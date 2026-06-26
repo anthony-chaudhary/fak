@@ -211,6 +211,60 @@ func TestParallelProofCapsHotFilesToWorkload(t *testing.T) {
 	}
 }
 
+func TestServedProofShowsHTTPAndMCPServedCache(t *testing.T) {
+	proof, err := buildServedProof(context.Background(), 3, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof.TotalServedCalls != 6 {
+		t.Fatalf("total served calls = %d, want 6", proof.TotalServedCalls)
+	}
+	if proof.RawEngineCalls != 6 {
+		t.Fatalf("raw engine calls = %d, want 6", proof.RawEngineCalls)
+	}
+	if proof.FakEngineCalls != 1 {
+		t.Fatalf("fak engine calls = %d, want 1 for one warmed read key", proof.FakEngineCalls)
+	}
+	if proof.VDSOHits != 5 {
+		t.Fatalf("response vdso tier-2 hits = %d, want 5", proof.VDSOHits)
+	}
+	if proof.GatewayMetrics.Delta.GatewaySyscalls != 6 {
+		t.Fatalf("/metrics syscall operations delta = %d, want 6", proof.GatewayMetrics.Delta.GatewaySyscalls)
+	}
+	if proof.GatewayMetrics.Delta.HTTPSyscallRequests != 3 || proof.GatewayMetrics.Delta.MCPRequests != 3 {
+		t.Fatalf("/metrics route deltas http=%d mcp=%d, want 3/3",
+			proof.GatewayMetrics.Delta.HTTPSyscallRequests, proof.GatewayMetrics.Delta.MCPRequests)
+	}
+	if proof.GatewayMetrics.Delta.VDSOLookups != 6 || proof.GatewayMetrics.Delta.VDSOHits != 5 || proof.GatewayMetrics.Delta.VDSOFills != 1 {
+		t.Fatalf("/metrics vDSO deltas lookups=%d hits=%d fills=%d, want 6/5/1",
+			proof.GatewayMetrics.Delta.VDSOLookups, proof.GatewayMetrics.Delta.VDSOHits, proof.GatewayMetrics.Delta.VDSOFills)
+	}
+	if len(proof.Calls) != 6 {
+		t.Fatalf("calls = %d, want 6", len(proof.Calls))
+	}
+	if proof.Calls[0].Surface != "http" || proof.Calls[0].ServedBy != "engine" || !proof.Calls[0].EngineRanServed {
+		t.Fatalf("first served call should be an HTTP engine miss, got %+v", proof.Calls[0])
+	}
+	sawMCP := false
+	for i, c := range proof.Calls[1:] {
+		if c.Surface == "mcp" {
+			sawMCP = true
+		}
+		if c.EngineRanServed || c.ServedEngineDelta != 0 {
+			t.Fatalf("served hit row %d ran the engine: %+v", i+1, c)
+		}
+		if c.ServedBy != "vdso" || c.Tier != "2" {
+			t.Fatalf("served row %d = served_by=%q tier=%q, want vdso/2: %+v", i+1, c.ServedBy, c.Tier, c)
+		}
+		if c.ResponseMeta["served_by"] != "vdso" || c.ResponseMeta["tier"] != "2" {
+			t.Fatalf("served row %d lacks gateway response metadata: %+v", i+1, c.ResponseMeta)
+		}
+	}
+	if !sawMCP {
+		t.Fatal("served proof did not exercise MCP fak_syscall")
+	}
+}
+
 // TestDenyVerdictBounded guards the one constant the prefilter win rests on: a deny
 // verdict that enters context in place of an executed bad call's result must stay a
 // SMALL, bounded size (the refusal vocabulary is closed). If it ever grows large, the

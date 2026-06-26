@@ -58,12 +58,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -76,6 +80,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
@@ -345,6 +350,62 @@ type parallelProof struct {
 	EngineCallAvoidedRate float64                 `json:"engine_call_avoided_rate"`
 	ToolTokensFromCache   int                     `json:"tool_tokens_from_cache"`
 	PerResource           []parallelResourceProof `json:"per_resource"`
+}
+
+type servedCall struct {
+	Index             int               `json:"index"`
+	Surface           string            `json:"surface"`
+	Tool              string            `json:"tool"`
+	Resource          string            `json:"resource"`
+	ArgsHash          string            `json:"args_hash"`
+	RawToolTimeNs     int64             `json:"raw_tool_time_ns"`
+	ServedTimeNs      int64             `json:"served_time_ns"`
+	Verdict           string            `json:"verdict"`
+	ServedBy          string            `json:"served_by"`
+	Tier              string            `json:"tier,omitempty"`
+	EngineRanRaw      bool              `json:"engine_ran_raw"`
+	EngineRanServed   bool              `json:"engine_ran_served"`
+	ServedEngineDelta int64             `json:"served_engine_call_delta"`
+	ResponseMeta      map[string]string `json:"response_meta,omitempty"`
+}
+
+type servedMetricsSnapshot struct {
+	VDSOLookups         int64 `json:"vdso_lookups"`
+	VDSOHits            int64 `json:"vdso_hits"`
+	VDSOFills           int64 `json:"vdso_cache_fills"`
+	GatewaySyscalls     int64 `json:"gateway_syscalls"`
+	HTTPSyscallRequests int64 `json:"http_syscall_requests"`
+	MCPRequests         int64 `json:"mcp_requests"`
+	TurnsSavedVDSO      int64 `json:"turns_saved_vdso_dedup"`
+}
+
+type servedMetricsEvidence struct {
+	Before servedMetricsSnapshot `json:"before"`
+	After  servedMetricsSnapshot `json:"after"`
+	Delta  servedMetricsSnapshot `json:"delta"`
+}
+
+type servedProof struct {
+	Schema           string                `json:"schema"`
+	Tool             string                `json:"tool"`
+	Resource         string                `json:"resource"`
+	Surfaces         []string              `json:"surfaces"`
+	CallsPerSurface  int                   `json:"calls_per_surface"`
+	TotalServedCalls int                   `json:"total_served_calls"`
+	DistinctKeys     int                   `json:"distinct_keys"`
+	EngineDelayMs    int                   `json:"engine_delay_ms"`
+	RawTotalNs       int64                 `json:"raw_total_ns"`
+	ServedTotalNs    int64                 `json:"served_total_ns"`
+	TimeSavedNs      int64                 `json:"time_saved_ns"`
+	RawP50Ns         int64                 `json:"raw_p50_ns"`
+	RawP95Ns         int64                 `json:"raw_p95_ns"`
+	ServedP50Ns      int64                 `json:"served_p50_ns"`
+	ServedP95Ns      int64                 `json:"served_p95_ns"`
+	RawEngineCalls   int64                 `json:"raw_engine_calls"`
+	FakEngineCalls   int64                 `json:"fak_engine_calls"`
+	VDSOHits         int64                 `json:"vdso_hits"`
+	GatewayMetrics   servedMetricsEvidence `json:"gateway_metrics"`
+	Calls            []servedCall          `json:"calls"`
 }
 
 // resultTokens reads the explicit per-call `result_tokens` annotation (the modeled,
@@ -917,6 +978,384 @@ func ratio(num, den int64) float64 {
 	return float64(num) / float64(den)
 }
 
+func buildServedProof(ctx context.Context, callsPerSurface int, engineDelay time.Duration) (servedProof, error) {
+	if callsPerSurface <= 0 {
+		return servedProof{}, fmt.Errorf("served calls must be positive")
+	}
+	const (
+		tool     = "read_file"
+		resource = "config.yaml"
+	)
+	args := json.RawMessage(`{"path":"` + resource + `"}`)
+	surfaces := []string{"http", "mcp"}
+	totalCalls := callsPerSurface * len(surfaces)
+
+	configureFileWorld()
+	res := abi.ActiveResolver()
+	if res == nil {
+		return servedProof{}, fmt.Errorf("no active Ref resolver registered")
+	}
+	prevDelay := setFileEngineDelay(engineDelay)
+	defer setFileEngineDelay(prevDelay)
+
+	rawTimes := make([]int64, 0, totalCalls)
+	resetFileEngineStats()
+	rawEngine := fileEngine{}
+	rawCall := turnbench.Call{Tool: tool, Args: args}
+	for i := 0; i < totalCalls; i++ {
+		tc, err := traceToolCall(ctx, res, rawCall)
+		if err != nil {
+			return servedProof{}, err
+		}
+		start := time.Now()
+		if _, err := rawEngine.Complete(ctx, tc); err != nil {
+			return servedProof{}, err
+		}
+		rawTimes = append(rawTimes, elapsedNs(start))
+	}
+	rawEngineCalls := fileEngineCalls()
+
+	resetFileEngineStats()
+	vdso.Default.BumpWorld()
+	ifc.Default.Reset("")
+	srv, err := gateway.New(gateway.Config{
+		EngineID: "localtools",
+		Model:    "tokendemo-served",
+		VDSO:     true,
+		Logf:     func(string, ...any) {},
+	})
+	if err != nil {
+		return servedProof{}, err
+	}
+	defer srv.Close()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	before, err := servedMetrics(client, ts.URL)
+	if err != nil {
+		return servedProof{}, err
+	}
+
+	out := servedProof{
+		Schema:           "fak.tokendemo.served.v1",
+		Tool:             tool,
+		Resource:         resource,
+		Surfaces:         surfaces,
+		CallsPerSurface:  callsPerSurface,
+		TotalServedCalls: totalCalls,
+		DistinctKeys:     1,
+		EngineDelayMs:    int(engineDelay / time.Millisecond),
+		RawEngineCalls:   rawEngineCalls,
+		Calls:            make([]servedCall, 0, totalCalls),
+	}
+
+	idx := 0
+	for _, surface := range surfaces {
+		for i := 0; i < callsPerSurface; i++ {
+			beforeEngine := fileEngineCalls()
+			start := time.Now()
+			resp, err := servedSyscall(ctx, client, ts.URL, surface, idx+1, gateway.SyscallRequest{
+				Tool:      tool,
+				Arguments: args,
+				ReadOnly:  true,
+				TraceID:   "tokendemo-served-" + surface,
+			})
+			servedElapsed := elapsedNs(start)
+			if err != nil {
+				return servedProof{}, err
+			}
+			afterEngine := fileEngineCalls()
+			meta := cloneMeta(resp.Result)
+			servedBy, tier := servedMetaSource(meta)
+			row := servedCall{
+				Index:             idx,
+				Surface:           surface,
+				Tool:              tool,
+				Resource:          resource,
+				ArgsHash:          argsHash(args),
+				RawToolTimeNs:     rawTimes[idx],
+				ServedTimeNs:      servedElapsed,
+				Verdict:           resp.Verdict.Kind,
+				ServedBy:          servedBy,
+				Tier:              tier,
+				EngineRanRaw:      true,
+				EngineRanServed:   afterEngine > beforeEngine,
+				ServedEngineDelta: afterEngine - beforeEngine,
+				ResponseMeta:      meta,
+			}
+			if row.ServedBy == "vdso" && row.Tier == "2" {
+				out.VDSOHits++
+			}
+			out.RawTotalNs += row.RawToolTimeNs
+			out.ServedTotalNs += row.ServedTimeNs
+			out.Calls = append(out.Calls, row)
+			idx++
+		}
+	}
+
+	after, err := servedMetrics(client, ts.URL)
+	if err != nil {
+		return servedProof{}, err
+	}
+	out.FakEngineCalls = fileEngineCalls()
+	out.TimeSavedNs = out.RawTotalNs - out.ServedTotalNs
+	out.RawP50Ns = percentileNs(rawTimes, 50)
+	out.RawP95Ns = percentileNs(rawTimes, 95)
+	servedTimes := make([]int64, 0, len(out.Calls))
+	for _, c := range out.Calls {
+		servedTimes = append(servedTimes, c.ServedTimeNs)
+	}
+	out.ServedP50Ns = percentileNs(servedTimes, 50)
+	out.ServedP95Ns = percentileNs(servedTimes, 95)
+	out.GatewayMetrics = servedMetricsEvidence{
+		Before: before,
+		After:  after,
+		Delta:  after.sub(before),
+	}
+	if err := validateServedProof(out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func validateServedProof(p servedProof) error {
+	if p.TotalServedCalls <= 1 {
+		return fmt.Errorf("served proof needs at least two served calls, got %d", p.TotalServedCalls)
+	}
+	if p.RawEngineCalls != int64(p.TotalServedCalls) {
+		return fmt.Errorf("raw engine calls = %d, want %d", p.RawEngineCalls, p.TotalServedCalls)
+	}
+	if p.FakEngineCalls != int64(p.DistinctKeys) {
+		return fmt.Errorf("fak engine calls = %d, want %d distinct key(s)", p.FakEngineCalls, p.DistinctKeys)
+	}
+	wantHits := int64(p.TotalServedCalls - p.DistinctKeys)
+	if p.VDSOHits != wantHits {
+		return fmt.Errorf("response tier-2 vDSO hits = %d, want %d", p.VDSOHits, wantHits)
+	}
+	if p.GatewayMetrics.Delta.VDSOHits != wantHits {
+		return fmt.Errorf("/metrics fak_vdso_hits_total delta = %d, want %d", p.GatewayMetrics.Delta.VDSOHits, wantHits)
+	}
+	if p.GatewayMetrics.Delta.VDSOLookups != int64(p.TotalServedCalls) {
+		return fmt.Errorf("/metrics fak_vdso_lookups_total delta = %d, want %d", p.GatewayMetrics.Delta.VDSOLookups, p.TotalServedCalls)
+	}
+	if p.GatewayMetrics.Delta.VDSOFills != int64(p.DistinctKeys) {
+		return fmt.Errorf("/metrics fak_vdso_cache_fills_total delta = %d, want %d", p.GatewayMetrics.Delta.VDSOFills, p.DistinctKeys)
+	}
+	if p.GatewayMetrics.Delta.TurnsSavedVDSO != wantHits {
+		return fmt.Errorf("/metrics fak_gateway_turns_saved_total{mechanism=vdso_dedup} delta = %d, want %d", p.GatewayMetrics.Delta.TurnsSavedVDSO, wantHits)
+	}
+	if p.GatewayMetrics.Delta.GatewaySyscalls != int64(p.TotalServedCalls) {
+		return fmt.Errorf("/metrics syscall operation delta = %d, want %d", p.GatewayMetrics.Delta.GatewaySyscalls, p.TotalServedCalls)
+	}
+	if p.GatewayMetrics.Delta.HTTPSyscallRequests != int64(p.CallsPerSurface) {
+		return fmt.Errorf("/metrics HTTP syscall request delta = %d, want %d", p.GatewayMetrics.Delta.HTTPSyscallRequests, p.CallsPerSurface)
+	}
+	if p.GatewayMetrics.Delta.MCPRequests != int64(p.CallsPerSurface) {
+		return fmt.Errorf("/metrics MCP request delta = %d, want %d", p.GatewayMetrics.Delta.MCPRequests, p.CallsPerSurface)
+	}
+	for i, c := range p.Calls {
+		if c.Verdict != "ALLOW" {
+			return fmt.Errorf("served call %d verdict = %q, want ALLOW", i, c.Verdict)
+		}
+		if i == 0 {
+			if !c.EngineRanServed || c.ServedBy == "vdso" {
+				return fmt.Errorf("first served call should run the engine, got served_by=%q engine_delta=%d", c.ServedBy, c.ServedEngineDelta)
+			}
+			continue
+		}
+		if c.EngineRanServed || c.ServedEngineDelta != 0 || c.ServedBy != "vdso" || c.Tier != "2" {
+			return fmt.Errorf("served call %d should be a tier-2 vDSO hit with no engine run, got served_by=%q tier=%q engine_delta=%d", i, c.ServedBy, c.Tier, c.ServedEngineDelta)
+		}
+	}
+	return nil
+}
+
+func servedSyscall(ctx context.Context, client *http.Client, base, surface string, id int, req gateway.SyscallRequest) (gateway.SyscallResponse, error) {
+	switch surface {
+	case "http":
+		return servedHTTPSyscall(ctx, client, base, req)
+	case "mcp":
+		return servedMCPSyscall(ctx, client, base, id, req)
+	default:
+		return gateway.SyscallResponse{}, fmt.Errorf("unknown served surface %q", surface)
+	}
+}
+
+func servedHTTPSyscall(ctx context.Context, client *http.Client, base string, req gateway.SyscallRequest) (gateway.SyscallResponse, error) {
+	var out gateway.SyscallResponse
+	body, _ := json.Marshal(req)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/fak/syscall", bytes.NewReader(body))
+	if err != nil {
+		return out, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return out, fmt.Errorf("POST /v1/fak/syscall = %d: %s", resp.StatusCode, string(b))
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func servedMCPSyscall(ctx context.Context, client *http.Client, base string, id int, req gateway.SyscallRequest) (gateway.SyscallResponse, error) {
+	var out gateway.SyscallResponse
+	frame := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "fak_syscall",
+			"arguments": req,
+		},
+	}
+	body, _ := json.Marshal(frame)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/mcp", bytes.NewReader(body))
+	if err != nil {
+		return out, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return out, fmt.Errorf("POST /mcp = %d: %s", resp.StatusCode, string(b))
+	}
+	var rpc struct {
+		Result struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(b, &rpc); err != nil {
+		return out, err
+	}
+	if rpc.Error != nil {
+		return out, fmt.Errorf("MCP error %d: %s", rpc.Error.Code, rpc.Error.Message)
+	}
+	if rpc.Result.IsError {
+		return out, fmt.Errorf("MCP tool result isError=true")
+	}
+	if len(rpc.Result.Content) == 0 {
+		return out, fmt.Errorf("MCP tool result had no content")
+	}
+	if err := json.Unmarshal([]byte(rpc.Result.Content[0].Text), &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func cloneMeta(env *gateway.ResultEnvelope) map[string]string {
+	if env == nil || len(env.Meta) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(env.Meta))
+	for k, v := range env.Meta {
+		out[k] = v
+	}
+	return out
+}
+
+func servedMetaSource(meta map[string]string) (servedBy, tier string) {
+	if meta == nil {
+		return "missing", ""
+	}
+	if by := meta["served_by"]; by != "" {
+		return by, meta["tier"]
+	}
+	if meta["engine"] != "" {
+		return "engine", ""
+	}
+	return "unknown", meta["tier"]
+}
+
+func servedMetrics(client *http.Client, base string) (servedMetricsSnapshot, error) {
+	resp, err := client.Get(base + "/metrics")
+	if err != nil {
+		return servedMetricsSnapshot{}, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return servedMetricsSnapshot{}, fmt.Errorf("GET /metrics = %d: %s", resp.StatusCode, string(b))
+	}
+	text := string(b)
+	return servedMetricsSnapshot{
+		VDSOLookups:         sumMetricInt(text, "fak_vdso_lookups_total"),
+		VDSOHits:            sumMetricInt(text, "fak_vdso_hits_total"),
+		VDSOFills:           sumMetricInt(text, "fak_vdso_cache_fills_total"),
+		GatewaySyscalls:     sumMetricInt(text, "fak_gateway_operations_total", `operation="syscall"`),
+		HTTPSyscallRequests: sumMetricInt(text, "fak_gateway_http_requests_total", `route="/v1/fak/syscall"`, `method="POST"`, `status="200"`),
+		MCPRequests:         sumMetricInt(text, "fak_gateway_http_requests_total", `route="/mcp"`, `method="POST"`, `status="200"`),
+		TurnsSavedVDSO:      sumMetricInt(text, "fak_gateway_turns_saved_total", `mechanism="vdso_dedup"`),
+	}, nil
+}
+
+func (s servedMetricsSnapshot) sub(prev servedMetricsSnapshot) servedMetricsSnapshot {
+	return servedMetricsSnapshot{
+		VDSOLookups:         s.VDSOLookups - prev.VDSOLookups,
+		VDSOHits:            s.VDSOHits - prev.VDSOHits,
+		VDSOFills:           s.VDSOFills - prev.VDSOFills,
+		GatewaySyscalls:     s.GatewaySyscalls - prev.GatewaySyscalls,
+		HTTPSyscallRequests: s.HTTPSyscallRequests - prev.HTTPSyscallRequests,
+		MCPRequests:         s.MCPRequests - prev.MCPRequests,
+		TurnsSavedVDSO:      s.TurnsSavedVDSO - prev.TurnsSavedVDSO,
+	}
+}
+
+func sumMetricInt(text, name string, labelNeedles ...string) int64 {
+	var total int64
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if len(labelNeedles) == 0 {
+			if !strings.HasPrefix(line, name+" ") {
+				continue
+			}
+		} else if !strings.HasPrefix(line, name+"{") {
+			continue
+		}
+		matches := true
+		for _, needle := range labelNeedles {
+			if !strings.Contains(line, needle) {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err == nil {
+			total += int64(v)
+		}
+	}
+	return total
+}
+
 // ---------------------------------------------------------------------------
 // fixture resolution (mirrors cmd/turntaxdemo's turnTaxDir climb).
 // ---------------------------------------------------------------------------
@@ -960,9 +1399,14 @@ func main() {
 	asJSON := flag.Bool("json", false, "emit the exact per-call ledger as JSON (all suites, or just -suite) and exit.")
 	timing := flag.Bool("timing", false, "run a measured raw-vs-fak proof for one suite and print per-tool-call latency/source evidence. If -suite is omitted, defaults to reread-same-file.")
 	timingJSON := flag.Bool("timing-json", false, "emit the measured raw-vs-fak proof as JSON. If -suite is omitted, defaults to reread-same-file.")
+	served := flag.Bool("served", false, "run a served-boundary same-read proof: raw os.ReadFile N times, then HTTP POST /v1/fak/syscall N times through a gateway test server, showing first read hits fakread and repeats return served_by=vdso tier=2.")
+	servedJSON := flag.Bool("served-json", false, "emit the served-boundary same-read HTTP proof as JSON.")
+	servedCalls := flag.Int("served-calls", defaultServedCalls, "same-file read count for -served/-served-json; must be at least 2.")
 	parallel := flag.Bool("parallel", false, "run a warmed parallel hot-read proof: many workers repeat a small read set and fak serves the hot phase from vDSO tier-2.")
 	parallelJSON := flag.Bool("parallel-json", false, "emit the warmed parallel hot-read proof as JSON.")
-	engineDelayMS := flag.Int("engine-delay-ms", 15, "fixed local-tool delay used by timing and parallel proof modes so engine re-execution cost is visible and deterministic enough to inspect.")
+	served := flag.Bool("served", false, "run the served-boundary same-read proof: raw loop versus HTTP /v1/fak/syscall plus MCP fak_syscall on one gateway, with response metadata and /metrics evidence.")
+	servedJSON := flag.Bool("served-json", false, "emit the served-boundary same-read proof as JSON.")
+	engineDelayMS := flag.Int("engine-delay-ms", 15, "fixed local-tool delay used by timing, parallel, and served proof modes so engine re-execution cost is visible and deterministic enough to inspect.")
 	parallelWorkers := flag.Int("parallel-workers", 32, "worker count for -parallel/-parallel-json.")
 	parallelCalls := flag.Int("parallel-calls", 512, "parallel hot-phase calls for -parallel/-parallel-json.")
 	parallelHotFiles := flag.Int("parallel-hot-files", 8, "distinct hot files to prewarm and repeat for -parallel/-parallel-json.")
@@ -970,6 +1414,7 @@ func main() {
 	parallelColdJSON := flag.Bool("parallel-cold-json", false, "emit the cold concurrent same-read fill-race probe as JSON.")
 	parallelColdWorkers := flag.Int("parallel-cold-workers", 64, "worker count released at the cold barrier for -parallel-cold/-parallel-cold-json.")
 	parallelColdTrials := flag.Int("parallel-cold-trials", 24, "independent cold trials (each a fresh empty vDSO world + never-seen key) for -parallel-cold/-parallel-cold-json.")
+	servedCalls := flag.Int("served-calls", 4, "same-read calls per served surface for -served/-served-json. The proof runs both HTTP and MCP surfaces against one warmed key.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each suite through the kernel (the same turnbench.RunWithWorld path -print/-json drive), assert the documented ledger invariants, and exit non-zero on any drift. The CI / cross-platform dog-food of this demo's data path.")
 	suite := flag.String("suite", "prefilter-bad-calls", "suite for -print / -json (prefilter-bad-calls | reread-same-file | clean-control)")
 	flag.Parse()
@@ -991,6 +1436,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-engine-delay-ms must be non-negative")
 		os.Exit(2)
 	}
+	if (*served || *servedJSON) && *servedCalls < 2 {
+		fmt.Fprintln(os.Stderr, "-served-calls must be at least 2")
+		os.Exit(2)
+	}
 	if *parallelWorkers <= 0 || *parallelCalls <= 0 || *parallelHotFiles <= 0 {
 		fmt.Fprintln(os.Stderr, "-parallel-workers, -parallel-calls, and -parallel-hot-files must be positive")
 		os.Exit(2)
@@ -999,14 +1448,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-parallel-cold-workers and -parallel-cold-trials must be positive")
 		os.Exit(2)
 	}
+	if *servedCalls <= 0 {
+		fmt.Fprintln(os.Stderr, "-served-calls must be positive")
+		os.Exit(2)
+	}
 
 	switch {
 	case *selfcheck:
 		os.Exit(runSelfcheck())
+	case *servedJSON:
+		os.Exit(runServedJSON(*servedCalls, time.Duration(*engineDelayMS)*time.Millisecond))
+	case *served:
+		os.Exit(runServedPrint(*servedCalls, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *parallelColdJSON:
 		os.Exit(runColdJSON(*parallelColdWorkers, *parallelColdTrials, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *parallelCold:
 		os.Exit(runColdPrint(*parallelColdWorkers, *parallelColdTrials, time.Duration(*engineDelayMS)*time.Millisecond))
+	case *servedJSON:
+		os.Exit(runServedJSON(*servedCalls))
+	case *served:
+		os.Exit(runServedPrint(*servedCalls))
 	case *parallelJSON:
 		os.Exit(runParallelJSON(*parallelWorkers, *parallelCalls, *parallelHotFiles, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *parallel:
@@ -1026,8 +1487,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "trace dir: %s\n", tokenDir())
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -print [-suite %s]\n", knownSuites[0].ID)
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -timing [-suite reread-same-file]\n")
+		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -served [-served-calls %d]\n", defaultServedCalls)
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -parallel [-parallel-workers 32 -parallel-calls 512]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -parallel-cold [-parallel-cold-workers 64 -parallel-cold-trials 24]\n")
+		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -served [-served-calls 4]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -json\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -selfcheck\n")
 		os.Exit(2)
@@ -1177,6 +1640,66 @@ func runParallelPrint(workers, calls, hotFiles int, delay time.Duration) int {
 		)))
 	}
 	fmt.Println()
+	return 0
+}
+
+func runServedJSON(calls int, delay time.Duration) int {
+	proof, err := buildServedProof(context.Background(), calls, delay)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "served proof: %v\n", err)
+		return 1
+	}
+	b, _ := json.MarshalIndent(proof, "", "  ")
+	fmt.Println(string(b))
+	return 0
+}
+
+func runServedPrint(calls int, delay time.Duration) int {
+	p := colors()
+	proof, err := buildServedProof(context.Background(), calls, delay)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "served proof: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("\n  %s — %s %q through HTTP + MCP (%d calls/surface, engine delay %dms)\n",
+		p.paint(p.bold, "fak · served same-read cache proof"), proof.Tool, proof.Resource, proof.CallsPerSurface, proof.EngineDelayMs)
+	fmt.Printf("  %s\n\n", p.paint(p.dim, "raw loop executes every read; served loop POSTs /v1/fak/syscall and MCP fak_syscall against one gateway"))
+	fmt.Printf("  %-3s  %-5s  %9s  %9s  %-9s  %-6s  %-7s  %-12s\n",
+		"#", "wire", "raw ms", "served ms", "served_by", "tier", "engine", "args")
+	fmt.Printf("  %s\n", strings.Repeat("─", 74))
+	for _, c := range proof.Calls {
+		engine := "skip"
+		if c.EngineRanServed {
+			engine = "run"
+		}
+		color := p.dim
+		if c.ServedBy == "vdso" && c.Tier == "2" {
+			color = p.green
+		}
+		fmt.Printf("  %s\n", p.paint(color, fmt.Sprintf("%-3d  %-5s  %9s  %9s  %-9s  %-6s  %-7s  %-12s",
+			c.Index,
+			c.Surface,
+			formatMs(c.RawToolTimeNs),
+			formatMs(c.ServedTimeNs),
+			padTrim(c.ServedBy, 9),
+			padTrim(c.Tier, 6),
+			engine,
+			c.ArgsHash,
+		)))
+	}
+	fmt.Printf("  %s\n", strings.Repeat("─", 74))
+	fmt.Printf("  raw engine calls: %d   fak engine calls: %d   response tier-2 hits: %d\n",
+		proof.RawEngineCalls, proof.FakEngineCalls, proof.VDSOHits)
+	fmt.Printf("  /metrics delta: syscalls=%d   vdso_lookups=%d   vdso_hits=%d   cache_fills=%d   http=%d   mcp=%d\n",
+		proof.GatewayMetrics.Delta.GatewaySyscalls,
+		proof.GatewayMetrics.Delta.VDSOLookups,
+		proof.GatewayMetrics.Delta.VDSOHits,
+		proof.GatewayMetrics.Delta.VDSOFills,
+		proof.GatewayMetrics.Delta.HTTPSyscallRequests,
+		proof.GatewayMetrics.Delta.MCPRequests)
+	fmt.Printf("  measured tool time: raw %.3fms   served %.3fms   saved %.3fms\n\n",
+		nsToMs(proof.RawTotalNs), nsToMs(proof.ServedTotalNs), nsToMs(proof.TimeSavedNs))
 	return 0
 }
 
