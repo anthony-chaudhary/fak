@@ -78,7 +78,7 @@ var servewiringData = []wiringRow{
 	{"debitsession", "(host func, default-on)", "DebitSession", verdictWired, "internal/gateway/session_admit.go:157", "debits TokensLeft + context budget after the planner returns"},
 	{"routemanifest", "--route-manifest", "RouteManifest", verdictWired, "internal/gateway/gateway.go:1127", "binds ToolCall.Engine before Submit; flag wired (was DEAD_WIRED before this pass)"},
 	{"ctxview", "--ctx-view-budget", "CtxViewBudget", verdictOffByDefault, "internal/gateway/gateway.go:807", "re-materializes history as an O(1) planned ctxplan view under the budget; off at 0"},
-	{"compacthistory", "--compact-history-budget", "CompactHistoryBudget", verdictOffByDefault, "internal/gateway/messages.go:365", "compacts old turns in the Anthropic outbound body, cache prefix byte-identical; off at 0"},
+	{"compacthistory", "--compact-history-budget", "CompactHistoryBudget", verdictWired, "internal/gateway/messages.go:365", "compacts old turns in the Anthropic outbound body once it sprawls past the budget, cache prefix byte-identical; DEFAULT-ON at ~48k (gateway.DefaultCompactHistoryBudget), pass 0 to disable"},
 	{"debugstats", "--debug-stats", "DebugStatsf", verdictOffByDefault, "internal/gateway/metrics.go:404", "emits one compact payload-free per-turn cache/compaction/resetScore line to stderr; off by default"},
 	{"resetonbudget", "--reset-on-budget", "ResetOnBudget", verdictOffByDefault, "internal/gateway/session_admit.go:108", "distills a carryover seed and continues transparently on budget exhaustion; needs --context-budget-tokens"},
 	{"budgetwebhook", "--budget-webhook", "", verdictOffByDefault, "internal/session/usage.go:73", "POSTs a pre-exhaustion warning + exhaustion event; wired via WatchBudget, off when URL empty"},

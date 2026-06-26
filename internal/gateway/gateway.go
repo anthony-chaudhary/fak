@@ -51,6 +51,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
+// DefaultCompactHistoryBudget is the resident-token line the cache-prefix-preserving
+// history compaction trims the kept window to BY DEFAULT on the Anthropic passthrough.
+// It is the operator's "reset once a conversation sprawls" trigger, expressed as a
+// budget: once the compactible (uncached) suffix grows past it, the cut fires and drops
+// the un-cacheable middle the provider re-bills every turn — while the cached_control
+// prefix stays byte-identical, so a still-warm cache hit survives. ~48k keeps a typical
+// short session untouched and only acts on genuinely long ones. Default-on is safe by
+// construction: the cut only ever sheds UNCACHED bytes (it proves prefix-byte-identity
+// before returning, agent.CompactAnthropicHistory), so it can never net-charge more by
+// discarding a cached prefix. An explicit --compact-history-budget wins; 0 means OFF.
+const DefaultCompactHistoryBudget = 48000
+
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
@@ -231,8 +243,11 @@ type Config struct {
 	// req.Raw step). Each turn the OUTBOUND body is compacted so OLD whole turns beyond the
 	// cache_control prefix are dropped to this resident-token budget, while the cached
 	// prefix bytes are copied VERBATIM so the upstream cache hit survives (see
-	// agent.CompactAnthropicHistory). 0 (the default) leaves the body byte-for-byte
-	// unchanged. Anthropic passthrough only; it is an inert no-op on every other wire.
+	// agent.CompactAnthropicHistory). 0 means OFF (body forwarded byte-for-byte). The CLI
+	// flag defaults this to DefaultCompactHistoryBudget (a non-zero default-on trigger that
+	// trims sprawl while a typical short session stays untouched), so the byte-for-byte
+	// path is now the explicit --compact-history-budget=0 opt-out, not the default.
+	// Anthropic passthrough only; it is an inert no-op on every other wire.
 	CompactHistoryBudget int
 	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
 	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for

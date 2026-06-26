@@ -38,15 +38,19 @@ went up.
 
 ## What fak does instead
 
-`fak guard --compact-history-budget 8000` takes a different route. Instead of
-rewriting the prompt, it **drops** the old middle turns and splices the bytes back
-together. The cacheable front of the prompt is copied through untouched, byte-for-byte
-(a `memcpy`, never a re-serialize), so the provider's cache prefix still matches and
-the discount holds. On any ambiguity it does nothing and forwards the original prompt
-unchanged, so it never breaks a turn.
+`fak guard` takes a different route, **on by default**. Instead of rewriting the
+prompt, it **drops** the old middle turns and splices the bytes back together. The
+cacheable front of the prompt is copied through untouched, byte-for-byte (a `memcpy`,
+never a re-serialize), so the provider's cache prefix still matches and the discount
+holds. On any ambiguity it does nothing and forwards the original prompt unchanged, so
+it never breaks a turn.
+
+You don't have to ask for it: it fires automatically once a conversation sprawls past
+~48k resident tokens (a typical short session is left untouched). Pass a tighter budget
+to shed sooner, or `--compact-history-budget 0` to disable it entirely:
 
 ```bash
-fak guard --compact-history-budget 8000 -- claude
+fak guard --compact-history-budget 8000 -- claude   # tighter than the ~48k default
 ```
 
 ## What it guarantees, and what it only observes
