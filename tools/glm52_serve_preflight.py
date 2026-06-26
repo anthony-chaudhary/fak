@@ -539,6 +539,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         "After a READY/READY_PENDING_INSTALL node serves the endpoint, capture the issue-#130 "
         "evidence with `tools/glm52_serving_witness.py --base-url <url>/v1 --engine-cache-engine <engine>`.",
         "",
+        "> **Scope of this witness.** It proves the *fak-fronts-an-external-engine* (SGLang/vLLM) "
+        "form of #130 only — fak governs and fronts the weights an outside engine serves. It does "
+        "**not** prove native in-kernel GLM-5.2 serving, which is the separate multi-month native "
+        "track (`docs/notes/native-753b-track-staged-plan.md`; the external-vs-native evidence "
+        "boundary is drawn in `docs/serving/glm52-full-size-serving-witness.md` §6).",
+        "",
     ]
     return "\n".join(lines)
 

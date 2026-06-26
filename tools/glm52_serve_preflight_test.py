@@ -373,6 +373,12 @@ def test_report_schema_and_markdown():
     md = pf.render_markdown(rep)
     assert "GLM-5.2 SGLang/vLLM serving-readiness preflight" in md
     assert "BLOCKED_ARCH" in md
+    # #919: the witness step must state its scope — the #130 evidence it
+    # captures proves the fak-fronts-external-engine form only, not native
+    # in-kernel GLM serving.
+    assert "Scope of this witness" in md
+    assert "fak-fronts-an-external-engine" in md
+    assert "does **not** prove native in-kernel GLM-5.2 serving" in md
     # JSON round-trips.
     json.loads(json.dumps(rep))
 
