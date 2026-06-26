@@ -1,0 +1,120 @@
+{
+  "schema": "fak.toolsandbox-official-run-contract.v1",
+  "generated_at": "2026-06-26T03:03:22Z",
+  "benchmark": "ToolSandbox/tau3 policy-state official-run contract",
+  "status": "READY_FOR_EXTERNAL_HARNESS",
+  "claim_boundary": "External-run contract only: fixes the raw/fak command shape, shared model and simulator requirements, evidence paths, and promotion gates for a benchmark-native tau3 or ToolSandbox run. It is not an official result until external task definitions, raw/fak outputs, and native grader summaries are checked in.",
+  "local_fixture_artifact": "experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json",
+  "task_selection": {
+    "candidate_suite": "testdata/toolsandbox/policy_state_smoke.json",
+    "candidate_task_ids": [
+      "retail-refund-policy-minefield"
+    ],
+    "official_harness": "tau3",
+    "official_domain": "retail",
+    "official_task_ids_required": true,
+    "same_task_ids_required": true,
+    "same_simulator_required": true,
+    "same_budget_required": true,
+    "trials": 1
+  },
+  "model": {
+    "agent_model": "shared-agent-model",
+    "user_simulator": "shared-agent-model",
+    "fak_gateway": "http://localhost:8080/v1",
+    "same_model_required": true
+  },
+  "arms": [
+    {
+      "name": "raw-toolsandbox",
+      "harness": "benchmark-native",
+      "command": "$env:TAU3_TASK_IDS='\u003cspace-separated official task ids\u003e'; tau2 run --domain retail --agent-llm shared-agent-model --user-llm shared-agent-model --num-trials 1 --task-ids ($env:TAU3_TASK_IDS -split ' ')",
+      "output_dir": "experiments/agent-live/toolsandbox-official-raw-20260626",
+      "required_artifacts": [
+        "benchmark-native raw result summary",
+        "raw trajectory or simulation log"
+      ]
+    },
+    {
+      "name": "fak-toolsandbox",
+      "harness": "benchmark-native-through-fak-gateway",
+      "command": "$env:TAU3_TASK_IDS='\u003cspace-separated official task ids\u003e'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; tau2 run --domain retail --agent-llm shared-agent-model --user-llm shared-agent-model --num-trials 1 --task-ids ($env:TAU3_TASK_IDS -split ' ')",
+      "output_dir": "experiments/agent-live/toolsandbox-official-fak-20260626",
+      "required_artifacts": [
+        "benchmark-native fak result summary",
+        "fak trajectory or simulation log",
+        "fak verdict/evidence log linked to mediated tool calls"
+      ]
+    }
+  ],
+  "upstream_refs": [
+    {
+      "name": "Apple ToolSandbox",
+      "url": "https://github.com/apple/ToolSandbox",
+      "notes": "Official ToolSandbox CLI stores result_summary.json and trajectories under the repository data directory."
+    },
+    {
+      "name": "tau3/tau2-bench",
+      "url": "https://github.com/sierra-research/tau2-bench",
+      "notes": "Current tau benchmark CLI documents tau2 run with domain, agent/user model, trials, task count, and outputs under data/simulations."
+    }
+  ],
+  "gates": [
+    {
+      "name": "candidate_task_ids",
+      "ok": true,
+      "detail": "1 candidate id from local smoke suite"
+    },
+    {
+      "name": "same_task_ids_required",
+      "ok": true,
+      "detail": "raw and fak official runs must use the same benchmark-native task ids"
+    },
+    {
+      "name": "same_model_required",
+      "ok": true,
+      "detail": "shared-agent-model"
+    },
+    {
+      "name": "same_user_simulator_required",
+      "ok": true,
+      "detail": "shared-agent-model"
+    },
+    {
+      "name": "raw_arm_command",
+      "ok": true,
+      "detail": "$env:TAU3_TASK_IDS='\u003cspace-separated official task ids\u003e'; tau2 run --domain retail --agent-llm shared-agent-model --user-llm shared-agent-model --num-trials 1 --task-ids ($env:TAU3_TASK_IDS -split ' ')"
+    },
+    {
+      "name": "fak_arm_command",
+      "ok": true,
+      "detail": "$env:TAU3_TASK_IDS='\u003cspace-separated official task ids\u003e'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; tau2 run --domain retail --agent-llm shared-agent-model --user-llm shared-agent-model --num-trials 1 --task-ids ($env:TAU3_TASK_IDS -split ' ')"
+    },
+    {
+      "name": "official_harness_required",
+      "ok": true,
+      "detail": "external tau3 or Apple ToolSandbox task/grader output is required before promotion"
+    }
+  ],
+  "compare_metrics": [
+    "benchmark_native_success_or_pass_k",
+    "safe_completion",
+    "policy_breach_rate",
+    "minefield_or_mutating_action_avoidance",
+    "tool_call_count",
+    "latency",
+    "cost_or_token_budget",
+    "fak_denied_calls",
+    "evidence_completeness"
+  ],
+  "required_before_claim": [
+    "benchmark-native task manifest or scenario ids for the selected tau3 or ToolSandbox subset",
+    "raw-arm benchmark-native output over those exact task ids",
+    "fak-arm benchmark-native output over those exact task ids",
+    "benchmark-native grader or result summary for both arms",
+    "proof that raw and fak arms used the same model, user simulator, task ids, budget, and retry policy",
+    "fak verdict/evidence log linked to each mediated tool call",
+    "raw/fak compare artifact reporting task success separately from policy compliance and benign utility preservation"
+  ],
+  "result_claim_allowed": false
+}

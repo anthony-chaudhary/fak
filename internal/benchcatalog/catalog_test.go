@@ -56,7 +56,7 @@ func TestToolSandboxBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	if !strings.Contains(b.Run, "go run ./cmd/toolsandboxbench") {
 		t.Fatalf("toolsandboxbench run = %q, want cmd invocation", b.Run)
 	}
-	for _, want := range []string{"-suite", "-out", "-md"} {
+	for _, want := range []string{"-suite", "-contract", "-out", "-md"} {
 		if !containsFlag(b.Flags, want) {
 			t.Fatalf("toolsandboxbench flags = %v, missing %s", b.Flags, want)
 		}

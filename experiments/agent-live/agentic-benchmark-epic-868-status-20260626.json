@@ -1,13 +1,13 @@
 {
   "schema": "fak.agentic-benchmark-epic-rollup.v1",
-  "generated_at": "2026-06-26T02:50:06Z",
+  "generated_at": "2026-06-26T03:03:31Z",
   "epic": 868,
   "status": "PENDING_EXTERNAL_HARNESS",
   "result_claim_allowed": false,
   "summary": {
     "children_total": 8,
     "children_parsed": 8,
-    "local_evidence_artifacts": 5,
+    "local_evidence_artifacts": 4,
     "result_claim_artifacts": 0,
     "pending_children": [
       870,
@@ -76,19 +76,20 @@
       "issue": 873,
       "packet": "E",
       "title": "ToolSandbox/tau3 policy-state",
-      "artifact": "experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json",
-      "gate": "PASS_LOCAL",
-      "status": "SIMULATED_LOCAL_FIXTURE",
-      "evidence_class": "SIMULATED_LOCAL_FIXTURE",
+      "artifact": "experiments/agent-live/toolsandbox-official-run-contract-20260626.json",
+      "gate": "PENDING_EXTERNAL_HARNESS",
+      "status": "READY_FOR_EXTERNAL_HARNESS",
+      "evidence_class": "EXTERNAL_RUN_CONTRACT",
       "result_claim_allowed": false,
-      "detail": "local fixture is parseable and explicitly non-promotable",
+      "detail": "READY_FOR_EXTERNAL_HARNESS; benchmark-native tau3/ToolSandbox raw/fak outputs and grader summaries still required",
       "missing": [
-        "benchmark-native task manifest or scenario ids",
-        "raw-arm benchmark output",
-        "fak-arm benchmark output",
-        "benchmark-native grader or result summary",
-        "same model, simulator, task ids, budget, and retry policy across both arms",
-        "fak verdict/evidence log linked to each mediated tool call"
+        "benchmark-native task manifest or scenario ids for the selected tau3 or ToolSandbox subset",
+        "raw-arm benchmark-native output over those exact task ids",
+        "fak-arm benchmark-native output over those exact task ids",
+        "benchmark-native grader or result summary for both arms",
+        "proof that raw and fak arms used the same model, user simulator, task ids, budget, and retry policy",
+        "fak verdict/evidence log linked to each mediated tool call",
+        "raw/fak compare artifact reporting task success separately from policy compliance and benign utility preservation"
       ]
     },
     {

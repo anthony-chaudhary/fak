@@ -210,7 +210,7 @@ var registry = []Bench{
 		Name: "toolsandboxbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "ToolSandbox/tau3-shaped policy-state adapter smoke: replays the same local policy/minefield trace through raw and fak arms and reports safe pass^1 plus denied policy calls.",
 		Run:     "go run ./cmd/toolsandboxbench",
-		Flags:   []string{"-suite  -  ToolSandbox/tau3-shaped suite JSON", "-out  -  report JSON path", "-md  -  markdown summary path"},
+		Flags:   []string{"-suite  -  ToolSandbox/tau3-shaped suite JSON", "-contract  -  emit external official-run contract", "-out  -  report JSON path", "-md  -  markdown summary path"},
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{

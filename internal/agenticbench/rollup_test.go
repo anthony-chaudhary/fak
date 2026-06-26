@@ -79,7 +79,11 @@ func fixtureRoot(t *testing.T) string {
   "result_claim_allowed": false,
   "required_before_claim": ["raw predictions", "fak predictions", "official reports"]
 }`)
-	write(t, root, "experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json", fixtureReport())
+	write(t, root, "experiments/agent-live/toolsandbox-official-run-contract-20260626.json", `{
+  "status": "READY_FOR_EXTERNAL_HARNESS",
+  "result_claim_allowed": false,
+  "required_before_claim": ["official task ids", "raw output", "fak output", "grader summary"]
+}`)
 	write(t, root, "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json", fixtureReport())
 	write(t, root, "experiments/agent-live/browser-action-mediation-smoke-20260625.json", fixtureReport())
 	write(t, root, "BENCHMARK-AUTHORITY.md", "# BENCHMARK AUTHORITY\n\n## AgentDojo Structural Safety Floor\n\n## ToolSandbox/tau3 Adapter Smoke\n\n### Promotion Gate\n")
