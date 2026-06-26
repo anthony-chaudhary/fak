@@ -351,6 +351,7 @@ type configJSONHints struct {
 	LayerNormEps      *float64 `json:"layer_norm_epsilon"`
 	MultiQuery        *bool    `json:"multi_query"`
 	NumKVHeadsAlt     *int     `json:"num_kv_heads"`
+	NormTopKProb      *bool    `json:"norm_topk_prob"`
 	Alibi             *bool    `json:"alibi"`
 	SlidingWindow     *int     `json:"sliding_window"`
 	UseSlidingWindow  *bool    `json:"use_sliding_window"`
@@ -511,6 +512,11 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 			// export can still pin qk_norm=false explicitly to opt out.
 			c.QKNorm = true
 		}
+	}
+	if strings.Contains(family, "mixtral") && c.NumExperts > 0 && h.NormTopKProb == nil {
+		// HF Mixtral does not serialize norm_topk_prob, but MixtralSparseMoeBlock
+		// normalizes the selected top-k router weights before the expert weighted sum.
+		c.NormTopKProb = true
 	}
 	if strings.Contains(family, "minimax") && h.NormGain1p == nil {
 		// MiniMax-M3 uses Gemma-style RMSNorm: every norm — the input/post

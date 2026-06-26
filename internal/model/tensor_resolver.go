@@ -135,6 +135,8 @@ func resolveSpecFor(cfg Config) resolverSpec {
 		return cohereSpec(cfg)
 	case strings.Contains(fam, "gemma"):
 		return gemmaSpec(cfg)
+	case strings.Contains(fam, "mixtral"):
+		return mixtralSpec(cfg)
 	case strings.Contains(fam, "gptoss"):
 		return gptOSSSpec(cfg)
 	case strings.Contains(fam, "deepseek"):
@@ -189,6 +191,35 @@ func qkNorm(p string, optional bool) []tensorReq {
 	return []tensorReq{
 		{canonical: p + "self_attn.q_norm.weight", optional: optional},
 		{canonical: p + "self_attn.k_norm.weight", optional: optional},
+	}
+}
+
+// mixtralSpec covers Mixtral 8x7B / 8x22B source-format checkpoints. Attention and
+// norms use the standard Llama names, but the MoE FFN is under block_sparse_moe:
+// gate.weight is the router and each expert stores w1/w2/w3 for gate/down/up.
+func mixtralSpec(cfg Config) resolverSpec {
+	return resolverSpec{
+		family:  "mixtral",
+		globals: baseGlobals(),
+		perLayer: func(l int) []tensorReq {
+			p := layerPrefix(l)
+			block := p + "block_sparse_moe."
+			reqs := []tensorReq{{canonical: p + "input_layernorm.weight"}}
+			reqs = append(reqs, stdAttnProjections(p, nil, nil, nil, nil)...)
+			reqs = append(reqs,
+				tensorReq{canonical: p + "post_attention_layernorm.weight"},
+				tensorReq{canonical: routerName(l), aliases: []string{block + "gate.weight"}},
+			)
+			for e := 0; e < cfg.NumExperts; e++ {
+				expert := block + "experts." + itoa(e) + "."
+				reqs = append(reqs,
+					tensorReq{canonical: expertName(l, e, "gate_proj.weight"), aliases: []string{expert + "w1.weight"}},
+					tensorReq{canonical: expertName(l, e, "down_proj.weight"), aliases: []string{expert + "w2.weight"}},
+					tensorReq{canonical: expertName(l, e, "up_proj.weight"), aliases: []string{expert + "w3.weight"}},
+				)
+			}
+			return reqs
+		},
 	}
 }
 
