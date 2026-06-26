@@ -539,6 +539,13 @@ def render_markdown(report: dict[str, Any]) -> str:
         "After a READY/READY_PENDING_INSTALL node serves the endpoint, capture the issue-#130 "
         "evidence with `tools/glm52_serving_witness.py --base-url <url>/v1 --engine-cache-engine <engine>`.",
         "",
+        "> **Flag naming.** `--base-url`/`--engine-cache-engine` are the witness runner's own "
+        "(subcommand-scoped) arguments. The *same* OpenAI-compatible endpoint URL is what "
+        "`fak serve` / `fak guard` front with `--base-url`, so the URL flag is `--base-url` end "
+        "to end in this flow. A fleet loop that wraps serve + witness as subcommands may expose "
+        "that one URL to its parent ship/run steps as `--upstream-base-url` — the same URL under "
+        "a parent-scoped flag — while the witness keeps its subcommand-scoped `--base-url`.",
+        "",
         "> **Scope of this witness.** It proves the *fak-fronts-an-external-engine* (SGLang/vLLM) "
         "form of #130 only — fak governs and fronts the weights an outside engine serves. It does "
         "**not** prove native in-kernel GLM-5.2 serving, which is the separate multi-month native "

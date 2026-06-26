@@ -379,6 +379,14 @@ def test_report_schema_and_markdown():
     assert "Scope of this witness" in md
     assert "fak-fronts-an-external-engine" in md
     assert "does **not** prove native in-kernel GLM-5.2 serving" in md
+    # #918: the witness step must explain the flag naming a reader meets in a
+    # fleet ship/run/witness loop — the witness's own subcommand-scoped
+    # `--base-url`/`--engine-cache-engine` vs the parent-scoped `--upstream-base-url`
+    # — so a copy-paste reader does not read the rename as a typo.
+    assert "Flag naming" in md
+    assert "subcommand-scoped" in md
+    assert "--upstream-base-url" in md
+    assert "--base-url" in md
     # JSON round-trips.
     json.loads(json.dumps(rep))
 
