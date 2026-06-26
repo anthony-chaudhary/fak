@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -206,5 +207,116 @@ func TestPlacementEnablesCompaction(t *testing.T) {
 	}
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		t.Fatalf("compacted body failed to re-decode: %v", err)
+	}
+}
+
+// TestVolatileSystemStepsDownToTools is the core #806-bullet-2 case: the maximal head (tools+system)
+// is NOT byte-stable because the system block carries a per-request UUID, so anchoring there would
+// pay the cache-write premium for a prefix doomed to miss. The placer steps DOWN to caching just the
+// stable tools head, leaving the volatile system untouched.
+func TestVolatileSystemStepsDownToTools(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"session 550e8400-e29b-41d4-a716-446655440000"}],` +
+		`"tools":[{"name":"a","input_schema":{"type":"object"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+	if oc.Reason != BreakpointReasonNone || oc.Target != "tools" {
+		t.Fatalf("got reason=%q target=%q, want none/tools (step down from volatile system)", oc.Reason, oc.Target)
+	}
+	// The breakpoint lands on the stable tools head, NOT on the volatile system block.
+	if !bytes.Contains(out, []byte(`"input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}`)) {
+		t.Fatalf("breakpoint not on the stable tools head:\n%s", out)
+	}
+	if bytes.Contains(out, []byte(`446655440000","cache_control"`)) {
+		t.Fatalf("breakpoint wrongly anchored on the volatile system block:\n%s", out)
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("placed body failed to re-decode: %v", err)
+	}
+}
+
+// TestVolatileTimestampSystemStepsDown: a sub-day ISO timestamp in the system head is volatile (it
+// changes faster than the 5-minute ephemeral TTL), so the same step-down to tools applies.
+func TestVolatileTimestampSystemStepsDown(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"as of 2026-06-26T14:23:01Z, you are helpful"}],` +
+		`"tools":[{"name":"a","input_schema":{"type":"object"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	_, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+	if oc.Reason != BreakpointReasonNone || oc.Target != "tools" {
+		t.Fatalf("got reason=%q target=%q, want none/tools", oc.Reason, oc.Target)
+	}
+}
+
+// TestVolatileHeadNoStableFallbackBails: the only head is a volatile system block and there is no
+// tools head to step down to, so there is no byte-stable span to anchor — leave the body unchanged.
+func TestVolatileHeadNoStableFallbackBails(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"req 550e8400-e29b-41d4-a716-446655440000"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+	if oc.Reason != BreakpointReasonVolatileHead {
+		t.Fatalf("reason = %q, want volatile_head", oc.Reason)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatal("body must be unchanged when the only head span is volatile")
+	}
+}
+
+// TestVolatileToolsHeadBails: a per-request nonce inside a tool description makes the tools head
+// volatile; with no system head to fall back to, there is nothing byte-stable to cache.
+func TestVolatileToolsHeadBails(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"tools":[{"name":"a","description":"trace 550e8400-e29b-41d4-a716-446655440000","input_schema":{"type":"object"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+	if oc.Reason != BreakpointReasonVolatileHead {
+		t.Fatalf("reason = %q, want volatile_head", oc.Reason)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatal("body must be unchanged when the tools head is volatile and there is no fallback")
+	}
+}
+
+// TestDateOnlyHeadStillCaches is the false-positive guard: a date-ONLY token (the common "Today's
+// date is ..." system shape) is byte-stable across a session's turns within the cache TTL, so it must
+// NOT be flagged volatile — the maximal tools+system head is still cached on the last system block.
+func TestDateOnlyHeadStillCaches(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"Today's date is 2026-06-26. You are helpful."}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	_, oc := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+	if oc.Reason != BreakpointReasonNone || oc.Target != "system" {
+		t.Fatalf("got reason=%q target=%q, want none/system (date-only is stable, must still cache)", oc.Reason, oc.Target)
+	}
+}
+
+// TestHeadValueIsVolatileBoundaries nails the detector's stable/volatile boundary directly: only an
+// adjacent ISO date-TIME or a UUID is volatile; a date-only token, a bare time, and plain prose are
+// stable (a false positive only skips a cache, a false negative caches a busting span).
+func TestHeadValueIsVolatileBoundaries(t *testing.T) {
+	volatile := []string{
+		`2026-06-26T14:23:01Z`,                               // ISO datetime, T separator
+		`2026-06-26 14:23`,                                   // ISO datetime, space separator
+		`550e8400-e29b-41d4-a716-446655440000`,               // UUID
+		`prefix 11111111-2222-3333-4444-555555555555 suffix`, // embedded UUID
+	}
+	stable := []string{
+		`2026-06-26`,                    // date only — stable within the day
+		`meeting at 14:30`,              // bare time, no date
+		`you are a helpful assistant`,   // plain prose
+		``,                              // empty
+		`version 1.2.3-4567 of the cli`, // not a UUID shape
+		`on 2026-06-26 the release ...`, // date not adjacent to a time
+	}
+	for _, s := range volatile {
+		if !headValueIsVolatile(json.RawMessage(s)) {
+			t.Errorf("headValueIsVolatile(%q) = false, want true", s)
+		}
+	}
+	for _, s := range stable {
+		if headValueIsVolatile(json.RawMessage(s)) {
+			t.Errorf("headValueIsVolatile(%q) = true, want false", s)
+		}
 	}
 }

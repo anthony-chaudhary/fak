@@ -29,6 +29,13 @@ package agent
 //     byte-identical to the input.
 //   - The result must re-decode as a valid Messages request; on ANY ambiguity the function
 //     returns its input UNCHANGED.
+//   - A candidate head span that carries a self-evidently per-request token — a sub-day timestamp
+//     or a UUID/nonce (headValueIsVolatile) — is NOT byte-stable across turns, so anchoring a
+//     breakpoint on it would pay the provider's cache-WRITE premium for a prefix doomed to miss. We
+//     step DOWN from a volatile tools+system head to caching just the stable tools head, and bail to
+//     identity (BreakpointReasonVolatileHead) when no stable span remains. This is the fail-safe,
+//     single-body half of #806 bullet 2 (keep the stable spans byte-stable); the aggressive form
+//     (STRIP/normalize the volatile token in place) needs a redaction spec + soak and is deferred.
 //
 // Like CompactAnthropicHistory this is a REQUEST-side transform on the wire bytes only. It
 // never touches the decoded req.Messages the kernel adjudicates, so the trust boundary is
@@ -37,6 +44,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 )
 
 // cacheControlBreakpoint is the byte sequence spliced into a target block to mark it as a
@@ -47,10 +55,11 @@ const cacheControlBreakpoint = `"cache_control":{"type":"ephemeral"}`
 // BreakpointReasonNone means a breakpoint was PLACED (the body was rewritten); every other
 // value means the body was returned unchanged (identity).
 const (
-	BreakpointReasonNone         = ""               // PLACED: a breakpoint was spliced onto the stable head
+	BreakpointReasonNone         = ""                // PLACED: a breakpoint was spliced onto the stable head
 	BreakpointReasonNonJSON      = "non_json"        // body is empty or not a JSON object
 	BreakpointReasonAlreadySet   = "already_set"     // a cache_control already exists — respect the existing layout
 	BreakpointReasonNoStableHead = "no_stable_head"  // no system[] or tools[] block to anchor on
+	BreakpointReasonVolatileHead = "volatile_head"   // every cacheable head span carries a per-request token
 	BreakpointReasonSpliceFailed = "splice_failed"   // the target block is not a spliceable object
 	BreakpointReasonRedecodeFail = "redecode_failed" // the spliced body failed to re-decode as a request
 )
@@ -95,16 +104,32 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 		return raw, BreakpointOutcome{Reason: BreakpointReasonAlreadySet}
 	}
 
-	// 2. Pick the stable-head target: the LAST `system` block (caches tools+system) if `system`
-	//    is a non-empty array, else the LAST `tools` entry (caches tools). No array head ⇒ there
-	//    is no stable span we can safely cache without touching the volatile message tail — bail.
-	target := "system"
-	elems, spans, ok := decodeArrayElements(raw, obj["system"])
-	if !ok || len(elems) == 0 {
-		target = "tools"
-		elems, spans, ok = decodeArrayElements(raw, obj["tools"])
-	}
-	if !ok || len(elems) == 0 {
+	// 2. Pick the stable-head target, preferring the MAXIMAL stable span. The breakpoint marks the
+	//    end of a positional prefix the provider caches (order: tools → system → messages), so the
+	//    LAST `system` block caches tools+system and the LAST `tools` entry caches tools alone. A
+	//    span is only worth anchoring if it is BYTE-STABLE across turns: a per-request token in it
+	//    (a sub-day timestamp, a UUID/nonce — headValueIsVolatile) changes the very prefix this
+	//    breakpoint secures, so we'd pay the provider's cache-WRITE premium for a prefix doomed to
+	//    miss. So we step DOWN from a volatile tools+system head to caching just the stable tools,
+	//    and bail to identity when no cacheable span is byte-stable (#806 bullet 2, fail-safe form).
+	sysElems, sysSpans, sysOK := decodeArrayElements(raw, obj["system"])
+	sysOK = sysOK && len(sysElems) > 0
+	toolElems, toolSpans, toolOK := decodeArrayElements(raw, obj["tools"])
+	toolOK = toolOK && len(toolElems) > 0
+	toolsVolatile := headValueIsVolatile(obj["tools"])
+
+	var target string
+	var spans []elementSpan
+	switch {
+	case sysOK && !toolsVolatile && !headValueIsVolatile(obj["system"]):
+		target, spans = "system", sysSpans // maximal stable head: cache tools+system
+	case toolOK && !toolsVolatile:
+		target, spans = "tools", toolSpans // system absent or volatile, tools stable: cache tools alone
+	case sysOK || toolOK:
+		// There IS an array head, but every cacheable span carries a volatility signature — anchoring
+		// here would bust the prefix it caches, so leave the body unchanged (the fail-safe direction).
+		return raw, BreakpointOutcome{Reason: BreakpointReasonVolatileHead}
+	default:
 		return raw, BreakpointOutcome{Reason: BreakpointReasonNoStableHead}
 	}
 	last := spans[len(spans)-1]
@@ -164,4 +189,31 @@ func spliceCacheControlIntoObject(obj []byte) ([]byte, bool) {
 		b.WriteByte('}')
 	}
 	return b.Bytes(), true
+}
+
+// Volatility signatures — the per-request token SHAPES that, sitting in a cache-prefix head, change
+// the bytes between turns and bust the prefix a breakpoint is meant to secure. Only UNAMBIGUOUS
+// shapes are listed, because a false positive merely SKIPS a cache (fail-safe) while a false
+// negative caches a busting span (the harm). Single-body detection cannot see a value-only nonce
+// that looks like an ordinary word, nor reordered-key JSON (which needs two turns to observe); those
+// remain for the aggressive strip/normalize follow-up — the full form of #806 bullet 2.
+var (
+	// volUUID matches a canonical UUID/GUID (8-4-4-4-12 hex) — the standard nonce / request-id shape.
+	volUUID = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	// volDateTime matches an ISO-8601 date with a TIME-OF-DAY component (a `T`/space then HH:MM):
+	// sub-day resolution changes faster than the 5-minute ephemeral cache TTL. A date-ONLY token
+	// (2026-06-26) lacks the trailing HH:MM and is intentionally NOT matched — it is byte-stable
+	// across a session's turns and is the common "Today's date is ..." head shape we WANT to cache.
+	volDateTime = regexp.MustCompile(`[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt ][0-9]{2}:[0-9]{2}`)
+)
+
+// headValueIsVolatile reports whether a candidate cache-prefix value (the `system` or `tools` JSON
+// value, raw) carries a self-evidently per-request token. It scans the raw bytes, so it sees a
+// token embedded anywhere in the head — a UUID in a tool description, a timestamp in a system block.
+// An empty or absent value is not volatile.
+func headValueIsVolatile(v json.RawMessage) bool {
+	if len(v) == 0 {
+		return false
+	}
+	return volUUID.Match(v) || volDateTime.Match(v)
 }
