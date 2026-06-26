@@ -1246,6 +1246,35 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("- **vacuous_tests** — a Test/Benchmark func that makes zero assertions. [HARD]")
     out.append("- **stub_masquerade** — an exported func with a trivial/panic body, not `[STUB]`. [SOFT]")
     out.append("- **churn_bloat** — recent commits adding `.go` files without retiring any. [SOFT]")
+    # stub_masquerade SOFT->HARD promotion readiness (#781) — advisory, never gates. The
+    # --json/corpus and text paths already surface it; the committed doc is the canonical
+    # operator-facing artifact, so the readout (and the eventual flip procedure) belongs
+    # here too. Rendered only when the promotion block is present (build_payload lifts it
+    # from the stub_masquerade KPI), so fixtures without it emit no empty section.
+    promo = c.get("stub_masquerade_promotion")
+    if promo:
+        out.append("")
+        out.append("## stub_masquerade SOFT->HARD promotion (#781)")
+        out.append("")
+        out.append("> Advisory readiness for promoting the `stub_masquerade` axis from SOFT "
+                   "(scores, never gates) to HARD (a gating defect). Re-derived from disk; the "
+                   "readout never performs the flip — moving the finding from `soft` to "
+                   "`defects` and bumping its weight stays a deliberate maintainer act, taken "
+                   "once the elapsed soak window is reviewed for zero false positives.")
+        out.append("")
+        out.append("| Gate | State |")
+        out.append("|---|---|")
+        out.append(f"| symbol<->`[STUB]`-ledger link tight | {'yes' if promo.get('link_tight') else 'no'} |")
+        out.append(f"| zero-FP soak (releases since {promo.get('ship_release')}) | "
+                   f"{promo.get('releases_since_ship')}/{promo.get('soak_releases_required')} |")
+        out.append(f"| promotable now | {'yes' if promo.get('promotable') else 'no'} |")
+        out.append("")
+        out.append(f"> {promo.get('status')}")
+        out.append("")
+        out.append("> When `promotable` is yes: review the elapsed window for any false "
+                   "positive, then move the `stub_masquerade` finding from `soft` to `defects` "
+                   "and bump `KPI_WEIGHTS[\"stub_masquerade\"]` in "
+                   "`tools/code_slop_scorecard.py` — the deliberate flip.")
     out.append("")
     out.append(f"> {payload.get('reason', '')}")
     out.append("")

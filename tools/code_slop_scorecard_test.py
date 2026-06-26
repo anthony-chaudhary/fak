@@ -547,6 +547,30 @@ def test_markdown_stamp_roundtrips():
     assert "code-slop-scorecard:" in body
 
 
+def test_markdown_surfaces_stub_promotion_781():
+    # The committed doc is the canonical operator-facing artifact, so it must surface the
+    # #781 SOFT->HARD promotion readiness (not just --json/text). At 0.34.0 the honest
+    # state is AWAITING SOAK / not promotable — the doc must say so, never fake READY.
+    stub = cs.kpi_stub_masquerade({}, claims_text="", version="0.34.0")
+    kpis = [_kpi("duplication", []), _kpi("dead_code", []), _kpi("comment_slop", []),
+            _kpi("vacuous_tests", []), stub, _kpi("churn_bloat", [])]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    body = cs.render_markdown(p, stamp="2026-06-25")
+    assert "## stub_masquerade SOFT->HARD promotion (#781)" in body
+    assert "AWAITING SOAK" in body
+    assert "| promotable now | no |" in body
+    # the flip procedure is documented so the eventual promotion is not forgotten
+    assert "soft` to `defects`" in body
+
+
+def test_markdown_omits_promotion_when_block_absent():
+    # a payload without the promotion block renders no promotion section (no empty header).
+    kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    body = cs.render_markdown(p, stamp="2026-06-25")
+    assert "promotion (#781)" not in body
+
+
 def main() -> int:
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))
