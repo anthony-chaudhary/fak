@@ -5,8 +5,6 @@ description: "Industry-first competitive scorecard: a researched taxonomy of the
 
 # Industry scorecard — fak vs the LLM-serving field
 
-<!-- industry-scorecard: 2026-06-24 · process: tools/industry_scorecard.py · data: tools/industry_scorecard.data/ -->
-
 This is the **outward** measuring stick — the counterpart of the inward scorecards (hygiene, code, docs). It does not start from what fak happened to measure; it starts from the **industry**. The source of truth is a researched taxonomy of the dimensions a serious operator, buyer, or analyst uses to evaluate an LLM-serving system (`tools/industry_scorecard.data/_taxonomy.json`), each with the current SOTA bar and a dated source. fak is then positioned honestly on every dimension — and for most of them the honest answer is a **named gap**, not a win. Everything below is re-derived from the data by `tools/industry_scorecard.py`; no number is hand-typed.
 
 Two numbers are driven:
@@ -20,34 +18,34 @@ Two numbers are driven:
 
 | Metric | Value |
 |---|---|
-| **Coverage** | **100.0%** (88/88 industry dimensions positioned) |
+| **Coverage** | **100.0%** (89/89 industry dimensions positioned) |
 | **Parity-debt (honesty defects)** | **0** |
 | Coverage-debt (unpositioned dimensions) | 0 |
 | Composite score | 98.8/100 (grade A) — honesty 98.0 × 60% + coverage 100.0% × 40% |
-| Standing | 4 lead · 11 parity · 8 trails · 65 honest gap |
-| Measured vs gap | 22 measured · 66 honest gaps |
-| Tracked | 88 dimensions · 103 competitors · 88 positions |
+| Standing | 5 lead · 11 parity · 8 trails · 66 honest gap |
+| Measured vs gap | 23 measured · 67 honest gaps |
+| Tracked | 89 dimensions · 103 competitors · 90 positions |
 | As of | 2026-06-23 (fak 0.31.0) |
-| Advisory signals | 7 fak-freshness · 47 industry-drift |
+| Advisory signals | 8 fak-freshness · 47 industry-drift |
 
 > **Read this right.** The score grades how *complete and honest fak's competitive map is* — not how much fak wins. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
 
 ## Standing at a glance
 
 ```text
-industry standing chart — 88 dimensions · 103 competitors · score 98.8/100 (grade A) · parity-debt 0
+industry standing chart — 89 dimensions · 103 competitors · score 98.8/100 (grade A) · parity-debt 0
 
 coverage of the field (positioned / in-scope dimensions):
-  positioned  [████████████████████████████████]  88/88  (100.0%)
+  positioned  [████████████████████████████████]  89/89  (100.0%)
 
 standing on the positioned axes (shown, not hidden):
-  ▲ lead      █······················· 4
+  ▲ lead      ██······················ 5
   ≈ parity    ████···················· 11
   ▼ trails    ███····················· 8
-  ○ no-claim  ████████████████████████ 65
+  ○ no-claim  ████████████████████████ 66
 
 coverage by group:
-  agent          ████████················ 5/5
+  agent          ██████████·············· 6/6
   cost           ████████················ 5/5
   decoding       █████████████████████··· 13/13
   distributed    ████████················ 5/5
@@ -63,7 +61,7 @@ coverage by group:
 
 | Group | Positioned / in-scope | Pages |
 |---|---|---|
-| agent | 5/5 | [agent.md](agent.md) |
+| agent | 6/6 | [agent.md](agent.md) |
 | cost | 5/5 | [cost.md](cost.md) |
 | decoding | 13/13 | [decoding.md](decoding.md) |
 | distributed | 5/5 | [distributed.md](distributed.md) |
@@ -82,6 +80,7 @@ coverage by group:
 |---|---|---|---|---|---|---|---|
 | ▲ | lead | agent-fleet | Cross-agent fleet serving time (N agents × T turns): work eliminated by shared-prefix fusion | 19 min | 78 min | 4.11× | Tuned warm per-agent KV cache (the SGLang / vLLM / OpenAI-prompt-caching floor) |
 | ▲ | lead | agent-fleet | Marginal value of cross-agent prefix fusion ON TOP of an already-warm per-agent cache | 2.4 × | 1 × | 2.40× | Tuned warm per-agent KV cache, already hot (B) |
+| ▲ | lead | client-compaction | Compact a long session WITHOUT busting the provider prompt-cache prefix (proven byte-identity drop-and-splice vs summarize/clear-and-rewrite) | — | — | — | Anthropic API context-editing; OpenAI Codex CLI; GitHub Copilot CLI; Aider; LangChain (trim_messages / ConversationSummaryMemory) |
 | ▲ | lead | model-routing | Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection | — | — | — | RouteLLM (LMSYS); Martian; NotDiamond; Unify.ai; OpenRouter (+ Fusion); Portkey; LiteLLM Router |
 | ▲ | lead | quantization | int8 / Q8_0 SIMD decode throughput vs the same-rung int8 peer | 2.97 × vs HF int8 | 1 × vs HF int8 | 2.97× | HuggingFace dynamic-int8 (the standard same-rung int8 reference) |
 | ≈ | parity | kv-cache | Prefix caching / automatic KV reuse across requests (shared-context workloads) | 6.95 × | 7.5 × | 0.93× | fak's own deterministic token-reuse ceiling (the exact upper bound) |
@@ -104,6 +103,7 @@ coverage by group:
 | ▼ | trails | single-stream | Single-stream prefill throughput, apples-to-apples CPU-vs-CPU | 0.12 × of llama.cpp CPU | 1 × of llama.cpp CPU | 0.12× | llama.cpp CPU, same box + Q8 weights (CPU-vs-CPU) |
 | ▼ | trails | throughput | Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded) | 1085.6 tok/s @ conc 64 (peak) | 1451.6 tok/s @ conc 64 (peak) | 0.75× | Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU datacenter server |
 | ○ | no-claim | agent-fleet | Cross-agent reuse marginal value vs a LIVE tuned shared-prefix engine (head-to-head) | — | — | — | SGLang RadixAttention / vLLM Automatic Prefix Caching (actual competing processes) |
+| ○ | no-claim | client-compaction | Provider-REALIZED cache reuse after dropping the middle (does Anthropic's cache cascade to the head breakpoint, or re-bill the dropped middle as fresh input?) | — | — | — | Anthropic prompt cache (multi-breakpoint cascade behavior) |
 | ○ | no-claim | cost-efficiency | Goodput under an SLA (requests/s meeting TTFT and TPOT SLOs simultaneously) | — | — | — | DistServe (introduced goodput, P/D disaggregation); SGLang-PD; MuxWise (P/D multiplexing) |
 | ○ | no-claim | cost-efficiency | SLO-constrained goodput (per-GPU) | — | 4.48 SLO-attained req/s per GPU | — | DistServe; DynaServe; NVIDIA Dynamo; GenAI-Perf goodput mode |
 | ○ | no-claim | cost-efficiency | End-to-end effective request capacity / cost gain from the KV system under SLO | — | — | — | Mooncake; LMCache + vLLM; NVIDIA Dynamo |
@@ -173,8 +173,8 @@ coverage by group:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (7 unverifiable) |
-| structure | `well_formed` | 100 | 0 | all 88 rows well-formed |
+| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (8 unverifiable) |
+| structure | `well_formed` | 100 | 0 | all 90 rows well-formed |
 | completeness | `competitor_named` | 100 | 0 | every row names a concrete competitor |
 | completeness | `axis_coverage` | 100 | 0 | all 5 contracted regimes covered |
 | honesty | `baseline_sota` | 100 | 0 | every comparison is vs a tuned / SOTA / next-best baseline |

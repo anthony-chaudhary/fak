@@ -1578,6 +1578,26 @@
       "source_date": "2026-06",
       "notes": "Survey of 2025-2026 routers/gateways in docs/model-routing.md. The gap is categorical (a routing GRANULARITY no surveyed product exposes), not a benchmarked speed/quality win — any '10x' is a target to be measured, never an inferred or borrowed number.",
       "in_scope": true
+    },
+    {
+      "id": "compaction-cache-preservation",
+      "category": "client-compaction",
+      "dimension": "Long-session history compaction that preserves the provider prompt-cache prefix (drop-and-splice vs summarize-and-resend)",
+      "why_it_matters": "An agent re-sends its whole transcript every turn; the provider prompt cache discounts the unchanged prefix ONLY while it stays byte-for-byte identical. Almost every built-in compaction (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI, Anthropic API context-editing) summarizes or clears old turns and re-sends a REWRITTEN prompt — which by the providers' own docs breaks that exact-match prefix and re-bills it at full price on the compacting turn. Whether a tool can shrink a long conversation WITHOUT busting the cache is the axis that decides if compaction saves money on the turn it fires or costs it.",
+      "sota_systems": [
+        "Anthropic API context-editing (clear_tool_uses_20250919)",
+        "OpenAI Codex CLI (summary compaction)",
+        "GitHub Copilot CLI (cache-boundary compaction)",
+        "Aider (ChatSummary)",
+        "LangChain (trim_messages / ConversationSummaryMemory)"
+      ],
+      "sota_bar": "The field splits two ways. Summarizers (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI) and Anthropic's API context-editing REWRITE/clear content and break the prefix cache (OpenAI docs: 'when you drop, summarize or compact earlier turns ... you'll break the cache'; Anthropic context-editing docs: 'Invalidates cached prompt prefixes when content is cleared'). The cache-preserving sub-field is small: LangChain trim_messages (pure sliding-window drop, no rewrite) and Copilot's DELIBERATE cache-boundary reset reason about it; no surveyed tool ships a PROVEN byte-identity splice on by default. Context-editing pairs clearing with a memory tool for recovery (a different axis: recoverability), reporting up to ~84% token reduction on an Anthropic agent eval.",
+      "best_value": null,
+      "metric_unit": "qualitative (preserves byte-identical cache prefix while compacting: yes/no; lossy vs drop; on-by-default vs library/beta)",
+      "source_url": "https://platform.claude.com/docs/en/docs/build-with-claude/context-editing",
+      "source_date": "2026-01",
+      "notes": "Industry mechanisms web-sourced 2026-06 (OpenAI prompt-caching cookbook, Anthropic context-editing docs, GitHub Copilot context blog, Aider/LangChain source). fak's drop-and-splice is verified in internal/agent/anthropic_compact.go (bytes.Equal prefix proof, 13 fail-safe identity exits). FENCE: fak proves byte-identity of the shipped prefix; whether the provider's cache CASCADE realizes the hit on the compacting turn is unmeasured (epic #745) — so this is a cache-PRESERVATION-mechanism position, not a measured cost-saving number.",
+      "in_scope": true
     }
   ]
 }

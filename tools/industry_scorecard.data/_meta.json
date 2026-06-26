@@ -96,6 +96,11 @@
       "name": "Model routing"
     },
     {
+      "id": "client-compaction",
+      "group": "agent",
+      "name": "Client-side context compaction"
+    },
+    {
       "id": "single-stream",
       "group": "serving",
       "name": "Single-stream (one chat)"

@@ -1,0 +1,48 @@
+{
+  "_about": "fak position rows for client-side context compaction. dim_id links each to a _taxonomy.json dimension. See docs/notes/COMPACTION-VS-INDUSTRY-2026-06-25.md for the full audit (industry mechanisms web-sourced; fak claims adversarially verified against source).",
+  "rows": [
+    {
+      "id": "compaction-byte-identity-splice",
+      "dim_id": "compaction-cache-preservation",
+      "axis": "Compact a long session WITHOUT busting the provider prompt-cache prefix (proven byte-identity drop-and-splice vs summarize/clear-and-rewrite)",
+      "category": "client-compaction",
+      "competitor": "Anthropic API context-editing; OpenAI Codex CLI; GitHub Copilot CLI; Aider; LangChain (trim_messages / ConversationSummaryMemory)",
+      "competitor_class": "sota",
+      "competitor_value": null,
+      "competitor_source": "OpenAI prompt-caching docs ('when you drop, summarize or compact earlier turns ... you'll break the cache'); Anthropic context-editing docs ('Invalidates cached prompt prefixes when content is cleared'); GitHub Copilot context blog; Aider/LangChain source — web-sourced 2026-06.",
+      "fak_value": null,
+      "unit": "qualitative (preserves byte-identical cache prefix while compacting: yes/no)",
+      "higher_is_better": true,
+      "verdict": "lead",
+      "status": "shipped",
+      "qualitative": true,
+      "fak_commit": "ff7ca4d",
+      "fak_artifact": "experiments/agent-live/compact-100k-session-dogfood-2026-06-25.json",
+      "fak_doc": "internal/agent/anthropic_compact.go (CompactAnthropicHistory: drops middle whole turns, splices ORIGINAL bytes, asserts bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) before shipping, 13 fail-safe identity exits); internal/gateway/gateway.go:64 DefaultCompactHistoryBudget=48000 (on-by-default); dogfood 142,516->6,597 tokens (95.4% shed), prefix SHA256-identical off vs on. docs/notes/COMPACTION-VS-INDUSTRY-2026-06-25.md.",
+      "apples_to_apples": false,
+      "comparison_note": "CATEGORICAL capability lead on the cache-PRESERVATION mechanism, not a benchmarked cost win. To our knowledge / among surveyed 2026 built-in compactors, the summarizers (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI) and Anthropic's API context-editing all REWRITE/clear content and break the exact-match prefix by their own docs; only LangChain trim_messages (pure drop) and Copilot's deliberate boundary-reset reason about preservation, and none ships a PROVEN byte-identity splice on by default. fak does (bytes.Equal proof, fail-safe identity on any ambiguity). NOT apples-to-apples vs context-editing, which optimizes a DIFFERENT axis (recoverable tool-result clearing + memory tool) — see the recoverability row. FENCE: this is a mechanism position; the cost win depends on the provider cache CASCADE realizing the hit on the compacting turn, which is UNMEASURED (row 'compaction-cache-read-realized').",
+      "measured_on": "2026-06-25"
+    },
+    {
+      "id": "compaction-cache-read-realized",
+      "dim_id": "compaction-cache-preservation",
+      "axis": "Provider-REALIZED cache reuse after dropping the middle (does Anthropic's cache cascade to the head breakpoint, or re-bill the dropped middle as fresh input?)",
+      "category": "client-compaction",
+      "competitor": "Anthropic prompt cache (multi-breakpoint cascade behavior)",
+      "competitor_class": "sota",
+      "competitor_value": null,
+      "competitor_source": "Anthropic prompt-caching docs (up to 4 cache breakpoints, ~20-block backward lookback per breakpoint); behavior under a shifted recent breakpoint not publicly specified.",
+      "fak_value": null,
+      "unit": "x observed cache_read / witnessed shed on a compacted turn",
+      "higher_is_better": true,
+      "verdict": "no-claim",
+      "status": "in-flight",
+      "fak_commit": "",
+      "fak_artifact": "",
+      "fak_doc": "The instrument exists but is unmeasured on real traffic: /metrics emits fak_gateway_compaction_shed_tokens_total (WITNESSED, 'what fak SENT') next to fak_gateway_compaction_cache_read_tokens_total (OBSERVED, provider cache_read, 'attribute nothing to fak from it alone') — internal/gateway/metrics.go writeCompactionMetrics. The dogfood (compact-100k-session-dogfood-2026-06-25.json) runs vs a MOCK upstream, so it proves byte-identity, not provider reuse. Settling this is one credentialed Anthropic session scraped, not new code. Epic #745.",
+      "apples_to_apples": true,
+      "comparison_note": "HONEST NO-CLAIM, the audit's single biggest open risk. fak proves the shipped prefix is byte-identical, which makes a cache hit ELIGIBLE; whether the provider's lookup CASCADES to the head breakpoint after the middle is dropped (vs missing at the shifted recent breakpoint and re-billing the dropped middle as fresh input) is unverified by direct telemetry. If the cascade fails, the claimed shed savings collapse toward zero on the compacting turn. No fak_value is asserted until witnessed shed is correlated against observed cache_read on real Anthropic traffic (off vs on). The byte-identity row above is a mechanism lead; THIS is the cost realization, deliberately kept separate so the first is never read as the second.",
+      "measured_on": "2026-06-25"
+    }
+  ]
+}
