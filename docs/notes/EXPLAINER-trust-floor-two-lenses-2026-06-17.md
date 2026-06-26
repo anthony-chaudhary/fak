@@ -244,7 +244,7 @@ core image : 4 pages (2 benign, 2 sealed), 442 bytes CAS — reloaded in a FRESH
   ✓ resolve poison policy (no witness)     -> REFUSED: sealed by the trust gate (no Clear)
   ✓ resolve poison policy (after clear)    -> REFUSED: content re-screen RE-QUARANTINED it
                                               — clearance does not launder poison
-working set for "what refund fee?"         -> 1 benign page; poison present: false
+working set for "what refund fee did the user's account show?"  -> 1 benign page; poison present: false
 ```
 
 Witnesses: 37 `go test ./internal/recall/` functions pass; a 5-skeptic
