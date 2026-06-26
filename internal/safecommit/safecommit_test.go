@@ -2,11 +2,14 @@ package safecommit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
 // fakeGit is a scriptable Runner: it answers each git invocation from a small reply table
@@ -111,6 +114,29 @@ func baseOpts() Options {
 	}
 }
 
+func decisionRecorder(t *testing.T) (*witness.Recorder, *[]witness.Decision) {
+	t.Helper()
+	var captured []witness.Decision
+	runner := func(_ context.Context, _ string, args ...string) (string, int, error) {
+		for i, a := range args {
+			if a != "-F" || i+1 >= len(args) {
+				continue
+			}
+			body, err := os.ReadFile(args[i+1])
+			if err != nil {
+				return "", 1, err
+			}
+			var d witness.Decision
+			if err := json.Unmarshal([]byte(strings.TrimSpace(string(body))), &d); err != nil {
+				return "", 1, err
+			}
+			captured = append(captured, d)
+		}
+		return "", 0, nil
+	}
+	return witness.NewRecorderWithRunner(runner, ""), &captured
+}
+
 func TestPathspecRace_isTheHeadlineGuard(t *testing.T) {
 	g := &fakeGit{reply: onTrunkBase()}
 	// A peer raced: diff-tree shows our path PLUS a peer's file that no requested path covers.
@@ -137,6 +163,60 @@ func TestPathspecRace_isTheHeadlineGuard(t *testing.T) {
 	}
 	if res.Pushed {
 		t.Fatalf("race: must not report Pushed")
+	}
+}
+
+func TestDecisionRecorderRecordsPathspecAssertionPass(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	rec, captured := decisionRecorder(t)
+	opts.Recorder = rec
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Verified {
+		t.Fatalf("happy path should verify, got %+v", res)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one recorded decision, got %d: %+v", len(*captured), *captured)
+	}
+	got := (*captured)[0]
+	if got.Op != "safecommit" || got.Verdict != witness.VerdictAssertPass {
+		t.Fatalf("recorded decision = %+v, want safecommit/assert-pass", got)
+	}
+	if got.PathspecAssertion != "committed-set==requested-set" {
+		t.Fatalf("PathspecAssertion = %q", got.PathspecAssertion)
+	}
+	if len(got.Tree) != 1 || got.Tree[0] != "internal/foo/bar.go" {
+		t.Fatalf("Tree = %+v", got.Tree)
+	}
+}
+
+func TestDecisionRecorderRecordsPathspecRaceFailure(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["diff-tree"] = reply{out: "internal/foo/bar.go\ninternal/peer/swept.go\n", code: 0}
+	opts := baseOpts()
+	rec, captured := decisionRecorder(t)
+	opts.Recorder = rec
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if res.Reason != ReasonPathspecRace {
+		t.Fatalf("want PATHSPEC_RACE, got %+v", res)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one recorded decision, got %d: %+v", len(*captured), *captured)
+	}
+	got := (*captured)[0]
+	if got.Op != "safecommit" || got.Verdict != witness.VerdictAssertFail || got.ReasonClass != ReasonPathspecRace {
+		t.Fatalf("recorded decision = %+v, want safecommit/assert-fail/PATHSPEC_RACE", got)
+	}
+	if got.PathspecAssertion != "committed-set!=requested-set" {
+		t.Fatalf("PathspecAssertion = %q", got.PathspecAssertion)
 	}
 }
 

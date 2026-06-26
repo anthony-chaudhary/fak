@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
+	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
 // Runner executes a git subcommand in dir and returns (stdout, exitCode, err). It is the
@@ -73,13 +74,14 @@ const DefaultLockTimeout = 10 * time.Second
 
 // Options is the full request to Commit / CommitWith.
 type Options struct {
-	Dir     string   // repo dir ("" => git discovery from cwd)
-	Paths   []string // explicit repo-relative pathspec (REQUIRED, >= 1)
-	Message string   // commit message (already assembled from -m / -F / stdin)
-	Trunk   string   // expected trunk branch ("" => DefaultTrunk)
-	SignOff bool     // add the DCO sign-off (-s)
-	Push    bool     // push, but ONLY after a verified commit
-	Lock    LockOptions
+	Dir      string            // repo dir ("" => git discovery from cwd)
+	Paths    []string          // explicit repo-relative pathspec (REQUIRED, >= 1)
+	Message  string            // commit message (already assembled from -m / -F / stdin)
+	Trunk    string            // expected trunk branch ("" => DefaultTrunk)
+	SignOff  bool              // add the DCO sign-off (-s)
+	Push     bool              // push, but ONLY after a verified commit
+	Lock     LockOptions       // advisory same-host lock
+	Recorder *witness.Recorder // optional decisions-note sink for post-commit assertions
 }
 
 // DefaultTrunk is the branch fak commits land on when Options.Trunk is empty.
@@ -122,6 +124,11 @@ type Result struct {
 // flock (gpulease) on <Dir>/.git/fak-commit.lock. It is the thin production wiring around
 // CommitWith.
 func Commit(ctx context.Context, opts Options) (Result, error) {
+	if opts.Recorder == nil {
+		opts.Recorder = witness.NewRecorderWithRunner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			return realRunner(ctx, dir, args...)
+		}, opts.Dir)
+	}
 	return CommitWith(ctx, realRunner, realLock, opts)
 }
 
@@ -270,6 +277,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (R
 		res.Reason = ReasonPathspecRace
 		res.RacedExtra = extra
 		res.Detail = "extra files landed in this commit — a peer raced; commit left intact for review, not pushed"
+		recordPathspecAssertion(ctx, opts, res, witness.VerdictAssertFail, ReasonPathspecRace, "committed-set!=requested-set")
 		return res, nil
 	}
 
@@ -284,9 +292,11 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (R
 		res.Reason = ReasonSymlinkEscape
 		res.RacedExtra = escaped
 		res.Detail = "a landed path resolves through a symlink to a target outside the lease; commit left intact for review, not pushed"
+		recordPathspecAssertion(ctx, opts, res, witness.VerdictAssertFail, ReasonSymlinkEscape, "resolved-targets-within-requested-set=false")
 		return res, nil
 	}
 	res.Verified = true
+	recordPathspecAssertion(ctx, opts, res, witness.VerdictAssertPass, "", "committed-set==requested-set")
 
 	// (8) Optional push — only a verified commit, plain push (never --force). A rejection
 	// (e.g. non-fast-forward) surfaces honestly; the commit stands for a human to integrate.
@@ -303,6 +313,24 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (R
 	}
 
 	return res, nil
+}
+
+// recordPathspecAssertion appends the post-commit assertion result to the
+// dedicated decisions note when a recorder is wired. It is best-effort: the
+// assertion result stays in Result and the commit outcome does not depend on a
+// side-ref write succeeding.
+func recordPathspecAssertion(ctx context.Context, opts Options, res Result, verdict, reason, assertion string) {
+	if opts.Recorder == nil || res.SHA == "" {
+		return
+	}
+	d := witness.Decision{
+		Op:                "safecommit",
+		Verdict:           verdict,
+		ReasonClass:       reason,
+		Tree:              append([]string(nil), res.Paths...),
+		PathspecAssertion: assertion,
+	}
+	_ = opts.Recorder.AppendDecision(ctx, res.SHA, d)
 }
 
 // normalizePaths runs each raw pathspec through gitgate's exported repo-path rule, drops

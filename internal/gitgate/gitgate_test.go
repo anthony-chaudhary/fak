@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
 // TestClassify is the table that pins the rung's structural decisions: which git
@@ -222,6 +223,29 @@ func cmdCall(tool, key, cmd string) *abi.ToolCall {
 	return &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: b}}
 }
 
+func decisionRecorder(t *testing.T) (*witness.Recorder, *[]witness.Decision) {
+	t.Helper()
+	var captured []witness.Decision
+	runner := func(_ context.Context, _ string, args ...string) (string, int, error) {
+		for i, a := range args {
+			if a != "-F" || i+1 >= len(args) {
+				continue
+			}
+			body, err := os.ReadFile(args[i+1])
+			if err != nil {
+				return "", 1, err
+			}
+			var d witness.Decision
+			if err := json.Unmarshal([]byte(strings.TrimSpace(string(body))), &d); err != nil {
+				return "", 1, err
+			}
+			captured = append(captured, d)
+		}
+		return "", 0, nil
+	}
+	return witness.NewRecorderWithRunner(runner, ""), &captured
+}
+
 // TestAdjudicate proves the end-to-end verdict path: a hazardous shell call Denies
 // with ReasonPolicyBlock + a witness Claim; a safe one and a non-shell one Defer.
 func TestAdjudicate(t *testing.T) {
@@ -260,6 +284,27 @@ func TestAdjudicate(t *testing.T) {
 	// A nil call defers (no panic).
 	if v := g.Adjudicate(ctx, nil); v.Kind != abi.VerdictDefer {
 		t.Fatalf("nil call: Kind=%v, want Defer", v.Kind)
+	}
+}
+
+func TestAdjudicateRecordsRefusalWhenRecorderWired(t *testing.T) {
+	g := New()
+	rec, captured := decisionRecorder(t)
+	g.SetRecorder(rec)
+
+	v := g.Adjudicate(context.Background(), cmdCall("Bash", "command", "git push --force origin main"))
+	if v.Kind != abi.VerdictDeny {
+		t.Fatalf("force push: Kind=%v, want Deny", v.Kind)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one recorded decision, got %d: %+v", len(*captured), *captured)
+	}
+	got := (*captured)[0]
+	if got.Op != "gitgate" || got.Verdict != witness.VerdictRefuse || got.ReasonClass != "POLICY_BLOCK" {
+		t.Fatalf("recorded decision = %+v, want gitgate/refuse/POLICY_BLOCK", got)
+	}
+	if strings.Join(got.RefusedArgv, " ") != "shell -c git push --force origin main" {
+		t.Fatalf("RefusedArgv = %+v", got.RefusedArgv)
 	}
 }
 
@@ -314,6 +359,33 @@ func TestCollectiveCommitRefusesPathOutsideLeasedTree(t *testing.T) {
 	wp, ok := v.Payload.(abi.WitnessPayload)
 	if !ok || !strings.Contains(wp.Claim, "outside leased tree") {
 		t.Fatalf("collective outside-lease witness=%v, want outside leased tree claim", v.Payload)
+	}
+}
+
+func TestCollectiveCommitRecordsRefusalWhenRecorderWired(t *testing.T) {
+	g := New()
+	rec, captured := decisionRecorder(t)
+	g.SetRecorder(rec)
+	plan := CollectiveCommitPlan{
+		Writers: []CollectiveWriter{
+			{ID: "gitgate", Leases: []string{"internal/gitgate/**"}, Paths: []string{"internal/kernel/kernel.go"}},
+		},
+		CommitPaths: []string{"internal/kernel/kernel.go"},
+	}
+
+	v := g.Adjudicate(context.Background(), collectiveCall(plan))
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonLeaseHeld {
+		t.Fatalf("collective outside-lease verdict=%+v, want Deny LEASE_HELD", v)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one recorded decision, got %d: %+v", len(*captured), *captured)
+	}
+	got := (*captured)[0]
+	if got.Op != ToolCollectiveCommit || got.Verdict != witness.VerdictRefuse || got.ReasonClass != "LEASE_HELD" {
+		t.Fatalf("recorded decision = %+v, want collective/refuse/LEASE_HELD", got)
+	}
+	if len(got.Tree) != 1 || got.Tree[0] != "internal/kernel/kernel.go" {
+		t.Fatalf("Tree = %+v", got.Tree)
 	}
 }
 

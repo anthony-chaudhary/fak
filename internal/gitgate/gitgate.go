@@ -50,6 +50,7 @@
 //     substitution RESULT (`git $(echo push) --force`) need runtime state no STATIC parse
 //     has, so they stay opaque under mvdan/sh too. The AST would only change which esoteric
 //     quoting the lexer disclaims — never a verdict on the hazards this rung exists to catch.
+//
 //   - ARGV-DECIDABLE HAZARDS ONLY. Laws that need REPO STATE — OFF_TRUNK (the
 //     current branch), the shared-tree staging sweep (the live index), a peer's
 //     in-flight MERGE_HEAD (a transient .git file) — are NOT decidable in a pure,
@@ -57,6 +58,7 @@
 //     plus a per-call git spawn and a TOCTOU race, so they stay with the witness
 //     resolver (internal/witness, off the fast path) and the git hooks. This rung
 //     DEFERS on them — the fold passes to the next link, fail-closed by default.
+//
 //   - ENFORCING ONLY IN-PATH. A client that bypasses the kernel hits the git
 //     hooks, not this rung. gitgate is the earlier, in-path complement to the
 //     hooks, never their replacement.
@@ -72,9 +74,9 @@
 // branch, a peer's MERGE_HEAD — stay deferred to the witness resolver and git
 // hooks, not this in-path pure rung.
 //
-// It is PURE (a string read + an argv walk); it execs nothing, imports only the
-// frozen ABI, and is cgo-free — so it satisfies architest's interpreter-free /
-// cgo-free / layered-DAG gates exactly as a hot-path rung must.
+// The structural decision is PURE (a string read + an argv walk). When a recorder
+// is explicitly wired, a denial also appends a best-effort side-ref note through
+// internal/witness; the verdict never depends on that forensic write.
 package gitgate
 
 import (
@@ -84,8 +86,10 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
 // hazard is one structurally-decidable git refusal: a (subcommand, flag) pair the
@@ -142,12 +146,21 @@ const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (A
 const ToolCollectiveCommit = "gitgate.collective_commit"
 
 // GitGate is the registered rung. Construct with New; the package Default instance
-// registers itself in init() unless FAK_GITGATE=off. Stateless: the rule table is
-// read-only after construction, so one instance is safe for the whole process.
-type GitGate struct{ rules []hazard }
+// registers itself in init() unless FAK_GITGATE=off. The rule table is read-only
+// after construction, and the optional recorder is atomic, so one instance is safe
+// for the whole process.
+type GitGate struct {
+	rules []hazard
+	rec   atomic.Pointer[witness.Recorder]
+}
 
 // New builds a gate carrying the default trunk-discipline hazard table.
 func New() *GitGate { return &GitGate{rules: defaultHazards} }
+
+// SetRecorder wires an optional durable witness sink. When set, a refusal verdict
+// also appends a witness.Decision to refs/notes/fak/decisions, best-effort: a note
+// write failure never changes the deny/defer/allow verdict.
+func (g *GitGate) SetRecorder(r *witness.Recorder) { g.rec.Store(r) }
 
 func (g *GitGate) Caps() []abi.Capability { return nil }
 
@@ -171,12 +184,14 @@ func (g *GitGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 		return deferVerdict()
 	}
 	if law, denied := g.classify(cmd); denied {
-		return abi.Verdict{
+		v := abi.Verdict{
 			Kind:    abi.VerdictDeny,
 			Reason:  abi.ReasonPolicyBlock,
 			By:      "gitgate",
 			Payload: abi.WitnessPayload{Claim: law},
 		}
+		g.recordRefusal(ctx, "gitgate", abi.ReasonName(v.Reason), []string{"shell", "-c", cmd}, nil)
+		return v
 	}
 	return deferVerdict()
 }
@@ -282,7 +297,9 @@ func (g *GitGate) adjudicateCollective(ctx context.Context, c *abi.ToolCall) abi
 	if finding.OK {
 		return abi.Verdict{Kind: abi.VerdictAllow, By: ToolCollectiveCommit}
 	}
-	return collectiveDeny(finding)
+	v := collectiveDeny(finding)
+	g.recordRefusal(ctx, ToolCollectiveCommit, abi.ReasonName(v.Reason), []string{ToolCollectiveCommit}, plan.CommitPaths)
+	return v
 }
 
 func collectiveDeny(f CollectiveFinding) abi.Verdict {
@@ -300,6 +317,21 @@ func malformedCollective(claim string) CollectiveFinding {
 
 func leaseFinding(claim string) CollectiveFinding {
 	return CollectiveFinding{Reason: abi.ReasonLeaseHeld, Claim: claim}
+}
+
+func (g *GitGate) recordRefusal(ctx context.Context, op, reason string, argv, tree []string) {
+	rec := g.rec.Load()
+	if rec == nil {
+		return
+	}
+	d := witness.Decision{
+		Op:          op,
+		Verdict:     witness.VerdictRefuse,
+		ReasonClass: reason,
+		RefusedArgv: append([]string(nil), argv...),
+		Tree:        append([]string(nil), tree...),
+	}
+	_ = rec.AppendDecision(ctx, "", d)
 }
 
 type leaseTree struct {
@@ -690,7 +722,7 @@ func unwrapShellSources(cmd string) []string {
 	return out
 }
 
-// commandSubstitutions extracts the bodies of every UNQUOTED `$(...)` and backtick `` `...` ``
+// commandSubstitutions extracts the bodies of every UNQUOTED `$()` and backtick
 // command substitution in s. A `$()` is paren-depth-tracked so a nested `$(... $(...) ...)`
 // yields the OUTER body (the recursion in unwrapShellSources re-extracts the inner one). A
 // substitution inside SINGLE quotes is inert in the shell (no expansion happens there), so
