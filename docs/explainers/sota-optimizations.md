@@ -101,15 +101,20 @@ management. Differentiator: **policy-aware invalidation** (not just memory press
 
 ---
 
-### 6. Multi-GPU / Tensor Parallelism ❌ NOT FOCUSED
+### 6. Multi-GPU / Tensor Parallelism 🟡 PRIMITIVE SHIPPED, DEVICE RUN HARDWARE-GATED
 
 **What it is:** Distribute a large model across multiple GPUs using tensor parallelism or
 pipeline parallelism.
 
 **SOTA implementations:** vLLM (tensor parallelism), DeepSpeed, TensorRT-LLM
 
-**fak status:** ❌ **Not focused** — fak runs on single GPU or CPU. Multi-GPU is handled
-by the serving engine `fak` fronts (e.g., vLLM cluster).
+**fak status:** 🟡 The native kernel now has a tensor-parallel decomposition (Megatron
+column/row sharding), a four-collective HAL seam, and both an in-process and a **real
+cross-process (TCP)** collective — all **bit-exact** vs a single-device reference, proven
+on a CPU with no GPU. The live multi-GPU **device** run still needs an NCCL/RCCL
+`CollectiveBackend` plus a 2-/4-GPU host (hardware-gated). fak can also still front a
+serving engine's own multi-GPU cluster (e.g. vLLM). See
+[multi-gpu-tensor-parallelism.md](multi-gpu-tensor-parallelism.md).
 
 ---
 

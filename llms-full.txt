@@ -99,6 +99,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [O(1) context window economics](docs/explainers/o1-context-window-economics.md): when reconstructing a bounded context every turn beats relying on the prefix cache — the crossover, measured on real billed usage, is the cache's own effective discount (~12% of the billed prompt).
 - [The compounding benefits of a saved call](docs/explainers/compounding-benefits-of-a-saved-call.md): why one avoided/cheapened tool call pays back from four orthogonal budgets at once (local CPU, GPU prefill, context window, wall-clock - rarely dollars), then compounds on the horizon - effective_horizon = budget / effective_cost_per_call, fak pushing the denominator down and the numerator up so the gain is their product r/d. The flat Net accounting under-models both; the per-call discharge is largely measured, the horizon multiplier is structure with measured inputs (no headline number). Lens tool: tools/savings_vector.py.
 - [SOTA optimizations fak sits on top of](docs/explainers/sota-optimizations.md): the 10 already-shipped serving optimizations that define the honest baseline.
+- [Multi-GPU tensor parallelism](docs/explainers/multi-gpu-tensor-parallelism.md): the native tensor-parallel (multi-GPU) path — Megatron column/row sharding, the four-collective HAL seam, the in-process and real cross-process (TCP) collectives proven bit-exact vs single-device on a CPU, and the exact NCCL/RCCL device swap-in point. Honest about the hardware-gated residual: a real device communicator and a 2-/4-GPU run.
 - [One binary is the whole surface](docs/explainers/one-binary-one-surface.md): why the governed-serving surface as a single static Go binary beats assembling a multi-component Python/CUDA stack — operational surface, laptop to fleet, not throughput.
 - [Linting agent code at the kernel](docs/explainers/code-linting-at-the-kernel.md): the boundary that adjudicates a tool call is also where a `write_file` can be checked for code that actually parses — language-server packs (Go/JSON in-process, Python/CUDA shell-out) feed parse/compile errors back so the agent fixes them on the same turn.
 - [Model routing (per-aspect + ensemble)](docs/model-routing.md): route any aspect of one request — a single tool call, a sub-query, a reasoning step — to a different model, with first-class ensembles and configurable reductions (vote / best-of / all-reduce / concat), all from one deterministic, reviewable policy. SOTA routers pick one model for the whole request; fak makes routing first-class at every level (`fak route`).
@@ -106,6 +107,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [The four layers of agent memory](docs/MEMORY-LAYERS-EXPLAINER.md): routing, addressing, fusion, and semantics as four distinct KV-cache problems, and why fak's change lives only at the semantics layer.
 - [Shared state ladder](docs/shared-state-ladder.md): the split between shared live messages, live mutable objects, durable handoff, disaggregated state, and user-level collaborative editing.
 - [Shared task record contract](docs/shared-task-record-contract.md): executable JSON envelopes and fixtures for collaborative task records, user patches, conflicts, approval gates, and disaggregated artifact refs.
+- [Multi-agent coordination protocol (RFC)](docs/multi-agent-coordination-protocol.md): the single normative spec for agent-to-agent coordination — the message format (`a2achan`), the shared-state API (`sharedtask`), and the wave coordination primitives (`comm`/`agenttopo`) — every coordination act adjudicated on the same default-deny capability floor as a tool call. The D-007 (#241) capstone.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
 - [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
 
@@ -139,6 +141,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Model/compute engine env knobs](docs/model-engine-env.md): every `FAK_*` variable the in-kernel model and compute engine read — GPU residency budget (`FAK_GPU_BUDGET_MB`), quant/load format, matmul worker budget, SIMD kernel tiers, and the GPU build vars — each with type, default, when-to-use, and a `file:line` source. The compute-engine companion to serve-config.md.
 - [Server troubleshooting](docs/fak/server-troubleshooting.md): diagnosing common `fak serve` failures — port conflicts, out-of-memory model loads, GPU/CUDA/Vulkan errors, and policy issues.
 - [Related tools & workflows](docs/fak/related-items.md): a catalog of fak's CLI verbs, the serve gateway, the test/CI runners, the demo scripts, and the policy templates, with usage examples.
+- [Private comms channel (stub)](docs/private-comms-channel.md): the public front door to the private comms channel — the Slack control-bridge to the lab GPU/DGX servers. Names what it is and how to reach it via the `fak-private` companion repo; carries zero live plumbing (no host, channel id, or token). See also the [GPU-server / Slack boundary](docs/dgx-slack-boundary.md).
 
 ## Optional
 
@@ -153,7 +156,9 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 
 # fak - Fused Agent Kernel
 
-<!-- readme-verified: 2026-06-25 vs VERSION 0.34.0. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
+<!-- readme-verified: 2026-06-25 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
+
+**One binary you put in front of the agent you already run — it keeps your key, puts a default-deny floor under every tool call, and makes long sessions cheaper.**
 
 ## What It Is
 
@@ -176,6 +181,23 @@ on the parts of a real agent loop that get expensive or go wrong:
 > **fak in one line:** Put `fak` in front of the agent you already run. It makes long sessions
 > cheaper, routes each call to the right model, keeps unsafe tool results out of
 > context, and records every verdict. One binary, no rewrite, no key to start.
+
+**The 30-second picture, in numbers** — every figure traces to
+[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). On a 50-turn × 5-agent run, `fak`'s
+reuse does **~4.1× less work than a tuned warm-cache stack** (and ~60× less than the
+naive re-send loop); reuse of the shared prompt prefix climbs to **6.95×** across the
+model ladder. The guard is cheap where it counts — the kernel's allow/deny decision is
+~362 ns in-process per call (measured, Apple M3 Pro), not a network hop, and on the
+gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`) the in-kernel GPU decode holds
+~120 tok/s on an RTX 4070 (SmolLM2-135M), at parity with llama.cpp Q8_0.
+`fak guard` also reports live prefill vs decode tok/s on `/metrics`, so a slow first
+request gets an answer instead of a shrug.
+
+**Pick your path:** wrap the agent you already run in one command
+([`fak guard`](#use-it-with-your-agent)), put `fak` in front of any OpenAI / Anthropic /
+MCP endpoint ([`fak serve`](#any-openai-compatible-or-anthropic-compatible-client)), or —
+if a hard security floor is why you're here — jump to
+[For security teams](#for-security-teams).
 
 It does this by sitting on the tool-call path as a kernel. The model *proposes* a
 call. `fak` decides whether that call exists, whether its arguments are allowed,
@@ -221,6 +243,9 @@ before a model interpretation matters.
 ## Use It With Your Agent
 
 ### Claude Code, OpenCode, Aider-style CLIs
+
+The lowest-friction path: wrap the agent you already run in one command — no rewrite,
+no key to start.
 
 ```bash
 fak guard -- claude
@@ -10274,6 +10299,14 @@ The policy floor *is* the task-level tool policy: list the tools each crew legit
 needs in `allow` / `allow_prefix`, and `DEFAULT_DENY` holds everything else (see
 [the policy floor](#the-policy-floor-your-tool-allow-list), below).
 
+**Manager-worker (hierarchical) pattern.** For CrewAI's *hierarchical* process — a
+manager agent delegating subtasks to workers — route the `manager_llm` through fak too,
+so the manager's coordination prompts hit the shared-brief KV cache instead of
+re-prefilling the shared crew context on every delegation. A runnable, dependency-free
+example crew (governance over every worker tool call + the manager-role
+coordination-overhead model) is in
+[`examples/crewai-crew/`](https://github.com/anthony-chaudhary/fak/tree/main/examples/crewai-crew).
+
 ---
 
 ## Other frameworks
@@ -13232,6 +13265,17 @@ for example, has an oracle that documents the MLA tensor boundary but does not a
 full forward. Treat any family not in the table above as parse-and-axis support, not a
 proven forward.
 
+### Multimodal input support
+
+The in-kernel engine has a governed VLM input seam: `model.ForwardMultimodal` accepts
+ordered text token ids plus precomputed CLIP/LLaVA-style vision embeddings and runs them
+through the same decoder stack as text. It is opt-in only: the zero policy quarantines
+any image-bearing request, and `MultimodalPolicy{Mode: "quarantine"}` is required before
+bounded image embeddings become model-visible. Raw image bytes are accounted/digested for
+quarantine evidence, the embedding fingerprint is bound into the same evidence pointer,
+and raw bytes are never fed to the decoder. This is not a built-in CLIP/OCR tower; the
+encoder interface is where a concrete vision tower plugs in.
+
 ### Load and quantization formats
 
 The in-kernel engine loads weights in these formats. The reference path is f32; the
@@ -13243,6 +13287,7 @@ narrower-precision paths each have their own status.
 | **Q8_0 / int8 SIMD** (hand-written AVX2/AVX-512, CPUID-gated, scalar fallback; opt-in `Session.Quant`) | ~1.125 | In-flight increment, **not** [SHIPPED] — witnessed green in the working tree (argmax-exact vs the f32 oracle, decode near-parity with llama.cpp Q8_0), deliberately not given a SHIPPED row until the lane commits | CLAIMS "In-kernel model" (int8/Q8_0 lane note); `MODEL-BASELINE-RESULTS.md` Act 3 |
 | **Resident Q4_K** (raw q4_k blocks stay resident, decode streams ~1.8× fewer bytes; the Qwen3.6-27B route) | ~0.5 | Available via `FAK_Q4K` (the resident-Q4_K decode path) | [model-engine-env.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/model-engine-env.md) (`FAK_Q4K`) |
 | **AWQ 4-bit** (activation-aware, symmetric, zero-point 8; safetensors only) | ~0.5625 | Implemented (`model.LoadAWQ`); CUDA kernel near-Q8 throughput, CPU scalar reference; oracle threshold cosine ≥0.95 | [awq-quantization.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/awq-quantization.md) |
+| **GPTQ 4/8-bit** (AutoGPTQ/GPTQModel `qweight`/`qzeros`/`scales`, optional `g_idx`) | ~0.5 / ~1.0 plus scales | Implemented for CPU-resident in-kernel sessions (`model.LoadGPTQ`, opt-in `Session.GPTQ`); loader supports single-file and sharded safetensors and routes Llama/Mistral-shaped matmul weights through resident GPTQ GEMV. No native packed GPTQ CUDA throughput claim is made here. | `internal/model/gptq.go`; `go test ./internal/model -run TestGPTQ` |
 
 Hardware coverage for these paths (Metal, Vulkan, CUDA Ada and Ampere, the CPU SIMD
 tiers) is in the [Hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md). The `FAK_*` knobs that pick a
@@ -13390,6 +13435,7 @@ fak tags every capability with exactly one of three honest states:
 | Feature | Status | What it does |
 |---|---|---|
 | Pure-Go SmolLM2-135M forward pass | Shipped | Runs in-process with the KV cache as a kernel-owned Go structure; every rung proven against a HuggingFace oracle (per-layer cos=1.000000, KV-decode token-for-token identical). |
+| Governed multimodal input seam (#399) | Shipped | `ForwardMultimodal` admits ordered text plus externally-produced vision embeddings only under explicit quarantine-mode opt-in, with image count/bytes/pixels and embedding-token limits; raw image bytes stay out of the decoder path. |
 | Parity lane | Shipped | Parallel matmul, batched prefill GEMM, and an 8-accumulator `fdot`, each bit-identical to the serial reference; decode beats every same-precision HF f32 config. |
 | KV-quarantine bridge | Shipped | A ctxmmu Quarantine verdict mechanically evicts that result's K/V span, leaving the cache bit-identical (max|Δ|=0) to never-having-seen it (synthetic-model witness; live agent loop not yet wired). |
 | Planned-elision to KV-eviction residency bridge (#550) | Shipped | `kvmmu.Context.ApplyPlan` evicts every elided span so the cache's residency shrinks to the planner's O(1) view, bit-for-bit (synthetic-model witness; not yet wired into the live HTTP loop). |
@@ -13400,6 +13446,7 @@ fak tags every capability with exactly one of three honest states:
 | Single-pass batched + tree-attention verify | Shipped | `model.VerifyForward` turns the accept decision into a real one-pass forward over candidate tokens, token-identical to sequential decode; CPU synthetic regime, so no tokens/sec, off mainline (`FAK_POLYMODEL`). |
 | Multi-model weight-residency layer | Shipped | `internal/residency` lifts the single-model assumption with a weight-byte budget and LRU page-out, reusing `polymodel.Pool`'s policy; moves no weight bytes, off mainline (`FAK_POLYMODEL`). |
 | RadixAttention parity vs SGLang | Shipped | `internal/radixkv` rebuilds SGLang's radix-tree prefix reuse over the kernel-owned KVCache; measured 77.2–88.2% cache hit rate inside SGLang's 50–99% band, reuse-through-edge-split bit-identical to recompute. |
+| GPTQ resident loader/session (#300) | Shipped | `model.LoadGPTQ` parses AutoGPTQ/GPTQModel safetensors triples (`qweight`/`qzeros`/`scales`, optional `g_idx`) for 4-bit and 8-bit weights, keeps normal tensors f32, and runs opt-in `Session.GPTQ` through resident GPTQ GEMV. CPU-resident path only; native packed GPTQ CUDA throughput is not claimed. |
 | int8/Q8_0 SIMD lane | Simulated | Hand-written AVX2/AVX-512 lane (CPUID-gated, scalar fallback) is the active in-flight increment, witnessed green in the working tree but deliberately not given a Shipped row in the ledger until the implementation lane commits it. |
 
 GPU device compute is witnessed real on several backends (CUDA on an RTX 4070 and a datacenter sm_80 GPU, Vulkan on an AMD RX 7600, Metal on an Apple M3 Pro). See the [hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) and the [engines page](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/engines.md) for those rows.
@@ -15770,15 +15817,20 @@ management. Differentiator: **policy-aware invalidation** (not just memory press
 
 ---
 
-### 6. Multi-GPU / Tensor Parallelism ❌ NOT FOCUSED
+### 6. Multi-GPU / Tensor Parallelism 🟡 PRIMITIVE SHIPPED, DEVICE RUN HARDWARE-GATED
 
 **What it is:** Distribute a large model across multiple GPUs using tensor parallelism or
 pipeline parallelism.
 
 **SOTA implementations:** vLLM (tensor parallelism), DeepSpeed, TensorRT-LLM
 
-**fak status:** ❌ **Not focused** — fak runs on single GPU or CPU. Multi-GPU is handled
-by the serving engine `fak` fronts (e.g., vLLM cluster).
+**fak status:** 🟡 The native kernel now has a tensor-parallel decomposition (Megatron
+column/row sharding), a four-collective HAL seam, and both an in-process and a **real
+cross-process (TCP)** collective — all **bit-exact** vs a single-device reference, proven
+on a CPU with no GPU. The live multi-GPU **device** run still needs an NCCL/RCCL
+`CollectiveBackend` plus a 2-/4-GPU host (hardware-gated). fak can also still front a
+serving engine's own multi-GPU cluster (e.g. vLLM). See
+[multi-gpu-tensor-parallelism.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/multi-gpu-tensor-parallelism.md).
 
 ---
 
@@ -15908,6 +15960,220 @@ that serving engines don't have.
 ---
 
 *Last updated: 2026-06-19*
+
+---
+
+# Multi-GPU tensor parallelism
+
+> Source: `docs/explainers/multi-gpu-tensor-parallelism.md`
+
+---
+title: "Multi-GPU tensor parallelism in fak: architecture, API, and setup"
+description: "How fak's native tensor-parallel (multi-GPU) path is built — the Megatron-style column/row sharding, the four-collective HAL seam, the in-process and cross-process collectives, and the exact NCCL/RCCL swap-in point. Documents what runs and is bit-exact today (host-free) and the hardware-gated residual: a real device communicator and a 2-/4-GPU run."
+---
+
+# Multi-GPU tensor parallelism in fak
+
+Tensor parallelism (TP) splits a *single* layer's matmuls across several GPUs so a
+model that does not fit on one device can be served across many. This page is the
+single setup/architecture reference for fak's **native** TP path: the API you call,
+the collective seam you implement to reach real hardware, what is proven today, and
+exactly what is not yet shipped.
+
+> **Status banner (read first).** The TP decomposition, the four-collective seam, and
+> two collective implementations (in-process and **real cross-process over TCP**) are
+> shipped and **bit-exact** against a single-device reference — all witnessable on a
+> CPU with no GPU. What is **not** shipped is a **device communicator** (an NCCL /
+> RCCL `CollectiveBackend`) and therefore a live **2×/4× GPU run** with throughput
+> scaling. That residual is hardware-gated; it is a backend that implements two/four
+> methods behind the seam below, **not** a rewrite of the decomposition. This tracks
+> GitHub **#295** (`feat(gpu): Multi-GPU Tensor Parallelism [A-007]`).
+
+---
+
+## 1. The shape: pipeline × tensor
+
+A real multi-GPU serving plan is a **grid of pipeline stages × tensor-parallel ranks**.
+The two axes are orthogonal and compose:
+
+- **Pipeline parallelism** splits the layer *stack* across workers and crosses a hidden
+  state at each stage boundary (`internal/model/partition.go`, `pipeline.go`). The wire
+  is the `StageTransport` seam; `TCPTransport` (`internal/model/pipeline_transport.go`)
+  is a real socket implementation, byte-identical to the in-process `LocalTransport`.
+- **Tensor parallelism** splits a *single* layer's matmuls across workers and crosses a
+  collective (AllGather / AllReduce) *inside* the layer. This page is about this axis.
+
+You can run either alone or both together; this doc covers the tensor axis end to end.
+
+---
+
+## 2. The decomposition (Megatron-style, made honest)
+
+fak uses the canonical Megatron-LM decomposition, and the repo's existing numeric
+discipline (`internal/model/parallel.go`) is what keeps it honest:
+
+- **Column-parallel** (shard the **output** features): `y = x·Wᵀ`, with `W` split into
+  row-bands `[W_0; W_1; …]`. Rank `r` computes its output band `y_r = x·W_rᵀ`; the parts
+  are **AllGather**-concatenated in rank order. Each output element is computed by exactly
+  **one** rank in the **same inner order** as the monolithic matmul, so column-parallel is
+  **bit-exact** vs single-device (`max|Δ| = 0`).
+- **Row-parallel** (shard the **contraction** dim): `W` split into column-bands, `x` into
+  matching segments. Rank `r` computes a **partial** `y` over its slice; the parts are
+  **AllReduce**-summed. This *reassociates* the reduction, so it is not bit-exact vs the
+  monolith — it drifts ~`1e-6`, the same non-associativity `parallel.go` already documents
+  for `fdot`. It **is** bit-exact vs a **shard-grouped reference** (the rank-ordered sum of
+  each shard's `fdot`), which is the invariant the gate pins.
+
+Megatron composes exactly these: attention is QKV column-parallel (shard heads) then
+output-proj row-parallel; the FFN is gate/up column-parallel then down row-parallel — one
+AllReduce per block, the intermediate never gathered. `TensorParallelFFN` and
+`TensorParallelAttention` (`internal/model/tensor_parallel.go`,
+`tensor_parallel_attn.go`) are those composed blocks.
+
+The algebra the wired forward path obeys:
+
+```
+ForwardTP(ranks=1)  ==(bit-exact, max|Δ|=0)        Forward
+ForwardTP(ranks=N)  ==(AllReduce reassociation)    ForwardTP(ranks=1)   (~1e-6, rank-order pinned)
+```
+
+The `ranks=1` leg is the **"bit-exact vs the single-GPU path"** rung — and it is
+witnessable on a CPU, with **no multi-GPU hardware**.
+
+---
+
+## 3. The API surface
+
+| You call | Where | What it does |
+|---|---|---|
+| `Model.ForwardTP(ids, TPConfig{AttnRanks, FFNRanks, Coll})` | `internal/model/tensor_parallel_forward.go` | The wired TP forward. `AttnRanks` shards attention over the kv-head groups; `FFNRanks` shards the FFN over the intermediate dim. `Coll == nil` → `LocalCollective`. |
+| `NewTPPlan(dim, ranks)` → `TPPlan` / `TPShard` | `internal/model/tensor_parallel.go` | Validated tiling of one dimension into `ranks` contiguous, non-overlapping, complete shards. Fails closed on a degenerate plan (a rank with no work). |
+| `Collective` (`LocalCollective`) | `internal/model/tensor_parallel.go` | The host-`[]float32` AllGather/AllReduce seam; `LocalCollective` is the single-box, bit-exact default. |
+| `CollectiveBackend` | `internal/compute/compute.go` | The **device-tensor** cross-rank seam at the HAL — the swap-in point for real hardware (see §5). |
+| `BackendCollective` | `internal/model/collective_bridge.go` | Bridges `model.Collective` onto a HAL `CollectiveBackend`, byte-identical to `LocalCollective`. |
+| `DistComm` | `internal/model/dist_collective.go` | A **real cross-process** communicator (a process group): a star rooted at rank 0 over framed TCP. The distributed twin of `LocalCollective`. |
+| `TCPTransport` | `internal/model/pipeline_transport.go` | The pipeline-axis cross-process wire (real socket, byte-identical to in-process). |
+
+Minimal call (single box, the bit-exact default):
+
+```go
+act, err := m.ForwardTP(ids, model.TPConfig{AttnRanks: 2, FFNRanks: 2}) // Coll nil → LocalCollective
+```
+
+---
+
+## 4. The collective seam — four primitives
+
+A device collective implements the cross-rank reduction. The HAL interface
+`compute.CollectiveBackend` declares the four canonical Megatron collectives; the
+CPU reference (`internal/compute/collective.go`) is the single-box, **exact** default
+that a real communicator must reproduce **byte-for-byte**:
+
+- **AllReduceSum** — element-wise sum of equal-length per-rank partials, added in rank
+  order. Post-block reduction for row-parallel.
+- **AllGather** — rank-ordered concatenation of per-rank shards. Recombines a
+  column-parallel output.
+- **ReduceScatter** — the AllReduceSum result scattered into equal per-rank shards; the
+  dual of AllGather. `AllReduceSum ≡ AllGather∘ReduceScatter` (the identity the reference
+  pins). Lets sequence-parallel TP keep only a `1/P` slice of the activation.
+- **AllToAll** — the transpose collective (a different shard to each peer). An involution
+  (`AllToAll∘AllToAll == identity`); `ReduceScatter` is recoverable as `AllToAll` + a local
+  per-rank reduce. Turns a sequence-sharded activation into a head-sharded one.
+
+Every method **fails closed** at the boundary: no parts, ragged partials, a non-F32 part,
+an unready part, or a part owned by a *different* backend (the cross-backend reduction a
+real communicator rejects — a CUDA tensor cannot be all-reduced against a host tensor) is
+refused, never silently mis-reduced. Indivisible inputs (real NCCL requires
+`sendcount % nranks == 0`) fail closed too.
+
+---
+
+## 5. Reaching real hardware — the swap-in point
+
+Adding NCCL (NVIDIA) or RCCL (AMD) is **a backend that implements `CollectiveBackend`**,
+discovered by a type-assert in the forward loop (with a cheap `Caps().Collective`
+pre-check) — never an edit to the forward loop:
+
+1. Implement `AllReduceSum`, `AllGather`, `ReduceScatter`, `AllToAll` over device-resident
+   tensors on one communicator (`ncclAllReduce` / `ncclAllGather` / `ncclReduceScatter` /
+   `ncclAllToAll`, or the RCCL equivalents).
+2. It is **correct iff it reproduces the reference bytes** — the rank-order spec in
+   `collective.go` and the identities above are the conformance target. The CPU reference
+   is your test oracle on a single box before you ever touch two GPUs.
+3. For a **multi-process** topology (N processes, rank `r` holds only its own part — *why*
+   real NCCL serving runs N processes), `DistComm` already pins the cross-process protocol:
+   a star rooted at rank 0, one framed connection per worker, each collective a single
+   gather→reduce→scatter round reduced through `LocalCollective`'s rank-order spec, so the
+   result is byte-identical to the in-process gate by construction.
+
+What you need for the **live** run (the hardware-gated residual of #295):
+
+- 2× (or 4×) GPUs with NCCL/RCCL on the host (e.g. 2× RTX 4090, or the 8-GPU lane in
+  [`docs/HARDWARE-MATRIX.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md)).
+- The `CollectiveBackend` implementation from step 1, registered as a backend cap.
+- A 70B checkpoint sharded across the ranks per `NewTPPlan`.
+
+Until that backend lands, fak serves on a single GPU or CPU; there is **no** device-side
+multi-GPU all-reduce yet. This doc does not claim otherwise.
+
+---
+
+## 6. What is proven today (host-free witnesses)
+
+All of these run under `go test ./internal/model/... ./internal/compute/...` on a CPU —
+no GPU required:
+
+| Property | Witness |
+|---|---|
+| Column-parallel matmul bit-exact vs monolith | `model.TestColumnParallelMatMulBitExact` |
+| Row-parallel matmul == shard-grouped reference | `model.TestRowParallelMatMulMatchesShardReference` |
+| TP FFN / attention / full layer == monolith | `model.TestTensorParallelFFNMatchesMonolith`, `TestTensorParallelAttentionMatchesMonolith`, `TestTensorParallelLayerMatchesMonolith` |
+| `ForwardTP(ranks=1)` == `Forward` (**bit-exact vs single-device**) | `model.TestForwardTPMatchesForward`, `TestTPForwardRanks1MatchesLive` |
+| Reduction order is rank-order pinned | `model.TestTPForwardReductionRankOrderPinned` |
+| HAL collective bridge == `LocalCollective` byte-for-byte | `model.TestBackendCollectiveMatchesLocal`, `TestForwardTPViaBackendCollective` |
+| **Real cross-process** `ForwardTP` over `DistComm` == single-process `ForwardTP` | `model.TestForwardTPDistCommRanksMatchLocalForwardTP`, `TestForwardTPViaDistCommCollective` |
+| `DistComm` over a real wire == `LocalCollective` (+ fail-closed on desync/ragged) | `model.TestDistCommAllReduceSumMatchesLocal`, `TestDistCommFailsClosedOpDesync`, … |
+| The four device collectives + identities + fail-closed | `compute.TestCollectiveAllReduceSumRankOrder`, `TestCollectiveAllGatherRankOrder`, `TestCollectiveReduceScatter`, `TestCollectiveAllToAll`, `TestCollectiveFailsClosed` |
+
+The cross-process row (`DistComm`) is the strongest host-free rung: it is a **genuine
+multi-process collective over a socket** proven byte-identical to the single-process path,
+on hardware that exists. The device backend swaps in behind the same contract.
+
+---
+
+## 7. #295 acceptance status (honest)
+
+| Acceptance item | Status |
+|---|---|
+| Design TP API (`compute.Backend` extension) | ✅ Shipped — `CollectiveBackend` seam + `ForwardTP`/`TPConfig`/`TPPlan`. |
+| All-reduce collective implementation | ✅ Shipped — CPU reference (`collective.go`) + cross-process `DistComm`, bit-exact. |
+| Bit-exact vs single-GPU path | ✅ Host-free rung shipped (`ForwardTP(ranks=1) == Forward`). Device-side bit-exact awaits the GPU backend. |
+| Documentation for multi-GPU setup | ✅ **This page.** |
+| NCCL/RCCL backend | ❌ Not shipped — the `CollectiveBackend` device impl (§5). **Hardware-gated.** |
+| Run 70B across 2× RTX 4090 · near-linear 1.8× scaling | ❌ Not run — depends on the backend above + a 2-GPU host. **Hardware-gated.** |
+
+The math primitive and both collectives are landed and proven; the **device communicator
+and the real multi-GPU run** are the remaining work, and they need multi-GPU hardware.
+
+---
+
+## 8. Where the code lives
+
+```
+internal/model/tensor_parallel.go          # TPPlan/TPShard, TensorParallelFFN, Collective/LocalCollective
+internal/model/tensor_parallel_attn.go     # TensorParallelAttention
+internal/model/tensor_parallel_forward.go  # ForwardTP, TPConfig (the wired forward)
+internal/model/collective_bridge.go        # BackendCollective (model→HAL bridge)
+internal/model/dist_collective.go          # DistComm (cross-process communicator over TCP)
+internal/model/pipeline_transport.go       # TCPTransport (pipeline-axis wire)
+internal/compute/compute.go                # CollectiveBackend interface (the device seam)
+internal/compute/collective.go             # CPU reference implementation (the conformance oracle)
+```
+
+Related reading:
+[`docs/comm-as-mpi-split.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/comm-as-mpi-split.md) (the agent-layer lease ≈ `MPI_Comm_split`, and why it is *not* this tensor-layer collective),
+[`docs/explainers/sota-optimizations.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/sota-optimizations.md) (where TP sits among serving optimizations),
+[`docs/HARDWARE-MATRIX.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) (the multi-GPU serving lane).
 
 ---
 
@@ -18110,6 +18376,338 @@ and not a browser/editor UI.
 
 ---
 
+# Multi-agent coordination protocol (RFC)
+
+> Source: `docs/multi-agent-coordination-protocol.md`
+
+---
+title: "RFC: the fak Multi-Agent Coordination Protocol (D-007)"
+description: "The single normative spec for agent-to-agent coordination in fak: the message format, the shared-state API, and the coordination primitives — all carried over the same default-deny capability floor that gates a tool call. Binds the three shipped pillars (a2achan, sharedtask, comm) under one protocol and maps issue #241's acceptance to its shipped artifacts + test witnesses."
+---
+
+# RFC: the fak Multi-Agent Coordination Protocol
+
+> **Status:** Draft (rungs 1–3 shipped in-process; durable cross-process backing is the named next rung).
+> **Issue:** [#241](https://github.com/anthony-chaudhary/fak/issues/241) · **Slug:** D-007 · **Epic:** [#304](https://github.com/anthony-chaudhary/fak/issues/304) (Track D — Agent Framework Parity).
+> **Sibling epic:** [#639](https://github.com/anthony-chaudhary/fak/issues/639) (MPI-shaped message-passing primitives).
+> **House rule:** every primitive named here is on disk with a package test; the honest-scope section says plainly what is in-process today versus durable across a process boundary. No throughput or latency number is asserted here.
+
+This is the authoritative spec the issue's *"RFC/spec document"* acceptance names. The
+three other acceptance items — message passing, shared KV/cache space, coordination
+primitives — already ship as test-witnessed kernel packages; until now they were
+described only in scattered design docs. This RFC pulls them into **one protocol** and
+states the invariant that makes it fak-native: **every coordination act is an
+adjudicated tool call — fail-closed, scope- and taint-bounded, refusable with a closed
+reason vocabulary.** Coordination in fak is not a side library with its own security
+surface; it rides the registries the kernel already walks for every tool call.
+
+---
+
+## 1. Why a protocol (the gap it closes)
+
+Most "agent-to-agent" work is a *transport*: a way for two agents to find each other and
+move bytes over HTTP. fak already has that story at the fleet edge
+([`a2a-value-opportunities.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/a2a-value-opportunities.md), the out-of-kernel Agent Link
+in [`agent-machine-link-protocol.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/agent-machine-link-protocol.md)). What was missing
+is the **in-kernel substrate** the transport projects onto: a way for one agent to hand a
+value to another, share mutable state, and synchronize a wave — **under the same
+default-deny floor that gates a tool call**, so a poisoned result or a private payload
+cannot cross an agent boundary just because it travelled through a "coordination" call
+instead of a "tool" call.
+
+fak had every *half* but no whole: `abi.Ref` carries the `Taint`+`ShareScope` a
+cross-agent message needs but never *routes* anywhere; the async `Submit`/`Reap` seam is
+1:1 with no recipient identity; `session`/`recall`/the vDSO fan-out move drive state,
+read-only memory images, or cache-invalidation broadcasts — none *delivers* an addressed
+value from agent A to a different agent B. This protocol is the missing whole, assembled
+from the existing currency (`Ref` provenance) and the existing registries (the
+adjudicator + result-admitter chains).
+
+The protocol has three layers, each a shipped package:
+
+| Layer | What it carries | Package | Try it |
+|---|---|---|---|
+| **§3 Message passing** | one addressed value, now, A→B | [`internal/a2achan`](https://github.com/anthony-chaudhary/fak/blob/main/internal/a2achan/a2achan.go) | `go run ./cmd/a2ademo` |
+| **§4 Shared state** | a named record / KV space many agents co-edit | [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask) | `python tools/shared_task_contract.py validate-sequence examples/shared-task-record` |
+| **§5 Coordination primitives** | broadcast / scatter / gather / barrier over a wave | [`internal/comm`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/comm.go), [`internal/agenttopo`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/agenttopo.go) | `go test ./internal/comm` |
+
+---
+
+## 2. The adjudication invariant (the spine)
+
+Everything below obeys one rule, and the rule is the contribution:
+
+> **A coordination act is a synthetic tool call.** A `Send`, a `Recv`, a `Publish`, a
+> `Broadcast`, a `Scatter`, a `Barrier` — each folds the **same** registered adjudicator
+> + ingress admitter the kernel walks for a real `tool_call`. There is no collective and
+> no message that is exempt from refusal.
+
+Three consequences are normative for any conforming implementation or adapter:
+
+1. **Fail-closed by default.** The default `abi.Ref` is `(Tainted, ScopeAgent)` — private
+   and quarantine-eligible. Such a body is **undeliverable across an agent boundary by
+   construction**. To share, the sender must *explicitly widen* the body's `Scope`
+   (`ScopeFleet` / `ScopeTenant`), an auditable act — never an implicit side effect of
+   "sending."
+2. **Provenance rides the value, unchanged.** A coordination op copies an `abi.Ref`
+   through; it never re-marshals or re-labels the body. *Sharing a result shares its
+   taint* — an admitted message/broadcast keeps its `Taint`, so a receiver cannot
+   re-share it past its `Scope`. Quarantined bytes are **held out of the receiver's
+   context** on ingress, never admitted.
+3. **Refusal is a value from a closed vocabulary.** A denied coordination act returns an
+   `abi.Verdict` citing the core reason set (`DEFAULT_DENY` for an un-negotiated
+   capability; `TRUST_VIOLATION` for a scope/taint breach). **No new reason is minted** —
+   the 12-reason core set is unchanged, so a coordination refusal is auditable by exactly
+   the machinery that audits a tool-call refusal.
+
+This is why the protocol is fak-native rather than a generic message bus: the security
+floor is *the same object* on the coordination path and the tool-call path.
+
+---
+
+## 3. Message passing — the message format (`a2achan`)
+
+The live-message rung: deliver one addressed value from agent A to a different agent B.
+
+### 3.1 Addressing and the message
+
+A mailbox is named by a `ChannelKey`; a delivered unit is a `Message`:
+
+```go
+type ChannelKey struct {
+    Locale Locale  // InKernel | Session | Window
+    ID     string  // rendezvous name | peer TraceID | window continuation id
+}
+
+type Message struct {
+    From string      // the sending principal
+    To   ChannelKey  // the destination mailbox
+    Body abi.Ref     // the payload — its Taint + Scope ride unchanged
+    Seq  uint64      // per-bus monotonic; fixes a deterministic delivery order
+}
+```
+
+Two keys are equal iff **both** fields match: a `Session` channel and an `InKernel`
+channel that happen to share an `ID` are distinct mailboxes — the `Locale` is part of the
+identity. The `Body` is an `abi.Ref` (inline or CAS-backed); its `(Taint, Scope)` are the
+share bound and are never widened by transit.
+
+### 3.2 One shape, three locales
+
+The *same* `Send`/`Recv` serve all three communication locales; only the key differs.
+Sessions and windows are the same mailbox addressed differently — **not** three
+mechanisms.
+
+| Locale | `ID` is… | What it bridges | Status |
+|---|---|---|---|
+| `InKernel` | a rendezvous name in one process | two concurrent goroutine-agents | **shipped, race-tested** |
+| `Session` | a peer's `ToolCall.TraceID` | a cross-session handoff | code-shared; durable backing = next rung |
+| `Window` | a continuation id minted on compaction | an explicit handoff across a context window | code-shared; compaction trigger = next rung |
+
+### 3.3 Two delivery shapes
+
+Point-to-point and pub/sub are two *delivery shapes* over **one** floor, not two security
+surfaces:
+
+- **Point-to-point** — `Send(ctx, from, to, body, caps…) → Verdict` and
+  `Recv(ctx, to, caps…) → (Message, Verdict, error)` (ctx-aware blocking; `TryRecv` is
+  the non-blocking dual). One message, one receiver.
+- **Pub/sub** — `Subscribe(topic) → (inbox, cancel)` and
+  `Publish(ctx, from, topic, body, caps…) → (Verdict, fanout)`. One adjudicated message
+  fanned out as an independent copy to every current subscriber's private inbox. A
+  `Publish` folds the **same** send-time gate, so publishing a private or quarantined
+  body is refused identically.
+
+### 3.4 The capability floor on messages
+
+`Send`/`Recv`/`Publish` fold a registered adjudicator (`a2aGate`, tools `a2a.send` /
+`a2a.recv`) and ingress admitter (`a2aIngress`). The capabilities are
+`CapA2ASend = "a2a.send"` and `CapA2ARecv = "a2a.recv"`, negotiated like any other. The
+verdict table is normative:
+
+| Situation | Verdict | Reason |
+|---|---|---|
+| `Send` without the negotiated `CapA2ASend` | `Deny` | `DEFAULT_DENY` (no send-right) |
+| `TaintQuarantined` body | `Deny` | `TRUST_VIOLATION` (poison never leaves) |
+| `ScopeAgent` (private) body to *another* agent's channel | `Deny` | `TRUST_VIOLATION` (widen `Scope` to share) |
+| `ScopeFleet`/`ScopeTenant` body, not quarantined, cap held | `Allow` | — |
+| `Recv` without `CapA2ARecv` | `Deny` | `DEFAULT_DENY` (no receive-right) |
+| On ingress, a `TaintQuarantined` delivered message | `Quarantine` | held out of the receiver's context |
+
+**Witness:** `internal/a2achan/a2achan_test.go` (determinism, fail-closed default,
+taint/scope enforcement, async rendezvous, ingress quarantine-hold; `go test -race
+./internal/a2achan`). Reference design: [`a2a-in-kernel-channel.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/a2a-in-kernel-channel.md).
+
+---
+
+## 4. Shared state — the shared KV/cache space API (`sharedtask`)
+
+The shared-state rung. fak keeps five related-but-different senses of "shared state"
+separate (the [shared-state ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/shared-state-ladder.md)) so they are not collapsed
+into one over-claimed feature:
+
+| Rung | Meaning | Shipped shape |
+|---|---|---|
+| Live addressed message | one value delivered now | §3 `a2achan` `Send`/`Recv`, `Publish`/`Subscribe` |
+| Live shared object | a named mutable cell during one run | compose from refs + messages today; first-class region work is planned |
+| Durable handoff | state that survives a process/session/window boundary | session-image + snapshot primitives; the `sharedtask` journal is a task-local materialized handoff |
+| Disaggregated state | bytes live outside the record | shared refs carry digest, taint, scope, store, and a deletion certificate |
+| User-level collaboration | a human + agents co-edit task state | the shared-task-record contract + in-memory fold |
+
+### 4.1 The shared record / KV space
+
+A coordinated wave's shared KV space is a **shared task record**: a single addressable
+record (`task_id`, monotonic `rev`, a scoped body `Ref`, and append-only `notes` /
+`artifacts` / `open_decisions`) that many agents and humans co-edit by **patch**, not by
+unstructured chat. The envelopes are versioned JSON (`fak.shared-task.v1`,
+`fak.shared-patch.v1`, `fak.shared-patch-result.v1`, `fak.shared-event.v1`,
+`fak.shared-artifact-ref.v1`, `fak.shared-task-journal.v1`); the normative contract +
+worked fixtures are in [`shared-task-record-contract.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/shared-task-record-contract.md).
+
+### 4.2 Merge semantics (normative)
+
+| Operation | Auto-merge? | Rule |
+|---|---:|---|
+| append note / artifact / open decision | yes | id must be new; body is a scoped ref |
+| replace `/title` or `/state` | no | requires the current base `rev`; a stale writer gets a typed conflict |
+| replace `/body_ref` | no | external refs need a deletion certificate |
+| replace an open-decision state | no | stale or missing decisions conflict |
+
+Append-only edits commute on new ids; scalar edits are current-base and return a **typed
+conflict** (base, current, proposed) when stale — so concurrent agents converge
+deterministically instead of last-writer-wins clobbering. Scoped views (`View`,
+`EventsView`, `SubscribeScopedView`) redact a snapshot and its event history by the
+reader's scope, so a tenant-scoped reader never sees a fleet-scoped body.
+
+### 4.3 The KV/cache connection
+
+"Shared KV/cache space" has two faces in fak, both honored here:
+
+- **Shared *state* KV** — the record above: a scoped, taint-tracked, patch-merged KV that
+  agents read and write under the §2 invariant. Disaggregated bytes (`l3-kv` store) are
+  admitted only with a digest and a deletion witness.
+- **Shared *cache* KV** — the cross-agent prefix-cache reuse fak already ships: do the
+  shared prefill work once, later agents read it for free (the addressable, bit-exact KV
+  cache and the radix prefix pool). That reuse is the *performance* dual of this protocol;
+  this RFC governs the *coordination* and *provenance* of shared bytes, not the cache
+  arithmetic (see the cache docs for the measured reuse).
+
+**Witness:** `internal/sharedtask/sharedtask_test.go`, `internal/sharedtask/live_test.go`;
+the executable contract validator `tools/shared_task_contract.py` over
+`examples/shared-task-record`.
+
+---
+
+## 5. Coordination primitives — the wave collectives (`comm`, `agenttopo`)
+
+The synchronize-a-wave rung. A [`comm.Group`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/comm.go) is an **ordered
+set of member agents**: `Rank` is a member's position in the *sorted* member set, so the
+same members always get the same ranks regardless of arrival order — rank is a
+deterministic function of the member identities, never of arrival order or a member's
+output.
+
+### 5.1 The collectives
+
+Each collective routes its admitting tool call through `abi.Kernel.Submit` (the
+adjudication chokepoint) — there is no collective exempt from refusal. The `I*` variants
+return `StatusPending` handles completed via `Kernel.Reap`; no ABI edit is needed.
+
+| Primitive | Shape | Floor behavior |
+|---|---|---|
+| `Broadcast(payload)` | one `Ref` to every member | **refuses** to broadcast a `ScopeAgent`/private `Ref` to a multi-member group |
+| `Scatter(goals)` | one per-rank goal `Ref` | per-rank `Submit`; each adjudicated |
+| `Gather(outputs, reduce)` | fold member outputs in **rank order** | layout is deterministic even though member text is not |
+| `Barrier()` | one adjudicated read-back descriptor per rank | a `dos-witness-claim`-shaped arrival fold, **not** a scheduler lock |
+| `Split(color)` / `SplitLane()` | partition the group by color → lane | each color binds a `dos.toml` lane; overlapping lanes serialize by refusal at the arbiter |
+| `Spawn()` | mint rank-stamped `Membership` for a wave | — |
+
+### 5.2 Topology: declare vs search
+
+- **Declare** — [`internal/agenttopo`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/agenttopo.go) declares a
+  *named, validated DAG* over a `comm.Group`: who may hand a result to whom, every edge
+  checked against the group, cycles refused, declaration order preserved. (The
+  `MPI_Graph_create` analogue.)
+- **Search** — `cmd/topobench` + `turnbench.TopologyGenome` *optimize* an anonymous shape,
+  ranking topologies by measured prefix-reuse savings capped at the corpus divergence
+  frontier — never an extrapolated number.
+
+The full MPI-communicator analogy (the lane lease as `MPI_Comm_split`, `ShareScope` as the
+communicator isolation scope) is documented in
+[`comm-as-mpi-split.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/comm-as-mpi-split.md), with the honest line that **no bytes move
+at the lane-lease layer** — a lease coordinates *who may write which files*, it does not
+transport a message.
+
+**Witness:** `internal/comm/comm_test.go`, `internal/agenttopo/agenttopo_test.go`.
+
+---
+
+## 6. Conformance — issue #241 acceptance mapping
+
+A conforming claim for D-007 is *evidence-backed*: each acceptance item maps to a shipped
+artifact and a runnable witness, not to prose.
+
+| Acceptance item | Shipped artifact | Witness |
+|---|---|---|
+| **Message passing between agents** | `internal/a2achan` — `Send`/`Recv`/`TryRecv`, `Publish`/`Subscribe`, three locales, the capability floor | `go test -race ./internal/a2achan`; `go run ./cmd/a2ademo` |
+| **Shared KV/cache space** | `internal/sharedtask` shared record + scoped/taint-tracked refs + journal; cross-agent prefix-cache reuse | `go test ./internal/sharedtask`; `python tools/shared_task_contract.py validate-sequence examples/shared-task-record` |
+| **Coordination primitives** | `internal/comm` Group collectives (broadcast/scatter/gather/barrier/split/spawn) + `internal/agenttopo` declared topology DAG | `go test ./internal/comm ./internal/agenttopo` |
+| **RFC/spec document** | **this document** | renders + link-clean; binds the three pillars under the §2 invariant |
+
+---
+
+## 7. Honest scope, non-goals, and the roadmap
+
+**Shipped (in-process):** the `InKernel` message locale, the message capability floor,
+pub/sub fan-out, the `sharedtask` patch fold + scoped views + materialized journal, and
+the `comm` adjudicated collectives + `agenttopo` declared topology — all race/contract
+tested.
+
+**Not claimed here:**
+
+- **This is not MPI.** `comm`'s collectives borrow collective *names* and rank-order
+  *structure*; they inherit no interconnect, message-rate, progress, or
+  collective-latency property. They are explicitly **not** `internal/model`'s `DistComm`
+  (the real cross-process tensor collective whose ranks are GPU shards of one model). A
+  `comm.Group`'s ranks index detached OS processes that communicate only through git and
+  leases.
+- **Durable cross-process delivery is the named next rung.** The `Session`/`Window`
+  locales share the `InKernel` code path and work in-process today; a session-image-backed
+  mailbox (so a `Session`/`Window` message survives a process boundary) and the compaction
+  trigger that mints a `Window` continuation id are **not** shipped.
+- **No networked task-store daemon, no external L3 transport, no browser/editor UI** for
+  the shared record — it is an in-memory reference fold plus a data-only journal.
+- **No new ABI surface.** The protocol registers no `abi` engine and makes zero ABI edits;
+  routing `Send`/`Recv` as *true* kernel syscalls (wiring the registered-but-dormant `abi`
+  Op table) is a named future rung, not a current claim.
+
+**Where the fleet edge fits:** the out-of-kernel A2A HTTP edge
+([`a2a-value-opportunities.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/a2a-value-opportunities.md),
+[`agent-machine-link-protocol.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/agent-machine-link-protocol.md)) is the projection of
+this substrate — discovery, task lifecycle, multi-tenant routing — and should map its
+`SendMessage`/`GetTask` onto §3/§4, **not** reinvent the floor. MCP stays the
+model/tool/context boundary; it is not the peer-agent channel.
+
+---
+
+## 8. References
+
+- **Message passing:** [`a2a-in-kernel-channel.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/a2a-in-kernel-channel.md) ·
+  [`internal/a2achan/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/a2achan/doc.go)
+- **Shared state:** [`shared-state-ladder.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/shared-state-ladder.md) ·
+  [`shared-task-record-contract.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/shared-task-record-contract.md) ·
+  [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask)
+- **Coordination primitives:** [`comm-as-mpi-split.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/comm-as-mpi-split.md) ·
+  [`internal/comm/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/doc.go) ·
+  [`internal/agenttopo/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/doc.go)
+- **The fleet edge (out-of-kernel projection):**
+  [`a2a-value-opportunities.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/a2a-value-opportunities.md) ·
+  [`agent-machine-link-protocol.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/agent-machine-link-protocol.md)
+- **Track-D status + the sibling epic:**
+  [`notes/track-d-agent-framework-parity-tracking-304.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/track-d-agent-framework-parity-tracking-304.md)
+  · epic [#639](https://github.com/anthony-chaudhary/fak/issues/639)
+
+---
+
 # AWQ quantization support
 
 > Source: `docs/explainers/awq-quantization.md`
@@ -19161,6 +19759,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | **RadixAttention live speedup (model ladder)** | **4.58× → 6.95×** | SmolLM2-135M → Qwen2.5-1.5B Q8 | Full re-prefill | `92896a4` | `radixbench-*-agents-fresh-20260619.json` |
 | RadixAttention token speedup | 7.50× | all four models (Q8) | Token count | `92896a4` | Same (`prefill_token_speedup`) |
 | RadixAttention hit rate | 86.7% (FCFS 62.1% → cache-aware) | all four models (Q8) | Cache hits | `92896a4` | Same (100% of optimal) |
+| **Speculative decode — bit-exact + deterministic verify-pass speedup** ([#402](https://github.com/anthony-chaudhary/fak/issues/402), epic [#529](https://github.com/anthony-chaudhary/fak/issues/529)) | **E(K=4) = 1.00× (full-reject) → 5.00× (full-accept ceiling = K+1); the 2× decode-step threshold is crossed at acceptance a≈0.53, 3× at a≈0.74; lossless=true (speculative output token-identical to plain greedy)** | Synthetic CPU target+draft pair (PreNorm), draft K=4, no GPU | Plain greedy decode (E = 1 real token / target forward) | _this commit_ | `experiments/spec-decode/spec-decode-effective-e-20260625.json`. **DETERMINISTIC verify-pass speedup** — E = real tokens committed per target forward, the closed-form `polymodel.EffectiveTokensPerVerify(K, a)` evaluated at the **MEASURED** acceptance `a` (real-draft a=1.00 → E=5.00; adversarial a=0.00 → E=1.00 with 96 bit-exact `KVCache.Evict` rollbacks). **NOT wall-clock tokens/sec**: there is no GPU here, so the on-hardware 2–3× tokens/sec headline stays HW-gated (a measured number needs the [#535](https://github.com/anthony-chaudhary/fak/issues/535) bench harness on a GPU). Mechanism shipped: `internal/spec` (`SpeculativeGreedy`/`SpeculativeTree`, `ProvisionalSink`) + `internal/polymodel` (`AcceptGreedy`/`AcceptTree`), feature-gated `FAK_POLYMODEL` (off by default); bit-exactness witnessed by `TestVerifyForwardChainMatchesSerial` + the bench `lossless` gate. Reproduce: `go run ./cmd/polymodelbench -bench` (or `-out FILE`) |
 | **README headline: 50-turn × 5-agent reuse win** | **60.3× vs naive · 4.1× vs tuned** | Qwen2.5-1.5B Q8, T=50 A=5 P=2048 | Naive stateless / tuned per-agent KV | `2bbda6f` | `headline-qwen-50x5.json` |
 | **Fleet 5-agent × 200-turn 7B in <10 min — on a Metal forward (MEASURED, M3 Pro)** | **8.2 min (llama.cpp Metal forward + fak's reuse/batching pattern) · 2.5× vs a tuned single-stream baseline · ≥30× vs naive. ⚠️ pure-fak OWN forward (pure-Go CPU, Metal-decode lane open) ≈ 22–51 min — over the bar; sub-10-min on fak's own forward needs its GPU/CUDA path** | Qwen2.5-7B Q8, T=200 A=5 P=2048 D=20 R=12, M3 Pro | 5 single-stream sessions / naive re-prefill | _this commit_ | `session/macbook-m3pro-7b-batched-{bench,ctx}.log` (measured 17.41/44/392 t/s) + `fleet-5x200-7b-projection-20260622.json` + `FLEET-5X200-7B-10MIN-RESULTS.md`. Batched ≈ a tuned `llama-server --parallel`; fak's add is per-agent KV ownership + safety floor, not raw t/s |
 | **Session value-add (high-T ladder)** | **24.9× → 139.3×** | SmolLM2-135M Q8, T=64 → T=512 | Naive stateless | `92896a4` | `highT-smollm2-135m-*-fresh-20260619.json` |
@@ -19173,6 +19772,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | Qwen3.5-0.8B hybrid-GDN runs in fak | ✅ coherent ("pong") | Qwen3.5-0.8B f32 | instruction-following | `6a376b8` | `QWEN35-0.8B-RESULTS.md` |
 | Qwen3.6-27B resident-q4k decode | 0.9 tok/s | Qwen3.6-27B q4_k_m | llama.cpp Metal 7.29 tok/s | `1698eff` | `model-ladder/qwen36-perf-gate-m3-20260619.json` |
 | Qwen3.6-27B fak/llama.cpp ratio | 0.12× decode / 0.01× prefill | Qwen3.6-27B q4_k_m | llama.cpp Metal | `1698eff` | `model-ladder/qwen36-perf-gate-m3-20260619.md` |
+| Qwen3.6-27B fak **Metal Q4_K** decode / prefill | **1.2 / 0.6 tok/s** (0.16× / 0.012× of SOTA) | Qwen3.6-27B q4_k_m, M3 Pro (`-tags fakmetal`, `FAK_Q4K=1 FAK_METAL=1`, llama-server stopped) | llama.cpp Metal 7.29 / 51.55 | _this commit_ | `runs/by-machine/node-macos-a/20260626T055239Z-q4k-metal-decode-27b/score.json` — kernels are **bit-correct** (GEMV cosine 1.000000, greedy token-parity vs CPU) but decode is launch-bound: ~336 per-token command-buffer GEMVs @ ~360 µs fixed overhead each (epic #59 / #67), plus low kernel util (GEMV 32 GB/s ≈21% BW, GEMM 364 GFLOP/s ≈5%). Lever = one-command-buffer resident decode forward + kernel pass. Full diagnosis: `docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md` |
 | Qwen3.6-27B token parity | 2-token match (drift @3) | Qwen3.6-27B q4_k_m | llama.cpp oracle | `d03be46` | `model-ladder/qwen36-resident-q4k-parity-20260619.json` |
 | Qwen3.6-27B surface smoke | 4/4 surfaces PASS | Qwen3.6-27B (served) | agent/gateway/mcp/dogfood | `8a0f5bc` | `model-ladder/qwen36-surfaces-dogfood-opencode-20260619.json` |
 | Synthetic model live ratio | 1.64× | 64h/4L wiring | Full re-prefill | `a200c3d` | `radixbench-synthetic.json` |
@@ -19185,6 +19785,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | **Pure-kernel decide latency (M3 Pro)** | **362 ns** allow · 560–605 ns w/ ArgPredicates | syscall/adjudicator Decide | per-call decision | `bcad56e` | `experiments/mac-m3pro-kernel-20260620/kernel-latency-mac-m3pro-20260620.json` |
 | **Pure-kernel admission latency (M3 Pro)** | **1.8–14 µs** scan · 3.3–15.8 µs Admit · 29–87 µs chain | ctxmmu / normgate+ctxmmu | per-result admission (cited "~1,300 ns" = cheapest scan layer only) | `bcad56e` | same (`MAC-M3PRO-KERNEL-BENCH-2026-06-20.md`) |
 | **Syscall boundary tax (M3 Pro, refreshed)** | **~2,849×** in-process vs spawned `fak hook` | in-process adjudication | process-per-decide baseline (n=100) | `bcad56e` | `report.json` + `experiments/mac-m3pro-kernel-20260620/report.json` |
+| **Adjudication overhead on the zero-alloc read path — drop-in-cost floor ([#451](https://github.com/anthony-chaudhary/fak/issues/451))** | **~0.55 ns/op · 0 B/op · 0 allocs/op · FLAT across N=1→1000 registered drivers** | n/a — kernel registry-read fold (no model, no GPU) | per-call registry read the decide path folds over every tool call | _this commit_ | `internal/abi/registry_scaling_test.go` — non-regression proof `TestRegistryReadsZeroAlloc` (0 allocs/op with 256 drivers of every kind); reproduce `go test ./internal/abi -bench BenchmarkRegistryReadScaling -benchmem`. Machine-stamped Ryzen 9 9950X (linux/amd64, 2026-06-26); v0.21.0's single-accessor figure was 1.39 ns/op. This is the **GPU-free FLOOR** of the `fak serve`-fronts-vLLM/SGLang drop-in cost: the full per-call decide is the "Pure-kernel decide latency" row above (362 ns allow), and the end-to-end **network** gateway tax is `docs/benchmarks/VLLM-HEADTOHEAD-RESULTS.md` §3 (vLLM TBD) / §4 (SGLang measured 0.75× peak → ~3% at saturation) |
 | **Causal invalidation-on-external-write** | **PASS · max\|Δ\|=0** (1 evicted, sibling warm, re-admit refused) | vDSO `Revoke` + cachemeta external-invalidation | blunt world-flush / stale serve | `0fc39aa` | `experiments/causal-invalidation-20260620/causalbench-witness-20260620.json` |
 | **Ultra-long-context work floor (>100k tokens, EXACT/contention-free)** | **single ~10× · 5-agent fleet ~40×+ vs naive (4.3× vs tuned)** | Qwen2.5-7B geometry, P=100k T=10 C=1/5 D=200 R=500 (arithmetic, no model) | Naive re-prefill (A/C ref) / warm per-agent KV (B/C) | _this commit_ | `session/ultra-long-context-floor-20260622.json` + `ULTRA-LONG-CONTEXT-RESULTS.md`. WORK floor (token = sessionbench `prefillTokens`; FLOP = O(L²)-aware), not a wall-clock; anchor token A/C 62.0× reproduces the committed 50×5 token floor; live wall-clock anchor at >100k is separately gated |
 | **README front-page webbench hero — WebVoyager fleet prefill (MODELED geometry, no model)** | **8-worker A/C 9.7× vs naive floor · B/C 1.10× vs tuned per-agent KV · A/B turn-tax 8.8× (worker-independent)** | WebVoyager 643-task set, turns derived per-task from difficulty (`geometry_sources: difficulty=643`), BasePrefix=3000 / Action=150 / DOMState=2000 | A: naive re-prefill-every-turn (A/C) · B: tuned per-agent KV (B/C) | _this commit_ | `experiments/webbench/webvoyager-geometry-20260625.json` (emit with `fak webbench describe --dataset testdata/webbench/webvoyager-converted.jsonl --workers 1,2,4,8 --out …`). PREFILL-TOKEN WORK FLOOR from a deterministic geometry model — closed-form integer formula in `internal/webbench/geometry.go::ComputeArms`, **no model, no wall-clock, not "measured"**. README leads with the B/C value-stack number (1.10×); the 9.7× is explicitly the vs-naive-floor figure |
@@ -21641,6 +22242,8 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 ## In-kernel model (the model fused into the kernel)
 
 - [SHIPPED] A pure-Go SmolLM2-135M forward pass (134.5M params / 272 tensors) runs in-process with the **KV cache as a kernel-owned Go structure**; every rung is proven against a HuggingFace oracle — embedding exact, per-layer cos=1.000000, final-logits max|Δ|≈4.4e-5, KV-decode and KV-quarantine-evict token-for-token identical (max|Δ|=0). Witness: `go test ./internal/model` (oracle argmax-exact); `IN-KERNEL-MODEL-RESULTS.md`. Prior art: the kernel owning its KV cache for provable eviction (vs RadixAttention's LRU).
+- [SHIPPED] GPTQ resident CPU path (issue #300 / A-002): `model.LoadGPTQ` parses AutoGPTQ/GPTQModel safetensors directories (single-file or sharded index) into resident 4-bit or 8-bit `qweight`/`qzeros`/`scales` tensors, honors optional `g_idx` activation-order groups, keeps embeddings/norms/biases in the f32 manifest, and routes opt-in `Session.GPTQ` decode/prefill through the shared resident matmul skeleton (`residentMatRows`) with GPTQ GEMV for quantized projection/head weights and f32 for small tensors. The loader accepts the Llama/Mistral-shaped projection names the existing in-kernel session already runs. Honest fences: this is CPU-resident weight-only GPTQ support; it does not claim a native packed GPTQ CUDA kernel, a measured "within 2x llama.cpp GPTQ" throughput result, or real-checkpoint HuggingFace/llama.cpp oracle parity on this build box. Witness: `go test ./internal/model -run TestGPTQ` (`TestGPTQDequantAndMatRows4BitAnd8Bit`, `TestGPTQGIdxSelectsScaleGroup`, `TestLoadGPTQSafetensorsRoundTripAndResidentDispatch`, `TestGPTQSessionUsesResidentHead`, `TestGPTQSessionArgmaxExactAgainstDequantizedF32`).
+- [SHIPPED] Governed multimodal input seam (#399): `model.ForwardMultimodal` runs an ordered text+image prompt by splicing externally-produced CLIP/LLaVA-style vision embeddings into the same hidden-state sequence the text `Forward` uses, behind `MultimodalPolicy{Mode: "quarantine"}`. The zero policy is fail-closed: text-only requests are bit-identical to `Forward`, but any image-bearing request is quarantined out of the model until explicit quarantine-mode opt-in; admitted images are bounded by image count, bytes, pixels, and embedding-token width/count, and image metadata/raw bytes plus the embedding fingerprint are digested into a `vision-sha256:` quarantine pointer while raw bytes are never fed to the decoder. Honest fence: this is the in-kernel VLM input/governance layer and encoder interface, not a built-in CLIP weight runner or OCR/VLM classifier. Witness: `go test ./internal/model -run Multimodal` (`TestForwardMultimodalTextOnlyMatchesForward`, `TestForwardMultimodalDefaultQuarantinesImages`, `TestForwardMultimodalQuarantineIDBindsEmbeddingBits`, `TestForwardMultimodalQuarantineModeAllowsBoundedEmbeddings`, `TestForwardMultimodalGovernanceLimits`, `TestForwardMultimodalRejectsWrongEmbeddingWidth`).
 - [SHIPPED] Parity lane: parallel matmul across output rows + batched prefill GEMM + an 8-accumulator `fdot`, each output **bit-identical** to the serial reference (`math.Float32bits` equality); decode now beats every same-precision HF f32 config and prefill closed ~16×, with no proven-correctness rung disturbed. Witness: `TestParallelMatchesSerial`, `TestPrefillBatchedMatchesSerial`; `MODEL-BASELINE-RESULTS.md` (Act 2).
 - [SHIPPED] KV-quarantine bridge: a ctxmmu `Quarantine` verdict on poison bytes mechanically **evicts that result's K/V span**, leaving the kernel-owned attention cache bit-identical (max|Δ|=0.0) to never-having-seen it, against a non-vacuous poison control (max|Δ|≈0.33). Witness: `go test ./internal/kvmmu` (green); `KV-QUARANTINE-BRIDGE-RESULTS.md`. (The bridge's witness uses a synthetic model; the numerics are proven separately by the HF oracle, and the live agent loop is not yet wired to it.)
 - [SHIPPED] Planned-elision → KV-eviction residency bridge (issue #550): `kvmmu.Context.ApplyPlan(plan ctxplan.Plan)` evicts every recorded K/V segment whose id is in the plan's ELIDED set (and not its SELECTED set), so the kernel-owned cache's RESIDENCY shrinks to the planner's O(1) resident VIEW — an O(1) view becomes an O(1) KV residency, byte-for-byte (the eviction is the proven `model.KVCache.Evict` re-RoPE+renumber). The plan's faithfulness witness (`ctxplan.Audit`) already guarantees every elided span carries a page-back-in handle, so evicting it loses nothing. Witness: `go test ./internal/kvmmu -run TestApplyPlan` — the post-plan next-token distribution is BIT-IDENTICAL (max|Δ|=0) to a reference that only ever prefilled the resident spans, with a non-vacuous control (keeping the elided spans perturbs the distribution). Honest fences: the witness uses a synthetic model (HF numerics proven separately by the `internal/model` oracle); the bridge only SHRINKS residency to match the view (paging a resident span back IN is the separate demand-fault path, `ctxplan.Materialize`); and it is not yet wired into the live agent HTTP loop.
@@ -21680,6 +22283,7 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] `fak serve`: an OpenAI-compatible HTTP surface (`/v1/chat/completions` adjudication proxy, `/v1/fak/{syscall,adjudicate}`, `/v1/models`, `/healthz`) + MCP over stdio/HTTP, so a non-Go agent routes tool calls through the same in-process syscall boundary. A wire client never supplies an `abi.Ref` — the gateway mints a tainted, agent-scoped Ref from raw bytes, so the IFC/secret/self-modify rungs stay armed; optional bearer auth (constant-time compare); fails loud if the ABI isn't wired. Witness: `go test ./internal/gateway`; v0.2.1 folded an adversarial-review hardening pass (auth, DoS timeouts, MCP spec-conformance, no cross-trust-boundary leak).
 - [SHIPPED] The served path arms the **result-side** stack: a new `fak_admit` op (`POST /v1/fak/admit` + the MCP tool) runs a CLIENT-produced tool result through `k.AdmitResult` (context-MMU quarantine + IFC source-stamp/taint ledger), and a `TraceID` is threaded end-to-end (`buildCall` mints one when the wire omits it) so the per-trace IFC ledger / plan-CFI key on it. Closes the structural gap where the proxy + `fak_adjudicate` ran `k.Decide` only, leaving the exfil floor inert off the in-process `Syscall` topology. Witness: `go test ./internal/gateway` — `TestServedResultArmsResultSideStack`: a served secret-shaped result comes back QUARANTINE with the bytes paged out AND `ifc.Ledger.Level(trace)` rises above Trusted (issue #7).
 - [SHIPPED] `fak guard -- <agent>` is the one-command adopter front door that collapses the dogfood path (a shell launcher + two terminals + six env vars + manual teardown) into one cross-platform Go verb. It starts the in-process gateway on a private loopback port, injects its URL into the CHILD process env only (never the parent shell or `settings.json`), execs the real agent interactively, and prints a verdict roll-up on exit. The default upstream is the Anthropic API in passthrough mode, so `fak guard -- claude` wraps a normal Claude Code session with the capability floor armed while the user's own key + prompt-cache breakpoints pass through untouched. A secure floor is embedded in the binary so it works from any directory (`--dump-policy` prints it; `--policy FILE` overrides). The exit audit reads `Server.AdjudicationSummary` from the same operation counters `/metrics` exposes, so it cannot overstate the protection. Witness: `go test ./cmd/fak` — `TestGuardDefaultPolicyDeniesDangerAllowsBenign` (the embedded floor denies `rm -rf`/`sudo`/RCE-pipe, allows `Read`, fails closed on unlisted tools), `TestGuardEnvVar`, `TestGuardDefaultBaseURL`, `TestFormatAuditSummary`, `TestGuardWaitHealthy`; end-to-end, a wrapped child posting to `/v1/fak/adjudicate` is denied/allowed by the kernel and the exit line reports the real tally.
+- [SHIPPED] **Serving-latency observability — percentile-capable TTFT / TPOT / end-to-end histograms on `/metrics`.** The gateway emitted TTFT and decode only as cumulative MEANS (`fak_gateway_inference_prefill_seconds_total` / `_ttft_turns_total`, a derived rate), which structurally hide the P95/P99 tail an operator watches under load. `internal/gateway` `writeInferenceMetrics` now also emits three Prometheus HISTOGRAMS, fed on the same turn-completion path under the same `inferenceMu`: `fak_gateway_inference_ttft_seconds` (time-to-first-token, over the streaming turns whose prefill boundary is observable), `fak_gateway_inference_tpot_seconds` (per-output-token / inter-token latency = decode wall-clock ÷ generated tokens), and `fak_gateway_inference_e2e_seconds` (whole model-turn wall-clock, every served turn) — the fak analogues of vLLM's `vllm:time_to_first_token_seconds` / `vllm:inter_token_latency_seconds` / `vllm:e2e_request_latency_seconds`, so P50/P95/P99 are now queryable instead of only a mean. They stay empty (count 0) on an idle gateway, so no phantom distribution is published. With the existing running-request gauge (`fak_gateway_inflight_requests` + `_inflight_max_age_seconds`), the token-level prefix-cache-hit family (`fak_gateway_kv_prefix_{prompt,reused}_tokens_total` + `_reuse_ratio`), and the KV-residency family (`fak_gateway_kv_memory_*`), this brings the de facto vLLM Prometheus metric-SET to parity. Honest fence: OTLP/OpenTelemetry distributed-trace span EXPORT (gen_ai.* spans, vLLM's `--otlp-traces-endpoint`) is NOT shipped — fak threads an end-to-end `TraceID` but does not export OTLP spans. Witness: `go test ./internal/gateway -run TestInferenceLatencyHistograms` (idle histograms count 0; a buffered turn lands in e2e only; a streamed turn lands in all three with the right buckets and sums).
 - [SHIPPED] **Cache-prefix-preserving history compaction — the 100k+-session cost lever on the flagship `fak guard -- claude` / `fak serve` Anthropic passthrough, DEFAULT-ON** (`--compact-history-budget N`, defaulting to ~48k resident tokens via `gateway.DefaultCompactHistoryBudget` so a sprawling conversation is shed with NO operator configuration — a short session stays untouched, and `--compact-history-budget 0` is the explicit byte-for-byte opt-out; `agent.CompactAnthropicHistory` + `internal/gateway/messages.go:maybeCompactAnthropicRaw`; the #555 `req.Raw` transform). On the ONE route that forwards the body byte-for-byte (so the client's prompt-cache breakpoints survive), an append-only long session re-sends the whole transcript every turn. This compactor sheds OLD whole turns to a resident-token budget while keeping the cache_control prefix **byte-identical** — it SPLICES on the original bytes (a memcpy of the protected prefix through the last `cache_control` breakpoint, never a re-marshal that would reorder JSON keys and break the cache), so the upstream cache hit is preserved instead of destroyed. The protected prefix is whole-message-granular and the transform is **fail-safe identity** on any ambiguity (no breakpoint, suffix already under budget, non-JSON, <3 messages, or a splice that fails to re-decode), so it never breaks a turn; tool_use↔tool_result pairs and role alternation are preserved; a `[fak] compacted N earlier turns` stub marks the drop. It is a request-side transform only — the kernel still adjudicates the FULL decoded history, so the trust boundary is unchanged. Honest fence: token counts use the bytes/4 `EstimateAnthropicTokens` proxy (the budget unit); the value is provider-cache survival via byte-identity, and the live provider-side `cache_read_input_tokens` capture is the credentialed-host follow-on (epic #745). Witness: `go test ./internal/agent ./internal/gateway -run Compact` (`TestCompactPreservesCachePrefix`, the 8 fail-safe `TestCompactIdentityCases`, `TestCompactToolPairNotOrphaned`, `TestMaybeCompactOnShortensKeepsPrefix`, `TestMaybeCompactOffIsIdentity`, `TestMaybeCompactNonPassthroughIsIdentity`, the default-on trigger `TestMaybeCompactDefaultBudgetTrigger` + `TestMaybeCompactDefaultBudgetLeavesShortSessionAlone`, and the flag default `go test ./cmd/fak -run TestCompactHistoryBudgetDefaultsToDefaultConst`); end-to-end dogfood on the real wire — `experiments/agent-live/compact-100k-session-dogfood-2026-06-25.json` (142,516-token inbound → 6,597 forwarded, 95.4% shed, OFF/ON cache-prefix sha256 equal).
 
 ## Model routing (per-aspect + ensemble — `fak route`)
@@ -24802,6 +25406,122 @@ python3 tools/fleet_supervisor_watchdog.py
 - [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — Capability floor schema
 - [`docs/fak/server-quickstart.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-quickstart.md) — Server deployment scenarios
 - [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) — Contributor guide & repo conventions
+
+---
+
+# Private comms channel (stub)
+
+> Source: `docs/private-comms-channel.md`
+
+# Private comms channel (stub → `fak-private`)
+
+**This is a stub.** It names the private comms channel and tells you how to reach it.
+None of the live plumbing lives here — it is all in the **`fak-private`** companion repo.
+This file exists so the channel is *findable from the public tree* without ever leaking
+a host, a channel id, or a token into public history.
+
+## What the channel is
+
+The private comms channel is the **Slack control-bridge** to the lab GPU servers (the
+`DGX` boxes). It is a Slack channel driven by a small pure-Go client (`cmd/dgxbridge`):
+you post a command, a session on the GPU server runs it, and you read the result back
+from channel history. It is the operator's out-of-band control + comms plane for the
+hardware-gated work (real-kernel-on-GPU witnesses, throughput runs) that cannot happen on
+the dev box.
+
+It is **private on purpose.** The connection subsystem speaks a private lab protocol and
+carries lab identifiers, so the source is scrubbed from this public repo and the commit
+gate refuses it (see [the boundary doc](https://github.com/anthony-chaudhary/fak/blob/main/docs/dgx-slack-boundary.md)). Public `fak` keeps only
+*scrubbed* evidence (generic "GPU server" language); the live channel stays private.
+
+## Where it lives
+
+| Thing | Location |
+|---|---|
+| The bridge client (source of truth) | `fak-private/tools/dgxbridge/` — start at its `README.md` |
+| The companion repo | `fak-private`, normally checked out next to this clone as `../fak-private` |
+| Host / channel id / token | **never in public** — they resolve from a gitignored local env file in the private repo |
+
+## How to reach it (when `../fak-private` is available)
+
+1. Confirm the private repo is checked out alongside this one (`../fak-private`). If it is
+   not, you cannot reach the channel from here — that is the intended boundary.
+2. Read **`fak-private/tools/dgxbridge/README.md`**. It is the operating runbook: the
+   discovery/readback grammar, the persistent-vs-`default` session rule, and the exact
+   build + run commands (with the host/channel/token that must stay private).
+3. The bridge builds **inside this `fak` Go module** from the private snapshot: stage the
+   `cmd/dgxbridge` + `internal/dgxbridge` files, `go build` a throwaway `dgxbridge.exe`,
+   run it to enumerate the live sessions, then **remove the staged `cmd|internal/*dgx*`
+   files** — the public scrub must stay intact, so never commit them. The commit gate
+   (`tools/check_committed_files.py`) refuses any `cmd|internal/*dgx*` path as a backstop.
+
+## See also
+
+- [GPU-server / Slack boundary](https://github.com/anthony-chaudhary/fak/blob/main/docs/dgx-slack-boundary.md) — the source of truth for *what is
+  public vs private* and which gates enforce it.
+- [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — the agent entry point links here from the repo-layout map.
+
+---
+
+# GPU-server / Slack boundary
+
+> Source: `docs/dgx-slack-boundary.md`
+
+# GPU-Server / Slack Boundary
+
+This is the source of truth for the recurring GPU-server/Slack confusion.
+
+> **Just want to reach the channel?** See [`private-comms-channel.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/private-comms-channel.md)
+> — the public stub that points to the live Slack control-bridge in `fak-private`. This doc
+> explains *what is public vs private and why*; that stub is the entry point.
+
+## Public tree
+
+The public `fak` tree may keep scrubbed benchmark evidence, runbooks, and result
+summaries for the GPU-server work. Those artifacts must use generic public language
+(`GPU server`, hardware class, no lab host/IP/path/token) and must pass the scrub and
+file-admission gates.
+
+Examples that can be public:
+
+- `docs/benchmarks/*GPU-SERVER*.md`
+- scrubbed result artifacts under `experiments/qwen36/...`
+- GPU acceptance scripts that run local commands and do not implement the lab control
+  channel
+
+## Private tree
+
+The live control plane for the lab GPU server is private operational plumbing. It
+belongs in `fak-private`, not here.
+
+Private-only paths and concepts:
+
+- `cmd/*dgx*/`, `internal/*dgx*/`
+- `cmd/slackgc/`
+- `cmd/*slack*bridge*/`, `internal/*slack*control*/`, and similar Slack control-bridge
+  packages
+- the sunset Python bridge paths `tools/bench_slack.py` and `tools/bench_slack_test.py`
+- GPU-server machine catalog runs under `experiments/benchmark/runs/by-machine/dgx*/`
+- raw Slack-control state, transcripts, tokens, workspace IDs, lab hostnames, and
+  operator paths
+
+## Go vs Python
+
+New public tooling is Go. Add a `fak` subcommand or a small `cmd/<name>/` binary, with
+pure logic under `internal/<name>/` where appropriate. Do not add a new `tools/*.py`.
+
+Existing Python tools are grandfathered only. The allowlist in `internal/pythongate` can
+shrink when a Python tool is ported or sunset, but it must not grow. Restoring
+`tools/bench_slack.py` would violate both rules: it is a new Python path after deletion
+and it is private Slack/GPU-server control-plane code.
+
+## Enforced by
+
+- `internal/pythongate`: refuses new tracked `tools/*.py`
+- `tools/check_committed_files.py`: refuses private-only Slack/GPU-server control paths
+- `.gitignore`: keeps private GPU-server run outputs and bridge working copies out of status
+- `tools/scrub_public_copy.py`: strips private GPU-server machine runs and lab identifiers from
+  exported copies
 
 ---
 
