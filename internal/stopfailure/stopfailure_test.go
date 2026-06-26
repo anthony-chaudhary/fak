@@ -22,6 +22,7 @@ func TestResetAndArchiveCandidates(t *testing.T) {
 
 	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 	writeMarker(t, stopDir, "recent", `{"total":1,"consecutive":1}`, now.Add(-time.Hour))
+	writeMarker(t, stopDir, "recent2", `{"total":1,"consecutive":1}`, now.Add(-2*time.Hour))
 	writeMarker(t, stopDir, "stale", `{"total":2,"consecutive":2}`, now.Add(-8*time.Hour))
 	writeMarker(t, stopDir, "claudeonly", `{"total":1,"consecutive":1}`, now.Add(-7*time.Hour))
 	writeMarker(t, stopDir, "markeronly", `{"total":1,"consecutive":1}`, now.Add(-9*time.Hour))
@@ -43,8 +44,8 @@ func TestResetAndArchiveCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.Counts[ActionRecentReview]; got != 1 {
-		t.Fatalf("recent count = %d, want 1", got)
+	if got := plan.Counts[ActionRecentReview]; got != 2 {
+		t.Fatalf("recent count = %d, want 2", got)
 	}
 	if got := plan.Counts[ActionStaleReset]; got != 2 {
 		t.Fatalf("stale reset count = %d, want 2", got)
@@ -64,6 +65,16 @@ func TestResetAndArchiveCandidates(t *testing.T) {
 	assertConsecutive(t, stopDir, "claudeonly", 0)
 	assertConsecutive(t, stopDir, "recent", 1)
 	assertConsecutive(t, stopDir, "markeronly", 1)
+
+	cleared, err := ClearReviewed(opts, []string{"recent"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleared.Updated) != 1 {
+		t.Fatalf("clear updated = %d, want 1", len(cleared.Updated))
+	}
+	assertConsecutive(t, stopDir, "recent", 0)
+	assertConsecutive(t, stopDir, "recent2", 1)
 
 	archived, err := ArchiveMarkerOnly(opts, true)
 	if err != nil {

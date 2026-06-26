@@ -77,6 +77,17 @@ type ArchiveResult struct {
 	Errors     []string `json:"errors,omitempty"`
 }
 
+type ClearReviewedResult struct {
+	Schema     string   `json:"schema"`
+	Applied    bool     `json:"applied"`
+	Root       string   `json:"root"`
+	Requested  []string `json:"requested"`
+	Candidates []Marker `json:"candidates"`
+	Updated    []Marker `json:"updated"`
+	Missing    []string `json:"missing,omitempty"`
+	Errors     []string `json:"errors,omitempty"`
+}
+
 func BuildPlan(opts Options) (Plan, error) {
 	opts = normalizeOptions(opts)
 	root, err := filepath.Abs(opts.Root)
@@ -202,6 +213,54 @@ func ArchiveMarkerOnly(opts Options, apply bool) (ArchiveResult, error) {
 	return result, nil
 }
 
+func ClearReviewed(opts Options, sessionIDs []string, apply bool) (ClearReviewedResult, error) {
+	opts = normalizeOptions(opts)
+	allOpts := opts
+	allOpts.Limit = 0
+	plan, err := BuildPlan(allOpts)
+	if err != nil {
+		return ClearReviewedResult{}, err
+	}
+	requested := compactSessionIDs(sessionIDs)
+	result := ClearReviewedResult{
+		Schema:    "fak.stopfailure.clear-reviewed.v1",
+		Applied:   apply,
+		Root:      plan.Root,
+		Requested: requested,
+	}
+	if len(requested) == 0 {
+		result.Errors = append(result.Errors, "at least one --session is required")
+		return result, nil
+	}
+	want := map[string]bool{}
+	for _, id := range requested {
+		want[id] = true
+	}
+	for _, marker := range plan.Candidates[ActionRecentReview] {
+		if want[marker.SessionID] {
+			result.Candidates = append(result.Candidates, marker)
+			delete(want, marker.SessionID)
+		}
+	}
+	for id := range want {
+		result.Missing = append(result.Missing, id)
+	}
+	sort.Strings(result.Missing)
+	if !apply {
+		return result, nil
+	}
+	for _, marker := range result.Candidates {
+		if err := writeResetMarker(plan.Root, marker); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", marker.MarkerPath, err))
+			continue
+		}
+		marker.Consecutive = 0
+		marker.SettlementAction = ActionHealedNonzero
+		result.Updated = append(result.Updated, marker)
+	}
+	return result, nil
+}
+
 func normalizeOptions(opts Options) Options {
 	if opts.Root == "" {
 		opts.Root = "."
@@ -322,6 +381,20 @@ func relStopDir() string {
 
 func archiveMarkerPath(marker Marker) string {
 	return filepath.ToSlash(filepath.Join(".dos", "stop-failures", "archive", filepath.Base(marker.MarkerPath)))
+}
+
+func compactSessionIDs(values []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		id := strings.TrimSpace(value)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
 
 type markerOrigin struct {

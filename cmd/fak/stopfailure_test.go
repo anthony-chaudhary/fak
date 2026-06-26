@@ -27,6 +27,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 	writeStopFailureFixture(t, stopDir, "recent", `{"total":1,"consecutive":1}`, now.Add(-time.Hour))
+	writeStopFailureFixture(t, stopDir, "recent2", `{"total":1,"consecutive":1}`, now.Add(-2*time.Hour))
 	writeStopFailureFixture(t, stopDir, "stale", `{"total":3,"consecutive":2}`, now.Add(-8*time.Hour))
 	writeStopFailureFixture(t, stopDir, "claudeonly", `{"total":2,"consecutive":1}`, now.Add(-7*time.Hour))
 	writeStopFailureFixture(t, stopDir, "markeronly", `{"total":1,"consecutive":1}`, now.Add(-9*time.Hour))
@@ -65,7 +66,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
 		t.Fatalf("plan JSON: %v\n%s", err, stdout.String())
 	}
-	if plan.Counts["RECENT_REVIEW"] != 1 || plan.Counts["STALE_RESET_CANDIDATE"] != 2 || plan.Counts["STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"] != 1 || plan.Counts["HEALED_NONZERO"] != 1 || plan.Counts["ZERO_TOTAL"] != 1 {
+	if plan.Counts["RECENT_REVIEW"] != 2 || plan.Counts["STALE_RESET_CANDIDATE"] != 2 || plan.Counts["STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"] != 1 || plan.Counts["HEALED_NONZERO"] != 1 || plan.Counts["ZERO_TOTAL"] != 1 {
 		t.Fatalf("counts = %#v", plan.Counts)
 	}
 	if plan.IgnoredOld != 1 {
@@ -101,6 +102,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	assertStopFailureConsecutive(t, stopDir, "claudeonly", 1)
 	assertStopFailureConsecutive(t, stopDir, "markeronly", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent", 1)
+	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
 
 	stdout.Reset()
 	stderr.Reset()
@@ -119,6 +121,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	assertStopFailureConsecutive(t, stopDir, "claudeonly", 0)
 	assertStopFailureConsecutive(t, stopDir, "markeronly", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent", 1)
+	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
 
 	stdout.Reset()
 	stderr.Reset()
@@ -158,6 +161,41 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 		t.Fatalf("markeronly archive missing: %v", err)
 	}
 	assertStopFailureConsecutive(t, stopDir, "recent", 1)
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runStopFailure(&stdout, &stderr, []string{
+		"clear-reviewed",
+		"--root", root,
+		"--claude-home", claudeHome,
+		"--now", now.Format(time.RFC3339),
+		"--session", "recent",
+	})
+	if code != 0 {
+		t.Fatalf("clear-reviewed dry-run code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "DRY-RUN requested=1 candidates=1 updated=0") {
+		t.Fatalf("clear-reviewed dry-run output:\n%s", stdout.String())
+	}
+	assertStopFailureConsecutive(t, stopDir, "recent", 1)
+	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runStopFailure(&stdout, &stderr, []string{
+		"clear-reviewed",
+		"--root", root,
+		"--claude-home", claudeHome,
+		"--now", now.Format(time.RFC3339),
+		"--session", "recent",
+		"--apply",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("clear-reviewed apply code=%d stderr=%s", code, stderr.String())
+	}
+	assertStopFailureConsecutive(t, stopDir, "recent", 0)
+	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
 }
 
 func writeStopFailureFixture(t *testing.T, dir, session, body string, mtime time.Time) {

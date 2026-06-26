@@ -26,6 +26,8 @@ func runStopFailure(stdout, stderr io.Writer, argv []string) int {
 		return runStopFailureResetStale(stdout, stderr, argv[1:])
 	case "archive-marker-only":
 		return runStopFailureArchiveMarkerOnly(stdout, stderr, argv[1:])
+	case "clear-reviewed":
+		return runStopFailureClearReviewed(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		stopFailureUsage(stdout)
 		return 0
@@ -40,6 +42,7 @@ func stopFailureUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak stopfailure plan [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--json]")
 	fmt.Fprintln(w, "       fak stopfailure reset-stale [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--apply] [--json]")
 	fmt.Fprintln(w, "       fak stopfailure archive-marker-only [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--apply] [--json]")
+	fmt.Fprintln(w, "       fak stopfailure clear-reviewed --session ID [--session ID ...] [--root DIR] [--recent-hours N] [--apply] [--json]")
 }
 
 func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
@@ -164,6 +167,48 @@ func runStopFailureArchiveMarkerOnly(stdout, stderr io.Writer, argv []string) in
 	return 0
 }
 
+func runStopFailureClearReviewed(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak stopfailure clear-reviewed", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
+	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
+	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
+	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
+	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
+	apply := fs.Bool("apply", false, "write consecutive=0 to named recent reviewed markers; omitted means dry-run")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	nowFlag := fs.String("now", "", "override current time as RFC3339 for deterministic tests")
+	var sessions stopFailureSessionList
+	fs.Var(&sessions, "session", "recent reviewed StopFailure session id to clear; repeatable")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	now, ok := parseStopFailureNow(*nowFlag, stderr)
+	if !ok {
+		return 2
+	}
+	result, err := stopfailure.ClearReviewed(stopfailure.Options{
+		Root:                *root,
+		Now:                 now,
+		RecentWindow:        time.Duration(*recentHours) * time.Hour,
+		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
+		ClaudeHome:          *claudeHome,
+		TranscriptNamespace: *namespace,
+	}, sessions, *apply)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak stopfailure clear-reviewed: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		return writeStopFailureJSON(stdout, stderr, result)
+	}
+	printStopFailureClearReviewed(stdout, result)
+	if len(result.Errors) > 0 || len(result.Missing) > 0 {
+		return 1
+	}
+	return 0
+}
+
 func parseStopFailureNow(value string, stderr io.Writer) (time.Time, bool) {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}, true
@@ -251,6 +296,28 @@ func printStopFailureArchive(w io.Writer, result stopfailure.ArchiveResult) {
 	}
 }
 
+func printStopFailureClearReviewed(w io.Writer, result stopfailure.ClearReviewedResult) {
+	mode := "DRY-RUN"
+	if result.Applied {
+		mode = "APPLIED"
+	}
+	fmt.Fprintf(w, "fak stopfailure clear-reviewed: %s requested=%d candidates=%d updated=%d missing=%d errors=%d\n", mode, len(result.Requested), len(result.Candidates), len(result.Updated), len(result.Missing), len(result.Errors))
+	rows := result.Candidates
+	if result.Applied {
+		rows = result.Updated
+	}
+	printStopFailureRows(w, "reviewed recent clear", rows)
+	if !result.Applied && len(result.Candidates) > 0 {
+		fmt.Fprintln(w, "next: rerun with --apply to set consecutive=0 on the named reviewed recent markers")
+	}
+	for _, missing := range result.Missing {
+		fmt.Fprintf(w, "missing: %s\n", missing)
+	}
+	for _, err := range result.Errors {
+		fmt.Fprintf(w, "error: %s\n", err)
+	}
+}
+
 func printStopFailureRows(w io.Writer, label string, rows []stopfailure.Marker) {
 	if len(rows) == 0 {
 		return
@@ -278,4 +345,20 @@ func formatStopFailureAge(seconds int64) string {
 		return d.Truncate(time.Minute).String()
 	}
 	return d.Truncate(time.Second).String()
+}
+
+type stopFailureSessionList []string
+
+func (s *stopFailureSessionList) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stopFailureSessionList) Set(value string) error {
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			*s = append(*s, part)
+		}
+	}
+	return nil
 }
