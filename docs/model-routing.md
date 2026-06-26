@@ -165,7 +165,7 @@ prints a starter; `--check` validates one (unknown fields are rejected).
 
 ## The matching primitive (`Match.Matches` — the envelope-matching spine)
 
-`Match.Matches(Subject)` (`internal/modelroute/modelroute.go`) is the single
+`Match.Matches(Subject)` (`internal/modelroute/modelroute.go:297`) is the single
 tag-matching primitive every routing rule reduces to. It has the *shape* of MPI's
 point-to-point envelope match, without the point-to-point delivery:
 
@@ -180,9 +180,10 @@ point-to-point envelope match, without the point-to-point delivery:
   subject's label for the same key (`s.Labels[k] == v`); a key the rule omits is a
   wildcard for that key. Labels are the OPEN tag channel — domain, tenant, language,
   taint — that a deployment matches on without a code change.
-- **`tool` adds one wildcard form.** It matches an exact name, a single trailing `*`
-  prefix (`git_*` matches `git_push`), or bare `*` for any tool. The remaining fields
-  are exact, or — for the token band and `min_complexity` — banded / floored.
+- **`tool` adds one wildcard form.** The `toolMatch` helper matches an exact name, a
+  single trailing `*` prefix (`git_*` matches `git_push`), or bare `*` for any tool. The
+  remaining fields are exact, or — for the token band and `min_complexity` — banded /
+  floored.
 - **Rules are first-match-wins.** `Manifest.Route` walks `Rules` top-to-bottom and
   returns the first `Match` that fires, else the fail-closed `Default`: the deterministic
   first-match receive of the envelope analogue. Put the most specific rules first.
