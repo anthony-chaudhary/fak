@@ -163,7 +163,8 @@ func RenderOpusSmokeContractMarkdown(c OpusSmokeContract) string {
 	fmt.Fprintf(&b, "| Arm | Harness | Model | Predictions | Eval run id |\n")
 	fmt.Fprintf(&b, "|---|---|---|---|---|\n")
 	for _, arm := range c.Arms {
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | `%s` |\n", arm.Name, arm.Harness, arm.Model, arm.PredictionsPath, arm.EvalRunID)
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | `%s` |\n",
+			mdCell(arm.Name), mdCell(arm.Harness), mdCell(arm.Model), mdCell(arm.PredictionsPath), mdCell(arm.EvalRunID))
 	}
 	fmt.Fprintf(&b, "\n## Gates\n\n")
 	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
@@ -173,13 +174,20 @@ func RenderOpusSmokeContractMarkdown(c OpusSmokeContract) string {
 		if gate.OK {
 			mark = "yes"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", gate.Name, mark, gate.Detail)
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", mdCell(gate.Name), mark, mdCell(gate.Detail))
 	}
 	fmt.Fprintf(&b, "\n## Required Before Any Result Claim\n\n")
 	for _, req := range c.RequiredBeforeClaim {
 		fmt.Fprintf(&b, "- %s\n", req)
 	}
 	return b.String()
+}
+
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }
 
 func smokeTaskSelection(d *Dataset) ([]string, map[string]int) {

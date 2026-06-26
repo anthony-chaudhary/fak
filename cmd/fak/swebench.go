@@ -275,6 +275,10 @@ func cmdSwebenchSmokeContract(argv []string) {
 	d, srcDesc, err := loadSwebenchSource(diff, ds)
 	must(err)
 	selected := selectSwebenchSmokeTasks(d, *filter, *limit)
+	rawCmd := strings.TrimSpace(*rawCommand)
+	if rawCmd == "" {
+		rawCmd = buildSwebenchRawOpusSmokeCommand(selected, *model, *rawOutput)
+	}
 	fakCommand := buildSwebenchFakSmokeCommand(diff, ds, *filter, *limit, *gateway, *model, *fakOutput)
 	contract := swebench.BuildOpusSmokeContract(swebench.OpusSmokeContractInput{
 		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
@@ -283,7 +287,7 @@ func cmdSwebenchSmokeContract(argv []string) {
 		Filter:         *filter,
 		Limit:          *limit,
 		Model:          *model,
-		RawCommand:     *rawCommand,
+		RawCommand:     rawCmd,
 		FakCommand:     fakCommand,
 		RawOutputDir:   *rawOutput,
 		FakOutputDir:   *fakOutput,
@@ -331,6 +335,38 @@ func selectSwebenchSmokeTasks(d *swebench.Dataset, filter string, limit int) *sw
 	return d
 }
 
+func buildSwebenchRawOpusSmokeCommand(d *swebench.Dataset, model, output string) string {
+	if output == "" {
+		output = "experiments/agent-live/swebench-opus-raw-smoke-20260626"
+	}
+	ids := make([]string, 0)
+	if d != nil {
+		for _, in := range d.Instances {
+			if in.InstanceID != "" {
+				ids = append(ids, in.InstanceID)
+			}
+		}
+	}
+	sort.Strings(ids)
+	filter := strings.Join(ids, "|")
+	if filter == "" {
+		filter = ".*"
+	}
+	modelArg := model
+	if !strings.Contains(modelArg, "/") {
+		modelArg = "anthropic/" + modelArg
+	}
+	preds := filepath.ToSlash(filepath.Join(output, "preds.json"))
+	canon := filepath.ToSlash(filepath.Join(output, "predictions.json"))
+	return strings.Join([]string{
+		"$env:MSWEA_COST_TRACKING='ignore_errors'",
+		"mini-extra swebench --subset verified --split test -w 1 -o " + quoteSwebenchArg(output) +
+			" -m " + quoteSwebenchArg(modelArg) +
+			" -c swebench.yaml --filter " + quoteSwebenchArg(filter),
+		"Copy-Item -LiteralPath " + quoteSwebenchArg(preds) + " -Destination " + quoteSwebenchArg(canon),
+	}, "; ")
+}
+
 func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int, gateway, model, output string) string {
 	args := []string{
 		"go run ./cmd/fak swebench run",
@@ -356,7 +392,7 @@ func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int,
 }
 
 func quoteSwebenchArg(s string) string {
-	if s == "" || strings.ContainsAny(s, " \t`\"'") {
+	if s == "" || strings.ContainsAny(s, " \t`\"'|") {
 		return fmt.Sprintf("%q", s)
 	}
 	return s

@@ -34,8 +34,8 @@ func TestSwebenchSmokeContractCommandWritesPreRunContract(t *testing.T) {
 	if contract.Schema != swebench.OpusSmokeContractSchema {
 		t.Fatalf("schema = %q", contract.Schema)
 	}
-	if contract.Status != "INCOMPLETE_CONTRACT" {
-		t.Fatalf("status = %q, want INCOMPLETE_CONTRACT while raw command is missing", contract.Status)
+	if contract.Status != "READY_FOR_REMOTE_GRADING" {
+		t.Fatalf("status = %q, want READY_FOR_REMOTE_GRADING while only local grading is gated", contract.Status)
 	}
 	if contract.ResultClaimAllowed {
 		t.Fatal("smoke-contract must not allow a result claim")
@@ -47,8 +47,17 @@ func TestSwebenchSmokeContractCommandWritesPreRunContract(t *testing.T) {
 	for _, gate := range contract.Gates {
 		if gate.Name == "raw_arm_command" {
 			sawRawGate = true
-			if gate.OK {
-				t.Fatalf("raw_arm_command gate must be false without --raw-command: %+v", gate)
+			if !gate.OK {
+				t.Fatalf("raw_arm_command gate must be true with the default raw command: %+v", gate)
+			}
+			if !strings.Contains(gate.Detail, "mini-extra swebench") {
+				t.Fatalf("raw command does not use mini-swe-agent scaffold: %s", gate.Detail)
+			}
+			if !strings.Contains(gate.Detail, "django__django-12345|django__django-23456") {
+				t.Fatalf("raw command does not pin selected task ids: %s", gate.Detail)
+			}
+			if !strings.Contains(gate.Detail, "predictions.json") {
+				t.Fatalf("raw command does not normalize the predictions path: %s", gate.Detail)
 			}
 		}
 	}
@@ -62,6 +71,34 @@ func TestSwebenchSmokeContractCommandWritesPreRunContract(t *testing.T) {
 	}
 	if !strings.Contains(string(mb), "Required Before Any Result Claim") {
 		t.Fatalf("markdown did not render the no-claim requirements:\n%s", mb)
+	}
+}
+
+func TestSwebenchSmokeContractCommandPreservesExplicitRawCommand(t *testing.T) {
+	tmp := t.TempDir()
+	out := filepath.Join(tmp, "contract.json")
+	difficulty := filepath.Join("..", "..", "testdata", "swebench_smoke.json")
+	raw := "raw-opus-runner --tasks smoke.txt"
+
+	cmdSwebenchSmokeContract([]string{
+		"--difficulty", difficulty,
+		"--python", "definitely-not-a-python-binary",
+		"--raw-command", raw,
+		"--out", out,
+	})
+
+	var contract swebench.OpusSmokeContract
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &contract); err != nil {
+		t.Fatal(err)
+	}
+	for _, arm := range contract.Arms {
+		if arm.Name == "raw-opus" && arm.Command != raw {
+			t.Fatalf("explicit raw command was not preserved: %q", arm.Command)
+		}
 	}
 }
 

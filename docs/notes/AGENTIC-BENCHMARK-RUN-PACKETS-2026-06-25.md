@@ -115,9 +115,9 @@ ladder in
 
 ## Packet C: Opus-class SWE-bench smoke through fak
 
-Status: `run-contract-shipped`; the actual Opus raw/fak run is still gated on
-the raw scaffold command, the live Opus gateway, and official SWE-bench grader
-output.
+Status: `ready-for-remote-grading-contract-shipped`; the actual Opus raw/fak
+run is still gated on executing the raw scaffold, the live Opus gateway, and
+official SWE-bench grader output.
 
 Why third: SWE-bench is not the best final headline, but it is the compatibility
 control. The point is to show an Opus-class coding agent can run through fak
@@ -141,11 +141,12 @@ go run ./cmd/fak swebench smoke-contract `
 ```
 
 This fixes the five selected smoke task ids, the shared Opus-class model id, the
-fak arm command, and the exact official-grader commands for both arms. The
-checked-in contract is intentionally `INCOMPLETE_CONTRACT`: `raw_arm_command` is
-not supplied yet, and this box does not have the `swebench` Python harness
-importable. `result_claim_allowed` remains `false` until raw and fak
-`predictions.json` files exist and both are graded by the official harness.
+raw mini-swe-agent scaffold command, the fak arm command, and the exact
+official-grader commands for both arms. The checked-in contract is now
+`READY_FOR_REMOTE_GRADING`: both arm commands are present, but this box does not
+have the `swebench` Python harness importable. `result_claim_allowed` remains
+`false` until raw and fak `predictions.json` files exist and both are graded by
+the official harness.
 
 Smoke command:
 

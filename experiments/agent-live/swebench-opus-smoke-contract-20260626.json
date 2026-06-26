@@ -1,9 +1,9 @@
 {
   "schema": "fak.swebench-opus-smoke-contract.v1",
-  "generated_at": "2026-06-26T01:01:22Z",
+  "generated_at": "2026-06-26T01:50:50Z",
   "benchmark": "SWE-bench Verified",
   "model_class": "opus-class",
-  "status": "INCOMPLETE_CONTRACT",
+  "status": "READY_FOR_REMOTE_GRADING",
   "claim_boundary": "Pre-run contract only: fixes task ids, model identity, arm commands, and official-grader commands for an Opus-class raw-vs-fak SWE-bench smoke. It is not a solve-rate result until both predictions files are produced and graded by the official SWE-bench harness.",
   "task_selection": {
     "source": "difficulty map testdata/swebench_smoke.json (5 instances from princeton-nlp/SWE-bench_Verified, bucket-derived geometry)",
@@ -27,7 +27,7 @@
       "name": "raw-opus",
       "harness": "benchmark-native-or-raw-agent-scaffold",
       "model": "claude-opus-4-8",
-      "command": "",
+      "command": "$env:MSWEA_COST_TRACKING='ignore_errors'; mini-extra swebench --subset verified --split test -w 1 -o experiments/agent-live/swebench-opus-raw-smoke-20260626 -m anthropic/claude-opus-4-8 -c swebench.yaml --filter \"django__django-12345|django__django-23456|scikit-learn__scikit-learn-56789|sympy__sympy-34567|sympy__sympy-45678\"; Copy-Item -LiteralPath experiments/agent-live/swebench-opus-raw-smoke-20260626/preds.json -Destination experiments/agent-live/swebench-opus-raw-smoke-20260626/predictions.json",
       "output_dir": "experiments/agent-live/swebench-opus-raw-smoke-20260626",
       "predictions_path": "experiments/agent-live/swebench-opus-raw-smoke-20260626/predictions.json",
       "eval_run_id": "swebench-opus-raw-smoke",
@@ -62,7 +62,8 @@
     },
     {
       "name": "raw_arm_command",
-      "ok": false
+      "ok": true,
+      "detail": "$env:MSWEA_COST_TRACKING='ignore_errors'; mini-extra swebench --subset verified --split test -w 1 -o experiments/agent-live/swebench-opus-raw-smoke-20260626 -m anthropic/claude-opus-4-8 -c swebench.yaml --filter \"django__django-12345|django__django-23456|scikit-learn__scikit-learn-56789|sympy__sympy-34567|sympy__sympy-45678\"; Copy-Item -LiteralPath experiments/agent-live/swebench-opus-raw-smoke-20260626/preds.json -Destination experiments/agent-live/swebench-opus-raw-smoke-20260626/predictions.json"
     },
     {
       "name": "fak_arm_command",

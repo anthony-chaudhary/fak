@@ -1,9 +1,9 @@
 # Opus SWE-bench Smoke Contract
 
-- Generated: `2026-06-26T01:01:22Z`
+- Generated: `2026-06-26T01:50:50Z`
 - Benchmark: `SWE-bench Verified`
 - Model class: `opus-class`
-- Status: `INCOMPLETE_CONTRACT`
+- Status: `READY_FOR_REMOTE_GRADING`
 - Boundary: Pre-run contract only: fixes task ids, model identity, arm commands, and official-grader commands for an Opus-class raw-vs-fak SWE-bench smoke. It is not a solve-rate result until both predictions files are produced and graded by the official SWE-bench harness.
 
 ## Task Selection
@@ -25,7 +25,7 @@
 | `fixed_task_ids` | yes | 5 task ids selected |
 | `same_task_ids` | yes | raw and fak arms consume the same selected task id list |
 | `same_model` | yes | claude-opus-4-8 |
-| `raw_arm_command` | no |  |
+| `raw_arm_command` | yes | $env:MSWEA_COST_TRACKING='ignore_errors'; mini-extra swebench --subset verified --split test -w 1 -o experiments/agent-live/swebench-opus-raw-smoke-20260626 -m anthropic/claude-opus-4-8 -c swebench.yaml --filter "django__django-12345\|django__django-23456\|scikit-learn__scikit-learn-56789\|sympy__sympy-34567\|sympy__sympy-45678"; Copy-Item -LiteralPath experiments/agent-live/swebench-opus-raw-smoke-20260626/preds.json -Destination experiments/agent-live/swebench-opus-raw-smoke-20260626/predictions.json |
 | `fak_arm_command` | yes | go run ./cmd/fak swebench run --agent fleet --filter smoke --difficulty testdata/swebench_smoke.json --gateway localhost:8080 --model claude-opus-4-8 --preds-only --output experiments/agent-live/swebench-opus-fak-smoke-20260626 |
 | `official_grader_local` | no | swebench python module not importable — `pip install swebench[harness]` (or run scripts/install_swebench.py) |
 
