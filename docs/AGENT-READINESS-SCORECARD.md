@@ -5,7 +5,7 @@ description: "fak's deterministic agent-readiness scorecard: KPIs across the thr
 
 # Agent-readiness scorecard — can an agent discover, adopt, and build on fak
 
-<!-- agent-readiness-scorecard: 2026-06-25 · process: tools/agent_readiness_scorecard.py -->
+<!-- agent-readiness-scorecard: 2026-06-26 · process: tools/agent_readiness_scorecard.py -->
 
 This is the measuring stick for fak's **agent attractiveness** — the question an agent-first project lives or dies on: can an autonomous coding agent (Claude Code, OpenAI Codex, Cursor, an MCP client) **discover** fak, **want** to adopt it, and **build** on it effectively? Every number below is re-derived from the git-tracked tree by `tools/agent_readiness_scorecard.py` — no hand-entry. The headline metric is **friction-debt**: the count of concrete, mechanical defects that make fak harder for an agent to find, trust, and build on — a missing entry point, a dead orientation link, no copy-pasteable first command, an un-tagged claim, a guard that ambushes instead of teaches. Driving friction-debt to zero is what makes fak the path of least resistance for the agent that lands in it cold.
 
@@ -23,7 +23,7 @@ This is the measuring stick for fak's **agent attractiveness** — the question 
 
 ## The three steps an agent walks
 
-20 KPIs, each 0–100, grouped by the step they gate. `debt` = units of HARD friction-debt. The presence KPIs ask does-the-affordance-exist; the paste-and-run / executable-truth KPIs ask the question presence can't reach — does an agent who pastes the docs actually succeed: `fenced_paths_resolve` (the path resolves), `command_verbs_resolve` (the `fak <verb>` is a real dispatched verb, parsed live from cmd/fak/main.go), `first_command_runs` (the proof runs cold), `recipe_links_resolve` (the link inside the recipe is alive), `agent_config_valid` (the auto-loaded config parses), `platform_guidance_consistent` (the gate names its Windows bridge). `codex_recipe_current` asks whether the Codex guide still matches the current Codex MCP / AGENTS.md / exec JSON / Responses-vs-Chat-Completions shape. `machine_consumable` is advisory (it scores but emits no hard debt — a token is cheap to game).
+23 KPIs, each 0–100, grouped by the step they gate. `debt` = units of HARD friction-debt. The presence KPIs ask does-the-affordance-exist; the paste-and-run / executable-truth KPIs ask the question presence can't reach — does an agent who pastes the docs actually succeed: `fenced_paths_resolve` (the path resolves), `command_verbs_resolve` (the `fak <verb>` is a real dispatched verb, parsed live from cmd/fak/main.go), `first_command_runs` (the proof runs cold), `recipe_links_resolve` (the link inside the recipe is alive), `agent_config_valid` (the auto-loaded config parses), `platform_guidance_consistent` (the gate names its Windows bridge). `codex_recipe_current` asks whether the Codex guide still matches the current Codex MCP / AGENTS.md / exec JSON / Responses-vs-Chat-Completions shape. `machine_consumable` is advisory (it scores but emits no hard debt — a token is cheap to game).
 
 | Step | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
@@ -47,7 +47,11 @@ This is the measuring stick for fak's **agent attractiveness** — the question 
 | build | `contributor_contract` | 100 | 0 | CONTRIBUTING linked + green gate documented |
 | build | `platform_guidance_consistent` | 100 | 0 | the green gate names its native-Windows bridge |
 | build | `machine_consumable` | 100 | 0 | 23/23 measurement tools expose --json (100%) |
+| build | `refusal_recovery_mapped` | 100 | 0 | 6/6 kernel refusal tokens have an agent-facing recovery |
+| adopt | `quickstart_success_signal` | 100 | 0 | the proof block shows an observable success signal |
+| adopt | `toolchain_pinned` | 100 | 0 | go.mod pins the Go version and an entry doc names it |
 
 ## Friction-debt work-list
 
 No friction-debt: an agent can discover, adopt, and build on fak with no missing affordance. 🎉
+

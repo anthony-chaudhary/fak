@@ -426,6 +426,80 @@ def test_agent_config_integrity_reads_mcp_json() -> None:
         assert ar._agent_config_integrity(root) == []
 
 
+# --- hardened bar: refusal-recovery / quickstart signal / toolchain pin ------
+
+def test_dos_reason_tokens_parses_reason_blocks() -> None:
+    toml = ('[reasons.OFF_TRUNK]\nrefusal = true\n\n'
+            '[reasons.ARCH_LAYER_VIOLATION]\nsummary = "x"\n\n'
+            '[other.NOT_A_REASON]\nx = 1\n'
+            '  [reasons.INDENTED]\n')  # an indented header is not a top-level block
+    toks = ar.dos_reason_tokens(toml)
+    assert toks == ["ARCH_LAYER_VIOLATION", "OFF_TRUNK"]   # sorted + deduped
+    assert "NOT_A_REASON" not in toks and "INDENTED" not in toks
+    # unreadable / empty source => abstain (empty set), never invented debt.
+    assert ar.dos_reason_tokens(None) == []
+    assert ar.dos_reason_tokens("no reason blocks here") == []
+
+
+def test_unmapped_refusal_tokens_requires_nearby_recovery_cue() -> None:
+    tokens = ["OFF_TRUNK", "ARCH_LAYER_VIOLATION", "OUT_OF_DIRECTION"]
+    # a real recovery section (a cue word — "recover"/"fix" — near each token); the third
+    # token is absent entirely => the only unmapped one.
+    recovery = ("## How to recover from a refusal\n"
+                "OFF_TRUNK: commit to main instead.\n"
+                "ARCH_LAYER_VIOLATION: fix the import.\n")
+    assert ar.unmapped_refusal_tokens(tokens, recovery) == ["OUT_OF_DIRECTION"]
+    # ANTI-GAMING: a bare glossary that names the tokens with NO recovery cue nearby does
+    # not count — both present tokens stay unmapped.
+    glossary = "OFF_TRUNK is a thing.\nARCH_LAYER_VIOLATION is another thing.\n"
+    assert set(ar.unmapped_refusal_tokens(tokens, glossary)) == set(tokens)
+    assert ar.unmapped_refusal_tokens(tokens, None) == tokens   # no surface => all unmapped
+    assert ar.unmapped_refusal_tokens([], recovery) == []
+
+
+def test_refusal_recovery_mapped_kpi() -> None:
+    clean = ar.kpi_refusal_recovery_mapped([], 6)
+    assert clean["defects"] == [] and clean["score"] == 100 and clean["group"] == "build"
+    bad = ar.kpi_refusal_recovery_mapped(["ARCH_LAYER_VIOLATION", "OUT_OF_DIRECTION"], 6)
+    assert len(bad["defects"]) == 2 and bad["score"] == 67   # 4/6 mapped
+    assert all("recovery" in d for d in bad["defects"])
+    # ABSTAIN: dos.toml couldn't be parsed (total 0) => clean, never blame the docs.
+    assert ar.kpi_refusal_recovery_mapped([], 0)["score"] == 100
+
+
+def test_quickstart_signal_finds_signal_in_proof_block() -> None:
+    with_signal = {"AGENTS.md": "Proof:\n```\nfak preflight --policy p.json   # -> DENY\n```\n"}
+    assert ar.quickstart_signal(with_signal) == (True, True)
+    no_signal = {"AGENTS.md": "Proof:\n```\nfak preflight --policy p.json\n```\n"}
+    assert ar.quickstart_signal(no_signal) == (True, False)
+    # ANTI-GAMING: an incidental `--allow-foo` flag (or a glued `->`) is NOT a success
+    # marker — the anchored `-> ` / `exit code` form is required.
+    flag_only = {"AGENTS.md": "Proof:\n```\nfak preflight --allow-foo --policy p.json\n```\n"}
+    assert ar.quickstart_signal(flag_only) == (True, False)
+    assert ar.quickstart_signal({"README.md": "no fenced first command at all"}) == (False, False)
+
+
+def test_quickstart_success_signal_kpi() -> None:
+    ok = ar.kpi_quickstart_success_signal(True, True)
+    assert ok["defects"] == [] and ok["score"] == 100 and ok["group"] == "adopt"
+    bad = ar.kpi_quickstart_success_signal(True, False)
+    assert len(bad["defects"]) == 1 and bad["score"] == 40 and "expected" in bad["defects"][0]
+    # no first command => abstain (first_command books the absence).
+    absent = ar.kpi_quickstart_success_signal(False, False)
+    assert absent["defects"] == [] and absent["score"] == 100
+
+
+def test_toolchain_pinned_kpi() -> None:
+    ok = ar.kpi_toolchain_pinned(True, True)
+    assert ok["defects"] == [] and ok["score"] == 100 and ok["group"] == "adopt"
+    # go.mod has no directive AND no doc names the version => 2 defects.
+    both = ar.kpi_toolchain_pinned(False, False)
+    assert len(both["defects"]) == 2 and both["score"] == 0
+    # directive present but undocumented => one defect.
+    one = ar.kpi_toolchain_pinned(True, False)
+    assert len(one["defects"]) == 1 and one["score"] == 50
+
+
 def _clean_kpis() -> list[dict]:
     """Every KPI in its zero-defect (clean) state — the all-green tree."""
     return [
@@ -449,6 +523,9 @@ def _clean_kpis() -> list[dict]:
         ar.kpi_contributor_contract(True, True, True),
         ar.kpi_platform_guidance_consistent(True, True),
         ar.kpi_machine_consumable(8, 8, []),
+        ar.kpi_refusal_recovery_mapped([], 6),
+        ar.kpi_quickstart_success_signal(True, True),
+        ar.kpi_toolchain_pinned(True, True),
     ]
 
 

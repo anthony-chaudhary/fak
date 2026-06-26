@@ -164,6 +164,22 @@ until it clears.
   (`scrub_public_copy.py`) — keeps private *content* out of the public history. Soften with
   `FAK_REPO_GUARD=warn` (advisory) or `off`. Full doc: [`docs/repo-guard.md`](docs/repo-guard.md).
 
+### If the kernel refuses you (recover, don't fight it)
+
+A guard refusal names a token from a **closed vocabulary** — declared as `[reasons.*]`
+blocks in [`dos.toml`](dos.toml), each with a `summary` + a `fix` you can look up live
+with `dos check-reason <TOKEN>`. When you hit one, recover by the action below; don't
+route around the guard (that just trips the next one).
+
+| Token | What tripped it | Recover by |
+|---|---|---|
+| `OFF_TRUNK` | you branched / spun a worktree instead of committing to `main` | commit directly to `main` with `git commit -s -- <paths>`; a dirty/diverged tree means merge **in place** or STOP — never escape into a side branch |
+| `ARCH_LAYER_VIOLATION` | an upward/cross-tier import, or a new leaf with no declared tier | invert the dependency through a registration seam, or push the shared type down a layer; declare a new leaf's tier (`python tools/new_leaf.py`). Floor: `internal/architest` |
+| `OUT_OF_DIRECTION` | request-path logic in an untyped language, or a non-Go package blank-imported into the kernel | keep the request path Go-only; a non-Go seam stays off-path behind a typed, re-validated boundary. Floor: architest `TestHotPathHasNoExec` |
+| `FILE_ADMISSION` | a staged path is private-only content, regenerable junk, or an oversized blob | move private-only code to `fak-private`; drop or gitignore junk; put real data under `experiments/` or `testdata/` |
+| `PUBLIC_LEAK` | staged content matches a redact-needle | remove or redact the needle before committing; `FLEET_ALLOW_LEAK=1` overrides once, only for an intentional adversarial fixture |
+| `OUT_OF_TREE_WRITE` | a write op escaped the repo into a sibling tree | operate inside the workspace; send scratch to a temp dir, never `..`. Soften with `FAK_REPO_GUARD=warn`. See [`docs/repo-guard.md`](docs/repo-guard.md) |
+
 Check your setup first: `python tools/extend_preflight.py`. Full contributor contract:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

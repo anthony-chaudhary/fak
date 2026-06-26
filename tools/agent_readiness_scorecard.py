@@ -256,6 +256,45 @@ _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 # breaks the drop-in the moment the harness tries to start it.
 MCP_CONFIG_FILE = ".mcp.json"
 
+# `refusal_recovery_mapped`: the kernel refuses an agent with a CLOSED vocabulary of
+# tokens — declared as `[reasons.TOKEN]` blocks in dos.toml (the DOS refusal vocabulary,
+# each block carrying a `summary` + a `fix`). An agent that reads `<TOKEN>` in a refusal
+# needs an agent-facing surface where that exact token is greppable, so it can learn what
+# the refusal means and how to RECOVER instead of fighting the guard blind. `guardrails_
+# surfaced` checks the RULE is described; this checks the TOKEN an agent literally sees is
+# findable. The reason set is parsed LIVE from dos.toml (so the KPI stays correct as
+# reasons are added) — the same source-of-truth discipline as `command_verbs_resolve`
+# parsing cmd/fak/main.go. Empty parse => ABSTAIN (a missing source is not a doc defect).
+DOS_TOML = "dos.toml"
+_REASON_RE = re.compile(r"^\[reasons\.([A-Z][A-Z0-9_]+)\]", re.MULTILINE)
+# The agent-facing surfaces a recovering agent reads. AGENTS.md is the entry point;
+# repo-guard.md is the write/commit-guard explainer the entry point links.
+REFUSAL_RECOVERY_DOCS = [AGENTS_FILE, "docs/repo-guard.md"]
+# Anti-gaming: a token is "mapped" only if it sits NEAR recovery guidance, not merely
+# present. A bare glossary that names the token with no how-to-recover must NOT score —
+# so the token must appear within RECOVERY_WINDOW lines of a recovery cue (a heading or
+# column that says how to recover). Format-agnostic: works for a table or a prose section.
+RECOVERY_CUES = ("recover", "refus", "fix", "floor", "instead", "soften")
+RECOVERY_WINDOW = 20
+
+# `quickstart_success_signal`: the 60-second proof block must show the OBSERVABLE success
+# signal — an expected result marker (`-> DENY/ALLOW`, an exit code, a `YES->no` outcome)
+# inline with each command — so an agent can tell the proof SUCCEEDED, not merely that it
+# ran. `first_command_runs` checks the command CAN run (policy resolves, no key); this
+# checks the agent can distinguish success from a silent failure. The markers are ANCHORED
+# (the arrow carries a trailing space, `exit code` not bare `exit`) so an incidental
+# `--allow-foo` flag or a `->` glued inside an expression is not a false success signal.
+SUCCESS_SIGNAL_TOKENS = ("-> ", "=> ", "→ ", "exit code", "expected", "you should see",
+                         "prints", "outputs", "yes->no")
+
+# `toolchain_pinned`: the build toolchain is pinned so an agent provisions the right Go
+# version instead of failing the build on a wrong one — go.mod carries a `go <version>`
+# directive AND an entry doc names the required Go version.
+GO_MOD_FILE = "go.mod"
+_GO_DIRECTIVE_RE = re.compile(r"^go\s+\d+\.\d+", re.MULTILINE)
+_GO_VERSION_IN_DOC_RE = re.compile(r"go\s*1\.\d+", re.IGNORECASE)
+TOOLCHAIN_DOCS = [AGENTS_FILE, "README.md", "GETTING-STARTED.md"]
+
 GROUPS = ("discover", "adopt", "build")
 KPI_GROUP: dict[str, str] = {
     "agents_entrypoint": "discover",
@@ -279,17 +318,24 @@ KPI_GROUP: dict[str, str] = {
     "fenced_paths_resolve": "adopt",
     "first_command_runs": "adopt",
     "platform_guidance_consistent": "build",
+    # hardened bar (added 2026-06-26 — the saturated-A harden pass):
+    "refusal_recovery_mapped": "build",
+    "quickstart_success_signal": "adopt",
+    "toolchain_pinned": "adopt",
 }
-# Twenty KPIs across the three steps. The "presence" originals keep their relative
+# Twenty-three KPIs across the three steps. The "presence" originals keep their relative
 # ranking; the success/currentness/executable-truth KPIs carry real weight (they
 # measure whether an agent who pastes the docs actually succeeds — whether the
 # `fak <verb>` resolves, the recipe link is alive, the config parses, the Codex
 # recipe still matches Codex's current surfaces — questions presence checks can't
-# reach). Sum is exactly 1.0 (the score can reach 100); a regression test asserts
-# both the sum and that the weight set == the KPI set.
+# reach). The 2026-06-26 harden pass (the surface had saturated at A/zero-debt) added
+# three growth-invariant HARD bars — refusal-token recovery, the quickstart success
+# signal, and the toolchain pin — and rebalanced the weights to make room. Sum is
+# exactly 1.0 (the score can reach 100); a regression test asserts both the sum and that
+# the weight set == the KPI set.
 KPI_WEIGHTS: dict[str, float] = {
-    # discover (0.31)
-    "agents_entrypoint": 0.09,
+    # discover (0.30)
+    "agents_entrypoint": 0.08,
     "agent_config": 0.05,
     "agent_config_valid": 0.03,   # executable-truth: the config actually parses
     "llms_map": 0.04,
@@ -297,20 +343,23 @@ KPI_WEIGHTS: dict[str, float] = {
     "recipe_links_resolve": 0.03,  # success: links inside the recipe resolve
     "identity_statement": 0.03,
     # adopt (0.39) — carries the headline success checks plus executable-truth + currentness
-    "fenced_paths_resolve": 0.07,
-    "command_verbs_resolve": 0.06,  # executable-truth: the pasted `fak <verb>` exists
-    "first_command": 0.04,
-    "first_command_runs": 0.05,
-    "honesty_ledger": 0.05,
+    "fenced_paths_resolve": 0.06,
+    "command_verbs_resolve": 0.05,  # executable-truth: the pasted `fak <verb>` exists
+    "first_command": 0.03,
+    "first_command_runs": 0.04,
+    "honesty_ledger": 0.04,
     "integration_recipes": 0.04,
-    "codex_recipe_current": 0.05,
+    "codex_recipe_current": 0.04,
     "install_oneliner": 0.03,
-    # build (0.30)
-    "guardrails_surfaced": 0.07,
-    "contributor_contract": 0.06,
+    "quickstart_success_signal": 0.03,  # success: an agent can tell the proof WORKED
+    "toolchain_pinned": 0.03,           # the build toolchain is pinned + documented
+    # build (0.31)
+    "guardrails_surfaced": 0.06,
+    "contributor_contract": 0.05,
     "extension_scaffold": 0.05,
-    "platform_guidance_consistent": 0.06,
-    "machine_consumable": 0.06,
+    "platform_guidance_consistent": 0.05,
+    "machine_consumable": 0.05,
+    "refusal_recovery_mapped": 0.05,    # every kernel refusal token has an agent-facing recovery
 }
 
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")
@@ -583,6 +632,48 @@ def _prose_outside_fences(text: str) -> str:
         if not in_fence:
             out.append(raw)
     return "\n".join(out)
+
+
+def dos_reason_tokens(dos_toml_text: str | None) -> list[str]:
+    """The closed-vocabulary refusal tokens the kernel can emit, parsed LIVE from the
+    `[reasons.TOKEN]` blocks in dos.toml. Sorted + deduped. Empty if the file is
+    unreadable or carries no reason blocks — the KPI then ABSTAINS rather than invent
+    debt from a missing source of truth (mirrors `dispatch_verbs`)."""
+    if not dos_toml_text:
+        return []
+    return sorted(set(_REASON_RE.findall(dos_toml_text)))
+
+
+def unmapped_refusal_tokens(tokens: list[str], recovery_text: str | None) -> list[str]:
+    """Refusal tokens with no agent-facing RECOVERY — an agent that reads the token in a
+    refusal has nowhere to learn how to recover. A token is "mapped" only if it appears in
+    the recovery surface within RECOVERY_WINDOW lines of a recovery cue (anti-gaming: a
+    bare glossary that lists the token with no how-to-recover does NOT count). Returns the
+    unmapped tokens in input order — the diff `kpi_refusal_recovery_mapped` reports, one
+    unit per unmapped token."""
+    if not recovery_text:
+        return list(tokens)
+    lines = recovery_text.splitlines()
+    cue_lines = [i for i, ln in enumerate(lines) if _has(ln, *RECOVERY_CUES)]
+    unmapped: list[str] = []
+    for t in tokens:
+        hits = [i for i, ln in enumerate(lines) if t in ln]
+        if hits and any(abs(h - c) <= RECOVERY_WINDOW for h in hits for c in cue_lines):
+            continue
+        unmapped.append(t)
+    return unmapped
+
+
+def quickstart_signal(texts: dict[str, str]) -> tuple[bool, bool]:
+    """(found, has_signal) for the 60-second proof: the first adoption-doc fenced block
+    carrying a FIRST_COMMAND token, and whether that block shows an OBSERVABLE success
+    signal (an expected `-> DENY/ALLOW`, exit code, or result line). An agent pastes a
+    fenced proof; without a signal it can run the command but can't tell it WORKED."""
+    for doc in FIRST_COMMAND_DOCS:
+        for block in _fenced_blocks(texts.get(doc, "")):
+            if _has(block, *FIRST_COMMAND_TOKENS):
+                return True, _has(block, *SUCCESS_SIGNAL_TOKENS)
+    return False, False
 
 
 # ---------------------------------------------------------------------------
@@ -933,6 +1024,74 @@ def kpi_platform_guidance_consistent(sells_make: bool, has_bridge: bool) -> dict
             "defects": defects, "soft": []}
 
 
+def kpi_refusal_recovery_mapped(unmapped: list[str], total: int) -> dict[str, Any]:
+    """SUCCESS / executable-truth — every closed-vocabulary refusal token the kernel can
+    emit (parsed live from dos.toml `[reasons.*]`) is greppable in an agent-facing
+    recovery surface, so an agent that reads `<TOKEN>` in a refusal can learn what it
+    means and how to recover instead of fighting the guard blind. `guardrails_surfaced`
+    checks the RULE is described in prose; this checks the exact TOKEN an agent sees is
+    findable — the gap a prose check is blind to (AGENTS.md can describe "stay on the
+    trunk" yet never name `ARCH_LAYER_VIOLATION`, the token an architest refusal prints).
+    ``unmapped`` is the tokens with no recovery surface; each is one unit. ABSTAINS
+    (score 100) when ``total`` is 0 — the dos.toml reason set couldn't be parsed, and a
+    missing source of truth is not a documentation defect."""
+    defects = [f"refusal token an agent will see has no agent-facing recovery: {t} — add "
+               f"it to the refusal-recovery table in {AGENTS_FILE} (token → what it means "
+               "→ how to recover; lift the recovery from the dos.toml [reasons] block)"
+               for t in unmapped]
+    mapped = total - len(unmapped)
+    return {"kpi": "refusal_recovery_mapped", "group": "build",
+            "score": _clamp(100 * mapped / total) if total else 100,
+            "detail": (f"{mapped}/{total} kernel refusal tokens have an agent-facing recovery"
+                       if total else "no dos.toml [reasons.*] parsed — abstain"),
+            "defects": defects, "soft": []}
+
+
+def kpi_quickstart_success_signal(found: bool, has_signal: bool) -> dict[str, Any]:
+    """SUCCESS — the 60-second proof block shows the OBSERVABLE success signal (an
+    expected `-> DENY/ALLOW`, exit code, or result line) so an agent can tell the proof
+    WORKED, not merely that it ran. `first_command_runs` checks the command CAN run;
+    this checks the agent can distinguish success from a silent failure — the difference
+    between "it printed a denial like the doc says" and "it errored and I can't tell".
+    Abstains (score 100) when no first command is present — `first_command` books that
+    absence, so this only grades a proof that IS there."""
+    if not found:
+        return {"kpi": "quickstart_success_signal", "group": "adopt", "score": 100,
+                "detail": "no first command to check (see first_command)",
+                "defects": [], "soft": []}
+    defects: list[str] = []
+    if not has_signal:
+        defects.append("the first-command proof block shows no expected-result marker "
+                       "(`-> DENY/ALLOW`, an exit code, a result line) — an agent can run "
+                       "it but can't tell whether it succeeded; annotate each command with "
+                       "its expected outcome")
+    return {"kpi": "quickstart_success_signal", "group": "adopt",
+            "score": _clamp(100 - 60 * len(defects)),
+            "detail": ("the proof block shows an observable success signal" if not defects
+                       else "the proof block names no expected outcome"),
+            "defects": defects, "soft": []}
+
+
+def kpi_toolchain_pinned(has_directive: bool, doc_named: bool) -> dict[str, Any]:
+    """ADOPT — the build toolchain is pinned so an agent provisions the right Go version
+    instead of failing the build on a wrong one: go.mod carries a `go <version>` directive
+    AND an entry doc (AGENTS.md / README / GETTING-STARTED) names the required Go version.
+    The shortest path from "cloned it" to "the build compiles" runs through the right
+    toolchain; an agent that has to guess the version burns a turn on a version error."""
+    defects: list[str] = []
+    if not has_directive:
+        defects.append(f"{GO_MOD_FILE} has no `go <version>` directive — an agent can't "
+                       "know which Go toolchain to provision")
+    if not doc_named:
+        defects.append("no entry doc (AGENTS.md / README / GETTING-STARTED) names the "
+                       "required Go version — pin it so an agent provisions the right toolchain")
+    return {"kpi": "toolchain_pinned", "group": "adopt",
+            "score": _clamp(100 - 50 * len(defects)),
+            "detail": (f"{len(defects)} toolchain-pin gap(s)" if defects
+                       else "go.mod pins the Go version and an entry doc names it"),
+            "defects": defects, "soft": []}
+
+
 # ---------------------------------------------------------------------------
 # Fold: KPIs -> composite score, grade, friction-debt, control-pane payload.
 # ---------------------------------------------------------------------------
@@ -1272,6 +1431,18 @@ def gather(root: Path) -> list[dict[str, Any]]:
     dead_recipe_links = _dead_recipe_links(root, recipe_texts)
     config_integrity = _agent_config_integrity(root)
 
+    # hardened bar: the kernel's refusal vocabulary parsed live from dos.toml, mapped
+    # against the agent-facing recovery surface; the quickstart success signal; the
+    # toolchain pin. (Each source is read from disk here so the KPIs stay pure.)
+    dos_text = _safe_read(root / DOS_TOML) if present(DOS_TOML) else None
+    reason_tokens = dos_reason_tokens(dos_text)
+    recovery_text = "\n".join(_safe_read(root / d) for d in REFUSAL_RECOVERY_DOCS if present(d))
+    unmapped_reasons = unmapped_refusal_tokens(reason_tokens, recovery_text)
+    qs_found, qs_signal = quickstart_signal(texts)
+    go_mod_text = _safe_read(root / GO_MOD_FILE) if present(GO_MOD_FILE) else ""
+    go_directive = bool(_GO_DIRECTIVE_RE.search(go_mod_text))
+    go_doc_named = any(_GO_VERSION_IN_DOC_RE.search(texts.get(d, "")) for d in TOOLCHAIN_DOCS)
+
     return [
         kpi_agents_entrypoint(agents_text if present(AGENTS_FILE) else None),
         kpi_agent_config(missing_agent_configs(config_present)),
@@ -1293,6 +1464,9 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_contributor_contract(contributing, contributing_linked, green_gate),
         kpi_platform_guidance_consistent(sells_make, windows_bridge),
         kpi_machine_consumable(json_tools, len(tool_files), missing_json),
+        kpi_refusal_recovery_mapped(unmapped_reasons, len(reason_tokens)),
+        kpi_quickstart_success_signal(qs_found, qs_signal),
+        kpi_toolchain_pinned(go_directive, go_doc_named),
     ]
 
 
