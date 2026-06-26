@@ -211,8 +211,8 @@ never resident; a pin cannot launder poison.
   computed and discarded. That wire's live context lever today is the cache-prefix-preserving
   `--compact-history-budget` (default-on at ~48k) + `--elide-result-bytes`; the full ctxplan view
   on the passthrough waits on the deferred **`req.Raw` cache-prefix-preserving transform** (the
-  still-open half of #555), since you cannot re-plan that body without breaking the very cache
-  prefix the passthrough exists to preserve.
+  still-open half of #555, now tracked as #927), since you cannot re-plan that body without
+  breaking the very cache prefix the passthrough exists to preserve.
 - **The forecast is authored from the trajectory, not a model.** `ctxplan.TrajectoryAuthor`
   (#556) now AUTHORS `Forecast.Intents` from the recent trajectory (recency-weighted
   content-token recurrence — recurrence dominates, recency breaks near-ties), the
