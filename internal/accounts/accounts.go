@@ -26,10 +26,12 @@
 // and credential-safe: it records WHICH directory and WHO it is logged in as, never
 // a secret — the registry is safe to read, diff, and back up.
 //
-// The package is pure stdlib. Resolve/Validate/Default are pure functions over a
-// Registry VALUE; Discover/DeriveIdentity/LoadRegistry do the read-only disk I/O.
-// It is DISTINCT from internal/modelroute's Account/Roster, which switches PROVIDER
-// CREDENTIALS for a routed model id — a different concern at a different layer.
+// Resolve/Validate/Default are pure functions over a Registry VALUE;
+// Discover/DeriveIdentity/LoadRegistry do the read-only disk I/O. Setup-token reads
+// route through internal/secretload so credential sourcing has one redaction seam, but
+// the registry still stores only one-way fingerprints. It is DISTINCT from
+// internal/modelroute's Account/Roster, which switches PROVIDER CREDENTIALS for a routed
+// model id — a different concern at a different layer.
 package accounts
 
 import (
@@ -42,6 +44,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
 
 // RegistryVersion is this registry's on-disk schema tag. It is DISTINCT from
@@ -49,6 +53,35 @@ import (
 // registry vs a provider-credential roster. A registry MAY omit it (treated as
 // current); one naming a different major is refused.
 const RegistryVersion = "fak-config-homes/v1"
+
+const setupTokenSecretKey = "CLAUDE_SETUP_TOKEN"
+
+type setupTokenFileSource struct {
+	path string
+}
+
+func (s setupTokenFileSource) Name() string { return s.path }
+
+func (s setupTokenFileSource) Lookup(key string) (string, bool) {
+	if key != setupTokenSecretKey {
+		return "", false
+	}
+	b, err := os.ReadFile(s.path)
+	if err != nil {
+		return "", false
+	}
+	tok := bytes.TrimSpace(b)
+	if len(tok) == 0 {
+		return "", false
+	}
+	return string(tok), true
+}
+
+func setupTokenLoader(dir string) *secretload.Loader {
+	l := secretload.New(setupTokenFileSource{path: filepath.Join(dir, ".oauth-token")})
+	l.Require(setupTokenSecretKey, "Claude setup token", nil)
+	return l
+}
 
 // Status is the lifecycle of a config-home seat. A CLOSED set: an empty status reads
 // as Active, so a hand-written registry need only mark the tombstones.
@@ -609,15 +642,11 @@ func DeriveIdentity(dir string) Identity {
 // one rate-limit bucket without the registry ever storing or exposing the secret. The
 // token is read, hashed, and discarded; only the 12-hex-char fingerprint is retained.
 func tokenFingerprint(dir string) string {
-	b, err := os.ReadFile(filepath.Join(dir, ".oauth-token"))
-	if err != nil {
+	tok, ok := setupTokenLoader(dir).Lookup(setupTokenSecretKey)
+	if !ok {
 		return ""
 	}
-	tok := bytes.TrimSpace(b)
-	if len(tok) == 0 {
-		return ""
-	}
-	sum := sha256.Sum256(tok)
+	sum := sha256.Sum256([]byte(tok))
 	return hex.EncodeToString(sum[:6])
 }
 

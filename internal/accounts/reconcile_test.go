@@ -66,6 +66,20 @@ func TestTokenFingerprintNonSecretAndStable(t *testing.T) {
 	}
 }
 
+func TestSetupTokenLoaderRedactsResolvedToken(t *testing.T) {
+	root := t.TempDir()
+	seat := mkSeat(t, root, ".claude-redact", "r@x.test", "u-r", "plain-account-token-value", true)
+
+	loader := setupTokenLoader(seat.Dir)
+	tok, src, ok := loader.LookupSource(setupTokenSecretKey)
+	if !ok || tok != "plain-account-token-value" || src != filepath.Join(seat.Dir, ".oauth-token") {
+		t.Fatalf("LookupSource = (%q,%q,%v), want setup token file source", tok, src, ok)
+	}
+	if out := loader.Redact("accounts loaded " + tok); contains(out, tok) {
+		t.Fatalf("resolved setup token was not redacted: %q", out)
+	}
+}
+
 func TestAccountKeyPrefersUUIDThenToken(t *testing.T) {
 	withUUID := Identity{AccountUUID: "u-1", TokenFP: "ff00"}
 	if got := withUUID.AccountKey(); got != "uuid:u-1" {
