@@ -80,6 +80,10 @@ func main() {
 		cmdRecall(os.Args[2:])
 	case "session":
 		cmdSession(os.Args[2:])
+	case "ps":
+		cmdPS(os.Args[2:])
+	case "top":
+		cmdTop(os.Args[2:])
 	case "signal":
 		cmdSignal(os.Args[2:])
 	case "task":
@@ -340,6 +344,11 @@ func usage() {
                 priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
                 (the OPERATOR control surface: read a served session's live DRIVE state
                  and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)
+  fak ps        [--json] [--watch] [--interval D] [--frames N] [--addr URL] [--key K]
+  fak top       (= fak ps --watch)
+                (the READ-ONLY PROCESS TABLE: one aligned row per live session folded
+                 from GET /v1/fak/sessions; --watch is the top mode. Issues no control
+                 verb - control a session with fak session)
   fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."
                 (JOB CONTROL for a running session - the OS process-model names over the
                  control plane; steer sends INPUT to a running agent, taken at its next
