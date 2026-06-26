@@ -173,6 +173,8 @@ func main() {
 		cmdDogfoodIssues(os.Args[2:])
 	case "stopfailure":
 		cmdStopFailure(os.Args[2:])
+	case "cluster":
+		cmdCluster(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -402,6 +404,15 @@ func usage() {
                  fak_session_reset / fak_context_change) over stdin/stdout)
   fak serve-wiring [--md|--check]
                 (audit fak serve flag -> gateway.Config -> runtime-read wiring)
+  fak cluster   selftest | coordinator --listen ADDR --size N --vec a,b,c |
+                worker --coord ADDR --rank R --size N --vec a,b,c   [--op allreduce|allgather]
+                (MULTI-NODE COMPUTE: run a real cross-node collective over fak's DistComm
+                 process group (host float32). Launch 'coordinator' on one box and 'worker'
+                 on each other, pointing at the coordinator's address; every rank holds only
+                 its own --vec and they reduce/gather it across the wire. 'selftest' proves
+                 the path bit-exact vs the in-process reference over loopback, no second box.
+                 Host-layer, CPU-runnable today; the NCCL/RCCL device collective is the
+                 separate GPU rung  -  see docs/serving/multi-node-compute.md)
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
                 [--restart-limit N] [--restart-seed-dir DIR]
