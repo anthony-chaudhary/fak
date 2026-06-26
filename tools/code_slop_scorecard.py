@@ -1020,6 +1020,13 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         "debt_by_kpi": {k["kpi"]: len(k["defects"]) for k in kpis},
         "breakdown": breakdown,
     }
+    # Lift the stub_masquerade SOFT->HARD promotion readiness (#781) to the corpus
+    # summary the control-pane reads, so the soak status is reachable without walking
+    # the kpis array — and a future automated check can act on `promotable` to prompt
+    # the (deliberate) flip. Absent on fixtures without the block; never affects scoring.
+    stub_promotion = (by_name.get("stub_masquerade") or {}).get("promotion")
+    if stub_promotion:
+        corpus["stub_masquerade_promotion"] = stub_promotion
 
     if slop_debt == 0:
         ok, verdict, finding = True, "OK", "code_slop_clean"

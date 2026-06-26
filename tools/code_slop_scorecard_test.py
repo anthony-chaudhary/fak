@@ -503,6 +503,25 @@ def test_payload_soft_never_counts_as_debt():
     assert p["corpus"]["soft_signals"] == 1
 
 
+def test_payload_lifts_stub_promotion_to_corpus():
+    # the #781 promotion readiness must be reachable from corpus (what the control-pane
+    # reads), surfaced from the stub_masquerade KPI's `promotion` block.
+    stub = cs.kpi_stub_masquerade({}, claims_text="", version="0.34.0")
+    kpis = [_kpi("duplication", []), _kpi("dead_code", []), _kpi("comment_slop", []),
+            _kpi("vacuous_tests", []), stub, _kpi("churn_bloat", [])]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    promo = p["corpus"]["stub_masquerade_promotion"]
+    assert promo["promotable"] is False
+    assert promo["current_release"] == "0.34.0"
+
+
+def test_payload_without_promotion_block_omits_corpus_key():
+    # fixtures that don't carry a promotion block must not synthesize the corpus key.
+    kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    assert "stub_masquerade_promotion" not in p["corpus"]
+
+
 def test_payload_breakdown_worst_first():
     kpis = [_kpi("duplication", ["a", "b", "c"]), _kpi("dead_code", ["d"]),
             _kpi("comment_slop", []), _kpi("vacuous_tests", []),
