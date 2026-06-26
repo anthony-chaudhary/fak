@@ -121,6 +121,19 @@ COMMENT_SLOP_CAP = 300
 # this many statement lines — a real implementation is longer.
 STUB_BODY_MAX_LINES = 2
 
+# stub_masquerade SOFT->HARD promotion gate (#781). The axis stays SOFT until BOTH
+# preconditions hold: (1) the symbol<->[STUB]-ledger LINK is tight — shipped in fc7449d
+# (suppression keyed on backtick-quoted Go symbols, not lowercased prose) — and (2) the
+# detector proves ZERO false positives on the tree across a SOAK window of a few
+# releases. The detector first shipped in 53e4d5f, which is contained only in release
+# 0.34.0, so the soak window OPENS at 0.34.0. `STUB_SOAK_RELEASES` encodes "a few
+# releases" as 3 (the conservative reading); a maintainer may tune it. This gate is
+# ADVISORY and self-reporting (`stub_promotion_status`): it computes READINESS, it never
+# performs the flip — moving `soft` -> `defects` and bumping the KPI weight stays a
+# deliberate maintainer act, taken once the elapsed window is reviewed for zero FP.
+STUB_DETECTOR_SHIP_RELEASE = "0.34.0"
+STUB_SOAK_RELEASES = 3
+
 # Per-KPI weights for the composite slop_score. The HARD axes that most signal a
 # rotting codebase weigh most; the SOFT/heuristic axes weigh least.
 KPI_WEIGHTS: dict[str, float] = {
@@ -821,7 +834,57 @@ def _ledger_stub_symbols(claims_text: str) -> set[str]:
     return symbols
 
 
-def kpi_stub_masquerade(files: dict[str, str], claims_text: str) -> dict[str, Any]:
+def _parse_release(v: str) -> tuple[int, int] | None:
+    """(major, minor) of a ``MAJOR.MINOR[.PATCH]`` version string (a leading ``v`` is
+    tolerated), or ``None`` when unparseable. Callers treat ``None`` as fail-safe: an
+    unknown version yields a NOT-met soak, never a false promotion."""
+    m = re.match(r"\s*v?(\d+)\.(\d+)", v or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def stub_promotion_status(current_version: str, n_findings: int) -> dict[str, Any]:
+    """Re-derivable readiness of the stub_masquerade SOFT->HARD promotion (#781).
+
+    Gate 1 — the symbol<->[STUB]-ledger LINK is tight — shipped in fc7449d, so it is
+    always met. Gate 2 — zero false positives across a SOAK window of a few releases —
+    is computed here from objective on-disk facts: the release the detector first
+    shipped in (``STUB_DETECTOR_SHIP_RELEASE``), the current ``VERSION``, and the live
+    finding count. ``releases_since_ship`` counts minor bumps since the ship release on
+    the same major line (a cross-major jump or an unparseable version fails SAFE to 0).
+
+    ``soak_met`` is a NECESSARY-not-sufficient mechanical signal: the window has elapsed
+    AND the tree is currently clean. ``promotable`` mirrors it — it tells a maintainer
+    the window is up and the tree is clean, so they may REVIEW the elapsed window for
+    any false positive and then flip (move ``soft`` -> ``defects`` + bump the weight). It
+    does NOT itself flip the axis; the readout is advisory, the flip stays a human act."""
+    cur = _parse_release(current_version)
+    ship = _parse_release(STUB_DETECTOR_SHIP_RELEASE)
+    if cur and ship and cur[0] == ship[0] and cur[1] >= ship[1]:
+        releases_since = cur[1] - ship[1]
+    else:
+        releases_since = 0
+    soak_met = releases_since >= STUB_SOAK_RELEASES and n_findings == 0
+    if soak_met:
+        status = ("READY: soak window elapsed and tree clean — a maintainer may review "
+                  "the window for zero FP, then move soft->defects + bump the weight")
+    else:
+        status = (f"AWAITING SOAK: {releases_since}/{STUB_SOAK_RELEASES} release(s) since "
+                  f"the detector shipped ({STUB_DETECTOR_SHIP_RELEASE}); stays SOFT (advisory)")
+    return {
+        "link_tight": True,
+        "ship_release": STUB_DETECTOR_SHIP_RELEASE,
+        "current_release": current_version or "unknown",
+        "soak_releases_required": STUB_SOAK_RELEASES,
+        "releases_since_ship": releases_since,
+        "live_findings": n_findings,
+        "soak_met": soak_met,
+        "promotable": soak_met,
+        "status": status,
+    }
+
+
+def kpi_stub_masquerade(files: dict[str, str], claims_text: str,
+                        version: str = "") -> dict[str, Any]:
     """SOFT (v1, advisory). An EXPORTED func whose body explicitly declares itself
     UNIMPLEMENTED — ``panic("not implemented")`` / ``panic("unimplemented")`` / a
     body whose only statement is a ``// TODO: implement`` — where the symbol is not
@@ -845,10 +908,15 @@ def kpi_stub_masquerade(files: dict[str, str], claims_text: str) -> dict[str, An
 
     Still SOFT: the SOFT->HARD promotion (move ``soft`` -> ``defects`` + bump the KPI
     weight) is gated on a SECOND condition the link-tightening alone does not satisfy —
-    zero false positives confirmed on the tree across a few releases. The detector is
-    one release old (it shipped with the scorecard in 53e4d5f) and the tree currently
-    has ZERO exported panic-stubs, so the soak has not run yet; until it does, the axis
-    scores but never gates. See #781 / the #775 Track-B epic."""
+    zero false positives confirmed on the tree across a few releases. The detector first
+    shipped in 53e4d5f, contained only in release ``STUB_DETECTOR_SHIP_RELEASE``, so the
+    soak window opens there; the tree currently has ZERO exported panic-stubs. The
+    readiness of that second gate is now SELF-REPORTING, not a prose vibe: the returned
+    ``promotion`` block (``stub_promotion_status``) carries a re-derivable
+    ``releases_since_ship`` / ``soak_met`` / ``promotable`` readout so an agent or
+    operator can check the soak status (and the eventual flip is evidence-bound) without
+    re-deriving it by hand. The readout never gates and never flips the axis on its own.
+    See #781 / the #775 Track-B epic."""
     stub_symbols = _ledger_stub_symbols(claims_text)
 
     todo_only_re = re.compile(r"^\s*//\s*TODO[:\s].*implement", re.I)
@@ -886,8 +954,12 @@ def kpi_stub_masquerade(files: dict[str, str], claims_text: str) -> dict[str, An
     score = _clamp(100 - 4 * len(soft))
     detail = ("no exported stub-masquerade" if not soft
               else f"{len(soft)} possible stub-masquerade(s) [SOFT]")
+    # The `promotion` block is advisory metadata (the #781 SOFT->HARD readiness): an
+    # extra key the fold/render ignore for scoring — it changes no score, defect, or
+    # snapshot, it only surfaces the soak status.
     return {"kpi": "stub_masquerade", "score": score, "detail": detail,
-            "defects": [], "soft": soft}
+            "defects": [], "soft": soft,
+            "promotion": stub_promotion_status(version, len(soft))}
 
 
 def kpi_churn_bloat(added: int, removed: int, n_commits: int) -> dict[str, Any]:
@@ -1044,6 +1116,7 @@ def collect(workspace: Path, *, run_churn: bool = True,
         return build_payload(workspace=str(workspace), kpis=[],
                              error="no first-party .go files found (run from repo ROOT)")
     claims_text = _safe_read(workspace / CLAIMS_REL)
+    version_text = _safe_read(workspace / VERSION_REL).strip()
 
     if run_churn:
         added, removed, n_commits = git_churn(workspace, churn_range)
@@ -1055,7 +1128,7 @@ def collect(workspace: Path, *, run_churn: bool = True,
         kpi_dead_code(files, test_files),
         kpi_comment_slop(files),
         kpi_vacuous_tests(test_files),
-        kpi_stub_masquerade(files, claims_text),
+        kpi_stub_masquerade(files, claims_text, version_text),
         kpi_churn_bloat(added, removed, n_commits),
     ]
     return build_payload(workspace=str(workspace), kpis=kpis)
@@ -1101,6 +1174,12 @@ def render(payload: dict[str, Any]) -> str:
             lines.append("  advisory (SOFT, never gates):")
             for kpi, s in softs[:12]:
                 lines.append(f"    · [{kpi}] {s}")
+        # stub_masquerade SOFT->HARD promotion readiness (#781) — advisory, never gates.
+        for k in payload.get("kpis", []):
+            promo = k.get("promotion")
+            if promo:
+                lines.append("")
+                lines.append(f"  stub_masquerade promotion (#781): {promo.get('status')}")
     lines.append("")
     lines.append(f"next: {payload.get('next_action')}")
     return "\n".join(lines)

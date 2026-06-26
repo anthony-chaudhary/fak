@@ -385,6 +385,70 @@ def test_real_implementation_is_clean():
     assert k["soft"] == []
 
 
+# --- stub_masquerade SOFT->HARD promotion gate (#781) ---------------------
+
+def test_promotion_awaiting_soak_at_ship_release():
+    # At the detector's own ship release the soak window has NOT elapsed: link tight,
+    # but releases_since_ship == 0 -> not promotable, stays SOFT. The honest state today.
+    s = cs.stub_promotion_status(cs.STUB_DETECTOR_SHIP_RELEASE, n_findings=0)
+    assert s["link_tight"] is True
+    assert s["releases_since_ship"] == 0
+    assert s["soak_met"] is False
+    assert s["promotable"] is False
+    assert "AWAITING SOAK" in s["status"]
+
+
+def test_promotion_ready_after_soak_window_elapsed_and_clean():
+    # SOAK_RELEASES minor bumps later with a clean tree -> the mechanical gate is met
+    # (promotable=True), which tells a maintainer to review the window and flip. It does
+    # not itself flip the axis.
+    smaj, smin = cs._parse_release(cs.STUB_DETECTOR_SHIP_RELEASE)
+    later = f"{smaj}.{smin + cs.STUB_SOAK_RELEASES}.0"
+    s = cs.stub_promotion_status(later, n_findings=0)
+    assert s["releases_since_ship"] == cs.STUB_SOAK_RELEASES
+    assert s["soak_met"] is True
+    assert s["promotable"] is True
+    assert "READY" in s["status"]
+
+
+def test_promotion_findings_block_even_after_window():
+    # A live finding means the tree is NOT clean: the soak is not met no matter how many
+    # releases elapsed (zero false positives is a precondition, and any live finding is
+    # an unconfirmed signal).
+    smaj, smin = cs._parse_release(cs.STUB_DETECTOR_SHIP_RELEASE)
+    later = f"{smaj}.{smin + cs.STUB_SOAK_RELEASES + 1}.0"
+    s = cs.stub_promotion_status(later, n_findings=1)
+    assert s["soak_met"] is False
+    assert s["promotable"] is False
+
+
+def test_promotion_unparseable_or_cross_major_fails_safe():
+    # An unknown version, or a major-version jump, must never falsely claim the soak ran.
+    assert cs.stub_promotion_status("garbage", n_findings=0)["releases_since_ship"] == 0
+    smaj, smin = cs._parse_release(cs.STUB_DETECTOR_SHIP_RELEASE)
+    cross_major = f"{smaj + 1}.{smin + cs.STUB_SOAK_RELEASES}.0"
+    s = cs.stub_promotion_status(cross_major, n_findings=0)
+    assert s["releases_since_ship"] == 0
+    assert s["promotable"] is False
+
+
+def test_kpi_attaches_promotion_block_without_changing_scoring():
+    # The promotion block is advisory metadata: it must be present on the KPI result but
+    # change no score and emit no HARD defect.
+    files = {"a.go": "package a\nfunc Future() int { panic(\"not implemented\") }\n"}
+    k = cs.kpi_stub_masquerade(files, claims_text="", version="0.34.0")
+    assert k["defects"] == []          # still SOFT — never gates
+    assert k["score"] == 96            # one SOFT signal, score unaffected by promotion
+    assert "promotion" in k
+    assert k["promotion"]["link_tight"] is True
+    assert k["promotion"]["current_release"] == "0.34.0"
+    # the fold ignores the extra key: a clean stub KPI still folds to zero debt
+    p = cs.build_payload(workspace="/x", kpis=[
+        _kpi("duplication", []), _kpi("dead_code", []), _kpi("comment_slop", []),
+        _kpi("vacuous_tests", []), k, _kpi("churn_bloat", [])])
+    assert p["corpus"]["slop_debt"] == 0
+
+
 # --- churn_bloat (SOFT) ---------------------------------------------------
 
 def test_churn_bloat_accretion_is_soft():
