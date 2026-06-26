@@ -2196,6 +2196,9 @@ func tuiGuardRowsForArtifact(artifact tuiGuardArtifact) []tuiGuardRow {
 	if preflight := tuiGuardMap(raw["preflight"]); preflight != nil {
 		return []tuiGuardRow{tuiGuardPreflightProbeRow(artifact, preflight)}
 	}
+	if schema == "fak-codex-dos-recent-audit/1" || (raw["actionability"] != nil && raw["codex_hook_fast_path"] != nil) {
+		return tuiGuardCodexRecentRows(artifact)
+	}
 	if schema == "fak-claude-historical-guard-audit/1" || raw["verdict_counts"] != nil || raw["non_allow_samples"] != nil {
 		return tuiGuardHistoricalRows(artifact)
 	}
@@ -2302,6 +2305,137 @@ func tuiGuardHistoricalDetail(raw map[string]any) string {
 		bits = append(bits, fmt.Sprintf("sessions=%d", sessions))
 	}
 	return strings.Join(bits, "  ")
+}
+
+func tuiGuardCodexRecentRows(artifact tuiGuardArtifact) []tuiGuardRow {
+	raw := artifact.Raw
+	artifactName := tuiGuardArtifactName(artifact.Path)
+	status := tuiGuardString(raw, "status")
+	summary := tuiGuardMap(raw["summary"])
+	actionability := tuiGuardMap(raw["actionability"])
+	hook := tuiGuardMap(raw["codex_hook_fast_path"])
+	gitGate := tuiGuardMap(raw["git_gate_evidence"])
+	workspaceStop := tuiGuardMap(raw["workspace_stop_failures"])
+
+	rows := []tuiGuardRow{
+		{
+			Artifact: artifactName,
+			Kind:     "codex-actionability",
+			Status:   firstNonEmptyTUI(tuiGuardString(actionability, "status"), status),
+			Detail: strings.Join(nonEmptyTUI([]string{
+				fmt.Sprintf("sessions=%d/%d", tuiGuardInt(raw, "sessions_audited"), tuiGuardInt(raw, "codex_threads_discovered")),
+				"reasons=" + tuiGuardCompactJSON(actionability["reasons"]),
+				"residual=" + tuiGuardCompactJSON(actionability["residual"]),
+				fmt.Sprintf("delegates=%d", tuiGuardInt(actionability, "delegate_count")),
+			}), "  "),
+			Count: 1,
+		},
+	}
+	if hook != nil {
+		rows = append(rows, tuiGuardRow{
+			Artifact: artifactName,
+			Kind:     "codex-hook-fast-path",
+			Status:   tuiGuardString(hook, "status"),
+			Detail: strings.Join(nonEmptyTUI([]string{
+				"modes=" + tuiGuardCompactJSON(hook["codex_command_modes"]),
+				"reason=" + tuiGuardString(hook, "reason"),
+			}), "  "),
+			Count: 1,
+		})
+	}
+	if gitGate != nil {
+		rows = append(rows, tuiGuardRow{
+			Artifact: artifactName,
+			Kind:     "codex-git-gate",
+			Status:   tuiGuardString(gitGate, "status"),
+			Detail: strings.Join(nonEmptyTUI([]string{
+				"proved_at=" + tuiGuardString(gitGate, "proved_at"),
+				"missing=" + tuiGuardCompactJSON(gitGate["missing"]),
+			}), "  "),
+			Count: 1,
+		})
+	}
+	if workspaceStop != nil && (tuiGuardInt(workspaceStop, "markers") > 0 || tuiGuardInt(workspaceStop, "total_failures") > 0) {
+		rows = append(rows, tuiGuardRow{
+			Artifact: artifactName,
+			Kind:     "stopfailure-api-wall",
+			Status:   tuiGuardString(workspaceStop, "status"),
+			Detail: fmt.Sprintf("markers=%d failures=%d nonzero=%d zero=%d max_consecutive=%d",
+				tuiGuardInt(workspaceStop, "markers"),
+				tuiGuardInt(workspaceStop, "total_failures"),
+				tuiGuardInt(workspaceStop, "nonzero_total_markers"),
+				tuiGuardInt(workspaceStop, "zero_total_markers"),
+				tuiGuardInt(workspaceStop, "max_consecutive"),
+			),
+			Count: 1,
+		})
+		topStop := workspaceStop["top_nonzero"]
+		if topStop == nil {
+			topStop = workspaceStop["recent"]
+		}
+		rows = append(rows, tuiGuardStopFailureSessionRows(artifactName, topStop)...)
+	}
+	if mutating := tuiGuardIntMap(actionability["post_repair_mutating_shell_family_counts"]); len(mutating) > 0 {
+		rows = append(rows, tuiGuardRow{
+			Artifact: artifactName,
+			Kind:     "codex-mutating-shell",
+			Status:   "WARN",
+			Detail:   "families=" + tuiGuardCompactJSON(mutating),
+			Count:    1,
+		})
+	}
+	if residualsContain(actionability["residual"], "HOST_SHELL_OPACITY") || tuiGuardIntMap(actionability["post_repair_shell_shape_counts"])["shell_no_write_target_detected"] > 0 {
+		rows = append(rows, tuiGuardRow{
+			Artifact: artifactName,
+			Kind:     "codex-shell-opacity",
+			Status:   firstNonEmptyTUI(tuiGuardString(actionability, "status"), status),
+			Detail: strings.Join(nonEmptyTUI([]string{
+				"shapes=" + tuiGuardCompactJSON(actionability["post_repair_shell_shape_counts"]),
+				"families=" + tuiGuardCompactJSON(actionability["post_repair_shell_family_counts"]),
+				fmt.Sprintf("unknown_tree=%d", tuiGuardInt(summary, "unknown_tree_admission_warnings")),
+			}), "  "),
+			Count: 1,
+		})
+	}
+	return rows
+}
+
+func tuiGuardStopFailureSessionRows(artifactName string, recent any) []tuiGuardRow {
+	items, ok := recent.([]any)
+	if !ok {
+		return nil
+	}
+	rows := []tuiGuardRow{}
+	for _, item := range items {
+		m := tuiGuardMap(item)
+		if m == nil {
+			continue
+		}
+		total := tuiGuardInt(m, "total")
+		if total <= 0 {
+			continue
+		}
+		transcript := tuiGuardMap(m["transcript"])
+		rows = append(rows, tuiGuardRow{
+			Artifact: artifactName,
+			Kind:     "stopfailure-session",
+			Status:   "WARN",
+			Detail: strings.Join(nonEmptyTUI([]string{
+				"session=" + tuiGuardString(m, "session_id"),
+				fmt.Sprintf("total=%d", total),
+				fmt.Sprintf("consecutive=%d", tuiGuardInt(m, "consecutive")),
+				"mtime=" + tuiGuardString(m, "mtime"),
+				"transcript=" + tuiGuardString(transcript, "status"),
+				"account=" + tuiGuardString(transcript, "account"),
+				"project=" + tuiGuardString(transcript, "project"),
+			}), "  "),
+			Count: total,
+		})
+		if len(rows) >= 5 {
+			break
+		}
+	}
+	return rows
 }
 
 func tuiGuardVendorRows(artifact tuiGuardArtifact) []tuiGuardRow {
@@ -2464,6 +2598,10 @@ func scoreTUIGuardRow(row tuiGuardRow) ([]string, int) {
 		tags = append(tags, "expected-deny")
 		score += 5
 	}
+	if strings.Contains(status, "WARN") {
+		tags = append(tags, "warn")
+		score += 35
+	}
 	if status == "FAIL" || strings.Contains(status, "UNEXPECTED") || strings.Contains(status, "ERROR") || strings.Contains(status, "BLOCKED") {
 		tags = append(tags, "unexpected")
 		score += 100
@@ -2543,6 +2681,8 @@ func tuiGuardActions(counts tuiGuardCounts) []string {
 	switch {
 	case counts.Unexpected > 0 || counts.Fail > 0:
 		return []string{"inspect failing or unexpected guard artifacts before treating the proof packet as current"}
+	case counts.Warn > 0:
+		return []string{"inspect WARN guard artifacts before treating fak-by-default actionability as clear"}
 	case counts.Deny == 0 && counts.Quarantine == 0:
 		return []string{"add a recent guard proof with at least one denial or quarantine"}
 	case counts.PolicyBlock == 0:
@@ -2555,10 +2695,11 @@ func tuiGuardActions(counts tuiGuardCounts) []string {
 func renderTUIGuard(report tuiGuardReport, width int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak console guard  at=%s  source=%s\n", report.At, report.Source)
-	fmt.Fprintf(&b, "status=%s  artifacts=%d  rows=%d  allow=%d  deny=%d  quarantine=%d  policy_block=%d  default_deny=%d  expected=%d  unexpected=%d\n",
-		report.Status, report.Counts.Artifacts, report.Counts.Rows, report.Counts.Allow,
-		report.Counts.Deny, report.Counts.Quarantine, report.Counts.PolicyBlock,
-		report.Counts.DefaultDeny, report.Counts.Expected, report.Counts.Unexpected)
+	fmt.Fprintf(&b, "status=%s  artifacts=%d  pass=%d  warn=%d  fail=%d  rows=%d  allow=%d  deny=%d  quarantine=%d  policy_block=%d  default_deny=%d  expected=%d  unexpected=%d\n",
+		report.Status, report.Counts.Artifacts, report.Counts.Pass, report.Counts.Warn,
+		report.Counts.Fail, report.Counts.Rows, report.Counts.Allow, report.Counts.Deny,
+		report.Counts.Quarantine, report.Counts.PolicyBlock, report.Counts.DefaultDeny,
+		report.Counts.Expected, report.Counts.Unexpected)
 	if len(report.Actions) > 0 {
 		fmt.Fprintf(&b, "next: %s\n", trimTUI(report.Actions[0], maxTUI(20, width-6)))
 	}
@@ -2665,6 +2806,41 @@ func tuiGuardIntMap(v any) map[string]int {
 		out[k] = tuiGuardInt(map[string]any{"v": raw}, "v")
 	}
 	return out
+}
+
+func tuiGuardCompactJSON(v any) string {
+	if v == nil {
+		return "null"
+	}
+	b, err := json.Marshal(v)
+	if err != nil || len(b) == 0 {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(b)
+}
+
+func residualsContain(v any, want string) bool {
+	switch xs := v.(type) {
+	case []any:
+		for _, x := range xs {
+			if strings.EqualFold(strings.TrimSpace(fmt.Sprint(x)), want) {
+				return true
+			}
+		}
+	case []string:
+		for _, x := range xs {
+			if strings.EqualFold(strings.TrimSpace(x), want) {
+				return true
+			}
+		}
+	case string:
+		for _, x := range strings.Split(xs, ",") {
+			if strings.EqualFold(strings.TrimSpace(x), want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {

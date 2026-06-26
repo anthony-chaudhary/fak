@@ -369,6 +369,134 @@ func TestTUIGuardJSONOutputFromFixtures(t *testing.T) {
 	}
 }
 
+func TestTUIGuardCodexRecentAuditSurfacesActionability(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex-dos-recent-audit.json")
+	payload := map[string]any{
+		"schema":                    "fak-codex-dos-recent-audit/1",
+		"status":                    "WARN",
+		"sessions_audited":          20,
+		"codex_threads_discovered":  20,
+		"debug_command_body_should": "git commit -s -- private/path",
+		"summary": map[string]any{
+			"unknown_tree_admission_warnings": 0,
+		},
+		"actionability": map[string]any{
+			"status": "WARN",
+			"reasons": []any{
+				"stop blocks or StopFailure API-wall breaker markers are present",
+			},
+			"residual": []any{
+				"HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE",
+				"HOST_SHELL_OPACITY",
+			},
+			"delegate_count": 0,
+			"post_repair_shell_shape_counts": map[string]any{
+				"shell_no_write_target_detected": 2290,
+			},
+			"post_repair_shell_family_counts": map[string]any{
+				"git_write": 45,
+				"search_rg": 281,
+			},
+			"post_repair_mutating_shell_family_counts": map[string]any{
+				"git_write": 45,
+			},
+		},
+		"codex_hook_fast_path": map[string]any{
+			"status":              "PASS",
+			"reason":              "Codex hook commands use the native launcher",
+			"codex_command_modes": map[string]any{"native_launcher": 4},
+		},
+		"git_gate_evidence": map[string]any{
+			"status":    "PASS",
+			"proved_at": "2026-06-25T22:38:12Z",
+			"missing":   []any{},
+		},
+		"workspace_stop_failures": map[string]any{
+			"status":                "WARN",
+			"markers":               204,
+			"total_failures":        96,
+			"nonzero_total_markers": 64,
+			"zero_total_markers":    140,
+			"max_consecutive":       4,
+			"recent": []any{
+				map[string]any{
+					"session_id":  "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+					"mtime":       "2026-06-25T23:10:51Z",
+					"total":       1,
+					"consecutive": 1,
+					"transcript": map[string]any{
+						"status":  "FOUND",
+						"account": ".claude",
+						"project": "C--work-fak",
+					},
+				},
+				map[string]any{
+					"session_id":  "2b8682ae-ced6-402b-bcc8-21180e96d5b3",
+					"mtime":       "2026-06-25T23:01:02Z",
+					"total":       3,
+					"consecutive": 0,
+					"transcript": map[string]any{
+						"status":  "FOUND",
+						"account": ".claude",
+						"project": "C--work-fak",
+					},
+				},
+			},
+		},
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal codex fixture: %v", err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatalf("write codex fixture: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"guard",
+		"--guard-json", path,
+		"--at", "2026-06-25T12:00:00Z",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI guard code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiGuardReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal guard report: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "WARN" || report.Counts.Warn != 1 {
+		t.Fatalf("status/counts = %s/%+v, want WARN with one warn source", report.Status, report.Counts)
+	}
+	encoded := string(stdout.Bytes())
+	for _, want := range []string{"codex-actionability", "stopfailure-api-wall", "stopfailure-session", "codex-hook-fast-path", "codex-shell-opacity", "native_launcher", "HOST_SHELL_OPACITY", "git_write", "2b8682ae-ced6-402b-bcc8-21180e96d5b3", "C--work-fak"} {
+		if !strings.Contains(encoded, want) {
+			t.Fatalf("codex guard JSON missing %q:\n%s", want, encoded)
+		}
+	}
+	if strings.Contains(encoded, "git commit -s") || strings.Contains(encoded, "private/path") {
+		t.Fatalf("codex guard JSON leaked command body:\n%s", encoded)
+	}
+	if len(report.Rows) == 0 || !hasTUITag(report.Rows[0].Tags, "warn") {
+		t.Fatalf("top row = %+v, want warn-tagged Codex blocker", report.Rows)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runTUI(&stdout, &stderr, []string{"guard", "--guard-json", path, "--width", "150"})
+	if code != 0 {
+		t.Fatalf("runTUI guard human code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak console guard", "artifacts=1", "warn=1", "codex-actionability", "stopfailure-api-wall", "stopfailure-session", "warn"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("codex guard human missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // writeGuardJournalFixture writes a small canonical-shaped guard decision journal:
 // one ALLOW, two DENYs (POLICY_BLOCK + DEFAULT_DENY), and one QUARANTINE. Payload-free
 // rows (digests/claims only), exactly as the real journal emits.
