@@ -12,8 +12,9 @@
 //	path/to/file optional — the file within the repo (e.g. model.Q8_0.gguf). When
 //	             omitted, FetchURI resolves the repo to one unambiguous loadable artifact.
 //
-// The package is pure standard library (the `fak` binary ships with zero
-// external dependencies), so it can be linked into cmd/fak without bloating the
+// Apart from the internal secretload helper (used to honor a .env HF token), the
+// package depends only on the standard library — the `fak` binary keeps its zero
+// external dependencies, so this can be linked into cmd/fak without bloating the
 // static build.
 package hfhub
 
@@ -31,6 +32,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
 
 // defaultHTTPClient is the Hub client used when a caller injects none. It carries
@@ -120,19 +123,35 @@ type Client struct {
 }
 
 // NewClient returns a Client wired from the environment: BaseURL = DefaultBaseURL,
-// Token = $HF_TOKEN (or $HUGGING_FACE_HUB_TOKEN), CacheDir = $FAK_MODELS_DIR or
+// Token = the resolved HF token (see resolveToken), CacheDir = $FAK_MODELS_DIR or
 // <user-cache-dir>/fak-models/hub.
 func NewClient() *Client {
-	token := os.Getenv("HF_TOKEN")
-	if token == "" {
-		token = os.Getenv("HUGGING_FACE_HUB_TOKEN")
-	}
 	return &Client{
 		BaseURL:  DefaultBaseURL,
 		HTTP:     defaultHTTPClient,
-		Token:    token,
+		Token:    resolveToken(),
 		CacheDir: defaultCacheDir(),
 	}
+}
+
+// resolveToken finds the Hugging Face auth token. An operator-set HF_TOKEN (or the
+// HUGGING_FACE_HUB_TOKEN alias) in the process environment always wins; failing that,
+// a .env file in the working directory is consulted — so `fak model load` respects a
+// .env HF token without the operator having to export it first (issue #294). os-env is
+// the highest-priority source, so a real exported value is never shadowed by .env.
+func resolveToken() string {
+	loader := secretload.Default() // process env, highest priority
+	if dotenvs, err := secretload.DiscoverDotEnv(".", ""); err == nil {
+		for _, d := range dotenvs {
+			loader.AddSource(d) // lower priority than the process env
+		}
+	}
+	for _, key := range []string{"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"} {
+		if v, ok := loader.Lookup(key); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func defaultCacheDir() string {

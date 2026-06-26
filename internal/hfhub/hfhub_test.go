@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -164,6 +165,37 @@ func TestDownloadSendsToken(t *testing.T) {
 	}
 	if auth, _ := stub.lastAuth.Load().(string); auth != "Bearer testtok" {
 		t.Fatalf("Authorization = %q, want %q", auth, "Bearer testtok")
+	}
+}
+
+func TestNewClientResolvesDotEnvToken(t *testing.T) {
+	// A .env in the working directory supplies the HF token when nothing is
+	// exported — the acceptance box "Respects .env HF token" (issue #294).
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("HF_TOKEN=from-dotenv\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("HF_TOKEN", "")              // exported-but-blank must not shadow .env
+	t.Setenv("HUGGING_FACE_HUB_TOKEN", "")
+
+	if got := NewClient().Token; got != "from-dotenv" {
+		t.Fatalf("NewClient().Token = %q, want %q (from .env)", got, "from-dotenv")
+	}
+}
+
+func TestNewClientEnvWinsOverDotEnv(t *testing.T) {
+	// A real exported HF_TOKEN always wins over a .env value — os-env is the
+	// highest-priority source, so .env can never shadow an operator's export.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("HF_TOKEN=from-dotenv\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("HF_TOKEN", "from-export")
+
+	if got := NewClient().Token; got != "from-export" {
+		t.Fatalf("NewClient().Token = %q, want %q (export wins)", got, "from-export")
 	}
 }
 
