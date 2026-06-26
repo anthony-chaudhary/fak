@@ -209,6 +209,30 @@ def read_active_weekly_cap(runs_dir: Path, account_tag: str | None,
     return best[0] if best else None
 
 
+def read_backend_health(runs_dir: Path) -> list[dict[str, Any]]:
+    """The backends currently held DEAD by the dispatcher's backend-health gate, read
+    from ``backend-health-*.json`` (written by issue_resolve_dispatch.check_backend_health
+    when a backend spins on a banner-only/0-byte streak). Each row carries the product,
+    since-when, the lane reallocated to a healthy backend, and the evidence logs — so the
+    card shows WHY a backend stopped spawning and where its work went. Read-only /
+    best-effort; a corrupt or healthy sidecar is skipped. Newest-dead first."""
+    out: list[dict[str, Any]] = []
+    if not runs_dir.is_dir():
+        return out
+    for path in runs_dir.glob("backend-health-*.json"):
+        try:
+            st = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if st.get("state") != "dead":
+            continue
+        out.append({k: st.get(k) for k in
+                    ("product", "since", "abandoned_lane", "evidence_logs",
+                     "reprobe_min", "last_reprobe")})
+    out.sort(key=lambda r: str(r.get("since") or ""), reverse=True)
+    return out
+
+
 def collect(root: Path, *, max_workers: int, fast: bool,
             closure_commits: int) -> dict[str, Any]:
     pre = run_json([_py(), str(root / "tools" / "dispatch_preflight.py"),
@@ -236,17 +260,20 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     silent = silent_workers(root / RUNS_DIRNAME)
     weekly_cap = read_active_weekly_cap(root / RUNS_DIRNAME,
                                         (pre.get("account") or {}).get("tag"))
+    backend_health = read_backend_health(root / RUNS_DIRNAME)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
-                         silent=silent, weekly_cap=weekly_cap, throughput=throughput)
+                         silent=silent, weekly_cap=weekly_cap, throughput=throughput,
+                         backend_health=backend_health)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   closure: dict, max_workers: int, fast: bool,
                   silent: list[dict[str, Any]] | None = None,
                   weekly_cap: dict[str, Any] | None = None,
-                  throughput: dict[str, Any] | None = None) -> dict[str, Any]:
+                  throughput: dict[str, Any] | None = None,
+                  backend_health: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -321,6 +348,12 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     if silent:
         nums = ", ".join(f"#{w['issue']}" for w in silent[:6])
         reasons.append(f"{len(silent)} worker(s) exited producing nothing ({nums}) — inspect or re-scope")
+    backend_health = backend_health or []
+    if backend_health:
+        names = ", ".join(f"{b.get('product')}->{b.get('abandoned_lane') or '?'}"
+                          for b in backend_health[:4])
+        reasons.append(f"{len(backend_health)} backend(s) held dead, lane reallocated "
+                       f"({names}) — a healthy backend is covering; auto-restores on recovery")
 
     if not tp_na:
         tp_verdict = throughput.get("verdict")
@@ -383,6 +416,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "workers": {
             "silent_count": len(silent),
             "silent": silent,
+        },
+        "backend_health": {
+            "dead_count": len(backend_health),
+            "dead": backend_health,
         },
         "fast": fast,
     }
@@ -550,6 +587,27 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 + (f"{last} min ago." if last is not None else "**none on record**.")
                 + " A gh-rate far above the loop-rate means humans/peers are draining "
                 "the backlog, not the dispatcher."]
+
+    bh = payload.get("backend_health") or {}
+    dead = bh.get("dead") or []
+    out += ["", "## Backend health / reallocation", ""]
+    if not dead:
+        out.append("All backends healthy — none held dead, no lane reallocated.")
+    else:
+        out += [
+            f"**{len(dead)}** backend(s) are spinning dead (a streak of banner-only / "
+            "0-byte worker logs the weekly-cap gate doesn't catch — e.g. a credit-walled "
+            "codex or a glm worker that prints only its startup banner). The dispatcher "
+            "holds their spawns and a healthy backend claims the freed lane + budget; "
+            "one re-probe worker is admitted per interval, so each auto-restores the "
+            "moment it produces a real turn again.",
+            "",
+            "| backend | dead since | lane reallocated | re-probe (min) |",
+            "|---|---|---|---|",
+        ]
+        for b in dead:
+            out.append(f"| {b.get('product')} | {b.get('since')} | "
+                       f"{b.get('abandoned_lane') or '—'} | {b.get('reprobe_min') or '—'} |")
 
     sc = w.get("silent_count") or 0
     out += ["", "## Workers that produced nothing", ""]

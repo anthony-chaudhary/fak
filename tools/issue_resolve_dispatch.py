@@ -65,6 +65,10 @@ ACCOUNT_SIDECAR_SUFFIX = ".account"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
 DEFAULT_SPAWN_PROBE_S = 5.0
+# Hard ceiling on how many extra worker slots a healthy backend may claim from dead
+# siblings in one tick — bounds the blast radius so a transient mass-death can't blow
+# the healthy backend's cap past what its account can actually serve.
+DEFAULT_REALLOC_CEILING = 2
 LOOP_ID_PREFIX = "issue-resolve-dispatch"
 
 # Worker backends this tick can launch:
@@ -781,6 +785,173 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
         return {"capped": False}
 
 
+# --- backend-health reallocation gate -----------------------------------------
+# The weekly-cap gate above catches ONE dead-backend shape: the explicit "hit your
+# limit" banner. But a backend can spin just as silently WITHOUT that banner — a
+# codex spawn that dies credit-walled (0-byte log) or a glm/opencode worker that
+# prints only its startup banner ("> build · glm-5.2", ~32 bytes) and exits without
+# a turn. Those pass the 5s early-exit probe (alive then) and slip the cap regex, so
+# the dispatcher keeps feeding the backend budget while it ships nothing — and the
+# lane it owned (e.g. docs, the biggest backlog) is abandoned rather than handed to
+# a backend that IS producing turns.
+#
+# check_backend_health() is the sibling gate, shaped exactly like check_weekly_cap:
+# a fast on-disk signal (a STREAK of stub logs for this backend) declares it DEAD,
+# persisted in backend-health-<product>.json with the same write/honor/expire and
+# FAIL-OPEN discipline (any error -> healthy, so the gate can only ever ADD a hold).
+# The dead backend self-suppresses (BACKEND_UNHEALTHY) but lets ONE re-probe worker
+# through per interval so it can prove recovery; the healthy backend reads the
+# sidecar and claims the freed lane + budget (see evaluate()).
+
+# A worker log at/under this size produced no real turn: a 0-byte credit-wall death
+# or a banner-only (~32-byte) exit. A real turn streams kilobytes. Matches the size
+# floor the weekly-cap banner scanner already trusts (_scan_recent_cap_banner: 512).
+_STUB_LOG_MAX_BYTES = 512
+# DEAD only on a sustained streak — the last N attempted spawns for this backend ALL
+# stubs — never a single blip (a real worker can rarely exit early for benign
+# reasons). N is small so the gate reacts within a few ticks, not hours.
+_BACKEND_DEAD_STREAK = 3
+# How long a DEAD hold suppresses spawns before letting one re-probe worker through.
+# A credit wall lifts on its own (codex resets nightly); the re-probe is how the
+# backend earns its budget back without an operator.
+_BACKEND_REPROBE_MIN = 30
+
+
+def _classify_backend_logs(runs_dir: Path, *, product: str, lookback_min: int,
+                           now_ts: float, alive: set[int] | None,
+                           probe: Any | None) -> list[dict[str, Any]]:
+    """The recent resolve logs for ONE backend, newest first, each tagged
+    ``{"stamp", "productive", "size"}``. Productive = a log over the real-turn floor;
+    a stub (<= floor) only counts as evidence of death when its pid is provably dead
+    (a still-running claude worker writes nothing until its final message, so a live
+    0-byte log is NOT a stub — reuses the silent_workers dead-pid guard)."""
+    out: list[dict[str, Any]] = []
+    if not runs_dir.is_dir():
+        return out
+    horizon = now_ts - lookback_min * 60
+    for log in runs_dir.glob("resolve-*.log"):
+        m = _LOG_ISSUE_RE.search(log.name)
+        if not m:
+            continue
+        try:
+            st = log.stat()
+        except OSError:
+            continue
+        if st.st_mtime < horizon:
+            continue
+        if _backend_of_log(log) != product:
+            continue
+        productive = st.st_size > _STUB_LOG_MAX_BYTES
+        if not productive:
+            # Only a DEAD pid over a stub log is evidence of a doomed spawn; a live
+            # one is still running (claude streams nothing until the end).
+            pid_file = log.with_suffix(".pid")
+            if pid_file.exists() and dispatch_preflight.resolve_sidecar_pid_is_live(
+                    pid_file, alive=alive, probe=probe):
+                continue  # still running -> not (yet) evidence either way
+        out.append({"stamp": st.st_mtime, "productive": productive, "size": st.st_size,
+                    "log": log.name})
+    out.sort(key=lambda r: r["stamp"], reverse=True)
+    return out
+
+
+def check_backend_health(runs_dir: Path, *, product: str, lane: str | None = None,
+                         now_ts: float | None = None, lookback_min: int = 90,
+                         alive: set[int] | None = None,
+                         probe: Any | None = None) -> dict[str, Any]:
+    """Is ``product`` producing real turns right now, or spinning dead? Reads the
+    backend's recent worker logs: the last ``_BACKEND_DEAD_STREAK`` attempts all
+    stubs (banner-only/0-byte over a dead pid) -> DEAD; any productive log in the
+    window breaks the streak -> HEALTHY (and clears a stale hold). Persists a hold in
+    ``backend-health-<product>.json`` so it survives the ticks after spawns stop, and
+    gates ONE re-probe spawn per ``_BACKEND_REPROBE_MIN`` so a dead backend can earn
+    its budget back. Returns ``{state, ...}``. FAIL-OPEN: any error -> healthy."""
+    try:
+        import time
+        now_ts = time.time() if now_ts is None else now_ts
+        now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)
+        state_path = runs_dir / f"backend-health-{product}.json"
+        if alive is None and probe is None:
+            try:
+                import psutil  # type: ignore
+                alive = {p.pid for p in psutil.process_iter()}
+            except ImportError:
+                alive = None  # cannot prove a pid dead -> classify no stubs (no false death)
+        logs = _classify_backend_logs(runs_dir, product=product, lookback_min=lookback_min,
+                                      now_ts=now_ts, alive=alive, probe=probe)
+        recent = logs[:_BACKEND_DEAD_STREAK]
+        # A productive log anywhere in the window means the backend HAS landed a turn
+        # recently -> healthy, clear any stale hold (the witnessed restore: a real
+        # turn is the slow-layer confirmation a re-probe worked).
+        if any(r["productive"] for r in logs):
+            if state_path.exists():
+                try:
+                    state_path.unlink()
+                except OSError:
+                    pass
+            return {"state": "healthy", "source": "productive"}
+        dead = (len(recent) >= _BACKEND_DEAD_STREAK
+                and all(not r["productive"] for r in recent))
+        if not dead:
+            return {"state": "healthy", "source": "no-streak"}
+        # DEAD. Honor an existing hold (keep its since/lane); otherwise open one.
+        prior: dict[str, Any] = {}
+        if state_path.exists():
+            try:
+                prior = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                prior = {}
+        since = prior.get("since") if prior.get("state") == "dead" else None
+        since = since or (now_utc.isoformat() + "Z")
+        # The lane this backend would otherwise own — recorded so the healthy tick can
+        # claim it. Keep a prior non-empty lane if this tick didn't resolve one.
+        abandoned = lane or prior.get("abandoned_lane") or ""
+        last_probe = _iso_to_utc(prior.get("last_reprobe") or "") if prior else None
+        due = (last_probe is None
+               or now_utc - last_probe >= dt.timedelta(minutes=_BACKEND_REPROBE_MIN))
+        state = {
+            "product": product, "state": "dead", "since": since,
+            "abandoned_lane": abandoned,
+            "evidence_logs": [r["log"] for r in recent],
+            "detected": now_utc.isoformat() + "Z",
+            "last_reprobe": (now_utc.isoformat() + "Z") if due else prior.get("last_reprobe"),
+            "reprobe_min": _BACKEND_REPROBE_MIN,
+        }
+        try:
+            runs_dir.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+        # reprobe_due: caller (the DEAD backend's own tick) may let ONE worker through
+        # to test recovery. We stamped last_reprobe above so the next tick holds again.
+        return {"state": "dead", "since": since, "abandoned_lane": abandoned,
+                "reprobe_due": bool(due), "evidence_logs": state["evidence_logs"],
+                "source": "streak"}
+    except Exception:
+        return {"state": "healthy", "source": "error"}
+
+
+def read_dead_backends(runs_dir: Path, *, exclude: str | None = None,
+                       now_ts: float | None = None) -> list[dict[str, Any]]:
+    """Sibling backends currently held DEAD, read from backend-health-*.json — the
+    healthy tick's view of what budget/lane is free to claim. ``exclude`` drops the
+    caller's own product. Read-only / best-effort (a corrupt sidecar is skipped)."""
+    out: list[dict[str, Any]] = []
+    if not runs_dir.is_dir():
+        return out
+    for path in runs_dir.glob("backend-health-*.json"):
+        try:
+            st = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if st.get("state") != "dead":
+            continue
+        if exclude and st.get("product") == exclude:
+            continue
+        out.append(st)
+    return out
+
+
 def loop_id_for_payload(payload: dict[str, Any]) -> str:
     backend = str(payload.get("backend") or "claude").strip() or "claude"
     return f"{LOOP_ID_PREFIX}/{backend}"
@@ -946,6 +1117,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               exclude_lanes: set[str] | None = None,
               worker_timeout_s: int | None = DEFAULT_WORKER_TIMEOUT_S,
               spawn_probe_s: float = DEFAULT_SPAWN_PROBE_S,
+              realloc_ceiling: int = DEFAULT_REALLOC_CEILING,
               record_loop: bool = False,
               loop_ledger: Path | None = None) -> dict[str, Any]:
     def finish(payload: dict[str, Any]) -> dict[str, Any]:
@@ -963,7 +1135,29 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # capacity — otherwise stale `.pid` files accumulate and a recycled PID landing
     # in one's spawn window is miscounted as a live worker, pinning the cap.
     pruned = prune_dead_sidecars(runs_dir, live=live)
-    pre = issue_dispatch.preflight(root, max_workers=max_workers, work_kind=work_kind,
+
+    # Backend-health reallocation (the cross-read half). A HEALTHY backend claims the
+    # budget + lane a DEAD sibling abandoned: it raises its effective cap by one slot
+    # per dead sibling (bounded by realloc_ceiling) and prefers the freed lane in the
+    # busiest-pick. Fail-open: no sibling held dead -> realloc is a no-op and behavior
+    # is exactly as before. The DEAD backend's own self-suppress gate is below, after
+    # preflight/weekly-cap, so a dead backend never also tries to claim from itself.
+    own_health = check_backend_health(runs_dir, product=product, lane=lane)
+    realloc: dict[str, Any] = {"claimed_lanes": [], "bonus": 0, "from": []}
+    eff_max_workers = max_workers
+    if own_health.get("state") != "dead":
+        dead_siblings = read_dead_backends(runs_dir, exclude=product)
+        if dead_siblings:
+            bonus = min(len(dead_siblings), max(0, realloc_ceiling))
+            eff_max_workers = max_workers + bonus
+            realloc = {
+                "claimed_lanes": [d.get("abandoned_lane") for d in dead_siblings
+                                  if d.get("abandoned_lane")],
+                "bonus": bonus,
+                "from": [d.get("product") for d in dead_siblings],
+            }
+
+    pre = issue_dispatch.preflight(root, max_workers=eff_max_workers, work_kind=work_kind,
                                    product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
@@ -991,7 +1185,38 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                        f"{cap.get('until')} — re-arm is automatic at the reset"),
         })
 
-    pick = lane_issue_numbers(root, lane, exclude=exclude_lanes)
+    # Backend-health gate (the self-suppress half) — AFTER weekly-cap, same shape. If
+    # THIS backend is spinning dead (a streak of banner-only/0-byte deaths the cap
+    # regex misses), hold the spawn so we stop feeding budget to a doomed worker. But
+    # let ONE re-probe worker through per interval (reprobe_due) so the backend can
+    # earn its budget back the moment it recovers — a fully-held backend can never
+    # come back. Fail-open: check_backend_health returns dead only on positive
+    # streak evidence. (own_health was read above for the realloc no-op decision.)
+    if pre_ok and own_health.get("state") == "dead" and not own_health.get("reprobe_due"):
+        return finish({
+            "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
+            "max_workers": max_workers, "registry_refresh": reg,
+            "timed_out_workers": reaped, "pruned_sidecars": pruned,
+            "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
+                          "cap": pre.get("cap"), "live": pre.get("live")},
+            "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
+            "backend_health": own_health, "ok": False, "action": "backend_unhealthy",
+            "verdict": "BACKEND_UNHEALTHY",
+            "reason": (f"backend '{backend}' is spinning dead (banner-only/0-byte "
+                       f"streak since {own_health.get('since')}); holding spawn — its "
+                       f"lane '{own_health.get('abandoned_lane') or '?'}' is reallocated "
+                       f"to a healthy backend, and one re-probe worker is admitted every "
+                       f"{_BACKEND_REPROBE_MIN} min to detect recovery"),
+        })
+
+    # Healthy backend: claim any lane a dead sibling abandoned. Dropping the freed
+    # lane from the dead sibling's exclude set lets this backend's busiest-pick own it
+    # (it was kept off this backend by --exclude-lane lane partitioning). The freed
+    # budget was already folded into eff_max_workers above.
+    effective_exclude = set(exclude_lanes or set())
+    if realloc["claimed_lanes"]:
+        effective_exclude -= {lc for lc in realloc["claimed_lanes"] if lc}
+    pick = lane_issue_numbers(root, lane, exclude=effective_exclude)
     chosen_lane = pick.get("lane")
     live_issues = live_resolution_issues(runs_dir)
     cooled = recently_attempted_issues(runs_dir, cooldown_min=cooldown_min)
@@ -1004,6 +1229,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
         "max_workers": max_workers, "registry_refresh": reg,
         "timed_out_workers": reaped,
+        # Only surface the realloc block when it actually changed something, so the
+        # common (no dead sibling) path's payload is byte-identical to before.
+        **({"reallocation": {"effective_max_workers": eff_max_workers, **realloc}}
+           if realloc["bonus"] or realloc["claimed_lanes"] else {}),
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                       "cap": pre.get("cap"), "live": pre.get("live")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
@@ -1103,6 +1332,12 @@ def render(p: dict[str, Any]) -> str:
     if p.get("spawned"):
         s = p["spawned"]
         lines.append(f"  spawned pid={s.get('pid')} issue=#{s.get('issue')} log={s.get('log')}")
+    rl = p.get("reallocation") or {}
+    if rl.get("bonus") or rl.get("claimed_lanes"):
+        frm = ",".join(x for x in (rl.get("from") or []) if x)
+        claimed = ",".join(x for x in (rl.get("claimed_lanes") or []) if x)
+        lines.append(f"  realloc   : +{rl.get('bonus')} workers, lane(s) [{claimed}] "
+                     f"claimed from dead [{frm}] -> eff cap {rl.get('effective_max_workers')}")
     timed_out = p.get("timed_out_workers") or {}
     reaped = timed_out.get("reaped") or []
     would_reap = timed_out.get("would_reap") or []
@@ -1150,6 +1385,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--spawn-probe-s", type=float, default=DEFAULT_SPAWN_PROBE_S,
                     help=f"seconds to wait after a live spawn to catch immediate "
                          f"empty-log exits (default: {DEFAULT_SPAWN_PROBE_S}; 0 disables)")
+    ap.add_argument("--max-realloc-workers", type=int, default=DEFAULT_REALLOC_CEILING,
+                    help=f"ceiling on extra worker slots a HEALTHY backend may claim "
+                         f"from dead siblings in one tick (backend-health reallocation; "
+                         f"default {DEFAULT_REALLOC_CEILING}, 0 disables the budget bump)")
     ap.add_argument("--loop-ledger", default="",
                     help="append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
     ap.add_argument("--no-loop-ledger", action="store_true",
@@ -1168,6 +1407,7 @@ def main(argv: list[str] | None = None) -> int:
                        exclude_lanes=exclude_lanes,
                        worker_timeout_s=dispatch_worker.normalize_timeout(args.worker_timeout_s),
                        spawn_probe_s=max(0.0, args.spawn_probe_s),
+                       realloc_ceiling=max(0, args.max_realloc_workers),
                        record_loop=not args.no_loop_ledger,
                        loop_ledger=(Path(args.loop_ledger).resolve()
                                     if args.loop_ledger else None))

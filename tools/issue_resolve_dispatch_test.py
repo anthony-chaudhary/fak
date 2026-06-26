@@ -843,6 +843,104 @@ class WeeklyCapGateTest(unittest.TestCase):
         self.assertEqual(p["weekly_cap"]["until"], "2026-06-25T20:00:00Z")
 
 
+class EvaluateBackendHealthTest(unittest.TestCase):
+    """evaluate()-level wiring of the backend-health gate: a dead backend self-
+    suppresses (and never spawns) while its re-probe is not due; a healthy backend
+    claims a dead sibling's lane + a budget bump."""
+
+    def _common_stubs(self, mod, pre):
+        mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
+        mod.issue_dispatch.preflight = lambda root, **kw: dict(pre, _seen_max=kw.get("max_workers"))
+        mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
+        mod.reap_timed_out_workers = lambda runs_dir, **k: {
+            "timeout_s": None, "live": k.get("live"),
+            "candidates": [], "reaped": [], "would_reap": []}
+        mod.prune_dead_sidecars = lambda runs_dir, **k: {"pruned": []}
+
+    def test_dead_backend_self_suppresses_without_spawning(self) -> None:
+        mod = load()
+        pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+               "account": {"tag": "default", "tier": 2, "model": "glm", "dir": "/a"}}
+        self._common_stubs(mod, pre)
+        mod.check_backend_health = lambda runs_dir, **k: {
+            "state": "dead", "since": "2026-06-26T04:00:00Z", "abandoned_lane": "docs",
+            "reprobe_due": False, "evidence_logs": ["resolve-872-x.log"]}
+        mod.read_dead_backends = lambda runs_dir, **k: []
+        mod.lane_issue_numbers = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("a held-dead backend must short-circuit before the lane router"))
+        mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("a held-dead backend must never spawn"))
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="gardening", lane=None,
+                         live=True, backend="opencode")
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "BACKEND_UNHEALTHY")
+        self.assertEqual(p["action"], "backend_unhealthy")
+        self.assertEqual(p["backend_health"]["abandoned_lane"], "docs")
+
+    def test_dead_backend_admits_one_reprobe_when_due(self) -> None:
+        # reprobe_due True -> the gate does NOT short-circuit; the tick proceeds to the
+        # lane router so one worker can test recovery.
+        mod = load()
+        pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+               "account": {"tag": "default", "tier": 2, "model": "glm", "dir": "/a"}}
+        self._common_stubs(mod, pre)
+        mod.check_backend_health = lambda runs_dir, **k: {
+            "state": "dead", "since": "x", "abandoned_lane": "docs", "reprobe_due": True,
+            "evidence_logs": []}
+        mod.read_dead_backends = lambda runs_dir, **k: []
+        reached = {"router": False}
+        def _router(root, lane, exclude=None):
+            reached["router"] = True
+            return {"lane": None, "numbers": []}
+        mod.lane_issue_numbers = _router
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="gardening", lane=None,
+                         live=False, backend="opencode")
+        self.assertTrue(reached["router"])  # re-probe admitted -> router reached
+        self.assertNotEqual(p["verdict"], "BACKEND_UNHEALTHY")
+
+    def test_healthy_backend_claims_dead_sibling_lane_and_budget(self) -> None:
+        mod = load()
+        pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 4, "live": 0,
+               "account": {"tag": "day24-netra", "tier": 1, "model": "opus", "dir": "/a"}}
+        self._common_stubs(mod, pre)
+        mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
+        mod.read_dead_backends = lambda runs_dir, **k: [
+            {"product": "opencode", "abandoned_lane": "docs"}]
+        seen = {}
+        def _router(root, lane, exclude=None):
+            seen["exclude"] = set(exclude or set())
+            return {"lane": "docs", "numbers": [501]}
+        mod.lane_issue_numbers = _router
+        mod.live_resolution_issues = lambda runs_dir, **k: set()
+        mod.recently_attempted_issues = lambda runs_dir, **k: set()
+        import types
+        mod.issue_worker_prompt = types.SimpleNamespace(
+            build=lambda issue, lane, workspace=None: {
+                "prompt": "p", "prompt_chars": 1, "title": "t"})
+        # claude excludes 'docs' by partition; the realloc must DROP that exclude so it
+        # can own the freed lane, and bump the effective cap by the freed slot.
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane=None,
+                         live=False, backend="claude", exclude_lanes={"docs"})
+        self.assertNotIn("docs", seen["exclude"])             # freed lane un-excluded
+        self.assertEqual(p["reallocation"]["bonus"], 1)        # +1 from one dead sibling
+        self.assertEqual(p["reallocation"]["effective_max_workers"], 3)  # 2 + 1
+        self.assertIn("docs", p["reallocation"]["claimed_lanes"])
+        # the bumped cap actually reached preflight:
+        self.assertEqual(p["preflight"]["cap"], 4)             # pre echoes through
+
+    def test_no_dead_sibling_is_a_noop(self) -> None:
+        mod = load()
+        pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+               "account": {"tag": "day24-netra", "tier": 1, "model": "opus", "dir": "/a"}}
+        self._common_stubs(mod, pre)
+        mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
+        mod.read_dead_backends = lambda runs_dir, **k: []
+        mod.lane_issue_numbers = lambda *a, **k: {"lane": None, "numbers": []}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane=None,
+                         live=False, backend="claude")
+        self.assertNotIn("reallocation", p)  # payload byte-identical to pre-feature path
+
+
 class WaveMembershipTest(unittest.TestCase):
     """A wave is a typed group, not N anonymous lanes: each worker is stamped with
     its rank/wave/size into child_env + a .wave sidecar, so an auditor enumerates
@@ -951,6 +1049,142 @@ class WaveMembershipTest(unittest.TestCase):
                 mod.spawn_issue_worker(["true"], {}, runs, runs,
                                        issue=1, lane="tools", backend="claude")
             self.assertEqual(list(runs.glob("*.wave")), [])
+
+
+class BackendHealthTest(unittest.TestCase):
+    """The backend-health reallocation gate: a STREAK of stub (banner-only/0-byte,
+    dead-pid) logs for a backend declares it dead; a productive log breaks the streak
+    and clears the hold; a still-running stub is never counted."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, backend: str, size: int,
+            pid: int | None, mtime: float) -> None:
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text("x" * size, encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+        log.with_suffix(".backend").write_text(backend, encoding="utf-8")
+        if pid is not None:
+            pidf = log.with_suffix(".pid")
+            pidf.write_text(str(pid), encoding="utf-8")
+            os.utime(pidf, (mtime, mtime))
+
+    def _dead_probe(self):
+        # Every pid is dead — the realistic post-mortem state for a stub log.
+        return lambda pid: {"alive": False}
+
+    def test_streak_of_stub_logs_declares_dead(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i, iss in enumerate((872, 873, 879)):  # 3 == _BACKEND_DEAD_STREAK
+                self._mk(runs, iss, f"20260626-04370{i}", backend="opencode",
+                         size=32, pid=200 + i, mtime=now - i * 60)
+            out = mod.check_backend_health(runs, product="opencode", lane="docs",
+                                           now_ts=now, alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "dead")
+            self.assertEqual(out["abandoned_lane"], "docs")
+            self.assertTrue(out["reprobe_due"])  # first detection -> a re-probe is due
+            # The hold is persisted for the ticks after spawns stop.
+            self.assertTrue((runs / "backend-health-opencode.json").exists())
+
+    def test_one_productive_log_breaks_streak_and_clears_hold(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # Seed a prior dead hold, then a real turn (large log) lands.
+            (runs / "backend-health-opencode.json").write_text(
+                '{"product":"opencode","state":"dead","since":"x","abandoned_lane":"docs"}',
+                encoding="utf-8")
+            self._mk(runs, 900, "20260626-050000", backend="opencode",
+                     size=5000, pid=300, mtime=now)  # >512B == productive
+            out = mod.check_backend_health(runs, product="opencode",
+                                           now_ts=now, alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "healthy")
+            self.assertFalse((runs / "backend-health-opencode.json").exists())  # hold cleared
+
+    def test_live_stub_pid_is_not_counted_dead(self) -> None:
+        # A claude -p worker streams nothing until its final message: a 0-byte log with
+        # a LIVE pid is still-running, not a stub. Must not trip the gate.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i, iss in enumerate((10, 11, 12)):
+                self._mk(runs, iss, f"20260626-04000{i}", backend="claude",
+                         size=0, pid=400 + i, mtime=now - i * 60)
+            live_probe = lambda pid: {"alive": True, "create_time": now - 1,
+                                      "name": "claude.exe", "cmdline": ""}
+            out = mod.check_backend_health(runs, product="claude",
+                                           now_ts=now, alive={400, 401, 402},
+                                           probe=live_probe)
+            self.assertEqual(out["state"], "healthy")  # all still running -> not dead
+
+    def test_fewer_than_streak_is_not_dead(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i, iss in enumerate((872, 873)):  # only 2 < streak of 3
+                self._mk(runs, iss, f"20260626-04370{i}", backend="opencode",
+                         size=32, pid=200 + i, mtime=now - i * 60)
+            out = mod.check_backend_health(runs, product="opencode",
+                                           now_ts=now, alive=set(), probe=self._dead_probe())
+            self.assertEqual(out["state"], "healthy")
+
+    def test_reprobe_gated_after_recent_probe(self) -> None:
+        # A second tick within the re-probe window holds (reprobe_due False); a tick
+        # past the window admits one re-probe worker again.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for i, iss in enumerate((872, 873, 879)):
+                self._mk(runs, iss, f"20260626-04370{i}", backend="opencode",
+                         size=32, pid=200 + i, mtime=now - i * 60)
+            first = mod.check_backend_health(runs, product="opencode", lane="docs",
+                                             now_ts=now, alive=set(), probe=self._dead_probe())
+            self.assertTrue(first["reprobe_due"])
+            soon = mod.check_backend_health(runs, product="opencode", lane="docs",
+                                            now_ts=now + 60, alive=set(),
+                                            probe=self._dead_probe())  # +1 min < 30
+            self.assertFalse(soon["reprobe_due"])
+            later = mod.check_backend_health(
+                runs, product="opencode", lane="docs",
+                now_ts=now + (mod._BACKEND_REPROBE_MIN + 1) * 60, alive=set(),
+                probe=self._dead_probe())
+            self.assertTrue(later["reprobe_due"])
+
+    def test_read_dead_backends_excludes_self_and_healthy(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            (runs / "backend-health-opencode.json").write_text(
+                '{"product":"opencode","state":"dead","abandoned_lane":"docs"}',
+                encoding="utf-8")
+            (runs / "backend-health-codex.json").write_text(
+                '{"product":"codex","state":"dead","abandoned_lane":"model"}',
+                encoding="utf-8")
+            (runs / "backend-health-claude.json").write_text(
+                '{"product":"claude","state":"healthy"}', encoding="utf-8")
+            dead = mod.read_dead_backends(runs, exclude="claude")
+            prods = sorted(b["product"] for b in dead)
+            self.assertEqual(prods, ["codex", "opencode"])  # healthy + self excluded
+            # And from the claude tick's view (exclude self), both dead lanes are free.
+            lanes = sorted(b["abandoned_lane"] for b in dead)
+            self.assertEqual(lanes, ["docs", "model"])
+
+    def test_fail_open_on_missing_runs_dir(self) -> None:
+        mod = load()
+        out = mod.check_backend_health(Path("/no/such/dir/xyz"), product="opencode")
+        self.assertEqual(out["state"], "healthy")  # never wedges the loop
 
 
 if __name__ == "__main__":
