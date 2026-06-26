@@ -18,6 +18,7 @@ adapter is not presented as runnable.
 | status | meaning |
 |---|---|
 | `runnable-now` | the command exists in this tree and does not need a live frontier model |
+| `run-contract-shipped` | the pre-run contract artifact exists, but the benchmark result is still gated |
 | `hardware-gated` | the run is scripted, but needs the named serving node or external harness |
 | `adapter-gap` | the benchmark is high-value, but the repo lacks the adapter that would make the comparison honest |
 | `negative-witness` | the command exists only to prove the gap is still real |
@@ -69,9 +70,7 @@ gate: PASS
 
 ## Packet B: GLM-5.2 over vLLM live agentic battery
 
-Status: `run-contract-shipped`; the actual Opus raw/fak run is still gated on
-the raw scaffold command, the live Opus gateway, and official SWE-bench grader
-output.
+Status: `hardware-gated`.
 
 Why second: this is the existing GLM-5.2 open-weight path. It compares a raw
 vLLM GLM-5.2 endpoint against the same endpoint behind `fak serve`, then adds a
@@ -116,7 +115,9 @@ ladder in
 
 ## Packet C: Opus-class SWE-bench smoke through fak
 
-Status: `hardware-gated`.
+Status: `run-contract-shipped`; the actual Opus raw/fak run is still gated on
+the raw scaffold command, the live Opus gateway, and official SWE-bench grader
+output.
 
 Why third: SWE-bench is not the best final headline, but it is the compatibility
 control. The point is to show an Opus-class coding agent can run through fak

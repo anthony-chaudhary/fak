@@ -263,8 +263,14 @@ func cmdSwebenchSmokeContract(argv []string) {
 
 	diff, ds := *difficulty, *dataset
 	if diff == "" && ds == "" {
-		diff = swebenchSampleDifficulty
-		fmt.Fprintf(os.Stderr, "fak swebench smoke-contract: no --difficulty/--dataset; using committed sample %s.\n", diff)
+		if env := os.Getenv("FAK_SWEBENCH_DIFFICULTY"); env != "" {
+			diff = env
+		} else if env := os.Getenv("FAK_SWEBENCH_DATASET"); env != "" {
+			ds = env
+		} else {
+			diff = swebenchSampleDifficulty
+			fmt.Fprintf(os.Stderr, "fak swebench smoke-contract: no --difficulty/--dataset; using committed sample %s.\n", diff)
+		}
 	}
 	d, srcDesc, err := loadSwebenchSource(diff, ds)
 	must(err)

@@ -64,3 +64,38 @@ func TestSwebenchSmokeContractCommandWritesPreRunContract(t *testing.T) {
 		t.Fatalf("markdown did not render the no-claim requirements:\n%s", mb)
 	}
 }
+
+func TestSwebenchSmokeContractCommandHonorsDifficultyEnv(t *testing.T) {
+	tmp := t.TempDir()
+	out := filepath.Join(tmp, "contract.json")
+	difficulty := filepath.Join("..", "..", "testdata", "swebench_smoke.json")
+	t.Setenv("FAK_SWEBENCH_DIFFICULTY", difficulty)
+	t.Setenv("FAK_SWEBENCH_DATASET", "")
+
+	cmdSwebenchSmokeContract([]string{
+		"--python", "definitely-not-a-python-binary",
+		"--out", out,
+	})
+
+	var contract swebench.OpusSmokeContract
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(contract.TaskSelection.Source, difficulty) {
+		t.Fatalf("source did not use env difficulty: %q", contract.TaskSelection.Source)
+	}
+	var fakCommand string
+	for _, arm := range contract.Arms {
+		if arm.Name == "fak-opus" {
+			fakCommand = arm.Command
+			break
+		}
+	}
+	if !strings.Contains(fakCommand, "--difficulty "+difficulty) {
+		t.Fatalf("fak command did not preserve env difficulty:\n%s", fakCommand)
+	}
+}
