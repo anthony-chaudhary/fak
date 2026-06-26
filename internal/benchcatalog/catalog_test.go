@@ -69,6 +69,27 @@ func TestToolSandboxBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	}
 }
 
+func TestAgenticBenchRollupIsDiscoverableOfflineGate(t *testing.T) {
+	b, ok := Get("agenticbench")
+	if !ok {
+		t.Fatal("agenticbench benchmark missing from catalog")
+	}
+	if b.Kind != KindCmd || b.Need != NeedNone {
+		t.Fatalf("agenticbench kind/need = %s/%s, want cmd/offline", b.Kind, b.Need)
+	}
+	if !strings.Contains(b.Run, "go run ./cmd/agenticbench") {
+		t.Fatalf("agenticbench run = %q, want cmd invocation", b.Run)
+	}
+	for _, want := range []string{"-root", "-out", "-md", "-strict"} {
+		if !containsFlag(b.Flags, want) {
+			t.Fatalf("agenticbench flags = %v, missing %s", b.Flags, want)
+		}
+	}
+	if !b.Offline() {
+		t.Fatal("agenticbench only reads committed artifacts; it must stay zero-asset/offline")
+	}
+}
+
 func TestBrowserActionBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	b, ok := Get("browseractionbench")
 	if !ok {

@@ -46,6 +46,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
+	"agenticbench": 1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"benchcatalog": 1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"callavoid":    1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"accounts":     1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,

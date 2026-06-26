@@ -81,6 +81,13 @@ var registry = []Bench{
 		Doc:     "docs/benchmarks/ABLATE-RESULTS.md",
 	},
 	{
+		Name: "agenticbench", Kind: KindCmd, Need: NeedNone,
+		Summary: "Parent #868 rollup gate: folds the committed agentic benchmark child artifacts and reports whether any real raw-vs-fak result claim is allowed.",
+		Run:     "go run ./cmd/agenticbench -out experiments/agent-live/agentic-benchmark-epic-868-status-20260626.json -md experiments/agent-live/agentic-benchmark-epic-868-status-20260626.md",
+		Flags:   []string{"-root  -  repo root containing artifacts", "-out  -  rollup JSON path", "-md  -  markdown summary path", "-strict  -  exit nonzero unless #868 is complete"},
+		Doc:     "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
+	},
+	{
 		Name: "bench", Kind: KindVerb, Need: NeedNone,
 		Summary: "A/B ablation of the vDSO over a frozen tau2 trace  -  the per-turn adjudication work fak eliminates vs a spawned-hook baseline.",
 		Run:     "fak bench --suite tau2-smoke --out report.json",
