@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
@@ -78,6 +79,72 @@ func decode(p *InKernelPlanner, ids []int, maxNew int) (gen []int, matched int) 
 		return false
 	})
 	return gen, matched
+}
+
+func kvConfigFromModelConfig(cfg model.Config) compute.KVConfig {
+	return compute.KVConfig{
+		NumLayers:  cfg.NumLayers,
+		NumKVHeads: cfg.NumKVHeads,
+		HeadDim:    cfg.HeadDim,
+		RopeTheta:  cfg.RopeTheta,
+	}
+}
+
+func TestInKernelKVMemoryStatsReportsRadixResidency(t *testing.T) {
+	cfg := tinyCfg()
+	p := reusePlanner(true, false, cfg)
+	ids := synthIDs(cfg.VocabSize, 16, 99)
+	decode(p, ids, 2)
+
+	st := p.KVMemoryStats()
+	wantPerToken := compute.EstimateKVStoreBytes(kvConfigFromModelConfig(cfg), 1)
+	if !st.Enabled {
+		t.Fatal("KVMemoryStats.Enabled = false, want radix cache enabled")
+	}
+	if st.Backend != "radixkv" || st.MemoryClass != string(compute.MemoryKVCache) || st.Scope != string(compute.MemoryScopeHost) {
+		t.Fatalf("KVMemoryStats labels = backend=%q class=%q scope=%q", st.Backend, st.MemoryClass, st.Scope)
+	}
+	if st.BytesPerToken != wantPerToken {
+		t.Fatalf("BytesPerToken = %d, want %d", st.BytesPerToken, wantPerToken)
+	}
+	if st.ResidentTokens <= 0 || st.LRUTokens <= 0 || st.Nodes <= 0 || st.Leaves <= 0 || st.MaxDepthTokens <= 0 {
+		t.Fatalf("KVMemoryStats did not report resident radix shape: %+v", st)
+	}
+	wantResidentBytes := compute.EstimateKVStoreBytes(kvConfigFromModelConfig(cfg), st.ResidentTokens)
+	if st.ResidentBytes != wantResidentBytes {
+		t.Fatalf("ResidentBytes = %d, want %d for %d resident tokens", st.ResidentBytes, wantResidentBytes, st.ResidentTokens)
+	}
+	if st.BudgetTokens != 0 {
+		t.Fatalf("BudgetTokens = %d, want 0 for unbounded test tree", st.BudgetTokens)
+	}
+}
+
+func TestInKernelKVMemoryStatsDeviceBackendReportsGeometryOnly(t *testing.T) {
+	cfg := tinyCfg()
+	backend, ok := compute.Lookup("cpu-ref")
+	if !ok {
+		t.Fatal("cpu-ref backend not registered")
+	}
+	p := &InKernelPlanner{
+		m:       model.NewSynthetic(cfg),
+		modelID: "synthetic-device",
+		backend: backend,
+	}
+
+	st := p.KVMemoryStats()
+	wantPerToken := compute.EstimateKVStoreBytes(kvConfigFromModelConfig(cfg), 1)
+	if st.Enabled {
+		t.Fatalf("KVMemoryStats.Enabled = true on device backend; stats=%+v", st)
+	}
+	if st.Backend != backend.Name() || st.MemoryClass != string(compute.MemoryKVCache) || st.Scope != string(compute.MemoryScopeDevice) {
+		t.Fatalf("KVMemoryStats labels = backend=%q class=%q scope=%q", st.Backend, st.MemoryClass, st.Scope)
+	}
+	if st.BytesPerToken != wantPerToken {
+		t.Fatalf("BytesPerToken = %d, want %d", st.BytesPerToken, wantPerToken)
+	}
+	if st.ResidentTokens != 0 || st.ResidentBytes != 0 || st.LRUTokens != 0 || st.Nodes != 0 {
+		t.Fatalf("device backend should report geometry only, got %+v", st)
+	}
 }
 
 // TestInKernelReuseMatchesFullPrefill is the PARITY witness: a second turn that shares a
@@ -204,6 +271,50 @@ func TestInKernelReuseMultiTurnPrefillSavings(t *testing.T) {
 	speedup := float64(durOFF) / float64(durON)
 	t.Logf("PERF (%d turns, base=%d): prefill tokens computed ON=%d OFF=%d (%.0f%% saved); wall %s -> %s (%.2fx)",
 		turns, len(base), computedON, computedOFF, saved, durOFF.Round(time.Microsecond), durON.Round(time.Microsecond), speedup)
+}
+
+func TestInKernelKVMemoryStatsReportsResidentFootprint(t *testing.T) {
+	cfg := tinyCfg()
+	p := reusePlanner(true, false, cfg)
+	first := synthIDs(cfg.VocabSize, 12, 90)
+	second := append(append([]int{}, first...), synthIDs(cfg.VocabSize, 5, 91)...)
+
+	decode(p, first, 0)
+	_, matched := decode(p, second, 0)
+	if matched != len(first) {
+		t.Fatalf("second turn reused %d tokens, want first prefix %d", matched, len(first))
+	}
+
+	stats := p.KVMemoryStats()
+	if !stats.Enabled {
+		t.Fatalf("KV memory stats should report enabled for a radix-backed planner: %+v", stats)
+	}
+	if stats.Backend != "radixkv" || stats.MemoryClass != string(compute.MemoryKVCache) || stats.Scope != string(compute.MemoryScopeHost) {
+		t.Fatalf("unexpected KV memory labels: %+v", stats)
+	}
+	wantBytesPerToken := compute.EstimateKVStoreBytes(compute.KVConfig{
+		NumLayers:  cfg.NumLayers,
+		NumKVHeads: cfg.NumKVHeads,
+		HeadDim:    cfg.HeadDim,
+		RopeTheta:  cfg.RopeTheta,
+	}, 1)
+	if stats.BytesPerToken != wantBytesPerToken {
+		t.Fatalf("bytes/token = %d, want %d", stats.BytesPerToken, wantBytesPerToken)
+	}
+	if stats.ResidentTokens <= stats.LRUTokens {
+		t.Fatalf("resident PrefixTokens should exceed LRU edge-token count for nested prefixes: %+v", stats)
+	}
+	if want := compute.EstimateKVStoreBytes(compute.KVConfig{
+		NumLayers:  cfg.NumLayers,
+		NumKVHeads: cfg.NumKVHeads,
+		HeadDim:    cfg.HeadDim,
+		RopeTheta:  cfg.RopeTheta,
+	}, stats.ResidentTokens); stats.ResidentBytes != want {
+		t.Fatalf("resident bytes = %d, want %d from PrefixTokens=%d", stats.ResidentBytes, want, stats.ResidentTokens)
+	}
+	if stats.Nodes == 0 || stats.Leaves == 0 || stats.MaxDepthTokens != len(second) {
+		t.Fatalf("tree shape not reflected in KV memory stats: %+v", stats)
+	}
 }
 
 // TestInKernelReuseConcurrentNoRace drives concurrent turns, probes, and evictions through

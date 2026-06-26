@@ -3,8 +3,11 @@ package gateway
 import (
 	"net/http"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 type debugVarsResponse struct {
@@ -12,6 +15,7 @@ type debugVarsResponse struct {
 	Runtime   debugRuntimeVars    `json:"runtime"`
 	Kernel    debugKernelVars     `json:"kernel"`
 	ModelLoad *debugModelLoadVars `json:"model_load,omitempty"`
+	KVMemory  *debugKVMemoryVars  `json:"kv_memory,omitempty"`
 	Metrics   debugMetricsVars    `json:"metrics"`
 }
 
@@ -102,6 +106,24 @@ type debugModelLoadCapacityVars struct {
 	FreeBytes  int64  `json:"free_bytes,omitempty"`
 	Known      bool   `json:"known"`
 	FreeKnown  bool   `json:"free_known"`
+}
+
+type debugKVMemoryVars struct {
+	Enabled         bool   `json:"enabled"`
+	Backend         string `json:"backend"`
+	MemoryClass     string `json:"memory_class"`
+	Scope           string `json:"scope"`
+	BytesPerToken   int64  `json:"bytes_per_token"`
+	ResidentTokens  int    `json:"resident_tokens,omitempty"`
+	ResidentBytes   int64  `json:"resident_bytes,omitempty"`
+	BudgetTokens    int    `json:"budget_tokens,omitempty"`
+	LRUTokens       int    `json:"lru_tokens,omitempty"`
+	MaxDepthTokens  int    `json:"max_depth_tokens,omitempty"`
+	Nodes           int    `json:"nodes,omitempty"`
+	Leaves          int    `json:"leaves,omitempty"`
+	Evictions       int    `json:"evictions,omitempty"`
+	PolicyEvictions int    `json:"policy_evictions,omitempty"`
+	Splits          int    `json:"splits,omitempty"`
 }
 
 type debugCompactionVars struct {
@@ -226,6 +248,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			VDSOHitRatio: ratio,
 		},
 		ModelLoad: debugModelLoadProfile(s.modelLoadProfile()),
+		KVMemory:  debugKVMemory(s.planner),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
@@ -320,6 +343,43 @@ func debugOperationRows(rows []operationMetricSnapshot) []debugOperationMetricVa
 		})
 	}
 	return out
+}
+
+func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
+	reporter, ok := p.(agent.KVMemoryReporter)
+	if !ok {
+		return nil
+	}
+	st := reporter.KVMemoryStats()
+	class := strings.TrimSpace(st.MemoryClass)
+	if class == "" {
+		class = "kv_cache"
+	}
+	scope := strings.TrimSpace(st.Scope)
+	if scope == "" {
+		scope = "host"
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	return &debugKVMemoryVars{
+		Enabled:         st.Enabled,
+		Backend:         backend,
+		MemoryClass:     class,
+		Scope:           scope,
+		BytesPerToken:   st.BytesPerToken,
+		ResidentTokens:  st.ResidentTokens,
+		ResidentBytes:   st.ResidentBytes,
+		BudgetTokens:    st.BudgetTokens,
+		LRUTokens:       st.LRUTokens,
+		MaxDepthTokens:  st.MaxDepthTokens,
+		Nodes:           st.Nodes,
+		Leaves:          st.Leaves,
+		Evictions:       st.Evictions,
+		PolicyEvictions: st.PolicyEvictions,
+		Splits:          st.Splits,
+	}
 }
 
 func debugInKernelOOMRows(rows []inKernelOOMSnapshot) []debugInKernelOOMVars {

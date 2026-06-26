@@ -1,10 +1,13 @@
 package gateway
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 )
 
@@ -56,5 +59,112 @@ func TestMetricsExposesKVPrefixReuse(t *testing.T) {
 	}
 	if uint64(n) < after.ReusedTokens {
 		t.Fatalf("scraped reused tokens %d < observed %d", n, after.ReusedTokens)
+	}
+}
+
+type kvMemoryStatsPlanner struct {
+	stats agent.KVMemoryStats
+}
+
+func (p kvMemoryStatsPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "ok"}}, nil
+}
+
+func (p kvMemoryStatsPlanner) Model() string { return "kv-memory-test" }
+
+func (p kvMemoryStatsPlanner) KVMemoryStats() agent.KVMemoryStats { return p.stats }
+
+func TestKVMemoryMetricsSuppressedWithoutReporter(t *testing.T) {
+	srv := newTestServer(t)
+	if text := srv.renderMetrics(); strings.Contains(text, "fak_gateway_kv_memory_") {
+		t.Fatalf("resident KV memory metrics should be absent for a non-reporting planner:\n%s", text)
+	}
+	if vars := srv.debugVars(time.Now()); vars.KVMemory != nil {
+		t.Fatalf("debug kv_memory should be absent for a non-reporting planner: %+v", vars.KVMemory)
+	}
+}
+
+func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = kvMemoryStatsPlanner{stats: agent.KVMemoryStats{
+		Enabled:         true,
+		Backend:         "radixkv",
+		MemoryClass:     "kv_cache",
+		Scope:           "host",
+		BytesPerToken:   6144,
+		ResidentTokens:  42,
+		ResidentBytes:   258048,
+		BudgetTokens:    64,
+		LRUTokens:       18,
+		MaxDepthTokens:  21,
+		Nodes:           3,
+		Leaves:          2,
+		Evictions:       4,
+		PolicyEvictions: 1,
+		Splits:          5,
+	}}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_kv_memory_enabled{class="kv_cache",scope="host",backend="radixkv"} 1`,
+		`fak_gateway_kv_memory_bytes_per_token{class="kv_cache",scope="host",backend="radixkv"} 6144`,
+		`fak_gateway_kv_memory_resident_tokens{class="kv_cache",scope="host",backend="radixkv"} 42`,
+		`fak_gateway_kv_memory_resident_bytes{class="kv_cache",scope="host",backend="radixkv"} 258048`,
+		`fak_gateway_kv_memory_lru_tokens{class="kv_cache",scope="host",backend="radixkv"} 18`,
+		`fak_gateway_kv_memory_budget_tokens{class="kv_cache",scope="host",backend="radixkv"} 64`,
+		`fak_gateway_kv_memory_evictions_total{class="kv_cache",scope="host",backend="radixkv",kind="lru"} 4`,
+		`fak_gateway_kv_memory_evictions_total{class="kv_cache",scope="host",backend="radixkv",kind="policy"} 1`,
+		`fak_gateway_kv_memory_splits_total{class="kv_cache",scope="host",backend="radixkv"} 5`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("KV memory metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	if vars.KVMemory == nil {
+		t.Fatal("/debug/vars missing kv_memory")
+	}
+	if vars.KVMemory.ResidentTokens != 42 || vars.KVMemory.ResidentBytes != 258048 ||
+		vars.KVMemory.LRUTokens != 18 || vars.KVMemory.PolicyEvictions != 1 {
+		t.Fatalf("debug kv_memory = %+v, want resident/lru/eviction fields", vars.KVMemory)
+	}
+}
+
+func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = kvMemoryStatsPlanner{stats: agent.KVMemoryStats{
+		Enabled:       false,
+		Backend:       "cpu-ref",
+		MemoryClass:   "kv_cache",
+		Scope:         "device",
+		BytesPerToken: 4096,
+	}}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_kv_memory_enabled{class="kv_cache",scope="device",backend="cpu-ref"} 0`,
+		`fak_gateway_kv_memory_bytes_per_token{class="kv_cache",scope="device",backend="cpu-ref"} 4096`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("disabled KV memory reporter missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+	for _, absent := range []string{
+		"fak_gateway_kv_memory_resident_tokens",
+		"fak_gateway_kv_memory_evictions_total",
+		"fak_gateway_kv_memory_splits_total",
+	} {
+		if strings.Contains(text, absent) {
+			t.Fatalf("disabled KV memory reporter should not emit %q\n--- metrics ---\n%s", absent, text)
+		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	if vars.KVMemory == nil {
+		t.Fatal("/debug/vars missing disabled kv_memory geometry")
+	}
+	if vars.KVMemory.Enabled || vars.KVMemory.Scope != "device" || vars.KVMemory.BytesPerToken != 4096 || vars.KVMemory.ResidentTokens != 0 {
+		t.Fatalf("debug disabled kv_memory = %+v, want geometry-only disabled snapshot", vars.KVMemory)
 	}
 }

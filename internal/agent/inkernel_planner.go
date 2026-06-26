@@ -138,6 +138,60 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 // Model reports the model id (for /v1/models provenance + the planner seam).
 func (p *InKernelPlanner) Model() string { return p.modelID }
 
+// KVMemoryStats reports the in-process KV prefix cache's resident memory shape.
+// RadixAttention reuse is currently CPU-session backed, so enabled=true reports host
+// scoped kv_cache bytes. A device backend uses per-request backend sessions today
+// (no persistent radix tree), so it reports enabled=false with the model's per-token
+// KV byte geometry for planning visibility.
+func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
+	if p == nil || p.m == nil {
+		return KVMemoryStats{
+			MemoryClass: string(compute.MemoryKVCache),
+			Scope:       string(compute.MemoryScopeHost),
+		}
+	}
+	bytesPerToken := compute.EstimateKVStoreBytes(compute.KVConfig{
+		NumLayers:  p.m.Cfg.NumLayers,
+		NumKVHeads: p.m.Cfg.NumKVHeads,
+		HeadDim:    p.m.Cfg.HeadDim,
+		RopeTheta:  p.m.Cfg.RopeTheta,
+	}, 1)
+	stats := KVMemoryStats{
+		Enabled:       p.tree != nil,
+		Backend:       "radixkv",
+		MemoryClass:   string(compute.MemoryKVCache),
+		Scope:         string(compute.MemoryScopeHost),
+		BytesPerToken: bytesPerToken,
+	}
+	if p.backend != nil {
+		stats.Enabled = false
+		stats.Backend = p.backend.Name()
+		stats.Scope = string(compute.MemoryScopeDevice)
+	}
+	if p.tree == nil {
+		return stats
+	}
+	p.mu.Lock()
+	st := p.tree.Stats()
+	p.mu.Unlock()
+	stats.ResidentTokens = st.PrefixTokens
+	stats.ResidentBytes = compute.EstimateKVStoreBytes(compute.KVConfig{
+		NumLayers:  p.m.Cfg.NumLayers,
+		NumKVHeads: p.m.Cfg.NumKVHeads,
+		HeadDim:    p.m.Cfg.HeadDim,
+		RopeTheta:  p.m.Cfg.RopeTheta,
+	}, st.PrefixTokens)
+	stats.BudgetTokens = st.MaxTokens
+	stats.LRUTokens = st.Tokens
+	stats.MaxDepthTokens = st.MaxDepthTokens
+	stats.Nodes = st.Nodes
+	stats.Leaves = st.Leaves
+	stats.Evictions = st.Evictions
+	stats.PolicyEvictions = st.PolicyEvictions
+	stats.Splits = st.Splits
+	return stats
+}
+
 // Complete renders the transcript as ChatML and runs one in-kernel decode turn,
 // returning the generated assistant text. Mirrors cmd/fakchat's hybrid path. The
 // per-request SampleOpts override this planner's configured decode length,

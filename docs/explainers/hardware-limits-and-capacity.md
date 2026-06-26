@@ -17,6 +17,9 @@ description: "fak's HAL lifts seven hardware-SHAPE assumptions; finite device CA
 > transients consume device capacity while expert weights are host-scoped offload bytes.
 > Host-scoped offload/DDR bytes can refuse when a native GPU backend explicitly advertises
 > `HostCapacityProbe` from the OS host-memory probe; otherwise they stay visible and fail open.
+> On a successful eager GGUF device load, the same classed admission profile is visible on
+> `/metrics` (`fak_model_load_memory_plan_bytes`, `fak_model_load_memory_capacity_*`) and
+> `/debug/vars` (detailed rows plus the capacity snapshot).
 > Runtime device allocation failures now recover as a typed,
 > classed in-kernel OOM on the served path and publish classed counters on `/metrics`
 > plus last-site drilldown on `/debug/vars`. Nothing here claims that allocator OOM can
@@ -243,9 +246,13 @@ transients stay device-scoped. If a backend also advertises `HostCapacityProbe`,
 classed pre-check can reject an expert-offload plan that exceeds reported host capacity; if
 the OS probe is unavailable the host-scoped bytes still fail open. The remaining 15% device
 headroom is still reserved for allocator fragmentation, backend pools, and unmodeled runtime
-uploads. Honest fences: unknown capacity still fails open, host memory is physical/OS memory
-rather than cgroup/container quota, safetensors and generic `model.Load` are not wired yet,
-and runtime upload pre-checks are still allocator-side.
+uploads. After a successful eager device load, the gateway publishes the exact admission
+profile it used: `/metrics` aggregates `fak_model_load_memory_plan_bytes` by class+scope,
+exports device/host capacity known/free-known/byte gauges, and records the headroom ratio;
+`/debug/vars` keeps the detailed memory-plan rows and capacity snapshot for drilldown.
+Honest fences: unknown capacity still fails open, host memory is physical/OS memory rather
+than cgroup/container quota, safetensors and generic `model.Load` are not wired yet, runtime
+upload pre-checks are still allocator-side, and the telemetry is not spill/retry.
 
 **Plank 6 — the capacity ESCAPE when one device is not enough.** When the model does not fit
 *any* single device, capacity is solved by spreading it: multi-GPU tensor/expert parallelism
@@ -269,7 +276,8 @@ add up to a HAL contract. Crediting them is what keeps the gap claim honest:
 | `model/paging.go: pagedKernel` | upload → compute → free, an on-demand page-in primitive | standalone; bit-equal to resident, but not integrated into the live weight HAL |
 | `engine.CacheEventMetrics` memory-class projection | KV residency events expose `memory_class` alongside `to_tier`: HBM is `kv_cache`, DRAM/NUMA-far/CXL are `ddr_cache`, and Disk/Remote/Provider are `offload`; byte/token breakdowns are exported as `fak_engine_cache_*_breakdown_total` series | visibility only; it does not yet drive spill/retry policy or allocate a DRAM cache |
 | `compute.DeviceAllocError` → `agent.InKernelOOMError` → gateway `in_kernel_oom` + `/metrics` | runtime device allocation failure becomes a typed served 503 with bytes + memory class, counted by class on `/metrics` and drillable by last site on `/debug/vars`; device weight, KV-cache, offload, scratchpad, HAL activation upload, GLM-DSA backend activation, and paged-weight page-in sites carry dedicated classes where the backend knows the purpose | classification and visibility only; no spill/retry policy yet, and ambiguous generic alloc sites stay `unknown` |
-| `ggufload.WeightSource.FitOnDevice` / `FitF32OnDevice` / `FitCPUOffloadExpertsOnDevice` + `compute.EstimateKVStoreMemoryPlan` / `EstimateHALTransientMemoryPlan` | header-only GGUF load refusal before the Go process allocates resident weights, with classed HAL KV-cache, activation, and scratchpad estimates when GGUF config exposes context geometry; expert-offload plans keep host expert bytes visible without counting them against device capacity, and optional `HostCapacity` can refuse known-too-large host-scoped `offload`/`ddr_cache` plans | shipped for GGUF serve's device load paths; quantized-upload backends are explicitly mixed precision (Q8 resident weights, f32 runtime state); f32 weights are only the fallback for backends without quantized upload; host capacity is OS physical memory, not cgroup/container quota; not yet safetensors, generic `model.Load`, upload pre-checks, or backend-specific transient peaks |
+| `ggufload.WeightSource.FitOnDevice` / `FitF32OnDevice` / `FitCPUOffloadExpertsOnDevice` + `compute.EstimateKVStoreMemoryPlan` / `EstimateHALTransientMemoryPlan` + gateway model-load memory telemetry | header-only GGUF load refusal before the Go process allocates resident weights, with classed HAL KV-cache, activation, and scratchpad estimates when GGUF config exposes context geometry; expert-offload plans keep host expert bytes visible without counting them against device capacity, and optional `HostCapacity` can refuse known-too-large host-scoped `offload`/`ddr_cache` plans; successful eager device loads expose the admission profile on `/metrics` and `/debug/vars` | shipped for GGUF serve's device load paths; quantized-upload backends are explicitly mixed precision (Q8 resident weights, f32 runtime state); f32 weights are only the fallback for backends without quantized upload; host capacity is OS physical memory, not cgroup/container quota; telemetry is visibility only, not spill/retry; not yet safetensors, generic `model.Load`, upload pre-checks, or backend-specific transient peaks |
+| `agent.KVMemoryReporter` + gateway `fak_gateway_kv_memory_*` | local in-kernel KV-prefix residency reports as `kv_cache`: bytes per KV position from `compute.EstimateKVStoreBytes`, true resident `PrefixTokens`, estimated resident bytes, configured radix LRU budget tokens, current LRU edge-token count, tree shape, splits, and LRU vs policy evictions; `/debug/vars` carries the same snapshot as `kv_memory` | visibility over the CPU-backed radix KV prefix cache and its known budget-vs-true-footprint gap; device-HAL serve currently reports per-token geometry with `enabled=false` because it uses per-request backend sessions, not device-side radix reuse; no pressure-driven demote/spill or retry yet |
 | `tools/memgate.py` | an operator pre-flight RAM gate | still useful outside the Go process, but no longer the only fit gate |
 | `glm52_serve_preflight.py: required_vram_gb` | VRAM-vs-quant fit + per-rank TP shard sizing | models the fit of **external** engines (SGLang/vLLM), not `fak`'s own backends |
 
@@ -289,7 +297,8 @@ and it is what `DeviceCapacity` begins.
   same runtime demands on f32-only backends, and a dense/device vs host/expert split for
   `--cpu-offload-experts`. Host-scoped `offload`/`ddr_cache` bytes are checked only when a
   backend advertises `HostCapacityProbe` from the OS host-memory probe; without that they
-  remain visible and fail open.
+  remain visible and fail open. Successful eager device loads expose that same classed plan
+  and capacity snapshot on `/metrics` and `/debug/vars`.
   Safetensors, generic `model.Load`, runtime upload pre-checks, and backend-specific
   transient peaks are still unwired.
 - The CUDA and Vulkan producers report `total` only; `free` is `FreeUnknown` until
@@ -300,6 +309,10 @@ and it is what `DeviceCapacity` begins.
   (`engine.PlanPlacementForDevice`), but it ships the report→policy SEAM, not a serving-loop
   caller — nothing on the live path invokes it yet. The other tiers' (`DRAM`/`NUMA-far`/`CXL`/
   `Disk`) numbers in `DefaultTierProfiles` remain representative defaults until measured per box.
+- The local KV-prefix memory surface reports the CPU-backed radix tree's true resident
+  `PrefixTokens` separately from its LRU edge-token budget (`Tokens`), because those can
+  diverge sharply on deep chains. Device-HAL serve does not yet use the radix tree, so it
+  reports geometry with `enabled=false`, not a fake device-resident cache.
 - The industry scorecard ([`docs/industry-scorecard/memory.md`](../industry-scorecard/memory.md))
   honestly lists `fak`'s capacity gaps (paged KV, KV-offload hierarchy, memory-utilization %,
   fleet KV-aware routing) as out-of-scope / no-claim today. This explainer harmonizes with

@@ -682,6 +682,7 @@ func (s *Server) renderMetrics() string {
 	}
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
+	s.writeKVMemoryMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	m.writeCompactionMetrics(&b)
@@ -803,6 +804,60 @@ func writeKVPrefixMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_kv_prefix_reuse_ratio",
 		"Realized in-kernel KV-prefix cache-hit: reused / prompt tokens across served turns (0 until the first turn). A single append-only agent climbs toward ~1 (the frozen ceiling); flexibility, cold fan-out, or a divergent prefix drives it down — the frozen-trajectory cache cliff, measured live.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_reuse_ratio %s\n", promFloat(s.ReuseRatio))
+}
+
+func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
+	if s == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.KVMemoryReporter)
+	if !ok {
+		return
+	}
+	st := reporter.KVMemoryStats()
+	class := strings.TrimSpace(st.MemoryClass)
+	if class == "" {
+		class = "kv_cache"
+	}
+	scope := strings.TrimSpace(st.Scope)
+	if scope == "" {
+		scope = "host"
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	labels := fmt.Sprintf("class=\"%s\",scope=\"%s\",backend=\"%s\"", promQuote(class), promQuote(scope), promQuote(backend))
+	enabled := 0
+	if st.Enabled {
+		enabled = 1
+	}
+	writeHelpType(b, "fak_gateway_kv_memory_enabled", "Whether a local reusable KV prefix cache is active for this planner. Proxy/mock planners emit no resident-KV series.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_enabled{%s} %d\n", labels, enabled)
+	writeHelpType(b, "fak_gateway_kv_memory_bytes_per_token", "Estimated bytes for one resident KV position under this model layout (classed as kv_cache).", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_bytes_per_token{%s} %d\n", labels, st.BytesPerToken)
+	if !st.Enabled {
+		return
+	}
+	writeHelpType(b, "fak_gateway_kv_memory_resident_tokens", "True resident KV prefix positions held by the local prefix cache. This can exceed the LRU edge-token budget on deep radix chains.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_resident_tokens{%s} %d\n", labels, st.ResidentTokens)
+	writeHelpType(b, "fak_gateway_kv_memory_resident_bytes", "Estimated resident local KV-cache bytes, derived from resident prefix positions and model KV geometry.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_resident_bytes{%s} %d\n", labels, st.ResidentBytes)
+	writeHelpType(b, "fak_gateway_kv_memory_lru_tokens", "Radix KV edge-token count enforced by the LRU budget. This is not the same as true resident prefix positions.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_lru_tokens{%s} %d\n", labels, st.LRUTokens)
+	writeHelpType(b, "fak_gateway_kv_memory_budget_tokens", "Configured radix KV LRU edge-token budget (0 means unbounded).", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_budget_tokens{%s} %d\n", labels, st.BudgetTokens)
+	writeHelpType(b, "fak_gateway_kv_memory_max_depth_tokens", "Longest cached KV prefix depth in tokens.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_max_depth_tokens{%s} %d\n", labels, st.MaxDepthTokens)
+	writeHelpType(b, "fak_gateway_kv_memory_nodes", "Radix KV prefix-cache nodes currently resident.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_nodes{%s} %d\n", labels, st.Nodes)
+	writeHelpType(b, "fak_gateway_kv_memory_leaves", "Radix KV prefix-cache leaves currently resident.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_leaves{%s} %d\n", labels, st.Leaves)
+	writeHelpType(b, "fak_gateway_kv_memory_evictions_total", "Radix KV prefix-cache evictions by cause: lru pressure or policy/quarantine.", "counter")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_evictions_total{%s,kind=\"lru\"} %d\n", labels, st.Evictions)
+	fmt.Fprintf(b, "fak_gateway_kv_memory_evictions_total{%s,kind=\"policy\"} %d\n", labels, st.PolicyEvictions)
+	writeHelpType(b, "fak_gateway_kv_memory_splits_total", "Radix KV prefix-cache edge splits performed to expose reusable mid-edge prefixes.", "counter")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_splits_total{%s} %d\n", labels, st.Splits)
 }
 
 type inferenceSnapshot struct {

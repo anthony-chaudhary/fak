@@ -535,6 +535,35 @@ type Planner interface {
 	Model() string
 }
 
+// KVMemoryStats is an optional planner-owned snapshot of local KV-cache residency.
+// It is separate from Usage cache-read counters: those count work saved on a turn,
+// while this reports resident KV memory pressure in the local process. Planners that
+// proxy an upstream model do not implement it; the gateway emits no resident-KV series
+// for them rather than publishing a fake zero.
+type KVMemoryStats struct {
+	Enabled         bool   // true when a reusable local KV cache is active
+	Backend         string // radixkv, device backend name, or empty when unknown
+	MemoryClass     string // kv_cache
+	Scope           string // host/device
+	BytesPerToken   int64  // bytes per resident KV position under this model layout
+	ResidentTokens  int    // true resident prefix positions, not the LRU edge-token budget
+	ResidentBytes   int64
+	BudgetTokens    int // configured LRU budget metric; 0 means unbounded or unavailable
+	LRUTokens       int // Σ edge lengths, the budget metric radixkv enforces
+	MaxDepthTokens  int
+	Nodes           int
+	Leaves          int
+	Evictions       int
+	PolicyEvictions int
+	Splits          int
+}
+
+// KVMemoryReporter is the optional interface a local planner implements when it
+// can report resident KV-cache memory state.
+type KVMemoryReporter interface {
+	KVMemoryStats() KVMemoryStats
+}
+
 // ---------------------------------------------------------------------------
 // Live planner — provider API client.
 // ---------------------------------------------------------------------------
