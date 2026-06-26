@@ -400,4 +400,18 @@ func (s *Server) writeModelLoadMetrics(b *strings.Builder) {
 			}
 		}
 	}
+	if rows := modelLoadMemoryFitRows(p.MemoryPlan, p.MemoryCapacities, p.MemoryHeadroomRatio); len(rows) > 0 {
+		writeHelpType(b, "fak_model_load_memory_fit_bytes", "Headroom-adjusted fit summary for the boot-time model load by scope. kind=want is planned bytes; kind=budget and kind=margin are omitted when capacity is unknown.", "gauge")
+		for _, row := range rows {
+			fmt.Fprintf(b, "fak_model_load_memory_fit_bytes{scope=\"%s\",kind=\"want\"} %d\n",
+				promQuote(row.Scope), row.WantBytes)
+			if !row.CapacityKnown {
+				continue
+			}
+			fmt.Fprintf(b, "fak_model_load_memory_fit_bytes{scope=\"%s\",kind=\"budget\"} %d\n",
+				promQuote(row.Scope), row.BudgetBytes)
+			fmt.Fprintf(b, "fak_model_load_memory_fit_bytes{scope=\"%s\",kind=\"margin\"} %d\n",
+				promQuote(row.Scope), row.MarginBytes)
+		}
+	}
 }

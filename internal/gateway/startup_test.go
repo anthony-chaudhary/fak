@@ -143,6 +143,12 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 		`fak_model_load_memory_capacity_free_known{scope="host"} 1`,
 		`fak_model_load_memory_capacity_bytes{scope="device",kind="total"} 8589934592`,
 		`fak_model_load_memory_capacity_bytes{scope="host",kind="free"} 51539607552`,
+		`fak_model_load_memory_fit_bytes{scope="device",kind="want"} 2240000`,
+		`fak_model_load_memory_fit_bytes{scope="device",kind="budget"} 7301444403`,
+		`fak_model_load_memory_fit_bytes{scope="device",kind="margin"} 7299204403`,
+		`fak_model_load_memory_fit_bytes{scope="host",kind="want"} 10000`,
+		`fak_model_load_memory_fit_bytes{scope="host",kind="budget"} 43808666419`,
+		`fak_model_load_memory_fit_bytes{scope="host",kind="margin"} 43808656419`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("model-load metrics missing %q\n--- metrics ---\n%s", want, got)
@@ -164,6 +170,11 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 	}
 	if len(vars.ModelLoad.MemoryCapacities) != 2 || !vars.ModelLoad.MemoryCapacities[1].FreeKnown {
 		t.Fatalf("debug capacities = %+v, want device+host rows with host free known", vars.ModelLoad.MemoryCapacities)
+	}
+	if len(vars.ModelLoad.MemoryFit) != 2 || vars.ModelLoad.MemoryFit[0].Scope != "device" ||
+		vars.ModelLoad.MemoryFit[0].WantBytes != 2_240_000 || vars.ModelLoad.MemoryFit[0].MarginBytes != 7_299_204_403 ||
+		!vars.ModelLoad.MemoryFit[1].FreeKnown {
+		t.Fatalf("debug memory fit = %+v, want device+host fit rows", vars.ModelLoad.MemoryFit)
 	}
 
 	// Bottleneck-first ordering: dequant's phase row precedes header's.

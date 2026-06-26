@@ -84,6 +84,7 @@ type debugModelLoadVars struct {
 	Phases              []debugModelLoadPhaseVars      `json:"phases"`
 	MemoryPlan          []debugModelLoadMemoryPlanVars `json:"memory_plan,omitempty"`
 	MemoryCapacities    []debugModelLoadCapacityVars   `json:"memory_capacities,omitempty"`
+	MemoryFit           []debugMemoryFitVars           `json:"memory_fit,omitempty"`
 	MemoryHeadroomRatio float64                        `json:"memory_headroom_ratio,omitempty"`
 }
 
@@ -108,6 +109,15 @@ type debugModelLoadCapacityVars struct {
 	FreeBytes  int64  `json:"free_bytes,omitempty"`
 	Known      bool   `json:"known"`
 	FreeKnown  bool   `json:"free_known"`
+}
+
+type debugMemoryFitVars struct {
+	Scope         string `json:"scope"`
+	WantBytes     int64  `json:"want_bytes"`
+	BudgetBytes   int64  `json:"budget_bytes,omitempty"`
+	MarginBytes   int64  `json:"margin_bytes,omitempty"`
+	CapacityKnown bool   `json:"capacity_known"`
+	FreeKnown     bool   `json:"free_known"`
 }
 
 type debugKVMemoryVars struct {
@@ -137,6 +147,7 @@ type debugRequestMemoryVars struct {
 	HeadroomRatio float64                        `json:"headroom_ratio,omitempty"`
 	MemoryPlan    []debugModelLoadMemoryPlanVars `json:"memory_plan,omitempty"`
 	Capacities    []debugModelLoadCapacityVars   `json:"capacities,omitempty"`
+	Fit           []debugMemoryFitVars           `json:"fit,omitempty"`
 }
 
 type debugCompactionVars struct {
@@ -320,6 +331,7 @@ func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {
 			FreeKnown:  cap.Known && cap.FreeKnown,
 		})
 	}
+	out.Fit = debugMemoryFitRows(requestMemoryFitRows(st.MemoryPlan, st.Capacities, st.HeadroomRatio))
 	return out
 }
 
@@ -363,6 +375,25 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 			FreeBytes:  cap.FreeBytes,
 			Known:      cap.Known,
 			FreeKnown:  cap.Known && cap.FreeKnown,
+		})
+	}
+	out.MemoryFit = debugMemoryFitRows(modelLoadMemoryFitRows(p.MemoryPlan, p.MemoryCapacities, p.MemoryHeadroomRatio))
+	return out
+}
+
+func debugMemoryFitRows(rows []memoryFitRow) []debugMemoryFitVars {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]debugMemoryFitVars, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, debugMemoryFitVars{
+			Scope:         row.Scope,
+			WantBytes:     row.WantBytes,
+			BudgetBytes:   row.BudgetBytes,
+			MarginBytes:   row.MarginBytes,
+			CapacityKnown: row.CapacityKnown,
+			FreeKnown:     row.FreeKnown,
 		})
 	}
 	return out

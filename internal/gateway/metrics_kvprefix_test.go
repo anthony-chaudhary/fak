@@ -207,6 +207,12 @@ func TestRequestMemoryMetricsAndDebugVars(t *testing.T) {
 		`fak_gateway_in_kernel_request_memory_capacity_known{backend="vulkan",scope="device"} 1`,
 		`fak_gateway_in_kernel_request_memory_capacity_free_known{backend="vulkan",scope="device"} 0`,
 		`fak_gateway_in_kernel_request_memory_capacity_bytes{backend="vulkan",scope="host",kind="free"} 51539607552`,
+		`fak_gateway_in_kernel_request_memory_fit_bytes{backend="vulkan",scope="device",kind="want"} 5598208`,
+		`fak_gateway_in_kernel_request_memory_fit_bytes{backend="vulkan",scope="device",kind="budget"} 7301444403`,
+		`fak_gateway_in_kernel_request_memory_fit_bytes{backend="vulkan",scope="device",kind="margin"} 7295846195`,
+		`fak_gateway_in_kernel_request_memory_fit_bytes{backend="vulkan",scope="host",kind="want"} 0`,
+		`fak_gateway_in_kernel_request_memory_fit_bytes{backend="vulkan",scope="host",kind="budget"} 43808666419`,
+		`fak_gateway_in_kernel_request_memory_fit_bytes{backend="vulkan",scope="host",kind="margin"} 43808666419`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("request memory metrics missing %q\n--- metrics ---\n%s", want, text)
@@ -222,5 +228,11 @@ func TestRequestMemoryMetricsAndDebugVars(t *testing.T) {
 	}
 	if vars.RequestMemory.MemoryPlan[0].DType != "f32" || vars.RequestMemory.Capacities[1].FreeBytes != 48<<30 {
 		t.Fatalf("debug request_memory detail = %+v capacities=%+v", vars.RequestMemory.MemoryPlan, vars.RequestMemory.Capacities)
+	}
+	if len(vars.RequestMemory.Fit) != 2 || vars.RequestMemory.Fit[0].Scope != "device" ||
+		vars.RequestMemory.Fit[0].WantBytes != 5_598_208 || vars.RequestMemory.Fit[0].MarginBytes != 7_295_846_195 ||
+		vars.RequestMemory.Fit[1].Scope != "host" || vars.RequestMemory.Fit[1].WantBytes != 0 ||
+		vars.RequestMemory.Fit[1].MarginBytes != 43_808_666_419 {
+		t.Fatalf("debug request_memory fit = %+v, want device+host fit rows", vars.RequestMemory.Fit)
 	}
 }
