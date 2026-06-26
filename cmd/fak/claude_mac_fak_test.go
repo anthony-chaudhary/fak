@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -106,6 +108,53 @@ func TestClaudeMacFakRequiresKeyWhenFetchDisabled(t *testing.T) {
 	if !strings.Contains(stderr.String(), "FAK_GATEWAY_KEY is empty") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
+}
+
+// TestEnsureClaudeMacGatewayKeySurfacesSSHStderr is the regression for the
+// opaque "fetch gateway key over ssh: exit status 255" report: ssh's exit
+// status is meaningless on its own, so the wrapped error must carry the
+// stderr text (the real cause) plus the override hint. The ssh invocation is
+// replaced by a helper process that mimics ssh: prints a resolve error to
+// stderr and exits 255.
+func TestEnsureClaudeMacGatewayKeySurfacesSSHStderr(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "")
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cs := append([]string{"-test.run=TestClaudeMacFakSSHHelperProcess", "--", name}, args...)
+		cmd := exec.Command(os.Args[0], cs...)
+		cmd.Env = append(os.Environ(), "GO_WANT_SSH_HELPER_PROCESS=1")
+		return cmd
+	}
+
+	err := ensureClaudeMacGatewayKey("FAK_GATEWAY_KEY", true, "user@node-macos-a.local", "")
+	if err == nil {
+		t.Fatal("expected an error when the ssh fetch fails")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"node-macos-a.local",           // which host failed
+		"Could not resolve hostname",   // the real cause from stderr, not a bare 255
+		"set FAK_GATEWAY_KEY directly", // the actionable override hint
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error missing %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "exit status 255") && !strings.Contains(msg, "Could not resolve hostname") {
+		t.Fatalf("error fell back to the opaque exit status:\n%s", msg)
+	}
+}
+
+// TestClaudeMacFakSSHHelperProcess is not a real test: it is the fake `ssh`
+// the test above execs. It writes a resolve error to stderr and exits 255,
+// reproducing the connection-level failure shape of the original bug report.
+func TestClaudeMacFakSSHHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_SSH_HELPER_PROCESS") != "1" {
+		return
+	}
+	_, _ = os.Stderr.WriteString("ssh: Could not resolve hostname node-macos-a.local: Name or service not known\n")
+	os.Exit(255)
 }
 
 func TestClaudeMacFakDryRunDoesNotProbeDebugGateway(t *testing.T) {

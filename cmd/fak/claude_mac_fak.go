@@ -175,6 +175,11 @@ func defaultClaudeMacSSHKey() string {
 	return filepath.Join(home, ".ssh", "id_ed25519_prod_to_laptop")
 }
 
+// execCommand is the indirection seam for the ssh key-fetch so a test can
+// substitute a helper process (the os/exec stdlib pattern). Production code
+// leaves it as exec.Command.
+var execCommand = exec.Command
+
 func ensureClaudeMacGatewayKey(envName string, fetch bool, host, keyPath string) error {
 	envName = strings.TrimSpace(envName)
 	if envName == "" {
@@ -195,10 +200,23 @@ func ensureClaudeMacGatewayKey(envName string, fetch bool, host, keyPath string)
 		args = append(args, "-i", keyPath)
 	}
 	args = append(args, host, "cat ~/.fak-gateway-key")
-	cmd := exec.Command("ssh", args...)
+	cmd := execCommand("ssh", args...)
+	var errBuf strings.Builder
+	cmd.Stderr = &errBuf
 	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("fetch gateway key over ssh: %w", err)
+		// ssh's exit status (255 = connection-level failure) is opaque on its
+		// own; the actionable cause ("Could not resolve hostname",
+		// "Permission denied", "Connection refused") goes to stderr, which
+		// cmd.Output() otherwise drops. Surface it, and point at the override
+		// that skips the fetch entirely.
+		detail := strings.TrimSpace(errBuf.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("fetch gateway key from %s over ssh: %s\n"+
+			"  set %s directly (or --gateway-key-env / FAK_MAC_SSH_HOST) to skip the ssh fetch",
+			host, detail, envName)
 	}
 	secret := strings.TrimSpace(string(out))
 	if secret == "" {
