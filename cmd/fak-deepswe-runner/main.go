@@ -14,12 +14,12 @@ import (
 const requestSchema = "fak.swebench.deepswe-request.v1"
 
 type adapterRequest struct {
-	Schema   string             `json:"schema"`
+	Schema   string            `json:"schema"`
 	Instance swebench.Instance `json:"instance"`
-	Model    string             `json:"model,omitempty"`
-	MaxSteps int                `json:"max_steps,omitempty"`
-	Repo     string             `json:"repo,omitempty"`
-	Runner   string             `json:"runner"`
+	Model    string            `json:"model,omitempty"`
+	MaxSteps int               `json:"max_steps,omitempty"`
+	Repo     string            `json:"repo,omitempty"`
+	Runner   string            `json:"runner"`
 }
 
 func main() {
