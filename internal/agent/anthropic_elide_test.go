@@ -355,6 +355,65 @@ func TestObjectValueSpan(t *testing.T) {
 	}
 }
 
+// TestElideShedMagnitudeOnLargeCodingSession is the synthetic dogfood that QUANTIFIES the value
+// (the magnitude counterpart of the correctness tests above, mirroring compaction's mock-upstream
+// dogfood): a realistic 30-message coding session that accumulated six ~50 KB tool_result bodies
+// (file dumps / command outputs). At the documented 16 KB threshold, elision sheds the FIVE old
+// ones in the un-cached middle while leaving the recent one (the active working set) and the
+// cached head untouched. Asserts a substantial, bounded shed and logs the realized fraction.
+func TestElideShedMagnitudeOnLargeCodingSession(t *testing.T) {
+	const threshold = 16384
+	type obj = map[string]any
+	cc := obj{"type": "ephemeral"}
+	bigElig := strings.Repeat("file line of scrolled-past output\n", 1500) // ~51 KB, old → shed
+	bigRecent := strings.Repeat("RECENTLY-FETCHED-OUTPUT-TOKEN-", 1800)     // ~52 KB, recent → kept (newline-free so the raw-bytes check is exact)
+	toolResult := func(id, text string) obj {
+		return obj{"role": "user", "content": []obj{{"type": "tool_result", "tool_use_id": id, "content": []obj{{"type": "text", "text": text}}}}}
+	}
+	txt := func(role, s string) obj { return obj{"role": role, "content": []obj{{"type": "text", "text": s}}} }
+	msgs := make([]obj, 30)
+	msgs[0] = obj{"role": "user", "content": []obj{{"type": "text", "text": "Refactor the auth module.", "cache_control": cc}}} // head breakpoint
+	for i := 1; i < 30; i++ {
+		if i%2 == 1 {
+			msgs[i] = txt("assistant", fmt.Sprintf("step %d: calling a tool", i))
+		} else {
+			msgs[i] = txt("user", fmt.Sprintf("note %d", i))
+		}
+	}
+	for n, i := range []int{2, 6, 10, 14, 18} { // five OLD oversized results (eligible band) → shed
+		msgs[i] = toolResult(fmt.Sprintf("t%d", n), bigElig)
+	}
+	msgs[28] = toolResult("recent", bigRecent) // recent oversized result (last-4 window) → kept
+
+	raw, err := json.Marshal(obj{
+		"model": "claude-sonnet-4-6", "max_tokens": 4096,
+		"system":   []obj{{"type": "text", "text": "You are a coding agent.", "cache_control": cc}},
+		"messages": msgs,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	out, outcome := ElideAnthropicResultsWithOutcome(raw, threshold)
+	if outcome.Reason != ElideReasonNone {
+		t.Fatalf("expected elision to FIRE, got %q", outcome.Reason)
+	}
+	if outcome.Elided != 5 {
+		t.Fatalf("expected the 5 old oversized results to shed (recent + head protected), got Elided=%d", outcome.Elided)
+	}
+	if !bytes.Contains(out, []byte(bigRecent)) {
+		t.Error("the recent (working-set) oversized result was wrongly shed")
+	}
+	shedFrac := float64(outcome.ShedBytes) / float64(len(raw))
+	if outcome.ShedBytes < 150_000 || shedFrac < 0.40 {
+		t.Errorf("expected a large shed, got ShedBytes=%d (%.1f%% of the %d-byte body)", outcome.ShedBytes, shedFrac*100, len(raw))
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Errorf("re-decode: %v", err)
+	}
+	t.Logf("dogfood: %d-byte body → shed %d bytes (%.1f%%) across %d old oversized tool_results; recent + head preserved",
+		len(raw), outcome.ShedBytes, shedFrac*100, outcome.Elided)
+}
+
 // TestElideIdentityCases pins the fail-safe identity returns: disabled, nothing oversized, and
 // no cache anchor must all leave the body byte-for-byte unchanged.
 func TestElideIdentityCases(t *testing.T) {
