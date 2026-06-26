@@ -347,7 +347,9 @@ func spliceMaxTokens(raw []byte, cap int) ([]byte, bool) {
 }
 
 // maybeCompactAnthropicRaw applies the cache-prefix-preserving history rewrite to the
-// outbound passthrough body when --compact-history-budget is set. It is a no-op unless the
+// outbound passthrough body when --compact-history-budget is set — and, as the offensive twin
+// (#806), first places a cache_control breakpoint on the stable head when the caller set none.
+// It is a no-op unless the
 // gateway is fronting the REAL Anthropic API (s.anthropicPassthrough) — only there is the
 // raw body forwarded verbatim, so only there does compacting it reach the wire AND need to
 // preserve the cached prefix. On every other wire the body is re-built from req.Messages
@@ -366,6 +368,15 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 		s.metrics.observeCompaction(agent.CompactOutcome{}, true) // configured OFF
 		return false
 	}
+	// Offensive half (#806): if the caller left NO cache_control breakpoint, place one on the
+	// stable system+tools head so the provider caches it — AND so the compaction below has an
+	// anchor to protect (a body with no breakpoint bails CompactReasonNoBreakpoint). Fail-safe
+	// identity: a body that already carries a breakpoint (the Claude Code shape), or has no stable
+	// head, is returned unchanged. Like compaction this only ADDS a caching hint to the FORWARDED
+	// bytes; the decoded req.Messages the kernel adjudicates are untouched, so the trust boundary
+	// is unchanged. The net effect is visible on the SAME readback: placement makes compaction
+	// fire (CompactionFired) and the provider cache_read it relays now covers the cached head.
+	req.Raw = agent.PlaceAnthropicCacheBreakpoint(req.Raw)
 	out, outcome := agent.CompactAnthropicHistoryWithOutcome(req.Raw, s.compactHistoryBudget)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
