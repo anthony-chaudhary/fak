@@ -295,6 +295,42 @@ func TestElideDuplicateToolUseIDNotCorrupted(t *testing.T) {
 	}
 }
 
+// TestElideDecoySiblingArrayNotCorrupted is the regression for the SECOND-round value-locator bug:
+// the array branch decoded the located content value via decodeArrayElements(blk, cVal), which
+// re-searches cVal in the whole block with bytes.Index. A non-conformant sibling array field
+// ("decoy") byte-identical to content, ordered BEFORE it, mis-located the splice onto the decoy —
+// shrinking the wrong field while reporting phantom savings. arrayElementSpans (base-0, no
+// re-search) fixes it: content shrinks, the decoy stays intact. Hand-authored bytes (decoy first).
+func TestElideDecoySiblingArrayNotCorrupted(t *testing.T) {
+	const threshold = 100
+	big := strings.Repeat("A", 2000)
+	inner := fmt.Sprintf(`[{"type":"text","text":"%s"}]`, big)
+	raw := []byte(fmt.Sprintf(`{"model":"m","max_tokens":1,`+
+		`"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],`+
+		`"messages":[`+
+		`{"role":"user","content":[{"type":"text","text":"head","cache_control":{"type":"ephemeral"}}]},`+
+		`{"role":"assistant","content":[{"type":"text","text":"a"}]},`+
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","decoy":%s,"content":%s}]},`+
+		`{"role":"assistant","content":[{"type":"text","text":"b"}]},`+
+		`{"role":"user","content":[{"type":"text","text":"c"}]},`+
+		`{"role":"assistant","content":[{"type":"text","text":"d"}]},`+
+		`{"role":"user","content":[{"type":"text","text":"e"}]}`+
+		`]}`, inner, inner))
+	out, outcome := ElideAnthropicResultsWithOutcome(raw, threshold)
+	if outcome.Reason != ElideReasonNone || outcome.Elided != 1 {
+		t.Fatalf("expected 1 elided result, got reason=%q elided=%d", outcome.Reason, outcome.Elided)
+	}
+	if !strings.Contains(string(out), `"decoy":`+inner) {
+		t.Error("BUG: the decoy sibling array was shrunk — the splice mis-located the content value")
+	}
+	if strings.Contains(string(out), `"content":`+inner) {
+		t.Error("the real content value was NOT shrunk (phantom savings reported)")
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Errorf("re-decode: %v", err)
+	}
+}
+
 // TestObjectValueSpan pins the key-based value locator: it must return the EXACT span of each
 // key's value even when a sibling holds identical bytes (the property that fixes the corruption).
 func TestObjectValueSpan(t *testing.T) {

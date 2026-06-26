@@ -223,13 +223,23 @@ type spliceEdit struct {
 // a tool_result that itself carries cache_control, or a shape it cannot parse yields no edits.
 func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (edits []spliceEdit, shed int) {
 	var m struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
+		Role string `json:"role"`
 	}
-	if json.Unmarshal(el, &m) != nil || m.Role != "user" || len(m.Content) == 0 || m.Content[0] != '[' {
+	if json.Unmarshal(el, &m) != nil || m.Role != "user" {
 		return nil, 0
 	}
-	blocks, blockSpans, ok := decodeArrayElements(el, m.Content) // spans relative to el
+	// Locate the message's content array by KEY (exact), then decode it with spans RELATIVE to the
+	// located value — never re-searching its bytes with bytes.Index, which a sibling field holding
+	// identical bytes would mis-locate.
+	mcStart, mcEnd, ok := objectValueSpan(el, "content")
+	if !ok {
+		return nil, 0
+	}
+	mContent := el[mcStart:mcEnd]
+	if len(mContent) == 0 || mContent[0] != '[' {
+		return nil, 0
+	}
+	blocks, blockSpans, ok := arrayElementSpans(mContent) // spans relative to mContent (base 0)
 	if !ok {
 		return nil, 0
 	}
@@ -246,8 +256,8 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 		if rawHasCacheControl(blk) || toolResultContentHasCacheControl(blk) {
 			continue
 		}
-		blkBase := msgBase + blockSpans[j].start
-		cStart, cEnd, ok := objectValueSpan(blk, "content") // exact content-value span within blk
+		blkBase := msgBase + mcStart + blockSpans[j].start // absolute start of blk in the body
+		cStart, cEnd, ok := objectValueSpan(blk, "content")
 		if !ok {
 			continue
 		}
@@ -259,7 +269,7 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 				shed += sh
 			}
 		case len(cVal) > 0 && cVal[0] == '[': // content is an array of blocks — shrink each oversized text block
-			inner, innerSpans, ok := decodeArrayElements(blk, cVal) // spans relative to blk
+			inner, innerSpans, ok := arrayElementSpans(cVal) // spans relative to cVal (base 0)
 			if !ok {
 				continue
 			}
@@ -274,7 +284,7 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 				if !ok {
 					continue
 				}
-				if e, sh, ok := elideStringEdit(blkBase+innerSpans[k].start+tStart, ib[tStart:tEnd], threshold); ok {
+				if e, sh, ok := elideStringEdit(blkBase+cStart+innerSpans[k].start+tStart, ib[tStart:tEnd], threshold); ok {
 					edits = append(edits, e)
 					shed += sh
 				}
@@ -282,6 +292,14 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 		}
 	}
 	return edits, shed
+}
+
+// arrayElementSpans decodes a JSON array's elements with spans RELATIVE TO arr (base 0). Unlike
+// decodeArrayElements, which locates the array inside a larger container by bytes.Index, the
+// caller has already located arr exactly — so re-searching it (and risking a byte-identical
+// sibling) is both unnecessary and unsafe. This keeps every value location key-exact.
+func arrayElementSpans(arr []byte) ([]json.RawMessage, []elementSpan, bool) {
+	return decodeArrayElements(arr, arr) // bytes.Index(arr, arr) == 0, so spans are arr-relative
 }
 
 // toolResultContentHasCacheControl reports whether a tool_result block's content array carries a
