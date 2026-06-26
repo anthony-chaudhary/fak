@@ -107,6 +107,9 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 					}
 					softcapInPlace(scores, attnCap)
 					softmaxInPlace(scores)
+					if m.attnObs != nil { // #852: emit the post-softmax row (copy-out, math untouched)
+						emitAttnRow(m.attnObs, l, base+t, h, j0, scores)
+					}
 					out := attnOut[t*nH*hd+h*hd : t*nH*hd+(h+1)*hd]
 					for j := j0; j < nPos; j++ {
 						vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]

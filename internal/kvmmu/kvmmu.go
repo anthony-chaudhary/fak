@@ -38,6 +38,7 @@ package kvmmu
 
 import (
 	"context"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -142,6 +143,7 @@ func (FoldedGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi
 // an already-built abi.KVBackend (a remote/zero-copy KV backend, the disaggregated
 // direction) so enforcement can run against an engine fak does not itself host.
 type Context struct {
+	mu          sync.Mutex
 	kv          abi.KVBackend
 	gate        Gate
 	segs        []*Segment
@@ -182,9 +184,11 @@ func NewBackendWithGate(kv abi.KVBackend, gate Gate) *Context {
 // model.Session.Step (only the final chunk before a model turn needs them).
 func (c *Context) Append(id, tool string, ids []int) ([]float32, *Segment) {
 	from := c.kv.Len()
-	logits := c.kv.Prefill(ids)
+	// Register before Prefill: the attention observer fires while the model appends
+	// these positions, so the just-created span must already own [from, from+len(ids)).
 	seg := &Segment{ID: id, Tool: tool, From: from, Len: len(ids), KV: c.kvEntryID(ids), Pinned: defaultPinned(tool)}
 	c.segs = append(c.segs, seg)
+	logits := c.kv.Prefill(ids)
 	return logits, seg
 }
 

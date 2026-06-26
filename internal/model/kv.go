@@ -336,6 +336,9 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 			}
 			softcapInPlace(scores, attnCap)
 			m.softmaxAttentionScores(l, h, scores)
+			if m.attnObs != nil { // #852: emit the post-softmax row (copy-out, math untouched)
+				emitAttnRow(m.attnObs, l, qpos, h, lo, scores)
+			}
 			out := attnOut[h*hd : (h+1)*hd]
 			for j := lo; j < nPos; j++ {
 				vh := s.Cache.V[l][j*w+kvh*hd : j*w+(kvh+1)*hd]

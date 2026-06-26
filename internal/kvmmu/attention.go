@@ -47,6 +47,9 @@ import (
 // linear cursor over the small live-segment ledger attributes the whole row in
 // O(positions + spans) with no per-position search.
 func (c *Context) AttributeRow(keyPositions []int, weights []float32) (unattributed float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	n := len(keyPositions)
 	if len(weights) < n {
 		n = len(weights)
