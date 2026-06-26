@@ -1,6 +1,8 @@
 # fak - Fused Agent Kernel
 
-<!-- readme-verified: 2026-06-25 vs VERSION 0.34.0. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
+<!-- readme-verified: 2026-06-25 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
+
+**One binary you put in front of the agent you already run — it keeps your key, puts a default-deny floor under every tool call, and makes long sessions cheaper.**
 
 ## What It Is
 
@@ -23,6 +25,23 @@ on the parts of a real agent loop that get expensive or go wrong:
 > **fak in one line:** Put `fak` in front of the agent you already run. It makes long sessions
 > cheaper, routes each call to the right model, keeps unsafe tool results out of
 > context, and records every verdict. One binary, no rewrite, no key to start.
+
+**The 30-second picture, in numbers** — every figure traces to
+[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). On a 50-turn × 5-agent run, `fak`'s
+reuse does **~4.1× less work than a tuned warm-cache stack** (and ~60× less than the
+naive re-send loop); reuse of the shared prompt prefix climbs to **6.95×** across the
+model ladder. The guard is cheap where it counts — the kernel's allow/deny decision is
+~362 ns in-process per call (measured, Apple M3 Pro), not a network hop, and on the
+gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`) the in-kernel GPU decode holds
+~120 tok/s on an RTX 4070 (SmolLM2-135M), at parity with llama.cpp Q8_0.
+`fak guard` also reports live prefill vs decode tok/s on `/metrics`, so a slow first
+request gets an answer instead of a shrug.
+
+**Pick your path:** wrap the agent you already run in one command
+([`fak guard`](#use-it-with-your-agent)), put `fak` in front of any OpenAI / Anthropic /
+MCP endpoint ([`fak serve`](#any-openai-compatible-or-anthropic-compatible-client)), or —
+if a hard security floor is why you're here — jump to
+[For security teams](#for-security-teams).
 
 It does this by sitting on the tool-call path as a kernel. The model *proposes* a
 call. `fak` decides whether that call exists, whether its arguments are allowed,
@@ -68,6 +87,9 @@ before a model interpretation matters.
 ## Use It With Your Agent
 
 ### Claude Code, OpenCode, Aider-style CLIs
+
+The lowest-friction path: wrap the agent you already run in one command — no rewrite,
+no key to start.
 
 ```bash
 fak guard -- claude

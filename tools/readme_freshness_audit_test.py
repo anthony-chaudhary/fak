@@ -101,6 +101,70 @@ def test_jargon_glossed_term_not_flagged() -> None:
     assert "KV cache" not in c["items"], c
 
 
+# --- substance checks (graded affordances → 0..1 score) --------------------
+
+def test_guard_prominence_high_when_leads() -> None:
+    txt = ("```\nfak guard -- claude\n```\n"
+           "A drop-in secure floor; no api key needed, it forwards your credential.\n")
+    c = rfa.check_guard_prominence(txt, first_screen_lines=110)
+    assert c["status"] == "OK" and c["score"] >= 0.75, c
+
+
+def test_guard_prominence_fails_when_absent() -> None:
+    c = rfa.check_guard_prominence("no guard here, just serve", first_screen_lines=110)
+    assert c["status"] == "FAIL" and c["score"] == 0.0, c
+
+
+def test_lcd_onramp_high_when_complete() -> None:
+    txt = ("# fak\n> **fak in one line:** put it in front of your agent.\n\n"
+           "No key, no model, no GPU. Install: `curl … install.sh | sh`.\n"
+           "```\nfak preflight --tool refund_payment   # -> DENY\n```\n")
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8)
+    assert c["status"] == "OK" and c["score"] >= 0.75, c
+
+
+def test_lcd_onramp_fails_with_no_command() -> None:
+    c = rfa.check_lcd_onramp("just prose, no code, no install", first_screen_lines=110,
+                             one_glance_lines=8)
+    assert c["status"] == "FAIL" and c["score"] == 0.0, c
+
+
+def test_speed_claim_zero_without_a_speed_token() -> None:
+    # No speed token above the fold ⇒ the framing affordances do NOT score.
+    txt = "we link to benchmarks and say vs tuned but quote no speed number"
+    c = rfa.check_speed_claim(txt, "authority", first_screen_lines=110)
+    assert c["score"] == 0.0 and "speed_token" in c["items"], c
+
+
+def test_speed_claim_high_when_traced_and_bounded() -> None:
+    txt = ("The kernel decision adds ~362 ns per call (in-process), and GPU decode "
+           "hits ~120 tok/s — see the benchmarks. Numbers vs a tuned warm-cache stack.")
+    authority = "row: ~362 ns decide … 120 tok/s parity"
+    c = rfa.check_speed_claim(txt, authority, first_screen_lines=110)
+    assert c["score"] >= 0.75, c
+
+
+def test_hero_above_fold_zero_without_a_number() -> None:
+    c = rfa.check_hero_above_fold("a page with prose but no headline result",
+                                  "authority", first_screen_lines=110)
+    assert c["score"] == 0.0 and "has_number" in c["items"], c
+
+
+def test_hero_above_fold_high_when_traced_sota() -> None:
+    txt = "**~4.1× vs a tuned warm-cache stack** on a 50-turn × 5-agent run."
+    authority = "headline: 4.1× vs tuned warm-cache"
+    c = rfa.check_hero_above_fold(txt, authority, first_screen_lines=110)
+    assert c["score"] >= 0.75, c
+
+
+def test_audience_footholds_all_personas() -> None:
+    txt = ("Start here. No key, no GPU — run `fak agent --offline` for an ALLOW/DENY proof. "
+           "A default-deny capability floor. Cache prefix reuse keeps the discount. "
+           "See CLAIMS.md for what's real.")
+    c = rfa.check_audience_footholds(txt, first_screen_lines=110)
+    assert c["score"] == 1.0, c
+
+
 # --- grader / payload tests ------------------------------------------------
 
 def test_payload_ok_all_green() -> None:
@@ -130,6 +194,44 @@ def test_run_checks_bad_readme_fails_overall() -> None:
     assert p["ok"] is False, p
     failed = {c["check"] for c in checks if c["status"] == "FAIL"}
     assert {"links", "naive_baseline"} <= failed, failed
+
+
+# --- composite score tests -------------------------------------------------
+
+def test_score_is_substance_only_not_padded_by_hygiene() -> None:
+    # All hygiene green but every substance check at 0 ⇒ a low score, NOT ~100.
+    checks = [
+        {"check": "links", "status": "OK"},
+        {"check": "version_pins", "status": "OK"},
+        {"check": "speed_claim", "status": "WARN", "score": 0.0},
+        {"check": "hero_above_fold", "status": "WARN", "score": 0.0},
+        {"check": "guard_prominence", "status": "OK", "score": 0.0},
+        {"check": "lcd_onramp", "status": "OK", "score": 0.0},
+        {"check": "audience_footholds", "status": "OK", "score": 0.0},
+    ]
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["score"] == 0, p  # substance-only: hygiene OK rows do not pad it
+    assert p["finding"] == "readme_fresh_thin", p
+
+
+def test_score_full_when_substance_maxed() -> None:
+    checks = [{"check": c, "status": "OK", "score": 1.0} for c in rfa.SUBSTANCE_CHECKS]
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["score"] == 100 and p["grade"] == "A", p
+    assert p["finding"] == "readme_fresh", p
+
+
+def test_hygiene_fail_caps_the_grade() -> None:
+    checks = [{"check": c, "status": "OK", "score": 1.0} for c in rfa.SUBSTANCE_CHECKS]
+    checks.append({"check": "links", "status": "FAIL", "detail": "dead link"})
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["ok"] is False, p
+    assert p["score"] <= rfa.FAIL_SCORE_CAP, p  # a broken page is not a passing grade
+
+
+def test_grade_letter_boundaries() -> None:
+    assert rfa._grade_letter(90) == "A" and rfa._grade_letter(89) == "B"
+    assert rfa._grade_letter(60) == "D" and rfa._grade_letter(59) == "F"
 
 
 # --- live smoke: the real committed README folds without error -------------
