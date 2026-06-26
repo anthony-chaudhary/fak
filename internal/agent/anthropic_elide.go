@@ -9,19 +9,21 @@ package agent
 // coding agent (the flagship `fak guard -- claude` use case) accumulates these constantly, and
 // most of them are never read again after the turn that produced them.
 //
-// The load-bearing invariant is the SAME cache guarantee compaction makes, and it is enforced
-// the same way — by SPLICING on the original bytes so the protected prefix is copied verbatim
-// (a memcpy), never re-marshalled:
+// The cache guarantee is the SAME one compaction makes, and it is enforced the same way — by
+// SPLICING on the original bytes so the protected prefix is copied verbatim (a memcpy), never
+// re-marshalled:
 //
 //	Only a tool_result that lives STRICTLY AFTER the protected prefix (the FIRST cache_control
-//	breakpoint message — the stable cached head the provider reuses every turn), is OUTSIDE the
-//	recent working-set window (the last elideRecentKeepMsgs messages), and sits in a message
-//	that carries NO cache_control of its own may be shrunk. That band is the un-cacheable middle
-//	the provider re-bills every turn anyway. Because no cache_control-bearing message is ever
-//	touched, elision is strictly cache-NON-bursting: it never changes a single byte that any
-//	breakpoint caches. On ANY ambiguity the function returns its input UNCHANGED (identity), and
-//	a non-identity result is proven to (a) still decode as a valid Messages request and (b) keep
-//	the protected prefix bytes byte-identical to the input.
+//	breakpoint message — the stable cached HEAD the provider reuses every turn), is OUTSIDE the
+//	recent working-set window (the last elideRecentKeepMsgs messages), and whose message carries
+//	NO cache_control reachable by the shrinker may be shrunk. The guarantee, proven before ship,
+//	is that the FIRST-breakpoint (head) cached prefix stays BYTE-IDENTICAL, so the dominant cache
+//	hit survives. Editing the middle DOES shift the bytes a LATER breakpoint caches — exactly as
+//	compaction's middle-drop does — so those later (recent-turn) breakpoints cascade-burst and the
+//	provider's read walks back to the byte-identical head; the shed middle is re-billed once. This
+//	is a cascade trade, NOT "never touches a cached byte." On ANY ambiguity the function returns
+//	its input UNCHANGED (identity), and a non-identity result is proven to (a) still decode as a
+//	valid Messages request and (b) keep the head prefix bytes byte-identical to the input.
 //
 // Like compaction this is a REQUEST-side transform only: it touches the bytes sent upstream,
 // never the decoded req.Messages the kernel adjudicates, so the trust boundary is unchanged.
@@ -53,7 +55,7 @@ func elideMarkerf(omittedRunes int) string {
 // ElideOutcome so a caller can label a metric and an operator can see WHY elision did nothing
 // (silence must not read as success). ElideReasonNone means the body was rewritten.
 const (
-	ElideReasonNone           = ""                // FIRED: a rewrite happened (Elided/ShedBytes meaningful)
+	ElideReasonNone           = ""               // FIRED: a rewrite happened (Elided/ShedBytes meaningful)
 	ElideReasonOff            = "off"             // threshold<=0 or empty body — disabled
 	ElideReasonNonJSON        = "non_json"        // body is not a JSON object
 	ElideReasonNoMsgsKey      = "no_messages_key" // no "messages" key
@@ -77,7 +79,7 @@ type ElideOutcome struct {
 
 // ElideAnthropicResults shrinks oversized tool_result bodies in an outbound Anthropic
 // /v1/messages body to a bounded head+tail form, byte-splicing on the original bytes so the
-// cached prefix is preserved verbatim. It returns raw UNCHANGED whenever it cannot prove the
+// cached head prefix is preserved verbatim. It returns raw UNCHANGED whenever it cannot prove the
 // rewrite is both cache-safe and well-formed. This is the byte-only wrapper;
 // ElideAnthropicResultsWithOutcome additionally reports WHY it bailed / how much it shed.
 func ElideAnthropicResults(raw []byte, threshold int) []byte {
@@ -106,10 +108,11 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 		return raw, ElideOutcome{Reason: ElideReasonTooFewMsgs}
 	}
 
-	// Anchor the protected prefix on the FIRST cache_control breakpoint message — the stable
-	// cached head — exactly as compaction does. Require a cache anchor or we cannot know the
-	// cache boundary and must not touch the body.
-	pfxEnd := firstBreakpointMessage(elems)
+	// Anchor the protected prefix on the FIRST cache_control breakpoint message, using the DEEP
+	// detector — one nesting level deeper than compaction's, because the shrinker descends into
+	// tool_result.content and must not anchor PAST a breakpoint nested there. Require a cache
+	// anchor or we cannot know the cache boundary and must not touch the body.
+	pfxEnd := firstBreakpointForElide(elems)
 	if pfxEnd < 0 {
 		// No message-level breakpoint. Fall back to a system-only cache anchor ONLY if `system`
 		// carries a breakpoint AND its bytes precede the messages array (so the array head is a
@@ -124,13 +127,13 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	}
 
 	// The eligible band: strictly after the protected prefix, before the recent working-set
-	// window, and never a cache_control-bearing message. Every byte we touch is in the un-cached,
-	// re-billed middle — so the splice is strictly cache-non-bursting.
+	// window, and never a message with cache_control reachable by the shrinker. Editing here keeps
+	// the head prefix byte-identical (proven below); later breakpoints cascade-burst, as documented.
 	lastEligible := len(elems) - elideRecentKeepMsgs // exclusive
 	var edits []spliceEdit
 	shed := 0
 	for i := pfxEnd + 1; i < lastEligible; i++ {
-		if i < 0 || messageHasCacheControl(elems[i]) {
+		if i < 0 || messageHasCacheControlForElide(elems[i]) {
 			continue
 		}
 		es, sh := collectResultElisionEdits(spans[i].start, elems[i], threshold)
@@ -145,9 +148,9 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	if !ok {
 		return raw, ElideOutcome{Reason: ElideReasonSpliceFailed}
 	}
-	// Prove it: the result must still decode as a valid Messages request, and the protected
-	// prefix bytes must be byte-identical to the input. Either failing is a splice bug, not a
-	// reason to ship a broken / cache-busting body — fall back to identity.
+	// Prove it: the result must still decode as a valid Messages request, and the head prefix
+	// bytes must be byte-identical to the input. Either failing is a splice bug, not a reason to
+	// ship a broken / cache-busting body — fall back to identity.
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		return raw, ElideOutcome{Reason: ElideReasonRedecodeFail}
 	}
@@ -161,17 +164,63 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	return out, ElideOutcome{Reason: ElideReasonNone, Elided: len(edits), ShedBytes: shed}
 }
 
+// messageHasCacheControlForElide reports whether a message carries a cache_control breakpoint at
+// ANY depth the shrinker can reach: on a top-level content block (messageHasCacheControl) OR on a
+// block nested inside a tool_result's content array (which collectResultElisionEdits descends
+// into). The shallow messageHasCacheControl misses the nested case — so using it for the anchor or
+// the per-message skip would let elision shrink, and mis-anchor PAST, a real breakpoint and burst
+// the head cache. This deeper predicate closes that gap for the elision path only; compaction's
+// shallow detector is left untouched.
+func messageHasCacheControlForElide(el json.RawMessage) bool {
+	if messageHasCacheControl(el) {
+		return true
+	}
+	var m struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(el, &m) != nil || len(m.Content) == 0 || m.Content[0] != '[' {
+		return false
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(m.Content, &blocks) != nil {
+		return false
+	}
+	for _, blk := range blocks {
+		var b struct {
+			Type    string          `json:"type"`
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(blk, &b) == nil && b.Type == "tool_result" && len(b.Content) > 0 && rawHasCacheControl(b.Content) {
+			return true
+		}
+	}
+	return false
+}
+
+// firstBreakpointForElide is firstBreakpointMessage with the deep detector: the index of the
+// first message carrying a cache_control breakpoint at any depth the shrinker can reach, or -1.
+func firstBreakpointForElide(elems []json.RawMessage) int {
+	for i, el := range elems {
+		if messageHasCacheControlForElide(el) {
+			return i
+		}
+	}
+	return -1
+}
+
 // spliceEdit is one byte-range replacement within the original body: [start,end) → repl.
 type spliceEdit struct {
 	start, end int
 	repl       []byte
 }
 
-// collectResultElisionEdits scans one messages[] element (a user turn that may carry
-// tool_result blocks) and returns a splice edit for each oversized tool_result text payload,
-// shrinking it to head+tail. msgBase is the element's absolute start byte in the original body;
-// every returned edit span is absolute. A non-user message, a non-array content, or a content
-// shape it cannot parse yields no edits (the conservative identity for that message).
+// collectResultElisionEdits scans one messages[] element (a user turn that may carry tool_result
+// blocks) and returns a splice edit for each oversized tool_result text payload, shrinking it to
+// head+tail. msgBase is the element's absolute start byte in the original body; every returned
+// edit span is absolute. Value byte ranges are located by KEY via objectValueSpan (never a
+// bytes.Index over the whole block, which a sibling field with identical bytes — e.g. a
+// tool_use_id equal to the content — would mis-locate). A non-user message, a non-array content,
+// a tool_result that itself carries cache_control, or a shape it cannot parse yields no edits.
 func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (edits []spliceEdit, shed int) {
 	var m struct {
 		Role    string          `json:"role"`
@@ -186,33 +235,46 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 	}
 	for j, blk := range blocks {
 		var b struct {
-			Type    string          `json:"type"`
-			Content json.RawMessage `json:"content"`
+			Type string `json:"type"`
 		}
-		if json.Unmarshal(blk, &b) != nil || b.Type != "tool_result" || len(b.Content) == 0 {
+		if json.Unmarshal(blk, &b) != nil || b.Type != "tool_result" {
+			continue
+		}
+		// Defense in depth: never shrink a tool_result that carries cache_control on the block
+		// itself or on any block nested in its content (the per-message skip already excludes such
+		// a message, but keep this self-contained too).
+		if rawHasCacheControl(blk) || toolResultContentHasCacheControl(blk) {
 			continue
 		}
 		blkBase := msgBase + blockSpans[j].start
-		switch b.Content[0] {
-		case '"': // content is a bare JSON string
-			if e, sh, ok := elideStringValue(blkBase, blk, b.Content, threshold); ok {
+		cStart, cEnd, ok := objectValueSpan(blk, "content") // exact content-value span within blk
+		if !ok {
+			continue
+		}
+		cVal := blk[cStart:cEnd]
+		switch {
+		case len(cVal) > 0 && cVal[0] == '"': // content is a bare JSON string
+			if e, sh, ok := elideStringEdit(blkBase+cStart, cVal, threshold); ok {
 				edits = append(edits, e)
 				shed += sh
 			}
-		case '[': // content is an array of blocks (the common Claude Code shape) — shrink each oversized text block
-			inner, innerSpans, ok := decodeArrayElements(blk, b.Content) // spans relative to blk
+		case len(cVal) > 0 && cVal[0] == '[': // content is an array of blocks — shrink each oversized text block
+			inner, innerSpans, ok := decodeArrayElements(blk, cVal) // spans relative to blk
 			if !ok {
 				continue
 			}
 			for k, ib := range inner {
 				var tb struct {
-					Type string          `json:"type"`
-					Text json.RawMessage `json:"text"`
+					Type string `json:"type"`
 				}
-				if json.Unmarshal(ib, &tb) != nil || tb.Type != "text" || len(tb.Text) == 0 || tb.Text[0] != '"' {
+				if json.Unmarshal(ib, &tb) != nil || tb.Type != "text" {
 					continue
 				}
-				if e, sh, ok := elideStringValue(blkBase+innerSpans[k].start, ib, tb.Text, threshold); ok {
+				tStart, tEnd, ok := objectValueSpan(ib, "text") // exact text-value span within ib
+				if !ok {
+					continue
+				}
+				if e, sh, ok := elideStringEdit(blkBase+innerSpans[k].start+tStart, ib[tStart:tEnd], threshold); ok {
 					edits = append(edits, e)
 					shed += sh
 				}
@@ -222,29 +284,36 @@ func collectResultElisionEdits(msgBase int, el json.RawMessage, threshold int) (
 	return edits, shed
 }
 
-// elideStringValue builds the splice edit that shrinks one JSON string value (val, a verbatim
-// slice of container) to head+tail, if val exceeds threshold bytes and the shrunk form is
-// strictly shorter. containerBase is container's absolute start byte in the original body. ok is
-// false (no edit) when the value is not oversized, cannot be decoded, or would not actually save.
-func elideStringValue(containerBase int, container, val json.RawMessage, threshold int) (spliceEdit, int, bool) {
-	if len(val) <= threshold {
-		return spliceEdit{}, 0, false
+// toolResultContentHasCacheControl reports whether a tool_result block's content array carries a
+// cache_control breakpoint on any nested block.
+func toolResultContentHasCacheControl(blk json.RawMessage) bool {
+	var b struct {
+		Content json.RawMessage `json:"content"`
 	}
-	rel := bytes.Index(container, val)
-	if rel < 0 {
+	if json.Unmarshal(blk, &b) != nil || len(b.Content) == 0 {
+		return false
+	}
+	return rawHasCacheControl(b.Content)
+}
+
+// elideStringEdit builds the splice edit that shrinks one JSON string VALUE (valBytes, located
+// at absolute byte offset valAbs) to head+tail, if it exceeds threshold bytes and the shrunk form
+// is strictly shorter. ok is false (no edit) when the value is not a string, not oversized, cannot
+// be decoded, or would not actually save.
+func elideStringEdit(valAbs int, valBytes []byte, threshold int) (spliceEdit, int, bool) {
+	if len(valBytes) <= threshold || len(valBytes) == 0 || valBytes[0] != '"' {
 		return spliceEdit{}, 0, false
 	}
 	var s string
-	if json.Unmarshal(val, &s) != nil {
+	if json.Unmarshal(valBytes, &s) != nil {
 		return spliceEdit{}, 0, false
 	}
 	shrunk := elideHeadTail(s, threshold)
 	newVal, err := json.Marshal(shrunk)
-	if err != nil || len(newVal) >= len(val) {
+	if err != nil || len(newVal) >= len(valBytes) {
 		return spliceEdit{}, 0, false
 	}
-	start := containerBase + rel
-	return spliceEdit{start: start, end: start + len(val), repl: newVal}, len(val) - len(newVal), true
+	return spliceEdit{start: valAbs, end: valAbs + len(valBytes), repl: newVal}, len(valBytes) - len(newVal), true
 }
 
 // elideHeadTail returns the head+tail-shrunk form of s: the first ~3/4·threshold and last
@@ -262,10 +331,54 @@ func elideHeadTail(s string, threshold int) string {
 	return string(r[:head]) + elideMarkerf(omitted) + string(r[len(r)-tail:])
 }
 
+// objectValueSpan returns the [start,end) byte span (relative to obj) of the VALUE for the given
+// top-level key in a JSON object, or ok=false if absent / not an object. It walks the object with
+// a streaming decoder so the span is exact even when a sibling value has identical bytes — a plain
+// bytes.Index over the object would mis-locate it (the tool_use_id == content corruption vector).
+func objectValueSpan(obj json.RawMessage, key string) (start, end int, ok bool) {
+	dec := json.NewDecoder(bytes.NewReader(obj))
+	tok, err := dec.Token()
+	if err != nil {
+		return 0, 0, false
+	}
+	if d, isDelim := tok.(json.Delim); !isDelim || d != '{' {
+		return 0, 0, false
+	}
+	for dec.More() {
+		kt, err := dec.Token()
+		if err != nil {
+			return 0, 0, false
+		}
+		k, isStr := kt.(string)
+		if !isStr {
+			return 0, 0, false
+		}
+		// InputOffset is now just past the key token, before the ':' and the value. Skip
+		// whitespace and the single ':' separator to the value's first significant byte.
+		vStart := int(dec.InputOffset())
+		for vStart < len(obj) && (isJSONSpace(obj[vStart]) || obj[vStart] == ':') {
+			vStart++
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return 0, 0, false
+		}
+		vEnd := int(dec.InputOffset())
+		// Trim any trailing whitespace the decoder may have left before the ','/'}' delimiter.
+		for vEnd > vStart && isJSONSpace(obj[vEnd-1]) {
+			vEnd--
+		}
+		if k == key {
+			return vStart, vEnd, true
+		}
+	}
+	return 0, 0, false
+}
+
 // applySpliceEdits applies disjoint byte-range replacements to raw, building the result forward.
 // Edits are sorted by start; an overlap or an out-of-range span returns ok=false (identity at the
-// caller). Bytes outside every edit span — including the whole protected prefix — are copied
-// verbatim, so the cache guarantee is a bytes.Equal, not a hope.
+// caller). Bytes outside every edit span — including the whole head prefix — are copied verbatim,
+// so the cache guarantee is a bytes.Equal, not a hope.
 func applySpliceEdits(raw []byte, edits []spliceEdit) ([]byte, bool) {
 	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
 	out := make([]byte, 0, len(raw))

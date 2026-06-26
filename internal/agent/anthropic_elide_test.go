@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -164,6 +165,129 @@ func TestElideStringContentResult(t *testing.T) {
 	}
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		t.Errorf("rewritten body failed to re-decode: %v", err)
+	}
+}
+
+// TestElideNestedCacheControlIsProtected is the regression for the cache-prefix-burst /
+// working-set-loss bugs the adversarial review found: a cache_control on a text block NESTED
+// inside a tool_result.content array is a valid Anthropic breakpoint the shrinker can reach, but
+// the SHALLOW detector missed it — so it could anchor PAST it (msg[0]) or shrink it (msg[2]),
+// bursting the cache. The deep detector (messageHasCacheControlForElide) must protect both, while
+// a clean oversized result still elides so the test is not vacuously identity.
+func TestElideNestedCacheControlIsProtected(t *testing.T) {
+	const threshold = 1024
+	type obj = map[string]any
+	cc := obj{"type": "ephemeral"}
+	big0 := strings.Repeat("0", 4000)  // msg[0] nested-cc anchor — must survive
+	big2 := strings.Repeat("2", 4000)  // msg[2] nested-cc — must survive
+	bigC := strings.Repeat("C", 4000)  // msg[4] clean — must shrink
+	nestedCC := func(id, text string) obj {
+		return obj{"role": "user", "content": []obj{{"type": "tool_result", "tool_use_id": id,
+			"content": []obj{{"type": "text", "text": text, "cache_control": cc}}}}}
+	}
+	cleanTR := func(id, text string) obj {
+		return obj{"role": "user", "content": []obj{{"type": "tool_result", "tool_use_id": id,
+			"content": []obj{{"type": "text", "text": text}}}}}
+	}
+	txt := func(role, s string) obj { return obj{"role": role, "content": []obj{{"type": "text", "text": s}}} }
+	raw, err := json.Marshal(obj{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024,
+		"system": []obj{{"type": "text", "text": "sys", "cache_control": cc}},
+		"messages": []obj{
+			nestedCC("t0", big0),    // 0 — nested-cc → the deep anchor (pfxEnd=0), protected
+			txt("assistant", "a1"),  // 1
+			nestedCC("t2", big2),    // 2 — nested-cc in the eligible band → must be SKIPPED
+			txt("assistant", "a3"),  // 3
+			cleanTR("t4", bigC),     // 4 — clean oversized, eligible → must SHRINK
+			txt("assistant", "a5"),  // 5
+			txt("user", "u6"),       // 6
+			txt("assistant", "a7"),  // 7
+			txt("user", "u8"),       // 8
+			txt("assistant", "a9"),  // 9
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	orig := append([]byte(nil), raw...)
+	out, outcome := ElideAnthropicResultsWithOutcome(raw, threshold)
+	if outcome.Reason != ElideReasonNone || outcome.Elided != 1 {
+		t.Fatalf("expected exactly the clean result to elide, got reason=%q elided=%d", outcome.Reason, outcome.Elided)
+	}
+	if !bytes.Contains(out, []byte(big0)) {
+		t.Error("BUG: msg[0] nested-cc anchor was shrunk — head cache burst")
+	}
+	if !bytes.Contains(out, []byte(big2)) {
+		t.Error("BUG: msg[2] nested-cc result was shrunk — cache-control message edited")
+	}
+	if bytes.Contains(out, []byte(bigC)) {
+		t.Error("clean oversized result was NOT shrunk (test vacuous)")
+	}
+	// Head prefix (through the nested-cc anchor msg[0]) must be byte-identical.
+	prefixEnd := protectedPrefixEnd(t, orig)
+	if !bytes.Equal(orig[:prefixEnd], out[:prefixEnd]) {
+		t.Error("head prefix bytes changed")
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Errorf("re-decode: %v", err)
+	}
+}
+
+// TestElideDuplicateToolUseIDNotCorrupted is the regression for the json-corruption bug: a
+// tool_result whose tool_use_id value is byte-identical to its string content, with tool_use_id
+// ordered BEFORE content on the wire (so a bytes.Index over the whole block would mis-splice the
+// id). objectValueSpan locates the content value by KEY, so the id stays intact and the content
+// shrinks. Hand-authored bytes (Go's json.Marshal sorts keys, hiding the ordering).
+func TestElideDuplicateToolUseIDNotCorrupted(t *testing.T) {
+	const threshold = 100
+	big := strings.Repeat("X", 300)
+	raw := []byte(fmt.Sprintf(`{"model":"claude-sonnet-4-6","max_tokens":1024,`+
+		`"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],`+
+		`"messages":[`+
+		`{"role":"user","content":[{"type":"text","text":"head","cache_control":{"type":"ephemeral"}}]},`+
+		`{"role":"assistant","content":[{"type":"text","text":"a"}]},`+
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"%s"}]},`+
+		`{"role":"assistant","content":[{"type":"text","text":"b"}]},`+
+		`{"role":"user","content":[{"type":"text","text":"c"}]},`+
+		`{"role":"assistant","content":[{"type":"text","text":"d"}]},`+
+		`{"role":"user","content":[{"type":"text","text":"e"}]}`+
+		`]}`, big, big))
+	out, outcome := ElideAnthropicResultsWithOutcome(raw, threshold)
+	if outcome.Reason != ElideReasonNone || outcome.Elided != 1 {
+		t.Fatalf("expected 1 elided result, got reason=%q elided=%d", outcome.Reason, outcome.Elided)
+	}
+	if !strings.Contains(string(out), `"tool_use_id":"`+big+`"`) {
+		t.Error("BUG: tool_use_id was corrupted — the splice mis-located the content value")
+	}
+	if strings.Contains(string(out), `"content":"`+big+`"`) {
+		t.Error("content value was NOT shrunk (the oversized payload survived)")
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Errorf("re-decode: %v", err)
+	}
+}
+
+// TestObjectValueSpan pins the key-based value locator: it must return the EXACT span of each
+// key's value even when a sibling holds identical bytes (the property that fixes the corruption).
+func TestObjectValueSpan(t *testing.T) {
+	obj := []byte(`{"a":"XYZ","b":"XYZ","c":123}`)
+	aS, aE, ok := objectValueSpan(obj, "a")
+	if !ok || string(obj[aS:aE]) != `"XYZ"` {
+		t.Fatalf("a: got ok=%v span=%q", ok, obj[aS:aE])
+	}
+	bS, bE, ok := objectValueSpan(obj, "b")
+	if !ok || string(obj[bS:bE]) != `"XYZ"` {
+		t.Fatalf("b: got ok=%v span=%q", ok, obj[bS:bE])
+	}
+	if aS == bS {
+		t.Error("a and b resolved to the SAME span despite distinct positions (locator is value-keyed, not key-keyed)")
+	}
+	cS, cE, ok := objectValueSpan(obj, "c")
+	if !ok || string(obj[cS:cE]) != `123` {
+		t.Fatalf("c: got ok=%v span=%q", ok, obj[cS:cE])
+	}
+	if _, _, ok := objectValueSpan(obj, "missing"); ok {
+		t.Error("absent key must return ok=false")
 	}
 }
 
