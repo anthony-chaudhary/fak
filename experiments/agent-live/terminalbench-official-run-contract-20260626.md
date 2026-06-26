@@ -1,6 +1,6 @@
 # Terminal-Bench Official-Run Contract
 
-- Generated: `2026-06-26T03:13:56Z`
+- Generated: `2026-06-26T11:14:18Z`
 - Benchmark: `Terminal-Bench command-boundary official-run contract`
 - Status: `READY_FOR_EXTERNAL_HARNESS`
 - Evidence class: `EXTERNAL_RUN_CONTRACT`
@@ -10,7 +10,7 @@
 
 ## Task Selection
 
-- Candidate suite: `testdata/terminalbench/command_boundary_smoke.json`
+- Candidate suite: `testdata\terminalbench\command_boundary_smoke.json`
 - Candidate task ids: `go-cli-help-benign, python-config-fix-danger-after-tests`
 - Official dataset: `terminal-bench-core==0.1.1`
 - Concurrent tasks: `1`
@@ -26,6 +26,14 @@
 |---|---|---|---|
 | `raw-terminalbench` | `benchmark-native` | `experiments/agent-live/terminalbench-official-raw-20260626` | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus --model shared-agent-model --task-id $task --n-concurrent 1 } |
 | `fak-terminalbench` | `benchmark-native-through-fak-gateway` | `experiments/agent-live/terminalbench-official-fak-20260626` | $env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus-through-fak --model shared-agent-model --task-id $task --n-concurrent 1 } |
+
+## Score Evidence Link
+
+- Required: `true`
+- Official test artifacts: `experiments/agent-live/terminalbench-official-raw-20260626/tb-results.json`, `experiments/agent-live/terminalbench-official-raw-20260626/command-log.jsonl`, `experiments/agent-live/terminalbench-official-fak-20260626/tb-results.json`, `experiments/agent-live/terminalbench-official-fak-20260626/command-log.jsonl`
+- fak command evidence files: `experiments/agent-live/terminalbench-official-fak-20260626/fak-command-evidence.jsonl`, `experiments/agent-live/terminalbench-official-fak-20260626/raw-fak-command-join.json`
+- Join keys: `task_id`, `turn_or_command_index`, `command`, `cwd`, `evidence_id`, `state_hash`
+- Detail: The official compare artifact must join Terminal-Bench test/pass rows and command logs to the mediated fak command verdict and evidence checkpoint for the same task command.
 
 ## Gates
 

@@ -32,12 +32,12 @@ func RenderMarkdown(r *Report) string {
 	fmt.Fprintf(&b, "\n")
 
 	fmt.Fprintf(&b, "## Tasks\n\n")
-	fmt.Fprintf(&b, "| Task | Raw tests | Raw safe | fak tests | fak safe | fak denied | dangerous blocks | unnecessary blocks |\n")
-	fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---:|---:|---:|\n")
+	fmt.Fprintf(&b, "| Task | Raw tests | Raw safe | fak tests | fak safe | fak denied | dangerous blocks | unnecessary blocks | normalized commands |\n")
+	fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for _, t := range r.Tasks {
-		fmt.Fprintf(&b, "| `%s` | %t | %t | %t | %t | %d | %d | %d |\n",
+		fmt.Fprintf(&b, "| `%s` | %t | %t | %t | %t | %d | %d | %d | %d |\n",
 			t.ID, t.Raw.TestSuccess, t.Raw.SafeResolve, t.Fak.TestSuccess, t.Fak.SafeResolve,
-			t.Fak.DeniedCommands, len(t.Fak.DangerousBlocks), len(t.Fak.UnnecessaryBlocks))
+			t.Fak.DeniedCommands, len(t.Fak.DangerousBlocks), len(t.Fak.UnnecessaryBlocks), len(t.Fak.NormalizedCommands))
 	}
 	if len(r.PromotionRequirements) > 0 {
 		fmt.Fprintf(&b, "\n## Promotion Requirements\n\n")

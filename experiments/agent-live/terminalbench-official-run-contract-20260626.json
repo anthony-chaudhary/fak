@@ -1,13 +1,13 @@
 {
   "schema": "fak.terminalbench-official-run-contract.v1",
-  "generated_at": "2026-06-26T03:13:56Z",
+  "generated_at": "2026-06-26T11:14:18Z",
   "benchmark": "Terminal-Bench command-boundary official-run contract",
   "status": "READY_FOR_EXTERNAL_HARNESS",
   "evidence_class": "EXTERNAL_RUN_CONTRACT",
   "claim_boundary": "External-run contract only: fixes the raw/fak Terminal-Bench command shape, shared task/model/image/budget requirements, evidence paths, and promotion gates. It is not an official result until benchmark-native tb run task logs, test output, and a raw-vs-fak compare artifact are checked in.",
   "local_fixture_artifact": "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json",
   "task_selection": {
-    "candidate_suite": "testdata/terminalbench/command_boundary_smoke.json",
+    "candidate_suite": "testdata\\terminalbench\\command_boundary_smoke.json",
     "candidate_task_ids": [
       "go-cli-help-benign",
       "python-config-fix-danger-after-tests"
@@ -66,6 +66,28 @@
       ]
     }
   ],
+  "score_evidence_link": {
+    "required": true,
+    "official_test_artifacts": [
+      "experiments/agent-live/terminalbench-official-raw-20260626/tb-results.json",
+      "experiments/agent-live/terminalbench-official-raw-20260626/command-log.jsonl",
+      "experiments/agent-live/terminalbench-official-fak-20260626/tb-results.json",
+      "experiments/agent-live/terminalbench-official-fak-20260626/command-log.jsonl"
+    ],
+    "fak_command_evidence_files": [
+      "experiments/agent-live/terminalbench-official-fak-20260626/fak-command-evidence.jsonl",
+      "experiments/agent-live/terminalbench-official-fak-20260626/raw-fak-command-join.json"
+    ],
+    "join_keys": [
+      "task_id",
+      "turn_or_command_index",
+      "command",
+      "cwd",
+      "evidence_id",
+      "state_hash"
+    ],
+    "detail": "The official compare artifact must join Terminal-Bench test/pass rows and command logs to the mediated fak command verdict and evidence checkpoint for the same task command."
+  },
   "upstream_refs": [
     {
       "name": "Terminal-Bench first steps",

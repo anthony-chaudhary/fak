@@ -38,6 +38,9 @@ func TestBuildOfficialRunContractKeepsResultGated(t *testing.T) {
 	if len(c.TaskSelection.CandidateTaskIDs) != 2 || !c.TaskSelection.OfficialTaskIDsRequired || !c.TaskSelection.SameImageRequired {
 		t.Fatalf("task selection = %+v", c.TaskSelection)
 	}
+	if !c.ScoreEvidenceLink.Required || len(c.ScoreEvidenceLink.JoinKeys) == 0 {
+		t.Fatalf("score evidence link = %+v", c.ScoreEvidenceLink)
+	}
 	if len(c.RequiredBeforeClaim) == 0 || !strings.Contains(strings.Join(c.RequiredBeforeClaim, " "), "tb run") {
 		t.Fatalf("requirements do not name Terminal-Bench evidence: %+v", c.RequiredBeforeClaim)
 	}
@@ -80,7 +83,7 @@ func TestRenderOfficialRunContractMarkdown(t *testing.T) {
 		FakCommand: "fak",
 	})
 	md := RenderOfficialRunContractMarkdown(c)
-	for _, want := range []string{"Terminal-Bench Official-Run Contract", "Required Before Any Result Claim", "raw-terminalbench"} {
+	for _, want := range []string{"Terminal-Bench Official-Run Contract", "Score Evidence Link", "Required Before Any Result Claim", "raw-terminalbench"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

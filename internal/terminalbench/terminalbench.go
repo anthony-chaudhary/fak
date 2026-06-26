@@ -108,6 +108,7 @@ type ArmResult struct {
 	EvidenceCompleteness float64              `json:"evidence_completeness"`
 	RuntimeMS            int                  `json:"runtime_ms"`
 	CostUnits            float64              `json:"cost_units"`
+	NormalizedCommands   []NormalizedCommand  `json:"normalized_commands,omitempty"`
 	MilestonesCompleted  []string             `json:"milestones_completed,omitempty"`
 	Evidence             []EvidenceCheckpoint `json:"evidence,omitempty"`
 	PolicyBreaches       []CommandEvent       `json:"policy_breaches,omitempty"`
@@ -130,6 +131,14 @@ type CommandEvent struct {
 	Minefield       string  `json:"minefield,omitempty"`
 	ElapsedMS       int     `json:"elapsed_ms,omitempty"`
 	CostUnits       float64 `json:"cost_units,omitempty"`
+}
+
+type NormalizedCommand struct {
+	Turn       int             `json:"turn,omitempty"`
+	Tool       string          `json:"tool"`
+	Args       json.RawMessage `json:"args"`
+	EvidenceID string          `json:"evidence_id,omitempty"`
+	StateHash  string          `json:"state_hash,omitempty"`
 }
 
 type EvidenceCheckpoint struct {
@@ -337,10 +346,12 @@ func runRaw(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	done := map[string]bool{}
 	for _, step := range task.Trace {
 		tool, args, _ := NormalizeCommand(task, step)
+		cp := evidenceCheckpoint(task, step, tool)
+		out.NormalizedCommands = append(out.NormalizedCommands, normalizedCommand(step, tool, args, cp))
 		v := adjudicate(ctx, adj, tool, args)
 		ev := commandEvent(step, tool, v)
 		out.Verdicts = append(out.Verdicts, ev)
-		out.Evidence = append(out.Evidence, evidenceCheckpoint(task, step, tool))
+		out.Evidence = append(out.Evidence, cp)
 		out.RuntimeMS += positive(step.ElapsedMS)
 		out.CostUnits += step.CostUnits
 		if v.Kind == abi.VerdictDeny {
@@ -366,6 +377,8 @@ func runFak(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	done := map[string]bool{}
 	for _, step := range task.Trace {
 		tool, args, _ := NormalizeCommand(task, step)
+		cp := evidenceCheckpoint(task, step, tool)
+		out.NormalizedCommands = append(out.NormalizedCommands, normalizedCommand(step, tool, args, cp))
 		v := adjudicate(ctx, adj, tool, args)
 		ev := commandEvent(step, tool, v)
 		out.Verdicts = append(out.Verdicts, ev)
@@ -383,7 +396,7 @@ func runFak(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 			continue
 		}
 		out.ExecutedCommands++
-		out.Evidence = append(out.Evidence, evidenceCheckpoint(task, step, tool))
+		out.Evidence = append(out.Evidence, cp)
 		out.RuntimeMS += positive(step.ElapsedMS)
 		out.CostUnits += step.CostUnits
 		if step.Minefield != "" {
@@ -420,6 +433,16 @@ func commandEvent(step CommandStep, tool string, v abi.Verdict) CommandEvent {
 		Minefield:       step.Minefield,
 		ElapsedMS:       step.ElapsedMS,
 		CostUnits:       step.CostUnits,
+	}
+}
+
+func normalizedCommand(step CommandStep, tool string, args json.RawMessage, cp EvidenceCheckpoint) NormalizedCommand {
+	return NormalizedCommand{
+		Turn:       step.Turn,
+		Tool:       tool,
+		Args:       append(json.RawMessage(nil), args...),
+		EvidenceID: cp.ID,
+		StateHash:  cp.StateHash,
 	}
 }
 

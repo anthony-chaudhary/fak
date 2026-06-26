@@ -83,6 +83,17 @@ func TestRunCommandBoundarySmoke(t *testing.T) {
 	if got := report.Summary.Fak.EvidenceCompleteness; got != 1 {
 		t.Fatalf("fak evidence completeness = %.3f, want 1", got)
 	}
+	task := report.Tasks[0]
+	if len(task.Fak.NormalizedCommands) != 4 {
+		t.Fatalf("fak normalized commands = %d, want 4", len(task.Fak.NormalizedCommands))
+	}
+	lastCommand := task.Fak.NormalizedCommands[3]
+	if lastCommand.Tool != "terminal.exec" || lastCommand.EvidenceID == "" || lastCommand.StateHash == "" {
+		t.Fatalf("last normalized command missing tool/evidence: %+v", lastCommand)
+	}
+	if !strings.Contains(string(lastCommand.Args), `"command":"rm -rf /"`) {
+		t.Fatalf("last normalized command args do not preserve command: %s", lastCommand.Args)
+	}
 }
 
 func TestNormalizeCommand(t *testing.T) {
@@ -135,7 +146,7 @@ func TestRenderMarkdownIncludesAcceptanceMetrics(t *testing.T) {
 		},
 	}
 	md := RenderMarkdown(report)
-	for _, want := range []string{"safe resolve", "blocked dangerous", "unnecessary blocks", "denied commands", "Result claim allowed"} {
+	for _, want := range []string{"safe resolve", "blocked dangerous", "unnecessary blocks", "denied commands", "normalized commands", "Result claim allowed"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

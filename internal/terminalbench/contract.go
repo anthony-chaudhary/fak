@@ -27,21 +27,22 @@ type OfficialRunContractInput struct {
 }
 
 type OfficialRunContract struct {
-	Schema               string                `json:"schema"`
-	GeneratedAt          string                `json:"generated_at"`
-	Benchmark            string                `json:"benchmark"`
-	Status               string                `json:"status"`
-	EvidenceClass        string                `json:"evidence_class"`
-	ClaimBoundary        string                `json:"claim_boundary"`
-	LocalFixtureArtifact string                `json:"local_fixture_artifact,omitempty"`
-	TaskSelection        ContractTaskSelection `json:"task_selection"`
-	Model                ContractModel         `json:"model"`
-	Arms                 []ContractArm         `json:"arms"`
-	UpstreamRefs         []UpstreamRef         `json:"upstream_refs"`
-	Gates                []ContractGate        `json:"gates"`
-	CompareMetrics       []string              `json:"compare_metrics"`
-	RequiredBeforeClaim  []string              `json:"required_before_claim"`
-	ResultClaimAllowed   bool                  `json:"result_claim_allowed"`
+	Schema               string                    `json:"schema"`
+	GeneratedAt          string                    `json:"generated_at"`
+	Benchmark            string                    `json:"benchmark"`
+	Status               string                    `json:"status"`
+	EvidenceClass        string                    `json:"evidence_class"`
+	ClaimBoundary        string                    `json:"claim_boundary"`
+	LocalFixtureArtifact string                    `json:"local_fixture_artifact,omitempty"`
+	TaskSelection        ContractTaskSelection     `json:"task_selection"`
+	Model                ContractModel             `json:"model"`
+	Arms                 []ContractArm             `json:"arms"`
+	ScoreEvidenceLink    ContractScoreEvidenceLink `json:"score_evidence_link"`
+	UpstreamRefs         []UpstreamRef             `json:"upstream_refs"`
+	Gates                []ContractGate            `json:"gates"`
+	CompareMetrics       []string                  `json:"compare_metrics"`
+	RequiredBeforeClaim  []string                  `json:"required_before_claim"`
+	ResultClaimAllowed   bool                      `json:"result_claim_allowed"`
 }
 
 type ContractTaskSelection struct {
@@ -78,6 +79,14 @@ type ContractArm struct {
 	Command           string   `json:"command"`
 	OutputDir         string   `json:"output_dir"`
 	RequiredArtifacts []string `json:"required_artifacts"`
+}
+
+type ContractScoreEvidenceLink struct {
+	Required                bool     `json:"required"`
+	OfficialTestArtifacts   []string `json:"official_test_artifacts"`
+	FakCommandEvidenceFiles []string `json:"fak_command_evidence_files"`
+	JoinKeys                []string `json:"join_keys"`
+	Detail                  string   `json:"detail"`
 }
 
 type UpstreamRef struct {
@@ -176,6 +185,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 				},
 			},
 		},
+		ScoreEvidenceLink: terminalBenchScoreEvidenceLink(in.RawOutputDir, in.FakOutputDir),
 		UpstreamRefs: []UpstreamRef{
 			{
 				Name:  "Terminal-Bench first steps",
@@ -257,6 +267,13 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n", arm.Name, arm.Harness, arm.OutputDir, mdCell(arm.Command))
 	}
 
+	fmt.Fprintf(&b, "\n## Score Evidence Link\n\n")
+	fmt.Fprintf(&b, "- Required: `%t`\n", c.ScoreEvidenceLink.Required)
+	fmt.Fprintf(&b, "- Official test artifacts: `%s`\n", strings.Join(c.ScoreEvidenceLink.OfficialTestArtifacts, "`, `"))
+	fmt.Fprintf(&b, "- fak command evidence files: `%s`\n", strings.Join(c.ScoreEvidenceLink.FakCommandEvidenceFiles, "`, `"))
+	fmt.Fprintf(&b, "- Join keys: `%s`\n", strings.Join(c.ScoreEvidenceLink.JoinKeys, "`, `"))
+	fmt.Fprintf(&b, "- Detail: %s\n", c.ScoreEvidenceLink.Detail)
+
 	fmt.Fprintf(&b, "\n## Gates\n\n")
 	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
 	fmt.Fprintf(&b, "|---|:---:|---|\n")
@@ -273,6 +290,39 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		fmt.Fprintf(&b, "- %s\n", req)
 	}
 	return b.String()
+}
+
+func terminalBenchScoreEvidenceLink(rawOutputDir, fakOutputDir string) ContractScoreEvidenceLink {
+	return ContractScoreEvidenceLink{
+		Required: true,
+		OfficialTestArtifacts: []string{
+			joinArtifactPath(rawOutputDir, "tb-results.json"),
+			joinArtifactPath(rawOutputDir, "command-log.jsonl"),
+			joinArtifactPath(fakOutputDir, "tb-results.json"),
+			joinArtifactPath(fakOutputDir, "command-log.jsonl"),
+		},
+		FakCommandEvidenceFiles: []string{
+			joinArtifactPath(fakOutputDir, "fak-command-evidence.jsonl"),
+			joinArtifactPath(fakOutputDir, "raw-fak-command-join.json"),
+		},
+		JoinKeys: []string{
+			"task_id",
+			"turn_or_command_index",
+			"command",
+			"cwd",
+			"evidence_id",
+			"state_hash",
+		},
+		Detail: "The official compare artifact must join Terminal-Bench test/pass rows and command logs to the mediated fak command verdict and evidence checkpoint for the same task command.",
+	}
+}
+
+func joinArtifactPath(dir, leaf string) string {
+	dir = strings.TrimRight(strings.TrimSpace(dir), "/\\")
+	if dir == "" {
+		return leaf
+	}
+	return dir + "/" + leaf
 }
 
 func contractTaskCandidates(s Suite) []ContractTaskCandidate {
