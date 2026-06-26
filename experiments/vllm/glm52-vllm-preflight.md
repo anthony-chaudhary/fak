@@ -1,6 +1,6 @@
 # GLM-5.2 SGLang/vLLM serving-readiness preflight
 
-- Generated: `2026-06-26T19:04:12.987070Z`
+- Generated: `2026-06-26T19:14:11.944431Z`
 - Model: `zai-org/GLM-5.2` (753.0B)
 - Node verdict: **`BLOCKED_ARCH`**
 - GPU: `unknown` × `0` — `unknown` (cc `None`)
@@ -16,5 +16,7 @@
 > KV headroom is modeled as a flat 0.15 fraction of weights, independent of served context length. At long context (the serve script defaults to 131072, up to 1M) the real KV/activation working set is larger and not modeled here — verify on-node before committing to a high `--context-length`.
 
 After a READY/READY_PENDING_INSTALL node serves the endpoint, capture the issue-#130 evidence with `tools/glm52_serving_witness.py --base-url <url>/v1 --engine-cache-engine <engine>`.
+
+> **Flag naming.** `--base-url`/`--engine-cache-engine` are the witness runner's own (subcommand-scoped) arguments. The *same* OpenAI-compatible endpoint URL is what `fak serve` / `fak guard` front with `--base-url`, so the URL flag is `--base-url` end to end in this flow. A fleet loop that wraps serve + witness as subcommands may expose that one URL to its parent ship/run steps as `--upstream-base-url` — the same URL under a parent-scoped flag — while the witness keeps its subcommand-scoped `--base-url`.
 
 > **Scope of this witness.** It proves the *fak-fronts-an-external-engine* (SGLang/vLLM) form of #130 only — fak governs and fronts the weights an outside engine serves. It does **not** prove native in-kernel GLM-5.2 serving, which is the separate multi-month native track (`docs/notes/native-753b-track-staged-plan.md`; the external-vs-native evidence boundary is drawn in `docs/serving/glm52-full-size-serving-witness.md` §6).
