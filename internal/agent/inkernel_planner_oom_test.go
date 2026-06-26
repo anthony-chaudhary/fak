@@ -76,6 +76,40 @@ func TestRecoverDevicePanic_OtherPanicsAreNotHandled(t *testing.T) {
 	}
 }
 
+type oomRetryBackend struct {
+	compute.Backend
+	recycle   int
+	trim      int
+	trimLarge []int
+}
+
+func (b *oomRetryBackend) Recycle() { b.recycle++ }
+func (b *oomRetryBackend) Trim()    { b.trim++ }
+func (b *oomRetryBackend) TrimLarge(maxKeepBytes int) {
+	b.trimLarge = append(b.trimLarge, maxKeepBytes)
+}
+
+func TestPrepareDeviceOOMRetryTrimsIdlePoolsOnce(t *testing.T) {
+	be := &oomRetryBackend{Backend: compute.Default()}
+	p := &InKernelPlanner{modelID: "retry-test", backend: be}
+	err := &InKernelOOMError{Bytes: 1 << 20, Class: compute.MemoryScratchpad, Site: "transient"}
+	if !p.prepareDeviceOOMRetry(err) {
+		t.Fatal("typed in-kernel OOM on a trim-capable backend should prepare one retry")
+	}
+	if be.recycle != 1 || be.trim != 1 || len(be.trimLarge) != 1 || be.trimLarge[0] != 0 {
+		t.Fatalf("retry cleanup = recycle %d trim %d trimLarge %+v, want 1/1/[0]", be.recycle, be.trim, be.trimLarge)
+	}
+	if p.prepareDeviceOOMRetry(errors.New("ordinary upstream error")) {
+		t.Fatal("ordinary errors must not trigger device OOM retry cleanup")
+	}
+	if be.recycle != 1 || be.trim != 1 || len(be.trimLarge) != 1 {
+		t.Fatalf("non-OOM changed cleanup counters: recycle %d trim %d trimLarge %+v", be.recycle, be.trim, be.trimLarge)
+	}
+	if (&InKernelPlanner{backend: compute.Default()}).prepareDeviceOOMRetry(err) {
+		t.Fatal("backend without trim/recycle hooks must not claim a retry was prepared")
+	}
+}
+
 type capacityProbeBackend struct {
 	compute.Backend
 	total int64

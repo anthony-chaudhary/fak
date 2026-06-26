@@ -205,8 +205,11 @@ capacity precheck refusals, while `/debug/vars` includes the last site for drill
 turning dynamic sites into Prometheus labels.
 Honest fences: allocation OOM recovery is still panic/recover below the HAL, unknown
 capacity still fails open, generic allocation sites can still be `unknown`, resource-cap
-validation panics are not OOM, and no caller yet spills, demotes, or retries based on the
-class.
+validation panics are not OOM, and no caller yet spills or demotes live KV based on the
+class. The served backend path does make one narrow retry after a typed allocation OOM, but
+that retry only asks the backend to release idle transient pools (`Recycle`, `Trim`, or
+`TrimLarge(0)`) before rerunning the same request; a truly-too-large request still returns
+the typed OOM/capacity refusal.
 
 **Plank 3 — feed real pressure into the policy plane. _Shipped_ (#707).**
 `internal/engine.PlanPlacementForDevice` is the report→policy wire: it derives a live

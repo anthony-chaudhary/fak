@@ -325,6 +325,75 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 	return nil, false
 }
 
+type inKernelGenerateResult struct {
+	gen, promptTok, matched int
+	prefillS, decodeS       float64
+	stopped                 bool
+}
+
+func (p *InKernelPlanner) generateReusedRecovering(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := recoverDevicePanic(r); ok {
+				err = e
+				return
+			}
+			panic(r)
+		}
+	}()
+	gen, promptTok, matched, prefillS, decodeS, stopped := p.generateReused(ids, maxNew, temp, topP, topK, stops, emit)
+	return inKernelGenerateResult{
+		gen:       gen,
+		promptTok: promptTok,
+		matched:   matched,
+		prefillS:  prefillS,
+		decodeS:   decodeS,
+		stopped:   stopped,
+	}, nil
+}
+
+func (p *InKernelPlanner) generateReusedWithOOMRetry(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
+	res, err := p.generateReusedRecovering(ids, maxNew, temp, topP, topK, stops, emit)
+	if err == nil {
+		return res, nil
+	}
+	if !p.prepareDeviceOOMRetry(err) {
+		return inKernelGenerateResult{}, err
+	}
+	if onRetry != nil {
+		onRetry()
+	}
+	return p.generateReusedRecovering(ids, maxNew, temp, topP, topK, stops, emit)
+}
+
+func (p *InKernelPlanner) prepareDeviceOOMRetry(err error) bool {
+	if p == nil || p.backend == nil {
+		return false
+	}
+	var oom *InKernelOOMError
+	if !errors.As(err, &oom) {
+		return false
+	}
+	released := false
+	if r, ok := p.backend.(interface{ Recycle() }); ok {
+		r.Recycle()
+		released = true
+	}
+	if t, ok := p.backend.(interface{ Trim() }); ok {
+		t.Trim()
+		released = true
+	}
+	if t, ok := p.backend.(interface{ TrimLarge(int) }); ok {
+		t.TrimLarge(0)
+		released = true
+	}
+	if released {
+		log.Printf("inkernel_chat oom-retry model=%s backend=%s class=%s site=%s bytes=%d action=trim-idle-pools",
+			p.modelID, p.backend.Name(), oom.Class, oom.Site, oom.Bytes)
+	}
+	return released
+}
+
 func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	// An in-kernel device-allocation failure (e.g. OOM on a small GPU under a large Claude
 	// Code system prompt) panics deep below a CGO boundary with no error channel. Recover it
@@ -401,7 +470,13 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 			return nil, err
 		}
 	}
-	gen, promptTok, matched, prefillS, decodeS, stopped := p.generateReused(ids, maxNew, temp, topP, topK, stops, emit)
+	genRes, err := p.generateReusedWithOOMRetry(ids, maxNew, temp, topP, topK, stops, emit, func() {
+		sb.Reset()
+	})
+	if err != nil {
+		return nil, err
+	}
+	gen, promptTok, matched, prefillS, decodeS, stopped := genRes.gen, genRes.promptTok, genRes.matched, genRes.prefillS, genRes.decodeS, genRes.stopped
 	// finishReason is honest about WHY decode ended: "stop" when a token-ID stop or a
 	// per-request Stop sequence fired, "length" when maxNew was the only limit hit.
 	finishReason := "length"
