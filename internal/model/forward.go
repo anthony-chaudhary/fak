@@ -54,7 +54,16 @@ func (m *Model) Forward(ids []int) *Activations {
 		x[t] = append([]float32(nil), embed[id*H:(id+1)*H]...)
 		scaleEmbedInPlace(x[t], cfg) // Gemma sqrt(hidden); no-op for Llama
 	}
+	return m.forwardHiddenRows(x)
+}
 
+// forwardHiddenRows runs the decoder stack from already-materialized input embeddings.
+// Forward builds these rows from token ids; governed multimodal callers may splice in
+// externally-produced vision embeddings after admission checks.
+func (m *Model) forwardHiddenRows(x [][]float32) *Activations {
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	seq := len(x)
 	act := &Activations{Seq: seq, Hidden: [][]float32{flatten(x)}}
 	var glmDsaSharedTopK [][]int
 	gemma4 := cfg.isGemma4()
