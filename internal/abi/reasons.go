@@ -8,38 +8,40 @@
 package abi
 
 const (
-	ReasonNone           ReasonCode = iota // not a refusal
-	ReasonDefaultDeny                      // no policy affirmatively allowed it (fail-closed)
-	ReasonPolicyBlock                      // an explicit policy rule denied it
-	ReasonSelfModify                       // the call would modify the agent/kernel itself
-	ReasonLeaseHeld                        // a file-tree lease conflict (dos arbitrate)
-	ReasonTrustViolation                   // taint/scope violation (shared-result isolation)
-	ReasonMalformed                        // failed a grammar / arity well-formedness rung
-	ReasonMisroute                         // wrong tool or arg shape — MODEL-FIXABLE
-	ReasonRateLimited                      // throttled; retry after a wait
-	ReasonSecretExfil                      // result/args matched a secret pattern
-	ReasonUnwitnessed                      // require-witness gate had no corroboration
-	ReasonOversize                         // payload exceeded the context-admission budget
-	ReasonUnknownTool                      // tool not in the registry
-	// 14.. reserved for additive core reasons; register out-of-tree names via
+	ReasonNone             ReasonCode = iota // not a refusal
+	ReasonDefaultDeny                        // no policy affirmatively allowed it (fail-closed)
+	ReasonPolicyBlock                        // an explicit policy rule denied it
+	ReasonSelfModify                         // the call would modify the agent/kernel itself
+	ReasonLeaseHeld                          // a file-tree lease conflict (dos arbitrate)
+	ReasonTrustViolation                     // taint/scope violation (shared-result isolation)
+	ReasonMalformed                          // failed a grammar / arity well-formedness rung
+	ReasonMisroute                           // wrong tool or arg shape — MODEL-FIXABLE
+	ReasonRateLimited                        // throttled; retry after a wait
+	ReasonSecretExfil                        // result/args matched a secret pattern
+	ReasonUnwitnessed                        // require-witness gate had no corroboration
+	ReasonOversize                           // payload exceeded the context-admission budget
+	ReasonUnknownTool                        // tool not in the registry
+	ReasonSecretDiscovered                   // a tool RESULT bore a secret, caught on discovery (the on-discovery event; distinct from ReasonSecretExfil, the egress verdict) [#884]
+	// 15.. reserved for additive core reasons; register out-of-tree names via
 	// RegisterReason.
 	ReasonCoreMax ReasonCode = 1023
 )
 
 var coreReasonNames = map[ReasonCode]string{
-	ReasonNone:           "NONE",
-	ReasonDefaultDeny:    "DEFAULT_DENY",
-	ReasonPolicyBlock:    "POLICY_BLOCK",
-	ReasonSelfModify:     "SELF_MODIFY",
-	ReasonLeaseHeld:      "LEASE_HELD",
-	ReasonTrustViolation: "TRUST_VIOLATION",
-	ReasonMalformed:      "MALFORMED",
-	ReasonMisroute:       "MISROUTE",
-	ReasonRateLimited:    "RATE_LIMITED",
-	ReasonSecretExfil:    "SECRET_EXFIL",
-	ReasonUnwitnessed:    "UNWITNESSED",
-	ReasonOversize:       "OVERSIZE",
-	ReasonUnknownTool:    "UNKNOWN_TOOL",
+	ReasonNone:             "NONE",
+	ReasonDefaultDeny:      "DEFAULT_DENY",
+	ReasonPolicyBlock:      "POLICY_BLOCK",
+	ReasonSelfModify:       "SELF_MODIFY",
+	ReasonLeaseHeld:        "LEASE_HELD",
+	ReasonTrustViolation:   "TRUST_VIOLATION",
+	ReasonMalformed:        "MALFORMED",
+	ReasonMisroute:         "MISROUTE",
+	ReasonRateLimited:      "RATE_LIMITED",
+	ReasonSecretExfil:      "SECRET_EXFIL",
+	ReasonUnwitnessed:      "UNWITNESSED",
+	ReasonOversize:         "OVERSIZE",
+	ReasonUnknownTool:      "UNKNOWN_TOOL",
+	ReasonSecretDiscovered: "RESULT_SECRET_DISCOVERED",
 }
 
 // ReasonName resolves a reason code to its stable name, consulting the closed
@@ -115,8 +117,8 @@ func sortStrings(s []string) {
 }
 
 // CoreReasonCount is the size of the closed core vocabulary (excludes NONE) —
-// referenced by tests asserting the "12-reason" closed set.
-const CoreReasonCount = 12
+// referenced by tests asserting the closed reason set.
+const CoreReasonCount = 13
 
 func itoa(n uint64) string {
 	if n == 0 {

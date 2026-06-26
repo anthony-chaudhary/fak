@@ -65,6 +65,13 @@ import (
 	// the default build's abi.SemanticScreens() stays empty and the MMU is unchanged.
 	_ "github.com/anthony-chaudhary/fak/internal/wirescreen"
 
+	// On-discovery SECRET rung (rank 4, in front of normgate): classifies a
+	// credential found in a tool result as a discovery event (ReasonSecretDiscovered),
+	// quarantines it under refs/fak/secrets/<nonce>, and records a structured Finding.
+	// INERT unless FAK_SECRETGATE opts in — the default keeps the normgate-only secret
+	// path, so a registered-but-off rung is a no-op Defer in the fold.
+	_ "github.com/anthony-chaudhary/fak/internal/secretgate"
+
 	// Normalize-and-rescan admitter (rank 5, in front of ctxmmu): closes the
 	// obfuscation-evasion gap + provenance-gates trusted-local false positives.
 	_ "github.com/anthony-chaudhary/fak/internal/normgate"

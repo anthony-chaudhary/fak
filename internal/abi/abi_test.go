@@ -45,14 +45,14 @@ func TestABIGoldenFreeze(t *testing.T) {
 	}
 }
 
-// TestClosedReasonVocabulary asserts the closed 12-reason refusal vocabulary
-// (unit 19): every core reason resolves to a stable non-empty name and the count
-// matches the declared closed set.
+// TestClosedReasonVocabulary asserts the closed refusal vocabulary (unit 19):
+// every core reason resolves to a stable non-empty name and the count matches the
+// declared closed set.
 func TestClosedReasonVocabulary(t *testing.T) {
 	if len(coreReasonNames)-1 != CoreReasonCount { // -1 for ReasonNone
 		t.Fatalf("closed reason vocabulary size = %d, want %d", len(coreReasonNames)-1, CoreReasonCount)
 	}
-	for c := ReasonDefaultDeny; c <= ReasonUnknownTool; c++ {
+	for c := ReasonDefaultDeny; c <= ReasonSecretDiscovered; c++ {
 		if n := ReasonName(c); n == "" || n[0:1] == "R" && n[0:7] == "REASON_" {
 			t.Fatalf("core reason %d has no stable name: %q", c, n)
 		}
