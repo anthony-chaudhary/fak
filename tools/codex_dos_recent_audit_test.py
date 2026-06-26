@@ -284,6 +284,13 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertEqual(stop["top_active"][0]["origin"], "claude_transcript")
             self.assertEqual(stop["top_active"][0]["settlement_action"], "RECENT_REVIEW")
             self.assertEqual(stop["top_recent_active"][0]["session_id"], claude_session)
+            plan = stop["settlement_plan"]
+            self.assertEqual(plan["RECENT_REVIEW"][0]["session_id"], claude_session)
+            self.assertEqual(plan["RECENT_REVIEW"][0]["marker_path"], f".dos/stop-failures/{claude_session}.json")
+            self.assertEqual(plan["RECENT_REVIEW"][0]["settlement_action"], "RECENT_REVIEW")
+            self.assertEqual(plan["RECENT_REVIEW"][0]["origin"], "claude_transcript")
+            self.assertEqual(plan["HEALED_NONZERO"][0]["session_id"], hot_session)
+            self.assertEqual(plan["ZERO_TOTAL"][0]["session_id"], zero_session)
             found = [item for item in stop["recent"] if item["session_id"] == claude_session][0]
             self.assertEqual(found["transcript"]["status"], "FOUND")
             self.assertEqual(found["transcript"]["project"], "C--work-fak")
@@ -309,6 +316,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertIn('workspace_stop_failure_active_settlement_action_counts: `{"RECENT_REVIEW": 1}`', debt)
             self.assertIn("workspace_stop_failure_top_recent_active_sessions", debt)
             self.assertIn("workspace_stop_failure_top_active_sessions", debt)
+            self.assertIn("workspace_stop_failure_settlement_plan", debt)
             self.assertIn("workspace_stop_failure_transcript_evidence_tags", debt)
             self.assertIn("workspace_stop_failure_top_sessions", debt)
             encoded = json.dumps(report)

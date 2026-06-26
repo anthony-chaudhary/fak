@@ -34,7 +34,7 @@
       "HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE"
     ],
     "status": "WARN",
-    "stop_total": 57,
+    "stop_total": 51,
     "unknowns": []
   },
   "budgets": {
@@ -968,31 +968,31 @@
     "unknown_tree_warning_rate": 0.169815,
     "unknown_tree_warning_threshold": 0.02,
     "warned_sessions": 20,
-    "workspace_stop_failure_active_consecutive_total": 57,
-    "workspace_stop_failure_active_markers": 48,
+    "workspace_stop_failure_active_consecutive_total": 51,
+    "workspace_stop_failure_active_markers": 46,
     "workspace_stop_failure_active_origin_counts": {
       "claude_transcript": 33,
-      "dos_stream+claude_transcript": 11,
+      "dos_stream+claude_transcript": 9,
       "marker_only": 4
     },
     "workspace_stop_failure_active_recent_threshold_hours": 6,
     "workspace_stop_failure_active_settlement_action_counts": {
       "RECENT_REVIEW": 3,
       "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-      "STALE_RESET_CANDIDATE": 41
+      "STALE_RESET_CANDIDATE": 39
     },
-    "workspace_stop_failure_healed_nonzero_markers": 15,
-    "workspace_stop_failure_markers": 200,
-    "workspace_stop_failure_nonzero_markers": 63,
+    "workspace_stop_failure_healed_nonzero_markers": 14,
+    "workspace_stop_failure_markers": 197,
+    "workspace_stop_failure_nonzero_markers": 60,
     "workspace_stop_failure_nonzero_origin_counts": {
       "claude_transcript": 33,
-      "dos_stream+claude_transcript": 26,
+      "dos_stream+claude_transcript": 23,
       "marker_only": 4
     },
     "workspace_stop_failure_origin_counts": {
       "claude_transcript": 41,
       "dos_stream": 54,
-      "dos_stream+claude_transcript": 80,
+      "dos_stream+claude_transcript": 77,
       "marker_only": 25
     },
     "workspace_stop_failure_recent_active_consecutive_total": 3,
@@ -1005,62 +1005,62 @@
       "RECENT_REVIEW": 3
     },
     "workspace_stop_failure_settlement_action_counts": {
-      "HEALED_NONZERO": 15,
+      "HEALED_NONZERO": 14,
       "RECENT_REVIEW": 3,
       "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-      "STALE_RESET_CANDIDATE": 41,
+      "STALE_RESET_CANDIDATE": 39,
       "ZERO_TOTAL": 137
     },
-    "workspace_stop_failure_stale_active_consecutive_total": 54,
-    "workspace_stop_failure_stale_active_markers": 45,
+    "workspace_stop_failure_stale_active_consecutive_total": 48,
+    "workspace_stop_failure_stale_active_markers": 43,
     "workspace_stop_failure_stale_active_origin_counts": {
       "claude_transcript": 31,
-      "dos_stream+claude_transcript": 10,
+      "dos_stream+claude_transcript": 8,
       "marker_only": 4
     },
     "workspace_stop_failure_stale_active_settlement_action_counts": {
       "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-      "STALE_RESET_CANDIDATE": 41
+      "STALE_RESET_CANDIDATE": 39
     },
     "workspace_stop_failure_transcript_evidence_tags": {
-      "DENY_OR_BLOCKED_FEEDBACK": 19,
-      "HOOK_OR_API_WALL_FEEDBACK": 28,
-      "HOST_PERMISSION_INTERRUPT": 28,
-      "LARGE_TOOL_RESULT": 11,
+      "DENY_OR_BLOCKED_FEEDBACK": 16,
+      "HOOK_OR_API_WALL_FEEDBACK": 25,
+      "HOST_PERMISSION_INTERRUPT": 25,
+      "LARGE_TOOL_RESULT": 8,
       "SHELL_HEAVY_SESSION": 6,
-      "TOOL_ERROR_RECOVERY": 28
+      "TOOL_ERROR_RECOVERY": 25
     },
     "workspace_stop_failure_zero_markers": 137,
-    "workspace_stop_failures_total": 95
+    "workspace_stop_failures_total": 76
   },
   "workspace": "fak",
   "workspace_stop_failures": {
-    "active_consecutive_markers": 48,
-    "active_consecutive_total": 57,
+    "active_consecutive_markers": 46,
+    "active_consecutive_total": 51,
     "active_origin_counts": {
       "claude_transcript": 33,
-      "dos_stream+claude_transcript": 11,
+      "dos_stream+claude_transcript": 9,
       "marker_only": 4
     },
     "active_recent_threshold_hours": 6,
     "active_settlement_action_counts": {
       "RECENT_REVIEW": 3,
       "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-      "STALE_RESET_CANDIDATE": 41
+      "STALE_RESET_CANDIDATE": 39
     },
     "by_day": {
       "2026-06-25": {
-        "active_consecutive_markers": 48,
-        "active_consecutive_total": 57,
-        "healed_nonzero_markers": 13,
-        "markers": 194,
-        "max_consecutive": 4,
-        "nonzero_total_markers": 61,
+        "active_consecutive_markers": 46,
+        "active_consecutive_total": 51,
+        "healed_nonzero_markers": 12,
+        "markers": 191,
+        "max_consecutive": 3,
+        "nonzero_total_markers": 58,
         "recent_active_consecutive_markers": 3,
         "recent_active_consecutive_total": 3,
-        "stale_active_consecutive_markers": 45,
-        "stale_active_consecutive_total": 54,
-        "total_failures": 92
+        "stale_active_consecutive_markers": 43,
+        "stale_active_consecutive_total": 48,
+        "total_failures": 73
       },
       "2026-06-26": {
         "active_consecutive_markers": 0,
@@ -1076,26 +1076,26 @@
         "total_failures": 3
       }
     },
-    "healed_nonzero_markers": 15,
+    "healed_nonzero_markers": 14,
     "malformed_markers": 0,
-    "markers": 200,
-    "max_consecutive": 4,
+    "markers": 197,
+    "max_consecutive": 3,
     "nonzero_origin_counts": {
       "claude_transcript": 33,
-      "dos_stream+claude_transcript": 26,
+      "dos_stream+claude_transcript": 23,
       "marker_only": 4
     },
     "nonzero_settlement_action_counts": {
-      "HEALED_NONZERO": 15,
+      "HEALED_NONZERO": 14,
       "RECENT_REVIEW": 3,
       "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-      "STALE_RESET_CANDIDATE": 41
+      "STALE_RESET_CANDIDATE": 39
     },
-    "nonzero_total_markers": 63,
+    "nonzero_total_markers": 60,
     "origin_counts": {
       "claude_transcript": 41,
       "dos_stream": 54,
-      "dos_stream+claude_transcript": 80,
+      "dos_stream+claude_transcript": 77,
       "marker_only": 25
     },
     "path": ".dos/stop-failures",
@@ -1118,9 +1118,9 @@
     "recent": [
       {
         "active_recent": false,
-        "age_seconds": 260,
+        "age_seconds": 277,
         "consecutive": 0,
-        "mtime": "2026-06-26T02:21:59.667096Z",
+        "mtime": "2026-06-26T02:33:50.403469Z",
         "origin": "dos_stream+claude_transcript",
         "origin_labels": [
           "dos_stream",
@@ -1131,14 +1131,14 @@
         "total": 1,
         "transcript": {
           "account": ".claude",
-          "mtime": "2026-06-26T02:22:01.260418Z",
+          "mtime": "2026-06-26T02:38:00.197730Z",
           "project": "C--work-fak",
           "status": "FOUND"
         }
       },
       {
         "active_recent": false,
-        "age_seconds": 2292,
+        "age_seconds": 3019,
         "consecutive": 0,
         "mtime": "2026-06-26T01:48:07.814509Z",
         "origin": "dos_stream+claude_transcript",
@@ -1158,7 +1158,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 4186,
+        "age_seconds": 4914,
         "consecutive": 0,
         "mtime": "2026-06-26T01:16:33.683785Z",
         "origin": "dos_stream+claude_transcript",
@@ -1178,7 +1178,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 4335,
+        "age_seconds": 5063,
         "consecutive": 0,
         "mtime": "2026-06-26T01:14:04.129225Z",
         "origin": "dos_stream+claude_transcript",
@@ -1198,7 +1198,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 7852,
+        "age_seconds": 8580,
         "consecutive": 0,
         "mtime": "2026-06-26T00:15:27.122426Z",
         "origin": "dos_stream+claude_transcript",
@@ -1218,7 +1218,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 8547,
+        "age_seconds": 9275,
         "consecutive": 0,
         "mtime": "2026-06-26T00:03:52.194878Z",
         "origin": "dos_stream+claude_transcript",
@@ -1318,7 +1318,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 9569,
+        "age_seconds": 10297,
         "consecutive": 0,
         "mtime": "2026-06-25T23:46:50.096581Z",
         "origin": "claude_transcript",
@@ -1337,7 +1337,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 9801,
+        "age_seconds": 10529,
         "consecutive": 0,
         "mtime": "2026-06-25T23:42:57.967738Z",
         "origin": "dos_stream+claude_transcript",
@@ -1357,7 +1357,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 11728,
+        "age_seconds": 12456,
         "consecutive": 1,
         "mtime": "2026-06-25T23:10:51.602921Z",
         "origin": "claude_transcript",
@@ -1430,7 +1430,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 12317,
+        "age_seconds": 13044,
         "consecutive": 0,
         "mtime": "2026-06-25T23:01:02.895782Z",
         "origin": "dos_stream+claude_transcript",
@@ -1529,7 +1529,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 12869,
+        "age_seconds": 13597,
         "consecutive": 0,
         "mtime": "2026-06-25T22:51:50.739060Z",
         "origin": "dos_stream+claude_transcript",
@@ -1549,7 +1549,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 13128,
+        "age_seconds": 13856,
         "consecutive": 0,
         "mtime": "2026-06-25T22:47:31.247798Z",
         "origin": "dos_stream+claude_transcript",
@@ -1569,7 +1569,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 14054,
+        "age_seconds": 14782,
         "consecutive": 0,
         "mtime": "2026-06-25T22:32:05.340983Z",
         "origin": "claude_transcript",
@@ -1588,7 +1588,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 14197,
+        "age_seconds": 14925,
         "consecutive": 0,
         "mtime": "2026-06-25T22:29:42.599534Z",
         "origin": "claude_transcript",
@@ -1607,7 +1607,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 14254,
+        "age_seconds": 14982,
         "consecutive": 0,
         "mtime": "2026-06-25T22:28:44.988688Z",
         "origin": "claude_transcript",
@@ -1626,7 +1626,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 14297,
+        "age_seconds": 15025,
         "consecutive": 1,
         "mtime": "2026-06-25T22:28:02.588507Z",
         "origin": "claude_transcript",
@@ -1698,7 +1698,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 14571,
+        "age_seconds": 15299,
         "consecutive": 1,
         "mtime": "2026-06-25T22:23:28.082063Z",
         "origin": "dos_stream+claude_transcript",
@@ -1798,7 +1798,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 14652,
+        "age_seconds": 15380,
         "consecutive": 0,
         "mtime": "2026-06-25T22:22:07.221106Z",
         "origin": "dos_stream+claude_transcript",
@@ -1818,7 +1818,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 15270,
+        "age_seconds": 15998,
         "consecutive": 0,
         "mtime": "2026-06-25T22:11:49.370993Z",
         "origin": "dos_stream+claude_transcript",
@@ -1838,7 +1838,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 15424,
+        "age_seconds": 16152,
         "consecutive": 0,
         "mtime": "2026-06-25T22:09:15.518808Z",
         "origin": "dos_stream+claude_transcript",
@@ -1868,128 +1868,964 @@
     },
     "scope": "workspace StopFailure API-wall breaker markers; includes non-Codex hook sessions",
     "settlement_action_counts": {
-      "HEALED_NONZERO": 15,
+      "HEALED_NONZERO": 14,
       "RECENT_REVIEW": 3,
       "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-      "STALE_RESET_CANDIDATE": 41,
+      "STALE_RESET_CANDIDATE": 39,
       "ZERO_TOTAL": 137
     },
-    "stale_active_consecutive_markers": 45,
-    "stale_active_consecutive_total": 54,
-    "stale_active_origin_counts": {
-      "claude_transcript": 31,
-      "dos_stream+claude_transcript": 10,
-      "marker_only": 4
-    },
-    "stale_active_settlement_action_counts": {
-      "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-      "STALE_RESET_CANDIDATE": 41
-    },
-    "status": "WARN",
-    "summarized_transcripts": 28,
-    "top_active": [
-      {
-        "active_recent": false,
-        "age_seconds": 86244,
-        "consecutive": 4,
-        "mtime": "2026-06-25T02:28:55.308656Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "b33eca05-c71e-4a51-979b-b4c8bcb43b1e",
-        "settlement_action": "STALE_RESET_CANDIDATE",
-        "total": 4,
-        "transcript": {
-          "account": ".claude-a62988d9",
-          "mtime": "2026-06-25T04:40:40.664940Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 68,
-            "thinking": 66,
-            "tool_result": 112,
-            "tool_use": 112
-          },
-          "evidence_tags": [
+    "settlement_plan": {
+      "HEALED_NONZERO": [
+        {
+          "age_seconds": 66608,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/87a2adc1-653e-4c67-9243-d2058084029b.json",
+          "mtime": "2026-06-25T08:08:19.788300Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "87a2adc1-653e-4c67-9243-d2058084029b",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 4,
+          "transcript_evidence_tags": [
             "HOOK_OR_API_WALL_FEEDBACK",
             "HOST_PERMISSION_INTERRUPT",
             "DENY_OR_BLOCKED_FEEDBACK",
             "TOOL_ERROR_RECOVERY",
             "LARGE_TOOL_RESULT"
           ],
-          "first_timestamp": "2026-06-25T01:55:31.086Z",
-          "last_timestamp": "2026-06-25T04:30:47.506Z",
-          "lines": 552,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 13,
-            "denied": 5,
-            "error": 70,
-            "hook": 13,
-            "permission": 46
-          },
-          "max_tool_result_chars": 63955,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 244,
-            "user": 123
-          },
-          "row_type_counts": {
-            "assistant": 244,
-            "attachment": 35,
-            "file-history-snapshot": 22,
-            "last-prompt": 40,
-            "mode": 38,
-            "permission-mode": 38,
-            "queue-operation": 6,
-            "system": 6,
-            "user": 123
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Bash": 32,
-            "Edit": 18,
-            "Glob": 10,
-            "Grep": 10,
-            "Read": 18,
-            "TaskCreate": 4,
-            "TaskUpdate": 3,
-            "ToolSearch": 3,
-            "Workflow": 1,
-            "Write": 13
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 107,
-            "toolUseResult_str": 5,
-            "tool_result_error_text": 16,
-            "tool_result_list": 3,
-            "tool_result_other_text": 92,
-            "tool_result_permission_text": 1
-          }
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 13044,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/2b8682ae-ced6-402b-bcc8-21180e96d5b3.json",
+          "mtime": "2026-06-25T23:01:02.895782Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "2b8682ae-ced6-402b-bcc8-21180e96d5b3",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 3,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 9275,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/6dff026d-e10d-4708-ba61-d29727b6d859.json",
+          "mtime": "2026-06-26T00:03:52.194878Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "6dff026d-e10d-4708-ba61-d29727b6d859",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 28527,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/a9dd5c1c-af6e-4c28-8e08-98940a570503.json",
+          "mtime": "2026-06-25T18:43:00.656239Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "a9dd5c1c-af6e-4c28-8e08-98940a570503",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 35404,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/35522ab7-572c-4c8d-9869-1d1d4a9488d2.json",
+          "mtime": "2026-06-25T16:48:23.457243Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "35522ab7-572c-4c8d-9869-1d1d4a9488d2",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 277,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/aac6e2b1-ea31-462e-a6a4-3dabcfd855c7.json",
+          "mtime": "2026-06-26T02:33:50.403469Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "aac6e2b1-ea31-462e-a6a4-3dabcfd855c7",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 13597,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/388ce57e-bdff-4d97-89f7-96ce91e806d8.json",
+          "mtime": "2026-06-25T22:51:50.739060Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "388ce57e-bdff-4d97-89f7-96ce91e806d8",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 13856,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/4085a516-dd8c-4fee-8c64-480a375fa2bc.json",
+          "mtime": "2026-06-25T22:47:31.247798Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "4085a516-dd8c-4fee-8c64-480a375fa2bc",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 32026,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/f7b94e9f-787c-4da0-afb9-f7c69eb6b71a.json",
+          "mtime": "2026-06-25T17:44:40.875355Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "f7b94e9f-787c-4da0-afb9-f7c69eb6b71a",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 32042,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/4cdbfd35-407b-42e0-b72d-2c2fcead1f91.json",
+          "mtime": "2026-06-25T17:44:25.056539Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "4cdbfd35-407b-42e0-b72d-2c2fcead1f91",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 32260,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/c97a98f5-c300-4c36-8081-3fb4c0c9f469.json",
+          "mtime": "2026-06-25T17:40:47.663397Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "c97a98f5-c300-4c36-8081-3fb4c0c9f469",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 34508,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/e1701b1d-0cf4-4df3-b827-f4f7f847b3ae.json",
+          "mtime": "2026-06-25T17:03:19.410579Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "e1701b1d-0cf4-4df3-b827-f4f7f847b3ae",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 35442,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/a6db515d-409d-4251-bbad-e797096414ca.json",
+          "mtime": "2026-06-25T16:47:45.035088Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "a6db515d-409d-4251-bbad-e797096414ca",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 35711,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/fd89f33c-6a23-4317-a08b-3c9983c53e7f.json",
+          "mtime": "2026-06-25T16:43:16.436121Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "fd89f33c-6a23-4317-a08b-3c9983c53e7f",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
         }
-      },
+      ],
+      "RECENT_REVIEW": [
+        {
+          "age_seconds": 15299,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/3af9576f-4e22-4eac-bc59-fb7935196e31.json",
+          "mtime": "2026-06-25T22:23:28.082063Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
+          "settlement_action": "RECENT_REVIEW",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 12456,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6.json",
+          "mtime": "2026-06-25T23:10:51.602921Z",
+          "origin": "claude_transcript",
+          "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+          "settlement_action": "RECENT_REVIEW",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 15025,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/2a660dbb-9d35-4502-9a8c-5f14ceac1686.json",
+          "mtime": "2026-06-25T22:28:02.588507Z",
+          "origin": "claude_transcript",
+          "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
+          "settlement_action": "RECENT_REVIEW",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        }
+      ],
+      "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": [
+        {
+          "age_seconds": 79888,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/7c7bb07f-3da9-4730-ad17-24e183914d53.json",
+          "mtime": "2026-06-25T04:26:59.244803Z",
+          "origin": "marker_only",
+          "session_id": "7c7bb07f-3da9-4730-ad17-24e183914d53",
+          "settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": null,
+          "transcript_status": "MISSING"
+        },
+        {
+          "age_seconds": 79950,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/6647eaa0-116d-40d5-9fca-8294a2d5a358.json",
+          "mtime": "2026-06-25T04:25:57.432614Z",
+          "origin": "marker_only",
+          "session_id": "6647eaa0-116d-40d5-9fca-8294a2d5a358",
+          "settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": null,
+          "transcript_status": "MISSING"
+        },
+        {
+          "age_seconds": 79962,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/9329ab4e-407a-465c-842b-f9cebe6a656c.json",
+          "mtime": "2026-06-25T04:25:45.726205Z",
+          "origin": "marker_only",
+          "session_id": "9329ab4e-407a-465c-842b-f9cebe6a656c",
+          "settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": null,
+          "transcript_status": "MISSING"
+        },
+        {
+          "age_seconds": 79974,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/280c7951-65fc-4f79-ba79-e97dbc50f345.json",
+          "mtime": "2026-06-25T04:25:33.626440Z",
+          "origin": "marker_only",
+          "session_id": "280c7951-65fc-4f79-ba79-e97dbc50f345",
+          "settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": null,
+          "transcript_status": "MISSING"
+        }
+      ],
+      "STALE_RESET_CANDIDATE": [
+        {
+          "age_seconds": 81350,
+          "consecutive": 3,
+          "marker_path": ".dos/stop-failures/3f29f826-b400-476b-811c-374e61fd75ad.json",
+          "mtime": "2026-06-25T04:02:36.920330Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "3f29f826-b400-476b-811c-374e61fd75ad",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 3,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 36281,
+          "consecutive": 2,
+          "marker_path": ".dos/stop-failures/dde358da-6862-4e56-992a-e1527b02c89f.json",
+          "mtime": "2026-06-25T16:33:46.558971Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "dde358da-6862-4e56-992a-e1527b02c89f",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 82791,
+          "consecutive": 2,
+          "marker_path": ".dos/stop-failures/0b2c4844-23b3-4ccf-ab02-032c50cab607.json",
+          "mtime": "2026-06-25T03:38:35.921552Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "0b2c4844-23b3-4ccf-ab02-032c50cab607",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 83110,
+          "consecutive": 2,
+          "marker_path": ".dos/stop-failures/f7198142-f77b-47ba-8e9a-453ab3ea27e1.json",
+          "mtime": "2026-06-25T03:33:16.831990Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "f7198142-f77b-47ba-8e9a-453ab3ea27e1",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 83117,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/1f689f62-ef81-4862-ac09-2763a362f655.json",
+          "mtime": "2026-06-25T03:33:10.385686Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "1f689f62-ef81-4862-ac09-2763a362f655",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 85941,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/8f9a68cd-887a-44fa-8b74-0d41669b4509.json",
+          "mtime": "2026-06-25T02:46:06.241330Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "8f9a68cd-887a-44fa-8b74-0d41669b4509",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 35523,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/2cd19a7a-2b80-4497-a939-28638fc37de5.json",
+          "mtime": "2026-06-25T16:46:24.501834Z",
+          "origin": "claude_transcript",
+          "session_id": "2cd19a7a-2b80-4497-a939-28638fc37de5",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 35683,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/79afded4-7cce-46b3-84b8-9906f4bfdb17.json",
+          "mtime": "2026-06-25T16:43:44.511129Z",
+          "origin": "claude_transcript",
+          "session_id": "79afded4-7cce-46b3-84b8-9906f4bfdb17",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 36237,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/c414ab74-6d5e-4b2f-8a95-6e8fdba52054.json",
+          "mtime": "2026-06-25T16:34:30.580259Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "c414ab74-6d5e-4b2f-8a95-6e8fdba52054",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 36271,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/f6b5b4db-5f4e-4469-aaf4-d6676282c527.json",
+          "mtime": "2026-06-25T16:33:56.491980Z",
+          "origin": "claude_transcript",
+          "session_id": "f6b5b4db-5f4e-4469-aaf4-d6676282c527",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 38711,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/0ca65829-55f7-4e83-8395-d66af9a3667b.json",
+          "mtime": "2026-06-25T15:53:16.634806Z",
+          "origin": "claude_transcript",
+          "session_id": "0ca65829-55f7-4e83-8395-d66af9a3667b",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 41840,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/63679ca4-afe2-4af2-afff-3c603866e70c.json",
+          "mtime": "2026-06-25T15:01:07.219361Z",
+          "origin": "claude_transcript",
+          "session_id": "63679ca4-afe2-4af2-afff-3c603866e70c",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 41913,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/772509bb-0b67-49b5-8965-015ea43f1c3a.json",
+          "mtime": "2026-06-25T14:59:53.964482Z",
+          "origin": "claude_transcript",
+          "session_id": "772509bb-0b67-49b5-8965-015ea43f1c3a",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 42282,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/b13097c6-73f2-4aa5-a4fc-0fd80943b152.json",
+          "mtime": "2026-06-25T14:53:44.945273Z",
+          "origin": "claude_transcript",
+          "session_id": "b13097c6-73f2-4aa5-a4fc-0fd80943b152",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 61882,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/bc3770a3-ac59-4729-8406-fca08b2f5bd8.json",
+          "mtime": "2026-06-25T09:27:05.526678Z",
+          "origin": "claude_transcript",
+          "session_id": "bc3770a3-ac59-4729-8406-fca08b2f5bd8",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 64962,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/1c9b6d78-c64b-4340-a2c3-76f6033aa0dc.json",
+          "mtime": "2026-06-25T08:35:45.770057Z",
+          "origin": "claude_transcript",
+          "session_id": "1c9b6d78-c64b-4340-a2c3-76f6033aa0dc",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 79490,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/d71cc091-59bb-4a24-bebd-070c313e9393.json",
+          "mtime": "2026-06-25T04:33:37.489428Z",
+          "origin": "claude_transcript",
+          "session_id": "d71cc091-59bb-4a24-bebd-070c313e9393",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 80634,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/f479cbcd-60ed-42bf-99ec-1b5387fd5488.json",
+          "mtime": "2026-06-25T04:14:33.304870Z",
+          "origin": "claude_transcript",
+          "session_id": "f479cbcd-60ed-42bf-99ec-1b5387fd5488",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 80665,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/7bb1ea04-6ed1-40a8-9d6d-ad81ce787487.json",
+          "mtime": "2026-06-25T04:14:02.707823Z",
+          "origin": "claude_transcript",
+          "session_id": "7bb1ea04-6ed1-40a8-9d6d-ad81ce787487",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 80732,
+          "consecutive": 1,
+          "marker_path": ".dos/stop-failures/dfcc5059-fe2c-48ee-82f6-c48068ca72d0.json",
+          "mtime": "2026-06-25T04:12:55.470391Z",
+          "origin": "claude_transcript",
+          "session_id": "dfcc5059-fe2c-48ee-82f6-c48068ca72d0",
+          "settlement_action": "STALE_RESET_CANDIDATE",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        }
+      ],
+      "ZERO_TOTAL": [
+        {
+          "age_seconds": 3019,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/f9570e26-cb3b-45b7-8b9f-09cea89e58d8.json",
+          "mtime": "2026-06-26T01:48:07.814509Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "f9570e26-cb3b-45b7-8b9f-09cea89e58d8",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 4914,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/02a63915-2cf6-493b-a5a4-acb177897c0a.json",
+          "mtime": "2026-06-26T01:16:33.683785Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "02a63915-2cf6-493b-a5a4-acb177897c0a",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 5063,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/674f3746-4339-43d6-81e4-900d9d7a5bc4.json",
+          "mtime": "2026-06-26T01:14:04.129225Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "674f3746-4339-43d6-81e4-900d9d7a5bc4",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 8580,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/8a1ce5bb-1d6e-4071-bc24-7dfc2bae7647.json",
+          "mtime": "2026-06-26T00:15:27.122426Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "8a1ce5bb-1d6e-4071-bc24-7dfc2bae7647",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 10297,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/10a25ec0-3803-4fe7-92da-2e4ae182973a.json",
+          "mtime": "2026-06-25T23:46:50.096581Z",
+          "origin": "claude_transcript",
+          "session_id": "10a25ec0-3803-4fe7-92da-2e4ae182973a",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 10529,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/8a4e693c-7638-4a8c-bbfa-dabb41f8cee8.json",
+          "mtime": "2026-06-25T23:42:57.967738Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "8a4e693c-7638-4a8c-bbfa-dabb41f8cee8",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 14782,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/4a1b92c1-c5f0-46a6-aef6-02a91f29c5de.json",
+          "mtime": "2026-06-25T22:32:05.340983Z",
+          "origin": "claude_transcript",
+          "session_id": "4a1b92c1-c5f0-46a6-aef6-02a91f29c5de",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 14925,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/4266e596-e09b-4049-a7c7-f85322570d1d.json",
+          "mtime": "2026-06-25T22:29:42.599534Z",
+          "origin": "claude_transcript",
+          "session_id": "4266e596-e09b-4049-a7c7-f85322570d1d",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 14982,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/5f1c9876-41f3-455c-95a5-17e2425551f6.json",
+          "mtime": "2026-06-25T22:28:44.988688Z",
+          "origin": "claude_transcript",
+          "session_id": "5f1c9876-41f3-455c-95a5-17e2425551f6",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 15380,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/439cb1b3-8acd-471a-bd08-406e8a2000f4.json",
+          "mtime": "2026-06-25T22:22:07.221106Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "439cb1b3-8acd-471a-bd08-406e8a2000f4",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 15998,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/0c437c57-b888-43c4-8fef-1a2a9c884bc4.json",
+          "mtime": "2026-06-25T22:11:49.370993Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "0c437c57-b888-43c4-8fef-1a2a9c884bc4",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 16152,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/f4438b79-47c8-41cd-a98f-7fdc860bab18.json",
+          "mtime": "2026-06-25T22:09:15.518808Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "f4438b79-47c8-41cd-a98f-7fdc860bab18",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 16830,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/51fcb753-1667-4f79-ba74-58a8c800906e.json",
+          "mtime": "2026-06-25T21:57:57.037852Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "51fcb753-1667-4f79-ba74-58a8c800906e",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 17862,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/9b7bd6c7-ac36-433c-ae7a-618e8b96caa9.json",
+          "mtime": "2026-06-25T21:40:45.645524Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "9b7bd6c7-ac36-433c-ae7a-618e8b96caa9",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 22690,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/e2198d6b-5abe-4470-9548-e76fc3e985c9.json",
+          "mtime": "2026-06-25T20:20:17.626242Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "e2198d6b-5abe-4470-9548-e76fc3e985c9",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 22888,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/e5491dd7-fe6f-499c-9f6a-1822ac3994dd.json",
+          "mtime": "2026-06-25T20:16:59.629447Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "e5491dd7-fe6f-499c-9f6a-1822ac3994dd",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 23384,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/40dfbeac-dba5-4645-b183-944467ec5428.json",
+          "mtime": "2026-06-25T20:08:43.095085Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "40dfbeac-dba5-4645-b183-944467ec5428",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 23515,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/92c85f38-809a-48ca-a398-86f3269011df.json",
+          "mtime": "2026-06-25T20:06:32.516663Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "92c85f38-809a-48ca-a398-86f3269011df",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 23836,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/04593164-3578-438e-827a-9c6979837063.json",
+          "mtime": "2026-06-25T20:01:11.175688Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "04593164-3578-438e-827a-9c6979837063",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 26618,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/c78a0e0d-8347-4966-a787-cae2d8d5779b.json",
+          "mtime": "2026-06-25T19:14:49.225266Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "c78a0e0d-8347-4966-a787-cae2d8d5779b",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        }
+      ]
+    },
+    "stale_active_consecutive_markers": 43,
+    "stale_active_consecutive_total": 48,
+    "stale_active_origin_counts": {
+      "claude_transcript": 31,
+      "dos_stream+claude_transcript": 8,
+      "marker_only": 4
+    },
+    "stale_active_settlement_action_counts": {
+      "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
+      "STALE_RESET_CANDIDATE": 39
+    },
+    "status": "WARN",
+    "summarized_transcripts": 25,
+    "top_active": [
       {
         "active_recent": false,
-        "age_seconds": 80623,
+        "age_seconds": 81350,
         "consecutive": 3,
         "mtime": "2026-06-25T04:02:36.920330Z",
         "origin": "dos_stream+claude_transcript",
@@ -2089,7 +2925,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35553,
+        "age_seconds": 36281,
         "consecutive": 2,
         "mtime": "2026-06-25T16:33:46.558971Z",
         "origin": "dos_stream+claude_transcript",
@@ -2183,7 +3019,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82064,
+        "age_seconds": 82791,
         "consecutive": 2,
         "mtime": "2026-06-25T03:38:35.921552Z",
         "origin": "dos_stream+claude_transcript",
@@ -2281,7 +3117,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82383,
+        "age_seconds": 83110,
         "consecutive": 2,
         "mtime": "2026-06-25T03:33:16.831990Z",
         "origin": "dos_stream+claude_transcript",
@@ -2381,102 +3217,8 @@
         }
       },
       {
-        "active_recent": false,
-        "age_seconds": 86235,
-        "consecutive": 2,
-        "mtime": "2026-06-25T02:29:04.781052Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "3370708f-09ae-428b-b057-918ae8a1caf9",
-        "settlement_action": "STALE_RESET_CANDIDATE",
-        "total": 2,
-        "transcript": {
-          "account": ".claude-a62988d9",
-          "mtime": "2026-06-25T09:18:58.105613Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 125,
-            "thinking": 120,
-            "tool_result": 166,
-            "tool_use": 166
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "first_timestamp": "2026-06-25T01:23:33.111Z",
-          "last_timestamp": "2026-06-25T09:13:21.972Z",
-          "lines": 862,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 4,
-            "denied": 11,
-            "error": 135,
-            "hook": 26,
-            "permission": 64
-          },
-          "max_tool_result_chars": 31853,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 406,
-            "user": 182
-          },
-          "row_type_counts": {
-            "assistant": 406,
-            "attachment": 58,
-            "file-history-snapshot": 30,
-            "last-prompt": 57,
-            "mode": 55,
-            "permission-mode": 54,
-            "queue-operation": 7,
-            "system": 13,
-            "user": 182
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Bash": 61,
-            "Edit": 36,
-            "Grep": 15,
-            "Read": 44,
-            "Workflow": 1,
-            "Write": 9
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 160,
-            "toolUseResult_str": 6,
-            "tool_result_error_text": 38,
-            "tool_result_other_text": 127,
-            "tool_result_permission_text": 1
-          }
-        }
-      },
-      {
         "active_recent": true,
-        "age_seconds": 14571,
+        "age_seconds": 15299,
         "consecutive": 1,
         "mtime": "2026-06-25T22:23:28.082063Z",
         "origin": "dos_stream+claude_transcript",
@@ -2576,7 +3318,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82389,
+        "age_seconds": 83117,
         "consecutive": 1,
         "mtime": "2026-06-25T03:33:10.385686Z",
         "origin": "dos_stream+claude_transcript",
@@ -2674,7 +3416,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 85213,
+        "age_seconds": 85941,
         "consecutive": 1,
         "mtime": "2026-06-25T02:46:06.241330Z",
         "origin": "dos_stream+claude_transcript",
@@ -2773,7 +3515,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 11728,
+        "age_seconds": 12456,
         "consecutive": 1,
         "mtime": "2026-06-25T23:10:51.602921Z",
         "origin": "claude_transcript",
@@ -2846,7 +3588,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 14297,
+        "age_seconds": 15025,
         "consecutive": 1,
         "mtime": "2026-06-25T22:28:02.588507Z",
         "origin": "claude_transcript",
@@ -2918,7 +3660,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 34795,
+        "age_seconds": 35523,
         "consecutive": 1,
         "mtime": "2026-06-25T16:46:24.501834Z",
         "origin": "claude_transcript",
@@ -2993,7 +3735,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 34955,
+        "age_seconds": 35683,
         "consecutive": 1,
         "mtime": "2026-06-25T16:43:44.511129Z",
         "origin": "claude_transcript",
@@ -3062,7 +3804,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35509,
+        "age_seconds": 36237,
         "consecutive": 1,
         "mtime": "2026-06-25T16:34:30.580259Z",
         "origin": "dos_stream+claude_transcript",
@@ -3152,7 +3894,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35543,
+        "age_seconds": 36271,
         "consecutive": 1,
         "mtime": "2026-06-25T16:33:56.491980Z",
         "origin": "claude_transcript",
@@ -3221,7 +3963,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 37983,
+        "age_seconds": 38711,
         "consecutive": 1,
         "mtime": "2026-06-25T15:53:16.634806Z",
         "origin": "claude_transcript",
@@ -3290,7 +4032,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 41112,
+        "age_seconds": 41840,
         "consecutive": 1,
         "mtime": "2026-06-25T15:01:07.219361Z",
         "origin": "claude_transcript",
@@ -3359,7 +4101,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 41185,
+        "age_seconds": 41913,
         "consecutive": 1,
         "mtime": "2026-06-25T14:59:53.964482Z",
         "origin": "claude_transcript",
@@ -3428,7 +4170,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 41555,
+        "age_seconds": 42282,
         "consecutive": 1,
         "mtime": "2026-06-25T14:53:44.945273Z",
         "origin": "claude_transcript",
@@ -3497,7 +4239,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 61154,
+        "age_seconds": 61882,
         "consecutive": 1,
         "mtime": "2026-06-25T09:27:05.526678Z",
         "origin": "claude_transcript",
@@ -3563,207 +4305,150 @@
           "tool_counts": {},
           "tool_result_shape_counts": {}
         }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 64962,
+        "consecutive": 1,
+        "mtime": "2026-06-25T08:35:45.770057Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "1c9b6d78-c64b-4340-a2c3-76f6033aa0dc",
+        "settlement_action": "STALE_RESET_CANDIDATE",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-fef872f9",
+          "mtime": "2026-06-25T08:35:45.477187Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T08:35:44.318Z",
+          "last_timestamp": "2026-06-25T08:35:45.342Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 79490,
+        "consecutive": 1,
+        "mtime": "2026-06-25T04:33:37.489428Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "d71cc091-59bb-4a24-bebd-070c313e9393",
+        "settlement_action": "STALE_RESET_CANDIDATE",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T04:33:37.226813Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T04:33:36.165Z",
+          "last_timestamp": "2026-06-25T04:33:37.116Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
       }
     ],
     "top_nonzero": [
       {
         "active_recent": false,
-        "age_seconds": 86315,
-        "consecutive": 0,
-        "mtime": "2026-06-25T02:27:44.831894Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "f99d46c5-3080-4fc1-b942-f1422a6711e8",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 13,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:21:29.664000Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 102,
-            "thinking": 107,
-            "tool_result": 173,
-            "tool_use": 173
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "first_timestamp": "2026-06-25T01:21:29.650Z",
-          "last_timestamp": "2026-06-25T02:27:51.999Z",
-          "lines": 806,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 9,
-            "denied": 13,
-            "error": 140,
-            "hook": 30,
-            "permission": 65
-          },
-          "max_tool_result_chars": 49218,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 382,
-            "user": 179
-          },
-          "row_type_counts": {
-            "assistant": 382,
-            "attachment": 44,
-            "file-history-snapshot": 23,
-            "last-prompt": 56,
-            "mode": 57,
-            "permission-mode": 57,
-            "queue-operation": 6,
-            "system": 2,
-            "user": 179
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Bash": 49,
-            "Edit": 48,
-            "Glob": 4,
-            "Grep": 18,
-            "Read": 30,
-            "TaskCreate": 7,
-            "Workflow": 1,
-            "Write": 16
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 157,
-            "toolUseResult_str": 16,
-            "tool_result_error_text": 27,
-            "tool_result_other_text": 144,
-            "tool_result_permission_text": 2
-          }
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 86244,
-        "consecutive": 4,
-        "mtime": "2026-06-25T02:28:55.308656Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "b33eca05-c71e-4a51-979b-b4c8bcb43b1e",
-        "settlement_action": "STALE_RESET_CANDIDATE",
-        "total": 4,
-        "transcript": {
-          "account": ".claude-a62988d9",
-          "mtime": "2026-06-25T04:40:40.664940Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 68,
-            "thinking": 66,
-            "tool_result": 112,
-            "tool_use": 112
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "first_timestamp": "2026-06-25T01:55:31.086Z",
-          "last_timestamp": "2026-06-25T04:30:47.506Z",
-          "lines": 552,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 13,
-            "denied": 5,
-            "error": 70,
-            "hook": 13,
-            "permission": 46
-          },
-          "max_tool_result_chars": 63955,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 244,
-            "user": 123
-          },
-          "row_type_counts": {
-            "assistant": 244,
-            "attachment": 35,
-            "file-history-snapshot": 22,
-            "last-prompt": 40,
-            "mode": 38,
-            "permission-mode": 38,
-            "queue-operation": 6,
-            "system": 6,
-            "user": 123
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Bash": 32,
-            "Edit": 18,
-            "Glob": 10,
-            "Grep": 10,
-            "Read": 18,
-            "TaskCreate": 4,
-            "TaskUpdate": 3,
-            "ToolSearch": 3,
-            "Workflow": 1,
-            "Write": 13
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 107,
-            "toolUseResult_str": 5,
-            "tool_result_error_text": 16,
-            "tool_result_list": 3,
-            "tool_result_other_text": 92,
-            "tool_result_permission_text": 1
-          }
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 65880,
+        "age_seconds": 66608,
         "consecutive": 0,
         "mtime": "2026-06-25T08:08:19.788300Z",
         "origin": "dos_stream+claude_transcript",
@@ -3862,7 +4547,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 80623,
+        "age_seconds": 81350,
         "consecutive": 3,
         "mtime": "2026-06-25T04:02:36.920330Z",
         "origin": "dos_stream+claude_transcript",
@@ -3962,7 +4647,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 12317,
+        "age_seconds": 13044,
         "consecutive": 0,
         "mtime": "2026-06-25T23:01:02.895782Z",
         "origin": "dos_stream+claude_transcript",
@@ -4061,7 +4746,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35553,
+        "age_seconds": 36281,
         "consecutive": 2,
         "mtime": "2026-06-25T16:33:46.558971Z",
         "origin": "dos_stream+claude_transcript",
@@ -4155,7 +4840,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82064,
+        "age_seconds": 82791,
         "consecutive": 2,
         "mtime": "2026-06-25T03:38:35.921552Z",
         "origin": "dos_stream+claude_transcript",
@@ -4253,7 +4938,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82383,
+        "age_seconds": 83110,
         "consecutive": 2,
         "mtime": "2026-06-25T03:33:16.831990Z",
         "origin": "dos_stream+claude_transcript",
@@ -4353,102 +5038,8 @@
         }
       },
       {
-        "active_recent": false,
-        "age_seconds": 86235,
-        "consecutive": 2,
-        "mtime": "2026-06-25T02:29:04.781052Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "3370708f-09ae-428b-b057-918ae8a1caf9",
-        "settlement_action": "STALE_RESET_CANDIDATE",
-        "total": 2,
-        "transcript": {
-          "account": ".claude-a62988d9",
-          "mtime": "2026-06-25T09:18:58.105613Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 125,
-            "thinking": 120,
-            "tool_result": 166,
-            "tool_use": 166
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "first_timestamp": "2026-06-25T01:23:33.111Z",
-          "last_timestamp": "2026-06-25T09:13:21.972Z",
-          "lines": 862,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 4,
-            "denied": 11,
-            "error": 135,
-            "hook": 26,
-            "permission": 64
-          },
-          "max_tool_result_chars": 31853,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 406,
-            "user": 182
-          },
-          "row_type_counts": {
-            "assistant": 406,
-            "attachment": 58,
-            "file-history-snapshot": 30,
-            "last-prompt": 57,
-            "mode": 55,
-            "permission-mode": 54,
-            "queue-operation": 7,
-            "system": 13,
-            "user": 182
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Bash": 61,
-            "Edit": 36,
-            "Grep": 15,
-            "Read": 44,
-            "Workflow": 1,
-            "Write": 9
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 160,
-            "toolUseResult_str": 6,
-            "tool_result_error_text": 38,
-            "tool_result_other_text": 127,
-            "tool_result_permission_text": 1
-          }
-        }
-      },
-      {
         "active_recent": true,
-        "age_seconds": 14571,
+        "age_seconds": 15299,
         "consecutive": 1,
         "mtime": "2026-06-25T22:23:28.082063Z",
         "origin": "dos_stream+claude_transcript",
@@ -4548,7 +5139,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82389,
+        "age_seconds": 83117,
         "consecutive": 1,
         "mtime": "2026-06-25T03:33:10.385686Z",
         "origin": "dos_stream+claude_transcript",
@@ -4646,7 +5237,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 85213,
+        "age_seconds": 85941,
         "consecutive": 1,
         "mtime": "2026-06-25T02:46:06.241330Z",
         "origin": "dos_stream+claude_transcript",
@@ -4745,7 +5336,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 8547,
+        "age_seconds": 9275,
         "consecutive": 0,
         "mtime": "2026-06-26T00:03:52.194878Z",
         "origin": "dos_stream+claude_transcript",
@@ -4845,7 +5436,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 27799,
+        "age_seconds": 28527,
         "consecutive": 0,
         "mtime": "2026-06-25T18:43:00.656239Z",
         "origin": "dos_stream+claude_transcript",
@@ -4946,7 +5537,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 34676,
+        "age_seconds": 35404,
         "consecutive": 0,
         "mtime": "2026-06-25T16:48:23.457243Z",
         "origin": "dos_stream+claude_transcript",
@@ -5043,7 +5634,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 11728,
+        "age_seconds": 12456,
         "consecutive": 1,
         "mtime": "2026-06-25T23:10:51.602921Z",
         "origin": "claude_transcript",
@@ -5116,7 +5707,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 14297,
+        "age_seconds": 15025,
         "consecutive": 1,
         "mtime": "2026-06-25T22:28:02.588507Z",
         "origin": "claude_transcript",
@@ -5188,7 +5779,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 34795,
+        "age_seconds": 35523,
         "consecutive": 1,
         "mtime": "2026-06-25T16:46:24.501834Z",
         "origin": "claude_transcript",
@@ -5263,7 +5854,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 34955,
+        "age_seconds": 35683,
         "consecutive": 1,
         "mtime": "2026-06-25T16:43:44.511129Z",
         "origin": "claude_transcript",
@@ -5332,7 +5923,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35509,
+        "age_seconds": 36237,
         "consecutive": 1,
         "mtime": "2026-06-25T16:34:30.580259Z",
         "origin": "dos_stream+claude_transcript",
@@ -5419,12 +6010,219 @@
             "tool_result_permission_text": 1
           }
         }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 36271,
+        "consecutive": 1,
+        "mtime": "2026-06-25T16:33:56.491980Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "f6b5b4db-5f4e-4469-aaf4-d6676282c527",
+        "settlement_action": "STALE_RESET_CANDIDATE",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-fef872f9",
+          "mtime": "2026-06-25T16:33:56.013401Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T16:33:54.495Z",
+          "last_timestamp": "2026-06-25T16:33:55.757Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 38711,
+        "consecutive": 1,
+        "mtime": "2026-06-25T15:53:16.634806Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "0ca65829-55f7-4e83-8395-d66af9a3667b",
+        "settlement_action": "STALE_RESET_CANDIDATE",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-fef872f9",
+          "mtime": "2026-06-25T15:53:15.394080Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T15:53:11.425Z",
+          "last_timestamp": "2026-06-25T15:53:15.018Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 41840,
+        "consecutive": 1,
+        "mtime": "2026-06-25T15:01:07.219361Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "63679ca4-afe2-4af2-afff-3c603866e70c",
+        "settlement_action": "STALE_RESET_CANDIDATE",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-fef872f9",
+          "mtime": "2026-06-25T15:01:06.011053Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T15:01:03.036Z",
+          "last_timestamp": "2026-06-25T15:01:05.799Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
       }
     ],
     "top_recent_active": [
       {
         "active_recent": true,
-        "age_seconds": 14571,
+        "age_seconds": 15299,
         "consecutive": 1,
         "mtime": "2026-06-25T22:23:28.082063Z",
         "origin": "dos_stream+claude_transcript",
@@ -5524,7 +6322,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 11728,
+        "age_seconds": 12456,
         "consecutive": 1,
         "mtime": "2026-06-25T23:10:51.602921Z",
         "origin": "claude_transcript",
@@ -5597,7 +6395,7 @@
       },
       {
         "active_recent": true,
-        "age_seconds": 14297,
+        "age_seconds": 15025,
         "consecutive": 1,
         "mtime": "2026-06-25T22:28:02.588507Z",
         "origin": "claude_transcript",
@@ -5671,106 +6469,7 @@
     "top_stale_active": [
       {
         "active_recent": false,
-        "age_seconds": 86244,
-        "consecutive": 4,
-        "mtime": "2026-06-25T02:28:55.308656Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "b33eca05-c71e-4a51-979b-b4c8bcb43b1e",
-        "settlement_action": "STALE_RESET_CANDIDATE",
-        "total": 4,
-        "transcript": {
-          "account": ".claude-a62988d9",
-          "mtime": "2026-06-25T04:40:40.664940Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 68,
-            "thinking": 66,
-            "tool_result": 112,
-            "tool_use": 112
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "first_timestamp": "2026-06-25T01:55:31.086Z",
-          "last_timestamp": "2026-06-25T04:30:47.506Z",
-          "lines": 552,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 13,
-            "denied": 5,
-            "error": 70,
-            "hook": 13,
-            "permission": 46
-          },
-          "max_tool_result_chars": 63955,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 244,
-            "user": 123
-          },
-          "row_type_counts": {
-            "assistant": 244,
-            "attachment": 35,
-            "file-history-snapshot": 22,
-            "last-prompt": 40,
-            "mode": 38,
-            "permission-mode": 38,
-            "queue-operation": 6,
-            "system": 6,
-            "user": 123
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Bash": 32,
-            "Edit": 18,
-            "Glob": 10,
-            "Grep": 10,
-            "Read": 18,
-            "TaskCreate": 4,
-            "TaskUpdate": 3,
-            "ToolSearch": 3,
-            "Workflow": 1,
-            "Write": 13
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 107,
-            "toolUseResult_str": 5,
-            "tool_result_error_text": 16,
-            "tool_result_list": 3,
-            "tool_result_other_text": 92,
-            "tool_result_permission_text": 1
-          }
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 80623,
+        "age_seconds": 81350,
         "consecutive": 3,
         "mtime": "2026-06-25T04:02:36.920330Z",
         "origin": "dos_stream+claude_transcript",
@@ -5870,7 +6569,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35553,
+        "age_seconds": 36281,
         "consecutive": 2,
         "mtime": "2026-06-25T16:33:46.558971Z",
         "origin": "dos_stream+claude_transcript",
@@ -5964,7 +6663,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82064,
+        "age_seconds": 82791,
         "consecutive": 2,
         "mtime": "2026-06-25T03:38:35.921552Z",
         "origin": "dos_stream+claude_transcript",
@@ -6062,7 +6761,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 82383,
+        "age_seconds": 83110,
         "consecutive": 2,
         "mtime": "2026-06-25T03:33:16.831990Z",
         "origin": "dos_stream+claude_transcript",
@@ -6163,101 +6862,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 86235,
-        "consecutive": 2,
-        "mtime": "2026-06-25T02:29:04.781052Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "3370708f-09ae-428b-b057-918ae8a1caf9",
-        "settlement_action": "STALE_RESET_CANDIDATE",
-        "total": 2,
-        "transcript": {
-          "account": ".claude-a62988d9",
-          "mtime": "2026-06-25T09:18:58.105613Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 125,
-            "thinking": 120,
-            "tool_result": 166,
-            "tool_use": 166
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "first_timestamp": "2026-06-25T01:23:33.111Z",
-          "last_timestamp": "2026-06-25T09:13:21.972Z",
-          "lines": 862,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 4,
-            "denied": 11,
-            "error": 135,
-            "hook": 26,
-            "permission": 64
-          },
-          "max_tool_result_chars": 31853,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 406,
-            "user": 182
-          },
-          "row_type_counts": {
-            "assistant": 406,
-            "attachment": 58,
-            "file-history-snapshot": 30,
-            "last-prompt": 57,
-            "mode": 55,
-            "permission-mode": 54,
-            "queue-operation": 7,
-            "system": 13,
-            "user": 182
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Bash": 61,
-            "Edit": 36,
-            "Grep": 15,
-            "Read": 44,
-            "Workflow": 1,
-            "Write": 9
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 160,
-            "toolUseResult_str": 6,
-            "tool_result_error_text": 38,
-            "tool_result_other_text": 127,
-            "tool_result_permission_text": 1
-          }
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 82389,
+        "age_seconds": 83117,
         "consecutive": 1,
         "mtime": "2026-06-25T03:33:10.385686Z",
         "origin": "dos_stream+claude_transcript",
@@ -6355,7 +6960,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 85213,
+        "age_seconds": 85941,
         "consecutive": 1,
         "mtime": "2026-06-25T02:46:06.241330Z",
         "origin": "dos_stream+claude_transcript",
@@ -6454,7 +7059,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 34795,
+        "age_seconds": 35523,
         "consecutive": 1,
         "mtime": "2026-06-25T16:46:24.501834Z",
         "origin": "claude_transcript",
@@ -6529,7 +7134,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 34955,
+        "age_seconds": 35683,
         "consecutive": 1,
         "mtime": "2026-06-25T16:43:44.511129Z",
         "origin": "claude_transcript",
@@ -6598,7 +7203,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35509,
+        "age_seconds": 36237,
         "consecutive": 1,
         "mtime": "2026-06-25T16:34:30.580259Z",
         "origin": "dos_stream+claude_transcript",
@@ -6688,7 +7293,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 35543,
+        "age_seconds": 36271,
         "consecutive": 1,
         "mtime": "2026-06-25T16:33:56.491980Z",
         "origin": "claude_transcript",
@@ -6757,7 +7362,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 37983,
+        "age_seconds": 38711,
         "consecutive": 1,
         "mtime": "2026-06-25T15:53:16.634806Z",
         "origin": "claude_transcript",
@@ -6826,7 +7431,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 41112,
+        "age_seconds": 41840,
         "consecutive": 1,
         "mtime": "2026-06-25T15:01:07.219361Z",
         "origin": "claude_transcript",
@@ -6895,7 +7500,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 41185,
+        "age_seconds": 41913,
         "consecutive": 1,
         "mtime": "2026-06-25T14:59:53.964482Z",
         "origin": "claude_transcript",
@@ -6964,7 +7569,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 41555,
+        "age_seconds": 42282,
         "consecutive": 1,
         "mtime": "2026-06-25T14:53:44.945273Z",
         "origin": "claude_transcript",
@@ -7033,7 +7638,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 61154,
+        "age_seconds": 61882,
         "consecutive": 1,
         "mtime": "2026-06-25T09:27:05.526678Z",
         "origin": "claude_transcript",
@@ -7102,7 +7707,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 64234,
+        "age_seconds": 64962,
         "consecutive": 1,
         "mtime": "2026-06-25T08:35:45.770057Z",
         "origin": "claude_transcript",
@@ -7171,7 +7776,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 78762,
+        "age_seconds": 79490,
         "consecutive": 1,
         "mtime": "2026-06-25T04:33:37.489428Z",
         "origin": "claude_transcript",
@@ -7240,7 +7845,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 79160,
+        "age_seconds": 79888,
         "consecutive": 1,
         "mtime": "2026-06-25T04:26:59.244803Z",
         "origin": "marker_only",
@@ -7253,16 +7858,48 @@
         "transcript": {
           "status": "MISSING"
         }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 79950,
+        "consecutive": 1,
+        "mtime": "2026-06-25T04:25:57.432614Z",
+        "origin": "marker_only",
+        "origin_labels": [
+          "marker_only"
+        ],
+        "session_id": "6647eaa0-116d-40d5-9fca-8294a2d5a358",
+        "settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+        "total": 1,
+        "transcript": {
+          "status": "MISSING"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 79962,
+        "consecutive": 1,
+        "mtime": "2026-06-25T04:25:45.726205Z",
+        "origin": "marker_only",
+        "origin_labels": [
+          "marker_only"
+        ],
+        "session_id": "9329ab4e-407a-465c-842b-f9cebe6a656c",
+        "settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+        "total": 1,
+        "transcript": {
+          "status": "MISSING"
+        }
       }
     ],
-    "total_failures": 95,
+    "total_failures": 76,
     "transcript_evidence_tag_counts": {
-      "DENY_OR_BLOCKED_FEEDBACK": 19,
-      "HOOK_OR_API_WALL_FEEDBACK": 28,
-      "HOST_PERMISSION_INTERRUPT": 28,
-      "LARGE_TOOL_RESULT": 11,
+      "DENY_OR_BLOCKED_FEEDBACK": 16,
+      "HOOK_OR_API_WALL_FEEDBACK": 25,
+      "HOST_PERMISSION_INTERRUPT": 25,
+      "LARGE_TOOL_RESULT": 8,
       "SHELL_HEAVY_SESSION": 6,
-      "TOOL_ERROR_RECOVERY": 28
+      "TOOL_ERROR_RECOVERY": 25
     },
     "zero_total_markers": 137
   }

@@ -31,7 +31,7 @@
       "status": "PASS"
     },
     {
-      "detail": "audit=WARN actionability=WARN workspace_stop_failures=95 active_consecutive=57 reasons=['stop blocks or uncleared StopFailure API-wall breaker markers are present'] residual=['HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE'] post_gate={}",
+      "detail": "audit=WARN actionability=WARN workspace_stop_failures=76 active_consecutive=51 reasons=['stop blocks or uncleared StopFailure API-wall breaker markers are present'] residual=['HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE'] post_gate={}",
       "name": "historical codex/dos actionability",
       "status": "PASS"
     },
@@ -70,20 +70,20 @@
     {
       "code": "WORKSPACE_RECENT_STOPFAILURE_API_WALL",
       "evidence": {
-        "active_consecutive_total": 57,
-        "active_markers": 48,
+        "active_consecutive_total": 51,
+        "active_markers": 46,
         "active_recent_threshold_hours": 6,
         "active_settlement_action_counts": {
           "RECENT_REVIEW": 3,
           "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-          "STALE_RESET_CANDIDATE": 41
+          "STALE_RESET_CANDIDATE": 39
         },
-        "healed_nonzero_markers": 15,
-        "one_day_failures_total": 95,
+        "healed_nonzero_markers": 14,
+        "one_day_failures_total": 76,
         "origin_counts": {
           "claude_transcript": 41,
           "dos_stream": 54,
-          "dos_stream+claude_transcript": 80,
+          "dos_stream+claude_transcript": 77,
           "marker_only": 25
         },
         "recent_active_consecutive_total": 3,
@@ -95,19 +95,9 @@
         "recent_active_settlement_action_counts": {
           "RECENT_REVIEW": 3
         },
-        "stale_active_consecutive_total": 54,
-        "stale_active_markers": 45,
-        "stale_active_origin_counts": {
-          "claude_transcript": 31,
-          "dos_stream+claude_transcript": 10,
-          "marker_only": 4
-        },
-        "stale_active_settlement_action_counts": {
-          "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-          "STALE_RESET_CANDIDATE": 41
-        },
-        "top_recent_active_sessions": [
+        "recent_review_plan": [
           {
+            "age_seconds": 15299,
             "consecutive": 1,
             "evidence_tags": [
               "HOOK_OR_API_WALL_FEEDBACK",
@@ -115,12 +105,16 @@
               "DENY_OR_BLOCKED_FEEDBACK",
               "TOOL_ERROR_RECOVERY"
             ],
+            "marker_path": ".dos/stop-failures/3af9576f-4e22-4eac-bc59-fb7935196e31.json",
+            "origin": "dos_stream+claude_transcript",
             "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
+            "settlement_action": "RECENT_REVIEW",
             "total": 2,
             "transcript_project": "C--work-fak",
             "transcript_status": "FOUND"
           },
           {
+            "age_seconds": 12456,
             "consecutive": 1,
             "evidence_tags": [
               "HOOK_OR_API_WALL_FEEDBACK",
@@ -128,12 +122,16 @@
               "DENY_OR_BLOCKED_FEEDBACK",
               "TOOL_ERROR_RECOVERY"
             ],
+            "marker_path": ".dos/stop-failures/e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6.json",
+            "origin": "claude_transcript",
             "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+            "settlement_action": "RECENT_REVIEW",
             "total": 1,
             "transcript_project": "C--work-fak",
             "transcript_status": "FOUND"
           },
           {
+            "age_seconds": 15025,
             "consecutive": 1,
             "evidence_tags": [
               "HOOK_OR_API_WALL_FEEDBACK",
@@ -141,19 +139,179 @@
               "DENY_OR_BLOCKED_FEEDBACK",
               "TOOL_ERROR_RECOVERY"
             ],
+            "marker_path": ".dos/stop-failures/2a660dbb-9d35-4502-9a8c-5f14ceac1686.json",
+            "origin": "claude_transcript",
             "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
+            "settlement_action": "RECENT_REVIEW",
+            "total": 1,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          }
+        ],
+        "stale_active_consecutive_total": 48,
+        "stale_active_markers": 43,
+        "stale_active_origin_counts": {
+          "claude_transcript": 31,
+          "dos_stream+claude_transcript": 8,
+          "marker_only": 4
+        },
+        "stale_active_settlement_action_counts": {
+          "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
+          "STALE_RESET_CANDIDATE": 39
+        },
+        "stale_settlement_plan": [
+          {
+            "age_seconds": 81350,
+            "consecutive": 3,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": ".dos/stop-failures/3f29f826-b400-476b-811c-374e61fd75ad.json",
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "3f29f826-b400-476b-811c-374e61fd75ad",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 3,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 36281,
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": ".dos/stop-failures/dde358da-6862-4e56-992a-e1527b02c89f.json",
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "dde358da-6862-4e56-992a-e1527b02c89f",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 82791,
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": ".dos/stop-failures/0b2c4844-23b3-4ccf-ab02-032c50cab607.json",
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "0b2c4844-23b3-4ccf-ab02-032c50cab607",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 83110,
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": ".dos/stop-failures/f7198142-f77b-47ba-8e9a-453ab3ea27e1.json",
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "f7198142-f77b-47ba-8e9a-453ab3ea27e1",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 83117,
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": ".dos/stop-failures/1f689f62-ef81-4862-ac09-2763a362f655.json",
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "1f689f62-ef81-4862-ac09-2763a362f655",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          }
+        ],
+        "top_recent_active_sessions": [
+          {
+            "age_seconds": 15299,
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY"
+            ],
+            "marker_path": null,
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
+            "settlement_action": "RECENT_REVIEW",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 12456,
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY"
+            ],
+            "marker_path": null,
+            "origin": "claude_transcript",
+            "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+            "settlement_action": "RECENT_REVIEW",
+            "total": 1,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 15025,
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY"
+            ],
+            "marker_path": null,
+            "origin": "claude_transcript",
+            "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
+            "settlement_action": "RECENT_REVIEW",
             "total": 1,
             "transcript_project": "C--work-fak",
             "transcript_status": "FOUND"
           }
         ],
         "transcript_evidence_tags": {
-          "DENY_OR_BLOCKED_FEEDBACK": 19,
-          "HOOK_OR_API_WALL_FEEDBACK": 28,
-          "HOST_PERMISSION_INTERRUPT": 28,
-          "LARGE_TOOL_RESULT": 11,
+          "DENY_OR_BLOCKED_FEEDBACK": 16,
+          "HOOK_OR_API_WALL_FEEDBACK": 25,
+          "HOST_PERMISSION_INTERRUPT": 25,
+          "LARGE_TOOL_RESULT": 8,
           "SHELL_HEAVY_SESSION": 6,
-          "TOOL_ERROR_RECOVERY": 28
+          "TOOL_ERROR_RECOVERY": 25
         }
       },
       "next_action": "Clear or rotate the recent workspace sessions with nonzero consecutive StopFailure markers before treating fak-by-default actionability as healthy.",
@@ -303,33 +461,20 @@
       "code": "WORKSPACE_STALE_STOPFAILURE_MARKERS",
       "evidence": {
         "active_recent_threshold_hours": 6,
-        "stale_active_consecutive_total": 54,
-        "stale_active_markers": 45,
+        "stale_active_consecutive_total": 48,
+        "stale_active_markers": 43,
         "stale_active_origin_counts": {
           "claude_transcript": 31,
-          "dos_stream+claude_transcript": 10,
+          "dos_stream+claude_transcript": 8,
           "marker_only": 4
         },
         "stale_active_settlement_action_counts": {
           "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
-          "STALE_RESET_CANDIDATE": 41
+          "STALE_RESET_CANDIDATE": 39
         },
-        "top_stale_active_sessions": [
+        "stale_settlement_plan": [
           {
-            "consecutive": 4,
-            "evidence_tags": [
-              "HOOK_OR_API_WALL_FEEDBACK",
-              "HOST_PERMISSION_INTERRUPT",
-              "DENY_OR_BLOCKED_FEEDBACK",
-              "TOOL_ERROR_RECOVERY",
-              "LARGE_TOOL_RESULT"
-            ],
-            "session_id": "b33eca05-c71e-4a51-979b-b4c8bcb43b1e",
-            "total": 4,
-            "transcript_project": "C--work-fak",
-            "transcript_status": "FOUND"
-          },
-          {
+            "age_seconds": 81350,
             "consecutive": 3,
             "evidence_tags": [
               "HOOK_OR_API_WALL_FEEDBACK",
@@ -338,12 +483,16 @@
               "TOOL_ERROR_RECOVERY",
               "LARGE_TOOL_RESULT"
             ],
+            "marker_path": ".dos/stop-failures/3f29f826-b400-476b-811c-374e61fd75ad.json",
+            "origin": "dos_stream+claude_transcript",
             "session_id": "3f29f826-b400-476b-811c-374e61fd75ad",
+            "settlement_action": "STALE_RESET_CANDIDATE",
             "total": 3,
             "transcript_project": "C--work-fak",
             "transcript_status": "FOUND"
           },
           {
+            "age_seconds": 36281,
             "consecutive": 2,
             "evidence_tags": [
               "HOOK_OR_API_WALL_FEEDBACK",
@@ -353,12 +502,16 @@
               "SHELL_HEAVY_SESSION",
               "LARGE_TOOL_RESULT"
             ],
+            "marker_path": ".dos/stop-failures/dde358da-6862-4e56-992a-e1527b02c89f.json",
+            "origin": "dos_stream+claude_transcript",
             "session_id": "dde358da-6862-4e56-992a-e1527b02c89f",
+            "settlement_action": "STALE_RESET_CANDIDATE",
             "total": 2,
             "transcript_project": "C--work-fak",
             "transcript_status": "FOUND"
           },
           {
+            "age_seconds": 82791,
             "consecutive": 2,
             "evidence_tags": [
               "HOOK_OR_API_WALL_FEEDBACK",
@@ -367,12 +520,16 @@
               "TOOL_ERROR_RECOVERY",
               "LARGE_TOOL_RESULT"
             ],
+            "marker_path": ".dos/stop-failures/0b2c4844-23b3-4ccf-ab02-032c50cab607.json",
+            "origin": "dos_stream+claude_transcript",
             "session_id": "0b2c4844-23b3-4ccf-ab02-032c50cab607",
+            "settlement_action": "STALE_RESET_CANDIDATE",
             "total": 2,
             "transcript_project": "C--work-fak",
             "transcript_status": "FOUND"
           },
           {
+            "age_seconds": 83110,
             "consecutive": 2,
             "evidence_tags": [
               "HOOK_OR_API_WALL_FEEDBACK",
@@ -381,7 +538,121 @@
               "TOOL_ERROR_RECOVERY",
               "LARGE_TOOL_RESULT"
             ],
+            "marker_path": ".dos/stop-failures/f7198142-f77b-47ba-8e9a-453ab3ea27e1.json",
+            "origin": "dos_stream+claude_transcript",
             "session_id": "f7198142-f77b-47ba-8e9a-453ab3ea27e1",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 83117,
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": ".dos/stop-failures/1f689f62-ef81-4862-ac09-2763a362f655.json",
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "1f689f62-ef81-4862-ac09-2763a362f655",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          }
+        ],
+        "top_stale_active_sessions": [
+          {
+            "age_seconds": 81350,
+            "consecutive": 3,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": null,
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "3f29f826-b400-476b-811c-374e61fd75ad",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 3,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 36281,
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": null,
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "dde358da-6862-4e56-992a-e1527b02c89f",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 82791,
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": null,
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "0b2c4844-23b3-4ccf-ab02-032c50cab607",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 83110,
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": null,
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "f7198142-f77b-47ba-8e9a-453ab3ea27e1",
+            "settlement_action": "STALE_RESET_CANDIDATE",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "age_seconds": 83117,
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "marker_path": null,
+            "origin": "dos_stream+claude_transcript",
+            "session_id": "1f689f62-ef81-4862-ac09-2763a362f655",
+            "settlement_action": "STALE_RESET_CANDIDATE",
             "total": 2,
             "transcript_project": "C--work-fak",
             "transcript_status": "FOUND"

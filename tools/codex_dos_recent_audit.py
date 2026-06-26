@@ -284,6 +284,52 @@ def stop_failure_settlement_counts(entries: list[dict[str, Any]]) -> dict[str, i
     return limited_counter(counts)
 
 
+def compact_stop_failure_plan_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    transcript = entry.get("transcript") if isinstance(entry.get("transcript"), dict) else {}
+    summary = entry.get("transcript_summary") if isinstance(entry.get("transcript_summary"), dict) else {}
+    session_id = str(entry.get("session_id") or "")
+    return {
+        "session_id": session_id,
+        "marker_path": f".dos/stop-failures/{session_id}.json" if session_id else "",
+        "total": safe_int(entry.get("total")),
+        "consecutive": safe_int(entry.get("consecutive")),
+        "age_seconds": safe_int(entry.get("age_seconds")),
+        "mtime": entry.get("mtime"),
+        "origin": stop_failure_origin(entry),
+        "settlement_action": stop_failure_settlement_action(entry),
+        "transcript_status": transcript.get("status"),
+        "transcript_project": transcript.get("project"),
+        "transcript_evidence_tags": [str(tag) for tag in (summary.get("evidence_tags") or [])],
+    }
+
+
+def stop_failure_settlement_plan(entries: list[dict[str, Any]], limit: int = 5) -> dict[str, list[dict[str, Any]]]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        action = stop_failure_settlement_action(entry)
+        buckets.setdefault(action, []).append(entry)
+    ordered: dict[str, list[dict[str, Any]]] = {}
+    for action in [
+        "RECENT_REVIEW",
+        "STALE_RESET_CANDIDATE",
+        "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+        "HEALED_NONZERO",
+        "ZERO_TOTAL",
+    ]:
+        rows = buckets.get(action) or []
+        rows.sort(
+            key=lambda item: (
+                -safe_int(item.get("consecutive")),
+                -safe_int(item.get("total")),
+                safe_int(item.get("age_seconds")),
+                str(item.get("session_id") or ""),
+            )
+        )
+        if rows:
+            ordered[action] = [compact_stop_failure_plan_entry(item) for item in rows[: max(1, limit)]]
+    return ordered
+
+
 def summarize_claude_transcript_shape(path: Path) -> dict[str, Any]:
     line_count = 0
     malformed = 0
@@ -603,6 +649,7 @@ def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int
         "top_active": top_active[: max(1, limit)],
         "top_recent_active": top_recent_active[: max(1, limit)],
         "top_stale_active": top_stale_active[: max(1, limit)],
+        "settlement_plan": stop_failure_settlement_plan(entries, limit=max(5, limit)),
         "summarized_transcripts": summarized_transcripts,
         "transcript_evidence_tag_counts": limited_counter(transcript_evidence_tags),
         "privacy": {
@@ -1579,6 +1626,7 @@ def render_debt_packet(report: dict[str, Any]) -> str:
         f"- workspace_stop_failure_top_sessions: `{json.dumps(stop_top, sort_keys=True)}`",
         f"- workspace_stop_failure_top_recent_active_sessions: `{json.dumps(stop_recent_active, sort_keys=True)}`",
         f"- workspace_stop_failure_top_active_sessions: `{json.dumps(stop_active, sort_keys=True)}`",
+        f"- workspace_stop_failure_settlement_plan: `{json.dumps(workspace_stop.get('settlement_plan') or {}, sort_keys=True)}`",
         f"- workspace_stop_failure_transcript_evidence_tags: `{json.dumps(summary.get('workspace_stop_failure_transcript_evidence_tags') or {}, sort_keys=True)}`",
         f"- post_repair_observations: `{post.get('observations')}`",
         f"- post_repair_delegates: `{post.get('delegate_count')}`",

@@ -113,14 +113,35 @@ def summarize_stop_sessions(rows: Any, limit: int = 5) -> list[dict[str, Any]]:
         shape = row.get("transcript_summary") if isinstance(row.get("transcript_summary"), dict) else {}
         out.append({
             "session_id": row.get("session_id"),
+            "marker_path": row.get("marker_path"),
             "total": safe_int(row.get("total")),
             "consecutive": safe_int(row.get("consecutive")),
-            "transcript_status": transcript.get("status"),
-            "transcript_project": transcript.get("project"),
-            "evidence_tags": [str(tag) for tag in (shape.get("evidence_tags") or [])],
+            "age_seconds": safe_int(row.get("age_seconds")),
+            "origin": row.get("origin"),
+            "settlement_action": row.get("settlement_action"),
+            "transcript_status": transcript.get("status") or row.get("transcript_status"),
+            "transcript_project": transcript.get("project") or row.get("transcript_project"),
+            "evidence_tags": [str(tag) for tag in (shape.get("evidence_tags") or row.get("transcript_evidence_tags") or [])],
         })
         if len(out) >= limit:
             break
+    return out
+
+
+def settlement_plan_rows(plan: Any, actions: list[str], limit: int = 5) -> list[dict[str, Any]]:
+    if not isinstance(plan, dict):
+        return []
+    out: list[dict[str, Any]] = []
+    for action in actions:
+        rows = plan.get(action)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            out.extend(summarize_stop_sessions([row], limit=1))
+            if len(out) >= limit:
+                return out
     return out
 
 
@@ -509,6 +530,7 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
     recent_active_markers = safe_int(codex_summary.get("workspace_stop_failure_recent_active_markers"))
     stale_active_consecutive = safe_int(codex_summary.get("workspace_stop_failure_stale_active_consecutive_total"))
     stale_active_markers = safe_int(codex_summary.get("workspace_stop_failure_stale_active_markers"))
+    settlement_plan = workspace_stop.get("settlement_plan")
     if recent_active_consecutive:
         add_blocker(
             blockers,
@@ -533,6 +555,11 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
                 "one_day_failures_total": safe_int(codex_summary.get("workspace_stop_failures_total")),
                 "healed_nonzero_markers": safe_int(codex_summary.get("workspace_stop_failure_healed_nonzero_markers")),
                 "top_recent_active_sessions": summarize_stop_sessions(workspace_stop.get("top_recent_active")),
+                "recent_review_plan": settlement_plan_rows(settlement_plan, ["RECENT_REVIEW"]),
+                "stale_settlement_plan": settlement_plan_rows(
+                    settlement_plan,
+                    ["STALE_RESET_CANDIDATE", "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"],
+                ),
                 "transcript_evidence_tags": top_counts(codex_summary.get("workspace_stop_failure_transcript_evidence_tags")),
             },
             next_action="Clear or rotate the recent workspace sessions with nonzero consecutive StopFailure markers before treating fak-by-default actionability as healthy.",
@@ -550,6 +577,10 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
                 "active_recent_threshold_hours": safe_int(codex_summary.get("workspace_stop_failure_active_recent_threshold_hours")),
                 "stale_active_origin_counts": top_counts(codex_summary.get("workspace_stop_failure_stale_active_origin_counts")),
                 "stale_active_settlement_action_counts": top_counts(codex_summary.get("workspace_stop_failure_stale_active_settlement_action_counts")),
+                "stale_settlement_plan": settlement_plan_rows(
+                    settlement_plan,
+                    ["STALE_RESET_CANDIDATE", "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"],
+                ),
                 "top_stale_active_sessions": summarize_stop_sessions(workspace_stop.get("top_stale_active")),
             },
             next_action="Decide whether stale nonzero consecutive markers need a success reset, archival, or a hook fix so old breaker state does not masquerade as live blockage.",
@@ -698,6 +729,10 @@ def render(payload: dict[str, Any]) -> str:
                 bits.append(f"settlement={evidence.get('active_settlement_action_counts')}")
             elif "stale_active_settlement_action_counts" in evidence:
                 bits.append(f"settlement={evidence.get('stale_active_settlement_action_counts')}")
+            if "recent_review_plan" in evidence:
+                bits.append(f"recent_plan={len(evidence.get('recent_review_plan') or [])}")
+            if "stale_settlement_plan" in evidence:
+                bits.append(f"stale_plan={len(evidence.get('stale_settlement_plan') or [])}")
             if "shell_no_write_target_detected" in evidence:
                 bits.append(f"opaque_shell={evidence.get('shell_no_write_target_detected')}")
             if "evidence_tag_counts" in evidence:

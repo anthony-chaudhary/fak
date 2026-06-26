@@ -2163,7 +2163,7 @@ func buildTUIGuardReport(artifacts []tuiGuardArtifact, at time.Time) tuiGuardRep
 		rows[i].Tags, rows[i].Attention = scoreTUIGuardRow(rows[i])
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Kind == "default-blocker" && rows[j].Kind == "default-blocker" && rows[i].Rank > 0 && rows[j].Rank > 0 && rows[i].Rank != rows[j].Rank {
+		if rows[i].Rank > 0 && rows[j].Rank > 0 && rows[i].Rank != rows[j].Rank {
 			return rows[i].Rank < rows[j].Rank
 		}
 		if rows[i].Attention != rows[j].Attention {
@@ -2295,6 +2295,7 @@ func tuiGuardStatusAuditRows(artifact tuiGuardArtifact) []tuiGuardRow {
 				continue
 			}
 			rows = append(rows, tuiGuardDefaultBlockerRow(artifactName, m))
+			rows = append(rows, tuiGuardSettlementRows(artifactName, m)...)
 		}
 	}
 	if checks, ok := raw["checks"].([]any); ok {
@@ -2329,6 +2330,50 @@ func tuiGuardDefaultBlockerRow(artifactName string, blocker map[string]any) tuiG
 		Count:    tuiGuardDefaultBlockerCount(evidence),
 		Rank:     tuiGuardInt(blocker, "rank"),
 	}
+}
+
+func tuiGuardSettlementRows(artifactName string, blocker map[string]any) []tuiGuardRow {
+	evidence := tuiGuardMap(blocker["evidence"])
+	if evidence == nil {
+		return nil
+	}
+	rows := []tuiGuardRow{}
+	for _, key := range []string{"recent_review_plan", "stale_settlement_plan"} {
+		items, ok := evidence[key].([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			m := tuiGuardMap(item)
+			if m == nil {
+				continue
+			}
+			rows = append(rows, tuiGuardRow{
+				Artifact: artifactName,
+				Kind:     "settlement-candidate",
+				Tool:     tuiGuardString(blocker, "surface"),
+				Reason:   tuiGuardString(m, "settlement_action"),
+				Status:   "WARN",
+				Detail: strings.Join(nonEmptyTUI([]string{
+					"code=" + tuiGuardString(blocker, "code"),
+					"session=" + tuiGuardString(m, "session_id"),
+					"path=" + tuiGuardString(m, "marker_path"),
+					fmt.Sprintf("total=%d", tuiGuardInt(m, "total")),
+					fmt.Sprintf("consecutive=%d", tuiGuardInt(m, "consecutive")),
+					fmt.Sprintf("age_seconds=%d", tuiGuardInt(m, "age_seconds")),
+					"origin=" + tuiGuardString(m, "origin"),
+					"project=" + tuiGuardString(m, "transcript_project"),
+					"evidence=" + tuiGuardCompactJSON(m["evidence_tags"]),
+				}), "  "),
+				Count: maxTUI(1, tuiGuardInt(m, "consecutive")),
+				Rank:  tuiGuardInt(blocker, "rank"),
+			})
+			if len(rows) >= 8 {
+				return rows
+			}
+		}
+	}
+	return rows
 }
 
 func tuiGuardDefaultBlockerDetail(blocker, evidence map[string]any) string {
@@ -2826,6 +2871,10 @@ func scoreTUIGuardRow(row tuiGuardRow) ([]string, int) {
 	if row.Kind == "sample" {
 		tags = append(tags, "sample")
 		score += 15
+	}
+	if row.Kind == "settlement-candidate" {
+		tags = append(tags, "settlement")
+		score += 30
 	}
 	if row.Kind == "default-blocker" {
 		tags = append(tags, "blocker")

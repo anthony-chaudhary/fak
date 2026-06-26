@@ -141,6 +141,33 @@ def seed_tree(
                 "post_gate_command_shapes": {"shell_family_counts": families},
             },
             "workspace_stop_failures": {
+                "settlement_plan": {
+                    "RECENT_REVIEW": [
+                        {
+                            "session_id": "s-stop",
+                            "marker_path": ".dos/stop-failures/s-stop.json",
+                            "total": 2,
+                            "consecutive": 1,
+                            "age_seconds": 12,
+                            "origin": "claude_transcript",
+                            "settlement_action": "RECENT_REVIEW",
+                            "transcript_status": "FOUND",
+                            "transcript_project": "C--work-fak",
+                            "transcript_evidence_tags": ["HOOK_OR_API_WALL_FEEDBACK"],
+                        }
+                    ],
+                    "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": [
+                        {
+                            "session_id": "s-stale",
+                            "marker_path": ".dos/stop-failures/s-stale.json",
+                            "total": 2,
+                            "consecutive": 2,
+                            "age_seconds": 99999,
+                            "origin": "marker_only",
+                            "settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+                        }
+                    ],
+                },
                 "top_recent_active": [
                     {
                         "session_id": "s-stop",
@@ -337,6 +364,9 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
             self.assertEqual(first["surface"], "workspace_dos")
             self.assertEqual(first["evidence"]["recent_active_origin_counts"], {"claude_transcript": 1})
             self.assertEqual(first["evidence"]["recent_active_settlement_action_counts"], {"RECENT_REVIEW": 1})
+            self.assertEqual(first["evidence"]["recent_review_plan"][0]["marker_path"], ".dos/stop-failures/s-stop.json")
+            stale = next(row for row in payload["default_blockers"] if row["code"] == "WORKSPACE_STALE_STOPFAILURE_MARKERS")
+            self.assertEqual(stale["evidence"]["stale_settlement_plan"][0]["settlement_action"], "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE")
 
     def test_main_writes_json_out_file(self) -> None:
         mod = load()

@@ -590,7 +590,33 @@ func TestTUIGuardStatusAuditSurfacesDefaultBlockers(t *testing.T) {
 					"recent_active_origin_counts":            map[string]any{"claude_transcript": 2, "dos_stream+claude_transcript": 1},
 					"active_settlement_action_counts":        map[string]any{"RECENT_REVIEW": 3, "STALE_RESET_CANDIDATE": 45},
 					"recent_active_settlement_action_counts": map[string]any{"RECENT_REVIEW": 3},
-					"top_recent_active_sessions_should":      []any{"raw session detail should not be copied"},
+					"recent_review_plan": []any{
+						map[string]any{
+							"session_id":               "s-stop",
+							"marker_path":              ".dos/stop-failures/s-stop.json",
+							"total":                    2,
+							"consecutive":              1,
+							"age_seconds":              42,
+							"origin":                   "claude_transcript",
+							"settlement_action":        "RECENT_REVIEW",
+							"transcript_status":        "FOUND",
+							"transcript_project":       "C--work-fak",
+							"transcript_evidence_tags": []any{"HOOK_OR_API_WALL_FEEDBACK"},
+							"raw_prompt_should":        "raw session detail should not be copied",
+						},
+					},
+					"stale_settlement_plan": []any{
+						map[string]any{
+							"session_id":        "s-stale",
+							"marker_path":       ".dos/stop-failures/s-stale.json",
+							"total":             2,
+							"consecutive":       2,
+							"age_seconds":       99999,
+							"origin":            "marker_only",
+							"settlement_action": "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE",
+						},
+					},
+					"top_recent_active_sessions_should": []any{"raw session detail should not be copied"},
 					"evidence_tag_counts": map[string]any{
 						"HOOK_OR_API_WALL_FEEDBACK": 20,
 						"HOST_PERMISSION_INTERRUPT": 20,
@@ -644,8 +670,8 @@ func TestTUIGuardStatusAuditSurfacesDefaultBlockers(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("unmarshal guard report: %v\n%s", err, stdout.String())
 	}
-	if report.Status != "WARN" || report.Counts.Warn != 1 || report.Counts.Rows != 4 {
-		t.Fatalf("status/counts = %s/%+v, want WARN with summary + 3 blocker rows", report.Status, report.Counts)
+	if report.Status != "WARN" || report.Counts.Warn != 1 || report.Counts.Rows != 6 {
+		t.Fatalf("status/counts = %s/%+v, want WARN with summary + blockers + settlement rows", report.Status, report.Counts)
 	}
 	if len(report.Rows) == 0 || report.Rows[0].Reason != "WORKSPACE_RECENT_STOPFAILURE_API_WALL" {
 		t.Fatalf("top row = %+v, want recent StopFailure blocker first", report.Rows)
@@ -654,7 +680,7 @@ func TestTUIGuardStatusAuditSurfacesDefaultBlockers(t *testing.T) {
 		t.Fatalf("top row tags = %v, want blocker+active", report.Rows[0].Tags)
 	}
 	encoded := string(stdout.Bytes())
-	for _, want := range []string{"guard-status-audit", "default-blocker", "WORKSPACE_RECENT_STOPFAILURE_API_WALL", "CODEX_HOST_SHELL_OPACITY", "OPENAI_AGENTS_SDK_NOT_INSTALLED", "recent_active_consecutive_total=3", "claude_transcript", "RECENT_REVIEW", "shell_no_write_target_detected=2290", "openai-agents distribution is not installed"} {
+	for _, want := range []string{"guard-status-audit", "default-blocker", "settlement-candidate", "WORKSPACE_RECENT_STOPFAILURE_API_WALL", "CODEX_HOST_SHELL_OPACITY", "OPENAI_AGENTS_SDK_NOT_INSTALLED", "recent_active_consecutive_total=3", "claude_transcript", "RECENT_REVIEW", ".dos/stop-failures/s-stop.json", "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE", "shell_no_write_target_detected=2290", "openai-agents distribution is not installed"} {
 		if !strings.Contains(encoded, want) {
 			t.Fatalf("status audit JSON missing %q:\n%s", want, encoded)
 		}
@@ -672,7 +698,7 @@ func TestTUIGuardStatusAuditSurfacesDefaultBlockers(t *testing.T) {
 		t.Fatalf("runTUI guard human code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak console guard", "warn=1", "default-blocker", "WORKSPACE_RECENT_STOPFAILURE_API_WALL", "CODEX_HOST_SHELL_OPACITY"} {
+	for _, want := range []string{"fak console guard", "warn=1", "default-blocker", "settlement-candidate", "WORKSPACE_RECENT_STOPFAILURE_API_WALL", "CODEX_HOST_SHELL_OPACITY"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status audit human missing %q:\n%s", want, out)
 		}
