@@ -345,9 +345,10 @@ and it is what `DeviceCapacity` begins.
   the same want/budget/margin rollup by scope.
   Safetensors, generic `model.Load`, runtime upload pre-checks, and backend-specific
   transient peaks are still unwired.
-- The CUDA and Vulkan producers report `total` only; `free` is `FreeUnknown` until
-  backend-specific free-memory probes are wired, so the check catches "too big for the whole
-  device," not "too big for the current free headroom." Metal still advertises device
+- CUDA still reports `total` only (`free=FreeUnknown`). Vulkan reports current free
+  device-local budget when `VK_EXT_memory_budget` is available and falls back to
+  `FreeUnknown` otherwise, so Vulkan can use current headroom on drivers that expose it
+  while preserving the fail-open contract elsewhere. Metal still advertises device
   residency but not `CapacityProbe`.
 - Plank 3 (#707) makes the HBM tier's pressure and `CapacityBytes` real on a probing backend
   (`engine.PlanPlacementForDevice`), and `engine.RunCapacityPressureSweep` now binds that

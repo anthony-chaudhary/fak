@@ -77,6 +77,11 @@ uint64_t fvk_max_buffer_bytes(void);
 uint64_t fvk_max_storage_buffer_range(void);
 uint64_t fvk_max_memory_allocation_size(void);
 uint64_t fvk_total_device_local_memory(void);
+/* Current device-local heap budget/usage from VK_EXT_memory_budget when the driver exposes
+ * it. Returns 1 and fills budget/usage/free_bytes on success; returns 0 when the extension is
+ * unavailable, the query is not initialized, or the driver reports no usable budget. */
+int fvk_device_local_memory_budget(uint64_t *budget, uint64_t *usage, uint64_t *free_bytes);
+int fvk_have_memory_budget(void);
 
 /* Q8_0 quantized GEMM: y[P,out] = dequant(Wq[out,in], scales[out,in/32]) applied to x[P,in].
  * Wq is int8 weight codes (out*in bytes), Wscale is per-block f32 scales (out*(in/32) floats),

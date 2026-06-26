@@ -46,6 +46,7 @@ func init() {
 		name:                    "vulkan",
 		tier:                    tier + ":" + C.GoString(&name[0]),
 		haveQ8:                  C.fvk_have_q8() != 0,
+		haveMemoryBudget:        C.fvk_have_memory_budget() != 0,
 		totalMem:                vulkanCapInt64(C.fvk_total_device_local_memory()),
 		budgetBytes:             vulkanBudgetBytes(),
 		maxBufferBytes:          vulkanCapInt64(C.fvk_max_buffer_bytes()),
@@ -140,6 +141,12 @@ func (v *vulkanBackend) VulkanDebugResourceCaps() (maxBufferBytes, maxStorageBuf
 	return v.maxBufferBytes, v.maxStorageBufferRange, v.maxMemoryAllocationSize
 }
 
+func (v *vulkanBackend) VulkanDebugMemoryBudgetAvailable() bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.haveMemoryBudget
+}
+
 type vulkanBackend struct {
 	name          string
 	tier          string
@@ -159,6 +166,7 @@ type vulkanBackend struct {
 	// effective STORAGE buffer ceiling: min(maxStorageBufferRange, maxMemoryAllocationSize)
 	// when both are known. It does not solve chunking, but it turns a raw driver allocation
 	// failure into a deterministic refusal that names the over-cap buffer (#362).
+	haveMemoryBudget        bool
 	totalMem                int64
 	maxBufferBytes          int64
 	maxStorageBufferRange   int64
@@ -200,11 +208,26 @@ func (v *vulkanBackend) Caps() Caps {
 	return Caps{DeviceMemory: true, UploadDtype: v.haveQ8, CapacityProbe: v.totalMem > 0, HostCapacityProbe: hostKnown}
 }
 
-// DeviceMemory reports the Vulkan device-local heap total. Vulkan exposes heap size, not a
-// cheap cross-vendor free-memory query in the core API, so free stays unknown just like the
-// CUDA total-only producer. That still catches a memory plan that cannot fit the device at all.
+// DeviceMemory reports the Vulkan device-local heap total and, when VK_EXT_memory_budget is
+// available, the current device-local budget headroom. Drivers without the extension keep
+// the prior fail-open behavior: total known, free unknown.
 func (v *vulkanBackend) DeviceMemory() (total, free int64, known bool) {
-	return v.totalMem, FreeUnknown, v.totalMem > 0
+	if v == nil || v.totalMem <= 0 {
+		return 0, FreeUnknown, false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	if v.haveMemoryBudget {
+		var budget C.uint64_t
+		var usage C.uint64_t
+		var freeBytes C.uint64_t
+		if C.fvk_device_local_memory_budget(&budget, &usage, &freeBytes) != 0 {
+			if free := vulkanCapInt64(freeBytes); free >= 0 {
+				return v.totalMem, free, true
+			}
+		}
+	}
+	return v.totalMem, FreeUnknown, true
 }
 
 func (v *vulkanBackend) HostMemory() (total, free int64, known bool) {

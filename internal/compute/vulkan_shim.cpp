@@ -57,6 +57,7 @@ VkDeviceSize      g_maxStorageBufferRange = 0;
 VkDeviceSize      g_maxMemoryAllocationSize = 0;
 VkDeviceSize      g_maxBufferBytes = 0;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
+bool              g_haveMemoryBudget = false;
 
 // A device buffer: VkBuffer + its memory + byte size. The opaque handle Go holds is a
 // Buffer* — never a host address.
@@ -137,6 +138,50 @@ bool allocPressure(VkResult r) {
     return r == VK_ERROR_OUT_OF_DEVICE_MEMORY ||
            r == VK_ERROR_OUT_OF_HOST_MEMORY ||
            r == VK_ERROR_TOO_MANY_OBJECTS;
+}
+
+bool deviceExtensionSupported(const char* name) {
+    if (!g_phys || !name || !*name) return false;
+    uint32_t n = 0;
+    if (vkEnumerateDeviceExtensionProperties(g_phys, nullptr, &n, nullptr) != VK_SUCCESS || n == 0) {
+        return false;
+    }
+    std::vector<VkExtensionProperties> props(n);
+    if (vkEnumerateDeviceExtensionProperties(g_phys, nullptr, &n, props.data()) != VK_SUCCESS) {
+        return false;
+    }
+    for (const auto& p : props) {
+        if (strcmp(p.extensionName, name) == 0) return true;
+    }
+    return false;
+}
+
+bool queryDeviceLocalMemoryBudget(VkDeviceSize* budget, VkDeviceSize* usage) {
+#ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
+    if (!g_phys || !g_haveMemoryBudget) return false;
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT bp{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    VkPhysicalDeviceMemoryProperties2 props2{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+    props2.pNext = &bp;
+    vkGetPhysicalDeviceMemoryProperties2(g_phys, &props2);
+    VkDeviceSize b = 0;
+    VkDeviceSize u = 0;
+    for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
+        if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            b += bp.heapBudget[i];
+            u += bp.heapUsage[i];
+        }
+    }
+    if (b == 0) return false;
+    if (budget) *budget = b;
+    if (usage) *usage = u;
+    return true;
+#else
+    (void)budget;
+    (void)usage;
+    return false;
+#endif
 }
 
 void destroyBuffer(Buffer* b) {
@@ -673,9 +718,21 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     vkGetPhysicalDeviceFeatures2(g_phys, &feat2);
     g_have_q8 = (f8.storageBuffer8BitAccess && fi8.shaderInt8) ? 1 : 0;
 
+    std::vector<const char*> enabledDeviceExts;
+#ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
+    g_haveMemoryBudget = deviceExtensionSupported(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+    if (g_haveMemoryBudget) {
+        enabledDeviceExts.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+    }
+#else
+    g_haveMemoryBudget = false;
+#endif
+
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
+    dci.enabledExtensionCount = (uint32_t)enabledDeviceExts.size();
+    dci.ppEnabledExtensionNames = enabledDeviceExts.empty() ? nullptr : enabledDeviceExts.data();
     VkPhysicalDevice8BitStorageFeatures e8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES};
     VkPhysicalDeviceShaderFloat16Int8Features ei8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
     if (g_have_q8) {
@@ -684,7 +741,15 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         e8.pNext = &ei8;
         dci.pNext = &e8;
     }
-    if (vkCreateDevice(g_phys, &dci, nullptr, &g_dev) != VK_SUCCESS) return 4;
+    VkResult dr = vkCreateDevice(g_phys, &dci, nullptr, &g_dev);
+    if (dr != VK_SUCCESS && g_haveMemoryBudget) {
+        enabledDeviceExts.clear();
+        g_haveMemoryBudget = false;
+        dci.enabledExtensionCount = 0;
+        dci.ppEnabledExtensionNames = nullptr;
+        dr = vkCreateDevice(g_phys, &dci, nullptr, &g_dev);
+    }
+    if (dr != VK_SUCCESS) return 4;
     vkGetDeviceQueue(g_dev, g_qfam, 0, &g_queue);
 
     VkCommandPoolCreateInfo cpi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -854,6 +919,17 @@ uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
 uint64_t fvk_max_memory_allocation_size(void) { return (uint64_t)g_maxMemoryAllocationSize; }
 uint64_t fvk_total_device_local_memory(void) { return (uint64_t)g_totalDeviceLocalMemory; }
+int fvk_have_memory_budget(void) { return g_haveMemoryBudget ? 1 : 0; }
+
+int fvk_device_local_memory_budget(uint64_t* budget, uint64_t* usage, uint64_t* free_bytes) {
+    VkDeviceSize b = 0;
+    VkDeviceSize u = 0;
+    if (!queryDeviceLocalMemoryBudget(&b, &u)) return 0;
+    if (budget) *budget = (uint64_t)b;
+    if (usage) *usage = (uint64_t)u;
+    if (free_bytes) *free_bytes = (uint64_t)(b > u ? b - u : 0);
+    return 1;
+}
 
 uint32_t fvk_debug_buffer_props(const void* d) {
     if (!d) return 0;

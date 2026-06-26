@@ -72,8 +72,14 @@ func TestVulkanResourceCapsAreDiscovered(t *testing.T) {
 	v := vk(t)
 	maxBufferBytes, maxStorageBufferRange, maxMemoryAllocationSize := v.VulkanDebugResourceCaps()
 	total, free, known := DeviceMemoryInfo(v)
-	if !known || total <= 0 || free != FreeUnknown {
-		t.Fatalf("DeviceMemoryInfo = total=%d free=%d known=%v, want positive total/free unknown/known", total, free, known)
+	if !known || total <= 0 {
+		t.Fatalf("DeviceMemoryInfo = total=%d free=%d known=%v, want positive total/known", total, free, known)
+	}
+	if free != FreeUnknown && (free < 0 || free > total) {
+		t.Fatalf("DeviceMemoryInfo free=%d outside [0,total=%d]", free, total)
+	}
+	if v.VulkanDebugMemoryBudgetAvailable() && free == FreeUnknown {
+		t.Fatalf("Vulkan memory-budget extension is available but free memory is unknown: total=%d free=%d", total, free)
 	}
 	hostTotal, hostFree, hostKnown := HostMemoryInfo(v)
 	if !hostKnown || hostTotal <= 0 {
