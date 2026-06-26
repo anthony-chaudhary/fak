@@ -64,10 +64,11 @@ GGUF, default `unsloth/GLM-5.2-GGUF` `UD-Q4_K_M`), `NCPU_MOE`, `GLM_PORT`, `HF_T
 > to Hopper (sm_90) / Blackwell (sm_100); on Ampere (A100, sm_80) the preflight
 > (`tools/glm52_serve_preflight.py`) **fails closed** (vLLM #35021). Two paths clear it on
 > A100: fak's **own** kernel runs the `glm_moe_dsa` forward as full MLA (no sm_90 kernel
-> needed) — **bit-exact vs the CPU reference, cosine 1.0, witnessed on sm_80**
-> (`experiments/glm-gpu-witness/a100-glm52-*.json`) — and llama.cpp serves the same GGUF as
-> the honest throughput baseline. **Prefer the pure fak kernel; keep llama.cpp for the
-> comparison.** (See the benchmarking framework in
+> needed) — **bit-exact vs the CPU reference at q8 (cosine 1.0, argmax-exact), witnessed on
+> sm_80** (`experiments/glm-gpu-witness/a100-glm52-*.json`, incl. the cpu-offload hybrid). The
+> `--cpu-offload-experts` serve runs the resident-Q4_K path, which is not yet covered by a
+> full-forward cosine witness (the q8 forward is). llama.cpp serves the same GGUF as the honest
+> throughput baseline. **Prefer the pure fak kernel; keep llama.cpp for the comparison.** (See the benchmarking framework in
 > `docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md` — never put the two
 > numbers side by side without holding {weights, hardware, precision, context} equal.)
 
@@ -132,15 +133,18 @@ which is not stood up from the implementing host — same gate as
 | The bring-up plan renders the gcloud create + serve + the `claude-glm-gcp` hand-off, with no creds | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanRendersWithoutCreds` | ✅ proven on any host |
 | The **A100 tiers** are in the single registry (`a2-ultra-a100-80gb`, `a2-high-a100-40gb`) | `tools/gcp_accel_test.py` + `go test ./cmd/fak -run TestClaudeGLMGCPA100TiersInRegistry` | ✅ proven on any host |
 | The A100 plan **wires the pure fak kernel** by default; `SERVE=llamacpp` wires the llama.cpp benchmark | `go test ./cmd/fak -run 'TestClaudeGLMGCPA100Plan'` (WSL/Unix CI) + `TestClaudeGLMGCPFakNativeServeWiring` | ✅ proven on any host |
-| The fak-native **`glm_moe_dsa` forward is bit-exact** on A100 (sm_80): cosine 1.0, argmax-exact | `experiments/glm-gpu-witness/a100-glm52-*.json` (`TestCUDAGLMMoeDsaBackendForward` …) | ✅ witnessed on sm_80 |
+| The fak-native **`glm_moe_dsa` forward is bit-exact** on A100 (sm_80) **at q8**: cosine 1.0, argmax-exact (incl. the cpu-offload hybrid) | `experiments/glm-gpu-witness/a100-glm52-*.json` (`TestCUDAGLMMoeDsaBackendForward` …) | ✅ witnessed (q8) on sm_80 |
+| The resident-**Q4_K** serve path (`--cpu-offload-experts`) is cosine-witnessed end to end | — (the q8 forward is; the served Q4_K path is not) | ⏳ not yet |
 | The wire end-to-end (Anthropic `/v1/messages` → kernel) | `claude-glm-gcp --smoke` (offline mock planner; no model needed) | ✅ runnable here |
 | A **live GLM-5.2 turn** through the preset (pure fak kernel **or** llama.cpp) | needs the GCP node up (Half A `--apply`) → `claude-glm-gcp --probe` | ⏳ hardware-gated |
 
-The pure-fak-kernel **load** on the dynamic-mixed `UD-Q4_K_M` is the open perf item (the
-resident-Q4_K path fully fires only on pure-Q4_K tensors; see
-`docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md`) — it serves, the load is being
-sped up. The remaining step is operational: run Half A `--apply` on an authenticated host
-with A100 (or H200/B200) quota, open the tunnel, and run `claude-glm-gcp --probe "say pong"`.
+The pure-fak-kernel serve command is **wired** and the `glm_moe_dsa` forward is **witnessed at
+q8** (cosine 1.0, sm_80); a live serve turn stays **hardware+load-gated** — the resident-Q4_K
+serve path is not yet cosine-witnessed, and the **load** on the dynamic-mixed `UD-Q4_K_M` is
+the open perf item (the resident-Q4_K path fully fires only on pure-Q4_K tensors; see
+`docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md`). The remaining step is
+operational: run Half A `--apply` on an authenticated host with A100 (or H200/B200) quota, open
+the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
 ## Troubleshooting
 
