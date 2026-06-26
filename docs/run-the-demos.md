@@ -187,6 +187,16 @@ bash tools/run_comparison_demos.sh        # play all four side-by-sides, then ve
 bash tools/run_comparison_demos.sh -q     # quiet: just the acceptance gate (CI-usable)
 ```
 
+Model-backed memory/serving demo:
+
+```bash
+go run ./cmd/simpledemo                  # local GGUF chat REPL; no API key, but needs model weights
+```
+
+`cmd/simpledemo` is intentionally not in the start-here set: it is the friendliest local
+model path, but it depends on a GGUF file or a download. Use it when you want the
+memory/serving track rather than the deterministic no-model proof.
+
 ## 3. With a real model (the live race)
 
 `ctxdemo` and `demorace` run a model **in-process** for the live race. Export a small one
