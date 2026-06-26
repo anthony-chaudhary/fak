@@ -84,6 +84,18 @@ type Policy struct {
 	// violations) already returned before defaultDeny, so they still fail closed. An
 	// empty/nil Complain set is byte-identical to HEAD (no tool is in complain mode).
 	Complain map[string]bool
+	// SecretPosture selects what the on-discovery secret rung (internal/secretgate,
+	// #884/#885) does when a tool RESULT bears a credential: quarantine (the zero
+	// value = today's behavior), fail_closed (deny), or admit_and_log (admit a
+	// read-shaped result + record the would-deny). Additive — the zero value is
+	// quarantine, so an unset posture is byte-for-byte the pre-#885 path. See
+	// secretposture.go for the verdict mapping.
+	SecretPosture SecretPosture
+	// SecretPatterns are policy-declared EXTRA secret shapes, compiled at policy
+	// load (a bad regex fails LOUD at load, not at runtime), UNIONED with the
+	// canon.SecretPatterns floor at the gate — extend, never replace. Empty by
+	// default (floor patterns only), so this too is additive.
+	SecretPatterns []*regexp.Regexp
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal

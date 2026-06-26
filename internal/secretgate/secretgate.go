@@ -32,11 +32,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
@@ -192,7 +194,7 @@ func (g *Gate) bytes(ctx context.Context, r abi.Ref) []byte {
 // secret it pages the bytes out under a stable handle, records the Finding (+
 // optional witness.Decision), stubs the payload in place, and returns a Quarantine
 // verdict carrying ReasonSecretDiscovered.
-func (g *Gate) Admit(ctx context.Context, _ *abi.ToolCall, r *abi.Result) abi.Verdict {
+func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
 	if !enabled {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "secretgate(off)"}
 	}
@@ -201,13 +203,31 @@ func (g *Gate) Admit(ctx context.Context, _ *abi.ToolCall, r *abi.Result) abi.Ve
 	if len(body) == 0 {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "secretgate"}
 	}
-	if !canon.Scan(body).Secret {
-		return abi.Verdict{Kind: abi.VerdictDefer, By: "secretgate"} // clean (of secrets) -> let the next link decide
+	// Detection UNIONS the canon floor with the policy-declared EXTRA patterns
+	// (#885); the posture (#885) selects the verdict. Default = quarantine + floor
+	// patterns only = today's behavior. The active policy flows in via cmd/fak's
+	// adjudicator.Default.SetPolicy(manifest); with none loaded the zero posture +
+	// nil patterns reproduce the pre-#885 path.
+	posture, extra := adjudicator.Default.SecretPolicy()
+	if !canon.Scan(body).Secret && !matchesAnyPattern(extra, body) {
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "secretgate"} // clean of secrets -> next link
 	}
-	return g.quarantineSecret(ctx, r, body)
+	tool := ""
+	if c != nil {
+		tool = c.Tool
+	}
+	v := posture.Verdict(tool)
+	if v.Kind == abi.VerdictAllow {
+		return g.admitAndLog(ctx, r, body, v) // admit_and_log: record the would-deny, admit unchanged
+	}
+	return g.holdSecret(ctx, r, body, v) // quarantine / fail_closed: hold out of context
 }
 
-func (g *Gate) quarantineSecret(ctx context.Context, r *abi.Result, body []byte) abi.Verdict {
+// holdSecret pages the secret-bearing body out under a stable handle (CAS-pinned),
+// records the Finding(s) + optional witness.Decision, stubs the payload, and returns
+// the posture verdict v — Quarantine for the default posture, Deny for fail_closed.
+// The bytes are held identically for both; only the verdict KIND differs.
+func (g *Gate) holdSecret(ctx context.Context, r *abi.Result, body []byte, v abi.Verdict) abi.Verdict {
 	atomic.AddInt64(&g.discovered, 1)
 	handle := newHandle()
 	pin := g.pageOut(ctx, body)
@@ -224,7 +244,7 @@ func (g *Gate) quarantineSecret(ctx context.Context, r *abi.Result, body []byte)
 
 	g.record(ctx, f)
 
-	stub := map[string]any{"_quarantined": true, "handle": handle, "reason": abi.ReasonName(abi.ReasonSecretDiscovered),
+	stub := map[string]any{"_quarantined": true, "handle": handle, "reason": abi.ReasonName(v.Reason),
 		"by": "secretgate", "len": len(body), "findings": len(f), "_note": "secret discovered in tool result; held out of context"}
 	if ref, ok := putJSON(ctx, stub); ok {
 		r.Payload = ref
@@ -236,8 +256,44 @@ func (g *Gate) quarantineSecret(ctx context.Context, r *abi.Result, body []byte)
 	}
 	r.Meta["secret_handle"] = handle
 	r.Meta["secretgate"] = "quarantined"
-	return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonSecretDiscovered, By: "secretgate",
-		Payload: abi.QuarantinePayload{PageOut: true}}
+	return v
+}
+
+// admitAndLog records the discovery (the would-deny Finding + optional witness) but
+// ADMITS the result unchanged — the admit_and_log posture's explicit choice to let a
+// read-shaped secret-bearing result through with a forensic record rather than hold
+// it. The bytes are NOT paged out (the result enters context), so PageIn has nothing
+// to release for this handle; the handle is a record id only.
+func (g *Gate) admitAndLog(ctx context.Context, r *abi.Result, body []byte, v abi.Verdict) abi.Verdict {
+	atomic.AddInt64(&g.discovered, 1)
+	handle := newHandle()
+	f := classifySpans(body, handle, abi.Ref{})
+	g.escalate(f)
+
+	g.mu.Lock()
+	g.findings = append(g.findings, f...)
+	g.evictExcessLocked()
+	g.mu.Unlock()
+
+	g.record(ctx, f)
+
+	if r.Meta == nil {
+		r.Meta = map[string]string{}
+	}
+	r.Meta["secretgate"] = "admit_and_log"
+	r.Meta["secret_handle"] = handle
+	return v
+}
+
+// matchesAnyPattern reports whether body matches any policy-declared extra secret
+// pattern — the #885 union with the canon floor (extend, never replace).
+func matchesAnyPattern(pats []*regexp.Regexp, body []byte) bool {
+	for _, re := range pats {
+		if re != nil && re.Match(body) {
+			return true
+		}
+	}
+	return false
 }
 
 // classifySpans builds the Finding(s) for a discovered-secret body. It locates raw

@@ -5,14 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the blob PageOut/Resolver backend
 	"github.com/anthony-chaudhary/fak/internal/leakcheck"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
+
+// withSecretPolicy installs a secret posture/patterns on the global adjudicator the
+// gate reads at admit time, and restores the default floor after the test.
+func withSecretPolicy(t *testing.T, p adjudicator.Policy) {
+	t.Helper()
+	adjudicator.Default.SetPolicy(p)
+	t.Cleanup(func() { adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy()) })
+}
 
 // A canon.SecretPatterns-matching credential used across the tests.
 const secretBody = "token: github_pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5N4m3L2k1J0"
@@ -257,6 +267,71 @@ func TestDistinctDigestsDoNotCrossTrigger(t *testing.T) {
 		if f.Sightings != 1 || f.Escalated {
 			t.Errorf("a distinct secret must be a first sighting, not escalated: %+v", f)
 		}
+	}
+}
+
+// TestPostureFailClosedDenies (#885): under the fail_closed secret posture a
+// discovered secret yields a Deny verdict (still held + recorded), not a Quarantine.
+func TestPostureFailClosedDenies(t *testing.T) {
+	withEnabled(t, true)
+	withSecretPolicy(t, adjudicator.Policy{SecretPosture: adjudicator.SecretFailClosed})
+	ctx := context.Background()
+	g := New()
+	r := result(secretBody)
+	v := g.Admit(ctx, toolCall("read_webpage"), r)
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonSecretDiscovered {
+		t.Fatalf("fail_closed verdict = %v/%s, want Deny/RESULT_SECRET_DISCOVERED", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if len(g.Findings()) == 0 {
+		t.Error("fail_closed must still record the discovery Finding")
+	}
+	if got := resolve(t, ctx, r.Payload); strings.Contains(got, "github_pat_") {
+		t.Error("fail_closed must still hold the secret out of context (payload stubbed)")
+	}
+}
+
+// TestPostureAdmitAndLogAdmits (#885): under admit_and_log a read-shaped result is
+// ADMITTED unchanged (the secret enters context) while the would-deny is recorded.
+func TestPostureAdmitAndLogAdmits(t *testing.T) {
+	withEnabled(t, true)
+	withSecretPolicy(t, adjudicator.Policy{SecretPosture: adjudicator.SecretAdmitAndLog})
+	ctx := context.Background()
+	g := New()
+	r := result(secretBody)
+	v := g.Admit(ctx, toolCall("read_file"), r) // read-shaped
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("admit_and_log (read-shaped) verdict = %v, want Allow", v.Kind)
+	}
+	if v.Meta["would_deny"] != "RESULT_SECRET_DISCOVERED" {
+		t.Errorf("admit_and_log must record the would-deny, got Meta %v", v.Meta)
+	}
+	if got := resolve(t, ctx, r.Payload); !strings.Contains(got, "github_pat_") {
+		t.Error("admit_and_log must admit the result unchanged (secret stays in the payload)")
+	}
+	if r.Meta["secretgate"] != "admit_and_log" {
+		t.Errorf("result Meta secretgate = %q, want admit_and_log", r.Meta["secretgate"])
+	}
+	if len(g.Findings()) == 0 {
+		t.Error("admit_and_log must still record the discovery Finding")
+	}
+}
+
+// TestDeclaredPatternUnion (#885): a policy-declared extra pattern catches a secret
+// shape the canon floor misses, and the gate quarantines it (default posture).
+func TestDeclaredPatternUnion(t *testing.T) {
+	withEnabled(t, true)
+	withSecretPolicy(t, adjudicator.Policy{SecretPatterns: []*regexp.Regexp{regexp.MustCompile(`ACME-[A-Z0-9]{8}`)}})
+	ctx := context.Background()
+	g := New()
+	// canon does not flag this shape; the declared pattern does.
+	body := "config ACME-AB12CD34 value"
+	r := result(body)
+	v := g.Admit(ctx, toolCall("read_file"), r)
+	if v.Kind != abi.VerdictQuarantine {
+		t.Fatalf("declared-pattern hit verdict = %v, want Quarantine", v.Kind)
+	}
+	if got := resolve(t, ctx, r.Payload); strings.Contains(got, "ACME-AB12CD34") {
+		t.Error("the declared-pattern secret should have been held out of context")
 	}
 }
 

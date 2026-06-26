@@ -67,9 +67,18 @@ type Manifest struct {
 	Deny            map[string]string `json:"deny,omitempty"`
 	SelfModifyGlobs []string          `json:"self_modify_globs,omitempty"`
 	RedactFields    []string          `json:"redact_fields,omitempty"`
-	SafeSinks       []string          `json:"safe_sinks,omitempty"`
-	Authorize       []AuthorizeRule   `json:"authorize,omitempty"`
-	Sources         map[string]string `json:"sources,omitempty"`
+	// SecretPosture (issue #885) selects what the on-discovery secret rung does when
+	// a tool result bears a credential: "quarantine" (default, omitted), "fail_closed",
+	// or "admit_and_log". An unknown token is refused at load. Maps to
+	// adjudicator.Policy.SecretPosture.
+	SecretPosture string `json:"secret_posture,omitempty"`
+	// SecretPatterns are RE2 strings for EXTRA secret shapes, compiled at load (a bad
+	// pattern fails loud) and unioned with the canon floor at the gate. Maps to
+	// adjudicator.Policy.SecretPatterns.
+	SecretPatterns []string          `json:"secret_patterns,omitempty"`
+	SafeSinks      []string          `json:"safe_sinks,omitempty"`
+	Authorize      []AuthorizeRule   `json:"authorize,omitempty"`
+	Sources        map[string]string `json:"sources,omitempty"`
 	// ArgRules are per-tool ARGUMENT-VALUE constraints (issue #9) — the manifest
 	// form of adjudicator.ArgPredicate. They extend the floor from "which tool"
 	// to "which tool with which argument values". See ArgRule for the matchers.
@@ -280,6 +289,16 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	}
 	p.ArgPredicates = argPreds
 	p.LintWrites = m.LintWrites
+	secretPosture, ok := adjudicator.ParseSecretPosture(m.SecretPosture)
+	if !ok {
+		return Runtime{}, fmt.Errorf("unknown secret_posture %q; valid: quarantine, fail_closed, admit_and_log", m.SecretPosture)
+	}
+	p.SecretPosture = secretPosture
+	secretPats, err := compileSecretPatterns(m.SecretPatterns)
+	if err != nil {
+		return Runtime{}, err
+	}
+	p.SecretPatterns = secretPats
 	sources, err := compileSources(m.Sources)
 	if err != nil {
 		return Runtime{}, err
@@ -370,6 +389,17 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 				r.MaxBytes = pred.N
 			}
 			m.ArgRules = append(m.ArgRules, r)
+		}
+	}
+	if p.SecretPosture != adjudicator.SecretQuarantine {
+		m.SecretPosture = p.SecretPosture.String() // quarantine is the default -> omitted
+	}
+	if len(p.SecretPatterns) > 0 {
+		m.SecretPatterns = make([]string, 0, len(p.SecretPatterns))
+		for _, re := range p.SecretPatterns {
+			if re != nil {
+				m.SecretPatterns = append(m.SecretPatterns, re.String())
+			}
 		}
 	}
 	m.LintWrites = p.LintWrites
@@ -556,6 +586,25 @@ func parseSource(s string) (provenance.Source, error) {
 	default:
 		return provenance.Untrusted, fmt.Errorf("unknown source %q (want trusted_local|untrusted)", s)
 	}
+}
+
+// compileSecretPatterns compiles the manifest's declared EXTRA secret RE2 strings
+// (issue #885) at policy LOAD, so a bad pattern fails loud here, never at runtime.
+// The compiled set is unioned with the canon floor at the gate (extend, never
+// replace). An empty list compiles to nil (floor patterns only).
+func compileSecretPatterns(pats []string) ([]*regexp.Regexp, error) {
+	if len(pats) == 0 {
+		return nil, nil
+	}
+	out := make([]*regexp.Regexp, 0, len(pats))
+	for i, p := range pats {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("secret_patterns[%d] %q: %w", i, p, err)
+		}
+		out = append(out, re)
+	}
+	return out, nil
 }
 
 func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
