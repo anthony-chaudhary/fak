@@ -56,6 +56,20 @@ import (
 // before/after A/B can be measured against the SAME binary.
 var enabled = os.Getenv("FAK_IFC") != "off"
 
+// gateExecOnTaint restores EXEC (shell/code) taint-gating in the DEFAULT gated set
+// without authoring a full policy — the strict-by-env opt-in that mirrors FAK_IFC.
+// It is OFF by default: see DefaultGatedSinks for why a reasonable default does NOT
+// gate the EXEC sink on the session-wide taint high-water mark. An operator whose
+// agent processes untrusted input sets FAK_IFC_GATE_EXEC=1 (or uses StrictGatedSinks
+// in a policy) to bar a tainted shell exec too.
+var gateExecOnTaint = func() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_IFC_GATE_EXEC"))) {
+	case "1", "on", "true", "yes":
+		return true
+	}
+	return false
+}()
+
 // ---------------------------------------------------------------------------
 // Taint restrictiveness — the abi.TaintLabel enum values are NOT ordered by
 // restrictiveness (Tainted=0, Trusted=1, Quarantined=2), so never compare them
@@ -276,6 +290,51 @@ type Policy struct {
 	// exceeds the trusted ceiling instead of admitting it with a ScopeAgent clamp.
 	// Default false preserves the historical stamp-only result path.
 	DenyResultsOverTaintCeiling bool
+	// GatedSinks selects WHICH sink classes the SinkGate refuses when tainted data is
+	// in flight. A nil set uses the reasonable DEFAULT (DefaultGatedSinks): the EGRESS
+	// and DESTRUCTIVE channels — exfiltration and irreversible mutation — are gated,
+	// but the EXEC (shell/code) sink is NOT. Gating EXEC on the session-wide taint
+	// HIGH-WATER MARK denies every Bash after any untrusted read, a workflow-breaking
+	// false positive on trusted dev work (the common case), for little marginal safety
+	// beyond the hard arg-rules (rm -rf / sudo / curl|sh / mkfs / path-escape) that
+	// block dangerous shell UNCONDITIONALLY. An agent that processes UNTRUSTED INPUT
+	// (the prompt-injection threat model) opts into StrictGatedSinks, which gates EXEC
+	// too; the agentdojo red-team harness and the FAK_IFC_GATE_EXEC env toggle do.
+	GatedSinks map[SinkClass]bool
+}
+
+// DefaultGatedSinks is the reasonable default sink-gate set: gate the exfiltration
+// (EGRESS) and irreversible-mutation (DESTRUCTIVE) channels on session taint, but NOT
+// EXEC. EXEC is included only when FAK_IFC_GATE_EXEC restores it (see gateExecOnTaint).
+// The load-bearing anti-exfil property — no false negatives on the egress channel — is
+// preserved; the EXEC false-positive that breaks dev work is not paid by default.
+func DefaultGatedSinks() map[SinkClass]bool {
+	s := map[SinkClass]bool{SinkEgress: true, SinkDestructive: true}
+	if gateExecOnTaint {
+		s[SinkExec] = true
+	}
+	return s
+}
+
+// StrictGatedSinks gates EVERY sensitive sink, INCLUDING EXEC — the configuration for
+// an agent processing UNTRUSTED INPUT, where a tainted shell exec is itself an attack
+// channel. Opt in via Policy.GatedSinks for that threat model.
+func StrictGatedSinks() map[SinkClass]bool {
+	return map[SinkClass]bool{SinkEgress: true, SinkExec: true, SinkDestructive: true}
+}
+
+// Gates reports whether the policy refuses sink class s when tainted data is in
+// flight. A nil GatedSinks uses DefaultGatedSinks (EXEC ungated unless
+// FAK_IFC_GATE_EXEC). SinkNone is never gated. Exported so the capture-replay mirror
+// (internal/tracesink) can stay byte-identical to the live gate.
+func (p Policy) Gates(s SinkClass) bool {
+	if s == SinkNone {
+		return false
+	}
+	if p.GatedSinks != nil {
+		return p.GatedSinks[s]
+	}
+	return DefaultGatedSinks()[s]
 }
 
 // defaultSafeSinks: a human handoff is the safe response to an injection.
@@ -570,6 +629,15 @@ func (g *SinkGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict 
 	}
 	if !Dangerous(flow) {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink"} // clean data to a sink is fine
+	}
+
+	// This sink class may not be taint-gated by policy. The DEFAULT exempts EXEC:
+	// gating shell on the session-wide taint high-water mark denies normal Bash after
+	// ANY untrusted read (a workflow-breaking false positive on trusted dev work), and
+	// the hard arg-rules block genuinely-dangerous shell unconditionally. An agent on
+	// untrusted input opts into StrictGatedSinks (or FAK_IFC_GATE_EXEC) to gate it.
+	if !g.policy.Gates(sink) {
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink"} // sink class not gated by policy
 	}
 
 	// A tainted flow into a sensitive sink. The explicit-authorization escape (a
