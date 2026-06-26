@@ -163,6 +163,8 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "stopfailure":
+		cmdStopFailure(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -413,6 +415,12 @@ func usage() {
                  end to end  -  exit 1 naming the first broken link if a byte changed
                  since it was written; 'export' re-emits it as JSONL. A self-report is
                  not a witness  -  this is how the record is checked offline)
+  fak stopfailure plan | reset-stale
+                (operator surface for .dos/stop-failures breaker markers. plan is
+                 read-only; reset-stale is dry-run unless --apply is passed. The
+                 default one-day lens matches the guard/MCP status queue; pass
+                 --since-hours 0 for all history. Only stale marker consecutive counts
+                 are reset; recent markers stay review-only)
   fak headroom  list | status | compress [--via NAME] [--model ID] [--emit] [FILE|-]
                 (the CONTEXT-COMPRESSION seam: shrink tool outputs/logs/files before
                  they reach the model, reversibly. A pluggable AREA  -  one generic

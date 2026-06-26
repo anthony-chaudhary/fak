@@ -151,6 +151,7 @@ fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # o
 fak vcache    status | prove | prove-telemetry           # virtual provider-cache status plus planned/observed token-savings proof/refutation
 fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
+fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
 
