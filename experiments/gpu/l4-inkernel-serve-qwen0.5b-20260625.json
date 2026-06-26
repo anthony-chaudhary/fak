@@ -1,0 +1,36 @@
+{
+  "schema": "l4-inkernel-serve/1",
+  "utc": "2026-06-25",
+  "node_class": "gcp-g2-standard-8",
+  "device": "NVIDIA L4",
+  "device_arch": "sm_89",
+  "driver": "535.309.01",
+  "vram_total_mib": 23034,
+  "vram_used_mib": 2254,
+  "engine": "fak in-kernel CUDA serve (fak serve --gguf ... --backend cuda)",
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_id": "qwen2.5-0.5b-gpu",
+  "weights": "Q8_0 (real GGUF, ~644 MiB on disk)",
+  "category": "real fak in-kernel device decode of a real 0.5B Q8 checkpoint; NOT a 753B serving rate, NOT a DGX2/A100 number, NOT a stock-engine comparison",
+  "binary": "fak-gpu:latest image built 2026-06-21T19:24Z (predates the devMu fix); single-stream numbers are unaffected by the fix",
+  "single_stream_decode": {
+    "max_tokens": 128,
+    "warmup_discarded": true,
+    "reps": 8,
+    "tok_s_median": 466.09,
+    "tok_s_min": 437.25,
+    "tok_s_max": 510.37,
+    "latency_128tok_s": 0.27,
+    "note": "warm steady-state; the very first decode after a cold container start measures ~66 tok/s (includes CUDA-context + first-graph warmup) and must not be quoted as the steady-state rate"
+  },
+  "concurrency": {
+    "status": "BROKEN on the live 2026-06-21 binary",
+    "observed": "a 2-way (and 4-way) concurrent /v1/messages burst returns 0 usable tokens: one stream drops the connection (http 000), the other returns garbage ('!!!!'), and the CUDA context is poisoned with thousands of sticky 'fak-cuda: cuda_kernels.cu:81/:88 an illegal memory access was encountered' errors until the container is restarted",
+    "root_cause": "the in-kernel planner did not serialize the whole device forward pass: the single-stream CUDA backend (one g_stream, one cuBLAS handle, a shared device free-list) was driven by two concurrent agent.InKernelPlanner.Complete goroutines whose per-token op sequences interleaved and corrupted each other's device buffers",
+    "fix": "internal/agent/inkernel_planner.go: hold a dedicated devMu across the entire forward when backend != nil, serializing concurrent device requests into safe queuing (correct for a single-stream device). Paired GPU-free honesty test TestInKernelConcurrentDeviceCompleteSerializes (proven non-vacuous: 3719 overlaps without the lock, 0 with it).",
+    "fix_status": "in tree; NOT yet redeployed to the live fak-gpu container (the CUDA image build pipeline is out-of-band of this repo)"
+  },
+  "contrast": {
+    "cpu_serve_8081": "the sibling CPU GGUF serve (qwen2.5-0.5b-cpu, same model, --backend omitted) answered correctly throughout (http 200, real text), isolating the fault to the CUDA backend path"
+  }
+}
