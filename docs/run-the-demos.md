@@ -1,47 +1,64 @@
 ---
-title: "Run the fak demos yourself | local, headless, Docker, or your own cloud VM"
-description: "How to run the fak browser demos and headless command witnesses on your own machine or cloud host: guarddemo, turntaxdemo, tokendemo, unseedemo, ctxdemo, demorace, a2ademo, ctxplandemo, hwcachedemo, cxlpooldemo, memqdemo, poisonedmcpdemo, causalbench, and deletioncert."
+title: "Run the fak demos yourself | lowest-common-denominator first, then dedicated tracks"
+description: "How to run the fak demos on your own machine or cloud host: start with no-key/no-model lowest-common-denominator demos, then choose security, research/science, memory/serving, adoption, or live-model tracks."
 ---
 
 # Run the demos yourself
 
-The [live demos](demos.html) run on our GCP host, but every one of them is in the public
-repo and runs anywhere Go runs. This page shows four ways to run them yourself — pick the
-row that fits. Nothing here needs our infrastructure; the commands are the same ones the
-demo source documents at the top of each `main.go`.
+The [live demos](demos.html) run on our GCP host, but a new runner should not have to
+start with hosted infrastructure, a model download, a GPU, or an API key. Start with the
+lowest-common-denominator set: one Go command, deterministic output, no browser required,
+no network, no model weights.
 
-The browser demos:
+| Start-here demo | Command | Track |
+|---|---|---|
+| **dropindemo** — how fak wraps the agent you already run | `go run ./cmd/dropindemo -print` | adoption |
+| **guarddemo** — the safety floor, side by side | `go run ./cmd/guarddemo -print` | security |
+| **turntaxdemo** — forced turn tax deleted in the kernel | `go run ./cmd/turntaxdemo -print` | efficiency |
+| **tokendemo** — model-context and tool-call token ledger | `go run ./cmd/tokendemo -print` | efficiency |
+| **unseedemo** — poisoned KV span removed with a bit-exact witness | `go run ./cmd/unseedemo -print` | research/science |
 
-| Demo | Command | Needs a model? |
-|------|---------|----------------|
-| **guarddemo** — the safety floor, side by side (WITHOUT fak vs WITH fak, same attack) | `go run ./cmd/guarddemo` | no — self-contained |
-| **turntaxdemo** — turn-tax race (SOTA loop vs fak 1-shot) | `go run ./cmd/turntaxdemo` | no — self-contained |
-| **tokendemo** — tool-call token ledger (two meters: model-context tokens kept OUT by a prefiltered /bad call, and tool round-trips collapsed by a re-read served from cache) | `go run ./cmd/tokendemo -print` | no — self-contained |
-| **unseedemo** — Un-See It / Lobotomy Cam (poisoned result deleted from KV cache, with bit-exact witness) | `go run ./cmd/unseedemo` | no — self-contained |
-| **ctxdemo** — multi-agent context-reuse proof (fak vs a tuned warm-cache SOTA baseline) | `go run ./cmd/ctxdemo` | optional (live race needs one) |
-| **demorace** — reuse race (fak vs a tuned warm-cache SOTA baseline) + reuse curve | `go run ./cmd/demorace` | yes (live race) |
+Everything else is still runnable, but it belongs in a dedicated track instead of the
+front door:
 
-The headless command witnesses:
+| Track | Use it when you want... | Demos |
+|---|---|---|
+| **Security and policy** | default-deny behavior, tool poisoning, safe escalation, policy reloads, or red-team corpora | `guarddemo`, `poisonedmcpdemo`, `examples/adjudication-demo`, `examples/agentdojo-redteam`, `examples/wire-quarantine-demo`, `examples/auth-hardening`, `examples/escalation-demo`, `examples/policy-hot-reload`, `examples/trace-reset` |
+| **Research/science** | context reuse, KV/cache proofs, deletion certificates, or causal invalidation | `ctxdemo`, `demorace`, `tokendemo`, `unseedemo`, `ctxplandemo`, `causalbench`, `deletioncert`, `examples/routing-bench` |
+| **Memory and serving systems** | placement, CXL/pool economics, memory-query composition, or model-backed races | `hwcachedemo`, `cxlpooldemo`, `memqdemo`, `simpledemo`, `demorace` |
+| **Adoption and integrations** | wrapping existing agents, MCP, OpenAI Agents, AutoGen, CrewAI, or external drivers | `dropindemo`, `a2ademo`, `examples/mcp`, `examples/mcp-client`, `examples/openai-agents-guardrail`, `examples/autogen-groupchat`, `examples/crewai-crew`, `examples/extdriver` |
 
-| Demo | Command | What it proves |
-|------|---------|----------------|
-| **a2ademo** | `go run ./cmd/a2ademo` | in-kernel agent-to-agent delivery, denial, session/window handoff, and pub/sub |
-| **ctxplandemo** | `go run ./cmd/ctxplandemo -selfcheck` | O(1) context view planning, poison exclusion, recoverability, and scaling invariants |
-| **hwcachedemo** | `go run ./cmd/hwcachedemo` | hardware-aware demote-not-evict placement beats blind LRU under pressure |
-| **cxlpooldemo** | `go run ./cmd/cxlpooldemo` | coherent pooled memory can save both prefills and resident KV copies, gated by trust |
-| **memqdemo** | `go run ./cmd/memqdemo` | memory strategies are composable queries; effects default fail-closed |
-| **poisonedmcpdemo** | `go run ./cmd/poisonedmcpdemo` | poisoned MCP results are quarantined and unwired tools are denied by structure |
-| **causalbench** | `go run ./cmd/causalbench -selfcheck` | an external write evicts exactly the dependent cached read, keeps siblings warm, and refuses stale re-admission |
-| **deletioncert** | `go run ./cmd/deletioncert -selfcheck` | a selected KV span is evicted to `max|Delta|=0`, bound into a certificate, and tamper-rejected |
+Browser demos by track:
 
-The first four are **self-contained** (no model, no GPU, no downloads). `guarddemo`,
-`turntaxdemo`, and `tokendemo` replay frozen, class-labeled tool-call traces through the
-*real* kernel, so they reproduce identically on any box; `unseedemo` drives the real
-`ctxmmu` gate, `kvmmu` bridge, and `model.KVCache.Evict` over a synthetic model witness.
-`guarddemo` is the fastest point to grasp — the moat in one side-by-side glance;
-`tokendemo` is the most concrete *clear win* — the model-context tokens a prefiltered /bad
-call keeps out of the model (plus the tool round-trips a cached re-read collapses), counted
-call by call.
+| Demo | Command | Track | Needs a model? |
+|------|---------|-------|----------------|
+| **dropindemo** — drop-in wiring gallery for existing coding agents | `go run ./cmd/dropindemo` | adoption | no — self-contained |
+| **guarddemo** — the safety floor, side by side (WITHOUT fak vs WITH fak, same attack) | `go run ./cmd/guarddemo` | security | no — self-contained |
+| **turntaxdemo** — turn-tax race (SOTA loop vs fak 1-shot) | `go run ./cmd/turntaxdemo` | efficiency | no — self-contained |
+| **unseedemo** — Un-See It / Lobotomy Cam (poisoned result deleted from KV cache, with bit-exact witness) | `go run ./cmd/unseedemo` | research/science | no — self-contained |
+| **ctxdemo** — multi-agent context-reuse proof (fak vs a tuned warm-cache SOTA baseline) | `go run ./cmd/ctxdemo` | research/science | optional (live race needs one) |
+| **demorace** — reuse race (fak vs a tuned warm-cache SOTA baseline) + reuse curve | `go run ./cmd/demorace` | live model research | yes (live race) |
+
+Headless witnesses by track:
+
+| Demo | Command | Track | What it proves |
+|------|---------|-------|----------------|
+| **dropindemo** | `go run ./cmd/dropindemo -selfcheck` | adoption | provider/upstream/base-URL wiring is generated without a key or network |
+| **a2ademo** | `go run ./cmd/a2ademo` | adoption | in-kernel agent-to-agent delivery, denial, session/window handoff, and pub/sub |
+| **ctxplandemo** | `go run ./cmd/ctxplandemo -selfcheck` | research/science | O(1) context view planning, poison exclusion, recoverability, and scaling invariants |
+| **hwcachedemo** | `go run ./cmd/hwcachedemo` | memory/serving | hardware-aware demote-not-evict placement beats blind LRU under pressure |
+| **cxlpooldemo** | `go run ./cmd/cxlpooldemo` | memory/serving | coherent pooled memory can save both prefills and resident KV copies, gated by trust |
+| **memqdemo** | `go run ./cmd/memqdemo` | memory/serving | memory strategies are composable queries; effects default fail-closed |
+| **poisonedmcpdemo** | `go run ./cmd/poisonedmcpdemo` | security | poisoned MCP results are quarantined and unwired tools are denied by structure |
+| **causalbench** | `go run ./cmd/causalbench -selfcheck` | research/science | an external write evicts exactly the dependent cached read, keeps siblings warm, and refuses stale re-admission |
+| **deletioncert** | `go run ./cmd/deletioncert -selfcheck` | research/science | a selected KV span is evicted to `max|Delta|=0`, bound into a certificate, and tamper-rejected |
+
+`guarddemo`, `turntaxdemo`, `tokendemo`, `dropindemo`, and `unseedemo` are the
+lowest-common-denominator demos: no model, no GPU, no download, no provider key, no network.
+They run against frozen fixtures or synthetic witnesses through the real kernel path, so they
+reproduce identically on any box with Go. `ctxdemo` is also model-free in `-print` and
+`-bars` modes, but it lives in the research track because its main job is explaining
+multi-agent context reuse rather than onboarding.
 
 ## 1. Local — one command
 
@@ -49,6 +66,8 @@ call by call.
 git clone https://github.com/anthony-chaudhary/fak && cd fak
 
 # the self-contained ones — no model, no GPU, no downloads:
+go run ./cmd/dropindemo            # -> http://127.0.0.1:8154
+#   inspect the drop-in wiring gallery for Claude Code, Codex, OpenCode, and Aider
 go run ./cmd/guarddemo             # → http://127.0.0.1:8151
 #   pick a scenario → "Run both agents"  (WITHOUT fak vs WITH fak, side by side)
 go run ./cmd/turntaxdemo            # → http://127.0.0.1:8150
@@ -61,16 +80,30 @@ go run ./cmd/demorace             # → http://127.0.0.1:8147
 ```
 
 **What you'll see:** each server prints the loopback URL it bound — `guarddemo` on
-`http://127.0.0.1:8151`, `turntaxdemo` on `:8150`, `unseedemo` on `:8156`, `ctxdemo` on
-`:8153`, and `demorace` on `:8147` (as shown in the comments above) — then waits; open that
-URL in a browser to drive the demo. On a shared/busy machine, cap the demos that accept it
-with `-jobs 8` (absolute) or `-budget 0.75` (a fraction of the box) so they don't starve
-other work.
+`http://127.0.0.1:8151`, `turntaxdemo` on `:8150`, `dropindemo` on `:8154`,
+`unseedemo` on `:8156`, `ctxdemo` on `:8153`, and `demorace` on `:8147` (as shown in
+the comments above) — then waits; open that URL in a browser to drive the demo. On a
+shared/busy machine, cap the demos that accept it with `-jobs 8` (absolute) or
+`-budget 0.75` (a fraction of the box) so they don't starve other work.
 
 ## 2. Headless — exact accounting, no browser, no model
 
-`ctxdemo` can print the precise, timing-free token accounting for every scenario without a
-model or a server — useful in CI or to read the numbers directly:
+This section is the CI-friendly surface: every command below exits, needs no browser, and
+uses no model weights or provider network. It is grouped the same way as the catalog above.
+
+Lowest-common-denominator terminal demos:
+
+```bash
+go run ./cmd/dropindemo -print                         # adoption: one static binary, child-only env wiring
+go run ./cmd/guarddemo  -print                         # security: WITHOUT fak vs WITH fak (4 breaches -> 0)
+go run ./cmd/guarddemo  -print -scenario turntax-happy # security: clean control (0 breaches)
+go run ./cmd/turntaxdemo -print                         # efficiency: tuned SOTA vs fak (5 forced turns -> 0)
+go run ./cmd/turntaxdemo -print -suite turntax-happy    # efficiency: anti-inflation control
+go run ./cmd/tokendemo   -print                         # tokens: prefiltered /bad call keeps 1,452 model-context tokens out
+go run ./cmd/unseedemo   -print                         # research/science: three-act KV eviction witness
+```
+
+Research/science accounting:
 
 ```bash
 go run ./cmd/ctxdemo -print          # a table of per-strategy prefill-token work
@@ -86,11 +119,10 @@ curl "http://127.0.0.1:8150/api/run?suite=turntax-airline" | jq .net
 # → {"turns_saved":9,"tokens_saved":11880, ...}
 ```
 
-`guarddemo` and `turntaxdemo` both ship a browserless `-selfcheck` that replays every
-scenario through the *real* kernel (the same code path the browser drives) and asserts the
-documented invariants — CI-usable, no browser, no network:
+Acceptance self-checks:
 
 ```bash
+go run ./cmd/dropindemo -selfcheck   # adoption wiring invariants
 go run ./cmd/guarddemo  -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH fak: 0 (per scenario)
 go run ./cmd/turntaxdemo -selfcheck   # turn-tax + safety-floor invariants per suite
 go run ./cmd/tokendemo  -selfcheck   # token-ledger invariants per suite (incl. the clean control at 0)
@@ -101,38 +133,29 @@ go run ./cmd/unseedemo  -selfcheck   # KV eviction invariants: quarantine, evict
 terminal walkthrough, `-json` for the exact event/ledger, `-selfcheck` for the invariants.
 
 ```bash
-go run ./cmd/tokendemo -print -suite prefilter-bad-calls   # win 1 (model context): 4 /bad calls refused → 1,452 tok kept out of the model
-go run ./cmd/tokendemo -print -suite reread-same-file       # win 2 (tool-side): 3 re-reads served from cache → the tool ran 3×, not 6×
+go run ./cmd/tokendemo -print -suite prefilter-bad-calls   # win 1 (model context): 4 /bad calls refused -> 1,452 tok kept out of the model
+go run ./cmd/tokendemo -print -suite reread-same-file       # win 2 (tool-side): 3 re-reads served from cache -> the tool ran 3x, not 6x
 go run ./cmd/tokendemo -json                                 # the exact per-call ledger (both meters), all suites
 go run ./cmd/unseedemo -print                                # the three-act KV eviction witness in the terminal
 go run ./cmd/unseedemo -json                                 # the browser event log as JSON
 ```
 
-All four self-contained comparisons ship a terminal side-by-side: the **30-second point
-with zero setup** — rendered right in the terminal, no browser, no port (honors
-`NO_COLOR`). One per fak value axis: `guarddemo` the **safety** axis, `turntaxdemo` the
-**efficiency** axis, `ctxdemo` the **reuse** axis, `tokendemo` the **token** axis:
-
-```bash
-go run ./cmd/guarddemo  -print                          # safety: WITHOUT fak vs WITH fak (4 breaches → 0)
-go run ./cmd/guarddemo  -print -scenario turntax-happy   # safety: the clean control (0 breaches)
-go run ./cmd/turntaxdemo -print                          # efficiency: tuned SOTA vs fak (5 forced turns → 0)
-go run ./cmd/turntaxdemo -print -suite turntax-happy     # efficiency: the anti-inflation control
-go run ./cmd/ctxdemo     -bars                           # reuse: tokens re-read — cold vs warm-cache vs fak
-go run ./cmd/tokendemo   -print                          # tokens: a prefiltered /bad call → 1,452 model-context tokens kept out
-```
-
-The other headless command witnesses are also one-command, deterministic, and CI-usable:
+Dedicated security, memory, and research witnesses:
 
 ```bash
 go run ./cmd/a2ademo
 go run ./cmd/ctxplandemo -selfcheck
 go run ./cmd/hwcachedemo
 go run ./cmd/cxlpooldemo
+go run ./cmd/cxlpooldemo -profiles cmd/cxlpooldemo/calibration.example.json
 go run ./cmd/memqdemo
+go run ./cmd/memqdemo -report memqdemo-report.json
 go run ./cmd/poisonedmcpdemo
+go run ./cmd/poisonedmcpdemo -json
 go run ./cmd/causalbench -selfcheck
+go run ./cmd/causalbench -selfcheck -out causalbench-witness.json
 go run ./cmd/deletioncert -selfcheck
+go run ./cmd/deletioncert -selfcheck -out deletioncert.json
 ```
 
 Or play all four in one shot — **fak in 30 seconds**, then a built-in acceptance check

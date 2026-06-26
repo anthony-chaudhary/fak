@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 32 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 34 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 32 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 32 |
+| Demos scored | 34 |
 | **Demo-debt (total defects)** | **0** |
-| Mean score | 99.8/100 |
+| Mean score | 99.6/100 |
 | Median / min / max | 100.0 / 94.2 / 100.0 |
-| Grade distribution | A:32 B:0 C:0 D:0 F:0 |
+| Grade distribution | A:34 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -29,6 +29,8 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | Score | Grade | Debt | run | repro | scope | self | docs | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
 | 94.2 | A | 0 | 100 | 100 | 90 | 88 | 90 | `cmd/dropindemo` |
+| 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/autogen-groupchat` |
+| 96.2 | A | 0 | 100 | 100 | 100 | 88 | 90 | `examples/crewai-crew` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/openai-agents-guardrail` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/adjudication-demo` |
 | 100.0 | A | 0 | 100 | 100 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
@@ -69,6 +71,14 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 
 ### `cmd/dropindemo`
 - honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/autogen-groupchat`
+- self_contained: no stated prerequisites — a cold runner can't tell what to install first
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/crewai-crew`
 - self_contained: no stated prerequisites — a cold runner can't tell what to install first
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 

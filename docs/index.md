@@ -78,13 +78,12 @@ security floor reach for it too ([see below](#for-security-teams)).
 [Read the FAQ](FAQ.md){: .btn } ·
 [GitHub repository](https://github.com/anthony-chaudhary/fak){: .btn }
 
-> **▶ See it run.** Three interactive demos drive the **real kernel** live on GCP —
-> [the turn-tax race](demos.html) (a SOTA agent loop vs fak's one-shot kernel), the
-> [multi-agent context-reuse proof](demos.html), and a [live model reuse race](demos.html).
-> Nothing to install; they run in your browser. **[Open the demos →](demos.html)**
-> Or [run your own copy](run-the-demos.md) — `go run ./cmd/turntaxdemo` or
-> `go run ./cmd/unseedemo` locally, in a
-> container, or on your own cloud VM.
+> **▶ See it run.** Start with no-key, no-model demos that run anywhere Go runs:
+> `go run ./cmd/dropindemo -print`, `go run ./cmd/guarddemo -print`, or
+> `go run ./cmd/tokendemo -print`. Then move to the dedicated security,
+> research/science, adoption, memory/serving, and hosted live-model tracks.
+> **[Open the demos →](demos.html)** Or [run your own copy](run-the-demos.md)
+> locally, in a container, or on your own cloud VM.
 
 ---
 

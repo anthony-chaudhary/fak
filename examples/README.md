@@ -44,6 +44,23 @@ flowchart LR
 > `fak policy --check`. It includes [`presets/coding-agent-safe.json`](presets/coding-agent-safe.json),
 > the hardened coding-agent floor built on the `gitgate` refusals (issue #578).
 
+## Runnable Example Tracks
+
+The top-level demo front door is now the lowest-common-denominator set in
+[`docs/run-the-demos.md`](../docs/run-the-demos.md): no key, no model, no GPU, no network.
+The rest of `examples/` is intentionally specialized and grouped by job:
+
+| Track | Directories | Purpose |
+|---|---|---|
+| **Security and policy** | [`adjudication-demo/`](adjudication-demo/README.md), [`agentdojo-redteam/`](agentdojo-redteam/README.md), [`wire-quarantine-demo/`](wire-quarantine-demo/README.md), [`auth-hardening/`](auth-hardening/README.md) | default-deny, tool poisoning, attack-corpus, quarantine, and auth-boundary witnesses |
+| **Policy lifecycle** | [`escalation-demo/`](escalation-demo/README.md), [`policy-hot-reload/`](policy-hot-reload/README.md), [`trace-reset/`](trace-reset/README.md), [`observability/`](observability/README.md) | safe-sink routing, reloads, per-trace reset, and operator visibility |
+| **Adoption and integrations** | [`mcp/`](mcp/README.md), [`mcp-client/`](mcp-client/README.md), [`openai-agents-guardrail/`](openai-agents-guardrail/README.md), [`autogen-groupchat/`](autogen-groupchat/README.md), [`crewai-crew/`](crewai-crew/README.md), [`extdriver/`](extdriver/README.md) | framework-specific ways to put fak in front of existing agents |
+| **Research/science fixtures** | [`routing-bench/`](routing-bench/), [`routing-presets/`](routing-presets/), [`trajectory/`](trajectory/) | recorded corpora and manifests for routing, trajectory scoring, and reproducible analysis |
+| **Shared task records** | [`shared-task-record/`](shared-task-record/README.md), [`shared-task-record-verdicts/`](shared-task-record-verdicts/README.md) | task-record interchange and verdict fixtures |
+
+That split keeps the first-run path small while preserving the heavier research,
+security, and framework demos for readers who came for those tracks.
+
 Run checks from `fak/`:
 
 ```bash

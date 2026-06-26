@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Robustness Scorecard: Simplicity, Speed, Durability"
-description: "The fak demo-robustness scorecard grades 32 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
+description: "The fak demo-robustness scorecard grades 34 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
 ---
 
 # Demo-robustness scorecard
@@ -16,12 +16,12 @@ description: "The fak demo-robustness scorecard grades 32 demos on simplicity, s
 
 | Metric | Value |
 |---|---|
-| Demos scored | 32 |
+| Demos scored | 34 |
 | **Robustness-debt (total defects)** | **0** |
 | Axis-debt | simplicity:0 · speed:0 · durability:0 |
-| Mean score | 98.9/100 |
+| Mean score | 99.0/100 |
 | Median / min / max | 100.0 / 92.2 / 100.0 |
-| Grade distribution | A:32 B:0 C:0 D:0 F:0 |
+| Grade distribution | A:34 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -38,6 +38,8 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 | 95.8 | A | 0 | 100 | 88 | 100 | `examples/wire-quarantine-demo` |
 | 97.6 | A | 0 | 92 | 100 | 100 | `examples/shared-task-record` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/agentdojo-redteam` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/autogen-groupchat` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/crewai-crew` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/extdriver` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/mcp` |
 | 100.0 | A | 0 | 100 | 100 | 100 | `examples/mcp-client` |
