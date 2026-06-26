@@ -1,0 +1,33 @@
+{
+  "schema": "fak-compact-dogfood/1",
+  "wire": "fak serve --provider anthropic --base-url <mock-upstream> --compact-history-budget",
+  "input": {
+    "turns": 900,
+    "budget_tokens": 8000,
+    "inbound_est_tokens": 142516,
+    "inbound_bytes": 570066
+  },
+  "off": {
+    "forwarded_bytes": 570066,
+    "est_tokens": 142516,
+    "valid_messages": true,
+    "byte_identical_to_inbound": true
+  },
+  "on": {
+    "forwarded_bytes": 42579,
+    "est_tokens": 10644,
+    "valid_messages": true,
+    "compaction_stub_present": true
+  },
+  "shed": {
+    "tokens": 131872,
+    "percent": 92.5
+  },
+  "cache_prefix": {
+    "compared_prefix_bytes": 10660,
+    "byte_identical_off_vs_on": true,
+    "off_prefix_sha256": "f3e5aa83de040125e7e7ef6337babf20326946b0c7d802af88964d27467e1f60",
+    "on_prefix_sha256": "f3e5aa83de040125e7e7ef6337babf20326946b0c7d802af88964d27467e1f60"
+  },
+  "verdict": "PASS"
+}
