@@ -100,6 +100,11 @@ python tools/glm52_serving_witness.py \
     --markdown docs/notes/GLM52-FULL-SIZE-SERVING-WITNESS.md
 ```
 
+> **Scope of this witness.** It proves the *fak-fronts-an-external-engine* (SGLang/vLLM)
+> form of #130 only — fak governs and fronts the weights an outside engine serves. It does
+> **not** prove native in-kernel GLM-5.2 serving; that external-vs-native boundary is drawn
+> in §6 below, and the separate native track is the [native 753B staged plan](../notes/native-753b-track-staged-plan.md).
+
 The committed `experiments/glm52/full-size-serving-witness.json` (schema
 `fak.glm52-serving-witness.v1`) — recording the model id, engine/version, GPU snapshot,
 and context length — is the **real artifact** that pins the `glm_moe_dsa` serving claim,
