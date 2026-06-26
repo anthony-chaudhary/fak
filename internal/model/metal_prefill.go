@@ -28,6 +28,7 @@ import (
 // and the CPU elementwise rest (norm/rope/silu/residual) — the map for where the gap to
 // llama.cpp-Metal still lives.
 var metalProf = os.Getenv("FAK_QPROFILE") != ""
+var metalResidentDisabled = os.Getenv("FAK_METAL_RESIDENT") == "0"
 
 // metalProjNames are the seven projection weights uploaded to the GPU, in upload order.
 var metalProjNames = []string{
@@ -177,7 +178,7 @@ func (s *Session) prefillMetalResident(ids []int) []float32 {
 // Both fill the same f32 KV cache the CPU paths build and return the last token's
 // post-final-norm hidden (caller applies the head).
 func (s *Session) prefillBatchedMetal(ids []int) []float32 {
-	if s.Cache.Len() == 0 {
+	if s.Cache.Len() == 0 && !metalResidentDisabled {
 		if out := s.prefillMetalResident(ids); out != nil {
 			return out
 		}

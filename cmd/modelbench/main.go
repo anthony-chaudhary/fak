@@ -136,6 +136,43 @@ func argmax(v []float32) int {
 	return bi
 }
 
+func logitTop2(v []float32) (top1Idx int, top1, top2 float32) {
+	top1, top2 = float32(-math.MaxFloat32), float32(-math.MaxFloat32)
+	for i, x := range v {
+		if x > top1 {
+			top2 = top1
+			top1, top1Idx = x, i
+		} else if x > top2 {
+			top2 = x
+		}
+	}
+	return top1Idx, top1, top2
+}
+
+func cosineF32(a, b []float32) float64 {
+	var dot, aa, bb float64
+	for i := range a {
+		x, y := float64(a[i]), float64(b[i])
+		dot += x * y
+		aa += x * x
+		bb += y * y
+	}
+	if aa == 0 || bb == 0 {
+		return 0
+	}
+	return dot / math.Sqrt(aa*bb)
+}
+
+func tryF32Prefill(m *model.Model, ids []int) (logits []float32, ok bool) {
+	defer func() {
+		if recover() != nil {
+			logits, ok = nil, false
+		}
+	}()
+	s := m.NewSession()
+	return s.Prefill(ids), true
+}
+
 // lcgIDs builds n deterministic token ids in [0,vocab) via a glibc LCG. The exact
 // same recurrence is reproduced in bench_hf.py so both engines see identical input.
 func lcgIDs(n, vocab int) []int {
@@ -447,16 +484,32 @@ func resolveMetal(f *benchFlags) {
 }
 
 // runVerify proves the Metal prefill is numerically faithful before trusting its speed.
-// Compare its last-token logits to the CPU Q8 path (already argmax-validated vs the HF
-// oracle) on several prompt lengths: argmax must agree, and the logit max|Δ| should sit
-// at the f16-vs-Q8 noise floor, not diverge. It is terminal (exits the process).
+// Prefer the f32 path as the reference when the model still holds f32 weights; CPU Q8 is a
+// useful speed baseline, but it can flip a greedy token on tiny margins. A f16 GPU path is
+// accepted when cosine stays high and every decisive f32 argmax (top1-top2 >= margin) agrees.
+// It is terminal (exits the process).
 func runVerify(f *benchFlags, m *model.Model, vocab int) {
 	if !*f.metal {
 		fmt.Fprintln(os.Stderr, "-verify requires -metal")
 		os.Exit(2)
 	}
+	const minMetalVerifyCosine = 0.999
+	const decisiveLogitMargin = 0.02
+	lengths := []int{8, 32, 128, 256}
+	if extra, err := parsePositiveInts(*f.prefillSizesCSV); err == nil {
+		seen := make(map[int]bool, len(lengths)+len(extra))
+		for _, n := range lengths {
+			seen[n] = true
+		}
+		for _, n := range extra {
+			if !seen[n] {
+				lengths = append(lengths, n)
+				seen[n] = true
+			}
+		}
+	}
 	allOK := true
-	for _, P := range []int{8, 32, 128, 256} {
+	for _, P := range lengths {
 		ids := lcgIDs(P, vocab)
 		sc := m.NewSession()
 		sc.Quant = true
@@ -471,14 +524,33 @@ func runVerify(f *benchFlags, m *model.Model, vocab int) {
 				maxAbs = d
 			}
 		}
-		ok := ac == ag
+		_, c1, c2 := logitTop2(lc)
+		_, g1, g2 := logitTop2(lg)
+		cpuMetalCos := cosineF32(lc, lg)
+		ok := ac == ag && cpuMetalCos >= minMetalVerifyCosine
+		status := "cpu-q8"
+		line := fmt.Sprintf("P=%-4d argmax cpu=%-7d metal=%-7d agree=%-5v  max|Δlogit|=%.4f  cosine=%.8f  margin cpu=%.4f metal=%.4f",
+			P, ac, ag, ac == ag, maxAbs, cpuMetalCos, c1-c2, g1-g2)
+		if lf, hasF32 := tryF32Prefill(m, ids); hasF32 {
+			af, f1, f2 := logitTop2(lf)
+			f32Margin := f1 - f2
+			f32MetalCos := cosineF32(lf, lg)
+			decisive := f32Margin >= decisiveLogitMargin
+			ok = f32MetalCos >= minMetalVerifyCosine && (!decisive || af == ag)
+			status = "f32"
+			if !decisive && af != ag {
+				status = "f32-near-tie"
+			}
+			line += fmt.Sprintf("  f32_argmax=%-7d f32_margin=%.4f f32_cpu_cos=%.8f f32_metal_cos=%.8f",
+				af, f32Margin, cosineF32(lf, lc), f32MetalCos)
+		}
 		allOK = allOK && ok
-		fmt.Printf("P=%-4d argmax cpu=%-7d metal=%-7d agree=%-5v  max|Δlogit|=%.4f\n", P, ac, ag, ok, maxAbs)
+		fmt.Printf("%s  status=%s ok=%v\n", line, status, ok)
 	}
 	if allOK {
-		fmt.Println("VERIFY OK — Metal prefill argmax-matches the CPU Q8 path on all lengths")
+		fmt.Println("VERIFY OK — Metal prefill matches the f32 reference on decisive margins")
 	} else {
-		fmt.Println("VERIFY FAIL — Metal prefill diverges from the CPU Q8 path")
+		fmt.Println("VERIFY FAIL — Metal prefill diverges from the available reference")
 		os.Exit(1)
 	}
 }
