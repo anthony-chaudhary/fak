@@ -410,10 +410,14 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 
 	t := s.phaseStart()
 	xp := mat.prep(xn)
-	mixed := mat.mul(p("linear_attn.in_proj_qkv.weight"), xp, convDim, H)
-	zAll := mat.mul(p("linear_attn.in_proj_z.weight"), xp, valDim, H)
-	bvec := mat.mul(p("linear_attn.in_proj_b.weight"), xp, nV, H)
-	avec := mat.mul(p("linear_attn.in_proj_a.weight"), xp, nV, H)
+	// The four GDN in_proj weights all read the same normed input xp — group them so the
+	// resident-Q4_K Metal kernel issues the q4_k-resident members (qkv, z) in a single command
+	// buffer (the per-token decode lever, #67); the tiny b/a fall back per-call.
+	in4 := mulGroup(mat, []string{
+		p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"),
+		p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"),
+	}, xp, []int{convDim, valDim, nV, nV}, H)
+	mixed, zAll, bvec, avec := in4[0], in4[1], in4[2], in4[3]
 	s.phaseEnd("qwen35_linear_step_in_proj", t)
 	conv := m.tensor(p("linear_attn.conv1d.weight")) // [convDim*K] depthwise
 	aLog := m.tensor(p("linear_attn.A_log"))

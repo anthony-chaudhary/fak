@@ -117,6 +117,48 @@ func TestMetalQ4KGemvMatchesCPU(t *testing.T) {
 	}
 }
 
+// TestMetalQ4KGemvGroupMatchesSingle verifies that GEMVGroup (n weights sharing one activation,
+// one command buffer) returns the same result as a single GEMV per weight — the correctness gate
+// for the live decode group batching (q/k/v, gate/up). Weights have different out dims to exercise
+// the per-weight y-offset packing.
+func TestMetalQ4KGemvGroupMatchesSingle(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	in := 1024
+	outs := []int{512, 1024, 256, 1536} // different out dims, shared in
+	x := randomVecF(in, 9)
+	ws := make([]*metalgemm.Q4KWeight, len(outs))
+	singles := make([][]float32, len(outs))
+	for i, out := range outs {
+		qt := randomQ4KTensor(out, in, int64(100+i))
+		w := metalgemm.UploadQ4K(qt.raw, out, in)
+		if w == nil {
+			t.Fatalf("UploadQ4K(%d,%d) returned nil", out, in)
+		}
+		ws[i] = w
+		y := make([]float32, out)
+		w.GEMV(x, y)
+		singles[i] = y
+	}
+	group := metalgemm.GEMVGroup(ws, x)
+	if len(group) != len(ws) {
+		t.Fatalf("GEMVGroup returned %d results, want %d", len(group), len(ws))
+	}
+	for i := range ws {
+		if len(group[i]) != outs[i] {
+			t.Fatalf("group[%d] len=%d want %d", i, len(group[i]), outs[i])
+		}
+		for o := 0; o < outs[i]; o++ {
+			if d := group[i][o] - singles[i][o]; d > 1e-3 || d < -1e-3 {
+				t.Fatalf("group[%d][%d]=%g != single %g", i, o, group[i][o], singles[i][o])
+			}
+		}
+	}
+	t.Logf("GEMVGroup matches single GEMV across %d weights (outs=%v)", len(ws), outs)
+}
+
 // TestMetalQ4KPrefillMatchesCPU is the end-to-end wiring gate: the resident-Q4_K hybrid
 // prefill with MetalQ4K=true (q4_k-majority GEMMs on the GPU) produces the same logits as the
 // CPU path (MetalQ4K=false) on the synthetic hybrid model. CPU GEMV is forced to f32
@@ -340,6 +382,72 @@ func BenchmarkMetalQ4KGemvBatch(b *testing.B) {
 		b.ReportMetric(weightBytes*float64(n)*float64(b.N)/secs/1e9, "GB/s")
 		b.ReportMetric(secs/float64(b.N)/float64(n)*1e6, "us/gemv")
 	}
+}
+
+// BenchmarkMetalQ4KFusedMLP isolates the fused on-GPU MLP (gate→silu·up→down in ONE command
+// buffer, intermediate resident) against the same three matmuls run as separate command buffers
+// with a CPU SwiGLU between — the decode MLP is ~54% of q4_k_m decode, so this is the noise-free
+// measure of the per-MLP-call lever the end-to-end wall-clock is too contended to show cleanly.
+// Shapes are Qwen3.6-27B's: H=5120, I=17408.
+func BenchmarkMetalQ4KFusedMLP(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	H, I := 5120, 17408
+	gate := metalgemm.UploadQ4K(randomQ4KTensor(I, H, 1).raw, I, H)
+	up := metalgemm.UploadQ4K(randomQ4KTensor(I, H, 2).raw, I, H)
+	down := metalgemm.UploadQ4K(randomQ4KTensor(H, I, 3).raw, H, I)
+	if gate == nil || up == nil || down == nil {
+		b.Fatal("UploadQ4K returned nil")
+	}
+	x := randomVecF(H, 4)
+	y := make([]float32, H)
+	rowBytes := func(out, in int) float64 { return float64(out) * float64(in) / 256.0 * 144.0 }
+	mlpBytes := rowBytes(I, H) + rowBytes(I, H) + rowBytes(H, I) // gate + up + down weight bytes
+	// Trust check: fused output equals the separate path on decisive margin.
+	g0, u0, inter0 := make([]float32, I), make([]float32, I), make([]float32, I)
+	gate.GEMV(x, g0)
+	up.GEMV(x, u0)
+	for j := 0; j < I; j++ {
+		inter0[j] = silu(g0[j]) * u0[j]
+	}
+	ySep := make([]float32, H)
+	down.GEMV(inter0, ySep)
+	metalgemm.FusedMLP(gate, up, down, x, y)
+	for o := 0; o < H; o++ {
+		if d := y[o] - ySep[o]; d > 1e-2 || d < -1e-2 {
+			b.Fatalf("FusedMLP[%d]=%g != separate %g", o, y[o], ySep[o])
+		}
+	}
+	b.Run("fused", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			metalgemm.FusedMLP(gate, up, down, x, y)
+		}
+		b.StopTimer()
+		if s := b.Elapsed().Seconds(); s > 0 {
+			b.ReportMetric(mlpBytes*float64(b.N)/s/1e9, "GB/s")
+			b.ReportMetric(s/float64(b.N)*1e3, "ms/mlp")
+		}
+	})
+	b.Run("separate", func(b *testing.B) {
+		g, u, inter := make([]float32, I), make([]float32, I), make([]float32, I)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			gate.GEMV(x, g)
+			up.GEMV(x, u)
+			for j := 0; j < I; j++ {
+				inter[j] = silu(g[j]) * u[j]
+			}
+			down.GEMV(inter, y)
+		}
+		b.StopTimer()
+		if s := b.Elapsed().Seconds(); s > 0 {
+			b.ReportMetric(mlpBytes*float64(b.N)/s/1e9, "GB/s")
+			b.ReportMetric(s/float64(b.N)*1e3, "ms/mlp")
+		}
+	})
 }
 
 // BenchmarkMetalQ4KGemmSteady measures the kernel's raw dequant+dot throughput when the

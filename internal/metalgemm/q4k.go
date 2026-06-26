@@ -14,6 +14,8 @@ package metalgemm
 int  mg_q4k_upload(const unsigned char* raw, int out, int in);
 void mg_q4k_gemv(int wid, const float* x, float* y);
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
+void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff);
+void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y);
 void mg_q4k_reset(void);
 */
@@ -64,6 +66,60 @@ func (w *Q4KWeight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
 		return
 	}
 	C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])))
+}
+
+// GEMVGroup runs one decode GEMV per weight in ws — all reading the SAME activation x (length
+// In, shared) — in a SINGLE Metal command buffer, and returns one result slice per weight (each
+// length ws[i].Out). Every weight must share x's In. This is the live decode group pattern
+// (q/k/v, gate/up, the GDN in_proj quad): it pays the per-command-buffer submit/sync once for the
+// whole group and pipelines the dispatches. Returns nil on a shape mismatch or empty input.
+func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32 {
+	n := len(ws)
+	if n == 0 || ws[0] == nil || len(x) < ws[0].In {
+		return nil
+	}
+	in := ws[0].In
+	wids := make([]C.int, n)
+	yoff := make([]C.int, n+1)
+	off := 0
+	for i, w := range ws {
+		if w == nil || w.id < 0 || w.In != in {
+			return nil
+		}
+		wids[i] = w.id
+		yoff[i] = C.int(off)
+		off += w.Out
+	}
+	yoff[n] = C.int(off)
+	ycat := make([]float32, off)
+	C.mg_q4k_gemv_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0])
+	out := make([][]float32, n)
+	o := 0
+	for i, w := range ws {
+		out[i] = ycat[o : o+w.Out : o+w.Out]
+		o += w.Out
+	}
+	return out
+}
+
+// FusedMLP runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) * (up·x) )
+// — in ONE Metal command buffer, keeping the intermediate-wide gate/up/inter resident on the GPU
+// (only x and y cross the boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==
+// down.In (=I); len(x)>=H, len(y)>=H. Returns false on a shape mismatch (caller uses the per-matmul
+// path). The activation is silu — the caller must gate on a non-GELU config.
+func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
+	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
+		return false
+	}
+	if gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || down.Out != gate.In {
+		return false
+	}
+	if len(x) < gate.In || len(y) < down.Out {
+		return false
+	}
+	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+	return true
 }
 
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ (batched prefill GEMM). X and Y are f32 row-major;
