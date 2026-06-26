@@ -288,11 +288,15 @@ func rawArgs(m json.RawMessage) string {
 // (max_tokens, temperature, top_p, stop) are parsed and forwarded to the upstream
 // model per request — an omitted field falls through to the planner default, so a
 // client that asks for a long completion is no longer hard-capped at the planner's
-// 1024-token floor. tool_choice and other unknown OpenAI fields are still accepted
-// and ignored (drop-in compatibility); there is, by construction, no Ref field to
-// smuggle. stream=true is supported by buffering the upstream turn, adjudicating the
-// complete proposed tool-call set, then emitting a synthetic SSE stream. Raw
-// upstream deltas are never passed through before adjudication.
+// 1024-token floor. The structured-output carriers (response_format, logit_bias) ride
+// through to the ride engine VERBATIM (#907): in ride mode vLLM/SGLang enforce the
+// JSON-schema/regex/grammar constraint, then fak adjudicates the resulting tool
+// candidate — fak forwards the constraint, it does not own it on this path. tool_choice
+// and other unknown OpenAI fields are still accepted and ignored (drop-in
+// compatibility); there is, by construction, no Ref field to smuggle. stream=true is
+// supported by buffering the upstream turn, adjudicating the complete proposed
+// tool-call set, then emitting a synthetic SSE stream. Raw upstream deltas are never
+// passed through before adjudication.
 type ChatRequest struct {
 	Model       string          `json:"model"`
 	Messages    []agent.Message `json:"messages"`
@@ -303,8 +307,17 @@ type ChatRequest struct {
 	// Stop is raw because the OpenAI wire allows EITHER a bare string OR an array of
 	// strings; decoding straight into []string would reject the common `"stop":"\n"`
 	// form. normalizeStop folds both shapes to a slice.
-	Stop   json.RawMessage `json:"stop,omitempty"`
-	Stream bool            `json:"stream,omitempty"`
+	Stop json.RawMessage `json:"stop,omitempty"`
+	// ResponseFormat is the OpenAI structured-output carrier (#907 / the #560
+	// guided-decode seam): the raw `response_format` object the client sent (a
+	// json_object or a json_schema). It is forwarded to the upstream verbatim so a ride
+	// engine (vLLM `guided_json`/`response_format`, SGLang `json_schema`) enforces the
+	// constraint during generation. Absent => unset on the wire (bit-exact drop-in).
+	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
+	// LogitBias is the OpenAI per-token logit-bias map (token id -> bias, the standard
+	// -100..100 mask), forwarded verbatim to the upstream. Absent => unset on the wire.
+	LogitBias map[int]float64 `json:"logit_bias,omitempty"`
+	Stream    bool            `json:"stream,omitempty"`
 }
 
 // normalizeStop folds the OpenAI `stop` field (a bare string, an array of strings,

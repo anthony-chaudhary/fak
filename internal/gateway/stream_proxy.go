@@ -87,6 +87,12 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
+		// Structured-output passthrough (#907): the streamed wire forwards the same
+		// response_format / logit_bias constraints as the buffered path, so a streamed
+		// tool-bearing turn is generated under the ride engine's constraint and still
+		// adjudicated whole. No-op when absent (bit-exact drop-in).
+		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithLogitBias(req.LogitBias),
 	)
 	if err != nil {
 		if _, _, _, ok := inKernelOOMObservation(err); ok {

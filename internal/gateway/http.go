@@ -355,6 +355,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
+		// Structured-output passthrough (#907): forward the client's response_format /
+		// logit_bias to the ride engine verbatim so vLLM/SGLang enforce the constraint
+		// during generation; the resulting tool candidate still enters adjudication
+		// below. Each option is a no-op when its field is absent (bit-exact drop-in).
+		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithLogitBias(req.LogitBias),
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator
