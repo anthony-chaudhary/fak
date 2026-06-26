@@ -96,8 +96,25 @@ func (denseSwiGLU) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	cfg := m.Cfg
 	H, I := cfg.HiddenSize, cfg.IntermediateSize
 	p := func(s string) string { return layerName(layer, s) }
-	g := mat.mul(p("mlp.gate_proj.weight"), xn, I, H)
-	u := mat.mul(p("mlp.up_proj.weight"), xn, I, H)
+	// Fused on-GPU MLP fast path: when the resident-Q4_K Metal kernel is active, the activation is
+	// silu (no GELU), and the MLP carries no bias, run gate→silu·up→down in ONE command buffer with
+	// the I-wide intermediate resident on the GPU (the per-token decode lever, #67). Falls through to
+	// the per-matmul path otherwise (bit-identical up to GPU float-order; pinned by the decode parity
+	// gate). _ = I keeps the dims referenced when this returns early.
+	if !cfg.ActGeluTanh && !cfg.ActGeluErf &&
+		!m.has(p("mlp.gate_proj.bias")) && !m.has(p("mlp.up_proj.bias")) && !m.has(p("mlp.down_proj.bias")) {
+		if sk, ok := mat.(sessionQ4KKernel); ok {
+			if xf, ok2 := xn.([]float32); ok2 {
+				if out := sk.s.q4kFusedMLP(p("mlp.gate_proj.weight"), p("mlp.up_proj.weight"), p("mlp.down_proj.weight"), xf); out != nil {
+					return out
+				}
+			}
+		}
+	}
+	// gate and up share the same normed input xn — run them as one group so the resident-Q4_K
+	// Metal kernel issues both in a single command buffer (the per-token decode lever, #67).
+	gu := mulGroup(mat, []string{p("mlp.gate_proj.weight"), p("mlp.up_proj.weight")}, xn, []int{I, I}, H)
+	g, u := gu[0], gu[1]
 	m.addBiasIfPresent(g, p("mlp.gate_proj.bias"))
 	m.addBiasIfPresent(u, p("mlp.up_proj.bias"))
 	for i := 0; i < I; i++ {
@@ -127,9 +144,21 @@ func (denseActivationMLP) apply(m *Model, layer int, xn any, mat matKernel) []fl
 // expertSwiGLU runs one expert's dense SwiGLU over xn and returns its [H] output.
 // It is the per-expert primitive the MoE weighted sum reuses — the same SwiGLU
 // arithmetic as the dense path, just over an expert-indexed weight set.
+// expertIntermediate is the per-ROUTED-EXPERT FFN width. It differs from the dense
+// IntermediateSize on models whose experts are narrower than the dense MLP (GLM-5.2:
+// expert_feed_forward_length=2048 vs the dense ffn ~12288). Falls back to IntermediateSize
+// when MoEIntermediateSize is unset (Mixtral / Qwen3-MoE GGUFs do not carry the key), so
+// those models are byte-for-byte unchanged.
+func (c Config) expertIntermediate() int {
+	if c.MoEIntermediateSize > 0 {
+		return c.MoEIntermediateSize
+	}
+	return c.IntermediateSize
+}
+
 func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 {
 	cfg := m.Cfg
-	H, I := cfg.HiddenSize, cfg.IntermediateSize
+	H, I := cfg.HiddenSize, cfg.expertIntermediate()
 	g := mat.mul(expertName(layer, expert, "gate_proj.weight"), xn, I, H)
 	u := mat.mul(expertName(layer, expert, "up_proj.weight"), xn, I, H)
 	m.addBiasIfPresent(g, expertName(layer, expert, "gate_proj.bias"))
