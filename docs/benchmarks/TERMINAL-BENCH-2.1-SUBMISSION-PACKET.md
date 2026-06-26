@@ -24,6 +24,12 @@ cleared the go/no-go bar: the credentialed raw and fak arms have not run, so no
 compare artifact and no gateway-traffic witness exist. The packet therefore
 stays precredential.
 
+The checked-in `terminalbench-21-rehearsal-preflight-20260626.json` (#900) is the
+machine-readable witness of that block: it records `status=BLOCKED_PREFLIGHT` with
+the exact host gates that fail (Docker engine down, `OPENAI_API_KEY` missing), and
+it itself carries `result_claim_allowed=false`. It is host-readiness evidence, never
+a benchmark number.
+
 Target bar to clear before submission, from the epic (#897), shown here only as
 the bar — **not** as a fak result: the official Terminal-Bench 2.1 leaderboard
 lists Codex CLI + GPT-5.5 at **83.4% ± 2.2** at rank 1 (as of 2026-06-26), and
@@ -40,6 +46,8 @@ this index plus these hashes: re-derive them with `sha256sum <path>` and compare
 |---|---|---|
 | `experiments/agent-live/terminalbench-official-run-contract-20260626.json` | Official-run contract (machine-readable gate): task selection, both arm commands, score-evidence link, gates, required-before-claim, `result_claim_allowed=false`. | `c89798de6f3205a695268b79e46efdd3d3192eb6fa72fbc07cd4ea7d4da7bd94` |
 | `experiments/agent-live/terminalbench-official-run-contract-20260626.md` | Human-readable render of the contract above. | `99f4f595604e8c17081e35008bdb4dce5605f34ee205cf1eb157b8ab49bee65f` |
+| `experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.json` | Rehearsal host-readiness preflight (#900): machine-readable **environment metadata** — the Harbor, Docker-engine, `OPENAI_API_KEY`, and fak-gateway gates this host passes or fails — and the checked-in witness that the credentialed run is `BLOCKED_PREFLIGHT`. Never a result; `result_claim_allowed=false`. | `e7963ed751290b299bd5332bde9939628c719b0d91815dbed1b0ce632e87c58a` |
+| `experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.md` | Human-readable render of the preflight above. | `e90080cd0945cc72a465982117838143e3105d85c574152c34a08f3568422c10` |
 | `experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json` | Adapter smoke (`SIMULATED_LOCAL_FIXTURE`): raw-vs-fak command-boundary shape over a recorded trace. Adapter evidence only — never a leaderboard number. | `2db95bdaa778e2df0733de41973fc895bfae01ea911ffd5a1a8f8d521c43f31c` |
 | `experiments/agent-live/terminalbench-command-boundary-smoke-20260625.md` | Human-readable render of the smoke above. | `a334c9c6a94576f82e006ee19a7192ada36c36a0ba0379dbc793ef51a9375691` |
 | `docs/benchmarks/TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md` | Failure taxonomy + legal retry policy (#901): the closed-vocabulary classifier the compare artifact tallies by. | `768a2eea696bc8dcb1a82034d724c7c89b79ea96e2ddd92a32fd7cb08ed4a52c` |
@@ -59,12 +67,25 @@ go run ./cmd/terminalbench \
   --md  experiments/agent-live/terminalbench-command-boundary-smoke-20260625.md
 ```
 
+The preflight is a **host-readiness probe**, not a deterministic render:
+re-running it re-probes this machine, so its gate booleans — and therefore its
+content and hash — change with the host. The pinned hash captures the
+`BLOCKED_PREFLIGHT` snapshot taken on the campaign host; regenerate it with:
+
+```bash
+go run ./cmd/terminalbench --preflight \
+  --out experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.json \
+  --md  experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.md
+```
+
 Verify every committed hash in one pass (this is the byte-exact gate):
 
 ```bash
 sha256sum \
   experiments/agent-live/terminalbench-official-run-contract-20260626.json \
   experiments/agent-live/terminalbench-official-run-contract-20260626.md \
+  experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.json \
+  experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.md \
   experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json \
   experiments/agent-live/terminalbench-command-boundary-smoke-20260625.md \
   docs/benchmarks/TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md \
