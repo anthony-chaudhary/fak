@@ -79,6 +79,45 @@ func TestMaybeElideNonPassthroughIsIdentity(t *testing.T) {
 	}
 }
 
+// TestMaybeElideMessagesLocalModelPath proves the decoded-path elision is enabled for a LOCAL
+// model served by fak (GLM-5.2 / Qwen-3.6-27B via an OpenAI backend or the in-kernel engine):
+// the non-passthrough wire shrinks an old oversized tool result, the Anthropic passthrough does
+// NOT (it is handled on req.Raw), and threshold 0 is identity.
+func TestMaybeElideMessagesLocalModelPath(t *testing.T) {
+	bigOld := strings.Repeat("scrolled-past command output line. ", 200) // ~7 KB, old → eligible
+	msgs := []agent.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "q"},
+		{Role: "tool", ToolCallID: "t2", Content: bigOld}, // idx 2, old → shrink on the local path
+		{Role: "assistant", Content: "a"},
+		{Role: "user", Content: "u"},
+		{Role: "assistant", Content: "b"},
+		{Role: "user", Content: "c"},
+		{Role: "assistant", Content: "d"},
+	}
+	// Non-passthrough (a mock planner stands in for a LOCAL GLM/Qwen model): elision fires.
+	local := &Server{planner: agent.NewMockPlanner("glm-5.2"), elideResultBytes: 2048, logf: func(string, ...any) {}}
+	if local.anthropicPassthrough() {
+		t.Fatal("mock planner must NOT be an anthropic passthrough")
+	}
+	if got := local.maybeElideMessages(msgs); len(got[2].Content) >= len(bigOld) {
+		t.Errorf("local-model (GLM/Qwen) path did not shrink the old oversized tool result: len=%d", len(got[2].Content))
+	}
+	// Anthropic passthrough: a no-op here (handled on req.Raw by maybeElideAnthropicRaw).
+	pass := &Server{planner: &agent.HTTPPlanner{Provider: agent.ProviderAnthropic}, elideResultBytes: 2048, logf: func(string, ...any) {}}
+	if !pass.anthropicPassthrough() {
+		t.Fatal("expected an anthropic passthrough server")
+	}
+	if got := pass.maybeElideMessages(msgs); got[2].Content != bigOld {
+		t.Error("passthrough path must NOT elide req.Messages (the kernel adjudicates full history; req.Raw is elided instead)")
+	}
+	// OFF (threshold 0) is identity on the local path too.
+	off := &Server{planner: agent.NewMockPlanner("m"), elideResultBytes: 0, logf: func(string, ...any) {}}
+	if got := off.maybeElideMessages(msgs); got[2].Content != bigOld {
+		t.Error("threshold 0 must leave messages unchanged")
+	}
+}
+
 func TestMaybeElideOnShrinksKeepsPrefix(t *testing.T) {
 	req, err := agent.DecodeAnthropicMessagesRequest(elideWireBody(t))
 	if err != nil {

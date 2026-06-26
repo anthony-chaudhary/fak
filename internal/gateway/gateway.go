@@ -913,6 +913,23 @@ func (s *Server) maybePlanMessages(ctx context.Context, trace string, messages [
 	return planned
 }
 
+// maybeElideMessages shrinks oversized OLD tool-role message Content to a bounded head+tail on
+// the DECODED []Message path — the OpenAI / in-kernel wire a LOCAL model served by fak takes
+// (GLM-5.2 / Qwen-3.6-27B via an OpenAI backend or the in-kernel engine), where the byte-splice
+// ElideAnthropicResults — which only fires on the real-Anthropic passthrough — never runs. It is
+// the decoded-path twin of maybeElideAnthropicRaw, so oversized-result elision is enabled by
+// default on BOTH wires. Guarded OFF on the passthrough (handled there on req.Raw) and when
+// --elide-result-bytes is 0. agent.ElideMessages is copy-on-write and fail-safe (it only ever
+// SHORTENS an old tool message, never empties a turn, recent working set protected), so this can
+// never break a turn or mutate the caller's slice.
+func (s *Server) maybeElideMessages(messages []agent.Message) []agent.Message {
+	if s.elideResultBytes <= 0 || s.anthropicPassthrough() {
+		return messages
+	}
+	out, _ := agent.ElideMessages(messages, s.elideResultBytes)
+	return out
+}
+
 // maxSessionPlanners bounds the per-session planner cache so a long-lived gateway serving
 // many distinct traces cannot grow it without limit. When the cache is full a new trace
 // evicts the whole map (a cheap generational reset) rather than tracking per-entry LRU —
@@ -958,6 +975,12 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// identity) unless CtxViewBudget > 0, so the default path is unchanged. The trace keys
 	// the persistent per-session planner so the rewrite is O(c·N), not O(N²), across turns.
 	messages = s.maybePlanMessages(ctx, trace, messages)
+	// Oversized tool_result elision on the DECODED path — the OpenAI / in-kernel wire a LOCAL
+	// model served by fak takes (GLM-5.2 / Qwen-3.6-27B), where the byte-splice passthrough
+	// elision never fires. Shrinks old oversized tool-role content to head+tail; default-on,
+	// fail-safe, recent working set protected. No-op on the Anthropic passthrough (handled on
+	// req.Raw there).
+	messages = s.maybeElideMessages(messages)
 	start := time.Now()
 	comp, err := s.planner.Complete(ctx, messages, tools, opts...)
 	dur := time.Since(start)
