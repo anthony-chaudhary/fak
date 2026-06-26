@@ -966,6 +966,10 @@ func main() {
 	parallelWorkers := flag.Int("parallel-workers", 32, "worker count for -parallel/-parallel-json.")
 	parallelCalls := flag.Int("parallel-calls", 512, "parallel hot-phase calls for -parallel/-parallel-json.")
 	parallelHotFiles := flag.Int("parallel-hot-files", 8, "distinct hot files to prewarm and repeat for -parallel/-parallel-json.")
+	parallelCold := flag.Bool("parallel-cold", false, "run the COLD concurrent same-read fill-race probe: N workers released at ONE barrier against a NEVER-SEEN key, counting engine calls before the vDSO tier-2 fill exists. A measurement first — MEASURED_RACE is the expected verdict until singleflight is built.")
+	parallelColdJSON := flag.Bool("parallel-cold-json", false, "emit the cold concurrent same-read fill-race probe as JSON.")
+	parallelColdWorkers := flag.Int("parallel-cold-workers", 64, "worker count released at the cold barrier for -parallel-cold/-parallel-cold-json.")
+	parallelColdTrials := flag.Int("parallel-cold-trials", 24, "independent cold trials (each a fresh empty vDSO world + never-seen key) for -parallel-cold/-parallel-cold-json.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each suite through the kernel (the same turnbench.RunWithWorld path -print/-json drive), assert the documented ledger invariants, and exit non-zero on any drift. The CI / cross-platform dog-food of this demo's data path.")
 	suite := flag.String("suite", "prefilter-bad-calls", "suite for -print / -json (prefilter-bad-calls | reread-same-file | clean-control)")
 	flag.Parse()
@@ -991,10 +995,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-parallel-workers, -parallel-calls, and -parallel-hot-files must be positive")
 		os.Exit(2)
 	}
+	if *parallelColdWorkers <= 0 || *parallelColdTrials <= 0 {
+		fmt.Fprintln(os.Stderr, "-parallel-cold-workers and -parallel-cold-trials must be positive")
+		os.Exit(2)
+	}
 
 	switch {
 	case *selfcheck:
 		os.Exit(runSelfcheck())
+	case *parallelColdJSON:
+		os.Exit(runColdJSON(*parallelColdWorkers, *parallelColdTrials, time.Duration(*engineDelayMS)*time.Millisecond))
+	case *parallelCold:
+		os.Exit(runColdPrint(*parallelColdWorkers, *parallelColdTrials, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *parallelJSON:
 		os.Exit(runParallelJSON(*parallelWorkers, *parallelCalls, *parallelHotFiles, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *parallel:
@@ -1015,6 +1027,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -print [-suite %s]\n", knownSuites[0].ID)
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -timing [-suite reread-same-file]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -parallel [-parallel-workers 32 -parallel-calls 512]\n")
+		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -parallel-cold [-parallel-cold-workers 64 -parallel-cold-trials 24]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -json\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -selfcheck\n")
 		os.Exit(2)
