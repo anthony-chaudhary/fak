@@ -107,6 +107,15 @@ func TestTimingProofShowsRepeatedReadsServedByVDSO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if proof.Path != cacheProofPathKernelSyscall || proof.Prewarmed {
+		t.Fatalf("timing path/prewarmed = %q/%v, want kernel_syscall/false", proof.Path, proof.Prewarmed)
+	}
+	if proof.ToolTokensFromCacheMeaning == "" || proof.ContextTokensKeptOutMeaning == "" {
+		t.Fatalf("timing proof lacks token-boundary meanings: %+v", proof)
+	}
+	if len(proof.ClaimBoundary) == 0 || !containsString(proof.ClaimBoundary, cacheProofNotModelTokenSaving) {
+		t.Fatalf("timing proof lacks non-claim boundary notes: %+v", proof.ClaimBoundary)
+	}
 	if proof.RawEngineCalls != 6 {
 		t.Fatalf("raw engine calls = %d, want 6", proof.RawEngineCalls)
 	}
@@ -145,6 +154,18 @@ func TestParallelProofShowsSharedHotCache(t *testing.T) {
 	proof, err := buildParallelProof(context.Background(), 8, 64, 4, time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if proof.Path != cacheProofPathKernelSyscall || !proof.Prewarmed {
+		t.Fatalf("parallel path/prewarmed = %q/%v, want kernel_syscall/true", proof.Path, proof.Prewarmed)
+	}
+	if proof.ContextTokensKeptOut != 0 {
+		t.Fatalf("parallel context_tokens_kept_out = %d, want 0", proof.ContextTokensKeptOut)
+	}
+	if proof.ToolTokensFromCacheMeaning == "" || proof.ContextTokensKeptOutMeaning == "" {
+		t.Fatalf("parallel proof lacks token-boundary meanings: %+v", proof)
+	}
+	if len(proof.ClaimBoundary) == 0 || !containsString(proof.ClaimBoundary, cacheProofNotColdSingleflight) {
+		t.Fatalf("parallel proof lacks non-claim boundary notes: %+v", proof.ClaimBoundary)
 	}
 	if proof.RawEngineCalls != 64 {
 		t.Fatalf("raw engine calls = %d, want 64", proof.RawEngineCalls)
@@ -305,4 +326,13 @@ func TestJSONDefaultsToAllSuites(t *testing.T) {
 	if got := selectedSuiteForJSON("clean-control", true); got != "clean-control" {
 		t.Fatalf("explicit -json suite = %q, want clean-control", got)
 	}
+}
+
+func containsString(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }

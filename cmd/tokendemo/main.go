@@ -294,19 +294,24 @@ type timingCall struct {
 }
 
 type timingProof struct {
-	Suite                string       `json:"suite"`
-	EngineDelayMs        int          `json:"engine_delay_ms"`
-	Calls                []timingCall `json:"calls"`
-	RawTotalNs           int64        `json:"raw_total_ns"`
-	FakTotalNs           int64        `json:"fak_total_ns"`
-	TimeSavedNs          int64        `json:"time_saved_ns"`
-	RawEngineCalls       int64        `json:"raw_engine_calls"`
-	FakEngineCalls       int64        `json:"fak_engine_calls"`
-	VDSOHits             int64        `json:"vdso_hits"`
-	RoundtripsCollapsed  int          `json:"roundtrips_collapsed"`
-	ToolTokensFromCache  int          `json:"tool_tokens_from_cache"`
-	ContextTokensKeptOut int          `json:"context_tokens_kept_out"`
-	DenyVerdictTokens    int          `json:"deny_verdict_tokens"`
+	Suite                       string       `json:"suite"`
+	Path                        string       `json:"path"`
+	Prewarmed                   bool         `json:"prewarmed"`
+	EngineDelayMs               int          `json:"engine_delay_ms"`
+	Calls                       []timingCall `json:"calls"`
+	RawTotalNs                  int64        `json:"raw_total_ns"`
+	FakTotalNs                  int64        `json:"fak_total_ns"`
+	TimeSavedNs                 int64        `json:"time_saved_ns"`
+	RawEngineCalls              int64        `json:"raw_engine_calls"`
+	FakEngineCalls              int64        `json:"fak_engine_calls"`
+	VDSOHits                    int64        `json:"vdso_hits"`
+	RoundtripsCollapsed         int          `json:"roundtrips_collapsed"`
+	ToolTokensFromCache         int          `json:"tool_tokens_from_cache"`
+	ToolTokensFromCacheMeaning  string       `json:"tool_tokens_from_cache_meaning"`
+	ContextTokensKeptOut        int          `json:"context_tokens_kept_out"`
+	ContextTokensKeptOutMeaning string       `json:"context_tokens_kept_out_meaning"`
+	DenyVerdictTokens           int          `json:"deny_verdict_tokens"`
+	ClaimBoundary               []string     `json:"claim_boundary"`
 }
 
 type parallelResourceProof struct {
@@ -326,30 +331,68 @@ type parallelResourceProof struct {
 }
 
 type parallelProof struct {
-	Schema                string                  `json:"schema"`
-	Workers               int                     `json:"workers"`
-	Calls                 int                     `json:"calls"`
-	HotFiles              int                     `json:"hot_files"`
-	EngineDelayMs         int                     `json:"engine_delay_ms"`
-	Prewarmed             bool                    `json:"prewarmed"`
-	RawWallNs             int64                   `json:"raw_wall_ns"`
-	FakWarmupWallNs       int64                   `json:"fak_warmup_wall_ns"`
-	FakHotWallNs          int64                   `json:"fak_hot_wall_ns"`
-	RawTotalNs            int64                   `json:"raw_total_ns"`
-	FakHotTotalNs         int64                   `json:"fak_hot_total_ns"`
-	TimeSavedNs           int64                   `json:"time_saved_ns"`
-	RawP50Ns              int64                   `json:"raw_p50_ns"`
-	RawP95Ns              int64                   `json:"raw_p95_ns"`
-	FakP50Ns              int64                   `json:"fak_p50_ns"`
-	FakP95Ns              int64                   `json:"fak_p95_ns"`
-	RawEngineCalls        int64                   `json:"raw_engine_calls"`
-	FakWarmupEngineCalls  int64                   `json:"fak_warmup_engine_calls"`
-	FakHotEngineCalls     int64                   `json:"fak_hot_engine_calls"`
-	VDSOHits              int64                   `json:"vdso_hits"`
-	EngineCallsAvoided    int64                   `json:"engine_calls_avoided"`
-	EngineCallAvoidedRate float64                 `json:"engine_call_avoided_rate"`
-	ToolTokensFromCache   int                     `json:"tool_tokens_from_cache"`
-	PerResource           []parallelResourceProof `json:"per_resource"`
+	Schema                      string                  `json:"schema"`
+	Path                        string                  `json:"path"`
+	Workers                     int                     `json:"workers"`
+	Calls                       int                     `json:"calls"`
+	HotFiles                    int                     `json:"hot_files"`
+	EngineDelayMs               int                     `json:"engine_delay_ms"`
+	Prewarmed                   bool                    `json:"prewarmed"`
+	RawWallNs                   int64                   `json:"raw_wall_ns"`
+	FakWarmupWallNs             int64                   `json:"fak_warmup_wall_ns"`
+	FakHotWallNs                int64                   `json:"fak_hot_wall_ns"`
+	RawTotalNs                  int64                   `json:"raw_total_ns"`
+	FakHotTotalNs               int64                   `json:"fak_hot_total_ns"`
+	TimeSavedNs                 int64                   `json:"time_saved_ns"`
+	RawP50Ns                    int64                   `json:"raw_p50_ns"`
+	RawP95Ns                    int64                   `json:"raw_p95_ns"`
+	FakP50Ns                    int64                   `json:"fak_p50_ns"`
+	FakP95Ns                    int64                   `json:"fak_p95_ns"`
+	RawEngineCalls              int64                   `json:"raw_engine_calls"`
+	FakWarmupEngineCalls        int64                   `json:"fak_warmup_engine_calls"`
+	FakHotEngineCalls           int64                   `json:"fak_hot_engine_calls"`
+	VDSOHits                    int64                   `json:"vdso_hits"`
+	EngineCallsAvoided          int64                   `json:"engine_calls_avoided"`
+	EngineCallAvoidedRate       float64                 `json:"engine_call_avoided_rate"`
+	ToolTokensFromCache         int                     `json:"tool_tokens_from_cache"`
+	ToolTokensFromCacheMeaning  string                  `json:"tool_tokens_from_cache_meaning"`
+	ContextTokensKeptOut        int                     `json:"context_tokens_kept_out"`
+	ContextTokensKeptOutMeaning string                  `json:"context_tokens_kept_out_meaning"`
+	ClaimBoundary               []string                `json:"claim_boundary"`
+	PerResource                 []parallelResourceProof `json:"per_resource"`
+}
+
+const (
+	cacheProofPathKernelSyscall    = "kernel_syscall"
+	toolTokensFromCacheMeaning     = "tool-result payload size served from cache instead of refetched; not prompt tokens removed"
+	contextTokensKeptOutMeaning    = "model-context tokens omitted only by denied bad-call results; cached read content is still returned"
+	cacheProofPositiveClaim        = "proves repeated read-only/idempotent calls routed through kernel.Syscall can be served from vDSO tier-2 after fill"
+	cacheProofNotGuardNativeRead   = "does not prove native Claude Code Read calls through fak guard are served from vDSO"
+	cacheProofNotModelTokenSaving  = "does not claim model-context token savings for cached rereads"
+	cacheProofNotColdSingleflight  = "does not prove cold concurrent singleflight; the parallel proof is warmed hot-cache sharing"
+	cacheProofDelayIsObservability = "synthetic engine delay is an observability aid, not a production latency claim"
+)
+
+func cacheClaimBoundary(path string, prewarmed bool) []string {
+	warmth := "after normal fill"
+	if prewarmed {
+		warmth = "after explicit warmup"
+	}
+	return []string{
+		cacheProofPositiveClaim + " (" + path + ", " + warmth + ")",
+		cacheProofNotGuardNativeRead,
+		cacheProofNotModelTokenSaving,
+		cacheProofNotColdSingleflight,
+		cacheProofDelayIsObservability,
+	}
+}
+
+func printCacheClaimBoundary(path string, prewarmed bool) {
+	lines := cacheClaimBoundary(path, prewarmed)
+	fmt.Printf("  scope: %s\n", lines[0])
+	fmt.Printf("  non-claims: not native guard Read via vDSO; not model-context token savings for rereads; not cold singleflight; not production latency.\n")
+	fmt.Printf("  token terms: tool_tokens_from_cache = %s; context_tokens_kept_out = %s.\n\n",
+		toolTokensFromCacheMeaning, contextTokensKeptOutMeaning)
 }
 
 type servedCall struct {
@@ -521,11 +564,16 @@ func buildTimingProof(ctx context.Context, suite string, engineDelay time.Durati
 	k.SetVDSO(true)
 
 	out := timingProof{
-		Suite:             suite,
-		EngineDelayMs:     int(engineDelay / time.Millisecond),
-		DenyVerdictTokens: denyVerdictTokens,
-		Calls:             make([]timingCall, 0, len(t.Calls)),
-		RawEngineCalls:    rawEngineCalls,
+		Suite:                       suite,
+		Path:                        cacheProofPathKernelSyscall,
+		Prewarmed:                   false,
+		EngineDelayMs:               int(engineDelay / time.Millisecond),
+		ToolTokensFromCacheMeaning:  toolTokensFromCacheMeaning,
+		ContextTokensKeptOutMeaning: contextTokensKeptOutMeaning,
+		DenyVerdictTokens:           denyVerdictTokens,
+		ClaimBoundary:               cacheClaimBoundary(cacheProofPathKernelSyscall, false),
+		Calls:                       make([]timingCall, 0, len(t.Calls)),
+		RawEngineCalls:              rawEngineCalls,
 	}
 	for idx, c := range t.Calls {
 		tc, err := traceToolCall(ctx, res, c)
@@ -674,25 +722,29 @@ func buildParallelProof(ctx context.Context, workers, calls, hotFiles int, engin
 	fakHotEngineCalls := fileEngineCalls() - beforeHotEngine
 
 	out := parallelProof{
-		Schema:               "fak.tokendemo.parallel.v1",
-		Workers:              workers,
-		Calls:                calls,
-		HotFiles:             hotFiles,
-		EngineDelayMs:        int(engineDelay / time.Millisecond),
-		Prewarmed:            true,
-		RawWallNs:            rawRun.wallNs,
-		FakWarmupWallNs:      warmWall,
-		FakHotWallNs:         fakRun.wallNs,
-		RawTotalNs:           sumNs(rawRun.durations),
-		FakHotTotalNs:        sumNs(fakRun.durations),
-		RawP50Ns:             percentileNs(rawRun.durations, 50),
-		RawP95Ns:             percentileNs(rawRun.durations, 95),
-		FakP50Ns:             percentileNs(fakRun.durations, 50),
-		FakP95Ns:             percentileNs(fakRun.durations, 95),
-		RawEngineCalls:       rawEngineCalls,
-		FakWarmupEngineCalls: warmEngineCalls,
-		FakHotEngineCalls:    fakHotEngineCalls,
-		VDSOHits:             int64(countSource(fakRun.sources, "vdso_tier2")),
+		Schema:                      "fak.tokendemo.parallel.v1",
+		Path:                        cacheProofPathKernelSyscall,
+		Workers:                     workers,
+		Calls:                       calls,
+		HotFiles:                    hotFiles,
+		EngineDelayMs:               int(engineDelay / time.Millisecond),
+		Prewarmed:                   true,
+		RawWallNs:                   rawRun.wallNs,
+		FakWarmupWallNs:             warmWall,
+		FakHotWallNs:                fakRun.wallNs,
+		RawTotalNs:                  sumNs(rawRun.durations),
+		FakHotTotalNs:               sumNs(fakRun.durations),
+		RawP50Ns:                    percentileNs(rawRun.durations, 50),
+		RawP95Ns:                    percentileNs(rawRun.durations, 95),
+		FakP50Ns:                    percentileNs(fakRun.durations, 50),
+		FakP95Ns:                    percentileNs(fakRun.durations, 95),
+		RawEngineCalls:              rawEngineCalls,
+		FakWarmupEngineCalls:        warmEngineCalls,
+		FakHotEngineCalls:           fakHotEngineCalls,
+		VDSOHits:                    int64(countSource(fakRun.sources, "vdso_tier2")),
+		ToolTokensFromCacheMeaning:  toolTokensFromCacheMeaning,
+		ContextTokensKeptOutMeaning: contextTokensKeptOutMeaning,
+		ClaimBoundary:               cacheClaimBoundary(cacheProofPathKernelSyscall, true),
 	}
 	out.TimeSavedNs = out.RawTotalNs - out.FakHotTotalNs
 	out.EngineCallsAvoided = out.RawEngineCalls - out.FakWarmupEngineCalls - out.FakHotEngineCalls
@@ -1573,6 +1625,7 @@ func runTimingPrint(suite string, delay time.Duration) int {
 		nsToMs(proof.RawTotalNs), nsToMs(proof.FakTotalNs), nsToMs(proof.TimeSavedNs))
 	fmt.Printf("  tool-result tokens served from cache: %s   model-context tokens kept out: %s\n\n",
 		commaInt(proof.ToolTokensFromCache), commaInt(proof.ContextTokensKeptOut))
+	printCacheClaimBoundary(proof.Path, proof.Prewarmed)
 	return 0
 }
 
@@ -1607,6 +1660,7 @@ func runParallelPrint(workers, calls, hotFiles int, delay time.Duration) int {
 		nsToMs(proof.RawWallNs), nsToMs(proof.FakHotWallNs), nsToMs(proof.FakWarmupWallNs))
 	fmt.Printf("  p50/p95 per call: raw %s/%sms   fak %s/%sms\n\n",
 		formatMs(proof.RawP50Ns), formatMs(proof.RawP95Ns), formatMs(proof.FakP50Ns), formatMs(proof.FakP95Ns))
+	printCacheClaimBoundary(proof.Path, proof.Prewarmed)
 
 	fmt.Printf("  %-38s  %8s  %8s  %8s  %8s  %10s  %10s\n",
 		"resource", "raw_eng", "warm_eng", "hot_eng", "vdso", "raw_p95", "fak_p95")

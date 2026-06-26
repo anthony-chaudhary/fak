@@ -44,6 +44,30 @@ OK - all suites reproduced the documented ledger invariants.
 The `-print` view renders the without-kernel and with-kernel columns. The JSON output
 contains every call's class, token accounting, and tool-run count.
 
+## What this proves
+
+The cache proof modes show repeated identical read-only/idempotent calls routed through
+`kernel.Syscall`. After a fill, the in-process vDSO tier-2 content cache can return the
+tool result without rerunning the demo file engine; cache-hit rows report
+`fak_source=vdso_tier2` and `engine_ran_fak=false`.
+
+`tool_tokens_from_cache` is the tool-result payload size served from cache instead of
+refetched. It is not prompt tokens removed. `context_tokens_kept_out` is separate and
+only counts denied bad-call results that never enter model context.
+
+## What this does not prove
+
+- It does not prove native Claude Code `Read` calls under `fak guard -- claude .` are
+  served from vDSO; that requires the syscall/MCP read path and is tracked in
+  [#877](https://github.com/anthony-chaudhary/fak/issues/877).
+- It does not claim model-context token savings for cached rereads. The cached content
+  is still returned to the model.
+- `-parallel` is a warmed hot-cache sharing proof (`prewarmed=true`), not cold
+  concurrent singleflight. The cold-fill benchmark is tracked in
+  [#878](https://github.com/anthony-chaudhary/fak/issues/878).
+- The synthetic engine delay makes reruns visible in the demo; it is not a production
+  latency claim.
+
 Use `-timing` for the concrete cache proof: the raw loop calls the local tool engine
 for every read, while the fak loop runs the same trace through `kernel.Syscall` with
 the vDSO enabled. Repeated reads show `fak_source=vdso_tier2`,
