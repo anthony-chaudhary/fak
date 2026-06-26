@@ -45,6 +45,56 @@ fak claude-mac-fak
 fak claude-mac-fak --probe
 ```
 
+## See what fak is doing
+
+Once interactive Claude Code starts it owns the terminal, so fak is otherwise
+invisible behind the `ANTHROPIC_BASE_URL` it set. Two surfaces fix that.
+
+**Preflight debug panel** (on by default for the interactive launch). Before
+handing the terminal to Claude Code, `claude-mac-fak` probes the gateway
+(`/healthz` + `/debug/vars`) and prints what fak is about to do:
+
+```text
+fak debug · gateway http://node-macos-a.local:8080
+health: ok  engine=metal  planner=inkernel
+vdso=on  cache-hit 0.88  inflight 0  up 3h12m
+model qwen3.6-27b  auth gateway-bearer
+metrics: http://node-macos-a.local:8080/metrics · …/debug/vars · grafana http://localhost:3000
+-> launching claude ...
+```
+
+It proves the gateway is the live in-kernel `fak serve` (a `planner=mock` line
+would mean scripted, non-model responses) and aborts the interactive launch
+instead of starting Claude against an unreachable gateway. Pass `--debug=false`
+to skip it.
+
+**Live overlay** — run this in a second pane next to the session; it polls
+`/debug/vars` and prints one fak line per tick (Ctrl-C to stop):
+
+```powershell
+go run ./cmd/fak claude-mac-fak --overlay
+# submits 1240  hits 1101 (88.8%)  engine 139  inflight 1  heap 412.0M  gor 47
+```
+
+`--overlay-interval 5s` changes the refresh rate; `--overlay` never launches
+Claude.
+
+## Watch fak from Grafana
+
+The repo ships a Prometheus + Grafana stack at
+[`tools/grafana/`](../../tools/grafana/README.md) that already scrapes a
+`fak serve` gateway's `/metrics`. To point it at the Mac gateway, set the
+`fak_gateway` job target in `tools/grafana/prometheus.yml` to the tailnet host
+(e.g. `node-macos-a.local:8080`) instead of localhost, then:
+
+```bash
+tools/grafana/up.sh      # http://localhost:3000 (the --grafana-url default)
+```
+
+If the Mac gateway runs with `--require-key-env`, add Prometheus bearer auth for
+that job (see the note already in `tools/grafana/prometheus.yml`). The Grafana URL
+shown in the preflight panel comes from `--grafana-url` / `FAK_MAC_GRAFANA`.
+
 ## Mac service prerequisites
 
 The always-on Mac services must be sized for a real Claude Code first turn:
