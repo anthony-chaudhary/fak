@@ -36,6 +36,20 @@
 //     to defer/opaque (never to allow) and remain the git hooks' job. Like the
 //     self-modify floor it mirrors, this rung is over-broad where a refusal is cheap and
 //     under-precise where a determined agent can evade; it never CLAIMS full coverage.
+//
+//     WHY HAND-ROLLED, NOT mvdan.cc/sh (#823). #823 proposed wiring the unwrap pass to
+//     mvdan.cc/sh/v3/syntax (a real shell AST). We implement it hand-rolled instead
+//     because the module is ZERO-EXTERNAL-DEPS (go.mod, line 7) — there is no go.sum, and
+//     code_quality_scorecard.py's `deps` KPI counts any added require / a present go.sum as
+//     debt. Pulling mvdan.cc/sh + a go.sum onto the live decision path would break the
+//     single-static-binary invariant DIRECTION.md rests on. And a real AST buys NO verdict
+//     here: on every laundering case #823 names — a pipe, an `&&`/`||`/`;` operator, a
+//     `$(...)` / backtick substitution, a `bash -c`/`sh -c` string — this pass already
+//     REFUSES (proven load-bearing in gitgate_launder_test.go), and it hits the SAME
+//     expansion wall a real parser does: `$VAR`, `eval`, an `alias`, and a command-
+//     substitution RESULT (`git $(echo push) --force`) need runtime state no STATIC parse
+//     has, so they stay opaque under mvdan/sh too. The AST would only change which esoteric
+//     quoting the lexer disclaims — never a verdict on the hazards this rung exists to catch.
 //   - ARGV-DECIDABLE HAZARDS ONLY. Laws that need REPO STATE — OFF_TRUNK (the
 //     current branch), the shared-tree staging sweep (the live index), a peer's
 //     in-flight MERGE_HEAD (a transient .git file) — are NOT decidable in a pure,

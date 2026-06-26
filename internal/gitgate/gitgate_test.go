@@ -133,6 +133,11 @@ func TestClassify(t *testing.T) {
 		{"var-expanded program", "$GIT push --force", false, ""},
 		{"eval launder", `eval "git push --force"`, false, ""},
 		{"alias then push", "alias g=git; g push -f", false, ""},
+		// A subcommand laundered through a command-substitution RESULT (#823's
+		// `git $(echo push) --force`) is the SAME undecidable class as $VAR: the verb is
+		// whatever `echo push` prints at runtime, which no STATIC parse — this lexer OR a
+		// real shell AST (mvdan/sh) — can resolve, so it must DEFER (opaque), never allow.
+		{"cmdsubst-result subcommand", "git $(echo push) --force", false, ""},
 		// ...but a REAL hazard paired with an unrecoverable one is still caught.
 		{"var plus real hazard", "git $CMD; git push --force", true, "force-push"},
 
