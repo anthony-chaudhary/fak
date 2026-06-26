@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // estimate.go — the load-time device-fit pre-check for the GGUF loader (issue #709; the
@@ -49,6 +50,121 @@ func (s *WeightSource) EstimateLoadBytes() (int64, error) {
 	return int64(total), nil
 }
 
+// EstimateF32LoadBytes reports the resident f32 footprint of loading this GGUF through
+// LoadModel/WeightSource.Model. Unlike EstimateLoadBytes (the raw/lean payload proxy),
+// this counts every tensor by element-count * 4 bytes because the default dequant path
+// expands quantized GGUF payloads into f32 resident weights. It is intentionally an
+// upper-bound header estimate over the tensor directory; unmapped or later-skipped
+// tensors still count, which is the safe direction for a pre-load capacity refusal.
+func (s *WeightSource) EstimateF32LoadBytes() (int64, error) {
+	var total uint64
+	for _, info := range s.File.Tensors {
+		elems, err := tensorElems(info)
+		if err != nil {
+			return 0, fmt.Errorf("gguf: estimate f32 tensor %s: %w", info.Name, err)
+		}
+		if elems > math.MaxUint64/4 || total > math.MaxUint64-elems*4 {
+			return 0, fmt.Errorf("gguf: estimated f32 load bytes overflow uint64")
+		}
+		total += elems * 4
+	}
+	if total > math.MaxInt64 {
+		return 0, fmt.Errorf("gguf: estimated f32 load bytes %d overflow int64", total)
+	}
+	return int64(total), nil
+}
+
+// EstimateLoadMemoryPlan is the classed form of EstimateLoadBytes. The whole estimate is a
+// weights demand because the GGUF loader is admitting resident model weights; KV-cache,
+// scratchpad, and offload staging are reserved separately by the caller's headroom or by a
+// richer multi-demand plan.
+func (s *WeightSource) EstimateLoadMemoryPlan() (compute.MemoryPlan, error) {
+	want, err := s.EstimateLoadBytes()
+	if err != nil {
+		return nil, err
+	}
+	return compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: want, Detail: "gguf-load"}}, nil
+}
+
+// EstimateF32LoadMemoryPlan is the classed form of EstimateF32LoadBytes for the f32-resident
+// device load path.
+func (s *WeightSource) EstimateF32LoadMemoryPlan() (compute.MemoryPlan, error) {
+	want, err := s.EstimateF32LoadBytes()
+	if err != nil {
+		return nil, err
+	}
+	return compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: want, Detail: "gguf-f32-load"}}, nil
+}
+
+// EstimateCPUOffloadExpertsMemoryPlan estimates the --cpu-offload-experts placement without
+// reading tensor payloads. Dense/router/attention tensors remain device-scoped weights; routed
+// and shared expert tensors are host-scoped offload bytes. The partition uses the same canonical
+// tensor names as the runtime split kernel (model.CPUOffloadExpertWeight), with GLM-DSA's batched
+// routed-expert GGUF blobs classified before their loader-time 1->E split.
+func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan, error) {
+	arch, _ := s.File.String("general.architecture")
+	modelType := canonicalGGUFArch(arch)
+	var deviceTotal, hostTotal uint64
+	for _, info := range s.File.Tensors {
+		n, err := tensorPayloadBytes(info)
+		if err != nil {
+			return nil, fmt.Errorf("gguf: estimate offload tensor %s: %w", info.Name, err)
+		}
+		hostExpert, err := tensorCPUOffloadExpert(info.Name, modelType)
+		if err != nil {
+			return nil, err
+		}
+		if hostExpert {
+			if hostTotal > math.MaxUint64-n {
+				return nil, fmt.Errorf("gguf: estimated offload bytes overflow uint64")
+			}
+			hostTotal += n
+			continue
+		}
+		if deviceTotal > math.MaxUint64-n {
+			return nil, fmt.Errorf("gguf: estimated device bytes overflow uint64")
+		}
+		deviceTotal += n
+	}
+	if deviceTotal > math.MaxInt64 || hostTotal > math.MaxInt64 {
+		return nil, fmt.Errorf("gguf: estimated offload memory plan overflows int64")
+	}
+	plan := make(compute.MemoryPlan, 0, 2)
+	if deviceTotal > 0 {
+		plan = append(plan, compute.MemoryDemand{
+			Class:  compute.MemoryWeights,
+			Bytes:  int64(deviceTotal),
+			Detail: "gguf-device-dense-load",
+			Scope:  compute.MemoryScopeDevice,
+		})
+	}
+	if hostTotal > 0 {
+		plan = append(plan, compute.MemoryDemand{
+			Class:  compute.MemoryOffload,
+			Bytes:  int64(hostTotal),
+			Detail: "gguf-host-expert-offload",
+			Scope:  compute.MemoryScopeHost,
+		})
+	}
+	return plan, nil
+}
+
+func tensorCPUOffloadExpert(name, modelType string) (bool, error) {
+	if modelType == "glm_moe_dsa" {
+		if _, _, ok := glmMoeDsaBatchedExpert(name); ok {
+			return true, nil
+		}
+		if _, _, ok := glmMoeDsaSplitKVB(name); ok {
+			return false, nil
+		}
+	}
+	canon, ok := CanonicalTensorNameArch(name, modelType)
+	if !ok {
+		return false, fmt.Errorf("gguf: no canonical mapping for tensor %s", name)
+	}
+	return model.CPUOffloadExpertWeight(canon), nil
+}
+
 // FitOnDevice is the load-time device-fit refusal for a GGUF WeightSource: it estimates the
 // load bytes off the header and returns a *compute.FitError ("needs ~W GiB, device has ~A
 // GiB") ONLY when be is a capacity-reporting backend that KNOWS the model exceeds its ceiling.
@@ -59,9 +175,29 @@ func (s *WeightSource) EstimateLoadBytes() (int64, error) {
 // that fraction of the budget for the KV cache / activations / per-op scratch that do not
 // pass through this single check (see compute.FitsOnDevice).
 func (s *WeightSource) FitOnDevice(be compute.Backend, headroom float64) error {
-	want, err := s.EstimateLoadBytes()
+	plan, err := s.EstimateLoadMemoryPlan()
 	if err != nil {
 		return err
 	}
-	return compute.RefuseIfTooBig(be, want, headroom)
+	return compute.RefuseMemoryPlanIfTooBig(be, plan, headroom)
+}
+
+// FitF32OnDevice is FitOnDevice for the f32-resident GGUF load path. Use this before
+// LoadModel/WeightSource.Model when a device backend will hold f32 weights.
+func (s *WeightSource) FitF32OnDevice(be compute.Backend, headroom float64) error {
+	plan, err := s.EstimateF32LoadMemoryPlan()
+	if err != nil {
+		return err
+	}
+	return compute.RefuseMemoryPlanIfTooBig(be, plan, headroom)
+}
+
+// FitCPUOffloadExpertsOnDevice is FitOnDevice for the --cpu-offload-experts placement. Host
+// expert bytes remain visible as MemoryOffload demands but do not count against device capacity.
+func (s *WeightSource) FitCPUOffloadExpertsOnDevice(be compute.Backend, headroom float64) error {
+	plan, err := s.EstimateCPUOffloadExpertsMemoryPlan()
+	if err != nil {
+		return err
+	}
+	return compute.RefuseMemoryPlanIfTooBig(be, plan, headroom)
 }

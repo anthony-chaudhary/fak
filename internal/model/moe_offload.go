@@ -92,6 +92,13 @@ func isExpertWeight(name string) bool {
 	return strings.Contains(name, ".mlp.experts.") || strings.Contains(name, ".mlp.shared_experts.")
 }
 
+// CPUOffloadExpertWeight reports whether the canonical tensor name is routed to host RAM by
+// the CPU-offload expert split. It is exported so load-time memory planners can use the exact
+// same partition as the runtime split kernel.
+func CPUOffloadExpertWeight(name string) bool {
+	return isExpertWeight(name)
+}
+
 // glmDsaMatKernel selects the matKernel the GLM-DSA forward runs its dense GEMMs through, in one
 // place, so decodeBandGLMDsa stays a single instruction stream. The four cases:
 //   - no Backend, no offload    -> residentKernel (the host path; byte-for-byte unchanged default)
