@@ -1,0 +1,54 @@
+{
+  "schema": "fak.terminalbench21-rehearsal-preflight.v1",
+  "generated_at": "2026-06-26T23:16:10Z",
+  "benchmark": "Terminal-Bench 2.1 raw/fak rehearsal preflight",
+  "issue": "#900",
+  "dataset": "terminal-bench/terminal-bench-2-1",
+  "status": "BLOCKED_PREFLIGHT",
+  "evidence_class": "REHEARSAL_PREFLIGHT",
+  "claim_boundary": "Host-readiness preflight only: probes whether this host can attempt the Terminal-Bench 2.1 raw/fak rehearsal (Harbor, Docker engine, OPENAI_API_KEY, fak gateway). It is never a benchmark result; result_claim_allowed stays false. The oracle smoke and the credentialed raw-vs-fak compare remain the result-bearing artifacts.",
+  "oracle_smoke_ready": false,
+  "raw_paid_smoke_ready": false,
+  "fak_paid_smoke_ready": false,
+  "gates": [
+    {
+      "name": "harbor_present",
+      "ok": true,
+      "detail": "harbor 0.15.0"
+    },
+    {
+      "name": "docker_engine_up",
+      "ok": false,
+      "detail": "docker engine not reachable"
+    },
+    {
+      "name": "openai_api_key_present",
+      "ok": false,
+      "detail": "OPENAI_API_KEY not set in this shell"
+    },
+    {
+      "name": "fak_gateway_reachable",
+      "ok": false,
+      "detail": "not probed (http://localhost:8080/v1); pass --probe-gateway to check"
+    }
+  ],
+  "blocking_reasons": [
+    "DOCKER_ENGINE_DOWN",
+    "OPENAI_API_KEY_MISSING"
+  ],
+  "next_action": "start the Docker engine, then re-run the preflight and the official oracle smoke before any paid run",
+  "official_run_contract": "experiments/agent-live/terminalbench-official-run-contract-20260626.json",
+  "submission_packet": "docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md",
+  "candidate_task_ids": [
+    "go-cli-help-benign",
+    "python-config-fix-danger-after-tests"
+  ],
+  "known_dependencies": [
+    "a running Docker engine for every Harbor task container (oracle, raw, and fak arms)",
+    "OPENAI_API_KEY in the rehearsal shell for the credentialed raw baseline (#900)",
+    "the fak Codex /v1/responses client wire so the fak arm routes through the gateway (#925)",
+    "explicit paid-spend authority before the credentialed raw/fak smoke pair",
+    "the official Harbor grader output as the sole authority for any pass-rate number"
+  ],
+  "result_claim_allowed": false
+}
