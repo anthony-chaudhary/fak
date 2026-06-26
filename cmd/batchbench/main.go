@@ -22,8 +22,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -68,6 +70,37 @@ func bestMS(ds []time.Duration) float64 {
 // parallel + multi-user batching) can be reported against the honest origin.
 const naiveSerialMsPerTok = 52.1
 
+func readHFConfig(dir string) (model.Config, error) {
+	var cfg model.Config
+	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return cfg, fmt.Errorf("config.json: %w", err)
+	}
+	if err := json.Unmarshal(cb, &cfg); err != nil {
+		return cfg, fmt.Errorf("config.json parse: %w", err)
+	}
+	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
+		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
+	}
+	return cfg, nil
+}
+
+func hfName(cfg model.Config, dir string) string {
+	base := filepath.Base(strings.TrimRight(dir, `/\`))
+	if cfg.ModelType == "" {
+		return base
+	}
+	return fmt.Sprintf("%s (%s)", base, cfg.ModelType)
+}
+
+func hfSource(dir string) string {
+	index := filepath.Join(dir, "model.safetensors.index.json")
+	if _, err := os.Stat(index); err == nil {
+		return index
+	}
+	return filepath.Join(dir, "model.safetensors")
+}
+
 type batchPoint struct {
 	Batch           int     `json:"batch"`
 	DecodeSteps     int     `json:"decode_steps"`
@@ -81,6 +114,7 @@ type batchPoint struct {
 
 func main() {
 	dir := flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir")
+	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors); overrides -dir")
 	out := flag.String("out", "", "write JSON result here (default stdout)")
 	reps := flag.Int("reps", 5, "reps per batch size (median over per-step wall-clock)")
 	decodeSteps := flag.Int("decode-steps", 16, "decode steps to time per user")
@@ -93,6 +127,7 @@ func main() {
 	flag.Parse()
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*dir = pathutil.ExpandTilde(*dir)
+	*hf = pathutil.ExpandTilde(*hf)
 
 	if *budget > 0 {
 		if os.Getenv("FAK_WORKERS") != "" {
@@ -114,10 +149,33 @@ func main() {
 		}
 	}
 
-	m, err := model.Load(*dir)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "load:", err)
-		os.Exit(1)
+	var (
+		m           *model.Model
+		err         error
+		modelName   string
+		modelSource string
+	)
+	if *hf != "" {
+		cfg, err := readHFConfig(*hf)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "load:", err)
+			os.Exit(1)
+		}
+		m, err = model.LoadSafetensorsDir(*hf, cfg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "load: safetensors:", err)
+			os.Exit(1)
+		}
+		modelName = hfName(cfg, *hf)
+		modelSource = hfSource(*hf)
+	} else {
+		m, err = model.Load(*dir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "load:", err)
+			os.Exit(1)
+		}
+		modelName = filepath.Base(strings.TrimRight(*dir, `/\`))
+		modelSource = filepath.Join(*dir, "weights.f32")
 	}
 	vocab := m.Cfg.VocabSize
 	if *quant {
@@ -221,7 +279,8 @@ func main() {
 	report := map[string]any{
 		"app_version":             appversion.Current(),
 		"engine":                  engine,
-		"model":                   "SmolLM2-135M",
+		"model":                   modelName,
+		"source":                  modelSource,
 		"precision":               precision,
 		"workers":                 model.NumWorkers(),
 		"budget":                  model.WorkerBudget(),

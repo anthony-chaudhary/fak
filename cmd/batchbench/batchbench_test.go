@@ -6,6 +6,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -92,6 +94,71 @@ func TestBestMS(t *testing.T) {
 	if orig[0] != 5*time.Millisecond || orig[1] != 2*time.Millisecond || orig[2] != 9*time.Millisecond {
 		t.Fatalf("bestMS mutated input slice: %v", orig)
 	}
+}
+
+func TestReadHFConfigFillsHeadDim(t *testing.T) {
+	dir := t.TempDir()
+	config := []byte(`{
+		"model_type": "qwen2",
+		"hidden_size": 1536,
+		"num_attention_heads": 12,
+		"num_key_value_heads": 2,
+		"num_hidden_layers": 28,
+		"intermediate_size": 8960,
+		"vocab_size": 151936
+	}`)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), config, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := readHFConfig(dir)
+	if err != nil {
+		t.Fatalf("readHFConfig: %v", err)
+	}
+	if cfg.ModelType != "qwen2" {
+		t.Fatalf("ModelType = %q, want qwen2", cfg.ModelType)
+	}
+	if cfg.HeadDim != 128 {
+		t.Fatalf("HeadDim = %d, want hidden_size/num_attention_heads = 128", cfg.HeadDim)
+	}
+}
+
+func TestHFNameIncludesModelTypeWhenPresent(t *testing.T) {
+	dir := filepath.Join("models", "snapshots", "abc123") + string(os.PathSeparator)
+	cfg, err := readHFConfig(writeHFConfig(t, `{"model_type":"llama","hidden_size":64,"num_attention_heads":4}`))
+	if err != nil {
+		t.Fatalf("readHFConfig: %v", err)
+	}
+	if got := hfName(cfg, dir); got != "abc123 (llama)" {
+		t.Fatalf("hfName with type = %q, want abc123 (llama)", got)
+	}
+
+	cfg.ModelType = ""
+	if got := hfName(cfg, dir); got != "abc123" {
+		t.Fatalf("hfName without type = %q, want abc123", got)
+	}
+}
+
+func TestHFSourcePrefersShardIndex(t *testing.T) {
+	dir := t.TempDir()
+	if got := hfSource(dir); got != filepath.Join(dir, "model.safetensors") {
+		t.Fatalf("hfSource without index = %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "model.safetensors.index.json"), []byte(`{"weight_map":{}}`), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	if got := hfSource(dir); got != filepath.Join(dir, "model.safetensors.index.json") {
+		t.Fatalf("hfSource with index = %q", got)
+	}
+}
+
+func writeHFConfig(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return dir
 }
 
 func TestLCGIDs(t *testing.T) {
