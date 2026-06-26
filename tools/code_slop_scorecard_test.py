@@ -32,6 +32,32 @@ def _dup_block(name: str) -> str:
             "}\n")
 
 
+def _same_skeleton(fn: str, a: str, b: str, c: str, r: str) -> str:
+    return (f"func {fn}({a}, {b}, {c} int) int {{\n"
+            f"\t{r} := {a} + {b}*{c}\n"
+            f"\t{r} = {r} - {a}%{b} + {c}\n"
+            f"\tif {r} > {a} {{\n"
+            f"\t\t{r} = {r}*{b} - {c}\n"
+            f"\t}} else {{\n"
+            f"\t\t{r} = {r} + {a} - {b}\n"
+            f"\t}}\n"
+            f"\treturn {r} + {a}*{b} - {c}\n"
+            f"}}\n")
+
+
+def _retuned_scale(threshold: int, mul: int, modulus: int) -> str:
+    return ("func scale(xs []int) int {\n"
+            "\ttotal := 0\n"
+            "\tfor _, v := range xs {\n"
+            f"\t\tif v > {threshold} {{\n"
+            f"\t\t\ttotal += v * {mul}\n"
+            f"\t\t\ttotal -= v % {modulus}\n"
+            "\t\t}\n"
+            "\t}\n"
+            "\treturn total\n"
+            "}\n")
+
+
 def test_duplication_real_clone_is_debt():
     files = {"a.go": "package a\n" + _dup_block("sum"),
              "b.go": "package b\n" + _dup_block("sum")}
@@ -50,6 +76,32 @@ def test_duplication_unique_code_is_clean():
     k = cs.kpi_duplication(files)
     assert k["defects"] == []
     assert k["score"] == 100
+
+
+def test_duplication_keeps_identifiers_for_clone_precision_780():
+    # A shared operator/control skeleton with disjoint identifiers is not a copy-paste
+    # clone. The control proves the fixture is long enough to match when identifiers
+    # are actually identical.
+    distinct = {"a.go": "package a\n" + _same_skeleton("f", "p", "q", "s", "r"),
+                "b.go": "package b\n" + _same_skeleton("g", "w", "x", "z", "y")}
+    assert cs.kpi_duplication(distinct)["defects"] == []
+
+    identical = {"a.go": "package a\n" + _same_skeleton("f", "p", "q", "s", "r"),
+                 "b.go": "package b\n" + _same_skeleton("f", "p", "q", "s", "r")}
+    k = cs.kpi_duplication(identical)
+    assert len(k["defects"]) >= 1
+    assert k["score"] < 100
+
+
+def test_duplication_normalizes_literals_for_clone_recall_780():
+    # Retuned constants are still a copy-pasted structure because literals collapse to
+    # the `L` token. A single copy remains clean.
+    retuned = {"a.go": "package a\n" + _retuned_scale(0, 2, 3),
+               "b.go": "package b\n" + _retuned_scale(7, 5, 9)}
+    k = cs.kpi_duplication(retuned)
+    assert len(k["defects"]) >= 1
+    assert k["score"] < 100
+    assert cs.kpi_duplication({"a.go": "package a\n" + _retuned_scale(0, 2, 3)})["defects"] == []
 
 
 def test_duplication_token_window_keys_are_collision_exact():
