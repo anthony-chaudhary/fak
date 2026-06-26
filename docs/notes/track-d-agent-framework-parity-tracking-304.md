@@ -68,7 +68,7 @@ adapter / example / benchmark* acceptance is not yet built.
 | **D-001** #255 benchmark (P0) | 🟡 **Scaffold shipped; published run bench-node-gated** | A host-runnable N=1/100/500/1000 fan-out scale harness (**N≥1024 capable**) that computes coordination-overhead-vs-N=1 and cross-agent-reuse-uplift **deterministically** (turnbench is in-process kernel arithmetic, not model calls), wrapping the already-witnessed fan-out engine. `cmd/fanbench --grid canonical` now emits the exact D-001 ladder as a user-facing command path. **CPU smoke green** (`go test ./internal/bench -run FanScale` → `ok`). The published HEADLINE — live-model wall-clock + the LangGraph/AutoGen/CrewAI comparison + the results table — is explicitly **deferred** to a bench node (`DeferredRun`), not fabricated here. | [`internal/bench/fanscale.go`](../../internal/bench/fanscale.go) · [`internal/bench/fanscale_test.go`](../../internal/bench/fanscale_test.go) · [`internal/turnbench/fanout.go`](../../internal/turnbench/fanout.go) · [`cmd/fanbench/main.go`](../../cmd/fanbench/main.go) |
 | **D-002** #253 LangChain/LangGraph (P1) | 🟢 **CLOSED — works by wire repoint** | LangChain (`ChatOpenAI`) and LangGraph (via its underlying LangChain chat model) reach the fak gateway by setting `base_url` to fak's OpenAI-compatible endpoint — documented and marked supported in the compatibility matrix (rows 58-59). fak's intended integration shape **is** "repoint the base URL," so no bespoke adapter is required. The only closed child. | [`docs/integrations/compatibility-matrix.md`](../integrations/compatibility-matrix.md) · [`docs/integrations/README.md`](../integrations/README.md) |
 | **D-003** #250 CrewAI (P1) | 🟢 **Host-tractable acceptance shipped; live-model wall-clock folded into D-001** | CrewAI's `LLM(base_url=...)` (routed through LiteLLM) reaches the gateway today (matrix row 61, "Yes"). A runnable, dependency-free **example crew** (`examples/crewai-crew/`) now demonstrates the manager-worker pattern: governance over every worker tool call (verdicts match `fak preflight`) **and** the **manager-role coordination-overhead reduction**, documented with a **deterministic performance model** (modeled 4.93× prefill reduction at the illustrative geometry). The only open piece — the **live-model CrewAI-vs-native wall-clock** — is the deferred bench-node run owned by D-001 (#255), not asserted here. | [`examples/crewai-crew/`](../../examples/crewai-crew/README.md) · [`docs/integrations/compatibility-matrix.md`](../integrations/compatibility-matrix.md) (row 61) |
-| **D-004** #248 AutoGen (P1) | 🟡 **Wire-supported; bespoke adapter/example acceptance open** | AutoGen / AG2 `OpenAIChatCompletionClient(base_url=...)` reaches the gateway today (matrix row 62, "Yes"). The issue's acceptance — an AutoGen **agent adapter**, **conversation-state preservation**, **multi-agent examples**, a **benchmark vs native** — is not shipped. | [`docs/integrations/compatibility-matrix.md`](../integrations/compatibility-matrix.md) (row 62) |
+| **D-004** #248 AutoGen (P1) | 🟢 **Host-tractable acceptance shipped; live-model wall-clock folded into D-001** | AutoGen v0.4 `OpenAIChatCompletionClient(base_url=...)` reaches the gateway today (matrix row 62, "Yes"). A runnable, dependency-free **example group chat** (`examples/autogen-groupchat/`) now demonstrates the multi-agent pattern: governance over every agent tool call **and** speaker hand-off (verdicts match `fak preflight`) **and** **conversation-state preservation** through the shared transcript, documented with a **deterministic performance model** (modeled 7.67× prefill reduction at the illustrative geometry). The only open piece — the **live-model AutoGen-vs-native wall-clock** — is the deferred bench-node run owned by D-001 (#255), not asserted here. | [`examples/autogen-groupchat/`](../../examples/autogen-groupchat/README.md) · [`docs/integrations/compatibility-matrix.md`](../integrations/compatibility-matrix.md) (row 62) |
 | **D-005** #245 Workflow Orchestration (P2) | 🔴 **Not implemented** | No workflow DSL (YAML/JSON), no DAG execution engine, no built-in map-reduce / fan-out *product* layer. The fan-out topology in `turnbench`/`fanbench` is the **D-001 benchmark harness**, not a user-facing orchestration layer. Design-only. | — (none) |
 | **D-006** #243 Tool Ecosystem (P2) | 🔴 **Not implemented** | No built-in 20+ tool library (filesystem/HTTP/DB connectors). fak's architecture **gates** the agent's existing tools (deny-by-structure / repair / quarantine); it is not a tool *provider* — so this child is partly an architecture-fit question, not just unbuilt code. Design-only. | — (none) |
 | **D-007** #241 Coordination Protocol (P2) | 🟡 **Partial — shared-state scaffold; full protocol is a sibling epic** | A **shared-task-record contract** (fixtures + JSON schema + validator) gives coordinated multi-agent workflows a shared record, and `internal/comm` is a low-level comm driver. The full **message-passing protocol / shared-KV API / RFC** the issue names is the active epic **#639** (MPI-shaped message-passing primitives). | [`examples/shared-task-record`](../../examples/shared-task-record) · [`internal/comm/comm.go`](../../internal/comm/comm.go) |
@@ -77,12 +77,12 @@ adapter / example / benchmark* acceptance is not yet built.
 Legend: 🟢 done · 🟡 partial (scaffold / wire-supported / sibling-epic) · 🔴 not implemented.
 
 **Roll-up: 1 / 8 children closed (#253).** Of the 7 open: 1 is a scaffold whose published run
-is bench-node-gated (D-001), D-003's host-tractable acceptance (example crew + manager-role
-reduction doc + a deterministic performance model) is now shipped with only its live-model
-wall-clock folded into the D-001 deferred run, 1 (D-004) is wire-supported with its
-adapter/example acceptance still open, 2 are partial scaffolds whose public surface is tracked
-by a separate epic (D-007→#639, D-008→#498), and 2 are unimplemented features (D-005, D-006).
-So #304 stays **OPEN** — correctly (its published headline run is still deferred).
+is bench-node-gated (D-001); D-003 (CrewAI) and D-004 (AutoGen) have both shipped their
+host-tractable acceptance (a dependency-free example + a deterministic performance model),
+with only their live-model wall-clock folded into the D-001 deferred run; 2 are partial
+scaffolds whose public surface is tracked by a separate epic (D-007→#639, D-008→#498); and 2
+are unimplemented features (D-005, D-006). So #304 stays **OPEN** — correctly (its published
+headline run is still deferred).
 
 ---
 
@@ -103,9 +103,11 @@ host**:
    leaf (a DAG execution engine; a 20+ tool library with safety annotations), and D-006 is also
    an architecture-fit question (fak gates tools rather than shipping them).
 
-3. **Bespoke-adapter parity gap (D-003 CrewAI, D-004 AutoGen).** Both frameworks already reach
-   fak by wire repoint, but the issues' acceptance asks for **native adapters + worked examples
-   + a benchmark vs native** — not yet built. Each is a separate leaf, not a single small change.
+3. **Live-model wall-clock gap (D-003 CrewAI, D-004 AutoGen).** Both frameworks reach fak by
+   wire repoint, and both now ship a dependency-free worked example (`examples/crewai-crew/`,
+   `examples/autogen-groupchat/`) with a deterministic performance model. The remaining piece
+   for each — the live-model framework-vs-native **wall-clock** — is the deferred bench-node
+   run owned by D-001 (#255), not a host-tractable change here.
 
 4. **Scaffolds whose public surface is a sibling epic (D-007, D-008).** The shared-task-record
    contract and the turnbench/trajectory harness exist, but the protocol RFC (epic #639) and the
@@ -127,7 +129,7 @@ reject. So the correct deliverable is this tracker, not a closed epic.
 | D-001 #255 | Stand up the headline run: install LangGraph/AutoGen/CrewAI on a bench node, run `fanbench` at N=100/500/1000 with a live model, record coordination-overhead + cross-agent-reuse vs the frameworks, publish the table | a live-model bench node |
 | D-002 #253 | Done (closed). Optional: add a 3-workflow LangChain/LangGraph migration guide to harden the closure narrative | host-tractable (docs) |
 | D-003 #250 | **Shipped** (`examples/crewai-crew/`): example crew + manager-role coordination-reduction doc + deterministic performance model. Remaining: the live-model CrewAI-vs-native wall-clock, owned by D-001 (#255) | a live-model bench node (wall-clock only) |
-| D-004 #248 | Build a minimal AutoGen multi-agent example pointed at fak, show conversation-state preservation through the gateway, benchmark vs native | host-tractable (Python example) |
+| D-004 #248 | **Shipped** (`examples/autogen-groupchat/`): example group chat + conversation-state-preservation model + deterministic performance model. Remaining: the live-model AutoGen-vs-native wall-clock, owned by D-001 (#255) | a live-model bench node (wall-clock only) |
 | D-005 #245 | Spec a workflow DSL (YAML) + a map-reduce/fan-out/DAG executor as a `new_leaf` package; CPU-correct first, then fault tolerance | host-tractable |
 | D-006 #243 | Decide the architecture fit first (does fak ship tools, or only gate them?); if shipping, add filesystem read/write/glob with safety annotations as the first leaf | host-tractable |
 | D-007 #241 | Graduate the shared-task-record contract into a message-passing API on `internal/comm`; write the RFC under epic #639 | host-tractable |
