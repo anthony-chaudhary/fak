@@ -92,6 +92,9 @@ type InKernelPlanner struct {
 	oomRetryMu sync.Mutex
 	oomRetry   map[string]*inKernelOOMRetryClassStats
 
+	pressureTrimMu sync.Mutex
+	pressureTrim   map[requestPressureTrimKey]*requestPressureTrimStats
+
 	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
 	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a
 	// real model.KVCache.Evict of the result's K/V span over a fresh model.Session built
@@ -110,6 +113,22 @@ type inKernelOOMRetryClassStats struct {
 	failures        uint64
 	lastFailedBytes uint64
 	lastSite        string
+}
+
+type requestPressureTrimKey struct {
+	scope  string
+	class  string
+	reason string
+}
+
+type requestPressureTrimStats struct {
+	attempts        uint64
+	trimmed         uint64
+	noHooks         uint64
+	resolved        uint64
+	lastWantBytes   uint64
+	lastBudgetBytes uint64
+	lastMarginBytes int64
 }
 
 // NewInKernelPlanner builds a planner over an already-loaded model + tokenizer.
@@ -295,6 +314,47 @@ func (p *InKernelPlanner) InKernelOOMRetryStats() InKernelOOMRetryStats {
 	return out
 }
 
+func (p *InKernelPlanner) InKernelMemoryPressureTrimStats() InKernelMemoryPressureTrimStats {
+	if p == nil {
+		return InKernelMemoryPressureTrimStats{}
+	}
+	backend := "unknown"
+	if p.backend != nil {
+		backend = p.backend.Name()
+	}
+	p.pressureTrimMu.Lock()
+	defer p.pressureTrimMu.Unlock()
+	out := InKernelMemoryPressureTrimStats{Backend: backend, Rows: make([]InKernelMemoryPressureTrimClassStats, 0, len(p.pressureTrim))}
+	for key, st := range p.pressureTrim {
+		if st == nil {
+			continue
+		}
+		out.Rows = append(out.Rows, InKernelMemoryPressureTrimClassStats{
+			Scope:           key.scope,
+			Class:           key.class,
+			Reason:          key.reason,
+			Attempts:        st.attempts,
+			Trimmed:         st.trimmed,
+			NoHooks:         st.noHooks,
+			Resolved:        st.resolved,
+			LastWantBytes:   st.lastWantBytes,
+			LastBudgetBytes: st.lastBudgetBytes,
+			LastMarginBytes: st.lastMarginBytes,
+		})
+	}
+	sort.SliceStable(out.Rows, func(i, j int) bool {
+		a, b := out.Rows[i], out.Rows[j]
+		if a.Scope != b.Scope {
+			return a.Scope < b.Scope
+		}
+		if a.Class != b.Class {
+			return a.Class < b.Class
+		}
+		return a.Reason < b.Reason
+	})
+	return out
+}
+
 // Complete renders the transcript as ChatML and runs one in-kernel decode turn,
 // returning the generated assistant text. Mirrors cmd/fakchat's hybrid path. The
 // per-request SampleOpts override this planner's configured decode length,
@@ -415,6 +475,18 @@ func (p *InKernelPlanner) prepareDeviceOOMRetry(err error) bool {
 	if !errors.As(err, &oom) {
 		return false
 	}
+	released := p.trimBackendIdlePools()
+	if released {
+		log.Printf("inkernel_chat oom-retry model=%s backend=%s class=%s site=%s bytes=%d action=trim-idle-pools",
+			p.modelID, p.backend.Name(), oom.Class, oom.Site, oom.Bytes)
+	}
+	return released
+}
+
+func (p *InKernelPlanner) trimBackendIdlePools() bool {
+	if p == nil || p.backend == nil {
+		return false
+	}
 	released := false
 	if r, ok := p.backend.(interface{ Recycle() }); ok {
 		r.Recycle()
@@ -427,10 +499,6 @@ func (p *InKernelPlanner) prepareDeviceOOMRetry(err error) bool {
 	if t, ok := p.backend.(interface{ TrimLarge(int) }); ok {
 		t.TrimLarge(0)
 		released = true
-	}
-	if released {
-		log.Printf("inkernel_chat oom-retry model=%s backend=%s class=%s site=%s bytes=%d action=trim-idle-pools",
-			p.modelID, p.backend.Name(), oom.Class, oom.Site, oom.Bytes)
 	}
 	return released
 }
@@ -608,6 +676,8 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 }
 
 const inKernelRequestDeviceHeadroom = 0.15
+const inKernelRequestPressureTrimMarginRatio = 0.10
+const inKernelRequestPressureTrimMinMarginBytes = 64 << 20
 
 func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error {
 	if p == nil || p.backend == nil || p.m == nil {
@@ -621,11 +691,149 @@ func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error 
 	if err := compute.RefuseMemoryPlanIfTooBig(p.backend, plan, inKernelRequestDeviceHeadroom); err != nil {
 		var fe *compute.FitError
 		if errors.As(err, &fe) {
+			if p.maybeTrimRequestPressure(plan, "capacity_precheck") {
+				p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
+				if retryErr := compute.RefuseMemoryPlanIfTooBig(p.backend, plan, inKernelRequestDeviceHeadroom); retryErr == nil {
+					p.recordRequestPressureTrimResolved(plan, "capacity_precheck")
+					return nil
+				} else if errors.As(retryErr, &fe) {
+					err = retryErr
+				} else {
+					return retryErr
+				}
+			}
 			return p.capacityErrorFromFit(fe)
 		}
 		return err
 	}
+	if p.maybeTrimRequestPressure(plan, "low_margin") {
+		p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
+	}
 	return nil
+}
+
+type requestPressureFit struct {
+	scope     compute.MemoryScope
+	class     compute.MemoryClass
+	want      int64
+	budget    int64
+	margin    int64
+	freeKnown bool
+}
+
+func (p *InKernelPlanner) maybeTrimRequestPressure(plan compute.MemoryPlan, reason string) bool {
+	fit, ok := p.requestDevicePressureFit(plan)
+	if !ok || !shouldTrimRequestPressure(fit) {
+		return false
+	}
+	trimmed := p.trimBackendIdlePools()
+	p.recordRequestPressureTrim(fit, reason, trimmed, false)
+	if trimmed {
+		log.Printf("inkernel_chat pressure-trim model=%s backend=%s scope=%s class=%s reason=%s want=%d budget=%d margin=%d action=trim-idle-pools",
+			p.modelID, p.backend.Name(), fit.scope, fit.class, reason, fit.want, fit.budget, fit.margin)
+	}
+	return trimmed
+}
+
+func (p *InKernelPlanner) recordRequestPressureTrimResolved(plan compute.MemoryPlan, reason string) {
+	fit, ok := p.requestDevicePressureFit(plan)
+	if !ok {
+		return
+	}
+	p.recordRequestPressureTrim(fit, reason, false, true)
+}
+
+func (p *InKernelPlanner) requestDevicePressureFit(plan compute.MemoryPlan) (requestPressureFit, bool) {
+	if p == nil || p.backend == nil {
+		return requestPressureFit{}, false
+	}
+	total, free, known := compute.DeviceMemoryInfo(p.backend)
+	if !known || total <= 0 || free < 0 {
+		return requestPressureFit{}, false
+	}
+	want := plan.DeviceTotal()
+	if want <= 0 {
+		return requestPressureFit{}, false
+	}
+	budget := applyKVCapacityHeadroom(free, inKernelRequestDeviceHeadroom)
+	return requestPressureFit{
+		scope:     compute.MemoryScopeDevice,
+		class:     primaryDemandClass(plan, compute.MemoryScopeDevice),
+		want:      want,
+		budget:    budget,
+		margin:    budget - want,
+		freeKnown: true,
+	}, true
+}
+
+func shouldTrimRequestPressure(fit requestPressureFit) bool {
+	if !fit.freeKnown || fit.want <= 0 {
+		return false
+	}
+	if fit.margin < 0 {
+		return true
+	}
+	return fit.margin <= requestPressureTrimMarginThreshold(fit.budget)
+}
+
+func requestPressureTrimMarginThreshold(budget int64) int64 {
+	if budget <= 0 {
+		return 0
+	}
+	threshold := int64(float64(budget) * inKernelRequestPressureTrimMarginRatio)
+	if threshold < inKernelRequestPressureTrimMinMarginBytes {
+		threshold = inKernelRequestPressureTrimMinMarginBytes
+	}
+	return threshold
+}
+
+func (p *InKernelPlanner) recordRequestPressureTrim(fit requestPressureFit, reason string, trimmed, resolved bool) {
+	if p == nil {
+		return
+	}
+	scope := strings.TrimSpace(string(fit.scope))
+	if scope == "" {
+		scope = string(compute.MemoryScopeDevice)
+	}
+	class := strings.TrimSpace(string(fit.class))
+	if class == "" {
+		class = string(compute.MemoryUnknown)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unknown"
+	}
+	p.pressureTrimMu.Lock()
+	if p.pressureTrim == nil {
+		p.pressureTrim = map[requestPressureTrimKey]*requestPressureTrimStats{}
+	}
+	key := requestPressureTrimKey{scope: scope, class: class, reason: reason}
+	st := p.pressureTrim[key]
+	if st == nil {
+		st = &requestPressureTrimStats{}
+		p.pressureTrim[key] = st
+	}
+	if resolved {
+		st.resolved++
+	} else {
+		st.attempts++
+		if trimmed {
+			st.trimmed++
+		} else {
+			st.noHooks++
+		}
+	}
+	st.lastWantBytes = positiveInt64ToUint64(fit.want)
+	st.lastBudgetBytes = positiveInt64ToUint64(fit.budget)
+	st.lastMarginBytes = fit.margin
+	p.pressureTrimMu.Unlock()
+}
+
+func positiveInt64ToUint64(v int64) uint64 {
+	if v <= 0 {
+		return 0
+	}
+	return uint64(v)
 }
 
 func (p *InKernelPlanner) recordRequestMemoryPlan(promptTokens, maxNew int, plan compute.MemoryPlan) {

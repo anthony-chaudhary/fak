@@ -35,7 +35,11 @@ description: "fak's HAL lifts seven hardware-SHAPE assumptions; finite device CA
 > The one served decode retry is also explicit:
 > `fak_gateway_in_kernel_oom_retry_total` reports idle-pool trim retry attempts,
 > successes, and failures by backend/class, while `/debug/vars` keeps the last trigger
-> site. Nothing here claims allocator OOM can spill/demote live KV or weights, that the
+> site. The request precheck can also make one pre-decode idle-pool trim when known
+> current-free pressure is already over budget or inside the low-margin band; those actions
+> are counted as `fak_gateway_in_kernel_memory_pressure_trim_total` with sizing gauges and
+> `/debug/vars.metrics.in_kernel_pressure_trims`. Nothing here claims allocator OOM can
+> spill/demote live KV or weights, that the
 > serving loop demotes KV under live pressure, or that every model loader has a complete
 > memory plan yet. Those remain tracked planks below.
 
@@ -212,14 +216,19 @@ turning dynamic sites into Prometheus labels. The narrow served decode retry is 
 `fak_gateway_in_kernel_oom_retry_total` publishes attempted/succeeded/failed counts by
 backend and memory class, `fak_gateway_in_kernel_oom_retry_last_failed_bytes` records the
 triggering allocation size, and `/debug/vars.metrics.in_kernel_oom_retries` carries the
-last trigger site.
+last trigger site. The pre-allocation side now has a narrow action too: when current free
+bytes are known and the request plan is already over its headroom-adjusted budget or close
+to it, the served planner asks the backend to release idle pools before decode (`Recycle`,
+`Trim`, or `TrimLarge(0)`) and reruns a refused capacity check once. That pre-decode action
+is visible as `fak_gateway_in_kernel_memory_pressure_trim_total` by backend/scope/class/
+reason/outcome plus `fak_gateway_in_kernel_memory_pressure_trim_last_bytes` and
+`/debug/vars.metrics.in_kernel_pressure_trims`.
 Honest fences: allocation OOM recovery is still panic/recover below the HAL, unknown
 capacity still fails open, generic allocation sites can still be `unknown`, resource-cap
 validation panics are not OOM, and no caller yet spills or demotes live KV based on the
-class. The served backend path does make one narrow retry after a typed allocation OOM, but
-that retry only asks the backend to release idle transient pools (`Recycle`, `Trim`, or
-`TrimLarge(0)`) before rerunning the same request; a truly-too-large request still returns
-the typed OOM/capacity refusal.
+class. Both the pre-decode pressure trim and the post-OOM retry only release idle transient
+pools; they do not move live KV spans, demote weights, or create a host DDR cache. A
+truly-too-large request still returns the typed OOM/capacity refusal.
 
 **Plank 3 — feed real pressure into the policy plane. _Shipped_ (#707).**
 `internal/engine.PlanPlacementForDevice` is the report→policy wire: it derives a live
@@ -333,7 +342,7 @@ add up to a HAL contract. Crediting them is what keeps the gap claim honest:
 | `model/paging.go: pagedKernel` | upload → compute → free, an on-demand page-in primitive | standalone; bit-equal to resident, but not integrated into the live weight HAL |
 | `engine.CacheEventMetrics` memory-class projection | KV residency events expose `memory_class` alongside `to_tier`: HBM is `kv_cache`, DRAM/NUMA-far/CXL are `ddr_cache`, and Disk/Remote/Provider are `offload`; byte/token breakdowns are exported as `fak_engine_cache_*_breakdown_total` series | visibility only; it does not yet drive spill/retry policy or allocate a DRAM cache |
 | `engine.RunCapacityPressureSweep` + `CapacityAdapter` | bounded report→policy→execute loop for caller-supplied KV candidates: derives HBM pressure from the backend, treats an operator high-water mark as "full", plans demote/spill/evict with `cachemeta.PlanPlacement`, executes via `StageSpan` then `Evict`, and records DRAM/CXL moves as `ddr_cache` and disk/remote/provider moves as `offload` | reusable engine primitive, not yet called by the live serving loop; candidate ordering, resident-byte accounting, restore, and retry policy still belong to the serving/cache owner |
-| `compute.DeviceAllocError` / `agent.InKernelCapacityError` → gateway `in_kernel_oom` + `/metrics` | runtime device allocation failure becomes a typed served 503 with bytes + memory class; served backend requests also refuse a known-too-large prompt+`max_tokens` KV/HAL plan before allocation with site `capacity-precheck`; both are counted by class on `/metrics` and drillable by last site on `/debug/vars`; after an allocation OOM, the served decode path can make one idle-pool trim retry and exposes attempted/succeeded/failed counts as `fak_gateway_in_kernel_oom_retry_total`; the latest served backend request plan is separately visible as `fak_gateway_in_kernel_request_memory_*`, including per-scope want/budget/margin fit rows, and process-lifetime request-plan totals/high-water rows are exposed under the same prefix plus `/debug/vars.metrics.request_memory*`; device weight, KV-cache, offload, scratchpad, HAL activation upload, GLM-DSA backend activation, and paged-weight page-in sites carry dedicated classes where the backend knows the purpose | classification/admission, one idle-pool retry, and visibility only; no live spill/demote policy yet, ambiguous generic alloc sites stay `unknown`, detailed request-plan gauges remain last-request snapshots, aggregate request rows reset with the process and are not histograms, and the request precheck fails open when capacity is unknown |
+| `compute.DeviceAllocError` / `agent.InKernelCapacityError` → gateway `in_kernel_oom` + `/metrics` | runtime device allocation failure becomes a typed served 503 with bytes + memory class; served backend requests also refuse a known-too-large prompt+`max_tokens` KV/HAL plan before allocation with site `capacity-precheck`, but first make one idle-pool trim when current-free pressure is over budget or in the low-margin band and rerun the fit check; both remaining refusals and allocation OOMs are counted by class on `/metrics` and drillable by last site on `/debug/vars`; after an allocation OOM, the served decode path can make one idle-pool trim retry and exposes attempted/succeeded/failed counts as `fak_gateway_in_kernel_oom_retry_total`; pre-decode trims are exposed as `fak_gateway_in_kernel_memory_pressure_trim_total`; the latest served backend request plan is separately visible as `fak_gateway_in_kernel_request_memory_*`, including per-scope want/budget/margin fit rows, and process-lifetime request-plan totals/high-water rows are exposed under the same prefix plus `/debug/vars.metrics.request_memory*`; device weight, KV-cache, offload, scratchpad, HAL activation upload, GLM-DSA backend activation, and paged-weight page-in sites carry dedicated classes where the backend knows the purpose | classification/admission, one pre-decode idle-pool trim, one post-OOM idle-pool retry, and visibility only; no live spill/demote policy yet, ambiguous generic alloc sites stay `unknown`, detailed request-plan gauges remain last-request snapshots, aggregate request rows reset with the process and are not histograms, and the request precheck fails open when capacity is unknown |
 | `ggufload.WeightSource.FitOnDevice` / `FitF32OnDevice` / `FitCPUOffloadExpertsOnDevice` + `compute.EstimateKVStoreMemoryPlan` / `EstimateHALTransientMemoryPlan` + gateway model-load memory telemetry | header-only GGUF load refusal before the Go process allocates resident weights, with classed HAL KV-cache, activation, and scratchpad estimates when GGUF config exposes context geometry; expert-offload plans keep host expert bytes visible without counting them against device capacity, and optional `HostCapacity` can refuse known-too-large host-scoped `offload`/`ddr_cache` plans; successful eager device loads expose the admission profile on `/metrics` and `/debug/vars`, including bounded dtype/storage labels and per-scope want/budget/margin fit rows | shipped for GGUF serve's device load paths; quantized-upload backends are explicitly mixed precision (Q8 resident weights, f32 runtime state); f32 weights are only the fallback for backends without quantized upload; host capacity is OS physical memory, not cgroup/container quota; telemetry is visibility only, not spill/retry; not yet safetensors, generic `model.Load`, upload pre-checks, or backend-specific transient peaks |
 | `agent.KVMemoryReporter` + gateway `fak_gateway_kv_memory_*` | local in-kernel KV-prefix residency reports as `kv_cache`: bytes per KV position from `compute.EstimateKVStoreBytes`, true resident `PrefixTokens`, estimated resident bytes, configured radix LRU budget tokens, current LRU edge-token count, tree shape, splits, and LRU vs policy evictions; it also emits capacity-known/free-known, capacity bytes, headroom, and resident KV `want`/`budget`/`margin` fit rows; `fak_gateway_kv_memory_dtype_info` and `/debug/vars` carry the KV row dtype (`f32` today) and the same fit snapshot | visibility over the CPU-backed radix KV prefix cache and its known budget-vs-true-footprint gap; the host budget includes `free + resident` when free memory is known so the current cache is not counted against itself; device-HAL serve currently reports per-token geometry/capacity with `enabled=false` because it uses per-request backend sessions, not device-side radix reuse; no pressure-driven demote/spill, quantized KV, or KV-pressure retry yet |
 | `tools/memgate.py` | an operator pre-flight RAM gate | still useful outside the Go process, but no longer the only fit gate |
@@ -366,9 +375,11 @@ and it is what `DeviceCapacity` begins.
   gauges are last-request snapshots, while the aggregate request-memory rows are
   process-lifetime totals/high-water gauges rather than long-term histograms or a policy
   engine; both include the same want/budget/margin rollup by scope where the backend can
-  report capacity. Runtime allocation OOMs can trigger one
-  idle-pool trim retry on the served decode path, and the retry outcome is visible as
-  `fak_gateway_in_kernel_oom_retry_total`; that is not live KV/weight spill or demotion.
+  report capacity. Known current-free pressure can trigger one pre-decode idle-pool trim,
+  visible as `fak_gateway_in_kernel_memory_pressure_trim_total`, and runtime allocation OOMs
+  can trigger one idle-pool trim retry on the served decode path, visible as
+  `fak_gateway_in_kernel_oom_retry_total`; neither action is live KV/weight spill or
+  demotion.
   Safetensors, generic `model.Load`, runtime upload pre-checks, and backend-specific
   transient peaks are still unwired.
 - CUDA reports current free VRAM via `cudaMemGetInfo`. Vulkan reports current free

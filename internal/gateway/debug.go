@@ -68,14 +68,15 @@ type debugKernelVars struct {
 }
 
 type debugMetricsVars struct {
-	HTTP                []debugHTTPMetricVars          `json:"http"`
-	Operations          []debugOperationMetricVars     `json:"operations"`
-	Compaction          debugCompactionVars            `json:"compaction"`
-	RequestMemory       []debugRequestMemoryMetricVars `json:"request_memory,omitempty"`
-	RequestMemoryFit    []debugRequestMemoryFitVars    `json:"request_memory_fit,omitempty"`
-	RequestMemoryTokens []debugRequestMemoryTokenVars  `json:"request_memory_tokens,omitempty"`
-	InKernelOOM         []debugInKernelOOMVars         `json:"in_kernel_oom"`
-	InKernelOOMRetries  []debugInKernelOOMRetryVars    `json:"in_kernel_oom_retries,omitempty"`
+	HTTP                 []debugHTTPMetricVars           `json:"http"`
+	Operations           []debugOperationMetricVars      `json:"operations"`
+	Compaction           debugCompactionVars             `json:"compaction"`
+	RequestMemory        []debugRequestMemoryMetricVars  `json:"request_memory,omitempty"`
+	RequestMemoryFit     []debugRequestMemoryFitVars     `json:"request_memory_fit,omitempty"`
+	RequestMemoryTokens  []debugRequestMemoryTokenVars   `json:"request_memory_tokens,omitempty"`
+	InKernelOOM          []debugInKernelOOMVars          `json:"in_kernel_oom"`
+	InKernelOOMRetries   []debugInKernelOOMRetryVars     `json:"in_kernel_oom_retries,omitempty"`
+	InKernelPressureTrim []debugInKernelPressureTrimVars `json:"in_kernel_pressure_trims,omitempty"`
 }
 
 type debugModelLoadVars struct {
@@ -231,6 +232,20 @@ type debugInKernelOOMRetryVars struct {
 	LastSite        string `json:"last_site,omitempty"`
 }
 
+type debugInKernelPressureTrimVars struct {
+	Backend         string `json:"backend"`
+	Scope           string `json:"scope"`
+	Class           string `json:"class"`
+	Reason          string `json:"reason"`
+	Attempts        uint64 `json:"attempts"`
+	Trimmed         uint64 `json:"trimmed"`
+	NoHooks         uint64 `json:"no_hooks"`
+	Resolved        uint64 `json:"resolved"`
+	LastWantBytes   uint64 `json:"last_want_bytes"`
+	LastBudgetBytes uint64 `json:"last_budget_bytes"`
+	LastMarginBytes int64  `json:"last_margin_bytes"`
+}
+
 type debugLatencyVars struct {
 	Count      uint64            `json:"count"`
 	SumSeconds float64           `json:"sum_seconds"`
@@ -334,11 +349,12 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 				CacheReadTokens:             compact.cacheReads,
 				LastPostFireCacheReadTokens: compact.lastCacheRd,
 			},
-			RequestMemory:       debugRequestMemoryMetricRows(reqMemoryRows.plans),
-			RequestMemoryFit:    debugRequestMemoryFitRows(reqMemoryRows.fits),
-			RequestMemoryTokens: debugRequestMemoryTokenRows(reqMemoryRows.tokens),
-			InKernelOOM:         debugInKernelOOMRows(oomRows),
-			InKernelOOMRetries:  debugInKernelOOMRetryRows(s.planner),
+			RequestMemory:        debugRequestMemoryMetricRows(reqMemoryRows.plans),
+			RequestMemoryFit:     debugRequestMemoryFitRows(reqMemoryRows.fits),
+			RequestMemoryTokens:  debugRequestMemoryTokenRows(reqMemoryRows.tokens),
+			InKernelOOM:          debugInKernelOOMRows(oomRows),
+			InKernelOOMRetries:   debugInKernelOOMRetryRows(s.planner),
+			InKernelPressureTrim: debugInKernelPressureTrimRows(s.planner),
 		},
 	}
 }
@@ -625,6 +641,38 @@ func debugInKernelOOMRetryRows(p agent.Planner) []debugInKernelOOMRetryVars {
 			Failures:        row.Failures,
 			LastFailedBytes: row.LastFailedBytes,
 			LastSite:        row.LastSite,
+		})
+	}
+	return out
+}
+
+func debugInKernelPressureTrimRows(p agent.Planner) []debugInKernelPressureTrimVars {
+	reporter, ok := p.(agent.InKernelMemoryPressureTrimReporter)
+	if !ok {
+		return nil
+	}
+	st := reporter.InKernelMemoryPressureTrimStats()
+	if len(st.Rows) == 0 {
+		return nil
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	out := make([]debugInKernelPressureTrimVars, 0, len(st.Rows))
+	for _, row := range st.Rows {
+		out = append(out, debugInKernelPressureTrimVars{
+			Backend:         backend,
+			Scope:           modelLoadScope(row.Scope),
+			Class:           oomClassLabel(row.Class),
+			Reason:          pressureTrimReasonLabel(row.Reason),
+			Attempts:        row.Attempts,
+			Trimmed:         row.Trimmed,
+			NoHooks:         row.NoHooks,
+			Resolved:        row.Resolved,
+			LastWantBytes:   row.LastWantBytes,
+			LastBudgetBytes: row.LastBudgetBytes,
+			LastMarginBytes: row.LastMarginBytes,
 		})
 	}
 	return out

@@ -243,3 +243,93 @@ func TestInKernelRequestCapacityPrecheckFailsOpenWhenCapacityUnknown(t *testing.
 		t.Fatalf("unknown-capacity backend must fail open, got %v", err)
 	}
 }
+
+type pressureTrimBackend struct {
+	compute.Backend
+	total     int64
+	free      int64
+	trimFree  int64
+	recycle   int
+	trim      int
+	trimLarge []int
+}
+
+func (b *pressureTrimBackend) Caps() compute.Caps {
+	return compute.Caps{DeviceMemory: true, CapacityProbe: true}
+}
+
+func (b *pressureTrimBackend) Name() string { return "pressure-trim" }
+
+func (b *pressureTrimBackend) DeviceMemory() (total, free int64, known bool) {
+	return b.total, b.free, true
+}
+
+func (b *pressureTrimBackend) Recycle() { b.recycle++ }
+
+func (b *pressureTrimBackend) Trim() {
+	b.trim++
+	if b.trimFree > b.free {
+		b.free = b.trimFree
+	}
+}
+
+func (b *pressureTrimBackend) TrimLarge(maxKeepBytes int) {
+	b.trimLarge = append(b.trimLarge, maxKeepBytes)
+}
+
+func TestInKernelRequestPressureTrimRescuesCapacityPrecheck(t *testing.T) {
+	be := &pressureTrimBackend{Backend: compute.Default(), total: 1 << 30, free: 1, trimFree: 1 << 30}
+	p := &InKernelPlanner{
+		m:       model.NewSynthetic(tinyConcurrencyConfig()),
+		backend: be,
+		modelID: "pressure-test",
+	}
+
+	if err := p.refuseOversizeRequest(10, 5); err != nil {
+		t.Fatalf("pressure trim should rescue stale-free capacity refusal, got %v", err)
+	}
+	if be.recycle != 1 || be.trim != 1 || len(be.trimLarge) != 1 || be.trimLarge[0] != 0 {
+		t.Fatalf("pressure cleanup = recycle %d trim %d trimLarge %+v, want 1/1/[0]", be.recycle, be.trim, be.trimLarge)
+	}
+	st := p.InKernelMemoryPressureTrimStats()
+	if st.Backend != "pressure-trim" || len(st.Rows) != 1 {
+		t.Fatalf("pressure trim stats = %+v, want one pressure-trim row", st)
+	}
+	row := st.Rows[0]
+	if row.Reason != "capacity_precheck" || row.Scope != string(compute.MemoryScopeDevice) ||
+		row.Attempts != 1 || row.Trimmed != 1 || row.NoHooks != 0 || row.Resolved != 1 ||
+		row.LastWantBytes == 0 || row.LastBudgetBytes == 0 || row.LastMarginBytes <= 0 {
+		t.Fatalf("pressure trim row = %+v, want rescued capacity_precheck with positive post-trim margin", row)
+	}
+}
+
+func TestInKernelRequestPressureTrimOnLowMargin(t *testing.T) {
+	m := model.NewSynthetic(tinyConcurrencyConfig())
+	p := &InKernelPlanner{m: m}
+	plan := p.requestMemoryPlan(10, 5)
+	want := plan.DeviceTotal()
+	if want <= 0 {
+		t.Fatalf("test request plan want = %d, want positive", want)
+	}
+	margin := int64(32 << 20)
+	free := int64(float64(want+margin) / (1 - inKernelRequestDeviceHeadroom))
+	be := &pressureTrimBackend{Backend: compute.Default(), total: free + (1 << 30), free: free, trimFree: free}
+	p.backend = be
+	p.modelID = "pressure-test"
+
+	if err := p.refuseOversizeRequest(10, 5); err != nil {
+		t.Fatalf("low-margin request should still fit after proactive trim, got %v", err)
+	}
+	if be.trim != 1 {
+		t.Fatalf("low-margin request did not trim idle pools: recycle %d trim %d trimLarge %+v", be.recycle, be.trim, be.trimLarge)
+	}
+	st := p.InKernelMemoryPressureTrimStats()
+	if len(st.Rows) != 1 {
+		t.Fatalf("pressure trim stats = %+v, want one row", st)
+	}
+	row := st.Rows[0]
+	if row.Reason != "low_margin" || row.Attempts != 1 || row.Trimmed != 1 || row.Resolved != 0 ||
+		row.LastMarginBytes <= 0 || row.LastMarginBytes > inKernelRequestPressureTrimMinMarginBytes {
+		t.Fatalf("low-margin trim row = %+v", row)
+	}
+}

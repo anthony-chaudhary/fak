@@ -863,6 +863,7 @@ func (s *Server) renderMetrics() string {
 	inf := m.writeInferenceMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
+	s.writeInKernelPressureTrimMetrics(&b)
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
 
@@ -1048,6 +1049,62 @@ func (s *Server) writeInKernelOOMRetryMetrics(b *strings.Builder) {
 	for _, row := range st.Rows {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_retry_last_failed_bytes{backend=\"%s\",class=\"%s\"} %d\n",
 			promQuote(backend), promQuote(oomClassLabel(row.Class)), row.LastFailedBytes)
+	}
+}
+
+func (s *Server) writeInKernelPressureTrimMetrics(b *strings.Builder) {
+	if s == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.InKernelMemoryPressureTrimReporter)
+	if !ok {
+		return
+	}
+	st := reporter.InKernelMemoryPressureTrimStats()
+	if len(st.Rows) == 0 {
+		return
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_memory_pressure_trim_total", "Idle-pool trims attempted before local in-kernel decode when a known request memory plan is refused or close to the headroom-adjusted budget. resolved means a capacity-precheck refusal fit after trimming.", "counter")
+	for _, row := range st.Rows {
+		scope := modelLoadScope(row.Scope)
+		class := oomClassLabel(row.Class)
+		reason := pressureTrimReasonLabel(row.Reason)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_memory_pressure_trim_total{backend=\"%s\",scope=\"%s\",class=\"%s\",reason=\"%s\",outcome=\"attempted\"} %d\n",
+			promQuote(backend), promQuote(scope), promQuote(class), promQuote(reason), row.Attempts)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_memory_pressure_trim_total{backend=\"%s\",scope=\"%s\",class=\"%s\",reason=\"%s\",outcome=\"trimmed\"} %d\n",
+			promQuote(backend), promQuote(scope), promQuote(class), promQuote(reason), row.Trimmed)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_memory_pressure_trim_total{backend=\"%s\",scope=\"%s\",class=\"%s\",reason=\"%s\",outcome=\"no_hooks\"} %d\n",
+			promQuote(backend), promQuote(scope), promQuote(class), promQuote(reason), row.NoHooks)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_memory_pressure_trim_total{backend=\"%s\",scope=\"%s\",class=\"%s\",reason=\"%s\",outcome=\"resolved\"} %d\n",
+			promQuote(backend), promQuote(scope), promQuote(class), promQuote(reason), row.Resolved)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_memory_pressure_trim_last_bytes", "Most recent request memory pressure trim sizing by backend, scope, class, and reason. kind=margin may be negative for a refused precheck.", "gauge")
+	for _, row := range st.Rows {
+		scope := modelLoadScope(row.Scope)
+		class := oomClassLabel(row.Class)
+		reason := pressureTrimReasonLabel(row.Reason)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_memory_pressure_trim_last_bytes{backend=\"%s\",scope=\"%s\",class=\"%s\",reason=\"%s\",kind=\"want\"} %d\n",
+			promQuote(backend), promQuote(scope), promQuote(class), promQuote(reason), row.LastWantBytes)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_memory_pressure_trim_last_bytes{backend=\"%s\",scope=\"%s\",class=\"%s\",reason=\"%s\",kind=\"budget\"} %d\n",
+			promQuote(backend), promQuote(scope), promQuote(class), promQuote(reason), row.LastBudgetBytes)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_memory_pressure_trim_last_bytes{backend=\"%s\",scope=\"%s\",class=\"%s\",reason=\"%s\",kind=\"margin\"} %d\n",
+			promQuote(backend), promQuote(scope), promQuote(class), promQuote(reason), row.LastMarginBytes)
+	}
+}
+
+func pressureTrimReasonLabel(reason string) string {
+	reason = strings.TrimSpace(reason)
+	switch reason {
+	case "capacity_precheck", "low_margin":
+		return reason
+	case "":
+		return "unknown"
+	default:
+		return "other"
 	}
 }
 

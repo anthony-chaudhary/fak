@@ -63,9 +63,10 @@ func TestMetricsExposesKVPrefixReuse(t *testing.T) {
 }
 
 type kvMemoryStatsPlanner struct {
-	stats    agent.KVMemoryStats
-	req      agent.RequestMemoryStats
-	oomRetry agent.InKernelOOMRetryStats
+	stats        agent.KVMemoryStats
+	req          agent.RequestMemoryStats
+	oomRetry     agent.InKernelOOMRetryStats
+	pressureTrim agent.InKernelMemoryPressureTrimStats
 }
 
 func (p kvMemoryStatsPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
@@ -82,6 +83,10 @@ func (p kvMemoryStatsPlanner) InKernelOOMRetryStats() agent.InKernelOOMRetryStat
 	return p.oomRetry
 }
 
+func (p kvMemoryStatsPlanner) InKernelMemoryPressureTrimStats() agent.InKernelMemoryPressureTrimStats {
+	return p.pressureTrim
+}
+
 func TestKVMemoryMetricsSuppressedWithoutReporter(t *testing.T) {
 	srv := newTestServer(t)
 	if text := srv.renderMetrics(); strings.Contains(text, "fak_gateway_kv_memory_") {
@@ -89,6 +94,51 @@ func TestKVMemoryMetricsSuppressedWithoutReporter(t *testing.T) {
 	}
 	if vars := srv.debugVars(time.Now()); vars.KVMemory != nil {
 		t.Fatalf("debug kv_memory should be absent for a non-reporting planner: %+v", vars.KVMemory)
+	}
+}
+
+func TestInKernelPressureTrimMetricsAndDebugVars(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = kvMemoryStatsPlanner{pressureTrim: agent.InKernelMemoryPressureTrimStats{
+		Backend: "vulkan",
+		Rows: []agent.InKernelMemoryPressureTrimClassStats{
+			{
+				Scope:           "device",
+				Class:           "kv_cache",
+				Reason:          "capacity_precheck",
+				Attempts:        2,
+				Trimmed:         1,
+				NoHooks:         1,
+				Resolved:        1,
+				LastWantBytes:   900,
+				LastBudgetBytes: 850,
+				LastMarginBytes: -50,
+			},
+		},
+	}}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_in_kernel_memory_pressure_trim_total{backend="vulkan",scope="device",class="kv_cache",reason="capacity_precheck",outcome="attempted"} 2`,
+		`fak_gateway_in_kernel_memory_pressure_trim_total{backend="vulkan",scope="device",class="kv_cache",reason="capacity_precheck",outcome="trimmed"} 1`,
+		`fak_gateway_in_kernel_memory_pressure_trim_total{backend="vulkan",scope="device",class="kv_cache",reason="capacity_precheck",outcome="no_hooks"} 1`,
+		`fak_gateway_in_kernel_memory_pressure_trim_total{backend="vulkan",scope="device",class="kv_cache",reason="capacity_precheck",outcome="resolved"} 1`,
+		`fak_gateway_in_kernel_memory_pressure_trim_last_bytes{backend="vulkan",scope="device",class="kv_cache",reason="capacity_precheck",kind="want"} 900`,
+		`fak_gateway_in_kernel_memory_pressure_trim_last_bytes{backend="vulkan",scope="device",class="kv_cache",reason="capacity_precheck",kind="budget"} 850`,
+		`fak_gateway_in_kernel_memory_pressure_trim_last_bytes{backend="vulkan",scope="device",class="kv_cache",reason="capacity_precheck",kind="margin"} -50`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("pressure trim metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	rows := vars.Metrics.InKernelPressureTrim
+	if len(rows) != 1 || rows[0].Backend != "vulkan" || rows[0].Class != "kv_cache" ||
+		rows[0].Reason != "capacity_precheck" || rows[0].Attempts != 2 ||
+		rows[0].Trimmed != 1 || rows[0].NoHooks != 1 || rows[0].Resolved != 1 ||
+		rows[0].LastMarginBytes != -50 {
+		t.Fatalf("debug pressure trim rows = %+v", rows)
 	}
 }
 

@@ -636,6 +636,36 @@ type InKernelOOMRetryReporter interface {
 	InKernelOOMRetryStats() InKernelOOMRetryStats
 }
 
+// InKernelMemoryPressureTrimClassStats is one bounded-label row for proactive
+// memory-pressure trims before a served in-kernel device decode enters allocation-heavy
+// work. "resolved" means a capacity-precheck refusal fit after the trim.
+type InKernelMemoryPressureTrimClassStats struct {
+	Scope           string
+	Class           string
+	Reason          string
+	Attempts        uint64
+	Trimmed         uint64
+	NoHooks         uint64
+	Resolved        uint64
+	LastWantBytes   uint64
+	LastBudgetBytes uint64
+	LastMarginBytes int64
+}
+
+// InKernelMemoryPressureTrimStats reports proactive idle-pool trims triggered by
+// known request-memory pressure. It is separate from OOM retry stats: these happen
+// before decode allocation, not after a recovered DeviceAllocError.
+type InKernelMemoryPressureTrimStats struct {
+	Backend string
+	Rows    []InKernelMemoryPressureTrimClassStats
+}
+
+// InKernelMemoryPressureTrimReporter is implemented by local planners that can
+// report proactive memory-pressure trims. Proxy planners do not implement it.
+type InKernelMemoryPressureTrimReporter interface {
+	InKernelMemoryPressureTrimStats() InKernelMemoryPressureTrimStats
+}
+
 // ---------------------------------------------------------------------------
 // Live planner — provider API client.
 // ---------------------------------------------------------------------------
