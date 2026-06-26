@@ -169,6 +169,53 @@ escalation trigger for carrying the rung identity on the event itself (Rung B), 
 deliberately not done here. Like the other `fak_kernel_*_total` counters, this one is
 in-memory and process-local: it resets on restart and is not persisted.
 
+### Revocation — observing the invalidate-on-refutation path (the `MPI_Comm_revoke` analogue)
+
+`vdso.Revoke` is fak's integrity-direction eraser: when an external world-state witness
+(a git commit, blob hash, or lease epoch a cache entry was admitted under) turns out to be
+poisoned or stale, revoking it evicts every pooled entry admitted under it, refuses future
+re-admission, advances a monotone *trust* clock, and publishes the refutation so peer
+agents are causally evicted too. That is the shape of ULFM's `MPI_Comm_revoke` —
+*invalidate-on-refutation + propagate* — applied to a cache witness rather than a live
+communicator, so revocation can only ever turn a would-be hit into a miss (the full
+structural mapping is in
+[`docs/explainers/vdso-revoke-as-comm-revoke.md`](../explainers/vdso-revoke-as-comm-revoke.md)).
+This subsection is the operator surface: how you observe a revocation on a running gateway.
+
+Three surfaces carry it, and none logs the refuted witness's *content* — only its name and
+its effect:
+
+| Surface | What you see | Where |
+|---|---|---|
+| **The trigger** — `POST /v1/fak/revoke` (and the `fak_revoke` MCP tool) | the response `{witness, evicted, trust_epoch}` — how many pooled entries the refutation stranded locally, and the integrity clock after the bump | one HTTP call; body `{"witness":"…"}` |
+| **The propagation** — the `fak_changes` "what changed" feed (`GET /v1/fak/changes?since=<cursor>`, or `POST {"since":N}`) | a typed `revocation` event `{kind:"revocation", seq, witness, evicted, world_ver, trust_epoch}` in the cursor-drained stream — the broadcast every peer agent drains since its cursor to evict its *own* private cache | events are ordered by the shared `seq`, so writes and refutations interleave in one total order |
+| **The fast-path footprint** | `fak_vdso_misses_total{reason="WITNESS_REVOKED"}` — lookups that missed because the entry's external witness had been refuted, i.e. the revocation's mark on the hit ratio | `GET /metrics` |
+
+A revocation observed end to end: a caller learns a witness is poisoned and
+`POST /v1/fak/revoke`s it; the response reports `evicted` and the new `trust_epoch`. The
+same refutation lands on the `/v1/fak/changes` feed as a `revocation` event, so every other
+agent routed through this gateway drains it and evicts its own copies — the *cross-agent
+propagation* half of the analogue. Afterward, any fast-path lookup that would have served
+that witness counts as a `fak_vdso_misses_total{reason="WITNESS_REVOKED"}` miss and
+delegates to a fresh call, which is why a refutation can only ever lower the hit ratio,
+never raise a stale serve.
+
+```promql
+# refutation pressure on the fast path — misses caused by a refuted witness
+sum(rate(fak_vdso_misses_total{reason="WITNESS_REVOKED"}[5m]))
+```
+
+**Honesty boundary — the integrity clock is not (yet) its own metric.** The refutation
+count (`vdso.Revocations()`) and the integrity clock (`vdso.TrustEpoch()`) are exposed on the
+vDSO API and carried on every revoke response and changes-feed event, but they are **not**
+rendered as dedicated `fak_*` Prometheus series on `/metrics`. So you read the trust epoch
+per-revoke (from the response) or per-event (from the feed), not as a chartable gauge. The
+nearest `/metrics` signal that a refutation happened is the `WITNESS_REVOKED` miss counter
+above — which is an *effect* (a later lookup on a refuted witness), not the refutation event
+itself. This mirrors the `fak_vdso_invalidations_total` note that the vDSO exports no
+per-entry eviction counter: both are the nearest exported signal to a clock the API holds but
+`/metrics` does not yet chart.
+
 ---
 
 ## 3. The live JSON snapshot (`GET /debug/vars`)
@@ -269,5 +316,6 @@ hardening (bind address, reverse-proxy scrape isolation) is covered in
 - [tutorial.md §2.5](tutorial.md) — seeing the access log in the guided first session.
 - [security.md](security.md) — auth, network exposure, and the threat model for these surfaces.
 - [server-config.md](server-config.md) — every `fak serve` flag and env var.
+- [vdso-revoke-as-comm-revoke.md](../explainers/vdso-revoke-as-comm-revoke.md) — the structural mapping of `vdso.Revoke` onto ULFM's `MPI_Comm_revoke` (the concept behind the revocation surfaces above).
 - [`tools/grafana/`](https://github.com/anthony-chaudhary/fak/tree/main/tools/grafana) — the ready-to-run Prometheus + Grafana stack (scrape config, provisioned dashboards, alert rules).
 - [`fak/GETTING-STARTED.md` §3](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) — the full route table.
