@@ -122,10 +122,21 @@ if { [ "$SERVE" = "sglang" ] || [ "$SERVE" = "vllm" ]; } && [ "$cap" -lt 90 ] 2>
 fi
 if [ "$cap" -lt 90 ] 2>/dev/null; then
   if [ "$SERVE" = "fak" ]; then
-    log "tier '$GCP_TIER' is sm_${cap} (Ampere, below the sm_90 DSA floor): serving via the PURE FAK KERNEL (native glm_moe_dsa, forward witnessed cosine 1.0 on sm_80)."
+    log "tier '$GCP_TIER' is sm_${cap} (Ampere, below the sm_90 DSA floor): serving via the PURE FAK KERNEL (native glm_moe_dsa; forward witnessed at q8 on sm_80, a live serve turn is hardware+load-gated)."
   else
     log "tier '$GCP_TIER' is sm_${cap} (Ampere): serving via llama.cpp MLA (the DGX A100 benchmark baseline)."
   fi
+fi
+
+# Secret hygiene: PLAN prints the startup script to stdout (meant to be read/shared), so it
+# must NEVER contain live credentials. Render secrets as a redacted placeholder in plan; only
+# APPLY (which writes the script to a mode-0600 temp file) bakes the real values in.
+if [ "$MODE" = "apply" ]; then
+  RENDER_HF_TOKEN="${HF_TOKEN:-}"
+  RENDER_TS_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
+else
+  RENDER_HF_TOKEN="$([ -n "${HF_TOKEN:-}" ] && printf '%s' '***REDACTED — set HF_TOKEN in the --apply env***' || printf '')"
+  RENDER_TS_AUTHKEY="$([ -n "${TAILSCALE_AUTHKEY:-}" ] && printf '%s' '***REDACTED — set TAILSCALE_AUTHKEY in the --apply env***' || printf '')"
 fi
 
 # --- the VM startup script (cloud-init) ---------------------------------------
@@ -145,9 +156,9 @@ apt-get update -y || true
 apt-get install -y git python3 python3-pip curl $1 || true
 
 # Optional: join the Tailscale overlay so this laptop can dial the /v1 privately.
-if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+if [ -n "${RENDER_TS_AUTHKEY}" ]; then
   curl -fsSL https://tailscale.com/install.sh | sh
-  tailscale up --authkey "${TAILSCALE_AUTHKEY:-}" --hostname "${VM_NAME}" || true
+  tailscale up --authkey "${RENDER_TS_AUTHKEY}" --hostname "${VM_NAME}" || true
 fi
 
 install -d -o root -g root /opt
@@ -155,8 +166,8 @@ git clone "${FAK_REPO_URL}" /opt/fak || (cd /opt/fak && git pull --ff-only)
 cd /opt/fak
 
 # The GLM-5.2 checkpoint is gated on Hugging Face; export the token for the fetch.
-export HF_TOKEN="${HF_TOKEN:-}"
-export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}"
+export HF_TOKEN="${RENDER_HF_TOKEN}"
+export HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}"
 PRE
 }
 
@@ -175,8 +186,8 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=PORT="${GLM_PORT}" \\
   --setenv=MODEL_ID="glm-5.2" \\
   --setenv=FAK_CUDA_ARCH="sm_${cap}" \\
-  --setenv=HF_TOKEN="${HF_TOKEN:-}" \\
-  --setenv=HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}" \\
+  --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
+  --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HF_HUB_ENABLE_HF_TRANSFER=1 \\
   --property=Restart=on-failure --property=RestartSec=15 \\
   /usr/bin/env bash /opt/fak/tools/glm52_fak_native_serve.sh
@@ -198,8 +209,8 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=GLM_SUBDIR="${GLM_GGUF_SUBDIR}" \\
   --setenv=PORT="${GLM_PORT}" \\
   --setenv=NCPU_MOE="${NCPU_MOE}" \\
-  --setenv=HF_TOKEN="${HF_TOKEN:-}" \\
-  --setenv=HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}" \\
+  --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
+  --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
   --setenv=HF_HUB_ENABLE_HF_TRANSFER=1 \\
   --property=Restart=on-failure --property=RestartSec=15 \\
   /usr/bin/env bash /opt/fak/tools/glm52_stage_serve_dgx3.sh
@@ -215,8 +226,8 @@ systemd-run --unit=glm52serve --collect \\
   --setenv=ENGINE="${ENGINE}" \\
   --setenv=QUANT="${QUANT}" \\
   --setenv=PORT="${GLM_PORT}" \\
-  --setenv=HF_TOKEN="${HF_TOKEN:-}" \\
-  --setenv=HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}" \\
+  --setenv=HF_TOKEN="${RENDER_HF_TOKEN}" \\
+  --setenv=HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}" \\
   --property=Restart=on-failure --property=RestartSec=10 \\
   /usr/bin/env bash /opt/fak/tools/glm52_sglang_vllm_serve.sh
 TAIL
