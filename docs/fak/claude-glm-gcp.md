@@ -39,11 +39,11 @@ It picks the serve path from the tier's GPU arch (override with `SERVE=`):
 
 | `SERVE` | what runs | default on |
 |---|---|---|
-| `fak` | the **pure fak kernel** — fak serves GLM-5.2 (`glm_moe_dsa`) through its *own* CUDA kernels (`tools/glm52_fak_native_serve.sh`: `fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 8192`). **Preferred.** | Ampere (A100, sm_80) |
-| `llamacpp` | the **benchmark baseline** — the *same* checkpoint under llama.cpp MLA + CPU expert-offload (`tools/glm52_stage_serve_dgx3.sh`, the DGX A100 example brought to GCP). Stand it up to compare fak apples-to-apples. | — (opt-in, any tier) |
+| `fak` | the **pure fak kernel** — fak serves GLM-5.2 (`glm_moe_dsa`) through its *own* CUDA kernels (`tools/glm52_fak_native_serve.sh`: `fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 8192`). **Preferred.** | Ampere (datacenter GPU, sm_80) |
+| `llamacpp` | the **benchmark baseline** — the *same* checkpoint under llama.cpp MLA + CPU expert-offload (`tools/glm52_stage_serve_dgx3.sh`, the GPU server example brought to GCP). Stand it up to compare fak apples-to-apples. | — (opt-in, any tier) |
 | `sglang` / `vllm` | stock DSA engines (`tools/glm52_sglang_vllm_serve.sh`), gated by `tools/glm52_serve_preflight.py` (fails closed below sm_90). | Hopper / Blackwell (sm_90+) |
 
-So **"whatever is available" includes A100** — `GCP_TIER=a2-ultra-a100-80gb` serves GLM-5.2
+So **"whatever is available" includes datacenter GPU** — `GCP_TIER=a2-ultra-a100-80gb` serves GLM-5.2
 via the pure fak kernel by default:
 
 ```bash
@@ -53,17 +53,17 @@ GCP_TIER=a4-b200 ./scripts/gcp-glm-serve.sh                            # Blackwe
 ```
 
 The default tier is `a3-ultra-h200` (8× H200, sm_90, ~$60/hr) from the `tools/gcp_accel.py`
-registry — the most-provisionable tier that clears the DSA floor. The A100 tiers are
-`a2-ultra-a100-80gb` (8× A100 80GB, 640 GB VRAM, ~$40/hr — the same shape as the DGX example)
-and `a2-high-a100-40gb` (8× A100 40GB, ~$29/hr). Knobs: `GCP_TIER`, `SERVE`, `GCP_ZONE`,
+registry — the most-provisionable tier that clears the DSA floor. The datacenter GPU tiers are
+`a2-ultra-a100-80gb` (8-GPU datacenter server 80GB, 640 GB VRAM, ~$40/hr — the same shape as the GPU server example)
+and `a2-high-a100-40gb` (8-GPU datacenter server 40GB, ~$29/hr). Knobs: `GCP_TIER`, `SERVE`, `GCP_ZONE`,
 `ENGINE`/`QUANT` (the sm_90 stock path), `GLM_GGUF_REPO`/`GLM_GGUF_SUBDIR` (the fak/llama.cpp
 GGUF, default `unsloth/GLM-5.2-GGUF` `UD-Q4_K_M`), `NCPU_MOE`, `GLM_PORT`, `HF_TOKEN`,
 `TAILSCALE_AUTHKEY`.
 
 > **Why A100 needs a different serve.** GLM-5.2's DSA kernels in stock SGLang/vLLM are gated
-> to Hopper (sm_90) / Blackwell (sm_100); on Ampere (A100, sm_80) the preflight
+> to Hopper (sm_90) / Blackwell (sm_100); on Ampere (datacenter GPU, sm_80) the preflight
 > (`tools/glm52_serve_preflight.py`) **fails closed** (vLLM #35021). Two paths clear it on
-> A100: fak's **own** kernel runs the `glm_moe_dsa` forward as full MLA (no sm_90 kernel
+> datacenter GPU: fak's **own** kernel runs the `glm_moe_dsa` forward as full MLA (no sm_90 kernel
 > needed) — **bit-exact vs the CPU reference at q8 (cosine 1.0, argmax-exact), witnessed on
 > sm_80** (`experiments/glm-gpu-witness/a100-glm52-*.json`, incl. the cpu-offload hybrid). The
 > `--cpu-offload-experts` serve runs the resident-Q4_K path, which is not yet covered by a
@@ -131,9 +131,9 @@ which is not stood up from the implementing host — same gate as
 |---|---|---|
 | The `glm-gcp` preset resolves to fak's openai backend at the GLM `/v1` with model `glm-5.2` | `go test ./cmd/fak -run TestClaudeGLMGCP` (bash + PowerShell launchers) | ✅ proven on any host |
 | The bring-up plan renders the gcloud create + serve + the `claude-glm-gcp` hand-off, with no creds | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanRendersWithoutCreds` | ✅ proven on any host |
-| The **A100 tiers** are in the single registry (`a2-ultra-a100-80gb`, `a2-high-a100-40gb`) | `tools/gcp_accel_test.py` + `go test ./cmd/fak -run TestClaudeGLMGCPA100TiersInRegistry` | ✅ proven on any host |
-| The A100 plan **wires the pure fak kernel** by default; `SERVE=llamacpp` wires the llama.cpp benchmark | `go test ./cmd/fak -run 'TestClaudeGLMGCPA100Plan'` (WSL/Unix CI) + `TestClaudeGLMGCPFakNativeServeWiring` | ✅ proven on any host |
-| The fak-native **`glm_moe_dsa` forward is bit-exact** on A100 (sm_80) **at q8**: cosine 1.0, argmax-exact (incl. the cpu-offload hybrid) | `experiments/glm-gpu-witness/a100-glm52-*.json` (`TestCUDAGLMMoeDsaBackendForward` …) | ✅ witnessed (q8) on sm_80 |
+| The **datacenter GPU tiers** are in the single registry (`a2-ultra-a100-80gb`, `a2-high-a100-40gb`) | `tools/gcp_accel_test.py` + `go test ./cmd/fak -run TestClaudeGLMGCPA100TiersInRegistry` | ✅ proven on any host |
+| The datacenter GPU plan **wires the pure fak kernel** by default; `SERVE=llamacpp` wires the llama.cpp benchmark | `go test ./cmd/fak -run 'TestClaudeGLMGCPA100Plan'` (WSL/Unix CI) + `TestClaudeGLMGCPFakNativeServeWiring` | ✅ proven on any host |
+| The fak-native **`glm_moe_dsa` forward is bit-exact** on datacenter GPU (sm_80) **at q8**: cosine 1.0, argmax-exact (incl. the cpu-offload hybrid) | `experiments/glm-gpu-witness/a100-glm52-*.json` (`TestCUDAGLMMoeDsaBackendForward` …) | ✅ witnessed (q8) on sm_80 |
 | The resident-**Q4_K** serve path (`--cpu-offload-experts`) is cosine-witnessed end to end | — (the q8 forward is; the served Q4_K path is not) | ⏳ not yet |
 | The wire end-to-end (Anthropic `/v1/messages` → kernel) | `claude-glm-gcp --smoke` (offline mock planner; no model needed) | ✅ runnable here |
 | A **live GLM-5.2 turn** through the preset (pure fak kernel **or** llama.cpp) | needs the GCP node up (Half A `--apply`) → `claude-glm-gcp --probe` | ⏳ hardware-gated |
@@ -143,7 +143,7 @@ q8** (cosine 1.0, sm_80); a live serve turn stays **hardware+load-gated** — th
 serve path is not yet cosine-witnessed, and the **load** on the dynamic-mixed `UD-Q4_K_M` is
 the open perf item (the resident-Q4_K path fully fires only on pure-Q4_K tensors; see
 `docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md`). The remaining step is
-operational: run Half A `--apply` on an authenticated host with A100 (or H200/B200) quota, open
+operational: run Half A `--apply` on an authenticated host with datacenter GPU (or H200/B200) quota, open
 the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
 ## Troubleshooting
@@ -160,9 +160,9 @@ the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
 - `scripts/gcp-glm-serve.sh` — the GCP bring-up (plan/apply), `SERVE=fak|llamacpp|sglang|vllm`
 - `scripts/dogfood-claude.sh` / `.ps1` — the launcher + the `glm-gcp` preset
-- `tools/gcp_accel.py` — the GCP accelerator registry (A100 tiers + `--emit-shell` feeds the bring-up)
-- `tools/glm52_fak_native_serve.sh` — the **pure fak kernel** on-node serve (A100 default)
-- `tools/glm52_stage_serve_dgx3.sh` — the **llama.cpp benchmark** on-node serve (the DGX A100 example)
+- `tools/gcp_accel.py` — the GCP accelerator registry (datacenter GPU tiers + `--emit-shell` feeds the bring-up)
+- `tools/glm52_fak_native_serve.sh` — the **pure fak kernel** on-node serve (datacenter GPU default)
+- `tools/glm52_stage_serve_dgx3.sh` — the **llama.cpp benchmark** on-node serve (the GPU server example)
 - `tools/glm52_sglang_vllm_serve.sh` / `tools/glm52_serve_preflight.py` — the sm_90 stock serve + arch gate
 - `internal/compute/build_cuda.sh binary <pkg> <out>` — the DRY `-tags cuda` binary build the fak-native serve uses
 - [`GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md`](../notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md) — the honest fak-vs-llama.cpp comparison framework
