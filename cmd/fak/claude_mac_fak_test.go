@@ -310,6 +310,58 @@ func TestRenderClaudeMacOverlayLineShowsThroughput(t *testing.T) {
 	}
 }
 
+// TestPanelLegendExpandsAcronyms proves the preflight panel carries a legend that
+// expands every acronym/term it (and the overlay) print — so an operator never has to
+// leave the terminal to decode vDSO/TTFT/prefill/decode/engine/planner. A regression
+// that drops a term re-opens the "what does this mean" confusion.
+func TestPanelLegendExpandsAcronyms(t *testing.T) {
+	var v claudeMacDebugVars
+	v.Gateway.VDSO = true
+	out := renderClaudeMacPreflight(
+		claudeMacHealth{OK: true, Engine: "inkernel", Model: "qwen-local", Planner: "proxy"},
+		v, "http://node.example:8080", "qwen-local", "gateway-bearer", "",
+	)
+	for _, want := range []string{
+		"legend:",
+		"engine(build) =",
+		"planner(live) =",
+		"vDSO =",
+		"prefill =",
+		"decode =",
+		"TTFT = time-to-first-token",
+		"tok/s = tokens per second",
+		"inflight =",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("panel legend missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestOverlayLegendCoversOverlayOnlyFields proves the overlay header legend expands the
+// terms unique to the overlay line (turns/submits/hits/engine/heap/gor) on top of the
+// shared panel legend, and explicitly tells the operator the kernel counters reading 0
+// on a proxy/chat workload is expected — the exact confusion the user hit.
+func TestOverlayLegendCoversOverlayOnlyFields(t *testing.T) {
+	out := claudeMacOverlayLegend()
+	for _, want := range []string{
+		// shared panel terms are included...
+		"vDSO =",
+		"TTFT = time-to-first-token",
+		// ...plus the overlay-only fields.
+		"submits = kernel adjudications",
+		"hits = vDSO fast-path hits",
+		"engine = submits that reached the model",
+		"heap = Go heap in use",
+		"gor = live goroutines",
+		"stay 0 on a proxy/chat workload — that is expected",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("overlay legend missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestRenderClaudeMacPreflightProxyClarity proves the panel disambiguates the
 // engine(build)/planner(live) labels and annotates a 0.00 cache-hit on a proxy planner
 // as expected rather than a fault — the confusion the user flagged.

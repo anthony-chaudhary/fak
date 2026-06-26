@@ -397,10 +397,31 @@ func renderClaudeMacPreflight(h claudeMacHealth, v claudeMacDebugVars, gatewayUR
 		fmt.Fprintf(&b, " · grafana %s", grafanaURL)
 	}
 	fmt.Fprintln(&b)
+	// Legend: the panel is dense with infra acronyms a fresh operator can't decode on
+	// sight. Expand the ones that actually appear above so the panel is self-documenting
+	// rather than requiring the docs. Kept to two lines and printed every launch (it is
+	// cheap and the panel is read at most once per session).
+	b.WriteString(claudeMacPanelLegend())
 	if strings.EqualFold(planner, "mock") {
 		fmt.Fprintln(&b, "WARN: planner=mock — responses are scripted, not model output")
 	}
 	fmt.Fprintln(&b, "-> launching claude ...")
+	return b.String()
+}
+
+// claudeMacPanelLegend expands every acronym/term the preflight panel and the --overlay
+// line use, so an operator never has to leave the terminal to decode them. The terms are
+// listed in the order they first appear on the surfaces above. Shared by the panel and
+// the overlay header so the two can never drift apart.
+func claudeMacPanelLegend() string {
+	var b strings.Builder
+	fmt.Fprintln(&b, "legend:")
+	fmt.Fprintln(&b, "  engine(build) = what this fak binary CAN serve · planner(live) = the backend actually answering this run")
+	fmt.Fprintln(&b, "    (inkernel = fak runs the model itself · proxy = forwards to an upstream model · mock = scripted, not a model)")
+	fmt.Fprintln(&b, "  vDSO = fak's in-process fast-path cache (a served result that skips the model) · cache-hit = its hit ratio")
+	fmt.Fprintln(&b, "  prefill = prompt-ingest speed (tok/s; the cold cost of a slow FIRST request) · decode = steady-state generation (tok/s)")
+	fmt.Fprintln(&b, "  TTFT = time-to-first-token (the prefill→decode boundary) · tok/s = tokens per second · inflight = requests running now")
+	fmt.Fprintln(&b, "  up = gateway uptime · auth = how this client authenticates to the gateway · '-' = not measured yet (no served turn)")
 	return b.String()
 }
 
@@ -477,6 +498,9 @@ func runClaudeMacOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, mode
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fmt.Fprintf(stdout, "fak debug overlay · %s  model=%s  (every %s, Ctrl-C to stop)\n", c.base, blankDash(model), interval)
+	// Print the legend ONCE in the header (the per-tick line must stay compact). Covers
+	// the shared throughput terms plus the overlay-only kernel/runtime fields.
+	fmt.Fprint(stdout, claudeMacOverlayLegend())
 	emit := func() {
 		v, err := c.vars()
 		if err != nil {
@@ -496,6 +520,17 @@ func runClaudeMacOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, mode
 			emit()
 		}
 	}
+}
+
+// claudeMacOverlayLegend expands the terms on the --overlay line. It reuses the shared
+// panel legend (prefill/decode/TTFT/tok/s/inflight) and adds the overlay-only kernel and
+// runtime fields, so a watcher in a second pane can read the line without the docs.
+func claudeMacOverlayLegend() string {
+	var b strings.Builder
+	b.WriteString(claudeMacPanelLegend())
+	fmt.Fprintln(&b, "  turns = model turns served · submits = kernel adjudications · hits = vDSO fast-path hits (% of submits) · engine = submits that reached the model")
+	fmt.Fprintln(&b, "  heap = Go heap in use · gor = live goroutines · (submits/hits/engine stay 0 on a proxy/chat workload — that is expected, not a stall)")
+	return b.String()
 }
 
 func firstNonEmpty(vals ...string) string {
