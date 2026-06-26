@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // `fak accounts` — the durable, identity-true registry of Claude config homes
@@ -50,6 +51,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	pin := fs.Bool("pin", false, "(resolve) PIN to the exact seat (strict); default rehomes to a live seat")
 	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying")
 	gateDir := fs.String("dir", "", "(gate-write) target config dir to gate a stdin setup-token write against")
+	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -60,6 +62,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(rest[lead:]); err != nil {
 		return 2
 	}
+	*registryPath = pathutil.ExpandTilde(*registryPath)
+	*homeDir = pathutil.ExpandTilde(*homeDir)
+	*gateDir = pathutil.ExpandTilde(*gateDir)
 	positional := append(append([]string{}, rest[:lead]...), fs.Args()...)
 
 	switch sub {
@@ -156,6 +161,31 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "discover":
+		if *write {
+			// Regenerator mode: load the canonical registry (or start empty), MERGE the disk
+			// scan in (refresh identities, add new dirs, PRESERVE authored policy fields), and
+			// write it back atomically. This is how the registry becomes the single source of
+			// truth without a human re-typing identities — it derives them from disk.
+			base := accounts.Registry{}
+			if _, err := os.Stat(*registryPath); err == nil {
+				base, err = accounts.LoadRegistry(*registryPath)
+				if err != nil {
+					fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+					return 1
+				}
+			}
+			merged, err := base.MergeDiscovered(*homeDir)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+				return 1
+			}
+			if err := accounts.SaveRegistry(*registryPath, merged); err != nil {
+				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "wrote %d home(s) to %s\n", len(merged.Homes), *registryPath)
+			return 0
+		}
 		homes, err := accounts.Discover(*homeDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak accounts: %v\n", err)

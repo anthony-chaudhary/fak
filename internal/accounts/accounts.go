@@ -44,11 +44,16 @@ import (
 	"strings"
 )
 
-// RegistryVersion is this registry's on-disk schema tag. It is DISTINCT from
-// modelroute.RosterVersion (a separate file, a different concern): a config-home
-// registry vs a provider-credential roster. A registry MAY omit it (treated as
-// current); one naming a different major is refused.
-const RegistryVersion = "fak-config-homes/v1"
+// RegistryVersion is this registry's on-disk schema tag, and registryFamily is the
+// prefix every version of THIS file shares. It is DISTINCT from modelroute.RosterVersion
+// (a separate file, a different concern): a config-home registry vs a provider-credential
+// roster. A registry MAY omit the version (treated as current); one in the same family
+// (fak-config-homes/*) is accepted so additive, omitempty schema growth (e.g. the policy
+// attributes on Home) never strands an existing file; one from a FOREIGN family is refused.
+const (
+	RegistryVersion = "fak-config-homes/v1"
+	registryFamily  = "fak-config-homes/"
+)
 
 // Status is the lifecycle of a config-home seat. A CLOSED set: an empty status reads
 // as Active, so a hand-written registry need only mark the tombstones.
@@ -112,6 +117,18 @@ type Home struct {
 	Role     string   `json:"role,omitempty"`
 	Note     string   `json:"note,omitempty"`
 	Identity Identity `json:"identity,omitempty"`
+	// Policy ATTRIBUTES of the one account — the fields that used to be restated by hand in
+	// the dos roster (~/.claude/accounts.yaml) and the job roster
+	// (job/config/claude_accounts.yaml). Carrying them here makes the registry the single
+	// source of truth and those two files GENERATED views (see SyncViews). They are
+	// AUTHORED (not disk-derived like Identity), so Discover preserves them across a rescan.
+	//
+	// Enabled is a pointer so "absent" (nil) is distinguishable from an explicit false: a
+	// nil Enabled reads as TRUE (EnabledOrDefault), matching the rosters' "default true"
+	// semantics, so an old v1 registry with no enabled field stays fully enrolled.
+	Enabled       *bool  `json:"enabled,omitempty"`
+	Reserved      bool   `json:"reserved,omitempty"`
+	ChromeProfile string `json:"chrome_profile,omitempty"`
 	// HistoryAt names this seat's history BUNDLE in the registry's shared-history store
 	// (a path relative to Registry.SharedHistory, defaulting to Name). A tombstoned seat
 	// keeps its sessions/projects in the SHARED store — not trapped in a home that may be
@@ -132,6 +149,12 @@ func (h Home) bundle(store string) string {
 
 // Active reports whether the seat serves sessions directly (empty status == active).
 func (h Home) Active() bool { return h.Status == "" || h.Status == StatusActive }
+
+// EnabledOrDefault reads the Enabled attribute with its default-true semantics: a nil
+// pointer (the field omitted, e.g. an older registry) reads as enabled, so an account is
+// only OUT of the rosters when it carries an explicit `"enabled": false`. This mirrors the
+// dos/job rosters, where a row with no `enabled:` key is a rotation candidate.
+func (h Home) EnabledOrDefault() bool { return h.Enabled == nil || *h.Enabled }
 
 // Registry is the on-disk set of config-home seats. Homes is the whole roster; a seat's
 // status decides whether Resolve serves it or follows its rehome. SharedHistory is the
@@ -287,8 +310,8 @@ func (r Registry) Serve(name string) (Home, []string, error) {
 //
 // A misconfigured registry must fail here, never fall through to an arbitrary seat.
 func (r Registry) Validate() error {
-	if r.Version != "" && !strings.HasPrefix(r.Version, RegistryVersion) {
-		return fmt.Errorf("accounts: registry version %q is not %s.x", r.Version, RegistryVersion)
+	if r.Version != "" && !strings.HasPrefix(r.Version, registryFamily) {
+		return fmt.Errorf("accounts: registry version %q is not in the %s* family", r.Version, registryFamily)
 	}
 	if len(r.Homes) == 0 {
 		return fmt.Errorf("accounts: registry has no homes")
@@ -662,6 +685,70 @@ func Discover(home string) ([]Home, error) {
 	return homes, nil
 }
 
+// MergeDiscovered folds a fresh disk scan of home/.claude* INTO an existing canonical
+// registry, returning the merged registry. It is the non-destructive regenerator the
+// single-source model needs: identity is disk-derived truth, but the policy ATTRIBUTES
+// (Status, Default, RehomeTo, Role, Note, Enabled, Reserved, ChromeProfile, HistoryAt) are
+// AUTHORED and must survive a rescan. So for every home already in the registry it refreshes
+// ONLY Identity (and self-heals Dir to the scan's canonical path form) and keeps every
+// authored field; every config dir on disk that the registry does not yet know becomes a NEW
+// active home (identity-only, policy defaults). A registry home whose dir has vanished from
+// the scan is kept verbatim — pruning/tombstoning is an explicit operator decision (Stage
+// 4/5), not a side effect of discovery.
+//
+// Matching is by NAME — the stable roster handle, which Discover derives from the same dir
+// basename convention the roster uses (".claude-<name>" -> "<name>"). Name is preferred over
+// Dir because the SAME directory can surface under different path representations across a
+// scan (e.g. a /tmp vs C:/…/Temp form under MSYS), which would otherwise fork one seat into a
+// spurious duplicate. A cleaned-path index is kept only as a secondary tie-break for a
+// dir-less placeholder entry whose name differs.
+func (r Registry) MergeDiscovered(home string) (Registry, error) {
+	discovered, err := Discover(home)
+	if err != nil {
+		return r, err
+	}
+	byName := map[string]int{}
+	byDir := map[string]int{}
+	for i, h := range r.Homes {
+		byName[h.Name] = i
+		if h.Dir != "" {
+			byDir[filepath.Clean(h.Dir)] = i
+		}
+	}
+	out := r // copy header (Version, SharedHistory)
+	out.Homes = append([]Home(nil), r.Homes...)
+	for _, d := range discovered {
+		idx, ok := byName[d.Name]
+		if !ok {
+			if j, okd := byDir[filepath.Clean(d.Dir)]; okd && out.Homes[j].Name == "" {
+				idx, ok = j, true
+			}
+		}
+		if ok {
+			// Known seat: adopt the scan's canonical Dir + fresh Identity, preserve all
+			// authored policy fields already in out.Homes[idx].
+			out.Homes[idx].Dir = d.Dir
+			out.Homes[idx].Identity = d.Identity
+			continue
+		}
+		// Brand-new config dir the registry never knew: add as an active seat with policy
+		// defaults (Enabled nil => default-true).
+		out.Homes = append(out.Homes, d)
+	}
+	// Refresh identity for any KNOWN home the scan did NOT cover (its dir is outside `home`
+	// or vanished) so a loaded registry's cached identities still reflect disk reality.
+	covered := map[string]bool{}
+	for _, d := range discovered {
+		covered[d.Name] = true
+	}
+	for i := range out.Homes {
+		if !covered[out.Homes[i].Name] && out.Homes[i].Dir != "" {
+			out.Homes[i].Identity = DeriveIdentity(out.Homes[i].Dir)
+		}
+	}
+	return out, nil
+}
+
 // Refresh re-derives every home's Identity from disk in place, so a loaded registry's
 // cached identities reflect the current logins (a home re-/logged-in since it was
 // written). It mutates the receiver's Homes and returns it for chaining.
@@ -710,4 +797,41 @@ func LoadRegistry(path string) (Registry, error) {
 		return Registry{}, fmt.Errorf("accounts: read registry %s: %w", path, err)
 	}
 	return ParseRegistry(b)
+}
+
+// SaveRegistry validates r and writes it to path atomically: it marshals via JSON() (which
+// stamps the version), parses the bytes back through ParseRegistry as a self-check so a
+// registry that would not round-trip is NEVER persisted, then writes to a sibling temp file
+// and renames it over path. The rename is the atomic step — a reader sees either the old
+// file or the fully-written new one, never a half-written registry. This is the single
+// writer the canonical-source model needs; before it, JSON() was the only serializer and
+// nothing persisted the registry back.
+func SaveRegistry(path string, r Registry) error {
+	b := r.JSON()
+	if _, err := ParseRegistry(b); err != nil {
+		return fmt.Errorf("accounts: refusing to write invalid registry %s: %w", path, err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("accounts: mkdir %s: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".registry-*.tmp")
+	if err != nil {
+		return fmt.Errorf("accounts: temp registry in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	// Best-effort cleanup if we bail before the rename; after a successful rename the temp
+	// no longer exists, so the Remove is a harmless no-op.
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return fmt.Errorf("accounts: write temp registry %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("accounts: close temp registry %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("accounts: rename %s -> %s: %w", tmpName, path, err)
+	}
+	return nil
 }

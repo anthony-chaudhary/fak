@@ -91,7 +91,7 @@ func TestValidateRejections(t *testing.T) {
 		"dangling rehome":       {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned, RehomeTo: "ghost"}}},
 		"two defaults":          {Homes: []Home{{Name: "a", Dir: "/d", Default: true}, {Name: "b", Dir: "/e", Default: true}}},
 		"default tombstoned":    {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned, Default: true, RehomeTo: "a"}}},
-		"bad version":           {Version: "fak-config-homes/v9", Homes: []Home{{Name: "a", Dir: "/d"}}},
+		"foreign version":        {Version: "some-other-roster/v1", Homes: []Home{{Name: "a", Dir: "/d"}}},
 		"rehome cycle":          {Homes: []Home{{Name: "a", Status: StatusTombstoned, RehomeTo: "b"}, {Name: "b", Status: StatusTombstoned, RehomeTo: "a"}}},
 	}
 	for name, r := range cases {
@@ -144,6 +144,91 @@ func TestJSONRoundTrip(t *testing.T) {
 	}
 	if _, _, err := got.Resolve("old"); err != nil {
 		t.Fatalf("round-tripped registry should still resolve: %v", err)
+	}
+}
+
+// TestSameFamilyVersionAccepted proves the version check is family-based: a later minor/
+// major in the same fak-config-homes/* family validates (so additive, omitempty schema
+// growth never strands an existing file), while only a FOREIGN family is refused.
+func TestSameFamilyVersionAccepted(t *testing.T) {
+	r := fixture()
+	r.Version = "fak-config-homes/v2"
+	if err := r.Validate(); err != nil {
+		t.Fatalf("same-family v2 should validate: %v", err)
+	}
+}
+
+// TestEnabledOrDefault pins the default-true semantics of the optional Enabled pointer: a
+// nil pointer (the field omitted, as in every v1 registry) reads as enabled; only an
+// explicit false disables. This is what keeps an old registry's accounts fully enrolled.
+func TestEnabledOrDefault(t *testing.T) {
+	tru, fal := true, false
+	if (Home{}).EnabledOrDefault() != true {
+		t.Fatalf("nil Enabled should read as enabled (default true)")
+	}
+	if (Home{Enabled: &tru}).EnabledOrDefault() != true {
+		t.Fatalf("explicit true should read as enabled")
+	}
+	if (Home{Enabled: &fal}).EnabledOrDefault() != false {
+		t.Fatalf("explicit false should read as disabled")
+	}
+}
+
+// TestPolicyFieldsRoundTrip proves the new policy attributes (Enabled/Reserved/
+// ChromeProfile) survive a JSON round-trip, and that a registry WITHOUT them (the v1 shape)
+// still parses under the new code — the additive-growth guarantee.
+func TestPolicyFieldsRoundTrip(t *testing.T) {
+	disabled := false
+	r := Registry{
+		Homes: []Home{
+			{Name: "live", Dir: "/h/.claude-live", Default: true, Reserved: true, ChromeProfile: "Profile 9"},
+			{Name: "off", Dir: "/h/.claude-off", Enabled: &disabled},
+		},
+	}
+	got, err := ParseRegistry(r.JSON())
+	if err != nil {
+		t.Fatalf("policy round-trip parse: %v", err)
+	}
+	if !got.Homes[0].Reserved || got.Homes[0].ChromeProfile != "Profile 9" {
+		t.Fatalf("reserved/chrome_profile lost in round-trip: %+v", got.Homes[0])
+	}
+	if got.Homes[0].EnabledOrDefault() != true {
+		t.Fatalf("home with no enabled field should read enabled after round-trip")
+	}
+	if got.Homes[1].EnabledOrDefault() != false {
+		t.Fatalf("home with enabled:false should read disabled after round-trip")
+	}
+
+	// A literal v1-shaped registry (no new keys at all) must still parse.
+	v1 := []byte(`{"version":"fak-config-homes/v1","homes":[{"name":"a","dir":"/d"}]}`)
+	if _, err := ParseRegistry(v1); err != nil {
+		t.Fatalf("v1-shaped registry should parse under new code: %v", err)
+	}
+}
+
+// TestSaveRegistryRoundTrips proves SaveRegistry writes a file that LoadRegistry reads back
+// to an equivalent registry, and that it refuses to persist an invalid one.
+func TestSaveRegistryRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "registry.json")
+	r := fixture()
+	if err := SaveRegistry(path, r); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
+	got, err := LoadRegistry(path)
+	if err != nil {
+		t.Fatalf("LoadRegistry after save: %v", err)
+	}
+	if len(got.Homes) != len(r.Homes) {
+		t.Fatalf("saved homes = %d, want %d", len(got.Homes), len(r.Homes))
+	}
+	// An invalid registry (no homes) must be refused, leaving no file behind at a fresh path.
+	bad := filepath.Join(dir, "bad.json")
+	if err := SaveRegistry(bad, Registry{}); err == nil {
+		t.Fatalf("SaveRegistry should refuse an invalid registry")
+	}
+	if _, err := os.Stat(bad); !os.IsNotExist(err) {
+		t.Fatalf("refused registry should not have been written")
 	}
 }
 
@@ -333,5 +418,70 @@ func TestDiscover(t *testing.T) {
 	}
 	if !qn.Identity.HasCreds || !qn.Identity.Exists {
 		t.Errorf("q-seat should have creds + exist: %+v", qn.Identity)
+	}
+}
+
+// TestMergeDiscovered proves the regenerator is non-destructive: authored policy fields on a
+// known home survive a rescan, identity is refreshed from disk, a brand-new config dir is
+// added as an active seat, and a registry entry whose dir vanished is kept (not silently
+// dropped).
+func TestMergeDiscovered(t *testing.T) {
+	home := t.TempDir()
+	mk := func(dir, email, uuid string) {
+		full := filepath.Join(home, dir)
+		if err := os.MkdirAll(full, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := `{"oauthAccount":{"emailAddress":"` + email + `","accountUuid":"` + uuid + `"}}`
+		if err := os.WriteFile(filepath.Join(full, ".claude.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(full, ".credentials.json"), []byte(`{}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk(".claude-keep-seat", "keep@example.test", "uuid-keep") // known home, has authored policy
+	mk(".claude-new-seat", "new@example.test", "uuid-new")    // brand new, registry doesn't know it
+
+	reserved := true
+	base := Registry{
+		Homes: []Home{
+			// Known home: authored Reserved + ChromeProfile must survive; identity gets refreshed.
+			{Name: "keep-seat", Dir: filepath.Join(home, ".claude-keep-seat"), Reserved: reserved, ChromeProfile: "Profile 9"},
+			// A tombstone whose dir never existed on disk — must be kept verbatim.
+			{Name: "gone", Status: StatusTombstoned, RehomeTo: "keep-seat"},
+		},
+	}
+	merged, err := base.MergeDiscovered(home)
+	if err != nil {
+		t.Fatalf("MergeDiscovered: %v", err)
+	}
+	byName := map[string]Home{}
+	for _, h := range merged.Homes {
+		byName[h.Name] = h
+	}
+	keep, ok := byName["keep-seat"]
+	if !ok {
+		t.Fatalf("keep-seat missing after merge")
+	}
+	if !keep.Reserved || keep.ChromeProfile != "Profile 9" {
+		t.Errorf("authored policy lost on merge: %+v", keep)
+	}
+	if keep.Identity.Email != "keep@example.test" {
+		t.Errorf("identity not refreshed from disk: %q", keep.Identity.Email)
+	}
+	nw, ok := byName["new-seat"]
+	if !ok {
+		t.Fatalf("new-seat (brand-new dir) should have been added")
+	}
+	if nw.Identity.Email != "new@example.test" || !nw.EnabledOrDefault() {
+		t.Errorf("new seat should be active with disk identity: %+v", nw)
+	}
+	if _, ok := byName["gone"]; !ok {
+		t.Errorf("vanished-dir tombstone should be kept, not dropped")
+	}
+	// The merged registry must still be valid (gone resolves to keep-seat).
+	if err := merged.Validate(); err != nil {
+		t.Errorf("merged registry should validate: %v", err)
 	}
 }
