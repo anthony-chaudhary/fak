@@ -1,0 +1,54 @@
+{
+  "issue": "388",
+  "cycle": 2,
+  "timestamp": "2026-06-26T06:40:28",
+  "leaf": "benchids",
+  "package": "./internal/benchids/...",
+  "base_sha": "c588c993e221c11ddba60df10fb5a3132ec8eb2a",
+  "candidate": {
+    "name": "bad",
+    "kind": "bad",
+    "subject": "test(benchids): inject a failing test to exercise REVERT (fak benchids)",
+    "relpath": "internal/benchids/selfimprove_seed_revert_test.go",
+    "sha": "933e29bb5e6f0d98fd43eeb8fb587f3866254da3"
+  },
+  "witnesses": {
+    "suite": {
+      "name": "go test ./internal/benchids/...",
+      "green": false,
+      "exit": 1,
+      "tail": "    selfimprove_seed_revert_test.go:9: deliberate REVERT-arm regression (#388 seed) \u00e2\u20ac\u201d this candidate MUST be reverted\nFAIL\nFAIL\tgithub.com/anthony-chaudhary/fak/internal/benchids\t0.003s\nFAIL"
+    },
+    "architest": {
+      "name": "go test ./internal/architest/...",
+      "green": true,
+      "exit": 0,
+      "tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/architest\t31.743s"
+    },
+    "dos_verify": {
+      "name": "dos verify fak benchids",
+      "shipped": true,
+      "source": "grep-subject",
+      "rung": "trailer",
+      "sha": "933e29b",
+      "counts_as_confirmation": true
+    }
+  },
+  "metric": {
+    "baseline_tests": 4,
+    "candidate_tests": 5
+  },
+  "kernel_dos_improve": {
+    "exit": 3,
+    "verdict": "REVERT",
+    "raw": "{\"escalation\": \"NONE\", \"evidence\": {\"baseline_work\": 4, \"consecutive_reverts\": 0, \"delta\": 1, \"improved\": true, \"narrated\": \"self-improve seed candidate 'bad' on leaf benchids\", \"suite_passed\": false, \"tokens\": 0, \"truth_clean\": true, \"work\": 5}, \"next_consecutive_reverts\": 1, \"reason\": \"candidate REGRESSED (the test suite is RED) \\u2014 revert; it broke the kernel, so it is not an improvement no matter what it claims (1/3 consecutive reverts)\", \"revert_cause\": \"regressed\", \"verdict\": \"REVERT\"}"
+  },
+  "decision": "REVERT",
+  "decision_reasons": [
+    "SUITE RED (witness 1)",
+    "architest green (witness 2)",
+    "dos verify confirms ship via grep-subject (witness 3)",
+    "kernel dos improve = REVERT"
+  ],
+  "patch": "diff --git a/internal/benchids/selfimprove_seed_revert_test.go b/internal/benchids/selfimprove_seed_revert_test.go\nnew file mode 100644\nindex 0000000..7c2de40\n--- /dev/null\n+++ b/internal/benchids/selfimprove_seed_revert_test.go\n@@ -0,0 +1,10 @@\n+package benchids\n+\n+import \"testing\"\n+\n+// TestSelfImproveSeedDeliberateRegression is the dos-self-improve REVERT-arm seed\n+// (#388): it fails ON PURPOSE so the witness must catch it and REVERT. A loop that\n+// graded its own homework would keep this; the env-authored suite witness cannot.\n+func TestSelfImproveSeedDeliberateRegression(t *testing.T) {\n+\tt.Fatal(\"deliberate REVERT-arm regression (#388 seed) \u00e2\u20ac\u201d this candidate MUST be reverted\")\n+}\n"
+}

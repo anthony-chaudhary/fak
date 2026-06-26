@@ -1,0 +1,54 @@
+{
+  "issue": "388",
+  "cycle": 1,
+  "timestamp": "2026-06-26T06:39:45",
+  "leaf": "benchids",
+  "package": "./internal/benchids/...",
+  "base_sha": "c588c993e221c11ddba60df10fb5a3132ec8eb2a",
+  "candidate": {
+    "name": "good",
+    "kind": "good",
+    "subject": "test(benchids): guard LCG id bound across vocab sweep (fak benchids)",
+    "relpath": "internal/benchids/selfimprove_seed_keep_test.go",
+    "sha": "0b46ae6e965687c3d663899037ca2951d2094695"
+  },
+  "witnesses": {
+    "suite": {
+      "name": "go test ./internal/benchids/...",
+      "green": true,
+      "exit": 0,
+      "tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/benchids\t0.003s"
+    },
+    "architest": {
+      "name": "go test ./internal/architest/...",
+      "green": true,
+      "exit": 0,
+      "tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/architest\t35.000s"
+    },
+    "dos_verify": {
+      "name": "dos verify fak benchids",
+      "shipped": true,
+      "source": "grep-subject",
+      "rung": "trailer",
+      "sha": "0b46ae6",
+      "counts_as_confirmation": true
+    }
+  },
+  "metric": {
+    "baseline_tests": 4,
+    "candidate_tests": 5
+  },
+  "kernel_dos_improve": {
+    "exit": 0,
+    "verdict": "KEEP",
+    "raw": "{\"escalation\": \"NONE\", \"evidence\": {\"baseline_work\": 4, \"consecutive_reverts\": 0, \"delta\": 1, \"improved\": true, \"narrated\": \"self-improve seed candidate 'good' on leaf benchids\", \"suite_passed\": true, \"tokens\": 0, \"truth_clean\": true, \"work\": 5}, \"next_consecutive_reverts\": 0, \"reason\": \"candidate KEPT \\u2014 suite green, truth clean, metric improved 4 -> 5 (+1); witnessed by bytes the loop did not author, so the gain is real\", \"revert_cause\": null, \"verdict\": \"KEEP\"}"
+  },
+  "decision": "KEEP",
+  "decision_reasons": [
+    "suite green (witness 1)",
+    "architest green (witness 2)",
+    "dos verify confirms ship via grep-subject (witness 3)",
+    "kernel dos improve = KEEP"
+  ],
+  "patch": "diff --git a/internal/benchids/selfimprove_seed_keep_test.go b/internal/benchids/selfimprove_seed_keep_test.go\nnew file mode 100644\nindex 0000000..473e7f3\n--- /dev/null\n+++ b/internal/benchids/selfimprove_seed_keep_test.go\n@@ -0,0 +1,17 @@\n+package benchids\n+\n+import \"testing\"\n+\n+// TestLCGAllIDsWithinVocab guards the LCG bound invariant across a sweep of vocab\n+// sizes: every emitted id must fall in [0, vocab). Added by the dos-self-improve\n+// seed run (#388) as a real coverage gain \u00e2\u20ac\u201d the KEEP arm.\n+func TestLCGAllIDsWithinVocab(t *testing.T) {\n+\tfor _, vocab := range []int{1, 2, 7, 256, 50000} {\n+\t\tids := LCG(512, vocab, 11)\n+\t\tfor i, id := range ids {\n+\t\t\tif id < 0 || id >= vocab {\n+\t\t\t\tt.Fatalf(\"vocab=%d: ids[%d]=%d out of [0,%d)\", vocab, i, id, vocab)\n+\t\t\t}\n+\t\t}\n+\t}\n+}\n"
+}
