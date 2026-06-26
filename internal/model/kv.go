@@ -61,6 +61,12 @@ type Session struct {
 	// This is the end-to-end-correct, low-memory route toward the q4_k_m decode bar.
 	Q4K bool
 
+	// GPTQ selects the resident AutoGPTQ/GPTQModel path loaded by LoadGPTQ. It routes
+	// matmul weights through residentMatRows (GPTQ when present, f32 for small tensors)
+	// using the shared per-token blockStep skeleton. It is opt-in so existing f32/Q8/Q4
+	// sessions remain byte-for-byte on their prior paths.
+	GPTQ bool
+
 	// CPUOffloadExperts routes the MoE expert GEMMs (mlp.experts.* and mlp.shared_experts.*)
 	// to host RAM while the dense projections + router + attention run on Backend — the
 	// llama.cpp `--n-cpu-moe` hybrid. It is the path that lets a Q4_K model whose experts dwarf
@@ -157,6 +163,9 @@ func (s *Session) token(id, pos int) []float32 {
 		// minority); the LM head is whichever resident format it loaded as, so headResident
 		// picks q4k/q8/f32 rather than assuming Q8.
 		return s.headResident(s.tokenHiddenQ(id, pos))
+	}
+	if s.GPTQ {
+		return s.headResident(s.tokenHiddenGPTQ(id, pos))
 	}
 	if s.Quant {
 		return s.headQ(s.tokenHiddenQ(id, pos))
@@ -453,6 +462,13 @@ func (s *Session) Prefill(ids []int) []float32 {
 		}
 		return s.headResident(last)
 	}
+	if s.GPTQ {
+		var last []float32
+		for _, id := range ids {
+			last = s.tokenHiddenGPTQ(id, s.Cache.Len())
+		}
+		return s.headResident(last)
+	}
 	if s.Backend != nil {
 		s.requirePreNorm("HAL prefill")
 		return s.prefillHAL(ids, true)
@@ -536,6 +552,12 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		}
 		for _, id := range ids {
 			s.tokenHiddenQ(id, s.Cache.Len())
+		}
+		return
+	}
+	if s.GPTQ {
+		for _, id := range ids {
+			s.tokenHiddenGPTQ(id, s.Cache.Len())
 		}
 		return
 	}

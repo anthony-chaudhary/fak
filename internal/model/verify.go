@@ -62,7 +62,7 @@ func (s *Session) verifyForwardSequential(ids []int) [][]float32 {
 // session. It mirrors the dispatch in Prefill (kv.go): the plain PreNorm standard path with
 // no backend / quant / MoE / Alibi / Qwen-hybrid / non-PreNorm / per-layer-RoPE.
 func verifyForwardBatchedOK(s *Session) bool {
-	if s.Backend != nil || s.Quant || s.Q4 || s.Q4K || s.Metal || s.PrecisionPolicy != nil {
+	if s.Backend != nil || s.Quant || s.Q4 || s.Q4K || s.GPTQ || s.Metal || s.PrecisionPolicy != nil {
 		return false
 	}
 	cfg := s.M.Cfg

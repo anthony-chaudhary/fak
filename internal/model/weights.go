@@ -208,6 +208,11 @@ type Model struct {
 	// unless such a checkpoint was loaded. See awqw for the simplified symmetric stub.
 	awqg map[string]*awqGroupTensor
 
+	// gptqw holds optional resident GPTQ weight-only tensors loaded from AutoGPTQ /
+	// GPTQModel qweight/qzeros/scales triples. It is consumed only by Session.GPTQ via
+	// residentMatRows; the f32/Q8/Q4/Q4_K paths never read it.
+	gptqw map[string]*gptqTensor
+
 	// MLA holds the DeepSeek V2/V3 Multi-head Latent Attention projection geometry
 	// when this model uses the MLA kvLayout (issue #25). It is nil for Llama/Qwen
 	// models, which keep the default standard per-head kvLayout unchanged — so adding
@@ -373,6 +378,11 @@ func (m *Model) hasWeight(name string) bool {
 	}
 	if m.q4kw != nil {
 		if _, ok := m.q4kw[name]; ok {
+			return true
+		}
+	}
+	if m.gptqw != nil {
+		if _, ok := m.gptqw[name]; ok {
 			return true
 		}
 	}

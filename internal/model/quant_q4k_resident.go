@@ -43,8 +43,9 @@ func (s *Session) headQ4K(xf []float32) []float32 {
 
 // headResident picks the LM head matching whatever resident format this session's model
 // carries: q4k (lm_head quantized Q4_K) → q4 → q8 (lm_head quantized Q6_K, or untied Q8)
-// → f32 (tied embedding). This makes the Q4_K path's head correct regardless of how the
-// GGUF quantized the head, where headName()-only resolution would miss a raw-q4kw lm_head.
+// → GPTQ → f32 (tied embedding). This makes resident-quant paths' heads correct regardless
+// of how the source quantized the head, where headName()-only resolution would miss a raw
+// resident lm_head.
 func (s *Session) headResident(xf []float32) []float32 {
 	m := s.M
 	if m.q4khead != nil || m.q4kw[m.q4kHeadName()] != nil {
@@ -55,6 +56,9 @@ func (s *Session) headResident(xf []float32) []float32 {
 	}
 	if _, hasQ8 := m.q8w[m.headName()]; hasQ8 || m.q8head != nil {
 		return s.headQ(xf)
+	}
+	if m.hasGPTQ("lm_head.weight") {
+		return s.headGPTQ(xf)
 	}
 	return s.head(xf)
 }
