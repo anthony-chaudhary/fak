@@ -136,3 +136,73 @@ func TestSwebenchSmokeContractCommandHonorsDifficultyEnv(t *testing.T) {
 		t.Fatalf("fak command did not preserve env difficulty:\n%s", fakCommand)
 	}
 }
+
+func TestSwebenchDeepSWEContractCommandWritesPreRunContract(t *testing.T) {
+	tmp := t.TempDir()
+	out := filepath.Join(tmp, "deepswe-contract.json")
+	md := filepath.Join(tmp, "deepswe-contract.md")
+	difficulty := filepath.Join("..", "..", "testdata", "swebench_smoke.json")
+
+	cmdSwebenchDeepSWEContract([]string{
+		"--difficulty", difficulty,
+		"--python", "definitely-not-a-python-binary",
+		"--out", out,
+		"--md", md,
+	})
+
+	var contract swebench.DeepSWERawFakContract
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if contract.Schema != swebench.DeepSWERawFakContractSchema {
+		t.Fatalf("schema = %q", contract.Schema)
+	}
+	if contract.Status != "READY_FOR_EXTERNAL_RUN" {
+		t.Fatalf("status = %q", contract.Status)
+	}
+	if contract.ResultClaimAllowed {
+		t.Fatal("deepswe-contract must not allow a result claim")
+	}
+	if len(contract.TaskSelection.TaskIDs) != 2 || !contract.TaskSelection.SameTaskIDs {
+		t.Fatalf("task selection = %+v", contract.TaskSelection)
+	}
+	if contract.Adapter.Command != "deepswe-r2e-runner" || !contract.Adapter.SameAdapter {
+		t.Fatalf("adapter not fixed: %+v", contract.Adapter)
+	}
+
+	arms := map[string]swebench.SmokeArm{}
+	for _, arm := range contract.Arms {
+		arms[arm.Name] = arm
+	}
+	raw := arms["raw-deepswe"].Command
+	fak := arms["fak-deepswe"].Command
+	for name, cmd := range map[string]string{"raw": raw, "fak": fak} {
+		for _, want := range []string{"go run ./cmd/fak swebench run", "--agent deepswe", "--limit 2", "--model DeepSWE-Preview"} {
+			if !strings.Contains(cmd, want) {
+				t.Fatalf("%s command missing %q:\n%s", name, want, cmd)
+			}
+		}
+	}
+	if !strings.Contains(arms["raw-deepswe"].PredictionsPath, "predictions.json") ||
+		!strings.Contains(arms["fak-deepswe"].PredictionsPath, "predictions.json") {
+		t.Fatalf("prediction paths missing: %+v", contract.Arms)
+	}
+	if !strings.Contains(raw, "$env:FAK_DEEPSWE_BASE_URL=$env:RAW_DEEPSWE_BASE_URL") {
+		t.Fatalf("raw command did not preserve raw base URL env reference:\n%s", raw)
+	}
+	if !strings.Contains(fak, "$env:FAK_DEEPSWE_BASE_URL='http://localhost:8080/v1'") {
+		t.Fatalf("fak command did not target the fak gateway base URL:\n%s", fak)
+	}
+
+	mb, err := os.ReadFile(md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mb), "DeepSWE Raw-vs-fak SWE-bench Contract") {
+		t.Fatalf("markdown did not render the DeepSWE contract:\n%s", mb)
+	}
+}

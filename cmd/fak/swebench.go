@@ -51,6 +51,8 @@ func cmdSwebench(argv []string) {
 		cmdSwebenchCompareRunners(rest)
 	case "smoke-contract":
 		cmdSwebenchSmokeContract(rest)
+	case "deepswe-contract":
+		cmdSwebenchDeepSWEContract(rest)
 	case "sota-snapshot":
 		os.Exit(runSwebenchSotaSnapshot(os.Stdout, os.Stderr, rest))
 	case "-h", "--help", "help":
@@ -108,6 +110,12 @@ usage:
         Emit the Opus-class raw-vs-fak pre-run contract: fixed task ids, same model,
         raw/fak arm commands, official grader commands, and the gates that must pass
         before any SWE-bench result claim is allowed.
+
+  fak swebench deepswe-contract [--difficulty FILE | --dataset FILE] [--filter FILTER]
+        [--model MODEL] [--adapter CMD] [--raw-base-url URL] [--fak-base-url URL] [--out FILE] [--md FILE]
+        Emit the DeepSWE/R2E-Gym raw-vs-fak pre-run contract: same task ids, same
+        adapter, same model id and budget, raw/fak endpoint routing, official grader
+        commands, and the gates that must pass before any result claim is allowed.
 
 the metrics most relevant to us, on the real SWE-bench Verified set:
   A/C  net prefill work-elimination vs the naive re-prefill-every-turn harness
@@ -319,6 +327,95 @@ func cmdSwebenchSmokeContract(argv []string) {
 	}
 }
 
+// cmdSwebenchDeepSWEContract writes the pre-run contract for a real
+// DeepSWE/R2E-Gym raw-vs-fak smoke. It is intentionally not the fixture runner:
+// it fixes the commands and gates required to promote #872 to benchmark-native
+// evidence once a real adapter and official grader are available.
+func cmdSwebenchDeepSWEContract(argv []string) {
+	fs := flag.NewFlagSet("swebench deepswe-contract", flag.ExitOnError)
+	difficulty := fs.String("difficulty", "", "bench difficulty map; default: the committed "+swebenchSampleDifficulty+" sample")
+	dataset := fs.String("dataset", "", "full SWE-bench Verified dataset (JSONL or JSON array)")
+	filter := fs.String("filter", "full", "instance filter: smoke (~5), l3 (~50), full (all selected)")
+	limit := fs.Int("limit", 2, "cap to the first N selected instances (0 = filter default)")
+	model := fs.String("model", "DeepSWE-Preview", "DeepSWE model id shared by raw and fak arms")
+	adapter := fs.String("adapter", "deepswe-r2e-runner", "real DeepSWE/R2E-Gym adapter executable shared by both arms")
+	adapterArgs := fs.String("adapter-args", "", "extra adapter args shared by both arms")
+	rawBaseURL := fs.String("raw-base-url", "$env:RAW_DEEPSWE_BASE_URL", "raw provider OpenAI-compatible base URL or PowerShell env reference")
+	fakBaseURL := fs.String("fak-base-url", "http://localhost:8080/v1", "fak gateway OpenAI-compatible base URL")
+	rawOutput := fs.String("raw-output", "experiments/agent-live/deepswe-raw-smoke-20260626", "raw arm output directory")
+	fakOutput := fs.String("fak-output", "experiments/agent-live/deepswe-fak-smoke-20260626", "fak arm output directory")
+	maxSteps := fs.Int("max-steps", 50, "max DeepSWE/R2E-Gym steps per instance")
+	timeout := fs.String("timeout", "30m", "per-instance timeout passed to fak swebench run")
+	maxWorkers := fs.Int("max-workers", 4, "official SWE-bench eval workers")
+	python := fs.String("python", "", "python interpreter to probe for swebench harness")
+	out := fs.String("out", "", "write the contract JSON here (default stdout)")
+	md := fs.String("md", "", "write the contract markdown here")
+	_ = fs.Parse(argv)
+
+	diff, ds := *difficulty, *dataset
+	if diff == "" && ds == "" {
+		if env := os.Getenv("FAK_SWEBENCH_DIFFICULTY"); env != "" {
+			diff = env
+		} else if env := os.Getenv("FAK_SWEBENCH_DATASET"); env != "" {
+			ds = env
+		} else {
+			diff = swebenchSampleDifficulty
+			fmt.Fprintf(os.Stderr, "fak swebench deepswe-contract: no --difficulty/--dataset; using committed sample %s.\n", diff)
+		}
+	}
+	d, srcDesc, err := loadSwebenchSource(diff, ds)
+	must(err)
+	selected := selectSwebenchSmokeTasks(d, *filter, *limit)
+	rawCommand := buildDeepSWERawFakRunCommand(diff, ds, *filter, *limit, *model, *rawBaseURL, *adapter, *adapterArgs, *rawOutput, *timeout, *maxSteps)
+	fakCommand := buildDeepSWERawFakRunCommand(diff, ds, *filter, *limit, *model, *fakBaseURL, *adapter, *adapterArgs, *fakOutput, *timeout, *maxSteps)
+	contract := swebench.BuildDeepSWERawFakContract(swebench.DeepSWERawFakContractInput{
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		Dataset:        selected,
+		Source:         srcDesc,
+		Filter:         *filter,
+		Limit:          *limit,
+		Model:          *model,
+		RawBaseURL:     *rawBaseURL,
+		FakBaseURL:     *fakBaseURL,
+		Adapter:        *adapter,
+		AdapterArgs:    *adapterArgs,
+		RawCommand:     rawCommand,
+		FakCommand:     fakCommand,
+		RawOutputDir:   *rawOutput,
+		FakOutputDir:   *fakOutput,
+		MaxSteps:       *maxSteps,
+		Timeout:        *timeout,
+		MaxWorkers:     *maxWorkers,
+		EvalCapability: swebench.DetectEvalCapability(*python),
+	})
+	if *out != "" {
+		must(os.WriteFile(*out, jsonIndent(contract), 0o644))
+	} else {
+		fmt.Println(string(jsonIndent(contract)))
+	}
+	if *md != "" {
+		must(os.WriteFile(*md, []byte(swebench.RenderDeepSWERawFakContractMarkdown(contract)), 0o644))
+	}
+	fmt.Fprintf(os.Stderr, "\n== fak swebench deepswe-contract ==\n")
+	fmt.Fprintf(os.Stderr, "status       : %s\n", contract.Status)
+	fmt.Fprintf(os.Stderr, "tasks        : %d\n", len(contract.TaskSelection.TaskIDs))
+	fmt.Fprintf(os.Stderr, "model        : %s\n", *model)
+	fmt.Fprintf(os.Stderr, "adapter      : %s\n", *adapter)
+	fmt.Fprintf(os.Stderr, "raw base     : %s\n", *rawBaseURL)
+	fmt.Fprintf(os.Stderr, "fak base     : %s\n", *fakBaseURL)
+	fmt.Fprintf(os.Stderr, "grader       : runnable=%t", contract.OfficialGrader.Runnable)
+	if contract.OfficialGrader.Reason != "" {
+		fmt.Fprintf(os.Stderr, " (%s)", contract.OfficialGrader.Reason)
+	}
+	fmt.Fprintln(os.Stderr)
+	if *out != "" {
+		fmt.Fprintf(os.Stderr, "json         : %s\n", *out)
+	}
+	if *md != "" {
+		fmt.Fprintf(os.Stderr, "markdown     : %s\n", *md)
+	}
+}
+
 func selectSwebenchSmokeTasks(d *swebench.Dataset, filter string, limit int) *swebench.Dataset {
 	n := limit
 	if n <= 0 {
@@ -389,6 +486,49 @@ func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int,
 		"--output "+quoteSwebenchArg(output),
 	)
 	return strings.Join(args, " ")
+}
+
+func buildDeepSWERawFakRunCommand(difficulty, dataset, filter string, limit int, model, baseURL, adapter, adapterArgs, output, timeoutArg string, maxSteps int) string {
+	args := []string{
+		"go run ./cmd/fak swebench run",
+		"--agent deepswe",
+		"--filter " + filter,
+	}
+	if difficulty != "" {
+		args = append(args, "--difficulty "+quoteSwebenchArg(difficulty))
+	}
+	if dataset != "" {
+		args = append(args, "--dataset "+quoteSwebenchArg(dataset))
+	}
+	if limit > 0 {
+		args = append(args, fmt.Sprintf("--limit %d", limit))
+	}
+	if maxSteps > 0 {
+		args = append(args, fmt.Sprintf("--max-steps %d", maxSteps))
+	}
+	if timeoutArg != "" {
+		args = append(args, "--timeout "+quoteSwebenchArg(timeoutArg))
+	}
+	args = append(args,
+		"--model "+quoteSwebenchArg(model),
+		"--preds-only",
+		"--output "+quoteSwebenchArg(output),
+	)
+	env := []string{
+		"$env:FAK_DEEPSWE_RUNNER=" + quotePowerShellEnvValue(adapter),
+		"$env:FAK_DEEPSWE_RUNNER_ARGS=" + quotePowerShellEnvValue(adapterArgs),
+		"$env:FAK_DEEPSWE_BASE_URL=" + quotePowerShellEnvValue(baseURL),
+		"$env:FAK_DEEPSWE_MODEL=" + quotePowerShellEnvValue(model),
+	}
+	return strings.Join(append(env, strings.Join(args, " ")), "; ")
+}
+
+func quotePowerShellEnvValue(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "$env:") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func quoteSwebenchArg(s string) string {
