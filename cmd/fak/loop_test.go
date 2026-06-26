@@ -303,6 +303,233 @@ func appendLoopTestEvent(t *testing.T, path string, ev loopmgr.Event) {
 	}
 }
 
+// appendLoopTestEventAt appends with a fixed timestamp so cadence/last-run can be
+// asserted deterministically (the chain validates seq+prev_hash, not clock order).
+func appendLoopTestEventAt(t *testing.T, path string, ev loopmgr.Event, tsNano int64) {
+	t.Helper()
+	if _, err := loopmgr.Append(path, ev, loopmgr.WithClock(func() time.Time {
+		return time.Unix(0, tsNano).UTC()
+	})); err != nil {
+		t.Fatalf("Append(%s)@%d: %v", ev.Kind, tsNano, err)
+	}
+}
+
+// loopRollupTestReport mirrors the unexported loopRollupReport for JSON decoding
+// in tests (the rollup --json contract: schema, nodes, per-loop fold).
+type loopRollupTestReport struct {
+	Schema string   `json:"schema"`
+	Nodes  []string `json:"nodes"`
+	Loops  []struct {
+		LoopID            string  `json:"loop_id"`
+		Nodes             int     `json:"nodes"`
+		Runs              uint64  `json:"runs"`
+		Witnessed         uint64  `json:"witnessed"`
+		Refused           uint64  `json:"refused"`
+		CadenceSeconds    float64 `json:"cadence_seconds"`
+		LastEventUnixNano int64   `json:"last_event_unix_nano"`
+	} `json:"loops"`
+	Skipped []struct {
+		Node string `json:"node"`
+	} `json:"skipped"`
+}
+
+const second = int64(time.Second)
+
+func TestLoopRollupJSONFoldsAcrossNodes(t *testing.T) {
+	dir := t.TempDir()
+	nodeA := filepath.Join(dir, "node-a.jsonl")
+	nodeB := filepath.Join(dir, "node-b.jsonl")
+	// Loop "dispatch/issues": 2 fires on node-a (0s, 60s) + 1 fire on node-b (120s),
+	// so fleet runs=3 over a merged 120s span (2 gaps) -> cadence 60s, last=120s.
+	appendLoopTestEventAt(t, nodeA, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 0)
+	appendLoopTestEventAt(t, nodeA, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventWitness, RunID: "a1", Status: loopmgr.StatusWitnessedDone}, 30*second)
+	appendLoopTestEventAt(t, nodeA, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 60*second)
+	appendLoopTestEventAt(t, nodeB, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 120*second)
+	// A second loop only node-b ran, to prove the fold reports every loop fleet-wide.
+	appendLoopTestEventAt(t, nodeB, loopmgr.Event{LoopID: "docs/refresh", Kind: loopmgr.EventAdmit, Status: loopmgr.StatusRefused, Reason: "PAUSED"}, 90*second)
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"rollup", "--ledger", nodeA, "--ledger", "edge=" + nodeB, "--json"})
+	if code != 0 {
+		t.Fatalf("rollup code=%d stderr=%s", code, stderr.String())
+	}
+	var rep loopRollupTestReport
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
+	}
+	if rep.Schema != "fak.loop-rollup.v1" {
+		t.Fatalf("schema = %q", rep.Schema)
+	}
+	if len(rep.Nodes) != 2 || rep.Nodes[1] != "edge" {
+		t.Fatalf("nodes = %v (want [node-a edge]; NODE=PATH must label)", rep.Nodes)
+	}
+	byLoop := map[string]int{}
+	for i, l := range rep.Loops {
+		byLoop[l.LoopID] = i
+	}
+	di, ok := byLoop["dispatch/issues"]
+	if !ok {
+		t.Fatalf("dispatch/issues missing from %+v", rep.Loops)
+	}
+	d := rep.Loops[di]
+	if d.Runs != 3 {
+		t.Fatalf("dispatch/issues runs = %d, want 3 (2 node-a + 1 edge)", d.Runs)
+	}
+	if d.Nodes != 2 {
+		t.Fatalf("dispatch/issues nodes = %d, want 2", d.Nodes)
+	}
+	if d.Witnessed != 1 {
+		t.Fatalf("dispatch/issues witnessed = %d, want 1", d.Witnessed)
+	}
+	if d.CadenceSeconds != 60 {
+		t.Fatalf("dispatch/issues cadence = %v, want 60 (120s merged span / 2 gaps)", d.CadenceSeconds)
+	}
+	if d.LastEventUnixNano != 120*second {
+		t.Fatalf("dispatch/issues last = %d, want %d", d.LastEventUnixNano, 120*second)
+	}
+	ri, ok := byLoop["docs/refresh"]
+	if !ok {
+		t.Fatalf("docs/refresh missing (fleet view must include refuse-only loops): %+v", rep.Loops)
+	}
+	if rep.Loops[ri].Refused != 1 || rep.Loops[ri].Runs != 0 {
+		t.Fatalf("docs/refresh = %+v, want refused=1 runs=0", rep.Loops[ri])
+	}
+}
+
+// TestLoopRollupAddNodeChangesOnlyRollup is the #769 acceptance: adding a node's
+// journal changes only the rollup, never any node's behavior. We assert the
+// aggregate count grows by the new node's runs AND the pre-existing ledgers are
+// byte-for-byte unchanged (the fold is read-only — it ingests, it never writes).
+func TestLoopRollupAddNodeChangesOnlyRollup(t *testing.T) {
+	dir := t.TempDir()
+	nodeA := filepath.Join(dir, "node-a.jsonl")
+	nodeB := filepath.Join(dir, "node-b.jsonl")
+	appendLoopTestEventAt(t, nodeA, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 0)
+	appendLoopTestEventAt(t, nodeB, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 60*second)
+
+	runsFor := func(args ...string) (uint64, []byte, []byte) {
+		var stdout, stderr bytes.Buffer
+		if code := runLoop(&stdout, &stderr, append([]string{"rollup", "--json"}, args...)); code != 0 {
+			t.Fatalf("rollup code=%d stderr=%s", code, stderr.String())
+		}
+		var rep loopRollupTestReport
+		if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
+		}
+		var runs uint64
+		for _, l := range rep.Loops {
+			if l.LoopID == "dispatch/issues" {
+				runs = l.Runs
+			}
+		}
+		a, err := os.ReadFile(nodeA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(nodeB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return runs, a, b
+	}
+
+	before, aBefore, bBefore := runsFor("--ledger", nodeA, "--ledger", nodeB)
+	if before != 2 {
+		t.Fatalf("two-node runs = %d, want 2", before)
+	}
+
+	// Add a third node's journal and re-fold over all three.
+	nodeC := filepath.Join(dir, "node-c.jsonl")
+	appendLoopTestEventAt(t, nodeC, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 120*second)
+	appendLoopTestEventAt(t, nodeC, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 180*second)
+
+	after, aAfter, bAfter := runsFor("--ledger", nodeA, "--ledger", nodeB, "--ledger", nodeC)
+	if after != 4 {
+		t.Fatalf("three-node runs = %d, want 4 (added node-c's 2 fires)", after)
+	}
+	if !bytes.Equal(aBefore, aAfter) || !bytes.Equal(bBefore, bAfter) {
+		t.Fatalf("adding node-c mutated a pre-existing node ledger — rollup must be read-only")
+	}
+}
+
+func TestLoopRollupDirAndSkipsCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.jsonl")
+	appendLoopTestEventAt(t, good, loopmgr.Event{LoopID: "dispatch/issues", Kind: loopmgr.EventFire}, 0)
+	// A corrupt journal must be skipped (surfaced), not abort the whole fleet view.
+	bad := filepath.Join(dir, "bad.jsonl")
+	if err := os.WriteFile(bad, []byte("{not valid json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"rollup", "--dir", dir, "--json"})
+	if code != 0 {
+		t.Fatalf("rollup --dir code=%d stderr=%s", code, stderr.String())
+	}
+	var rep loopRollupTestReport
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
+	}
+	if len(rep.Loops) != 1 || rep.Loops[0].Runs != 1 {
+		t.Fatalf("loops = %+v, want one loop with runs=1 from the good node", rep.Loops)
+	}
+	if len(rep.Skipped) != 1 || rep.Skipped[0].Node != "bad" {
+		t.Fatalf("skipped = %+v, want the corrupt 'bad' node surfaced", rep.Skipped)
+	}
+}
+
+func TestLoopRollupHumanOutput(t *testing.T) {
+	dir := t.TempDir()
+	nodeA := filepath.Join(dir, "mac.jsonl")
+	appendLoopTestEventAt(t, nodeA, loopmgr.Event{LoopID: "dogfood/mac", Kind: loopmgr.EventFire}, 0)
+	appendLoopTestEventAt(t, nodeA, loopmgr.Event{LoopID: "dogfood/mac", Kind: loopmgr.EventFire}, 120*second)
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"rollup", "--ledger", nodeA})
+	if code != 0 {
+		t.Fatalf("rollup code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak loop rollup", "LOOP", "RUNS", "CADENCE", "dogfood/mac", "2.0m"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("human output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestLoopRollupRequiresNodes(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"rollup", "--json"})
+	if code != 2 {
+		t.Fatalf("rollup with no nodes code=%d, want 2 stdout=%s", code, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "no node ledgers") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestCadenceAndHumanCadence(t *testing.T) {
+	if got := cadenceSeconds([]int64{0, 60 * second, 120 * second}); got != 60 {
+		t.Fatalf("cadenceSeconds = %v, want 60", got)
+	}
+	if got := cadenceSeconds([]int64{42 * second}); got != 0 {
+		t.Fatalf("single-fire cadence = %v, want 0 (no measurable interval)", got)
+	}
+	if got := cadenceSeconds([]int64{5, 5, 5}); got != 0 {
+		t.Fatalf("zero-span cadence = %v, want 0", got)
+	}
+	cases := []struct {
+		sec  float64
+		want string
+	}{{0, "-"}, {0.3, "0.3s"}, {45, "45s"}, {120, "2.0m"}, {3960, "1.1h"}, {172800, "2.0d"}}
+	for _, c := range cases {
+		if got := humanCadence(c.sec); got != c.want {
+			t.Fatalf("humanCadence(%v) = %q, want %q", c.sec, got, c.want)
+		}
+	}
+}
+
 func gotKinds(events []loopmgr.Event) string {
 	parts := make([]string, 0, len(events))
 	for _, ev := range events {
