@@ -1,14 +1,48 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/turnbench"
 )
+
+// TestRunScaleWritesReport witnesses the --scale wiring: runScale drives the dedicated
+// D-001 harness (internal/bench.RunFanScale) and writes a valid report whose grid always
+// prices the N=1 baseline, whose baseline coordination-overhead is exactly 0 (it is the
+// reference point), and whose DeferredRun names the live-model SOTA-framework comparison
+// rather than silently dropping it. Kept to a small grid so the cmd-level gate stays fast;
+// the acceptance-grid points and >=1024 capability are asserted in internal/bench.
+func TestRunScaleWritesReport(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "scale.json")
+	if err := runScale([]int{100}, 2, 2, 1234, turnbench.FanoutResearch, turnbench.DefaultFanoutCostModel(), out); err != nil {
+		t.Fatalf("runScale: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	var rep bench.FanScaleReport
+	if err := json.Unmarshal(b, &rep); err != nil {
+		t.Fatalf("report is not valid JSON: %v", err)
+	}
+	if !reflect.DeepEqual(rep.Grid, []int{1, 100}) {
+		t.Fatalf("grid = %v, want [1 100] (the N=1 baseline is always priced)", rep.Grid)
+	}
+	if rep.Baseline.CoordOverheadFrac != 0 || rep.Baseline.CoordOverheadTurns != 0 {
+		t.Errorf("baseline coord-overhead = %.3f turns / %.3f frac, want 0/0 (it is the reference point)",
+			rep.Baseline.CoordOverheadTurns, rep.Baseline.CoordOverheadFrac)
+	}
+	if rep.DeferredRun == "" {
+		t.Error("DeferredRun must name the deferred live-model LangGraph/AutoGen/CrewAI comparison, not silently drop it")
+	}
+}
 
 // TestPrefixReuseFanoutWitness grounds fanbench's prefix-reuse GEOMETRY claim
 // ((N−1)·prefix_tokens prefill saved) in the REAL kernel, fanned out across N

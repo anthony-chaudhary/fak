@@ -93,6 +93,58 @@ Read four things off this surface:
    single agent beats trivial multi-agent," surfaced honestly rather than hidden — the
    levers only pay once there are siblings to amortize across.
 
+### The D-001 acceptance grid (N=1 / 100 / 500 / 1000) — host-computed, reproducible (#255)
+
+The §1 surface above uses the geometric N-ladder (the right spacing to read a curve
+spanning three orders of magnitude). The D-001 acceptance criteria
+([#255](https://github.com/anthony-chaudhary/fak/issues/255)) name the **literal** scale
+points **N=100, N=500, N=1000** and ask for **coordination overhead vs a baseline** next to
+the cross-agent reuse uplift. The dedicated scale harness
+([`internal/bench/fanscale.go`](../../internal/bench/fanscale.go)) prices exactly those
+points against the **N=1 single-agent baseline** and is wired to a reproducible command
+path. Medians over 16 seeded trials (research-goal, P=2048, sub-turns=4, seed 1,
+`fak 0.34.0`, `go1.26.3`); checked-in artifact
+[`experiments/fanout/fanscale-d001.json`](../../experiments/fanout/fanscale-d001.json):
+
+| N (sub-agents) | calls | **coord overhead** (turns vs N=1) | coord overhead ÷ baseline | parallel_speedup | **cross_uplift** (measured) | prefix_tokens_saved = (N−1)·P | tax_clawed_back (modeled) |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1    | 8    | 0   | 0×    | 1.0  | **0**    | 0          | 0%    |
+| 100  | 404  | 4   | 0.67× | 40.6 | **+93**  | 202,752    | 61.6% |
+| 500  | 2,004| 24  | 4.0×  | 67.5 | **+495** | 1,021,952  | 61.7% |
+| 1000 | 4,004| 49  | 8.2×  | 73.7 | **+990** | 2,045,952  | 61.7% |
+
+Reproduce (deterministic, in-process kernel arithmetic — **no model call**, runs on the
+agent host): `go run ./cmd/fanbench --scale --grid canonical --prefix 2048 --trials 16
+--seed 1 --out experiments/fanout/fanscale-d001.json`.
+
+Read three things off the acceptance grid:
+
+1. **Coordination overhead vs the N=1 baseline grows with the join, not the work.** The
+   single-agent critical path is 6 turns; the fold/synchronous-join tax adds **+4 turns at
+   N=100, +24 at N=500, +49 at N=1000** — an **8.2× depth multiple** over baseline by
+   N=1000. The lead must wait on the slowest of N sub-agents and then fold N results, so
+   added width buys parallel throughput (speedup 1.0→73.7) but pays a critical-path tax that
+   keeps rising — the coordination overhead the acceptance criterion names, priced against
+   one agent so a "fan-out win" is always budget-controlled.
+2. **Cross-agent reuse uplift scales ~linearly with N** (the MEASURED `SHARED − ISOLATED`
+   sibling dedup): **+93 / +495 / +990 calls** the interleaved fan-out deletes that the same
+   sub-agents run apart cannot. `N=1` is exactly **0** (a lone worker has no sibling to share
+   with — the budget-controlled control).
+3. **Prefix reuse is exact `(N−1)·P` geometry, not a model** — 202,752 / 1,021,952 /
+   2,045,952 prefill tokens the SHARED arm never recomputes, and the modeled prompt-cache
+   clawback sits on its **~61.7% plateau** at every acceptance point (P fixed).
+
+**What this grid does NOT do (the honest gate that keeps #255 open).** It is the
+**host-computed reuse + coordination geometry**, exactly the measured/modeled split of §1 —
+*not* the live-model wall-clock and *not* the cross-framework comparison. The remaining
+D-001 acceptance — **benchmark fak against LangGraph / AutoGen / CrewAI at these N with a
+live model** — is a `DeferredRun` (`deferred_run` field in the artifact): it needs a
+bench node with the three frameworks installed and a served model, which the agent host
+lacks. Running it here would starve the agent seat and skew the number, so it is named as
+deferred rather than fabricated (the BENCHMARK-AUTHORITY rule). That cross-framework
+task-success axis overlaps **#429** (the §5 controlled litmus) and the live-model seam
+**#106**.
+
 ### Prefix-scale impact (new, fixed N=256)
 
 The longer-prefix pscale artifacts keep the fan-out topology fixed (`N=256`,

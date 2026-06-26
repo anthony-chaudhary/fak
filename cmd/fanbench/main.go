@@ -50,6 +50,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
@@ -84,6 +85,7 @@ func main() {
 
 	out := fs.String("out", "fanout.json", "JSON artifact path")
 	csv := fs.String("csv", "fanout.csv", "CSV artifact path (one row per cell)")
+	scale := fs.Bool("scale", false, "run the dedicated D-001 SCALE harness (internal/bench.RunFanScale): emit the coordination-overhead-vs-N=1-baseline + cross-agent-reuse report at the canonical 1/100/500/1000 grid (or --agents); JSON only, prefix-sweep flags ignored")
 	_ = fs.Parse(os.Args[1:])
 
 	p, ok := profileByName(*profileName)
@@ -104,6 +106,26 @@ func main() {
 	subTurnGrid := parseInts(*subTurnsArg)
 	if len(subTurnGrid) == 0 {
 		subTurnGrid = []int{4}
+	}
+
+	// --scale: run the dedicated D-001 acceptance harness (internal/bench.RunFanScale),
+	// which carries the named "coordination overhead vs the N=1 baseline" metric next to
+	// the cross-agent reuse uplift, at the canonical 1/100/500/1000 ladder. Deterministic
+	// and host-runnable (in-process kernel arithmetic, no model call); the live-model
+	// SOTA-framework comparison stays a DeferredRun, never fabricated here.
+	if *scale {
+		grid := agentGrid
+		if strings.TrimSpace(*agentsArg) == "" && strings.ToLower(*gridKind) != "canonical" {
+			grid = bench.CanonicalFanScaleGrid // default the scale harness to the acceptance ladder, not the log grid
+		}
+		fmt.Fprintf(os.Stderr, "fanbench --scale: D-001 harness profile=%s grid=%v sub-turns=%d trials=%d seed=%d => coord-overhead-vs-N=1 + cross-agent reuse (live-model SOTA-framework comparison deferred)\n",
+			p.Name, grid, subTurnGrid[0], *trials, *seed)
+		if err := runScale(grid, subTurnGrid[0], *trials, *seed, p, cm, *out); err != nil {
+			fmt.Fprintln(os.Stderr, "fanbench:", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "fanbench --scale: wrote %s\n", *out)
+		return
 	}
 	if *modelConfig != "" {
 		n, err := contextWindowFromConfig(*modelConfig)
@@ -150,6 +172,23 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "fanbench: wrote %s (%d cells) and %s in %s\n",
 		*out, len(sw.Cells), *csv, time.Since(t0).Round(time.Second))
+}
+
+// runScale runs the dedicated D-001 fan-out SCALE harness (internal/bench.RunFanScale) at
+// the given grid and writes its JSON report — the one artifact that carries the named
+// "coordination overhead vs the N=1 baseline" metric (coord_overhead_turns / _frac)
+// alongside the cross-agent reuse uplift and the exact (N−1)·prefix reuse geometry. The
+// run is deterministic in (profile, grid, subTurns, trials, seed); the published live-model
+// LangGraph/AutoGen/CrewAI comparison stays a DeferredRun in the report, never fabricated.
+func runScale(grid []int, subTurns, trials int, seed int64, prof turnbench.FanoutProfile, cm turnbench.FanoutCostModel, outPath string) error {
+	rep := bench.RunFanScale(context.Background(), bench.FanScaleOptions{
+		Profile: prof, Cost: cm, Grid: grid, SubTurns: subTurns, Trials: trials, Seed: seed,
+	})
+	b, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(outPath, append(b, '\n'), 0o644)
 }
 
 func profileByName(name string) (turnbench.FanoutProfile, bool) {
