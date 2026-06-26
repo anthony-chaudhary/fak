@@ -421,11 +421,12 @@ jobs:
           echo "::endgroup::"
 
       # Scorecard control pane: the RSI checking layer for the whole scorecard
-      # family. The six gates above each emit ONE debt integer (doc/code/appeal/
-      # seo/demo/robustness/hygiene); none folds them into a single portfolio
+      # family. The gates above each emit ONE debt integer (doc/readme/code/appeal/
+      # seo/demo/robustness/hygiene/...); none folds them into a single portfolio
       # number, pins a per-metric baseline, and shows the commit-over-commit
       # trend. This aggregator does — so "is the repo getting better or worse"
-      # is one query. Same two tiers as its siblings:
+      # is one query. The README freshness score rides this same green ratchet
+      # (#779/#893), not a standalone red gate. Same two tiers as its siblings:
       #   * the tool's own unit tests are HARD (a real regression suite);
       #   * the folded aggregate is now a HARD ratchet (`--check`, #587): unlike
       #     the default exit (green only at ZERO debt), `--check` is GREEN while
@@ -438,6 +439,7 @@ jobs:
       - name: scorecard control pane (folds every *-debt + trend; HARD ratchet --check)
         working-directory: ${{ github.workspace }}
         run: |
+          python tools/readme_freshness_audit_test.py
           python tools/scorecard_control_pane_test.py
           python tools/scorecard_control_pane.py --check
 

@@ -222,6 +222,20 @@ def test_baseline_round_trip() -> None:
     assert again["trend"]["direction"] == "flat"
 
 
+def test_tracked_baseline_pins_readme_floor() -> None:
+    base = scp.load_baseline(scp.repo_root() / scp.BASELINE_REL)
+    assert base is not None
+    assert base["metrics"]["readme"] == 0
+
+
+def test_make_ci_runs_portfolio_ratchet() -> None:
+    makefile = (scp.repo_root() / "Makefile").read_text(encoding="utf-8")
+    assert "ci:" in makefile and "scorecard-ratchet" in makefile.split("ci:", 1)[1].splitlines()[0]
+    assert "scorecard-ratchet:" in makefile
+    assert "tools/readme_freshness_audit_test.py" in makefile
+    assert "tools/scorecard_control_pane.py --check" in makefile
+
+
 # --- the CI ratchet gate (--check) -----------------------------------------
 
 def test_check_gate_green_when_flat() -> None:

@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet test test-fast bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -17,7 +17,7 @@
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI parity gate — deterministic, no toolchain, so it joins
 # the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build gofmt-check vet test claims-lint salience index-sync hygiene demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build gofmt-check vet test claims-lint salience index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -208,6 +208,16 @@ demo-scorecards:
 # --check-doc both exit 1 while slop-debt > 0 (the scorecard reports honestly), so
 # wiring them would red-gate `make ci` immediately. Add them once slop-debt is driven
 # to 0; until then the scorecard is run on demand / via the control pane (the slop epic).
+
+# scorecard-ratchet: the portfolio floor, not a standalone README-only red gate.
+# The README freshness card rides scorecard_control_pane.py --check with
+# readme_debt pinned at 0, so a front-page regression reds through the existing
+# green ratchet (#779/#893): debt may hold or fall, never rise.
+scorecard-ratchet:
+	@python3 tools/readme_freshness_audit_test.py
+	@python3 tools/scorecard_control_pane_test.py
+	@python3 tools/scorecard_control_pane.py --check
+	@echo "scorecard-ratchet OK"
 
 # demo-smoke: dynamic but hermetic. It builds the browser demos into a temp dir,
 # starts them on loopback, mounts each behind its documented base path, verifies

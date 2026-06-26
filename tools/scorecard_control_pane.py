@@ -35,6 +35,9 @@ at ZERO debt), ``--check`` is GREEN while the portfolio holds at-or-below its
 pinned baseline and RED only when debt *regresses* above it (or a scorecard
 fails to report). That is the honest CI contract — debt may stay or fall, never
 silently rise — without demanding the whole family be at zero first. Issue #509.
+The README freshness scorecard is deliberately wired here, not as a bespoke
+``--min-score`` CI line: its baseline pins ``readme_debt`` at zero, so a front-page
+score-affordance regression reds through the existing green ratchet (#779/#893).
 
 The portfolio ratchet has one blind spot: it folds every metric into one sum, so
 a single metric's regression can hide under another metric's improvement (seo
