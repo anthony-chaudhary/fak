@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 )
 
 const (
@@ -181,8 +182,13 @@ func (s *Server) sessionAdmits(ctx context.Context, trace string) (bool, Session
 		return true, SessionState{}
 	}
 	st := s.observeSession(ctx, trace)
+	// The non-advancing states are the shared lifecycle phases other than Running:
+	// Paused/Draining/Stopped. The tokens are SOURCED from internal/lifecycle (not
+	// re-spelled) so a vocabulary rename can never silently drift this admission gate
+	// away from the served session's own RunState.String() (#912). Throttled is a
+	// session-only pace extra and stays advancing; armed/disabled/unknown fail open.
 	switch st.Run {
-	case "paused", "draining", "stopped":
+	case lifecycle.TokenPaused, lifecycle.TokenDraining, lifecycle.TokenStopped:
 		return false, st
 	default:
 		return true, st

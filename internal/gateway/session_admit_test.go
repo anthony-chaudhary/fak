@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
@@ -102,6 +103,39 @@ func TestSessionAdmitFailsOpenWhenRunningOrUnwired(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusConflict {
 		t.Fatalf("throttled session must be admitted; got 409")
+	}
+}
+
+// TestSessionAdmitBoundToLifecycleVocabulary pins the proxy admission gate to the
+// shared internal/lifecycle vocabulary: it refuses EXACTLY the non-advancing shared
+// phases (Paused/Draining/Stopped) and admits Running plus the layer-specific extras
+// and unknown tokens. The expected-refusal keys are the lifecycle.Token* constants,
+// so a future rename of a shared token can never silently drift this gate away from
+// the served session's own RunState wire output (#912).
+func TestSessionAdmitBoundToLifecycleVocabulary(t *testing.T) {
+	srv := newTestServer(t)
+	var run string
+	srv.observeSession = func(_ context.Context, trace string) SessionState {
+		return SessionState{TraceID: trace, Run: run}
+	}
+	cases := []struct {
+		run       string
+		wantAdmit bool
+	}{
+		{lifecycle.TokenRunning, true},   // advancing
+		{lifecycle.TokenPaused, false},   // operator-held
+		{lifecycle.TokenDraining, false}, // stop requested
+		{lifecycle.TokenStopped, false},  // terminal
+		{"throttled", true},              // session-only pace extra: still advancing
+		{"armed", true},                  // supervisor-only: not a served run-state, fail open
+		{"", true},                       // unknown/unset: fail open
+	}
+	for _, c := range cases {
+		run = c.run
+		admit, _ := srv.sessionAdmits(context.Background(), "trace-"+c.run)
+		if admit != c.wantAdmit {
+			t.Errorf("sessionAdmits(run=%q) admit=%v, want %v", c.run, admit, c.wantAdmit)
+		}
 	}
 }
 
