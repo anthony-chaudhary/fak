@@ -72,6 +72,69 @@ All docs updated with:
 
 ---
 
+## Fleet-Scale (100+ Worker) Validation — #920
+
+Issue #920 asks for DGX-scale fleet runs (100+ concurrent agents). Two of its six
+sub-items are hardware-free and are verified here; the remaining four need the DGX
+fleet run (gated — see "What remains" below).
+
+### Deterministic floor at 100+ workers (sub-item: validate floor predictions)
+
+The closed-form geometry, extended past the 1–8 sweep to fleet scale over the same
+real 643-task WebVoyager set. Still a MODEL, not a wall-clock measurement.
+
+| Workers | A naive | B per-agent | C fak | A/C (net) | B/C (cross-worker) |
+|--------:|--------:|------------:|------:|----------:|-------------------:|
+| 8 | 1.37 G | 155.1 M | 141.3 M | 9.7x | 1.10x |
+| 16 | 2.73 G | 310.2 M | 280.7 M | 9.7x | 1.11x |
+| 32 | 5.47 G | 620.4 M | 559.4 M | 9.8x | 1.11x |
+| 64 | 10.94 G | 1.24 G | 1.12 G | 9.8x | 1.11x |
+| 100 | 17.09 G | 1.94 G | 1.74 G | 9.8x | 1.11x |
+| 128 | 21.88 G | 2.48 G | 2.23 G | 9.8x | 1.11x |
+
+Reading this against #920's stated expectations:
+
+- **B/C (cross-worker reuse) exceeds 1.10x at 100+ workers — CONFIRMED by the model**
+  (1.11x, saturating at the asymptote `1 + Prefix/(growth·(T−1))`).
+- **A/C "~16x" — CORRECTED.** The deterministic asymptote is ~9.8x, not 16x. The 16x
+  figure was the synthetic-mock ceiling (see the "Theoretical vs Real" table above);
+  over the real WebVoyager turn geometry the naive-vs-fused ratio saturates at ~9.8x.
+  A/B (the worker-independent turn-tax) stays 8.8x throughout.
+
+Reproduce: `go run ./cmd/fak webbench describe --dataset testdata/webbench/webvoyager-converted.jsonl --workers 1,2,4,8,16,32,64,100,128 --out experiments/webbench/webvoyager-fleet-scale-20260626.json`
+Artifact: `experiments/webbench/webvoyager-fleet-scale-20260626.json`
+
+### In-process adjudication overhead (sub-item: profile adjudication cost)
+
+#920 expects "sub-millisecond per call." Measured with the existing benchmark on the
+dev-box CPU (AMD Ryzen 9 9950X; the adjudicator is pure in-process Go, so this is
+CPU-bound, not GPU-bound):
+
+```
+BenchmarkDecideReadClass/baseline_nil_profile-16   781.4 ns/op   742 B/op   11 allocs/op
+BenchmarkDecideReadClass/read_profile-16           774.8 ns/op   742 B/op   11 allocs/op
+```
+
+~0.78 µs/call (≈0.0008 ms) — over 1000x under the 1 ms bar. Sub-millisecond CONFIRMED.
+Reproduce (WSL — native `go test` is blocked on the Windows host):
+`go test ./internal/adjudicator -run XXXNONE -bench BenchmarkDecideReadClass -benchtime=2s`
+
+### What remains gated (the DGX fleet run)
+
+Sub-items NOT closed by this validation — they require the measured fleet run on DGX:
+
+- DGX node access (private Slack control bridge; lives in `fak-private`).
+- Deploy webbench harness to the DGX (model server + browser-use + network — none
+  confirmed configured even on the dev box; see `docs/webbench-blockers.md`).
+- Run the 100+ concurrent-agent fleet experiment.
+- MEASURE real cross-worker reuse / net elimination at high concurrency (the model
+  above predicts; the DGX run would confirm).
+
+The deterministic floor and the adjudication overhead are now validated; the
+end-to-end MEASURED fleet number is still gated on DGX access + orchestration.
+
+---
+
 ## What Remains for Full Model Measurements
 
 ### Phase 1: Deterministic ✅ COMPLETE
