@@ -1,0 +1,230 @@
+package swebench
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+const OpusSmokeContractSchema = "fak.swebench-opus-smoke-contract.v1"
+
+type OpusSmokeContractInput struct {
+	GeneratedAt    string
+	Dataset        *Dataset
+	Source         string
+	Filter         string
+	Limit          int
+	Model          string
+	RawCommand     string
+	FakCommand     string
+	RawOutputDir   string
+	FakOutputDir   string
+	MaxWorkers     int
+	EvalCapability EvalCapability
+}
+
+type OpusSmokeContract struct {
+	Schema              string             `json:"schema"`
+	GeneratedAt         string             `json:"generated_at"`
+	Benchmark           string             `json:"benchmark"`
+	ModelClass          string             `json:"model_class"`
+	Status              string             `json:"status"`
+	ClaimBoundary       string             `json:"claim_boundary"`
+	TaskSelection       SmokeTaskSelection `json:"task_selection"`
+	Arms                []SmokeArm         `json:"arms"`
+	Gates               []SmokeGate        `json:"gates"`
+	OfficialGrader      EvalCapability     `json:"official_grader"`
+	CompareMetrics      []string           `json:"compare_metrics"`
+	RequiredBeforeClaim []string           `json:"required_before_claim"`
+	ResultClaimAllowed  bool               `json:"result_claim_allowed"`
+}
+
+type SmokeTaskSelection struct {
+	Source         string         `json:"source"`
+	Filter         string         `json:"filter,omitempty"`
+	Limit          int            `json:"limit,omitempty"`
+	TaskIDs        []string       `json:"task_ids"`
+	DifficultyDist map[string]int `json:"difficulty_distribution,omitempty"`
+	SameTaskIDs    bool           `json:"same_task_ids"`
+}
+
+type SmokeArm struct {
+	Name            string `json:"name"`
+	Harness         string `json:"harness"`
+	Model           string `json:"model"`
+	Command         string `json:"command"`
+	OutputDir       string `json:"output_dir"`
+	PredictionsPath string `json:"predictions_path"`
+	EvalRunID       string `json:"eval_run_id"`
+	EvalCommand     string `json:"eval_command"`
+}
+
+type SmokeGate struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func BuildOpusSmokeContract(in OpusSmokeContractInput) OpusSmokeContract {
+	if in.MaxWorkers <= 0 {
+		in.MaxWorkers = 4
+	}
+	taskIDs, dist := smokeTaskSelection(in.Dataset)
+	rawPreds := joinPath(in.RawOutputDir, "predictions.json")
+	fakPreds := joinPath(in.FakOutputDir, "predictions.json")
+	arms := []SmokeArm{
+		{
+			Name:            "raw-opus",
+			Harness:         "benchmark-native-or-raw-agent-scaffold",
+			Model:           in.Model,
+			Command:         in.RawCommand,
+			OutputDir:       in.RawOutputDir,
+			PredictionsPath: rawPreds,
+			EvalRunID:       "swebench-opus-raw-smoke",
+			EvalCommand:     EvalCommandHint(rawPreds, "swebench-opus-raw-smoke", in.MaxWorkers),
+		},
+		{
+			Name:            "fak-opus",
+			Harness:         "fak-gateway-fleet-runner",
+			Model:           in.Model,
+			Command:         in.FakCommand,
+			OutputDir:       in.FakOutputDir,
+			PredictionsPath: fakPreds,
+			EvalRunID:       "swebench-opus-fak-smoke",
+			EvalCommand:     EvalCommandHint(fakPreds, "swebench-opus-fak-smoke", in.MaxWorkers),
+		},
+	}
+	gates := []SmokeGate{
+		{Name: "fixed_task_ids", OK: len(taskIDs) > 0, Detail: fmt.Sprintf("%d task ids selected", len(taskIDs))},
+		{Name: "same_task_ids", OK: true, Detail: "raw and fak arms consume the same selected task id list"},
+		{Name: "same_model", OK: strings.TrimSpace(in.Model) != "", Detail: in.Model},
+		{Name: "raw_arm_command", OK: strings.TrimSpace(in.RawCommand) != "", Detail: in.RawCommand},
+		{Name: "fak_arm_command", OK: strings.TrimSpace(in.FakCommand) != "", Detail: in.FakCommand},
+		{Name: "official_grader_local", OK: in.EvalCapability.Runnable, Detail: in.EvalCapability.Reason},
+	}
+	status := smokeStatus(gates)
+	return OpusSmokeContract{
+		Schema:        OpusSmokeContractSchema,
+		GeneratedAt:   in.GeneratedAt,
+		Benchmark:     "SWE-bench Verified",
+		ModelClass:    "opus-class",
+		Status:        status,
+		ClaimBoundary: "Pre-run contract only: fixes task ids, model identity, arm commands, and official-grader commands for an Opus-class raw-vs-fak SWE-bench smoke. It is not a solve-rate result until both predictions files are produced and graded by the official SWE-bench harness.",
+		TaskSelection: SmokeTaskSelection{
+			Source:         in.Source,
+			Filter:         in.Filter,
+			Limit:          in.Limit,
+			TaskIDs:        taskIDs,
+			DifficultyDist: dist,
+			SameTaskIDs:    true,
+		},
+		Arms:           arms,
+		Gates:          gates,
+		OfficialGrader: in.EvalCapability,
+		CompareMetrics: []string{
+			"solve_rate",
+			"safe_completion",
+			"cost_or_token_budget",
+			"latency",
+			"tool_call_count",
+			"policy_blocks",
+			"evidence_completeness",
+		},
+		RequiredBeforeClaim: []string{
+			"raw-opus predictions.json generated by the raw scaffold over the selected task ids",
+			"fak-opus predictions.json generated by the fak fleet runner over the same selected task ids",
+			"official SWE-bench harness report.json for both arms",
+			"raw/fak compare artifact that folds solve rate, safe completion, cost or token budget, latency, policy blocks, and evidence completeness",
+		},
+		ResultClaimAllowed: false,
+	}
+}
+
+func RenderOpusSmokeContractMarkdown(c OpusSmokeContract) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Opus SWE-bench Smoke Contract\n\n")
+	fmt.Fprintf(&b, "- Generated: `%s`\n", c.GeneratedAt)
+	fmt.Fprintf(&b, "- Benchmark: `%s`\n", c.Benchmark)
+	fmt.Fprintf(&b, "- Model class: `%s`\n", c.ModelClass)
+	fmt.Fprintf(&b, "- Status: `%s`\n", c.Status)
+	fmt.Fprintf(&b, "- Boundary: %s\n\n", c.ClaimBoundary)
+
+	fmt.Fprintf(&b, "## Task Selection\n\n")
+	fmt.Fprintf(&b, "- Source: `%s`\n", c.TaskSelection.Source)
+	if c.TaskSelection.Filter != "" {
+		fmt.Fprintf(&b, "- Filter: `%s`\n", c.TaskSelection.Filter)
+	}
+	if c.TaskSelection.Limit > 0 {
+		fmt.Fprintf(&b, "- Limit: `%d`\n", c.TaskSelection.Limit)
+	}
+	fmt.Fprintf(&b, "- Tasks: `%d`\n", len(c.TaskSelection.TaskIDs))
+	fmt.Fprintf(&b, "- Same task ids: `%t`\n\n", c.TaskSelection.SameTaskIDs)
+
+	fmt.Fprintf(&b, "| Arm | Harness | Model | Predictions | Eval run id |\n")
+	fmt.Fprintf(&b, "|---|---|---|---|---|\n")
+	for _, arm := range c.Arms {
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | `%s` |\n", arm.Name, arm.Harness, arm.Model, arm.PredictionsPath, arm.EvalRunID)
+	}
+	fmt.Fprintf(&b, "\n## Gates\n\n")
+	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
+	fmt.Fprintf(&b, "|---|:---:|---|\n")
+	for _, gate := range c.Gates {
+		mark := "no"
+		if gate.OK {
+			mark = "yes"
+		}
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", gate.Name, mark, gate.Detail)
+	}
+	fmt.Fprintf(&b, "\n## Required Before Any Result Claim\n\n")
+	for _, req := range c.RequiredBeforeClaim {
+		fmt.Fprintf(&b, "- %s\n", req)
+	}
+	return b.String()
+}
+
+func smokeTaskSelection(d *Dataset) ([]string, map[string]int) {
+	if d == nil {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(d.Instances))
+	dist := map[string]int{}
+	for _, in := range d.Instances {
+		ids = append(ids, in.InstanceID)
+		diff := in.Difficulty
+		if diff == "" {
+			diff = "unknown"
+		}
+		dist[diff]++
+	}
+	sort.Strings(ids)
+	return ids, dist
+}
+
+func smokeStatus(gates []SmokeGate) string {
+	requiredOK := true
+	localGraderOK := true
+	for _, gate := range gates {
+		if gate.Name == "official_grader_local" {
+			localGraderOK = gate.OK
+			continue
+		}
+		if !gate.OK {
+			requiredOK = false
+		}
+	}
+	if !requiredOK {
+		return "INCOMPLETE_CONTRACT"
+	}
+	if !localGraderOK {
+		return "READY_FOR_REMOTE_GRADING"
+	}
+	return "READY_FOR_LOCAL_GRADING"
+}
+
+func joinPath(dir, leaf string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return leaf
+	}
+	return strings.TrimRight(strings.ReplaceAll(dir, "\\", "/"), "/") + "/" + leaf
+}

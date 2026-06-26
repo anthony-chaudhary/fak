@@ -49,6 +49,8 @@ func cmdSwebench(argv []string) {
 		cmdSwebenchCompare(rest)
 	case "compare-runners":
 		cmdSwebenchCompareRunners(rest)
+	case "smoke-contract":
+		cmdSwebenchSmokeContract(rest)
 	case "sota-snapshot":
 		os.Exit(runSwebenchSotaSnapshot(os.Stdout, os.Stderr, rest))
 	case "-h", "--help", "help":
@@ -100,6 +102,12 @@ usage:
         [--max-steps N] [--timeout DURATION] [--gateway ADDR] [--model MODEL]
         Head-to-head comparison between multiple agent runners (fleet, deepswe, mock).
         Generates comparison.json + comparison.md with resolve rates and per-runner stats.
+
+  fak swebench smoke-contract [--difficulty FILE | --dataset FILE] [--filter FILTER]
+        [--model MODEL] [--raw-command CMD] [--gateway ADDR] [--out FILE] [--md FILE]
+        Emit the Opus-class raw-vs-fak pre-run contract: fixed task ids, same model,
+        raw/fak arm commands, official grader commands, and the gates that must pass
+        before any SWE-bench result claim is allowed.
 
 the metrics most relevant to us, on the real SWE-bench Verified set:
   A/C  net prefill work-elimination vs the naive re-prefill-every-turn harness
@@ -230,6 +238,122 @@ func sortedCountsSWE(m map[string]int) string {
 		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))
 	}
 	return strings.Join(parts, "  ")
+}
+
+// cmdSwebenchSmokeContract writes the pre-run contract for the Opus-class
+// SWE-bench smoke. It intentionally produces no solve-rate claim; it fixes the
+// task ids and commands that must later be run and graded by the official
+// harness.
+func cmdSwebenchSmokeContract(argv []string) {
+	fs := flag.NewFlagSet("swebench smoke-contract", flag.ExitOnError)
+	difficulty := fs.String("difficulty", "", "bench difficulty map; default: the committed "+swebenchSampleDifficulty+" sample")
+	dataset := fs.String("dataset", "", "full SWE-bench Verified dataset (JSONL or JSON array)")
+	filter := fs.String("filter", "smoke", "instance filter: smoke (~5), l3 (~50), full (all selected)")
+	limit := fs.Int("limit", 0, "cap to the first N selected instances (0 = filter default)")
+	model := fs.String("model", "claude-opus-4-8", "Opus-class model id shared by raw and fak arms")
+	rawCommand := fs.String("raw-command", "", "copy-pasteable raw-arm command from the benchmark-native/raw scaffold")
+	gateway := fs.String("gateway", "localhost:8080", "fak gateway address for the fak arm")
+	rawOutput := fs.String("raw-output", "experiments/agent-live/swebench-opus-raw-smoke-20260626", "raw arm output directory")
+	fakOutput := fs.String("fak-output", "experiments/agent-live/swebench-opus-fak-smoke-20260626", "fak arm output directory")
+	maxWorkers := fs.Int("max-workers", 4, "official SWE-bench eval workers")
+	python := fs.String("python", "", "python interpreter to probe for swebench harness")
+	out := fs.String("out", "", "write the contract JSON here (default stdout)")
+	md := fs.String("md", "", "write the contract markdown here")
+	_ = fs.Parse(argv)
+
+	diff, ds := *difficulty, *dataset
+	if diff == "" && ds == "" {
+		diff = swebenchSampleDifficulty
+		fmt.Fprintf(os.Stderr, "fak swebench smoke-contract: no --difficulty/--dataset; using committed sample %s.\n", diff)
+	}
+	d, srcDesc, err := loadSwebenchSource(diff, ds)
+	must(err)
+	selected := selectSwebenchSmokeTasks(d, *filter, *limit)
+	fakCommand := buildSwebenchFakSmokeCommand(diff, ds, *filter, *limit, *gateway, *model, *fakOutput)
+	contract := swebench.BuildOpusSmokeContract(swebench.OpusSmokeContractInput{
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		Dataset:        selected,
+		Source:         srcDesc,
+		Filter:         *filter,
+		Limit:          *limit,
+		Model:          *model,
+		RawCommand:     *rawCommand,
+		FakCommand:     fakCommand,
+		RawOutputDir:   *rawOutput,
+		FakOutputDir:   *fakOutput,
+		MaxWorkers:     *maxWorkers,
+		EvalCapability: swebench.DetectEvalCapability(*python),
+	})
+	if *out != "" {
+		must(os.WriteFile(*out, jsonIndent(contract), 0o644))
+	} else {
+		fmt.Println(string(jsonIndent(contract)))
+	}
+	if *md != "" {
+		must(os.WriteFile(*md, []byte(swebench.RenderOpusSmokeContractMarkdown(contract)), 0o644))
+	}
+	fmt.Fprintf(os.Stderr, "\n== fak swebench smoke-contract ==\n")
+	fmt.Fprintf(os.Stderr, "status       : %s\n", contract.Status)
+	fmt.Fprintf(os.Stderr, "tasks        : %d\n", len(contract.TaskSelection.TaskIDs))
+	fmt.Fprintf(os.Stderr, "model        : %s\n", *model)
+	fmt.Fprintf(os.Stderr, "grader       : runnable=%t", contract.OfficialGrader.Runnable)
+	if contract.OfficialGrader.Reason != "" {
+		fmt.Fprintf(os.Stderr, " (%s)", contract.OfficialGrader.Reason)
+	}
+	fmt.Fprintln(os.Stderr)
+	if *out != "" {
+		fmt.Fprintf(os.Stderr, "json         : %s\n", *out)
+	}
+	if *md != "" {
+		fmt.Fprintf(os.Stderr, "markdown     : %s\n", *md)
+	}
+}
+
+func selectSwebenchSmokeTasks(d *swebench.Dataset, filter string, limit int) *swebench.Dataset {
+	n := limit
+	if n <= 0 {
+		switch filter {
+		case "smoke":
+			n = 5
+		case "l3":
+			n = 50
+		}
+	}
+	if n > 0 {
+		return d.Limit(n)
+	}
+	return d
+}
+
+func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int, gateway, model, output string) string {
+	args := []string{
+		"go run ./cmd/fak swebench run",
+		"--agent fleet",
+		"--filter " + filter,
+	}
+	if difficulty != "" {
+		args = append(args, "--difficulty "+quoteSwebenchArg(difficulty))
+	}
+	if dataset != "" {
+		args = append(args, "--dataset "+quoteSwebenchArg(dataset))
+	}
+	if limit > 0 {
+		args = append(args, fmt.Sprintf("--limit %d", limit))
+	}
+	args = append(args,
+		"--gateway "+quoteSwebenchArg(gateway),
+		"--model "+quoteSwebenchArg(model),
+		"--preds-only",
+		"--output "+quoteSwebenchArg(output),
+	)
+	return strings.Join(args, " ")
+}
+
+func quoteSwebenchArg(s string) string {
+	if s == "" || strings.ContainsAny(s, " \t`\"'") {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
 }
 
 // fak swebench eval — grade a predictions file into the resolve-rate via the

@@ -69,7 +69,9 @@ gate: PASS
 
 ## Packet B: GLM-5.2 over vLLM live agentic battery
 
-Status: `hardware-gated`.
+Status: `run-contract-shipped`; the actual Opus raw/fak run is still gated on
+the raw scaffold command, the live Opus gateway, and official SWE-bench grader
+output.
 
 Why second: this is the existing GLM-5.2 open-weight path. It compares a raw
 vLLM GLM-5.2 endpoint against the same endpoint behind `fak serve`, then adds a
@@ -126,6 +128,23 @@ Prerequisite:
   such as `claude-opus-4-8`.
 - `FAK_SWEBENCH_DIFFICULTY` points to the official Verified difficulty map, or
   `--dataset` points to a full Verified export.
+
+Current pre-run contract witness:
+
+```powershell
+go run ./cmd/fak swebench smoke-contract `
+  --difficulty testdata/swebench_smoke.json `
+  --model claude-opus-4-8 `
+  --out experiments/agent-live/swebench-opus-smoke-contract-20260626.json `
+  --md experiments/agent-live/swebench-opus-smoke-contract-20260626.md
+```
+
+This fixes the five selected smoke task ids, the shared Opus-class model id, the
+fak arm command, and the exact official-grader commands for both arms. The
+checked-in contract is intentionally `INCOMPLETE_CONTRACT`: `raw_arm_command` is
+not supplied yet, and this box does not have the `swebench` Python harness
+importable. `result_claim_allowed` remains `false` until raw and fak
+`predictions.json` files exist and both are graded by the official harness.
 
 Smoke command:
 
