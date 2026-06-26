@@ -61,6 +61,25 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"write into .ssh refused", "Write", `{"file_path":".ssh/authorized_keys","content":"x"}`, abi.VerdictDeny},
 		{"unlisted tool fails closed", "exfiltrate_secrets", `{}`, abi.VerdictDeny},
 
+		// The host harness's orchestration / deferred-tool-loading / read-only-MCP surface must
+		// be ADMITTED, or `fak guard -- claude` DEFAULT_DENYs the agent's own task system,
+		// subagent spawning, plan mode, and tool-schema loading — the dominant friction the
+		// historical-session replay flagged (align_policy_with_real_tool_shapes). These are safe
+		// because a spawned subagent's real tool calls are re-adjudicated through this same floor.
+		{"ToolSearch allowed (deferred-tool loading is load-bearing)", "ToolSearch", `{"query":"select:WebFetch"}`, abi.VerdictAllow},
+		{"Agent allowed (subagent calls re-adjudicated downstream)", "Agent", `{"subagent_type":"Explore","prompt":"map the floor"}`, abi.VerdictAllow},
+		{"TaskCreate allowed", "TaskCreate", `{"description":"x"}`, abi.VerdictAllow},
+		{"TaskUpdate allowed", "TaskUpdate", `{"task_id":"t1","status":"in_progress"}`, abi.VerdictAllow},
+		{"TaskOutput allowed", "TaskOutput", `{"task_id":"t1"}`, abi.VerdictAllow},
+		{"SendMessage allowed", "SendMessage", `{"id":"a1","message":"continue"}`, abi.VerdictAllow},
+		{"EnterPlanMode allowed", "EnterPlanMode", `{}`, abi.VerdictAllow},
+		{"Monitor allowed", "Monitor", `{}`, abi.VerdictAllow},
+		{"ReadMcpResourceTool allowed (read-only)", "ReadMcpResourceTool", `{"uri":"x"}`, abi.VerdictAllow},
+		// Admitting orchestration does NOT widen the danger floor: a still-unlisted tool fails
+		// closed, and a destructive Bash arg is still refused even though Bash is allowed.
+		{"unlisted orchestration-shaped tool still fails closed", "RemoteTrigger", `{"target":"prod"}`, abi.VerdictDeny},
+		{"danger arg still denied after widening the floor", "Bash", `{"command":"rm -rf /important"}`, abi.VerdictDeny},
+
 		// OpenCode (lowercase tool names; camelCase filePath) — the same floor must hold.
 		{"opencode bash rm -rf denied (case-insensitive arg rule)", "bash", `{"command":"rm -rf /tmp/x"}`, abi.VerdictDeny},
 		{"opencode bash sudo denied", "bash", `{"command":"sudo rm"}`, abi.VerdictDeny},

@@ -38,6 +38,18 @@ import (
 // that escape the working tree, and writes into credential/SSH/secret paths. Print or
 // fork it with `fak guard --dump-policy`.
 //
+// The allow-list also admits the host harness's ORCHESTRATION + deferred-tool-loading +
+// read-only-MCP surface (Agent/Task*/SendMessage/Monitor/ScheduleWakeup/EnterPlanMode/
+// AskUserQuestion/ToolSearch/Read*McpResource*). These are NOT capability grants: a
+// subagent the floor lets the agent SPAWN makes its own tool calls back through this same
+// gateway, so every real effect is re-adjudicated downstream — the floor is unchanged, the
+// agent just keeps its task/subagent/plan plumbing. ToolSearch in particular is load-bearing
+// on harnesses that defer tool schemas: deny it and the agent cannot even reach WebFetch /
+// WebSearch / MCP tools, so a bare floor silently bricks the wrapped agent. This was the
+// dominant friction a historical-session replay surfaced ("align_policy_with_real_tool_shapes"
+// across every audited Claude Code session: the floor was DEFAULT_DENYing Task*/SendMessage/
+// ToolSearch — the harness's own tools). The genuine-danger classes above are untouched.
+//
 //go:embed guard-default-policy.json
 var guardDefaultPolicyJSON []byte
 
