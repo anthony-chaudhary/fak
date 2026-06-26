@@ -16,6 +16,8 @@ go run ./cmd/tokendemo -print
 go run ./cmd/tokendemo -print -suite reread-same-file
 go run ./cmd/tokendemo -timing
 go run ./cmd/tokendemo -timing-json
+go run ./cmd/tokendemo -served
+go run ./cmd/tokendemo -served-json
 go run ./cmd/tokendemo -parallel
 go run ./cmd/tokendemo -parallel-json
 go run ./cmd/tokendemo -json
@@ -42,6 +44,12 @@ Use `-timing` for the concrete cache proof: the raw loop calls the local tool en
 for every read, while the fak loop runs the same trace through `kernel.Syscall` with
 the vDSO enabled. Repeated reads show `fak_source=vdso_tier2`,
 `fak_engine_call_delta=0`, and a per-call latency next to the raw engine time.
+
+Use `-served` for the served-boundary proof. It starts the gateway handler, repeats a
+raw `os.ReadFile` baseline, then sends the same `Read` through HTTP
+`POST /v1/fak/syscall` and MCP `fak_syscall` against the real `fakread` filesystem
+engine. The first served call reaches `fakread`; repeats show `served_by=vdso`,
+`tier=2`, and `/metrics` rows for engine calls, vDSO hits, HTTP, and MCP requests.
 
 Use `-parallel` for a larger hot-cache proof. It prewarms one read per hot file, then
 runs hundreds of parallel repeated reads. The output reports raw engine calls, fak
