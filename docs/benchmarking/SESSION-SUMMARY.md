@@ -93,6 +93,13 @@ python tools/run_sweep.py --list
 
 ## GLM 5.2 Path Summary
 
+> **Current direction (#917).** Native 753B GLM-5.2 serving on the pure fak engine is the
+> active, committed track — see
+> [`native-753b-track-staged-plan.md`](../notes/native-753b-track-staged-plan.md). The
+> "Recommended Path" below (proxy → external SGLang/vLLM engine) is the mid-June 2026
+> snapshot, retained as the *parallel* external-engine deliverable, not the only direction;
+> read the "Hardware Gated" framing as that snapshot, not the current posture.
+
 **Current State:** Tiny-oracle reference shipped; full 753B serving witness requires a multi-GPU node
 
 ### Shipped

@@ -133,6 +133,16 @@ both_completed: true
 
 ## GLM 5.2 Status
 
+> **Current direction (#917).** Native 753B GLM-5.2 serving on the pure fak engine *is* the
+> active, committed track; the staged plan is the single current direction — see
+> [`native-753b-track-staged-plan.md`](../notes/native-753b-track-staged-plan.md). The
+> "Recommended Path" and "Hardware-Gated" framing below is the mid-June 2026 snapshot
+> (external-engine / proxy first), written before the loader, quantized device GEMM, and
+> `--cpu-offload-experts` rungs landed on `origin/main`; read it as that snapshot, not the
+> current posture. The external-engine serving track is a separate, parallel deliverable
+> ([#413 runbook](../serving/glm52-full-size-serving-witness.md)), not a replacement for
+> native serving.
+
 ### Current State
 - **Tiny-oracle reference:** Shipped (commit `66ccb27`)
 - **Full 753B serving:** Hardware-gated (needs 8×80 GB H100/A100)
@@ -156,6 +166,12 @@ both_completed: true
 3. **Phase 2:** KV-coherence via `abi.RegisterKVBackend` seam
 
 ### Staged Documents (ready to commit)
+
+> These are private mid-June 2026 fleet docs, absent from this public repo and all its
+> history; `GLM-5.2-ON-FAK-PLAN-2026-06-19.md` is one of the three #917 cites and its
+> out-of-scope posture is superseded by the staged plan above. Do not treat this list as a
+> pointer to a reachable file.
+
 - `GLM-5.2-ON-FAK-PLAN-2026-06-19.md`
 - `GLM52-IN-KERNEL-ARCH-2026-06-19.md`
 - `GLM52-HOSTED-CACHE-COHERENCE-2026-06-19.md`
