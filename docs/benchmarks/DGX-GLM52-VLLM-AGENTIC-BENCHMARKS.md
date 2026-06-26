@@ -16,7 +16,7 @@ There are two different comparisons, and the reports must keep them separate:
 
 | axis | fair comparison | required artifact |
 |---|---|---|
-| **Gateway tax / completion** | GLM-5.2 served by **raw vLLM** vs the same raw vLLM endpoint behind `fak serve` | `experiments/vllm/adjudication-tax-witness.json`; SWE-bench `COMPARE-PREFLIGHT.json` + `compare.json` |
+| **Gateway tax / completion** | GLM-5.2 served by **raw vLLM** vs the same raw vLLM endpoint behind `fak serve` | `experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json`; `experiments/vllm/adjudication-tax-witness.json`; SWE-bench `COMPARE-PREFLIGHT.json` + `compare.json` |
 | **Native fak kernel vs stock engines** | same GLM-family checkpoint, same hardware, same precision/context/batch, fak native vs vLLM/SGLang/llama.cpp | future B2/B3 artifacts; the current `glmdsatput` numbers are synthetic kernel-cost only |
 
 Do not compare fak's synthetic GLM kernel tok/s directly to a full-size vLLM
@@ -27,13 +27,14 @@ native fak GLM numbers are reduced-scale device-kernel cost.
 
 | rung | benchmark | question answered | command / artifact |
 |---|---|---|---|
-| 0 | readiness | can this node serve GLM-5.2 with vLLM at all? | `tools/glm52_serve_preflight.py` -> `preflight.json` |
-| 1 | serving witness | does GLM-5.2 answer direct, through fak, and quarantine a poisoned tool result? | `tools/glm52_serving_witness.py` -> `experiments/glm52/full-size-serving-witness.json` |
-| 2 | vLLM adjudication tax | what latency/decode tax does `fak serve` add over raw vLLM? | `tools/vllm_tax_witness.py` -> `experiments/vllm/adjudication-tax-witness.json` |
-| 3 | SWE-bench Verified 20 | does the agent finish/resolve the same 20 Verified tasks raw-vLLM vs fak-gateway? | `tools/dgx_swebench_compare.py --preflight-only`, then `--verified-count 20` -> `COMPARE-PREFLIGHT.json` + `compare.json` + `COMPARE.md` + `DONE.rc` |
-| 4 | fak-native agentic floors | what are the deterministic turn-tax/session/fanout/cache-reuse floors independent of live model variance? | `fak swebench compare`, `turntax`, `sessionbench`, `fanbench`, `radixbench` artifacts |
+| 0 | contract | is the raw-vLLM/fak-gateway comparison identity pinned before any result claim? | `tools/glm52_vllm_agentic_battery.py --contract-only` -> `raw-vllm-vs-fak-gateway-contract.json` |
+| 1 | readiness | can this node serve GLM-5.2 with vLLM at all? | `tools/glm52_serve_preflight.py` -> `preflight.json` |
+| 2 | serving witness | does GLM-5.2 answer direct, through fak, and quarantine a poisoned tool result? | `tools/glm52_serving_witness.py` -> `experiments/glm52/full-size-serving-witness.json` |
+| 3 | vLLM adjudication tax | what latency/decode tax does `fak serve` add over raw vLLM? | `tools/vllm_tax_witness.py` -> `experiments/vllm/adjudication-tax-witness.json` |
+| 4 | SWE-bench Verified 20 | does the agent finish/resolve the same 20 Verified tasks raw-vLLM vs fak-gateway? | `tools/dgx_swebench_compare.py --preflight-only`, then `--verified-count 20` -> `COMPARE-PREFLIGHT.json` + `compare.json` + `COMPARE.md` + `DONE.rc` |
+| 5 | fak-native agentic floors | what are the deterministic turn-tax/session/fanout/cache-reuse floors independent of live model variance? | `fak swebench compare`, `turntax`, `sessionbench`, `fanbench`, `radixbench` artifacts |
 
-Rungs 0-3 are the GLM-5.2/vLLM live-serving comparison. Rung 4 is the fak-native
+Rungs 0-4 are the GLM-5.2/vLLM live-serving comparison. Rung 5 is the fak-native
 agentic mechanism series; it explains what fak should move, but it is not a raw
 vLLM head-to-head unless the workload also drives the same served endpoint.
 
@@ -58,6 +59,7 @@ python tools/glm52_vllm_agentic_battery.py \
   --out experiments/vllm/glm52-agentic-battery/manifest.json \
   --markdown experiments/vllm/glm52-agentic-battery/MANIFEST.md \
   --script experiments/vllm/glm52-agentic-battery/run.sh \
+  --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json \
   --swebench-difficulty "$FAK_SWEBENCH_DIFFICULTY" \
   --allow-pending
 
@@ -161,6 +163,10 @@ artifact is the resolve-rate evidence.
 The benchmark is complete only when all of these are true:
 
 - `preflight.json` says the serving node is `READY` or `READY_PENDING_INSTALL`.
+- `raw-vllm-vs-fak-gateway-contract.json` records `result_claim_allowed=false`,
+  the two arms (`raw-vllm`, `fak-gateway`), the shared GLM-5.2/vLLM identity,
+  the 20-task selection, budgets/retry policy, required metrics, and result
+  artifact paths.
 - `full-size-serving-witness.json` has `summary.full_size_serving_witness == "PASS"`.
 - `adjudication-tax-witness.json` reports measured raw-vLLM and fak-gateway legs.
 - SWE-bench `COMPARE-PREFLIGHT.json` passes and records `config` plus `runtime`

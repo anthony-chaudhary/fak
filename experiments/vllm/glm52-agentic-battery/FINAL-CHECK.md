@@ -1,16 +1,17 @@
 # GLM-5.2 vLLM Agentic Benchmark Battery
 
-- Generated: `2026-06-25T23:16:24.391619Z`
+- Generated: `2026-06-26T01:32:00.052205Z`
 - Model family: `zai-org/GLM-5.2`
 - Checkpoint: `zai-org/GLM-5.2-FP8` served as `glm-5.2`
 - Raw vLLM endpoint: `http://127.0.0.1:8000/v1`
 - Status: **`PENDING_MEASUREMENT`**
-- Required artifacts passed: `3/10`
+- Required artifacts passed: `4/11`
 
 > Pending measurement: this manifest contains commands and artifact checks, not benchmark results.
 
 | step | kind | artifact | status | detail |
 |---|---|---|---|---|
+| `raw_fak_run_contract` | run-contract | `experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json` | PASS | raw-vLLM/fak-gateway same-model run contract present; result claims disabled |
 | `preflight` | live-readiness | `experiments/vllm/glm52-vllm-preflight.json` | FAIL | node_verdict='BLOCKED_ARCH'; vllm.ready=False; expected GLM-5.2 vLLM READY/PENDING preflight |
 | `serve_raw_vllm` | manual-live-serving | `(manual)` | MANUAL | manual serving step; witnessed by downstream artifacts |
 | `serving_witness` | live-serving | `experiments/glm52/full-size-serving-witness.json` | MISSING | missing |
@@ -24,6 +25,14 @@
 | `radixbench_synthetic` | fak-native-floor | `experiments/vllm/radixbench-synthetic.json` | PASS | radixbench agents hit_rate=0.8666666666666667 |
 
 ## Commands
+
+### raw_fak_run_contract
+
+Record the raw-vLLM vs fak-gateway same-model run contract.
+
+```bash
+python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir /tmp/swe-glm52-vllm-20 --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200
+```
 
 ### preflight
 

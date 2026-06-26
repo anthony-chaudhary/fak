@@ -1,6 +1,6 @@
 {
   "schema": "fak.glm52-vllm-agentic-battery.v1",
-  "generated_at": "2026-06-25T23:16:18.571294Z",
+  "generated_at": "2026-06-26T01:32:00.051843Z",
   "model_family": "zai-org/GLM-5.2",
   "checkpoint_model": "zai-org/GLM-5.2-FP8",
   "served_model_name": "glm-5.2",
@@ -15,7 +15,55 @@
   "swe_run_dir": "/tmp/swe-glm52-vllm-20",
   "swebench_difficulty": "",
   "swebench_dataset": "",
+  "run_contract_artifact": "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json",
   "steps": [
+    {
+      "id": "raw_fak_run_contract",
+      "kind": "run-contract",
+      "description": "Record the raw-vLLM vs fak-gateway same-model run contract.",
+      "required": true,
+      "status": "artifact-pass",
+      "command": {
+        "argv": [
+          "python",
+          "tools/glm52_vllm_agentic_battery.py",
+          "--model",
+          "zai-org/GLM-5.2-FP8",
+          "--served-model-name",
+          "glm-5.2",
+          "--base-url",
+          "http://127.0.0.1:8000/v1",
+          "--context-length",
+          "131072",
+          "--quant",
+          "fp8",
+          "--verified-count",
+          "20",
+          "--tax-count",
+          "8",
+          "--out-dir",
+          "experiments/vllm",
+          "--serving-out-dir",
+          "experiments/glm52",
+          "--swe-run-dir",
+          "/tmp/swe-glm52-vllm-20",
+          "--run-contract",
+          "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json",
+          "--contract-only",
+          "--require-gpu-name",
+          "H200"
+        ],
+        "shell": "python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir /tmp/swe-glm52-vllm-20 --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200"
+      },
+      "primary_artifact": "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json",
+      "artifacts": [
+        "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json"
+      ],
+      "check": "run_contract",
+      "claim_boundary": "Contract only; result_claim_allowed=false until the live artifacts pass.",
+      "artifact_status": "PASS",
+      "artifact_detail": "raw-vLLM/fak-gateway same-model run contract present; result claims disabled"
+    },
     {
       "id": "preflight",
       "kind": "live-readiness",
@@ -379,8 +427,8 @@
   "summary": {
     "complete": false,
     "status": "PENDING_MEASUREMENT",
-    "required_artifacts": 10,
-    "required_passed": 3,
+    "required_artifacts": 11,
+    "required_passed": 4,
     "required_failed": [
       "preflight"
     ],

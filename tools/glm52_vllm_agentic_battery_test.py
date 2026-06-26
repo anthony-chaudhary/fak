@@ -226,6 +226,61 @@ class ManifestTest(unittest.TestCase):
         self.assertIn("swebench_compare_preflight", report["summary"]["required_missing"])
         self.assertIn("swebench_verified_20", report["summary"]["required_missing"])
 
+    def test_run_contract_is_written_and_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            contract = root / "out" / "glm52-agentic-battery" / "raw-vllm-vs-fak-gateway-contract.json"
+            rc = bat.main(base_args(root) + [
+                "--run-contract", str(contract),
+                "--contract-only",
+            ])
+
+            self.assertEqual(rc, 0)
+            doc = json.loads(contract.read_text(encoding="utf-8"))
+            parser = bat.argparse.ArgumentParser()
+            bat.add_common_args(parser)
+            parsed = parser.parse_args(base_args(root) + ["--run-contract", str(contract)])
+            report = bat.build_report(parsed)
+            steps = {row["id"]: row for row in report["steps"]}
+            final_cmd = bat.final_gate_command(report)
+
+        self.assertEqual(doc["schema"], bat.RUN_CONTRACT_SCHEMA)
+        self.assertEqual(doc["status"], "PENDING_MEASUREMENT")
+        self.assertFalse(doc["result_claim_allowed"])
+        self.assertEqual(
+            {row["id"] for row in doc["arms"]},
+            {"raw-vllm", "fak-gateway"},
+        )
+        self.assertEqual(doc["shared_config"]["checkpoint_model"], "zai-org/GLM-5.2-FP8")
+        self.assertEqual(doc["shared_config"]["selection"], "slice 0:20")
+        self.assertEqual(doc["shared_config"]["budget"]["implicit_retries"], 0)
+        self.assertIn("tools/dgx_swebench_compare.py", doc["commands"]["compare_run"])
+        self.assertEqual(steps["raw_fak_run_contract"]["artifact_status"], "PASS")
+        self.assertIn("--run-contract", final_cmd)
+        self.assertIn(str(contract).replace("\\", "/"), final_cmd)
+        self.assertIn(
+            "result_claim_allowed=false",
+            steps["raw_fak_run_contract"]["claim_boundary"],
+        )
+
+    def test_main_writes_contract_before_manifest_check(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = root / "manifest.json"
+            contract = root / "contract.json"
+            rc = bat.main(base_args(root) + [
+                "--out", str(manifest),
+                "--run-contract", str(contract),
+                "--allow-pending",
+            ])
+
+            self.assertEqual(rc, 0)
+            report = json.loads(manifest.read_text(encoding="utf-8"))
+            steps = {row["id"]: row for row in report["steps"]}
+
+        self.assertEqual(report["run_contract_artifact"], str(contract).replace("\\", "/"))
+        self.assertEqual(steps["raw_fak_run_contract"]["artifact_status"], "PASS")
+
     def test_artifact_checker_marks_complete_for_minimal_passing_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

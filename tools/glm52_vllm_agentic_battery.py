@@ -30,10 +30,12 @@ DEFAULT_MODEL = "zai-org/GLM-5.2"
 DEFAULT_CHECKPOINT_MODEL = "zai-org/GLM-5.2-FP8"
 DEFAULT_SERVED_MODEL = "glm-5.2"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
+DEFAULT_GATEWAY_BASE_URL = "http://127.0.0.1:8080/v1"
 DEFAULT_OUT_DIR = Path("experiments/vllm")
 DEFAULT_SERVING_OUT_DIR = Path("experiments/glm52")
 DEFAULT_SWE_RUN_DIR = Path("/tmp/swe-glm52-vllm-20")
 REQUIRED_PREFLIGHT_VERDICTS = {"READY", "READY_PENDING_INSTALL"}
+RUN_CONTRACT_SCHEMA = "fak.glm52-vllm-raw-fak-run-contract.v1"
 
 
 def utc_now() -> str:
@@ -92,6 +94,188 @@ def expectation(args: argparse.Namespace) -> dict[str, Any]:
         "verified_count": args.verified_count,
         "require_gpu_name": args.require_gpu_name,
     }
+
+
+def default_run_contract_path(out_dir: Path) -> Path:
+    return out_dir / "glm52-agentic-battery" / "raw-vllm-vs-fak-gateway-contract.json"
+
+
+def compare_budget() -> dict[str, Any]:
+    return {
+        "workers": 1,
+        "max_iterations": 0,
+        "agent_timeout_sec": 3600,
+        "grade_workers": 2,
+        "grade_timeout_sec": 2400,
+        "implicit_retries": 0,
+    }
+
+
+def build_run_contract(args: argparse.Namespace) -> dict[str, Any]:
+    p = paths(args.out_dir, args.serving_out_dir, args.swe_run_dir)
+    selection = f"slice 0:{args.verified_count}"
+    raw_base = norm_url(args.base_url)
+    gateway_base = DEFAULT_GATEWAY_BASE_URL
+    swe_common = [
+        args.python, "tools/dgx_swebench_compare.py",
+        "--engine", "vllm",
+        "--model", args.model,
+        "--served-model-name", args.served_model_name,
+        "--raw-base-url", args.base_url,
+        "--verified-count", str(args.verified_count),
+        "--skip-engine-serve",
+        "--require-tool-calls",
+        "--require-grade",
+        "--run-dir", slash(args.swe_run_dir),
+    ]
+    if args.require_gpu_name:
+        swe_common += ["--require-gpu-name", args.require_gpu_name]
+    return {
+        "schema": RUN_CONTRACT_SCHEMA,
+        "generated_at": utc_now(),
+        "status": "PENDING_MEASUREMENT",
+        "result_claim_allowed": False,
+        "result_claim_allowed_when": [
+            "preflight artifact passes",
+            "raw-vLLM endpoint and fak-gateway endpoint both pass tool-call probes",
+            "both arms run the same selected SWE-bench instance IDs",
+            "official SWE-bench harness grades both arms",
+            "DONE.rc is 0",
+            "GLM-5.2/vLLM battery final-check status is COMPLETE",
+        ],
+        "shared_config": {
+            "checkpoint_model": args.model,
+            "served_model_name": args.served_model_name,
+            "engine": "vllm",
+            "selection": selection,
+            "verified_count": args.verified_count,
+            "same_task_ids_required": True,
+            "tool_calls_required": True,
+            "official_grade_required": True,
+            "raw_vllm_base_url": raw_base,
+            "gateway_base_url": gateway_base,
+            "context_length": args.context_length,
+            "quant": args.quant,
+            "require_gpu_name": args.require_gpu_name,
+            "tax_count": args.tax_count,
+            "budget": compare_budget(),
+        },
+        "arms": [
+            {
+                "id": "raw-vllm",
+                "model": args.served_model_name,
+                "endpoint": raw_base,
+                "engine": "vllm",
+                "request_path": "direct OpenAI-compatible /v1 endpoint",
+            },
+            {
+                "id": "fak-gateway",
+                "model": args.served_model_name,
+                "endpoint": gateway_base,
+                "upstream": raw_base,
+                "engine": "fak serve fronting the same raw vLLM endpoint",
+                "request_path": "OpenAI-compatible /v1 through fak adjudication",
+            },
+        ],
+        "metrics_required": [
+            "completed",
+            "resolved",
+            "resolve_pct",
+            "agent_sec",
+            "grade_sec",
+            "patch_bytes",
+            "tool_call_probes.tool_calls",
+            "tool_call_probes.completion_tokens",
+            "vllm_tax.summary.latency_tax",
+            "vllm_tax.summary.decode_tps_tax",
+        ],
+        "required_artifacts": {
+            "serving_witness": slash(p["serving_json"]),
+            "vllm_tax": slash(p["tax_json"]),
+            "compare_preflight": slash(p["swe_compare_preflight"]),
+            "compare_result": slash(p["swe_compare_json"]),
+            "compare_markdown": slash(p["swe_compare_md"]),
+            "done_rc": slash(p["swe_compare_done"]),
+        },
+        "commands": {
+            "compare_preflight": shell_join(swe_common + ["--preflight-only"]),
+            "compare_run": shell_join(swe_common),
+        },
+        "honesty": (
+            "This is a run contract, not a benchmark result. It records the identity, "
+            "arms, budgets, required metrics, and artifact boundaries for the future "
+            "live GLM-5.2/vLLM comparison."
+        ),
+    }
+
+
+def check_run_contract(path: Path, expected: dict[str, Any]) -> tuple[bool, str]:
+    doc, detail = read_json(path)
+    if doc is None:
+        return False, detail
+    problems: list[str] = []
+    if doc.get("schema") != RUN_CONTRACT_SCHEMA:
+        problems.append(f"schema={doc.get('schema')!r}")
+    if doc.get("status") != "PENDING_MEASUREMENT":
+        problems.append(f"status={doc.get('status')!r}")
+    if doc.get("result_claim_allowed") is not False:
+        problems.append(f"result_claim_allowed={doc.get('result_claim_allowed')!r}")
+    shared = doc.get("shared_config")
+    if not isinstance(shared, dict):
+        problems.append("shared_config missing")
+        shared = {}
+    else:
+        checks = {
+            "checkpoint_model": expected["checkpoint_model"],
+            "served_model_name": expected["served_model_name"],
+            "engine": "vllm",
+            "selection": f"slice 0:{expected['verified_count']}",
+            "verified_count": expected["verified_count"],
+            "raw_vllm_base_url": expected["base_url"],
+            "gateway_base_url": DEFAULT_GATEWAY_BASE_URL,
+            "context_length": expected["context_length"],
+            "quant": expected["quant"],
+            "require_gpu_name": expected["require_gpu_name"],
+        }
+        for key, want in checks.items():
+            if shared.get(key) != want:
+                problems.append(f"shared_config.{key}={shared.get(key)!r}")
+        for key in ("same_task_ids_required", "tool_calls_required", "official_grade_required"):
+            if shared.get(key) is not True:
+                problems.append(f"shared_config.{key}={shared.get(key)!r}")
+        budget = shared.get("budget") if isinstance(shared.get("budget"), dict) else {}
+        if budget.get("implicit_retries") != 0:
+            problems.append(f"budget.implicit_retries={budget.get('implicit_retries')!r}")
+    arms = doc.get("arms") if isinstance(doc.get("arms"), list) else []
+    by_arm = {row.get("id"): row for row in arms if isinstance(row, dict)}
+    raw = by_arm.get("raw-vllm")
+    gateway = by_arm.get("fak-gateway")
+    if not raw:
+        problems.append("missing raw-vllm arm")
+    else:
+        if raw.get("endpoint") != expected["base_url"]:
+            problems.append(f"raw-vllm.endpoint={raw.get('endpoint')!r}")
+        if raw.get("model") != expected["served_model_name"]:
+            problems.append(f"raw-vllm.model={raw.get('model')!r}")
+    if not gateway:
+        problems.append("missing fak-gateway arm")
+    else:
+        if gateway.get("endpoint") != DEFAULT_GATEWAY_BASE_URL:
+            problems.append(f"fak-gateway.endpoint={gateway.get('endpoint')!r}")
+        if gateway.get("upstream") != expected["base_url"]:
+            problems.append(f"fak-gateway.upstream={gateway.get('upstream')!r}")
+        if gateway.get("model") != expected["served_model_name"]:
+            problems.append(f"fak-gateway.model={gateway.get('model')!r}")
+    required = doc.get("required_artifacts") if isinstance(doc.get("required_artifacts"), dict) else {}
+    for key in ("compare_preflight", "compare_result", "done_rc"):
+        if not isinstance(required.get(key), str) or not required.get(key):
+            problems.append(f"required_artifacts.{key} missing")
+    commands = doc.get("commands") if isinstance(doc.get("commands"), dict) else {}
+    if "tools/dgx_swebench_compare.py" not in str(commands.get("compare_run", "")):
+        problems.append("commands.compare_run missing dgx_swebench_compare.py")
+    if problems:
+        return False, "; ".join(problems) + "; expected raw-vLLM/fak-gateway run contract"
+    return True, "raw-vLLM/fak-gateway same-model run contract present; result claims disabled"
 
 
 def check_preflight(path: Path, expected: dict[str, Any]) -> tuple[bool, str]:
@@ -515,6 +699,8 @@ def artifact_check(step: dict[str, Any], expected: dict[str, Any]) -> tuple[str,
         ok, detail = check_fanbench_floor(path)
     elif kind == "radixbench_floor":
         ok, detail = check_radixbench_floor(path)
+    elif kind == "run_contract":
+        ok, detail = check_run_contract(path, expected)
     elif kind == "json_present":
         ok, detail = json_present(path)
     else:
@@ -546,6 +732,10 @@ def add_common_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--markdown", type=Path, default=None, help="write Markdown run sheet here")
     ap.add_argument("--script", type=Path, default=None,
                     help="write a bash runner for the planned benchmark battery")
+    ap.add_argument("--run-contract", type=Path, default=None,
+                    help="write and check the standalone raw-vLLM/fak-gateway run contract")
+    ap.add_argument("--contract-only", action="store_true",
+                    help="write --run-contract and exit without emitting the full manifest")
     ap.add_argument("--authority-draft", type=Path, default=None,
                     help="write a BENCHMARK-AUTHORITY.md draft entry; requires COMPLETE artifacts")
     ap.add_argument("--allow-pending", action="store_true",
@@ -607,6 +797,25 @@ def step(
 
 def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
     p = paths(args.out_dir, args.serving_out_dir, args.swe_run_dir)
+    run_contract = args.run_contract or default_run_contract_path(args.out_dir)
+
+    contract_cmd = [
+        args.python, "tools/glm52_vllm_agentic_battery.py",
+        "--model", args.model,
+        "--served-model-name", args.served_model_name,
+        "--base-url", args.base_url,
+        "--context-length", str(args.context_length),
+        "--quant", args.quant,
+        "--verified-count", str(args.verified_count),
+        "--tax-count", str(args.tax_count),
+        "--out-dir", slash(args.out_dir),
+        "--serving-out-dir", slash(args.serving_out_dir),
+        "--swe-run-dir", slash(args.swe_run_dir),
+        "--run-contract", slash(run_contract),
+        "--contract-only",
+    ]
+    if args.require_gpu_name:
+        contract_cmd += ["--require-gpu-name", args.require_gpu_name]
 
     preflight = [
         args.python, "tools/glm52_serve_preflight.py",
@@ -673,7 +882,19 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
     if args.swebench_difficulty:
         swe_floor += ["--difficulty", args.swebench_difficulty]
 
-    return [
+    steps: list[dict[str, Any]] = []
+    if args.run_contract:
+        steps.append(step(
+            step_id="raw_fak_run_contract",
+            kind="run-contract",
+            description="Record the raw-vLLM vs fak-gateway same-model run contract.",
+            argv=contract_cmd,
+            primary_artifact=run_contract,
+            artifacts=[run_contract],
+            check="run_contract",
+            notes="Contract only; result_claim_allowed=false until the live artifacts pass.",
+        ))
+    steps += [
         step(
             step_id="preflight",
             kind="live-readiness",
@@ -797,6 +1018,7 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
             notes="Hardware-independent hit-rate evidence; live tok/s needs a separate serving run.",
         ),
     ]
+    return steps
 
 
 def annotate_artifacts(steps: list[dict[str, Any]], expected: dict[str, Any]) -> None:
@@ -857,6 +1079,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "swe_run_dir": slash(args.swe_run_dir),
         "swebench_difficulty": args.swebench_difficulty,
         "swebench_dataset": args.swebench_dataset,
+        "run_contract_artifact": slash(args.run_contract) if args.run_contract else "",
         "steps": steps,
     }
     report["summary"] = summarize(steps)
@@ -1117,6 +1340,8 @@ def final_gate_command(report: dict[str, Any]) -> list[str]:
         cmd += ["--swebench-difficulty", str(report["swebench_difficulty"])]
     if report.get("swebench_dataset"):
         cmd += ["--swebench-dataset", str(report["swebench_dataset"])]
+    if report.get("run_contract_artifact"):
+        cmd += ["--run-contract", str(report["run_contract_artifact"])]
     return cmd
 
 
@@ -1174,6 +1399,15 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     add_common_args(ap)
     args = ap.parse_args(argv)
+
+    if args.contract_only:
+        if not args.run_contract:
+            sys.stderr.write("--contract-only requires --run-contract\n")
+            return 2
+        write_text(args.run_contract, json.dumps(build_run_contract(args), indent=2) + "\n")
+        return 0
+    if args.run_contract:
+        write_text(args.run_contract, json.dumps(build_run_contract(args), indent=2) + "\n")
 
     report = build_report(args)
     payload = json.dumps(report, indent=2) + "\n"
