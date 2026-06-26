@@ -138,7 +138,9 @@ python tools\codex_dos_recent_audit.py `
   --gate-report experiments\agent-live\codex-fak-gate-git-add.json `
   --gate-report experiments\agent-live\codex-fak-gate-git-commit.json `
   --gate-report experiments\agent-live\codex-fak-gate-git-push.json `
-  --max-delegates 0
+  --max-delegates 0 `
+  --out experiments\agent-live\codex-dos-recent-audit.json `
+  --out-debt experiments\agent-live\codex-dos-host-opacity-debt.md
 python tools\guard_mcp_status_audit.py `
   --root . `
   --out experiments\agent-live\guard-mcp-status-audit-2026-06-25.json
