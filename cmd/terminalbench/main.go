@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +23,12 @@ func main() {
 	outPath := flag.String("out", "", "write report JSON to this path (default stdout)")
 	mdPath := flag.String("md", "", "write markdown summary to this path")
 	contractMode := flag.Bool("contract", false, "emit an external official-run contract instead of replaying the local smoke")
+	preflightMode := flag.Bool("preflight", false, "probe this host's readiness for the Terminal-Bench 2.1 raw/fak rehearsal and emit a result-claim-gated preflight artifact")
+	preflightDataset := flag.String("preflight-dataset", "terminal-bench/terminal-bench-2-1", "official Harbor dataset slug the rehearsal targets")
+	probeGateway := flag.Bool("probe-gateway", false, "in --preflight, GET the fak gateway /models endpoint to check the fak arm is reachable")
+	officialContract := flag.String("official-contract", "experiments/agent-live/terminalbench-official-run-contract-20260626.json", "path to the official-run contract this preflight gates")
+	submissionPacket := flag.String("submission-packet", "docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md", "path to the submission-packet index this preflight feeds")
+	issueRef := flag.String("issue", "#900", "campaign issue reference recorded in the preflight artifact")
 	datasetName := flag.String("dataset-name", "terminal-bench-core", "official Terminal-Bench dataset name")
 	datasetVersion := flag.String("dataset-version", "0.1.1", "official Terminal-Bench dataset version")
 	model := flag.String("model", "shared-agent-model", "model id shared by raw and fak arms")
@@ -91,6 +100,71 @@ func main() {
 		fmt.Fprintf(os.Stderr, "dataset      : %s==%s\n", contract.TaskSelection.OfficialDataset, contract.TaskSelection.OfficialDatasetVersion)
 		fmt.Fprintf(os.Stderr, "tasks        : %d candidate %s\n", len(contract.TaskSelection.CandidateTaskIDs), candidateIDLabel(len(contract.TaskSelection.CandidateTaskIDs)))
 		fmt.Fprintf(os.Stderr, "claim        : %t\n", contract.ResultClaimAllowed)
+		if *outPath != "" {
+			fmt.Fprintf(os.Stderr, "json         : %s\n", *outPath)
+		}
+		if *mdPath != "" {
+			fmt.Fprintf(os.Stderr, "markdown     : %s\n", *mdPath)
+		}
+		return
+	}
+	if *preflightMode {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		defer cancel()
+		harborOK, harborVer := probeHarbor(ctx)
+		dockerOK, dockerDetail := probeDocker(ctx)
+		gatewayBase := strings.TrimSpace(*fakGateway)
+		var gwChecked, gwReachable bool
+		if *probeGateway && gatewayBase != "" {
+			gwChecked = true
+			gwReachable, _ = probeGatewayReachable(ctx, gatewayBase)
+		}
+		preflight := terminalbench.BuildRehearsalPreflight(terminalbench.RehearsalPreflightInput{
+			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+			Probe: terminalbench.PreflightProbe{
+				HarborPresent:    harborOK,
+				HarborVersion:    harborVer,
+				DockerEngineUp:   dockerOK,
+				DockerDetail:     dockerDetail,
+				OpenAIKeyPresent: strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "",
+				GatewayChecked:   gwChecked,
+				GatewayReachable: gwReachable,
+				GatewayURL:       gatewayBase,
+			},
+			Dataset:          *preflightDataset,
+			Issue:            *issueRef,
+			OfficialContract: *officialContract,
+			SubmissionPacket: *submissionPacket,
+			CandidateTaskIDs: suiteTaskIDs(suite),
+		})
+		b, err := json.MarshalIndent(preflight, "", "  ")
+		if err != nil {
+			fatal(err)
+		}
+		b = append(b, '\n')
+		if *outPath == "" {
+			if _, err := os.Stdout.Write(b); err != nil {
+				fatal(err)
+			}
+		} else if err := writeFile(*outPath, b); err != nil {
+			fatal(err)
+		}
+		if *mdPath != "" {
+			if err := writeFile(*mdPath, []byte(terminalbench.RenderRehearsalPreflightMarkdown(preflight))); err != nil {
+				fatal(err)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "\n== terminalbench preflight ==\n")
+		fmt.Fprintf(os.Stderr, "dataset      : %s\n", preflight.Dataset)
+		fmt.Fprintf(os.Stderr, "status       : %s\n", preflight.Status)
+		fmt.Fprintf(os.Stderr, "oracle ready : %t\n", preflight.OracleSmokeReady)
+		fmt.Fprintf(os.Stderr, "raw ready    : %t\n", preflight.RawPaidSmokeReady)
+		fmt.Fprintf(os.Stderr, "fak ready    : %t\n", preflight.FakPaidSmokeReady)
+		fmt.Fprintf(os.Stderr, "claim        : %t\n", preflight.ResultClaimAllowed)
+		if len(preflight.BlockingReasons) > 0 {
+			fmt.Fprintf(os.Stderr, "blocked by   : %s\n", strings.Join(preflight.BlockingReasons, ", "))
+		}
+		fmt.Fprintf(os.Stderr, "next action  : %s\n", preflight.NextAction)
 		if *outPath != "" {
 			fmt.Fprintf(os.Stderr, "json         : %s\n", *outPath)
 		}
@@ -188,6 +262,62 @@ func quotePowerShellValue(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func suiteTaskIDs(s terminalbench.Suite) []string {
+	ids := make([]string, 0, len(s.Tasks))
+	for _, task := range s.Tasks {
+		if id := strings.TrimSpace(task.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func probeHarbor(ctx context.Context) (bool, string) {
+	out, err := exec.CommandContext(ctx, "harbor", "--version").CombinedOutput()
+	if err != nil {
+		return false, ""
+	}
+	return true, firstLine(string(out))
+}
+
+func probeDocker(ctx context.Context) (bool, string) {
+	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}").CombinedOutput()
+	if err != nil {
+		return false, "docker engine not reachable"
+	}
+	v := firstLine(string(out))
+	if v == "" {
+		return false, "docker info returned no server version"
+	}
+	return true, "docker engine " + v
+}
+
+func probeGatewayReachable(ctx context.Context, base string) (bool, string) {
+	url := strings.TrimRight(strings.TrimSpace(base), "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err.Error()
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err.Error()
+	}
+	defer resp.Body.Close()
+	// Any HTTP round-trip proves the gateway process is listening, even a 401.
+	return true, fmt.Sprintf("HTTP %d", resp.StatusCode)
+}
+
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func candidateIDLabel(n int) string {

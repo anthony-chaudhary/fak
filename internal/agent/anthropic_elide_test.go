@@ -168,19 +168,19 @@ func TestElideStringContentResult(t *testing.T) {
 	}
 }
 
-// TestElideNestedCacheControlIsProtected is the regression for the cache-prefix-burst /
-// working-set-loss bugs the adversarial review found: a cache_control on a text block NESTED
-// inside a tool_result.content array is a valid Anthropic breakpoint the shrinker can reach, but
-// the SHALLOW detector missed it — so it could anchor PAST it (msg[0]) or shrink it (msg[2]),
-// bursting the cache. The deep detector (messageHasCacheControlForElide) must protect both, while
-// a clean oversized result still elides so the test is not vacuously identity.
-func TestElideNestedCacheControlIsProtected(t *testing.T) {
+// TestElideNestedCacheControlSkipped is the regression for the working-set-loss bug: a
+// cache_control on a text block NESTED inside a tool_result.content array is a valid Anthropic
+// breakpoint the shrinker can reach, but the SHALLOW detector missed it, so the eligible-band
+// message carrying it was shrunk anyway. The deep detector (messageHasCacheControlForElide) must
+// SKIP it. msg[0] carries a normal TOP-level breakpoint so neither version bails — the test is
+// non-vacuous: the buggy version elides BOTH msg[2] and msg[4] (Elided=2, big2 gone); the fixed
+// version elides only the clean msg[4] (Elided=1, big2 survives).
+func TestElideNestedCacheControlSkipped(t *testing.T) {
 	const threshold = 1024
 	type obj = map[string]any
 	cc := obj{"type": "ephemeral"}
-	big0 := strings.Repeat("0", 4000)  // msg[0] nested-cc anchor — must survive
-	big2 := strings.Repeat("2", 4000)  // msg[2] nested-cc — must survive
-	bigC := strings.Repeat("C", 4000)  // msg[4] clean — must shrink
+	big2 := strings.Repeat("2", 4000) // msg[2] nested-cc — must survive
+	bigC := strings.Repeat("C", 4000) // msg[4] clean — must shrink
 	nestedCC := func(id, text string) obj {
 		return obj{"role": "user", "content": []obj{{"type": "tool_result", "tool_use_id": id,
 			"content": []obj{{"type": "text", "text": text, "cache_control": cc}}}}}
@@ -194,39 +194,67 @@ func TestElideNestedCacheControlIsProtected(t *testing.T) {
 		"model": "claude-sonnet-4-6", "max_tokens": 1024,
 		"system": []obj{{"type": "text", "text": "sys", "cache_control": cc}},
 		"messages": []obj{
-			nestedCC("t0", big0),    // 0 — nested-cc → the deep anchor (pfxEnd=0), protected
-			txt("assistant", "a1"),  // 1
-			nestedCC("t2", big2),    // 2 — nested-cc in the eligible band → must be SKIPPED
-			txt("assistant", "a3"),  // 3
-			cleanTR("t4", bigC),     // 4 — clean oversized, eligible → must SHRINK
-			txt("assistant", "a5"),  // 5
-			txt("user", "u6"),       // 6
-			txt("assistant", "a7"),  // 7
-			txt("user", "u8"),       // 8
-			txt("assistant", "a9"),  // 9
+			{"role": "user", "content": []obj{{"type": "text", "text": "head", "cache_control": cc}}}, // 0 top-level breakpoint
+			txt("assistant", "a1"), // 1
+			nestedCC("t2", big2),   // 2 — nested-cc in the eligible band → must be SKIPPED
+			txt("assistant", "a3"), // 3
+			cleanTR("t4", bigC),    // 4 — clean oversized, eligible → must SHRINK
+			txt("assistant", "a5"), // 5
+			txt("user", "u6"),      // 6
+			txt("assistant", "a7"), // 7
+			txt("user", "u8"),      // 8
+			txt("assistant", "a9"), // 9
 		},
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	orig := append([]byte(nil), raw...)
 	out, outcome := ElideAnthropicResultsWithOutcome(raw, threshold)
 	if outcome.Reason != ElideReasonNone || outcome.Elided != 1 {
 		t.Fatalf("expected exactly the clean result to elide, got reason=%q elided=%d", outcome.Reason, outcome.Elided)
 	}
-	if !bytes.Contains(out, []byte(big0)) {
-		t.Error("BUG: msg[0] nested-cc anchor was shrunk — head cache burst")
-	}
 	if !bytes.Contains(out, []byte(big2)) {
-		t.Error("BUG: msg[2] nested-cc result was shrunk — cache-control message edited")
+		t.Error("BUG: msg[2] nested-cc result was shrunk — a cache_control message was edited")
 	}
 	if bytes.Contains(out, []byte(bigC)) {
 		t.Error("clean oversized result was NOT shrunk (test vacuous)")
 	}
-	// Head prefix (through the nested-cc anchor msg[0]) must be byte-identical.
-	prefixEnd := protectedPrefixEnd(t, orig)
-	if !bytes.Equal(orig[:prefixEnd], out[:prefixEnd]) {
-		t.Error("head prefix bytes changed")
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Errorf("re-decode: %v", err)
+	}
+}
+
+// TestElideNestedCacheControlAnchor is the regression for the cache-prefix-burst bug: when a
+// message's ONLY breakpoint is nested in a tool_result.content text block, the shallow detector
+// returns pfxEnd=-1 and (with system before messages on the wire) the system fallback admits the
+// body — so the eligible band starts at msg[0] and the shrinker shrinks the very message that
+// carries the head breakpoint, bursting the cache. The deep anchor (firstBreakpointForElide) must
+// detect msg[0] and protect it. Hand-authored bytes (system BEFORE messages) so the buggy path is
+// reached; non-vacuous: the buggy version shrinks msg[0] (big0 gone), the fixed version protects it.
+func TestElideNestedCacheControlAnchor(t *testing.T) {
+	const threshold = 100
+	big0 := strings.Repeat("H", 4000) // msg[0] nested-cc anchor — must survive
+	bigC := strings.Repeat("C", 4000) // msg[2] clean oversized — must shrink
+	raw := []byte(fmt.Sprintf(`{"model":"claude-sonnet-4-6","max_tokens":1024,`+
+		`"system":[{"type":"text","text":"sys"}],`+ // system FIRST, no cc here
+		`"messages":[`+
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t0","content":[{"type":"text","text":"%s","cache_control":{"type":"ephemeral"}}]}]},`+ // 0 nested-cc anchor
+		`{"role":"assistant","content":[{"type":"text","text":"a1"}]},`+
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"%s"}]}]},`+ // 2 clean oversized
+		`{"role":"assistant","content":[{"type":"text","text":"a3"}]},`+
+		`{"role":"user","content":[{"type":"text","text":"u4"}]},`+
+		`{"role":"assistant","content":[{"type":"text","text":"a5"}]},`+
+		`{"role":"user","content":[{"type":"text","text":"u6"}]}`+
+		`]}`, big0, bigC))
+	out, outcome := ElideAnthropicResultsWithOutcome(raw, threshold)
+	if outcome.Reason != ElideReasonNone || outcome.Elided != 1 {
+		t.Fatalf("expected the clean result to elide, got reason=%q elided=%d", outcome.Reason, outcome.Elided)
+	}
+	if !bytes.Contains(out, []byte(big0)) {
+		t.Error("BUG: msg[0] nested-cc anchor was shrunk — head cache burst")
+	}
+	if bytes.Contains(out, []byte(bigC)) {
+		t.Error("clean oversized result was NOT shrunk (test vacuous)")
 	}
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		t.Errorf("re-decode: %v", err)
