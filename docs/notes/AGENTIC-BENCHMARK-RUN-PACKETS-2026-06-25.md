@@ -297,7 +297,8 @@ Win claim allowed:
 
 ## Packet G: Browser and computer-use safe success
 
-Status: `adapter-gap`.
+Status: `adapter-smoke-shipped`; official browser/computer-use harness execution
+is still gated.
 
 Targets:
 
@@ -317,6 +318,29 @@ Adapter completion bar:
 - Page/tool content can be quarantined before model-visible context.
 - State checkpoints are saved per task.
 - Final answers require evidence read-back where the benchmark permits it.
+
+Current local witness:
+
+```powershell
+go run ./cmd/browseractionbench `
+  -suite testdata/webbench/action_mediation_smoke.json `
+  -out experiments/agent-live/browser-action-mediation-smoke-20260625.json `
+  -md experiments/agent-live/browser-action-mediation-smoke-20260625.md
+```
+
+This is a browser-action adapter smoke, not an official WebArena, OSWorld,
+WorkArena, BrowseComp, or BrowserGym run. It normalizes benchmark-style browser
+actions into `browser.*` fak tool calls and emits per-action evidence
+checkpoints while replaying the same action trace through raw and fak arms. The
+shipped smoke records raw safe pass^1 `0.500` versus fak safe pass^1 `1.000`,
+with one fak-denied destructive click and benign task utility preserved.
+
+Remaining official-harness bar:
+
+- Replace the smoke suite with benchmark-native task and action traces under the
+  upstream benchmark's license.
+- Keep raw and fak arms on the same model, browser state, task ids, and budgets.
+- Link benchmark-native grader output to the fak action/evidence log.
 
 Win claim allowed:
 
