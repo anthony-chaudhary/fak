@@ -106,6 +106,25 @@ func ActiveRedactor() Redactor {
 	return ractive
 }
 
+// SetActiveRedactorForTest forces the FAK_WIRE_REDACT selection to the named
+// registered redactor ("" resolves to inert/nil), bypassing the one-shot env
+// resolution, and returns a restore func that puts the prior selection back. It
+// lets a cross-package test (e.g. the agent outbound-wire path) exercise the
+// active-redactor branch deterministically without depending on FAK_WIRE_REDACT
+// or on init-resolution order. Test-support only — production code selects via
+// ActiveRedactor; the package's own tests poke ractive/ractiveResolved directly.
+func SetActiveRedactorForTest(name string) (restore func()) {
+	rmu.Lock()
+	defer rmu.Unlock()
+	prev, prevResolved := ractive, ractiveResolved
+	ractive, ractiveResolved = rregistry[strings.TrimSpace(name)], true
+	return func() {
+		rmu.Lock()
+		defer rmu.Unlock()
+		ractive, ractiveResolved = prev, prevResolved
+	}
+}
+
 // Redactions reports how many spans this leaf has redacted over its lifetime — the
 // redaction peer of Flags() (the screener) and ctxmmu.MMU.Screened().
 func Redactions() int64 { return atomic.LoadInt64(&redactions) }

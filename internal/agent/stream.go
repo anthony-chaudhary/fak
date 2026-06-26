@@ -273,6 +273,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 		comp.Raw = raw
 		comp.PreSendQuarantines = call.quarantined
+		comp.PreSendRedactions = call.redacted
 		return comp, nil
 	}
 
@@ -362,6 +363,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 	comp.Raw = rawBuf.Bytes()
 	comp.PreSendQuarantines = call.quarantined
+	comp.PreSendRedactions = call.redacted
 	return comp, nil
 }
 

@@ -267,6 +267,13 @@ type Completion struct {
 	ProviderCache      *cachemeta.Entry
 	Raw                []byte // the raw response body (transcript witness for the live seam)
 	PreSendQuarantines int    // tool-result payloads held out before provider serialization
+	// PreSendRedactions counts the outbound messages whose content was span-redacted
+	// (rung 5, #572) before provider serialization on the re-marshal path. It mirrors
+	// PreSendQuarantines so a caller can observe that something was redacted, not only
+	// that something was held out. Zero on the default-inert path (FAK_WIRE_REDACT
+	// unset → wirescreen.ActiveRedactor() nil) and on the Anthropic raw-passthrough
+	// path (which forwards req.Raw verbatim and never re-marshals these messages).
+	PreSendRedactions int
 
 	// Model is the model id the UPSTREAM reported it served this completion with
 	// (the provider response's `model` field), or "" when the provider omitted it.
@@ -856,6 +863,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 		comp.Raw = raw
 		comp.PreSendQuarantines = call.quarantined
+		comp.PreSendRedactions = call.redacted
 		return comp, nil
 	}
 	return nil, fmt.Errorf("planner: failed after %d attempts: %w", maxAttempts, lastErr)
