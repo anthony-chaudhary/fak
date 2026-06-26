@@ -352,6 +352,33 @@ func (m *Model) has(name string) bool {
 	return ok
 }
 
+// hasWeight reports whether a matmul weight is resident in ANY of the stores a
+// quantized serve uses: the f32 manifest, the Q8_0 store (q8w), or the raw-resident
+// Q4_K store (q4kw). m.has alone only sees the f32 manifest, so on a lean-Q8 or
+// resident-Q4_K model (the cuda serve path) a router/dense-MLP weight that was
+// quantized at load is invisible to it. ffnForLayer's dense-vs-MoE dispatch keys on
+// the PRESENCE of a layer's router (mlp.gate.weight) vs its dense MLP
+// (mlp.gate_proj.weight); keying that on m.has would mis-route every layer in a
+// quantized model (the weights live in q8w/q4kw), sending a dense first-k layer
+// down the MoE path whose router mul then panics in glmDsaWeightHAL. hasWeight is
+// the residency-complete presence check that dispatch must use.
+func (m *Model) hasWeight(name string) bool {
+	if m.has(name) {
+		return true
+	}
+	if m.q8w != nil {
+		if _, ok := m.q8w[name]; ok {
+			return true
+		}
+	}
+	if m.q4kw != nil {
+		if _, ok := m.q4kw[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) tensorOptional(name string) []float32 {
 	if m.has(name) {
 		return m.tensor(name)
