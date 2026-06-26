@@ -2576,12 +2576,12 @@ func tuiGuardCodexRecentRows(artifact tuiGuardArtifact) []tuiGuardRow {
 			fmt.Sprintf("max_consecutive=%d", tuiGuardInt(workspaceStop, "max_consecutive")),
 		}
 		for _, key := range []string{
-			"origin_counts",
-			"recent_active_origin_counts",
-			"stale_active_origin_counts",
 			"active_settlement_action_counts",
 			"recent_active_settlement_action_counts",
 			"stale_active_settlement_action_counts",
+			"origin_counts",
+			"recent_active_origin_counts",
+			"stale_active_origin_counts",
 		} {
 			if counts := tuiGuardIntMap(workspaceStop[key]); len(counts) > 0 {
 				detail = append(detail, key+"="+tuiGuardCompactJSON(counts))
