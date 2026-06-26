@@ -29,6 +29,9 @@ func TestBuildOpusSmokeContractGatesRemoteGrading(t *testing.T) {
 	if c.Status != "READY_FOR_REMOTE_GRADING" {
 		t.Fatalf("status = %q", c.Status)
 	}
+	if c.EvidenceClass != "EXTERNAL_RUN_CONTRACT" {
+		t.Fatalf("evidence class = %q", c.EvidenceClass)
+	}
 	if len(c.TaskSelection.TaskIDs) != 2 || !c.TaskSelection.SameTaskIDs {
 		t.Fatalf("task selection = %+v", c.TaskSelection)
 	}
@@ -37,6 +40,13 @@ func TestBuildOpusSmokeContractGatesRemoteGrading(t *testing.T) {
 	}
 	if c.Arms[0].EvalCommand == "" || c.Arms[1].EvalCommand == "" {
 		t.Fatalf("missing eval commands: %+v", c.Arms)
+	}
+	if !c.CompareEvidenceLink.Required ||
+		len(c.CompareEvidenceLink.Predictions) != 2 ||
+		len(c.CompareEvidenceLink.OfficialEval) != 2 ||
+		len(c.CompareEvidenceLink.FakEvidence) == 0 ||
+		len(c.CompareEvidenceLink.JoinKeys) == 0 {
+		t.Fatalf("compare evidence link = %+v", c.CompareEvidenceLink)
 	}
 }
 
@@ -65,7 +75,7 @@ func TestRenderOpusSmokeContractMarkdown(t *testing.T) {
 		EvalCapability: EvalCapability{Runnable: true},
 	})
 	md := RenderOpusSmokeContractMarkdown(c)
-	for _, want := range []string{"Opus SWE-bench Smoke Contract", "Required Before Any Result Claim", "same_model"} {
+	for _, want := range []string{"Opus SWE-bench Smoke Contract", "Compare Evidence Link", "Required Before Any Result Claim", "same_model"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

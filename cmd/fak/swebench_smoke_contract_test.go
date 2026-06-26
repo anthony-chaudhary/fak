@@ -40,8 +40,18 @@ func TestSwebenchSmokeContractCommandWritesPreRunContract(t *testing.T) {
 	if contract.ResultClaimAllowed {
 		t.Fatal("smoke-contract must not allow a result claim")
 	}
+	if contract.EvidenceClass != "EXTERNAL_RUN_CONTRACT" {
+		t.Fatalf("evidence class = %q", contract.EvidenceClass)
+	}
 	if len(contract.TaskSelection.TaskIDs) != 5 || !contract.TaskSelection.SameTaskIDs {
 		t.Fatalf("task selection = %+v", contract.TaskSelection)
+	}
+	if !contract.CompareEvidenceLink.Required ||
+		len(contract.CompareEvidenceLink.Predictions) != 2 ||
+		len(contract.CompareEvidenceLink.OfficialEval) != 2 ||
+		len(contract.CompareEvidenceLink.FakEvidence) == 0 ||
+		len(contract.CompareEvidenceLink.JoinKeys) == 0 {
+		t.Fatalf("compare evidence link = %+v", contract.CompareEvidenceLink)
 	}
 	var sawRawGate bool
 	for _, gate := range contract.Gates {
@@ -69,7 +79,8 @@ func TestSwebenchSmokeContractCommandWritesPreRunContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(mb), "Required Before Any Result Claim") {
+	if !strings.Contains(string(mb), "Compare Evidence Link") ||
+		!strings.Contains(string(mb), "Required Before Any Result Claim") {
 		t.Fatalf("markdown did not render the no-claim requirements:\n%s", mb)
 	}
 }
