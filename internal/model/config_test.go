@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -358,6 +359,106 @@ func TestConfigAcceptsFlatRopeParameters(t *testing.T) {
 	}
 	if cfg.RopeParameters["default"].RopeTheta != 1000000 {
 		t.Fatalf("flat rope_parameters decoded as %+v, want default rope theta", cfg.RopeParameters)
+	}
+}
+
+func TestConfigDerivesQwen25ProductionCheckpoints(t *testing.T) {
+	tests := []struct {
+		name      string
+		js        string
+		hidden    int
+		layers    int
+		heads     int
+		kvHeads   int
+		inter     int
+		groupSize int
+	}{
+		{
+			name: "7b",
+			js: `{
+				"architectures": ["Qwen2ForCausalLM"],
+				"eos_token_id": 151645,
+				"hidden_act": "silu",
+				"hidden_size": 3584,
+				"intermediate_size": 18944,
+				"max_position_embeddings": 32768,
+				"max_window_layers": 28,
+				"model_type": "qwen2",
+				"num_attention_heads": 28,
+				"num_hidden_layers": 28,
+				"num_key_value_heads": 4,
+				"rms_norm_eps": 1e-6,
+				"rope_theta": 1000000.0,
+				"sliding_window": 131072,
+				"tie_word_embeddings": false,
+				"use_sliding_window": false,
+				"vocab_size": 152064
+			}`,
+			hidden: 3584, layers: 28, heads: 28, kvHeads: 4, inter: 18944, groupSize: 7,
+		},
+		{
+			name: "32b",
+			js: `{
+				"architectures": ["Qwen2ForCausalLM"],
+				"eos_token_id": 151645,
+				"hidden_act": "silu",
+				"hidden_size": 5120,
+				"intermediate_size": 27648,
+				"max_position_embeddings": 32768,
+				"max_window_layers": 70,
+				"model_type": "qwen2",
+				"num_attention_heads": 40,
+				"num_hidden_layers": 64,
+				"num_key_value_heads": 8,
+				"rms_norm_eps": 1e-6,
+				"rope_theta": 1000000.0,
+				"sliding_window": 131072,
+				"tie_word_embeddings": false,
+				"use_sliding_window": false,
+				"vocab_size": 152064
+			}`,
+			hidden: 5120, layers: 64, heads: 40, kvHeads: 8, inter: 27648, groupSize: 5,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg Config
+			if err := json.Unmarshal([]byte(tt.js), &cfg); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if !strings.Contains(cfg.archFamilyKey(), "qwen2") {
+				t.Fatalf("family = %q, want qwen2", cfg.archFamilyKey())
+			}
+			if cfg.HiddenSize != tt.hidden || cfg.NumLayers != tt.layers || cfg.NumHeads != tt.heads ||
+				cfg.NumKVHeads != tt.kvHeads || cfg.IntermediateSize != tt.inter {
+				t.Fatalf("dims = H:%d L:%d heads:%d kv:%d I:%d, want H:%d L:%d heads:%d kv:%d I:%d",
+					cfg.HiddenSize, cfg.NumLayers, cfg.NumHeads, cfg.NumKVHeads, cfg.IntermediateSize,
+					tt.hidden, tt.layers, tt.heads, tt.kvHeads, tt.inter)
+			}
+			if cfg.HeadDim != 128 {
+				t.Fatalf("HeadDim = %d, want 128 derived from hidden/heads", cfg.HeadDim)
+			}
+			if cfg.GroupSize() != tt.groupSize {
+				t.Fatalf("GQA group size = %d, want %d", cfg.GroupSize(), tt.groupSize)
+			}
+			if cfg.activationName() != "silu" || cfg.ActGeluTanh || cfg.ActGeluErf || cfg.DenseMLP {
+				t.Fatalf("activation axes = name:%q tanh:%v erf:%v dense:%v, want SiLU SwiGLU",
+					cfg.activationName(), cfg.ActGeluTanh, cfg.ActGeluErf, cfg.DenseMLP)
+			}
+			if !cfg.AttentionBias {
+				t.Fatal("Qwen2 omitted attention_bias did not derive legacy q/k/v projection bias")
+			}
+			if len(cfg.Window) != 0 || cfg.windowForLayer(0) != -1 || cfg.windowForLayer(tt.layers-1) != -1 {
+				t.Fatalf("use_sliding_window=false derived Window=%v, want full causal attention", cfg.Window)
+			}
+			if cfg.RopeTheta != 1000000 || cfg.MaxPositionEmbeddings != 32768 || cfg.VocabSize != 152064 {
+				t.Fatalf("rope/context/vocab = %v/%d/%d, want 1000000/32768/152064",
+					cfg.RopeTheta, cfg.MaxPositionEmbeddings, cfg.VocabSize)
+			}
+			if cfg.TieWordEmbeddings {
+				t.Fatal("tie_word_embeddings=true, want false for production Qwen2.5 checkpoints")
+			}
+		})
 	}
 }
 

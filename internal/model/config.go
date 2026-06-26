@@ -353,6 +353,7 @@ type configJSONHints struct {
 	NumKVHeadsAlt     *int     `json:"num_kv_heads"`
 	Alibi             *bool    `json:"alibi"`
 	SlidingWindow     *int     `json:"sliding_window"`
+	UseSlidingWindow  *bool    `json:"use_sliding_window"`
 	Window            []int    `json:"sliding_window_per_layer"`
 	HiddenAct         string   `json:"hidden_act"`
 	HiddenActivation  string   `json:"hidden_activation"`
@@ -502,7 +503,7 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 			c.EmbedScale = math.Sqrt(float64(c.HiddenSize))
 		}
 	}
-	c.deriveLayerAttentionAxes(family, h.SlidingWindow)
+	c.deriveLayerAttentionAxes(family, h.SlidingWindow, h.UseSlidingWindow)
 	if strings.Contains(family, "olmo2") || strings.Contains(family, "cohere2") || strings.Contains(family, "qwen3") || strings.Contains(family, "gemma3") || strings.Contains(family, "minimax") {
 		if h.QKNorm == nil && h.UseQKNorm == nil {
 			// MiniMax-M3 layers carry per-head q_norm/k_norm; the other families
@@ -575,7 +576,7 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	return nil
 }
 
-func (c *Config) deriveLayerAttentionAxes(family string, slidingWindow *int) {
+func (c *Config) deriveLayerAttentionAxes(family string, slidingWindow *int, useSlidingWindow *bool) {
 	if c.NumLayers <= 0 {
 		return
 	}
@@ -593,7 +594,7 @@ func (c *Config) deriveLayerAttentionAxes(family string, slidingWindow *int) {
 			}
 		}
 	}
-	if len(c.Window) == 0 && slidingWindow != nil && *slidingWindow > 0 {
+	if len(c.Window) == 0 && slidingWindow != nil && *slidingWindow > 0 && (useSlidingWindow == nil || *useSlidingWindow) {
 		c.Window = make([]int, c.NumLayers)
 		for l := range c.Window {
 			if c.layerType(l) == "full_attention" {
