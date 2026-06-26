@@ -1,0 +1,46 @@
+{
+  "issue": "bench(polymodel): measured numbers for the poly-model lane (#535)",
+  "speculation": {
+    "draft_k": 4,
+    "baseline_e_no_spec": 1,
+    "real_draft": {
+      "acceptance_rate": 1,
+      "effective_e": 5,
+      "drafted_tokens": 20,
+      "accepted_tokens": 20,
+      "evicted_kv_spans": 0,
+      "draft_cost_per_real_token": 0.8333333333333334
+    },
+    "adversarial": {
+      "acceptance_rate": 0,
+      "effective_e": 1,
+      "drafted_tokens": 96,
+      "accepted_tokens": 0,
+      "evicted_kv_spans": 96,
+      "draft_cost_per_real_token": 4
+    },
+    "lossless": true
+  },
+  "decode_lane": {
+    "models_on_lane": 3,
+    "quantum": 2,
+    "prefill_tokens": 66,
+    "decode_tokens": 12,
+    "decode_steps": 6,
+    "max_concurrent_decode": 1,
+    "tokens_per_step": 2,
+    "decode_hbm_traffic_kb": 4120
+  },
+  "residency": {
+    "distinct_models": 10,
+    "budget_kb": 2325,
+    "requests": 50,
+    "readmit_hits": 29,
+    "cold_admits": 21,
+    "evictions": 24,
+    "hit_rate": 0.58,
+    "final_warm": 2,
+    "pinned_survived": true
+  },
+  "honest_fence": "Deterministic synthetic-workload measurements on the real polymodel primitives (Pool, Schedule, AcceptGreedy, KVCache.Evict). No GPU, so no tokens/sec-on-hardware claim — only the acceptance rate, serial-lane throughput, and residency hit-rate the policy core actually produces. Reproduce: polymodelbench -bench [-out FILE]."
+}
