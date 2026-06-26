@@ -203,6 +203,28 @@ func TestCommitMsgVerdict(t *testing.T) {
 	}
 }
 
+func TestScanMessageNeedles_skipsTrailersCommentsScissors(t *testing.T) {
+	needle := privateAddressNeedle() // a hardcoded AUDIT_NEEDLE
+	// A needle inside a DCO/identity trailer is metadata, not a leak -> exempt (this is
+	// the fix that lets `git commit -s` with an org-domain sign-off survive the gate).
+	if f := ScanMessageNeedles("fix: x\n\nSigned-off-by: A B <a@"+needle+">\n", ""); len(f) != 0 {
+		t.Errorf("identity trailer must be exempt; got %+v", f)
+	}
+	// A needle in a comment line git strips from the final message -> exempt.
+	if f := ScanMessageNeedles("fix: x\n\n# note "+needle+"\n", ""); len(f) != 0 {
+		t.Errorf("comment line must be exempt; got %+v", f)
+	}
+	// A needle below git's scissors line -> exempt (the content gate owns that preview).
+	scissors := "# ------------------------ >8 ------------------------"
+	if f := ScanMessageNeedles("fix: x\n"+scissors+"\n"+needle+"\n", ""); len(f) != 0 {
+		t.Errorf("scissors block must be exempt; got %+v", f)
+	}
+	// A needle in the real prose body IS a leak -> still flagged (no weakening).
+	if f := ScanMessageNeedles("fix: x\n\nbody has "+needle+" leak\n", ""); len(f) == 0 {
+		t.Error("a needle in the prose body must be flagged")
+	}
+}
+
 func TestParseUnifiedAddedLines_lineNumbers(t *testing.T) {
 	diff := "" +
 		"diff --git a/x.md b/x.md\n" +

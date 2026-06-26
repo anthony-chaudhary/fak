@@ -123,9 +123,19 @@ func effectiveAuditNeedles(d *StagedDiff) []string {
 	return out
 }
 
+// messageTrailerRe matches the git identity trailers (DCO sign-off, co-author, …) that
+// scrub_public_copy.py exempts from the commit-message PUBLIC_LEAK scan (its trailer_re):
+// a `Signed-off-by: name <user@org>` legitimately carries an identity-tier needle (the org
+// domain) and is a structured trailer, not prose — flagging it would refuse every signed
+// commit. Kept in lockstep with the Python list so the gate and the checker cannot drift.
+var messageTrailerRe = regexp.MustCompile(
+	`(?i)^(Signed-off-by|Co-authored-by|Acked-by|Reviewed-by|Reported-by|` +
+		`Suggested-by|Tested-by|Cc|Helped-by|Reported-and-tested-by):\s`)
+
 // ScanMessageNeedles ports scrub_public_copy.py --audit-message: the SAME needle/regex scan over
 // the lines of a commit message (the commit-msg hook's PUBLIC_LEAK gate). A message line carries
-// no file, so File is "" and Line is the 1-based message line number.
+// no file, so File is "" and Line is the 1-based message line number. Like the Python twin it
+// skips git's scissors block, comment lines, and identity trailers (see messageTrailerRe).
 func ScanMessageNeedles(msg string, root string) []Finding {
 	needles := append([]string(nil), auditNeedles...)
 	// best-effort sidecar union (no StagedDiff here)
@@ -149,6 +159,21 @@ func ScanMessageNeedles(msg string, root string) []Finding {
 	}
 	var findings []Finding
 	for i, line := range strings.Split(msg, "\n") {
+		// Mirror scrub_public_copy.py's message scanner so the Go gate and the Python
+		// checker cannot drift: stop at git's scissors line (the to-be-stripped diff
+		// preview the content gate owns), skip comment lines git strips from the final
+		// message, and skip identity trailers (DCO sign-off / co-author) — a needle in a
+		// `Signed-off-by: name <user@org>` is identity metadata, not a leak, so scanning
+		// it would refuse every signed commit.
+		if strings.HasPrefix(line, "# ------------------------ >8") {
+			break
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if messageTrailerRe.MatchString(line) {
+			continue
+		}
 		ll := strings.ToLower(line)
 		for _, n := range needles {
 			if strings.Contains(ll, strings.ToLower(n)) {
