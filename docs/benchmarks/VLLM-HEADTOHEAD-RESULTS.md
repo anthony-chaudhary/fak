@@ -11,8 +11,11 @@ description: "How fak measures itself against vLLM as a first-class peer: a gate
 > `experiments/vllm/` or `experiments/benchmark/runs/`. The only real *vLLM-comparison*
 > numbers in this document are the **measured SGLang sibling's** (§4), and they are fenced
 > there and labelled as the SGLang stack — never copied into a vLLM table as if measured.
-> (The on-host **adjudication-overhead floor** in §3a is also measured, but it is a
-> GPU-free kernel read-path number, not a vLLM-vs-fak comparison.) This is
+> (Two things here ARE real but are NOT vLLM-vs-fak *numbers*: the on-host
+> **adjudication-overhead floor** in §3a — a GPU-free kernel read-path measurement — and
+> the §1 `gateway-openai` **wire integration**, proven GPU-free in CI by
+> `internal/gateway` `TestChatProxyFrontsVLLMAndSGLangServedToolCalls`. Both are
+> pass/fail integration facts, not throughput comparisons.) This is
 > the honesty contract this repo holds every benchmark to (`BENCHMARK-GOVERNANCE.md`):
 > no fabricated numbers, and a comparison shows where fak *loses*.
 
@@ -41,11 +44,24 @@ prefix reuse that composes *on top of* vLLM's per-instance prefix caching
 
 | Surface | What it proves | Status |
 |---|---|---|
-| `agent` | fak's coding agent drives the vLLM-served model; every tool call adjudicated | PENDING-MEASUREMENT |
-| `gateway-openai` | `fak serve` fronts vLLM over the OpenAI-compatible wire | PENDING-MEASUREMENT |
-| `mcp-http` | the same served model reached over fak's MCP surface | PENDING-MEASUREMENT |
+| `agent` | fak's coding agent drives the vLLM/SGLang-served model; every tool call adjudicated | PENDING-MEASUREMENT (live node) |
+| `gateway-openai` (**wire**) | `fak serve` fronts a vLLM (`--enable-auto-tool-choice`) / SGLang upstream over the OpenAI-compatible wire and runs every proposed tool call through fak's adjudication plane before forwarding | **TESTED — GPU-free, CI** (`TestChatProxyFrontsVLLMAndSGLangServedToolCalls`) |
+| `gateway-openai` (**wall-clock**) | the live latency / decode-tok/s tax of that same hop against a real served model | PENDING-MEASUREMENT (live node) — §3 |
+| `mcp-http` | the same served model reached over fak's MCP surface | PENDING-MEASUREMENT (live node) |
 
-Artifact (pending): `experiments/vllm/surface-smoke.json`.
+The **wire** integration is the part that needs no GPU: it proves `fak serve` decodes the
+exact tool-call wire each engine emits (vLLM's `--enable-auto-tool-choice` `tool_calls`,
+SGLang's `tool_calls` with content alongside) and adjudicates each one (allow kept / deny
+dropped / transform redacted) before forwarding — the protocol-level drop-in, proven in CI
+today so the lane is a *tested integration* rather than prose. Only the **wall-clock** tax
+(§3) and the live-model surfaces stay host-gated.
+
+```bash
+go test ./internal/gateway -run TestChatProxyFrontsVLLMAndSGLangServedToolCalls -v   # GPU-free wire witness
+```
+
+Artifact: the wire integration is proven in CI by the named Go test (above); the live-node
+smoke (`experiments/vllm/surface-smoke.json`) stays pending.
 
 ## 2. Engine throughput head-to-head (fak engine vs vLLM vs llama.cpp, same GPU)
 
