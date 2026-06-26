@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -103,5 +105,196 @@ func TestClaudeMacFakRequiresKeyWhenFetchDisabled(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "FAK_GATEWAY_KEY is empty") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestClaudeMacFakDryRunDoesNotProbeDebugGateway(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--dry-run",
+		"--claude-config-dir", dir,
+		"--gateway-url", "http://127.0.0.1:1",
+		"--model", "qwen-local",
+	})
+	if code != 0 {
+		t.Fatalf("runClaudeMacFak code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "gateway unreachable") {
+		t.Fatalf("dry-run should not probe the gateway: %s", stderr.String())
+	}
+}
+
+func TestClaudeMacFakRejectsNonPositiveOverlayInterval(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--overlay",
+		"--overlay-interval", "0s",
+	})
+	if code != 2 {
+		t.Fatalf("runClaudeMacFak code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--overlay-interval must be positive") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestClaudeMacDebugClientProbeUsesBearer(t *testing.T) {
+	var sawHealth, sawVars bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer super-secret-test-key" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		switch r.URL.Path {
+		case "/healthz":
+			sawHealth = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true,"engine":"fak","model":"qwen-local","planner":"inkernel"}`))
+		case "/debug/vars":
+			sawVars = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"gateway":{"up":true,"vdso":true},"kernel":{"submits":9,"vdso_hits":3,"engine_calls":6,"vdso_hit_ratio":0.3333333333},"runtime":{"num_goroutine":7,"memory":{"heap_alloc_bytes":2048}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	c := &claudeMacDebugClient{base: ts.URL, key: "super-secret-test-key", hc: ts.Client()}
+	h, v, err := c.probe()
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if !sawHealth || !sawVars {
+		t.Fatalf("probe did not call both endpoints: health=%v vars=%v", sawHealth, sawVars)
+	}
+	if h.Planner != "inkernel" || v.Kernel.Submits != 9 || v.Kernel.VDSOHits != 3 {
+		t.Fatalf("unexpected probe data: health=%+v vars=%+v", h, v.Kernel)
+	}
+}
+
+func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
+	var v claudeMacDebugVars
+	v.Gateway.VDSO = true
+	v.Gateway.UptimeSeconds = 3725
+	v.Gateway.InflightRequests = 2
+	v.Kernel.VDSOHitRatio = 0.875
+
+	out := renderClaudeMacPreflight(
+		claudeMacHealth{OK: true, Engine: "fak", Model: "qwen-local", Planner: "mock"},
+		v,
+		"http://node.example:8080",
+		"qwen-local",
+		"gateway-bearer",
+		"http://grafana.example",
+	)
+	for _, want := range []string{
+		"fak debug",
+		"planner=mock",
+		"vdso=on",
+		"cache-hit 0.88",
+		"inflight 2",
+		"auth gateway-bearer",
+		"grafana http://grafana.example",
+		"WARN: planner=mock",
+		"-> launching claude ...",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("preflight missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "super-secret-test-key") || strings.Contains(out, "Bearer ") {
+		t.Fatalf("preflight leaked bearer material:\n%s", out)
+	}
+}
+
+func TestRenderClaudeMacOverlayLine(t *testing.T) {
+	var v claudeMacDebugVars
+	v.Kernel.Submits = 10
+	v.Kernel.VDSOHits = 4
+	v.Kernel.EngineCalls = 6
+	v.Gateway.InflightRequests = 2
+	v.Runtime.Memory.HeapAllocBytes = 2048
+	v.Runtime.NumGoroutine = 7
+
+	out := renderClaudeMacOverlayLine(v)
+	for _, want := range []string{
+		"submits 10",
+		"hits 4 (40.0%)",
+		"engine 6",
+		"inflight 2",
+		"gor 7",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("overlay line missing %q: %s", want, out)
+		}
+	}
+}
+
+// TestClaudeMacFakInteractiveEmitsDebugPanel proves --interactive now carries real,
+// asserted behavior (not a dead flag): against a live gateway the preflight debug
+// panel is printed BEFORE the launch. The launch itself targets a non-existent
+// command so exec fails fast; the panel is emitted regardless, which is what we
+// assert. The bearer must never appear in the panel.
+func TestClaudeMacFakInteractiveEmitsDebugPanel(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte(`{"ok":true,"engine":"metal","model":"qwen-local","planner":"inkernel"}`))
+		case "/debug/vars":
+			_, _ = w.Write([]byte(`{"gateway":{"up":true,"vdso":true,"uptime_seconds":11520,"inflight_requests":1},"kernel":{"submits":1240,"vdso_hits":1101,"engine_calls":139,"vdso_hit_ratio":0.888},"runtime":{"num_goroutine":47,"memory":{"heap_alloc_bytes":432013312}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	runClaudeMacFak(&stdout, &stderr, []string{
+		"--interactive",
+		"--claude-config-dir", dir,
+		"--gateway-url", ts.URL,
+		"--model", "qwen-local",
+		"--command", "fak-no-such-claude-binary-xyz",
+	})
+	out := stdout.String()
+	for _, want := range []string{"fak debug", "planner=inkernel", "cache-hit 0.89", "-> launching claude ..."} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("interactive --debug should emit the preflight panel; missing %q\nstdout=%s\nstderr=%s", want, out, stderr.String())
+		}
+	}
+	if strings.Contains(out, "super-secret-test-key") {
+		t.Fatalf("preflight leaked the bearer:\n%s", out)
+	}
+}
+
+// TestClaudeMacFakInteractiveAbortsOnUnreachableGateway is the "better info"
+// guarantee: an interactive launch whose gateway is unreachable returns 1 and
+// never reaches the launch, instead of starting Claude against a dead backend.
+func TestClaudeMacFakInteractiveAbortsOnUnreachableGateway(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := runClaudeMacFak(&stdout, &stderr, []string{
+		"--interactive",
+		"--claude-config-dir", dir,
+		// 127.0.0.1:1 is a closed reserved port: connection refused, fast.
+		"--gateway-url", "http://127.0.0.1:1",
+		"--model", "qwen-local",
+		"--command", "fak-no-such-claude-binary-xyz",
+	})
+	if code != 1 {
+		t.Fatalf("unreachable interactive launch must abort with code 1, got %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "gateway unreachable") {
+		t.Fatalf("expected a gateway-unreachable error, stderr=%q", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "launching claude") {
+		t.Fatalf("must not launch claude after an unreachable-gateway abort:\n%s", stdout.String())
 	}
 }
