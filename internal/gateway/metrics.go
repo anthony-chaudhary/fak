@@ -698,6 +698,7 @@ func (s *Server) renderMetrics() string {
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
 	s.writeKVMemoryMetrics(&b)
+	s.writeRequestMemoryMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	m.writeCompactionMetrics(&b)
@@ -718,6 +719,103 @@ func (s *Server) renderMetrics() string {
 
 	s.writeModelLoadMetrics(&b)
 	return b.String()
+}
+
+func (s *Server) writeRequestMemoryMetrics(b *strings.Builder) {
+	reporter, ok := s.planner.(agent.RequestMemoryReporter)
+	if !ok {
+		return
+	}
+	st := reporter.RequestMemoryStats()
+	if !st.Observed {
+		return
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_bytes", "Most recent served in-kernel backend request memory plan, by class/scope/dtype. This is a last-request gauge, not a cumulative counter.", "gauge")
+	for _, row := range requestMemoryPlanByClassScopeDType(st.MemoryPlan) {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_bytes{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
+			promQuote(backend), promQuote(row.Class), promQuote(row.Scope), promQuote(row.DType), row.Bytes)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_tokens", "Token window used by the most recent served in-kernel backend request memory plan.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens{backend=\"%s\",kind=\"prompt\"} %d\n", promQuote(backend), st.PromptTokens)
+	fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens{backend=\"%s\",kind=\"max_new\"} %d\n", promQuote(backend), st.MaxNewTokens)
+	fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens{backend=\"%s\",kind=\"planned\"} %d\n", promQuote(backend), st.PlannedTokens)
+	if st.HeadroomRatio > 0 {
+		writeHelpType(b, "fak_gateway_in_kernel_request_memory_headroom_ratio", "Fraction of reported capacity reserved by the most recent in-kernel request fit check for runtime headroom.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_headroom_ratio{backend=\"%s\"} %s\n", promQuote(backend), promFloat(st.HeadroomRatio))
+	}
+	if len(st.Capacities) > 0 {
+		writeHelpType(b, "fak_gateway_in_kernel_request_memory_capacity_known", "Whether the backend reported capacity for a memory scope used by the most recent in-kernel request fit check.", "gauge")
+		for _, cap := range sortedRequestMemoryCapacities(st.Capacities) {
+			known := 0
+			if cap.Known {
+				known = 1
+			}
+			fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_capacity_known{backend=\"%s\",scope=\"%s\"} %d\n",
+				promQuote(backend), promQuote(modelLoadScope(cap.Scope)), known)
+		}
+		writeHelpType(b, "fak_gateway_in_kernel_request_memory_capacity_free_known", "Whether the backend reported current free bytes for a memory scope used by the most recent in-kernel request fit check.", "gauge")
+		for _, cap := range sortedRequestMemoryCapacities(st.Capacities) {
+			known := 0
+			if cap.Known && cap.FreeKnown {
+				known = 1
+			}
+			fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_capacity_free_known{backend=\"%s\",scope=\"%s\"} %d\n",
+				promQuote(backend), promQuote(modelLoadScope(cap.Scope)), known)
+		}
+		writeHelpType(b, "fak_gateway_in_kernel_request_memory_capacity_bytes", "Reported backend capacity bytes used by the most recent in-kernel request fit check. The free row is omitted when current free bytes are unknown.", "gauge")
+		for _, cap := range sortedRequestMemoryCapacities(st.Capacities) {
+			if !cap.Known {
+				continue
+			}
+			scope := modelLoadScope(cap.Scope)
+			fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_capacity_bytes{backend=\"%s\",scope=\"%s\",kind=\"total\"} %d\n",
+				promQuote(backend), promQuote(scope), cap.TotalBytes)
+			if cap.FreeKnown {
+				fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_capacity_bytes{backend=\"%s\",scope=\"%s\",kind=\"free\"} %d\n",
+					promQuote(backend), promQuote(scope), cap.FreeBytes)
+			}
+		}
+	}
+}
+
+func requestMemoryPlanByClassScopeDType(plan []agent.RequestMemoryDemand) []agent.RequestMemoryDemand {
+	type key struct {
+		class string
+		scope string
+		dtype string
+	}
+	by := map[key]int64{}
+	for _, row := range plan {
+		if row.Bytes <= 0 {
+			continue
+		}
+		k := key{class: modelLoadClass(row.Class), scope: modelLoadScope(row.Scope), dtype: modelLoadDType(row.DType)}
+		by[k] += row.Bytes
+	}
+	out := make([]agent.RequestMemoryDemand, 0, len(by))
+	for k, bytes := range by {
+		out = append(out, agent.RequestMemoryDemand{Class: k.class, Scope: k.scope, DType: k.dtype, Bytes: bytes})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope < out[j].Scope
+		}
+		if out[i].Class != out[j].Class {
+			return out[i].Class < out[j].Class
+		}
+		return out[i].DType < out[j].DType
+	})
+	return out
+}
+
+func sortedRequestMemoryCapacities(in []agent.RequestMemoryCapacity) []agent.RequestMemoryCapacity {
+	out := append([]agent.RequestMemoryCapacity(nil), in...)
+	sort.SliceStable(out, func(i, j int) bool { return modelLoadScope(out[i].Scope) < modelLoadScope(out[j].Scope) })
+	return out
 }
 
 // writeVDSOMetrics renders vDSO fast-path effectiveness from the live vdso.Default

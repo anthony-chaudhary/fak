@@ -87,6 +87,13 @@ func (b capacityProbeBackend) Caps() compute.Caps {
 	return compute.Caps{DeviceMemory: true, CapacityProbe: true}
 }
 
+func (b capacityProbeBackend) Name() string {
+	if b.Backend != nil {
+		return b.Backend.Name()
+	}
+	return "capacity-probe"
+}
+
 func (b capacityProbeBackend) DeviceMemory() (total, free int64, known bool) {
 	return b.total, b.free, b.known
 }
@@ -148,6 +155,16 @@ func TestInKernelRequestCapacityPrecheckRefusesKnownTooLargeKV(t *testing.T) {
 	}
 	if capErr.Want <= capErr.Avail || capErr.Avail <= 0 {
 		t.Fatalf("capacity sizing = want %d avail %d, want positive refused budget", capErr.Want, capErr.Avail)
+	}
+	st := p.RequestMemoryStats()
+	if !st.Observed || st.Backend != "capacity-probe" || st.PromptTokens != 100_000 || st.MaxNewTokens != 256 || st.PlannedTokens != 100_256 {
+		t.Fatalf("request memory stats = %+v, want observed capacity-probe 100000+256", st)
+	}
+	if len(st.MemoryPlan) == 0 || st.MemoryPlan[0].Class == "" || st.MemoryPlan[0].DType == "" {
+		t.Fatalf("request memory plan missing class/dtype rows: %+v", st.MemoryPlan)
+	}
+	if len(st.Capacities) != 2 || !st.Capacities[0].Known {
+		t.Fatalf("request memory capacities = %+v, want device/host snapshot with known device", st.Capacities)
 	}
 }
 

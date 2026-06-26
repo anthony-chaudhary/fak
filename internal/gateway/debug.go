@@ -11,12 +11,13 @@ import (
 )
 
 type debugVarsResponse struct {
-	Gateway   debugGatewayVars    `json:"gateway"`
-	Runtime   debugRuntimeVars    `json:"runtime"`
-	Kernel    debugKernelVars     `json:"kernel"`
-	ModelLoad *debugModelLoadVars `json:"model_load,omitempty"`
-	KVMemory  *debugKVMemoryVars  `json:"kv_memory,omitempty"`
-	Metrics   debugMetricsVars    `json:"metrics"`
+	Gateway       debugGatewayVars        `json:"gateway"`
+	Runtime       debugRuntimeVars        `json:"runtime"`
+	Kernel        debugKernelVars         `json:"kernel"`
+	ModelLoad     *debugModelLoadVars     `json:"model_load,omitempty"`
+	KVMemory      *debugKVMemoryVars      `json:"kv_memory,omitempty"`
+	RequestMemory *debugRequestMemoryVars `json:"request_memory,omitempty"`
+	Metrics       debugMetricsVars        `json:"metrics"`
 }
 
 type debugGatewayVars struct {
@@ -126,6 +127,16 @@ type debugKVMemoryVars struct {
 	Evictions       int    `json:"evictions,omitempty"`
 	PolicyEvictions int    `json:"policy_evictions,omitempty"`
 	Splits          int    `json:"splits,omitempty"`
+}
+
+type debugRequestMemoryVars struct {
+	Backend       string                         `json:"backend"`
+	PromptTokens  int                            `json:"prompt_tokens"`
+	MaxNewTokens  int                            `json:"max_new_tokens"`
+	PlannedTokens int                            `json:"planned_tokens"`
+	HeadroomRatio float64                        `json:"headroom_ratio,omitempty"`
+	MemoryPlan    []debugModelLoadMemoryPlanVars `json:"memory_plan,omitempty"`
+	Capacities    []debugModelLoadCapacityVars   `json:"capacities,omitempty"`
 }
 
 type debugCompactionVars struct {
@@ -249,8 +260,9 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			Admitted:     c.Admitted,
 			VDSOHitRatio: ratio,
 		},
-		ModelLoad: debugModelLoadProfile(s.modelLoadProfile()),
-		KVMemory:  debugKVMemory(s.planner),
+		ModelLoad:     debugModelLoadProfile(s.modelLoadProfile()),
+		KVMemory:      debugKVMemory(s.planner),
+		RequestMemory: debugRequestMemory(s.planner),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
@@ -265,6 +277,50 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			InKernelOOM: debugInKernelOOMRows(oomRows),
 		},
 	}
+}
+
+func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {
+	reporter, ok := p.(agent.RequestMemoryReporter)
+	if !ok {
+		return nil
+	}
+	st := reporter.RequestMemoryStats()
+	if !st.Observed {
+		return nil
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	out := &debugRequestMemoryVars{
+		Backend:       backend,
+		PromptTokens:  st.PromptTokens,
+		MaxNewTokens:  st.MaxNewTokens,
+		PlannedTokens: st.PlannedTokens,
+		HeadroomRatio: st.HeadroomRatio,
+	}
+	for _, row := range st.MemoryPlan {
+		if row.Bytes <= 0 {
+			continue
+		}
+		out.MemoryPlan = append(out.MemoryPlan, debugModelLoadMemoryPlanVars{
+			Class:  modelLoadClass(row.Class),
+			Scope:  modelLoadScope(row.Scope),
+			Bytes:  row.Bytes,
+			Detail: row.Detail,
+			DType:  modelLoadDType(row.DType),
+		})
+	}
+	for _, cap := range st.Capacities {
+		out.Capacities = append(out.Capacities, debugModelLoadCapacityVars{
+			Scope:      modelLoadScope(cap.Scope),
+			TotalBytes: cap.TotalBytes,
+			FreeBytes:  cap.FreeBytes,
+			Known:      cap.Known,
+			FreeKnown:  cap.Known && cap.FreeKnown,
+		})
+	}
+	return out
 }
 
 func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {

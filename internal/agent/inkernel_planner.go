@@ -86,6 +86,9 @@ type InKernelPlanner struct {
 	// follow-up (internal/model/batch.go), not a correctness fix.
 	devMu sync.Mutex
 
+	reqMemMu      sync.Mutex
+	lastReqMemory RequestMemoryStats
+
 	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
 	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a
 	// real model.KVCache.Evict of the result's K/V span over a fresh model.Session built
@@ -189,6 +192,18 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	stats.PolicyEvictions = st.PolicyEvictions
 	stats.Splits = st.Splits
 	return stats
+}
+
+func (p *InKernelPlanner) RequestMemoryStats() RequestMemoryStats {
+	if p == nil {
+		return RequestMemoryStats{}
+	}
+	p.reqMemMu.Lock()
+	defer p.reqMemMu.Unlock()
+	out := p.lastReqMemory
+	out.MemoryPlan = append([]RequestMemoryDemand(nil), p.lastReqMemory.MemoryPlan...)
+	out.Capacities = append([]RequestMemoryCapacity(nil), p.lastReqMemory.Capacities...)
+	return out
 }
 
 // Complete renders the transcript as ChatML and runs one in-kernel decode turn,
@@ -396,6 +411,7 @@ func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error 
 	if len(plan) == 0 {
 		return nil
 	}
+	p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
 	if err := compute.RefuseMemoryPlanIfTooBig(p.backend, plan, inKernelRequestDeviceHeadroom); err != nil {
 		var fe *compute.FitError
 		if errors.As(err, &fe) {
@@ -404,6 +420,75 @@ func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error 
 		return err
 	}
 	return nil
+}
+
+func (p *InKernelPlanner) recordRequestMemoryPlan(promptTokens, maxNew int, plan compute.MemoryPlan) {
+	if p == nil || p.backend == nil {
+		return
+	}
+	plannedTokens := promptTokens + maxNew
+	if plannedTokens < promptTokens {
+		plannedTokens = promptTokens
+	}
+	deviceTotal, deviceFree, deviceKnown := compute.DeviceMemoryInfo(p.backend)
+	hostTotal, hostFree, hostKnown := compute.HostMemoryInfo(p.backend)
+	stats := RequestMemoryStats{
+		Observed:      len(plan) > 0,
+		Backend:       p.backend.Name(),
+		PromptTokens:  promptTokens,
+		MaxNewTokens:  maxNew,
+		PlannedTokens: plannedTokens,
+		HeadroomRatio: inKernelRequestDeviceHeadroom,
+		MemoryPlan:    requestMemoryDemands(plan),
+		Capacities: []RequestMemoryCapacity{
+			requestMemoryCapacity(string(compute.MemoryScopeDevice), deviceTotal, deviceFree, deviceKnown),
+			requestMemoryCapacity(string(compute.MemoryScopeHost), hostTotal, hostFree, hostKnown),
+		},
+	}
+	p.reqMemMu.Lock()
+	p.lastReqMemory = stats
+	p.reqMemMu.Unlock()
+}
+
+func requestMemoryDemands(plan compute.MemoryPlan) []RequestMemoryDemand {
+	if len(plan) == 0 {
+		return nil
+	}
+	out := make([]RequestMemoryDemand, 0, len(plan))
+	for _, d := range plan {
+		if d.Bytes <= 0 {
+			continue
+		}
+		class := d.Class
+		if class == "" {
+			class = compute.MemoryUnknown
+		}
+		out = append(out, RequestMemoryDemand{
+			Class:  string(class),
+			Scope:  string(d.ScopeOrDefault()),
+			DType:  d.DType,
+			Bytes:  d.Bytes,
+			Detail: d.Detail,
+		})
+	}
+	return out
+}
+
+func requestMemoryCapacity(scope string, total, free int64, known bool) RequestMemoryCapacity {
+	cap := RequestMemoryCapacity{
+		Scope:      scope,
+		TotalBytes: total,
+		Known:      known,
+		FreeKnown:  known && free >= 0,
+	}
+	if !known {
+		cap.TotalBytes = 0
+		return cap
+	}
+	if cap.FreeKnown {
+		cap.FreeBytes = free
+	}
+	return cap
 }
 
 func (p *InKernelPlanner) requestMemoryPlan(promptTokens, maxNew int) compute.MemoryPlan {

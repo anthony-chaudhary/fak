@@ -64,6 +64,7 @@ func TestMetricsExposesKVPrefixReuse(t *testing.T) {
 
 type kvMemoryStatsPlanner struct {
 	stats agent.KVMemoryStats
+	req   agent.RequestMemoryStats
 }
 
 func (p kvMemoryStatsPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
@@ -73,6 +74,8 @@ func (p kvMemoryStatsPlanner) Complete(context.Context, []agent.Message, []agent
 func (p kvMemoryStatsPlanner) Model() string { return "kv-memory-test" }
 
 func (p kvMemoryStatsPlanner) KVMemoryStats() agent.KVMemoryStats { return p.stats }
+
+func (p kvMemoryStatsPlanner) RequestMemoryStats() agent.RequestMemoryStats { return p.req }
 
 func TestKVMemoryMetricsSuppressedWithoutReporter(t *testing.T) {
 	srv := newTestServer(t)
@@ -170,5 +173,54 @@ func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 	}
 	if vars.KVMemory.Enabled || vars.KVMemory.Scope != "device" || vars.KVMemory.DType != "f32" || vars.KVMemory.BytesPerToken != 4096 || vars.KVMemory.ResidentTokens != 0 {
 		t.Fatalf("debug disabled kv_memory = %+v, want geometry-only disabled snapshot", vars.KVMemory)
+	}
+}
+
+func TestRequestMemoryMetricsAndDebugVars(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = kvMemoryStatsPlanner{req: agent.RequestMemoryStats{
+		Observed:      true,
+		Backend:       "vulkan",
+		PromptTokens:  13,
+		MaxNewTokens:  4,
+		PlannedTokens: 17,
+		HeadroomRatio: 0.15,
+		MemoryPlan: []agent.RequestMemoryDemand{
+			{Class: "kv_cache", Scope: "device", DType: "f32", Bytes: 1462272, Detail: "hal-kv-store"},
+			{Class: "scratchpad", Scope: "device", DType: "f32", Bytes: 4134912, Detail: "hal-token-scratch"},
+			{Class: "kv_cache", Scope: "device", DType: "f32", Bytes: 1024, Detail: "second-kv-row"},
+		},
+		Capacities: []agent.RequestMemoryCapacity{
+			{Scope: "device", TotalBytes: 8 << 30, Known: true},
+			{Scope: "host", TotalBytes: 64 << 30, FreeBytes: 48 << 30, Known: true, FreeKnown: true},
+		},
+	}}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_in_kernel_request_memory_plan_bytes{backend="vulkan",class="kv_cache",scope="device",dtype="f32"} 1463296`,
+		`fak_gateway_in_kernel_request_memory_plan_bytes{backend="vulkan",class="scratchpad",scope="device",dtype="f32"} 4134912`,
+		`fak_gateway_in_kernel_request_memory_tokens{backend="vulkan",kind="prompt"} 13`,
+		`fak_gateway_in_kernel_request_memory_tokens{backend="vulkan",kind="max_new"} 4`,
+		`fak_gateway_in_kernel_request_memory_tokens{backend="vulkan",kind="planned"} 17`,
+		`fak_gateway_in_kernel_request_memory_headroom_ratio{backend="vulkan"} 0.15`,
+		`fak_gateway_in_kernel_request_memory_capacity_known{backend="vulkan",scope="device"} 1`,
+		`fak_gateway_in_kernel_request_memory_capacity_free_known{backend="vulkan",scope="device"} 0`,
+		`fak_gateway_in_kernel_request_memory_capacity_bytes{backend="vulkan",scope="host",kind="free"} 51539607552`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("request memory metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	if vars.RequestMemory == nil {
+		t.Fatal("/debug/vars missing request_memory")
+	}
+	if vars.RequestMemory.Backend != "vulkan" || vars.RequestMemory.PlannedTokens != 17 || len(vars.RequestMemory.MemoryPlan) != 3 {
+		t.Fatalf("debug request_memory = %+v, want backend/tokens/raw plan rows", vars.RequestMemory)
+	}
+	if vars.RequestMemory.MemoryPlan[0].DType != "f32" || vars.RequestMemory.Capacities[1].FreeBytes != 48<<30 {
+		t.Fatalf("debug request_memory detail = %+v capacities=%+v", vars.RequestMemory.MemoryPlan, vars.RequestMemory.Capacities)
 	}
 }

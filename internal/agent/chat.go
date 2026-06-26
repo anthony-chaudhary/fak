@@ -565,6 +565,45 @@ type KVMemoryReporter interface {
 	KVMemoryStats() KVMemoryStats
 }
 
+// RequestMemoryDemand is one row from the most recent local request memory plan.
+// It mirrors compute.MemoryDemand without making gateway depend on compute types.
+type RequestMemoryDemand struct {
+	Class  string
+	Scope  string
+	DType  string
+	Bytes  int64
+	Detail string
+}
+
+type RequestMemoryCapacity struct {
+	Scope      string
+	TotalBytes int64
+	FreeBytes  int64
+	Known      bool
+	FreeKnown  bool
+}
+
+// RequestMemoryStats is the optional planner-owned snapshot of the last in-kernel
+// request admission plan. It reports successful plans too, so request memory pressure
+// is visible before an OOM happens.
+type RequestMemoryStats struct {
+	Observed      bool
+	Backend       string
+	PromptTokens  int
+	MaxNewTokens  int
+	PlannedTokens int
+	HeadroomRatio float64
+	MemoryPlan    []RequestMemoryDemand
+	Capacities    []RequestMemoryCapacity
+}
+
+// RequestMemoryReporter is implemented by local planners that can report their last
+// request-time memory plan. Proxy planners do not implement it, so the gateway emits no
+// local request-memory series for upstream providers.
+type RequestMemoryReporter interface {
+	RequestMemoryStats() RequestMemoryStats
+}
+
 // ---------------------------------------------------------------------------
 // Live planner — provider API client.
 // ---------------------------------------------------------------------------
