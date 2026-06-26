@@ -3,6 +3,8 @@ package ggufload
 import (
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -79,11 +81,19 @@ func (s *WeightSource) EstimateF32LoadBytes() (int64, error) {
 // scratchpad, and offload staging are reserved separately by the caller's headroom or by a
 // richer multi-demand plan.
 func (s *WeightSource) EstimateLoadMemoryPlan() (compute.MemoryPlan, error) {
-	want, err := s.EstimateLoadBytes()
-	if err != nil {
-		return nil, err
+	byDType := map[string]uint64{}
+	for _, info := range s.File.Tensors {
+		n, err := tensorPayloadBytes(info)
+		if err != nil {
+			return nil, fmt.Errorf("gguf: estimate tensor %s: %w", info.Name, err)
+		}
+		dtype := ggufTensorDTypeLabel(info.Type)
+		if byDType[dtype] > math.MaxUint64-n {
+			return nil, fmt.Errorf("gguf: estimated load bytes overflow uint64")
+		}
+		byDType[dtype] += n
 	}
-	return compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: want, Detail: "gguf-load"}}, nil
+	return ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-load", byDType)
 }
 
 // EstimateF32LoadMemoryPlan is the classed form of EstimateF32LoadBytes for the f32-resident
@@ -93,7 +103,7 @@ func (s *WeightSource) EstimateF32LoadMemoryPlan() (compute.MemoryPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: want, Detail: "gguf-f32-load"}}, nil
+	return compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: want, Detail: "gguf-f32-load", DType: compute.F32.String()}}, nil
 }
 
 // EstimateCPUOffloadExpertsMemoryPlan estimates the --cpu-offload-experts placement without
@@ -104,7 +114,12 @@ func (s *WeightSource) EstimateF32LoadMemoryPlan() (compute.MemoryPlan, error) {
 func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan, error) {
 	arch, _ := s.File.String("general.architecture")
 	modelType := canonicalGGUFArch(arch)
-	var deviceTotal, hostTotal uint64
+	type key struct {
+		class compute.MemoryClass
+		scope compute.MemoryScope
+		dtype string
+	}
+	by := map[key]uint64{}
 	for _, info := range s.File.Tensors {
 		if modelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(info.Name) {
 			continue
@@ -117,36 +132,81 @@ func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan
 		if err != nil {
 			return nil, err
 		}
+		k := key{class: compute.MemoryWeights, scope: compute.MemoryScopeDevice, dtype: ggufTensorDTypeLabel(info.Type)}
 		if hostExpert {
-			if hostTotal > math.MaxUint64-n {
-				return nil, fmt.Errorf("gguf: estimated offload bytes overflow uint64")
-			}
-			hostTotal += n
-			continue
+			k = key{class: compute.MemoryOffload, scope: compute.MemoryScopeHost, dtype: ggufTensorDTypeLabel(info.Type)}
 		}
-		if deviceTotal > math.MaxUint64-n {
+		if by[k] > math.MaxUint64-n {
 			return nil, fmt.Errorf("gguf: estimated device bytes overflow uint64")
 		}
-		deviceTotal += n
+		by[k] += n
 	}
-	if deviceTotal > math.MaxInt64 || hostTotal > math.MaxInt64 {
-		return nil, fmt.Errorf("gguf: estimated offload memory plan overflows int64")
+	keys := make([]key, 0, len(by))
+	for k := range by {
+		keys = append(keys, k)
 	}
-	plan := make(compute.MemoryPlan, 0, 2)
-	if deviceTotal > 0 {
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].scope != keys[j].scope {
+			return keys[i].scope < keys[j].scope
+		}
+		if keys[i].class != keys[j].class {
+			return keys[i].class < keys[j].class
+		}
+		return keys[i].dtype < keys[j].dtype
+	})
+	plan := make(compute.MemoryPlan, 0, len(keys))
+	for _, k := range keys {
+		total := by[k]
+		if total == 0 {
+			continue
+		}
+		if total > math.MaxInt64 {
+			return nil, fmt.Errorf("gguf: estimated offload memory plan overflows int64")
+		}
+		detail := "gguf-device-dense-load"
+		if k.scope == compute.MemoryScopeHost {
+			detail = "gguf-host-expert-offload"
+		}
 		plan = append(plan, compute.MemoryDemand{
-			Class:  compute.MemoryWeights,
-			Bytes:  int64(deviceTotal),
-			Detail: "gguf-device-dense-load",
-			Scope:  compute.MemoryScopeDevice,
+			Class:  k.class,
+			Bytes:  int64(total),
+			Detail: detail,
+			Scope:  k.scope,
+			DType:  k.dtype,
 		})
 	}
-	if hostTotal > 0 {
+	return plan, nil
+}
+
+func ggufTensorDTypeLabel(t TensorType) string {
+	label := strings.ToLower(strings.TrimSpace(t.String()))
+	if label == "" {
+		return "unknown"
+	}
+	return label
+}
+
+func ggufMemoryPlanByDType(class compute.MemoryClass, scope compute.MemoryScope, detail string, byDType map[string]uint64) (compute.MemoryPlan, error) {
+	dtypes := make([]string, 0, len(byDType))
+	for dtype := range byDType {
+		dtypes = append(dtypes, dtype)
+	}
+	sort.Strings(dtypes)
+	plan := make(compute.MemoryPlan, 0, len(dtypes))
+	for _, dtype := range dtypes {
+		total := byDType[dtype]
+		if total == 0 {
+			continue
+		}
+		if total > math.MaxInt64 {
+			return nil, fmt.Errorf("gguf: estimated load bytes %d overflow int64", total)
+		}
 		plan = append(plan, compute.MemoryDemand{
-			Class:  compute.MemoryOffload,
-			Bytes:  int64(hostTotal),
-			Detail: "gguf-host-expert-offload",
-			Scope:  compute.MemoryScopeHost,
+			Class:  class,
+			Bytes:  int64(total),
+			Detail: detail,
+			Scope:  scope,
+			DType:  dtype,
 		})
 	}
 	return plan, nil

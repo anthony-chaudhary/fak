@@ -116,8 +116,18 @@ func TestFitOnDeviceRefusesOversizeOnKnownCeiling(t *testing.T) {
 	if fe.Want != 1638400 || fe.Avail != 1<<20 {
 		t.Fatalf("FitError sizing: Want=%d Avail=%d, want 1638400 / %d", fe.Want, fe.Avail, 1<<20)
 	}
-	if len(fe.Demands) != 1 || fe.Demands[0].Class != compute.MemoryWeights {
-		t.Fatalf("FitError demands = %+v, want one weights demand", fe.Demands)
+	if len(fe.Demands) != 2 {
+		t.Fatalf("FitError demands = %+v, want f32 + q4_k weight demands", fe.Demands)
+	}
+	byDType := map[string]int64{}
+	for _, d := range fe.Demands {
+		if d.Class != compute.MemoryWeights || d.ScopeOrDefault() != compute.MemoryScopeDevice {
+			t.Fatalf("FitError demand = %+v, want device-scoped weights", d)
+		}
+		byDType[d.DType] += d.Bytes
+	}
+	if byDType["f32"] != 1048576 || byDType["q4_k"] != 589824 {
+		t.Fatalf("FitError demands by dtype = %+v, want f32=1048576 q4_k=589824", byDType)
 	}
 	for _, want := range []string{"needs", "device has", "MiB", "FitTooBig"} {
 		if !strings.Contains(err.Error(), want) {

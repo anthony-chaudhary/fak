@@ -87,6 +87,7 @@ type MemoryDemand struct {
 	Bytes  int64
 	Detail string
 	Scope  MemoryScope
+	DType  string // optional bounded dtype/storage label ("f32", "q8_0", "mixed"); empty = unknown/not applicable
 }
 
 // MemoryPlan is the classed form of "will this fit?" A plan can hold several
@@ -117,7 +118,7 @@ func EstimateKVStoreMemoryPlan(cfg KVConfig, tokens int) MemoryPlan {
 	if bytes <= 0 {
 		return nil
 	}
-	return MemoryPlan{{Class: MemoryKVCache, Bytes: bytes, Detail: "hal-kv-store"}}
+	return MemoryPlan{{Class: MemoryKVCache, Bytes: bytes, Detail: "hal-kv-store", DType: F32.String()}}
 }
 
 // TransformerScratchConfig is the geometry needed to conservatively plan the f32 transient
@@ -142,10 +143,10 @@ type TransformerScratchConfig struct {
 func EstimateHALTransientMemoryPlan(cfg TransformerScratchConfig) MemoryPlan {
 	var plan MemoryPlan
 	if activation := EstimateHALActivationBytes(cfg); activation > 0 {
-		plan = append(plan, MemoryDemand{Class: MemoryActivation, Bytes: activation, Detail: "hal-token-activation"})
+		plan = append(plan, MemoryDemand{Class: MemoryActivation, Bytes: activation, Detail: "hal-token-activation", DType: F32.String()})
 	}
 	if scratch := EstimateHALScratchpadBytes(cfg); scratch > 0 {
-		plan = append(plan, MemoryDemand{Class: MemoryScratchpad, Bytes: scratch, Detail: "hal-token-scratch"})
+		plan = append(plan, MemoryDemand{Class: MemoryScratchpad, Bytes: scratch, Detail: "hal-token-scratch", DType: F32.String()})
 	}
 	return plan
 }
