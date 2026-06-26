@@ -241,9 +241,12 @@ IDENTITY_HEAD_LINES = 40
 # added, never a hand-maintained list. A `fak <verb>` an agent pastes from a command
 # span must be one of these, or the agent's first command dies on `unknown verb`.
 MAIN_GO = "cmd/fak/main.go"
-# A command span an agent pastes begins with one of these binary invocations. The
+# A command span an agent pastes begins with one of these binary invocations,
+# including the Windows forms (`.\fak`, `fak.exe`) an agent on Windows pastes. The
 # Cursor `@fak` tool handle is deliberately NOT here — it's a mention, not a CLI call.
-CMD_PREFIXES = ("go run ./cmd/fak ", "go run cmd/fak ", "./cmd/fak ", "./fak ", "fak ")
+# Ordered longest-first so a longer form is matched before a shorter prefix of it.
+CMD_PREFIXES = ("go run ./cmd/fak ", "go run cmd/fak ", "./cmd/fak ",
+                ".\\fak.exe ", ".\\fak ", "fak.exe ", "./fak ", "fak ")
 # The first token after the invocation is the verb to resolve (lowercase, hyphen-ok).
 VERB_TOKEN_RE = re.compile(r"^([a-z][a-z0-9-]+)")
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
@@ -520,29 +523,45 @@ def dispatch_verbs(main_go_text: str | None) -> set[str]:
 
 def command_verbs(text: str) -> list[str]:
     """Every CLI verb an agent would actually paste from this doc: the first token
-    after a `fak` / `./fak` / `go run ./cmd/fak` invocation that BEGINS a command —
-    the start of a fenced line or an inline `code` span (optionally after a `$`/`>`
-    prompt or a `&&`/`;`/`|` separator). The command-leading anchor is what separates
-    a real invocation from prose ("fak governs the call") and from the Cursor `@fak`
-    tool handle (a mention, not a CLI call). Returns verbs in order of appearance —
-    the unit `command_verbs_resolve` checks against the real dispatch set."""
+    after a `fak` / `./fak` / `fak.exe` / `go run ./cmd/fak` invocation that BEGINS a
+    command — the start of a fenced line or an inline `code` span, after stripping a
+    `$`/`>` prompt, a leading `VAR=val` env assignment, and splitting on `&&`/`;`/`|`
+    and the ` -- ` wrapper boundary. The command-leading anchor is what separates a real
+    invocation from prose ("fak governs the call") and from the Cursor `@fak` handle; an
+    output banner (`fak guard: 131 decision(s) …`, a verb followed by `:`) and a trailing
+    `# comment` are excluded too. Returns verbs in order of appearance — the unit
+    `command_verbs_resolve` checks against the real dispatch set."""
     verbs: list[str] = []
 
     def from_segment(seg: str) -> None:
-        s = re.sub(r"^\s*[\$>]\s+", "", seg.strip())  # drop a shell prompt marker
+        # Drop a trailing inline shell comment (its prose may name a non-command verb).
+        s = re.split(r"\s+#\s", seg.strip(), maxsplit=1)[0].strip()
+        s = re.sub(r"^[\$>]\s+", "", s)  # drop a shell prompt marker
+        # Drop leading VAR=val env assignments — an agent pastes `FOO=bar fak …` and the
+        # verb is still fak's; without this a real ambush hides behind an env prefix.
+        while True:
+            m = re.match(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+", s)
+            if not m:
+                break
+            s = s[m.end():]
         for pre in CMD_PREFIXES:
             if s.startswith(pre):
                 rest = s[len(pre):].lstrip()
                 m = VERB_TOKEN_RE.match(rest)
-                if m:
+                if m and rest[m.end():m.end() + 1] != ":":
+                    # (a `:` right after the verb is an output banner — `fak guard: 131
+                    # decision(s) …` — not a command an agent pastes; skip it.)
                     verbs.append(m.group(1))
                 return
 
+    # The wrapper boundary ` -- ` begins a fresh command (`… add fak -- ./fak serve`),
+    # so split on it too — a `fak <verb>` after `--` is still a pasted invocation.
+    seg_sep = r"&&|\|\||;|\||\s--\s"
     for block in _fenced_blocks(text):
         for line in block.split("\n"):
             if line.lstrip().startswith("#"):
                 continue
-            for seg in re.split(r"&&|\|\||;|\|", line):
+            for seg in re.split(seg_sep, line):
                 from_segment(seg)
     # Inline `code` spans, scanned on the PROSE OUTSIDE fenced blocks only — a fence's
     # triple-backticks would otherwise desync the inline-span backtick pairing and
@@ -1154,8 +1173,15 @@ def _agent_config_integrity(root: Path) -> list[str]:
         bad.append(f"{MCP_CONFIG_FILE} has no mcpServers map — the harness finds no server to start")
         return bad
     for name, spec in servers.items():
-        if not isinstance(spec, dict) or not str(spec.get("command", "")).strip():
-            bad.append(f"{MCP_CONFIG_FILE} server '{name}' names no launch command — the harness can't start it")
+        if str(name).strip().startswith("//"):
+            continue  # a JSON `//` comment key (idiomatic here), not a server entry
+        if not isinstance(spec, dict):
+            bad.append(f"{MCP_CONFIG_FILE} server '{name}' is not an object — the harness can't read it")
+            continue
+        # A server is launchable if it names a local `command` OR a remote `url`
+        # (an SSE/HTTP MCP server carries a url, not a command).
+        if not str(spec.get("command", "")).strip() and not str(spec.get("url", "")).strip():
+            bad.append(f"{MCP_CONFIG_FILE} server '{name}' names neither a launch command nor a url — the harness can't start it")
     return bad
 
 
@@ -1236,6 +1262,13 @@ def gather(root: Path) -> list[dict[str, Any]]:
     unknown_verbs = _unknown_command_verbs(paste_texts, verbs)
     recipe_texts = {rel: txt for rel, txt in paste_texts.items()
                     if rel.startswith(PASTE_DOCS_GLOB + "/") and not rel.endswith("/README.md")}
+    # Also scan the REQUIRED per-agent recipes that live OUTSIDE docs/integrations (e.g.
+    # examples/mcp/README.md) — a dead link inside a required recipe is the same friction,
+    # and the docs/integrations glob alone misses them.
+    for _label, cand_paths in REQUIRED_RECIPES:
+        for p in cand_paths:
+            if p.endswith(".md") and p not in recipe_texts and present(p):
+                recipe_texts[p] = _safe_read(root / p)
     dead_recipe_links = _dead_recipe_links(root, recipe_texts)
     config_integrity = _agent_config_integrity(root)
 

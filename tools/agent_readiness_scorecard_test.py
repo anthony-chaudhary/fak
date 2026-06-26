@@ -341,6 +341,32 @@ def test_command_verbs_extracts_command_context_only() -> None:
     assert "hooks" in ar.command_verbs(desync)
 
 
+def test_command_verbs_hardening_against_audit_vectors() -> None:
+    # An output BANNER (`fak guard: 131 decisions …`) is sample output, not a command —
+    # the `:` right after the verb disqualifies it (would otherwise flag `fak summary:`).
+    banner = "```\nfak guard: 131 kernel decision(s) — 121 allowed\nfak summary: done\n```\n"
+    got = ar.command_verbs(banner)
+    assert "guard" not in got and "summary" not in got
+
+    # A leading env-var assignment must not hide the verb (`FOO=bar fak <verb>`).
+    env = "```bash\nFAK_AUDIT_JOURNAL=x.jsonl fak badverb --flag\n```\n"
+    assert "badverb" in ar.command_verbs(env)
+
+    # A command after the ` -- ` wrapper boundary is still captured; the wrapped agent
+    # name after `fak guard --` is NOT a fak verb and must not be captured.
+    wrapped = "```bash\ncodex mcp add fak -- ./fak serve --stdio\nfak guard -- claude\n```\n"
+    got = ar.command_verbs(wrapped)
+    assert "serve" in got and "claude" not in got
+
+    # Windows invocation forms resolve to the same verb set.
+    win = "```powershell\n.\\fak serve --policy p.json\nfak.exe preflight --tool t\n```\n"
+    got = ar.command_verbs(win)
+    assert "serve" in got and "preflight" in got
+
+    # A trailing inline comment naming a non-verb must not leak (`fak serve  # fak foo`).
+    assert ar.command_verbs("```\nfak serve   # then fak foo later\n```\n") == ["serve"]
+
+
 def test_command_verbs_resolve_kpi() -> None:
     clean = ar.kpi_command_verbs_resolve([])
     assert clean["defects"] == [] and clean["score"] == 100 and clean["group"] == "adopt"
@@ -386,11 +412,17 @@ def test_agent_config_integrity_reads_mcp_json() -> None:
         # malformed JSON => one defect.
         (root / ".mcp.json").write_text("{ not json", encoding="utf-8")
         assert any("does not parse" in b for b in ar._agent_config_integrity(root))
-        # a server with no command => one defect.
+        # a server with neither command nor url => one defect.
         (root / ".mcp.json").write_text('{"mcpServers": {"x": {"args": []}}}', encoding="utf-8")
-        assert any("names no launch command" in b for b in ar._agent_config_integrity(root))
-        # a well-formed config => clean.
+        assert any("neither a launch command nor a url" in b for b in ar._agent_config_integrity(root))
+        # a well-formed command server => clean.
         (root / ".mcp.json").write_text('{"mcpServers": {"dos": {"command": "dos-mcp"}}}', encoding="utf-8")
+        assert ar._agent_config_integrity(root) == []
+        # a remote url-based server (SSE/HTTP, no command) => clean.
+        (root / ".mcp.json").write_text('{"mcpServers": {"r": {"url": "https://x/sse", "type": "sse"}}}', encoding="utf-8")
+        assert ar._agent_config_integrity(root) == []
+        # a `//` comment key inside mcpServers is idiomatic JSON, not a server => clean.
+        (root / ".mcp.json").write_text('{"mcpServers": {"//": "a note", "dos": {"command": "dos-mcp"}}}', encoding="utf-8")
         assert ar._agent_config_integrity(root) == []
 
 
