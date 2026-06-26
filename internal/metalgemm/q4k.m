@@ -162,9 +162,22 @@ kernel void q4k_gemm(device const uchar* W [[buffer(0)]],
     }
     if (active) Y[(long)token * out + o] = acc;
 }
+
+// q4k_swiglu: out[i] = silu(gate[i]) * up[i], the SwiGLU elementwise for the fused decode MLP. Run
+// on the GPU between the gate/up GEMVs and the down GEMV so the I-wide intermediate never leaves
+// the device. silu(z)=z/(1+exp(-z)) — matches internal/model.silu (the non-GELU activation path).
+kernel void q4k_swiglu(device const float* gate [[buffer(0)]],
+                       device const float* up   [[buffer(1)]],
+                       device float*       out  [[buffer(2)]],
+                       constant int&       n    [[buffer(3)]],
+                       uint i [[thread_position_in_grid]]) {
+    if (i >= (uint)n) return;
+    float g = gate[i];
+    out[i] = (g / (1.0f + exp(-g))) * up[i];
+}
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemm;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemm, psoQ4KSwiGLU;
 static int gQ4KReady;
 
 static int q4k_init(void) {
@@ -175,7 +188,8 @@ static int q4k_init(void) {
     if (lib == nil) { NSLog(@"q4k: library compile failed: %@", err); return 0; }
     psoQ4KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv"] error:&err];
     psoQ4KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm"] error:&err];
-    if (!psoQ4KGemv || !psoQ4KGemm) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
+    psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
+    if (!psoQ4KGemv || !psoQ4KGemm || !psoQ4KSwiGLU) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
     gQ4KReady = 1;
     return 1;
 }
@@ -204,6 +218,82 @@ static void q4k_grow_scratch(long xElems, long yElems) {
     if (gQYBuf == nil || gQYCap < yElems) {
         gQYBuf = [gDev newBufferWithLength:(NSUInteger)(yElems * 4) options:MTLResourceStorageModeShared];
         gQYCap = yElems;
+    }
+}
+
+// Reused device-resident scratch for the fused MLP's I-wide gate/up/intermediate, so that buffer
+// never crosses the host boundary in mg_q4k_mlp (only x[H] in and y[H] out do).
+static id<MTLBuffer> gMlpGate = nil, gMlpUp = nil, gMlpInter = nil; static long gMlpCap = 0;
+
+static void q4k_grow_mlp(long iElems) {
+    if (gMlpGate != nil && gMlpCap >= iElems) return;
+    gMlpGate  = [gDev newBufferWithLength:(NSUInteger)(iElems * 4) options:MTLResourceStorageModeShared];
+    gMlpUp    = [gDev newBufferWithLength:(NSUInteger)(iElems * 4) options:MTLResourceStorageModeShared];
+    gMlpInter = [gDev newBufferWithLength:(NSUInteger)(iElems * 4) options:MTLResourceStorageModeShared];
+    gMlpCap = iElems;
+}
+
+// mg_q4k_mlp runs a whole dense SwiGLU MLP — y = down( silu(gate·x) * (up·x) ) — for ONE decode
+// token in ONE command buffer, keeping the I-wide gate/up/intermediate resident on the GPU (only
+// x[H] in and y[H] out cross the boundary). Three encoders order the chain via Metal's automatic
+// hazard tracking on the shared scratch: (1) gate & up GEMVs (independent), (2) the SwiGLU
+// elementwise, (3) the down GEMV. This collapses the MLP — ~54% of q4_k_m decode — from three
+// per-matmul command buffers (each round-tripping the I-wide gate/up out + the intermediate back
+// in) to one. Caller guarantees gate.out==up.out==down.in (=I) and gate.in==up.in==down.out (=H).
+void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y) {
+    if (gate_wid < 0 || up_wid < 0 || down_wid < 0 ||
+        gate_wid >= gNQ4 || up_wid >= gNQ4 || down_wid >= gNQ4) return;
+    @autoreleasepool {
+        Q4KW G = gQ4[gate_wid], U = gQ4[up_wid], D = gQ4[down_wid];
+        int H = G.in;
+        int I = G.out;
+        q4k_grow_scratch((long)H, (long)D.out);
+        q4k_grow_mlp((long)I);
+        id<MTLBuffer> xb = gQXBuf, yb = gQYBuf;
+        memcpy(xb.contents, x, (size_t)H * 4);
+
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+
+        // (1) gate = G·x and up = U·x (independent), one encoder
+        id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
+        [e1 setComputePipelineState:psoQ4KGemv];
+        [e1 setBuffer:xb offset:0 atIndex:1];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpGate offset:0 atIndex:2];
+        [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpUp offset:0 atIndex:2];
+        [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e1 endEncoding];
+
+        // (2) inter = silu(gate) * up
+        id<MTLComputeCommandEncoder> e2 = [cb computeCommandEncoder];
+        [e2 setComputePipelineState:psoQ4KSwiGLU];
+        [e2 setBuffer:gMlpGate offset:0 atIndex:0];
+        [e2 setBuffer:gMlpUp offset:0 atIndex:1];
+        [e2 setBuffer:gMlpInter offset:0 atIndex:2];
+        [e2 setBytes:&I length:sizeof(int) atIndex:3];
+        [e2 dispatchThreads:MTLSizeMake((NSUInteger)I,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+        [e2 endEncoding];
+
+        // (3) y = D·inter
+        id<MTLComputeCommandEncoder> e3 = [cb computeCommandEncoder];
+        [e3 setComputePipelineState:psoQ4KGemv];
+        [e3 setBuffer:gMlpInter offset:0 atIndex:1];
+        [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
+        [e3 setBuffer:yb offset:0 atIndex:2];
+        [e3 setBytes:&D.nblk length:sizeof(int) atIndex:3];
+        [e3 setBytes:&D.out  length:sizeof(int) atIndex:4];
+        [e3 dispatchThreadgroups:MTLSizeMake((NSUInteger)D.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e3 endEncoding];
+
+        [cb commit];
+        [cb waitUntilCompleted];
+        memcpy(y, yb.contents, (size_t)D.out * 4);
     }
 }
 
@@ -304,6 +394,43 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat) {
     }
 }
 
+// mg_q4k_gemv_group runs n decode GEMVs that SHARE one activation x (length in) but apply n
+// DIFFERENT resident q4_k weights, into ONE command buffer (one commit/waitUntilCompleted). This
+// is the live decode access pattern: a layer's q/k/v (or gate/up, or the GDN in_proj quad) all
+// read the same post-norm activation. Each weight i writes Ycat[yoff[i] .. yoff[i]+out_i); yoff
+// has n+1 entries (yoff[n] = total y elems). The fixed ~submit/sync overhead is paid ONCE for the
+// group and the GPU pipelines the n dispatches — the per-token win the resident forward needs.
+void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff) {
+    if (n <= 0) return;
+    @autoreleasepool {
+        int in = gQ4[wids[0]].in;
+        long ytot = (long)yoff[n];
+        q4k_grow_scratch((long)in, ytot);
+        id<MTLBuffer> xb = gQXBuf;
+        id<MTLBuffer> yb = gQYBuf;
+        memcpy(xb.contents, x, (size_t)in * 4);
+
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        [e setComputePipelineState:psoQ4KGemv];
+        [e setBuffer:xb offset:0 atIndex:1]; // shared activation for every weight in the group
+        for (int i = 0; i < n; i++) {
+            Q4KW Wi = gQ4[wids[i]];
+            [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:0 atIndex:0];
+            [e setBuffer:yb offset:(NSUInteger)((long)yoff[i] * 4) atIndex:2];
+            [e setBytes:&Wi.nblk length:sizeof(int) atIndex:3];
+            [e setBytes:&Wi.out  length:sizeof(int) atIndex:4];
+            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)Wi.out, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        }
+        [e endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+
+        memcpy(Ycat, yb.contents, (size_t)ytot * 4);
+    }
+}
+
 // mg_q4k_gemm computes Y[P, out] = X[P, in] · W[wid]^T (batched prefill GEMM). f32 in/out,
 // row-major; Y must hold P*out floats.
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {
@@ -359,4 +486,5 @@ void mg_q4k_reset(void) {
     gNQ4 = 0;
     gQXBuf = nil; gQXCap = 0;
     gQYBuf = nil; gQYCap = 0;
+    gMlpGate = nil; gMlpUp = nil; gMlpInter = nil; gMlpCap = 0;
 }

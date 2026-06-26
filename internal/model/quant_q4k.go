@@ -302,6 +302,27 @@ func (k sessionQ4KKernel) mul(name string, x any, out, in int) []float32 {
 	return qMatRows(k.s.M.q8(name), quantizeVecQ8(xf))
 }
 
+// mulGroup applies several weights that share ONE prepared activation xn (same in), returning one
+// result per name in order. Under the resident-Q4_K session kernel with MetalQ4K it runs the
+// q4_k-resident members of the group in a SINGLE Metal command buffer (q4kGroupDispatch) — the
+// decode lever (one command buffer instead of one-per-matmul) — and falls the Q8 minority back to
+// the per-call CPU GEMV. Every other kernel (and the pure-Go build) loops mul; the results are
+// bit-identical either way (GEMVGroup == per-weight GEMV, pinned by TestMetalQ4KGemvGroupMatchesSingle).
+func mulGroup(mat matKernel, names []string, xn any, outs []int, in int) [][]float32 {
+	if sk, ok := mat.(sessionQ4KKernel); ok {
+		if xf, ok2 := xn.([]float32); ok2 {
+			if r := sk.s.q4kGroupDispatch(names, xf, outs); r != nil {
+				return r
+			}
+		}
+	}
+	r := make([][]float32, len(names))
+	for i, n := range names {
+		r[i] = mat.mul(n, xn, outs[i], in)
+	}
+	return r
+}
+
 // quantizeQ4KFromRaw wraps a raw GGUF Q4_K payload (row-major, in == nblk*qkK) as a
 // resident q4kTensor with NO transform — the bytes ARE the GGUF bytes. This is the
 // direct-q4 loader entry the plan calls for: it skips ggufload's dequantF32 (Q4→f32) and

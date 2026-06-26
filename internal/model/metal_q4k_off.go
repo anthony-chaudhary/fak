@@ -14,3 +14,15 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) []float32 {
 	return q4kMatRows(qt, xf)
 }
+
+// q4kGroupDispatch always declines in the pure-Go build (no Metal) so mulGroup loops the per-call
+// CPU path. The Metal one-command-buffer group path lives in metal_q4k_on.go behind -tags fakmetal.
+func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][]float32 {
+	return nil
+}
+
+// q4kFusedMLP always declines in the pure-Go build; the fused on-GPU SwiGLU MLP lives in
+// metal_q4k_on.go behind -tags fakmetal. The caller (denseSwiGLU.apply) uses the per-matmul path.
+func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []float32 {
+	return nil
+}
