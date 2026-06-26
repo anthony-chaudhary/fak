@@ -3,6 +3,9 @@ package model
 import (
 	"fmt"
 	"math"
+	"os"
+	"strconv"
+	"sync"
 )
 
 type glmDsaKVCache struct {
@@ -228,33 +231,58 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 func (m *Model) glmDsaAttentionStep(cache *glmDsaKVCache, layer, pos int, xn []float32, sharedTopK []int, mat matKernel) ([]float32, []int, bool) {
 	cfg := m.Cfg
 	if cache == nil || !cfg.isGLMMoeDsa() || len(xn) != cfg.HiddenSize {
+		glmDsaStepFail(layer, "preconditions", "cache_nil=%v isGLMMoeDsa=%v len(xn)=%d HiddenSize=%d",
+			cache == nil, cfg.isGLMMoeDsa(), len(xn), cfg.HiddenSize)
 		return nil, nil, false
 	}
 	var topK []int
 	if glmDsaIndexerIsShared(cfg, layer) {
 		if len(sharedTopK) == 0 {
+			glmDsaStepFail(layer, "shared-indexer-empty-topk", "this layer reuses a shared indexer but sharedTopK is empty (IndexerTypes pattern?)")
 			return nil, nil, false
 		}
 		topK = append([]int(nil), sharedTopK...)
 	} else {
 		if !glmDsaIndexerIsFull(cfg, layer) {
+			glmDsaStepFail(layer, "indexer-not-full", "layer is neither shared nor full per IndexerTypes; len(IndexerTypes)=%d", len(cfg.IndexerTypes))
 			return nil, nil, false
 		}
 		var ok bool
 		topK, ok = m.glmDsaIndexStep(cache, layer, pos, xn, mat)
 		if !ok {
+			glmDsaStepFail(layer, "index-step", "IndexNHeads=%d IndexHeadDim=%d QLoraRank=%d QKRopeHeadDim=%d", cfg.IndexNHeads, cfg.IndexHeadDim, cfg.QLoraRank, cfg.QKRopeHeadDim)
 			return nil, nil, false
 		}
 	}
 	query, ok := m.glmDsaAppendAttentionKV(cache, layer, pos, xn, mat)
 	if !ok {
+		glmDsaStepFail(layer, "append-kv", "nH=%d qkNope=%d qkRope=%d vHead=%d kvLora=%d", cfg.NumHeads, cfg.QKNopeHeadDim, cfg.QKRopeHeadDim, cfg.VHeadDim, cfg.KVLoraRank)
 		return nil, nil, false
 	}
 	out, ok := m.glmDsaAttendCached(cache, layer, pos, query, topK, mat)
 	if !ok {
+		glmDsaStepFail(layer, "attend-cached", "pos=%d nTopK=%d", pos, len(topK))
 		return nil, nil, false
 	}
 	return out, topK, true
+}
+
+// glmDsaStepFail logs (once per (layer,where), to stderr) WHY a glm_moe_dsa attention step
+// returned ok=false, turning the opaque "attention step failed" panic into an actionable
+// diagnostic. Gated on FAK_GLMDSA_DEBUG so the hot path is silent by default; the panic at the
+// call site is unchanged, but now a preceding line names the failing sub-step + the dims behind it.
+var glmDsaStepFailSeen sync.Map
+
+func glmDsaStepFail(layer int, where, format string, args ...any) {
+	if os.Getenv("FAK_GLMDSA_DEBUG") == "" {
+		return
+	}
+	key := where + ":" + strconv.Itoa(layer)
+	if _, dup := glmDsaStepFailSeen.LoadOrStore(key, true); dup {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "fak: glm_moe_dsa attention step FAILED at layer %d [%s]: "+format+"\n",
+		append([]any{layer, where}, args...)...)
 }
 
 func (m *Model) glmDsaIndexStep(cache *glmDsaKVCache, layer, pos int, xn []float32, mat matKernel) ([]int, bool) {
