@@ -30,7 +30,7 @@ Recently reviewed session markers can be cleared by id with
 | MCP stdio kernel tools | PASS | `experiments/agent-live/codex-dogfood-019efde3-6794-7401-93a1-e97e6bd72a9c.json` records `mcp_stdio_adjudication.status=PASS`, expected tools present, `git_push` denied as `POLICY_BLOCK`, and `git_status` allowed. |
 | Historical Codex/DOS sessions | WARN audit, PASS actionability | `experiments/agent-live/codex-dos-recent-audit.json` audits 20 recent Codex sessions. Overall audit remains `WARN` for residual debt, while `actionability.status=PASS`: Codex stream stop blocks/failures are 0, the workspace StopFailure API-wall breaker rollup found 69 one-day failures across 54 nonzero markers and 138 zero-total markers, and 0 markers remain active after review. Current StopFailure shape is 0 recent-active markers, 0 stale-active markers, 0 active consecutive failures, and 54 healed nonzero markers at `consecutive=0`. |
 | Historical git writes after mitigation | PASS | Expected-deny reports for `git_add`, `git_commit`, and `git_push` prove at `2026-06-25T22:38:12.037688Z`. The post-gate lens shows no `git_write` family after that proof, so earlier opaque git writes are classified as `HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE`, not current actionability. |
-| Historical Claude Code sessions | PASS + friction surfaced | `experiments/agent-live/claude-historical-guard-audit-2026-06-25.json` and `experiments/agent-live/CLAUDE-HISTORICAL-GUARD-AUDIT-2026-06-25.md` now scan 20 recent `C--work-fak` transcripts across 10 local `.claude*` account roots. They found 230 tool proposals and replayed 227 unique tool shapes through `fak preflight` under `examples/dogfood-claude-policy.json`, recording 181 `ALLOW` and 46 `DENY` verdicts, including 7 `POLICY_BLOCK`. The same artifact surfaces count-only friction tags: `HOOK_OR_API_WALL_FEEDBACK` in 20 sessions, `HOST_PERMISSION_INTERRUPT` in 20, `TOOL_ERROR_RECOVERY` in 19, `DENY_OR_BLOCKED_FEEDBACK` in 17, `SHELL_HEAVY_SESSION` in 11, and `LARGE_RESULT` in 9, while storing no prompts, tool arguments, tool results, full user paths, or raw transcript text. |
+| Historical Claude Code sessions | PASS + friction surfaced | `experiments/agent-live/claude-historical-guard-audit-2026-06-25.json` and `experiments/agent-live/CLAUDE-HISTORICAL-GUARD-AUDIT-2026-06-25.md` now scan 20 recent `C--work-fak` transcripts across 10 local `.claude*` account roots; 16 of those sessions had tool calls. They found 231 tool proposals and replayed 228 unique tool shapes through `fak preflight` under `examples/dogfood-claude-policy.json`, recording 177 `ALLOW` and 51 `DENY` verdicts, including 9 `POLICY_BLOCK`. The same artifact surfaces count-only friction tags: `HOOK_OR_API_WALL_FEEDBACK`, `HOST_PERMISSION_INTERRUPT`, `TOOL_ERROR_RECOVERY`, and `DENY_OR_BLOCKED_FEEDBACK` in all 20 summarized sessions, `SHELL_HEAVY_SESSION` in 11, and `LARGE_RESULT` in 7, while storing no prompts, tool arguments, tool results, full user paths, or raw transcript text. |
 | Claude Code live session | PASS | `experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json` records a live Claude Code turn where `rm -rf ./.fak-live-pilot-sentinel-do-not-exist` was denied (`POLICY_BLOCK`) and a later same-session `echo fak-claude-live-pilot-ok` was allowed. |
 | OpenAI/Codex MCP live session | PASS | `experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json` records a Codex CLI MCP turn where `fak_adjudicate(git_push)` denied `POLICY_BLOCK` and the same turn continued with allowed `fak_adjudicate(git_status, read_only=true)`. |
 | OpenAI Agents guardrail adapter | PASS | `examples/openai-agents-guardrail/demo.py` starts `fak serve`, blocks `git_push` before execution, allows `git_status`, admits the clean result, and quarantines a poisoned `web_fetch` result. Latest local run returned `summary: PASS`; captured expected output is in `examples/openai-agents-guardrail/EXAMPLE-OUTPUT.md`. |
@@ -42,8 +42,13 @@ Recently reviewed session markers can be cleared by id with
 - `HOST_SHELL_OPACITY` debt: Codex still emits many free-form shell commands whose file
   footprint is not visible to DOS lane admission. In the current audit this is visible
   as shell-shape debt and remains current default-on active debt: 2,290
-  `shell_no_write_target_detected` calls need path-visible host tools or structured
-  payloads before DOS can price file-tree collision risk.
+  `shell_no_write_target_detected` calls. The new remediation split makes that queue
+  actionable without storing command bodies: 826 read/search calls should become
+  path-visible read tools, 844 test/git-read/build commands need explicit workspace
+  scope, 107 script/redirect calls should be split into structured steps, 45 git-write
+  calls belong behind structured git gates, 31 path-bearing writes should become
+  apply/artifact operations, and 474 calls remain truly opaque shell needing tool or
+  path metadata before DOS can price file-tree collision risk.
 - `HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE`: the one-day window still contains
   opaque `git_write` shell families before the fresh structured deny probes. The
   post-gate lens is empty, so this is historical debt, not current actionability.
@@ -60,10 +65,15 @@ Recently reviewed session markers can be cleared by id with
   `SHELL_HEAVY_SESSION`, `LARGE_TOOL_RESULT`) and no prompts, command bodies, tool
   output, or model text.
 - `CLAUDE_FRICTION_SHAPES`: the all-account Claude replay is policy-clean enough to
-  pass, but the transcripts show operational friction: 508 hook/API-wall marker lines,
-  421 permission marker lines, 429 deny/blocked marker lines, 1527 error-recovery
-  marker lines, and a maximum sanitized result length of 64,944 characters. These are
-  count-shape signals only; session ids are hashed and root names are account labels.
+  pass, but the transcripts show operational friction: 509 hook/API-wall marker lines,
+  440 permission marker lines, 448 deny/blocked marker lines, 1463 error-recovery
+  marker lines, and a maximum sanitized result length of 55,614 characters. The new
+  remediation split makes this actionable: clear hook/API-wall feedback, reduce
+  permission interruptions, align policy with real tool shapes, and fix tool-error
+  recovery loops each appear in all 20 summarized sessions; 11 sessions need shell
+  replacement with path-visible tools, and 7 need large-output capping or summaries.
+  These are count-shape signals only; session ids are hashed and root names are
+  account labels.
 - `OPENAI_AGENTS_SDK_NOT_INSTALLED`: The hosted OpenAI proof now passes through the
   existing Codex ChatGPT/OAuth login (`auth_source=codex_login`), not a Platform API
   key. The remaining OpenAI residual is narrower: this host still has no installed
@@ -76,14 +86,27 @@ Recently reviewed session markers can be cleared by id with
 Ranked from current active debt to historical/external debt:
 
 1. `CODEX_HOST_SHELL_OPACITY` (`ACTIVE_DEBT`, Codex hooks): post-repair evidence still
-   has 2,290 `shell_no_write_target_detected` calls. Next action: prefer path-visible
-   host tools or structured tool payloads so DOS can assign file-tree footprints.
+   has 2,290 `shell_no_write_target_detected` calls. Remediation buckets:
+   `replace_with_path_visible_read_tool=826`,
+   `keep_repo_context_but_expose_workspace_scope=844`,
+   `split_script_or_redirect_into_structured_steps=107`,
+   `route_git_write_through_structured_gate=45`,
+   `replace_path_bearing_write_with_apply_patch_or_artifact_tool=31`, and
+   `opaque_shell_needs_tool_or_path_metadata=474`. Next action: work those buckets in
+   that order so DOS sees path/operation metadata instead of one bulk opaque shell
+   stream.
 2. `CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION` (`ACTIVE_DEBT`, Claude Code): across 20
-   recent transcripts, the all-account replay shows hook/API-wall and permission
-   friction in all 20 summarized sessions, plus tool-error recovery in 19,
-   deny/blocked feedback in 17, shell-heavy sessions in 11, and large results in 9.
-   Next action: triage top friction sessions by tag and reduce hook/API-wall and
-   permission interruptions first.
+   recent transcripts, the all-account replay shows hook/API-wall, permission,
+   deny/blocked, and tool-error recovery friction in all 20 summarized sessions,
+   plus shell-heavy sessions in 11 and large results in 7. Remediation buckets:
+   `clear_hook_or_api_wall_feedback=20`,
+   `reduce_permission_interruptions_or_scope_policy=20`,
+   `align_policy_with_real_tool_shapes=20`,
+   `fix_tool_contract_or_error_recovery_loop=20`,
+   `replace_shell_with_path_visible_tools=11`, and
+   `cap_or_summarize_large_outputs=7`. Next action: work those buckets in that order
+   so Claude defaults become useful without repeated hook/API-wall, permission, and
+   tool-contract interruptions.
 3. `HISTORICAL_OPAQUE_GIT_WRITE_BEFORE_GATE` (`HISTORICAL`, Codex hooks): opaque
    `git_write` appears in the one-day post-repair window, but not after the structured
    git gate proof at `2026-06-25T22:38:12.037688Z`. Next action: keep structured git

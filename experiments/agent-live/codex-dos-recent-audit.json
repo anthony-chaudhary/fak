@@ -21,6 +21,15 @@
       "search_rg": 281,
       "shell_redirect": 45
     },
+    "post_repair_shell_remediation_counts": {
+      "keep_repo_context_but_expose_workspace_scope": 844,
+      "non_shell_tool_already_structured": 408,
+      "opaque_shell_needs_tool_or_path_metadata": 474,
+      "replace_path_bearing_write_with_apply_patch_or_artifact_tool": 31,
+      "replace_with_path_visible_read_tool": 826,
+      "route_git_write_through_structured_gate": 45,
+      "split_script_or_redirect_into_structured_steps": 107
+    },
     "post_repair_shell_shape_counts": {
       "non_shell_tool": 408,
       "shell_in_tree_or_safe_write_target": 37,
@@ -197,6 +206,7 @@
           "counts",
           "shell family categories",
           "shell shape categories",
+          "shell remediation categories",
           "write operation kinds"
         ],
         "dropped": [
@@ -223,6 +233,15 @@
         "python_test": 68,
         "search_rg": 281,
         "shell_redirect": 45
+      },
+      "shell_remediation_counts": {
+        "keep_repo_context_but_expose_workspace_scope": 844,
+        "non_shell_tool_already_structured": 408,
+        "opaque_shell_needs_tool_or_path_metadata": 474,
+        "replace_path_bearing_write_with_apply_patch_or_artifact_tool": 31,
+        "replace_with_path_visible_read_tool": 826,
+        "route_git_write_through_structured_gate": 45,
+        "split_script_or_redirect_into_structured_steps": 107
       },
       "shell_shape_counts": {
         "non_shell_tool": 408,
@@ -285,7 +304,7 @@
     "repaired_at": "2026-06-25T15:53:01.729390Z",
     "status": "PASS"
   },
-  "codex_threads_discovered": 117,
+  "codex_threads_discovered": 118,
   "dos_version": {
     "distribution": "dos-kernel",
     "latest_check_note": "run with --check-latest to compare against https://pypi.org/pypi/dos-kernel/json",
@@ -307,6 +326,7 @@
           "counts",
           "shell family categories",
           "shell shape categories",
+          "shell remediation categories",
           "write operation kinds"
         ],
         "dropped": [
@@ -322,6 +342,7 @@
       "shell_argument_errors": 0,
       "shell_command_calls": 0,
       "shell_family_counts": {},
+      "shell_remediation_counts": {},
       "shell_shape_counts": {},
       "since": "2026-06-25T22:38:12.037688Z",
       "status": "UNKNOWN",
@@ -453,7 +474,7 @@
     "recent Codex DOS streams are Bash-dominated; prefer path-visible tools or narrower shell commands",
     "unknown-tree admission warning rate exceeds the transfer-playbook threshold",
     "recent-window delegate count includes pre-repair history; post-repair Codex delegates are zero",
-    "post-repair shell usage is mostly opaque read/inspect commands; prefer host-visible read/search tools when available",
+    "post-repair shell opacity is mostly read/search/test/git-read shape; expose those as path-visible or workspace-scoped host tools before treating remaining shell as irreducible",
     "post-repair shell usage includes opaque mutating git operations; route commit/push/add through explicit operator gates",
     "workspace StopFailure API-wall breaker markers appeared outside the audited Codex streams; inspect .dos/stop-failures"
   ],
@@ -996,11 +1017,11 @@
     "workspace_stop_failure_stale_active_origin_counts": {},
     "workspace_stop_failure_stale_active_settlement_action_counts": {},
     "workspace_stop_failure_transcript_evidence_tags": {
-      "DENY_OR_BLOCKED_FEEDBACK": 13,
+      "DENY_OR_BLOCKED_FEEDBACK": 14,
       "HOOK_OR_API_WALL_FEEDBACK": 20,
       "HOST_PERMISSION_INTERRUPT": 20,
-      "LARGE_TOOL_RESULT": 8,
-      "SHELL_HEAVY_SESSION": 5,
+      "LARGE_TOOL_RESULT": 9,
+      "SHELL_HEAVY_SESSION": 6,
       "TOOL_ERROR_RECOVERY": 20
     },
     "workspace_stop_failure_zero_markers": 138,
@@ -1079,7 +1100,132 @@
     "recent": [
       {
         "active_recent": false,
-        "age_seconds": 139,
+        "age_seconds": 355,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:28:00.735899Z",
+        "origin": "dos_stream+claude_transcript",
+        "origin_labels": [
+          "dos_stream",
+          "claude_transcript"
+        ],
+        "session_id": "674f3746-4339-43d6-81e4-900d9d7a5bc4",
+        "settlement_action": "ZERO_TOTAL",
+        "total": 0,
+        "transcript": {
+          "account": ".claude",
+          "mtime": "2026-06-26T03:28:58.623326Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 675,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:22:40.441385Z",
+        "origin": "dos_stream+claude_transcript",
+        "origin_labels": [
+          "dos_stream",
+          "claude_transcript"
+        ],
+        "session_id": "aac6e2b1-ea31-462e-a6a4-3dabcfd855c7",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude",
+          "mtime": "2026-06-26T03:29:58.635000Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 682,
+            "tool_result": 808,
+            "tool_use": 808
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "first_timestamp": "2026-06-25T17:29:58.513Z",
+          "last_timestamp": "2026-06-26T03:22:41.538Z",
+          "lines": 3872,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "blocked": 222,
+            "denied": 7,
+            "error": 858,
+            "hook": 353,
+            "permission": 222,
+            "stopfailure": 1
+          },
+          "max_tool_result_chars": 26764,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1489,
+            "user": 850
+          },
+          "row_type_counts": {
+            "agent-name": 99,
+            "ai-title": 146,
+            "assistant": 1489,
+            "attachment": 354,
+            "file-history-snapshot": 90,
+            "last-prompt": 185,
+            "mode": 185,
+            "permission-mode": 185,
+            "queue-operation": 212,
+            "system": 77,
+            "user": 850
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {
+            "Agent": 4,
+            "Bash": 449,
+            "Edit": 67,
+            "Glob": 2,
+            "Monitor": 23,
+            "Read": 101,
+            "ScheduleWakeup": 4,
+            "TaskCreate": 12,
+            "TaskOutput": 40,
+            "TaskStop": 6,
+            "TaskUpdate": 22,
+            "Write": 70
+          },
+          "tool_result_shape_counts": {
+            "toolUseResult_dict": 782,
+            "toolUseResult_str": 26,
+            "tool_result_error_text": 83,
+            "tool_result_list": 4,
+            "tool_result_other_text": 719,
+            "tool_result_permission_text": 1,
+            "tool_result_stopfailure_text": 1
+          }
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1143,
         "consecutive": 0,
         "mtime": "2026-06-26T03:14:52.182550Z",
         "origin": "dos_stream+claude_transcript",
@@ -1092,14 +1238,14 @@
         "total": 0,
         "transcript": {
           "account": ".claude",
-          "mtime": "2026-06-26T03:14:55.304147Z",
+          "mtime": "2026-06-26T03:23:30.013803Z",
           "project": "C--work-fak",
           "status": "FOUND"
         }
       },
       {
         "active_recent": false,
-        "age_seconds": 319,
+        "age_seconds": 1323,
         "consecutive": 0,
         "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "claude_transcript",
@@ -1171,7 +1317,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 319,
+        "age_seconds": 1323,
         "consecutive": 0,
         "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "dos_stream+claude_transcript",
@@ -1271,7 +1417,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 319,
+        "age_seconds": 1323,
         "consecutive": 0,
         "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "claude_transcript",
@@ -1344,7 +1490,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.877341Z",
         "origin": "claude_transcript",
@@ -1413,7 +1559,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.876341Z",
         "origin": "claude_transcript",
@@ -1482,7 +1628,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.875343Z",
         "origin": "claude_transcript",
@@ -1551,7 +1697,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -1620,7 +1766,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -1689,7 +1835,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -1758,7 +1904,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.873336Z",
         "origin": "claude_transcript",
@@ -1773,61 +1919,11 @@
           "mtime": "2026-06-25T03:45:15.376040Z",
           "project": "C--work-fak",
           "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:45:14.502Z",
-          "last_timestamp": "2026-06-25T03:45:15.259Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
         }
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.873336Z",
         "origin": "claude_transcript",
@@ -1846,7 +1942,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.873336Z",
         "origin": "claude_transcript",
@@ -1865,7 +1961,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.873336Z",
         "origin": "claude_transcript",
@@ -1884,7 +1980,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.872833Z",
         "origin": "claude_transcript",
@@ -1903,7 +1999,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.871834Z",
         "origin": "claude_transcript",
@@ -1922,7 +2018,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.871834Z",
         "origin": "claude_transcript",
@@ -1941,7 +2037,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.871834Z",
         "origin": "claude_transcript",
@@ -1954,44 +2050,6 @@
         "transcript": {
           "account": ".claude-ff8ec20a",
           "mtime": "2026-06-25T04:02:31.602810Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 1128,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.871834Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "d8a73007-c239-454b-9bc5-7748ac1b25c5",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:48:39.928830Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 1128,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.870833Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "2b0322ad-f0a6-4f20-93e6-3cbd721d213b",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T04:08:38.944338Z",
           "project": "C--work-fak",
           "status": "FOUND"
         }
@@ -2009,7 +2067,7 @@
     "settlement_plan": {
       "HEALED_NONZERO": [
         {
-          "age_seconds": 68931,
+          "age_seconds": 69936,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/87a2adc1-653e-4c67-9243-d2058084029b.json",
           "mtime": "2026-06-25T08:08:19.788300Z",
@@ -2028,7 +2086,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/3f29f826-b400-476b-811c-374e61fd75ad.json",
           "mtime": "2026-06-26T02:58:22.867327Z",
@@ -2047,7 +2105,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 15368,
+          "age_seconds": 16372,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/2b8682ae-ced6-402b-bcc8-21180e96d5b3.json",
           "mtime": "2026-06-25T23:01:02.895782Z",
@@ -2066,7 +2124,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 319,
+          "age_seconds": 1323,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/3af9576f-4e22-4eac-bc59-fb7935196e31.json",
           "mtime": "2026-06-26T03:11:52.142992Z",
@@ -2084,7 +2142,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/0b2c4844-23b3-4ccf-ab02-032c50cab607.json",
           "mtime": "2026-06-26T02:58:22.867830Z",
@@ -2103,7 +2161,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/1f689f62-ef81-4862-ac09-2763a362f655.json",
           "mtime": "2026-06-26T02:58:22.867830Z",
@@ -2122,7 +2180,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/dde358da-6862-4e56-992a-e1527b02c89f.json",
           "mtime": "2026-06-26T02:58:22.867830Z",
@@ -2142,7 +2200,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/f7198142-f77b-47ba-8e9a-453ab3ea27e1.json",
           "mtime": "2026-06-26T02:58:22.867830Z",
@@ -2161,7 +2219,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 11599,
+          "age_seconds": 12603,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/6dff026d-e10d-4708-ba61-d29727b6d859.json",
           "mtime": "2026-06-26T00:03:52.194878Z",
@@ -2180,7 +2238,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 30850,
+          "age_seconds": 31855,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/a9dd5c1c-af6e-4c28-8e08-98940a570503.json",
           "mtime": "2026-06-25T18:43:00.656239Z",
@@ -2200,7 +2258,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 37727,
+          "age_seconds": 38732,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/35522ab7-572c-4c8d-9869-1d1d4a9488d2.json",
           "mtime": "2026-06-25T16:48:23.457243Z",
@@ -2220,7 +2278,27 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 319,
+          "age_seconds": 675,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/aac6e2b1-ea31-462e-a6a4-3dabcfd855c7.json",
+          "mtime": "2026-06-26T03:22:40.441385Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "aac6e2b1-ea31-462e-a6a4-3dabcfd855c7",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1323,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/2a660dbb-9d35-4502-9a8c-5f14ceac1686.json",
           "mtime": "2026-06-26T03:11:52.142992Z",
@@ -2238,7 +2316,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 319,
+          "age_seconds": 1323,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6.json",
           "mtime": "2026-06-26T03:11:52.142992Z",
@@ -2256,7 +2334,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/03d07851-5d2b-4f07-b607-c9b7f5601d40.json",
           "mtime": "2026-06-26T02:58:22.877341Z",
@@ -2273,7 +2351,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/0b0648f8-e81c-4116-98b7-319ed9e3feee.json",
           "mtime": "2026-06-26T02:58:22.873336Z",
@@ -2281,16 +2359,12 @@
           "session_id": "0b0648f8-e81c-4116-98b7-319ed9e3feee",
           "settlement_action": "HEALED_NONZERO",
           "total": 1,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
+          "transcript_evidence_tags": [],
           "transcript_project": "C--work-fak",
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/0bc20897-7340-4971-b44c-899ea5997da3.json",
           "mtime": "2026-06-26T02:58:22.873336Z",
@@ -2303,7 +2377,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/0ca65829-55f7-4e83-8395-d66af9a3667b.json",
           "mtime": "2026-06-26T02:58:22.868833Z",
@@ -2316,7 +2390,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/1c9b6d78-c64b-4340-a2c3-76f6033aa0dc.json",
           "mtime": "2026-06-26T02:58:22.869833Z",
@@ -2329,7 +2403,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 1128,
+          "age_seconds": 2133,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/2b0322ad-f0a6-4f20-93e6-3cbd721d213b.json",
           "mtime": "2026-06-26T02:58:22.870833Z",
@@ -2340,24 +2414,24 @@
           "transcript_evidence_tags": [],
           "transcript_project": "C--work-fak",
           "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 1128,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/2cd19a7a-2b80-4497-a939-28638fc37de5.json",
-          "mtime": "2026-06-26T02:58:22.867830Z",
-          "origin": "claude_transcript",
-          "session_id": "2cd19a7a-2b80-4497-a939-28638fc37de5",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
         }
       ],
       "ZERO_TOTAL": [
         {
-          "age_seconds": 139,
+          "age_seconds": 355,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/674f3746-4339-43d6-81e4-900d9d7a5bc4.json",
+          "mtime": "2026-06-26T03:28:00.735899Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "674f3746-4339-43d6-81e4-900d9d7a5bc4",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1143,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/9ff4f226-7ef7-4959-98e5-543fedfb0595.json",
           "mtime": "2026-06-26T03:14:52.182550Z",
@@ -2370,7 +2444,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 5343,
+          "age_seconds": 6348,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/f9570e26-cb3b-45b7-8b9f-09cea89e58d8.json",
           "mtime": "2026-06-26T01:48:07.814509Z",
@@ -2383,7 +2457,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 7237,
+          "age_seconds": 8242,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/02a63915-2cf6-493b-a5a4-acb177897c0a.json",
           "mtime": "2026-06-26T01:16:33.683785Z",
@@ -2396,20 +2470,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 7387,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/674f3746-4339-43d6-81e4-900d9d7a5bc4.json",
-          "mtime": "2026-06-26T01:14:04.129225Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "674f3746-4339-43d6-81e4-900d9d7a5bc4",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 10904,
+          "age_seconds": 11908,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/8a1ce5bb-1d6e-4071-bc24-7dfc2bae7647.json",
           "mtime": "2026-06-26T00:15:27.122426Z",
@@ -2422,7 +2483,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 12621,
+          "age_seconds": 13625,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/10a25ec0-3803-4fe7-92da-2e4ae182973a.json",
           "mtime": "2026-06-25T23:46:50.096581Z",
@@ -2435,7 +2496,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 12853,
+          "age_seconds": 13857,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/8a4e693c-7638-4a8c-bbfa-dabb41f8cee8.json",
           "mtime": "2026-06-25T23:42:57.967738Z",
@@ -2448,7 +2509,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 17106,
+          "age_seconds": 18110,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/4a1b92c1-c5f0-46a6-aef6-02a91f29c5de.json",
           "mtime": "2026-06-25T22:32:05.340983Z",
@@ -2461,7 +2522,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 17248,
+          "age_seconds": 18253,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/4266e596-e09b-4049-a7c7-f85322570d1d.json",
           "mtime": "2026-06-25T22:29:42.599534Z",
@@ -2474,7 +2535,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 17306,
+          "age_seconds": 18310,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/5f1c9876-41f3-455c-95a5-17e2425551f6.json",
           "mtime": "2026-06-25T22:28:44.988688Z",
@@ -2487,7 +2548,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 17704,
+          "age_seconds": 18708,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/439cb1b3-8acd-471a-bd08-406e8a2000f4.json",
           "mtime": "2026-06-25T22:22:07.221106Z",
@@ -2500,7 +2561,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 18322,
+          "age_seconds": 19326,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/0c437c57-b888-43c4-8fef-1a2a9c884bc4.json",
           "mtime": "2026-06-25T22:11:49.370993Z",
@@ -2513,7 +2574,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 18475,
+          "age_seconds": 19480,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/f4438b79-47c8-41cd-a98f-7fdc860bab18.json",
           "mtime": "2026-06-25T22:09:15.518808Z",
@@ -2526,7 +2587,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 19154,
+          "age_seconds": 20158,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/51fcb753-1667-4f79-ba74-58a8c800906e.json",
           "mtime": "2026-06-25T21:57:57.037852Z",
@@ -2539,7 +2600,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 20185,
+          "age_seconds": 21190,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/9b7bd6c7-ac36-433c-ae7a-618e8b96caa9.json",
           "mtime": "2026-06-25T21:40:45.645524Z",
@@ -2552,7 +2613,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 25013,
+          "age_seconds": 26018,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/e2198d6b-5abe-4470-9548-e76fc3e985c9.json",
           "mtime": "2026-06-25T20:20:17.626242Z",
@@ -2565,7 +2626,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 25211,
+          "age_seconds": 26216,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/e5491dd7-fe6f-499c-9f6a-1822ac3994dd.json",
           "mtime": "2026-06-25T20:16:59.629447Z",
@@ -2578,7 +2639,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 25708,
+          "age_seconds": 26712,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/40dfbeac-dba5-4645-b183-944467ec5428.json",
           "mtime": "2026-06-25T20:08:43.095085Z",
@@ -2591,7 +2652,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 25838,
+          "age_seconds": 26843,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/92c85f38-809a-48ca-a398-86f3269011df.json",
           "mtime": "2026-06-25T20:06:32.516663Z",
@@ -2604,7 +2665,7 @@
           "transcript_status": "FOUND"
         },
         {
-          "age_seconds": 26160,
+          "age_seconds": 27164,
           "consecutive": 0,
           "marker_path": ".dos/stop-failures/04593164-3578-438e-827a-9c6979837063.json",
           "mtime": "2026-06-25T20:01:11.175688Z",
@@ -2628,7 +2689,7 @@
     "top_nonzero": [
       {
         "active_recent": false,
-        "age_seconds": 68931,
+        "age_seconds": 69936,
         "consecutive": 0,
         "mtime": "2026-06-25T08:08:19.788300Z",
         "origin": "dos_stream+claude_transcript",
@@ -2727,7 +2788,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867327Z",
         "origin": "dos_stream+claude_transcript",
@@ -2827,7 +2888,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 15368,
+        "age_seconds": 16372,
         "consecutive": 0,
         "mtime": "2026-06-25T23:01:02.895782Z",
         "origin": "dos_stream+claude_transcript",
@@ -2926,7 +2987,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 319,
+        "age_seconds": 1323,
         "consecutive": 0,
         "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "dos_stream+claude_transcript",
@@ -3026,7 +3087,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3124,7 +3185,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3222,7 +3283,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3316,7 +3377,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3417,7 +3478,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 11599,
+        "age_seconds": 12603,
         "consecutive": 0,
         "mtime": "2026-06-26T00:03:52.194878Z",
         "origin": "dos_stream+claude_transcript",
@@ -3517,7 +3578,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 30850,
+        "age_seconds": 31855,
         "consecutive": 0,
         "mtime": "2026-06-25T18:43:00.656239Z",
         "origin": "dos_stream+claude_transcript",
@@ -3618,7 +3679,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 37727,
+        "age_seconds": 38732,
         "consecutive": 0,
         "mtime": "2026-06-25T16:48:23.457243Z",
         "origin": "dos_stream+claude_transcript",
@@ -3715,7 +3776,112 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 319,
+        "age_seconds": 675,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:22:40.441385Z",
+        "origin": "dos_stream+claude_transcript",
+        "origin_labels": [
+          "dos_stream",
+          "claude_transcript"
+        ],
+        "session_id": "aac6e2b1-ea31-462e-a6a4-3dabcfd855c7",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude",
+          "mtime": "2026-06-26T03:29:58.635000Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 682,
+            "tool_result": 808,
+            "tool_use": 808
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "first_timestamp": "2026-06-25T17:29:58.513Z",
+          "last_timestamp": "2026-06-26T03:22:41.538Z",
+          "lines": 3872,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "blocked": 222,
+            "denied": 7,
+            "error": 858,
+            "hook": 353,
+            "permission": 222,
+            "stopfailure": 1
+          },
+          "max_tool_result_chars": 26764,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1489,
+            "user": 850
+          },
+          "row_type_counts": {
+            "agent-name": 99,
+            "ai-title": 146,
+            "assistant": 1489,
+            "attachment": 354,
+            "file-history-snapshot": 90,
+            "last-prompt": 185,
+            "mode": 185,
+            "permission-mode": 185,
+            "queue-operation": 212,
+            "system": 77,
+            "user": 850
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {
+            "Agent": 4,
+            "Bash": 449,
+            "Edit": 67,
+            "Glob": 2,
+            "Monitor": 23,
+            "Read": 101,
+            "ScheduleWakeup": 4,
+            "TaskCreate": 12,
+            "TaskOutput": 40,
+            "TaskStop": 6,
+            "TaskUpdate": 22,
+            "Write": 70
+          },
+          "tool_result_shape_counts": {
+            "toolUseResult_dict": 782,
+            "toolUseResult_str": 26,
+            "tool_result_error_text": 83,
+            "tool_result_list": 4,
+            "tool_result_other_text": 719,
+            "tool_result_permission_text": 1,
+            "tool_result_stopfailure_text": 1
+          }
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1323,
         "consecutive": 0,
         "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "claude_transcript",
@@ -3787,7 +3953,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 319,
+        "age_seconds": 1323,
         "consecutive": 0,
         "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "claude_transcript",
@@ -3860,7 +4026,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.877341Z",
         "origin": "claude_transcript",
@@ -3929,7 +4095,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.876341Z",
         "origin": "claude_transcript",
@@ -3998,7 +4164,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.875343Z",
         "origin": "claude_transcript",
@@ -4067,7 +4233,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -4136,7 +4302,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -4205,7 +4371,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 1128,
+        "age_seconds": 2133,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -4271,86 +4437,17 @@
           "tool_counts": {},
           "tool_result_shape_counts": {}
         }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 1128,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.873336Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "0b0648f8-e81c-4116-98b7-319ed9e3feee",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:45:15.376040Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:45:14.502Z",
-          "last_timestamp": "2026-06-25T03:45:15.259Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
       }
     ],
     "top_recent_active": [],
     "top_stale_active": [],
     "total_failures": 69,
     "transcript_evidence_tag_counts": {
-      "DENY_OR_BLOCKED_FEEDBACK": 13,
+      "DENY_OR_BLOCKED_FEEDBACK": 14,
       "HOOK_OR_API_WALL_FEEDBACK": 20,
       "HOST_PERMISSION_INTERRUPT": 20,
-      "LARGE_TOOL_RESULT": 8,
-      "SHELL_HEAVY_SESSION": 5,
+      "LARGE_TOOL_RESULT": 9,
+      "SHELL_HEAVY_SESSION": 6,
       "TOOL_ERROR_RECOVERY": 20
     },
     "zero_total_markers": 138

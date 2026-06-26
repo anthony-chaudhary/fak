@@ -47,6 +47,25 @@ def limited_counter(counter: Counter[str], limit: int = 12) -> dict[str, int]:
     return {key: int(value) for key, value in counter.most_common(limit) if value}
 
 
+TAG_REMEDIATION = {
+    "HOOK_OR_API_WALL_FEEDBACK": "clear_hook_or_api_wall_feedback",
+    "HOST_PERMISSION_INTERRUPT": "reduce_permission_interruptions_or_scope_policy",
+    "DENY_OR_BLOCKED_FEEDBACK": "align_policy_with_real_tool_shapes",
+    "TOOL_ERROR_RECOVERY": "fix_tool_contract_or_error_recovery_loop",
+    "SHELL_HEAVY_SESSION": "replace_shell_with_path_visible_tools",
+    "LARGE_RESULT": "cap_or_summarize_large_outputs",
+}
+
+
+def remediation_for_tags(tags: list[str]) -> list[str]:
+    out = []
+    for tag in tags:
+        bucket = TAG_REMEDIATION.get(str(tag))
+        if bucket:
+            out.append(bucket)
+    return out
+
+
 def safe_block_type(value: Any) -> str:
     label = str(value or "unknown")
     if label == "tool_result":
@@ -188,11 +207,11 @@ def summarize_transcript_shape(path: Path) -> dict[str, Any]:
                         result_shapes[type(result).__name__] += 1
         tool_result = row.get("toolUseResult")
         if isinstance(tool_result, dict):
-            result_shapes["tool_use_result_dict"] += 1
+            result_shapes["result_record_dict"] += 1
             if tool_result.get("isError"):
-                result_shapes["tool_use_result_error"] += 1
+                result_shapes["result_record_error"] += 1
         elif isinstance(tool_result, str):
-            result_shapes["tool_use_result_str"] += 1
+            result_shapes["result_record_str"] += 1
             max_result_chars = max(max_result_chars, len(tool_result))
 
     tool_total = sum(tools.values())
@@ -203,7 +222,7 @@ def summarize_transcript_shape(path: Path) -> dict[str, Any]:
         evidence_tags.append("HOST_PERMISSION_INTERRUPT")
     if marker_lines.get("deny_or_blocked"):
         evidence_tags.append("DENY_OR_BLOCKED_FEEDBACK")
-    if marker_lines.get("error_recovery") or result_shapes.get("error_text") or result_shapes.get("tool_use_result_error"):
+    if marker_lines.get("error_recovery") or result_shapes.get("error_text") or result_shapes.get("result_record_error"):
         evidence_tags.append("TOOL_ERROR_RECOVERY")
     if tool_total and tools.get("Bash", 0) / tool_total >= 0.5:
         evidence_tags.append("SHELL_HEAVY_SESSION")
@@ -230,6 +249,7 @@ def summarize_transcript_shape(path: Path) -> dict[str, Any]:
 def aggregate_transcript_shapes(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     marker_lines: Counter[str] = Counter()
     evidence_tags: Counter[str] = Counter()
+    remediation: Counter[str] = Counter()
     result_shapes: Counter[str] = Counter()
     tools: Counter[str] = Counter()
     max_result_chars = 0
@@ -243,10 +263,13 @@ def aggregate_transcript_shapes(summaries: list[dict[str, Any]]) -> dict[str, An
         tools.update({str(k): int(v) for k, v in (summary.get("tool_counts") or {}).items()})
         for tag in summary.get("evidence_tags") or []:
             evidence_tags[str(tag)] += 1
+        for bucket in remediation_for_tags([str(tag) for tag in summary.get("evidence_tags") or []]):
+            remediation[bucket] += 1
         max_result_chars = max(max_result_chars, int(summary.get("max_result_chars") or 0))
     return {
         "summarized_sessions": summarized,
         "evidence_tag_counts": limited_counter(evidence_tags),
+        "remediation_session_counts": limited_counter(remediation),
         "marker_line_counts": limited_counter(marker_lines),
         "result_shape_counts": limited_counter(result_shapes),
         "tool_counts": limited_counter(tools),
@@ -332,13 +355,15 @@ Runner = Callable[[list[str]], dict[str, Any]]
 def replay_call(call: dict[str, Any], *, fak_bin: str, policy: str, runner: Runner = default_runner) -> dict[str, Any]:
     args_json = json.dumps(call["arguments"], sort_keys=True, separators=(",", ":"), default=str)
     raw = runner([fak_bin, "preflight", "--policy", policy, "--tool", call["tool"], "--args", args_json, "--json"])
+    claim = str(raw.get("claim") or "")
     return {
         "call_digest": call["call_digest"],
         "tool": call["tool"],
         "verdict": str(raw.get("verdict") or ""),
         "reason": str(raw.get("reason") or ""),
         "by": str(raw.get("by") or ""),
-        "claim": str(raw.get("claim") or ""),
+        "claim_digest": digest_obj(claim) if claim else "",
+        "claim_bytes": len(claim.encode("utf-8")),
         "args_digest": str(raw.get("args_digest") or ""),
         "args_bytes": int(raw.get("args_bytes") or len(args_json.encode("utf-8"))),
     }
@@ -381,6 +406,7 @@ def collect(
                 "marker_lines": marker_total,
                 "max_result_chars": int(shape.get("max_result_chars") or 0),
                 "evidence_tags": tags,
+                "remediation": remediation_for_tags(tags),
                 "tool_counts": shape.get("tool_counts") or {},
                 "marker_line_counts": shape.get("marker_line_counts") or {},
                 "result_shape_counts": shape.get("result_shape_counts") or {},
@@ -527,6 +553,7 @@ def render_md(payload: dict[str, Any]) -> str:
             [
                 f"- summarized_sessions: `{shape.get('summarized_sessions')}`",
                 f"- evidence_tag_counts: `{json.dumps(shape.get('evidence_tag_counts') or {}, sort_keys=True)}`",
+                f"- remediation_session_counts: `{json.dumps(shape.get('remediation_session_counts') or {}, sort_keys=True)}`",
                 f"- marker_line_counts: `{json.dumps(shape.get('marker_line_counts') or {}, sort_keys=True)}`",
                 f"- result_shape_counts: `{json.dumps(shape.get('result_shape_counts') or {}, sort_keys=True)}`",
                 f"- max_result_chars: `{shape.get('max_result_chars')}`",
@@ -541,7 +568,8 @@ def render_md(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- `{row.get('session_digest')}` root=`{row.get('root_label')}` "
                 f"tool_calls=`{row.get('tool_calls')}` marker_lines=`{row.get('marker_lines')}` "
-                f"max_result_chars=`{row.get('max_result_chars')}` tags=`{', '.join(row.get('evidence_tags') or []) or 'none'}`"
+                f"max_result_chars=`{row.get('max_result_chars')}` tags=`{', '.join(row.get('evidence_tags') or []) or 'none'}` "
+                f"remediation=`{', '.join(row.get('remediation') or []) or 'none'}`"
             )
     else:
         lines.append("- none")

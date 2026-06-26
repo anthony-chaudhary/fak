@@ -13,6 +13,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parent / "claude_historical_guard_audit.py"
+DANGEROUS_CLAIM = "Bash.command deny_regex /rm/ rm -rf ./x README.md tool_result secret result C:\\Users\\USER"
 
 
 def load():
@@ -65,7 +66,7 @@ def fake_runner(argv: list[str]) -> dict:
             "verdict": "DENY",
             "reason": "POLICY_BLOCK",
             "by": "monitor",
-            "claim": "Bash.command deny_regex /rm/",
+            "claim": DANGEROUS_CLAIM,
             "args_digest": "deny123",
             "args_bytes": 24,
         }
@@ -102,15 +103,24 @@ class ClaudeHistoricalGuardAuditTest(unittest.TestCase):
         self.assertEqual(payload["unique_tool_calls"], 2)
         self.assertEqual(payload["verdict_counts"], {"ALLOW": 1, "DENY": 1})
         self.assertEqual(payload["reason_counts"], {"POLICY_BLOCK": 1})
+        self.assertEqual(payload["non_allow_samples"][0]["claim_bytes"], len(DANGEROUS_CLAIM.encode("utf-8")))
+        self.assertEqual(len(payload["non_allow_samples"][0]["claim_digest"]), 16)
+        self.assertNotIn("claim", payload["non_allow_samples"][0])
         self.assertEqual(payload["transcript_shape"]["summarized_sessions"], 1)
         self.assertIn("HOOK_OR_API_WALL_FEEDBACK", payload["transcript_shape"]["evidence_tag_counts"])
         self.assertIn("HOST_PERMISSION_INTERRUPT", payload["transcript_shape"]["evidence_tag_counts"])
+        self.assertEqual(payload["transcript_shape"]["remediation_session_counts"]["clear_hook_or_api_wall_feedback"], 1)
+        self.assertEqual(payload["transcript_shape"]["remediation_session_counts"]["reduce_permission_interruptions_or_scope_policy"], 1)
+        self.assertEqual(mod.remediation_for_tags(["LARGE_RESULT"]), ["cap_or_summarize_large_outputs"])
         self.assertEqual(payload["top_friction_sessions"][0]["root_label"], root.name)
+        self.assertIn("clear_hook_or_api_wall_feedback", payload["top_friction_sessions"][0]["remediation"])
         serialized = json.dumps(payload)
         self.assertNotIn("rm -rf", serialized)
         self.assertNotIn("README.md", serialized)
         self.assertNotIn("secret result", serialized)
         self.assertNotIn("tool_result", serialized)
+        self.assertNotIn("tool_use_result", serialized)
+        self.assertNotIn("C:\\Users\\", serialized)
 
     def test_collect_all_accounts_scans_sibling_claude_roots(self) -> None:
         mod = load()
@@ -170,9 +180,12 @@ class ClaudeHistoricalGuardAuditTest(unittest.TestCase):
             rendered = md.read_text(encoding="utf-8")
             self.assertIn("Claude Code historical guard replay", rendered)
             self.assertIn("Transcript Friction Signals", rendered)
+            self.assertIn("remediation_session_counts", rendered)
             self.assertIn("Top Friction Sessions", rendered)
+            self.assertIn("clear_hook_or_api_wall_feedback", rendered)
             self.assertNotIn("secret result", rendered)
             self.assertNotIn("tool_result", rendered)
+            self.assertNotIn("tool_use_result", rendered)
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@
       "status": "PASS"
     },
     {
-      "detail": "status=PASS sessions=13 calls=230 verdicts={'ALLOW': 181, 'DENY': 46} tags={'DENY_OR_BLOCKED_FEEDBACK': 17, 'HOOK_OR_API_WALL_FEEDBACK': 20, 'HOST_PERMISSION_INTERRUPT': 20, 'LARGE_RESULT': 9, 'SHELL_HEAVY_SESSION': 11, 'TOOL_ERROR_RECOVERY': 19} leaked_payload=False",
+      "detail": "status=PASS sessions=16 calls=231 verdicts={'ALLOW': 177, 'DENY': 51} tags={'DENY_OR_BLOCKED_FEEDBACK': 20, 'HOOK_OR_API_WALL_FEEDBACK': 20, 'HOST_PERMISSION_INTERRUPT': 20, 'LARGE_RESULT': 7, 'SHELL_HEAVY_SESSION': 11, 'TOOL_ERROR_RECOVERY': 20} remediation={'align_policy_with_real_tool_shapes': 20, 'cap_or_summarize_large_outputs': 7, 'clear_hook_or_api_wall_feedback': 20, 'fix_tool_contract_or_error_recovery_loop': 20, 'reduce_permission_interruptions_or_scope_policy': 20, 'replace_shell_with_path_visible_tools': 11} leaked_payload=False",
       "name": "claude code historical replay",
       "status": "PASS"
     },
@@ -81,6 +81,15 @@
           "search_rg": 281
         },
         "shell_no_write_target_detected": 2290,
+        "shell_remediation_counts": {
+          "keep_repo_context_but_expose_workspace_scope": 844,
+          "non_shell_tool_already_structured": 408,
+          "opaque_shell_needs_tool_or_path_metadata": 474,
+          "replace_path_bearing_write_with_apply_patch_or_artifact_tool": 31,
+          "replace_with_path_visible_read_tool": 826,
+          "route_git_write_through_structured_gate": 45,
+          "split_script_or_redirect_into_structured_steps": 107
+        },
         "shell_shape_counts": {
           "non_shell_tool": 408,
           "shell_in_tree_or_safe_write_target": 37,
@@ -88,7 +97,7 @@
         },
         "unknown_tree_warning_rate": 0.169815
       },
-      "next_action": "Prefer path-visible host tools or structured tool payloads so DOS can assign file-tree footprints instead of warning on opaque shell calls.",
+      "next_action": "Work the shell remediation buckets: path-visible read/search tools first, explicit workspace-scoped test/git-read tools second, then split scripts and redirects into structured apply/artifact steps.",
       "rank": 20,
       "status": "ACTIVE_DEBT",
       "surface": "codex_hooks"
@@ -97,28 +106,36 @@
       "code": "CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION",
       "evidence": {
         "evidence_tag_counts": {
-          "DENY_OR_BLOCKED_FEEDBACK": 17,
+          "DENY_OR_BLOCKED_FEEDBACK": 20,
           "HOOK_OR_API_WALL_FEEDBACK": 20,
           "HOST_PERMISSION_INTERRUPT": 20,
-          "LARGE_RESULT": 9,
+          "LARGE_RESULT": 7,
           "SHELL_HEAVY_SESSION": 11,
-          "TOOL_ERROR_RECOVERY": 19
+          "TOOL_ERROR_RECOVERY": 20
         },
         "marker_line_counts": {
-          "deny_or_blocked": 429,
-          "error_recovery": 1527,
-          "hook_or_api_wall": 508,
-          "permission": 421
+          "deny_or_blocked": 448,
+          "error_recovery": 1463,
+          "hook_or_api_wall": 509,
+          "permission": 440
         },
-        "max_result_chars": 64944,
+        "max_result_chars": 55614,
         "reason_counts": {
-          "DEFAULT_DENY": 39,
-          "POLICY_BLOCK": 7
+          "DEFAULT_DENY": 42,
+          "POLICY_BLOCK": 9
+        },
+        "remediation_session_counts": {
+          "align_policy_with_real_tool_shapes": 20,
+          "cap_or_summarize_large_outputs": 7,
+          "clear_hook_or_api_wall_feedback": 20,
+          "fix_tool_contract_or_error_recovery_loop": 20,
+          "reduce_permission_interruptions_or_scope_policy": 20,
+          "replace_shell_with_path_visible_tools": 11
         },
         "root_count": 10,
-        "sessions_audited": 13,
+        "sessions_audited": 16,
         "sessions_discovered": 20,
-        "tool_calls_seen": 230,
+        "tool_calls_seen": 231,
         "top_friction_sessions": [
           {
             "evidence_tags": [
@@ -129,11 +146,11 @@
               "SHELL_HEAVY_SESSION",
               "LARGE_RESULT"
             ],
-            "marker_lines": 1485,
+            "marker_lines": 1659,
             "max_result_chars": 26764,
             "root_label": ".claude/C--work-fak",
             "session_digest": "a585f940822d0d52",
-            "tool_calls": 129
+            "tool_calls": 140
           },
           {
             "evidence_tags": [
@@ -159,11 +176,11 @@
               "SHELL_HEAVY_SESSION",
               "LARGE_RESULT"
             ],
-            "marker_lines": 59,
-            "max_result_chars": 38156,
+            "marker_lines": 77,
+            "max_result_chars": 21302,
             "root_label": ".claude-4e449ab2/C--work-fak",
-            "session_digest": "f5770132f058da8b",
-            "tool_calls": 0
+            "session_digest": "3ce3bdae26a0fe0e",
+            "tool_calls": 2
           },
           {
             "evidence_tags": [
@@ -171,14 +188,13 @@
               "HOST_PERMISSION_INTERRUPT",
               "DENY_OR_BLOCKED_FEEDBACK",
               "TOOL_ERROR_RECOVERY",
-              "SHELL_HEAVY_SESSION",
               "LARGE_RESULT"
             ],
-            "marker_lines": 39,
-            "max_result_chars": 58302,
-            "root_label": ".claude-7cc12304/C--work-fak",
-            "session_digest": "4c03751e6c6c01b0",
-            "tool_calls": 1
+            "marker_lines": 138,
+            "max_result_chars": 55614,
+            "root_label": ".claude/C--work-fak",
+            "session_digest": "9b2bbc8a51e22227",
+            "tool_calls": 16
           },
           {
             "evidence_tags": [
@@ -186,21 +202,21 @@
               "HOST_PERMISSION_INTERRUPT",
               "DENY_OR_BLOCKED_FEEDBACK",
               "TOOL_ERROR_RECOVERY",
-              "SHELL_HEAVY_SESSION"
+              "LARGE_RESULT"
             ],
-            "marker_lines": 401,
-            "max_result_chars": 18936,
+            "marker_lines": 118,
+            "max_result_chars": 55614,
             "root_label": ".claude/C--work-fak",
-            "session_digest": "7cb3d3b0088c9072",
-            "tool_calls": 30
+            "session_digest": "4b2e843b571dedd8",
+            "tool_calls": 22
           }
         ],
         "verdict_counts": {
-          "ALLOW": 181,
-          "DENY": 46
+          "ALLOW": 177,
+          "DENY": 51
         }
       },
-      "next_action": "Triage the top Claude friction sessions by tag: hook/API-wall and permission interruptions first, then large-result and shell-heavy sessions.",
+      "next_action": "Work the Claude remediation buckets: clear hook/API-wall feedback and permission interruptions first, then reduce tool-error loops, large results, and shell-heavy sessions.",
       "rank": 30,
       "status": "ACTIVE_DEBT",
       "surface": "claude_code"

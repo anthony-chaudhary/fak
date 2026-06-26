@@ -315,6 +315,7 @@ def check_claude_historical(root: Path, checks: list[dict[str, Any]]) -> None:
     reasons = report.get("reason_counts") if isinstance(report.get("reason_counts"), dict) else {}
     shape = report.get("transcript_shape") if isinstance(report.get("transcript_shape"), dict) else {}
     tags = shape.get("evidence_tag_counts") if isinstance(shape.get("evidence_tag_counts"), dict) else {}
+    remediation = shape.get("remediation_session_counts") if isinstance(shape.get("remediation_session_counts"), dict) else {}
     top_friction = report.get("top_friction_sessions") if isinstance(report.get("top_friction_sessions"), list) else []
     serialized = json.dumps(report, sort_keys=True) + md
     leaked_payload = any(token in serialized for token in ["rm -rf", "README.md", "tool_result", "secret result", "C:\\Users\\", "C:/Users/"])
@@ -333,6 +334,7 @@ def check_claude_historical(root: Path, checks: list[dict[str, Any]]) -> None:
         and int(shape.get("summarized_sessions") or 0) >= int(report.get("sessions_discovered") or 0)
         and int(tags.get("HOOK_OR_API_WALL_FEEDBACK") or 0) >= 1
         and int(tags.get("HOST_PERMISSION_INTERRUPT") or 0) >= 1
+        and int(remediation.get("clear_hook_or_api_wall_feedback") or 0) >= 1
         and len(top_friction) >= 1
         and report.get("truncated") is False
         and "status: **`PASS`**" in md
@@ -344,7 +346,7 @@ def check_claude_historical(root: Path, checks: list[dict[str, Any]]) -> None:
         checks,
         "claude code historical replay",
         ok,
-        f"status={report.get('status')} sessions={report.get('sessions_audited')} calls={report.get('tool_calls_seen')} verdicts={verdicts} tags={tags} leaked_payload={leaked_payload}",
+        f"status={report.get('status')} sessions={report.get('sessions_audited')} calls={report.get('tool_calls_seen')} verdicts={verdicts} tags={tags} remediation={remediation} leaked_payload={leaked_payload}",
     )
 
 
@@ -601,6 +603,7 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
     action = codex.get("actionability") if isinstance(codex.get("actionability"), dict) else {}
     shell_shapes = action.get("post_repair_shell_shape_counts") if isinstance(action.get("post_repair_shell_shape_counts"), dict) else {}
     shell_families = action.get("post_repair_shell_family_counts") if isinstance(action.get("post_repair_shell_family_counts"), dict) else {}
+    shell_remediation = action.get("post_repair_shell_remediation_counts") if isinstance(action.get("post_repair_shell_remediation_counts"), dict) else {}
     no_write_target = safe_int(shell_shapes.get("shell_no_write_target_detected"))
     if no_write_target:
         add_blocker(
@@ -613,9 +616,10 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
                 "shell_no_write_target_detected": no_write_target,
                 "shell_shape_counts": top_counts(shell_shapes),
                 "shell_family_counts": top_counts(shell_families),
+                "shell_remediation_counts": top_counts(shell_remediation),
                 "unknown_tree_warning_rate": codex_summary.get("unknown_tree_warning_rate"),
             },
-            next_action="Prefer path-visible host tools or structured tool payloads so DOS can assign file-tree footprints instead of warning on opaque shell calls.",
+            next_action="Work the shell remediation buckets: path-visible read/search tools first, explicit workspace-scoped test/git-read tools second, then split scripts and redirects into structured apply/artifact steps.",
         )
 
     mutating = action.get("post_repair_mutating_shell_family_counts") if isinstance(action.get("post_repair_mutating_shell_family_counts"), dict) else {}
@@ -640,6 +644,7 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
 
     claude_shape = claude.get("transcript_shape") if isinstance(claude.get("transcript_shape"), dict) else {}
     claude_tags = claude_shape.get("evidence_tag_counts") if isinstance(claude_shape.get("evidence_tag_counts"), dict) else {}
+    claude_remediation = claude_shape.get("remediation_session_counts") if isinstance(claude_shape.get("remediation_session_counts"), dict) else {}
     marker_lines = claude_shape.get("marker_line_counts") if isinstance(claude_shape.get("marker_line_counts"), dict) else {}
     if claude_tags:
         add_blocker(
@@ -656,11 +661,12 @@ def synthesize_default_blockers(root: Path) -> list[dict[str, Any]]:
                 "verdict_counts": top_counts(claude.get("verdict_counts")),
                 "reason_counts": top_counts(claude.get("reason_counts")),
                 "evidence_tag_counts": top_counts(claude_tags),
+                "remediation_session_counts": top_counts(claude_remediation),
                 "marker_line_counts": top_counts(marker_lines),
                 "max_result_chars": safe_int(claude_shape.get("max_result_chars")),
                 "top_friction_sessions": summarize_friction_sessions(claude.get("top_friction_sessions")),
             },
-            next_action="Triage the top Claude friction sessions by tag: hook/API-wall and permission interruptions first, then large-result and shell-heavy sessions.",
+            next_action="Work the Claude remediation buckets: clear hook/API-wall feedback and permission interruptions first, then reduce tool-error loops, large results, and shell-heavy sessions.",
         )
 
     prereq_blockers = [str(item) for item in (prereq.get("blockers") or [])]
@@ -747,8 +753,12 @@ def render(payload: dict[str, Any]) -> str:
                 bits.append(f"stale_plan={len(evidence.get('stale_settlement_plan') or [])}")
             if "shell_no_write_target_detected" in evidence:
                 bits.append(f"opaque_shell={evidence.get('shell_no_write_target_detected')}")
+            if "shell_remediation_counts" in evidence:
+                bits.append(f"remediation={evidence.get('shell_remediation_counts')}")
             if "evidence_tag_counts" in evidence:
                 bits.append(f"tags={evidence.get('evidence_tag_counts')}")
+            if "remediation_session_counts" in evidence:
+                bits.append(f"remediation={evidence.get('remediation_session_counts')}")
             if "blockers" in evidence:
                 bits.append(f"blockers={evidence.get('blockers')}")
             lines.append(

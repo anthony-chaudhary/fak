@@ -133,6 +133,10 @@ def seed_tree(
                 "residual": sorted(mod.RESIDUALS),
                 "post_repair_shell_shape_counts": {"shell_no_write_target_detected": 3},
                 "post_repair_shell_family_counts": {"git_write": 2, "search_rg": 1},
+                "post_repair_shell_remediation_counts": {
+                    "replace_with_path_visible_read_tool": 1,
+                    "route_git_write_through_structured_gate": 2,
+                },
                 "post_repair_mutating_shell_family_counts": {"git_write": 2},
             },
             "git_gate_evidence": {
@@ -237,6 +241,10 @@ def seed_tree(
                 "evidence_tag_counts": {
                     "HOOK_OR_API_WALL_FEEDBACK": 4,
                     "HOST_PERMISSION_INTERRUPT": 3,
+                },
+                "remediation_session_counts": {
+                    "clear_hook_or_api_wall_feedback": 4,
+                    "reduce_permission_interruptions_or_scope_policy": 3,
                 },
             },
             "top_friction_sessions": [
@@ -358,7 +366,11 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
             self.assertEqual(codes[0], "WORKSPACE_RECENT_STOPFAILURE_API_WALL")
             self.assertIn("WORKSPACE_STALE_STOPFAILURE_MARKERS", codes)
             self.assertIn("CODEX_HOST_SHELL_OPACITY", codes)
+            shell = next(row for row in payload["default_blockers"] if row["code"] == "CODEX_HOST_SHELL_OPACITY")
+            self.assertEqual(shell["evidence"]["shell_remediation_counts"]["replace_with_path_visible_read_tool"], 1)
             self.assertIn("CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION", codes)
+            claude = next(row for row in payload["default_blockers"] if row["code"] == "CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION")
+            self.assertEqual(claude["evidence"]["remediation_session_counts"]["clear_hook_or_api_wall_feedback"], 4)
             self.assertIn("OPENAI_AGENTS_SDK_NOT_INSTALLED", codes)
             first = payload["default_blockers"][0]
             self.assertEqual(first["surface"], "workspace_dos")

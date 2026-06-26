@@ -382,6 +382,9 @@ class RecentCodexDosAuditTest(unittest.TestCase):
         self.assertEqual(mod.shell_command_family("git add tools/report.json"), "git_write")
         self.assertEqual(mod.shell_command_family("git commit -s -- tools/report.json"), "git_write")
         self.assertEqual(mod.shell_command_family("git -C . push origin main"), "git_write")
+        self.assertEqual(mod.shell_remediation_bucket("search_rg", "shell_no_write_target_detected"), "replace_with_path_visible_read_tool")
+        self.assertEqual(mod.shell_remediation_bucket("git_read", "shell_no_write_target_detected"), "keep_repo_context_but_expose_workspace_scope")
+        self.assertEqual(mod.shell_remediation_bucket("git_write", "shell_no_write_target_detected"), "route_git_write_through_structured_gate")
 
     def test_actionable_gate_flags_mutating_shell_families(self) -> None:
         mod = load()
@@ -392,6 +395,10 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 "status": "PASS",
                 "shell_shape_counts": {"shell_no_write_target_detected": 2},
                 "shell_family_counts": {"git_read": 1, "git_write": 2},
+                "shell_remediation_counts": {
+                    "keep_repo_context_but_expose_workspace_scope": 1,
+                    "route_git_write_through_structured_gate": 2,
+                },
             },
             delegate_total=0,
             stop_total=0,
@@ -400,6 +407,13 @@ class RecentCodexDosAuditTest(unittest.TestCase):
         self.assertEqual(gate["status"], "WARN")
         self.assertIn("post-repair shell command families include opaque mutating operations", gate["reasons"])
         self.assertEqual(gate["post_repair_mutating_shell_family_counts"], {"git_write": 2})
+        self.assertEqual(
+            gate["post_repair_shell_remediation_counts"],
+            {
+                "keep_repo_context_but_expose_workspace_scope": 1,
+                "route_git_write_through_structured_gate": 2,
+            },
+        )
         self.assertEqual(gate["residual"], [])
         report = {
             "status": "WARN",
@@ -413,6 +427,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 "post_repair_command_shapes": {
                     "shell_shape_counts": {"shell_no_write_target_detected": 2},
                     "shell_family_counts": {"git_write": 2},
+                    "shell_remediation_counts": {"route_git_write_through_structured_gate": 2},
                     "write_op_counts": {},
                 },
             },
@@ -513,6 +528,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertEqual(shapes["scope"], "audited_dos_streams")
             self.assertEqual(shapes["threads_supplied"], 1)
             self.assertEqual(shapes["shell_family_counts"], {"search_rg": 1})
+            self.assertEqual(shapes["shell_remediation_counts"], {"replace_with_path_visible_read_tool": 1})
             self.assertEqual(shapes["mutating_shell_sessions"], [])
             self.assertNotIn("git_write", json.dumps(report))
             self.assertEqual(report["actionability"]["status"], "PASS")
@@ -569,6 +585,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
 
             shapes = report["codex_hook_fast_path"]["post_repair_command_shapes"]
             self.assertEqual(shapes["shell_family_counts"], {"git_write": 1})
+            self.assertEqual(shapes["shell_remediation_counts"], {"route_git_write_through_structured_gate": 1})
             self.assertEqual(len(shapes["mutating_shell_sessions"]), 1)
             session = shapes["mutating_shell_sessions"][0]
             self.assertEqual(session["thread_id"], thread)
@@ -833,6 +850,14 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                     "shell_redirect": 1,
                 },
             )
+            self.assertEqual(
+                shapes["shell_remediation_counts"],
+                {
+                    "non_shell_tool_already_structured": 1,
+                    "replace_path_bearing_write_with_apply_patch_or_artifact_tool": 1,
+                    "replace_with_path_visible_read_tool": 1,
+                },
+            )
             self.assertEqual(report["actionability"]["status"], "PASS")
             self.assertEqual(report["actionability"]["delegate_count"], 0)
             self.assertIn("HOST_SHELL_OPACITY", report["actionability"]["residual"])
@@ -844,6 +869,8 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertIn("Codex DOS Host-Opacity Debt", debt)
             self.assertIn("HOST_SHELL_OPACITY", debt)
             self.assertIn("shell_no_write_target_detected", debt)
+            self.assertIn("post_repair_shell_remediation", debt)
+            self.assertIn("replace_with_path_visible_read_tool", debt)
             self.assertIn("search_rg", debt)
             self.assertIn("shell_redirect", debt)
             self.assertNotIn("rg needle docs", debt)

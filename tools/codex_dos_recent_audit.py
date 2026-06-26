@@ -1020,6 +1020,26 @@ def mutating_shell_family_counts(family_counts: dict[str, Any]) -> dict[str, int
     }
 
 
+def shell_remediation_bucket(family: str, shape: str) -> str:
+    if shape == "shell_out_of_tree_write_target":
+        return "block_out_of_tree_write"
+    if family == "git_write":
+        return "route_git_write_through_structured_gate"
+    if family in {"search_rg", "powershell_read", "powershell_inspect"}:
+        return "replace_with_path_visible_read_tool"
+    if family in {"git_read", "build_test", "python_test"}:
+        return "keep_repo_context_but_expose_workspace_scope"
+    if shape == "shell_in_tree_or_safe_write_target":
+        return "replace_path_bearing_write_with_apply_patch_or_artifact_tool"
+    if family in {"inline_script", "python_script", "shell_redirect"}:
+        return "split_script_or_redirect_into_structured_steps"
+    if family == "shell_missing_command_arg":
+        return "fix_shell_payload_shape"
+    if family == "empty_shell":
+        return "drop_empty_shell_call"
+    return "opaque_shell_needs_tool_or_path_metadata"
+
+
 def git_gate_evidence(paths: list[Path]) -> dict[str, Any]:
     required = {
         "git_add": "DEFAULT_DENY",
@@ -1114,6 +1134,7 @@ def codex_command_shape_audit(
     tools: Counter[str] = Counter()
     shape_counts: Counter[str] = Counter()
     family_counts: Counter[str] = Counter()
+    remediation_counts: Counter[str] = Counter()
     write_ops: Counter[str] = Counter()
     shell_calls = 0
     shell_arg_errors = 0
@@ -1154,6 +1175,7 @@ def codex_command_shape_audit(
                 if name != "shell_command":
                     shape_counts["non_shell_tool"] += 1
                     session_shape_counts["non_shell_tool"] += 1
+                    remediation_counts["non_shell_tool_already_structured"] += 1
                     continue
                 shell_calls += 1
                 args = parse_arguments(payload.get("arguments"))
@@ -1164,6 +1186,7 @@ def codex_command_shape_audit(
                     session_shape_counts["shell_missing_command_arg"] += 1
                     family_counts["shell_missing_command_arg"] += 1
                     session_family_counts["shell_missing_command_arg"] += 1
+                    remediation_counts[shell_remediation_bucket("shell_missing_command_arg", "shell_missing_command_arg")] += 1
                     continue
                 family = shell_command_family(command)
                 family_counts[family] += 1
@@ -1171,6 +1194,7 @@ def codex_command_shape_audit(
                 shape, ops = classify_shell_shape(command, repo_root)
                 shape_counts[shape] += 1
                 session_shape_counts[shape] += 1
+                remediation_counts[shell_remediation_bucket(family, shape)] += 1
                 write_ops.update(ops)
                 session_write_ops.update(ops)
             if saw_session_row:
@@ -1206,11 +1230,12 @@ def codex_command_shape_audit(
         "shell_argument_errors": shell_arg_errors,
         "shell_shape_counts": {k: shape_counts[k] for k in sorted(shape_counts)},
         "shell_family_counts": {k: family_counts[k] for k in sorted(family_counts)},
+        "shell_remediation_counts": {k: remediation_counts[k] for k in sorted(remediation_counts)},
         "mutating_shell_sessions": mutating_sessions,
         "write_op_counts": {k: write_ops[k] for k in sorted(write_ops)},
         "malformed_rows": malformed,
         "privacy": {
-            "copied_fields": ["thread id", "session filename", "tool names", "counts", "shell family categories", "shell shape categories", "write operation kinds"],
+            "copied_fields": ["thread id", "session filename", "tool names", "counts", "shell family categories", "shell shape categories", "shell remediation categories", "write operation kinds"],
             "dropped": ["commands", "tool arguments", "tool results", "prompts", "model text"],
         },
     }
@@ -1249,6 +1274,7 @@ def actionable_gate(
 
     shape_counts = command_shapes.get("shell_shape_counts") if isinstance(command_shapes.get("shell_shape_counts"), dict) else {}
     family_counts = command_shapes.get("shell_family_counts") if isinstance(command_shapes.get("shell_family_counts"), dict) else {}
+    remediation_counts = command_shapes.get("shell_remediation_counts") if isinstance(command_shapes.get("shell_remediation_counts"), dict) else {}
     mutating_families = mutating_shell_family_counts(family_counts)
     post_gate_shapes = (git_gate or {}).get("post_gate_command_shapes") if isinstance(git_gate, dict) else {}
     post_gate_family_counts = post_gate_shapes.get("shell_family_counts") if isinstance(post_gate_shapes, dict) and isinstance(post_gate_shapes.get("shell_family_counts"), dict) else {}
@@ -1291,6 +1317,7 @@ def actionable_gate(
         "post_repair_unknown_tree_admission_warnings": int(post_repair.get("unknown_tree_admission_warnings") or 0),
         "post_repair_shell_shape_counts": {k: shape_counts[k] for k in sorted(shape_counts)},
         "post_repair_shell_family_counts": {k: family_counts[k] for k in sorted(family_counts)},
+        "post_repair_shell_remediation_counts": {k: remediation_counts[k] for k in sorted(remediation_counts)},
         "post_repair_mutating_shell_family_counts": mutating_families,
         "git_gate_status": (git_gate or {}).get("status") if isinstance(git_gate, dict) else None,
         "post_git_gate_mutating_shell_family_counts": post_gate_mutating_families,
@@ -1378,8 +1405,16 @@ def build_report(
             recommendations.append("post-repair Codex hook observations still include delegates or unknown-tree warnings")
     command_shapes = hook_fast_path.get("post_repair_command_shapes") if isinstance(hook_fast_path.get("post_repair_command_shapes"), dict) else {}
     shape_counts = command_shapes.get("shell_shape_counts") if isinstance(command_shapes.get("shell_shape_counts"), dict) else {}
+    remediation_counts = command_shapes.get("shell_remediation_counts") if isinstance(command_shapes.get("shell_remediation_counts"), dict) else {}
     if shape_counts.get("shell_no_write_target_detected"):
-        recommendations.append("post-repair shell usage is mostly opaque read/inspect commands; prefer host-visible read/search tools when available")
+        read_candidates = int(remediation_counts.get("replace_with_path_visible_read_tool") or 0)
+        repo_context = int(remediation_counts.get("keep_repo_context_but_expose_workspace_scope") or 0)
+        if read_candidates or repo_context:
+            recommendations.append(
+                "post-repair shell opacity is mostly read/search/test/git-read shape; expose those as path-visible or workspace-scoped host tools before treating remaining shell as irreducible"
+            )
+        else:
+            recommendations.append("post-repair shell usage is opaque; prefer host-visible read/search tools when available")
     if shape_counts.get("shell_out_of_tree_write_target"):
         recommendations.append("post-repair shell usage includes out-of-tree write targets; inspect repo-guard findings before continuing")
     family_counts = command_shapes.get("shell_family_counts") if isinstance(command_shapes.get("shell_family_counts"), dict) else {}
@@ -1633,6 +1668,7 @@ def render_debt_packet(report: dict[str, Any]) -> str:
         f"- post_repair_unknown_tree_warnings: `{post.get('unknown_tree_admission_warnings')}`",
         f"- post_repair_shell_shapes: `{json.dumps(shapes.get('shell_shape_counts') or {}, sort_keys=True)}`",
         f"- post_repair_shell_families: `{json.dumps(shapes.get('shell_family_counts') or {}, sort_keys=True)}`",
+        f"- post_repair_shell_remediation: `{json.dumps(shapes.get('shell_remediation_counts') or {}, sort_keys=True)}`",
         f"- post_repair_mutating_shell_families: `{json.dumps(mutating_families, sort_keys=True)}`",
         f"- post_repair_mutating_sessions: `{json.dumps(shapes.get('mutating_shell_sessions') or [], sort_keys=True)}`",
         f"- post_git_gate_shell_families: `{json.dumps(((git_gate.get('post_gate_command_shapes') or {}).get('shell_family_counts') if isinstance(git_gate.get('post_gate_command_shapes'), dict) else {}) or {}, sort_keys=True)}`",
@@ -1648,6 +1684,7 @@ def render_debt_packet(report: dict[str, Any]) -> str:
         "- Review `.dos/stop-failures` as StopFailure API-wall breaker state before treating actionability as PASS; prioritize recent nonzero `consecutive` markers, then decide whether stale nonzero markers need a success reset or can be archived as old breaker state.",
         "- Start with `workspace_stop_failure_top_recent_active_sessions`, then `workspace_stop_failure_top_active_sessions`, then `workspace_stop_failure_top_sessions`: these are already mapped to sanitized Claude transcript account/project metadata and count-only transcript evidence when available.",
         "- Route mutating Git operations through structured fak-gated tools such as `git_add`, `git_commit`, and `git_push`; do not run them as opaque shell commands.",
+        "- Use `post_repair_shell_remediation` to split the shell-opacity queue: read/search calls should become path-visible read tools, test/git-read calls need an explicit workspace scope, and script/redirect calls should be split into structured apply/artifact steps.",
         "- Include path/footprint metadata in Codex tool-call hook payloads, or expose host-visible read/search/list tools with path arguments.",
         "- Preserve the current privacy boundary: the audit needs tool names, path metadata, timestamps, and counts, not prompts, command bodies, tool output, diffs, or model text.",
         "- Keep shell command bodies out of durable reports; classify locally and emit only categories such as `shell_no_write_target_detected` or `shell_out_of_tree_write_target`.",
@@ -1742,6 +1779,10 @@ def render(report: dict[str, Any]) -> str:
             lines.append(
                 "  post-repair shell families: "
                 f"{json.dumps(command_shapes.get('shell_family_counts') or {}, sort_keys=True)}"
+            )
+            lines.append(
+                "  post-repair shell remediation: "
+                f"{json.dumps(command_shapes.get('shell_remediation_counts') or {}, sort_keys=True)}"
             )
     for rec in report.get("recommendations") or []:
         lines.append(f"  recommendation: {rec}")
