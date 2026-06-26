@@ -10,6 +10,8 @@ package ggufload
 import (
 	"encoding/binary"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -110,4 +112,34 @@ func TestReuseF32CapacityRule(t *testing.T) {
 	if got := reuseF32(nil, 4); got == nil || len(got) != 4 {
 		t.Fatalf("reuseF32(nil) should allocate length-n slice (len=%d)", len(got))
 	}
+}
+
+// TestQuantLoadArenaToggleProducesIdenticalModel proves the FAK_GGUF_NO_ARENA_REUSE escape
+// hatch is a memory-profile knob, never a numerics knob: a full GGUF->Q8 quant-on-load with
+// the arena reuse disabled (the pre-#440 fresh-alloc-per-tensor arm) must yield bit-identical
+// prefill logits to the default reused-arena load. The #440 same-host before/after page-churn
+// A/B (modelbench -load-only with the env on vs off) is only honest because of this invariant.
+func TestQuantLoadArenaToggleProducesIdenticalModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "qwen35.gguf")
+	if err := os.WriteFile(path, tinyQwen35HybridGGUF(t, sequenceF32ForTest(200, 64*32), sequenceF32ForTest(300, 32*32)), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ids := []int{0, 1, 2, 3} // vocab is 5 in the tiny hybrid fixture
+
+	prefill := func() []float32 {
+		m, err := LoadModelQuant(path)
+		if err != nil {
+			t.Fatalf("LoadModelQuant: %v", err)
+		}
+		s := m.NewSession()
+		s.Quant = true
+		return append([]float32(nil), s.Prefill(ids)...)
+	}
+
+	t.Setenv("FAK_GGUF_NO_ARENA_REUSE", "") // pin reuse ON regardless of ambient env
+	reuseOn := prefill()
+	t.Setenv("FAK_GGUF_NO_ARENA_REUSE", "1") // pre-#440 fresh-alloc-per-tensor arm
+	reuseOff := prefill()
+
+	assertF32BitsEqual(t, "arena-off vs arena-on prefill logits", reuseOff, reuseOn)
 }

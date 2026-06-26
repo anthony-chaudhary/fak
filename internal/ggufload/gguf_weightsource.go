@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -151,6 +152,13 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	// allocate (and the GC unmap) 800+ throwaway elems*4 f32 buffers — the load-time page
 	// churn #440 targets. Safe because each tensor's f32 is fully consumed (quantized or
 	// copied into the f32 blob) before the next dequantF32Into overwrites it.
+	//
+	// FAK_GGUF_NO_ARENA_REUSE=1 turns the reuse OFF (every tensor gets a fresh f32 buffer,
+	// the pre-#440 behavior). It exists only so the page-churn win is A/B-measurable on a
+	// single host via modelbench -load-only -load-profile: the reuse-safe vs fresh-alloc
+	// arms produce the bit-identical model (proven by TestDequantF32IntoReusesArenaAndNeverLeaksStaleData)
+	// while their peak-RSS / page-fault profiles differ. Unset on every normal load.
+	reuseArena := os.Getenv("FAK_GGUF_NO_ARENA_REUSE") == ""
 	var dequantBuf []float32
 	// glm_moe_dsa MLA KV-b merge buffer: the split attn_k_b / attn_v_b for a layer may not be
 	// adjacent in the tensor stream, so buffer the first half seen per layer and emit the merged
@@ -256,7 +264,11 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		}
 
 		t = loadProfileStart(p)
-		data, err := dequantF32Into(dequantBuf, info, raw)
+		scratch := dequantBuf
+		if !reuseArena {
+			scratch = nil // force a fresh allocation per tensor (pre-#440 page-churn arm)
+		}
+		data, err := dequantF32Into(scratch, info, raw)
 		dequantNanos := loadProfileEnd(p, "gguf_dequant", t, int64(len(data))*4, 1)
 		if p != nil {
 			tt.DequantNanos = dequantNanos
@@ -267,8 +279,11 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		}
 		// Carry the (possibly grown) arena forward. Capture it before normalize, which may
 		// hand back a fresh reordered buffer instead of data — dequantBuf must stay the
-		// dequant arena so the next tensor reuses it.
-		dequantBuf = data
+		// dequant arena so the next tensor reuses it. Skipped on the no-reuse arm so the next
+		// tensor allocates fresh.
+		if reuseArena {
+			dequantBuf = data
+		}
 
 		t = loadProfileStart(p)
 		data, err = normalizeCanonicalTensorData(name, data, cfg)
