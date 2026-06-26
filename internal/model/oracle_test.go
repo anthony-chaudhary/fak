@@ -19,6 +19,10 @@ const glmOracleModel = "yujiepan/glm-5-tiny-random"
 const glmOraclePromptIDsJSON = `[[785,6722,315,9621,374],[16,11,220,17,11,220,18,11,220,19,11],[750,912,2877,11,293,982,262,470]]`
 const glmOracleExportHint = "from fak/: python internal/model/export_oracle.py --online --trust-remote-code --model " +
 	glmOracleModel + " --out " + glmOracleDir + " --prompt-ids-json '" + glmOraclePromptIDsJSON + "'"
+const qwen25OracleDir = ".cache/oracle-qwen25"
+const qwen25OracleModel = "Qwen/Qwen2.5-0.5B-Instruct"
+const qwen25OracleExportHint = "from fak/: python internal/model/export_oracle.py --model " +
+	qwen25OracleModel + " --out " + qwen25OracleDir
 
 // MiniMax-M3 MSA oracle. No public tiny `minimax_m3` checkpoint exists, so the fixture
 // is built locally (à la yujiepan/glm-5-tiny-random) by make_minimax_m3_tiny.py — a small
@@ -364,6 +368,35 @@ func TestOptionalQwen3OracleCoversQKNorm(t *testing.T) {
 				t.Fatalf("%s tensor %s shape = %v, want [%d]", dir, name, meta.Shape, cfg.HeadDim)
 			}
 		}
+	}
+	resolved, _ := resolveOracleDir(dir)
+	assertForwardMatchesHFOracle(t, resolved, m, doc)
+}
+
+// TestOptionalQwen25OracleForwardMatchesHF is the Qwen2.5 family HF argmax gate for
+// issue #297. The production 7B/32B shape tests pin the large-checkpoint axes; this
+// weight-backed fixture proves the shared Qwen2.5 forward path against HF when the
+// gitignored oracle export is present.
+func TestOptionalQwen25OracleForwardMatchesHF(t *testing.T) {
+	const dir = qwen25OracleDir
+	m, doc := loadFixtureDir(t, dir, true)
+	cfg := m.Cfg
+	family := cfg.archFamilyKey()
+	if !strings.Contains(family, "qwen2") || strings.Contains(family, "qwen3") {
+		t.Fatalf("%s family = %q, want Qwen2/Qwen2.5; regenerate: %s",
+			dir, family, qwen25OracleExportHint)
+	}
+	if cfg.activationName() != "silu" || cfg.DenseMLP || cfg.ActGeluTanh || cfg.ActGeluErf {
+		t.Fatalf("%s activation axes = name:%q dense:%v tanh:%v erf:%v, want SiLU SwiGLU",
+			dir, cfg.activationName(), cfg.DenseMLP, cfg.ActGeluTanh, cfg.ActGeluErf)
+	}
+	if cfg.NumKVHeads <= 0 || cfg.NumHeads%cfg.NumKVHeads != 0 {
+		t.Fatalf("%s invalid Qwen2.5 GQA geometry: heads=%d kv=%d",
+			dir, cfg.NumHeads, cfg.NumKVHeads)
+	}
+	if cfg.windowForLayer(0) != -1 || cfg.windowForLayer(cfg.NumLayers-1) != -1 {
+		t.Fatalf("%s use_sliding_window=false should keep full causal attention, Window=%v",
+			dir, cfg.Window)
 	}
 	resolved, _ := resolveOracleDir(dir)
 	assertForwardMatchesHFOracle(t, resolved, m, doc)
