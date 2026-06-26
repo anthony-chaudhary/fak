@@ -89,9 +89,10 @@ same script works unchanged on WSL, a datacenter image, and a GCP DLVM.
 The CUDA backend is an **Approx** peer of the `cpuref` f32 Reference: it is held to an
 argmax-exact + logit-cosine gate, not bit-identity, because the device GEMM reorders the f32
 contraction. Each numeric path records its cosine floor as a constant in `cuda.go`
-(`cudaFP16CosineMin`, `cudaQ8CosineMin`, `cudaQ4KCosineMin`, `cudaFlashAttnCosineMin`, …), and
-**every floor carries the same honest caveat**: the constant *records* the threshold, it does
-not assert the path passes it — that is measured on a GPU node, not read from the source.
+(`cudaFP16CosineMin`, `cudaQ8CosineMin`, `cudaQ4KCosineMin`, `cudaAWQCosineMin`,
+`cudaFlashAttnCosineMin`, …), and **every floor carries the same honest caveat**: the constant
+*records* the threshold, it does not assert the path passes it — that is measured on a GPU node,
+not read from the source.
 
 Run the Approx witness on a GPU host:
 
@@ -145,11 +146,14 @@ likely to forget (a missing prototype or a missing binding):
 
 ## Honest residuals
 
-The AWQ 4-bit path (`AWQMatMul` / `AWQBatchedMatMul`, kernels `fcuda_awq_gemv` /
-`fcuda_awq_gemm`) ships a binding but has **no recorded cosine floor and no acceptance
-witness** yet — it is the one device op family without a cpuref-parity gate. Closing it means
-adding a `cudaAWQCosineMin` constant + a `run_*`-style acceptance script (a GPU job), the same
-recorded-then-measured pattern as the other floors.
+The AWQ 4-bit path (`AWQMatMul` / `AWQBatchedMatMul`, kernels `fcuda_awq_gemv` / `fcuda_awq_gemm`)
+was the one device op family without a cpuref-parity gate — it shipped a binding but had no
+recorded cosine floor and no acceptance witness. **That gap is now closed (#926, the #905
+selection):** it carries a `cudaAWQCosineMin` constant + a `-tags cuda` witness
+(`internal/compute/cuda_awq_test.go`, `TestCUDAAWQMatMul…` / `…BatchedMatMul…`) + a `run_*`-style
+acceptance script (`tools/run_926_acceptance_on_gpu.sh`, in the `cuda_acceptance.sh` manifest),
+the same recorded-then-measured pattern as every other floor. The realized cosine is still a GPU
+residual (the build host records the threshold; the acceptance run measures it).
 
 The health of this whole loop is itself scored: [`tools/cuda_dev_scorecard.py`](../tools/cuda_dev_scorecard.py)
 re-derives a **process-debt** number from the tree (is there a local gate? an automatic CI

@@ -5,7 +5,7 @@ description: "fak's deterministic CUDA-dev-process scorecard: KPIs across the fi
 
 # CUDA-dev-process scorecard — how hard is it to develop a kernel in fak
 
-<!-- cuda-dev-scorecard: 2026-06-24 · process: tools/cuda_dev_scorecard.py -->
+<!-- cuda-dev-scorecard: 2026-06-26 · process: tools/cuda_dev_scorecard.py -->
 
 This grades the **CUDA development loop**: changing `cuda_kernels.cu` / `cuda_backend.h` / `cuda.go`, building it, proving it correct, and keeping it from rotting — a loop made unusually painful because the canonical dev host has no CUDA toolkit and a walled GPU, so the loop spans a remote GPU node. Every number is re-derived from the git-tracked tree by `tools/cuda_dev_scorecard.py` — no hand-entry. The headline metric is **process-debt**: the count of concrete, mechanical defects that make the loop slower or less safe — a missing local gate, no automatic CI compile check, no one-command witness, no dev guide.
 
@@ -15,11 +15,11 @@ This grades the **CUDA development loop**: changing `cuda_kernels.cu` / `cuda_ba
 
 | Metric | Value |
 |---|---|
-| **Process-debt (total HARD defects)** | **1** |
-| Composite score | 99.2/100 (grade A) |
-| Dev loop | author 96 · build 100 · validate 100 · gate 100 · onboard 100 |
+| **Process-debt (total HARD defects)** | **0** |
+| Composite score | 100.0/100 (grade A) |
+| Dev loop | author 100 · build 100 · validate 100 · gate 100 · onboard 100 |
 | Advisory (soft) signals | 0 |
-| Debt by stage | author:1 · build:0 · validate:0 · gate:0 · onboard:0 |
+| Debt by stage | author:0 · build:0 · validate:0 · gate:0 · onboard:0 |
 
 ## The five stages of the kernel loop
 
@@ -27,9 +27,9 @@ This grades the **CUDA development loop**: changing `cuda_kernels.cu` / `cuda_ba
 
 | Stage | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| author | `cpuref_parity_coverage` | 86 | 1 | 6/7 device op families have a cpuref-parity witness |
 | author | `local_static_check` | 100 | 0 | ABI checker + make cuda-check + ci.ps1 mirror all present |
-| author | `abi_parity` | 100 | 0 | 31 prototypes in full parity (0 standby advisory) |
+| author | `abi_parity` | 100 | 0 | 34 prototypes in full parity (0 standby advisory) |
+| author | `cpuref_parity_coverage` | 100 | 0 | 7/7 device op families have a cpuref-parity witness |
 | build | `build_portable` | 100 | 0 | host matrix (WSL · GPU server · cloud · native Windows) + executable arch override covered |
 | build | `toolchain_pinned` | 100 | 0 | CUDA version pinned + arch override documented |
 | build | `task_runner` | 100 | 0 | cuda-build/cuda-test/cuda-accept delegate to the real scripts |
@@ -44,6 +44,5 @@ This grades the **CUDA development loop**: changing `cuda_kernels.cu` / `cuda_ba
 
 ## Process-debt work-list
 
-### `cpuref_parity_coverage` (author) — 1 defect(s), score 86
-- device op family with no cpuref-parity witness test: AWQ (4-bit GEMV/GEMM) — a kernel change here can't be checked against the cpu Reference's cosine
+No process-debt: the CUDA dev loop has a local gate, automatic CI coverage, a one-command witness, and a documented path. 🎉
 

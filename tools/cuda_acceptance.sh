@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # cuda_acceptance.sh — run EVERY on-GPU CUDA witness with ONE verdict.
 #
-# The CUDA correctness story is spread across six separate acceptance scripts
-# (tools/run_479..486_acceptance_on_gpu.sh) plus the GLM-DSA device witness
-# (tools/dgx_glm_gpu_witness.sh). Today "is the cuda path green?" means running each by
-# hand and eyeballing six logs. This aggregator runs them all and prints ONE per-family
-# manifest with a three-state verdict, so a single command answers the question.
+# The CUDA correctness story is spread across the per-family acceptance scripts
+# (tools/run_479..486_acceptance_on_gpu.sh + tools/run_926_acceptance_on_gpu.sh) plus the GLM-DSA
+# device witness (tools/dgx_glm_gpu_witness.sh). Today "is the cuda path green?" means running each
+# by hand and eyeballing the logs. This aggregator runs them all and prints ONE per-family manifest
+# with a three-state verdict, so a single command answers the question.
 #
 # THREE STATES — and SKIP-IS-NOT-PASS:
 #   PASS  the witness ran on a real GPU and cleared its recorded floor.
@@ -42,6 +42,7 @@ declare -a FAM_LABEL=(
   "quant Q8_0/Q4_K (#485, cudaQ8/Q4KCosineMin)"
   "flash-attention (#486, cudaFlashAttnCosineMin)"
   "GLM-DSA (cudaDsaSparseAttnCosineMin + cudaDsaIndexSelectionExact)"
+  "AWQ 4-bit (#926, cudaAWQCosineMin)"
 )
 declare -a FAM_CMD=(
   "tools/run_479_acceptance_on_gpu.sh"
@@ -51,11 +52,12 @@ declare -a FAM_CMD=(
   "tools/run_485_acceptance_on_gpu.sh"
   "tools/run_486_acceptance_on_gpu.sh"
   "tools/dgx_glm_gpu_witness.sh"
+  "tools/run_926_acceptance_on_gpu.sh"
 )
 
 echo "== CUDA acceptance — every GPU witness, one verdict (SKIP is NOT pass) =="
 echo "[accept] repo root : $MOD_DIR"
-echo "[accept] families  : ${#FAM_LABEL[@]} (run_479/482/483/484/485/486 + GLM-DSA witness)"
+echo "[accept] families  : ${#FAM_LABEL[@]} (run_479/482/483/484/485/486/926 + GLM-DSA witness)"
 echo
 
 declare -a STATE

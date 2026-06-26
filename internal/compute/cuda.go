@@ -105,6 +105,26 @@ const (
 	cudaQ4KCosineMin = 0.995
 )
 
+// cudaAWQCosineMin is the cuda backend's RECORDED Approx cosine floor for the AWQ 4-bit device
+// matmul (#926 — the one device op family that previously had NO cpuref-parity witness) — the
+// device-vs-cpuref cosine the AWQMatMul / AWQBatchedMatMul (fcuda_awq_gemv / fcuda_awq_gemm)
+// witness must clear. AWQ is a 4-bit weight-only format: nibble-packed codes (2/byte) with a
+// PER-CHANNEL f32 scale and a symmetric zero-point of 8 (weight = scale·(code−8)); the kernel
+// dequant-fuses the nibble into the GEMM tile and accumulates in F32, exactly the structure of
+// the Q4_K lane. The floor is therefore set at the SAME 0.995 the 4-bit Q4_K dequant-fused lane
+// records: the reference is an f32 dequant of the SAME packed bytes + scales, so this gate
+// isolates the device tile's arithmetic (reduction-order drift) against the host AWQ dequant —
+// the same class of drift cudaQ4KCosineMin bounds, not the true-f32→4-bit reconstruction error.
+// AWQ's per-CHANNEL f32 scale is in fact finer than Q4_K's per-SUB-BLOCK quantized 6-bit scale,
+// so 0.995 is a conservative recorded floor for the path.
+//
+// IMPORTANT (honest handoff, identical to cudaQ4KCosineMin): this RECORDS the threshold; it does
+// NOT assert the path passes it. The realized cosine is measured on a CUDA node by
+// tools/run_926_acceptance_on_gpu.sh (the win32 build host has no CUDA toolkit / GPU); this floor
+// is a reasoned target derived from the analogous 4-bit dequant-fused lane, and the first GPU run
+// records the realized value. Do not read a pass from this value alone.
+const cudaAWQCosineMin = 0.995
+
 // cudaFlashAttnCosineMin is the cuda backend's RECORDED Approx cosine floor for the fused
 // flash/online-softmax attention kernel (#486) — the device-vs-cpuref-f32 logit cosine a witness
 // must clear. The flash kernel computes the SAME math as the cpuref reference — softmax(scale·q·k)
