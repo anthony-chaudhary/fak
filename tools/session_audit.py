@@ -24,6 +24,11 @@ Usage:
 
 All numbers from token usage are EXACT. Cost uses the PRICING table below (an ASSUMPTION,
 clearly flagged) — edit it to match current rates; token counts are the ground truth.
+
+Cost is split by BILLING BUCKET (provider): claude-* is the Anthropic invoice; a gemini-*
+/ gpt-* / local model is a different invoice. The auditor never sums cost across buckets
+and never prices a non-Claude model at Claude rates — an unpriced model is reported with
+exact tokens but no fabricated cost. <synthetic> (harness-injected) is non-billed ($0).
 """
 import sys
 import os
@@ -35,15 +40,45 @@ import collections
 import datetime
 
 # --- pricing assumption (USD per 1e6 tokens). EDIT to match real card; flagged in output. ---
+# Rates are per-model-family and ANTHROPIC-ONLY. A model that matches none of these is
+# NOT silently priced as Opus — it is an UNPRICED, SEPARATE billing bucket. Claude and
+# Gemini are different vendors = different invoices; the audit never sums cost across
+# buckets and never invents a Claude price for a non-Claude model. Add a vendor's card to
+# PRICING (and its substrings to PROVIDER_BUCKETS) to price it; until then its tokens are
+# reported and its cost is left blank.
 PRICING = {
     # model_substring: (input, cache_write_5m, cache_read, output)
     "opus":   (15.0, 18.75, 1.50, 75.0),
     "sonnet": ( 3.0,  3.75, 0.30, 15.0),
     "haiku":  ( 0.80, 1.00, 0.08,  4.0),
     "fable":  ( 3.0,  3.75, 0.30, 15.0),
-    "_default": (15.0, 18.75, 1.50, 75.0),
 }
 PRICING_IS_ASSUMPTION = True
+
+# Harness-injected pseudo-models that never reach any vendor — never billed, never a bucket.
+NONBILLED_MODELS = {"<synthetic>", "?", ""}
+
+# Provider / billing-bucket classification. Each provider is a DISTINCT invoice; the report
+# breaks cost out per bucket and refuses to sum across them. Substring-matched, first hit wins;
+# Anthropic is first so a claude-* tier never falls through to another vendor's bucket.
+PROVIDER_BUCKETS = [
+    ("Anthropic (Claude)",  ("claude", "opus", "sonnet", "haiku", "fable")),
+    ("Google (Gemini)",     ("gemini", "gemma")),
+    ("OpenAI",              ("gpt", "o1-", "o3-", "o4-", "davinci")),
+    ("local / self-hosted", ("qwen", "llama", "mistral", "mixtral", "phi-", "deepseek")),
+]
+
+def provider_bucket(model):
+    """Which vendor invoice a model lands on — its billing bucket, not its rate."""
+    if (model or "") in NONBILLED_MODELS:
+        return "non-billed (harness)"
+    m = (model or "").lower()
+    if not m:
+        return "non-billed (harness)"
+    for name, subs in PROVIDER_BUCKETS:
+        if any(s in m for s in subs):
+            return name
+    return "UNKNOWN (unpriced bucket)"
 
 DEFAULT_ROOTS = [
     os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude")), "projects"),
@@ -61,15 +96,29 @@ READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS", "NotebookRead", "WebFetch", "We
 # side-effecting or spawn.
 
 def price_for(model):
+    """Rate card for a model, or None when we hold no card for its billing bucket.
+    None means: report the tokens, never invent a cost (and never default to Opus)."""
+    if (model or "") in NONBILLED_MODELS:
+        return None
     m = (model or "").lower()
+    if not m:
+        return None
     for key, rates in PRICING.items():
-        if key != "_default" and key in m:
+        if key in m:
             return rates
-    return PRICING["_default"]
+    return None
 
 def cost_usd(model, inp, cwrite, cread, out):
-    pi, pcw, pcr, po = price_for(model)
+    rates = price_for(model)
+    if rates is None:
+        return 0.0          # unpriced / non-Anthropic / non-billed — kept out of the total
+    pi, pcw, pcr, po = rates
     return (inp*pi + cwrite*pcw + cread*pcr + out*po) / 1e6
+
+def model_cost(model, c):
+    """Cost for one model's rolled-up token Counter (input/cache_create/cache_read/output)."""
+    return cost_usd(model, c.get("input", 0), c.get("cache_create", 0),
+                    c.get("cache_read", 0), c.get("output", 0))
 
 def discover(roots, since_days=None, ns_prefix=NS_INCLUDE_PREFIX, include_subagents=False):
     cutoff = None
@@ -146,6 +195,7 @@ def analyze(path):
     n_text = 0
     tok = dict(input=0, output=0, cache_read=0, cache_create=0,
                web_search=0, web_fetch=0, iterations=0)
+    per_model = collections.defaultdict(collections.Counter)   # model -> token Counter (per billing bucket)
     cost = 0.0
     ts_min = ts_max = None
     prompts = []          # (ts, text) — the trajectory's user asks
@@ -206,6 +256,12 @@ def analyze(path):
             tok["web_fetch"]  += stu.get("web_fetch_requests", 0) or 0
             tok["iterations"] += len(u.get("iterations", []) or [])
             cost += cost_usd(msg.get("model"), inp, cc, cr, out)
+            pm = per_model[msg.get("model", "?")]
+            pm["turns"] += 1
+            pm["input"] += inp
+            pm["output"] += out
+            pm["cache_read"] += cr
+            pm["cache_create"] += cc
             for b in (msg.get("content") or []):
                 if not isinstance(b, dict):
                     continue
@@ -247,7 +303,8 @@ def analyze(path):
     return {
         "path": path, "session": os.path.splitext(os.path.basename(path))[0],
         "n_records": sum(rec_types.values()), "rec_types": dict(rec_types),
-        "models": dict(models), "assistant_turns": assistant_turns,
+        "models": dict(models), "per_model": {m: dict(c) for m, c in per_model.items()},
+        "assistant_turns": assistant_turns,
         "dup_assistant_lines": dup_assistant_lines,
         "n_prompts": len(prompts), "prompts": prompts,
         "n_tool_use": n_tool_use, "n_tool_result": n_tool_result,
@@ -279,6 +336,7 @@ def aggregate(sessions):
         tot_tools.update(s["tools"])
     ns_roll = collections.defaultdict(lambda: collections.Counter())
     ns_cost = collections.Counter()
+    ns_models = collections.defaultdict(collections.Counter)   # ns -> {model: output tok}
     for s in S:
         ns = os.path.basename(os.path.dirname(s["path"]))
         ns_roll[ns]["sessions"] += 1
@@ -286,6 +344,16 @@ def aggregate(sessions):
         ns_roll[ns]["cache_read"] += s["tokens"]["cache_read"]
         ns_roll[ns]["tool_use"] += s["n_tool_use"]
         ns_cost[ns] += s["cost_usd"]
+        for model, c in s.get("per_model", {}).items():
+            ns_models[ns][model] += c.get("output", 0)
+    # per-model and per-billing-bucket rollups (token-exact; cost added at render)
+    pm_roll = collections.defaultdict(collections.Counter)
+    for s in S:
+        for model, c in s.get("per_model", {}).items():
+            pm_roll[model].update(c)
+    bucket_roll = collections.defaultdict(collections.Counter)
+    for model, c in pm_roll.items():
+        bucket_roll[provider_bucket(model)].update(c)
     calls = [s["n_tool_use"] for s in S]
     outs  = [s["tokens"]["output"] for s in S]
     ios   = [s["io_ratio"] for s in S if s["io_ratio"]]
@@ -296,6 +364,10 @@ def aggregate(sessions):
         "tool_mix": dict(tot_tools.most_common()),
         "per_namespace": {k: dict(v) for k, v in ns_roll.items()},
         "per_namespace_cost": dict(ns_cost),
+        "per_namespace_top_model": {k: (v.most_common(1)[0][0] if v else "?")
+                                    for k, v in ns_models.items()},
+        "per_model": {m: dict(c) for m, c in pm_roll.items()},
+        "per_bucket": {b: dict(c) for b, c in bucket_roll.items()},
         "dist": {
             "calls_per_session": {"median": statistics.median(calls) if calls else None,
                                   "mean": round(statistics.mean(calls),1) if calls else None,
@@ -343,14 +415,53 @@ def report_md(sessions, agg):
              f"·  **client tool:** WebSearch {fmt_int(ws_c)} / WebFetch {fmt_int(wf_c)}")
     L.append(f"- **Multi-iteration count:** {fmt_int(t['iterations'])}")
     flag = "  _(⚠ cost uses an ASSUMED price table — edit PRICING; token counts above are exact)_" if PRICING_IS_ASSUMPTION else ""
-    L.append(f"- **Estimated cost:** ${agg['total_cost_usd']:,.2f}{flag}\n")
+    L.append(f"- **Estimated Anthropic-billed cost:** ${agg['total_cost_usd']:,.2f}{flag}")
+    # Surface other billing buckets so the Anthropic total is never read as "the whole bill".
+    buckets = agg.get("per_bucket", {})
+    other = {b: c for b, c in buckets.items()
+             if b not in ("Anthropic (Claude)", "non-billed (harness)") and c.get("output", 0)}
+    if other:
+        parts = [f"{b} ({fmt_int(c['output'])} output tok, unpriced — add its card)"
+                 for b, c in sorted(other.items(), key=lambda kv: -kv[1].get("output", 0))]
+        L.append(f"- **⚠ Other billing buckets present (NOT in the total above — different invoices):** "
+                 + "; ".join(parts))
+    nb = buckets.get("non-billed (harness)", {})
+    if nb.get("turns"):
+        L.append(f"- **Non-billed `<synthetic>` turns (harness-injected, $0):** {fmt_int(nb.get('turns',0))} "
+                 f"({fmt_int(nb.get('output',0))} output tok)")
+    L.append("")
+
+    # Per billing bucket — the answer to "is this Claude or Gemini money?". NEVER summed.
+    L.append("## Cost by billing bucket (provider) — never sum across these\n")
+    L.append("| Billing bucket | Turns | Output tok | Cache-read tok | Est. cost | Priced? |")
+    L.append("|---|---:|---:|---:|---:|:--:|")
+    for b, c in sorted(buckets.items(), key=lambda kv: -kv[1].get("output", 0)):
+        bcost = sum(model_cost(m, mc) for m, mc in agg.get("per_model", {}).items()
+                    if provider_bucket(m) == b)
+        priced = b == "Anthropic (Claude)"
+        cost_cell = f"${bcost:,.2f}" if priced else ("$0.00" if b == "non-billed (harness)" else "— (no card)")
+        L.append(f"| {b} | {fmt_int(c.get('turns',0))} | {fmt_int(c.get('output',0))} | "
+                 f"{fmt_int(c.get('cache_read',0))} | {cost_cell} | {'✓' if priced else ''} |")
+    L.append("")
+
+    # Per-model tiers — so a blended cost can be read as opus-heavy vs haiku-heavy.
+    L.append("## Per-model breakdown (token-exact; cost Anthropic-assumed)\n")
+    L.append("| Model | Bucket | Turns | Output tok | Cache-read tok | Est. cost |")
+    L.append("|---|---|---:|---:|---:|---:|")
+    for m, c in sorted(agg.get("per_model", {}).items(), key=lambda kv: -kv[1].get("output", 0)):
+        mc = model_cost(m, c)
+        cost_cell = f"${mc:,.2f}" if price_for(m) is not None else ("$0.00" if m in NONBILLED_MODELS else "— (no card)")
+        L.append(f"| {m} | {provider_bucket(m)} | {fmt_int(c.get('turns',0))} | {fmt_int(c.get('output',0))} | "
+                 f"{fmt_int(c.get('cache_read',0))} | {cost_cell} |")
+    L.append("")
 
     L.append("## Per-namespace rollup\n")
-    L.append("| Namespace | Sessions | Output tok | Cache-read tok | Tool calls | Est. cost |")
-    L.append("|---|---:|---:|---:|---:|---:|")
+    L.append("| Namespace | Sessions | Output tok | Cache-read tok | Tool calls | Top model (by output) | Est. cost |")
+    L.append("|---|---:|---:|---:|---:|---|---:|")
+    top_model = agg.get("per_namespace_top_model", {})
     for ns, v in sorted(agg["per_namespace"].items(), key=lambda kv: -kv[1]["output"]):
         L.append(f"| {ns} | {v['sessions']} | {fmt_int(v['output'])} | {fmt_int(v['cache_read'])} | "
-                 f"{fmt_int(v['tool_use'])} | ${agg['per_namespace_cost'][ns]:,.2f} |")
+                 f"{fmt_int(v['tool_use'])} | {top_model.get(ns, '?')} | ${agg['per_namespace_cost'][ns]:,.2f} |")
     L.append("")
 
     d = agg["dist"]

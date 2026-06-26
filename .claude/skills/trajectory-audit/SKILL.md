@@ -14,10 +14,20 @@ metadata:
 
 > Wraps `tools/session_audit.py` (exact token accounting from the transcript
 > `message.usage` records). **Honest scope:** this is the *token-weighted* lens —
-> exact I:O ratio, cache reuse, cost, tool mix, heaviest sessions. It does **not**
-> flag read-loops / shell-poll / glob-storms, and it does **not** join the
-> transcript to any external run-id spine. Treat the numbers as a cost/efficiency
-> census, not a behavior audit.
+> exact I:O ratio, cache reuse, cost (split by billing bucket), tool mix, heaviest
+> sessions. It does **not** flag read-loops / shell-poll / glob-storms, and it does
+> **not** join the transcript to any external run-id spine. Treat the numbers as a
+> cost/efficiency census, not a behavior audit.
+>
+> **Billing buckets — the one cost rule.** Each model's tokens land on its vendor's
+> invoice: `claude-*` is the Anthropic bucket; a `gemini-*` / `gpt-*` / local model
+> is a **different bill entirely**. The auditor (a) breaks cost out per provider and
+> **never sums across buckets**, (b) refuses to price a non-Claude model at Claude
+> rates — an unknown model is reported with its tokens but **no fabricated cost**
+> (add its card to `PRICING` + `PROVIDER_BUCKETS` to price it), and (c) treats
+> `<synthetic>` (harness-injected) as **non-billed, $0**. A single blended "cost"
+> across providers is meaningless — read the per-bucket / per-model tables, not just
+> the headline.
 
 Reads the most recent Claude Code session transcripts and rolls up **what only
 shows up across many runs**: where the tokens and cost actually went, how much of
@@ -71,12 +81,18 @@ The report gives you, in order:
 1. **Machine-wide totals (EXACT)** — output tokens (the real work), fresh billed
    input, cache-read (prompt-cache / KV reuse), the **I:O ratio**, the
    **cache-read share** of all ingested context, web search/fetch, multi-iteration
-   count, and estimated cost (assumed-price, flagged).
-2. **Per-namespace rollup** — which project the spend lands in.
-3. **Per-session distributions** — median/p90 of tool-calls, output tokens, I:O
+   count, **Anthropic-billed cost** (assumed-price, flagged), plus a line for any
+   **other billing bucket** present and the non-billed `<synthetic>` turn count.
+2. **Cost by billing bucket (provider)** — the answer to "is this Claude money or
+   Gemini money?". Never sum across rows; an unpriced bucket shows "— (no card)".
+3. **Per-model breakdown** — the tier split (opus vs sonnet vs haiku), so a blended
+   number can be read as opus-heavy vs haiku-heavy. This is where you confirm *which*
+   model drove the cost before you quote a figure.
+4. **Per-namespace rollup** — which project the spend lands in, with its top model.
+5. **Per-session distributions** — median/p90 of tool-calls, output tokens, I:O
    ratio, cache-hit fraction, read-only fraction. The tails are where the waste is.
-4. **Global tool mix** — a tool dominating the call count is the first thing to question.
-5. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
+6. **Global tool mix** — a tool dominating the call count is the first thing to question.
+7. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
 
 Do **not** open the individual `.jsonl` files unless a heaviest-session row needs
 a root cause the rollup can't name. If you do, run `deep <session>` once — don't
@@ -92,13 +108,18 @@ re-read it in a loop.
 - A high I:O ratio is expected for read/research-heavy work; flag it only when it
   pairs with a heavy session whose output was small (lots of context in, little
   produced).
+- **Quote cost per bucket, never blended.** Before you state a dollar figure, read
+  the per-bucket and per-model tables: say "Anthropic-billed, ~99% opus-4-8", not a
+  lone total. If a non-Anthropic bucket appears with "— (no card)", say its cost is
+  **unknown** (a separate invoice), not zero — zero would imply it was free.
+  `<synthetic>` is genuinely $0 (never hit a vendor) and must not be counted as work.
 
 ### Step 3 — Surface the 0–2 that matter
 
 End with a short operator summary: the headline machine-wide numbers (I:O,
-cache-read share, cost), the single heaviest session and its likely cause, and any
-distribution tail that crosses a sane bar. Don't dump the whole table into chat —
-link the report file.
+cache-read share, **cost named by bucket + dominant model**), the single heaviest
+session and its likely cause, and any distribution tail that crosses a sane bar.
+Don't dump the whole table into chat — link the report file.
 
 ## Output
 
@@ -109,4 +130,10 @@ link the report file.
 ## Notes
 
 - Token figures are exact; the cost line uses an ASSUMED price table — edit
-  `PRICING` in `tools/session_audit.py` to match the current card.
+  `PRICING` in `tools/session_audit.py` to match the current card. `PRICING` is
+  **Anthropic-only** and matched by model substring (`opus`/`sonnet`/`haiku`/`fable`).
+- To price another vendor, add its rate card to `PRICING` **and** its model
+  substrings to `PROVIDER_BUCKETS` (the bucket map). Without both, that vendor's
+  sessions are reported with exact tokens but shown as "— (no card)" — never folded
+  into the Anthropic total and never mispriced at Opus rates.
+- `<synthetic>` / `?` / blank models are in `NONBILLED_MODELS` → always $0.

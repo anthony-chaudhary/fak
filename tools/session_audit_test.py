@@ -180,5 +180,67 @@ class DiscoverNamespaceDefaultTest(unittest.TestCase):
             self.assertEqual({r["ns"] for r in narrowed}, {"C--work-fak"})
 
 
+class BillingBucketTest(unittest.TestCase):
+    """Claude and Gemini are DIFFERENT invoices. The auditor must (a) never price a
+    non-Claude model at Claude rates (no silent Opus default), (b) keep non-Anthropic
+    spend OUT of the Anthropic total, (c) treat <synthetic> as non-billed $0, and
+    (d) render the per-bucket / per-model split so a blended number is decomposable."""
+
+    def test_price_for_unknown_model_is_none_not_opus(self) -> None:
+        sa = load()
+        self.assertIsNone(sa.price_for("gemini-2.5-pro"), "no Claude card for Gemini")
+        self.assertIsNone(sa.price_for("gpt-5"), "no card for OpenAI")
+        self.assertIsNone(sa.price_for("qwen2.5:14b"), "no card for a local model")
+        self.assertIsNone(sa.price_for("<synthetic>"), "synthetic is non-billed")
+        # …but a real Claude tier still resolves to its card.
+        self.assertEqual(sa.price_for("claude-opus-4-8"), sa.PRICING["opus"])
+        self.assertEqual(sa.price_for("claude-haiku-4-5-20251001"), sa.PRICING["haiku"])
+
+    def test_cost_usd_never_fabricates_for_unpriced_model(self) -> None:
+        sa = load()
+        # 1M output tok on Gemini would be ~$75 if mispriced as Opus — must be $0 here.
+        self.assertEqual(sa.cost_usd("gemini-2.5-pro", 0, 0, 0, 1_000_000), 0.0)
+        self.assertEqual(sa.cost_usd("<synthetic>", 1_000, 1_000, 1_000, 1_000), 0.0)
+        # Opus is still priced exactly.
+        self.assertAlmostEqual(sa.cost_usd("claude-opus-4-8", 0, 0, 0, 1_000_000), 75.0, places=6)
+
+    def test_provider_bucket_classification(self) -> None:
+        sa = load()
+        self.assertEqual(sa.provider_bucket("claude-opus-4-8"), "Anthropic (Claude)")
+        self.assertEqual(sa.provider_bucket("gemini-2.5-pro"), "Google (Gemini)")
+        self.assertEqual(sa.provider_bucket("gpt-5"), "OpenAI")
+        self.assertEqual(sa.provider_bucket("qwen2.5:14b"), "local / self-hosted")
+        self.assertEqual(sa.provider_bucket("<synthetic>"), "non-billed (harness)")
+        self.assertEqual(sa.provider_bucket("some-future-model"), "UNKNOWN (unpriced bucket)")
+
+    def test_non_claude_spend_excluded_from_total_and_flagged(self) -> None:
+        sa = load()
+        recs = [
+            _assistant("c1", out=1_000, cread=0, ccreate=0, model="claude-opus-4-8"),
+            _assistant("g1", out=2_000, cread=0, ccreate=0, model="gemini-2.5-pro"),
+        ]
+        s = sa.analyze(_write_transcript(recs))
+        agg = sa.aggregate([s])
+        # The total is ONLY the Anthropic spend (1000 opus out tok @ $75/MTok).
+        self.assertAlmostEqual(agg["total_cost_usd"], 1_000 * 75.0 / 1e6, places=9)
+        self.assertEqual(agg["per_bucket"]["Google (Gemini)"]["output"], 2_000)
+        md = sa.report_md([s], agg)
+        self.assertIn("Cost by billing bucket", md)
+        self.assertIn("Google (Gemini)", md)
+        self.assertIn("— (no card)", md, "unpriced bucket must show no fabricated cost")
+        self.assertIn("Other billing buckets present", md, "non-Claude spend must be flagged")
+
+    def test_synthetic_turns_are_non_billed_in_per_model(self) -> None:
+        sa = load()
+        recs = [
+            _assistant("a", out=100, cread=0, ccreate=0, model="claude-opus-4-8"),
+            _assistant("syn", out=0, cread=0, ccreate=0, model="<synthetic>"),
+        ]
+        s = sa.analyze(_write_transcript(recs))
+        self.assertIn("<synthetic>", s["per_model"])
+        agg = sa.aggregate([s])
+        self.assertEqual(sa.model_cost("<synthetic>", agg["per_model"]["<synthetic>"]), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
