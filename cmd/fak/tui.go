@@ -169,12 +169,25 @@ type tuiIssueReport struct {
 }
 
 type tuiLoopReport struct {
-	Schema string        `json:"schema"`
-	At     string        `json:"at"`
-	Ledger string        `json:"ledger"`
-	Counts tuiLoopCounts `json:"counts"`
-	Lanes  []tuiLoopLane `json:"lanes"`
-	Rows   []tuiLoopRow  `json:"rows"`
+	Schema    string              `json:"schema"`
+	At        string              `json:"at"`
+	Ledger    string              `json:"ledger"`
+	Counts    tuiLoopCounts       `json:"counts"`
+	Lanes     []tuiLoopLane       `json:"lanes"`
+	Rows      []tuiLoopRow        `json:"rows"`
+	Integrity *tuiLedgerIntegrity `json:"ledger_integrity,omitempty"`
+}
+
+// tuiLedgerIntegrity carries a loop-ledger chain break into the report model. It is
+// populated only when the ledger is forked/corrupt (the loops console then renders the
+// recovered prefix plus a banner instead of going dark); a clean ledger leaves it nil,
+// so JSON output for healthy ledgers is byte-identical.
+type tuiLedgerIntegrity struct {
+	Broken    bool   `json:"broken"`
+	AtLine    int    `json:"at_line,omitempty"`
+	AtSeq     uint64 `json:"at_seq,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Recovered int    `json:"recovered_events"`
 }
 
 type tuiLoopCounts struct {
@@ -562,12 +575,24 @@ func runTUILoops(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak console loops: %v\n", err)
 		return 2
 	}
-	st, err := loopmgr.SnapshotFile(*ledger, at)
+	// Tolerant read: a forked/corrupt ledger (e.g. two processes that raced an
+	// append) must not blank the pane — render the recovered prefix and surface the
+	// break as a banner. A true I/O fault still fails; only a chain break degrades.
+	st, integ, err := loopmgr.SnapshotFilePartial(*ledger, at)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console loops: %v\n", err)
 		return 1
 	}
 	report := buildTUILoopReport(st, at)
+	if integ.Broken {
+		report.Integrity = &tuiLedgerIntegrity{
+			Broken:    true,
+			AtLine:    integ.AtLine,
+			AtSeq:     integ.AtSeq,
+			Reason:    integ.Reason,
+			Recovered: integ.Recovered,
+		}
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -3935,6 +3960,11 @@ func renderTUILoops(report tuiLoopReport, top, width int) string {
 	fmt.Fprintf(&b, "loops=%d  running=%d  refused=%d  failed=%d  witnessed=%d  witness-gaps=%d  notified=%d\n",
 		report.Counts.Loops, report.Counts.Running, report.Counts.Refused, report.Counts.Failed,
 		report.Counts.Witnessed, report.Counts.WitnessGaps, report.Counts.Notifications)
+	if report.Integrity != nil && report.Integrity.Broken {
+		fmt.Fprintf(&b, "!! LEDGER CHAIN BROKEN at line %d (seq %d): %s -- showing %d recovered loop-event(s); later rows not loaded\n",
+			report.Integrity.AtLine, report.Integrity.AtSeq,
+			trimTUI(report.Integrity.Reason, maxTUI(40, width-48)), report.Integrity.Recovered)
+	}
 	if len(report.Rows) == 0 {
 		fmt.Fprintln(&b, "\nno loops found")
 		return b.String()

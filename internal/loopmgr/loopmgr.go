@@ -98,6 +98,22 @@ func WithClock(clock func() time.Time) Option {
 	}
 }
 
+// ErrLedgerBusy is returned by Append when the cross-process append lock could not
+// be acquired within the bounded wait. It is deliberately fail-closed: a forked chain
+// (two unserialized writers stamping the same seq + prev_hash) is worse than a
+// retriable error, so a contended-out Append never falls back to an unlocked write.
+// Callers (the one-shot `fak loop ...` producer) can retry.
+var ErrLedgerBusy = errors.New("loopmgr: loop ledger append lock is busy")
+
+// errLockBusy is the unexported sentinel the per-platform tryFlock primitives return
+// when the OS advisory lock is already held (mirrors internal/gpulease).
+var errLockBusy = errors.New("loopmgr: append lock busy")
+
+// appendLockWait bounds how long Append polls for the append lock before failing with
+// ErrLedgerBusy. A local single-line append holds the lock for microseconds, so this
+// should essentially never elapse; it only bounds a pathological stuck holder.
+const appendLockWait = 2 * time.Second
+
 func Append(path string, ev Event, opts ...Option) (Event, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -108,22 +124,10 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 		opt(&cfg)
 	}
 
-	existing, err := Load(path)
-	if err != nil {
-		return Event{}, err
-	}
+	// Validate the caller's event before touching the lock (cheap, no I/O).
 	if err := validateNewEvent(ev); err != nil {
 		return Event{}, err
 	}
-
-	ev.Schema = SchemaEvent
-	ev.Seq = uint64(len(existing) + 1)
-	ev.TSUnixNano = cfg.clock().UTC().UnixNano()
-	ev.PrevHash = ""
-	if len(existing) > 0 {
-		ev.PrevHash = existing[len(existing)-1].Hash
-	}
-	ev.Hash = hashEvent(ev)
 
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
@@ -131,20 +135,78 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 			return Event{}, fmt.Errorf("create loop ledger dir: %w", err)
 		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+
+	// Cross-process critical section: hold an OS advisory lock on a sidecar
+	// <path>.lock fd across the whole read-compute-write, so seq/prev_hash are
+	// derived from the TRUE tail under exclusion and two processes cannot fork the
+	// chain. Correctness rests on recomputing under the lock, NOT on the lock being
+	// acquired within the budget — on timeout we fail (ErrLedgerBusy), never proceed.
+	var out Event
+	err := withLedgerLock(path, appendLockWait, func() error {
+		existing, err := Load(path)
+		if err != nil {
+			return err
+		}
+
+		ev.Schema = SchemaEvent
+		ev.Seq = uint64(len(existing) + 1)
+		ev.TSUnixNano = cfg.clock().UTC().UnixNano()
+		ev.PrevHash = ""
+		if len(existing) > 0 {
+			ev.PrevHash = existing[len(existing)-1].Hash
+		}
+		ev.Hash = hashEvent(ev)
+
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return fmt.Errorf("open loop ledger: %w", err)
+		}
+		defer f.Close()
+
+		line, err := json.Marshal(ev)
+		if err != nil {
+			return fmt.Errorf("marshal loop event: %w", err)
+		}
+		if _, err := f.Write(append(line, '\n')); err != nil {
+			return fmt.Errorf("append loop event: %w", err)
+		}
+		out = ev
+		return nil
+	})
 	if err != nil {
-		return Event{}, fmt.Errorf("open loop ledger: %w", err)
+		return Event{}, err
+	}
+	return out, nil
+}
+
+// withLedgerLock runs fn while holding an exclusive cross-process advisory lock on
+// <path>.lock. The per-platform tryFlock is non-blocking, so it polls until the lock
+// is free or wait elapses (then ErrLedgerBusy). The lock fd is closed on return, which
+// also releases the OS lock (and the OS releases it if this process dies mid-write).
+func withLedgerLock(path string, wait time.Duration, fn func() error) error {
+	lockPath := path + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fmt.Errorf("open loop ledger lock: %w", err)
 	}
 	defer f.Close()
 
-	line, err := json.Marshal(ev)
-	if err != nil {
-		return Event{}, fmt.Errorf("marshal loop event: %w", err)
+	deadline := time.Now().Add(wait)
+	for {
+		lerr := tryFlock(f)
+		if lerr == nil {
+			break
+		}
+		if !errors.Is(lerr, errLockBusy) {
+			return fmt.Errorf("lock loop ledger: %w", lerr)
+		}
+		if time.Now().After(deadline) {
+			return ErrLedgerBusy
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return Event{}, fmt.Errorf("append loop event: %w", err)
-	}
-	return ev, nil
+	defer func() { _ = unflock(f) }()
+	return fn()
 }
 
 func Load(path string) ([]Event, error) {
@@ -330,6 +392,77 @@ func loadReader(r io.Reader) ([]Event, error) {
 		return nil, fmt.Errorf("read loop ledger: %w", err)
 	}
 	return out, nil
+}
+
+// Integrity describes the first chain break a tolerant read encountered, if any. It
+// is the structured form of "the strict reader would have aborted here": a console or
+// other read-only consumer can render what was recovered and surface the break,
+// instead of the whole pane going dark on a single forked/corrupt line.
+type Integrity struct {
+	Broken    bool   `json:"broken"`
+	AtLine    int    `json:"at_line,omitempty"`
+	AtSeq     uint64 `json:"at_seq,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Recovered int    `json:"recovered_events"`
+}
+
+// LoadPrefix is the tolerant sibling of Load: it reads the longest valid chained
+// prefix and, instead of aborting on the first integrity break (forked seq, bad
+// prev_hash, tampered hash), STOPS and returns the events recovered so far plus an
+// Integrity describing the break. err is reserved for true I/O / scanner faults, not
+// chain breaks — a forked ledger yields (prefix, Integrity{Broken:true}, nil). This
+// mirrors internal/journal's Verify (strict) vs ReadRows (tolerant) split; Load stays
+// strict so the tamper-evidence guarantee is never weakened.
+func LoadPrefix(path string) ([]Event, Integrity, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, Integrity{}, nil
+	}
+	if err != nil {
+		return nil, Integrity{}, fmt.Errorf("open loop ledger: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var out []Event
+	var prev string
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var ev Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return out, Integrity{Broken: true, AtLine: lineNo, Reason: "decode: " + err.Error(), Recovered: len(out)}, nil
+		}
+		if verr := validateLoadedEvent(ev, uint64(len(out)+1), prev); verr != nil {
+			return out, Integrity{Broken: true, AtLine: lineNo, AtSeq: ev.Seq, Reason: verr.Error(), Recovered: len(out)}, nil
+		}
+		prev = ev.Hash
+		out = append(out, ev)
+	}
+	if err := scanner.Err(); err != nil {
+		return out, Integrity{}, fmt.Errorf("read loop ledger: %w", err)
+	}
+	return out, Integrity{Recovered: len(out)}, nil
+}
+
+// SnapshotFilePartial is the tolerant sibling of SnapshotFile: it Summarizes the
+// recovered prefix from LoadPrefix and carries out the Integrity break (if any). Used
+// by the loops console so a forked/corrupt ledger renders the loops it could recover
+// plus a break banner, instead of exiting blank.
+func SnapshotFilePartial(path string, now time.Time) (Status, Integrity, error) {
+	events, integ, err := LoadPrefix(path)
+	if err != nil {
+		return Status{}, integ, err
+	}
+	st := Summarize(events, now)
+	st.LedgerPath = path
+	return st, integ, nil
 }
 
 func validateNewEvent(ev Event) error {

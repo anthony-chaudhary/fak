@@ -200,6 +200,57 @@ func TestTUILoopsJSONOutputFromLedger(t *testing.T) {
 	}
 }
 
+// TestTUILoopsDegradesOnForkedLedger is the regression for the loops console going dark
+// on a corrupt ledger: a forked tail (duplicate seq, exactly the live failure) must
+// still render the recovered loops AND a chain-broken banner, exit 0 — not exit 1 blank
+// with a cryptic seq error. The strict integrity gate is unchanged; the pane degrades.
+func TestTUILoopsDegradesOnForkedLedger(t *testing.T) {
+	path := writeTUILoopLedger(t)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	forked := string(body) + lines[len(lines)-1] + "\n" // duplicate the last line: forked seq
+	if err := os.WriteFile(path, []byte(forked), 0o644); err != nil {
+		t.Fatalf("write forked ledger: %v", err)
+	}
+
+	// Human mode: recovered loops + banner, exit 0.
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{"loops", "--ledger", path, "--at", "2026-06-25T12:10:00Z", "--width", "110"})
+	if code != 0 {
+		t.Fatalf("forked-ledger loops code=%d (want 0, degrade not brick) stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"LEDGER CHAIN BROKEN", "issue-dispatch/default"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("degraded loop output missing %q:\n%s", want, out)
+		}
+	}
+
+	// JSON mode: ledger_integrity is populated; recovered prefix still present.
+	stdout.Reset()
+	stderr.Reset()
+	code = runTUI(&stdout, &stderr, []string{"loops", "--ledger", path, "--at", "2026-06-25T12:10:00Z", "--json"})
+	if code != 0 {
+		t.Fatalf("forked-ledger loops --json code=%d, want 0", code)
+	}
+	var report tuiLoopReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal degraded report: %v\n%s", err, stdout.String())
+	}
+	if report.Integrity == nil || !report.Integrity.Broken {
+		t.Fatalf("ledger_integrity = %+v, want Broken=true", report.Integrity)
+	}
+	if report.Integrity.Recovered != 4 || report.Integrity.AtLine != 5 {
+		t.Fatalf("integrity = %+v, want Recovered=4 AtLine=5", report.Integrity)
+	}
+	if len(report.Rows) == 0 {
+		t.Fatalf("degraded report rendered zero loops; want the recovered prefix")
+	}
+}
+
 func TestTUISessionsHumanOutputFromFixture(t *testing.T) {
 	path := writeTUISessionsFixture(t)
 	var stdout, stderr bytes.Buffer

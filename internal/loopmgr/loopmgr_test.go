@@ -1,9 +1,12 @@
 package loopmgr
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -100,4 +103,134 @@ func TestSummarizeSortsLoops(t *testing.T) {
 
 func fixedClock() func() time.Time {
 	return func() time.Time { return time.Unix(0, 1000).UTC() }
+}
+
+// TestAppendConcurrentDoesNotForkChain is the regression for the lock-free read-
+// compute-write race that forked the live .fak/loops.jsonl (two events stamped the
+// same seq + prev_hash). Many goroutines append distinct events at one ledger at once;
+// with the cross-process append lock the result must Load clean under the STRICT reader
+// with strictly contiguous seqs 1..N. Pre-fix this fails: Load aborts on a forked seq.
+func TestAppendConcurrentDoesNotForkChain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	const n = 40
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ev := Event{
+				LoopID:    "race/loop",
+				Kind:      EventFire,
+				Source:    "schedule",
+				Principal: "timer",
+				RunID:     "run-" + strconv.Itoa(i), // distinct so each event hashes uniquely
+			}
+			_, errs[i] = Append(path, ev)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Append #%d: %v", i, err)
+		}
+	}
+
+	loaded, err := Load(path) // STRICT reader: any fork (dup/missing seq, bad chain) errors here.
+	if err != nil {
+		t.Fatalf("strict Load of concurrently-appended ledger: %v (chain forked)", err)
+	}
+	if len(loaded) != n {
+		t.Fatalf("loaded %d events, want %d", len(loaded), n)
+	}
+	for i, ev := range loaded {
+		if ev.Seq != uint64(i+1) {
+			t.Fatalf("event %d seq = %d, want %d (non-contiguous => fork)", i, ev.Seq, i+1)
+		}
+	}
+}
+
+// TestLoadPrefixRecoversBeforeFork covers the tolerant console reader: a ledger whose
+// tail is forked (a duplicate seq, exactly the live failure) must yield the valid
+// prefix plus a Broken Integrity pointing at the first bad line — not an error and not
+// an empty result. The strict Load still aborts; tolerance lives only in LoadPrefix.
+func TestLoadPrefixRecoversBeforeFork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	for i := 0; i < 3; i++ {
+		if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", Principal: "p", RunID: strconv.Itoa(i)}); err != nil {
+			t.Fatalf("seed Append #%d: %v", i, err)
+		}
+	}
+	// Forge a forked tail: duplicate the last line verbatim (same seq, same prev_hash).
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	forked := string(body) + lines[len(lines)-1] + "\n"
+	if err := os.WriteFile(path, []byte(forked), 0o644); err != nil {
+		t.Fatalf("write forked: %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatalf("strict Load accepted a forked ledger; integrity gate must reject it")
+	}
+
+	events, integ, err := LoadPrefix(path)
+	if err != nil {
+		t.Fatalf("LoadPrefix returned error for a chain break (want tolerant): %v", err)
+	}
+	if !integ.Broken {
+		t.Fatalf("Integrity.Broken = false, want true for a forked ledger")
+	}
+	if len(events) != 3 || integ.Recovered != 3 {
+		t.Fatalf("recovered %d events (Integrity.Recovered=%d), want 3 before the fork", len(events), integ.Recovered)
+	}
+	if integ.AtLine != 4 {
+		t.Fatalf("Integrity.AtLine = %d, want 4 (the duplicate tail line)", integ.AtLine)
+	}
+}
+
+// TestAppendBusyFailsClosed proves the contended-out path never forks: when the append
+// lock cannot be taken in time, Append returns ErrLedgerBusy rather than writing an
+// unserialized line. Holding the sidecar <path>.lock simulates a stuck peer.
+func TestAppendBusyFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", Principal: "p"}); err != nil {
+		t.Fatalf("seed Append: %v", err)
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	defer lock.Close()
+	if err := tryFlock(lock); err != nil {
+		t.Fatalf("hold lock: %v", err)
+	}
+	defer func() { _ = unflock(lock) }()
+
+	// withLedgerLock polls for appendLockWait (2s) then ErrLedgerBusy; assert the
+	// fail-closed contract without waiting the full budget by checking the error type.
+	done := make(chan error, 1)
+	go func() {
+		_, e := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", Principal: "p", RunID: "x"})
+		done <- e
+	}()
+	select {
+	case e := <-done:
+		if !errors.Is(e, ErrLedgerBusy) {
+			t.Fatalf("contended Append err = %v, want ErrLedgerBusy", e)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("contended Append did not return within 10s")
+	}
+
+	// The ledger still has exactly the one seeded event — no fork was written.
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after busy: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("ledger has %d events, want 1 (busy Append must not write)", len(loaded))
+	}
 }
