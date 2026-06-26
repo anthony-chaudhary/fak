@@ -217,7 +217,7 @@ func NewFullStack() *Defense {
 		detectors:  []abi.ResultAdmitter{normgate.New(), ctxmmu.New()},
 		ifcEngaged: true,
 		ledger:     led,
-		stamp: ifc.NewStampGate(led, ifc.Policy{}),
+		stamp:      ifc.NewStampGate(led, ifc.Policy{}),
 		// The red-team harness IS the untrusted-input threat model, so it gates EVERY
 		// sensitive sink including EXEC (StrictGatedSinks). The LIVE guard default
 		// exempts EXEC (DefaultGatedSinks) so trusted dev work is not false-positived;

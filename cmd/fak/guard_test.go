@@ -177,14 +177,14 @@ func TestNormalizeRemoteServe(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"", ""},                                            // off
-		{"box", "http://box:8080"},                          // bare host -> default port
-		{"box:8082", "http://box:8082"},                     // host:port preserved
-		{"http://box:8080", "http://box:8080"},              // scheme stripped, re-emitted
-		{"https://box:8080/", "http://box:8080"},            // https + trailing slash normalized
-		{"10.0.0.7:8080", "http://10.0.0.7:8080"},           // ipv4
-		{"  box:8082  ", "http://box:8082"},                 // trimmed
-		{"[::1]:8080", "http://[::1]:8080"},                 // ipv6 with port survives JoinHostPort
+		{"", ""},                                  // off
+		{"box", "http://box:8080"},                // bare host -> default port
+		{"box:8082", "http://box:8082"},           // host:port preserved
+		{"http://box:8080", "http://box:8080"},    // scheme stripped, re-emitted
+		{"https://box:8080/", "http://box:8080"},  // https + trailing slash normalized
+		{"10.0.0.7:8080", "http://10.0.0.7:8080"}, // ipv4
+		{"  box:8082  ", "http://box:8082"},       // trimmed
+		{"[::1]:8080", "http://[::1]:8080"},       // ipv6 with port survives JoinHostPort
 	}
 	for _, tc := range ok {
 		got, err := normalizeRemoteServe(tc.in)

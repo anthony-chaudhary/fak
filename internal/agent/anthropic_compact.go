@@ -672,7 +672,7 @@ func spliceToView(raw []byte, spans []elementSpan, pfxEnd int, stubIdx []int, el
 	var b bytes.Buffer
 	b.Grow(len(raw))
 	b.Write(raw[:prefixEnd]) // verbatim protected prefix
-	first := pfxEnd < 0       // no preceding element when the prefix is empty (system-only cache)
+	first := pfxEnd < 0      // no preceding element when the prefix is empty (system-only cache)
 	for i := pfxEnd + 1; i < n; i++ {
 		if !first {
 			b.WriteByte(',')

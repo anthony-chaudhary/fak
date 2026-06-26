@@ -91,7 +91,7 @@ func TestValidateRejections(t *testing.T) {
 		"dangling rehome":       {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned, RehomeTo: "ghost"}}},
 		"two defaults":          {Homes: []Home{{Name: "a", Dir: "/d", Default: true}, {Name: "b", Dir: "/e", Default: true}}},
 		"default tombstoned":    {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned, Default: true, RehomeTo: "a"}}},
-		"foreign version":        {Version: "some-other-roster/v1", Homes: []Home{{Name: "a", Dir: "/d"}}},
+		"foreign version":       {Version: "some-other-roster/v1", Homes: []Home{{Name: "a", Dir: "/d"}}},
 		"rehome cycle":          {Homes: []Home{{Name: "a", Status: StatusTombstoned, RehomeTo: "b"}, {Name: "b", Status: StatusTombstoned, RehomeTo: "a"}}},
 	}
 	for name, r := range cases {
