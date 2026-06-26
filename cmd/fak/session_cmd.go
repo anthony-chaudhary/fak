@@ -95,7 +95,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("session "+verb, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", defaultSessionAddr(), "gateway base URL")
-	key := fs.String("key", os.Getenv("FAK_KEY"), "bearer credential (only if the gateway sets --require-key)")
+	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential (only if the gateway sets --require-key)")
 	asJSON := fs.Bool("json", false, "emit the raw JSON instead of the human table")
 	ifRev := fs.Uint64("if-rev", 0, "optimistic-concurrency guard: apply only if the session's current rev matches (0 = no guard)")
 	reason := fs.String("reason", "", "reason token recorded on throttle/stop")

@@ -433,7 +433,7 @@ func snapIntPtr(n int) *int { return &n }
 func snapshotDumpFleet(argv []string) {
 	fs := flag.NewFlagSet("snapshot dump-fleet", flag.ExitOnError)
 	addr := fs.String("addr", defaultSnapshotAddr(), "gateway base URL")
-	key := fs.String("key", os.Getenv("FAK_KEY"), "bearer credential (only if the gateway sets --require-key)")
+	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential (only if the gateway sets --require-key)")
 	id := fs.String("id", "fleet", "an id for the fleet snapshot")
 	out := fs.String("out", "fleet.snap", "output snapshot path")
 	_ = fs.Parse(argv)
@@ -445,7 +445,7 @@ func snapshotDumpFleet(argv []string) {
 func snapshotRestoreFleet(argv []string) {
 	fs := flag.NewFlagSet("snapshot restore-fleet", flag.ExitOnError)
 	addr := fs.String("addr", defaultSnapshotAddr(), "gateway base URL")
-	key := fs.String("key", os.Getenv("FAK_KEY"), "bearer credential")
+	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential")
 	file := fs.String("file", "", "the fleet snapshot to restore (required)")
 	_ = fs.Parse(argv)
 	if *file == "" {

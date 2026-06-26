@@ -65,7 +65,7 @@ func runPS(stdout, stderr io.Writer, argv []string, watchDefault bool) int {
 	fs.SetOutput(stderr)
 	fs.Usage = func() { psUsage(stderr) }
 	addr := fs.String("addr", defaultSessionAddr(), "gateway base URL")
-	key := fs.String("key", os.Getenv("FAK_KEY"), "bearer credential (only if the gateway sets --require-key)")
+	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential (only if the gateway sets --require-key)")
 	asJSON := fs.Bool("json", false, "emit the raw GET /v1/fak/sessions JSON instead of the human table")
 	watch := fs.Bool("watch", watchDefault, "refresh continuously (the `top` mode)")
 	interval := fs.Duration("interval", psDefaultInterval, "watch refresh cadence")

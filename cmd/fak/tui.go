@@ -611,7 +611,7 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	sessionsJSON := fs.String("sessions-json", "", "read SessionListResponse JSON from a file instead of a live gateway")
 	addr := fs.String("addr", defaultSessionAddr(), "gateway base URL")
-	key := fs.String("key", os.Getenv("FAK_KEY"), "bearer credential (only if the gateway sets --require-key)")
+	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential (only if the gateway sets --require-key)")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	top := fs.Int("top", 25, "number of session rows to render in human mode")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
