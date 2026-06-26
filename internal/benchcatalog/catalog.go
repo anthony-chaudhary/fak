@@ -193,6 +193,13 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "terminalbench", Kind: KindCmd, Need: NeedNone,
+		Summary: "Terminal-Bench-shaped command-boundary smoke: replays local command traces through raw and fak arms and reports solve, safe resolve, blocked dangerous actions, unnecessary blocks, and command evidence.",
+		Run:     "go run ./cmd/terminalbench",
+		Flags:   []string{"-suite  -  Terminal-Bench-shaped command suite JSON", "-out  -  report JSON path", "-md  -  markdown summary path"},
+		Doc:     "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
+	},
+	{
 		Name: "toolsandboxbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "ToolSandbox/tau3-shaped policy-state adapter smoke: replays the same local policy/minefield trace through raw and fak arms and reports safe pass^1 plus denied policy calls.",
 		Run:     "go run ./cmd/toolsandboxbench",

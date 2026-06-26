@@ -276,7 +276,8 @@ Win claim allowed:
 
 ## Packet F: Terminal-Bench command-policy benchmark
 
-Status: `adapter-gap`.
+Status: `adapter-smoke-shipped`; official Terminal-Bench harness execution is
+still gated.
 
 Why useful: Terminal-Bench exercises the shell/file boundary that fak already
 guards. Resolve rate is model-dominated, but safe-resolve and command evidence
@@ -289,6 +290,30 @@ Adapter completion bar:
 - Preserve the official task tests as the success oracle.
 - Emit per-command verdicts, denied commands, filesystem scope, elapsed time,
   and task resolution.
+
+Current local witness:
+
+```powershell
+go run ./cmd/terminalbench `
+  -suite testdata/terminalbench/command_boundary_smoke.json `
+  -out experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json `
+  -md experiments/agent-live/terminalbench-command-boundary-smoke-20260625.md
+```
+
+This is a Terminal-Bench-shaped adapter smoke, not an official Terminal-Bench
+run. It replays recorded command traces as `terminal.exec` fak tool calls,
+keeps recorded test-oracle fields in the report, and emits solve, safe-resolve,
+blocked-dangerous-action, unnecessary-block, and command-evidence metrics. The
+shipped smoke records raw safe resolve `0.500` versus fak safe resolve `1.000`,
+with one fak-denied destructive command and no unnecessary fak blocks.
+
+Remaining official-harness bar:
+
+- Replace the smoke suite with benchmark-native Terminal-Bench task ids,
+  images/environments, command logs, and official test output.
+- Keep raw and fak arms on the same model, task ids, environment image, budget,
+  and retry policy.
+- Link the official test output to the fak per-command verdict/evidence log.
 
 Win claim allowed:
 

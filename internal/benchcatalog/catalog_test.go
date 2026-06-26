@@ -93,6 +93,30 @@ func TestBrowserActionBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	}
 }
 
+func TestTerminalBenchBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
+	b, ok := Get("terminalbench")
+	if !ok {
+		t.Fatal("terminalbench benchmark missing from catalog (tracked cmd/*bench* mains must have registry rows)")
+	}
+	if b.Kind != KindCmd || b.Need != NeedNone {
+		t.Fatalf("terminalbench kind/need = %s/%s, want cmd/offline", b.Kind, b.Need)
+	}
+	if !strings.Contains(b.Run, "go run ./cmd/terminalbench") {
+		t.Fatalf("terminalbench run = %q, want cmd invocation", b.Run)
+	}
+	for _, want := range []string{"-suite", "-out", "-md"} {
+		if !containsFlag(b.Flags, want) {
+			t.Fatalf("terminalbench flags = %v, missing %s", b.Flags, want)
+		}
+	}
+	if !b.Offline() {
+		t.Fatal("terminalbench uses a committed local smoke suite; it must stay zero-asset/offline")
+	}
+	if !strings.Contains(b.Doc, "AGENTIC-BENCHMARK-RUN-PACKETS") {
+		t.Fatalf("terminalbench doc = %q, want run-packet methodology note", b.Doc)
+	}
+}
+
 func containsFlag(flags []string, want string) bool {
 	for _, flag := range flags {
 		if strings.Contains(flag, want) {
