@@ -14,6 +14,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/swebench"
 )
 
+// swebenchSampleDifficulty is the committed difficulty map `fak swebench describe`
+// falls back to when no --difficulty/--dataset (and no FAK_SWEBENCH_* env) is
+// given, so the advertised RUNNABLE-NOW entry point works with zero args and zero
+// external assets — the same offline-fallback contract `fak webbench describe` has.
+const swebenchSampleDifficulty = "testdata/swebench_smoke.json"
+
 // fak swebench — run SWE-bench Verified as a fak-native benchmark whose results
 // are directly comparable to the external Benchmark tool ("bench") that runs the
 // same task set against an SGLang endpoint, on the metrics fak is built to move:
@@ -104,17 +110,27 @@ the metrics most relevant to us, on the real SWE-bench Verified set:
 
 func cmdSwebenchDescribe(argv []string) {
 	fs := flag.NewFlagSet("swebench describe", flag.ExitOnError)
-	difficulty := fs.String("difficulty", "", "bench difficulty map (swebench_verified_difficulty.json) — all 500 ids + buckets, offline")
+	difficulty := fs.String("difficulty", "", "bench difficulty map (swebench_verified_difficulty.json) — all 500 ids + buckets, offline; default: the committed "+swebenchSampleDifficulty+" sample")
 	dataset := fs.String("dataset", "", "full SWE-bench Verified dataset (JSONL or JSON array) for real problem-statement geometry")
 	workersArg := fs.String("workers", "1,2,4,8", "comma-separated worker counts to sweep (the bench mini-workers-sweep axis)")
 	limit := fs.Int("limit", 0, "cap to the first N instances (0 = all)")
 	out := fs.String("out", "", "write the Summary JSON here (default: stdout JSON + human table on stderr)")
 	_ = fs.Parse(argv)
 
-	// Resolve the source. Prefer an explicit flag; if neither is given, fall back
-	// to FAK_SWEBENCH_DIFFICULTY / FAK_SWEBENCH_DATASET when set — otherwise
-	// require a flag.
-	d, srcDesc, err := loadSwebenchSource(*difficulty, *dataset)
+	// describe is the advertised RUNNABLE-NOW entry point (the registry marks it
+	// Need: offline, Run: "fak swebench describe"): it must work with no flags.
+	// Prefer an explicit flag, then FAK_SWEBENCH_DIFFICULTY / FAK_SWEBENCH_DATASET;
+	// when none is set, fall back to a small committed difficulty sample so a
+	// newcomer sees the real bucket geometry on the first command, then can point
+	// --difficulty/--dataset at the full set. (eval/compare still require an
+	// explicit source — they grade a real run, not a shape demo.)
+	diff, ds := *difficulty, *dataset
+	if diff == "" && ds == "" &&
+		os.Getenv("FAK_SWEBENCH_DIFFICULTY") == "" && os.Getenv("FAK_SWEBENCH_DATASET") == "" {
+		diff = swebenchSampleDifficulty
+		fmt.Fprintf(os.Stderr, "fak swebench describe: no --difficulty/--dataset; using the committed sample %s (deterministic bucket geometry, no model).\n", diff)
+	}
+	d, srcDesc, err := loadSwebenchSource(diff, ds)
 	must(err)
 	if *limit > 0 {
 		d = d.Limit(*limit)

@@ -45,6 +45,30 @@ func TestAblateBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	}
 }
 
+func TestToolSandboxBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
+	b, ok := Get("toolsandboxbench")
+	if !ok {
+		t.Fatal("toolsandboxbench benchmark missing from catalog (tracked cmd/*bench* mains must have registry rows)")
+	}
+	if b.Kind != KindCmd || b.Need != NeedNone {
+		t.Fatalf("toolsandboxbench kind/need = %s/%s, want cmd/offline", b.Kind, b.Need)
+	}
+	if !strings.Contains(b.Run, "go run ./cmd/toolsandboxbench") {
+		t.Fatalf("toolsandboxbench run = %q, want cmd invocation", b.Run)
+	}
+	for _, want := range []string{"-suite", "-out", "-md"} {
+		if !containsFlag(b.Flags, want) {
+			t.Fatalf("toolsandboxbench flags = %v, missing %s", b.Flags, want)
+		}
+	}
+	if !b.Offline() {
+		t.Fatal("toolsandboxbench uses a committed local smoke suite; it must stay zero-asset/offline")
+	}
+	if b.Doc != "BENCHMARK-AUTHORITY.md" {
+		t.Fatalf("toolsandboxbench doc = %q, want BENCHMARK-AUTHORITY.md", b.Doc)
+	}
+}
+
 func containsFlag(flags []string, want string) bool {
 	for _, flag := range flags {
 		if strings.Contains(flag, want) {

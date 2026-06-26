@@ -186,6 +186,13 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "toolsandboxbench", Kind: KindCmd, Need: NeedNone,
+		Summary: "ToolSandbox/tau3-shaped policy-state adapter smoke: replays the same local policy/minefield trace through raw and fak arms and reports safe pass^1 plus denied policy calls.",
+		Run:     "go run ./cmd/toolsandboxbench",
+		Flags:   []string{"-suite  -  ToolSandbox/tau3-shaped suite JSON", "-out  -  report JSON path", "-md  -  markdown summary path"},
+		Doc:     "BENCHMARK-AUTHORITY.md",
+	},
+	{
 		Name: "topobench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Fleet-topology genome search (issue #541): searches the orthogonal topology space for the cheapest fan-out shape.",
 		Run:     "go run ./cmd/topobench",

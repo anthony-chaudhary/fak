@@ -8,7 +8,7 @@ the competitive claims. None of them grade the thing a *developer who wants to r
 a benchmark* actually hits: can they **(1) discover** what benchmarks exist,
 **(2) cold-start** at least one with no weights/GPU/dataset/key, **(3) learn one
 flag vocabulary that transfers**, **(4) read a number and know what it means**, and
-**(5) record + compare** a result? fak ships 25 benchmark surfaces (18 ``cmd/*bench*``
+**(5) record + compare** a result? fak ships 26 benchmark surfaces (19 ``cmd/*bench*``
 mains + 7 ``fak`` verbs)  -  its headline value-proof  -  and until now had no number
 for how hard they are to use.
 
@@ -31,6 +31,8 @@ flag, an inline provenance line, a record command), not by writing prose.
     offline_set      the registry marks which benchmarks need no weights/GPU/dataset/key
     webbench_runs_clean `fak webbench describe` works with NO --dataset (the doc's
                      "RUNNABLE NOW" claim is honest  -  it has an offline fallback)
+    swebench_runs_clean `fak swebench describe` works with NO --difficulty/--dataset
+                     (its RUNNABLE-NOW claim is honest  -  it has an offline fallback)
     no_spurious_paths no cmd/*bench* default flag points at a non-existent `fak/`-
                      prefixed path (the doubled-root bug that makes a bench fail cold)
 
@@ -91,6 +93,7 @@ CATALOG_VERB_GO = "cmd/fak/benchmarks.go"
 AUTHORITY_DOC = "BENCHMARK-AUTHORITY.md"
 BENCH_CLI = "tools/bench_cli.py"
 WEBBENCH_GO = "cmd/fak/webbench.go"
+SWEBENCH_GO = "cmd/fak/swebench.go"
 
 
 def repo_root() -> Path:
@@ -240,6 +243,32 @@ def kpi_webbench_runs_clean(root: Path) -> tuple[bool, int, str]:
     return False, 1, "`fak webbench describe` requires --dataset despite its RUNNABLE-NOW claim (add an offline fallback)"
 
 
+def kpi_swebench_runs_clean(root: Path) -> tuple[bool, int, str]:
+    # Same cold-start contract as webbench, the other RUNNABLE-NOW verb: the
+    # registry marks `fak swebench describe` Need=offline / Run="fak swebench
+    # describe", so it MUST produce a number with zero args. The defect: describe
+    # routes through loadSwebenchSource, which errors ("pass --difficulty FILE or
+    # --dataset FILE") when neither flag nor the FAK_SWEBENCH_* env is set. The
+    # fix: a fallback to the committed difficulty sample when describe gets no
+    # source. Score both pieces: describe's body must route to the fallback marker
+    # and the named sample must actually exist in the tree.
+    src = _read(root, SWEBENCH_GO) or ""
+    desc = ""
+    m = re.search(r"func cmdSwebenchDescribe\(.*?\n\}", src, re.S)
+    if m:
+        desc = m.group(0)
+    sample = ""
+    sm = re.search(r'swebenchSampleDifficulty\s*=\s*"([^"]+)"', src)
+    if sm:
+        sample = sm.group(1)
+    has_fallback = "swebenchSampleDifficulty" in desc
+    if desc and has_fallback and sample and (root / sample).exists():
+        return True, 0, "fak swebench describe falls back to a committed sample (runnable with zero args)"
+    if desc and has_fallback and sample:
+        return False, 1, f"`fak swebench describe` fallback sample {sample} is missing"
+    return False, 1, "`fak swebench describe` requires --difficulty/--dataset despite its RUNNABLE-NOW claim (add an offline fallback)"
+
+
 def kpi_no_spurious_paths(root: Path, tracked: list[str]) -> tuple[bool, int, str]:
     """A cmd/*bench* default flag pointing at a `fak/experiments` or `fak/testdata`
     path is the doubled-module-root bug: the real path has no `fak/` prefix, so the
@@ -340,6 +369,7 @@ KPI_GROUP = {
     "registry_covers_tree": "discover",
     "offline_set": "coldstart",
     "webbench_runs_clean": "coldstart",
+    "swebench_runs_clean": "coldstart",
     "no_spurious_paths": "coldstart",
     "out_flag_uniform": "learn",
     "quant_polarity_consistent": "learn",
@@ -358,6 +388,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
         ("registry_covers_tree", *kpi_registry_covers_tree(root, tracked)),
         ("offline_set", *kpi_offline_set(root)),
         ("webbench_runs_clean", *kpi_webbench_runs_clean(root)),
+        ("swebench_runs_clean", *kpi_swebench_runs_clean(root)),
         ("no_spurious_paths", *kpi_no_spurious_paths(root, tracked)),
         ("out_flag_uniform", *kpi_out_flag_uniform(root)),
         ("quant_polarity_consistent", *kpi_quant_polarity(root, tracked)),

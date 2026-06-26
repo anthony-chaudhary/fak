@@ -85,6 +85,48 @@ def test_spurious_path_kpi_fixture(tmp_path: Path = None) -> None:
     assert "fak/experiments/parity" in detail
 
 
+def test_swebench_runs_clean_kpi_fixture() -> None:
+    # The cold-start defect: `fak swebench describe` routes through a loader that
+    # errors with no flag, so its RUNNABLE-NOW claim is dishonest. The fix the KPI
+    # scores: a committed-sample fallback in describe's own body.
+    import tempfile
+    broken = Path(tempfile.mkdtemp())
+    (broken / "cmd" / "fak").mkdir(parents=True)
+    (broken / "cmd" / "fak" / "swebench.go").write_text(
+        "package main\n"
+        "func cmdSwebenchDescribe(argv []string) {\n"
+        '\td, srcDesc, err := loadSwebenchSource(*difficulty, *dataset)\n'
+        "\tmust(err)\n"
+        "}\n",
+        encoding="utf-8")
+    passed, debt, detail = bd.kpi_swebench_runs_clean(broken)
+    assert not passed and debt == 1, (passed, debt, detail)
+    assert "RUNNABLE-NOW" in detail
+
+    fixed = Path(tempfile.mkdtemp())
+    (fixed / "cmd" / "fak").mkdir(parents=True)
+    (fixed / "cmd" / "fak" / "swebench.go").write_text(
+        "package main\n"
+        "const swebenchSampleDifficulty = \"testdata/swebench_smoke.json\"\n"
+        "func cmdSwebenchDescribe(argv []string) {\n"
+        "\tdiff, ds := *difficulty, *dataset\n"
+        '\tif diff == "" && ds == "" {\n'
+        "\t\tdiff = swebenchSampleDifficulty\n"
+        "\t}\n"
+        "\td, srcDesc, err := loadSwebenchSource(diff, ds)\n"
+        "\tmust(err)\n"
+        "}\n",
+        encoding="utf-8")
+    passed, debt, detail = bd.kpi_swebench_runs_clean(fixed)
+    assert not passed and debt == 1, (passed, debt, detail)
+    assert "fallback sample" in detail
+
+    (fixed / "testdata").mkdir()
+    (fixed / "testdata" / "swebench_smoke.json").write_text("{}", encoding="utf-8")
+    passed, debt, detail = bd.kpi_swebench_runs_clean(fixed)
+    assert passed and debt == 0, (passed, debt, detail)
+
+
 # --- the load-bearing live smoke against the real tracked tree --------------
 
 def test_live_catalog_verb_and_registry_present() -> None:
