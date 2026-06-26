@@ -118,7 +118,13 @@ const bodyCap = 1500
 // the body is flagged. No decode is needed (the verdict is the argmax over two verbalizer
 // sets at the final prefill position), which is why a one-token classify is prefill-cheap.
 func classify(m *model.Model, tok *tokenizer.Tokenizer, vrb verbalizer, body []byte, tool string) bool {
-	prompt := classifyPrompt(body, tool)
+	return classifyPrompted(m, tok, vrb, classifyPrompt(body, tool))
+}
+
+// classifyPrompted runs the shared one-token YES/NO head over a fully-rendered prompt.
+// Model-backed siblings (the semantic screener and the redactor) share the same lazy model
+// loader and verbalizer; only the prompt changes.
+func classifyPrompted(m *model.Model, tok *tokenizer.Tokenizer, vrb verbalizer, prompt string) bool {
 	ids, err := tok.Encode(prompt)
 	if err != nil || len(ids) == 0 {
 		return false
