@@ -165,11 +165,12 @@ A backend that can probe its own memory implements `DeviceMemory() (total, free 
 bool)`. `DeviceMemoryInfo(b)` and `FitsOnDevice(b, wantBytes, headroom)` let any caller ask
 without knowing the concrete backend, and they **fail open**: a backend that cannot answer
 (the pure-Go `cpu-ref` floor, a wasm target) reports `known=false`, and the fit check returns
-`FitUnknown` ("proceed"), never `FitTooBig`. CUDA now *keeps* `totalGlobalMem` and reports
-it, and the Windows Vulkan backend reports the sum of its device-local heaps; both leave
-free memory as `FreeUnknown` until a backend-specific free-memory query is wired, so
-`FitsOnDevice` checks against the total ceiling and catches a model that cannot fit the
-whole device. This is the report half of the bridge: the wire by which a real backend's
+`FitUnknown` ("proceed"), never `FitTooBig`. CUDA now reports `cudaMemGetInfo`
+total/free bytes, and the Windows Vulkan backend reports the sum of its device-local heaps
+plus current free budget when `VK_EXT_memory_budget` is available. Backends whose current
+free bytes are unavailable return `FreeUnknown`, so `FitsOnDevice` falls back to the total
+ceiling and still catches a model that cannot fit the whole device. This is the report half
+of the bridge: the wire by which a real backend's
 capacity can feed `cachemeta.TierPressure` instead of placeholder profiles. The same
 contract now has a classed form: `MemoryPlan` / `MemoryDemand` keeps
 weights, KV cache, DDR cache, offload staging, activations, and scratchpad bytes distinct,
@@ -213,9 +214,10 @@ device memory via `compute.DeviceMemoryInfo(b)`, folds them into the request, an
 `DefaultTierProfiles`' representative numbers and the demo's hand-injected `TierPressure`. It
 **fails open**: a backend that cannot probe (the `cpu-ref` floor, a wasm target;
 `known=false`) contributes no pressure and no capacity override, so the profile default
-stands and no path that works today regresses. While the CUDA/Vulkan producers report `total`
-but not `free` (the `cudaMemGetInfo` / backend free-memory follow-ups), HBM pressure derives
-from `total` vs fak's tracked-resident bytes. `engine.RunCapacityPressureSweep` now binds
+stands and no path that works today regresses. When a producer reports current free bytes
+(CUDA, and Vulkan when `VK_EXT_memory_budget` is exposed), HBM pressure derives from
+current headroom; when free is unknown it falls back to `total` vs fak's tracked-resident
+bytes. `engine.RunCapacityPressureSweep` now binds
 that report→policy wire to the Plank-4 adapter for a bounded list of KV candidates: it scales
 observed pressure to an operator high-water mark, plans each span, executes demote/spill/evict
 through `CapacityAdapter`, and stops once estimated HBM pressure falls below target or the
@@ -345,9 +347,9 @@ and it is what `DeviceCapacity` begins.
   the same want/budget/margin rollup by scope.
   Safetensors, generic `model.Load`, runtime upload pre-checks, and backend-specific
   transient peaks are still unwired.
-- CUDA still reports `total` only (`free=FreeUnknown`). Vulkan reports current free
+- CUDA reports current free VRAM via `cudaMemGetInfo`. Vulkan reports current free
   device-local budget when `VK_EXT_memory_budget` is available and falls back to
-  `FreeUnknown` otherwise, so Vulkan can use current headroom on drivers that expose it
+  `FreeUnknown` otherwise, so both backends use current headroom where the driver exposes it
   while preserving the fail-open contract elsewhere. Metal still advertises device
   residency but not `CapacityProbe`.
 - Plank 3 (#707) makes the HBM tier's pressure and `CapacityBytes` real on a probing backend

@@ -23,6 +23,9 @@ extern "C" {
  * device name (into name, up to namelen-1 chars), SM version (major*10+minor), and total
  * VRAM bytes. Returns 0 on success, non-zero if no CUDA device is reachable. */
 int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem);
+/* Current CUDA device memory from cudaMemGetInfo. Returns 0 on success and fills free/total;
+ * returns non-zero when the CUDA runtime cannot provide a fresh snapshot. */
+int fcuda_mem_info(size_t *free_mem, size_t *total_mem);
 
 /* device memory + transfers (the residency seam). */
 void *fcuda_malloc(size_t bytes);

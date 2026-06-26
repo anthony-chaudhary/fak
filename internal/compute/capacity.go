@@ -37,10 +37,10 @@ import (
 // one a backend can satisfy from a number it already reads.
 
 // FreeUnknown is the sentinel a DeviceCapacity returns for `free` when the total ceiling is
-// known but the currently-allocatable bytes are not yet probeable (e.g. CUDA before
-// cudaMemGetInfo, or Vulkan before a budget/free-memory extension is wired). It is negative so it can never be
-// mistaken for a real free-byte count; FitsOnDevice falls back to the total ceiling when it
-// sees it (conservative: it treats the whole device as the budget rather than guessing).
+// known but the currently-allocatable bytes are not probeable or a backend-specific query
+// failed. It is negative so it can never be mistaken for a real free-byte count;
+// FitsOnDevice falls back to the total ceiling when it sees it (conservative: it treats the
+// whole device as the budget rather than guessing).
 const FreeUnknown int64 = -1
 
 const maxInt64Uint64 = uint64(1<<63 - 1)

@@ -402,14 +402,21 @@ func (c *cudaBackend) Caps() Caps {
 	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true, HostCapacityProbe: hostKnown}
 }
 
-// DeviceMemory reports the CUDA device's total VRAM — the totalGlobalMem fcuda_init already
-// probes, now KEPT instead of read-into-a-local-and-discarded. free is FreeUnknown until a
-// cudaMemGetInfo query is wired (the tracked follow-up); a caller's FitsOnDevice therefore
-// checks against the total ceiling, which already catches a model that cannot fit the whole
-// device. known is true whenever a device initialized (totalMem>0). This makes the cuda
-// backend the first producer into the capacity bridge (DeviceCapacity, capacity.go).
+// DeviceMemory reports CUDA VRAM total plus the current free bytes from cudaMemGetInfo.
+// If the runtime cannot provide a fresh snapshot, it preserves the capacity contract by
+// returning the init-time total with free=FreeUnknown rather than failing closed.
 func (c *cudaBackend) DeviceMemory() (total, free int64, known bool) {
-	return c.totalMem, FreeUnknown, c.totalMem > 0
+	if c == nil || c.totalMem <= 0 {
+		return 0, FreeUnknown, false
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	var freeMem C.size_t
+	var totalMem C.size_t
+	if C.fcuda_mem_info(&freeMem, &totalMem) == 0 && totalMem > 0 {
+		return uint64ToCapInt64(uint64(totalMem)), uint64ToCapInt64(uint64(freeMem)), true
+	}
+	return c.totalMem, FreeUnknown, true
 }
 
 func (c *cudaBackend) HostMemory() (total, free int64, known bool) {

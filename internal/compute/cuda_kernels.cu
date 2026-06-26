@@ -63,6 +63,16 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   return 0;
 }
 
+extern "C" int fcuda_mem_info(size_t *free_mem, size_t *total_mem) {
+  size_t free_b = 0;
+  size_t total_b = 0;
+  cudaError_t e = cudaMemGetInfo(&free_b, &total_b);
+  if (e != cudaSuccess) return (int)e;
+  if (free_mem) *free_mem = free_b;
+  if (total_mem) *total_mem = total_b;
+  return 0;
+}
+
 extern "C" void *fcuda_malloc(size_t bytes) {
   if (bytes == 0) bytes = 1;
   auto it = g_pool.find(bytes);

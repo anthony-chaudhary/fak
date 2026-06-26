@@ -25,6 +25,20 @@ func cudaOrSkip(t *testing.T) *cudaBackend {
 	return cb
 }
 
+func TestCUDADeviceMemoryInfoReportsCurrentFree(t *testing.T) {
+	cb := cudaOrSkip(t)
+	total, free, known := DeviceMemoryInfo(cb)
+	if !known || total <= 0 {
+		t.Fatalf("DeviceMemoryInfo = total=%d free=%d known=%v, want positive total/known", total, free, known)
+	}
+	if free == FreeUnknown {
+		t.Fatalf("CUDA cudaMemGetInfo should report current free bytes, got FreeUnknown with total=%d", total)
+	}
+	if free < 0 || free > total {
+		t.Fatalf("DeviceMemoryInfo free=%d outside [0,total=%d]", free, total)
+	}
+}
+
 func rscale(s *lcg, n int, scale float32) []float32 {
 	v := randVec(s, n) // ~[-0.5,0.5)
 	for i := range v {
