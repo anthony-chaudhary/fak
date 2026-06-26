@@ -95,8 +95,9 @@ This is where bytes are actually allocated and actually run out: `cudaBackend.da
 - **CUDA** (`cuda.go: dalloc`) — it now falls back from `cudaMalloc` to
   `cudaMallocManaged`, and `FAK_GPU_BUDGET_MB` deliberately sends over-budget explicit
   weight uploads to managed memory before a device-local OOM.
-- **Metal** (`metal.go: dalloc`) — raises a typed `DeviceAllocError`, but still has
-  no capacity check before the alloc and no fallback.
+- **Metal** (`metal.go: dalloc`) — raises a typed `DeviceAllocError`; when Metal reports a
+  recommended working-set size, the HAL exposes that as a known total budget with current
+  free bytes unknown, but still has no fallback.
 - **Vulkan** (`vulkan.go: dalloc`) — it falls back to a host-visible allocation, and only
   raises a typed `DeviceAllocError` if *both* device-local and host-visible are exhausted.
 
@@ -166,11 +167,12 @@ bool)`. `DeviceMemoryInfo(b)` and `FitsOnDevice(b, wantBytes, headroom)` let any
 without knowing the concrete backend, and they **fail open**: a backend that cannot answer
 (the pure-Go `cpu-ref` floor, a wasm target) reports `known=false`, and the fit check returns
 `FitUnknown` ("proceed"), never `FitTooBig`. CUDA now reports `cudaMemGetInfo`
-total/free bytes, and the Windows Vulkan backend reports the sum of its device-local heaps
-plus current free budget when `VK_EXT_memory_budget` is available. Backends whose current
-free bytes are unavailable return `FreeUnknown`, so `FitsOnDevice` falls back to the total
-ceiling and still catches a model that cannot fit the whole device. This is the report half
-of the bridge: the wire by which a real backend's
+total/free bytes, the Windows Vulkan backend reports the sum of its device-local heaps plus
+current free budget when `VK_EXT_memory_budget` is available, and Metal reports the
+device's recommended working-set size as a known total when the driver exposes it. Backends
+whose current free bytes are unavailable return `FreeUnknown`, so `FitsOnDevice` falls back
+to the total ceiling and still catches a model that cannot fit the whole device. This is the
+report half of the bridge: the wire by which a real backend's
 capacity can feed `cachemeta.TierPressure` instead of placeholder profiles. The same
 contract now has a classed form: `MemoryPlan` / `MemoryDemand` keeps
 weights, KV cache, DDR cache, offload staging, activations, and scratchpad bytes distinct,
@@ -349,9 +351,9 @@ and it is what `DeviceCapacity` begins.
   transient peaks are still unwired.
 - CUDA reports current free VRAM via `cudaMemGetInfo`. Vulkan reports current free
   device-local budget when `VK_EXT_memory_budget` is available and falls back to
-  `FreeUnknown` otherwise, so both backends use current headroom where the driver exposes it
-  while preserving the fail-open contract elsewhere. Metal still advertises device
-  residency but not `CapacityProbe`.
+  `FreeUnknown` otherwise. Metal reports a known total from the recommended working-set size
+  but keeps current free bytes as `FreeUnknown`, so it can refuse plans larger than the
+  whole Metal budget without pretending to know live free memory.
 - Plank 3 (#707) makes the HBM tier's pressure and `CapacityBytes` real on a probing backend
   (`engine.PlanPlacementForDevice`), and `engine.RunCapacityPressureSweep` now binds that
   report→policy decision to the Plank-4 `CapacityAdapter` for caller-supplied KV candidates.

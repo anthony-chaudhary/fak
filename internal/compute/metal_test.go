@@ -176,6 +176,23 @@ func TestMetalMatMulApproxMatchesRef(t *testing.T) {
 	t.Logf("MatMul: cosine=%.8f maxAbs=%.2e (device=%s tier=%s class=%s)", c, maxAbs, mb.Name(), mb.Tier(), mb.Class())
 }
 
+func TestMetalDeviceMemoryInfoReportsWorkingSet(t *testing.T) {
+	mb := metalOrSkip(t)
+	total, free, known := DeviceMemoryInfo(mb)
+	if !known {
+		t.Skip("Metal recommended working-set size unavailable")
+	}
+	if total <= 0 || free != FreeUnknown {
+		t.Fatalf("DeviceMemoryInfo = total=%d free=%d known=%v, want positive total/free unknown/known", total, free, known)
+	}
+	if !mb.Caps().CapacityProbe {
+		t.Fatal("known Metal working-set size must advertise CapacityProbe")
+	}
+	if v, avail := FitsOnDevice(mb, total+1, 0); v != FitTooBig || avail != total {
+		t.Fatalf("oversize Metal fit = %s avail=%d, want FitTooBig avail=%d", v, avail, total)
+	}
+}
+
 // TestMetalForwardMatchesRef — the headline: a full multi-layer Llama decode forward,
 // greedily run for several tokens, on the GPU vs the CPU reference. The Approx gate: every
 // step's argmax must be EXACT (same next token) and the logit cosine >= 0.999.

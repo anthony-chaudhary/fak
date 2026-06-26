@@ -45,10 +45,19 @@ func init() {
 		return // no reachable Metal device (or a pipeline failed to build) — cpu-ref stays sole backend
 	}
 	metalDev = &metalBackend{
-		name: "metal",
-		tier: C.GoString(&name[0]), // e.g. "Apple M3 Pro" (the device's own capability label)
+		name:     "metal",
+		tier:     C.GoString(&name[0]), // e.g. "Apple M3 Pro" (the device's own capability label)
+		totalMem: metalDeviceMemoryTotal(),
 	}
 	Register(metalDev)
+}
+
+func metalDeviceMemoryTotal() int64 {
+	var total C.ulonglong
+	if C.fmetal_device_memory_total(&total) != 0 || total == 0 {
+		return 0
+	}
+	return uint64ToCapInt64(uint64(total))
 }
 
 // metalBuf is a device-resident Buffer: an opaque id<MTLBuffer> handle + byte length.
@@ -72,6 +81,10 @@ var metalUploadCache = map[uintptr]Tensor{}
 type metalBackend struct {
 	name string
 	tier string
+	// totalMem is Metal's recommended working-set size. Metal does not expose a portable
+	// current-free VRAM figure here, especially on unified memory, so DeviceMemory reports
+	// FreeUnknown while still letting fit checks reject plans larger than the whole budget.
+	totalMem int64
 	// transient holds per-token op-output buffers (NOT weights or KV). Recycle() frees them
 	// all at a token boundary so steady-state decode stops paying newBuffer per op. Guarded
 	// by metalMu (every appender holds it).
@@ -103,7 +116,14 @@ func (c *metalBackend) Caps() Caps {
 	// Device-resident tensors are not host-addressable; the KV cache lives in device buffers.
 	// We do not yet advertise Async/FusedAttn/GraphCompile/UploadDtype — those are tracked seams.
 	_, _, hostKnown := hostSystemMemory()
-	return Caps{DeviceMemory: true, HostCapacityProbe: hostKnown}
+	return Caps{DeviceMemory: true, CapacityProbe: c.totalMem > 0, HostCapacityProbe: hostKnown}
+}
+
+func (c *metalBackend) DeviceMemory() (total, free int64, known bool) {
+	if c.totalMem <= 0 {
+		return 0, FreeUnknown, false
+	}
+	return c.totalMem, FreeUnknown, true
 }
 
 func (c *metalBackend) HostMemory() (total, free int64, known bool) {

@@ -34,6 +34,10 @@ int fmetal_init(char *name, int namelen);
  * handle of at least `bytes` (rounded up off 0); fmetal_free releases it. */
 void *fmetal_malloc(size_t bytes);
 void fmetal_free(void *buf);
+/* Reports Metal's recommended working-set size for this device when the driver exposes it.
+ * Returns non-zero when unavailable. This is a total-budget hint, not a live free-memory
+ * probe; Go reports free as FreeUnknown. */
+int fmetal_device_memory_total(unsigned long long *total);
 
 /* host<->device + device<->device transfers over unified shared memory (plain memcpy over
  * [buffer contents]; every op commits+waits synchronously, so contents are coherent). */

@@ -222,6 +222,21 @@ void fmetal_free(void *buf) {
     [b release];
 }
 
+int fmetal_device_memory_total(unsigned long long *total) {
+    if (!g_device || !total) {
+        return 1;
+    }
+    if (![g_device respondsToSelector:@selector(recommendedMaxWorkingSetSize)]) {
+        return 1;
+    }
+    unsigned long long v = (unsigned long long)[g_device recommendedMaxWorkingSetSize];
+    if (v == 0) {
+        return 1;
+    }
+    *total = v;
+    return 0;
+}
+
 void fmetal_h2d(void *dstBuf, const void *host, size_t bytes) {
     id<MTLBuffer> d = (id<MTLBuffer>)dstBuf;
     memcpy([d contents], host, bytes);
