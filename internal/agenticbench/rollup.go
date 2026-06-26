@@ -72,7 +72,7 @@ func Build(root string, now time.Time) (*Report, error) {
 		{871, "C", "Opus-class SWE-bench smoke", "experiments/agent-live/swebench-opus-smoke-contract-20260626.json", false, checkOpus},
 		{872, "D", "DeepSWE/R2E-Gym runner", "experiments/agent-live/deepswe-raw-fak-contract-20260626.json", false, checkDeepSWE},
 		{873, "E", "ToolSandbox/tau3 policy-state", "experiments/agent-live/toolsandbox-official-run-contract-20260626.json", false, checkToolSandbox},
-		{874, "F", "Terminal-Bench command boundary", "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json", false, checkFixture},
+		{874, "F", "Terminal-Bench command boundary", "experiments/agent-live/terminalbench-official-run-contract-20260626.json", false, checkTerminalBench},
 		{875, "G", "Browser/computer-use action mediation", "experiments/agent-live/browser-action-mediation-smoke-20260625.json", false, checkFixture},
 		{876, "authority", "Agentic benchmark authority entry shape", "BENCHMARK-AUTHORITY.md", true, checkAuthority},
 	}
@@ -209,6 +209,21 @@ func checkToolSandbox(doc map[string]any, child ChildStatus) ChildStatus {
 	}
 	child.Gate = "PENDING_EXTERNAL_HARNESS"
 	child.Detail = child.Status + "; benchmark-native tau3/ToolSandbox raw/fak outputs and grader summaries still required"
+	child.Missing = stringSlice(doc, "required_before_claim")
+	return child
+}
+
+func checkTerminalBench(doc map[string]any, child ChildStatus) ChildStatus {
+	child.Status = str(doc, "status")
+	child.ResultClaimAllowed = boolv(doc, "result_claim_allowed")
+	child.EvidenceClass = "EXTERNAL_RUN_CONTRACT"
+	if child.ResultClaimAllowed {
+		child.Gate = "PASS_RESULT"
+		child.Detail = "Terminal-Bench result claim enabled"
+		return child
+	}
+	child.Gate = "PENDING_EXTERNAL_HARNESS"
+	child.Detail = child.Status + "; benchmark-native Terminal-Bench raw/fak run dirs, command logs, and official test summaries still required"
 	child.Missing = stringSlice(doc, "required_before_claim")
 	return child
 }

@@ -1,0 +1,159 @@
+{
+  "schema": "fak.terminalbench-official-run-contract.v1",
+  "generated_at": "2026-06-26T03:13:56Z",
+  "benchmark": "Terminal-Bench command-boundary official-run contract",
+  "status": "READY_FOR_EXTERNAL_HARNESS",
+  "evidence_class": "EXTERNAL_RUN_CONTRACT",
+  "claim_boundary": "External-run contract only: fixes the raw/fak Terminal-Bench command shape, shared task/model/image/budget requirements, evidence paths, and promotion gates. It is not an official result until benchmark-native tb run task logs, test output, and a raw-vs-fak compare artifact are checked in.",
+  "local_fixture_artifact": "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json",
+  "task_selection": {
+    "candidate_suite": "testdata/terminalbench/command_boundary_smoke.json",
+    "candidate_task_ids": [
+      "go-cli-help-benign",
+      "python-config-fix-danger-after-tests"
+    ],
+    "candidate_tasks": [
+      {
+        "id": "go-cli-help-benign",
+        "image": "golang:1.26",
+        "test_oracle": "fixture-recorded-go-test",
+        "budget_turns": 2
+      },
+      {
+        "id": "python-config-fix-danger-after-tests",
+        "image": "python:3.12-slim",
+        "test_oracle": "fixture-recorded-pytest",
+        "budget_turns": 4
+      }
+    ],
+    "official_dataset": "terminal-bench-core",
+    "official_dataset_version": "0.1.1",
+    "official_task_ids_required": true,
+    "same_task_ids_required": true,
+    "same_image_required": true,
+    "same_budget_required": true,
+    "n_concurrent": 1
+  },
+  "model": {
+    "agent": "terminus",
+    "fak_agent": "terminus-through-fak",
+    "model": "shared-agent-model",
+    "fak_gateway": "http://localhost:8080/v1",
+    "same_model_required": true
+  },
+  "arms": [
+    {
+      "name": "raw-terminalbench",
+      "harness": "benchmark-native",
+      "command": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus --model shared-agent-model --task-id $task --n-concurrent 1 }",
+      "output_dir": "experiments/agent-live/terminalbench-official-raw-20260626",
+      "required_artifacts": [
+        "tb run directory for each selected task",
+        "benchmark-native command log",
+        "benchmark-native test output or result summary"
+      ]
+    },
+    {
+      "name": "fak-terminalbench",
+      "harness": "benchmark-native-through-fak-gateway",
+      "command": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus-through-fak --model shared-agent-model --task-id $task --n-concurrent 1 }",
+      "output_dir": "experiments/agent-live/terminalbench-official-fak-20260626",
+      "required_artifacts": [
+        "tb run directory for each selected task",
+        "benchmark-native command log",
+        "benchmark-native test output or result summary",
+        "fak verdict/evidence log linked to mediated terminal commands"
+      ]
+    }
+  ],
+  "upstream_refs": [
+    {
+      "name": "Terminal-Bench first steps",
+      "url": "https://www.tbench.ai/docs/first-steps",
+      "notes": "Documents tb run with dataset, agent, model, and task-id selection."
+    },
+    {
+      "name": "Terminal-Bench adapters",
+      "url": "https://www.tbench.ai/docs/adapters",
+      "notes": "Documents benchmark-native task subsets and parity experiments through the Terminal-Bench harness."
+    },
+    {
+      "name": "Terminal-Bench leaderboard logs",
+      "url": "https://github.com/abacusai/abacusai-terminal-bench-leaderboard",
+      "notes": "Shows the expected runs directory convention for submitted Terminal-Bench results."
+    },
+    {
+      "name": "Terminal-Bench 3 Harbor preview",
+      "url": "https://github.com/harbor-framework/terminal-bench-3",
+      "notes": "Tracks the Harbor-based next-generation harness shape for future migration."
+    }
+  ],
+  "gates": [
+    {
+      "name": "candidate_task_ids",
+      "ok": true,
+      "detail": "2 candidate ids from local Terminal-Bench-shaped smoke suite"
+    },
+    {
+      "name": "official_dataset_pin",
+      "ok": true,
+      "detail": "terminal-bench-core==0.1.1"
+    },
+    {
+      "name": "same_task_ids_required",
+      "ok": true,
+      "detail": "raw and fak official runs must use the same benchmark-native Terminal-Bench task ids"
+    },
+    {
+      "name": "same_image_required",
+      "ok": true,
+      "detail": "raw and fak official runs must use the same benchmark-provided image or environment setup for each task"
+    },
+    {
+      "name": "same_budget_required",
+      "ok": true,
+      "detail": "raw and fak official runs must use the same task budget and retry policy"
+    },
+    {
+      "name": "same_model_required",
+      "ok": true,
+      "detail": "shared-agent-model"
+    },
+    {
+      "name": "raw_arm_command",
+      "ok": true,
+      "detail": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus --model shared-agent-model --task-id $task --n-concurrent 1 }"
+    },
+    {
+      "name": "fak_arm_command",
+      "ok": true,
+      "detail": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus-through-fak --model shared-agent-model --task-id $task --n-concurrent 1 }"
+    },
+    {
+      "name": "official_harness_required",
+      "ok": true,
+      "detail": "external tb run output with benchmark-native test results is required before promotion"
+    }
+  ],
+  "compare_metrics": [
+    "benchmark_native_test_success_or_pass_1",
+    "safe_resolve",
+    "blocked_dangerous_actions",
+    "unnecessary_blocks",
+    "command_count",
+    "runtime",
+    "cost_or_token_budget",
+    "fak_denied_commands",
+    "fak_verdict_evidence_completeness"
+  ],
+  "required_before_claim": [
+    "benchmark-native Terminal-Bench task ids for the selected fixed subset",
+    "Terminal-Bench image or environment setup manifest for each selected task",
+    "raw-arm tb run directory with command log and official test output over those exact task ids",
+    "fak-arm tb run directory with command log and official test output over those exact task ids",
+    "proof that raw and fak arms used the same model, task ids, image or environment, budget, concurrency, and retry policy",
+    "fak per-command verdict/evidence log linked to the corresponding tb run command log and test output",
+    "raw/fak compare artifact reporting benchmark-native solve separately from safe resolve, blocked dangerous actions, unnecessary blocks, runtime, cost or token budget, and evidence completeness"
+  ],
+  "result_claim_allowed": false
+}

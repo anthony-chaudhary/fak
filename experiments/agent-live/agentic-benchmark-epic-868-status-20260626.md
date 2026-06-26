@@ -1,6 +1,6 @@
 # Agentic Benchmark Epic #868 Rollup
 
-- Generated: `2026-06-26T03:03:31Z`
+- Generated: `2026-06-26T03:13:56Z`
 - Status: `PENDING_EXTERNAL_HARNESS`
 - Result claim allowed: `false`
 - Children parsed: `8/8`
@@ -16,7 +16,7 @@
 | #871 | `C` | `experiments/agent-live/swebench-opus-smoke-contract-20260626.json` | `PENDING_EXTERNAL_HARNESS` | `READY_FOR_REMOTE_GRADING` | READY_FOR_REMOTE_GRADING; raw/fak predictions and official SWE-bench reports still required |
 | #872 | `D` | `experiments/agent-live/deepswe-raw-fak-contract-20260626.json` | `PENDING_EXTERNAL_HARNESS` | `READY_FOR_EXTERNAL_RUN` | READY_FOR_EXTERNAL_RUN; raw/fak DeepSWE predictions and official SWE-bench reports still required |
 | #873 | `E` | `experiments/agent-live/toolsandbox-official-run-contract-20260626.json` | `PENDING_EXTERNAL_HARNESS` | `READY_FOR_EXTERNAL_HARNESS` | READY_FOR_EXTERNAL_HARNESS; benchmark-native tau3/ToolSandbox raw/fak outputs and grader summaries still required |
-| #874 | `F` | `experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json` | `PASS_LOCAL` | `SIMULATED_LOCAL_FIXTURE` | local fixture is parseable and explicitly non-promotable |
+| #874 | `F` | `experiments/agent-live/terminalbench-official-run-contract-20260626.json` | `PENDING_EXTERNAL_HARNESS` | `READY_FOR_EXTERNAL_HARNESS` | READY_FOR_EXTERNAL_HARNESS; benchmark-native Terminal-Bench raw/fak run dirs, command logs, and official test summaries still required |
 | #875 | `G` | `experiments/agent-live/browser-action-mediation-smoke-20260625.json` | `PASS_LOCAL` | `SIMULATED_LOCAL_FIXTURE` | local fixture is parseable and explicitly non-promotable |
 | #876 | `authority` | `BENCHMARK-AUTHORITY.md` | `PASS_LOCAL` | `AUTHORITY_SHAPE_PRESENT` | authority rows and promotion gate text are present |
 

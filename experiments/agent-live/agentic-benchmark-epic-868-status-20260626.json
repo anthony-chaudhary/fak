@@ -1,13 +1,13 @@
 {
   "schema": "fak.agentic-benchmark-epic-rollup.v1",
-  "generated_at": "2026-06-26T03:03:31Z",
+  "generated_at": "2026-06-26T03:13:56Z",
   "epic": 868,
   "status": "PENDING_EXTERNAL_HARNESS",
   "result_claim_allowed": false,
   "summary": {
     "children_total": 8,
     "children_parsed": 8,
-    "local_evidence_artifacts": 4,
+    "local_evidence_artifacts": 3,
     "result_claim_artifacts": 0,
     "pending_children": [
       870,
@@ -96,19 +96,20 @@
       "issue": 874,
       "packet": "F",
       "title": "Terminal-Bench command boundary",
-      "artifact": "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json",
-      "gate": "PASS_LOCAL",
-      "status": "SIMULATED_LOCAL_FIXTURE",
-      "evidence_class": "SIMULATED_LOCAL_FIXTURE",
+      "artifact": "experiments/agent-live/terminalbench-official-run-contract-20260626.json",
+      "gate": "PENDING_EXTERNAL_HARNESS",
+      "status": "READY_FOR_EXTERNAL_HARNESS",
+      "evidence_class": "EXTERNAL_RUN_CONTRACT",
       "result_claim_allowed": false,
-      "detail": "local fixture is parseable and explicitly non-promotable",
+      "detail": "READY_FOR_EXTERNAL_HARNESS; benchmark-native Terminal-Bench raw/fak run dirs, command logs, and official test summaries still required",
       "missing": [
-        "benchmark-native Terminal-Bench task ids",
-        "environment image or setup manifest",
-        "raw-arm command log and test output",
-        "fak-arm command log and test output",
-        "same model, task ids, image or environment, budget, and retry policy across both arms",
-        "fak per-command verdict/evidence log linked to official test output"
+        "benchmark-native Terminal-Bench task ids for the selected fixed subset",
+        "Terminal-Bench image or environment setup manifest for each selected task",
+        "raw-arm tb run directory with command log and official test output over those exact task ids",
+        "fak-arm tb run directory with command log and official test output over those exact task ids",
+        "proof that raw and fak arms used the same model, task ids, image or environment, budget, concurrency, and retry policy",
+        "fak per-command verdict/evidence log linked to the corresponding tb run command log and test output",
+        "raw/fak compare artifact reporting benchmark-native solve separately from safe resolve, blocked dangerous actions, unnecessary blocks, runtime, cost or token budget, and evidence completeness"
       ]
     },
     {
