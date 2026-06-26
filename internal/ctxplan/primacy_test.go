@@ -69,8 +69,8 @@ func TestPrimacyHelperShape(t *testing.T) {
 func TestPrimacyOnLiftsOldEnd(t *testing.T) {
 	maxStep := 100
 	old := neutralSpan("old", 1)
-	off := Forecast{Weights: Weights{Recency: 0.2}}                 // primacy OFF
-	on := Forecast{Weights: Weights{Recency: 0.2, Primacy: 0.2}}    // primacy ON
+	off := Forecast{Weights: Weights{Recency: 0.2}}              // primacy OFF
+	on := Forecast{Weights: Weights{Recency: 0.2, Primacy: 0.2}} // primacy ON
 	if on.Benefit(old, maxStep) <= off.Benefit(old, maxStep) {
 		t.Fatalf("primacy must lift the oldest span's score: off=%v on=%v",
 			off.Benefit(old, maxStep), on.Benefit(old, maxStep))
