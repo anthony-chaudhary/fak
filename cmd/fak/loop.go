@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdLoop(argv []string) { os.Exit(runLoop(os.Stdout, os.Stderr, argv)) }
@@ -331,6 +332,7 @@ func runLoopRollup(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak loop rollup: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 
 	nodes, err := loopRollupNodes(ledgers, *dir, *glob)
 	if err != nil {
