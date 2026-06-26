@@ -52,7 +52,8 @@ var tier = map[string]int{
 	"callavoid":    1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"accounts":     1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	"blobfs": 1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
-	"xenginekv": 1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
+	"xenginekv":  1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
+	"secretload": 1, // first-class secret/config loader (#887/#889): SecretSource priority list + os-env/encrypted-file/.env backends + Require checklist + Redact; imports canon(1)+stdlib, off the hot path.
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
