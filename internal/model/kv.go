@@ -182,8 +182,10 @@ func (s *Session) glmDsaHead(xf []float32) []float32 {
 		// #86 (partial): the vocab projection (the largest single GEMM) runs on the backend.
 		// lmHeadMatHAL resolves the resident head weight (untied q8 / f32) + uploads it.
 		be := s.Backend
-		xt := be.Upload(compute.NewF32(be, []int{s.M.Cfg.HiddenSize}, xf), compute.F32)
-		return be.Read(be.MatMul(s.lmHeadMatHAL(), xt))
+		xt := uploadHostF32Class(be, []int{s.M.Cfg.HiddenSize}, xf, compute.MemoryActivation, "glm-dsa-lm-head-activation")
+		out := be.Read(be.MatMul(s.lmHeadMatHAL(), xt))
+		be.Free(xt)
+		return out
 	}
 	if s.Quant {
 		return s.headQ(xf)

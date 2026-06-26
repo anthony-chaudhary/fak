@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/engine"
 )
 
@@ -82,38 +83,69 @@ func TestCacheEventRestoreFaultIsTypedNeverSilent(t *testing.T) {
 	}
 }
 
+func TestCacheTierMemoryClassProjection(t *testing.T) {
+	for _, tc := range []struct {
+		tier cachemeta.ResidencyTier
+		want compute.MemoryClass
+	}{
+		{cachemeta.TierHBM, compute.MemoryKVCache},
+		{cachemeta.TierDRAM, compute.MemoryDDRCache},
+		{cachemeta.TierNUMAFar, compute.MemoryDDRCache},
+		{cachemeta.TierCXL, compute.MemoryDDRCache},
+		{cachemeta.TierDisk, compute.MemoryOffload},
+		{cachemeta.TierRemote, compute.MemoryOffload},
+		{cachemeta.TierProvider, compute.MemoryOffload},
+		{cachemeta.TierUnknown, compute.MemoryUnknown},
+	} {
+		if got := engine.CacheTierMemoryClass(tc.tier); got != tc.want {
+			t.Fatalf("CacheTierMemoryClass(%s) = %s, want %s", tc.tier, got, tc.want)
+		}
+	}
+}
+
 // Cache events must be exposable as metrics (not only internal engine counters):
-// the snapshot keys by direction x outcome x to_tier and renders Prometheus text.
+// the snapshot keys by direction x outcome x to_tier x memory_class and renders
+// Prometheus text, including byte/token breakdowns by class.
 func TestCacheEventMetricsExposedAsPrometheus(t *testing.T) {
 	rec := engine.NewCacheEventRecorder()
+	rec.Record(engine.CacheEvent{Direction: cachemeta.KVOffload, ToTier: cachemeta.TierDRAM, BytesMoved: 200, Tokens: 20, Outcome: cachemeta.KVTransferOK})
 	rec.Record(engine.CacheEvent{Direction: cachemeta.KVOffload, ToTier: cachemeta.TierDisk, BytesMoved: 100, Tokens: 10, Outcome: cachemeta.KVTransferOK})
 	rec.Record(engine.CacheEvent{Direction: cachemeta.KVOffload, ToTier: cachemeta.TierDisk, BytesMoved: 50, Tokens: 5, Outcome: cachemeta.KVTransferOK})
 	rec.Record(engine.CacheEvent{Direction: cachemeta.KVRestore, ToTier: cachemeta.TierHBM, Outcome: cachemeta.KVTransferFault, FaultReason: "x"})
 
 	snap := rec.Metrics().Snapshot()
-	if snap.Events != 3 || snap.BytesMoved != 150 || snap.TokensMoved != 15 {
+	if snap.Events != 4 || snap.BytesMoved != 350 || snap.TokensMoved != 35 {
 		t.Fatalf("aggregate totals wrong: %+v", snap)
 	}
 	// The two offload-ok-disk events collapse into one keyed row with count 2.
-	var found bool
+	var foundDisk, foundDRAM bool
 	for _, r := range snap.Rows {
 		if r.Direction == "offload" && r.Outcome == "ok" && r.ToTier == "disk" {
-			found = true
-			if r.Count != 2 || r.BytesMoved != 150 || r.TokensMoved != 15 {
+			foundDisk = true
+			if r.MemoryClass != string(compute.MemoryOffload) || r.Count != 2 || r.BytesMoved != 150 || r.TokensMoved != 15 {
 				t.Fatalf("offload/ok/disk row wrong: %+v", r)
 			}
 		}
+		if r.Direction == "offload" && r.Outcome == "ok" && r.ToTier == "dram" {
+			foundDRAM = true
+			if r.MemoryClass != string(compute.MemoryDDRCache) || r.Count != 1 || r.BytesMoved != 200 || r.TokensMoved != 20 {
+				t.Fatalf("offload/ok/dram row wrong: %+v", r)
+			}
+		}
 	}
-	if !found {
-		t.Fatalf("missing offload/ok/disk row in %+v", snap.Rows)
+	if !foundDisk || !foundDRAM {
+		t.Fatalf("missing expected classed rows in %+v", snap.Rows)
 	}
 
 	prom := snap.Prometheus()
 	for _, want := range []string{
-		"fak_engine_cache_events_total 3",
+		"fak_engine_cache_events_total 4",
 		"fak_engine_cache_restore_fault_total 1",
-		"fak_engine_cache_bytes_moved_total 150",
-		`fak_engine_cache_event_breakdown_total{direction="offload",outcome="ok",to_tier="disk"} 2`,
+		"fak_engine_cache_bytes_moved_total 350",
+		`fak_engine_cache_event_breakdown_total{direction="offload",outcome="ok",to_tier="disk",memory_class="offload"} 2`,
+		`fak_engine_cache_event_breakdown_total{direction="offload",outcome="ok",to_tier="dram",memory_class="ddr_cache"} 1`,
+		`fak_engine_cache_bytes_moved_breakdown_total{direction="offload",outcome="ok",to_tier="dram",memory_class="ddr_cache"} 200`,
+		`fak_engine_cache_tokens_moved_breakdown_total{direction="offload",outcome="ok",to_tier="dram",memory_class="ddr_cache"} 20`,
 		"# TYPE fak_engine_cache_faults_total counter",
 	} {
 		if !strings.Contains(prom, want) {

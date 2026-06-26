@@ -107,6 +107,17 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 			{Phase: "header", Seconds: 0.1, Bytes: 1_000, Tensors: 0},
 			{Phase: "dequant", Seconds: 1.2, Bytes: 1_900_000, Tensors: 290},
 		},
+		MemoryPlan: []ModelLoadMemoryDemand{
+			{Class: "weights", Scope: "device", Bytes: 1_750_000, Detail: "gguf-q8-load"},
+			{Class: "kv_cache", Scope: "device", Bytes: 240_000, Detail: "hal-kv-store"},
+			{Class: "offload", Scope: "host", Bytes: 10_000, Detail: "expert-weights"},
+			{Class: "weights", Scope: "device", Bytes: 250_000, Detail: "scale-buffer"},
+		},
+		MemoryCapacities: []ModelLoadMemoryCapacity{
+			{Scope: "device", TotalBytes: 8 << 30, Known: true},
+			{Scope: "host", TotalBytes: 64 << 30, FreeBytes: 48 << 30, Known: true, FreeKnown: true},
+		},
+		MemoryHeadroomRatio: 0.15,
 	})
 
 	got := srv.renderMetrics()
@@ -118,10 +129,34 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 		`fak_model_load_phase_duration_seconds{phase="dequant"} 1.2`,
 		`fak_model_load_phase_bytes{phase="dequant"} 1900000`,
 		`fak_model_load_phase_tensors{phase="dequant"} 290`,
+		`fak_model_load_memory_plan_bytes{class="weights",scope="device"} 2000000`,
+		`fak_model_load_memory_plan_bytes{class="kv_cache",scope="device"} 240000`,
+		`fak_model_load_memory_plan_bytes{class="offload",scope="host"} 10000`,
+		"fak_model_load_memory_headroom_ratio 0.15",
+		`fak_model_load_memory_capacity_known{scope="device"} 1`,
+		`fak_model_load_memory_capacity_free_known{scope="device"} 0`,
+		`fak_model_load_memory_capacity_known{scope="host"} 1`,
+		`fak_model_load_memory_capacity_free_known{scope="host"} 1`,
+		`fak_model_load_memory_capacity_bytes{scope="device",kind="total"} 8589934592`,
+		`fak_model_load_memory_capacity_bytes{scope="host",kind="free"} 51539607552`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("model-load metrics missing %q\n--- metrics ---\n%s", want, got)
 		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	if vars.ModelLoad == nil {
+		t.Fatal("/debug/vars missing model_load after setting a profile")
+	}
+	if vars.ModelLoad.Mode != "gguf-lean-q8" || vars.ModelLoad.MemoryHeadroomRatio != 0.15 {
+		t.Fatalf("debug model_load = %+v, want mode/headroom", vars.ModelLoad)
+	}
+	if len(vars.ModelLoad.MemoryPlan) != 4 || vars.ModelLoad.MemoryPlan[0].Detail != "gguf-q8-load" {
+		t.Fatalf("debug memory plan = %+v, want detailed plan rows", vars.ModelLoad.MemoryPlan)
+	}
+	if len(vars.ModelLoad.MemoryCapacities) != 2 || !vars.ModelLoad.MemoryCapacities[1].FreeKnown {
+		t.Fatalf("debug capacities = %+v, want device+host rows with host free known", vars.ModelLoad.MemoryCapacities)
 	}
 
 	// Bottleneck-first ordering: dequant's phase row precedes header's.
@@ -133,6 +168,9 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 	srv.SetModelLoadProfile(nil)
 	if got := srv.renderMetrics(); strings.Contains(got, "fak_model_load_") {
 		t.Fatalf("model-load metrics still present after clearing:\n%s", got)
+	}
+	if vars := srv.debugVars(time.Now()); vars.ModelLoad != nil {
+		t.Fatalf("debug model_load still present after clearing: %+v", vars.ModelLoad)
 	}
 }
 

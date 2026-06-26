@@ -76,6 +76,7 @@ int fvk_have_q8(void);
 uint64_t fvk_max_buffer_bytes(void);
 uint64_t fvk_max_storage_buffer_range(void);
 uint64_t fvk_max_memory_allocation_size(void);
+uint64_t fvk_total_device_local_memory(void);
 
 /* Q8_0 quantized GEMM: y[P,out] = dequant(Wq[out,in], scales[out,in/32]) applied to x[P,in].
  * Wq is int8 weight codes (out*in bytes), Wscale is per-block f32 scales (out*(in/32) floats),

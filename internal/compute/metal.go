@@ -27,6 +27,7 @@ package compute
 import "C"
 
 import (
+	"strconv"
 	"sync"
 	"unsafe"
 )
@@ -101,25 +102,45 @@ func (c *metalBackend) Class() CorrectnessClass { return Approx } // MPS GEMM !=
 func (c *metalBackend) Caps() Caps {
 	// Device-resident tensors are not host-addressable; the KV cache lives in device buffers.
 	// We do not yet advertise Async/FusedAttn/GraphCompile/UploadDtype — those are tracked seams.
-	return Caps{DeviceMemory: true}
+	_, _, hostKnown := hostSystemMemory()
+	return Caps{DeviceMemory: true, HostCapacityProbe: hostKnown}
+}
+
+func (c *metalBackend) HostMemory() (total, free int64, known bool) {
+	return hostSystemMemory()
 }
 
 // ---- residency ------------------------------------------------------------------
 
 func (c *metalBackend) dalloc(nbytes int) *metalBuf {
+	return c.dallocClass(nbytes, MemoryUnknown, "metal-dalloc")
+}
+
+func (c *metalBackend) dallocClass(nbytes int, class MemoryClass, site string) *metalBuf {
 	p := C.fmetal_malloc(C.size_t(nbytes))
 	if p == nil {
-		panic("compute: metal device allocation failed")
+		panic(&DeviceAllocError{Bytes: nbytes, Site: site, Class: class})
 	}
 	return &metalBuf{ptr: unsafe.Pointer(p), n: nbytes}
 }
 
+func (c *metalBackend) dallocKV(nbytes int, site string) *metalBuf {
+	if site == "" {
+		site = "metal-kv-cache"
+	}
+	return c.dallocClass(nbytes, MemoryKVCache, site)
+}
+
 func (c *metalBackend) dev(shape []int, dt Dtype) (Tensor, *metalBuf) {
+	return c.devClass(shape, dt, MemoryUnknown, "metal-dalloc")
+}
+
+func (c *metalBackend) devClass(shape []int, dt Dtype, class MemoryClass, site string) (Tensor, *metalBuf) {
 	n := 1
 	for _, d := range shape {
 		n *= d
 	}
-	buf := c.dalloc(n * dt.Bytes())
+	buf := c.dallocClass(n*dt.Bytes(), class, site)
 	return makeTensor(c, dt, RowMajor, append([]int(nil), shape...), nil, buf), buf
 }
 
@@ -127,7 +148,7 @@ func (c *metalBackend) dev(shape []int, dt Dtype) (Tensor, *metalBuf) {
 // free it at the next token boundary. Weights (Upload) deliberately use dev, not devTr, so
 // they are never recycled out from under the resident-weight cache.
 func (c *metalBackend) devTr(shape []int, dt Dtype) (Tensor, *metalBuf) {
-	t, b := c.dev(shape, dt)
+	t, b := c.devClass(shape, dt, MemoryScratchpad, "metal-transient")
 	c.transient = append(c.transient, b)
 	return t, b
 }
@@ -135,6 +156,20 @@ func (c *metalBackend) devTr(shape []int, dt Dtype) (Tensor, *metalBuf) {
 // Upload copies host data resident -> device. Only F32 is implemented today; quantized
 // upload (narrowing weights at H2D) is the UploadDtype seam, deferred.
 func (c *metalBackend) Upload(t Tensor, as Dtype) Tensor {
+	return c.uploadClass(t, as, MemoryWeights, "metal-upload-weight")
+}
+
+func (c *metalBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
+	if class == "" {
+		class = MemoryUnknown
+	}
+	if site == "" {
+		site = "metal-upload-" + string(class)
+	}
+	return c.uploadClass(t, as, class, site)
+}
+
+func (c *metalBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	hb, ok := t.buf.(HostBuffer)
@@ -144,7 +179,17 @@ func (c *metalBackend) Upload(t Tensor, as Dtype) Tensor {
 	if t.Dtype != F32 {
 		panic("compute: metal Upload supports only F32 today (got " + t.Dtype.String() + ")")
 	}
+	if as != F32 {
+		panic("compute: metal Upload supports only F32 resident uploads today")
+	}
 	f := hb.F32()
+	if class != MemoryWeights {
+		out, buf := c.devClass(t.Shape, F32, class, site)
+		if len(f) > 0 {
+			C.fmetal_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+		}
+		return out
+	}
 	var hp uintptr
 	if len(f) > 0 {
 		hp = uintptr(unsafe.Pointer(&f[0]))
@@ -152,7 +197,7 @@ func (c *metalBackend) Upload(t Tensor, as Dtype) Tensor {
 			return cached // same host buffer already resident; share it
 		}
 	}
-	out, buf := c.dev(t.Shape, F32)
+	out, buf := c.devClass(t.Shape, F32, MemoryWeights, "metal-upload-weight")
 	if len(f) > 0 {
 		C.fmetal_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
 		buf.host = hp
@@ -325,10 +370,10 @@ type mslice struct {
 	len, cap int
 }
 
-func (c *metalBackend) growAppend(d *mslice, srcPtr unsafe.Pointer, nFloats int) {
+func (c *metalBackend) growAppend(d *mslice, srcPtr unsafe.Pointer, nFloats int, site string) {
 	if d.len+nFloats > d.cap {
 		ncap := d.cap*2 + nFloats
-		np := C.fmetal_malloc(C.size_t(ncap * 4))
+		np := c.dallocKV(ncap*F32.Bytes(), site).ptr
 		if d.len > 0 {
 			C.fmetal_copy_at(unsafe.Pointer(np), C.size_t(0), d.ptr, C.size_t(0), C.size_t(d.len*4))
 		}
@@ -357,9 +402,9 @@ func (k *metalKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	w := k.stride()
-	k.be.growAppend(&k.Kraw[layer], kRaw.buf.(*metalBuf).ptr, w)
-	k.be.growAppend(&k.K[layer], kRoPE.buf.(*metalBuf).ptr, w)
-	k.be.growAppend(&k.V[layer], v.buf.(*metalBuf).ptr, w)
+	k.be.growAppend(&k.Kraw[layer], kRaw.buf.(*metalBuf).ptr, w, "metal-kv-pre-rope-key-grow layer "+strconv.Itoa(layer))
+	k.be.growAppend(&k.K[layer], kRoPE.buf.(*metalBuf).ptr, w, "metal-kv-key-grow layer "+strconv.Itoa(layer))
+	k.be.growAppend(&k.V[layer], v.buf.(*metalBuf).ptr, w, "metal-kv-value-grow layer "+strconv.Itoa(layer))
 	if layer == 0 {
 		k.pos = append(k.pos, pos)
 	}
@@ -417,9 +462,9 @@ func (k *metalKV) Evict(from, n int) int {
 				}
 			}
 		}
-		k.writeDS(&k.K[l], K)
-		k.writeDS(&k.Kraw[l], Kraw)
-		k.writeDS(&k.V[l], V)
+		k.writeDS(&k.K[l], K, "metal-kv-key-rewrite layer "+strconv.Itoa(l))
+		k.writeDS(&k.Kraw[l], Kraw, "metal-kv-pre-rope-key-rewrite layer "+strconv.Itoa(l))
+		k.writeDS(&k.V[l], V, "metal-kv-value-rewrite layer "+strconv.Itoa(l))
 	}
 	k.pos = append(k.pos[:from], k.pos[end:]...)
 	for i := range k.pos {
@@ -436,18 +481,18 @@ func (k *metalKV) Clone() KVStore {
 	n := &metalKV{be: k.be, cfg: k.cfg,
 		K: make([]mslice, len(k.K)), Kraw: make([]mslice, len(k.Kraw)), V: make([]mslice, len(k.V)),
 		pos: append([]int(nil), k.pos...)}
-	cp := func(dst, src *mslice) {
+	cp := func(dst, src *mslice, site string) {
 		if src.len == 0 {
 			return
 		}
-		np := C.fmetal_malloc(C.size_t(src.len * 4))
+		np := k.be.dallocKV(src.len*F32.Bytes(), site).ptr
 		C.fmetal_copy_at(unsafe.Pointer(np), C.size_t(0), src.ptr, C.size_t(0), C.size_t(src.len*4))
 		dst.ptr, dst.len, dst.cap = unsafe.Pointer(np), src.len, src.len
 	}
 	for l := range k.K {
-		cp(&n.K[l], &k.K[l])
-		cp(&n.Kraw[l], &k.Kraw[l])
-		cp(&n.V[l], &k.V[l])
+		cp(&n.K[l], &k.K[l], "metal-kv-key-clone layer "+strconv.Itoa(l))
+		cp(&n.Kraw[l], &k.Kraw[l], "metal-kv-pre-rope-key-clone layer "+strconv.Itoa(l))
+		cp(&n.V[l], &k.V[l], "metal-kv-value-clone layer "+strconv.Itoa(l))
 	}
 	return n
 }
@@ -480,13 +525,13 @@ func (k *metalKV) readDS(d *mslice) []float32 {
 	return out
 }
 
-func (k *metalKV) writeDS(d *mslice, data []float32) {
+func (k *metalKV) writeDS(d *mslice, data []float32, site string) {
 	need := len(data)
 	if need > d.cap {
 		if d.ptr != nil {
 			C.fmetal_free(d.ptr)
 		}
-		d.ptr = unsafe.Pointer(C.fmetal_malloc(C.size_t(need * 4)))
+		d.ptr = k.be.dallocKV(need*F32.Bytes(), site).ptr
 		d.cap = need
 	}
 	if need > 0 {

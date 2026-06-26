@@ -331,7 +331,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// upstream provider's raw body, which must not cross the trust boundary to a
 		// (possibly unauthenticated) downstream caller.
 		s.logf("gateway: upstream model error: %v", err)
-		status, code, msg := upstreamErrorStatus(err)
+		status, code, msg := s.plannerErrorStatus(err)
 		writeErrCode(w, status, code, msg)
 		return
 	}
@@ -440,9 +440,14 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	// upstream error can never be this type. 503 (retryable with a smaller request) over 502.
 	var oom *agent.InKernelOOMError
 	if errors.As(err, &oom) {
+		class := strings.TrimSpace(string(oom.Class))
+		if class == "" || class == "unknown" {
+			class = "device"
+		}
+		class = strings.ReplaceAll(class, "_", " ")
 		return http.StatusServiceUnavailable, "in_kernel_oom",
-			fmt.Sprintf("in-kernel GPU out of memory for this request (device allocation of %d bytes failed); "+
-				"reduce the prompt/context size or max_tokens, or serve a smaller model / shorter --ctx", oom.Bytes)
+			fmt.Sprintf("in-kernel GPU out of memory for this request (%s allocation of %d bytes failed); "+
+				"reduce the prompt/context size or max_tokens, or serve a smaller model / shorter --ctx", class, oom.Bytes)
 	}
 	var ue *agent.UpstreamUnreachableError
 	if errors.As(err, &ue) {
@@ -454,6 +459,13 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		return se.Status, "", fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
 	}
 	return http.StatusBadGateway, "", "upstream model error"
+}
+
+func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
+	if s != nil && s.metrics != nil {
+		s.metrics.observeInKernelOOM(err)
+	}
+	return upstreamErrorStatus(err)
 }
 
 func writeChatCompletionStream(w http.ResponseWriter, resp ChatResponse) {

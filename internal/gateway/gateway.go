@@ -830,14 +830,14 @@ func (s *Server) SetModelLoadProfile(p *ModelLoadProfile) {
 		return
 	}
 	s.modelLoadMu.Lock()
-	s.modelLoad = p
+	s.modelLoad = p.clone()
 	s.modelLoadMu.Unlock()
 }
 
 func (s *Server) modelLoadProfile() *ModelLoadProfile {
 	s.modelLoadMu.Lock()
 	defer s.modelLoadMu.Unlock()
-	return s.modelLoad
+	return s.modelLoad.clone()
 }
 
 // maybePlanMessages is the live-loop integration point for the ctxplan context PLANNER

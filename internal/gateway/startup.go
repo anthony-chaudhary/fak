@@ -109,18 +109,53 @@ type ModelLoadPhase struct {
 	Tensors int
 }
 
+// ModelLoadMemoryDemand is one classed row from the memory plan used to admit a
+// boot-time model load. Detail is safe for /debug/vars, but Prometheus aggregates
+// by class+scope to avoid high-cardinality tensor/path labels.
+type ModelLoadMemoryDemand struct {
+	Class  string
+	Scope  string
+	Bytes  int64
+	Detail string
+}
+
+// ModelLoadMemoryCapacity is the backend capacity snapshot used with the memory
+// plan. Unknown capacity is represented explicitly so a scrape can distinguish
+// "not probed" from "zero bytes".
+type ModelLoadMemoryCapacity struct {
+	Scope      string
+	TotalBytes int64
+	FreeBytes  int64
+	Known      bool
+	FreeKnown  bool
+}
+
 // ModelLoadProfile is the boot-time weight-load breakdown the dashboard renders.
 // nil (the default for a mock / proxy serve that loads no weights) suppresses every
 // fak_model_load_* metric entirely, so an empty series never masquerades as a 0ms
 // load.
 type ModelLoadProfile struct {
-	Source       string
-	Mode         string
-	TotalSeconds float64
-	Bytes        int64
-	Tensors      int
-	Bottleneck   string
-	Phases       []ModelLoadPhase
+	Source              string
+	Mode                string
+	TotalSeconds        float64
+	Bytes               int64
+	Tensors             int
+	Bottleneck          string
+	Phases              []ModelLoadPhase
+	MemoryPlan          []ModelLoadMemoryDemand
+	MemoryCapacities    []ModelLoadMemoryCapacity
+	MemoryHeadroomRatio float64
+}
+
+func (p *ModelLoadProfile) clone() *ModelLoadProfile {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	out.Phases = append([]ModelLoadPhase(nil), p.Phases...)
+	out.MemoryPlan = append([]ModelLoadMemoryDemand(nil), p.MemoryPlan...)
+	out.MemoryCapacities = append([]ModelLoadMemoryCapacity(nil), p.MemoryCapacities...)
+	return &out
 }
 
 // sorted returns the phases ordered by descending cost so the exposition (and the
@@ -132,6 +167,63 @@ func (p *ModelLoadProfile) sorted() []ModelLoadPhase {
 	out := append([]ModelLoadPhase(nil), p.Phases...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Seconds > out[j].Seconds })
 	return out
+}
+
+func (p *ModelLoadProfile) memoryPlanByClassScope() []ModelLoadMemoryDemand {
+	if p == nil {
+		return nil
+	}
+	type key struct {
+		class string
+		scope string
+	}
+	by := map[key]int64{}
+	for _, row := range p.MemoryPlan {
+		if row.Bytes <= 0 {
+			continue
+		}
+		k := key{class: modelLoadClass(row.Class), scope: modelLoadScope(row.Scope)}
+		by[k] += row.Bytes
+	}
+	out := make([]ModelLoadMemoryDemand, 0, len(by))
+	for k, bytes := range by {
+		out = append(out, ModelLoadMemoryDemand{Class: k.class, Scope: k.scope, Bytes: bytes})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope < out[j].Scope
+		}
+		return out[i].Class < out[j].Class
+	})
+	return out
+}
+
+func (p *ModelLoadProfile) sortedMemoryCapacities() []ModelLoadMemoryCapacity {
+	if p == nil {
+		return nil
+	}
+	out := append([]ModelLoadMemoryCapacity(nil), p.MemoryCapacities...)
+	for i := range out {
+		out[i].Scope = modelLoadScope(out[i].Scope)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Scope < out[j].Scope })
+	return out
+}
+
+func modelLoadClass(class string) string {
+	class = strings.TrimSpace(class)
+	if class == "" {
+		return "unknown"
+	}
+	return class
+}
+
+func modelLoadScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return "device"
+	}
+	return scope
 }
 
 // writeStartupMetrics renders the boot-timeline gauges. They are emitted on every
@@ -216,5 +308,47 @@ func (s *Server) writeModelLoadMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_model_load_phase_tensors", "Tensors processed by each model-weight load phase at boot.", "gauge")
 	for _, ph := range phases {
 		fmt.Fprintf(b, "fak_model_load_phase_tensors{phase=\"%s\"} %d\n", promQuote(ph.Phase), ph.Tensors)
+	}
+
+	if rows := p.memoryPlanByClassScope(); len(rows) > 0 {
+		writeHelpType(b, "fak_model_load_memory_plan_bytes", "Classed memory demand used to admit the boot-time model load, aggregated by memory class and scope.", "gauge")
+		for _, row := range rows {
+			fmt.Fprintf(b, "fak_model_load_memory_plan_bytes{class=\"%s\",scope=\"%s\"} %d\n",
+				promQuote(row.Class), promQuote(row.Scope), row.Bytes)
+		}
+	}
+	if p.MemoryHeadroomRatio > 0 {
+		writeHelpType(b, "fak_model_load_memory_headroom_ratio", "Fraction of reported capacity reserved by the boot-time model-load fit check for runtime headroom.", "gauge")
+		fmt.Fprintf(b, "fak_model_load_memory_headroom_ratio %s\n", promFloat(p.MemoryHeadroomRatio))
+	}
+	if caps := p.sortedMemoryCapacities(); len(caps) > 0 {
+		writeHelpType(b, "fak_model_load_memory_capacity_known", "Whether the backend reported capacity for a memory scope used by the boot-time model-load fit check.", "gauge")
+		for _, cap := range caps {
+			known := 0
+			if cap.Known {
+				known = 1
+			}
+			fmt.Fprintf(b, "fak_model_load_memory_capacity_known{scope=\"%s\"} %d\n", promQuote(cap.Scope), known)
+		}
+		writeHelpType(b, "fak_model_load_memory_capacity_free_known", "Whether the backend reported current free bytes for a memory scope used by the boot-time model-load fit check.", "gauge")
+		for _, cap := range caps {
+			known := 0
+			if cap.Known && cap.FreeKnown {
+				known = 1
+			}
+			fmt.Fprintf(b, "fak_model_load_memory_capacity_free_known{scope=\"%s\"} %d\n", promQuote(cap.Scope), known)
+		}
+		writeHelpType(b, "fak_model_load_memory_capacity_bytes", "Reported backend capacity bytes for the boot-time model load. The free row is omitted when current free bytes are unknown.", "gauge")
+		for _, cap := range caps {
+			if !cap.Known {
+				continue
+			}
+			fmt.Fprintf(b, "fak_model_load_memory_capacity_bytes{scope=\"%s\",kind=\"total\"} %d\n",
+				promQuote(cap.Scope), cap.TotalBytes)
+			if cap.FreeKnown {
+				fmt.Fprintf(b, "fak_model_load_memory_capacity_bytes{scope=\"%s\",kind=\"free\"} %d\n",
+					promQuote(cap.Scope), cap.FreeBytes)
+			}
+		}
 	}
 }

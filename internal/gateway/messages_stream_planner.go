@@ -8,6 +8,7 @@ package gateway
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -44,6 +45,12 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 	id := "msg_fak_" + itoa(uint64(time.Now().UnixNano()))
 	var send func(string, any)
+	var sendMu sync.Mutex
+	sendLocked := func(event string, data any) {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		send(event, data)
+	}
 	started := false
 	start := func() {
 		if started {
@@ -57,7 +64,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		h.Set("X-Accel-Buffering", "no")
 		w.WriteHeader(http.StatusOK)
 		send = anthropicSSESender(w, flusher)
-		send("message_start", map[string]any{
+		sendLocked("message_start", map[string]any{
 			"type": "message_start",
 			"message": map[string]any{
 				"id": id, "type": "message", "role": "assistant", "model": model,
@@ -72,7 +79,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	textIdx := -1
 	closeText := func() {
 		if textOpen {
-			send("content_block_stop", map[string]any{"type": "content_block_stop", "index": textIdx})
+			sendLocked("content_block_stop", map[string]any{"type": "content_block_stop", "index": textIdx})
 			textOpen = false
 			textIdx = -1
 		}
@@ -86,21 +93,21 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 			textIdx = outIdx
 			outIdx++
 			textOpen = true
-			send("content_block_start", map[string]any{
+			sendLocked("content_block_start", map[string]any{
 				"type": "content_block_start", "index": textIdx,
 				"content_block": map[string]any{"type": "text", "text": ""},
 			})
 		}
-		send("content_block_delta", map[string]any{
+		sendLocked("content_block_delta", map[string]any{
 			"type": "content_block_delta", "index": textIdx,
 			"delta": map[string]any{"type": "text_delta", "text": text},
 		})
 		return nil
 	}
 
+	start()
 	if note := resultAdmissionNote(resultAdmissions); note != "" {
-		start()
-		emitAnthropicTextBlock(send, &outIdx, note)
+		emitAnthropicTextBlock(sendLocked, &outIdx, note)
 	}
 
 	var temp *float64
@@ -118,7 +125,26 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	guard := newLiftGuard(emitText)
 	messages := s.maybePlanMessages(r.Context(), reqTrace, req.Messages)
 	began := time.Now()
+	stopPing := make(chan struct{})
+	pingDone := make(chan struct{})
+	go func() {
+		defer close(pingDone)
+		ticker := time.NewTicker(anthropicStreamPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sendLocked("ping", map[string]any{"type": "ping"})
+			case <-stopPing:
+				return
+			case <-r.Context().Done():
+				return
+			}
+		}
+	}()
 	comp, err := sp.CompleteStream(r.Context(), guard.write, messages, req.Tools, opts...)
+	close(stopPing)
+	<-pingDone
 	if err != nil {
 		if !started {
 			s.logf("gateway: upstream model error (messages stream): %v", err)
@@ -127,7 +153,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		}
 		s.logf("gateway: upstream model error mid-stream (messages): %v", err)
 		closeText()
-		send("error", map[string]any{
+		sendLocked("error", map[string]any{
 			"type":  "error",
 			"error": map[string]any{"type": "api_error", "message": "upstream model error"},
 		})
@@ -144,7 +170,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		}
 		s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (messages); model=%s", s.model)
 		closeText()
-		send("error", map[string]any{
+		sendLocked("error", map[string]any{
 			"type":  "error",
 			"error": map[string]any{"type": "api_error", "message": "upstream tool-call format not recognized"},
 		})
@@ -161,19 +187,19 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	for _, blk := range agent.AnthropicResponseBlocks(agent.Message{Role: agent.RoleAssistant, ToolCalls: kept}) {
 		oi := outIdx
 		outIdx++
-		send("content_block_start", map[string]any{
+		sendLocked("content_block_start", map[string]any{
 			"type": "content_block_start", "index": oi,
 			"content_block": map[string]any{"type": "tool_use", "id": blk.ID, "name": blk.Name, "input": map[string]any{}},
 		})
-		send("content_block_delta", map[string]any{
+		sendLocked("content_block_delta", map[string]any{
 			"type": "content_block_delta", "index": oi,
 			"delta": map[string]any{"type": "input_json_delta", "partial_json": string(blk.Input)},
 		})
-		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
+		sendLocked("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
 	}
 	if dropped > 0 || anyRepaired(adjs) {
 		if note := adjudicationNote(adjs); note != "" {
-			emitAnthropicTextBlock(send, &outIdx, note)
+			emitAnthropicTextBlock(sendLocked, &outIdx, note)
 		}
 	}
 
@@ -184,7 +210,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		CacheCreationInputTokens: comp.Usage.CacheCreationInputTokens,
 	}
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)
-	sendAnthropicTerminal(send, stop, usage)
+	sendAnthropicTerminal(sendLocked, stop, usage)
 	return true
 }
 

@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // CacheEvent is the live-engine residency event a routing/offload adapter feeds the
@@ -105,9 +106,10 @@ type CacheEventMetrics struct {
 }
 
 type cacheEventKey struct {
-	direction string
-	outcome   string
-	toTier    string
+	direction   string
+	outcome     string
+	toTier      string
+	memoryClass string
 }
 
 type cacheEventAgg struct {
@@ -132,9 +134,10 @@ func (mx *CacheEventMetrics) observe(e cachemeta.Entry, v cachemeta.LookupVerdic
 		mx.byKey = map[cacheEventKey]*cacheEventAgg{}
 	}
 	key := cacheEventKey{
-		direction: e.Labels["direction"],
-		outcome:   e.Labels["outcome"],
-		toTier:    string(e.Residency.Tier),
+		direction:   e.Labels["direction"],
+		outcome:     e.Labels["outcome"],
+		toTier:      string(e.Residency.Tier),
+		memoryClass: string(CacheTierMemoryClass(e.Residency.Tier)),
 	}
 	agg := mx.byKey[key]
 	if agg == nil {
@@ -178,11 +181,12 @@ type CacheEventSnapshot struct {
 	Rows         []CacheEventRow
 }
 
-// CacheEventRow is one (direction, outcome, to_tier) bucket.
+// CacheEventRow is one (direction, outcome, to_tier, memory_class) bucket.
 type CacheEventRow struct {
 	Direction   string
 	Outcome     string
 	ToTier      string
+	MemoryClass string
 	Count       uint64
 	BytesMoved  int64
 	TokensMoved int64
@@ -210,6 +214,7 @@ func (mx *CacheEventMetrics) Snapshot() CacheEventSnapshot {
 			Direction:   k.direction,
 			Outcome:     k.outcome,
 			ToTier:      k.toTier,
+			MemoryClass: k.memoryClass,
 			Count:       agg.count,
 			BytesMoved:  agg.bytesMoved,
 			TokensMoved: agg.tokensMoved,
@@ -223,9 +228,29 @@ func (mx *CacheEventMetrics) Snapshot() CacheEventSnapshot {
 		if a.Outcome != b.Outcome {
 			return a.Outcome < b.Outcome
 		}
-		return a.ToTier < b.ToTier
+		if a.ToTier != b.ToTier {
+			return a.ToTier < b.ToTier
+		}
+		return a.MemoryClass < b.MemoryClass
 	})
 	return s
+}
+
+// CacheTierMemoryClass projects a residency tier into the operator-facing memory class used
+// by the capacity/OOM surfaces. HBM is the hot device KV cache; byte-addressable host/far
+// tiers are DDR-cache residency; disk/remote/provider are offload tiers; an unset tier is
+// unknown. This is deliberately a projection over metadata only — it does not move bytes.
+func CacheTierMemoryClass(t cachemeta.ResidencyTier) compute.MemoryClass {
+	switch t {
+	case cachemeta.TierHBM:
+		return compute.MemoryKVCache
+	case cachemeta.TierDRAM, cachemeta.TierNUMAFar, cachemeta.TierCXL:
+		return compute.MemoryDDRCache
+	case cachemeta.TierDisk, cachemeta.TierRemote, cachemeta.TierProvider:
+		return compute.MemoryOffload
+	default:
+		return compute.MemoryUnknown
+	}
 }
 
 // Prometheus renders the snapshot as Prometheus exposition text. This is the metric
@@ -254,11 +279,26 @@ func (s CacheEventSnapshot) Prometheus() string {
 	b.WriteString("fak_engine_cache_bytes_moved_total " + itoa64(s.BytesMoved) + "\n")
 	help("fak_engine_cache_tokens_moved_total", "KV span positions moved across residency tiers by cache events.", "counter")
 	b.WriteString("fak_engine_cache_tokens_moved_total " + itoa64(s.TokensMoved) + "\n")
-	help("fak_engine_cache_event_breakdown_total", "Cache events by direction, outcome, and destination residency tier.", "counter")
+	help("fak_engine_cache_event_breakdown_total", "Cache events by direction, outcome, destination residency tier, and memory class.", "counter")
 	for _, r := range s.Rows {
 		b.WriteString("fak_engine_cache_event_breakdown_total{direction=\"" + promLabel(r.Direction) +
-			"\",outcome=\"" + promLabel(r.Outcome) + "\",to_tier=\"" + promLabel(r.ToTier) + "\"} " +
+			"\",outcome=\"" + promLabel(r.Outcome) + "\",to_tier=\"" + promLabel(r.ToTier) +
+			"\",memory_class=\"" + promLabel(r.MemoryClass) + "\"} " +
 			utoa(r.Count) + "\n")
+	}
+	help("fak_engine_cache_bytes_moved_breakdown_total", "Bytes moved by cache events, bucketed by direction, outcome, destination residency tier, and memory class.", "counter")
+	for _, r := range s.Rows {
+		b.WriteString("fak_engine_cache_bytes_moved_breakdown_total{direction=\"" + promLabel(r.Direction) +
+			"\",outcome=\"" + promLabel(r.Outcome) + "\",to_tier=\"" + promLabel(r.ToTier) +
+			"\",memory_class=\"" + promLabel(r.MemoryClass) + "\"} " +
+			itoa64(r.BytesMoved) + "\n")
+	}
+	help("fak_engine_cache_tokens_moved_breakdown_total", "KV span positions moved by cache events, bucketed by direction, outcome, destination residency tier, and memory class.", "counter")
+	for _, r := range s.Rows {
+		b.WriteString("fak_engine_cache_tokens_moved_breakdown_total{direction=\"" + promLabel(r.Direction) +
+			"\",outcome=\"" + promLabel(r.Outcome) + "\",to_tier=\"" + promLabel(r.ToTier) +
+			"\",memory_class=\"" + promLabel(r.MemoryClass) + "\"} " +
+			itoa64(r.TokensMoved) + "\n")
 	}
 	return b.String()
 }

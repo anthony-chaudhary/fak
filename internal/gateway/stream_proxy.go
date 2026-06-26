@@ -94,13 +94,14 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			// buffered path does, and own the response (the message is generic so the
 			// upstream body never crosses the trust boundary).
 			s.logf("gateway: upstream model error (stream): %v", err)
-			status, code, msg := upstreamErrorStatus(err)
+			status, code, msg := s.plannerErrorStatus(err)
 			writeErrCode(w, status, code, msg)
 			return true
 		}
 		// Headers + content already went out; we cannot change the status. Emit a
 		// terminal error frame + [DONE] so the client's SSE parser ends cleanly rather
 		// than hanging, and log the cause for the operator.
+		_, _, _ = s.plannerErrorStatus(err)
 		s.logf("gateway: upstream model error mid-stream: %v", err)
 		_ = writeSSEData(w, map[string]any{
 			"error": map[string]any{"message": "upstream model error", "type": "server_error"},

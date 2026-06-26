@@ -43,6 +43,15 @@ import (
 // sees it (conservative: it treats the whole device as the budget rather than guessing).
 const FreeUnknown int64 = -1
 
+const maxInt64Uint64 = uint64(1<<63 - 1)
+
+func uint64ToCapInt64(v uint64) int64 {
+	if v > maxInt64Uint64 {
+		return int64(maxInt64Uint64)
+	}
+	return int64(v)
+}
+
 // MemoryClass names the pool or purpose behind a capacity request. The byte-only
 // FitsOnDevice helper remains for legacy callers, but a MemoryPlan preserves the
 // distinction operators actually need when a node refuses a request: weights,
@@ -236,6 +245,13 @@ func (p MemoryPlan) DeviceTotal() int64 {
 	return p.totalWhere(func(d MemoryDemand) bool { return d.DeviceScoped() })
 }
 
+// HostTotal returns the bytes in the plan that consume host-side capacity. These demands
+// are visible even when the backend cannot report host capacity; in that case the fit check
+// fails open rather than pretending host RAM is bounded by the device ceiling.
+func (p MemoryPlan) HostTotal() int64 {
+	return p.totalWhere(func(d MemoryDemand) bool { return d.ScopeOrDefault() == MemoryScopeHost })
+}
+
 func (p MemoryPlan) totalWhere(include func(MemoryDemand) bool) int64 {
 	const maxInt64 = int64(^uint64(0) >> 1)
 	var total int64
@@ -308,6 +324,17 @@ type DeviceCapacity interface {
 	DeviceMemory() (total, free int64, known bool)
 }
 
+// HostCapacity is the OPTIONAL companion to DeviceCapacity for host-scoped memory
+// demands: CPU-offloaded expert weights, DDR/DRAM cache tiers, and host staging pools.
+// Like DeviceCapacity it is trusted only when Caps().HostCapacityProbe is also set, so a
+// backend cannot half-advertise a probe. Unknown host capacity fails open.
+type HostCapacity interface {
+	Backend
+	// HostMemory reports the host-side memory ceiling and current headroom available to
+	// this backend. FreeUnknown has the same meaning as DeviceMemory.
+	HostMemory() (total, free int64, known bool)
+}
+
 // FitVerdict is the typed outcome of a capacity pre-check — the answerable form of the
 // question a downstream cuda/metal dalloc answers today only by panicking.
 type FitVerdict uint8
@@ -352,6 +379,40 @@ func DeviceMemoryInfo(b Backend) (total, free int64, known bool) {
 	return dc.DeviceMemory()
 }
 
+// HostMemoryInfo reports host-side capacity for host-scoped memory demands. It follows
+// the same two-part discovery contract as DeviceMemoryInfo: interface plus explicit cap
+// flag, otherwise unknown/fail-open.
+func HostMemoryInfo(b Backend) (total, free int64, known bool) {
+	if b == nil {
+		return 0, FreeUnknown, false
+	}
+	hc, ok := b.(HostCapacity)
+	if !ok || !b.Caps().HostCapacityProbe {
+		return 0, FreeUnknown, false
+	}
+	return hc.HostMemory()
+}
+
+func fitsWithinReportedMemory(total, free int64, known bool, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
+	if wantBytes <= 0 {
+		return FitOK, 0
+	}
+	if !known || total <= 0 {
+		return FitUnknown, 0
+	}
+	budget := free
+	if budget < 0 { // FreeUnknown -> fall back to the total ceiling, conservatively
+		budget = total
+	}
+	if headroom > 0 && headroom < 1 {
+		budget = int64(float64(budget) * (1 - headroom))
+	}
+	if wantBytes <= budget {
+		return FitOK, budget
+	}
+	return FitTooBig, budget
+}
+
 // FitsOnDevice answers whether wantBytes can be placed on b's device without exhausting it
 // — turning a would-be OOM panic into a typed pre-check. It FAILS OPEN: a backend whose
 // capacity is unknown yields FitUnknown (proceed), never FitTooBig, so this never blocks
@@ -370,27 +431,44 @@ func DeviceMemoryInfo(b Backend) (total, free int64, known bool) {
 // free-memory probe).
 func FitsOnDevice(b Backend, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
 	total, free, known := DeviceMemoryInfo(b)
-	if !known || total <= 0 {
-		return FitUnknown, 0
-	}
-	budget := free
-	if budget < 0 { // FreeUnknown -> fall back to the total ceiling, conservatively
-		budget = total
-	}
-	if headroom > 0 && headroom < 1 {
-		budget = int64(float64(budget) * (1 - headroom))
-	}
-	if wantBytes <= budget {
-		return FitOK, budget
-	}
-	return FitTooBig, budget
+	return fitsWithinReportedMemory(total, free, known, wantBytes, headroom)
+}
+
+// FitsOnHost answers the same fit question for host-scoped demands. It is intentionally
+// opt-in and fail-open: a backend must implement HostCapacity and advertise
+// Caps().HostCapacityProbe before host-scoped offload/DDR bytes can refuse a plan.
+func FitsOnHost(b Backend, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
+	total, free, known := HostMemoryInfo(b)
+	return fitsWithinReportedMemory(total, free, known, wantBytes, headroom)
 }
 
 // FitsMemoryPlan is FitsOnDevice for a classed memory plan. The verdict is still
-// computed against the backend's single reported capacity today, but the demand
-// classes survive into the FitError and operator surfaces instead of being lost.
+// fail-open, but it now checks the demand's scope: device-scoped bytes against the device
+// probe, and host-scoped bytes against the host probe only when the backend advertises one.
+// Demand classes survive into the FitError and operator surfaces instead of being lost.
 func FitsMemoryPlan(b Backend, plan MemoryPlan, headroom float64) (verdict FitVerdict, avail int64) {
-	return FitsOnDevice(b, plan.DeviceTotal(), headroom)
+	_, verdict, avail, _ = fitsMemoryPlanByScope(b, plan, headroom)
+	return verdict, avail
+}
+
+func fitsMemoryPlanByScope(b Backend, plan MemoryPlan, headroom float64) (scope MemoryScope, verdict FitVerdict, avail int64, want int64) {
+	deviceWant := plan.DeviceTotal()
+	deviceVerdict, deviceAvail := FitsOnDevice(b, deviceWant, headroom)
+	if deviceVerdict == FitTooBig {
+		return MemoryScopeDevice, deviceVerdict, deviceAvail, deviceWant
+	}
+	hostWant := plan.HostTotal()
+	hostVerdict, hostAvail := FitsOnHost(b, hostWant, headroom)
+	if hostVerdict == FitTooBig {
+		return MemoryScopeHost, hostVerdict, hostAvail, hostWant
+	}
+	if deviceVerdict == FitUnknown {
+		return MemoryScopeDevice, deviceVerdict, deviceAvail, deviceWant
+	}
+	if hostVerdict == FitUnknown {
+		return MemoryScopeHost, hostVerdict, hostAvail, hostWant
+	}
+	return MemoryScopeDevice, FitOK, deviceAvail, deviceWant
 }
 
 // FitError is the typed refusal RefuseIfTooBig returns when a capacity-reporting backend
@@ -405,9 +483,10 @@ func FitsMemoryPlan(b Backend, plan MemoryPlan, headroom float64) (verdict FitVe
 // and-capacity.md Plank 5).
 type FitError struct {
 	Verdict FitVerdict // always FitTooBig
-	Want    int64      // bytes the caller asked to place
+	Want    int64      // bytes the caller asked to place in Scope
 	Avail   int64      // headroom-adjusted budget the verdict was computed against
 	Demands MemoryPlan // optional classed breakdown of Want
+	Scope   MemoryScope
 }
 
 func (e *FitError) Error() string {
@@ -415,8 +494,12 @@ func (e *FitError) Error() string {
 	if len(e.Demands) > 0 {
 		subject = "memory plan " + memoryPlanSummary(e.Demands)
 	}
-	return "compute: " + subject + " needs " + memSize(e.Want) + ", device has " + memSize(e.Avail) +
-		" (FitTooBig: request exceeds the reported device capacity; capacity pre-check turned a would-be OOM into a typed refusal)"
+	scope := e.Scope
+	if scope == "" {
+		scope = MemoryScopeDevice
+	}
+	return "compute: " + subject + " needs " + memSize(e.Want) + ", " + string(scope) + " has " + memSize(e.Avail) +
+		" (FitTooBig: request exceeds the reported " + string(scope) + " capacity; capacity pre-check turned a would-be OOM into a typed refusal)"
 }
 
 func memoryPlanSummary(plan MemoryPlan) string {
@@ -502,7 +585,7 @@ func RefuseIfTooBig(b Backend, wantBytes int64, headroom float64) error {
 	if verdict != FitTooBig {
 		return nil
 	}
-	return &FitError{Verdict: verdict, Want: wantBytes, Avail: avail}
+	return &FitError{Verdict: verdict, Want: wantBytes, Avail: avail, Scope: MemoryScopeDevice}
 }
 
 // RefuseMemoryPlanIfTooBig is the class-preserving form of RefuseIfTooBig. It
@@ -510,11 +593,11 @@ func RefuseIfTooBig(b Backend, wantBytes int64, headroom float64) error {
 // still fail open. The error carries both the total bytes and the original classed
 // plan so a caller can render targeted remedies instead of a generic OOM.
 func RefuseMemoryPlanIfTooBig(b Backend, plan MemoryPlan, headroom float64) error {
-	verdict, avail := FitsMemoryPlan(b, plan, headroom)
+	scope, verdict, avail, want := fitsMemoryPlanByScope(b, plan, headroom)
 	if verdict != FitTooBig {
 		return nil
 	}
-	return &FitError{Verdict: verdict, Want: plan.DeviceTotal(), Avail: avail, Demands: cloneMemoryPlan(plan)}
+	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: scope}
 }
 
 // DeviceAllocError is the typed form of a RUNTIME in-kernel device allocation failure — the

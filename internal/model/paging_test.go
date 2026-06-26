@@ -96,3 +96,16 @@ func TestPagedKernelLeavesNoResidentFootprint(t *testing.T) {
 		t.Fatalf("weightHAL did not populate halW (%d), expected a resident weight — the paging contrast is meaningless", len(s.halW))
 	}
 }
+
+func TestPagedKernelPageInUsesOffloadClass(t *testing.T) {
+	be := &uploadClassRecordingBackend{Backend: compute.Default()}
+	pk := newPagedKernel(be)
+
+	const out, in = 2, 3
+	x := compute.NewF32(compute.Default(), []int{in}, []float32{1, 2, 3})
+	_ = pk.matMul([]int{out, in}, []float32{1, 0, 0, 1, 1, -1}, x)
+
+	if !recordedUploadClass(be, compute.MemoryOffload, "paged-weight") {
+		t.Fatalf("paged weight upload classes/sites = %v/%v, want offload/paged-weight", be.classes, be.sites)
+	}
+}

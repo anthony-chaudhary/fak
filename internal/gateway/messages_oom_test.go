@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // upstreamErrorStatus must turn an in-kernel device OOM into a specific, actionable client
@@ -15,7 +16,7 @@ import (
 
 func TestUpstreamErrorStatus_InKernelOOMIsActionable(t *testing.T) {
 	const bytes = 4 << 30
-	status, code, msg := upstreamErrorStatus(&agent.InKernelOOMError{Bytes: bytes})
+	status, code, msg := upstreamErrorStatus(&agent.InKernelOOMError{Bytes: bytes, Class: compute.MemoryKVCache})
 
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("in-kernel OOM should be 503 (retryable local exhaustion), got %d", status)
@@ -26,6 +27,9 @@ func TestUpstreamErrorStatus_InKernelOOMIsActionable(t *testing.T) {
 	// The message must be actionable: name the failure AND at least one concrete remedy.
 	if !strings.Contains(msg, "out of memory") {
 		t.Fatalf("message does not name the failure: %q", msg)
+	}
+	if !strings.Contains(msg, "kv cache") {
+		t.Fatalf("message does not surface the memory class: %q", msg)
 	}
 	if !strings.Contains(msg, "smaller model") && !strings.Contains(msg, "reduce the prompt") {
 		t.Fatalf("message is not actionable (no remedy): %q", msg)

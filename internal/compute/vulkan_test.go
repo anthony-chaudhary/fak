@@ -71,6 +71,17 @@ func TestVulkanResourceCapCheckNamesOffendingBuffer(t *testing.T) {
 func TestVulkanResourceCapsAreDiscovered(t *testing.T) {
 	v := vk(t)
 	maxBufferBytes, maxStorageBufferRange, maxMemoryAllocationSize := v.VulkanDebugResourceCaps()
+	total, free, known := DeviceMemoryInfo(v)
+	if !known || total <= 0 || free != FreeUnknown {
+		t.Fatalf("DeviceMemoryInfo = total=%d free=%d known=%v, want positive total/free unknown/known", total, free, known)
+	}
+	hostTotal, hostFree, hostKnown := HostMemoryInfo(v)
+	if !hostKnown || hostTotal <= 0 {
+		t.Fatalf("HostMemoryInfo = total=%d free=%d known=%v, want positive host total/known", hostTotal, hostFree, hostKnown)
+	}
+	if hostFree != FreeUnknown && (hostFree < 0 || hostFree > hostTotal) {
+		t.Fatalf("HostMemoryInfo free=%d outside [0,total=%d]", hostFree, hostTotal)
+	}
 	if maxStorageBufferRange <= 0 {
 		t.Fatalf("maxStorageBufferRange=%d, want positive", maxStorageBufferRange)
 	}
@@ -81,6 +92,24 @@ func TestVulkanResourceCapsAreDiscovered(t *testing.T) {
 	if maxBufferBytes != want {
 		t.Fatalf("maxBufferBytes=%d, want effective cap %d (storage=%d allocation=%d)",
 			maxBufferBytes, want, maxStorageBufferRange, maxMemoryAllocationSize)
+	}
+}
+
+func TestVulkanAdvertisesDeviceCapacityWhenHeapTotalKnown(t *testing.T) {
+	v := &vulkanBackend{totalMem: 24 << 30}
+	if !v.Caps().CapacityProbe {
+		t.Fatal("positive Vulkan device-local heap total must advertise CapacityProbe")
+	}
+	total, free, known := DeviceMemoryInfo(v)
+	if !known || total != 24<<30 || free != FreeUnknown {
+		t.Fatalf("DeviceMemoryInfo = total=%d free=%d known=%v, want 24GiB/free unknown/known", total, free, known)
+	}
+	v.totalMem = 0
+	if v.Caps().CapacityProbe {
+		t.Fatal("zero Vulkan heap total must not advertise CapacityProbe")
+	}
+	if _, _, known := DeviceMemoryInfo(v); known {
+		t.Fatal("zero Vulkan heap total must fail open as unknown capacity")
 	}
 }
 

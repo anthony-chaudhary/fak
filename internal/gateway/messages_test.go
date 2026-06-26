@@ -350,6 +350,62 @@ func TestAnthropicMessagesSSEPingsDuringSlowPlanner(t *testing.T) {
 	}
 }
 
+func TestAnthropicMessagesPlannerLivePingsBeforeFirstUpstreamToken(t *testing.T) {
+	old := anthropicStreamPingInterval
+	anthropicStreamPingInterval = 5 * time.Millisecond
+	defer func() { anthropicStreamPingInterval = old }()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Stream bool `json:"stream"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Errorf("decode upstream request: %v", err)
+		}
+		if !req.Stream {
+			t.Errorf("upstream request stream=false, want true: %s", raw)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(40 * time.Millisecond)
+		_, _ = io.WriteString(w,
+			"data: {\"model\":\"served-m\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n"+
+				"data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\n"+
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":1,\"total_tokens\":5}}\n\n"+
+				"data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	srv := newTestServer(t)
+	srv.planner = agent.NewHTTPPlanner(upstream.URL, "served-m", "")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json",
+		bytes.NewReader([]byte(`{"model":"served-m","stream":true,"messages":[{"role":"user","content":"go"}]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"event: message_start", "event: ping", "event: content_block_delta", "event: message_stop"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("planner-live stream missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Index(body, "event: ping") > strings.Index(body, "event: content_block_delta") {
+		t.Fatalf("ping must arrive before first upstream content:\n%s", body)
+	}
+}
+
 func TestAnthropicCountTokens(t *testing.T) {
 	srv := newTestServer(t)
 	ts := httptest.NewServer(srv.Handler())

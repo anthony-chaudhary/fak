@@ -70,6 +70,22 @@ type InKernelPlanner struct {
 	mu   sync.Mutex
 	tree *radixkv.Tree
 
+	// devMu serializes the WHOLE device forward pass (Prefill + the decode loop) when a
+	// backend is wired. The CUDA backend is single-stream by construction (one g_stream, one
+	// cuBLAS handle, a shared size-bucketed device free-list) and its Go-side cudaMu makes
+	// each INDIVIDUAL op atomic — but NOT a whole multi-op forward. Two Complete calls driven
+	// concurrently by the gateway would interleave their per-token op sequences on that shared
+	// device state and stomp each other's activation/KV buffers, faulting the kernel with an
+	// illegal memory access that then poisons the CUDA context for every later request until a
+	// process restart (observed live on an L4: a 2-way concurrent burst took the GPU serve down
+	// with thousands of sticky cuda_kernels.cu illegal-access errors). The radix-reuse path
+	// (backend == nil) is already CPU-session-local per turn and guards only its shared tree
+	// with p.mu, so devMu engages ONLY on the backend path and leaves the CPU path untouched.
+	// This serializes concurrent device requests into safe queuing — correct for a single-stream
+	// device — instead of crashing; batched multi-user device decode is the separate throughput
+	// follow-up (internal/model/batch.go), not a correctness fix.
+	devMu sync.Mutex
+
 	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
 	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a
 	// real model.KVCache.Evict of the result's K/V span over a fresh model.Session built
@@ -130,17 +146,27 @@ func (p *InKernelPlanner) Model() string { return p.modelID }
 // the token-ID <|im_end|>/EOS stops). All five per-request sampling controls the
 // HTTP wires forward are now honored on the in-kernel path too.
 // InKernelOOMError is the agent-level, recovered form of an in-kernel device allocation
-// failure (a *compute.DeviceAllocError that unwound out of the CUDA decode path). It is
+// failure (a *compute.DeviceAllocError that unwound out of a device decode path). It is
 // in-kernel BY CONSTRUCTION — only the in-kernel planner / compute backend can produce it,
 // never a real upstream — so the gateway can safely render a specific, actionable client
 // message for it (an over-large prompt on a small GPU) without any risk of leaking upstream
-// content. Bytes is the device allocation that failed.
+// content. Bytes is the device allocation that failed; Class and Site preserve the allocator
+// category for operator visibility without exposing model/provider content.
 type InKernelOOMError struct {
 	Bytes int
+	Class compute.MemoryClass
+	Site  string
 }
 
 func (e *InKernelOOMError) Error() string {
-	return fmt.Sprintf("in-kernel GPU out of memory (device allocation of %d bytes failed)", e.Bytes)
+	class := e.Class
+	if class == "" {
+		class = compute.MemoryUnknown
+	}
+	if class == compute.MemoryUnknown {
+		return fmt.Sprintf("in-kernel GPU out of memory (device allocation of %d bytes failed)", e.Bytes)
+	}
+	return fmt.Sprintf("in-kernel GPU out of memory (%s allocation of %d bytes failed)", class, e.Bytes)
 }
 
 // recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
@@ -152,7 +178,7 @@ func (e *InKernelOOMError) Error() string {
 func recoverDevicePanic(r any) (err error, handled bool) {
 	var dae *compute.DeviceAllocError
 	if e, ok := r.(error); ok && errors.As(e, &dae) {
-		return &InKernelOOMError{Bytes: dae.Bytes}, true
+		return &InKernelOOMError{Bytes: dae.Bytes, Class: dae.DemandClass(), Site: dae.Site}, true
 	}
 	return nil, false
 }
@@ -221,6 +247,15 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 		return false
 	}
 
+	// Serialize the entire device forward pass: the single-stream backend cannot run two
+	// forwards at once without the concurrent op-streams corrupting shared device buffers
+	// (see devMu). On the CPU path (backend == nil) this is a no-op hold — generateReused
+	// owns a per-turn session there and guards the shared radix tree with p.mu itself — so
+	// the lock costs nothing and the reuse path is unchanged. Held across Prefill + decode.
+	if p.backend != nil {
+		p.devMu.Lock()
+		defer p.devMu.Unlock()
+	}
 	gen, promptTok, matched, prefillS, decodeS, stopped := p.generateReused(ids, maxNew, temp, topP, topK, stops, emit)
 	// finishReason is honest about WHY decode ended: "stop" when a token-ID stop or a
 	// per-request Stop sequence fired, "length" when maxNew was the only limit hit.

@@ -18,6 +18,7 @@ import "C"
 import (
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -45,6 +46,7 @@ func init() {
 		name:                    "vulkan",
 		tier:                    tier + ":" + C.GoString(&name[0]),
 		haveQ8:                  C.fvk_have_q8() != 0,
+		totalMem:                vulkanCapInt64(C.fvk_total_device_local_memory()),
 		budgetBytes:             vulkanBudgetBytes(),
 		maxBufferBytes:          vulkanCapInt64(C.fvk_max_buffer_bytes()),
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
@@ -157,6 +159,7 @@ type vulkanBackend struct {
 	// effective STORAGE buffer ceiling: min(maxStorageBufferRange, maxMemoryAllocationSize)
 	// when both are known. It does not solve chunking, but it turns a raw driver allocation
 	// failure into a deterministic refusal that names the over-cap buffer (#362).
+	totalMem                int64
 	maxBufferBytes          int64
 	maxStorageBufferRange   int64
 	maxMemoryAllocationSize int64
@@ -192,7 +195,21 @@ func (v *vulkanBackend) Trim() {
 func (v *vulkanBackend) Name() string            { return v.name }
 func (v *vulkanBackend) Tier() string            { return v.tier }
 func (v *vulkanBackend) Class() CorrectnessClass { return Approx }
-func (v *vulkanBackend) Caps() Caps              { return Caps{DeviceMemory: true, UploadDtype: v.haveQ8} }
+func (v *vulkanBackend) Caps() Caps {
+	_, _, hostKnown := hostSystemMemory()
+	return Caps{DeviceMemory: true, UploadDtype: v.haveQ8, CapacityProbe: v.totalMem > 0, HostCapacityProbe: hostKnown}
+}
+
+// DeviceMemory reports the Vulkan device-local heap total. Vulkan exposes heap size, not a
+// cheap cross-vendor free-memory query in the core API, so free stays unknown just like the
+// CUDA total-only producer. That still catches a memory plan that cannot fit the device at all.
+func (v *vulkanBackend) DeviceMemory() (total, free int64, known bool) {
+	return v.totalMem, FreeUnknown, v.totalMem > 0
+}
+
+func (v *vulkanBackend) HostMemory() (total, free int64, known bool) {
+	return hostSystemMemory()
+}
 
 func (v *vulkanBackend) BeginBatch() {
 	vulkanMu.Lock()
@@ -222,6 +239,10 @@ func (v *vulkanBackend) dalloc(nbytes int) *vulkanBuf {
 }
 
 func (v *vulkanBackend) dallocFor(nbytes int, what string) *vulkanBuf {
+	return v.dallocForClass(nbytes, memoryClassForVulkanAlloc(what), what)
+}
+
+func (v *vulkanBackend) dallocForClass(nbytes int, class MemoryClass, what string) *vulkanBuf {
 	v.checkResourceCap(nbytes, what)
 	p := C.fvk_malloc(C.size_t(nbytes))
 	if p == nil {
@@ -232,7 +253,7 @@ func (v *vulkanBackend) dallocFor(nbytes int, what string) *vulkanBuf {
 		// instead of the old hard panic. A nil here too is a genuine OOM with nowhere left.
 		p = C.fvk_malloc_hostvis(C.size_t(nbytes))
 		if p == nil {
-			panic("compute: vulkan device allocation failed (device-local and host-visible both exhausted)")
+			panic(&DeviceAllocError{Bytes: nbytes, Site: "vulkan:" + what, Class: class})
 		}
 	}
 	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes}
@@ -248,7 +269,7 @@ func (v *vulkanBackend) dallocHostVisFor(nbytes int, what string) *vulkanBuf {
 	v.checkResourceCap(nbytes, what)
 	p := C.fvk_malloc_hostvis(C.size_t(nbytes))
 	if p == nil {
-		panic("compute: vulkan host-visible allocation failed")
+		panic(&DeviceAllocError{Bytes: nbytes, Site: "vulkan:" + what, Class: MemoryOffload})
 	}
 	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes}
 }
@@ -266,9 +287,32 @@ func (v *vulkanBackend) dallocWeightFor(nbytes int, what string) *vulkanBuf {
 		v.accountWeightPlacement(buf, nbytes)
 		return buf
 	}
-	buf := v.dallocFor(nbytes, what)
+	buf := v.dallocForClass(nbytes, MemoryWeights, what)
 	v.accountWeightPlacement(buf, nbytes)
 	return buf
+}
+
+func (v *vulkanBackend) dallocKVFor(nbytes int, what string) *vulkanBuf {
+	if what == "" {
+		what = "KV cache buffer"
+	}
+	return v.dallocForClass(nbytes, MemoryKVCache, what)
+}
+
+func memoryClassForVulkanAlloc(what string) MemoryClass {
+	what = strings.ToLower(what)
+	switch {
+	case strings.Contains(what, "kv"):
+		return MemoryKVCache
+	case strings.Contains(what, "transient"):
+		return MemoryScratchpad
+	case strings.Contains(what, "weight"):
+		return MemoryWeights
+	case strings.Contains(what, "host-visible"):
+		return MemoryOffload
+	default:
+		return MemoryUnknown
+	}
 }
 
 func (v *vulkanBackend) accountWeightPlacement(buf *vulkanBuf, nbytes int) {
@@ -355,6 +399,20 @@ func (v *vulkanBackend) devTr(shape []int, dt Dtype) (Tensor, *vulkanBuf) {
 // Upload copies host weight data to the device: a Q8_0 tensor (or an F32 one narrowed
 // to Q8_0 via as) goes through the int8 code+scale path, otherwise F32 is sent H2D as-is.
 func (v *vulkanBackend) Upload(t Tensor, as Dtype) Tensor {
+	return v.uploadClass(t, as, MemoryWeights, "F32 weight tensor "+shapeText(t.Shape))
+}
+
+func (v *vulkanBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, what string) Tensor {
+	if class == "" {
+		class = MemoryUnknown
+	}
+	if what == "" {
+		what = "F32 " + string(class) + " tensor " + shapeText(t.Shape)
+	}
+	return v.uploadClass(t, as, class, what)
+}
+
+func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what string) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	hb, ok := t.buf.(HostBuffer)
@@ -371,12 +429,24 @@ func (v *vulkanBackend) Upload(t Tensor, as Dtype) Tensor {
 		panic("compute: vulkan Upload supports only F32 today (got " + t.Dtype.String() + ")")
 	}
 	f := hb.F32()
+	if class != MemoryWeights {
+		if as != F32 {
+			panic("compute: vulkan classed Upload supports only F32 activation/runtime uploads")
+		}
+		buf := v.dallocForClass(t.Numel()*F32.Bytes(), class, what)
+		out := makeTensor(v, F32, RowMajor, append([]int(nil), t.Shape...), nil, buf)
+		if len(f) > 0 {
+			C.fvk_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+		}
+		return out
+	}
 	if as == Q8_0 {
 		q := QuantizeQ8(Default(), t.Shape, f, 32)
 		qh := q.buf.(HostBuffer)
 		return v.uploadQ8Locked(q.Shape, qh.I8(), q.Quant.Scale, q.Quant.Block)
 	}
-	out, buf := v.dev(t.Shape, F32)
+	buf := v.dallocForClass(t.Numel()*F32.Bytes(), MemoryWeights, what)
+	out := makeTensor(v, F32, RowMajor, append([]int(nil), t.Shape...), nil, buf)
 	if len(f) > 0 {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
 	}
@@ -416,7 +486,7 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 	// stay fast even when the codes spill host-visible.
 	shapeName := shapeText(shape)
 	codeBuf := v.dallocWeightFor(len(codes), "Q8_0 weight code buffer "+shapeName)
-	scaleBuf := v.dallocFor(len(scales)*F32.Bytes(), "Q8_0 weight scale buffer "+shapeName)
+	scaleBuf := v.dallocForClass(len(scales)*F32.Bytes(), MemoryWeights, "Q8_0 weight scale buffer "+shapeName)
 	if len(codes) > 0 {
 		C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
 	}
@@ -448,7 +518,7 @@ func (v *vulkanBackend) uploadQ8ChunksLocked(shape []int, codes []int8, scales [
 		codeLabel := "Q8_0 weight code chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
 		scaleLabel := "Q8_0 weight scale chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
 		codeBuf := v.dallocWeightFor(codeEnd-codeStart, codeLabel)
-		scaleBuf := v.dallocFor((scaleEnd-scaleStart)*F32.Bytes(), scaleLabel)
+		scaleBuf := v.dallocForClass((scaleEnd-scaleStart)*F32.Bytes(), MemoryWeights, scaleLabel)
 		if codeEnd > codeStart {
 			C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[codeStart]), C.size_t(codeEnd-codeStart))
 		}
@@ -1087,7 +1157,7 @@ type vslice struct {
 func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int, what string) {
 	if d.len+nFloats > d.cap {
 		ncap := d.cap*2 + nFloats
-		np := v.dallocFor(ncap*F32.Bytes(), what).ptr
+		np := v.dallocKVFor(ncap*F32.Bytes(), what).ptr
 		if d.len > 0 {
 			C.fvk_d2d(unsafe.Pointer(np), d.ptr, C.size_t(d.len*4))
 		}
@@ -1221,7 +1291,7 @@ func (k *vulkanKV) Clone() KVStore {
 		if src.len == 0 {
 			return
 		}
-		np := k.be.dallocFor(src.len*F32.Bytes(), what).ptr
+		np := k.be.dallocKVFor(src.len*F32.Bytes(), what).ptr
 		C.fvk_d2d(unsafe.Pointer(np), src.ptr, C.size_t(src.len*4))
 		dst.ptr, dst.len, dst.cap = unsafe.Pointer(np), src.len, src.len
 	}
@@ -1268,7 +1338,7 @@ func (k *vulkanKV) writeVS(d *vslice, data []float32, what string) {
 		if d.ptr != nil {
 			C.fvk_free(d.ptr)
 		}
-		d.ptr = k.be.dallocFor(need*F32.Bytes(), what).ptr
+		d.ptr = k.be.dallocKVFor(need*F32.Bytes(), what).ptr
 		d.cap = need
 	}
 	if need > 0 {

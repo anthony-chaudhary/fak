@@ -5,12 +5,24 @@ description: "fak's HAL lifts seven hardware-SHAPE assumptions; finite device CA
 
 # How fak interfaces with hardware limits — capacity is the eighth assumption
 
-> **Status:** this is a *design* explainer, not a shipped feature. It names a real,
-> cross-cutting gap and the seam that starts closing it (`compute.DeviceCapacity`, shipped
-> with this note), and it credits the capacity mechanisms that already exist so the picture
-> stays honest. Nothing here claims that OOM is solved, that a span spills under live
-> pressure, or that a model that does not fit is refused on the live path yet. Those are
-> tracked planks, listed at the end.
+> **Status:** this is an incremental bridge, not a finished OOM subsystem. `compute`
+> now exposes a classed capacity fit contract (`DeviceCapacity`, optional `HostCapacity`,
+> `MemoryPlan`), the
+> policy plane has a real device-pressure seam, the engine has a demote/spill executor,
+> and `fak serve --gguf --backend` refuses a known-too-large GGUF before the device load
+> allocates. For quantized-upload backends that fit check is mixed precision: lean-Q8
+> resident weights plus f32 HAL KV, activation, and scratch estimates; f32 weights are now
+> only the fallback for backends that cannot consume quantized uploads yet.
+> `--cpu-offload-experts` uses a split plan: dense/router/attention weights plus KV and HAL
+> transients consume device capacity while expert weights are host-scoped offload bytes.
+> Host-scoped offload/DDR bytes can refuse when a native GPU backend explicitly advertises
+> `HostCapacityProbe` from the OS host-memory probe; otherwise they stay visible and fail open.
+> Runtime device allocation failures now recover as a typed,
+> classed in-kernel OOM on the served path and publish classed counters on `/metrics`
+> plus last-site drilldown on `/debug/vars`. Nothing here claims that allocator OOM can
+> already spill/retry, that the serving loop demotes KV under live pressure, or that
+> every model loader has a complete memory plan yet. Those remain tracked
+> planks below.
 
 *Who this is for:* contributors reasoning about what fak does when it runs out of memory —
 on a GPU, on the host, across a tier hierarchy. Prerequisites: the
@@ -73,16 +85,16 @@ This is where bytes are actually allocated and actually run out: `cudaBackend.da
 - **CUDA** (`cuda.go: dalloc`) — it now falls back from `cudaMalloc` to
   `cudaMallocManaged`, and `FAK_GPU_BUDGET_MB` deliberately sends over-budget explicit
   weight uploads to managed memory before a device-local OOM.
-- **Metal** (`metal.go: dalloc`) — `panic("compute: metal device allocation failed")`.
-  No capacity check before the alloc, no fallback, no typed error.
+- **Metal** (`metal.go: dalloc`) — raises a typed `DeviceAllocError`, but still has
+  no capacity check before the alloc and no fallback.
 - **Vulkan** (`vulkan.go: dalloc`) — it falls back to a host-visible allocation, and only
-  panics if *both* device-local and host-visible are exhausted.
+  raises a typed `DeviceAllocError` if *both* device-local and host-visible are exhausted.
 
-And the capacity *information* the physical plane has, it throws away. `fcuda_init` probes
-`p.totalGlobalMem` and returns it; `cuda.go: init` read it into a local and **discarded it**
-(this note's change keeps it). `Caps.DeviceMemory` is a boolean — it means "resident tensors
-are not host-addressable," a *shape* fact — not "the device has N bytes." Nothing in the
-`Backend` interface lets a caller ask "will this fit?"
+Historically the capacity *information* the physical plane had was not part of the HAL
+contract: CUDA's `totalGlobalMem` was read and discarded, and Vulkan's device-local heap
+size stayed behind the shim. `compute.DeviceCapacity` is the typed way out: `Caps.DeviceMemory`
+keeps its old shape meaning ("resident tensors are not host-addressable"), while
+`Caps.CapacityProbe` plus `DeviceMemory()` says "this backend can report N bytes."
 
 ### The gap: the planes meet only at the meter, never at the control
 
@@ -124,10 +136,10 @@ Stated in the form the portability explainer uses for the first seven:
 
 | # | Assumption | Where it lives today | What it shuts out |
 |---|---|---|---|
-| 8 | **uniform / infinite capacity** — a backend can hold whatever it is handed; "out of memory" is a process abort, not a value | `cuda.go`/`metal.go` `dalloc` panic; `Caps.DeviceMemory` is a shape bool; `cuda.go: init` discards `totalGlobalMem` | any device too small for the model — i.e. every real serving target above its faithful ceiling |
+| 8 | **uniform / infinite capacity** — a backend can hold whatever it is handed; "out of memory" is a process abort, not a value | legacy raw `dalloc` panics; `Caps.DeviceMemory` is a shape bool, not a capacity report; unprobed backends still fail open | any device too small for the model — i.e. every real serving target above its faithful ceiling |
 
 Lifting it follows the same discipline as the other seven: **neutralize it in the type
-system first**, even though only one backend can satisfy it today. That is what
+system first**, even though only some backends can satisfy it today. That is what
 `compute.DeviceCapacity` does (§4). The portability doc's own framing applies verbatim — the
 contract "already assumes none of [the assumptions], even though only the CPU reference is
 implemented today." Capacity is now one more capability a backend *may* report, discovered the
@@ -136,26 +148,46 @@ core path failing **open** when it is absent so the portable floor is never bloc
 
 ## 4. The bridge, plank by plank
 
-The fix is not one change; it is a bridge with several planks. Only the first ships with this
-note. The rest are named here so the deferral is tracked, not forgotten.
+The fix is not one change; it is a bridge with several planks. Several planks now ship, and
+the remaining ones are named here so the deferral is tracked, not forgotten.
 
 **Plank 1 — backends REPORT their ceiling (`compute.DeviceCapacity`). _Shipped._**
 A backend that can probe its own memory implements `DeviceMemory() (total, free int64, known
 bool)`. `DeviceMemoryInfo(b)` and `FitsOnDevice(b, wantBytes, headroom)` let any caller ask
 without knowing the concrete backend, and they **fail open**: a backend that cannot answer
 (the pure-Go `cpu-ref` floor, a wasm target) reports `known=false`, and the fit check returns
-`FitUnknown` ("proceed"), never `FitTooBig`. The `cuda` backend is the first producer — it now
-*keeps* `totalGlobalMem` and reports it (free is `FreeUnknown` until a `cudaMemGetInfo` query
-is wired, so `FitsOnDevice` checks against the total ceiling, which already catches a model
-that cannot fit the whole device). This is the report half of the bridge: the wire by which a
-real backend's capacity can one day feed `cachemeta.TierPressure` instead of placeholder
-profiles.
+`FitUnknown` ("proceed"), never `FitTooBig`. CUDA now *keeps* `totalGlobalMem` and reports
+it, and the Windows Vulkan backend reports the sum of its device-local heaps; both leave
+free memory as `FreeUnknown` until a backend-specific free-memory query is wired, so
+`FitsOnDevice` checks against the total ceiling and catches a model that cannot fit the
+whole device. This is the report half of the bridge: the wire by which a real backend's
+capacity can feed `cachemeta.TierPressure` instead of placeholder profiles. The same
+contract now has a classed form: `MemoryPlan` / `MemoryDemand` keeps
+weights, KV cache, DDR cache, offload staging, activations, and scratchpad bytes distinct,
+while `FitsMemoryPlan` / `RefuseMemoryPlanIfTooBig` still fail open on unknown capacity and
+carry the class breakdown into the typed `FitError`. Device-scoped demands are checked
+against `DeviceCapacity`; host-scoped demands are checked against optional `HostCapacity`
+only when `Caps.HostCapacityProbe` is set, otherwise those host bytes remain visible but do
+not refuse. The native GPU backends now advertise that host side when the stdlib OS probe
+succeeds: Windows uses `GlobalMemoryStatusEx`, Linux uses `sysinfo`, and Darwin reports the
+physical-memory ceiling via `hw.memsize` with `free=FreeUnknown`.
 
-**Plank 2 — OOM becomes a typed value, not a panic.** `dalloc` should return a typed
-allocation fault — the exact shape `abi.KVResidencyFault` already models for the off-box KV
-direction ("a failed restore is NEVER a silent recompute … typed, never a hang"). A caller
-that gets a fault can spill, evict, or refuse with a sizing message. Today it gets a
-stack trace.
+**Plank 2 — OOM becomes a typed value, not a panic. _Partially shipped._** `dalloc` should
+return a typed allocation fault — the exact shape `abi.KVResidencyFault` already models for
+the off-box KV direction ("a failed restore is NEVER a silent recompute … typed, never a
+hang"). The shipped slice is the in-kernel served path: `compute.DeviceAllocError` carries
+the failed byte count, allocator site, and memory class (`weights`, `kv_cache`, `offload`,
+`scratchpad`, `activation`, or `unknown`); CUDA, Metal, and Vulkan allocation choke points
+raise it instead of a raw string panic where the backend allocator returns nil;
+`agent.InKernelPlanner` recovers only that typed allocation fault; and the gateway maps it
+to a 503 `in_kernel_oom` with a client-safe, class-visible remedy. The visibility slice is
+also live: `/metrics` publishes `fak_gateway_in_kernel_oom_total`,
+`fak_gateway_in_kernel_oom_failed_bytes_total`, and
+`fak_gateway_in_kernel_oom_last_failed_bytes` by memory class, while `/debug/vars` includes
+the last allocator site for drilldown without turning dynamic sites into Prometheus labels.
+Honest fences: this is still panic/recover below the HAL, not ordinary `error` returns;
+generic allocation sites can still be `unknown`; resource-cap validation panics are not OOM;
+and no caller yet spills, demotes, or retries based on the class.
 
 **Plank 3 — feed real pressure into the policy plane. _Shipped_ (#707).**
 `internal/engine.PlanPlacementForDevice` is the report→policy wire: it derives a live
@@ -165,9 +197,9 @@ device memory via `compute.DeviceMemoryInfo(b)`, folds them into the request, an
 `DefaultTierProfiles`' representative numbers and the demo's hand-injected `TierPressure`. It
 **fails open**: a backend that cannot probe (the `cpu-ref` floor, a wasm target;
 `known=false`) contributes no pressure and no capacity override, so the profile default
-stands and no path that works today regresses. While the `cuda` producer reports `total` but
-not `free` (the `cudaMemGetInfo` follow-up, #363), HBM pressure derives from `total` vs fak's
-tracked-resident bytes. Witness: `go test ./internal/engine -run TestPlanPlacementForDevice`
+stands and no path that works today regresses. While the CUDA/Vulkan producers report `total`
+but not `free` (the `cudaMemGetInfo` / backend free-memory follow-ups), HBM pressure derives
+from `total` vs fak's tracked-resident bytes. Witness: `go test ./internal/engine -run TestPlanPlacementForDevice`
 (a full device flips a hot prefix from `keep` → `demote`; `cpu-ref` is unchanged). What
 remains is the serving loop CALLING this wire per pressured entry and routing the resulting
 demote through the Plank-4 adapter.
@@ -188,11 +220,32 @@ live capacity pressure; this adapter is the demote/spill executor that consumes 
 placement directive. What remains is feeding it LIVE pressure (Plank 3) and wiring it
 into the serving loop.
 
-**Plank 5 — a load-time fit pre-check.** `FitsOnDevice` before the `make`/`append` in the
-model loaders (`model: Load`, `LoadSafetensors`, `ggufload.LoadModel`) turns "OOM panic
-mid-load" into "this needs ~W GB, the device has ~A GB" *before* a byte is allocated. Today
-the Go load paths allocate optimistically; the only fit gate that exists, `tools/memgate.py`,
-is an operator script outside the Go process.
+**Plank 5 — a load-time fit pre-check. _Partially shipped._** `FitsOnDevice` before the
+`make`/`append` in the model loaders (`model: Load`, `LoadSafetensors`, `ggufload.LoadModel`)
+turns "OOM panic mid-load" into "this needs ~W GB, the device has ~A GB" *before* a byte is
+allocated. The shipped slice is the GGUF path: `ggufload.WeightSource` can estimate the raw
+payload plan (`EstimateLoadMemoryPlan`) and the f32-resident plan used by `LoadModel`
+(`EstimateF32LoadMemoryPlan`) from the header, and `FitOnDevice` / `FitF32OnDevice` route
+that plan through the classed `compute` refusal. The HAL also exposes
+`EstimateKVStoreMemoryPlan`, which counts the current device KV layout (`Kraw`, `K`, and `V`
+as f32 rows) from `KVConfig` plus a planned token window, and
+`EstimateHALTransientMemoryPlan`, which adds a conservative per-token HAL activation and
+scratchpad estimate from the same model geometry. `fak serve --gguf --backend` now resolves
+the backend before eager model load and, for the non-offload device path, refuses a
+known-too-large classed plan. If the backend advertises quantized upload, the plan uses the
+lean/raw Q8 proxy plus f32 KV, activation, and scratch estimates from the GGUF
+`context_length` (or the smaller `--context-budget-tokens` window); a backend without
+quantized upload falls back to f32-resident weights with the same f32 runtime demands.
+`--cpu-offload-experts` uses the same header-only path but partitions the GGUF tensor
+directory through the runtime offload predicate: dense/router/attention weights stay
+device-scoped, routed/shared experts become host-scoped `offload` demands, and KV plus HAL
+transients stay device-scoped. If a backend also advertises `HostCapacityProbe`, the same
+classed pre-check can reject an expert-offload plan that exceeds reported host capacity; if
+the OS probe is unavailable the host-scoped bytes still fail open. The remaining 15% device
+headroom is still reserved for allocator fragmentation, backend pools, and unmodeled runtime
+uploads. Honest fences: unknown capacity still fails open, host memory is physical/OS memory
+rather than cgroup/container quota, safetensors and generic `model.Load` are not wired yet,
+and runtime upload pre-checks are still allocator-side.
 
 **Plank 6 — the capacity ESCAPE when one device is not enough.** When the model does not fit
 *any* single device, capacity is solved by spreading it: multi-GPU tensor/expert parallelism
@@ -214,7 +267,10 @@ add up to a HAL contract. Crediting them is what keeps the gap claim honest:
 | `cachemeta.PlanPlacement` + `TierPressure` | full demote-not-evict placement policy | wired into `cmd/hwcachedemo`/`cmd/cxlpooldemo` + tests, **not** the live model/serving allocation path |
 | `residency.Manager` + `polymodel.Pool` (`ErrTooLarge`) | a backend-agnostic resident-weight-byte budget with LRU page-out | policy-only; caller-supplied budget, not VRAM-derived; not wired to CUDA/Metal `Upload` |
 | `model/paging.go: pagedKernel` | upload → compute → free, an on-demand page-in primitive | standalone; bit-equal to resident, but not integrated into the live weight HAL |
-| `tools/memgate.py` | an operator pre-flight RAM gate | a Python script outside the Go load path |
+| `engine.CacheEventMetrics` memory-class projection | KV residency events expose `memory_class` alongside `to_tier`: HBM is `kv_cache`, DRAM/NUMA-far/CXL are `ddr_cache`, and Disk/Remote/Provider are `offload`; byte/token breakdowns are exported as `fak_engine_cache_*_breakdown_total` series | visibility only; it does not yet drive spill/retry policy or allocate a DRAM cache |
+| `compute.DeviceAllocError` → `agent.InKernelOOMError` → gateway `in_kernel_oom` + `/metrics` | runtime device allocation failure becomes a typed served 503 with bytes + memory class, counted by class on `/metrics` and drillable by last site on `/debug/vars`; device weight, KV-cache, offload, scratchpad, HAL activation upload, GLM-DSA backend activation, and paged-weight page-in sites carry dedicated classes where the backend knows the purpose | classification and visibility only; no spill/retry policy yet, and ambiguous generic alloc sites stay `unknown` |
+| `ggufload.WeightSource.FitOnDevice` / `FitF32OnDevice` / `FitCPUOffloadExpertsOnDevice` + `compute.EstimateKVStoreMemoryPlan` / `EstimateHALTransientMemoryPlan` | header-only GGUF load refusal before the Go process allocates resident weights, with classed HAL KV-cache, activation, and scratchpad estimates when GGUF config exposes context geometry; expert-offload plans keep host expert bytes visible without counting them against device capacity, and optional `HostCapacity` can refuse known-too-large host-scoped `offload`/`ddr_cache` plans | shipped for GGUF serve's device load paths; quantized-upload backends are explicitly mixed precision (Q8 resident weights, f32 runtime state); f32 weights are only the fallback for backends without quantized upload; host capacity is OS physical memory, not cgroup/container quota; not yet safetensors, generic `model.Load`, upload pre-checks, or backend-specific transient peaks |
+| `tools/memgate.py` | an operator pre-flight RAM gate | still useful outside the Go process, but no longer the only fit gate |
 | `glm52_serve_preflight.py: required_vram_gb` | VRAM-vs-quant fit + per-rank TP shard sizing | models the fit of **external** engines (SGLang/vLLM), not `fak`'s own backends |
 
 Every one is real. None lets the forward loop, or the layer above it, ask the backend it is
@@ -223,15 +279,23 @@ and it is what `DeviceCapacity` begins.
 
 ## 6. Honest boundaries
 
-- This note ships **Plank 1 (backends report their ceiling) and Plank 4 (the engine
-  adapter that executes a demote/spill, #708)**. Neither yet touches the live serving
-  path: Plank 1 enforces nothing on the live path, and Plank 4 executes a placement
-  directive but is not yet driven by live capacity pressure (that is Plank 3).
-- `FitsOnDevice` is a *pre-check*, not an allocator. Nothing yet calls it before a load or an
-  upload; wiring it in is Plank 5.
-- The `cuda` producer reports `total` only; `free` is `FreeUnknown` until `cudaMemGetInfo` is
-  wired, so the check catches "too big for the whole device," not "too big for the current
-  free headroom."
+- This note now covers shipped pieces of **Plank 1 (capacity reporting + classed memory
+  plans), Plank 2 (typed/classed runtime allocation OOM on the served in-kernel path),
+  Plank 3 (real device-pressure planning seam), Plank 4 (the engine adapter that executes
+  a demote/spill, #708), and a GGUF slice of Plank 5 (load-time fit refusal)**.
+- `FitsOnDevice` / `FitsMemoryPlan` are *pre-checks*, not allocators. The live
+  `fak serve --gguf --backend` now calls a GGUF plan before load: Q8/raw weights plus f32
+  HAL KV/activation/scratch estimates on quantized-upload backends, f32 weights plus the
+  same runtime demands on f32-only backends, and a dense/device vs host/expert split for
+  `--cpu-offload-experts`. Host-scoped `offload`/`ddr_cache` bytes are checked only when a
+  backend advertises `HostCapacityProbe` from the OS host-memory probe; without that they
+  remain visible and fail open.
+  Safetensors, generic `model.Load`, runtime upload pre-checks, and backend-specific
+  transient peaks are still unwired.
+- The CUDA and Vulkan producers report `total` only; `free` is `FreeUnknown` until
+  backend-specific free-memory probes are wired, so the check catches "too big for the whole
+  device," not "too big for the current free headroom." Metal still advertises device
+  residency but not `CapacityProbe`.
 - Plank 3 (#707) makes the HBM tier's pressure and `CapacityBytes` real on a probing backend
   (`engine.PlanPlacementForDevice`), but it ships the report→policy SEAM, not a serving-loop
   caller — nothing on the live path invokes it yet. The other tiers' (`DRAM`/`NUMA-far`/`CXL`/

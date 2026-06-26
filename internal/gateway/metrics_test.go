@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
@@ -56,6 +57,52 @@ func TestHTTPMetricsEndpointExposesGatewayAndKernelCounters(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", want, text)
 		}
+	}
+}
+
+func TestInKernelOOMMetricsAndDebugVars(t *testing.T) {
+	srv := newTestServer(t)
+
+	status, code, _ := srv.plannerErrorStatus(&agent.InKernelOOMError{
+		Bytes: 4 << 20,
+		Class: compute.MemoryScratchpad,
+		Site:  "evict-scratch",
+	})
+	if status != http.StatusServiceUnavailable || code != "in_kernel_oom" {
+		t.Fatalf("plannerErrorStatus = (%d, %q), want 503/in_kernel_oom", status, code)
+	}
+	srv.plannerErrorStatus(&agent.InKernelOOMError{
+		Bytes: 1 << 20,
+		Class: compute.MemoryScratchpad,
+		Site:  "transient",
+	})
+	srv.plannerErrorStatus(&agent.UpstreamStatusError{Status: 500, Body: "provider body"})
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_in_kernel_oom_total{class="scratchpad"} 2`,
+		`fak_gateway_in_kernel_oom_failed_bytes_total{class="scratchpad"} 5242880`,
+		`fak_gateway_in_kernel_oom_last_failed_bytes{class="scratchpad"} 1048576`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	var got *debugInKernelOOMVars
+	for i := range vars.Metrics.InKernelOOM {
+		row := &vars.Metrics.InKernelOOM[i]
+		if row.Class == "scratchpad" {
+			got = row
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("/debug/vars missing scratchpad OOM row")
+	}
+	if got.Count != 2 || got.FailedBytes != 5242880 || got.LastFailedBytes != 1048576 || got.LastSite != "transient" {
+		t.Fatalf("debug OOM row = %+v, want count=2 failed=5242880 last=1048576 site=transient", got)
 	}
 }
 

@@ -42,7 +42,7 @@ func newPagedKernel(be compute.Backend) *pagedKernel {
 // backend. Bit-equal to be.MatMul(resident(w), x); increments pageIn once per call (each call pages
 // in afresh — the kernel caches nothing, which is the whole point).
 func (p *pagedKernel) matMul(shape []int, w []float32, x compute.Tensor) []float32 {
-	wt := p.be.Upload(compute.NewF32(compute.Default(), append([]int(nil), shape...), w), compute.F32)
+	wt := uploadHostF32Class(p.be, shape, w, compute.MemoryOffload, "paged-weight")
 	p.pageIn++
 	y := p.be.MatMul(wt, x)
 	out := append([]float32(nil), p.be.Read(y)...) // materialize before page-out

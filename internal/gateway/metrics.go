@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -83,6 +84,13 @@ type gatewayMetrics struct {
 	resetShadowReasons   map[string]uint64 // ResetReason -> compacted turns scored that way
 	resetShadowRecommend uint64            // compacted turns whose SHADOW verdict was ShouldReset (acted on: none)
 	resetShadowLastScore float64           // the most recent turn's 0..1 reset-pressure score
+
+	// oomMu guards the in-kernel device-OOM visibility family. These are LOCAL resource
+	// exhaustion faults recovered from compute.DeviceAllocError, not provider errors. The
+	// Prometheus labels stay class-only to avoid allocator-site cardinality; /debug/vars keeps
+	// the most recent site for operator drilldown.
+	oomMu       sync.Mutex
+	inKernelOOM map[string]*inKernelOOMClassStats
 }
 
 type inflightEntry struct {
@@ -104,6 +112,13 @@ type operationMetricKey struct {
 	by          string // which adjudicator decided (forensics) — answers WHO refused, not just that it was refused
 }
 
+type inKernelOOMClassStats struct {
+	count           uint64
+	failedBytes     uint64
+	lastFailedBytes uint64
+	lastSite        string
+}
+
 type latencyCounter struct {
 	count   uint64
 	sum     float64
@@ -118,7 +133,49 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		inflightReq:        map[uint64]inflightEntry{},
 		compactAttempts:    map[string]uint64{},
 		compactBailReasons: map[string]uint64{},
+		inKernelOOM:        map[string]*inKernelOOMClassStats{},
 	}
+}
+
+// observeInKernelOOM folds a planner error into the local device-OOM visibility family when
+// it is the in-kernel allocation fault. It returns true only for that local OOM class, so
+// callers can record without re-doing errors.As.
+func (m *gatewayMetrics) observeInKernelOOM(err error) bool {
+	if m == nil || err == nil {
+		return false
+	}
+	var oom *agent.InKernelOOMError
+	if !errors.As(err, &oom) {
+		return false
+	}
+	class := oomClassLabel(string(oom.Class))
+	var bytes uint64
+	if oom.Bytes > 0 {
+		bytes = uint64(oom.Bytes)
+	}
+	m.oomMu.Lock()
+	if m.inKernelOOM == nil {
+		m.inKernelOOM = map[string]*inKernelOOMClassStats{}
+	}
+	st := m.inKernelOOM[class]
+	if st == nil {
+		st = &inKernelOOMClassStats{}
+		m.inKernelOOM[class] = st
+	}
+	st.count++
+	st.failedBytes += bytes
+	st.lastFailedBytes = bytes
+	st.lastSite = strings.TrimSpace(oom.Site)
+	m.oomMu.Unlock()
+	return true
+}
+
+func oomClassLabel(class string) string {
+	class = strings.TrimSpace(class)
+	if class == "" {
+		return "unknown"
+	}
+	return class
 }
 
 // observeCompaction records the outcome of one history-compaction attempt. off=true means the
@@ -626,6 +683,7 @@ func (s *Server) renderMetrics() string {
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
+	m.writeInKernelOOMMetrics(&b)
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
 
@@ -765,6 +823,14 @@ type compactionSnapshot struct {
 	lastCacheRd float64
 }
 
+type inKernelOOMSnapshot struct {
+	class           string
+	count           uint64
+	failedBytes     uint64
+	lastFailedBytes uint64
+	lastSite        string
+}
+
 func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 	m.inferenceMu.Lock()
 	defer m.inferenceMu.Unlock()
@@ -806,6 +872,45 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		shed:        m.compactShed,
 		cacheReads:  m.compactCacheReads,
 		lastCacheRd: m.compactLastCacheRd,
+	}
+}
+
+func (m *gatewayMetrics) inKernelOOMSnapshotData() []inKernelOOMSnapshot {
+	if m == nil {
+		return nil
+	}
+	m.oomMu.Lock()
+	defer m.oomMu.Unlock()
+	out := make([]inKernelOOMSnapshot, 0, len(m.inKernelOOM))
+	for class, st := range m.inKernelOOM {
+		if st == nil {
+			continue
+		}
+		out = append(out, inKernelOOMSnapshot{
+			class:           class,
+			count:           st.count,
+			failedBytes:     st.failedBytes,
+			lastFailedBytes: st.lastFailedBytes,
+			lastSite:        st.lastSite,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].class < out[j].class })
+	return out
+}
+
+func (m *gatewayMetrics) writeInKernelOOMMetrics(b *strings.Builder) {
+	rows := m.inKernelOOMSnapshotData()
+	writeHelpType(b, "fak_gateway_in_kernel_oom_total", "LOCAL in-kernel device allocation OOMs recovered from compute.DeviceAllocError, bucketed by memory class. These are fak-owned resource faults, not upstream provider errors.", "counter")
+	for _, row := range rows {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_total{class=\"%s\"} %d\n", promQuote(row.class), row.count)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_oom_failed_bytes_total", "Cumulative bytes requested by recovered in-kernel device allocation OOMs, bucketed by memory class.", "counter")
+	for _, row := range rows {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_failed_bytes_total{class=\"%s\"} %d\n", promQuote(row.class), row.failedBytes)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_oom_last_failed_bytes", "Most recent failed device allocation size for each memory class (0 until that class has faulted).", "gauge")
+	for _, row := range rows {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_last_failed_bytes{class=\"%s\"} %d\n", promQuote(row.class), row.lastFailedBytes)
 	}
 }
 

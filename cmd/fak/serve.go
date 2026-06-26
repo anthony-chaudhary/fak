@@ -385,6 +385,72 @@ func toGatewayLoadProfile(p *ggufload.LoadProfile) *gateway.ModelLoadProfile {
 	return out
 }
 
+func withServeGGUFMemoryProfile(p *gateway.ModelLoadProfile, plan compute.MemoryPlan, be compute.Backend) *gateway.ModelLoadProfile {
+	if p == nil {
+		return nil
+	}
+	p.MemoryPlan = toGatewayLoadMemoryPlan(plan)
+	if be != nil {
+		p.MemoryCapacities = toGatewayLoadMemoryCapacities(be)
+		if len(p.MemoryPlan) > 0 {
+			p.MemoryHeadroomRatio = serveGGUFDeviceHeadroom
+		}
+	}
+	return p
+}
+
+func toGatewayLoadMemoryPlan(plan compute.MemoryPlan) []gateway.ModelLoadMemoryDemand {
+	if len(plan) == 0 {
+		return nil
+	}
+	out := make([]gateway.ModelLoadMemoryDemand, 0, len(plan))
+	for _, d := range plan {
+		if d.Bytes <= 0 {
+			continue
+		}
+		class := d.Class
+		if class == "" {
+			class = compute.MemoryUnknown
+		}
+		out = append(out, gateway.ModelLoadMemoryDemand{
+			Class:  string(class),
+			Scope:  string(d.ScopeOrDefault()),
+			Bytes:  d.Bytes,
+			Detail: d.Detail,
+		})
+	}
+	return out
+}
+
+func toGatewayLoadMemoryCapacities(be compute.Backend) []gateway.ModelLoadMemoryCapacity {
+	if be == nil {
+		return nil
+	}
+	deviceTotal, deviceFree, deviceKnown := compute.DeviceMemoryInfo(be)
+	hostTotal, hostFree, hostKnown := compute.HostMemoryInfo(be)
+	return []gateway.ModelLoadMemoryCapacity{
+		toGatewayLoadMemoryCapacity(string(compute.MemoryScopeDevice), deviceTotal, deviceFree, deviceKnown),
+		toGatewayLoadMemoryCapacity(string(compute.MemoryScopeHost), hostTotal, hostFree, hostKnown),
+	}
+}
+
+func toGatewayLoadMemoryCapacity(scope string, total, free int64, known bool) gateway.ModelLoadMemoryCapacity {
+	cap := gateway.ModelLoadMemoryCapacity{
+		Scope:      scope,
+		TotalBytes: total,
+		Known:      known,
+		FreeKnown:  known && free >= 0,
+	}
+	if !known {
+		cap.TotalBytes = 0
+		return cap
+	}
+	if cap.FreeKnown {
+		cap.FreeBytes = free
+	}
+	return cap
+}
+
 // loadServeInKernelModel eagerly loads the GGUF weights (when ggufPath is set) BEFORE the
 // listener binds, so the load counts toward time-to-ready and its phase breakdown reaches
 // /metrics rather than being a lazy cost on first request. It returns the resident model
@@ -450,7 +516,7 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 		}
 		plan = append(plan, weights...)
 	}
-	return appendServeGGUFKVPlan(ws, plan, contextBudgetTokens), nil
+	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens), nil
 }
 
 func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetTokens int) (compute.MemoryPlan, error) {
@@ -461,10 +527,10 @@ func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetToken
 	if err != nil {
 		return nil, err
 	}
-	return appendServeGGUFKVPlan(ws, plan, contextBudgetTokens), nil
+	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens), nil
 }
 
-func appendServeGGUFKVPlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int) compute.MemoryPlan {
+func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int) compute.MemoryPlan {
 	if cfg, err := ws.File.Config(); err == nil {
 		if tokens := serveGGUFContextPlanTokens(cfg, contextBudgetTokens); tokens > 0 {
 			plan = append(plan, compute.EstimateKVStoreMemoryPlan(compute.KVConfig{
@@ -474,6 +540,16 @@ func appendServeGGUFKVPlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, c
 				RopeTheta:  cfg.RopeTheta,
 			}, tokens)...)
 		}
+		plan = append(plan, compute.EstimateHALTransientMemoryPlan(compute.TransformerScratchConfig{
+			HiddenSize:       cfg.HiddenSize,
+			IntermediateSize: cfg.IntermediateSize,
+			VocabSize:        cfg.VocabSize,
+			NumLayers:        cfg.NumLayers,
+			NumHeads:         cfg.NumHeads,
+			NumKVHeads:       cfg.NumKVHeads,
+			HeadDim:          cfg.HeadDim,
+			IncludeLogits:    true,
+		})...)
 	}
 	return plan
 }
@@ -489,24 +565,62 @@ func fitServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident b
 	if ggufPath == "" || be == nil {
 		return nil
 	}
-	ws, err := ggufload.OpenWeights(ggufPath)
+	_, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, be, f32Resident, contextBudgetTokens)
+	return err
+}
+
+func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer ws.Close()
-	return fitServeGGUFOnDevice(ws, be, f32Resident, contextBudgetTokens)
+	if be == nil {
+		return plan, nil
+	}
+	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
 func fitServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) error {
 	if ggufPath == "" || be == nil {
 		return nil
 	}
+	_, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, be, contextBudgetTokens)
+	return err
+}
+
+func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, contextBudgetTokens)
+	if err != nil {
+		return nil, err
+	}
+	if be == nil {
+		return plan, nil
+	}
+	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
+}
+
+func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	if ggufPath == "" {
+		return nil, nil
+	}
 	ws, err := ggufload.OpenWeights(ggufPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer ws.Close()
-	return fitServeGGUFCPUOffloadOnDevice(ws, be, contextBudgetTokens)
+	return serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens)
+}
+
+func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	if ggufPath == "" {
+		return nil, nil
+	}
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	return serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens)
 }
 
 func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
@@ -532,14 +646,15 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// host-scoped offload demands, while dense/router/attention weights and KV consume the
 		// device budget. That keeps the valid "experts dwarf VRAM" use case alive while still
 		// refusing a dense side that cannot fit.
-		must(fitServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, contextBudgetTokens))
+		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, contextBudgetTokens)
+		must(err)
 		prof := ggufload.NewLoadProfiler()
 		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 		must(err)
 		modelengine.Preload(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
-		profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos))
+		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos)), memPlan, backend)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case backend != nil:
 		if backend.Caps().UploadDtype {
@@ -547,31 +662,33 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 			// the f32 resident path. The served planner runs Session.Quant=true, so this
 			// is the memory-lean representation it will actually execute.
 			fmt.Printf("fak: GGUF device load -> mixed precision on backend %q (Q8 resident weights, f32 activations/KV)\n", backend.Name())
-			must(fitServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens))
+			memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+			must(err)
 			prof := ggufload.NewLoadProfiler()
 			mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 			must(err)
 			modelengine.Preload(mm)
 			loadNanos := time.Since(tLoad).Nanoseconds()
-			profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos))
+			profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos)), memPlan, backend)
 			return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 		}
 		// Backends without quantized upload still need f32-resident weights; a lean-Q8
 		// model would drop the f32 matmul weights they fall back to.
 		fmt.Printf("fak: GGUF device load -> f32 resident weights on backend %q (backend has no quantized UploadDtype)\n", backend.Name())
-		must(fitServeGGUFPathOnDevice(ggufPath, backend, true, contextBudgetTokens))
+		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, true, contextBudgetTokens)
+		must(err)
 		mm, err := ggufload.LoadModel(ggufPath)
 		must(err)
 		modelengine.Preload(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
-		profile := toGatewayLoadProfile(&ggufload.LoadProfile{
+		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(&ggufload.LoadProfile{
 			Mode:       "gguf-f32-device",
 			Source:     ggufPath,
 			TotalNanos: loadNanos,
 			TotalMS:    float64(loadNanos) / 1e6,
 			Phases:     []ggufload.LoadPhaseStat{{Phase: "f32-load", Calls: 1, Nanos: loadNanos, MS: float64(loadNanos) / 1e6, TimePct: 100}},
 			Bottleneck: "f32-load",
-		})
+		}), memPlan, backend)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case os.Getenv("FAK_Q4K") != "":
 		mm, err := ggufload.LoadModelQ4K(ggufPath)

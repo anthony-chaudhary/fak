@@ -56,6 +56,7 @@ bool              g_ready    = false;
 VkDeviceSize      g_maxStorageBufferRange = 0;
 VkDeviceSize      g_maxMemoryAllocationSize = 0;
 VkDeviceSize      g_maxBufferBytes = 0;
+VkDeviceSize      g_totalDeviceLocalMemory = 0;
 
 // A device buffer: VkBuffer + its memory + byte size. The opaque handle Go holds is a
 // Buffer* — never a host address.
@@ -636,6 +637,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     if (name && namelen > 0) { strncpy(name, props.deviceName, namelen - 1); name[namelen - 1] = 0; }
     if (is_discrete) *is_discrete = discrete ? 1 : 0;
     vkGetPhysicalDeviceMemoryProperties(g_phys, &g_memprops);
+    g_totalDeviceLocalMemory = 0;
+    for (uint32_t i = 0; i < g_memprops.memoryHeapCount; ++i) {
+        if (g_memprops.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            g_totalDeviceLocalMemory += g_memprops.memoryHeaps[i].size;
+        }
+    }
 
     // find a compute-capable queue family.
     uint32_t qn = 0;
@@ -846,6 +853,7 @@ int fvk_have_q8(void) { return g_have_q8; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
 uint64_t fvk_max_memory_allocation_size(void) { return (uint64_t)g_maxMemoryAllocationSize; }
+uint64_t fvk_total_device_local_memory(void) { return (uint64_t)g_totalDeviceLocalMemory; }
 
 uint32_t fvk_debug_buffer_props(const void* d) {
     if (!d) return 0;

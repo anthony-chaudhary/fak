@@ -73,9 +73,20 @@ func (s *Session) Close() {
 	s.halW = nil
 }
 
-func (s *Session) hostF32(shape []int, data []float32) compute.Tensor {
+type classedUploadBackend interface {
+	UploadClass(t compute.Tensor, as compute.Dtype, class compute.MemoryClass, site string) compute.Tensor
+}
+
+func uploadHostF32Class(be compute.Backend, shape []int, data []float32, class compute.MemoryClass, site string) compute.Tensor {
 	src := compute.NewF32(compute.Default(), append([]int(nil), shape...), data)
-	return s.Backend.Upload(src, compute.F32)
+	if b, ok := be.(classedUploadBackend); ok {
+		return b.UploadClass(src, compute.F32, class, site)
+	}
+	return be.Upload(src, compute.F32)
+}
+
+func (s *Session) uploadHostF32(shape []int, data []float32, class compute.MemoryClass, site string) compute.Tensor {
+	return uploadHostF32Class(s.Backend, shape, data, class, site)
 }
 
 func (s *Session) weightHAL(name string) compute.Tensor {
@@ -88,7 +99,7 @@ func (s *Session) weightHAL(name string) compute.Tensor {
 	if !ok {
 		panic("model: missing tensor " + name)
 	}
-	t := s.hostF32(meta.Shape, s.M.tensor(name))
+	t := s.uploadHostF32(meta.Shape, s.M.tensor(name), compute.MemoryWeights, "hal-weight "+name)
 	if s.halW != nil {
 		s.halW[name] = t
 	}
@@ -258,7 +269,7 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	if useDeviceEmbed {
 		embedTable = s.weightHAL("model.embed_tokens.weight")
 	} else {
-		x = s.hostF32([]int{H}, append([]float32(nil), m.embedRows()[id*H:(id+1)*H]...))
+		x = s.uploadHostF32([]int{H}, append([]float32(nil), m.embedRows()[id*H:(id+1)*H]...), compute.MemoryActivation, "hal-token-input")
 	}
 	var batch batchBackend
 	if b, ok := be.(batchBackend); ok {

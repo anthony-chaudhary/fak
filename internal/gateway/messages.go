@@ -233,7 +233,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// actionable 503; a genuine upstream failure stays the opaque 502 with the raw provider
 		// body kept off the wire. writeErrCode with an empty code reproduces the historical
 		// code:null body byte-for-byte, so the non-OOM response is unchanged (#346).
-		status, code, msg := upstreamErrorStatus(err)
+		status, code, msg := s.plannerErrorStatus(err)
 		s.logf("gateway: messages turn error (%s): %v", code, err)
 		writeErrCode(w, status, code, msg)
 		return
@@ -699,7 +699,8 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 		if err != nil {
 			s.logf("gateway: upstream model error (messages): %v", err)
-			writeErr(w, http.StatusBadGateway, "upstream model error")
+			status, code, msg := s.plannerErrorStatus(err)
+			writeErrCode(w, status, code, msg)
 			return
 		}
 		if compacted {
@@ -760,7 +761,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 				// GPU OOM surfaces an actionable message in the SSE error frame instead of the
 				// opaque "upstream model error". A genuine upstream error still falls through to
 				// the default arm's "upstream model error" (no behavior change, no body leak).
-				_, _, msg := upstreamErrorStatus(res.err)
+				_, _, msg := s.plannerErrorStatus(res.err)
 				s.logf("gateway: messages stream turn error: %v", res.err)
 				send("error", map[string]any{
 					"type":  "error",

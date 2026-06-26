@@ -15,7 +15,7 @@ import (
 
 func TestRecoverDevicePanic_DeviceAllocBecomesTypedOOM(t *testing.T) {
 	const want = 4 << 30 // 4 GiB — the kind of logits buffer a large prompt drives
-	err, handled := recoverDevicePanic(&compute.DeviceAllocError{Bytes: want, Site: "dalloc"})
+	err, handled := recoverDevicePanic(&compute.DeviceAllocError{Bytes: want, Site: "dallocWeight", Class: compute.MemoryWeights})
 	if !handled {
 		t.Fatal("a *compute.DeviceAllocError panic must be handled (recovered into a clean error)")
 	}
@@ -26,6 +26,12 @@ func TestRecoverDevicePanic_DeviceAllocBecomesTypedOOM(t *testing.T) {
 	if oom.Bytes != want {
 		t.Fatalf("byte count lost across recovery: got %d, want %d", oom.Bytes, want)
 	}
+	if oom.Class != compute.MemoryWeights {
+		t.Fatalf("memory class lost across recovery: got %s, want %s", oom.Class, compute.MemoryWeights)
+	}
+	if oom.Site != "dallocWeight" {
+		t.Fatalf("site lost across recovery: got %q", oom.Site)
+	}
 	// The message must name the actionable condition so an operator/client can act on it.
 	if msg := oom.Error(); msg == "" {
 		t.Fatal("InKernelOOMError.Error() must not be empty")
@@ -35,13 +41,13 @@ func TestRecoverDevicePanic_DeviceAllocBecomesTypedOOM(t *testing.T) {
 // A device-alloc error WRAPPED in another error is still recognized via errors.As — the
 // recover does not depend on the panic value being the bare type.
 func TestRecoverDevicePanic_WrappedDeviceAllocStillHandled(t *testing.T) {
-	wrapped := fmt.Errorf("decode step 7: %w", &compute.DeviceAllocError{Bytes: 1 << 20, Site: "evict-scratch"})
+	wrapped := fmt.Errorf("decode step 7: %w", &compute.DeviceAllocError{Bytes: 1 << 20, Site: "evict-scratch", Class: compute.MemoryScratchpad})
 	err, handled := recoverDevicePanic(wrapped)
 	if !handled {
 		t.Fatal("a wrapped *compute.DeviceAllocError must still be handled")
 	}
 	var oom *InKernelOOMError
-	if !errors.As(err, &oom) || oom.Bytes != 1<<20 {
+	if !errors.As(err, &oom) || oom.Bytes != 1<<20 || oom.Class != compute.MemoryScratchpad {
 		t.Fatalf("wrapped device-alloc error not recovered with its byte count: %v", err)
 	}
 }

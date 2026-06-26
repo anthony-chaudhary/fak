@@ -8,10 +8,11 @@ import (
 )
 
 type debugVarsResponse struct {
-	Gateway debugGatewayVars `json:"gateway"`
-	Runtime debugRuntimeVars `json:"runtime"`
-	Kernel  debugKernelVars  `json:"kernel"`
-	Metrics debugMetricsVars `json:"metrics"`
+	Gateway   debugGatewayVars    `json:"gateway"`
+	Runtime   debugRuntimeVars    `json:"runtime"`
+	Kernel    debugKernelVars     `json:"kernel"`
+	ModelLoad *debugModelLoadVars `json:"model_load,omitempty"`
+	Metrics   debugMetricsVars    `json:"metrics"`
 }
 
 type debugGatewayVars struct {
@@ -62,9 +63,45 @@ type debugKernelVars struct {
 }
 
 type debugMetricsVars struct {
-	HTTP       []debugHTTPMetricVars      `json:"http"`
-	Operations []debugOperationMetricVars `json:"operations"`
-	Compaction debugCompactionVars        `json:"compaction"`
+	HTTP        []debugHTTPMetricVars      `json:"http"`
+	Operations  []debugOperationMetricVars `json:"operations"`
+	Compaction  debugCompactionVars        `json:"compaction"`
+	InKernelOOM []debugInKernelOOMVars     `json:"in_kernel_oom"`
+}
+
+type debugModelLoadVars struct {
+	Source              string                         `json:"source"`
+	Mode                string                         `json:"mode"`
+	TotalSeconds        float64                        `json:"total_seconds"`
+	Bytes               int64                          `json:"bytes"`
+	Tensors             int                            `json:"tensors"`
+	Bottleneck          string                         `json:"bottleneck"`
+	Phases              []debugModelLoadPhaseVars      `json:"phases"`
+	MemoryPlan          []debugModelLoadMemoryPlanVars `json:"memory_plan,omitempty"`
+	MemoryCapacities    []debugModelLoadCapacityVars   `json:"memory_capacities,omitempty"`
+	MemoryHeadroomRatio float64                        `json:"memory_headroom_ratio,omitempty"`
+}
+
+type debugModelLoadPhaseVars struct {
+	Phase   string  `json:"phase"`
+	Seconds float64 `json:"seconds"`
+	Bytes   int64   `json:"bytes"`
+	Tensors int     `json:"tensors"`
+}
+
+type debugModelLoadMemoryPlanVars struct {
+	Class  string `json:"class"`
+	Scope  string `json:"scope"`
+	Bytes  int64  `json:"bytes"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type debugModelLoadCapacityVars struct {
+	Scope      string `json:"scope"`
+	TotalBytes int64  `json:"total_bytes"`
+	FreeBytes  int64  `json:"free_bytes,omitempty"`
+	Known      bool   `json:"known"`
+	FreeKnown  bool   `json:"free_known"`
 }
 
 type debugCompactionVars struct {
@@ -90,6 +127,14 @@ type debugOperationMetricVars struct {
 	Disposition string           `json:"disposition"`
 	By          string           `json:"by"` // which adjudicator decided (forensics)
 	Latency     debugLatencyVars `json:"latency"`
+}
+
+type debugInKernelOOMVars struct {
+	Class           string `json:"class"`
+	Count           uint64 `json:"count"`
+	FailedBytes     uint64 `json:"failed_bytes"`
+	LastFailedBytes uint64 `json:"last_failed_bytes"`
+	LastSite        string `json:"last_site,omitempty"`
 }
 
 type debugLatencyVars struct {
@@ -135,6 +180,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 	}
 	httpRows, opRows := m.snapshot()
 	compact := m.compactionSnapshotData()
+	oomRows := m.inKernelOOMSnapshotData()
 
 	return debugVarsResponse{
 		Gateway: debugGatewayVars{
@@ -179,6 +225,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			Admitted:     c.Admitted,
 			VDSOHitRatio: ratio,
 		},
+		ModelLoad: debugModelLoadProfile(s.modelLoadProfile()),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
@@ -190,8 +237,53 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 				CacheReadTokens:             compact.cacheReads,
 				LastPostFireCacheReadTokens: compact.lastCacheRd,
 			},
+			InKernelOOM: debugInKernelOOMRows(oomRows),
 		},
 	}
+}
+
+func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
+	if p == nil {
+		return nil
+	}
+	out := &debugModelLoadVars{
+		Source:              p.Source,
+		Mode:                p.Mode,
+		TotalSeconds:        p.TotalSeconds,
+		Bytes:               p.Bytes,
+		Tensors:             p.Tensors,
+		Bottleneck:          p.Bottleneck,
+		MemoryHeadroomRatio: p.MemoryHeadroomRatio,
+	}
+	for _, ph := range p.sorted() {
+		out.Phases = append(out.Phases, debugModelLoadPhaseVars{
+			Phase:   ph.Phase,
+			Seconds: ph.Seconds,
+			Bytes:   ph.Bytes,
+			Tensors: ph.Tensors,
+		})
+	}
+	for _, row := range p.MemoryPlan {
+		if row.Bytes <= 0 {
+			continue
+		}
+		out.MemoryPlan = append(out.MemoryPlan, debugModelLoadMemoryPlanVars{
+			Class:  modelLoadClass(row.Class),
+			Scope:  modelLoadScope(row.Scope),
+			Bytes:  row.Bytes,
+			Detail: row.Detail,
+		})
+	}
+	for _, cap := range p.sortedMemoryCapacities() {
+		out.MemoryCapacities = append(out.MemoryCapacities, debugModelLoadCapacityVars{
+			Scope:      modelLoadScope(cap.Scope),
+			TotalBytes: cap.TotalBytes,
+			FreeBytes:  cap.FreeBytes,
+			Known:      cap.Known,
+			FreeKnown:  cap.Known && cap.FreeKnown,
+		})
+	}
+	return out
 }
 
 func debugStableCompactionAttempts(in map[string]uint64) map[string]uint64 {
@@ -225,6 +317,20 @@ func debugOperationRows(rows []operationMetricSnapshot) []debugOperationMetricVa
 			Disposition: row.key.disposition,
 			By:          row.key.by,
 			Latency:     debugLatency(row.val),
+		})
+	}
+	return out
+}
+
+func debugInKernelOOMRows(rows []inKernelOOMSnapshot) []debugInKernelOOMVars {
+	out := make([]debugInKernelOOMVars, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, debugInKernelOOMVars{
+			Class:           row.class,
+			Count:           row.count,
+			FailedBytes:     row.failedBytes,
+			LastFailedBytes: row.lastFailedBytes,
+			LastSite:        row.lastSite,
 		})
 	}
 	return out

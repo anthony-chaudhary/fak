@@ -246,7 +246,8 @@ type Caps struct {
 	// core interface assumes it absent: DeviceMemoryInfo/FitsOnDevice fail OPEN (unknown,
 	// proceed) on a backend that does not set it, so the portable floor never blocks. See
 	// capacity.go and docs/explainers/hardware-limits-and-capacity.md.
-	CapacityProbe bool
+	CapacityProbe     bool
+	HostCapacityProbe bool // implements HostCapacity for host-scoped offload/DDR demands; absent means fail open
 }
 
 // ---- KV store -------------------------------------------------------------------

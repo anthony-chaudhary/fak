@@ -398,7 +398,8 @@ func (c *cudaBackend) Caps() Caps {
 	// CapacityProbe (capacity.go): the backend can REPORT its VRAM ceiling (DeviceMemory),
 	// the report half of the hardware-capacity bridge. It is the one number this backend has
 	// always held (totalGlobalMem) but used to discard.
-	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true}
+	_, _, hostKnown := hostSystemMemory()
+	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true, HostCapacityProbe: hostKnown}
 }
 
 // DeviceMemory reports the CUDA device's total VRAM — the totalGlobalMem fcuda_init already
@@ -411,9 +412,17 @@ func (c *cudaBackend) DeviceMemory() (total, free int64, known bool) {
 	return c.totalMem, FreeUnknown, c.totalMem > 0
 }
 
+func (c *cudaBackend) HostMemory() (total, free int64, known bool) {
+	return hostSystemMemory()
+}
+
 // ---- residency ------------------------------------------------------------------
 
 func (c *cudaBackend) dalloc(nbytes int) *cudaBuf {
+	return c.dallocClass(nbytes, MemoryUnknown, "dalloc")
+}
+
+func (c *cudaBackend) dallocClass(nbytes int, class MemoryClass, site string) *cudaBuf {
 	p := C.fcuda_malloc(C.size_t(nbytes))
 	if p == nil {
 		p = C.fcuda_malloc_managed(C.size_t(nbytes))
@@ -422,7 +431,7 @@ func (c *cudaBackend) dalloc(nbytes int) *cudaBuf {
 			// poisoned by a prior async kernel fault) to stderr before returning nil; carry the
 			// requested size on a typed DeviceAllocError so the in-kernel decode boundary can
 			// recover it into an actionable error instead of crashing the serving goroutine.
-			panic(&DeviceAllocError{Bytes: nbytes, Site: "dalloc"})
+			panic(&DeviceAllocError{Bytes: nbytes, Site: site, Class: class})
 		}
 		return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
 	}
@@ -432,9 +441,13 @@ func (c *cudaBackend) dalloc(nbytes int) *cudaBuf {
 // dallocManaged allocates directly from cudaMallocManaged. Used by the residency-budget path for
 // cold weights. Caller holds cudaMu.
 func (c *cudaBackend) dallocManaged(nbytes int) *cudaBuf {
+	return c.dallocManagedClass(nbytes, MemoryOffload, "dallocManaged")
+}
+
+func (c *cudaBackend) dallocManagedClass(nbytes int, class MemoryClass, site string) *cudaBuf {
 	p := C.fcuda_malloc_managed(C.size_t(nbytes))
 	if p == nil {
-		panic(&DeviceAllocError{Bytes: nbytes, Site: "dallocManaged"})
+		panic(&DeviceAllocError{Bytes: nbytes, Site: site, Class: class})
 	}
 	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
 }
@@ -444,11 +457,11 @@ func (c *cudaBackend) dallocManaged(nbytes int) *cudaBuf {
 // device-local first. Caller holds cudaMu.
 func (c *cudaBackend) dallocWeight(nbytes int) *cudaBuf {
 	if c.budgetBytes > 0 && c.dlUsed+int64(nbytes) > c.budgetBytes {
-		buf := c.dallocManaged(nbytes)
+		buf := c.dallocManagedClass(nbytes, MemoryOffload, "dallocManaged")
 		c.accountWeightPlacement(buf, nbytes)
 		return buf
 	}
-	buf := c.dalloc(nbytes)
+	buf := c.dallocClass(nbytes, MemoryWeights, "dallocWeight")
 	c.accountWeightPlacement(buf, nbytes)
 	return buf
 }
@@ -479,7 +492,12 @@ func (c *cudaBackend) dev(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 // return it to the pool at the next token boundary. Weights (Upload) deliberately use dev,
 // not devTr, so they are never recycled out from under the resident-weight cache.
 func (c *cudaBackend) devTr(shape []int, dt Dtype) (Tensor, *cudaBuf) {
-	t, b := c.dev(shape, dt)
+	n := 1
+	for _, d := range shape {
+		n *= d
+	}
+	b := c.dallocClass(n*dt.Bytes(), MemoryScratchpad, "transient")
+	t := makeTensor(c, dt, RowMajor, append([]int(nil), shape...), nil, b)
 	// Mark async: this output is enqueued on g_stream in the current fence generation, so it
 	// reports Ready()==false until the next Read/Argmax drains the stream (#482).
 	b.be = c
@@ -515,6 +533,20 @@ func (c *cudaBackend) devF16(shape []int, layout Layout) (Tensor, *cudaBuf) {
 // narrow, so there is nothing to quantize; the dequant is fused into the GEMM tile on device.
 // Every other host dtype must be F32.
 func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
+	return c.uploadClass(t, as, MemoryWeights, "upload-weight")
+}
+
+func (c *cudaBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
+	if class == "" {
+		class = MemoryUnknown
+	}
+	if site == "" {
+		site = "upload-" + string(class)
+	}
+	return c.uploadClass(t, as, class, site)
+}
+
+func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	hb, ok := t.buf.(HostBuffer)
@@ -534,6 +566,18 @@ func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 	}
 	if t.Dtype != F32 {
 		panic("compute: cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K bytes today (got " + t.Dtype.String() + ")")
+	}
+	if class != MemoryWeights {
+		if as != F32 {
+			panic("compute: cuda classed Upload supports only F32 activation/runtime uploads")
+		}
+		f := hb.F32()
+		buf := c.dallocClass(t.Numel()*F32.Bytes(), class, site)
+		out := makeTensor(c, F32, RowMajor, append([]int(nil), t.Shape...), nil, buf)
+		if len(f) > 0 {
+			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+		}
+		return out
 	}
 	store := F32 // the resident dtype the `as` request narrows f32 host weights to
 	switch as {
@@ -683,7 +727,7 @@ func (c *cudaBackend) uploadQ4K(t Tensor, hb HostBuffer) Tensor {
 func (c *cudaBackend) devQ8(shape []int, block, nScales int) (Tensor, *cudaBuf) {
 	out, in := shape[0], shape[1]
 	buf := c.dallocWeight(out * in) // int8 codes, 1 byte each
-	scales := c.dalloc(nScales * 4)
+	scales := c.dallocClass(nScales*4, MemoryWeights, "q8-scale")
 	buf.scales = scales.ptr
 	buf.scalesN = scales.n
 	q := &QuantSpec{Block: block, Axis: 2, Bits: 8, Symmetric: true}
@@ -709,7 +753,7 @@ func (c *cudaBackend) uploadF16(t Tensor, f []float32, hp uintptr) Tensor {
 	if len(f) == 0 {
 		return out
 	}
-	stage := c.dalloc(len(f) * 4)
+	stage := c.dallocClass(len(f)*4, MemoryScratchpad, "f16-stage")
 	C.fcuda_h2d(stage.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
 	if t.Layout == ColMajor && len(t.Shape) == 2 {
 		C.fcuda_f32_to_f16_T(buf.ptr, (*C.float)(stage.ptr), C.int(t.Shape[0]), C.int(t.Shape[1]))
@@ -1099,12 +1143,19 @@ func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 		k.maxPos = cudaKVMaxPos
 		capF := k.maxPos * cfg.NumKVHeads * cfg.HeadDim
 		for l := 0; l < cfg.NumLayers; l++ {
-			k.K[l] = dslice{ptr: unsafe.Pointer(C.fcuda_malloc(C.size_t(capF * 4))), cap: capF}
-			k.Kraw[l] = dslice{ptr: unsafe.Pointer(C.fcuda_malloc(C.size_t(capF * 4))), cap: capF}
-			k.V[l] = dslice{ptr: unsafe.Pointer(C.fcuda_malloc(C.size_t(capF * 4))), cap: capF}
+			k.K[l] = dslice{ptr: k.be.dallocKV(capF*F32.Bytes(), "kv-key-prealloc layer "+itoaC(l)).ptr, cap: capF}
+			k.Kraw[l] = dslice{ptr: k.be.dallocKV(capF*F32.Bytes(), "kv-pre-rope-key-prealloc layer "+itoaC(l)).ptr, cap: capF}
+			k.V[l] = dslice{ptr: k.be.dallocKV(capF*F32.Bytes(), "kv-value-prealloc layer "+itoaC(l)).ptr, cap: capF}
 		}
 	}
 	return k
+}
+
+func (c *cudaBackend) dallocKV(nbytes int, site string) *cudaBuf {
+	if site == "" {
+		site = "kv-cache"
+	}
+	return c.dallocClass(nbytes, MemoryKVCache, site)
 }
 
 // dslice is a growable VRAM float buffer (len/cap in floats).
@@ -1113,10 +1164,10 @@ type dslice struct {
 	len, cap int
 }
 
-func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int) {
+func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int, site string) {
 	if d.len+nFloats > d.cap {
 		ncap := d.cap*2 + nFloats
-		np := C.fcuda_malloc(C.size_t(ncap * 4))
+		np := c.dallocKV(ncap*F32.Bytes(), site).ptr
 		if d.len > 0 {
 			C.fcuda_d2d(unsafe.Pointer(np), d.ptr, C.size_t(d.len*4))
 		}
@@ -1148,9 +1199,9 @@ func (k *cudaKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	w := k.stride()
-	k.be.growAppend(&k.Kraw[layer], kRaw.buf.(*cudaBuf).ptr, w)
-	k.be.growAppend(&k.K[layer], kRoPE.buf.(*cudaBuf).ptr, w)
-	k.be.growAppend(&k.V[layer], v.buf.(*cudaBuf).ptr, w)
+	k.be.growAppend(&k.Kraw[layer], kRaw.buf.(*cudaBuf).ptr, w, "kv-pre-rope-key-grow layer "+itoaC(layer))
+	k.be.growAppend(&k.K[layer], kRoPE.buf.(*cudaBuf).ptr, w, "kv-key-grow layer "+itoaC(layer))
+	k.be.growAppend(&k.V[layer], v.buf.(*cudaBuf).ptr, w, "kv-value-grow layer "+itoaC(layer))
 	if layer == 0 {
 		k.pos = append(k.pos, pos)
 	}
@@ -1207,7 +1258,7 @@ func (k *cudaKV) Evict(from, n int) int {
 	if tailFloats > 0 {
 		scratch = unsafe.Pointer(C.fcuda_malloc(C.size_t(tailFloats * 4)))
 		if scratch == nil {
-			panic(&DeviceAllocError{Bytes: tailFloats * 4, Site: "evict-scratch"})
+			panic(&DeviceAllocError{Bytes: tailFloats * 4, Site: "evict-scratch", Class: MemoryScratchpad})
 		}
 	}
 	for l := 0; l < k.cfg.NumLayers; l++ {
@@ -1262,18 +1313,18 @@ func (k *cudaKV) Clone() KVStore {
 	n := &cudaKV{be: k.be, cfg: k.cfg,
 		K: make([]dslice, len(k.K)), Kraw: make([]dslice, len(k.Kraw)), V: make([]dslice, len(k.V)),
 		pos: append([]int(nil), k.pos...)}
-	cp := func(dst, src *dslice) {
+	cp := func(dst, src *dslice, site string) {
 		if src.len == 0 {
 			return
 		}
-		np := C.fcuda_malloc(C.size_t(src.len * 4))
+		np := k.be.dallocKV(src.len*F32.Bytes(), site).ptr
 		C.fcuda_d2d(unsafe.Pointer(np), src.ptr, C.size_t(src.len*4))
 		dst.ptr, dst.len, dst.cap = unsafe.Pointer(np), src.len, src.len
 	}
 	for l := range k.K {
-		cp(&n.K[l], &k.K[l])
-		cp(&n.Kraw[l], &k.Kraw[l])
-		cp(&n.V[l], &k.V[l])
+		cp(&n.K[l], &k.K[l], "kv-key-clone layer "+itoaC(l))
+		cp(&n.Kraw[l], &k.Kraw[l], "kv-pre-rope-key-clone layer "+itoaC(l))
+		cp(&n.V[l], &k.V[l], "kv-value-clone layer "+itoaC(l))
 	}
 	return n
 }
