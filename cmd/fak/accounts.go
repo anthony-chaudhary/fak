@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -30,7 +31,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <list|resolve|pull|discover|validate> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <list|resolve|pull|discover|validate|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -48,6 +49,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	asEnv := fs.Bool("env", false, "(resolve) print CLAUDE_CONFIG_DIR=<dir> for eval/wrappers")
 	pin := fs.Bool("pin", false, "(resolve) PIN to the exact seat (strict); default rehomes to a live seat")
 	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying")
+	gateDir := fs.String("dir", "", "(gate-write) target config dir to gate a stdin setup-token write against")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -172,10 +174,74 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "ok: %d homes, registry valid (%s)\n", len(reg.Homes), *registryPath)
 		return 0
 
+	case "check-twins":
+		// The audit gate for Regression A: red (exit 1) when two config homes logged into
+		// DIFFERENT accounts share one setup-token fingerprint (the cross-account smear
+		// that surfaces as "subscription disabled"). Homes that share a token but resolve
+		// to ONE account (~/.claude + its named dir) are legitimate and pass.
+		findings, err := accounts.AuditTokenTwins(*homeDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		if *asJSON {
+			stdout.Write(mustJSON(map[string]any{"clean": len(findings) == 0, "findings": findings}))
+			fmt.Fprintln(stdout)
+		}
+		if len(findings) == 0 {
+			if !*asJSON {
+				fmt.Fprintln(stdout, "ok: no cross-account token-twins — every shared setup token is one account")
+			}
+			return 0
+		}
+		if !*asJSON {
+			for _, f := range findings {
+				fmt.Fprintf(stdout, "TOKEN-TWIN: homes [%s] share one setup token but log into %d accounts [%s]\n",
+					strings.Join(f.Homes, ", "), len(f.Accounts), strings.Join(f.Accounts, ", "))
+			}
+			fmt.Fprintf(stderr, "fak accounts: %d cross-account token-twin(s) — a foreign token will surface as "+
+				"\"subscription disabled\". Give each account its OWN setup token in its OWN dir.\n", len(findings))
+		}
+		return 1
+
+	case "gate-write":
+		// Pre-write gate: decide whether writing a setup token (stdin) into --dir is safe,
+		// BEFORE any flow persists it. Exit 0 = safe to write; exit 1 = refused (would
+		// create a cross-account token-twin). The token is read from stdin only, never
+		// argv, and is fingerprinted, never echoed.
+		if *gateDir == "" {
+			fmt.Fprintln(stderr, "usage: fak accounts gate-write --dir <config-dir> < token")
+			return 2
+		}
+		tokBytes, _ := io.ReadAll(os.Stdin)
+		verdict := accounts.GateTokenWrite(*gateDir, string(tokBytes), *homeDir)
+		if *asJSON {
+			stdout.Write(mustJSON(verdict))
+			fmt.Fprintln(stdout)
+		} else if verdict.Allow {
+			fmt.Fprintf(stdout, "ok: safe to write into %s (login: %s)\n", *gateDir, verdict.DirAccount)
+		} else {
+			fmt.Fprintf(stderr, "REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
+		}
+		if verdict.Allow {
+			return 0
+		}
+		return 1
+
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want list|resolve|pull|discover|validate)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want list|resolve|pull|discover|validate|check-twins|gate-write)\n", sub)
 		return 2
 	}
+}
+
+// mustJSON marshals v to indented JSON for the --json output paths; on the (unreachable
+// for these value types) marshal error it returns a JSON error object rather than panic.
+func mustJSON(v any) []byte {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return []byte(fmt.Sprintf("{\"error\":%q}", err.Error()))
+	}
+	return b
 }
 
 // loadOrDiscover reads the registry file if present, else falls back to a fresh
