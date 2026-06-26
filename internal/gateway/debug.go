@@ -121,22 +121,29 @@ type debugMemoryFitVars struct {
 }
 
 type debugKVMemoryVars struct {
-	Enabled         bool   `json:"enabled"`
-	Backend         string `json:"backend"`
-	MemoryClass     string `json:"memory_class"`
-	Scope           string `json:"scope"`
-	DType           string `json:"dtype,omitempty"`
-	BytesPerToken   int64  `json:"bytes_per_token"`
-	ResidentTokens  int    `json:"resident_tokens,omitempty"`
-	ResidentBytes   int64  `json:"resident_bytes,omitempty"`
-	BudgetTokens    int    `json:"budget_tokens,omitempty"`
-	LRUTokens       int    `json:"lru_tokens,omitempty"`
-	MaxDepthTokens  int    `json:"max_depth_tokens,omitempty"`
-	Nodes           int    `json:"nodes,omitempty"`
-	Leaves          int    `json:"leaves,omitempty"`
-	Evictions       int    `json:"evictions,omitempty"`
-	PolicyEvictions int    `json:"policy_evictions,omitempty"`
-	Splits          int    `json:"splits,omitempty"`
+	Enabled            bool    `json:"enabled"`
+	Backend            string  `json:"backend"`
+	MemoryClass        string  `json:"memory_class"`
+	Scope              string  `json:"scope"`
+	DType              string  `json:"dtype,omitempty"`
+	BytesPerToken      int64   `json:"bytes_per_token"`
+	ResidentTokens     int     `json:"resident_tokens,omitempty"`
+	ResidentBytes      int64   `json:"resident_bytes,omitempty"`
+	CapacityKnown      bool    `json:"capacity_known"`
+	CapacityFreeKnown  bool    `json:"capacity_free_known"`
+	CapacityTotalBytes int64   `json:"capacity_total_bytes,omitempty"`
+	CapacityFreeBytes  int64   `json:"capacity_free_bytes,omitempty"`
+	HeadroomRatio      float64 `json:"headroom_ratio,omitempty"`
+	FitBudgetBytes     int64   `json:"fit_budget_bytes,omitempty"`
+	FitMarginBytes     int64   `json:"fit_margin_bytes,omitempty"`
+	BudgetTokens       int     `json:"budget_tokens,omitempty"`
+	LRUTokens          int     `json:"lru_tokens,omitempty"`
+	MaxDepthTokens     int     `json:"max_depth_tokens,omitempty"`
+	Nodes              int     `json:"nodes,omitempty"`
+	Leaves             int     `json:"leaves,omitempty"`
+	Evictions          int     `json:"evictions,omitempty"`
+	PolicyEvictions    int     `json:"policy_evictions,omitempty"`
+	Splits             int     `json:"splits,omitempty"`
 }
 
 type debugRequestMemoryVars struct {
@@ -455,22 +462,29 @@ func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
 	}
 	dtype := modelLoadDType(st.DType)
 	return &debugKVMemoryVars{
-		Enabled:         st.Enabled,
-		Backend:         backend,
-		MemoryClass:     class,
-		Scope:           scope,
-		DType:           dtype,
-		BytesPerToken:   st.BytesPerToken,
-		ResidentTokens:  st.ResidentTokens,
-		ResidentBytes:   st.ResidentBytes,
-		BudgetTokens:    st.BudgetTokens,
-		LRUTokens:       st.LRUTokens,
-		MaxDepthTokens:  st.MaxDepthTokens,
-		Nodes:           st.Nodes,
-		Leaves:          st.Leaves,
-		Evictions:       st.Evictions,
-		PolicyEvictions: st.PolicyEvictions,
-		Splits:          st.Splits,
+		Enabled:            st.Enabled,
+		Backend:            backend,
+		MemoryClass:        class,
+		Scope:              scope,
+		DType:              dtype,
+		BytesPerToken:      st.BytesPerToken,
+		ResidentTokens:     st.ResidentTokens,
+		ResidentBytes:      st.ResidentBytes,
+		CapacityKnown:      st.CapacityKnown,
+		CapacityFreeKnown:  st.CapacityKnown && st.CapacityFreeKnown,
+		CapacityTotalBytes: st.CapacityTotalBytes,
+		CapacityFreeBytes:  st.CapacityFreeBytes,
+		HeadroomRatio:      st.HeadroomRatio,
+		FitBudgetBytes:     st.FitBudgetBytes,
+		FitMarginBytes:     st.FitMarginBytes,
+		BudgetTokens:       st.BudgetTokens,
+		LRUTokens:          st.LRUTokens,
+		MaxDepthTokens:     st.MaxDepthTokens,
+		Nodes:              st.Nodes,
+		Leaves:             st.Leaves,
+		Evictions:          st.Evictions,
+		PolicyEvictions:    st.PolicyEvictions,
+		Splits:             st.Splits,
 	}
 }
 

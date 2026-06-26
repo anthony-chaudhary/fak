@@ -27,11 +27,10 @@ package engine
 // RestoreSpan; a remote / disaggregated KV backend overrides StageSpan to serialize the
 // fak-owned pre-RoPE rows off-box first, so the demote survives disaggregated.
 //
-// Honest fence (matching the explainer's). This adapter executes the move against the
-// kernel-owned cache; it does not yet compute live TierPressure from a real device (that
-// is Plank 3) nor turn an OOM panic into a typed value (Plank 2). It is the control path
-// Plank 4 names; a capacity-pressure loop that drives it from real device state is the
-// remaining plank.
+// Honest fence (matching the explainer's). This adapter executes a supplied move against
+// the kernel-owned cache; it does not itself compute live TierPressure from a real device
+// (that is Plank 3 / capacity_sweep.go) nor turn an OOM panic into a typed value (Plank 2).
+// The live serving loop still has to supply pressured candidates and invoke the sweep.
 
 import (
 	"context"

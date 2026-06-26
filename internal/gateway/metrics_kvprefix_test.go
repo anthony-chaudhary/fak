@@ -90,22 +90,29 @@ func TestKVMemoryMetricsSuppressedWithoutReporter(t *testing.T) {
 func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = kvMemoryStatsPlanner{stats: agent.KVMemoryStats{
-		Enabled:         true,
-		Backend:         "radixkv",
-		MemoryClass:     "kv_cache",
-		Scope:           "host",
-		DType:           "f32",
-		BytesPerToken:   6144,
-		ResidentTokens:  42,
-		ResidentBytes:   258048,
-		BudgetTokens:    64,
-		LRUTokens:       18,
-		MaxDepthTokens:  21,
-		Nodes:           3,
-		Leaves:          2,
-		Evictions:       4,
-		PolicyEvictions: 1,
-		Splits:          5,
+		Enabled:            true,
+		Backend:            "radixkv",
+		MemoryClass:        "kv_cache",
+		Scope:              "host",
+		DType:              "f32",
+		BytesPerToken:      6144,
+		ResidentTokens:     42,
+		ResidentBytes:      258048,
+		CapacityKnown:      true,
+		CapacityFreeKnown:  true,
+		CapacityTotalBytes: 2 << 20,
+		CapacityFreeBytes:  790528,
+		HeadroomRatio:      0.25,
+		FitBudgetBytes:     786432,
+		FitMarginBytes:     528384,
+		BudgetTokens:       64,
+		LRUTokens:          18,
+		MaxDepthTokens:     21,
+		Nodes:              3,
+		Leaves:             2,
+		Evictions:          4,
+		PolicyEvictions:    1,
+		Splits:             5,
 	}}
 
 	text := srv.renderMetrics()
@@ -113,6 +120,14 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		`fak_gateway_kv_memory_enabled{class="kv_cache",scope="host",backend="radixkv"} 1`,
 		`fak_gateway_kv_memory_dtype_info{class="kv_cache",scope="host",backend="radixkv",dtype="f32"} 1`,
 		`fak_gateway_kv_memory_bytes_per_token{class="kv_cache",scope="host",backend="radixkv"} 6144`,
+		`fak_gateway_kv_memory_headroom_ratio{class="kv_cache",scope="host",backend="radixkv"} 0.25`,
+		`fak_gateway_kv_memory_capacity_known{class="kv_cache",scope="host",backend="radixkv"} 1`,
+		`fak_gateway_kv_memory_capacity_free_known{class="kv_cache",scope="host",backend="radixkv"} 1`,
+		`fak_gateway_kv_memory_capacity_bytes{class="kv_cache",scope="host",backend="radixkv",kind="total"} 2097152`,
+		`fak_gateway_kv_memory_capacity_bytes{class="kv_cache",scope="host",backend="radixkv",kind="free"} 790528`,
+		`fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="host",backend="radixkv",kind="want"} 258048`,
+		`fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="host",backend="radixkv",kind="budget"} 786432`,
+		`fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="host",backend="radixkv",kind="margin"} 528384`,
 		`fak_gateway_kv_memory_resident_tokens{class="kv_cache",scope="host",backend="radixkv"} 42`,
 		`fak_gateway_kv_memory_resident_bytes{class="kv_cache",scope="host",backend="radixkv"} 258048`,
 		`fak_gateway_kv_memory_lru_tokens{class="kv_cache",scope="host",backend="radixkv"} 18`,
@@ -131,7 +146,10 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		t.Fatal("/debug/vars missing kv_memory")
 	}
 	if vars.KVMemory.ResidentTokens != 42 || vars.KVMemory.ResidentBytes != 258048 ||
-		vars.KVMemory.LRUTokens != 18 || vars.KVMemory.PolicyEvictions != 1 || vars.KVMemory.DType != "f32" {
+		vars.KVMemory.LRUTokens != 18 || vars.KVMemory.PolicyEvictions != 1 || vars.KVMemory.DType != "f32" ||
+		!vars.KVMemory.CapacityKnown || !vars.KVMemory.CapacityFreeKnown ||
+		vars.KVMemory.CapacityTotalBytes != 2<<20 || vars.KVMemory.CapacityFreeBytes != 790528 ||
+		vars.KVMemory.FitBudgetBytes != 786432 || vars.KVMemory.FitMarginBytes != 528384 {
 		t.Fatalf("debug kv_memory = %+v, want resident/lru/eviction fields", vars.KVMemory)
 	}
 }
@@ -139,12 +157,17 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = kvMemoryStatsPlanner{stats: agent.KVMemoryStats{
-		Enabled:       false,
-		Backend:       "cpu-ref",
-		MemoryClass:   "kv_cache",
-		Scope:         "device",
-		DType:         "f32",
-		BytesPerToken: 4096,
+		Enabled:            false,
+		Backend:            "cpu-ref",
+		MemoryClass:        "kv_cache",
+		Scope:              "device",
+		DType:              "f32",
+		BytesPerToken:      4096,
+		CapacityKnown:      true,
+		CapacityTotalBytes: 8192,
+		HeadroomRatio:      0.25,
+		FitBudgetBytes:     6144,
+		FitMarginBytes:     6144,
 	}}
 
 	text := srv.renderMetrics()
@@ -152,6 +175,12 @@ func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 		`fak_gateway_kv_memory_enabled{class="kv_cache",scope="device",backend="cpu-ref"} 0`,
 		`fak_gateway_kv_memory_dtype_info{class="kv_cache",scope="device",backend="cpu-ref",dtype="f32"} 1`,
 		`fak_gateway_kv_memory_bytes_per_token{class="kv_cache",scope="device",backend="cpu-ref"} 4096`,
+		`fak_gateway_kv_memory_capacity_known{class="kv_cache",scope="device",backend="cpu-ref"} 1`,
+		`fak_gateway_kv_memory_capacity_free_known{class="kv_cache",scope="device",backend="cpu-ref"} 0`,
+		`fak_gateway_kv_memory_capacity_bytes{class="kv_cache",scope="device",backend="cpu-ref",kind="total"} 8192`,
+		`fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="device",backend="cpu-ref",kind="want"} 0`,
+		`fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="device",backend="cpu-ref",kind="budget"} 6144`,
+		`fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="device",backend="cpu-ref",kind="margin"} 6144`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("disabled KV memory reporter missing %q\n--- metrics ---\n%s", want, text)
@@ -171,7 +200,10 @@ func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 	if vars.KVMemory == nil {
 		t.Fatal("/debug/vars missing disabled kv_memory geometry")
 	}
-	if vars.KVMemory.Enabled || vars.KVMemory.Scope != "device" || vars.KVMemory.DType != "f32" || vars.KVMemory.BytesPerToken != 4096 || vars.KVMemory.ResidentTokens != 0 {
+	if vars.KVMemory.Enabled || vars.KVMemory.Scope != "device" || vars.KVMemory.DType != "f32" ||
+		vars.KVMemory.BytesPerToken != 4096 || vars.KVMemory.ResidentTokens != 0 ||
+		!vars.KVMemory.CapacityKnown || vars.KVMemory.CapacityFreeKnown ||
+		vars.KVMemory.FitBudgetBytes != 6144 || vars.KVMemory.FitMarginBytes != 6144 {
 		t.Fatalf("debug disabled kv_memory = %+v, want geometry-only disabled snapshot", vars.KVMemory)
 	}
 }

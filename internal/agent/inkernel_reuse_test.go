@@ -283,6 +283,17 @@ func TestInKernelKVMemoryStatsReportsResidentFootprint(t *testing.T) {
 	}, stats.ResidentTokens); stats.ResidentBytes != want {
 		t.Fatalf("resident bytes = %d, want %d from PrefixTokens=%d", stats.ResidentBytes, want, stats.ResidentTokens)
 	}
+	if total, _, known := compute.HostSystemMemoryInfo(); known {
+		if !stats.CapacityKnown || stats.CapacityTotalBytes != total {
+			t.Fatalf("host capacity known but KV stats did not report it: total=%d stats=%+v", total, stats)
+		}
+		if stats.HeadroomRatio != inKernelKVMemoryHeadroom {
+			t.Fatalf("KV headroom = %g, want %g", stats.HeadroomRatio, inKernelKVMemoryHeadroom)
+		}
+		if stats.FitBudgetBytes <= 0 || stats.FitMarginBytes != stats.FitBudgetBytes-stats.ResidentBytes {
+			t.Fatalf("invalid KV fit budget/margin: %+v", stats)
+		}
+	}
 	if stats.Nodes == 0 || stats.Leaves == 0 || stats.MaxDepthTokens != len(second) {
 		t.Fatalf("tree shape not reflected in KV memory stats: %+v", stats)
 	}

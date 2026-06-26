@@ -394,6 +394,13 @@ func HostMemoryInfo(b Backend) (total, free int64, known bool) {
 	return hc.HostMemory()
 }
 
+// HostSystemMemoryInfo reports process-host physical memory without requiring a backend.
+// It is for host-scoped local caches owned by the process rather than by a HAL backend;
+// unsupported platforms return known=false, preserving the fail-open capacity contract.
+func HostSystemMemoryInfo() (total, free int64, known bool) {
+	return hostSystemMemory()
+}
+
 func fitsWithinReportedMemory(total, free int64, known bool, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
 	if wantBytes <= 0 {
 		return FitOK, 0

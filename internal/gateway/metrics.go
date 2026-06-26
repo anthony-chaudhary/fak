@@ -966,6 +966,35 @@ func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_gateway_kv_memory_dtype_info{%s,dtype=\"%s\"} 1\n", labels, promQuote(dtype))
 	writeHelpType(b, "fak_gateway_kv_memory_bytes_per_token", "Estimated bytes for one resident KV position under this model layout (classed as kv_cache).", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_memory_bytes_per_token{%s} %d\n", labels, st.BytesPerToken)
+	if st.HeadroomRatio > 0 {
+		writeHelpType(b, "fak_gateway_kv_memory_headroom_ratio", "Fraction of reported capacity reserved when calculating resident KV-cache fit budget.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_kv_memory_headroom_ratio{%s} %s\n", labels, promFloat(st.HeadroomRatio))
+	}
+	known := 0
+	if st.CapacityKnown {
+		known = 1
+	}
+	writeHelpType(b, "fak_gateway_kv_memory_capacity_known", "Whether the planner reported capacity for the resident KV-cache memory scope.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_capacity_known{%s} %d\n", labels, known)
+	freeKnown := 0
+	if st.CapacityKnown && st.CapacityFreeKnown {
+		freeKnown = 1
+	}
+	writeHelpType(b, "fak_gateway_kv_memory_capacity_free_known", "Whether the planner reported current free bytes for the resident KV-cache memory scope.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_capacity_free_known{%s} %d\n", labels, freeKnown)
+	if st.CapacityKnown {
+		writeHelpType(b, "fak_gateway_kv_memory_capacity_bytes", "Reported capacity bytes for the resident KV-cache memory scope. The free row is omitted when current free bytes are unknown.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_kv_memory_capacity_bytes{%s,kind=\"total\"} %d\n", labels, st.CapacityTotalBytes)
+		if st.CapacityFreeKnown {
+			fmt.Fprintf(b, "fak_gateway_kv_memory_capacity_bytes{%s,kind=\"free\"} %d\n", labels, st.CapacityFreeBytes)
+		}
+	}
+	writeHelpType(b, "fak_gateway_kv_memory_fit_bytes", "Headroom-adjusted fit summary for resident KV-cache memory. kind=want is current resident bytes; kind=budget and kind=margin are omitted when capacity is unknown.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_fit_bytes{%s,kind=\"want\"} %d\n", labels, st.ResidentBytes)
+	if st.CapacityKnown {
+		fmt.Fprintf(b, "fak_gateway_kv_memory_fit_bytes{%s,kind=\"budget\"} %d\n", labels, st.FitBudgetBytes)
+		fmt.Fprintf(b, "fak_gateway_kv_memory_fit_bytes{%s,kind=\"margin\"} %d\n", labels, st.FitMarginBytes)
+	}
 	if !st.Enabled {
 		return
 	}

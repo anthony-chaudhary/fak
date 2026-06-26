@@ -541,22 +541,29 @@ type Planner interface {
 // proxy an upstream model do not implement it; the gateway emits no resident-KV series
 // for them rather than publishing a fake zero.
 type KVMemoryStats struct {
-	Enabled         bool   // true when a reusable local KV cache is active
-	Backend         string // radixkv, device backend name, or empty when unknown
-	MemoryClass     string // kv_cache
-	Scope           string // host/device
-	DType           string // storage dtype for the local KV rows, currently f32 for HAL KV
-	BytesPerToken   int64  // bytes per resident KV position under this model layout
-	ResidentTokens  int    // true resident prefix positions, not the LRU edge-token budget
-	ResidentBytes   int64
-	BudgetTokens    int // configured LRU budget metric; 0 means unbounded or unavailable
-	LRUTokens       int // Σ edge lengths, the budget metric radixkv enforces
-	MaxDepthTokens  int
-	Nodes           int
-	Leaves          int
-	Evictions       int
-	PolicyEvictions int
-	Splits          int
+	Enabled            bool   // true when a reusable local KV cache is active
+	Backend            string // radixkv, device backend name, or empty when unknown
+	MemoryClass        string // kv_cache
+	Scope              string // host/device
+	DType              string // storage dtype for the local KV rows, currently f32 for HAL KV
+	BytesPerToken      int64  // bytes per resident KV position under this model layout
+	ResidentTokens     int    // true resident prefix positions, not the LRU edge-token budget
+	ResidentBytes      int64
+	CapacityKnown      bool
+	CapacityFreeKnown  bool
+	CapacityTotalBytes int64
+	CapacityFreeBytes  int64
+	HeadroomRatio      float64
+	FitBudgetBytes     int64
+	FitMarginBytes     int64
+	BudgetTokens       int // configured LRU budget metric; 0 means unbounded or unavailable
+	LRUTokens          int // Σ edge lengths, the budget metric radixkv enforces
+	MaxDepthTokens     int
+	Nodes              int
+	Leaves             int
+	Evictions          int
+	PolicyEvictions    int
+	Splits             int
 }
 
 // KVMemoryReporter is the optional interface a local planner implements when it

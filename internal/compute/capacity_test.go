@@ -108,15 +108,15 @@ func TestHostCapacityReportsAndFits(t *testing.T) {
 }
 
 func TestHostSystemMemoryProbeIsSaneWhenAvailable(t *testing.T) {
-	total, free, known := hostSystemMemory()
+	total, free, known := HostSystemMemoryInfo()
 	if !known {
 		return
 	}
 	if total <= 0 {
-		t.Fatalf("hostSystemMemory known with non-positive total=%d", total)
+		t.Fatalf("HostSystemMemoryInfo known with non-positive total=%d", total)
 	}
 	if free != FreeUnknown && (free < 0 || free > total) {
-		t.Fatalf("hostSystemMemory free=%d outside [0,total=%d]", free, total)
+		t.Fatalf("HostSystemMemoryInfo free=%d outside [0,total=%d]", free, total)
 	}
 }
 

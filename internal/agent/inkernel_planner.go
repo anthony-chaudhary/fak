@@ -168,14 +168,19 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 		Scope:         string(compute.MemoryScopeHost),
 		DType:         compute.F32.String(),
 		BytesPerToken: bytesPerToken,
+		HeadroomRatio: inKernelKVMemoryHeadroom,
 	}
 	if p.backend != nil {
 		stats.Enabled = false
 		stats.Backend = p.backend.Name()
 		stats.Scope = string(compute.MemoryScopeDevice)
+		total, free, known := compute.DeviceMemoryInfo(p.backend)
+		applyKVMemoryCapacity(&stats, total, free, known)
 		return stats
 	}
+	hostTotal, hostFree, hostKnown := compute.HostSystemMemoryInfo()
 	if p.tree == nil {
+		applyKVMemoryCapacity(&stats, hostTotal, hostFree, hostKnown)
 		return stats
 	}
 	p.mu.Lock()
@@ -191,7 +196,52 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	stats.Evictions = st.Evictions
 	stats.PolicyEvictions = st.PolicyEvictions
 	stats.Splits = st.Splits
+	applyKVMemoryCapacity(&stats, hostTotal, hostFree, hostKnown)
 	return stats
+}
+
+const inKernelKVMemoryHeadroom = 0.15
+
+func applyKVMemoryCapacity(stats *KVMemoryStats, total, free int64, known bool) {
+	if stats == nil || !known || total <= 0 {
+		return
+	}
+	stats.CapacityKnown = true
+	stats.CapacityTotalBytes = total
+	if free != compute.FreeUnknown && free >= 0 {
+		stats.CapacityFreeKnown = true
+		stats.CapacityFreeBytes = free
+	}
+	budgetBase := total
+	if stats.CapacityFreeKnown {
+		budgetBase = addKVCapacityBytes(free, stats.ResidentBytes)
+		if budgetBase > total {
+			budgetBase = total
+		}
+	}
+	stats.FitBudgetBytes = applyKVCapacityHeadroom(budgetBase, stats.HeadroomRatio)
+	stats.FitMarginBytes = stats.FitBudgetBytes - stats.ResidentBytes
+}
+
+func addKVCapacityBytes(a, b int64) int64 {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if b <= 0 {
+		return a
+	}
+	if a > maxInt64-b {
+		return maxInt64
+	}
+	return a + b
+}
+
+func applyKVCapacityHeadroom(bytes int64, headroom float64) int64 {
+	if bytes <= 0 {
+		return 0
+	}
+	if headroom <= 0 || headroom >= 1 {
+		return bytes
+	}
+	return int64(float64(bytes) * (1 - headroom))
 }
 
 func (p *InKernelPlanner) RequestMemoryStats() RequestMemoryStats {
