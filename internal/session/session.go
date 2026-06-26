@@ -34,10 +34,13 @@
 // exhaustion and pause/stop are scheduling EVENTS (a slot frees); a supervisor
 // observes them through the table instead of re-deriving from a process scan.
 //
-// This package is a foundation leaf: stdlib-only (container/list + sync), off the
-// request path, registers nothing. The zero Table is not usable — construct with
-// NewTable / NewTableWithLimit.
+// This package is a foundation leaf: stdlib-only (container/list + sync) plus the
+// shared internal/lifecycle vocabulary leaf, off the request path, registers
+// nothing. The zero Table is not usable — construct with NewTable /
+// NewTableWithLimit.
 package session
+
+import "github.com/anthony-chaudhary/fak/internal/lifecycle"
 
 // RunState is a served session's lifecycle position — a small, total state machine.
 // The transitions are the control verbs the design names: throttle/pause/resume
@@ -63,38 +66,66 @@ const (
 )
 
 // String renders a RunState as its lowercase wire token (the form the
-// /v1/fak/session routes emit and accept). An out-of-range value renders
-// "unknown" rather than panicking — a wire value is never trusted to be in range.
+// /v1/fak/session routes emit and accept). The four shared-lifecycle tokens are
+// SOURCED from internal/lifecycle (not re-spelled here) so the served session and
+// the loop supervisor cannot drift apart; Throttled is the one session-only token.
+// An out-of-range value renders "unknown" rather than panicking — a wire value is
+// never trusted to be in range.
 func (s RunState) String() string {
-	switch s {
-	case Running:
-		return "running"
-	case Throttled:
+	if s == Throttled {
 		return "throttled"
-	case Paused:
-		return "paused"
-	case Draining:
-		return "draining"
-	case Stopped:
-		return "stopped"
+	}
+	if p, ok := s.Phase(); ok {
+		return p.String()
 	}
 	return "unknown"
 }
 
 // ParseRunState maps a wire token back to a RunState. The bool is false for an
 // unrecognized token, so a caller fails closed (the route returns 400) rather than
-// defaulting an unknown verb to Running.
+// defaulting an unknown verb to Running. The four shared tokens go through
+// lifecycle.Parse — the single definition both layers share.
 func ParseRunState(s string) (RunState, bool) {
-	switch s {
-	case "running":
-		return Running, true
-	case "throttled":
+	if s == "throttled" {
 		return Throttled, true
-	case "paused":
+	}
+	if p, ok := lifecycle.Parse(s); ok {
+		return RunStateFromPhase(p)
+	}
+	return 0, false
+}
+
+// Phase projects a RunState onto the shared lifecycle skeleton. The bool is false
+// for Throttled (a session-only pace modifier with no shared peer) and for any
+// out-of-range value — the projection is explicit about the extras, never a silent
+// default. This is the served-session half of the #912 "one machine" converter;
+// internal/lifebridge composes it with the supervisor half.
+func (s RunState) Phase() (lifecycle.Phase, bool) {
+	switch s {
+	case Running:
+		return lifecycle.Running, true
+	case Paused:
+		return lifecycle.Paused, true
+	case Draining:
+		return lifecycle.Draining, true
+	case Stopped:
+		return lifecycle.Stopped, true
+	}
+	return 0, false
+}
+
+// RunStateFromPhase lifts a shared lifecycle Phase into a RunState. It is total
+// over the four Phases (every shared state has a RunState peer); an out-of-range
+// Phase yields (0, false).
+func RunStateFromPhase(p lifecycle.Phase) (RunState, bool) {
+	switch p {
+	case lifecycle.Running:
+		return Running, true
+	case lifecycle.Paused:
 		return Paused, true
-	case "draining":
+	case lifecycle.Draining:
 		return Draining, true
-	case "stopped":
+	case lifecycle.Stopped:
 		return Stopped, true
 	}
 	return 0, false

@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 )
 
 const (
@@ -36,13 +38,53 @@ const (
 type LoopState string
 
 const (
+	// Armed and Disabled are supervisor-only schedule states — a live served
+	// sequence has no peer for either, so they are spelled here, not in the shared
+	// leaf. The four common states are SOURCED from internal/lifecycle (the single
+	// definition the served session shares) so the two machines cannot drift apart.
 	StateArmed    LoopState = "armed"
-	StateRunning  LoopState = "running"
-	StatePaused   LoopState = "paused"
-	StateDraining LoopState = "draining"
-	StateStopped  LoopState = "stopped"
+	StateRunning  LoopState = lifecycle.TokenRunning
+	StatePaused   LoopState = lifecycle.TokenPaused
+	StateDraining LoopState = lifecycle.TokenDraining
+	StateStopped  LoopState = lifecycle.TokenStopped
 	StateDisabled LoopState = "disabled"
 )
+
+// Phase projects a LoopState onto the shared lifecycle skeleton. The bool is false
+// for the supervisor-only extras (Armed/Disabled) and any unknown string — the
+// projection is explicit about the extras, never a silent default. This is the
+// supervisor half of the #912 "one machine" converter; internal/lifebridge
+// composes it with the served-session half.
+func (s LoopState) Phase() (lifecycle.Phase, bool) {
+	switch s {
+	case StateRunning:
+		return lifecycle.Running, true
+	case StatePaused:
+		return lifecycle.Paused, true
+	case StateDraining:
+		return lifecycle.Draining, true
+	case StateStopped:
+		return lifecycle.Stopped, true
+	}
+	return 0, false
+}
+
+// LoopStateFromPhase lifts a shared lifecycle Phase into a LoopState. It is total
+// over the four Phases (every shared state has a LoopState peer); an out-of-range
+// Phase yields ("", false).
+func LoopStateFromPhase(p lifecycle.Phase) (LoopState, bool) {
+	switch p {
+	case lifecycle.Running:
+		return StateRunning, true
+	case lifecycle.Paused:
+		return StatePaused, true
+	case lifecycle.Draining:
+		return StateDraining, true
+	case lifecycle.Stopped:
+		return StateStopped, true
+	}
+	return "", false
+}
 
 type RunStatus string
 
