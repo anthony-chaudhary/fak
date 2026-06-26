@@ -107,12 +107,20 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	}
 
 	// Anchor the protected prefix on the FIRST cache_control breakpoint message — the stable
-	// cached head — exactly as compaction does. Require a cache anchor (a message breakpoint or
-	// one in `system`); without it we cannot know the cache boundary and must not touch the body.
+	// cached head — exactly as compaction does. Require a cache anchor or we cannot know the
+	// cache boundary and must not touch the body.
 	pfxEnd := firstBreakpointMessage(elems)
-	sysHasCC := rawHasCacheControl(obj["system"])
-	if pfxEnd < 0 && !sysHasCC {
-		return raw, ElideOutcome{Reason: ElideReasonNoBreakpoint}
+	if pfxEnd < 0 {
+		// No message-level breakpoint. Fall back to a system-only cache anchor ONLY if `system`
+		// carries a breakpoint AND its bytes precede the messages array (so the array head is a
+		// sound protected-prefix end). If `system` sat AFTER messages on the wire, the
+		// system-anchored cached prefix would span the messages, and editing one could burst it —
+		// which we cannot prove safe, so bail. (Real clients send system before messages; this
+		// guard makes the byte order, not the convention, load-bearing.)
+		sysRaw, ok := obj["system"]
+		if !ok || !rawHasCacheControl(sysRaw) || bytes.Index(raw, sysRaw) >= spans[0].start {
+			return raw, ElideOutcome{Reason: ElideReasonNoBreakpoint}
+		}
 	}
 
 	// The eligible band: strictly after the protected prefix, before the recent working-set
