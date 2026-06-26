@@ -36,6 +36,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 )
 
 // compactStubPrefix marks the synthetic message that stands in for the dropped turns, so
@@ -54,6 +55,7 @@ const (
 	CompactReasonNoMsgsKey      = "no_messages_key"
 	CompactReasonTooFewMsgs     = "too_few_msgs"   // < 3 messages — nothing safe to drop
 	CompactReasonNoBreakpoint   = "no_breakpoint"  // no cache_control to anchor the protected prefix
+	CompactReasonCachedSpan     = "cached_span"    // candidate drop would delete cache_control-marked history
 	CompactReasonWindowNoDrop   = "window_no_drop" // the kept window swallowed the whole suffix
 	CompactReasonSpliceFailed   = "splice_failed"
 	CompactReasonRedecodeFail   = "redecode_failed" // the spliced body failed to re-decode
@@ -189,6 +191,13 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 	if messageHasToolResult(elems[keepStart]) {
 		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // would orphan a tool_result — fail safe
 	}
+	if rangeHasCacheControl(elems, pfxEnd+1, keepStart) {
+		// A cache_control-bearing message is provider-warm history. Dropping it may shrink
+		// the prompt, but it also intentionally bursts the cached suffix after the first
+		// changed byte. Without an explicit horizon/economics gate, the conservative action is
+		// identity: keep the provider's cache hit over a smaller prompt.
+		return raw, CompactOutcome{Reason: CompactReasonCachedSpan}
+	}
 	dropped := keepStart - (pfxEnd + 1)
 
 	// shedTokens: the estimated tokens removed from the outbound body — the sum over the dropped
@@ -288,13 +297,7 @@ func arrayContentStart(spans []elementSpan) int {
 func lastBreakpointMessage(elems []json.RawMessage) int {
 	last := -1
 	for i, el := range elems {
-		var m struct {
-			Content json.RawMessage `json:"content"`
-		}
-		if json.Unmarshal(el, &m) != nil {
-			continue
-		}
-		if rawHasCacheControl(m.Content) {
+		if messageHasCacheControl(el) {
 			last = i
 		}
 	}
@@ -309,17 +312,73 @@ func lastBreakpointMessage(elems []json.RawMessage) int {
 // is what lets compaction drop the un-cacheable MIDDLE on real multi-breakpoint traffic.
 func firstBreakpointMessage(elems []json.RawMessage) int {
 	for i, el := range elems {
-		var m struct {
-			Content json.RawMessage `json:"content"`
-		}
-		if json.Unmarshal(el, &m) != nil {
-			continue
-		}
-		if rawHasCacheControl(m.Content) {
+		if messageHasCacheControl(el) {
 			return i
 		}
 	}
 	return -1
+}
+
+func rangeHasCacheControl(elems []json.RawMessage, start, end int) bool {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(elems) {
+		end = len(elems)
+	}
+	for i := start; i < end; i++ {
+		if messageHasCacheControl(elems[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func messageHasCacheControl(el json.RawMessage) bool {
+	var m struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(el, &m) != nil {
+		return false
+	}
+	return rawHasCacheControl(m.Content)
+}
+
+// CacheBurstBreakEvenTurns prices an explicit cache-burst rewrite. If a compaction would
+// delete already cache_control-marked tokens, the immediate penalty is the cached suffix that
+// must be written cold again; the future saving is only the provider's discounted read cost for
+// the deleted cached tokens. It returns the minimum future turns needed to repay that burst.
+// A return of 0 means there is no one-time suffix penalty; MaxInt means the rewrite never
+// breaks even under the supplied multipliers.
+func CacheBurstBreakEvenTurns(droppedCachedTokens, invalidatedSuffixTokens int, readMult, writeMult float64) int {
+	if invalidatedSuffixTokens <= 0 {
+		return 0
+	}
+	perTurnSaving := float64(droppedCachedTokens) * readMult
+	oneTimePenalty := float64(invalidatedSuffixTokens) * (writeMult - readMult)
+	if oneTimePenalty <= 0 {
+		return 0
+	}
+	if perTurnSaving <= 0 {
+		return int(^uint(0) >> 1)
+	}
+	return int(math.Ceil(oneTimePenalty / perTurnSaving))
+}
+
+// CacheBurstPaysBack reports whether an explicit cache-burst rewrite has enough future
+// turns left in this session to repay itself. currentTurn is 1-based and "now": in a
+// 50-turn session at currentTurn=20, there are 30 future turns left (21..50). Unknown or
+// exhausted horizons return false unless the burst has no one-time penalty.
+func CacheBurstPaysBack(totalTurns, currentTurn, droppedCachedTokens, invalidatedSuffixTokens int, readMult, writeMult float64) bool {
+	breakEven := CacheBurstBreakEvenTurns(droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult)
+	if breakEven == 0 {
+		return true
+	}
+	if totalTurns <= 0 || currentTurn <= 0 {
+		return false
+	}
+	remainingTurns := totalTurns - currentTurn
+	return remainingTurns >= breakEven
 }
 
 // rawHasCacheControl reports whether a `system` or message `content` value (a bare string,

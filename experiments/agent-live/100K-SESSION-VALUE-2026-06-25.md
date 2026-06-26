@@ -22,13 +22,15 @@ part is shedding history tokens *without* breaking the cache.
 fak guard --compact-history-budget 8000 -- claude      # or: fak serve --compact-history-budget 8000 ...
 ```
 
-`agent.CompactAnthropicHistory` (shipped `5c2ab94`; consumer
+`agent.CompactAnthropicHistory` (consumer
 `internal/gateway/messages.go:maybeCompactAnthropicRaw`) drops OLD whole turns to a
-resident-token budget while keeping the `cache_control` prefix **byte-identical** — it
-SPLICES on the original bytes (a memcpy of the protected prefix through the last breakpoint,
-never a re-marshal that would reorder JSON keys and break the cache). Fail-safe identity on
-any ambiguity, so it never breaks a turn. Request-side transform only — the kernel still
-adjudicates the FULL decoded history, so the trust boundary is unchanged.
+resident-token budget while keeping the protected `cache_control` prefix
+**byte-identical** — it SPLICES on the original bytes (a memcpy of the protected prefix
+through the stable breakpoint, never a re-marshal that would reorder JSON keys and break
+the cache). Fail-safe identity on any ambiguity, including a candidate drop that itself
+contains `cache_control`, so it never breaks a turn or silently bursts provider-warm
+history. Request-side transform only — the kernel still adjudicates the FULL decoded
+history, so the trust boundary is unchanged.
 
 ## Verdict
 

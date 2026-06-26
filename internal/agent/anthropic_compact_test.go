@@ -294,6 +294,37 @@ func claudeCodeShapedBody(t *testing.T, nMsgs, recentBpBack int) []byte {
 	return raw
 }
 
+// fullyCacheControlledBody models the dogfood shape where Claude Code has made every
+// message part of a provider-warm prompt cache span. A smaller prompt is not automatically
+// cheaper here: deleting the middle would deliberately burst the cached suffix.
+func fullyCacheControlledBody(t *testing.T, nMsgs int) []byte {
+	t.Helper()
+	type block map[string]any
+	msgs := make([]map[string]any, 0, nMsgs)
+	for i := 0; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, map[string]any{
+			"role": role,
+			"content": []block{{
+				"type":          "text",
+				"text":          strings.Repeat("cache-hot conversation body. ", 20) + itoa(i),
+				"cache_control": map[string]any{"type": "ephemeral"},
+			}},
+		})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024,
+		"messages": msgs,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
 // firstMessageBreakpointEnd returns the byte offset just past the FIRST messages[] element
 // carrying a cache_control breakpoint — the stable cached HEAD the provider reuses every turn.
 func firstMessageBreakpointEnd(t *testing.T, raw []byte) int {
@@ -328,13 +359,13 @@ func firstMessageBreakpointEnd(t *testing.T, raw []byte) int {
 // Before the anchor fix, CompactAnthropicHistory anchored the protected prefix on the LAST
 // breakpoint (the recent turn), so the whole conversation was "protected" and it shed 0%.
 func TestCompactFiresOnClaudeCodeMultiBreakpointShape(t *testing.T) {
-	raw := claudeCodeShapedBody(t, 120, 2) // 120 turns, recent breakpoint 2 from the end
+	raw := claudeCodeShapedBody(t, 120, 3) // 120 turns, recent breakpoint kept in the tail
 	head := firstMessageBreakpointEnd(t, raw)
 
-	out := CompactAnthropicHistory(raw, 400) // budget far below the 120-turn middle
+	out := CompactAnthropicHistory(raw, 1200) // budget far below the 120-turn middle, but keeps the recent breakpoint
 	if bytes.Equal(out, raw) {
 		t.Fatalf("REGRESSION: compaction is a no-op on the real Claude Code multi-breakpoint shape — "+
-			"it must shed the un-cacheable middle turns (inbound %d bytes, budget 400)", len(raw))
+			"it must shed the un-cacheable middle turns (inbound %d bytes, budget 1200)", len(raw))
 	}
 	if len(out) >= len(raw) {
 		t.Fatalf("expected a shorter body, got %d >= %d", len(out), len(raw))
@@ -346,6 +377,67 @@ func TestCompactFiresOnClaudeCodeMultiBreakpointShape(t *testing.T) {
 	// The result must still be a valid, well-paired Messages request.
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		t.Fatalf("compacted body failed to decode: %v", err)
+	}
+}
+
+func TestCompactRefusesToBurstFullyCachedHistory(t *testing.T) {
+	raw := fullyCacheControlledBody(t, 80)
+
+	out, outcome := CompactAnthropicHistoryWithOutcome(raw, 400)
+	if !bytes.Equal(out, raw) {
+		t.Fatalf("fully cache_control-marked history must stay identity, changed %d -> %d bytes", len(raw), len(out))
+	}
+	if outcome.Reason != CompactReasonCachedSpan {
+		t.Fatalf("Reason=%q, want %q", outcome.Reason, CompactReasonCachedSpan)
+	}
+	if outcome.Dropped != 0 || outcome.ShedTokens != 0 {
+		t.Fatalf("cached-span bail must not claim shed work: %+v", outcome)
+	}
+}
+
+func TestCacheBurstBreakEvenTurns(t *testing.T) {
+	// Dropping 20k cache-hot tokens saves only their discounted read cost each future
+	// turn. If the edit invalidates 40k warm suffix tokens, Anthropic-like 1h write/read
+	// multipliers (1.25 vs 0.1) need ceil((1.25-0.1)*40000 / (0.1*20000)) = 23 turns.
+	if got := CacheBurstBreakEvenTurns(20000, 40000, 0.1, 1.25); got != 23 {
+		t.Fatalf("break-even = %d, want 23", got)
+	}
+	// Segment-level vCache surgery changes the same economics by shrinking the invalidated
+	// suffix. A 5k-token segment penalty repays in three future turns under the same drop.
+	if got := CacheBurstBreakEvenTurns(20000, 5000, 0.1, 1.25); got != 3 {
+		t.Fatalf("sub-vcache break-even = %d, want 3", got)
+	}
+	if got := CacheBurstBreakEvenTurns(0, 5000, 0.1, 1.25); got != int(^uint(0)>>1) {
+		t.Fatalf("no-saving break-even = %d, want MaxInt", got)
+	}
+	if got := CacheBurstBreakEvenTurns(20000, 0, 0.1, 1.25); got != 0 {
+		t.Fatalf("no-penalty break-even = %d, want 0", got)
+	}
+}
+
+func TestCacheBurstPaysBackOnKnownSessionHorizon(t *testing.T) {
+	// Same economics as TestCacheBurstBreakEvenTurns: full-suffix burst needs 23 future
+	// turns; sub-vCache-style surgery needs only three.
+	cases := []struct {
+		name                    string
+		totalTurns, currentTurn int
+		invalidatedSuffixTokens int
+		want                    bool
+	}{
+		{"turn 20 of 50 pays back full suffix", 50, 20, 40000, true},
+		{"turn 40 of 50 is too late for full suffix", 50, 40, 40000, false},
+		{"turn 47 of 50 pays back sub-vcache surgery", 50, 47, 5000, true},
+		{"turn 48 of 50 is too late even for sub-vcache surgery", 50, 48, 5000, false},
+		{"unknown horizon does not burst on a guess", 0, 20, 5000, false},
+		{"zero penalty always pays back", 50, 49, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CacheBurstPaysBack(tc.totalTurns, tc.currentTurn, 20000, tc.invalidatedSuffixTokens, 0.1, 1.25)
+			if got != tc.want {
+				t.Fatalf("CacheBurstPaysBack = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

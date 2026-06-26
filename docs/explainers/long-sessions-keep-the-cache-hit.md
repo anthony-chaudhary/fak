@@ -45,6 +45,12 @@ never a re-serialize), so the provider's cache prefix still matches and the disc
 holds. On any ambiguity it does nothing and forwards the original prompt unchanged, so
 it never breaks a turn.
 
+There is one important conservative case: if the candidate middle span itself contains
+`cache_control`, `fak` treats that span as provider-warm and refuses to drop it
+(`cached_span`). A smaller prompt is not automatically cheaper when the current full
+history is already being served from the provider cache. In that case keeping the cache
+hit beats bursting the cache just to send fewer bytes.
+
 You don't have to ask for it: it fires automatically once a conversation sprawls past
 ~48k resident tokens (a typical short session is left untouched). Pass a tighter budget
 to shed sooner, or `--compact-history-budget 0` to disable it entirely:
@@ -52,6 +58,29 @@ to shed sooner, or `--compact-history-budget 0` to disable it entirely:
 ```bash
 fak guard --compact-history-budget 8000 -- claude   # tighter than the ~48k default
 ```
+
+## When would you burst the cache?
+
+Only when the remaining session horizon repays the burst. A simple planning rule is:
+
+```text
+break_even_turns = ceil((write_mult - read_mult) * invalidated_suffix_tokens
+                         / (read_mult * dropped_cached_tokens))
+```
+
+For a 50-turn session, compare that number with the turns still ahead. With Anthropic-like
+1h cache economics (`write_mult=1.25`, `read_mult=0.1`), dropping 20k tokens that were
+already cache-read but invalidating a 40k-token warm suffix takes 23 future turns to pay
+back. If you are on turn 40 of 50, do not burst. If you are on turn 20 of 50, it might be
+worth a measured, explicit burst. If a future segment-addressable vCache surgery could
+invalidate only a 5k-token section instead of the 40k suffix, the same drop repays in
+three turns. That is the value of sub-vCache surgery: not magic savings, just a much
+smaller invalidated suffix.
+
+The live Anthropic prompt-cache path is prefix-shaped, so arbitrary middle surgery is not
+available there today. `fak` can do byte-splice drops only when the cached prefix remains
+intact, and it now refuses to silently delete cache-marked middle spans without an explicit
+horizon/economics gate.
 
 ## What it guarantees, and what it only observes
 
@@ -72,4 +101,4 @@ silently overpaying.
 
 Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
 
-*Last updated: 2026-06-25*
+*Last updated: 2026-06-26*
