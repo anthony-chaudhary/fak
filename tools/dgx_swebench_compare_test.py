@@ -266,6 +266,36 @@ class GateHelpersTest(unittest.TestCase):
         self.assertFalse(by_name["swebench-harness-import"]["ok"])
         self.assertTrue(by_name["mini-swe-agent"]["ok"])
 
+    def test_compare_preflight_requires_sglang_flashinfer_ninja(self) -> None:
+        old_command_exists = cmp.command_exists
+        old_check_python_import = cmp.check_python_import
+        old_preflight_runtime = cmp.preflight_runtime
+        old_check_ninja = cmp.check_sglang_flashinfer_ninja
+        try:
+            cmp.command_exists = lambda _cmd: True
+            cmp.check_python_import = lambda _python, _module: (True, "ok")
+            cmp.preflight_runtime = lambda _args: {}
+            cmp.check_sglang_flashinfer_ninja = lambda _python: {
+                "ok": False,
+                "detail": "ninja_package=no; ninja_executable=; install with pinned requirements",
+            }
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                payload = cmp.compare_preflight(
+                    root, args(), {"gpu0": "NVIDIA A100"}, cmp.selected_arms(args())
+                )
+                saved = json.loads((root / "COMPARE-PREFLIGHT.json").read_text(encoding="utf-8"))
+        finally:
+            cmp.command_exists = old_command_exists
+            cmp.check_python_import = old_check_python_import
+            cmp.preflight_runtime = old_preflight_runtime
+            cmp.check_sglang_flashinfer_ninja = old_check_ninja
+
+        self.assertFalse(payload["ok"])
+        by_name = {row["name"]: row for row in saved["checks"]}
+        self.assertFalse(by_name["sglang-flashinfer-jit-ninja"]["ok"])
+        self.assertIn("pinned requirements", by_name["sglang-flashinfer-jit-ninja"]["detail"])
+
     def test_format_toolcall_probe_names_failures(self) -> None:
         text = cmp.format_toolcall_probe({
             "endpoint": "http://node:8000/v1",

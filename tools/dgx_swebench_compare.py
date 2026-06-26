@@ -57,6 +57,7 @@ DEFAULT_SGLANG_PY = "/root/sglang-stock/bin/python"
 DEFAULT_ENGINE_PORT = 30000
 DEFAULT_FAK_BIN = "/srv/fleet/tools/.bin/fak"
 DEFAULT_FAK_PORT = 8080
+SGLANG_REQUIREMENTS_REL = Path("scripts") / "requirements-sglang-serving.txt"
 VENV = Path("/root/venvs/mini-swe-agent")
 MINI = str(VENV / "bin" / "mini-extra")
 VPY = str(VENV / "bin" / "python")
@@ -164,9 +165,9 @@ def check_python_import(python: str, module: str, timeout_s: int = 30) -> tuple[
     return proc.returncode == 0, detail
 
 
-def command_output(cmd: list[str], timeout_s: int = 10) -> dict:
+def command_output(cmd: list[str], timeout_s: int = 10, env: dict | None = None) -> dict:
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, env=env)
     except Exception as exc:
         return {"ok": False, "detail": repr(exc), "cmd": cmd}
     detail = (proc.stdout or proc.stderr or "").strip().splitlines()
@@ -174,12 +175,57 @@ def command_output(cmd: list[str], timeout_s: int = 10) -> dict:
         "ok": proc.returncode == 0,
         "rc": proc.returncode,
         "detail": detail[0] if detail else "",
+        "output": detail[:20],
         "cmd": cmd,
     }
 
 
-def python_expr(python: str, expr: str, timeout_s: int = 10) -> dict:
-    return command_output([python, "-c", expr], timeout_s=timeout_s)
+def python_expr(python: str, expr: str, timeout_s: int = 10, env: dict | None = None) -> dict:
+    return command_output([python, "-c", expr], timeout_s=timeout_s, env=env)
+
+
+def python_bin_env(python: str) -> dict:
+    """Return an env whose PATH includes the selected Python venv's bin dir."""
+    env = os.environ.copy()
+    try:
+        exe = shlex.split(python, posix=(os.name != "nt"))[0]
+    except ValueError:
+        exe = python
+    parent = Path(exe).parent
+    if str(parent) not in ("", "."):
+        env["PATH"] = str(parent) + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def sglang_requirements_path() -> Path:
+    candidates = [
+        Path(__file__).resolve().parents[1] / SGLANG_REQUIREMENTS_REL,
+        Path.cwd() / SGLANG_REQUIREMENTS_REL,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[-1]
+
+
+def check_sglang_flashinfer_ninja(python: str) -> dict:
+    """flashinfer JIT calls subprocess('ninja'); fail before the 900s health wait."""
+    code = "\n".join([
+        "import importlib.util, shutil, sys",
+        "has_pkg = importlib.util.find_spec('ninja') is not None",
+        "exe = shutil.which('ninja')",
+        "print('ninja_package=' + ('yes' if has_pkg else 'no'))",
+        "print('ninja_executable=' + (exe or ''))",
+        "sys.exit(0 if has_pkg and exe else 1)",
+    ])
+    res = python_expr(python, code, timeout_s=10, env=python_bin_env(python))
+    lines = res.get("output") or ([res.get("detail", "")] if res.get("detail") else [])
+    detail = "; ".join(str(line) for line in lines if line)
+    if not res.get("ok"):
+        req = str(sglang_requirements_path())
+        hint = f"install with: {python} -m pip install -r {req}"
+        detail = f"{detail}; {hint}" if detail else hint
+    return {"ok": bool(res.get("ok")), "detail": detail, "cmd": res.get("cmd")}
 
 
 def endpoint_ready(api_base: str) -> tuple[bool, str]:
@@ -215,6 +261,7 @@ def preflight_runtime(args) -> dict:
             args.sglang_python,
             "import importlib.metadata as m; print(m.version('sglang'))",
         )
+        runtime["sglang_flashinfer_jit_ninja"] = check_sglang_flashinfer_ninja(args.sglang_python)
     if not args.skip_gateway_serve:
         runtime["fak"] = command_output([args.fak_bin, "--version"], timeout_s=10)
     return runtime
@@ -255,7 +302,11 @@ def compare_preflight(run_dir: Path, args, env_info: dict, want: set[str]) -> di
 
     if not args.skip_engine_serve:
         if args.engine == "sglang":
-            add("sglang-python", command_exists(args.sglang_python), args.sglang_python)
+            sglang_python_ok = command_exists(args.sglang_python)
+            add("sglang-python", sglang_python_ok, args.sglang_python)
+            if sglang_python_ok:
+                ninja = check_sglang_flashinfer_ninja(args.sglang_python)
+                add("sglang-flashinfer-jit-ninja", ninja["ok"], ninja["detail"])
         elif args.engine == "vllm":
             add("vllm-command", command_exists(args.vllm_command), args.vllm_command)
     elif raw_arm_name(args.engine) in want:

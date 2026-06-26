@@ -1,0 +1,3 @@
+# Runtime deps for the SGLang serving venv used by DGX benchmark runners.
+# flashinfer JIT shells out to the ninja executable on first CUDA kernel build.
+ninja==1.13.0
