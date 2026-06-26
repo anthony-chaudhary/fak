@@ -1047,7 +1047,11 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 		}
 	}
 	s.Quant = p.quant
-	s.Q4K = p.q4k && p.backend == nil // resident-Q4_K is a CPU-only decode path; the device HAL uses Q8/F32
+	// resident-Q4_K decode runs on BOTH the host (cpu-ref) AND the cuda backend: the device HAL
+	// copies the raw Q4_K super-blocks resident and serves them with the dequant-fused k_q4k_gemm
+	// tile (internal/compute/cuda.go MatMul/BatchedMatMul case Q4_K, #485), so a device session can
+	// decode Q4_K directly — no f32/Q8 round-trip. (The old gate forced Q8/F32 on any backend.)
+	s.Q4K = p.q4k
 	s.CPUOffloadExperts = p.cpuOffloadExperts
 
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss).
