@@ -129,25 +129,3 @@ func TestSampleLensSpansRange(t *testing.T) {
 		t.Errorf("sampleLens should include the prefix length 2048: %v", ls)
 	}
 }
-
-func TestParseInts(t *testing.T) {
-	for _, c := range []struct {
-		in   string
-		want []int
-	}{
-		{"50", []int{50}},
-		{"5,8,16", []int{5, 8, 16}},
-		{"1, 2 , 3", []int{1, 2, 3}},
-		{"512,6,2,24,48", []int{512, 6, 2, 24, 48}},
-	} {
-		got := parseInts(c.in)
-		if len(got) != len(c.want) {
-			t.Fatalf("parseInts(%q) = %v, want %v", c.in, got, c.want)
-		}
-		for i := range got {
-			if got[i] != c.want[i] {
-				t.Fatalf("parseInts(%q) = %v, want %v", c.in, got, c.want)
-			}
-		}
-	}
-}

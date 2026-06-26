@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -138,7 +139,7 @@ func main() {
 		}
 	}
 
-	batches := parseInts(*batchesArg)
+	batches := intlist.Parse(*batchesArg)
 	var workload *model.BenchWorkload
 	if *workloadPath != "" {
 		var err error
@@ -321,23 +322,4 @@ func main() {
 	} else {
 		fmt.Println(string(b))
 	}
-}
-
-func parseInts(s string) []int {
-	var out []int
-	cur, has := 0, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= '0' && c <= '9' {
-			cur = cur*10 + int(c-'0')
-			has = true
-		} else if has {
-			out = append(out, cur)
-			cur, has = 0, false
-		}
-	}
-	if has {
-		out = append(out, cur)
-	}
-	return out
 }

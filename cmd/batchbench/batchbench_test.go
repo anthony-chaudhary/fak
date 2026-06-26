@@ -1,8 +1,8 @@
 // Package main unit tests for the pure, deterministic helpers in batchbench:
-// parseInts (the "1,2,4" batch-list parser), capPositive (clamp with a >=1
-// floor), bestMS (least-contended minimum duration in ms), and lcgIDs (the
-// deterministic LCG token-id generator). All are resource-free: no model
-// file, GPU, network, or subprocess is touched.
+// capPositive (clamp with a >=1 floor), bestMS (least-contended minimum
+// duration in ms), and lcgIDs (the deterministic LCG token-id generator). All
+// are resource-free: no model file, GPU, network, or subprocess is touched.
+// (parseInts moved to internal/intlist under #776; see intlist_test.go.)
 package main
 
 import (
@@ -11,37 +11,6 @@ import (
 	"testing"
 	"time"
 )
-
-func TestParseInts(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want []int
-	}{
-		{"empty", "", nil},
-		{"only separators", " , ; ", nil},
-		{"single", "42", []int{42}},
-		{"canonical csv", "1,2,4,8", []int{1, 2, 4, 8}},
-		{"trailing separator", "1,2,", []int{1, 2}},
-		{"leading separator", ",3,5", []int{3, 5}},
-		{"multi-char separators", "10  20\t30", []int{10, 20, 30}},
-		{"non-digit splits run", "1a2", []int{1, 2}},
-		{"multi-digit", "256,1024", []int{256, 1024}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseInts(tt.in)
-			if len(got) != len(tt.want) {
-				t.Fatalf("parseInts(%q) = %v, want %v", tt.in, got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Fatalf("parseInts(%q)[%d] = %d, want %d", tt.in, i, got[i], tt.want[i])
-				}
-			}
-		})
-	}
-}
 
 func TestCapPositive(t *testing.T) {
 	tests := []struct {

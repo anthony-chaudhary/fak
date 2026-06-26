@@ -59,6 +59,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -445,8 +446,8 @@ func main() {
 	if *quantF || *lean {
 		quant = 1
 	}
-	turns := parseInts(*turnsArg)
-	agents := parseInts(*agentsArg)
+	turns := intlist.Parse(*turnsArg)
+	agents := intlist.Parse(*agentsArg)
 	if *countsOnly {
 		if strings.TrimSpace(*synthetic) == "" {
 			fmt.Fprintln(os.Stderr, "-counts-only requires -synthetic so the report identity is explicit")
@@ -539,7 +540,7 @@ func main() {
 
 	var liveVal map[string]any
 	if *validate {
-		vs := parseInts(*valScale)
+		vs := intlist.Parse(*valScale)
 		for len(vs) < 5 {
 			vs = append(vs, 1)
 		}
@@ -629,9 +630,9 @@ func deterministicReport(name string, quant bool, turns, agents []int, prefix, d
 			}
 			cells = append(cells, cell{
 				Turns: T, Agents: C, Prefix: prefix, Decode: decode, Result: result,
-				A: arm{Name: "A_naive_stateless", Live: false},
-				B: arm{Name: "B_per_agent_kv", Live: false},
-				C: arm{Name: "C_fak_fused", Live: false},
+				A:          arm{Name: "A_naive_stateless", Live: false},
+				B:          arm{Name: "B_per_agent_kv", Live: false},
+				C:          arm{Name: "C_fak_fused", Live: false},
 				PrefillTok: ptok,
 				NetVsNaive: ptok.AOverC,
 				NetVsTuned: ptok.BOverC,
@@ -684,23 +685,4 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-func parseInts(s string) []int {
-	var out []int
-	cur, has := 0, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= '0' && c <= '9' {
-			cur = cur*10 + int(c-'0')
-			has = true
-		} else if has {
-			out = append(out, cur)
-			cur, has = 0, false
-		}
-	}
-	if has {
-		out = append(out, cur)
-	}
-	return out
 }

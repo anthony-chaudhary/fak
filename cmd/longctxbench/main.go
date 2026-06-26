@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 )
 
@@ -52,9 +53,9 @@ func main() {
 	if *ladder {
 		shapes = turnbench.CanonicalLadder()
 	} else {
-		for _, P := range parseInts(*prefix) {
-			for _, T := range parseInts(*turns) {
-				for _, C := range parseInts(*agents) {
+		for _, P := range intlist.Parse(*prefix) {
+			for _, T := range intlist.Parse(*turns) {
+				for _, C := range intlist.Parse(*agents) {
 					if P < 1 || T < 1 || C < 1 {
 						continue
 					}
@@ -115,24 +116,4 @@ func main() {
 	} else {
 		fmt.Println(string(blob))
 	}
-}
-
-// parseInts parses a comma-separated list of non-negative integers, skipping non-digits.
-func parseInts(s string) []int {
-	var out []int
-	cur, has := 0, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= '0' && c <= '9' {
-			cur = cur*10 + int(c-'0')
-			has = true
-		} else if has {
-			out = append(out, cur)
-			cur, has = 0, false
-		}
-	}
-	if has {
-		out = append(out, cur)
-	}
-	return out
 }
