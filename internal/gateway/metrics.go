@@ -1600,7 +1600,7 @@ func (m *gatewayMetrics) inKernelOOMSnapshotData() []inKernelOOMSnapshot {
 
 func (m *gatewayMetrics) writeInKernelOOMMetrics(b *strings.Builder) {
 	rows := m.inKernelOOMSnapshotData()
-	writeHelpType(b, "fak_gateway_in_kernel_oom_total", "LOCAL in-kernel device OOMs and capacity precheck refusals, bucketed by memory class. These are fak-owned resource faults, not upstream provider errors.", "counter")
+	writeHelpType(b, "fak_gateway_in_kernel_oom_total", "LOCAL in-kernel device OOMs and capacity precheck refusals, bucketed by memory class. These are WITNESSED fak-owned resource faults, distinct from provider-side errors.", "counter")
 	for _, row := range rows {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_total{class=\"%s\"} %d\n", promQuote(row.class), row.count)
 	}

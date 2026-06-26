@@ -63,6 +63,15 @@ import (
 // discarding a cached prefix. An explicit --compact-history-budget wins; 0 means OFF.
 const DefaultCompactHistoryBudget = 48000
 
+const (
+	// DocumentedElideResultBytes is the reviewed candidate threshold for oversized
+	// tool-result elision. It is documented but not armed by default.
+	DocumentedElideResultBytes = 16384
+	// DefaultElideResultBytes keeps oversized-result elision dark until an operator
+	// deliberately flips the threshold after reading the tradeoff witness.
+	DefaultElideResultBytes = 0
+)
+
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
@@ -251,6 +260,10 @@ type Config struct {
 	// other wire. Sibling of CtxViewBudget: compaction drops a contiguous suffix of old
 	// turns, ctxview stubs the planner's non-contiguous resident-set misses (#927).
 	CompactHistoryBudget int
+	// ElideResultBytes is the off-by-default oversized tool-result elision threshold.
+	// 0 keeps the transform inert; a positive value arms the documented head+tail
+	// shrinker for results outside the active working set.
+	ElideResultBytes int
 	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
 	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for
 	// every possible argument?" — true ONLY for a name the policy admits under no args
