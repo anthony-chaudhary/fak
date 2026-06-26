@@ -107,6 +107,14 @@ func loadGGUFLean(path string, lp *ggufload.LoadProfiler) (*model.Model, string,
 	return m, filepath.Base(path) + " [gguf-lean]", nil
 }
 
+func loadGGUFQ4K(path string) (*model.Model, string, error) {
+	m, err := ggufload.LoadModelQ4K(path)
+	if err != nil {
+		return nil, "", err
+	}
+	return m, filepath.Base(path) + " [gguf-q4k]", nil
+}
+
 // hfName builds a report label like "qwen2-1.5B" from the config (param count is approximated
 // from the dominant weight shapes), falling back to the directory basename.
 func hfName(cfg model.Config, dir string) string {
@@ -198,6 +206,7 @@ type benchFlags struct {
 	hf                    *string
 	gguf                  *string
 	lean                  *bool
+	q4k                   *bool
 	name                  *string
 	out                   *string
 	prefillSizesCSV       *string
@@ -228,6 +237,7 @@ func parseFlags() *benchFlags {
 		hf:                    flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors, bf16/f32, loaded fully in Go); overrides -dir"),
 		gguf:                  flag.String("gguf", "", "GGUF checkpoint path; default dequantizes to f32, -lean streams to Q8; overrides -hf and -dir"),
 		lean:                  flag.Bool("lean", false, "memory-lean load: quantize big matmul weights at load and drop their f32 (with -hf or -gguf; implies -quant; fits much bigger models)"),
+		q4k:                   flag.Bool("q4k", false, "with -gguf, load eligible Q4_K tensors as resident raw Q4_K and run the Q4_K session path"),
 		name:                  flag.String("name", "", "model name for the report (default: derived from the source dir)"),
 		out:                   flag.String("out", "", "write JSON result here (default stdout)"),
 		prefillSizesCSV:       flag.String("prefill-sizes", "16,64,256", "comma-separated prompt lengths for prefill timings"),
@@ -273,6 +283,25 @@ func applyBudget(budget float64) {
 
 // validateFlags enforces the flag combinations that must hold before any load.
 func validateFlags(f *benchFlags) {
+	if *f.q4k {
+		switch {
+		case *f.gguf == "":
+			fmt.Fprintln(os.Stderr, "-q4k requires -gguf")
+			os.Exit(2)
+		case *f.hf != "":
+			fmt.Fprintln(os.Stderr, "-q4k cannot be combined with -hf")
+			os.Exit(2)
+		case *f.lean:
+			fmt.Fprintln(os.Stderr, "-q4k is its own GGUF resident-quant load path; omit -lean")
+			os.Exit(2)
+		case *f.backendName != "legacy":
+			fmt.Fprintln(os.Stderr, "-q4k currently runs through the legacy resident-Q4_K session path; omit -backend")
+			os.Exit(2)
+		case *f.metal || *f.verify:
+			fmt.Fprintln(os.Stderr, "-q4k modelbench scoring is CPU-only for now; omit -metal/-verify")
+			os.Exit(2)
+		}
+	}
 	if *f.loadProfile && (*f.gguf == "" || !*f.lean) {
 		fmt.Fprintln(os.Stderr, "-load-profile requires -gguf and -lean")
 		os.Exit(2)
@@ -320,6 +349,9 @@ func newGGUFLoadProfiler(f *benchFlags) *ggufload.LoadProfiler {
 // loadModel selects the load path from the flags (lean GGUF/HF, plain GGUF/HF, or fak
 // dir format) and returns the model plus its report label. May set *f.quant for -lean.
 func loadModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
+	if *f.q4k {
+		return loadGGUFQ4K(*f.gguf)
+	}
 	if *f.lean {
 		if *f.hf == "" && *f.gguf == "" {
 			fmt.Fprintln(os.Stderr, "-lean requires -hf or -gguf")
@@ -348,10 +380,11 @@ func runLoadOnly(f *benchFlags, modelName string, loadMS float64, ggufLoadProfil
 		"app_version":          appversion.Current(),
 		"engine":               "fak model load",
 		"model":                modelName,
-		"source":               loadSource(*f.hf, *f.gguf, *f.dir, *f.lean),
+		"source":               loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k),
 		"load_ms":              loadMS,
 		"lean":                 *f.lean,
-		"quantized_at_load":    *f.lean,
+		"q4k":                  *f.q4k,
+		"quantized_at_load":    *f.lean || *f.q4k,
 		"peak_rss_bytes":       peakRSS,
 		"peak_rss_unavailable": rssErr != nil,
 	}
@@ -458,6 +491,10 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 	if *f.quant {
 		engine = "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8×int8→int32 dot)"
 		precision = "Q8_0"
+	}
+	if *f.q4k {
+		engine = "fak-in-kernel resident Q4_K/Q8 hybrid (raw GGUF Q4_K majority + Q8 minority)"
+		precision = "Q4_K/Q8 resident hybrid"
 	}
 	if *f.metal {
 		engine = "fak-in-kernel Metal prefill (MPS f16 GEMM on GPU; CPU Q8 decode)"
@@ -712,6 +749,7 @@ func main() {
 		}
 		s := m.NewSession()
 		s.Quant = *f.quant
+		s.Q4K = *f.q4k
 		s.Metal = *f.metal
 		return s
 	}
@@ -736,13 +774,14 @@ func main() {
 		"engine":            engine,
 		"model":             modelName,
 		"model_config":      modelConfigReport(m.Cfg),
-		"source":            loadSource(*f.hf, *f.gguf, *f.dir, *f.lean),
+		"source":            loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k),
 		"precision":         precision,
 		"backend":           backendReport,
 		"load_ms":           loadMS,
 		"quant_ms":          quantMS,
 		"lean":              *f.lean,
-		"quantized_at_load": *f.lean,
+		"q4k":               *f.q4k,
+		"quantized_at_load": *f.lean || *f.q4k,
 		"workers":           model.NumWorkers(),   // global matmul worker budget (prefill and explicit paths)
 		"budget":            model.WorkerBudget(), // how the worker count was resolved (FAK_WORKERS / FAK_BUDGET / -budget / default)
 		"q8_decode_workers": model.Q8DecodeWorkers(),
@@ -751,6 +790,11 @@ func main() {
 	}
 	if ggufLoadProfile != nil {
 		report["load_profile"] = ggufLoadProfile
+	}
+	if *f.q4k {
+		rep := m.ResidentReport()
+		report["resident"] = rep
+		report["resident_summary"] = model.FormatResidentReport(rep)
 	}
 	phaseReport := map[string]any{}
 	if workload != nil {
@@ -778,8 +822,11 @@ func main() {
 	writeReport(*f.out, report)
 }
 
-func loadSource(hf, gguf, dir string, lean bool) string {
+func loadSource(hf, gguf, dir string, lean, q4k bool) string {
 	if gguf != "" {
+		if q4k {
+			return gguf + " (resident Q4_K)"
+		}
 		return gguf
 	}
 	if hf == "" {

@@ -164,6 +164,13 @@ func q8FastDecodeOK(cfg Config) bool {
 	return q8FastPreNormOK(cfg)
 }
 
+func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
+	if s != nil && (s.Q4 || s.Q4K) {
+		return false
+	}
+	return q8FastDecodeOK(cfg)
+}
+
 // tokenHiddenQ is the Q8_0 decode path. It is now a thin shell over the shared
 // single-position blockStep, selecting the Q8 kernel (q8Kernel): the block skeleton —
 // RMSNorm, RoPE+Kraw stash, GQA over the f32 KV cache, residuals, SwiGLU — is the
@@ -178,7 +185,7 @@ func (s *Session) tokenHiddenQ(id, pos int) []float32 {
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
 	grp := cfg.GroupSize()
 	eps := float32(cfg.RMSNormEps)
-	if !q8FastDecodeOK(cfg) {
+	if !q8FastDecodeSessionOK(s, cfg) {
 		mat := matKernel(sessionQ8Kernel{s})
 		if s.Q4 && m.q4w != nil {
 			// Resident int4 decode: the Qwen3.6 hybrid (and every non-fast-PreNorm arch)

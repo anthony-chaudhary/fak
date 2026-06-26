@@ -23,6 +23,29 @@ func mkVec(n int, seed uint64) []float32 {
 	return v
 }
 
+func TestQ8FastDecodeSessionRejectsResidentQ4(t *testing.T) {
+	cfg := Config{
+		HiddenSize:       256,
+		NumLayers:        2,
+		NumHeads:         4,
+		NumKVHeads:       2,
+		HeadDim:          64,
+		IntermediateSize: 256,
+	}
+	if !q8FastDecodeOK(cfg) {
+		t.Fatal("fixture must be eligible for the Q8 fast decode path")
+	}
+	if !q8FastDecodeSessionOK(&Session{}, cfg) {
+		t.Fatal("plain Q8 session should keep the fast decode path")
+	}
+	if q8FastDecodeSessionOK(&Session{Q4: true}, cfg) {
+		t.Fatal("resident Q4 session must use the blockStep mat-kernel path")
+	}
+	if q8FastDecodeSessionOK(&Session{Q4K: true}, cfg) {
+		t.Fatal("resident Q4_K session must use the blockStep mat-kernel path")
+	}
+}
+
 // TestQ8RoundMatchesMathRound pins the fast float32 q8round to math.Round (ties away from
 // zero) over the full code range, including the near-half values where the naive
 // int8(int32(x+0.5)) trick diverges (the +0.5 addition rounds up). Quantization codes must
