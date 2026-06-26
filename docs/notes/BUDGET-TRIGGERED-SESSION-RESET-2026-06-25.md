@@ -133,7 +133,13 @@ issues:
 - **#741** — a model-call task distiller (summarize the middle, not just extract the ends).
 - **#742** — MCP `fak_session_reset` cooperative reset for clients/wrappers that report
   context usage (**shipped**).
-- **#743** — an operator webhook + a pre-threshold (e.g. 80%) warning before exhaustion.
+- **#743** — an operator webhook + a pre-threshold (e.g. 80%) warning before exhaustion
+  (**shipped**): `session.Table.WatchBudget(warnFraction, obs)` fires a once-per-drain
+  `BudgetWarn` when the context budget first crosses the consumed share (default 80%), then a
+  `BudgetExhausted` carrying the continuation id at zero. `fak serve --budget-webhook URL
+  [--budget-warn-fraction 0.8]` POSTs each event to an operator monitor — fail-open, off when
+  the URL is empty. Tests: `internal/session.TestWatchBudgetWarnsOnceThenExhausts`,
+  `cmd/fak.TestBudgetWebhookObserverPostsEvent`.
 - **#744** — a cross-session / fleet-wide budget pool (today each session's budget is independent).
 
 ## See also
