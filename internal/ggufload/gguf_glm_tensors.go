@@ -116,6 +116,23 @@ const (
 	glmGGUFExpertsDown = "ffn_down_exps.weight" // -> mlp.experts.<e>.down_proj.weight
 )
 
+// glmMoeDsaSkipGGUFTensor reports whether a glm_moe_dsa GGUF tensor is part of the Multi-Token-
+// Prediction (MTP / "nextn") speculative-decoding head or a multimodal vision tower — neither read
+// by the text causal-LM forward. llama.cpp likewise ignores these ("model has unused tensor
+// blk.<L>.nextn.*"); fak skips them at load so a real GLM-5.2 checkpoint does not fail on a tensor
+// the forward never consumes (mirrors the safetensors path's skipLoadTensor mtp/visual drop).
+func glmMoeDsaSkipGGUFTensor(name string) bool {
+	// MTP head: the GGUF spells it "blk.<L>.nextn.*" (eh_proj/enorm/hnorm/shared_head_norm/...).
+	if strings.Contains(name, ".nextn.") {
+		return true
+	}
+	// Multimodal vision tower (when present): llama.cpp's "v.*" / "mm." conversion namespace.
+	if strings.HasPrefix(name, "v.") || strings.HasPrefix(name, "mm.") {
+		return true
+	}
+	return false
+}
+
 // glmMoeDsaBatchedExpert reports whether a glm_moe_dsa GGUF tensor name is a batched routed-expert
 // blob and, if so, returns its layer index and the per-expert canonical projection name
 // (gate_proj/up_proj/down_proj). These are the tensors the loader splits into E per-expert 2-D
