@@ -138,7 +138,7 @@ func commitExitCode(res safecommit.Result) int {
 		return 2
 	case safecommit.ReasonNotARepo, safecommit.ReasonOffTrunk,
 		safecommit.ReasonMergeInProgress, safecommit.ReasonNothingStaged,
-		safecommit.ReasonLockBusy:
+		safecommit.ReasonLockBusy, safecommit.ReasonWindowFull:
 		return 3
 	default: // PATHSPEC_RACE, HOOK_REFUSED, PUSH_REJECTED
 		return 1

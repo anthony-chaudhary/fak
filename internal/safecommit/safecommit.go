@@ -82,6 +82,7 @@ type Options struct {
 	Push     bool              // push, but ONLY after a verified commit
 	Lock     LockOptions       // advisory same-host lock
 	Recorder *witness.Recorder // optional decisions-note sink for post-commit assertions
+	Window   *Window           // optional adaptive process-local writer window
 }
 
 // DefaultTrunk is the branch fak commits land on when Options.Trunk is empty.
@@ -99,6 +100,7 @@ const (
 	ReasonMergeInProgress = "MERGE_IN_PROGRESS" // a merge is mid-flight; a partial path commit would fail
 	ReasonNothingStaged   = "NOTHING_STAGED"    // the pathspec has no change to commit
 	ReasonLockBusy        = "LOCK_BUSY"         // another fak writer holds the commit lock (retryable)
+	ReasonWindowFull      = "WINDOW_FULL"       // adaptive writer window is full (retryable)
 	ReasonHookRefused     = "HOOK_REFUSED"      // git/commit-hook refused the commit (exit != 0)
 	ReasonPathspecRace    = "PATHSPEC_RACE"     // a peer swept extra files into the commit — the headline guard
 	ReasonSymlinkEscape   = "SYMLINK_ESCAPE"    // a landed path resolves (through a symlink) to a target outside the lease
@@ -129,13 +131,16 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 			return realRunner(ctx, dir, args...)
 		}, opts.Dir)
 	}
+	if opts.Window == nil {
+		opts.Window = DefaultWindow
+	}
 	return CommitWith(ctx, realRunner, realLock, opts)
 }
 
 // CommitWith is the testable core: every effect goes through the injected run and lock, so
 // a fake Runner + fake LockFunc exercise the whole step-ordered algorithm — including the
 // race remedy — with no git and no repo. See the package doc for the discipline it encodes.
-func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (Result, error) {
+func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (res Result, err error) {
 	trunk := strings.TrimSpace(opts.Trunk)
 	if trunk == "" {
 		trunk = DefaultTrunk
@@ -144,7 +149,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (R
 	// (0) Normalize + validate — pure, no git. Share gitgate's ONE path rule so the
 	// executor and the policy agree on what a repo path is.
 	paths, ok := normalizePaths(opts.Paths)
-	res := Result{Paths: paths}
+	res = Result{Paths: paths}
 	if !ok || len(paths) == 0 {
 		res.Reason = ReasonNoPath
 		return res, nil
@@ -152,6 +157,13 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (R
 	if strings.TrimSpace(opts.Message) == "" {
 		res.Reason = ReasonEmptyMessage
 		return res, nil
+	}
+	if release, admitted := opts.Window.TryAcquire(); !admitted {
+		res.Reason = ReasonWindowFull
+		res.Detail = "adaptive commit window is full; retry after an in-flight writer finishes"
+		return res, nil
+	} else if release != nil {
+		defer func() { release(res) }()
 	}
 
 	// (1) In a work tree?
