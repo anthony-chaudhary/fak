@@ -95,6 +95,34 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 				}
 				continue
 			}
+			// glm_moe_dsa batched routed experts: split the [E,out,in] blob 1->E into per-expert
+			// canonical tensors (the same split QuantModelProfile does). These are NOT resident-Q4_K
+			// eligible (the 1->E slice needs f32), so each per-expert tensor follows the standard
+			// dequant->Q8 builder path; the dense matmul weights still take the resident-Q4_K fast path.
+			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+				if err != nil {
+					return nil, err
+				}
+				raw, _, err := s.TensorBytes(info.Name)
+				if err != nil {
+					return nil, err
+				}
+				data, err := dequantF32(info, raw)
+				if err != nil {
+					return nil, err
+				}
+				experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
+				if err != nil {
+					return nil, err
+				}
+				for _, ex := range experts {
+					if err := builder.AddF32Tensor(ex.Name, ex.Shape, ex.Data); err != nil {
+						return nil, err
+					}
+				}
+				continue
+			}
 		}
 		canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
 		if !ok {
