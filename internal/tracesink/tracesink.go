@@ -323,6 +323,12 @@ func (s *TraceSink) egressBlocked(c *abi.ToolCall) bool {
 	if !ifc.Dangerous(flow) {
 		return false // clean data to a sink is fine to record
 	}
+	// Only the sink classes this policy gates are blocked — mirror the live gate's
+	// gated-set decision (the default exempts EXEC; StrictGatedSinks gates it too), or
+	// the recorder would redact a Bash the live floor serves.
+	if !s.policy.Gates(sink) {
+		return false
+	}
 	// A tainted flow into a sensitive sink. Honor the policy's authorization escape
 	// exactly as the live gate would, so the recorder is no more (and no less)
 	// restrictive than the floor it mirrors.

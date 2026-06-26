@@ -140,9 +140,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	ctx := r.Context()
-	rawTrace := r.Header.Get("X-Trace-Id")
-	reqTrace := s.traceFor(rawTrace)
-	stablePromptMMUTrace := s.hasStablePromptMMUTrace(rawTrace)
+	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
 	// Operator control / budget / pace at the served request boundary. With
 	// DecideSession wired this mutates the live session table (TurnsLeft debit,
 	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
@@ -158,7 +156,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		if newTrace, seed, reset := s.maybeResetOnBudget(ctx, sessionTurn.state, req.Messages); reset {
 			req.Messages = spliceSeed(seed, req.Messages)
 			reqTrace = newTrace
-			stablePromptMMUTrace = strings.TrimSpace(newTrace) != ""
 			if sessionTurn, ok, canceled = s.beginServedSessionTurn(ctx, reqTrace); canceled {
 				return
 			}
@@ -185,9 +182,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// outbound tools[], keeping the cache_control prefix byte-identical (promptmmu). Runs
 	// after the history compaction (both rewrite req.Raw; tools[] and messages[] are
 	// disjoint regions) and before either passthrough consumer of req.Raw. Identity-safe:
-	// nil predicate, no floor-denied advertised tool, or a non-rebuilt session prefix =>
-	// req.Raw untouched.
-	s.maybeCompactInboundTools(req, s.takePromptMMURebuildWindow(reqTrace, stablePromptMMUTrace))
+	// nil predicate or no floor-denied advertised tool ⇒ req.Raw untouched.
+	s.maybeCompactInboundTools(req)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
 	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
@@ -396,13 +392,11 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 // It is behavior-preserving by construction: if the model somehow names a pruned tool, the
 // kernel still DEFAULT_DENYs the call — so removing the advertisement only shrinks the
 // uncached tool-def tokens, never the reachable action set. A no-op (identity) unless the
-// gateway is fronting the real Anthropic API (only there is req.Raw forwarded verbatim), the
-// host supplied the floor predicate, and the session prefix is being rebuilt (session start or
-// post-RESET continuation trace). Mid-session the tools cache breakpoint is already live, so the
-// safe action is identity even if a floor-denied tool is advertised. promptmmu is fail-safe: any
-// ambiguity returns req.Raw unchanged with a named SkipReason, so this never breaks a turn.
-func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest, prefixRebuilt bool) (pruned []string) {
-	if !prefixRebuilt || req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || s.toolFloorDenies == nil {
+// gateway is fronting the real Anthropic API (only there is req.Raw forwarded verbatim) and
+// the host supplied the floor predicate. promptmmu is fail-safe: any ambiguity returns
+// req.Raw unchanged with a named SkipReason, so this never breaks a turn.
+func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (pruned []string) {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || s.toolFloorDenies == nil {
 		return nil
 	}
 	if len(req.Tools) == 0 {
@@ -426,41 +420,6 @@ func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest, p
 	}
 	req.Raw = res.Body
 	return res.Pruned
-}
-
-func (s *Server) hasStablePromptMMUTrace(rawTrace string) bool {
-	if s == nil {
-		return false
-	}
-	if strings.TrimSpace(rawTrace) != "" {
-		return true
-	}
-	s.defaultTraceMu.RLock()
-	defer s.defaultTraceMu.RUnlock()
-	return strings.TrimSpace(s.defaultTraceID) != ""
-}
-
-func (s *Server) takePromptMMURebuildWindow(trace string, stableTrace bool) bool {
-	if s == nil || !stableTrace {
-		return false
-	}
-	trace = strings.TrimSpace(trace)
-	if trace == "" {
-		return false
-	}
-	s.promptMMUMu.Lock()
-	defer s.promptMMUMu.Unlock()
-	if s.promptMMUSeen == nil {
-		s.promptMMUSeen = make(map[string]bool)
-	}
-	if s.promptMMUSeen[trace] {
-		return false
-	}
-	if len(s.promptMMUSeen) >= maxResetHealthSessions {
-		s.promptMMUSeen = make(map[string]bool)
-	}
-	s.promptMMUSeen[trace] = true
-	return true
 }
 
 // writeAnthropicTurn renders a fully-formed turn to the wire as either a buffered JSON

@@ -93,6 +93,7 @@ This document catalogs all configuration options for `fak serve`, the gateway se
 | Variable | Description |
 |----------|-------------|
 | `FAK_IFC` | IFC (Information Flow Control) toggle. Set to `off` to make both IFC gates no-ops (A/B testing ablation). Default: enabled. |
+| `FAK_IFC_GATE_EXEC` | Restrictive opt-in for the untrusted-input threat model: set to `1` to also gate the EXEC (shell/Bash) sink when the session is tainted. Default OFF — the reasonable default gates only the EGRESS and DESTRUCTIVE sinks, because gating shell on the session taint high-water mark blocks normal Bash after any untrusted read (and the hard arg-rules block dangerous shell unconditionally regardless of taint). Enable it for an agent processing untrusted input. |
 | `FAK_NORMGATE` | Normalization gate toggle. Set to `off` to make the admit gate a no-op. Default: enabled. |
 | `FAK_VDSO_GRANULARITY` | vDSO tier-2 invalidation granularity (overrides `--invalidation`). Options: `global`, `namespace`, `resource`. |
 

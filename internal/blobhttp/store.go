@@ -43,14 +43,11 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/blob"
-	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
 
 // InlineMax mirrors blob.InlineMax: a payload this small or smaller rides inline on
 // the Ref (no network round-trip) instead of being PUT to the remote.
 const InlineMax = blob.InlineMax
-
-const blobHTTPTokenEnv = "FAK_BLOB_HTTP_TOKEN"
 
 // Signer optionally mutates a request before it is sent — the auth seam. A bearer
 // token, an AWS SigV4 signature (crypto/hmac, stdlib), or any header scheme plugs
@@ -288,21 +285,10 @@ func init() {
 	if base == "" {
 		return // off by default: no codec registered, package inert
 	}
-	s := New(base, WithBearer(blobHTTPBearerToken()))
+	s := New(base, WithBearer(os.Getenv("FAK_BLOB_HTTP_TOKEN")))
 	active = s
 	abi.RegisterPageOutBackend("blobhttp", pageOutBackend{s})
 	fmt.Fprintf(os.Stderr, "fak: remote blob store -> %s (content-addressed, id=blobhttp)\n", base)
-}
-
-func blobHTTPSecretLoader() *secretload.Loader {
-	l := secretload.Default()
-	l.Require(blobHTTPTokenEnv, "remote blob HTTP bearer token", nil)
-	return l
-}
-
-func blobHTTPBearerToken() string {
-	v, _ := blobHTTPSecretLoader().Lookup(blobHTTPTokenEnv)
-	return v
 }
 
 // pageOutBackend adapts *Store to abi.PageOutBackend for the keyed registry.

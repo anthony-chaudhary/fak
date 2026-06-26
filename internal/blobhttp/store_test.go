@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 
@@ -200,30 +199,6 @@ func TestBearerSignerApplied(t *testing.T) {
 	}
 	if os.authSaw != "Bearer sekret" {
 		t.Fatalf("signer not applied: server saw Authorization=%q", os.authSaw)
-	}
-}
-
-func TestBearerTokenUsesSecretLoader(t *testing.T) {
-	t.Setenv(blobHTTPTokenEnv, "plain-blob-token-value")
-
-	loader := blobHTTPSecretLoader()
-	tok, src, ok := loader.LookupSource(blobHTTPTokenEnv)
-	if !ok || tok != "plain-blob-token-value" || src != "os-env" {
-		t.Fatalf("LookupSource = (%q,%q,%v), want os-env token", tok, src, ok)
-	}
-	if out := loader.Redact("blobhttp loaded " + tok); strings.Contains(out, tok) {
-		t.Fatalf("resolved blob HTTP token was not redacted: %q", out)
-	}
-
-	os := newObjectServer()
-	srv := httptest.NewServer(os)
-	defer srv.Close()
-	s := New(srv.URL, WithBearer(blobHTTPBearerToken()))
-	if _, err := s.Put(context.Background(), payload(1024, 'b')); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	if os.authSaw != "Bearer plain-blob-token-value" {
-		t.Fatalf("signer not applied from secret loader: server saw Authorization=%q", os.authSaw)
 	}
 }
 
