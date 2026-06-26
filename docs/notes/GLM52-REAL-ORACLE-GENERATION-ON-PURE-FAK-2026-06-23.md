@@ -11,6 +11,15 @@ description: "Fresh on-hardware capture on an idle 8-GPU datacenter server-80GB 
 > note records the on-device witnesses (grounded in `go test` exit codes and run logs, not
 > self-report) and is explicit about the one boundary that is still open.
 
+> **Superseded by progress (#917; see the [staged plan](native-753b-track-staged-plan.md)).**
+> The §5 "honest boundary" below — "not fak serving the full 753B natively … the full 753B
+> still serves only via the llama.cpp CPU-offload baseline" — was the 2026-06-23 snapshot.
+> The quantized device GEMM + `--cpu-offload-experts` + `glm_moe_dsa` loader rungs have since
+> landed and fak's **own** engine loads the full 466 GB model natively and binds `/v1/*`
+> ([2026-06-25 native-serve note](GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md)). The
+> real-oracle, bit-exact DSA-forward, and SmolLM2 decode witnesses (§1–3) stand; only the
+> serving boundary moved.
+
 All runs are on a fresh, idle **8× NVIDIA datacenter GPU-80GB (sm_80, compute 8.0), CUDA 12.8,
 ~2 TB host RAM** datacenter node, at the then-current `origin/main`, Go 1.26.4.
 

@@ -14,6 +14,15 @@ description: "Witnessed go-test results showing the GLM-5.2 architecture runs in
 > `go version` = go1.26.3 windows/amd64; GLM `go test` run under WSL go1.26.0
 > linux/amd64 because Windows app-control blocks freshly-compiled native test binaries).
 
+> **Current direction (see the [staged plan](native-753b-track-staged-plan.md), #917).**
+> This is a 2026-06-21 point-in-time witness. The second arm of its scope split — "serving
+> the real 753B checkpoint is hardware-gated; this dev box has no NVIDIA GPU" (§2) — has
+> since been superseded by progress on the datacenter GPU node: `--cpu-offload-experts`
+> shipped and fak's **own** engine loads the full 466 GB `glm_moe_dsa` model natively and
+> binds `/v1/*` ([2026-06-25 native-serve note](GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md);
+> the staged plan is the single current direction). The architecture-runs-green witnesses
+> (§1) and the model-agnostic turn demos (§3) stand unchanged; only the serving gate moved.
+
 ## The honest scope split (read this first)
 
 "Self-host GLM-5.2 on our kernel" is two different things, and conflating them is the
