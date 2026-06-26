@@ -58,7 +58,7 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 		}
 	}
 	require(strings.Contains(gateway, "const DefaultCompactHistoryBudget = 48000"), "gateway.DefaultCompactHistoryBudget must stay default-on")
-	require(strings.Contains(gateway, "DefaultElideResultBytes = 0"), "gateway.DefaultElideResultBytes must be the single dark default")
+	require(strings.Contains(gateway, "DefaultElideResultBytes = DocumentedElideResultBytes"), "gateway.DefaultElideResultBytes must arm oversized-result elision on by default at the documented threshold")
 	for _, entry := range []struct {
 		name string
 		src  string
@@ -98,10 +98,10 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 			"score":               score,
 			"grade":               grade,
 			"levers_total":        6,
-			"stacked_on":          4,
+			"stacked_on":          5,
 			"defects":             defects,
 			"lever_status": []map[string]any{
-				{"key": "elideresult", "on": false, "witnessed": false},
+				{"key": "elideresult", "on": true, "witnessed": true},
 				{"key": "ctxview", "on": false, "witnessed": true},
 			},
 		},

@@ -64,12 +64,21 @@ import (
 const DefaultCompactHistoryBudget = 48000
 
 const (
-	// DocumentedElideResultBytes is the reviewed candidate threshold for oversized
-	// tool-result elision. It is documented but not armed by default.
+	// DocumentedElideResultBytes is the reviewed threshold for oversized tool-result
+	// elision: a tool_result whose text payload exceeds this many bytes is a candidate
+	// for head+tail shrinking when it is old, un-cached, and outside the working set.
 	DocumentedElideResultBytes = 16384
-	// DefaultElideResultBytes keeps oversized-result elision dark until an operator
-	// deliberately flips the threshold after reading the tradeoff witness.
-	DefaultElideResultBytes = 0
+	// DefaultElideResultBytes arms oversized-result elision ON by default at the documented
+	// threshold. The lever is default-on because it is bounded-loss and fail-safe: it only
+	// shrinks an OLD tool_result (after the cache head, outside the recent working-set window,
+	// in a message with no cache_control the shrinker can reach), keeps the cached head prefix
+	// byte-identical, never drops a result entirely (head+tail survive), and returns identity
+	// on any ambiguity. Justified by adversarial verification (two rounds, four bugs closed),
+	// a synthetic dogfood (~56% shed on a large coding session), and a real-corpus prevalence
+	// scan (oversized tool_results in ~31% of 600 sampled real Claude Code sessions, ~2.9M
+	// estimated tokens of scrolled-past content; experiments/agent-live/). Pass
+	// --elide-result-bytes 0 to opt out; a larger value raises the threshold.
+	DefaultElideResultBytes = DocumentedElideResultBytes
 )
 
 // Config configures a gateway Server. The zero value is not valid — use New,

@@ -1,0 +1,24 @@
+{
+  "schema": "fak-elide-oversized-prevalence/1",
+  "title": "Oversized tool_result prevalence in real Claude Code sessions",
+  "date": "2026-06-26",
+  "purpose": "Real-corpus evidence supporting the default-on flip of oversized tool_result elision (gateway.DefaultElideResultBytes). Measures how much raw material the lever has: how often a real coding session accumulates a tool_result whose text payload exceeds the 16 KB elision threshold.",
+  "threshold_bytes": 16384,
+  "result": {
+    "sampled_sessions": 600,
+    "tool_results": 10965,
+    "oversized_results": 386,
+    "sessions_with_oversized": 184,
+    "pct_sessions_with_oversized": 30.7,
+    "oversized_text_bytes": 11618902,
+    "oversized_text_tokens_est_bytes_div4": 2904725
+  },
+  "headline": "~31% of 600 sampled real Claude Code sessions carry at least one oversized (>16 KB) tool_result; 386 oversized results totaling ~11.6 MB (~2.9M estimated tokens, bytes/4 proxy) of scrolled-past content that elision shrinks to head+tail.",
+  "method": "A one-off scan of the operator's local session transcripts (~/.claude*/projects/**/*.jsonl, the 600 most-recent by mtime). For each transcript line's message.content[], every block of type tool_result is measured: a string content by its length, an array content by the summed length of its text blocks. A result counts as oversized when that text length exceeds the 16384-byte threshold. Token figures use the bytes/4 EstimateAnthropicTokens proxy.",
+  "honest_scope": [
+    "This measures the PREVALENCE and SIZE of the elidable raw material (oversized tool_results), NOT the exact realized per-turn shed. The realized shed depends on each result's zone in the actual outbound /v1/messages body (after the cache head, outside the recent working-set window, no reachable cache_control) — reconstructing that exact body with Claude Code's cache_control placement is the named follow-on; this prevalence number is a sound lower-bound motivation, not the full tradeoff witness.",
+    "The synthetic dogfood (internal/agent TestElideShedMagnitudeOnLargeCodingSession) measures the realized shed on a crafted body (~56% of a 319 KB session); this artifact measures real prevalence. Together they justify the default-on flip alongside the adversarial-verification safety proof.",
+    "PRIVACY: only counts, byte lengths, and token estimates are recorded here — never a prompt, tool argument, result body, session id, or transcript path."
+  ],
+  "reproduce": "Re-run the scan over ~/.claude*/projects/**/*.jsonl counting tool_result text payloads > 16384 bytes. A fak elide-witness subcommand that does this (and the exact-body tradeoff) is the named next step; this run was a manual scan."
+}

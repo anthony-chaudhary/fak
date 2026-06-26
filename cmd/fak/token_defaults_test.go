@@ -9,10 +9,11 @@ package main
 // cmd/fak/guard.go) or the gateway Default* constant, so it pins the binary's actual
 // default, never a copy that could drift from it.
 //
-// The off-by-default levers (elision, ctxview) are pinned too — not to keep them off, but
-// so each stays wired to its single documented default (the gateway const / the literal
-// 0), making a future flip-on one deliberate edit that this test moves with, never a silent
-// per-entrypoint drift. The byte-faithful provider-cache passthrough is locked separately by
+// The remaining off-by-default lever (ctxview) is pinned too — not to keep it off, but so it
+// stays wired to its literal 0 default, making a future flip-on one deliberate edit that this
+// test moves with, never a silent per-entrypoint drift. (Elision was flipped on by default once
+// adversarial verification + a synthetic dogfood + a real-corpus prevalence scan supported it.)
+// The byte-faithful provider-cache passthrough is locked separately by
 // internal/gateway's TestAnthropicMessagesPassthroughStreamsLiveAndAdjudicates (upstream
 // body byte-identical to the inbound → the client's prompt-cache prefix survives).
 
@@ -72,14 +73,17 @@ func TestTokenDefault_ToolFloorDefaultsOn(t *testing.T) {
 	}
 }
 
-// TestTokenDefault_ElideShipsDarkAtDocumentedDefault pins the oversized-result elision lever
-// to its documented default (the gateway const). It ships dark (0) until a savings/fidelity
-// witness supports a default-on threshold; wiring the flag to the const keeps the on/off
-// decision a single deliberate edit to DefaultElideResultBytes, never a per-entrypoint drift.
-func TestTokenDefault_ElideShipsDarkAtDocumentedDefault(t *testing.T) {
+// TestTokenDefault_ElideDefaultsOn pins oversized-result elision ON by default: the gateway
+// const is a non-zero (default-on) byte threshold, and both front doors wire the flag to it, so
+// an old oversized tool_result is shrunk to head+tail with no operator configuration. Wiring the
+// flag to the const keeps the on/off decision a single edit to DefaultElideResultBytes.
+func TestTokenDefault_ElideDefaultsOn(t *testing.T) {
+	if gateway.DefaultElideResultBytes <= 0 {
+		t.Fatalf("DefaultElideResultBytes must be default-on (>0), got %d", gateway.DefaultElideResultBytes)
+	}
 	for _, f := range []string{"serve.go", "guard.go"} {
 		if !strings.Contains(readEntrypoint(t, f), `fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`) {
-			t.Errorf("%s must wire --elide-result-bytes to gateway.DefaultElideResultBytes (single documented default)", f)
+			t.Errorf("%s must wire --elide-result-bytes to gateway.DefaultElideResultBytes (default-on threshold)", f)
 		}
 	}
 }
