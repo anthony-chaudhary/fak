@@ -503,6 +503,16 @@ type Server struct {
 	planner     agent.Planner
 	engineCache *enginecache.Client
 
+	// kvReclaimer turns "a session slot freed" into "a KV block freed" for a waiting
+	// sequence (#915, the drain/stop↔evict edge of #912): when a Scheduler SlotEvent with a
+	// TERMINAL cause (draining/stopped) fires, ReclaimKVOnSlotFreed drives this reclaimer's
+	// real KV free (kvmmu.Context.EvictColdest / model.KVCache.Evict). nil (the default)
+	// leaves the edge a no-op; the host injects one backed by the live served residency via
+	// SetKVResidencyReclaimer. Guarded by kvReclaimMu — the slot-freed observer runs on the
+	// table's observer goroutine, so the read must be race-safe against a late install.
+	kvReclaimMu sync.RWMutex
+	kvReclaimer KVResidencyReclaimer
+
 	// ctxView, when non-nil, is the guarded ctxplan seam that re-plans each buffered
 	// turn's history into an O(1) resident view (issue #555). nil (CtxViewBudget == 0)
 	// leaves the forwarded history untouched; maybePlanMessages is an inert identity then.
