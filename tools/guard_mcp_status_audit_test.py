@@ -368,6 +368,41 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
             stale = next(row for row in payload["default_blockers"] if row["code"] == "WORKSPACE_STALE_STOPFAILURE_MARKERS")
             self.assertEqual(stale["evidence"]["stale_settlement_plan"][0]["settlement_action"], "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE")
 
+    def test_collect_passes_after_stopfailure_is_cleared(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed_tree(root)
+            path = root / mod.CODEX_DOS_AUDIT
+            audit = json.loads(path.read_text(encoding="utf-8"))
+            summary = audit["summary"]
+            summary["workspace_stop_failure_active_markers"] = 0
+            summary["workspace_stop_failure_active_consecutive_total"] = 0
+            summary["workspace_stop_failure_recent_active_markers"] = 0
+            summary["workspace_stop_failure_recent_active_consecutive_total"] = 0
+            summary["workspace_stop_failure_stale_active_markers"] = 0
+            summary["workspace_stop_failure_stale_active_consecutive_total"] = 0
+            summary["workspace_stop_failure_healed_nonzero_markers"] = 2
+            summary["workspace_stop_failure_recent_active_origin_counts"] = {}
+            summary["workspace_stop_failure_stale_active_origin_counts"] = {}
+            summary["workspace_stop_failure_active_settlement_action_counts"] = {}
+            summary["workspace_stop_failure_recent_active_settlement_action_counts"] = {}
+            summary["workspace_stop_failure_stale_active_settlement_action_counts"] = {}
+            audit["actionability"]["status"] = "PASS"
+            audit["actionability"]["reasons"] = []
+            audit["workspace_stop_failures"]["settlement_plan"] = {}
+            path.write_text(json.dumps(audit), encoding="utf-8")
+
+            payload = mod.collect(root)
+            self.assertEqual(payload["status"], "PASS")
+            codes = [row["code"] for row in payload["default_blockers"]]
+            self.assertNotIn("WORKSPACE_RECENT_STOPFAILURE_API_WALL", codes)
+            self.assertNotIn("WORKSPACE_STALE_STOPFAILURE_MARKERS", codes)
+            self.assertIn("CODEX_HOST_SHELL_OPACITY", codes)
+            details = next(check["detail"] for check in payload["checks"] if check["name"] == "historical codex/dos actionability")
+            self.assertIn("actionability=PASS", details)
+            self.assertIn("active_consecutive=0", details)
+
     def test_main_writes_json_out_file(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td:

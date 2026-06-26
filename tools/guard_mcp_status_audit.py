@@ -269,14 +269,26 @@ def check_historical_audit(root: Path, checks: list[dict[str, Any]]) -> None:
     residual = set(action.get("residual") or [])
     reasons = set(action.get("reasons") or [])
     post_repair_shapes = action.get("post_repair_shell_shape_counts") if isinstance(action.get("post_repair_shell_shape_counts"), dict) else {}
+    active_consecutive = int(summary.get("workspace_stop_failure_active_consecutive_total") or 0)
+    stop_failure_active = active_consecutive > 0
+    actionability_ok = (
+        (
+            action.get("status") == "WARN"
+            and stop_failure_active
+            and any("StopFailure API-wall" in reason for reason in reasons)
+        )
+        or (
+            action.get("status") == "PASS"
+            and not stop_failure_active
+            and not any("StopFailure API-wall" in reason for reason in reasons)
+        )
+    )
     ok = (
         report.get("status") == "WARN"
-        and action.get("status") == "WARN"
-        and any("StopFailure API-wall" in reason for reason in reasons)
+        and actionability_ok
         and git_gate.get("status") == "PASS"
         and "git_write" not in post_gate_families
         and int(summary.get("workspace_stop_failures_total") or 0) > 0
-        and int(summary.get("workspace_stop_failure_active_consecutive_total") or 0) > 0
         and int(post_repair_shapes.get("shell_no_write_target_detected") or 0) > 0
         and REQUIRED_CODEX_RESIDUALS.issubset(residual)
     )

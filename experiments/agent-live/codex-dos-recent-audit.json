@@ -27,14 +27,13 @@
       "shell_no_write_target_detected": 2290
     },
     "post_repair_unknown_tree_admission_warnings": 0,
-    "reasons": [
-      "stop blocks or uncleared StopFailure API-wall breaker markers are present"
-    ],
+    "reasons": [],
     "residual": [
-      "HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE"
+      "HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE",
+      "HOST_SHELL_OPACITY"
     ],
-    "status": "WARN",
-    "stop_total": 3,
+    "status": "PASS",
+    "stop_total": 0,
     "unknowns": []
   },
   "budgets": {
@@ -286,7 +285,7 @@
     "repaired_at": "2026-06-25T15:53:01.729390Z",
     "status": "PASS"
   },
-  "codex_threads_discovered": 116,
+  "codex_threads_discovered": 117,
   "dos_version": {
     "distribution": "dos-kernel",
     "latest_check_note": "run with --check-latest to compare against https://pypi.org/pypi/dos-kernel/json",
@@ -456,8 +455,7 @@
     "recent-window delegate count includes pre-repair history; post-repair Codex delegates are zero",
     "post-repair shell usage is mostly opaque read/inspect commands; prefer host-visible read/search tools when available",
     "post-repair shell usage includes opaque mutating git operations; route commit/push/add through explicit operator gates",
-    "workspace StopFailure API-wall breaker markers appeared outside the audited Codex streams; inspect .dos/stop-failures",
-    "recent workspace StopFailure markers are still consecutive; clear the underlying stop-hook/API-wall failure before treating the seat as healed"
+    "workspace StopFailure API-wall breaker markers appeared outside the audited Codex streams; inspect .dos/stop-failures"
   ],
   "schema": "fak-codex-dos-recent-audit/1",
   "sessions": [
@@ -967,18 +965,13 @@
     "unknown_tree_warning_rate": 0.169815,
     "unknown_tree_warning_threshold": 0.02,
     "warned_sessions": 20,
-    "workspace_stop_failure_active_consecutive_total": 3,
-    "workspace_stop_failure_active_markers": 3,
-    "workspace_stop_failure_active_origin_counts": {
-      "claude_transcript": 2,
-      "dos_stream+claude_transcript": 1
-    },
+    "workspace_stop_failure_active_consecutive_total": 0,
+    "workspace_stop_failure_active_markers": 0,
+    "workspace_stop_failure_active_origin_counts": {},
     "workspace_stop_failure_active_recent_threshold_hours": 6,
-    "workspace_stop_failure_active_settlement_action_counts": {
-      "RECENT_REVIEW": 3
-    },
-    "workspace_stop_failure_healed_nonzero_markers": 51,
-    "workspace_stop_failure_markers": 191,
+    "workspace_stop_failure_active_settlement_action_counts": {},
+    "workspace_stop_failure_healed_nonzero_markers": 54,
+    "workspace_stop_failure_markers": 192,
     "workspace_stop_failure_nonzero_markers": 54,
     "workspace_stop_failure_nonzero_origin_counts": {
       "claude_transcript": 33,
@@ -987,22 +980,16 @@
     "workspace_stop_failure_origin_counts": {
       "claude_transcript": 41,
       "dos_stream": 54,
-      "dos_stream+claude_transcript": 75,
+      "dos_stream+claude_transcript": 76,
       "marker_only": 21
     },
-    "workspace_stop_failure_recent_active_consecutive_total": 3,
-    "workspace_stop_failure_recent_active_markers": 3,
-    "workspace_stop_failure_recent_active_origin_counts": {
-      "claude_transcript": 2,
-      "dos_stream+claude_transcript": 1
-    },
-    "workspace_stop_failure_recent_active_settlement_action_counts": {
-      "RECENT_REVIEW": 3
-    },
+    "workspace_stop_failure_recent_active_consecutive_total": 0,
+    "workspace_stop_failure_recent_active_markers": 0,
+    "workspace_stop_failure_recent_active_origin_counts": {},
+    "workspace_stop_failure_recent_active_settlement_action_counts": {},
     "workspace_stop_failure_settlement_action_counts": {
-      "HEALED_NONZERO": 51,
-      "RECENT_REVIEW": 3,
-      "ZERO_TOTAL": 137
+      "HEALED_NONZERO": 54,
+      "ZERO_TOTAL": 138
     },
     "workspace_stop_failure_stale_active_consecutive_total": 0,
     "workspace_stop_failure_stale_active_markers": 0,
@@ -1016,66 +1003,60 @@
       "SHELL_HEAVY_SESSION": 5,
       "TOOL_ERROR_RECOVERY": 20
     },
-    "workspace_stop_failure_zero_markers": 137,
+    "workspace_stop_failure_zero_markers": 138,
     "workspace_stop_failures_total": 69
   },
   "workspace": "fak",
   "workspace_stop_failures": {
-    "active_consecutive_markers": 3,
-    "active_consecutive_total": 3,
-    "active_origin_counts": {
-      "claude_transcript": 2,
-      "dos_stream+claude_transcript": 1
-    },
+    "active_consecutive_markers": 0,
+    "active_consecutive_total": 0,
+    "active_origin_counts": {},
     "active_recent_threshold_hours": 6,
-    "active_settlement_action_counts": {
-      "RECENT_REVIEW": 3
-    },
+    "active_settlement_action_counts": {},
     "by_day": {
       "2026-06-25": {
-        "active_consecutive_markers": 3,
-        "active_consecutive_total": 3,
-        "healed_nonzero_markers": 12,
-        "markers": 148,
-        "max_consecutive": 1,
-        "nonzero_total_markers": 15,
-        "recent_active_consecutive_markers": 3,
-        "recent_active_consecutive_total": 3,
-        "stale_active_consecutive_markers": 0,
-        "stale_active_consecutive_total": 0,
-        "total_failures": 23
-      },
-      "2026-06-26": {
         "active_consecutive_markers": 0,
         "active_consecutive_total": 0,
-        "healed_nonzero_markers": 39,
-        "markers": 43,
+        "healed_nonzero_markers": 12,
+        "markers": 145,
         "max_consecutive": 0,
-        "nonzero_total_markers": 39,
+        "nonzero_total_markers": 12,
         "recent_active_consecutive_markers": 0,
         "recent_active_consecutive_total": 0,
         "stale_active_consecutive_markers": 0,
         "stale_active_consecutive_total": 0,
-        "total_failures": 46
+        "total_failures": 19
+      },
+      "2026-06-26": {
+        "active_consecutive_markers": 0,
+        "active_consecutive_total": 0,
+        "healed_nonzero_markers": 42,
+        "markers": 47,
+        "max_consecutive": 0,
+        "nonzero_total_markers": 42,
+        "recent_active_consecutive_markers": 0,
+        "recent_active_consecutive_total": 0,
+        "stale_active_consecutive_markers": 0,
+        "stale_active_consecutive_total": 0,
+        "total_failures": 50
       }
     },
-    "healed_nonzero_markers": 51,
+    "healed_nonzero_markers": 54,
     "malformed_markers": 0,
-    "markers": 191,
-    "max_consecutive": 1,
+    "markers": 192,
+    "max_consecutive": 0,
     "nonzero_origin_counts": {
       "claude_transcript": 33,
       "dos_stream+claude_transcript": 21
     },
     "nonzero_settlement_action_counts": {
-      "HEALED_NONZERO": 51,
-      "RECENT_REVIEW": 3
+      "HEALED_NONZERO": 54
     },
     "nonzero_total_markers": 54,
     "origin_counts": {
       "claude_transcript": 41,
       "dos_stream": 54,
-      "dos_stream+claude_transcript": 75,
+      "dos_stream+claude_transcript": 76,
       "marker_only": 21
     },
     "path": ".dos/stop-failures",
@@ -1098,19 +1079,39 @@
     "recent": [
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 139,
         "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.877341Z",
+        "mtime": "2026-06-26T03:14:52.182550Z",
+        "origin": "dos_stream+claude_transcript",
+        "origin_labels": [
+          "dos_stream",
+          "claude_transcript"
+        ],
+        "session_id": "9ff4f226-7ef7-4959-98e5-543fedfb0595",
+        "settlement_action": "ZERO_TOTAL",
+        "total": 0,
+        "transcript": {
+          "account": ".claude",
+          "mtime": "2026-06-26T03:14:55.304147Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 319,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "claude_transcript",
         "origin_labels": [
           "claude_transcript"
         ],
-        "session_id": "03d07851-5d2b-4f07-b607-c9b7f5601d40",
+        "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
         "settlement_action": "HEALED_NONZERO",
         "total": 1,
         "transcript": {
-          "account": ".claude-fef872f9",
-          "mtime": "2026-06-25T03:38:00.608489Z",
+          "account": ".claude",
+          "mtime": "2026-06-25T22:28:01.244847Z",
           "project": "C--work-fak",
           "status": "FOUND"
         },
@@ -1121,13 +1122,16 @@
           "evidence_tags": [
             "HOOK_OR_API_WALL_FEEDBACK",
             "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
             "TOOL_ERROR_RECOVERY"
           ],
-          "first_timestamp": "2026-06-25T03:37:59.355Z",
-          "last_timestamp": "2026-06-25T03:38:00.479Z",
-          "lines": 9,
+          "first_timestamp": "2026-06-25T22:24:53.964Z",
+          "last_timestamp": "2026-06-25T22:28:00.797Z",
+          "lines": 10,
           "malformed_lines": 0,
           "marker_line_counts": {
+            "blocked": 1,
+            "denied": 1,
             "error": 1,
             "hook": 1,
             "permission": 2
@@ -1156,7 +1160,7 @@
           "row_type_counts": {
             "assistant": 1,
             "attachment": 4,
-            "last-prompt": 1,
+            "last-prompt": 2,
             "queue-operation": 2,
             "user": 1
           },
@@ -1167,1361 +1171,16 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 319,
         "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.876341Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "b7c6693a-2b30-4c31-9657-66ccfe3d723b",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:38:03.941066Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:38:01.778Z",
-          "last_timestamp": "2026-06-25T03:38:03.835Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.875343Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "c61e8987-98b2-4e70-9920-f10dc1e6de45",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:38:29.116036Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:38:28.233Z",
-          "last_timestamp": "2026-06-25T03:38:29.020Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.874341Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "37647716-2aea-41d8-aa4e-18b395368497",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:43:30.754782Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:43:29.717Z",
-          "last_timestamp": "2026-06-25T03:43:30.638Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.874341Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "46c82572-b86f-4a1b-b392-b1e25569ad26",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:43:35.281376Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:43:34.109Z",
-          "last_timestamp": "2026-06-25T03:43:35.151Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.874341Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "833166df-a64f-40d8-b80e-70e3d5d45de6",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:43:49.161983Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:43:47.921Z",
-          "last_timestamp": "2026-06-25T03:43:49.009Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.873336Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "0b0648f8-e81c-4116-98b7-319ed9e3feee",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:45:15.376040Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T03:45:14.502Z",
-          "last_timestamp": "2026-06-25T03:45:15.259Z",
-          "lines": 9,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 1,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.873336Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "0bc20897-7340-4971-b44c-899ea5997da3",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:44:54.954186Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.873336Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "cd2d54e3-7df3-4025-aaa2-55531af5b728",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:44:08.574346Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.873336Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "eba16853-7719-4880-9bf4-571be7fbfd28",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:47:44.869326Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.872833Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "801ce28d-7877-448f-8e6e-12a4fcd5d7d1",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:48:28.534843Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.871834Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "4d506c12-7796-4b95-9dba-b13c54dd77e9",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:48:55.411239Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.871834Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "5ea6425e-b796-47cc-b7a4-4c669fac33a4",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T04:04:16.226860Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.871834Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "d852da61-6716-4a10-a2bc-a6c9d9c4460f",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T04:02:31.602810Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.871834Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "d8a73007-c239-454b-9bc5-7748ac1b25c5",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T03:48:39.928830Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.870833Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "2b0322ad-f0a6-4f20-93e6-3cbd721d213b",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T04:08:38.944338Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.870833Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "56c954ad-e84d-4c28-98f2-da858b83e110",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T04:12:08.376222Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.870833Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "aae6aed8-be14-46ca-8e85-1fe62d7fb70a",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T04:09:02.666213Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.870833Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "dfcc5059-fe2c-48ee-82f6-c48068ca72d0",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-ff8ec20a",
-          "mtime": "2026-06-25T04:12:55.223554Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      },
-      {
-        "active_recent": false,
-        "age_seconds": 255,
-        "consecutive": 0,
-        "mtime": "2026-06-26T02:58:22.869833Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "1c9b6d78-c64b-4340-a2c3-76f6033aa0dc",
-        "settlement_action": "HEALED_NONZERO",
-        "total": 1,
-        "transcript": {
-          "account": ".claude-fef872f9",
-          "mtime": "2026-06-25T08:35:45.477187Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        }
-      }
-    ],
-    "recent_active_consecutive_markers": 3,
-    "recent_active_consecutive_total": 3,
-    "recent_active_origin_counts": {
-      "claude_transcript": 2,
-      "dos_stream+claude_transcript": 1
-    },
-    "recent_active_settlement_action_counts": {
-      "RECENT_REVIEW": 3
-    },
-    "scope": "workspace StopFailure API-wall breaker markers; includes non-Codex hook sessions",
-    "settlement_action_counts": {
-      "HEALED_NONZERO": 51,
-      "RECENT_REVIEW": 3,
-      "ZERO_TOTAL": 137
-    },
-    "settlement_plan": {
-      "HEALED_NONZERO": [
-        {
-          "age_seconds": 68058,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/87a2adc1-653e-4c67-9243-d2058084029b.json",
-          "mtime": "2026-06-25T08:08:19.788300Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "87a2adc1-653e-4c67-9243-d2058084029b",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 4,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/3f29f826-b400-476b-811c-374e61fd75ad.json",
-          "mtime": "2026-06-26T02:58:22.867327Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "3f29f826-b400-476b-811c-374e61fd75ad",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 3,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 14495,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/2b8682ae-ced6-402b-bcc8-21180e96d5b3.json",
-          "mtime": "2026-06-25T23:01:02.895782Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "2b8682ae-ced6-402b-bcc8-21180e96d5b3",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 3,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "SHELL_HEAVY_SESSION"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/0b2c4844-23b3-4ccf-ab02-032c50cab607.json",
-          "mtime": "2026-06-26T02:58:22.867830Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "0b2c4844-23b3-4ccf-ab02-032c50cab607",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/1f689f62-ef81-4862-ac09-2763a362f655.json",
-          "mtime": "2026-06-26T02:58:22.867830Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "1f689f62-ef81-4862-ac09-2763a362f655",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/dde358da-6862-4e56-992a-e1527b02c89f.json",
-          "mtime": "2026-06-26T02:58:22.867830Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "dde358da-6862-4e56-992a-e1527b02c89f",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "SHELL_HEAVY_SESSION",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/f7198142-f77b-47ba-8e9a-453ab3ea27e1.json",
-          "mtime": "2026-06-26T02:58:22.867830Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "f7198142-f77b-47ba-8e9a-453ab3ea27e1",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 10726,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/6dff026d-e10d-4708-ba61-d29727b6d859.json",
-          "mtime": "2026-06-26T00:03:52.194878Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "6dff026d-e10d-4708-ba61-d29727b6d859",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "SHELL_HEAVY_SESSION"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 29977,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/a9dd5c1c-af6e-4c28-8e08-98940a570503.json",
-          "mtime": "2026-06-25T18:43:00.656239Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "a9dd5c1c-af6e-4c28-8e08-98940a570503",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "SHELL_HEAVY_SESSION",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 36854,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/35522ab7-572c-4c8d-9869-1d1d4a9488d2.json",
-          "mtime": "2026-06-25T16:48:23.457243Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "35522ab7-572c-4c8d-9869-1d1d4a9488d2",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY",
-            "SHELL_HEAVY_SESSION",
-            "LARGE_TOOL_RESULT"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/03d07851-5d2b-4f07-b607-c9b7f5601d40.json",
-          "mtime": "2026-06-26T02:58:22.877341Z",
-          "origin": "claude_transcript",
-          "session_id": "03d07851-5d2b-4f07-b607-c9b7f5601d40",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/0b0648f8-e81c-4116-98b7-319ed9e3feee.json",
-          "mtime": "2026-06-26T02:58:22.873336Z",
-          "origin": "claude_transcript",
-          "session_id": "0b0648f8-e81c-4116-98b7-319ed9e3feee",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/0bc20897-7340-4971-b44c-899ea5997da3.json",
-          "mtime": "2026-06-26T02:58:22.873336Z",
-          "origin": "claude_transcript",
-          "session_id": "0bc20897-7340-4971-b44c-899ea5997da3",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/0ca65829-55f7-4e83-8395-d66af9a3667b.json",
-          "mtime": "2026-06-26T02:58:22.868833Z",
-          "origin": "claude_transcript",
-          "session_id": "0ca65829-55f7-4e83-8395-d66af9a3667b",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/1c9b6d78-c64b-4340-a2c3-76f6033aa0dc.json",
-          "mtime": "2026-06-26T02:58:22.869833Z",
-          "origin": "claude_transcript",
-          "session_id": "1c9b6d78-c64b-4340-a2c3-76f6033aa0dc",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/2b0322ad-f0a6-4f20-93e6-3cbd721d213b.json",
-          "mtime": "2026-06-26T02:58:22.870833Z",
-          "origin": "claude_transcript",
-          "session_id": "2b0322ad-f0a6-4f20-93e6-3cbd721d213b",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/2cd19a7a-2b80-4497-a939-28638fc37de5.json",
-          "mtime": "2026-06-26T02:58:22.867830Z",
-          "origin": "claude_transcript",
-          "session_id": "2cd19a7a-2b80-4497-a939-28638fc37de5",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/37647716-2aea-41d8-aa4e-18b395368497.json",
-          "mtime": "2026-06-26T02:58:22.874341Z",
-          "origin": "claude_transcript",
-          "session_id": "37647716-2aea-41d8-aa4e-18b395368497",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/46c82572-b86f-4a1b-b392-b1e25569ad26.json",
-          "mtime": "2026-06-26T02:58:22.874341Z",
-          "origin": "claude_transcript",
-          "session_id": "46c82572-b86f-4a1b-b392-b1e25569ad26",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 255,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/4d506c12-7796-4b95-9dba-b13c54dd77e9.json",
-          "mtime": "2026-06-26T02:58:22.871834Z",
-          "origin": "claude_transcript",
-          "session_id": "4d506c12-7796-4b95-9dba-b13c54dd77e9",
-          "settlement_action": "HEALED_NONZERO",
-          "total": 1,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        }
-      ],
-      "RECENT_REVIEW": [
-        {
-          "age_seconds": 16750,
-          "consecutive": 1,
-          "marker_path": ".dos/stop-failures/3af9576f-4e22-4eac-bc59-fb7935196e31.json",
-          "mtime": "2026-06-25T22:23:28.082063Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
-          "settlement_action": "RECENT_REVIEW",
-          "total": 2,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 13906,
-          "consecutive": 1,
-          "marker_path": ".dos/stop-failures/e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6.json",
-          "mtime": "2026-06-25T23:10:51.602921Z",
-          "origin": "claude_transcript",
-          "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
-          "settlement_action": "RECENT_REVIEW",
-          "total": 1,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 16475,
-          "consecutive": 1,
-          "marker_path": ".dos/stop-failures/2a660dbb-9d35-4502-9a8c-5f14ceac1686.json",
-          "mtime": "2026-06-25T22:28:02.588507Z",
-          "origin": "claude_transcript",
-          "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
-          "settlement_action": "RECENT_REVIEW",
-          "total": 1,
-          "transcript_evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        }
-      ],
-      "ZERO_TOTAL": [
-        {
-          "age_seconds": 4470,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/f9570e26-cb3b-45b7-8b9f-09cea89e58d8.json",
-          "mtime": "2026-06-26T01:48:07.814509Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "f9570e26-cb3b-45b7-8b9f-09cea89e58d8",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 6364,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/02a63915-2cf6-493b-a5a4-acb177897c0a.json",
-          "mtime": "2026-06-26T01:16:33.683785Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "02a63915-2cf6-493b-a5a4-acb177897c0a",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 6514,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/674f3746-4339-43d6-81e4-900d9d7a5bc4.json",
-          "mtime": "2026-06-26T01:14:04.129225Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "674f3746-4339-43d6-81e4-900d9d7a5bc4",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 10031,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/8a1ce5bb-1d6e-4071-bc24-7dfc2bae7647.json",
-          "mtime": "2026-06-26T00:15:27.122426Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "8a1ce5bb-1d6e-4071-bc24-7dfc2bae7647",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 11748,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/10a25ec0-3803-4fe7-92da-2e4ae182973a.json",
-          "mtime": "2026-06-25T23:46:50.096581Z",
-          "origin": "claude_transcript",
-          "session_id": "10a25ec0-3803-4fe7-92da-2e4ae182973a",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 11980,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/8a4e693c-7638-4a8c-bbfa-dabb41f8cee8.json",
-          "mtime": "2026-06-25T23:42:57.967738Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "8a4e693c-7638-4a8c-bbfa-dabb41f8cee8",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 16232,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/4a1b92c1-c5f0-46a6-aef6-02a91f29c5de.json",
-          "mtime": "2026-06-25T22:32:05.340983Z",
-          "origin": "claude_transcript",
-          "session_id": "4a1b92c1-c5f0-46a6-aef6-02a91f29c5de",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 16375,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/4266e596-e09b-4049-a7c7-f85322570d1d.json",
-          "mtime": "2026-06-25T22:29:42.599534Z",
-          "origin": "claude_transcript",
-          "session_id": "4266e596-e09b-4049-a7c7-f85322570d1d",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 16433,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/5f1c9876-41f3-455c-95a5-17e2425551f6.json",
-          "mtime": "2026-06-25T22:28:44.988688Z",
-          "origin": "claude_transcript",
-          "session_id": "5f1c9876-41f3-455c-95a5-17e2425551f6",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 16831,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/439cb1b3-8acd-471a-bd08-406e8a2000f4.json",
-          "mtime": "2026-06-25T22:22:07.221106Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "439cb1b3-8acd-471a-bd08-406e8a2000f4",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 17448,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/0c437c57-b888-43c4-8fef-1a2a9c884bc4.json",
-          "mtime": "2026-06-25T22:11:49.370993Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "0c437c57-b888-43c4-8fef-1a2a9c884bc4",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 17602,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/f4438b79-47c8-41cd-a98f-7fdc860bab18.json",
-          "mtime": "2026-06-25T22:09:15.518808Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "f4438b79-47c8-41cd-a98f-7fdc860bab18",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 18281,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/51fcb753-1667-4f79-ba74-58a8c800906e.json",
-          "mtime": "2026-06-25T21:57:57.037852Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "51fcb753-1667-4f79-ba74-58a8c800906e",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 19312,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/9b7bd6c7-ac36-433c-ae7a-618e8b96caa9.json",
-          "mtime": "2026-06-25T21:40:45.645524Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "9b7bd6c7-ac36-433c-ae7a-618e8b96caa9",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 24140,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/e2198d6b-5abe-4470-9548-e76fc3e985c9.json",
-          "mtime": "2026-06-25T20:20:17.626242Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "e2198d6b-5abe-4470-9548-e76fc3e985c9",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 24338,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/e5491dd7-fe6f-499c-9f6a-1822ac3994dd.json",
-          "mtime": "2026-06-25T20:16:59.629447Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "e5491dd7-fe6f-499c-9f6a-1822ac3994dd",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 24835,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/40dfbeac-dba5-4645-b183-944467ec5428.json",
-          "mtime": "2026-06-25T20:08:43.095085Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "40dfbeac-dba5-4645-b183-944467ec5428",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 24965,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/92c85f38-809a-48ca-a398-86f3269011df.json",
-          "mtime": "2026-06-25T20:06:32.516663Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "92c85f38-809a-48ca-a398-86f3269011df",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 25287,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/04593164-3578-438e-827a-9c6979837063.json",
-          "mtime": "2026-06-25T20:01:11.175688Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "04593164-3578-438e-827a-9c6979837063",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        },
-        {
-          "age_seconds": 28069,
-          "consecutive": 0,
-          "marker_path": ".dos/stop-failures/c78a0e0d-8347-4966-a787-cae2d8d5779b.json",
-          "mtime": "2026-06-25T19:14:49.225266Z",
-          "origin": "dos_stream+claude_transcript",
-          "session_id": "c78a0e0d-8347-4966-a787-cae2d8d5779b",
-          "settlement_action": "ZERO_TOTAL",
-          "total": 0,
-          "transcript_evidence_tags": [],
-          "transcript_project": "C--work-fak",
-          "transcript_status": "FOUND"
-        }
-      ]
-    },
-    "stale_active_consecutive_markers": 0,
-    "stale_active_consecutive_total": 0,
-    "stale_active_origin_counts": {},
-    "stale_active_settlement_action_counts": {},
-    "status": "WARN",
-    "summarized_transcripts": 20,
-    "top_active": [
-      {
-        "active_recent": true,
-        "age_seconds": 16750,
-        "consecutive": 1,
-        "mtime": "2026-06-25T22:23:28.082063Z",
+        "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "dos_stream+claude_transcript",
         "origin_labels": [
           "dos_stream",
           "claude_transcript"
         ],
         "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
-        "settlement_action": "RECENT_REVIEW",
+        "settlement_action": "HEALED_NONZERO",
         "total": 2,
         "transcript": {
           "account": ".claude",
@@ -2611,16 +1270,16 @@
         }
       },
       {
-        "active_recent": true,
-        "age_seconds": 13906,
-        "consecutive": 1,
-        "mtime": "2026-06-25T23:10:51.602921Z",
+        "active_recent": false,
+        "age_seconds": 319,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "claude_transcript",
         "origin_labels": [
           "claude_transcript"
         ],
         "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
-        "settlement_action": "RECENT_REVIEW",
+        "settlement_action": "HEALED_NONZERO",
         "total": 1,
         "transcript": {
           "account": ".claude",
@@ -2684,20 +1343,20 @@
         }
       },
       {
-        "active_recent": true,
-        "age_seconds": 16475,
-        "consecutive": 1,
-        "mtime": "2026-06-25T22:28:02.588507Z",
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.877341Z",
         "origin": "claude_transcript",
         "origin_labels": [
           "claude_transcript"
         ],
-        "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
-        "settlement_action": "RECENT_REVIEW",
+        "session_id": "03d07851-5d2b-4f07-b607-c9b7f5601d40",
+        "settlement_action": "HEALED_NONZERO",
         "total": 1,
         "transcript": {
-          "account": ".claude",
-          "mtime": "2026-06-25T22:28:01.244847Z",
+          "account": ".claude-fef872f9",
+          "mtime": "2026-06-25T03:38:00.608489Z",
           "project": "C--work-fak",
           "status": "FOUND"
         },
@@ -2708,16 +1367,13 @@
           "evidence_tags": [
             "HOOK_OR_API_WALL_FEEDBACK",
             "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
             "TOOL_ERROR_RECOVERY"
           ],
-          "first_timestamp": "2026-06-25T22:24:53.964Z",
-          "last_timestamp": "2026-06-25T22:28:00.797Z",
-          "lines": 10,
+          "first_timestamp": "2026-06-25T03:37:59.355Z",
+          "last_timestamp": "2026-06-25T03:38:00.479Z",
+          "lines": 9,
           "malformed_lines": 0,
           "marker_line_counts": {
-            "blocked": 1,
-            "denied": 1,
             "error": 1,
             "hook": 1,
             "permission": 2
@@ -2746,7 +1402,7 @@
           "row_type_counts": {
             "assistant": 1,
             "attachment": 4,
-            "last-prompt": 2,
+            "last-prompt": 1,
             "queue-operation": 2,
             "user": 1
           },
@@ -2754,12 +1410,1225 @@
           "tool_counts": {},
           "tool_result_shape_counts": {}
         }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.876341Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "b7c6693a-2b30-4c31-9657-66ccfe3d723b",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:38:03.941066Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T03:38:01.778Z",
+          "last_timestamp": "2026-06-25T03:38:03.835Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.875343Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "c61e8987-98b2-4e70-9920-f10dc1e6de45",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:38:29.116036Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T03:38:28.233Z",
+          "last_timestamp": "2026-06-25T03:38:29.020Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.874341Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "37647716-2aea-41d8-aa4e-18b395368497",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:43:30.754782Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T03:43:29.717Z",
+          "last_timestamp": "2026-06-25T03:43:30.638Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.874341Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "46c82572-b86f-4a1b-b392-b1e25569ad26",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:43:35.281376Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T03:43:34.109Z",
+          "last_timestamp": "2026-06-25T03:43:35.151Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.874341Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "833166df-a64f-40d8-b80e-70e3d5d45de6",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:43:49.161983Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T03:43:47.921Z",
+          "last_timestamp": "2026-06-25T03:43:49.009Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.873336Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "0b0648f8-e81c-4116-98b7-319ed9e3feee",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:45:15.376040Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T03:45:14.502Z",
+          "last_timestamp": "2026-06-25T03:45:15.259Z",
+          "lines": 9,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 1,
+            "queue-operation": 2,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.873336Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "0bc20897-7340-4971-b44c-899ea5997da3",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:44:54.954186Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.873336Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "cd2d54e3-7df3-4025-aaa2-55531af5b728",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:44:08.574346Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.873336Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "eba16853-7719-4880-9bf4-571be7fbfd28",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:47:44.869326Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.872833Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "801ce28d-7877-448f-8e6e-12a4fcd5d7d1",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:48:28.534843Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.871834Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "4d506c12-7796-4b95-9dba-b13c54dd77e9",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:48:55.411239Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.871834Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "5ea6425e-b796-47cc-b7a4-4c669fac33a4",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T04:04:16.226860Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.871834Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "d852da61-6716-4a10-a2bc-a6c9d9c4460f",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T04:02:31.602810Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.871834Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "d8a73007-c239-454b-9bc5-7748ac1b25c5",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T03:48:39.928830Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
+        "consecutive": 0,
+        "mtime": "2026-06-26T02:58:22.870833Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "2b0322ad-f0a6-4f20-93e6-3cbd721d213b",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude-ff8ec20a",
+          "mtime": "2026-06-25T04:08:38.944338Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        }
       }
     ],
+    "recent_active_consecutive_markers": 0,
+    "recent_active_consecutive_total": 0,
+    "recent_active_origin_counts": {},
+    "recent_active_settlement_action_counts": {},
+    "scope": "workspace StopFailure API-wall breaker markers; includes non-Codex hook sessions",
+    "settlement_action_counts": {
+      "HEALED_NONZERO": 54,
+      "ZERO_TOTAL": 138
+    },
+    "settlement_plan": {
+      "HEALED_NONZERO": [
+        {
+          "age_seconds": 68931,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/87a2adc1-653e-4c67-9243-d2058084029b.json",
+          "mtime": "2026-06-25T08:08:19.788300Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "87a2adc1-653e-4c67-9243-d2058084029b",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 4,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/3f29f826-b400-476b-811c-374e61fd75ad.json",
+          "mtime": "2026-06-26T02:58:22.867327Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "3f29f826-b400-476b-811c-374e61fd75ad",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 3,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 15368,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/2b8682ae-ced6-402b-bcc8-21180e96d5b3.json",
+          "mtime": "2026-06-25T23:01:02.895782Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "2b8682ae-ced6-402b-bcc8-21180e96d5b3",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 3,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 319,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/3af9576f-4e22-4eac-bc59-fb7935196e31.json",
+          "mtime": "2026-06-26T03:11:52.142992Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/0b2c4844-23b3-4ccf-ab02-032c50cab607.json",
+          "mtime": "2026-06-26T02:58:22.867830Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "0b2c4844-23b3-4ccf-ab02-032c50cab607",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/1f689f62-ef81-4862-ac09-2763a362f655.json",
+          "mtime": "2026-06-26T02:58:22.867830Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "1f689f62-ef81-4862-ac09-2763a362f655",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/dde358da-6862-4e56-992a-e1527b02c89f.json",
+          "mtime": "2026-06-26T02:58:22.867830Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "dde358da-6862-4e56-992a-e1527b02c89f",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/f7198142-f77b-47ba-8e9a-453ab3ea27e1.json",
+          "mtime": "2026-06-26T02:58:22.867830Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "f7198142-f77b-47ba-8e9a-453ab3ea27e1",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 11599,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/6dff026d-e10d-4708-ba61-d29727b6d859.json",
+          "mtime": "2026-06-26T00:03:52.194878Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "6dff026d-e10d-4708-ba61-d29727b6d859",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 30850,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/a9dd5c1c-af6e-4c28-8e08-98940a570503.json",
+          "mtime": "2026-06-25T18:43:00.656239Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "a9dd5c1c-af6e-4c28-8e08-98940a570503",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 37727,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/35522ab7-572c-4c8d-9869-1d1d4a9488d2.json",
+          "mtime": "2026-06-25T16:48:23.457243Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "35522ab7-572c-4c8d-9869-1d1d4a9488d2",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 2,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY",
+            "SHELL_HEAVY_SESSION",
+            "LARGE_TOOL_RESULT"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 319,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/2a660dbb-9d35-4502-9a8c-5f14ceac1686.json",
+          "mtime": "2026-06-26T03:11:52.142992Z",
+          "origin": "claude_transcript",
+          "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 319,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6.json",
+          "mtime": "2026-06-26T03:11:52.142992Z",
+          "origin": "claude_transcript",
+          "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/03d07851-5d2b-4f07-b607-c9b7f5601d40.json",
+          "mtime": "2026-06-26T02:58:22.877341Z",
+          "origin": "claude_transcript",
+          "session_id": "03d07851-5d2b-4f07-b607-c9b7f5601d40",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/0b0648f8-e81c-4116-98b7-319ed9e3feee.json",
+          "mtime": "2026-06-26T02:58:22.873336Z",
+          "origin": "claude_transcript",
+          "session_id": "0b0648f8-e81c-4116-98b7-319ed9e3feee",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/0bc20897-7340-4971-b44c-899ea5997da3.json",
+          "mtime": "2026-06-26T02:58:22.873336Z",
+          "origin": "claude_transcript",
+          "session_id": "0bc20897-7340-4971-b44c-899ea5997da3",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/0ca65829-55f7-4e83-8395-d66af9a3667b.json",
+          "mtime": "2026-06-26T02:58:22.868833Z",
+          "origin": "claude_transcript",
+          "session_id": "0ca65829-55f7-4e83-8395-d66af9a3667b",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/1c9b6d78-c64b-4340-a2c3-76f6033aa0dc.json",
+          "mtime": "2026-06-26T02:58:22.869833Z",
+          "origin": "claude_transcript",
+          "session_id": "1c9b6d78-c64b-4340-a2c3-76f6033aa0dc",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/2b0322ad-f0a6-4f20-93e6-3cbd721d213b.json",
+          "mtime": "2026-06-26T02:58:22.870833Z",
+          "origin": "claude_transcript",
+          "session_id": "2b0322ad-f0a6-4f20-93e6-3cbd721d213b",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 1128,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/2cd19a7a-2b80-4497-a939-28638fc37de5.json",
+          "mtime": "2026-06-26T02:58:22.867830Z",
+          "origin": "claude_transcript",
+          "session_id": "2cd19a7a-2b80-4497-a939-28638fc37de5",
+          "settlement_action": "HEALED_NONZERO",
+          "total": 1,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        }
+      ],
+      "ZERO_TOTAL": [
+        {
+          "age_seconds": 139,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/9ff4f226-7ef7-4959-98e5-543fedfb0595.json",
+          "mtime": "2026-06-26T03:14:52.182550Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "9ff4f226-7ef7-4959-98e5-543fedfb0595",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 5343,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/f9570e26-cb3b-45b7-8b9f-09cea89e58d8.json",
+          "mtime": "2026-06-26T01:48:07.814509Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "f9570e26-cb3b-45b7-8b9f-09cea89e58d8",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 7237,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/02a63915-2cf6-493b-a5a4-acb177897c0a.json",
+          "mtime": "2026-06-26T01:16:33.683785Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "02a63915-2cf6-493b-a5a4-acb177897c0a",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 7387,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/674f3746-4339-43d6-81e4-900d9d7a5bc4.json",
+          "mtime": "2026-06-26T01:14:04.129225Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "674f3746-4339-43d6-81e4-900d9d7a5bc4",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 10904,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/8a1ce5bb-1d6e-4071-bc24-7dfc2bae7647.json",
+          "mtime": "2026-06-26T00:15:27.122426Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "8a1ce5bb-1d6e-4071-bc24-7dfc2bae7647",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 12621,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/10a25ec0-3803-4fe7-92da-2e4ae182973a.json",
+          "mtime": "2026-06-25T23:46:50.096581Z",
+          "origin": "claude_transcript",
+          "session_id": "10a25ec0-3803-4fe7-92da-2e4ae182973a",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 12853,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/8a4e693c-7638-4a8c-bbfa-dabb41f8cee8.json",
+          "mtime": "2026-06-25T23:42:57.967738Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "8a4e693c-7638-4a8c-bbfa-dabb41f8cee8",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 17106,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/4a1b92c1-c5f0-46a6-aef6-02a91f29c5de.json",
+          "mtime": "2026-06-25T22:32:05.340983Z",
+          "origin": "claude_transcript",
+          "session_id": "4a1b92c1-c5f0-46a6-aef6-02a91f29c5de",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 17248,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/4266e596-e09b-4049-a7c7-f85322570d1d.json",
+          "mtime": "2026-06-25T22:29:42.599534Z",
+          "origin": "claude_transcript",
+          "session_id": "4266e596-e09b-4049-a7c7-f85322570d1d",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 17306,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/5f1c9876-41f3-455c-95a5-17e2425551f6.json",
+          "mtime": "2026-06-25T22:28:44.988688Z",
+          "origin": "claude_transcript",
+          "session_id": "5f1c9876-41f3-455c-95a5-17e2425551f6",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 17704,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/439cb1b3-8acd-471a-bd08-406e8a2000f4.json",
+          "mtime": "2026-06-25T22:22:07.221106Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "439cb1b3-8acd-471a-bd08-406e8a2000f4",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 18322,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/0c437c57-b888-43c4-8fef-1a2a9c884bc4.json",
+          "mtime": "2026-06-25T22:11:49.370993Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "0c437c57-b888-43c4-8fef-1a2a9c884bc4",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 18475,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/f4438b79-47c8-41cd-a98f-7fdc860bab18.json",
+          "mtime": "2026-06-25T22:09:15.518808Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "f4438b79-47c8-41cd-a98f-7fdc860bab18",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 19154,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/51fcb753-1667-4f79-ba74-58a8c800906e.json",
+          "mtime": "2026-06-25T21:57:57.037852Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "51fcb753-1667-4f79-ba74-58a8c800906e",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 20185,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/9b7bd6c7-ac36-433c-ae7a-618e8b96caa9.json",
+          "mtime": "2026-06-25T21:40:45.645524Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "9b7bd6c7-ac36-433c-ae7a-618e8b96caa9",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 25013,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/e2198d6b-5abe-4470-9548-e76fc3e985c9.json",
+          "mtime": "2026-06-25T20:20:17.626242Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "e2198d6b-5abe-4470-9548-e76fc3e985c9",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 25211,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/e5491dd7-fe6f-499c-9f6a-1822ac3994dd.json",
+          "mtime": "2026-06-25T20:16:59.629447Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "e5491dd7-fe6f-499c-9f6a-1822ac3994dd",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 25708,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/40dfbeac-dba5-4645-b183-944467ec5428.json",
+          "mtime": "2026-06-25T20:08:43.095085Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "40dfbeac-dba5-4645-b183-944467ec5428",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 25838,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/92c85f38-809a-48ca-a398-86f3269011df.json",
+          "mtime": "2026-06-25T20:06:32.516663Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "92c85f38-809a-48ca-a398-86f3269011df",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        },
+        {
+          "age_seconds": 26160,
+          "consecutive": 0,
+          "marker_path": ".dos/stop-failures/04593164-3578-438e-827a-9c6979837063.json",
+          "mtime": "2026-06-25T20:01:11.175688Z",
+          "origin": "dos_stream+claude_transcript",
+          "session_id": "04593164-3578-438e-827a-9c6979837063",
+          "settlement_action": "ZERO_TOTAL",
+          "total": 0,
+          "transcript_evidence_tags": [],
+          "transcript_project": "C--work-fak",
+          "transcript_status": "FOUND"
+        }
+      ]
+    },
+    "stale_active_consecutive_markers": 0,
+    "stale_active_consecutive_total": 0,
+    "stale_active_origin_counts": {},
+    "stale_active_settlement_action_counts": {},
+    "status": "WARN",
+    "summarized_transcripts": 20,
+    "top_active": [],
     "top_nonzero": [
       {
         "active_recent": false,
-        "age_seconds": 68058,
+        "age_seconds": 68931,
         "consecutive": 0,
         "mtime": "2026-06-25T08:08:19.788300Z",
         "origin": "dos_stream+claude_transcript",
@@ -2858,7 +2727,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867327Z",
         "origin": "dos_stream+claude_transcript",
@@ -2958,7 +2827,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 14495,
+        "age_seconds": 15368,
         "consecutive": 0,
         "mtime": "2026-06-25T23:01:02.895782Z",
         "origin": "dos_stream+claude_transcript",
@@ -3056,17 +2925,17 @@
         }
       },
       {
-        "active_recent": true,
-        "age_seconds": 16750,
-        "consecutive": 1,
-        "mtime": "2026-06-25T22:23:28.082063Z",
+        "active_recent": false,
+        "age_seconds": 319,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "dos_stream+claude_transcript",
         "origin_labels": [
           "dos_stream",
           "claude_transcript"
         ],
         "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
-        "settlement_action": "RECENT_REVIEW",
+        "settlement_action": "HEALED_NONZERO",
         "total": 2,
         "transcript": {
           "account": ".claude",
@@ -3157,7 +3026,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3255,7 +3124,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3353,7 +3222,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3447,7 +3316,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.867830Z",
         "origin": "dos_stream+claude_transcript",
@@ -3548,7 +3417,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 10726,
+        "age_seconds": 11599,
         "consecutive": 0,
         "mtime": "2026-06-26T00:03:52.194878Z",
         "origin": "dos_stream+claude_transcript",
@@ -3648,7 +3517,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 29977,
+        "age_seconds": 30850,
         "consecutive": 0,
         "mtime": "2026-06-25T18:43:00.656239Z",
         "origin": "dos_stream+claude_transcript",
@@ -3749,7 +3618,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 36854,
+        "age_seconds": 37727,
         "consecutive": 0,
         "mtime": "2026-06-25T16:48:23.457243Z",
         "origin": "dos_stream+claude_transcript",
@@ -3845,89 +3714,16 @@
         }
       },
       {
-        "active_recent": true,
-        "age_seconds": 13906,
-        "consecutive": 1,
-        "mtime": "2026-06-25T23:10:51.602921Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
-        "settlement_action": "RECENT_REVIEW",
-        "total": 1,
-        "transcript": {
-          "account": ".claude",
-          "mtime": "2026-06-25T23:10:50.813364Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T23:07:45.297Z",
-          "last_timestamp": "2026-06-25T23:10:50.627Z",
-          "lines": 11,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 1,
-            "denied": 1,
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 2,
-            "queue-operation": 2,
-            "system": 1,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": true,
-        "age_seconds": 16475,
-        "consecutive": 1,
-        "mtime": "2026-06-25T22:28:02.588507Z",
+        "active_recent": false,
+        "age_seconds": 319,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:11:52.142992Z",
         "origin": "claude_transcript",
         "origin_labels": [
           "claude_transcript"
         ],
         "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
-        "settlement_action": "RECENT_REVIEW",
+        "settlement_action": "HEALED_NONZERO",
         "total": 1,
         "transcript": {
           "account": ".claude",
@@ -3991,7 +3787,80 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 319,
+        "consecutive": 0,
+        "mtime": "2026-06-26T03:11:52.142992Z",
+        "origin": "claude_transcript",
+        "origin_labels": [
+          "claude_transcript"
+        ],
+        "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+        "settlement_action": "HEALED_NONZERO",
+        "total": 1,
+        "transcript": {
+          "account": ".claude",
+          "mtime": "2026-06-25T23:10:50.813364Z",
+          "project": "C--work-fak",
+          "status": "FOUND"
+        },
+        "transcript_summary": {
+          "block_type_counts": {
+            "text": 1
+          },
+          "evidence_tags": [
+            "HOOK_OR_API_WALL_FEEDBACK",
+            "HOST_PERMISSION_INTERRUPT",
+            "DENY_OR_BLOCKED_FEEDBACK",
+            "TOOL_ERROR_RECOVERY"
+          ],
+          "first_timestamp": "2026-06-25T23:07:45.297Z",
+          "last_timestamp": "2026-06-25T23:10:50.627Z",
+          "lines": 11,
+          "malformed_lines": 0,
+          "marker_line_counts": {
+            "blocked": 1,
+            "denied": 1,
+            "error": 1,
+            "hook": 1,
+            "permission": 2
+          },
+          "max_tool_result_chars": 0,
+          "privacy": {
+            "copied_fields": [
+              "counts",
+              "timestamps",
+              "tool names",
+              "derived evidence tags",
+              "maximum tool-result length"
+            ],
+            "dropped": [
+              "prompts",
+              "tool arguments",
+              "tool result text",
+              "commands",
+              "model text"
+            ]
+          },
+          "role_counts": {
+            "assistant": 1,
+            "user": 1
+          },
+          "row_type_counts": {
+            "assistant": 1,
+            "attachment": 4,
+            "last-prompt": 2,
+            "queue-operation": 2,
+            "system": 1,
+            "user": 1
+          },
+          "status": "SUMMARIZED",
+          "tool_counts": {},
+          "tool_result_shape_counts": {}
+        }
+      },
+      {
+        "active_recent": false,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.877341Z",
         "origin": "claude_transcript",
@@ -4060,7 +3929,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.876341Z",
         "origin": "claude_transcript",
@@ -4129,7 +3998,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.875343Z",
         "origin": "claude_transcript",
@@ -4198,7 +4067,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -4267,7 +4136,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -4336,7 +4205,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.874341Z",
         "origin": "claude_transcript",
@@ -4405,7 +4274,7 @@
       },
       {
         "active_recent": false,
-        "age_seconds": 255,
+        "age_seconds": 1128,
         "consecutive": 0,
         "mtime": "2026-06-26T02:58:22.873336Z",
         "origin": "claude_transcript",
@@ -4473,253 +4342,7 @@
         }
       }
     ],
-    "top_recent_active": [
-      {
-        "active_recent": true,
-        "age_seconds": 16750,
-        "consecutive": 1,
-        "mtime": "2026-06-25T22:23:28.082063Z",
-        "origin": "dos_stream+claude_transcript",
-        "origin_labels": [
-          "dos_stream",
-          "claude_transcript"
-        ],
-        "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
-        "settlement_action": "RECENT_REVIEW",
-        "total": 2,
-        "transcript": {
-          "account": ".claude",
-          "mtime": "2026-06-25T22:35:33.984284Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 219,
-            "tool_result": 294,
-            "tool_use": 294
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T15:59:46.110Z",
-          "last_timestamp": "2026-06-25T22:35:30.482Z",
-          "lines": 1323,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 79,
-            "denied": 31,
-            "error": 270,
-            "hook": 468,
-            "permission": 78
-          },
-          "max_tool_result_chars": 15474,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 512,
-            "user": 304
-          },
-          "row_type_counts": {
-            "agent-name": 63,
-            "ai-title": 63,
-            "assistant": 512,
-            "attachment": 81,
-            "file-history-snapshot": 47,
-            "last-prompt": 75,
-            "mode": 74,
-            "permission-mode": 74,
-            "queue-operation": 26,
-            "system": 4,
-            "user": 304
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {
-            "Agent": 6,
-            "AskUserQuestion": 2,
-            "Bash": 137,
-            "Edit": 46,
-            "EnterPlanMode": 2,
-            "ExitPlanMode": 3,
-            "Read": 35,
-            "SendMessage": 3,
-            "TaskCreate": 11,
-            "TaskOutput": 6,
-            "TaskUpdate": 20,
-            "Write": 23
-          },
-          "tool_result_shape_counts": {
-            "toolUseResult_dict": 286,
-            "toolUseResult_str": 8,
-            "tool_result_error_text": 34,
-            "tool_result_list": 9,
-            "tool_result_other_text": 251
-          }
-        }
-      },
-      {
-        "active_recent": true,
-        "age_seconds": 13906,
-        "consecutive": 1,
-        "mtime": "2026-06-25T23:10:51.602921Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
-        "settlement_action": "RECENT_REVIEW",
-        "total": 1,
-        "transcript": {
-          "account": ".claude",
-          "mtime": "2026-06-25T23:10:50.813364Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T23:07:45.297Z",
-          "last_timestamp": "2026-06-25T23:10:50.627Z",
-          "lines": 11,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 1,
-            "denied": 1,
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 2,
-            "queue-operation": 2,
-            "system": 1,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      },
-      {
-        "active_recent": true,
-        "age_seconds": 16475,
-        "consecutive": 1,
-        "mtime": "2026-06-25T22:28:02.588507Z",
-        "origin": "claude_transcript",
-        "origin_labels": [
-          "claude_transcript"
-        ],
-        "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
-        "settlement_action": "RECENT_REVIEW",
-        "total": 1,
-        "transcript": {
-          "account": ".claude",
-          "mtime": "2026-06-25T22:28:01.244847Z",
-          "project": "C--work-fak",
-          "status": "FOUND"
-        },
-        "transcript_summary": {
-          "block_type_counts": {
-            "text": 1
-          },
-          "evidence_tags": [
-            "HOOK_OR_API_WALL_FEEDBACK",
-            "HOST_PERMISSION_INTERRUPT",
-            "DENY_OR_BLOCKED_FEEDBACK",
-            "TOOL_ERROR_RECOVERY"
-          ],
-          "first_timestamp": "2026-06-25T22:24:53.964Z",
-          "last_timestamp": "2026-06-25T22:28:00.797Z",
-          "lines": 10,
-          "malformed_lines": 0,
-          "marker_line_counts": {
-            "blocked": 1,
-            "denied": 1,
-            "error": 1,
-            "hook": 1,
-            "permission": 2
-          },
-          "max_tool_result_chars": 0,
-          "privacy": {
-            "copied_fields": [
-              "counts",
-              "timestamps",
-              "tool names",
-              "derived evidence tags",
-              "maximum tool-result length"
-            ],
-            "dropped": [
-              "prompts",
-              "tool arguments",
-              "tool result text",
-              "commands",
-              "model text"
-            ]
-          },
-          "role_counts": {
-            "assistant": 1,
-            "user": 1
-          },
-          "row_type_counts": {
-            "assistant": 1,
-            "attachment": 4,
-            "last-prompt": 2,
-            "queue-operation": 2,
-            "user": 1
-          },
-          "status": "SUMMARIZED",
-          "tool_counts": {},
-          "tool_result_shape_counts": {}
-        }
-      }
-    ],
+    "top_recent_active": [],
     "top_stale_active": [],
     "total_failures": 69,
     "transcript_evidence_tag_counts": {
@@ -4730,6 +4353,6 @@
       "SHELL_HEAVY_SESSION": 5,
       "TOOL_ERROR_RECOVERY": 20
     },
-    "zero_total_markers": 137
+    "zero_total_markers": 138
   }
 }

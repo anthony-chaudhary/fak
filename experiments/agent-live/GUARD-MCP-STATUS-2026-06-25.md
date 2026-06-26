@@ -18,6 +18,8 @@ Native operator dry-runs are available with `go run ./cmd/fak stopfailure plan`
 and evidence-backed stale consecutive counts can be cleared explicitly with
 `go run ./cmd/fak stopfailure reset-stale --apply`. Marker-only stale files can
 be moved out of the active scan with `go run ./cmd/fak stopfailure archive-marker-only --apply`.
+Recently reviewed session markers can be cleared by id with
+`go run ./cmd/fak stopfailure clear-reviewed --session <session> --apply`.
 
 ## Verdict
 
@@ -26,7 +28,7 @@ be moved out of the active scan with `go run ./cmd/fak stopfailure archive-marke
 | `fak guard` default floor | PASS | `cmd/fak/guard_test.go::TestGuardDefaultPolicyDeniesDangerAllowsBenign` proves the embedded guard policy allows normal agent tools, denies dangerous Bash arguments, blocks self-modifying paths, and fails closed on unlisted tools. |
 | `fak guard` default audit journal | PASS | `cmd/fak/guard_test.go::TestGuardAuditPlan`, `TestGuardDefaultAuditPath`, and `TestGuardEnableAuditEnablesVerifiableTrail` prove the decision journal defaults to an on-disk hash-chained trail unless explicitly opted out. |
 | MCP stdio kernel tools | PASS | `experiments/agent-live/codex-dogfood-019efde3-6794-7401-93a1-e97e6bd72a9c.json` records `mcp_stdio_adjudication.status=PASS`, expected tools present, `git_push` denied as `POLICY_BLOCK`, and `git_status` allowed. |
-| Historical Codex/DOS sessions | WARN - StopFailure review required | `experiments/agent-live/codex-dos-recent-audit.json` audits 20 recent Codex sessions. Overall audit remains `WARN`: Codex stream stop blocks/failures are 0, but the workspace StopFailure API-wall breaker rollup found 69 one-day failures across 54 nonzero markers; 3 markers are recently active with 3 consecutive failures, 0 markers are stale-active, and 51 nonzero markers have healed to `consecutive=0`, so `actionability.status=WARN`. |
+| Historical Codex/DOS sessions | WARN audit, PASS actionability | `experiments/agent-live/codex-dos-recent-audit.json` audits 20 recent Codex sessions. Overall audit remains `WARN` for residual debt, while `actionability.status=PASS`: Codex stream stop blocks/failures are 0, the workspace StopFailure API-wall breaker rollup found 69 one-day failures across 54 nonzero markers and 138 zero-total markers, and 0 markers remain active after review. Current StopFailure shape is 0 recent-active markers, 0 stale-active markers, 0 active consecutive failures, and 54 healed nonzero markers at `consecutive=0`. |
 | Historical git writes after mitigation | PASS | Expected-deny reports for `git_add`, `git_commit`, and `git_push` prove at `2026-06-25T22:38:12.037688Z`. The post-gate lens shows no `git_write` family after that proof, so earlier opaque git writes are classified as `HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE`, not current actionability. |
 | Historical Claude Code sessions | PASS + friction surfaced | `experiments/agent-live/claude-historical-guard-audit-2026-06-25.json` and `experiments/agent-live/CLAUDE-HISTORICAL-GUARD-AUDIT-2026-06-25.md` now scan 20 recent `C--work-fak` transcripts across 10 local `.claude*` account roots. They found 230 tool proposals and replayed 227 unique tool shapes through `fak preflight` under `examples/dogfood-claude-policy.json`, recording 181 `ALLOW` and 46 `DENY` verdicts, including 7 `POLICY_BLOCK`. The same artifact surfaces count-only friction tags: `HOOK_OR_API_WALL_FEEDBACK` in 20 sessions, `HOST_PERMISSION_INTERRUPT` in 20, `TOOL_ERROR_RECOVERY` in 19, `DENY_OR_BLOCKED_FEEDBACK` in 17, `SHELL_HEAVY_SESSION` in 11, and `LARGE_RESULT` in 9, while storing no prompts, tool arguments, tool results, full user paths, or raw transcript text. |
 | Claude Code live session | PASS | `experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json` records a live Claude Code turn where `rm -rf ./.fak-live-pilot-sentinel-do-not-exist` was denied (`POLICY_BLOCK`) and a later same-session `echo fak-claude-live-pilot-ok` was allowed. |
@@ -39,24 +41,24 @@ be moved out of the active scan with `go run ./cmd/fak stopfailure archive-marke
 
 - `HOST_SHELL_OPACITY` debt: Codex still emits many free-form shell commands whose file
   footprint is not visible to DOS lane admission. In the current audit this is visible
-  as shell-shape debt, but not the active `actionability.residual`; the active WARN is
-  dominated by StopFailure API-wall state.
+  as shell-shape debt and remains current default-on active debt: 2,290
+  `shell_no_write_target_detected` calls need path-visible host tools or structured
+  payloads before DOS can price file-tree collision risk.
 - `HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE`: the one-day window still contains
   opaque `git_write` shell families before the fresh structured deny probes. The
   post-gate lens is empty, so this is historical debt, not current actionability.
 - `STOPFAILURE_API_WALL_BREAKER`: `.dos/stop-failures` contains 69 one-day API-wall
-  failures across 54 nonzero session markers. Of those, 3 markers are recently active
-  within the 6-hour live threshold with 3 consecutive failures, 0 markers are
-  stale-active, and 51 nonzero markers are healed to `consecutive=0`. The recent
-  origin split is 2 Claude-transcript-only markers and 1 marker with both DOS stream
-  and Claude transcript linkage. The stale evidence-backed reset candidates were
-  cleared with `fak stopfailure reset-stale --apply`, and the 4 marker-only stale
-  records were moved under `.dos/stop-failures/archive/`. The blocker queue now
-  carries only bounded recent-review rows with `.dos/stop-failures/<session>.json`
-  marker paths. The top recent and settlement-plan sessions carry only sanitized count-shape transcript evidence
-  (`HOOK_OR_API_WALL_FEEDBACK`, `HOST_PERMISSION_INTERRUPT`, `DENY_OR_BLOCKED_FEEDBACK`,
-  `TOOL_ERROR_RECOVERY`, `SHELL_HEAVY_SESSION`, `LARGE_TOOL_RESULT`) and no prompts,
-  command bodies, tool output, or model text.
+  failures across 54 nonzero session markers and 138 zero-total markers. This is now
+  resolved for current actionability: 37 evidence-backed stale reset candidates were
+  reset to `consecutive=0`, 4 marker-only stale records were moved under
+  `.dos/stop-failures/archive/`, and the 3 reviewed recent markers were cleared with
+  `fak stopfailure clear-reviewed --apply`. The active shape is 0 recent-active
+  markers, 0 stale-active markers, 0 active consecutive failures, and 54 healed
+  nonzero markers at `consecutive=0`. The reviewed and settlement-plan rows carried
+  only sanitized count-shape transcript evidence (`HOOK_OR_API_WALL_FEEDBACK`,
+  `HOST_PERMISSION_INTERRUPT`, `DENY_OR_BLOCKED_FEEDBACK`, `TOOL_ERROR_RECOVERY`,
+  `SHELL_HEAVY_SESSION`, `LARGE_TOOL_RESULT`) and no prompts, command bodies, tool
+  output, or model text.
 - `CLAUDE_FRICTION_SHAPES`: the all-account Claude replay is policy-clean enough to
   pass, but the transcripts show operational friction: 508 hook/API-wall marker lines,
   421 permission marker lines, 429 deny/blocked marker lines, 1527 error-recovery
@@ -71,38 +73,32 @@ be moved out of the active scan with `go run ./cmd/fak stopfailure archive-marke
 
 ## Default-On Blocker Queue
 
-Ranked from current actionability blocker to historical/external debt:
+Ranked from current active debt to historical/external debt:
 
-1. `WORKSPACE_RECENT_STOPFAILURE_API_WALL` (`ACTIVE`, workspace DOS): 3 recent
-   markers still carry 3 consecutive StopFailure counts within the 6-hour live
-   threshold. Current origin split is 2 Claude-transcript-only markers and 1
-   marker with both DOS stream and Claude transcript linkage. Settlement class:
-   3 `RECENT_REVIEW`. Top recent sessions are mapped only by session id, counts,
-   marker-relative path, origin, settlement class, project label, and count-shape
-   tags. Next action: inspect those recent sessions before clearing or rotating their nonzero
-   `consecutive` state.
-2. `CODEX_HOST_SHELL_OPACITY` (`ACTIVE_DEBT`, Codex hooks): post-repair evidence still
+1. `CODEX_HOST_SHELL_OPACITY` (`ACTIVE_DEBT`, Codex hooks): post-repair evidence still
    has 2,290 `shell_no_write_target_detected` calls. Next action: prefer path-visible
    host tools or structured tool payloads so DOS can assign file-tree footprints.
-3. `CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION` (`ACTIVE_DEBT`, Claude Code): across 20
+2. `CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION` (`ACTIVE_DEBT`, Claude Code): across 20
    recent transcripts, the all-account replay shows hook/API-wall and permission
    friction in all 20 summarized sessions, plus tool-error recovery in 19,
    deny/blocked feedback in 17, shell-heavy sessions in 11, and large results in 9.
    Next action: triage top friction sessions by tag and reduce hook/API-wall and
    permission interruptions first.
-4. `HISTORICAL_OPAQUE_GIT_WRITE_BEFORE_GATE` (`HISTORICAL`, Codex hooks): opaque
+3. `HISTORICAL_OPAQUE_GIT_WRITE_BEFORE_GATE` (`HISTORICAL`, Codex hooks): opaque
    `git_write` appears in the one-day post-repair window, but not after the structured
    git gate proof at `2026-06-25T22:38:12.037688Z`. Next action: keep structured git
    gates in place; this only becomes current actionability if `git_write` reappears
    after the gate timestamp.
-5. `OPENAI_AGENTS_SDK_NOT_INSTALLED` (`EXTERNAL_PREREQ`, hosted OpenAI): the hosted
+4. `OPENAI_AGENTS_SDK_NOT_INSTALLED` (`EXTERNAL_PREREQ`, hosted OpenAI): the hosted
    Codex-login pilot passes, but the installed Agents SDK path remains unavailable on
    this host. Next action: install the SDK only when that hosted Agents surface is the
    target.
 
-Resolved this pass: `WORKSPACE_STALE_STOPFAILURE_MARKERS` no longer appears in the
-default-on blocker queue. Evidence-backed stale markers were reset to
-`consecutive=0`; marker-only stale files were moved under `.dos/stop-failures/archive/`.
+Resolved this pass: `WORKSPACE_RECENT_STOPFAILURE_API_WALL` and
+`WORKSPACE_STALE_STOPFAILURE_MARKERS` no longer appear in the default-on blocker
+queue. Evidence-backed stale markers were reset to `consecutive=0`; marker-only
+stale files were moved under `.dos/stop-failures/archive/`; reviewed recent markers
+were cleared to `consecutive=0` by explicit session id.
 
 ## Re-run Commands
 
@@ -147,6 +143,7 @@ go run ./cmd/fak console guard `
 go run ./cmd/fak stopfailure plan --root .
 go run ./cmd/fak stopfailure reset-stale --root .
 go run ./cmd/fak stopfailure archive-marker-only --root .
+go run ./cmd/fak stopfailure clear-reviewed --root . --session <session>
 ```
 
 The live pilot JSON files carry raw-capture hashes or sanitized hosted-response

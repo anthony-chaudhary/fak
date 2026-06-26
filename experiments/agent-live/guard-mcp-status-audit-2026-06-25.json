@@ -31,7 +31,7 @@
       "status": "PASS"
     },
     {
-      "detail": "audit=WARN actionability=WARN workspace_stop_failures=69 active_consecutive=3 reasons=['stop blocks or uncleared StopFailure API-wall breaker markers are present'] residual=['HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE'] post_gate={}",
+      "detail": "audit=WARN actionability=PASS workspace_stop_failures=69 active_consecutive=0 reasons=[] residual=['HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE', 'HOST_SHELL_OPACITY'] post_gate={}",
       "name": "historical codex/dos actionability",
       "status": "PASS"
     },
@@ -67,157 +67,6 @@
     }
   ],
   "default_blockers": [
-    {
-      "code": "WORKSPACE_RECENT_STOPFAILURE_API_WALL",
-      "evidence": {
-        "active_consecutive_total": 3,
-        "active_markers": 3,
-        "active_recent_threshold_hours": 6,
-        "active_settlement_action_counts": {
-          "RECENT_REVIEW": 3
-        },
-        "healed_nonzero_markers": 51,
-        "one_day_failures_total": 69,
-        "origin_counts": {
-          "claude_transcript": 41,
-          "dos_stream": 54,
-          "dos_stream+claude_transcript": 75,
-          "marker_only": 21
-        },
-        "recent_active_consecutive_total": 3,
-        "recent_active_markers": 3,
-        "recent_active_origin_counts": {
-          "claude_transcript": 2,
-          "dos_stream+claude_transcript": 1
-        },
-        "recent_active_settlement_action_counts": {
-          "RECENT_REVIEW": 3
-        },
-        "recent_review_plan": [
-          {
-            "age_seconds": 16750,
-            "consecutive": 1,
-            "evidence_tags": [
-              "HOOK_OR_API_WALL_FEEDBACK",
-              "HOST_PERMISSION_INTERRUPT",
-              "DENY_OR_BLOCKED_FEEDBACK",
-              "TOOL_ERROR_RECOVERY"
-            ],
-            "marker_path": ".dos/stop-failures/3af9576f-4e22-4eac-bc59-fb7935196e31.json",
-            "origin": "dos_stream+claude_transcript",
-            "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
-            "settlement_action": "RECENT_REVIEW",
-            "total": 2,
-            "transcript_project": "C--work-fak",
-            "transcript_status": "FOUND"
-          },
-          {
-            "age_seconds": 13906,
-            "consecutive": 1,
-            "evidence_tags": [
-              "HOOK_OR_API_WALL_FEEDBACK",
-              "HOST_PERMISSION_INTERRUPT",
-              "DENY_OR_BLOCKED_FEEDBACK",
-              "TOOL_ERROR_RECOVERY"
-            ],
-            "marker_path": ".dos/stop-failures/e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6.json",
-            "origin": "claude_transcript",
-            "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
-            "settlement_action": "RECENT_REVIEW",
-            "total": 1,
-            "transcript_project": "C--work-fak",
-            "transcript_status": "FOUND"
-          },
-          {
-            "age_seconds": 16475,
-            "consecutive": 1,
-            "evidence_tags": [
-              "HOOK_OR_API_WALL_FEEDBACK",
-              "HOST_PERMISSION_INTERRUPT",
-              "DENY_OR_BLOCKED_FEEDBACK",
-              "TOOL_ERROR_RECOVERY"
-            ],
-            "marker_path": ".dos/stop-failures/2a660dbb-9d35-4502-9a8c-5f14ceac1686.json",
-            "origin": "claude_transcript",
-            "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
-            "settlement_action": "RECENT_REVIEW",
-            "total": 1,
-            "transcript_project": "C--work-fak",
-            "transcript_status": "FOUND"
-          }
-        ],
-        "stale_active_consecutive_total": 0,
-        "stale_active_markers": 0,
-        "stale_active_origin_counts": {},
-        "stale_active_settlement_action_counts": {},
-        "stale_settlement_plan": [],
-        "top_recent_active_sessions": [
-          {
-            "age_seconds": 16750,
-            "consecutive": 1,
-            "evidence_tags": [
-              "HOOK_OR_API_WALL_FEEDBACK",
-              "HOST_PERMISSION_INTERRUPT",
-              "DENY_OR_BLOCKED_FEEDBACK",
-              "TOOL_ERROR_RECOVERY"
-            ],
-            "marker_path": null,
-            "origin": "dos_stream+claude_transcript",
-            "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
-            "settlement_action": "RECENT_REVIEW",
-            "total": 2,
-            "transcript_project": "C--work-fak",
-            "transcript_status": "FOUND"
-          },
-          {
-            "age_seconds": 13906,
-            "consecutive": 1,
-            "evidence_tags": [
-              "HOOK_OR_API_WALL_FEEDBACK",
-              "HOST_PERMISSION_INTERRUPT",
-              "DENY_OR_BLOCKED_FEEDBACK",
-              "TOOL_ERROR_RECOVERY"
-            ],
-            "marker_path": null,
-            "origin": "claude_transcript",
-            "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
-            "settlement_action": "RECENT_REVIEW",
-            "total": 1,
-            "transcript_project": "C--work-fak",
-            "transcript_status": "FOUND"
-          },
-          {
-            "age_seconds": 16475,
-            "consecutive": 1,
-            "evidence_tags": [
-              "HOOK_OR_API_WALL_FEEDBACK",
-              "HOST_PERMISSION_INTERRUPT",
-              "DENY_OR_BLOCKED_FEEDBACK",
-              "TOOL_ERROR_RECOVERY"
-            ],
-            "marker_path": null,
-            "origin": "claude_transcript",
-            "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
-            "settlement_action": "RECENT_REVIEW",
-            "total": 1,
-            "transcript_project": "C--work-fak",
-            "transcript_status": "FOUND"
-          }
-        ],
-        "transcript_evidence_tags": {
-          "DENY_OR_BLOCKED_FEEDBACK": 13,
-          "HOOK_OR_API_WALL_FEEDBACK": 20,
-          "HOST_PERMISSION_INTERRUPT": 20,
-          "LARGE_TOOL_RESULT": 8,
-          "SHELL_HEAVY_SESSION": 5,
-          "TOOL_ERROR_RECOVERY": 20
-        }
-      },
-      "next_action": "Clear or rotate the recent workspace sessions with nonzero consecutive StopFailure markers before treating fak-by-default actionability as healthy.",
-      "rank": 10,
-      "status": "ACTIVE",
-      "surface": "workspace_dos"
-    },
     {
       "code": "CODEX_HOST_SHELL_OPACITY",
       "evidence": {
@@ -392,8 +241,8 @@
   "schema": "fak-guard-mcp-status-audit/1",
   "status": "PASS",
   "summary": {
-    "active_default_blockers": 3,
-    "default_blockers": 5,
+    "active_default_blockers": 2,
+    "default_blockers": 4,
     "failed": 0,
     "passed": 13,
     "total": 13
