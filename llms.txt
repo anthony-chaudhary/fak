@@ -42,7 +42,7 @@
 
 ## Start here
 
-- [Charter](CHARTER.md): the ten principles fak is built to satisfy — agentic by default, industry-leading value, low-ego interoperability, DOS-verified, self-improving, up-to-date, great by default, agentic-first, win-win-win, and human-steerable — each mapped to the surface that embodies it, the scorecard that keeps it honest, and an honest alignment grade. The constitution above the 18-scorecard control pane.
+- [Charter](docs/notes/CHARTER.md): the ten principles fak is built to satisfy — agentic by default, industry-leading value, low-ego interoperability, DOS-verified, self-improving, up-to-date, great by default, agentic-first, win-win-win, and human-steerable — each mapped to the surface that embodies it, the scorecard that keeps it honest, and an honest alignment grade. The constitution above the 18-scorecard control pane.
 - [README](README.md): the full project overview — the two flips (policy in the kernel, addressable KV cache), the security results, and the install paths.
 - [Start Here](START-HERE.md): run a local AI model in under 10 minutes (no key, no GPU for small models).
 - [Getting Started](GETTING-STARTED.md): install the single static binary and put the gate in front of your model.
@@ -71,6 +71,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
 - [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
 - [Always-on dogfood server](docs/fak/always-on-dogfood-server.md): run the kernel in front of the REAL dev loop 24/7 — the guarded dispatch fleet plus a shared `fak serve` gateway — across a laptop, an always-on Mac (launchd + caffeinate), and GCP; with the `dogfood_coverage.py` scorecard to measure it and the `FLEET_DOGFOOD_GUARD` kill switch.
+- [Lab dev loop](docs/fak/lab-dev-loop.md): develop fak ON a lab GPU box you choose and drive it from Slack — `fak guard --remote-serve <box>:8080 -- claude` runs a kernel-adjudicated dev turn whose inference is on the lab box, the private Slack bridge drives it out-of-band, and `fleetctl` folds the per-box report. The public/private boundary is a data contract, not a code import.
 
 ## Supported (what fak works with)
 

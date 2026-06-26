@@ -35,6 +35,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Performance, scaling, multi-region, and HA | [advanced-topics.md](advanced-topics.md) |
 | Production deployment | [deployment-guide.md](deployment-guide.md) |
 | Always-on dogfood gateway and guarded fleet | [always-on-dogfood-server.md](always-on-dogfood-server.md) |
+| Develop fak on a lab box, drive it from Slack | [lab-dev-loop.md](lab-dev-loop.md) |
 | Activate the Tier-1 Mac dogfood node | [node-macos-a-activation.md](node-macos-a-activation.md) |
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](gcp-tier2-control-vm.md) |
 | Plan guard-hop RSI tuning | [guard-hop-rsi-loop.md](guard-hop-rsi-loop.md) |

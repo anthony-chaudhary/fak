@@ -172,6 +172,66 @@ func TestGuardInjectedEnv(t *testing.T) {
 	}
 }
 
+func TestNormalizeRemoteServe(t *testing.T) {
+	ok := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},                                            // off
+		{"box", "http://box:8080"},                          // bare host -> default port
+		{"box:8082", "http://box:8082"},                     // host:port preserved
+		{"http://box:8080", "http://box:8080"},              // scheme stripped, re-emitted
+		{"https://box:8080/", "http://box:8080"},            // https + trailing slash normalized
+		{"10.0.0.7:8080", "http://10.0.0.7:8080"},           // ipv4
+		{"  box:8082  ", "http://box:8082"},                 // trimmed
+		{"[::1]:8080", "http://[::1]:8080"},                 // ipv6 with port survives JoinHostPort
+	}
+	for _, tc := range ok {
+		got, err := normalizeRemoteServe(tc.in)
+		if err != nil {
+			t.Errorf("normalizeRemoteServe(%q) errored: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("normalizeRemoteServe(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// Malformed operands fail loud rather than producing a base URL that 404s mid-session.
+	for _, bad := range []string{":8080", "http://", "box:notaport"} {
+		if _, err := normalizeRemoteServe(bad); err == nil {
+			t.Errorf("normalizeRemoteServe(%q) = nil error, want a failure", bad)
+		}
+	}
+}
+
+// --remote-serve must resolve to the SAME upstream the informal chain produced
+// (provider=openai, base=the box) AND inject OPENAI_BASE_URL carrying the /v1 the OpenAI
+// wire needs — the suffix whose absence is the documented 404 trap. This is the public
+// core of the lab dev loop: the guarded turn's inference runs on the chosen box.
+func TestResolveGuardUpstreamRemoteServe(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	base, err := normalizeRemoteServe("labbox:8082")
+	if err != nil {
+		t.Fatalf("normalizeRemoteServe: %v", err)
+	}
+	us := resolveGuardUpstream("", "claude", "", base, "", false, "FAK_TEST_NO_TOKEN")
+	if us.provider != "openai" {
+		t.Errorf("remote-serve provider = %q, want openai (the wire fak serve exposes)", us.provider)
+	}
+	if us.baseURL != "http://labbox:8082" {
+		t.Errorf("remote-serve baseURL = %q, want http://labbox:8082", us.baseURL)
+	}
+	if !us.remoteServe {
+		t.Errorf("remoteServe flag = false, want true so the banner names the lab box")
+	}
+	// The injected child env must carry /v1 (OpenAI wire) — without it the client calls
+	// <host>/chat/completions and the gateway 404s.
+	inj := guardInjectedEnv(us.provider, "", "http://127.0.0.1:9000")
+	if len(inj) == 0 || inj[0][0] != "OPENAI_BASE_URL" || inj[0][1] != "http://127.0.0.1:9000/v1" {
+		t.Errorf("remote-serve injected env = %v, want OPENAI_BASE_URL=.../v1", inj)
+	}
+}
+
 func TestGuardRestartSeedFileAndEnv(t *testing.T) {
 	ev := guardBudgetRestartEvent{
 		Schema:      "fak.guard.budget_restart.v1",
@@ -636,7 +696,7 @@ func TestGuardPassthroughFallbackFlag(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	// No token anywhere -> passthrough fallback, not pinned.
-	us := resolveGuardUpstream("anthropic", "claude", "", "", false, tokenEnv)
+	us := resolveGuardUpstream("anthropic", "claude", "", "", "", false, tokenEnv)
 	if !us.passthroughFallback {
 		t.Fatalf("want passthroughFallback=true when no OAuth token exists; got %+v", us)
 	}
@@ -646,7 +706,7 @@ func TestGuardPassthroughFallbackFlag(t *testing.T) {
 
 	// A token present -> pinned, no fallback warning.
 	t.Setenv(tokenEnv, "sk-ant-oat01-present")
-	us = resolveGuardUpstream("anthropic", "claude", "", "", false, tokenEnv)
+	us = resolveGuardUpstream("anthropic", "claude", "", "", "", false, tokenEnv)
 	if us.passthroughFallback {
 		t.Fatalf("must not flag fallback when a token is present; got %+v", us)
 	}

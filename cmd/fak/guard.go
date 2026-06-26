@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +81,7 @@ func cmdGuard(argv []string) {
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
 	provider := fs.String("provider", "", "upstream wire the gateway proxies to: anthropic|openai|gemini|xai (default: auto-detected from the agent name — claude->anthropic, codex/opencode->openai — else anthropic)")
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
+	remoteServe := fs.String("remote-serve", "", "point the guarded turn's INFERENCE at a remote `fak serve` running on a lab box you chose (HOST or HOST:PORT, default port 8080). Forces the OpenAI-compatible wire and base URL http://HOST:PORT, so the dev turn runs on the lab GPU while the kernel still adjudicates locally. Mutually exclusive with --base-url; preflights GET /healthz and fails loud if the box is not serving.")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key (default: forward the client's own key — passthrough)")
 	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic when no API key is set; the flag forces it and fails loud if no token is found.")
@@ -95,6 +97,7 @@ func cmdGuard(argv []string) {
 	debugStats := fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log; default off to keep the wrapped agent's terminal clean (#793).")
 	ctxViewBudget := fs.Int("ctx-view-budget", 0, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). 0 (default) leaves the existing path byte-for-byte unchanged. OFF by default: it rewrites in-flight turn history, so gate it until you have watched a wrapped session. The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
+	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "OFF by default: shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables. The documented candidate is gateway.DocumentedElideResultBytes; flip only after reading the tradeoff witness.")
 	sessionID := fs.String("session-id", "guard", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
@@ -185,9 +188,39 @@ func cmdGuard(argv []string) {
 		auditSeq0, _, _ = auditJournal.Stats()
 	}
 
-	// 2. Resolve the upstream wire + credential posture (provider autodetect, base URL,
+	// 2. --remote-serve sugar: run the guarded turn's INFERENCE on a lab box you chose.
+	//    It is a one-name shorthand for the informal "treat a remote fak serve as a
+	//    provider URL" chain (`--provider openai --base-url http://HOST:PORT/v1`): it
+	//    forces the OpenAI-compatible wire and sets the base URL to the box, so the kernel
+	//    still adjudicates locally while the model runs on the lab GPU. Resolve + validate
+	//    it BEFORE binding anything so a typo or a down box fails loud, not mid-session.
+	remoteBase, remoteErr := normalizeRemoteServe(*remoteServe)
+	if remoteErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: --remote-serve: %v\n", remoteErr)
+		os.Exit(2)
+	}
+	if remoteBase != "" {
+		if strings.TrimSpace(*baseURL) != "" && strings.TrimSpace(*baseURL) != remoteBase {
+			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve and --base-url disagree (%s vs %s) — pass only one\n", remoteBase, strings.TrimSpace(*baseURL))
+			os.Exit(2)
+		}
+		if p := strings.ToLower(strings.TrimSpace(*provider)); p == "anthropic" {
+			fmt.Fprintln(os.Stderr, "fak guard: --remote-serve uses the OpenAI-compatible wire fak serve exposes; drop --provider anthropic")
+			os.Exit(2)
+		}
+		// Preflight: a remote serve that is not answering is the most common failure here
+		// (box not started, wrong port). Fail loud with the next step, mirroring the
+		// exec.LookPath check above, rather than binding a gateway that 502s on first call.
+		if err := guardPreflightRemoteServe(remoteBase); err != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve %s is not reachable: %v\n  start it on the box with `fak serve --gguf <weights> --backend cuda --addr 0.0.0.0:8080`, or check the host/port.\n", remoteBase, err)
+			os.Exit(2)
+		}
+	}
+
+	// 3. Resolve the upstream wire + credential posture (provider autodetect, base URL,
 	//    API key, and the Claude subscription-OAuth default); see resolveGuardUpstream.
-	us := resolveGuardUpstream(*provider, command[0], *baseURL, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
+	//    --remote-serve, when set, pins provider=openai + base=the box inside the resolver.
+	us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 	up, providerAutodetected, resolvedBase := us.provider, us.autodetected, us.baseURL
 	apiKey, pinUpstream, oauthSource := us.apiKey, us.pinUpstream, us.oauthSource
 	if us.passthroughFallback && !*quiet {
@@ -277,6 +310,7 @@ func cmdGuard(argv []string) {
 		DebugStatsf:          debugStatsSink(*debugStats),
 		CtxViewBudget:        *ctxViewBudget,
 		CompactHistoryBudget: *compactHistoryBudget,
+		ElideResultBytes:     *elideResultBytes,
 		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 		// Anthropic passthrough's tools[], cache-prefix-preserving. Default-ON because it is
 		// behavior-preserving by construction (a pruned tool stays DEFAULT_DENY at the kernel),
@@ -323,7 +357,7 @@ func cmdGuard(argv []string) {
 		for _, kv := range injected[1:] {
 			injectNames += ", " + kv[0]
 		}
-		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, command)
+		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, us.remoteServe, command)
 		switch {
 		case pinUpstream:
 			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
@@ -560,6 +594,60 @@ func guardDefaultBaseURL(provider string) string {
 	}
 }
 
+// normalizeRemoteServe turns a --remote-serve operand (HOST or HOST:PORT, with or
+// without a scheme) into the canonical base URL "http://HOST:PORT" the OpenAI-compatible
+// wire expects, defaulting the port to 8080 (the documented `fak serve` addr). It is the
+// one place the operand grammar lives, so the resolver, the preflight, and the banner all
+// agree. "" in -> "" out (feature off). A malformed operand returns an error so cmdGuard
+// fails loud before binding, rather than constructing a base URL that 404s mid-session.
+func normalizeRemoteServe(operand string) (string, error) {
+	s := strings.TrimSpace(operand)
+	if s == "" {
+		return "", nil
+	}
+	// Strip a scheme if the operator typed one; we always emit http:// (a remote fak serve
+	// on a lab tailnet is plain HTTP — TLS is the gateway's job, not assumed here).
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "http://"), "https://")
+	s = strings.TrimRight(s, "/")
+	if s == "" {
+		return "", fmt.Errorf("empty host in %q", operand)
+	}
+	host, port := s, "8080"
+	// A bracketed IPv6 host always needs SplitHostPort; a plain host has a port only if it
+	// contains a single colon (an unbracketed "::1" is an IPv6 literal, not host:port).
+	if strings.HasPrefix(s, "[") || strings.Count(s, ":") == 1 {
+		h, p, err := net.SplitHostPort(s)
+		if err != nil {
+			return "", fmt.Errorf("invalid host:port %q: %w", operand, err)
+		}
+		if strings.TrimSpace(h) == "" {
+			return "", fmt.Errorf("empty host in %q", operand)
+		}
+		if n, perr := strconv.Atoi(p); perr != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("invalid port %q in %q", p, operand)
+		}
+		host, port = h, p
+	}
+	return "http://" + net.JoinHostPort(host, port), nil
+}
+
+// guardPreflightRemoteServe confirms a remote `fak serve` is actually answering before
+// guard binds its own gateway and execs the agent. A down box (not started, wrong port)
+// is the most common --remote-serve failure, and a 502 on the first real turn is a far
+// worse place to discover it than a one-line fail-loud here. It probes GET <base>/healthz
+// (the endpoint `fak serve` exposes) with a short timeout; any 2xx/3xx/4xx response means
+// the box is up (even a 401 proves a live gateway, like the witnessed /v1/models probe),
+// so only a connection-level failure is fatal.
+func guardPreflightRemoteServe(baseURL string) error {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/healthz")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
 // guardEnvVar picks the env var that points the child agent at the gateway. An
 // explicit --env override always wins; otherwise it is the provider's conventional
 // base-URL variable: Anthropic clients (Claude Code, the Anthropic SDKs) read
@@ -675,10 +763,16 @@ func guardLoopbackOnly(addr string) bool {
 // into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
 // audit journal, and the structured log stream. It goes to stderr so it never pollutes a
 // `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, command []string) {
+func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, remoteServe bool, command []string) {
 	fmt.Fprintf(w, "fak guard — kernel-adjudicated: %s\n", strings.Join(command, " "))
 	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
-	fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
+	if remoteServe {
+		// Tell the operator the dev turn's INFERENCE is on the lab box they chose, not a
+		// public API — the whole point of --remote-serve.
+		fmt.Fprintf(w, "  upstream   : %s   (remote fak serve on a lab box, %s wire)\n", baseURL, provider)
+	} else {
+		fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
+	}
 	fmt.Fprintf(w, "  floor      : %s\n", floorSource)
 	fmt.Fprintf(w, "  wired via  : %s=%s   (child only — your shell is untouched)\n", injectVar, injectVal)
 	// Observability: the live scrape surfaces are on the gateway URL above (unauth on
@@ -859,6 +953,10 @@ type guardUpstream struct {
 	apiKey       string
 	pinUpstream  bool
 	oauthSource  string
+	// remoteServe is set when the base URL came from --remote-serve (a remote `fak serve`
+	// on a lab box), so the banner can say "remote fak serve" instead of a generic
+	// provider — the operator's signal that the dev turn's inference is on the lab GPU.
+	remoteServe bool
 	// passthroughFallback is set when the Anthropic subscription-OAuth auto-lookup found
 	// no token and guard fell back to plain passthrough. That path works ONLY if the
 	// wrapped agent (Claude Code) is itself logged in; cmdGuard surfaces a one-line note
@@ -873,7 +971,15 @@ type guardUpstream struct {
 // DEFAULT for Claude — when the upstream is Anthropic and no API key is configured, it
 // sources the Pro/Max OAuth token and pins it upstream; --anthropic-oauth forces that and
 // fails loud if no token is found. It exits(2) on an unresolvable base URL or OAuth misuse.
-func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, apiKeyEnv string, forceOAuth bool, oauthTokenEnv string) guardUpstream {
+func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase, apiKeyEnv string, forceOAuth bool, oauthTokenEnv string) guardUpstream {
+	// --remote-serve pins the OpenAI-compatible wire and the box's base URL: a remote
+	// `fak serve` speaks the OpenAI routes the gateway proxies, and the caller has already
+	// validated that it does not conflict with --provider/--base-url.
+	remote := strings.TrimSpace(remoteServeBase) != ""
+	if remote {
+		providerFlag = "openai"
+		baseURLFlag = strings.TrimSpace(remoteServeBase)
+	}
 	up, autodetected := resolveGuardProvider(providerFlag, agentName)
 	resolvedBase := strings.TrimSpace(baseURLFlag)
 	if resolvedBase == "" {
@@ -923,7 +1029,7 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, apiKeyEnv string
 	return guardUpstream{
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
 		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
-		passthroughFallback: passthroughFallback,
+		passthroughFallback: passthroughFallback, remoteServe: remote,
 	}
 }
 
