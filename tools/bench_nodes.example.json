@@ -13,7 +13,7 @@
     "roster": [
       { "node": "macbook", "sanitized_name": "node-macos-a",         "status": "onboarded", "verified": "2026-06-21", "note": "Apple M3 Pro arm64 — tests green, BenchmarkDecide ~317 ns idle." },
       { "node": "desktop", "sanitized_name": "node-linux-desktop-a", "status": "pending",   "blocker": "host-reachability — desktop answers ICMP but ships with no sshd; enable sshd + add driver pubkey, then pin host_key." },
-      { "node": "laptop",  "sanitized_name": "node-linux-laptop-a",  "status": "pending",   "blocker": "real-identity — reachable over Tailscale from the desktop hub (RTX 4070, Ada/sm_89); fill tailnet_ip/ssh_user/host_key in the gitignored registry." },
+      { "node": "laptop",  "sanitized_name": "node-linux-laptop-a",  "status": "pending",   "blocker": "remote-shell-mismatch — host reachable + key-auth OK over Tailscale (RTX 4070, Ada/sm_89), but its SSH login shell is Windows cmd (a remote `uname` returns 'not recognized'), so the runner's `bash -s` model can't execute there; set WSL bash as the SSH login shell (or add a Windows-shell adapter to bench_node.sh), THEN fill the gitignored registry + verify." },
       { "node": "gcp-gpu", "sanitized_name": "node-gcp-gpu-a",       "status": "pending",   "blocker": "ephemeral-host — cloud VM IP + host_key rotate on each provision and the driver's ADC may be stale; (re)bootstrap per provision, then pin." },
       { "node": "dgx-a100","sanitized_name": "node-dgx-a100",        "status": "pending",   "blocker": "no-direct-ssh — DGX is reached via a relay bridge, not a direct tailnet SSH handshake; needs a reachable sshd path before the driver can poll it." }
     ]
