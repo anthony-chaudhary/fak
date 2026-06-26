@@ -8,9 +8,11 @@ description: "How fak measures itself against vLLM as a first-class peer: a gate
 > **Status: pending-measurement (GATED scaffold).** No vLLM GPU run has landed yet.
 > **Every numeric cell in the vLLM tables below is a placeholder (`TBD`)** and stays
 > that way until a run on a serving node writes a committed artifact under
-> `experiments/vllm/` or `experiments/benchmark/runs/`. The *only* real numbers in this
-> document are the **measured SGLang sibling's** (§4), and they are fenced there and
-> labelled as the SGLang stack — never copied into a vLLM table as if measured. This is
+> `experiments/vllm/` or `experiments/benchmark/runs/`. The only real *vLLM-comparison*
+> numbers in this document are the **measured SGLang sibling's** (§4), and they are fenced
+> there and labelled as the SGLang stack — never copied into a vLLM table as if measured.
+> (The on-host **adjudication-overhead floor** in §3a is also measured, but it is a
+> GPU-free kernel read-path number, not a vLLM-vs-fak comparison.) This is
 > the honesty contract this repo holds every benchmark to (`BENCHMARK-GOVERNANCE.md`):
 > no fabricated numbers, and a comparison shows where fak *loses*.
 
