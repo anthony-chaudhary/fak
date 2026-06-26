@@ -127,12 +127,12 @@ type RecoveryBand struct {
 	ReclaimedTok       int64   `json:"reclaimed_tokens"`        // linear - bounded; resident budget returned to the pool
 
 	// the FENCE -- co-located with the operands by invariant; never ships apart.
-	FaultRate       float64 `json:"fault_rate"`        // faults / references on the real reference signal
-	FaultsServed    int     `json:"faults_served"`     // recovered via DemandPage (recoverable miss)
-	FaultsRefused   int     `json:"faults_refused"`    // gate held (sealed) -- the floor, not a loss
-	FaultTaxTokens  int64   `json:"fault_tax_tokens"`  // re-prefill tokens the misses cost (the recovery's price)
-	CompactionLoss  int     `json:"compaction_loss_turns"`  // turns naive compaction destroyed >=1 fact
-	FactsRecovered  int     `json:"facts_recovered"`   // facts the planned view recovered that compaction lost
+	FaultRate      float64 `json:"fault_rate"`            // faults / references on the real reference signal
+	FaultsServed   int     `json:"faults_served"`         // recovered via DemandPage (recoverable miss)
+	FaultsRefused  int     `json:"faults_refused"`        // gate held (sealed) -- the floor, not a loss
+	FaultTaxTokens int64   `json:"fault_tax_tokens"`      // re-prefill tokens the misses cost (the recovery's price)
+	CompactionLoss int     `json:"compaction_loss_turns"` // turns naive compaction destroyed >=1 fact
+	FactsRecovered int     `json:"facts_recovered"`       // facts the planned view recovered that compaction lost
 
 	Provenance string `json:"provenance"` // always "measured" -- every field is a real-transcript event
 }
