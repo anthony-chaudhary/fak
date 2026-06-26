@@ -1399,14 +1399,12 @@ func main() {
 	asJSON := flag.Bool("json", false, "emit the exact per-call ledger as JSON (all suites, or just -suite) and exit.")
 	timing := flag.Bool("timing", false, "run a measured raw-vs-fak proof for one suite and print per-tool-call latency/source evidence. If -suite is omitted, defaults to reread-same-file.")
 	timingJSON := flag.Bool("timing-json", false, "emit the measured raw-vs-fak proof as JSON. If -suite is omitted, defaults to reread-same-file.")
-	served := flag.Bool("served", false, "run a served-boundary same-read proof: raw os.ReadFile N times, then HTTP POST /v1/fak/syscall N times through a gateway test server, showing first read hits fakread and repeats return served_by=vdso tier=2.")
-	servedJSON := flag.Bool("served-json", false, "emit the served-boundary same-read HTTP proof as JSON.")
-	servedCalls := flag.Int("served-calls", defaultServedCalls, "same-file read count for -served/-served-json; must be at least 2.")
+	served := flag.Bool("served", false, "run a served-boundary same-read proof: raw os.ReadFile N times per served surface, then HTTP /v1/fak/syscall and MCP fak_syscall through one gateway, showing first read hits fakread and repeats return served_by=vdso tier=2.")
+	servedJSON := flag.Bool("served-json", false, "emit the served-boundary same-read HTTP/MCP proof as JSON.")
+	servedCalls := flag.Int("served-calls", defaultServedCalls, "same-file read count per served surface for -served/-served-json; must be at least 2.")
 	parallel := flag.Bool("parallel", false, "run a warmed parallel hot-read proof: many workers repeat a small read set and fak serves the hot phase from vDSO tier-2.")
 	parallelJSON := flag.Bool("parallel-json", false, "emit the warmed parallel hot-read proof as JSON.")
-	served := flag.Bool("served", false, "run the served-boundary same-read proof: raw loop versus HTTP /v1/fak/syscall plus MCP fak_syscall on one gateway, with response metadata and /metrics evidence.")
-	servedJSON := flag.Bool("served-json", false, "emit the served-boundary same-read proof as JSON.")
-	engineDelayMS := flag.Int("engine-delay-ms", 15, "fixed local-tool delay used by timing, parallel, and served proof modes so engine re-execution cost is visible and deterministic enough to inspect.")
+	engineDelayMS := flag.Int("engine-delay-ms", 15, "fixed local-tool delay used by timing and parallel proof modes so engine re-execution cost is visible and deterministic enough to inspect.")
 	parallelWorkers := flag.Int("parallel-workers", 32, "worker count for -parallel/-parallel-json.")
 	parallelCalls := flag.Int("parallel-calls", 512, "parallel hot-phase calls for -parallel/-parallel-json.")
 	parallelHotFiles := flag.Int("parallel-hot-files", 8, "distinct hot files to prewarm and repeat for -parallel/-parallel-json.")
@@ -1414,7 +1412,6 @@ func main() {
 	parallelColdJSON := flag.Bool("parallel-cold-json", false, "emit the cold concurrent same-read fill-race probe as JSON.")
 	parallelColdWorkers := flag.Int("parallel-cold-workers", 64, "worker count released at the cold barrier for -parallel-cold/-parallel-cold-json.")
 	parallelColdTrials := flag.Int("parallel-cold-trials", 24, "independent cold trials (each a fresh empty vDSO world + never-seen key) for -parallel-cold/-parallel-cold-json.")
-	servedCalls := flag.Int("served-calls", 4, "same-read calls per served surface for -served/-served-json. The proof runs both HTTP and MCP surfaces against one warmed key.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each suite through the kernel (the same turnbench.RunWithWorld path -print/-json drive), assert the documented ledger invariants, and exit non-zero on any drift. The CI / cross-platform dog-food of this demo's data path.")
 	suite := flag.String("suite", "prefilter-bad-calls", "suite for -print / -json (prefilter-bad-calls | reread-same-file | clean-control)")
 	flag.Parse()
@@ -1448,26 +1445,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-parallel-cold-workers and -parallel-cold-trials must be positive")
 		os.Exit(2)
 	}
-	if *servedCalls <= 0 {
-		fmt.Fprintln(os.Stderr, "-served-calls must be positive")
-		os.Exit(2)
-	}
-
 	switch {
 	case *selfcheck:
 		os.Exit(runSelfcheck())
 	case *servedJSON:
-		os.Exit(runServedJSON(*servedCalls, time.Duration(*engineDelayMS)*time.Millisecond))
+		os.Exit(runServedReadJSON(*servedCalls))
 	case *served:
-		os.Exit(runServedPrint(*servedCalls, time.Duration(*engineDelayMS)*time.Millisecond))
+		os.Exit(runServedReadPrint(*servedCalls))
 	case *parallelColdJSON:
 		os.Exit(runColdJSON(*parallelColdWorkers, *parallelColdTrials, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *parallelCold:
 		os.Exit(runColdPrint(*parallelColdWorkers, *parallelColdTrials, time.Duration(*engineDelayMS)*time.Millisecond))
-	case *servedJSON:
-		os.Exit(runServedJSON(*servedCalls))
-	case *served:
-		os.Exit(runServedPrint(*servedCalls))
 	case *parallelJSON:
 		os.Exit(runParallelJSON(*parallelWorkers, *parallelCalls, *parallelHotFiles, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *parallel:
@@ -1490,7 +1478,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -served [-served-calls %d]\n", defaultServedCalls)
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -parallel [-parallel-workers 32 -parallel-calls 512]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -parallel-cold [-parallel-cold-workers 64 -parallel-cold-trials 24]\n")
-		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -served [-served-calls 4]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -json\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -selfcheck\n")
 		os.Exit(2)
