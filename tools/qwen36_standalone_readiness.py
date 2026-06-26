@@ -4,6 +4,10 @@
 This is a driver-side audit. It does not claim a DGX or lab node is ready unless
 there is imported evidence for that surface; missing live hardware remains an
 explicit external gate in the report.
+
+Boundary: this grandfathered Python file may report whether a separately checked-out
+slack-helpers bridge is present, but it must not grow into the Slack/GPU-server control
+bridge itself. Live control-plane code belongs in fak-private; new public tooling is Go.
 """
 from __future__ import annotations
 
