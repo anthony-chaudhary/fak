@@ -26,25 +26,39 @@ import (
 // standard quant-on-load path (Q8_0 for the remaining matmul weights, f32 for small
 // tensors). Run the returned model through a Session with Q4K=true.
 func LoadModelQ4K(path string) (*model.Model, error) {
+	return LoadModelQ4KProfile(path, nil)
+}
+
+// LoadModelQ4KProfile is LoadModelQ4K with an optional load profiler so the direct-resident-Q4_K
+// path streams the same load-progress lines the lean-Q8 path does (a 466 GB GLM-5.2 resident load
+// must not be silent). Nil profiler = no progress, byte-identical to the old LoadModelQ4K.
+func LoadModelQ4KProfile(path string, p *LoadProfiler) (*model.Model, error) {
 	ws, err := OpenWeights(path)
 	if err != nil {
 		return nil, err
 	}
 	defer ws.Close()
-	return ws.QuantModelQ4K()
+	return ws.QuantModelQ4KProfile(p)
 }
 
 // QuantModelQ4K is the WeightSource form of LoadModelQ4K: QuantModelProfile with the
 // eligible-Q4_K branch pulled before the dequant, so those tensors never pay the f32
 // round-trip.
 func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
+	return s.QuantModelQ4KProfile(nil)
+}
+
+// QuantModelQ4KProfile is QuantModelQ4K with optional progress reporting (p.SetTotal/Tick).
+func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, error) {
 	cfg, err := s.File.Config()
 	if err != nil {
 		return nil, err
 	}
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
+	p.SetTotal(len(s.File.Tensors))
 	for _, info := range s.File.Tensors {
+		p.Tick(tensorOnDiskBytes(info))
 		// glm_moe_dsa MLA KV-b: buffer the split attn_k_b/attn_v_b and emit the combined
 		// kv_b_proj when both arrive, before CanonicalTensorNameArch (which leaves them unmapped).
 		// The merged tensor follows the standard dequant->Q8 path (it is not resident-Q4_K eligible).

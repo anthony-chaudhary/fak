@@ -634,29 +634,25 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		if !backend.Caps().UploadDtype {
 			must(fmt.Errorf("fak serve: --cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); use a quantized-upload backend or omit --cpu-offload-experts", backend.Name()))
 		}
-		fmt.Printf("fak: GGUF device load -> mixed precision on backend %q (Q8 resident dense/device weights, f32 activations/KV, experts host-resident)\n", backend.Name())
-		// Device backend + CPU expert-offload: the memory-lean Q8 quantize-at-load path (the
-		// SAME representation cmd/modelbench's `-lean -backend cuda` produces). The big matmul
-		// weights are dropped from f32 and kept Q8-resident, which the cuda HAL now consumes
-		// directly at H2D (internal/compute/cuda.go Upload(t, Q8_0) / uploadQ8Resident, #485) —
-		// the old "the HAL only narrows F32" limitation is gone. This is the only load that fits
-		// a model whose experts dwarf VRAM (GLM-5.2 Q4 experts ~424GB): with --cpu-offload-experts
-		// the per-request session keeps the expert GEMMs on host RAM while dense projections +
-		// router + attention run on the device (internal/model glmDsaMatKernel split).
-		// The fit check must use the dense-vs-expert split, not total GGUF bytes: experts are
-		// host-scoped offload demands, while dense/router/attention weights and KV consume the
-		// device budget. That keeps the valid "experts dwarf VRAM" use case alive while still
-		// refusing a dense side that cannot fit.
+		fmt.Printf("fak: GGUF device load -> direct-resident Q4_K on backend %q (raw super-blocks copied to VRAM/host, dequant FUSED into the GEMM tile, NO f32/Q8 round-trip; experts host-resident)\n", backend.Name())
+		// Device backend + CPU expert-offload: the DIRECT-RESIDENT-Q4_K path. Q4_K matmul weights
+		// are copied to VRAM (dense) / host RAM (experts) as raw super-blocks and served with the
+		// dequant-fused k_q4k_gemm tile (#485) — skipping the lean path's Q4_K->f32->Q8 round-trip
+		// entirely. That round-trip was the load bottleneck on the 466 GB GLM-5.2 (every tensor
+		// decompressed to f32 then re-quantized); the resident path is I/O-bound only, cutting the
+		// load from ~100 min to minutes. The per-request session decodes Q4_K (s.Q4K=true) on both
+		// the device (dense) and host (offloaded experts). The fit check still uses the dense-vs-
+		// expert split so experts dwarfing VRAM stay host-scoped while the dense side must fit.
 		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, contextBudgetTokens)
 		must(err)
 		prof := ggufload.NewLoadProfiler()
 		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
-		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
+		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
 		must(err)
-		modelengine.Preload(mm)
+		modelengine.PreloadQ4K(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
-		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos)), memPlan, backend)
-		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
+		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case backend != nil:
 		if backend.Caps().UploadDtype {
 			// A device backend that can consume Q8_0 uploads should not be forced through
