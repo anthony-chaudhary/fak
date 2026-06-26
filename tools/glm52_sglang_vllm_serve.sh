@@ -27,6 +27,11 @@
 # then, once healthy, capture the #130 evidence from any box:
 #   python tools/glm52_serving_witness.py --base-url http://<node>:8000/v1 \
 #       --model zai-org/GLM-5.2 --engine-cache-engine "${ENGINE}"
+# Scope of this witness: it proves the fak-fronts-an-external-engine (SGLang/vLLM)
+# form of #130 only -- fak governs/fronts the weights the outside engine serves. It
+# does NOT prove native in-kernel GLM-5.2 serving, which is the separate native track
+# (docs/notes/native-753b-track-staged-plan.md; the external-vs-native evidence
+# boundary is drawn in docs/serving/glm52-full-size-serving-witness.md section 6).
 set -euo pipefail
 
 ENGINE="${ENGINE:-sglang}"          # sglang | vllm
