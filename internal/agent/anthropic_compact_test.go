@@ -527,3 +527,123 @@ func TestCompactSystemOnlyBreakpoint(t *testing.T) {
 		t.Fatalf("array-head prefix changed under a system-only breakpoint")
 	}
 }
+
+// TestCompactToViewStubsElidedMiddleTurn is the byte-level witness for the ctxplan-view
+// req.Raw transform (#927): the planner's resident set drops the off-topic middle turn,
+// and CompactAnthropicHistoryToView replaces it in place with a same-role stub while the
+// cached prefix, the resident turns, AND the message count / role alternation are all
+// preserved byte-for-byte. Fail-safe identity when nothing is elided.
+func TestCompactToViewStubsElidedMiddleTurn(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":4096,` +
+		`"system":[{"type":"text","text":"You are a coding agent.","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[` +
+		`{"role":"user","content":"rotate the auth token and check the refund policy"},` +
+		`{"role":"assistant","content":"weather sunny 22C light wind from the west"},` +
+		`{"role":"user","content":"what is the auth token rotation and refund window"}]}`)
+
+	// The planner's resident view: system + first user + last user (the weather span elided).
+	planned := []Message{
+		{Role: RoleSystem, Content: "You are a coding agent."},
+		{Role: RoleUser, Content: "rotate the auth token and check the refund policy"},
+		{Role: RoleUser, Content: "what is the auth token rotation and refund window"},
+	}
+
+	out, outcome := CompactAnthropicHistoryToView(raw, planned)
+	if outcome.Reason != CompactReasonNone {
+		t.Fatalf("expected a fire (Reason==None), got %q (Dropped=%d)", outcome.Reason, outcome.Dropped)
+	}
+	if outcome.Dropped != 1 {
+		t.Fatalf("expected 1 stubbed message, got %d", outcome.Dropped)
+	}
+	s := string(out)
+
+	// The off-topic span is gone (stubbed); the resident turns are verbatim.
+	if strings.Contains(s, "weather sunny 22C") {
+		t.Errorf("the elided weather span must not survive in the rewritten body")
+	}
+	if !strings.Contains(s, "[fak] ctxview-elided") {
+		t.Errorf("the elided turn must be replaced by a [fak] ctxview-elided stub")
+	}
+	if !strings.Contains(s, "rotate the auth token") || !strings.Contains(s, "what is the auth token rotation") {
+		t.Errorf("the resident turns must survive verbatim")
+	}
+
+	// The cached system prefix is byte-identical.
+	wantSys := `"system":[{"type":"text","text":"You are a coding agent.","cache_control":{"type":"ephemeral"}}]`
+	if !strings.Contains(s, wantSys) {
+		t.Errorf("the cached system prefix must be byte-identical")
+	}
+
+	// The message COUNT and role alternation survive (same-role stub in place of the original).
+	if c := strings.Count(s, `"role":`); c != 3 {
+		t.Errorf("the rewritten body must keep all 3 messages (one stubbed in place), got %d role keys", c)
+	}
+	// The stub carries the assistant role (same as the original middle turn) and the ctxview
+	// marker. json.Marshal sorts keys, so check each independently.
+	if !strings.Contains(s, `"role":"assistant"`) || !strings.Contains(s, `"[fak] ctxview-elided`) {
+		t.Errorf("the stub must carry the assistant role + the ctxview-elided marker (json key order is unspecified)")
+	}
+
+	// The result re-decodes as a valid request.
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("rewritten body failed to decode: %v", err)
+	}
+}
+
+// TestCompactToViewIdentityWhenAllResident asserts the fail-safe no-op: when the planner
+// kept everything (every message is resident), the body is returned byte-for-byte unchanged.
+func TestCompactToViewIdentityWhenAllResident(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":4096,` +
+		`"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[` +
+		`{"role":"user","content":"hello"},` +
+		`{"role":"assistant","content":"hi there"}]}`)
+
+	// Every message is resident — nothing to elide.
+	planned := []Message{
+		{Role: RoleSystem, Content: "sys"},
+		{Role: RoleUser, Content: "hello"},
+		{Role: RoleAssistant, Content: "hi there"},
+	}
+	out, outcome := CompactAnthropicHistoryToView(raw, planned)
+	if outcome.Reason == CompactReasonNone {
+		t.Fatalf("expected a bail (nothing to elide), got a fire")
+	}
+	if !bytes.Equal(out, raw) {
+		t.Errorf("all-resident planned view must return the body byte-for-byte unchanged")
+	}
+}
+
+// TestCompactToViewKeepsToolBlocks asserts that a message carrying tool_use / tool_result
+// blocks is NEVER stubbed (elementTextContent bails on non-text blocks), so tool_use ↔
+// tool_result pairings stay intact.
+func TestCompactToViewKeepsToolBlocks(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":4096,` +
+		`"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[` +
+		`{"role":"user","content":"rotate the auth token"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"path":"x.go"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"file contents here"}]},` +
+		`{"role":"user","content":"what is the auth token rotation"}]}`)
+
+	// The planner elided the tool pair (kept only the two text turns) — but the transform
+	// must KEEP the tool blocks verbatim because it cannot confidently match them.
+	planned := []Message{
+		{Role: RoleSystem, Content: "sys"},
+		{Role: RoleUser, Content: "rotate the auth token"},
+		{Role: RoleUser, Content: "what is the auth token rotation"},
+	}
+	out, outcome := CompactAnthropicHistoryToView(raw, planned)
+	s := string(out)
+	// The tool_use and tool_result survive unchanged.
+	if !strings.Contains(s, `"tool_use"`) || !strings.Contains(s, `"tool_result"`) {
+		t.Errorf("tool_use/tool_result blocks must be kept verbatim (never stubbed):\n%s", s)
+	}
+	if outcome.Reason == CompactReasonNone && outcome.Dropped > 0 {
+		// It may have stubbed the text-only middle turn if any existed; the tool blocks are safe regardless.
+	}
+	// The result re-decodes.
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("rewritten body failed to decode: %v", err)
+	}
+}

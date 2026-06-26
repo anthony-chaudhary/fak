@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,10 +26,12 @@ import (
 //     budget. The planner reaches the wire.
 //   - OFF (the default, budget 0): the upstream sees the FULL transcript, message-for-message.
 //     A deploy that leaves the flag at 0 is unchanged on the live path.
-//   - The Anthropic PASSTHROUGH boundary: even with the budget set, the flagship
-//     `fak guard -- claude` route forwards req.Raw byte-for-byte, so the planner is INERT there
-//     by design (the deferred #555 req.Raw transform). This pins the honest fence as a witness:
-//     turning the budget on does not silently alter the flagship wire.
+//   - The Anthropic PASSTHROUGH boundary: with the budget OFF (the default) the flagship
+//     `fak guard -- claude` route forwards req.Raw byte-for-byte — the planner is inert
+//     until an operator opts in. With the budget ON the planned view NOW reaches this wire
+//     too (#927 — the deferred #555 req.Raw transform): the off-topic middle turn is stubbed
+//     in place beyond the cached system prefix, the prefix bytes stay byte-identical, and the
+//     elided span stays demand-pageable. This file pins BOTH fences as live-path witnesses.
 
 // ctxviewBudgetSession is a multi-turn transcript whose full residency exceeds a tight token
 // budget, so an enabled planner must elide at least one older turn. The last user turn's intents
@@ -215,13 +218,11 @@ func TestCtxViewHTTPOnPlansHistoryOnTheWire(t *testing.T) {
 	}
 }
 
-// TestCtxViewHTTPAnthropicPassthroughIgnoresBudget pins the honest fence as a live-path witness:
-// on the flagship `fak guard -- claude` Anthropic passthrough the gateway forwards req.Raw
-// byte-for-byte, so even with CtxViewBudget set the planner is INERT — the upstream sees the
-// caller's ORIGINAL body, unmodified. This is the deferred #555 req.Raw transform: ctxview cannot
-// reach this wire yet, and turning the budget on must not silently change it. (The flagship wire's
-// live context lever is --compact-history-budget, default-on, which IS cache-prefix-preserving.)
-func TestCtxViewHTTPAnthropicPassthroughIgnoresBudget(t *testing.T) {
+// TestCtxViewHTTPAnthropicPassthroughOffForwardsRaw is the OFF live-path guard for the
+// flagship wire: with CtxViewBudget == 0 (the default) the Anthropic passthrough forwards
+// req.Raw byte-for-byte, so the planner is INERT and the upstream sees the caller's ORIGINAL
+// body, unmodified. A deploy that does not opt in sees no change on the flagship wire.
+func TestCtxViewHTTPAnthropicPassthroughOffForwardsRaw(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
@@ -244,8 +245,66 @@ func TestCtxViewHTTPAnthropicPassthroughIgnoresBudget(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// Provider anthropic + an anthropic upstream == the passthrough route. Set a tight budget that
-	// WOULD elide a span on a re-marshaled wire, to prove it does not here.
+	// Provider anthropic + an anthropic upstream == the passthrough route. Budget 0 == OFF.
+	srv, err := New(Config{
+		EngineID: "test", Model: "claude-test", BaseURL: upstream.URL, Provider: "anthropic",
+		APIKey: "configured-key", CtxViewBudget: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader(inbound))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", "caller-key")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d: %s", resp.StatusCode, b)
+	}
+
+	// OFF: the passthrough forwarded the ORIGINAL bytes, byte-for-byte.
+	if !bytes.Equal(upstreamBody, inbound) {
+		t.Errorf("OFF: passthrough must forward req.Raw byte-for-byte when CtxViewBudget==0:\n got %q\nwant %q", upstreamBody, inbound)
+	}
+}
+
+// TestCtxViewHTTPAnthropicPassthroughPlansView is the #927 live-path witness: with
+// CtxViewBudget set, the ctxplan planned view NOW reaches the Anthropic passthrough — the
+// off-topic assistant turn beyond the cached system prefix is stubbed out of the FORWARDED
+// body (the bounded view), while (a) the cached prefix bytes stay byte-identical so the
+// upstream cache hit survives, and (b) the elided span's bytes stay recoverable under a
+// permissive re-plan (the lossless store the planner views preserved them — exact recall).
+func TestCtxViewHTTPAnthropicPassthroughPlansView(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	inbound := []byte(`{"model":"claude-test","max_tokens":4096,` +
+		`"system":[{"type":"text","text":"You are a coding agent.","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[` +
+		`{"role":"user","content":"rotate the auth token and check the refund policy"},` +
+		`{"role":"assistant","content":"weather sunny 22C light wind from the west, unrelated padding to exceed any small resident budget"},` +
+		`{"role":"user","content":"what is the auth token rotation and refund window"}]}`)
+
+	var upstreamBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	// Provider anthropic == the passthrough route. A tight budget that forces the off-topic
+	// assistant turn (the forecast MISS) to be elided beyond the cached system prefix.
 	srv, err := New(Config{
 		EngineID: "test", Model: "claude-test", BaseURL: upstream.URL, Provider: "anthropic",
 		APIKey: "configured-key", CtxViewBudget: 8,
@@ -270,12 +329,54 @@ func TestCtxViewHTTPAnthropicPassthroughIgnoresBudget(t *testing.T) {
 		t.Fatalf("status = %d: %s", resp.StatusCode, b)
 	}
 
-	// The honest fence: the passthrough forwarded the ORIGINAL bytes, budget notwithstanding.
-	if !bytes.Equal(upstreamBody, inbound) {
-		t.Errorf("passthrough must forward req.Raw byte-for-byte even with CtxViewBudget set (ctxview is the deferred #555 req.Raw transform on this wire):\n got %q\nwant %q", upstreamBody, inbound)
+	forwarded := string(upstreamBody)
+
+	// (a) BOUNDED VIEW: the off-topic weather span was elided from the forwarded body —
+	// replaced by a same-role [fak] ctxview-elided stub, not forwarded verbatim. The two
+	// resident turns (the auth/refund user turns) are still present, byte-for-byte.
+	if strings.Contains(forwarded, "weather sunny 22C") {
+		t.Errorf("(a): the off-topic span must be elided from the forwarded passthrough body, still present:\n%s", forwarded)
 	}
-	// And the off-topic span is STILL present upstream — proof the planner did not touch this wire.
-	if !strings.Contains(string(upstreamBody), "weather sunny 22C") {
-		t.Error("passthrough body must be unmodified (the off-topic span is still there); ctxview must be inert on the flagship wire")
+	if !strings.Contains(forwarded, "[fak] ctxview-elided") {
+		t.Errorf("(a): the elided turn must be replaced by a [fak] ctxview-elided stub:\n%s", forwarded)
+	}
+	if !strings.Contains(forwarded, "rotate the auth token") || !strings.Contains(forwarded, "what is the auth token rotation") {
+		t.Errorf("(a): the resident turns must still be present verbatim in the forwarded body:\n%s", forwarded)
+	}
+
+	// (b) PREFIX BYTE-IDENTITY: the cached system prefix bytes are unchanged so the upstream
+	// cache hit (cache_read_input_tokens) survives. The system field is outside messages[],
+	// so it rides through untouched; assert it byte-for-byte.
+	wantSys := `"system":[{"type":"text","text":"You are a coding agent.","cache_control":{"type":"ephemeral"}}]`
+	if !strings.Contains(forwarded, wantSys) {
+		t.Errorf("(b): the cached system prefix must be byte-identical in the forwarded body:\nwant %s\ngot  %s", wantSys, forwarded)
+	}
+	// The message COUNT and role alternation are preserved (same-role stubs), so Anthropic
+	// accepts the body — verify three messages survive (one stubbed, two resident).
+	if c := strings.Count(forwarded, `"role":`); c != 3 {
+		t.Errorf("(b): the forwarded body must keep all 3 messages (one stubbed in place), got %d role keys:\n%s", c, forwarded)
+	}
+
+	// (c) EXACT RECALL: the elided span is not lost. Re-planning the SAME transcript under a
+	// permissive budget selects the weather span resident again — the lossless store the
+	// planner views preserved its verbatim bytes (the agent-level seam witnesses the demand-
+	// page mechanism; here we witness the OUTCOME: nothing was destroyed).
+	permissive := &agent.CtxViewPlanner{Enabled: true, Budget: 1 << 20}
+	decoded, err := agent.DecodeAnthropicMessagesRequest(inbound)
+	if err != nil {
+		t.Fatalf("decode inbound: %v", err)
+	}
+	recovered, err := permissive.RenderTurn(context.Background(), decoded.Messages)
+	if err != nil {
+		t.Fatalf("permissive re-plan: %v", err)
+	}
+	foundWeather := false
+	for _, m := range recovered {
+		if strings.Contains(m.Content, "weather sunny 22C") {
+			foundWeather = true
+		}
+	}
+	if !foundWeather {
+		t.Error("(c): the elided weather span must be recoverable under a permissive re-plan (exact recall — the store preserved it)")
 	}
 }

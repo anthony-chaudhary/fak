@@ -82,8 +82,10 @@ planner behavior: pins stay resident, `OverBudget` is set, reported not hidden).
 - This bench is a measurement cmd, but the planner it measures is **no longer off the live path**:
   the same `ctxplan.Materialize` view is now wired into the gateway's per-turn buffered path
   (`--ctx-view-budget`, #555 shipped) and witnessed end-to-end through the real HTTP handler
-  (`internal/gateway/gateway_ctxview_http_test.go`). The flagship Anthropic `req.Raw` passthrough is
-  the one wire it does not yet reach (deferred #555 `req.Raw` transform).
+  (`internal/gateway/gateway_ctxview_http_test.go`). The flagship Anthropic `req.Raw` passthrough
+  now reaches the same planner too (#927 shipped): `agent.CompactAnthropicHistoryToView` stubs each
+  elided middle message in place (same role → alternation preserved) while the `cache_control` prefix
+  bytes stay byte-identical, so the upstream cache hit survives.
 
 ## Reproduce
 

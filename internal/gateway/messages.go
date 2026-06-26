@@ -172,6 +172,15 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
+	// ctxplan planned VIEW on the Anthropic passthrough (#927 — the deferred #555 req.Raw
+	// transform): when --ctx-view-budget is set, plan req.Messages into an O(1) resident
+	// view and materialize it onto req.Raw by stubbing each elided middle turn in place
+	// (same role → alternation preserved), while the cache_control prefix bytes and every
+	// resident message's original bytes stay byte-identical so the upstream cache hit
+	// survives. Runs FIRST so it operates on the original body (its content match keys off
+	// the decoded req.Messages); the siblings below then see the already-bounded body and
+	// bail (under-budget) in the common case. OFF (identity) by default; fail-safe.
+	viewPlanned := s.maybePlanAnthropicRaw(ctx, reqTrace, req)
 	// Cache-prefix-preserving history compaction (#555): on the Anthropic passthrough,
 	// shrink the OUTBOUND body's OLD turns to the configured resident-token budget while
 	// keeping the cached-prefix bytes verbatim, so a long conversation forwards far fewer
@@ -181,6 +190,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// after the pace cap (which only ever rewrites the top-level max_tokens, never the
 	// cached message prefix) and before either passthrough consumer of req.Raw.
 	compacted := s.maybeCompactAnthropicRaw(req)
+	if viewPlanned {
+		compacted = true // the ctxview transform shrunk the body too — record the observed cache_read
+	}
 	// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 	// outbound tools[], keeping the cache_control prefix byte-identical (promptmmu). Runs
 	// after the history compaction (both rewrite req.Raw; tools[] and messages[] are
@@ -385,6 +397,40 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	return outcome.Reason == agent.CompactReasonNone
+}
+
+// maybePlanAnthropicRaw is the ctxplan planned-view req.Raw transform for the Anthropic
+// PASSTHROUGH (#927 — the deferred #555 req.Raw step the buffered maybePlanMessages path
+// could not reach, because that route forwards req.Raw byte-for-byte). When the view
+// planner is enabled (--ctx-view-budget > 0), it plans req.Messages into an O(1)
+// resident view and materializes that view onto req.Raw: each message the planner elided
+// (beyond the cached prefix) is replaced in place by a same-role stub, while the prefix
+// bytes and every resident message's original bytes stay byte-identical so the upstream
+// cache hit survives.
+//
+// A no-op (identity) unless the gateway fronts the REAL Anthropic API and the view
+// planner is enabled — so a deploy that leaves --ctx-view-budget at 0 sees the body
+// byte-for-byte unchanged (the same posture as the buffered path). Fail-safe:
+// agent.CompactAnthropicHistoryToView returns req.Raw unchanged on any ambiguity, so this
+// never breaks a turn. Applied to req.Raw ONLY — the decoded req.Messages the kernel
+// adjudicates are untouched, so the trust boundary is unchanged.
+func (s *Server) maybePlanAnthropicRaw(ctx context.Context, trace string, req *agent.AnthropicMessagesRequest) bool {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
+		return false
+	}
+	if s.ctxView == nil || !s.ctxView.Enabled {
+		return false
+	}
+	planned := s.maybePlanMessages(ctx, trace, req.Messages)
+	if len(planned) >= len(req.Messages) {
+		return false // the planner did not elide anything — nothing to materialize
+	}
+	out, outcome := agent.CompactAnthropicHistoryToView(req.Raw, planned)
+	if outcome.Reason != agent.CompactReasonNone {
+		return false // bailed — identity (fail-safe)
+	}
+	req.Raw = out
+	return true
 }
 
 // maybeCompactInboundTools is the INBOUND twin of maybeCompactAnthropicRaw: on the

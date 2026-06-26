@@ -228,26 +228,28 @@ type Config struct {
 	// fak_gateway_startup_phase_duration_seconds.
 	StartupPhases []StartupPhase
 	// CtxViewBudget, when > 0, wires the ctxplan context PLANNER into the live
-	// serve/guard loop: each buffered turn, the forwarded message history is lowered
-	// into a lossless ctxplan store and re-materialized as an O(1) planned VIEW under
-	// this resident-token budget, replacing the append-the-whole-transcript path with a
-	// planned view (issue #555). 0 (the default) leaves the existing path byte-for-byte
-	// unchanged — the guard a production deploy needs before an in-flight rewrite of turn
-	// history ships (the same posture as the agent seam's FAK_CTXPLAN_SEAM). The
-	// streaming fast-path bypasses this hook; the buffered turn path (the canonical path
-	// all three wires route through s.complete) is what gets planned.
+	// serve/guard loop: each turn, the forwarded message history is lowered into a
+	// lossless ctxplan store and re-materialized as an O(1) planned VIEW under this
+	// resident-token budget, replacing the append-the-whole-transcript path with a
+	// planned view (issue #555). On the buffered/OpenAI wire it re-plans the decoded
+	// []Message; on the flagship Anthropic PASSTHROUGH it materializes the view onto
+	// req.Raw by stubbing each elided middle turn in place while the cache_control prefix
+	// stays byte-identical (#927 — the deferred #555 req.Raw transform). 0 (the default)
+	// leaves the existing path byte-for-byte unchanged — the guard a production deploy
+	// needs before an in-flight rewrite of turn history ships (the same posture as the
+	// agent seam's FAK_CTXPLAN_SEAM).
 	CtxViewBudget int
 	// CompactHistoryBudget, when > 0, wires the cache-prefix-preserving history rewrite
-	// into the flagship `fak guard -- claude` Anthropic PASSTHROUGH (where CtxViewBudget
-	// cannot reach, because that route forwards req.Raw byte-for-byte — the deferred #555
-	// req.Raw step). Each turn the OUTBOUND body is compacted so OLD whole turns beyond the
-	// cache_control prefix are dropped to this resident-token budget, while the cached
-	// prefix bytes are copied VERBATIM so the upstream cache hit survives (see
-	// agent.CompactAnthropicHistory). 0 means OFF (body forwarded byte-for-byte). The CLI
-	// flag defaults this to DefaultCompactHistoryBudget (a non-zero default-on trigger that
-	// trims sprawl while a typical short session stays untouched), so the byte-for-byte
-	// path is now the explicit --compact-history-budget=0 opt-out, not the default.
-	// Anthropic passthrough only; it is an inert no-op on every other wire.
+	// into the flagship `fak guard -- claude` Anthropic PASSTHROUGH. Each turn the OUTBOUND
+	// body is compacted so OLD whole turns beyond the cache_control prefix are dropped to
+	// this resident-token budget, while the cached prefix bytes are copied VERBATIM so the
+	// upstream cache hit survives (see agent.CompactAnthropicHistory). 0 means OFF (body
+	// forwarded byte-for-byte). The CLI flag defaults this to DefaultCompactHistoryBudget
+	// (a non-zero default-on trigger that trims sprawl while a typical short session stays
+	// untouched), so the byte-for-byte path is now the explicit --compact-history-budget=0
+	// opt-out, not the default. Anthropic passthrough only; it is an inert no-op on every
+	// other wire. Sibling of CtxViewBudget: compaction drops a contiguous suffix of old
+	// turns, ctxview stubs the planner's non-contiguous resident-set misses (#927).
 	CompactHistoryBudget int
 	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
 	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for
