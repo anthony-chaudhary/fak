@@ -141,12 +141,24 @@ func (denseActivationMLP) apply(m *Model, layer int, xn any, mat matKernel) []fl
 	return out
 }
 
+// expertIntermediate is the per-ROUTED-EXPERT FFN width. It differs from the dense
+// IntermediateSize on models whose experts are narrower than the dense MLP (GLM-5.2:
+// expert_feed_forward_length=2048 vs the dense ffn ~12288). Falls back to IntermediateSize
+// when MoEIntermediateSize is unset (Mixtral / Qwen3-MoE GGUFs do not carry the key), so
+// those models are byte-for-byte unchanged.
+func (c Config) expertIntermediate() int {
+	if c.MoEIntermediateSize > 0 {
+		return c.MoEIntermediateSize
+	}
+	return c.IntermediateSize
+}
+
 // expertSwiGLU runs one expert's dense SwiGLU over xn and returns its [H] output.
 // It is the per-expert primitive the MoE weighted sum reuses — the same SwiGLU
 // arithmetic as the dense path, just over an expert-indexed weight set.
 func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 {
 	cfg := m.Cfg
-	H, I := cfg.HiddenSize, cfg.IntermediateSize
+	H, I := cfg.HiddenSize, cfg.expertIntermediate()
 	g := mat.mul(expertName(layer, expert, "gate_proj.weight"), xn, I, H)
 	u := mat.mul(expertName(layer, expert, "up_proj.weight"), xn, I, H)
 	m.addBiasIfPresent(g, expertName(layer, expert, "gate_proj.bias"))
