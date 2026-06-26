@@ -87,6 +87,24 @@ func TestBuildRehearsalPreflightStatusMatrix(t *testing.T) {
 			raw:        true,
 			fak:        false,
 		},
+		{
+			name:       "oracle artifact required but missing blocks paid even with key",
+			probe:      PreflightProbe{HarborPresent: true, DockerEngineUp: true, OpenAIKeyPresent: true, OracleArtifactRequired: true},
+			wantStatus: PreflightOracleReadyPaidWait,
+			wantReason: ReasonOracleArtifactMissing,
+			oracle:     true,
+			raw:        false,
+			fak:        false,
+		},
+		{
+			name:       "oracle artifact present unblocks paid",
+			probe:      PreflightProbe{HarborPresent: true, DockerEngineUp: true, OpenAIKeyPresent: true, OracleArtifactRequired: true, OracleArtifactPresent: true},
+			wantStatus: PreflightReady,
+			wantReason: "",
+			oracle:     true,
+			raw:        true,
+			fak:        false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

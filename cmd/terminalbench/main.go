@@ -26,6 +26,7 @@ func main() {
 	preflightMode := flag.Bool("preflight", false, "probe this host's readiness for the Terminal-Bench 2.1 raw/fak rehearsal and emit a result-claim-gated preflight artifact")
 	preflightDataset := flag.String("preflight-dataset", "terminal-bench/terminal-bench-2-1", "official Harbor dataset slug the rehearsal targets")
 	probeGateway := flag.Bool("probe-gateway", false, "in --preflight, GET the fak gateway /models endpoint to check the fak arm is reachable")
+	oracleArtifact := flag.String("oracle-artifact", "", "in --preflight, require this official oracle-smoke artifact to exist before greenlighting any paid raw/fak run (acceptance criterion: oracle before paid)")
 	officialContract := flag.String("official-contract", "experiments/agent-live/terminalbench-official-run-contract-20260626.json", "path to the official-run contract this preflight gates")
 	submissionPacket := flag.String("submission-packet", "docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md", "path to the submission-packet index this preflight feeds")
 	issueRef := flag.String("issue", "#900", "campaign issue reference recorded in the preflight artifact")
@@ -122,14 +123,17 @@ func main() {
 		preflight := terminalbench.BuildRehearsalPreflight(terminalbench.RehearsalPreflightInput{
 			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 			Probe: terminalbench.PreflightProbe{
-				HarborPresent:    harborOK,
-				HarborVersion:    harborVer,
-				DockerEngineUp:   dockerOK,
-				DockerDetail:     dockerDetail,
-				OpenAIKeyPresent: strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "",
-				GatewayChecked:   gwChecked,
-				GatewayReachable: gwReachable,
-				GatewayURL:       gatewayBase,
+				HarborPresent:          harborOK,
+				HarborVersion:          harborVer,
+				DockerEngineUp:         dockerOK,
+				DockerDetail:           dockerDetail,
+				OpenAIKeyPresent:       strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "",
+				GatewayChecked:         gwChecked,
+				GatewayReachable:       gwReachable,
+				GatewayURL:             gatewayBase,
+				OracleArtifactRequired: strings.TrimSpace(*oracleArtifact) != "",
+				OracleArtifactPresent:  strings.TrimSpace(*oracleArtifact) != "" && fileExists(*oracleArtifact),
+				OracleArtifactPath:     strings.TrimSpace(*oracleArtifact),
 			},
 			Dataset:          *preflightDataset,
 			Issue:            *issueRef,
@@ -308,6 +312,11 @@ func probeGatewayReachable(ctx context.Context, base string) (bool, string) {
 	defer resp.Body.Close()
 	// Any HTTP round-trip proves the gateway process is listening, even a 401.
 	return true, fmt.Sprintf("HTTP %d", resp.StatusCode)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(strings.TrimSpace(path))
+	return err == nil && !info.IsDir()
 }
 
 func firstLine(s string) string {

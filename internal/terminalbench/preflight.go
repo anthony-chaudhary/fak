@@ -20,10 +20,11 @@ const (
 
 // Closed-vocabulary blocking reasons.
 const (
-	ReasonHarborMissing     = "HARBOR_NOT_INSTALLED"
-	ReasonDockerEngineDown  = "DOCKER_ENGINE_DOWN"
-	ReasonOpenAIKeyMissing  = "OPENAI_API_KEY_MISSING"
-	ReasonFakGatewayUnreach = "FAK_GATEWAY_UNREACHABLE"
+	ReasonHarborMissing         = "HARBOR_NOT_INSTALLED"
+	ReasonDockerEngineDown      = "DOCKER_ENGINE_DOWN"
+	ReasonOracleArtifactMissing = "ORACLE_SMOKE_ARTIFACT_MISSING"
+	ReasonOpenAIKeyMissing      = "OPENAI_API_KEY_MISSING"
+	ReasonFakGatewayUnreach     = "FAK_GATEWAY_UNREACHABLE"
 )
 
 // PreflightProbe is the observed host state. The caller (cmd/terminalbench)
@@ -38,6 +39,13 @@ type PreflightProbe struct {
 	GatewayChecked   bool
 	GatewayReachable bool
 	GatewayURL       string
+	// OracleArtifactRequired enforces acceptance criterion #2: the official
+	// oracle smoke artifact must exist before any paid model rehearsal. When
+	// required but absent, the paid arms stay blocked even on an otherwise
+	// ready host.
+	OracleArtifactRequired bool
+	OracleArtifactPresent  bool
+	OracleArtifactPath     string
 }
 
 // RehearsalPreflightInput carries the probe plus the campaign context the
@@ -88,7 +96,8 @@ type RehearsalPreflight struct {
 func BuildRehearsalPreflight(in RehearsalPreflightInput) RehearsalPreflight {
 	p := in.Probe
 	oracleReady := p.HarborPresent && p.DockerEngineUp
-	rawReady := oracleReady && p.OpenAIKeyPresent
+	oracleArtifactBlocked := p.OracleArtifactRequired && !p.OracleArtifactPresent
+	rawReady := oracleReady && p.OpenAIKeyPresent && !oracleArtifactBlocked
 	gatewayBlocked := p.GatewayChecked && !p.GatewayReachable
 	fakReady := rawReady && p.GatewayChecked && p.GatewayReachable
 
@@ -98,6 +107,11 @@ func BuildRehearsalPreflight(in RehearsalPreflightInput) RehearsalPreflight {
 	}
 	if !p.DockerEngineUp {
 		reasons = append(reasons, ReasonDockerEngineDown)
+	}
+	// Oracle-before-paid: surface the missing oracle artifact ahead of the key,
+	// because the operator must run the oracle smoke first to produce it.
+	if oracleReady && oracleArtifactBlocked {
+		reasons = append(reasons, ReasonOracleArtifactMissing)
 	}
 	if !p.OpenAIKeyPresent {
 		reasons = append(reasons, ReasonOpenAIKeyMissing)
@@ -119,6 +133,7 @@ func BuildRehearsalPreflight(in RehearsalPreflightInput) RehearsalPreflight {
 	gates := []PreflightGate{
 		{Name: "harbor_present", OK: p.HarborPresent, Detail: harborDetail(p)},
 		{Name: "docker_engine_up", OK: p.DockerEngineUp, Detail: dockerDetail(p)},
+		{Name: "oracle_smoke_artifact", OK: !oracleArtifactBlocked, Detail: oracleArtifactDetail(p)},
 		{Name: "openai_api_key_present", OK: p.OpenAIKeyPresent, Detail: keyDetail(p.OpenAIKeyPresent)},
 		{Name: "fak_gateway_reachable", OK: p.GatewayChecked && p.GatewayReachable, Detail: gatewayDetail(p)},
 	}
@@ -220,6 +235,8 @@ func preflightNextAction(reasons []string) string {
 		return "install Harbor (uv tool install harbor), then re-run the preflight"
 	case ReasonDockerEngineDown:
 		return "start the Docker engine, then re-run the preflight and the official oracle smoke before any paid run"
+	case ReasonOracleArtifactMissing:
+		return "run the official Harbor oracle smoke and check in its artifact before any paid raw/fak run"
 	case ReasonOpenAIKeyMissing:
 		return "run the oracle smoke first, then set OPENAI_API_KEY in the rehearsal shell for the bounded raw paid smoke"
 	case ReasonFakGatewayUnreach:
@@ -247,6 +264,24 @@ func dockerDetail(p PreflightProbe) string {
 		return "docker engine reachable"
 	}
 	return "docker engine not reachable"
+}
+
+func oracleArtifactDetail(p PreflightProbe) string {
+	path := strings.TrimSpace(p.OracleArtifactPath)
+	switch {
+	case !p.OracleArtifactRequired:
+		return "not required (pass --oracle-artifact to enforce oracle-before-paid)"
+	case p.OracleArtifactPresent:
+		if path != "" {
+			return "present at " + path
+		}
+		return "present"
+	default:
+		if path != "" {
+			return "required but missing: " + path
+		}
+		return "required but missing"
+	}
 }
 
 func keyDetail(present bool) string {
