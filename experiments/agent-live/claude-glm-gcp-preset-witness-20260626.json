@@ -1,0 +1,34 @@
+{
+  "witness": "claude-glm-gcp preset resolves to fak fronting a GLM-5.2 /v1 with model glm-5.2",
+  "date": "2026-06-26",
+  "host": "win32 (16-core), no GPU",
+  "what_this_proves": "The glm-gcp preset (claude-glm-gcp) wires the real Claude Code harness through fak's openai backend to a GLM-5.2 OpenAI-compatible /v1. Proven on BOTH launchers against a mock /v1 advertising model glm-5.2 (no GPU / no live GLM weights). The live model turn is hardware-gated; the preset + wire are proven here.",
+  "upstream_under_test": "mock OpenAI /v1 advertising {\"id\":\"glm-5.2\"} (stands in for the GCP serving node)",
+  "powershell_launcher": {
+    "command": "FAK_DOGFOOD_PRESET=glm-gcp FAK_GLM_GCP_BASE_URL=http://127.0.0.1:8200/v1 dogfood-claude.ps1 --print-env",
+    "backend_log": "using OpenAI-compatible backend http://127.0.0.1:8200/v1 (model: glm-5.2)",
+    "serve_argv": "fak serve --addr 127.0.0.1:8137 --provider openai --model glm-5.2 --base-url http://127.0.0.1:8200/v1",
+    "healthz": {"engine": "inkernel", "model": "glm-5.2", "ok": true, "planner": "proxy"},
+    "claude_wiring": {
+      "ANTHROPIC_BASE_URL": "http://127.0.0.1:8137",
+      "ANTHROPIC_MODEL": "glm-5.2",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.2",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.2",
+      "ANTHROPIC_SMALL_FAST_MODEL": "glm-5.2"
+    }
+  },
+  "bash_launcher": {
+    "command": "FAK_DOGFOOD_PRESET=glm-gcp FAK_GLM_GCP_BASE_URL=http://127.0.0.1:8200/v1 dogfood-claude.sh --print-env",
+    "backend_log": "using OpenAI-compatible backend http://127.0.0.1:8200/v1 (model: glm-5.2)",
+    "serve_argv": "fak serve --addr 127.0.0.1:8138 --provider openai --engine inkernel --model glm-5.2 --base-url http://127.0.0.1:8200/v1 --policy examples/dogfood-claude-policy.json",
+    "healthz": {"engine": "inkernel", "model": "glm-5.2", "ok": true, "planner": "proxy"}
+  },
+  "bringup_plan": {
+    "command": "scripts/gcp-glm-serve.sh (plan-by-default, no creds)",
+    "tier": "a3-ultra-h200 (a3-ultragpu-8g, 8x H200, sm_90, ~$60/hr)",
+    "renders": "gcloud compute instances create ... --accelerator=type=nvidia-h200-141gb,count=8 + the preflight-gated glm52_sglang_vllm_serve.sh + the claude-glm-gcp hand-off"
+  },
+  "contract_test": "tools/claude_glm_gcp_test.py (5 cases) + tools/gcp_accel_test.py emit-shell — 19 passed",
+  "hardware_gated_remaining": "Run scripts/gcp-glm-serve.sh --apply on an authenticated host with H200/B200 quota, tunnel to its /v1, then: claude-glm-gcp --probe \"say pong\"."
+}

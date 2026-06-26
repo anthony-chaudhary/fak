@@ -64,6 +64,33 @@ def test_boot_image_is_a_cuda_image():
     assert proj == "deeplearning-platform-release"
 
 
+def test_emit_shell_is_evalable_and_matches_the_registry():
+    # The bring-up script (scripts/gcp-glm-serve.sh) sources these, so they must be the
+    # exact registry strings, eval-able, and prefixed.
+    out = gcp_accel.emit_shell("a3-ultra-h200")
+    t = gcp_accel.by_slug("a3-ultra-h200")
+    fam, proj = gcp_accel.boot_image()
+    lines = dict(line.split("=", 1) for line in out.splitlines())
+    # shlex.quote wraps nothing for bare tokens; strip any quoting for the compare.
+    import shlex
+    got = {k: shlex.split(v)[0] if v else "" for k, v in lines.items()}
+    assert got["GLM_MACHINE_TYPE"] == t.machine_type == "a3-ultragpu-8g"
+    assert got["GLM_ACCEL_FLAG"] == "type=nvidia-h200-141gb,count=8"
+    assert got["GLM_GPU_COUNT"] == "8"
+    assert got["GLM_COMPUTE_CAP"] == "90"  # sm_90+, the DSA floor the preflight enforces
+    assert got["GLM_IMAGE_FAMILY"] == fam
+    assert got["GLM_IMAGE_PROJECT"] == proj
+    assert got["GLM_DEFAULT_ZONE"] == t.common_zones[0]
+
+
+def test_emit_shell_custom_prefix_and_unknown_slug():
+    out = gcp_accel.emit_shell("a4-b200", prefix="X")
+    assert "X_MACHINE_TYPE=" in out and "X_BLACKWELL=1" in out
+    import pytest
+    with pytest.raises(KeyError):
+        gcp_accel.emit_shell("no-such-tier")
+
+
 # --------------------------------------------------------------------------- #
 # Probe verdict logic (synthetic quota maps -- no network)
 # --------------------------------------------------------------------------- #

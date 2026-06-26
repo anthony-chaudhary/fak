@@ -17,6 +17,7 @@ it imports cleanly anywhere (including the test suite) with no auth.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Optional
 
@@ -266,8 +267,38 @@ def accelerator_flag(tier: AccelTier) -> str:
     return f"type={tier.accelerator_type},count={tier.gpu_count}"
 
 
-if __name__ == "__main__":
-    # Tiny human dump so `python tools/gcp_accel.py` is a quick sanity view.
+def emit_shell(slug: str, prefix: str = "GLM") -> str:
+    """Eval-able shell assignments for one tier, so a bash provisioner reads the
+    machine-type / accelerator / image strings from THIS registry instead of
+    re-hardcoding them (the module's whole reason for existing). Keys are
+    `<PREFIX>_<FIELD>`; values are single-quote-shell-safe. Raises KeyError on an
+    unknown slug. Pairs with scripts/gcp-glm-serve.sh:  eval "$(python tools/gcp_accel.py --emit-shell a3-ultra-h200)".
+    """
+    import shlex
+
+    t = by_slug(slug)
+    if t is None:
+        raise KeyError(slug)
+    fam, proj = boot_image()
+    pairs = {
+        "SLUG": t.slug,
+        "MACHINE_TYPE": t.machine_type,
+        "ACCEL_FLAG": accelerator_flag(t),
+        "ACCEL_TYPE": t.accelerator_type,
+        "GPU_COUNT": str(t.gpu_count),
+        "GPU_LABEL": t.gpu_label,
+        "COMPUTE_CAP": t.compute_capability,
+        "DEFAULT_ZONE": t.common_zones[0] if t.common_zones else "",
+        "IMAGE_FAMILY": fam,
+        "IMAGE_PROJECT": proj,
+        "APPROX_USD_HR": f"{t.approx_usd_per_hour:.2f}",
+        "BLACKWELL": "1" if t.blackwell else "0",
+    }
+    return "\n".join(f"{prefix}_{k}={shlex.quote(v)}" for k, v in pairs.items())
+
+
+def _print_table() -> None:
+    """The human sanity dump: `python tools/gcp_accel.py` with no args."""
     print(f"{'slug':14} {'machine_type':18} {'gpu':28} {'cap':4} {'~$/hr':>7}")
     for t in fallback_ladder():
         tag = " [blackwell]" if t.blackwell else ""
@@ -276,3 +307,29 @@ if __name__ == "__main__":
             f"{t.gpu_count}x {t.gpu_label:24} sm_{t.compute_capability:3} "
             f"{t.approx_usd_per_hour:7.2f}{tag}"
         )
+
+
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(description="GCP accelerator registry for fak.")
+    ap.add_argument(
+        "--emit-shell",
+        metavar="SLUG",
+        help="print eval-able shell assignments for one tier (for gcp-glm-serve.sh)",
+    )
+    ap.add_argument(
+        "--prefix",
+        default="GLM",
+        help="variable-name prefix for --emit-shell (default GLM)",
+    )
+    args = ap.parse_args()
+    if args.emit_shell:
+        try:
+            print(emit_shell(args.emit_shell, prefix=args.prefix))
+        except KeyError:
+            slugs = ", ".join(t.slug for t in TIERS)
+            sys.stderr.write(f"unknown tier slug: {args.emit_shell!r} (known: {slugs})\n")
+            raise SystemExit(2)
+    else:
+        _print_table()

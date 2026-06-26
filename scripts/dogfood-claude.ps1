@@ -26,7 +26,7 @@
   --smoke           curl the wire end-to-end (no model needed), then exit
   --print-env       print the env lines for your own `claude` invocation
   --list-accounts   show the account switcher's roster, then exit
-  --install         copy `fak.exe` + a `fak-dogfood.cmd` shim onto PATH, then exit
+  --install         copy `fak.exe` + `fak-dogfood.cmd` / `claude-glm-gcp.cmd` shims onto PATH, then exit
   --help            this help
 
 .NOTES
@@ -35,7 +35,15 @@
     FAK_DOGFOOD_SHIM_PORT  transformers shim port         (default 8190, auto-bumped if busy)
     FAK_DOGFOOD_MODEL      served model id                (default SmolLM2-135M for shim; qwen2.5-coder:7b for ollama; qwen2.5-7b-q8 for gguf; empty for anthropic)
     FAK_DOGFOOD_CTX        ollama context window          (default 32768; baked via a derived num_ctx model so the ~25K Claude Code prompt is not truncated; 0 disables)
-    FAK_DOGFOOD_BACKEND    shim | ollama | gguf | anthropic   (default shim)
+    FAK_DOGFOOD_PRESET     glm-gcp                        (auto from the invoked name claude-glm-gcp)
+                             glm-gcp = front GLM-5.2 served on the GCP node (scripts/gcp-glm-serve.sh)
+                             via the openai backend. Set FAK_GLM_GCP_BASE_URL to its /v1 (a Tailscale
+                             host, or a localhost SSH/IAP tunnel; default http://127.0.0.1:8200/v1).
+    FAK_GLM_GCP_BASE_URL   glm-gcp preset's GLM-5.2 /v1 base URL   (default http://127.0.0.1:8200/v1)
+    FAK_DOGFOOD_BASE_URL   openai backend upstream /v1 base URL    (overrides the preset's URL)
+    FAK_DOGFOOD_BACKEND    shim | ollama | openai | gguf | anthropic   (default shim)
+                             openai = a remote OpenAI-compatible /v1 (e.g. GLM-5.2 on GCP); fak
+                             proxies straight to it. Needs FAK_DOGFOOD_BASE_URL (or the preset's URL).
                              ollama = a coding-capable local model (default qwen2.5-coder:7b)
                              auto-pulled and served with a 32K context. The usable local
                              path: Claude Code -> fak (adjudicates) -> ollama. Needs the
@@ -103,17 +111,42 @@ $Root = $FakDir
 # ---- knobs -----------------------------------------------------------------
 $Port      = if ($env:FAK_DOGFOOD_PORT)      { [int]$env:FAK_DOGFOOD_PORT }      else { 8080 }
 $ShimPort  = if ($env:FAK_DOGFOOD_SHIM_PORT) { [int]$env:FAK_DOGFOOD_SHIM_PORT } else { 8190 }
-$Backend   = if ($env:FAK_DOGFOOD_BACKEND)   { $env:FAK_DOGFOOD_BACKEND }   else { 'shim' }
+# ---- preset (FAK_DOGFOOD_PRESET) -------------------------------------------
+# A preset is a named bundle of (backend, base URL, model) defaults, selected by env or
+# by the installed launcher name via the .cmd shim. claude-glm-gcp => the glm-gcp preset:
+# point fak's openai backend at GLM-5.2 served on the GCP node (scripts/gcp-glm-serve.sh).
+# An explicit FAK_DOGFOOD_BACKEND / _MODEL / _BASE_URL still overrides the preset below.
+$Preset        = $env:FAK_DOGFOOD_PRESET
+$PresetBackend = ''
+$PresetBaseUrl = ''
+$PresetModel   = ''
+if ($Preset) {
+  switch ($Preset) {
+    'glm-gcp' {
+      $PresetBackend = 'openai'
+      $PresetBaseUrl = if ($env:FAK_GLM_GCP_BASE_URL) { $env:FAK_GLM_GCP_BASE_URL } else { 'http://127.0.0.1:8200/v1' }
+      $PresetModel   = if ($env:FAK_GLM_GCP_MODEL)    { $env:FAK_GLM_GCP_MODEL }    else { 'glm-5.2' }
+    }
+    default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want glm-gcp)" }
+  }
+}
+
+$Backend   = if ($env:FAK_DOGFOOD_BACKEND)   { $env:FAK_DOGFOOD_BACKEND }   elseif ($PresetBackend) { $PresetBackend } else { 'shim' }
 # The 'gguf' (kernel) backend is the OPT-IN sibling: it runs `fak serve --gguf` — fak's
 # OWN pure-Go in-kernel forward, NO Python shim, NO proxy engine, NO --base-url. This is
 # the path that proves Claude Code doing agentic work against fak's own kernel. It is OFF
 # by default (default stays 'shim'); set FAK_DOGFOOD_BACKEND=gguf or pass -Kernel.
 $KernelBackend = ($Backend -eq 'gguf')
+# The 'openai' backend fronts a REMOTE OpenAI-compatible /v1 (e.g. GLM-5.2 on the GCP
+# node) — fak proxies straight to it, no local model. The base URL comes from the preset
+# or FAK_DOGFOOD_BASE_URL; the model is resolved from /models when not pinned.
+$OpenaiBackend = ($Backend -eq 'openai')
+$OpenaiBaseUrl = if ($env:FAK_DOGFOOD_BASE_URL) { $env:FAK_DOGFOOD_BASE_URL } else { $PresetBaseUrl }
 # The 'anthropic' upstream fronts the REAL Claude API — Claude Code keeps its own
 # real model tiers (claude-opus-4-8, etc.), so the single-model override is OFF and
 # the default 'model' is empty. Local backends still map every tier onto one model.
 $AnthropicUpstream = ($Backend -eq 'anthropic')
-$DefaultModel = if ($AnthropicUpstream) { '' } elseif ($KernelBackend) { 'qwen2.5-7b-q8' } elseif ($Backend -eq 'ollama') { 'qwen2.5-coder:7b' } else { 'HuggingFaceTB/SmolLM2-135M-Instruct' }
+$DefaultModel = if ($AnthropicUpstream) { '' } elseif ($KernelBackend) { 'qwen2.5-7b-q8' } elseif ($OpenaiBackend) { $PresetModel } elseif ($Backend -eq 'ollama') { 'qwen2.5-coder:7b' } else { 'HuggingFaceTB/SmolLM2-135M-Instruct' }
 $Model     = if ($env:FAK_DOGFOOD_MODEL)     { $env:FAK_DOGFOOD_MODEL }     else { $DefaultModel }
 $Account   = if ($env:FAK_DOGFOOD_ACCOUNT)   { $env:FAK_DOGFOOD_ACCOUNT }   else { 'faklocal' }
 $UserHome  = if ($env:FLEET_USER_HOME)       { $env:FLEET_USER_HOME }       else { $env:USERPROFILE }
@@ -193,6 +226,39 @@ function Wait-Url { param([string]$url, [int]$timeoutSec = 120)
   return $false
 }
 
+# ---- openai backend: discover a remote OpenAI-compatible /v1 ----------------
+# The glm-gcp preset (and any FAK_DOGFOOD_BACKEND=openai) fronts a REMOTE /v1 — GLM-5.2
+# on the GCP node, reached over Tailscale or a localhost tunnel. These two helpers mirror
+# the bash twin's normalize_openai_base_url / first_openai_model_from_models: confirm the
+# endpoint answers /models (so we never wire a dead upstream) and pick a served model id.
+function Get-JsonOrNull { param([string]$url)
+  try { return (Invoke-WebRequest -Uri $url -TimeoutSec 5 -UseBasicParsing).Content } catch { return $null }
+}
+function Resolve-OpenAiBaseUrl { param([string]$raw)
+  $raw = ([string]$raw).TrimEnd('/')
+  if (-not $raw) { return $null }
+  if ($raw -match '/v1$') {
+    if (Get-JsonOrNull "$raw/models") { return $raw }
+  } else {
+    if (Get-JsonOrNull "$raw/v1/models") { return "$raw/v1" }
+  }
+  if (Get-JsonOrNull "$raw/models") { return $raw }
+  return $null
+}
+function Get-FirstOpenAiModel { param([string]$url)
+  $body = Get-JsonOrNull $url
+  if (-not $body) { return $null }
+  try {
+    $doc = $body | ConvertFrom-Json
+    $rows = if ($doc.data) { $doc.data } elseif ($doc.models) { $doc.models } else { @() }
+    foreach ($row in $rows) {
+      $id = if ($row.id) { $row.id } elseif ($row.name) { $row.name } elseif ($row.model) { $row.model } else { $null }
+      if ($id) { return [string]$id }
+    }
+  } catch { }
+  return $null
+}
+
 # ---- help / list-accounts: no stack needed ---------------------------------
 if ($Mode -eq 'help') {
   Get-Help $MyInvocation.MyCommand.Path -Detailed
@@ -224,8 +290,15 @@ if ($Mode -eq 'install') {
   $shimBody = "@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
   [System.IO.File]::WriteAllText($shim, $shimBody, (New-Object System.Text.ASCIIEncoding))
 
+  # Write the claude-glm-gcp.cmd preset shim: same script, with FAK_DOGFOOD_PRESET=glm-gcp
+  # pinned for the child only (a .cmd's `set` is local to its own cmd.exe instance).
+  $glmShim = Join-Path $BinDir 'claude-glm-gcp.cmd'
+  $glmShimBody = "@set FAK_DOGFOOD_PRESET=glm-gcp`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
+  [System.IO.File]::WriteAllText($glmShim, $glmShimBody, (New-Object System.Text.ASCIIEncoding))
+
   Log "installed: $(Join-Path $BinDir 'fak.exe')  (copied; re-run --install to refresh)"
   Log "installed: $shim  -> $self"
+  Log "installed: $glmShim  -> $self (preset glm-gcp)"
   $onPath = (($env:PATH -split ';') | ForEach-Object { $_.TrimEnd('\') }) -contains $BinDir.TrimEnd('\')
   if ($onPath) {
     Log "ready - run ``fak-dogfood --smoke`` or ``fak serve --help`` from anywhere"
@@ -338,7 +411,19 @@ try {
         Log "ollama CLI not found (PATH or AMD AI-Bundle) - serving the already-loaded model; set FAK_DOGFOOD_CTX or pre-create a num_ctx model if the prompt is truncated."
       }
     }
-    else { Die "unknown FAK_DOGFOOD_BACKEND=$Backend (want shim|ollama)" }
+    elseif ($Backend -eq 'openai') {
+      # Remote OpenAI-compatible upstream (e.g. GLM-5.2 on the GCP node). Validate it is
+      # reachable and resolve the served model; fak proxies straight to it (no local model
+      # to start). The endpoint is per-node and hardware-gated, so fail loud with the
+      # bring-up hint rather than wiring Claude Code to a dead upstream.
+      if (-not $OpenaiBaseUrl) { Die "FAK_DOGFOOD_BACKEND=openai needs a base URL - set FAK_DOGFOOD_BASE_URL (or FAK_GLM_GCP_BASE_URL for the glm-gcp preset)" }
+      $BaseUrl = Resolve-OpenAiBaseUrl $OpenaiBaseUrl
+      if (-not $BaseUrl) { Die "OpenAI-compatible endpoint not reachable at $OpenaiBaseUrl (/models or /v1/models).`n       Stand up the GLM-5.2 node first: scripts/gcp-glm-serve.sh, then point FAK_GLM_GCP_BASE_URL at its /v1 (Tailscale host or a localhost SSH/IAP tunnel)." }
+      if (-not $Model) { $Model = Get-FirstOpenAiModel "$BaseUrl/models" }
+      if (-not $Model) { Die "could not resolve a model from $BaseUrl/models; set FAK_DOGFOOD_MODEL" }
+      Log "using OpenAI-compatible backend $BaseUrl (model: $Model)"
+    }
+    else { Die "unknown FAK_DOGFOOD_BACKEND=$Backend (want shim|ollama|openai)" }
   }
 
   # ---- start fak serve (the kernel) in front of the model ------------------
@@ -349,7 +434,9 @@ try {
   # The in-kernel 7B Q8 CPU forward is much slower than the SmolLM shim — a real Claude
   # Code turn (a multi-thousand-token tool prompt prefilled on CPU) can take minutes — so
   # the kernel arm raises the floor higher (900s) to avoid a 502 mid-turn.
-  $TimeoutFloor = if ($KernelBackend) { '900' } else { '300' }
+  # The remote openai backend (GLM-5.2 on GCP) is a big model with a long prefill — give
+  # its turns the same generous 900s floor as the slow in-kernel CPU forward.
+  $TimeoutFloor = if ($KernelBackend -or $OpenaiBackend) { '900' } else { '300' }
   if (-not $env:FAK_PLANNER_TIMEOUT_S)    { $env:FAK_PLANNER_TIMEOUT_S = $TimeoutFloor }
   if (-not $env:FAK_HTTP_WRITE_TIMEOUT_S) { $env:FAK_HTTP_WRITE_TIMEOUT_S = $TimeoutFloor }
   # Claude Code's OWN client request timeout must outlast a slow CPU turn, or the harness

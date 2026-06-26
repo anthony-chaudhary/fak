@@ -39,6 +39,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](gcp-tier2-control-vm.md) |
 | Plan guard-hop RSI tuning | [guard-hop-rsi-loop.md](guard-hop-rsi-loop.md) |
 | Guard the opencode/GLM dispatch lane | [opencode-glm-guard.md](opencode-glm-guard.md) |
+| Use GLM-5.2 from the GCP kernel setup (the `claude-glm-gcp` preset) | [claude-glm-gcp.md](claude-glm-gcp.md) |
 
 ## Author and harden the policy
 

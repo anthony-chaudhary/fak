@@ -89,7 +89,7 @@ count reaches the client.
 ./scripts/dogfood-claude.sh --smoke          # curl the wire end-to-end (no model needed), then exit
 ./scripts/dogfood-claude.sh --print-env      # the export lines for your own `claude` invocation
 ./scripts/dogfood-claude.sh --list-accounts  # the account switcher roster
-./scripts/dogfood-claude.sh --install        # symlink `fak`, `fak-dogfood`, and `fak-qwen36-claude` onto PATH
+./scripts/dogfood-claude.sh --install        # symlink `fak`, `fak-dogfood`, `fak-qwen36-claude`, and `claude-glm-gcp` onto PATH
 ```
 
 ### Run it from anywhere (one line)
@@ -145,7 +145,7 @@ when the box has only tiny <=3B models), `FAK_DOGFOOD_FALLBACK_MODEL`
 `FAK_DOGFOOD_BASE_URL` (OpenAI-compatible upstream for `openai`, e.g. a
 `llama-server` `/v1` URL), `FAK_DOGFOOD_TIMEOUT_S` (planner/write timeout; default
 300s, or 900s for `openai`), `FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON` (optional JSON
-merged into upstream requests), `FAK_DOGFOOD_PRESET` (`qwen36-local`),
+merged into upstream requests), `FAK_DOGFOOD_PRESET` (`qwen36-local` | `glm-gcp`),
 `FAK_DOGFOOD_CLAUDE_DEBUG` (default `api`; set `0`/`off` to disable),
 `FAK_DOGFOOD_CLAUDE_DEBUG_FILE` (optional Claude debug file),
 `FAK_DOGFOOD_ACCOUNT` (switcher tag), `FAK_DOGFOOD_POLICY`
@@ -190,6 +190,23 @@ fak-dogfood --probe "Reply with exactly the word: pong"
 
 If `FAK_DOGFOOD_MODEL` is omitted on a generic OpenAI-compatible run, the launcher
 reads the first id from `$FAK_DOGFOOD_BASE_URL/models`.
+
+### GLM-5.2 from the GCP kernel setup (`claude-glm-gcp` preset)
+
+The `glm-gcp` preset is the openai backend preset for **GLM-5.2 served on a GCP GPU
+node**. Stand the node up with `scripts/gcp-glm-serve.sh` (plan-by-default; provisions an
+sm_90+ tier and runs the preflight-gated SGLang/vLLM serve), open a Tailscale/SSH-IAP path
+to its `/v1`, then use it from here through the kernel with one command:
+
+```bash
+FAK_GLM_GCP_BASE_URL=http://127.0.0.1:8200/v1 claude-glm-gcp --probe "say pong"
+claude-glm-gcp                                 # interactive Claude Code on GLM-5.2
+```
+
+`claude-glm-gcp` is this launcher with `FAK_DOGFOOD_PRESET=glm-gcp`: backend `openai`,
+served id `glm-5.2`, base URL `FAK_GLM_GCP_BASE_URL`. The full playbook — bring-up,
+tunnel, and the honest hardware gate (the live model turn needs the GCP node up) — is
+[`docs/fak/claude-glm-gcp.md`](docs/fak/claude-glm-gcp.md).
 
 The launcher raises `API_TIMEOUT_MS` for the child Claude Code process from
 `FAK_DOGFOOD_TIMEOUT_S`, and the gateway emits Anthropic SSE `ping` events while a

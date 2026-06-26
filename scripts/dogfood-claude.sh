@@ -16,11 +16,15 @@
 #   ./scripts/dogfood-claude.sh --smoke         # curl the wire (no model intelligence needed), then exit
 #   ./scripts/dogfood-claude.sh --print-env     # print the export lines for your own `claude` invocation
 #   ./scripts/dogfood-claude.sh --list-accounts # show the account switcher's roster, then exit
-#   ./scripts/dogfood-claude.sh --install       # symlink `fak-dogfood`, `fak-qwen36-claude`, and `fak` onto PATH
+#   ./scripts/dogfood-claude.sh --install       # symlink `fak-dogfood`, `fak-qwen36-claude`, `claude-glm-gcp`, and `fak` onto PATH
 #   fak-qwen36-claude --probe "hi"              # installed Qwen3.6 local preset
+#   claude-glm-gcp --probe "say pong"           # installed GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
 #
 # Knobs (env):
-#   FAK_DOGFOOD_PRESET   qwen36-local preset    (auto when invoked as fak-qwen36-claude)
+#   FAK_DOGFOOD_PRESET   qwen36-local | glm-gcp (auto from the invoked name: fak-qwen36-claude / claude-glm-gcp)
+#   FAK_GLM_GCP_BASE_URL the glm-gcp preset's GLM-5.2 /v1 base URL (a Tailscale host, or a localhost
+#                          SSH/IAP tunnel to the GCP serving node; default http://127.0.0.1:8200/v1).
+#                          Stand the node up with scripts/gcp-glm-serve.sh.
 #   FAK_DOGFOOD_PORT     fak serve port              (default 8080)
 #   FAK_DOGFOOD_MODEL    served model id             (default: first ollama model, else qwen2.5:1.5b)
 #   FAK_DOGFOOD_BACKEND  ollama | shim | openai | gguf | anthropic
@@ -119,8 +123,13 @@ build_fak() {
 }
 
 PRESET="${FAK_DOGFOOD_PRESET:-}"
-if [ -z "$PRESET" ] && [ "$INVOKED_NAME" = "fak-qwen36-claude" ]; then
-  PRESET="qwen36-local"
+# The invoked name selects a preset when one isn't pinned via env — so the installed
+# symlinks (fak-qwen36-claude, claude-glm-gcp) each launch their own preset.
+if [ -z "$PRESET" ]; then
+  case "$INVOKED_NAME" in
+    fak-qwen36-claude) PRESET="qwen36-local" ;;
+    claude-glm-gcp)    PRESET="glm-gcp" ;;
+  esac
 fi
 
 DEFAULT_BACKEND="ollama"
@@ -136,7 +145,20 @@ case "$PRESET" in
     DEFAULT_MODEL="lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"
     DEFAULT_PROVIDER_EXTRA_BODY='{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}'
     ;;
-  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local)" ;;
+  glm-gcp)
+    # GLM-5.2 served on the GCP kernel setup (SGLang/vLLM on an sm_90+ node, stood up by
+    # scripts/gcp-glm-serve.sh) fronted by `fak serve --provider openai`. The base URL is
+    # the GLM /v1 — a Tailscale host, or a localhost SSH/IAP tunnel to the serving node.
+    # FAK_GLM_GCP_BASE_URL is the preset knob; FAK_DOGFOOD_BASE_URL still overrides it.
+    # The served id is `glm-5.2` (SGLang/vLLM --served-model-name); every Claude Code tier
+    # maps onto it. The openai backend's 900s timeout floor (below) covers GLM's big prefill.
+    PRESET="glm-gcp"
+    DEFAULT_BACKEND="openai"
+    DEFAULT_OPENAI_BASE_URL="${FAK_GLM_GCP_BASE_URL:-http://127.0.0.1:8200/v1}"
+    DEFAULT_MODEL="${FAK_GLM_GCP_MODEL:-glm-5.2}"
+    DEFAULT_PROVIDER_EXTRA_BODY=""
+    ;;
+  *) die "unknown FAK_DOGFOOD_PRESET=$PRESET (want qwen36-local | glm-gcp)" ;;
 esac
 
 PORT="${FAK_DOGFOOD_PORT:-8080}"
@@ -202,6 +224,7 @@ esac
 if [ "$MODE" = "install" ]; then
   name="fak-dogfood"
   qwen_name="fak-qwen36-claude"
+  glm_name="claude-glm-gcp"
   if [ -n "${FAK_DOGFOOD_BINDIR:-}" ]; then
     cands="$FAK_DOGFOOD_BINDIR"
   else
@@ -218,14 +241,16 @@ if [ "$MODE" = "install" ]; then
   target="$SCRIPT_DIR/$(basename "$SELF")"
   ln -sf "$target" "$bindir/$name"
   ln -sf "$target" "$bindir/$qwen_name"
+  ln -sf "$target" "$bindir/$glm_name"
   log "building fak -> $BIN"
   build_fak "$BIN"
   ln -sf "$BIN" "$bindir/fak"
   log "installed: $bindir/$name -> $target"
   log "installed: $bindir/$qwen_name -> $target"
+  log "installed: $bindir/$glm_name -> $target"
   log "installed: $bindir/fak -> $BIN"
   case ":$PATH:" in
-    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, or \`$qwen_name\` from anywhere" ;;
+    *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, or \`$glm_name --probe\` from anywhere" ;;
     *)             log "NOTE: $bindir is not on PATH — add it: export PATH=\"$bindir:\$PATH\"" ;;
   esac
   exit 0
