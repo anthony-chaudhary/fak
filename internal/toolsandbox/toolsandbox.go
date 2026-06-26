@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"time"
@@ -122,6 +123,13 @@ func Load(path string) (Suite, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&s); err != nil {
 		return Suite{}, fmt.Errorf("toolsandbox suite: %w", err)
+	}
+	var extra struct{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return Suite{}, fmt.Errorf("toolsandbox suite: trailing JSON value")
+		}
+		return Suite{}, fmt.Errorf("toolsandbox suite: trailing data: %w", err)
 	}
 	if err := s.Validate(); err != nil {
 		return Suite{}, err

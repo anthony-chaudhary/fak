@@ -3,6 +3,8 @@ package toolsandbox
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +63,38 @@ func TestValidateRefusesBadSuite(t *testing.T) {
 	err := (Suite{Schema: SuiteSchema, Benchmark: "toolsandbox", Tasks: []Task{{ID: "x"}}}).Validate()
 	if err == nil || !strings.Contains(err.Error(), "no milestones") {
 		t.Fatalf("Validate error = %v, want missing milestones", err)
+	}
+}
+
+func TestLoadRejectsTrailingData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "suite.json")
+	suite := `{
+  "schema": "fak.toolsandbox-adapter-suite.v1",
+  "benchmark": "toolsandbox-smoke",
+  "tasks": [{
+    "id": "task-1",
+    "milestones": ["done"],
+    "policy": {"version": "fak-policy/v1", "allow": ["finish"]},
+    "calls": [{"tool": "finish", "milestone": "done"}]
+  }]
+}`
+	if err := os.WriteFile(path, []byte(suite+"\n{}"), 0o644); err != nil {
+		t.Fatalf("write suite: %v", err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "trailing JSON value") {
+		t.Fatalf("Load trailing value error = %v, want trailing JSON value", err)
+	}
+	if err := os.WriteFile(path, []byte(suite+"\nnot-json"), 0o644); err != nil {
+		t.Fatalf("write suite: %v", err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "trailing data") {
+		t.Fatalf("Load trailing data error = %v, want trailing data", err)
+	}
+	if err := os.WriteFile(path, []byte(suite), 0o644); err != nil {
+		t.Fatalf("write suite: %v", err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("valid Load returned error: %v", err)
 	}
 }
 
