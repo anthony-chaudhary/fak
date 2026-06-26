@@ -1,0 +1,85 @@
+{
+  "schema": "fak.arm64-qkernel-score.v1",
+  "captured_at": "2026-06-26T05:52:39Z",
+  "machine": "node-macos-a",
+  "machine_spec": "Apple M3 Pro / Mac15,7, 12 CPU core (6P+6E), 18 GPU core, 36 GB unified, macOS 26.5, Metal 4",
+  "benchmark_clone": {
+    "rev": "20fdf16",
+    "build_tags": ["fakmetal"],
+    "local_patches": []
+  },
+  "goal": "3x better core KPIs for the Mac Qwen3.6-27B (decode/prefill tok/s)",
+  "model": {
+    "name": "Qwen3.6-27B",
+    "precision": "Q4_K_M",
+    "source": "~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf (15 GB)",
+    "arch": "Gated-DeltaNet hybrid (cfg.IsQwen35Hybrid, 48 GDN layers + periodic full-attention)"
+  },
+  "command": {
+    "tool": "cmd/fakchat",
+    "build_tags": ["fakmetal"],
+    "env": {"FAK_Q4K": "1", "FAK_METAL": "1", "FAK_GPU_LEASE_NOWAIT": "1", "FAK_QPROFILE": "1"},
+    "flags": ["-gguf", "Qwen3.6-27B.q4_k_m.gguf", "-tok", "tokenizers/qwen3.6", "-p", "Write three sentences about why the ocean is important.", "-n", "64", "-quiet"],
+    "backend_banner": "fak in-kernel Gated-DeltaNet (resident Q4_K decode + Q8 fallback, cached) [Metal q4_k prefill]"
+  },
+  "baselines": {
+    "fak_cpu_resident_q4k_decode_tok_per_sec": 0.9,
+    "llama_cpp_metal_decode_tok_per_sec": 7.29,
+    "llama_cpp_metal_prefill_tok_per_sec": 51.55,
+    "three_x_decode_target_tok_per_sec": 2.7
+  },
+  "arms": {
+    "clean_llama_stopped": {
+      "note": "launchd com.fak.qwen36-model booted out for a clean 36 GB GPU; restored via EXIT trap",
+      "prefill_tokens": 29,
+      "prefill_seconds": 48.27,
+      "prefill_tok_per_sec": 0.6,
+      "decode_tokens": 64,
+      "decode_seconds": 54.12,
+      "decode_tok_per_sec": 1.2,
+      "load_seconds_est": 40,
+      "max_rss_gib": 26.0,
+      "peak_footprint_gib": 53,
+      "swaps": 0,
+      "decode_phase_profile_ms": {
+        "mlp_decode": {"ms": 29200, "pct": 54.0, "calls": 4096, "ms_per_call": 7.13},
+        "qwen35_linear_step_in_proj": {"ms": 8697, "pct": 16.1, "calls": 3072},
+        "qwen35_linear_step_out_proj": {"ms": 3453, "pct": 6.4, "calls": 3072},
+        "qwen35_linear_step_recurrent": {"ms": 3199, "pct": 5.9, "calls": 3072},
+        "full_attn_qkv_proj": {"ms": 2900, "pct": 5.4, "calls": 1024},
+        "lm_head_q8": {"ms": 1934, "pct": 3.6, "calls": 64}
+      },
+      "prefill_phase_profile_ms": {
+        "mlp_gate_up_proj": {"ms": 26393, "pct": 54.7, "calls": 64, "ms_per_call": 412},
+        "mlp_down_proj": {"ms": 8765, "pct": 18.2, "calls": 64},
+        "qwen35_linear_in_proj": {"ms": 5416, "pct": 11.2, "calls": 48}
+      }
+    },
+    "contended_llama_up": {
+      "note": "both 27B models resident, swap thrash — not a fak number, kept for contrast",
+      "prefill_tok_per_sec": 0.6,
+      "decode_tok_per_sec": 0.8,
+      "load_seconds": 190,
+      "peak_footprint_gib": 53,
+      "page_reclaims": 15460150
+    }
+  },
+  "microbench": {
+    "tool": "go test -tags fakmetal -bench BenchmarkMetalQ4K* ./internal/model",
+    "correctness": {
+      "TestMetalQ4KGemvMatchesCPU": "PASS cosine=1.000000 maxRel<=1.2e-6",
+      "TestMetalQ4KDecodeMatchesCPU": "PASS greedy token seq == CPU [433 92 166 106]"
+    },
+    "q4k_gemv_5120x5120": {"ns_per_op": 457478, "gb_per_s": 32.23, "device_bw_gb_per_s": 150, "bw_utilization_pct": 21, "fixed_overhead_us_per_call_est": 360},
+    "q4k_gemv_tiny": {"ns_per_op": 171806},
+    "q4k_gemm_steady": {"ns_per_op": 10765751, "gb_per_s": 4.657, "gflop_per_s": 364.3}
+  },
+  "interpretation": {
+    "status": "diagnosis: Metal Q4_K path correct but far below the bar",
+    "decode_verdict": "1.2 tok/s clean = 0.16x of the 3x goal and 0.16x of llama.cpp-Metal; kernels are bit-correct, the wall is ~336 separate per-token command-buffer GEMVs at ~360us fixed launch overhead each, plus low in-kernel utilization (GEMV ~21% BW, GEMM ~5% FLOP)",
+    "primary_lever": "one-command-buffer-per-token GPU-resident decode forward (decode twin of metalgemm.Prefill/forward.m mg_prefill) — keep the activation on-GPU across all matmuls, read GPU-resident KV, submit one command buffer/token; GDN recurrent scan must run on-GPU or tight-hybrid",
+    "secondary_lever": "kernel-efficiency pass on internal/metalgemm/q4k.m (threadgroup/grid sizing, vectorized coalesced dequant, simdgroup_matrix GEMM tile)",
+    "bandwidth_ceiling_tok_per_sec_est": 10,
+    "report": "docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md"
+  }
+}
