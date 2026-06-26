@@ -11,12 +11,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/blobfs"
 	"github.com/anthony-chaudhary/fak/internal/blobhttp"
+	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
 
 // DefaultThreshold is the byte size at or above which a payload prefers a durable
 // tier (smaller payloads stay hot in RAM). It mirrors ctxmmu.OversizeBytes: the
 // same "small stays in context / large spills" boundary the MMU already uses.
 const DefaultThreshold = 4096
+
+const blobHTTPTokenEnv = "FAK_BLOB_HTTP_TOKEN"
 
 // Factory builds an external Driver from its spec argument — the extension seam an
 // optional/build-tagged backend (DuckDB columnar, an embedded KV, a vendor SDK)
@@ -109,7 +112,7 @@ func buildTiers(spec string) (tiers []Tier, mirror bool, err error) {
 func buildDriver(tok string) (Driver, bool, error) {
 	// http/https: the whole token is the URL.
 	if strings.HasPrefix(tok, "http://") || strings.HasPrefix(tok, "https://") {
-		return httpDriver{blobhttp.New(tok, blobhttp.WithBearer(os.Getenv("FAK_BLOB_HTTP_TOKEN")))}, true, nil
+		return httpDriver{blobhttp.New(tok, blobhttp.WithBearer(blobHTTPBearerToken()))}, true, nil
 	}
 	scheme, arg := tok, ""
 	if i := strings.Index(tok, ":"); i >= 0 {
@@ -145,6 +148,17 @@ func buildDriver(tok string) (Driver, bool, error) {
 		}
 		return d, true, nil
 	}
+}
+
+func storedrvSecretLoader() *secretload.Loader {
+	l := secretload.Default()
+	l.Require(blobHTTPTokenEnv, "remote blob HTTP bearer token", nil)
+	return l
+}
+
+func blobHTTPBearerToken() string {
+	v, _ := storedrvSecretLoader().Lookup(blobHTTPTokenEnv)
+	return v
 }
 
 func boolEnv(key string) bool {

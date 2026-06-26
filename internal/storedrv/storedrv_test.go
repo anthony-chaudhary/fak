@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -282,6 +283,50 @@ func TestBuildTiersSpec(t *testing.T) {
 	if _, _, err := buildTiers("bogusdriver:x"); err == nil {
 		t.Fatal("expected an error for an unknown tier scheme")
 	}
+}
+
+func TestBuildDriverHTTPBearerTokenUsesSecretLoader(t *testing.T) {
+	t.Setenv(blobHTTPTokenEnv, "plain-store-token-value")
+
+	loader := storedrvSecretLoader()
+	tok, src, ok := loader.LookupSource(blobHTTPTokenEnv)
+	if !ok || tok != "plain-store-token-value" || src != "os-env" {
+		t.Fatalf("LookupSource = (%q,%q,%v), want os-env token", tok, src, ok)
+	}
+	if out := loader.Redact("storedrv loaded " + tok); strings.Contains(out, tok) {
+		t.Fatalf("resolved store token was not redacted: %q", out)
+	}
+
+	var auths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auths = append(auths, r.Header.Get("Authorization"))
+		switch r.Method {
+		case http.MethodHead:
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer srv.Close()
+
+	d, durable, err := buildDriver(srv.URL)
+	if err != nil {
+		t.Fatalf("buildDriver: %v", err)
+	}
+	if !durable {
+		t.Fatalf("http driver must be durable")
+	}
+	if _, err := d.Put(context.Background(), payload(blobhttp.InlineMax+1, 'h')); err != nil {
+		t.Fatalf("Put through http driver: %v", err)
+	}
+	for _, got := range auths {
+		if got == "Bearer plain-store-token-value" {
+			return
+		}
+	}
+	t.Fatalf("server saw Authorization headers %v, want bearer from %s", auths, blobHTTPTokenEnv)
 }
 
 // TestRegisterFactory proves an external driver scheme resolves through the factory
