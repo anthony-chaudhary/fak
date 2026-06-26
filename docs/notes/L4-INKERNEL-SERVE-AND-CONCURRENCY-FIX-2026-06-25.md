@@ -8,15 +8,15 @@ description: "The first warm steady-state decode tok/s measured against fak's LI
 _2026-06-25._ A companion to
 [DGX2-CROSS-ENGINE-DATA](DGX2-CROSS-ENGINE-DATA-2026-06-25.md) and
 [GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN](GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md).
-Those notes record native-kernel and 753B-serving work on the DGX-class A100 nodes. This one
+Those notes record native-kernel and 753B-serving work on GPU-server-class datacenter nodes. This one
 records what could be measured **right now, on the one GPU node actually reachable** — the
 `fak-realmodel` GCP `g2-standard-8` (a single **NVIDIA L4**, sm_89, 23 GB) that already runs
 fak's in-kernel CUDA serve live — and the real serving bug that live traffic exposed there.
 
 > **Scope & honesty.** The number below is fak's **own in-kernel CUDA forward** decoding a
 > **real Q8_0 0.5B checkpoint** through the live `/v1/messages` serve. It is a *small-model
-> device-decode serving rate*, not a 753B rate, not a DGX2/A100 number, and not a stock-engine
-> comparison. The DGX2/DGX3 A100×8 nodes were reachable only through a control-bridge that is
+> device-decode serving rate*, not a 753B rate, not a GPU-server/datacenter number, and not a stock-engine
+> comparison. The 8-GPU datacenter nodes were reachable only through a control-bridge that is
 > down; the L4 is the reachable hardware, and one GPU is all the pure kernel needs.
 
 ## 1. The live serve
@@ -86,7 +86,7 @@ completes (the fix never engages there).
   safety to the live box. Until then, the live serve must be driven one request at a time.
 - **Follow-up — real concurrent throughput.** Serialization makes concurrency *safe*; batched
   device decode (`internal/model/batch.go`, the Q8 tile-GEMM lane) is what would make it *fast*.
-  That is the L4 analogue of the DGX "throughput@concurrency" rung.
+  That is the L4 analogue of the GPU server "throughput@concurrency" rung.
 
 ## 5. Reproduce
 
