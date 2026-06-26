@@ -112,6 +112,33 @@ bandwidth and the GEMM at 5% FLOP leave throughput on the table: revisit threadg
 sizing, vectorized/coalesced dequant, `simdgroup_matrix` for the GEMM tile, and larger
 per-launch work so a single launch saturates more of the 18 GPU cores.
 
+## 4b. Proof the lever works — batched GEMV witness (`BenchmarkMetalQ4KGemvBatch`)
+
+To confirm the wall is the per-op command buffer (not the kernel), a new primitive
+`metalgemm.Q4KWeight.GEMVBatch` encodes **N GEMVs of the same weight into ONE command buffer**
+(one `commit`/`waitUntilCompleted`) and a benchmark times it against N separate calls. Clean run
+(llama-server stopped, M3 Pro, 50× benchtime):
+
+| path | per-GEMV | effective BW | % of ~150 GB/s |
+|---|---:|---:|---:|
+| `BenchmarkMetalQ4KGemv` — single (one command buffer each) | 864 µs | 17.1 GB/s | ~11% |
+| `BenchmarkMetalQ4KGemvTiny` — 256×256 (overhead floor) | 188 µs | — | — |
+| **`BenchmarkMetalQ4KGemvBatch` — 64 in one command buffer** | **165 µs** | **89.1 GB/s** | **~59%** |
+
+Batching is **5.2× faster per GEMV** and lifts effective bandwidth from ~11% to **~59%** of the
+device ceiling. Two effects compound: the ~188 µs fixed submit/sync overhead (the tiny-GEMV
+floor) is paid **once** instead of N times, **and** the GPU pipelines the N dispatches, hiding the
+memory latency a lone GEMV can't. (The batch GEMVs the *same* weight N times — a measurement, not
+the decode access pattern — so the 89 GB/s is a per-dispatch-pipelining datum, not a model-decode
+rate.)
+
+**Projection for #67.** A one-command-buffer-per-token resident decode forward reads ~15 GB of
+weights/token; at the measured batched 89 GB/s that is **~169 ms/token ≈ 5.9 tok/s**, and ~8
+tok/s if a kernel pass closes the remaining ~40% to bandwidth — right at the llama.cpp-Metal 7.29
+bar and **5–7× over today's 1.2 tok/s**, clearing the 3× goal. The `q4k_gemm` prefill kernel
+stays at 4.8 GB/s / 377 GFLOP/s for the short P=22 panel (its 128-token tile leaves most threads
+idle at small P) — a separate kernel-occupancy fix for prefill.
+
 ## 5. Honest fences
 
 - **The clean 1.2 / 0.6 tok/s are single-run, greedy, one prompt** (29-token prefill, 64

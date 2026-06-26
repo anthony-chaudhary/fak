@@ -243,6 +243,94 @@ func TestMoEMixedDenseAndSparseLayerDispatch(t *testing.T) {
 		m.ffnForLayer(1).apply(m, 1, xn, f32Kernel{m}))
 }
 
+// TestGLMMoeDsaQuantizedDenseLayerDispatch pins the residency-complete dense-vs-MoE
+// dispatch for a QUANTIZED GLM-5.2 serve — the exact configuration that panicked live on
+// the sm_80 datacenter node ("missing resident weight model.layers.0.mlp.gate.weight").
+//
+// GLM-5.2 has first_k_dense_replace=3: layers 0..2 are DENSE (mlp.{gate,up,down}_proj,
+// NO router) and layers >=3 are routed MoE (mlp.gate.weight router + experts). On the
+// cuda serve the matmul weights are quantized at load and live in q8w/q4kw, NOT the f32
+// manifest. ffnForLayer used m.has/m.manifest (f32-only) to detect the per-layer router
+// vs dense MLP, so on a quantized model EVERY presence check missed and a dense first-k
+// layer fell through to moeFFN, whose router mul then panicked in glmDsaWeightHAL. This
+// test builds the model through NewQuantBuilder (weights -> q8w, like the serve) and
+// asserts the dense layer dispatches to denseSwiGLU, not moeFFN. With the bug it returns
+// moeFFN and m.ffnForLayer(0).apply panics; the hasWeight fix makes it denseSwiGLU.
+func TestGLMMoeDsaQuantizedDenseLayerDispatch(t *testing.T) {
+	const H, I, E, K = 256, 256, 2, 1
+	const firstKDense = 3
+	cfg := Config{
+		ModelType:          "glm_moe_dsa",
+		HiddenSize:         H,
+		NumLayers:          firstKDense + 1, // layers 0..2 dense, layer 3 MoE
+		IntermediateSize:   I,
+		NumExperts:         E,
+		NumExpertsPerTok:   K,
+		FirstKDenseReplace: firstKDense,
+		NormTopKProb:       true,
+	}
+	if !cfg.isGLMMoeDsa() || !cfg.IsMoE() {
+		t.Fatalf("cfg not glm_moe_dsa MoE: isGLMMoeDsa=%v IsMoE=%v", cfg.isGLMMoeDsa(), cfg.IsMoE())
+	}
+	// in must be a multiple of 256 (Q8 block) — H=I=256 satisfies it.
+	b := NewQuantBuilder(cfg, false)
+	add := func(name string, out, in int) {
+		if err := b.AddF32Tensor(name, []int{out, in}, rampF32Test(out*in)); err != nil {
+			t.Fatalf("AddF32Tensor %s: %v", name, err)
+		}
+	}
+	// Dense layers 0..2: mlp.{gate,up,down}_proj, NO router.
+	for l := 0; l < firstKDense; l++ {
+		add(layerName(l, "mlp.gate_proj.weight"), I, H)
+		add(layerName(l, "mlp.up_proj.weight"), I, H)
+		add(layerName(l, "mlp.down_proj.weight"), H, I)
+	}
+	// MoE layer 3: router + per-expert FFN.
+	add(routerName(firstKDense), E, H)
+	for e := 0; e < E; e++ {
+		add(expertName(firstKDense, e, "gate_proj.weight"), I, H)
+		add(expertName(firstKDense, e, "up_proj.weight"), I, H)
+		add(expertName(firstKDense, e, "down_proj.weight"), H, I)
+	}
+	m, err := b.Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// The dense gate IS quantized into q8w and NOT in the f32 manifest — the residency
+	// asymmetry that broke m.has-based dispatch.
+	denseGate := layerName(0, "mlp.gate_proj.weight")
+	if m.has(denseGate) {
+		t.Fatalf("dense gate %s unexpectedly in f32 manifest; test would not exercise the quant path", denseGate)
+	}
+	if !m.hasWeight(denseGate) {
+		t.Fatalf("hasWeight(%s) = false; the quantized dense gate must be visible to dispatch", denseGate)
+	}
+	// A dense layer has NO router weight in any store.
+	if m.hasWeight(routerName(0)) {
+		t.Fatalf("dense layer 0 must not have router %s resident", routerName(0))
+	}
+
+	for l := 0; l < firstKDense; l++ {
+		if _, ok := m.ffnForLayer(l).(denseSwiGLU); !ok {
+			t.Fatalf("dense layer %d selected %T, want denseSwiGLU (the live panic: it picked moeFFN and the router mul panicked)", l, m.ffnForLayer(l))
+		}
+	}
+	if _, ok := m.ffnForLayer(firstKDense).(glmMoeFFN); !ok {
+		t.Fatalf("MoE layer %d selected %T, want glmMoeFFN", firstKDense, m.ffnForLayer(firstKDense))
+	}
+}
+
+// rampF32Test fills n floats with a small deterministic ramp in (0,1], enough for
+// quantizeQ8 to produce finite codes/scales (the dispatch test reads no exact values).
+func rampF32Test(n int) []float32 {
+	out := make([]float32, n)
+	for i := range out {
+		out[i] = float32((i%17)+1) / 17.0
+	}
+	return out
+}
+
 // TestMoERoutingHandComputed pins the router and weighted sum against a hand-computed
 // reference on a tiny single-position MoE FFN: H=2, I=2, E=4, top-2, explicit weights.
 // It asserts (a) the two experts chosen are exactly the top-2 post-softmax experts and

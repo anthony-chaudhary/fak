@@ -267,6 +267,43 @@ void mg_q4k_gemv(int wid, const float* x, float* y) {
     }
 }
 
+// mg_q4k_gemv_batch runs n decode GEMVs of the SAME weight wid into ONE command buffer (one
+// commit + one waitUntilCompleted): Xcat is n contiguous activation rows (n*in floats), Ycat
+// receives n result rows (n*out floats). It exists to MEASURE how much of mg_q4k_gemv's
+// per-call cost is the CPU<->GPU submission/sync round-trip vs the kernel: if n GEMVs here cost
+// ~n*kernel + one round-trip (not n round-trips), the decode wall is the per-op command buffer,
+// and the fix is a one-command-buffer resident forward (issue #67). The encoder re-binds only
+// the X/Y offsets between dispatches; the weight + dims are set once.
+void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat) {
+    if (wid < 0 || wid >= gNQ4 || n <= 0) return;
+    @autoreleasepool {
+        Q4KW W = gQ4[wid];
+        q4k_grow_scratch((long)n * W.in, (long)n * W.out);
+        id<MTLBuffer> wbuf = (__bridge id<MTLBuffer>)W.buf;
+        id<MTLBuffer> xb = gQXBuf;
+        id<MTLBuffer> yb = gQYBuf;
+        memcpy(xb.contents, Xcat, (size_t)n * W.in * 4);
+
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        [e setComputePipelineState:psoQ4KGemv];
+        [e setBuffer:wbuf offset:0 atIndex:0];
+        [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+        [e setBytes:&W.out  length:sizeof(int) atIndex:4];
+        for (int i = 0; i < n; i++) {
+            [e setBuffer:xb offset:(NSUInteger)((long)i * W.in  * 4) atIndex:1];
+            [e setBuffer:yb offset:(NSUInteger)((long)i * W.out * 4) atIndex:2];
+            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        }
+        [e endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+
+        memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
+    }
+}
+
 // mg_q4k_gemm computes Y[P, out] = X[P, in] · W[wid]^T (batched prefill GEMM). f32 in/out,
 // row-major; Y must hold P*out floats.
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {

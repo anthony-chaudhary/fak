@@ -2,6 +2,10 @@
 
 This is the source of truth for the recurring GPU-server/Slack confusion.
 
+> **Just want to reach the channel?** See [`private-comms-channel.md`](private-comms-channel.md)
+> — the public stub that points to the live Slack control-bridge in `fak-private`. This doc
+> explains *what is public vs private and why*; that stub is the entry point.
+
 ## Public tree
 
 The public `fak` tree may keep scrubbed benchmark evidence, runbooks, and result

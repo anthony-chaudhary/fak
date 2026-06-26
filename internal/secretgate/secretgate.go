@@ -67,12 +67,14 @@ const DefaultMaxHeld = 8192
 // is digest-only by construction — it never holds the cleartext (that stays in the
 // CAS pin, reachable only via the gated PageIn). #886 escalates on a repeat Digest.
 type Finding struct {
-	Kind       string `json:"kind"`       // "secret" (a raw canon.SecretPatterns match) | "obfuscated" (canon.Scan caught it on a canonical view)
-	Location   string `json:"location"`   // a human handle for where in the body it sat ("offset N..M" | "obfuscated")
-	Confidence string `json:"confidence"` // "high" (raw match) | "medium" (obfuscated-only)
-	Digest     string `json:"digest"`     // sha256 hex (truncated) of the matched span — never the secret itself
-	Handle     string `json:"handle"`     // the stable quarantine handle (refs/fak/secrets/<nonce>)
-	Len        int    `json:"len"`        // length of the quarantined result body
+	Kind       string `json:"kind"`                // "secret" (a raw canon.SecretPatterns match) | "obfuscated" (canon.Scan caught it on a canonical view)
+	Location   string `json:"location"`            // a human handle for where in the body it sat ("offset N..M" | "obfuscated")
+	Confidence string `json:"confidence"`          // "medium" | "high" | "critical" (escalated on a repeat sighting)
+	Digest     string `json:"digest"`              // sha256 hex (truncated) of the matched span — never the secret itself
+	Handle     string `json:"handle"`              // the stable quarantine handle (refs/fak/secrets/<nonce>)
+	Len        int    `json:"len"`                 // length of the quarantined result body
+	Sightings  int    `json:"sightings"`           // how many times this digest has been seen this session (1 = first)
+	Escalated  bool   `json:"escalated,omitempty"` // true once a repeat sighting raised confidence (#886)
 }
 
 // Gate is the on-discovery secret ResultAdmitter.
@@ -89,7 +91,54 @@ type Gate struct {
 	orderHead int
 	maxHeld   int
 
+	digests *digestTracker // bounded digest->sighting-count map for reuse escalation (#886)
+
 	rec atomic.Pointer[witness.Recorder] // optional durable sink (nil = in-memory Finding only)
+}
+
+// digestTracker is the bounded set of discovered secret-span digests with their
+// sighting counts (#886). It holds DIGESTS only — never the cleartext, which stays
+// in the CAS pin. A secret seen once is ambiguous (placeholder/example/fixture); the
+// SAME digest seen again is strong evidence of a real, live credential handled
+// repeatedly, so the second sighting escalates. Bounded FIFO so a long, secret-heavy
+// session cannot grow the map without bound.
+type digestTracker struct {
+	mu    sync.Mutex
+	count map[string]int
+	order []string
+	head  int
+	cap   int
+}
+
+// sight records one sighting of dig and returns its new cumulative count (1 on the
+// first sighting). Oldest digests are dropped first once the cap is exceeded.
+func (d *digestTracker) sight(dig string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, existed := d.count[dig]; !existed {
+		d.order = append(d.order, dig)
+	}
+	d.count[dig]++
+	n := d.count[dig]
+	for len(d.count) > d.cap && d.head < len(d.order) {
+		old := d.order[d.head]
+		d.head++
+		delete(d.count, old)
+	}
+	if d.head > 0 && d.head*2 >= len(d.order) {
+		m := copy(d.order, d.order[d.head:])
+		d.order = d.order[:m]
+		d.head = 0
+	}
+	return n
+}
+
+// size reports the current number of tracked digests (≤ cap) — for the bounded-set
+// witness (leakcheck.BoundedSize).
+func (d *digestTracker) size() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.count)
 }
 
 // New builds the registered-default-shaped gate with the standard ledger bound,
@@ -102,7 +151,8 @@ func NewWithLimit(maxHeld int) *Gate {
 	if maxHeld < 1 {
 		maxHeld = DefaultMaxHeld
 	}
-	return &Gate{held: map[string]abi.Ref{}, cleared: map[string]bool{}, maxHeld: maxHeld}
+	return &Gate{held: map[string]abi.Ref{}, cleared: map[string]bool{}, maxHeld: maxHeld,
+		digests: &digestTracker{count: map[string]int{}, cap: maxHeld}}
 }
 
 func envPositiveInt(key string, def int) int {
@@ -162,6 +212,7 @@ func (g *Gate) quarantineSecret(ctx context.Context, r *abi.Result, body []byte)
 	handle := newHandle()
 	pin := g.pageOut(ctx, body)
 	f := classifySpans(body, handle, pin)
+	g.escalate(f) // #886: a repeat digest raises confidence/severity before the record is filed
 
 	g.mu.Lock()
 	g.held[handle] = pin
@@ -221,6 +272,38 @@ func classifySpans(body []byte, handle string, _ abi.Ref) []Finding {
 		})
 	}
 	return out
+}
+
+// escalate records a sighting of each finding's digest and, on a REPEAT (the same
+// secret span seen again this session), raises the finding's confidence and marks
+// it Escalated. A token seen once is ambiguous; the same token seen again is strong
+// evidence it is a real, live credential being handled repeatedly (#886). The
+// optional verdict tighten on a repeat (quarantine -> fail_closed) is gated on the
+// #885 secret-detection posture; the Escalated flag is the seam that reader uses.
+func (g *Gate) escalate(findings []Finding) {
+	if g.digests == nil {
+		return
+	}
+	for i := range findings {
+		n := g.digests.sight(findings[i].Digest)
+		findings[i].Sightings = n
+		if n >= 2 {
+			findings[i].Confidence = escalatedConfidence(findings[i].Confidence)
+			findings[i].Escalated = true
+		}
+	}
+}
+
+// escalatedConfidence bumps a confidence one rung on a repeat sighting.
+func escalatedConfidence(c string) string {
+	switch c {
+	case "high":
+		return "critical"
+	case "medium":
+		return "high"
+	default:
+		return c
+	}
 }
 
 // record appends a witness.Decision per discovery to the durable sink when one is

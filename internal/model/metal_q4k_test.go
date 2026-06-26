@@ -301,6 +301,47 @@ func BenchmarkMetalQ4KGemvTiny(b *testing.B) {
 	}
 }
 
+// BenchmarkMetalQ4KGemvBatch runs n decode GEMVs of one 5120x5120 weight in a SINGLE command
+// buffer (one commit→wait), to quantify how much of the per-GEMV cost is the CPU↔GPU
+// submission/sync round-trip vs the kernel. If per-GEMV here collapses far below the single-GEMV
+// BenchmarkMetalQ4KGemv (~457 µs) toward the kernel rate, the decode wall is the per-op command
+// buffer and the fix is the one-command-buffer resident forward (issue #67). n=64 ≈ the
+// projection/MLP GEMV count in one decoder layer scaled up.
+func BenchmarkMetalQ4KGemvBatch(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	out, in, n := 5120, 5120, 64
+	qt := randomQ4KTensor(out, in, 1)
+	Xcat := randomVecF(n*in, 2)
+	w := metalgemm.UploadQ4K(qt.raw, out, in)
+	if w == nil {
+		b.Fatal("UploadQ4K returned nil")
+	}
+	Ycat := make([]float32, n*out)
+	// Trust check: batched row 0 must equal a single GEMV of the same activation row.
+	w.GEMVBatch(Xcat, n, Ycat)
+	single := make([]float32, out)
+	w.GEMV(Xcat[:in], single)
+	for o := 0; o < out; o++ {
+		if d := Ycat[o] - single[o]; d > 1e-3 || d < -1e-3 {
+			b.Fatalf("GEMVBatch row0[%d]=%g != GEMV %g (offset binding wrong)", o, Ycat[o], single[o])
+		}
+	}
+	weightBytes := float64(out) * float64(in) / 256.0 * 144.0
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w.GEMVBatch(Xcat, n, Ycat)
+	}
+	b.StopTimer()
+	secs := b.Elapsed().Seconds()
+	if secs > 0 {
+		b.ReportMetric(weightBytes*float64(n)*float64(b.N)/secs/1e9, "GB/s")
+		b.ReportMetric(secs/float64(b.N)/float64(n)*1e6, "us/gemv")
+	}
+}
+
 // BenchmarkMetalQ4KGemmSteady measures the kernel's raw dequant+dot throughput when the
 // per-command-buffer launch overhead is amortized over a large batch (P tokens in one
 // dispatch). The single-GEMV bench above is overhead-bound (one commit→wait per ~0.5 ms of

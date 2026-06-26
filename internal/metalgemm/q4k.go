@@ -13,6 +13,7 @@ package metalgemm
 /*
 int  mg_q4k_upload(const unsigned char* raw, int out, int in);
 void mg_q4k_gemv(int wid, const float* x, float* y);
+void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y);
 void mg_q4k_reset(void);
 */
@@ -52,6 +53,17 @@ func (w *Q4KWeight) GEMV(x, y []float32) {
 		return
 	}
 	C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+}
+
+// GEMVBatch runs n decode GEMVs of this same weight in ONE command buffer: Xcat is n contiguous
+// activation rows (n*In floats), Ycat receives n result rows (n*Out floats). It is a measurement
+// primitive for issue #67 — it isolates how much of GEMV's per-call cost is the CPU<->GPU
+// submission/sync round-trip (paid once here) vs the kernel (paid n times).
+func (w *Q4KWeight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
+	if w == nil || w.id < 0 || n <= 0 || len(Xcat) < n*w.In || len(Ycat) < n*w.Out {
+		return
+	}
+	C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])))
 }
 
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ (batched prefill GEMM). X and Y are f32 row-major;

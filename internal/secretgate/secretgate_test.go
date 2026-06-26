@@ -3,12 +3,14 @@ package secretgate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the blob PageOut/Resolver backend
+	"github.com/anthony-chaudhary/fak/internal/leakcheck"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -199,4 +201,77 @@ func TestReasonRegistered(t *testing.T) {
 	if got := abi.ReasonName(abi.ReasonSecretDiscovered); got != "RESULT_SECRET_DISCOVERED" {
 		t.Fatalf("ReasonSecretDiscovered name = %q, want RESULT_SECRET_DISCOVERED", got)
 	}
+}
+
+// TestReuseEscalation (#886): the FIRST sighting of a secret digest is recorded at
+// base confidence; the SAME digest seen again escalates the Finding (Sightings>=2,
+// Escalated, confidence high->critical).
+func TestReuseEscalation(t *testing.T) {
+	withEnabled(t, true)
+	ctx := context.Background()
+	g := New()
+
+	g.Admit(ctx, toolCall("read_webpage"), result(secretBody))
+	first := g.Findings()
+	if len(first) == 0 {
+		t.Fatal("first admit recorded no findings")
+	}
+	for _, f := range first {
+		if f.Sightings != 1 || f.Escalated {
+			t.Fatalf("first sighting must be base (Sightings=1, not escalated): %+v", f)
+		}
+	}
+
+	g.Admit(ctx, toolCall("read_webpage"), result(secretBody))
+	second := g.Findings()[len(first):]
+	if len(second) == 0 {
+		t.Fatal("second admit recorded no findings")
+	}
+	for _, f := range second {
+		if f.Sightings < 2 || !f.Escalated {
+			t.Errorf("repeat sighting must escalate (Sightings>=2, Escalated): %+v", f)
+		}
+		if f.Confidence != "critical" {
+			t.Errorf("repeat of a high-confidence secret must escalate to critical, got %q", f.Confidence)
+		}
+	}
+}
+
+// TestDistinctDigestsDoNotCrossTrigger (#886): a DIFFERENT secret is a fresh first
+// sighting — distinct digests never escalate each other.
+func TestDistinctDigestsDoNotCrossTrigger(t *testing.T) {
+	withEnabled(t, true)
+	ctx := context.Background()
+	g := New()
+
+	g.Admit(ctx, toolCall("a"), result(secretBody))
+	before := len(g.Findings())
+
+	// A different credential (a Google API key) — distinct digest, must not escalate.
+	g.Admit(ctx, toolCall("b"), result("key=AIzaSyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG"))
+	fresh := g.Findings()[before:]
+	if len(fresh) == 0 {
+		t.Fatal("no findings for the second, distinct secret")
+	}
+	for _, f := range fresh {
+		if f.Sightings != 1 || f.Escalated {
+			t.Errorf("a distinct secret must be a first sighting, not escalated: %+v", f)
+		}
+	}
+}
+
+// TestDigestSetBounded (#886): the digest set stays under cap across many distinct
+// sightings — a long, secret-heavy session cannot grow it without bound.
+func TestDigestSetBounded(t *testing.T) {
+	withEnabled(t, true)
+	ctx := context.Background()
+	const limit = 4
+	g := NewWithLimit(limit)
+	leakcheck.BoundedSize(t, 60, limit,
+		func(i int) {
+			// Unique per i, matches github_pat_[0-9A-Za-z_]{20,} (one digest each).
+			g.Admit(ctx, toolCall("read"), result(fmt.Sprintf("github_pat_%030d", i)))
+		},
+		func() int { return g.digests.size() },
+	)
 }

@@ -133,6 +133,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Model/compute engine env knobs](docs/model-engine-env.md): every `FAK_*` variable the in-kernel model and compute engine read — GPU residency budget (`FAK_GPU_BUDGET_MB`), quant/load format, matmul worker budget, SIMD kernel tiers, and the GPU build vars — each with type, default, when-to-use, and a `file:line` source. The compute-engine companion to serve-config.md.
 - [Server troubleshooting](docs/fak/server-troubleshooting.md): diagnosing common `fak serve` failures — port conflicts, out-of-memory model loads, GPU/CUDA/Vulkan errors, and policy issues.
 - [Related tools & workflows](docs/fak/related-items.md): a catalog of fak's CLI verbs, the serve gateway, the test/CI runners, the demo scripts, and the policy templates, with usage examples.
+- [Private comms channel (stub)](docs/private-comms-channel.md): the public front door to the private comms channel — the Slack control-bridge to the lab GPU/DGX servers. Names what it is and how to reach it via the `fak-private` companion repo; carries zero live plumbing (no host, channel id, or token). See also the [GPU-server / Slack boundary](docs/dgx-slack-boundary.md).
 
 ## Optional
 
