@@ -58,23 +58,27 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 	// MoE block (ffn_gate_inp -> the mlp.gate.weight router). Gate on BOTH the per-layer router
 	// presence AND the dense-prefix count: a dense layer must never reach glmMoeFFN (whose router
 	// mul would panic in glmDsaWeightHAL for a router weight that does not exist on that layer).
-	if m.Cfg.isGLMMoeDsa() && layer >= m.Cfg.FirstKDenseReplace && m.has(routerName(layer)) {
+	// hasWeight (not m.has): on the quantized serve the router/dense-MLP weights live in
+	// q8w/q4kw, not the f32 manifest, so keying dispatch on m.has would mis-route every layer
+	// — a dense first-k GLM layer would fall through to moeFFN whose router mul panics in
+	// glmDsaWeightHAL ("missing resident weight …mlp.gate.weight" — the dense layer has none).
+	if m.Cfg.isGLMMoeDsa() && layer >= m.Cfg.FirstKDenseReplace && m.hasWeight(routerName(layer)) {
 		return glmMoeFFN{}
 	}
 	if m.Cfg.isMiniMaxSparseAttn() {
-		if m.has(routerName(layer)) {
+		if m.hasWeight(routerName(layer)) {
 			return minimaxMoeFFN{}
 		}
 		// A first-k DENSE MiniMax layer (no router) is an OAI MLP at DenseIntermediateSize,
 		// not the generic plain-SiLU denseSwiGLU — see minimaxDenseFFN.
-		if m.has(layerName(layer, "mlp.gate_proj.weight")) {
+		if m.hasWeight(layerName(layer, "mlp.gate_proj.weight")) {
 			return minimaxDenseFFN{}
 		}
 	}
-	if _, ok := m.manifest[routerName(layer)]; ok {
+	if m.hasWeight(routerName(layer)) {
 		return moeFFN{}
 	}
-	if _, ok := m.manifest[layerName(layer, "mlp.gate_proj.weight")]; ok {
+	if m.hasWeight(layerName(layer, "mlp.gate_proj.weight")) {
 		if m.Cfg.DenseMLP {
 			return denseActivationMLP{}
 		}
