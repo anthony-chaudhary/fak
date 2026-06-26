@@ -89,7 +89,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "fleet-readme-freshness-audit/1"
+SCHEMA = "fleet-readme-freshness-audit/2"
 
 # Repo-root-relative inputs (the repo root is the Go module root, where
 # BENCHMARK-AUTHORITY.md lives alongside README.md and VERSION).
@@ -706,6 +706,47 @@ def _grade_letter(score: int) -> str:
             "C" if score >= 70 else "D" if score >= 60 else "F")
 
 
+def _payload_corpus(payload: dict[str, Any]) -> dict[str, Any]:
+    corpus = payload.get("corpus")
+    return corpus if isinstance(corpus, dict) else {}
+
+
+def _payload_score(payload: dict[str, Any]) -> int:
+    corpus = _payload_corpus(payload)
+    return _as_int(corpus.get("score", payload.get("score")))
+
+
+def _payload_grade(payload: dict[str, Any], score: int | None = None) -> str:
+    corpus = _payload_corpus(payload)
+    grade = corpus.get("grade", payload.get("grade"))
+    if grade:
+        return str(grade)
+    return _grade_letter(score if score is not None else _payload_score(payload))
+
+
+def _payload_readme_debt(payload: dict[str, Any]) -> int | None:
+    corpus = _payload_corpus(payload)
+    for value in (payload.get("readme_debt"), corpus.get("readme_debt")):
+        if value is not None:
+            return max(0, _as_int(value))
+    return None
+
+
+def _readme_debt_from_checks(checks: list[dict[str, Any]]) -> int:
+    """Count hard README debt units without reusing the good-is-high score."""
+    hygiene_fails = sum(
+        1 for c in checks
+        if c.get("status") == "FAIL" and c.get("check") not in SUBSTANCE_CHECKS
+    )
+    substance_missing = 0
+    for c in checks:
+        if c.get("check") not in SUBSTANCE_CHECKS:
+            continue
+        items = c.get("items") or []
+        substance_missing += len(items) if isinstance(items, list) else 1
+    return hygiene_fails + substance_missing
+
+
 # ---------------------------------------------------------------------------
 # Grader: fold the check list into the standard control-pane payload
 # ---------------------------------------------------------------------------
@@ -732,6 +773,7 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
     if fails:
         score = min(score, FAIL_SCORE_CAP)  # a broken page is not a passing front page
     grade = _grade_letter(score)
+    debt = _readme_debt_from_checks(checks)
 
     # The work-list for next_action: lowest weighted contribution first (the
     # check where lifting the score buys the most), excluding already-perfect.
@@ -777,6 +819,12 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
         "reason": reason,
         "score": score,
         "grade": grade,
+        "readme_debt": debt,
+        "corpus": {
+            "score": score,
+            "grade": grade,
+            "readme_debt": debt,
+        },
         "next_action": next_action,
         "workspace": workspace,
         "counts": counts,
@@ -792,17 +840,13 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
 # ---------------------------------------------------------------------------
 
 def readme_debt(payload: dict[str, Any]) -> int:
-    """The front-page debt: distance from a perfect page (100 - score), floored.
-
-    The family scores debt so that LOWER is better and zero is perfect, and a
-    halving is the >=2x bar. The README auditor's headline is a 0–100 `score`
-    (higher is better), so its debt is simply the gap to 100. The score is
-    substance-only and clock-independent (the freshness stamp is a WARN, not a
-    substance check), so this debt is deterministic — the same payload always
-    folds to the same number. The 47->100 lift in ``70c6e5d`` reads here as
-    debt 53 -> 0, a >=3x improvement.
-    """
-    return max(0, 100 - _as_int(payload.get("score")))
+    """Return the payload's debt integer; tolerate pre-/2 baselines."""
+    debt = _payload_readme_debt(payload)
+    if debt is not None:
+        return debt
+    # Legacy saved baselines before schema /2 had no debt field. Keep --compare
+    # able to read them, but build_payload never emits score-as-debt.
+    return max(0, 100 - _payload_score(payload))
 
 
 def _compare_verdict(b_debt: int, c_debt: int) -> str:
@@ -833,9 +877,9 @@ def compare(current: dict[str, Any], baseline: dict[str, Any]) -> str:
     string.
     """
     b_debt, c_debt = readme_debt(baseline), readme_debt(current)
-    b_score, c_score = _as_int(baseline.get("score")), _as_int(current.get("score"))
-    b_grade = baseline.get("grade") or _grade_letter(b_score)
-    c_grade = current.get("grade") or _grade_letter(c_score)
+    b_score, c_score = _payload_score(baseline), _payload_score(current)
+    b_grade = _payload_grade(baseline, b_score)
+    c_grade = _payload_grade(current, c_score)
     lines = [
         "readme-freshness compare:",
         f"  readme_debt: {b_debt} -> {c_debt}  (retired {b_debt - c_debt})",

@@ -252,6 +252,13 @@ def test_run_checks_bad_readme_fails_overall() -> None:
     assert {"links", "naive_baseline"} <= failed, failed
 
 
+def test_synthetic_thin_page_has_positive_readme_debt() -> None:
+    checks = rfa.run_checks("# fak\nplain readme\n", "0.25.0", "", Path("."),
+                            today=TODAY, max_age_days=14, dispatch=set())
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["corpus"]["readme_debt"] > 0, p
+
+
 def test_fak_dispatch_verbs_parses_main_switch(tmp_path: Path) -> None:
     main_go = tmp_path / "cmd" / "fak" / "main.go"
     main_go.parent.mkdir(parents=True)
@@ -297,6 +304,23 @@ def test_score_full_when_substance_maxed() -> None:
     p = rfa.build_payload(workspace=".", checks=checks)
     assert p["score"] == 100 and p["grade"] == "A", p
     assert p["finding"] == "readme_fresh", p
+    assert p["readme_debt"] == 0 and p["corpus"] == {
+        "score": 100, "grade": "A", "readme_debt": 0,
+    }, p
+
+
+def test_payload_debt_counts_hygiene_fails_and_missing_affordances() -> None:
+    checks = [
+        {"check": "links", "status": "FAIL", "detail": "dead link"},
+        {"check": "freshness_stamp", "status": "WARN", "detail": "old"},
+        {"check": "speed_claim", "status": "WARN", "score": 0.5,
+         "items": ["bounded_vs_sota", "traced_or_marked"]},
+        {"check": "lcd_onramp", "status": "FAIL", "score": 0.0,
+         "items": ["bare_binary_cmd"]},
+    ]
+    p = rfa.build_payload(workspace=".", checks=checks)
+    assert p["readme_debt"] == 4, p
+    assert p["corpus"]["readme_debt"] == 4, p
 
 
 def test_hygiene_fail_caps_the_grade() -> None:
@@ -314,17 +338,19 @@ def test_grade_letter_boundaries() -> None:
 
 # --- compare (before/after delta) tests ------------------------------------
 
-def test_readme_debt_is_gap_to_100() -> None:
-    # debt = distance from a perfect page; lower is better, missing = maximal.
-    assert rfa.readme_debt({"score": 47}) == 53
-    assert rfa.readme_debt({"score": 100}) == 0
-    assert rfa.readme_debt({}) == 100  # no score = maximal debt, not a crash
+def test_readme_debt_prefers_payload_contract_over_score() -> None:
+    # debt is a lower-is-better integer, not the good-is-high score field.
+    assert rfa.readme_debt({"score": 100, "readme_debt": 3}) == 3
+    assert rfa.readme_debt({"score": 100, "corpus": {"readme_debt": 2}}) == 2
+    assert rfa.readme_debt({"score": 47}) == 53  # legacy pre-/2 baseline fallback
 
 
 def test_compare_improved_reports_multiplier_verdict() -> None:
-    # The 47 -> 100 lift in 70c6e5d: debt 53 -> 0, a >=3x improvement.
-    out = rfa.compare({"score": 100, "grade": "A"}, {"score": 47, "grade": "F"})
-    assert "readme_debt: 53 -> 0" in out, out
+    out = rfa.compare(
+        {"corpus": {"score": 100, "grade": "A", "readme_debt": 0}},
+        {"corpus": {"score": 47, "grade": "F", "readme_debt": 9}},
+    )
+    assert "readme_debt: 9 -> 0" in out, out
     assert "score:       47/100 -> 100/100" in out, out
     assert ">=3x improvement" in out, out
 
@@ -384,6 +410,7 @@ def test_live_collect_real_readme() -> None:
     p = rfa.collect(root, today=TODAY)
     assert p["schema"] == rfa.SCHEMA
     assert "ok" in p and isinstance(p["checks"], list) and p["checks"]
+    assert p["corpus"]["readme_debt"] == 0, p["corpus"]
 
 
 # --- self-contained runner (mirrors memory_recall_audit_test.py) -----------
