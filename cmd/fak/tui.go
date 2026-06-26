@@ -355,6 +355,7 @@ type tuiGuardRow struct {
 	Status    string   `json:"status,omitempty"`
 	Detail    string   `json:"detail,omitempty"`
 	Count     int      `json:"count,omitempty"`
+	Rank      int      `json:"rank,omitempty"`
 	Attention int      `json:"attention"`
 	Tags      []string `json:"tags,omitempty"`
 }
@@ -2150,7 +2151,7 @@ func buildTUIGuardReport(artifacts []tuiGuardArtifact, at time.Time) tuiGuardRep
 	sources := make([]tuiGuardSource, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		schema := tuiGuardString(artifact.Raw, "schema")
-		status := tuiGuardString(artifact.Raw, "status")
+		status := tuiGuardEffectiveSourceStatus(artifact)
 		sources = append(sources, tuiGuardSource{
 			Path:   artifact.Path,
 			Schema: schema,
@@ -2162,6 +2163,9 @@ func buildTUIGuardReport(artifacts []tuiGuardArtifact, at time.Time) tuiGuardRep
 		rows[i].Tags, rows[i].Attention = scoreTUIGuardRow(rows[i])
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Kind == "default-blocker" && rows[j].Kind == "default-blocker" && rows[i].Rank > 0 && rows[j].Rank > 0 && rows[i].Rank != rows[j].Rank {
+			return rows[i].Rank < rows[j].Rank
+		}
 		if rows[i].Attention != rows[j].Attention {
 			return rows[i].Attention > rows[j].Attention
 		}
@@ -2196,6 +2200,9 @@ func tuiGuardRowsForArtifact(artifact tuiGuardArtifact) []tuiGuardRow {
 	if preflight := tuiGuardMap(raw["preflight"]); preflight != nil {
 		return []tuiGuardRow{tuiGuardPreflightProbeRow(artifact, preflight)}
 	}
+	if schema == "fak-guard-mcp-status-audit/1" || raw["default_blockers"] != nil {
+		return tuiGuardStatusAuditRows(artifact)
+	}
 	if schema == "fak-codex-dos-recent-audit/1" || (raw["actionability"] != nil && raw["codex_hook_fast_path"] != nil) {
 		return tuiGuardCodexRecentRows(artifact)
 	}
@@ -2216,6 +2223,20 @@ func tuiGuardRowsForArtifact(artifact tuiGuardArtifact) []tuiGuardRow {
 		return nil
 	}
 	return []tuiGuardRow{row}
+}
+
+func tuiGuardEffectiveSourceStatus(artifact tuiGuardArtifact) string {
+	status := tuiGuardString(artifact.Raw, "status")
+	if tuiGuardStatusClass(status) == "fail" {
+		return status
+	}
+	schema := tuiGuardString(artifact.Raw, "schema")
+	if schema == "fak-guard-mcp-status-audit/1" || artifact.Raw["default_blockers"] != nil {
+		if blockers, ok := artifact.Raw["default_blockers"].([]any); ok && len(blockers) > 0 {
+			return "WARN"
+		}
+	}
+	return status
 }
 
 func tuiGuardPreflightProbeRow(artifact tuiGuardArtifact, preflight map[string]any) tuiGuardRow {
@@ -2248,6 +2269,149 @@ func tuiGuardPreflightProbeRow(artifact tuiGuardArtifact, preflight map[string]a
 	}
 }
 
+func tuiGuardStatusAuditRows(artifact tuiGuardArtifact) []tuiGuardRow {
+	raw := artifact.Raw
+	artifactName := tuiGuardArtifactName(artifact.Path)
+	summary := tuiGuardMap(raw["summary"])
+	status := tuiGuardEffectiveSourceStatus(artifact)
+	rows := []tuiGuardRow{
+		{
+			Artifact: artifactName,
+			Kind:     "guard-status-audit",
+			Status:   status,
+			Detail: strings.Join(nonEmptyTUI([]string{
+				fmt.Sprintf("checks=%d/%d", tuiGuardInt(summary, "passed"), tuiGuardInt(summary, "total")),
+				fmt.Sprintf("failed=%d", tuiGuardInt(summary, "failed")),
+				fmt.Sprintf("default_blockers=%d", tuiGuardInt(summary, "default_blockers")),
+				fmt.Sprintf("active_default_blockers=%d", tuiGuardInt(summary, "active_default_blockers")),
+			}), "  "),
+			Count: 1,
+		},
+	}
+	if blockers, ok := raw["default_blockers"].([]any); ok {
+		for _, blocker := range blockers {
+			m := tuiGuardMap(blocker)
+			if m == nil {
+				continue
+			}
+			rows = append(rows, tuiGuardDefaultBlockerRow(artifactName, m))
+		}
+	}
+	if checks, ok := raw["checks"].([]any); ok {
+		for _, check := range checks {
+			m := tuiGuardMap(check)
+			if m == nil || strings.EqualFold(tuiGuardString(m, "status"), "PASS") {
+				continue
+			}
+			rows = append(rows, tuiGuardRow{
+				Artifact: artifactName,
+				Kind:     "check",
+				Status:   tuiGuardString(m, "status"),
+				Detail:   strings.TrimSpace(tuiGuardString(m, "name") + "  " + tuiGuardString(m, "detail")),
+				Count:    1,
+			})
+		}
+	}
+	return rows
+}
+
+func tuiGuardDefaultBlockerRow(artifactName string, blocker map[string]any) tuiGuardRow {
+	evidence := tuiGuardMap(blocker["evidence"])
+	code := tuiGuardString(blocker, "code")
+	status := tuiGuardString(blocker, "status")
+	return tuiGuardRow{
+		Artifact: artifactName,
+		Kind:     "default-blocker",
+		Tool:     tuiGuardString(blocker, "surface"),
+		Reason:   code,
+		Status:   status,
+		Detail:   tuiGuardDefaultBlockerDetail(blocker, evidence),
+		Count:    tuiGuardDefaultBlockerCount(evidence),
+		Rank:     tuiGuardInt(blocker, "rank"),
+	}
+}
+
+func tuiGuardDefaultBlockerDetail(blocker, evidence map[string]any) string {
+	bits := []string{
+		"code=" + tuiGuardString(blocker, "code"),
+		"surface=" + tuiGuardString(blocker, "surface"),
+		fmt.Sprintf("rank=%d", tuiGuardInt(blocker, "rank")),
+	}
+	for _, key := range []string{
+		"active_settlement_action_counts",
+		"recent_active_settlement_action_counts",
+		"stale_active_settlement_action_counts",
+	} {
+		if counts := tuiGuardIntMap(evidence[key]); len(counts) > 0 {
+			bits = append(bits, key+"="+tuiGuardCompactJSON(counts))
+		}
+	}
+	for _, key := range []string{
+		"recent_active_consecutive_total",
+		"active_consecutive_total",
+		"stale_active_consecutive_total",
+		"shell_no_write_target_detected",
+		"sessions_audited",
+		"tool_calls_seen",
+		"max_result_chars",
+	} {
+		if n := tuiGuardInt(evidence, key); n > 0 {
+			bits = append(bits, fmt.Sprintf("%s=%d", key, n))
+		}
+	}
+	if tags := tuiGuardIntMap(evidence["evidence_tag_counts"]); len(tags) > 0 {
+		bits = append(bits, "tags="+tuiGuardCompactJSON(tags))
+	}
+	for _, key := range []string{
+		"recent_active_origin_counts",
+		"stale_active_origin_counts",
+		"origin_counts",
+	} {
+		if counts := tuiGuardIntMap(evidence[key]); len(counts) > 0 {
+			bits = append(bits, key+"="+tuiGuardCompactJSON(counts))
+		}
+	}
+	if blockers, ok := evidence["blockers"].([]any); ok && len(blockers) > 0 {
+		bits = append(bits, "blockers="+tuiGuardCompactJSON(blockers))
+	}
+	if provedAt := tuiGuardString(evidence, "proved_at"); provedAt != "" {
+		bits = append(bits, "proved_at="+provedAt)
+	}
+	if next := tuiGuardString(blocker, "next_action"); next != "" {
+		bits = append(bits, "next="+next)
+	}
+	return strings.Join(nonEmptyTUI(bits), "  ")
+}
+
+func tuiGuardDefaultBlockerCount(evidence map[string]any) int {
+	for _, key := range []string{
+		"recent_active_consecutive_total",
+		"shell_no_write_target_detected",
+		"stale_active_consecutive_total",
+		"sessions_audited",
+		"tool_calls_seen",
+		"one_day_failures_total",
+		"active_consecutive_total",
+	} {
+		if n := tuiGuardInt(evidence, key); n > 0 {
+			return n
+		}
+	}
+	for _, key := range []string{"post_repair_mutating_shell_family_counts", "evidence_tag_counts"} {
+		total := 0
+		for _, n := range tuiGuardIntMap(evidence[key]) {
+			total += n
+		}
+		if total > 0 {
+			return total
+		}
+	}
+	if blockers, ok := evidence["blockers"].([]any); ok && len(blockers) > 0 {
+		return len(blockers)
+	}
+	return 1
+}
+
 func tuiGuardHistoricalRows(artifact tuiGuardArtifact) []tuiGuardRow {
 	raw := artifact.Raw
 	artifactName := tuiGuardArtifactName(artifact.Path)
@@ -2271,6 +2435,47 @@ func tuiGuardHistoricalRows(artifact tuiGuardArtifact) []tuiGuardRow {
 			Detail:   tuiGuardString(raw, "policy"),
 			Count:    count,
 		})
+	}
+	shape := tuiGuardMap(raw["transcript_shape"])
+	if tags := tuiGuardIntMap(shape["evidence_tag_counts"]); len(tags) > 0 {
+		for tag, count := range tags {
+			rows = append(rows, tuiGuardRow{
+				Artifact: artifactName,
+				Kind:     "claude-friction",
+				Reason:   strings.ToUpper(tag),
+				Status:   "WARN",
+				Detail: strings.Join(nonEmptyTUI([]string{
+					fmt.Sprintf("sessions=%d", tuiGuardInt(shape, "summarized_sessions")),
+					fmt.Sprintf("max_result_chars=%d", tuiGuardInt(shape, "max_result_chars")),
+				}), "  "),
+				Count: count,
+			})
+		}
+	}
+	if sessions, ok := raw["top_friction_sessions"].([]any); ok {
+		for _, session := range sessions {
+			m := tuiGuardMap(session)
+			if m == nil {
+				continue
+			}
+			rows = append(rows, tuiGuardRow{
+				Artifact: artifactName,
+				Kind:     "claude-friction-session",
+				Status:   "WARN",
+				Detail: strings.Join(nonEmptyTUI([]string{
+					"session=" + tuiGuardString(m, "session_digest"),
+					"root=" + tuiGuardString(m, "root_label"),
+					fmt.Sprintf("tool_calls=%d", tuiGuardInt(m, "tool_calls")),
+					fmt.Sprintf("marker_lines=%d", tuiGuardInt(m, "marker_lines")),
+					fmt.Sprintf("max_result_chars=%d", tuiGuardInt(m, "max_result_chars")),
+					"tags=" + tuiGuardCompactJSON(m["evidence_tags"]),
+				}), "  "),
+				Count: tuiGuardInt(m, "marker_lines"),
+			})
+			if len(rows) >= 18 {
+				break
+			}
+		}
 	}
 	if samples, ok := raw["non_allow_samples"].([]any); ok {
 		for _, sample := range samples {
@@ -2356,20 +2561,46 @@ func tuiGuardCodexRecentRows(artifact tuiGuardArtifact) []tuiGuardRow {
 		})
 	}
 	if workspaceStop != nil && (tuiGuardInt(workspaceStop, "markers") > 0 || tuiGuardInt(workspaceStop, "total_failures") > 0) {
+		detail := []string{
+			fmt.Sprintf("markers=%d", tuiGuardInt(workspaceStop, "markers")),
+			fmt.Sprintf("failures=%d", tuiGuardInt(workspaceStop, "total_failures")),
+			fmt.Sprintf("nonzero=%d", tuiGuardInt(workspaceStop, "nonzero_total_markers")),
+			fmt.Sprintf("active=%d", tuiGuardInt(workspaceStop, "active_consecutive_markers")),
+			fmt.Sprintf("active_consecutive=%d", tuiGuardInt(workspaceStop, "active_consecutive_total")),
+			fmt.Sprintf("recent=%d", tuiGuardInt(workspaceStop, "recent_active_consecutive_markers")),
+			fmt.Sprintf("recent_consecutive=%d", tuiGuardInt(workspaceStop, "recent_active_consecutive_total")),
+			fmt.Sprintf("stale=%d", tuiGuardInt(workspaceStop, "stale_active_consecutive_markers")),
+			fmt.Sprintf("stale_consecutive=%d", tuiGuardInt(workspaceStop, "stale_active_consecutive_total")),
+			fmt.Sprintf("healed=%d", tuiGuardInt(workspaceStop, "healed_nonzero_markers")),
+			fmt.Sprintf("zero=%d", tuiGuardInt(workspaceStop, "zero_total_markers")),
+			fmt.Sprintf("max_consecutive=%d", tuiGuardInt(workspaceStop, "max_consecutive")),
+		}
+		for _, key := range []string{
+			"origin_counts",
+			"recent_active_origin_counts",
+			"stale_active_origin_counts",
+			"active_settlement_action_counts",
+			"recent_active_settlement_action_counts",
+			"stale_active_settlement_action_counts",
+		} {
+			if counts := tuiGuardIntMap(workspaceStop[key]); len(counts) > 0 {
+				detail = append(detail, key+"="+tuiGuardCompactJSON(counts))
+			}
+		}
 		rows = append(rows, tuiGuardRow{
 			Artifact: artifactName,
 			Kind:     "stopfailure-api-wall",
 			Status:   tuiGuardString(workspaceStop, "status"),
-			Detail: fmt.Sprintf("markers=%d failures=%d nonzero=%d zero=%d max_consecutive=%d",
-				tuiGuardInt(workspaceStop, "markers"),
-				tuiGuardInt(workspaceStop, "total_failures"),
-				tuiGuardInt(workspaceStop, "nonzero_total_markers"),
-				tuiGuardInt(workspaceStop, "zero_total_markers"),
-				tuiGuardInt(workspaceStop, "max_consecutive"),
-			),
-			Count: 1,
+			Detail:   strings.Join(detail, " "),
+			Count:    1,
 		})
-		topStop := workspaceStop["top_nonzero"]
+		topStop := workspaceStop["top_recent_active"]
+		if topStop == nil {
+			topStop = workspaceStop["top_active"]
+		}
+		if topStop == nil {
+			topStop = workspaceStop["top_nonzero"]
+		}
 		if topStop == nil {
 			topStop = workspaceStop["recent"]
 		}
@@ -2416,6 +2647,7 @@ func tuiGuardStopFailureSessionRows(artifactName string, recent any) []tuiGuardR
 			continue
 		}
 		transcript := tuiGuardMap(m["transcript"])
+		transcriptSummary := tuiGuardMap(m["transcript_summary"])
 		rows = append(rows, tuiGuardRow{
 			Artifact: artifactName,
 			Kind:     "stopfailure-session",
@@ -2428,6 +2660,7 @@ func tuiGuardStopFailureSessionRows(artifactName string, recent any) []tuiGuardR
 				"transcript=" + tuiGuardString(transcript, "status"),
 				"account=" + tuiGuardString(transcript, "account"),
 				"project=" + tuiGuardString(transcript, "project"),
+				"evidence=" + tuiGuardCompactJSON(transcriptSummary["evidence_tags"]),
 			}), "  "),
 			Count: total,
 		})
@@ -2593,6 +2826,31 @@ func scoreTUIGuardRow(row tuiGuardRow) ([]string, int) {
 	if row.Kind == "sample" {
 		tags = append(tags, "sample")
 		score += 15
+	}
+	if row.Kind == "default-blocker" {
+		tags = append(tags, "blocker")
+		score += 20
+		switch {
+		case status == "ACTIVE":
+			tags = append(tags, "active")
+			score += 160
+		case strings.Contains(status, "ACTIVE"):
+			tags = append(tags, "active")
+			score += 60
+		case strings.Contains(status, "STALE"):
+			tags = append(tags, "stale")
+			score += 40
+		case strings.Contains(status, "HISTORICAL"):
+			tags = append(tags, "historical")
+			score += 15
+		case strings.Contains(status, "EXTERNAL"):
+			tags = append(tags, "external")
+			score += 15
+		}
+		if strings.Contains(status, "DEBT") {
+			tags = append(tags, "debt")
+			score += 10
+		}
 	}
 	if strings.Contains(status, "DENIED_EXPECTED") {
 		tags = append(tags, "expected-deny")

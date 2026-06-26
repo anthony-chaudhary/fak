@@ -384,7 +384,7 @@ func TestTUIGuardCodexRecentAuditSurfacesActionability(t *testing.T) {
 		"actionability": map[string]any{
 			"status": "WARN",
 			"reasons": []any{
-				"stop blocks or StopFailure API-wall breaker markers are present",
+				"stop blocks or uncleared StopFailure API-wall breaker markers are present",
 			},
 			"residual": []any{
 				"HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE",
@@ -413,12 +413,59 @@ func TestTUIGuardCodexRecentAuditSurfacesActionability(t *testing.T) {
 			"missing":   []any{},
 		},
 		"workspace_stop_failures": map[string]any{
-			"status":                "WARN",
-			"markers":               204,
-			"total_failures":        96,
-			"nonzero_total_markers": 64,
-			"zero_total_markers":    140,
-			"max_consecutive":       4,
+			"status":                                 "WARN",
+			"markers":                                204,
+			"total_failures":                         96,
+			"nonzero_total_markers":                  64,
+			"active_consecutive_markers":             48,
+			"active_consecutive_total":               57,
+			"recent_active_consecutive_markers":      3,
+			"recent_active_consecutive_total":        3,
+			"stale_active_consecutive_markers":       45,
+			"stale_active_consecutive_total":         54,
+			"origin_counts":                          map[string]any{"claude_transcript": 2, "dos_stream+claude_transcript": 1},
+			"recent_active_origin_counts":            map[string]any{"claude_transcript": 1},
+			"stale_active_origin_counts":             map[string]any{"dos_stream+claude_transcript": 1},
+			"active_settlement_action_counts":        map[string]any{"RECENT_REVIEW": 3, "STALE_RESET_CANDIDATE": 45},
+			"recent_active_settlement_action_counts": map[string]any{"RECENT_REVIEW": 3},
+			"stale_active_settlement_action_counts":  map[string]any{"STALE_RESET_CANDIDATE": 45},
+			"healed_nonzero_markers":                 16,
+			"zero_total_markers":                     140,
+			"max_consecutive":                        4,
+			"top_active": []any{
+				map[string]any{
+					"session_id":        "b33eca05-c71e-4a51-979b-b4c8bcb43b1e",
+					"mtime":             "2026-06-25T23:11:51Z",
+					"total":             4,
+					"consecutive":       4,
+					"settlement_action": "STALE_RESET_CANDIDATE",
+					"transcript": map[string]any{
+						"status":  "FOUND",
+						"account": ".claude",
+						"project": "C--work-fak",
+					},
+					"transcript_summary": map[string]any{
+						"evidence_tags": []any{"HOOK_OR_API_WALL_FEEDBACK"},
+					},
+				},
+			},
+			"top_recent_active": []any{
+				map[string]any{
+					"session_id":        "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+					"mtime":             "2026-06-25T23:10:51Z",
+					"total":             1,
+					"consecutive":       1,
+					"settlement_action": "RECENT_REVIEW",
+					"transcript": map[string]any{
+						"status":  "FOUND",
+						"account": ".claude",
+						"project": "C--work-fak",
+					},
+					"transcript_summary": map[string]any{
+						"evidence_tags": []any{"HOOK_OR_API_WALL_FEEDBACK", "HOST_PERMISSION_INTERRUPT"},
+					},
+				},
+			},
 			"recent": []any{
 				map[string]any{
 					"session_id":  "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
@@ -430,6 +477,9 @@ func TestTUIGuardCodexRecentAuditSurfacesActionability(t *testing.T) {
 						"account": ".claude",
 						"project": "C--work-fak",
 					},
+					"transcript_summary": map[string]any{
+						"evidence_tags": []any{"HOOK_OR_API_WALL_FEEDBACK", "HOST_PERMISSION_INTERRUPT"},
+					},
 				},
 				map[string]any{
 					"session_id":  "2b8682ae-ced6-402b-bcc8-21180e96d5b3",
@@ -440,6 +490,9 @@ func TestTUIGuardCodexRecentAuditSurfacesActionability(t *testing.T) {
 						"status":  "FOUND",
 						"account": ".claude",
 						"project": "C--work-fak",
+					},
+					"transcript_summary": map[string]any{
+						"evidence_tags": []any{"SHELL_HEAVY_SESSION"},
 					},
 				},
 			},
@@ -471,7 +524,7 @@ func TestTUIGuardCodexRecentAuditSurfacesActionability(t *testing.T) {
 		t.Fatalf("status/counts = %s/%+v, want WARN with one warn source", report.Status, report.Counts)
 	}
 	encoded := string(stdout.Bytes())
-	for _, want := range []string{"codex-actionability", "stopfailure-api-wall", "stopfailure-session", "codex-hook-fast-path", "codex-shell-opacity", "native_launcher", "HOST_SHELL_OPACITY", "git_write", "2b8682ae-ced6-402b-bcc8-21180e96d5b3", "C--work-fak"} {
+	for _, want := range []string{"codex-actionability", "stopfailure-api-wall", "stopfailure-session", "codex-hook-fast-path", "codex-shell-opacity", "native_launcher", "HOST_SHELL_OPACITY", "git_write", "active_consecutive=57", "recent_consecutive=3", "RECENT_REVIEW", "HOOK_OR_API_WALL_FEEDBACK", "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6", "C--work-fak"} {
 		if !strings.Contains(encoded, want) {
 			t.Fatalf("codex guard JSON missing %q:\n%s", want, encoded)
 		}
@@ -493,6 +546,135 @@ func TestTUIGuardCodexRecentAuditSurfacesActionability(t *testing.T) {
 	for _, want := range []string{"fak console guard", "artifacts=1", "warn=1", "codex-actionability", "stopfailure-api-wall", "stopfailure-session", "warn"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("codex guard human missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUIGuardStatusAuditSurfacesDefaultBlockers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guard-mcp-status.json")
+	payload := map[string]any{
+		"schema":              "fak-guard-mcp-status-audit/1",
+		"status":              "PASS",
+		"debug_prompt_should": "do not copy this raw prompt",
+		"summary": map[string]any{
+			"passed":                  13,
+			"failed":                  0,
+			"total":                   13,
+			"default_blockers":        3,
+			"active_default_blockers": 2,
+		},
+		"checks": []any{
+			map[string]any{
+				"name":   "status packet present",
+				"status": "PASS",
+				"detail": "status packet names the evidence and residual interpretation",
+			},
+		},
+		"default_blockers": []any{
+			map[string]any{
+				"rank":         10,
+				"code":         "WORKSPACE_RECENT_STOPFAILURE_API_WALL",
+				"surface":      "workspace_dos",
+				"status":       "ACTIVE",
+				"next_action":  "Clear or rotate recent sessions.",
+				"private_note": "git commit -s -- private/path",
+				"evidence": map[string]any{
+					"recent_active_markers":                  3,
+					"recent_active_consecutive_total":        3,
+					"active_consecutive_total":               57,
+					"stale_active_consecutive_total":         54,
+					"active_recent_threshold_hours":          6,
+					"one_day_failures_total":                 96,
+					"healed_nonzero_markers":                 16,
+					"recent_active_origin_counts":            map[string]any{"claude_transcript": 2, "dos_stream+claude_transcript": 1},
+					"active_settlement_action_counts":        map[string]any{"RECENT_REVIEW": 3, "STALE_RESET_CANDIDATE": 45},
+					"recent_active_settlement_action_counts": map[string]any{"RECENT_REVIEW": 3},
+					"top_recent_active_sessions_should":      []any{"raw session detail should not be copied"},
+					"evidence_tag_counts": map[string]any{
+						"HOOK_OR_API_WALL_FEEDBACK": 20,
+						"HOST_PERMISSION_INTERRUPT": 20,
+					},
+				},
+			},
+			map[string]any{
+				"rank":        20,
+				"code":        "CODEX_HOST_SHELL_OPACITY",
+				"surface":     "codex_hooks",
+				"status":      "ACTIVE_DEBT",
+				"next_action": "Prefer path-visible host tools.",
+				"evidence": map[string]any{
+					"shell_no_write_target_detected": 2290,
+				},
+			},
+			map[string]any{
+				"rank":        70,
+				"code":        "OPENAI_AGENTS_SDK_NOT_INSTALLED",
+				"surface":     "openai_hosted",
+				"status":      "EXTERNAL_PREREQ",
+				"next_action": "Install only when targeting hosted Agents.",
+				"evidence": map[string]any{
+					"blockers": []any{
+						"openai-agents distribution is not installed",
+						"importable agents module is not an installed OpenAI Agents SDK distribution",
+					},
+				},
+			},
+		},
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal status audit fixture: %v", err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatalf("write status audit fixture: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"guard",
+		"--guard-json", path,
+		"--at", "2026-06-25T12:00:00Z",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI guard code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiGuardReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal guard report: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "WARN" || report.Counts.Warn != 1 || report.Counts.Rows != 4 {
+		t.Fatalf("status/counts = %s/%+v, want WARN with summary + 3 blocker rows", report.Status, report.Counts)
+	}
+	if len(report.Rows) == 0 || report.Rows[0].Reason != "WORKSPACE_RECENT_STOPFAILURE_API_WALL" {
+		t.Fatalf("top row = %+v, want recent StopFailure blocker first", report.Rows)
+	}
+	if !hasTUITag(report.Rows[0].Tags, "blocker") || !hasTUITag(report.Rows[0].Tags, "active") {
+		t.Fatalf("top row tags = %v, want blocker+active", report.Rows[0].Tags)
+	}
+	encoded := string(stdout.Bytes())
+	for _, want := range []string{"guard-status-audit", "default-blocker", "WORKSPACE_RECENT_STOPFAILURE_API_WALL", "CODEX_HOST_SHELL_OPACITY", "OPENAI_AGENTS_SDK_NOT_INSTALLED", "recent_active_consecutive_total=3", "claude_transcript", "RECENT_REVIEW", "shell_no_write_target_detected=2290", "openai-agents distribution is not installed"} {
+		if !strings.Contains(encoded, want) {
+			t.Fatalf("status audit JSON missing %q:\n%s", want, encoded)
+		}
+	}
+	for _, leak := range []string{"do not copy this raw prompt", "git commit -s", "raw session detail should not be copied"} {
+		if strings.Contains(encoded, leak) {
+			t.Fatalf("status audit JSON leaked %q:\n%s", leak, encoded)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runTUI(&stdout, &stderr, []string{"guard", "--guard-json", path, "--width", "190"})
+	if code != 0 {
+		t.Fatalf("runTUI guard human code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak console guard", "warn=1", "default-blocker", "WORKSPACE_RECENT_STOPFAILURE_API_WALL", "CODEX_HOST_SHELL_OPACITY"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status audit human missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -988,6 +1170,24 @@ func writeTUIGuardFixtures(t *testing.T) []string {
 		"unique_tool_calls_replayed": 38,
 		"verdict_counts":             map[string]any{"ALLOW": 35, "DENY": 3},
 		"reason_counts":              map[string]any{"DEFAULT_DENY": 2, "POLICY_BLOCK": 1},
+		"transcript_shape": map[string]any{
+			"summarized_sessions": 6,
+			"max_result_chars":    56309,
+			"evidence_tag_counts": map[string]any{
+				"HOOK_OR_API_WALL_FEEDBACK": 6,
+				"HOST_PERMISSION_INTERRUPT": 4,
+			},
+		},
+		"top_friction_sessions": []any{
+			map[string]any{
+				"session_digest":   "abc123",
+				"root_label":       ".claude/C--work-fak",
+				"tool_calls":       12,
+				"marker_lines":     44,
+				"max_result_chars": 56309,
+				"evidence_tags":    []any{"HOOK_OR_API_WALL_FEEDBACK", "HOST_PERMISSION_INTERRUPT"},
+			},
+		},
 		"non_allow_samples": []any{
 			map[string]any{
 				"tool":        "TaskUpdate",

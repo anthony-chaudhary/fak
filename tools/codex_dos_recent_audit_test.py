@@ -178,11 +178,144 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertEqual(report["summary"]["tool_counts"], {"Bash": 2})
             self.assertEqual(report["summary"]["unknown_tree_admission_warnings"], 1)
             self.assertEqual(report["summary"]["unknown_tree_warning_rate"], 0.5)
+            self.assertEqual(report["workspace_stop_failures"]["markers"], 1)
+            self.assertEqual(report["workspace_stop_failures"]["total_failures"], 0)
             encoded = json.dumps(report)
             self.assertNotIn("drop prompt text", encoded)
             self.assertNotIn("-m dos.cli hook", encoded)
             self.assertNotIn(str(home), encoded)
             self.assertNotIn(ignored, encoded)
+
+    def test_workspace_stop_failures_surface_non_codex_markers(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            user_home = root / "user-home"
+            thread = "019efde3-6794-7401-93a1-e97e6bd72a9c"
+            claude_session = "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6"
+            hot_session = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+            zero_session = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+            write_jsonl(home / "sessions" / "2026" / "06" / "25" / f"rollout-{thread}.jsonl", [{"type": "response_item"}])
+            write_hook_manifest(home, native_bash_hook_command())
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            write_jsonl(root / ".dos" / "streams" / f"{thread}.jsonl", [{"op": "STEP", "tool_name": "Read", "ts": now}])
+            write_jsonl(
+                root / ".dos" / "metrics" / "observations.jsonl",
+                [{"verb": "pretool", "outcome": "passthrough", "rung": "provenance", "dialect": "codex", "ts": now}],
+            )
+            transcript = user_home / ".claude" / "projects" / "C--work-fak" / f"{claude_session}.jsonl"
+            write_jsonl(
+                transcript,
+                [
+                    {"type": "user", "message": {"content": "prompt should not leak"}},
+                    {
+                        "type": "assistant",
+                        "timestamp": now,
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "tool_use", "name": "Bash", "input": {"command": "secret command should not leak"}},
+                                {"type": "tool_result", "content": "permission error: hook blocked secret result should not leak"},
+                            ],
+                        },
+                    },
+                ],
+            )
+            stop_dir = root / ".dos" / "stop-failures"
+            stop_dir.mkdir(parents=True, exist_ok=True)
+            (stop_dir / f"{claude_session}.json").write_text(json.dumps({"total": 1, "consecutive": 1}) + "\n", encoding="utf-8")
+            (stop_dir / f"{hot_session}.json").write_text(json.dumps({"total": 3, "consecutive": 0}) + "\n", encoding="utf-8")
+            (stop_dir / f"{zero_session}.json").write_text(json.dumps({"total": 0, "consecutive": 0}) + "\n", encoding="utf-8")
+
+            old_user_home = os.environ.get("FLEET_USER_HOME")
+            os.environ["FLEET_USER_HOME"] = str(user_home)
+            try:
+                report = mod.build_report(root, home, limit=10, since_days=3650, max_delegates=0)
+            finally:
+                if old_user_home is None:
+                    os.environ.pop("FLEET_USER_HOME", None)
+                else:
+                    os.environ["FLEET_USER_HOME"] = old_user_home
+
+            self.assertEqual(report["status"], "WARN")
+            self.assertEqual(report["summary"]["stop_failures_total"], 0)
+            self.assertEqual(report["summary"]["workspace_stop_failures_total"], 4)
+            self.assertEqual(report["summary"]["workspace_stop_failure_markers"], 3)
+            self.assertEqual(report["summary"]["workspace_stop_failure_zero_markers"], 1)
+            self.assertEqual(report["summary"]["workspace_stop_failure_nonzero_markers"], 2)
+            self.assertEqual(report["summary"]["workspace_stop_failure_active_markers"], 1)
+            self.assertEqual(report["summary"]["workspace_stop_failure_active_consecutive_total"], 1)
+            self.assertEqual(report["summary"]["workspace_stop_failure_active_recent_threshold_hours"], 6)
+            self.assertEqual(report["summary"]["workspace_stop_failure_recent_active_markers"], 1)
+            self.assertEqual(report["summary"]["workspace_stop_failure_recent_active_consecutive_total"], 1)
+            self.assertEqual(report["summary"]["workspace_stop_failure_stale_active_markers"], 0)
+            self.assertEqual(report["summary"]["workspace_stop_failure_stale_active_consecutive_total"], 0)
+            self.assertEqual(report["summary"]["workspace_stop_failure_healed_nonzero_markers"], 1)
+            self.assertEqual(report["summary"]["workspace_stop_failure_origin_counts"], {"claude_transcript": 1, "marker_only": 2})
+            self.assertEqual(report["summary"]["workspace_stop_failure_recent_active_origin_counts"], {"claude_transcript": 1})
+            self.assertEqual(
+                report["summary"]["workspace_stop_failure_settlement_action_counts"],
+                {"HEALED_NONZERO": 1, "RECENT_REVIEW": 1, "ZERO_TOTAL": 1},
+            )
+            self.assertEqual(report["summary"]["workspace_stop_failure_active_settlement_action_counts"], {"RECENT_REVIEW": 1})
+            self.assertEqual(report["actionability"]["status"], "WARN")
+            self.assertIn("stop blocks or uncleared StopFailure API-wall breaker markers are present", report["actionability"]["reasons"])
+            stop = report["workspace_stop_failures"]
+            self.assertEqual(stop["status"], "WARN")
+            self.assertEqual(stop["total_failures"], 4)
+            self.assertEqual(stop["active_consecutive_markers"], 1)
+            self.assertEqual(stop["active_consecutive_total"], 1)
+            self.assertEqual(stop["recent_active_consecutive_markers"], 1)
+            self.assertEqual(stop["recent_active_consecutive_total"], 1)
+            self.assertEqual(stop["stale_active_consecutive_markers"], 0)
+            self.assertEqual(stop["stale_active_consecutive_total"], 0)
+            self.assertEqual(stop["healed_nonzero_markers"], 1)
+            self.assertEqual(stop["origin_counts"], {"claude_transcript": 1, "marker_only": 2})
+            self.assertEqual(stop["recent_active_origin_counts"], {"claude_transcript": 1})
+            self.assertEqual(stop["settlement_action_counts"], {"HEALED_NONZERO": 1, "RECENT_REVIEW": 1, "ZERO_TOTAL": 1})
+            self.assertEqual(stop["recent_active_settlement_action_counts"], {"RECENT_REVIEW": 1})
+            self.assertEqual(sum(day["total_failures"] for day in stop["by_day"].values()), 4)
+            self.assertEqual(stop["top_nonzero"][0]["session_id"], hot_session)
+            self.assertEqual(stop["top_nonzero"][0]["total"], 3)
+            self.assertEqual(stop["top_nonzero"][0]["origin"], "marker_only")
+            self.assertEqual(stop["top_active"][0]["session_id"], claude_session)
+            self.assertEqual(stop["top_active"][0]["consecutive"], 1)
+            self.assertEqual(stop["top_active"][0]["origin"], "claude_transcript")
+            self.assertEqual(stop["top_active"][0]["settlement_action"], "RECENT_REVIEW")
+            self.assertEqual(stop["top_recent_active"][0]["session_id"], claude_session)
+            found = [item for item in stop["recent"] if item["session_id"] == claude_session][0]
+            self.assertEqual(found["transcript"]["status"], "FOUND")
+            self.assertEqual(found["transcript"]["project"], "C--work-fak")
+            self.assertIn("HOOK_OR_API_WALL_FEEDBACK", found["transcript_summary"]["evidence_tags"])
+            self.assertIn("HOST_PERMISSION_INTERRUPT", found["transcript_summary"]["evidence_tags"])
+            self.assertIn("DENY_OR_BLOCKED_FEEDBACK", found["transcript_summary"]["evidence_tags"])
+            rendered = mod.render(report)
+            self.assertIn("workspace StopFailure API-wall failures: 4", rendered)
+            self.assertIn("active StopFailure blockers: 1 markers", rendered)
+            self.assertIn('recent_origins={"claude_transcript": 1}', rendered)
+            self.assertIn('settlement={"RECENT_REVIEW": 1}', rendered)
+            self.assertIn("top recent active StopFailure sessions:", rendered)
+            self.assertIn("top active StopFailure sessions:", rendered)
+            self.assertIn("top StopFailure sessions:", rendered)
+            self.assertIn(hot_session, rendered)
+            debt = mod.render_debt_packet(report)
+            self.assertIn("current actionable WARN is workspace StopFailure API-wall breaker state", debt)
+            self.assertIn("workspace_stop_failures_total: `4`", debt)
+            self.assertIn("workspace_stop_failure_active_markers: `1`", debt)
+            self.assertIn("workspace_stop_failure_recent_active_markers: `1`", debt)
+            self.assertIn("workspace_stop_failure_stale_active_markers: `0`", debt)
+            self.assertIn('workspace_stop_failure_recent_active_origin_counts: `{"claude_transcript": 1}`', debt)
+            self.assertIn('workspace_stop_failure_active_settlement_action_counts: `{"RECENT_REVIEW": 1}`', debt)
+            self.assertIn("workspace_stop_failure_top_recent_active_sessions", debt)
+            self.assertIn("workspace_stop_failure_top_active_sessions", debt)
+            self.assertIn("workspace_stop_failure_transcript_evidence_tags", debt)
+            self.assertIn("workspace_stop_failure_top_sessions", debt)
+            encoded = json.dumps(report)
+            self.assertNotIn("prompt should not leak", encoded)
+            self.assertNotIn("secret command should not leak", encoded)
+            self.assertNotIn("secret result should not leak", encoded)
+            self.assertNotIn(str(user_home), encoded)
 
     def test_codex_hook_fast_path_detects_native_vs_python_manifest(self) -> None:
         mod = load()

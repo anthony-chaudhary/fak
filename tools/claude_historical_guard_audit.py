@@ -43,7 +43,47 @@ def digest_obj(value: Any) -> str:
     return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
 
 
-def discover(root: str, *, since_days: float | None = None, max_sessions: int = 10) -> list[Path]:
+def limited_counter(counter: Counter[str], limit: int = 12) -> dict[str, int]:
+    return {key: int(value) for key, value in counter.most_common(limit) if value}
+
+
+def safe_block_type(value: Any) -> str:
+    label = str(value or "unknown")
+    if label == "tool_result":
+        return "result_block"
+    return label
+
+
+def root_label(path: Path) -> str:
+    parts = path.parts
+    if len(parts) >= 3 and parts[-2] == "projects":
+        return f"{account_label(parts[-3])}/{parts[-1]}"
+    return path.name
+
+
+def account_label(name: str) -> str:
+    if name == ".claude":
+        return name
+    if name.startswith(".claude"):
+        return ".claude-" + digest_obj(name)[:8]
+    return digest_obj(name)[:8]
+
+
+def default_account_roots(namespace: str = DEFAULT_NS) -> list[Path]:
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    if configured:
+        root = Path(configured) / "projects" / namespace
+        return [root] if root.is_dir() else []
+    user_home = Path(os.environ.get("USERPROFILE", os.path.expanduser("~")))
+    roots = []
+    for account_dir in sorted(user_home.glob(".claude*")):
+        project = account_dir / "projects" / namespace
+        if project.is_dir():
+            roots.append(project)
+    return roots
+
+
+def discover(root: str | Path, *, since_days: float | None = None, max_sessions: int = 10) -> list[Path]:
     base = Path(root)
     if not base.is_dir():
         return []
@@ -62,6 +102,156 @@ def discover(root: str, *, since_days: float | None = None, max_sessions: int = 
         paths.append((st.st_mtime, p))
     paths.sort(reverse=True)
     return [p for _, p in paths[:max_sessions]]
+
+
+def discover_many(roots: list[Path], *, since_days: float | None = None, max_sessions: int = 10) -> list[Path]:
+    candidates = []
+    for root in roots:
+        for path in discover(root, since_days=since_days, max_sessions=max_sessions):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, path))
+    candidates.sort(reverse=True)
+    return [path for _, path in candidates[:max_sessions]]
+
+
+def summarize_transcript_shape(path: Path) -> dict[str, Any]:
+    line_count = 0
+    malformed = 0
+    row_types: Counter[str] = Counter()
+    roles: Counter[str] = Counter()
+    block_types: Counter[str] = Counter()
+    tools: Counter[str] = Counter()
+    marker_lines: Counter[str] = Counter()
+    result_shapes: Counter[str] = Counter()
+    first_ts = None
+    last_ts = None
+    max_result_chars = 0
+    markers = {
+        "hook_or_api_wall": ("hook", "api-wall", "api wall", "stopfailure", "stop failure"),
+        "permission": ("permission",),
+        "deny_or_blocked": ("denied", "deny", "blocked"),
+        "error_recovery": ("error", "exception", "traceback"),
+    }
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return {"status": "UNREADABLE", "error_type": type(exc).__name__}
+    for line in lines:
+        line_count += 1
+        lower = line.lower()
+        for marker, needles in markers.items():
+            if any(needle in lower for needle in needles):
+                marker_lines[marker] += 1
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            malformed += 1
+            continue
+        if not isinstance(row, dict):
+            malformed += 1
+            continue
+        row_types[str(row.get("type") or "unknown")] += 1
+        ts = row.get("timestamp") or row.get("created_at")
+        if isinstance(ts, str) and ts:
+            first_ts = first_ts or ts
+            last_ts = ts
+        msg = row.get("message") if isinstance(row.get("message"), dict) else {}
+        if msg:
+            roles[str(msg.get("role") or "unknown")] += 1
+            content = msg.get("content") if isinstance(msg.get("content"), list) else []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                block_type = safe_block_type(block.get("type"))
+                block_types[block_type] += 1
+                if block.get("type") == "tool_use":
+                    tools[str(block.get("name") or "unknown")] += 1
+                if block.get("type") == "tool_result":
+                    result = block.get("content")
+                    if isinstance(result, str):
+                        max_result_chars = max(max_result_chars, len(result))
+                        result_lower = result.lower()
+                        if "permission" in result_lower:
+                            result_shapes["permission_text"] += 1
+                        elif "error" in result_lower or "exception" in result_lower or "traceback" in result_lower:
+                            result_shapes["error_text"] += 1
+                        else:
+                            result_shapes["other_text"] += 1
+                    elif isinstance(result, list):
+                        result_shapes["list"] += 1
+                    elif result is None:
+                        result_shapes["null"] += 1
+                    else:
+                        result_shapes[type(result).__name__] += 1
+        tool_result = row.get("toolUseResult")
+        if isinstance(tool_result, dict):
+            result_shapes["tool_use_result_dict"] += 1
+            if tool_result.get("isError"):
+                result_shapes["tool_use_result_error"] += 1
+        elif isinstance(tool_result, str):
+            result_shapes["tool_use_result_str"] += 1
+            max_result_chars = max(max_result_chars, len(tool_result))
+
+    tool_total = sum(tools.values())
+    evidence_tags = []
+    if marker_lines.get("hook_or_api_wall"):
+        evidence_tags.append("HOOK_OR_API_WALL_FEEDBACK")
+    if marker_lines.get("permission") or result_shapes.get("permission_text"):
+        evidence_tags.append("HOST_PERMISSION_INTERRUPT")
+    if marker_lines.get("deny_or_blocked"):
+        evidence_tags.append("DENY_OR_BLOCKED_FEEDBACK")
+    if marker_lines.get("error_recovery") or result_shapes.get("error_text") or result_shapes.get("tool_use_result_error"):
+        evidence_tags.append("TOOL_ERROR_RECOVERY")
+    if tool_total and tools.get("Bash", 0) / tool_total >= 0.5:
+        evidence_tags.append("SHELL_HEAVY_SESSION")
+    if max_result_chars >= 20000:
+        evidence_tags.append("LARGE_RESULT")
+
+    return {
+        "status": "SUMMARIZED",
+        "line_count": line_count,
+        "malformed_lines": malformed,
+        "first_timestamp": first_ts,
+        "last_timestamp": last_ts,
+        "row_type_counts": limited_counter(row_types),
+        "role_counts": limited_counter(roles),
+        "block_type_counts": limited_counter(block_types),
+        "tool_counts": limited_counter(tools),
+        "marker_line_counts": limited_counter(marker_lines),
+        "result_shape_counts": limited_counter(result_shapes),
+        "max_result_chars": max_result_chars,
+        "evidence_tags": evidence_tags,
+    }
+
+
+def aggregate_transcript_shapes(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    marker_lines: Counter[str] = Counter()
+    evidence_tags: Counter[str] = Counter()
+    result_shapes: Counter[str] = Counter()
+    tools: Counter[str] = Counter()
+    max_result_chars = 0
+    summarized = 0
+    for summary in summaries:
+        if summary.get("status") != "SUMMARIZED":
+            continue
+        summarized += 1
+        marker_lines.update({str(k): int(v) for k, v in (summary.get("marker_line_counts") or {}).items()})
+        result_shapes.update({str(k): int(v) for k, v in (summary.get("result_shape_counts") or {}).items()})
+        tools.update({str(k): int(v) for k, v in (summary.get("tool_counts") or {}).items()})
+        for tag in summary.get("evidence_tags") or []:
+            evidence_tags[str(tag)] += 1
+        max_result_chars = max(max_result_chars, int(summary.get("max_result_chars") or 0))
+    return {
+        "summarized_sessions": summarized,
+        "evidence_tag_counts": limited_counter(evidence_tags),
+        "marker_line_counts": limited_counter(marker_lines),
+        "result_shape_counts": limited_counter(result_shapes),
+        "tool_counts": limited_counter(tools),
+        "max_result_chars": max_result_chars,
+    }
 
 
 def iter_tool_uses(path: Path) -> list[dict[str, Any]]:
@@ -157,6 +347,8 @@ def replay_call(call: dict[str, Any], *, fak_bin: str, policy: str, runner: Runn
 def collect(
     *,
     root: str = DEFAULT_ROOT,
+    all_accounts: bool = False,
+    namespace: str = DEFAULT_NS,
     policy: str = DEFAULT_POLICY,
     fak: str | None = None,
     since_days: float | None = 7,
@@ -168,23 +360,58 @@ def collect(
         runner = default_runner
     repo = Path(__file__).resolve().parents[1]
     fak_bin = find_fak(fak, repo)
-    paths = discover(root, since_days=since_days, max_sessions=max_sessions)
+    roots = default_account_roots(namespace) if all_accounts else [Path(root)]
+    paths = discover_many(roots, since_days=since_days, max_sessions=max_sessions)
     all_calls: list[dict[str, Any]] = []
     per_session = []
+    transcript_summaries: list[dict[str, Any]] = []
+    top_friction_sessions: list[dict[str, Any]] = []
     for p in paths:
         calls = iter_tool_uses(p)
+        shape = summarize_transcript_shape(p)
+        transcript_summaries.append(shape)
+        tags = [str(tag) for tag in shape.get("evidence_tags") or []]
+        marker_total = sum(int(v) for v in (shape.get("marker_line_counts") or {}).values())
+        if tags or marker_total:
+            top_friction_sessions.append({
+                "session_digest": digest_obj(p.stem),
+                "root_label": root_label(p.parent),
+                "mtime": dt.datetime.fromtimestamp(p.stat().st_mtime, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "tool_calls": len(calls),
+                "marker_lines": marker_total,
+                "max_result_chars": int(shape.get("max_result_chars") or 0),
+                "evidence_tags": tags,
+                "tool_counts": shape.get("tool_counts") or {},
+                "marker_line_counts": shape.get("marker_line_counts") or {},
+                "result_shape_counts": shape.get("result_shape_counts") or {},
+            })
         all_calls.extend(calls)
         per_session.append({
             "session_digest": digest_obj(p.stem),
+            "root_label": root_label(p.parent),
             "mtime": dt.datetime.fromtimestamp(p.stat().st_mtime, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z"),
             "tool_calls": len(calls),
+            "evidence_tags": tags,
         })
+    top_friction_sessions.sort(
+        key=lambda row: (
+            len(row.get("evidence_tags") or []),
+            int(row.get("marker_lines") or 0),
+            int(row.get("max_result_chars") or 0),
+            str(row.get("mtime") or ""),
+        ),
+        reverse=True,
+    )
+    transcript_shape = aggregate_transcript_shapes(transcript_summaries)
 
     payload: dict[str, Any] = {
         "schema": SCHEMA,
         "created_at": now_utc(),
         "status": "PASS",
-        "root": root,
+        "root": root if not all_accounts else "<all-claude-accounts>",
+        "root_labels": [root_label(path) for path in roots],
+        "all_accounts": all_accounts,
+        "namespace": namespace,
         "policy": policy,
         "sessions_discovered": len(paths),
         "sessions_audited": sum(1 for s in per_session if s["tool_calls"] > 0),
@@ -192,8 +419,10 @@ def collect(
         "max_sessions": max_sessions,
         "max_calls": max_calls,
         "since_days": since_days,
+        "transcript_shape": transcript_shape,
+        "top_friction_sessions": top_friction_sessions[:12],
         "privacy": {
-            "copied_fields": ["tool names", "verdict metadata", "counts", "hash digests"],
+            "copied_fields": ["tool names", "verdict metadata", "counts", "hash digests", "root labels", "derived transcript-shape tags"],
             "dropped": ["prompts", "tool arguments", "tool results", "raw transcript text"],
         },
     }
@@ -291,6 +520,31 @@ def render_md(payload: dict[str, Any]) -> str:
             )
     else:
         lines.append("- none")
+    lines.extend(["", "## Transcript Friction Signals", ""])
+    shape = payload.get("transcript_shape") if isinstance(payload.get("transcript_shape"), dict) else {}
+    if shape:
+        lines.extend(
+            [
+                f"- summarized_sessions: `{shape.get('summarized_sessions')}`",
+                f"- evidence_tag_counts: `{json.dumps(shape.get('evidence_tag_counts') or {}, sort_keys=True)}`",
+                f"- marker_line_counts: `{json.dumps(shape.get('marker_line_counts') or {}, sort_keys=True)}`",
+                f"- result_shape_counts: `{json.dumps(shape.get('result_shape_counts') or {}, sort_keys=True)}`",
+                f"- max_result_chars: `{shape.get('max_result_chars')}`",
+            ]
+        )
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Top Friction Sessions", ""])
+    friction = payload.get("top_friction_sessions") if isinstance(payload.get("top_friction_sessions"), list) else []
+    if friction:
+        for row in friction[:8]:
+            lines.append(
+                f"- `{row.get('session_digest')}` root=`{row.get('root_label')}` "
+                f"tool_calls=`{row.get('tool_calls')}` marker_lines=`{row.get('marker_lines')}` "
+                f"max_result_chars=`{row.get('max_result_chars')}` tags=`{', '.join(row.get('evidence_tags') or []) or 'none'}`"
+            )
+    else:
+        lines.append("- none")
     lines.extend(
         [
             "",
@@ -305,6 +559,8 @@ def render_md(payload: dict[str, Any]) -> str:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--root", default=DEFAULT_ROOT)
+    p.add_argument("--all-accounts", action="store_true", help="audit every local .claude* project root for the namespace")
+    p.add_argument("--namespace", default=DEFAULT_NS, help="Claude project namespace to use with --all-accounts")
     p.add_argument("--policy", default=DEFAULT_POLICY)
     p.add_argument("--fak", default=None)
     p.add_argument("--since-days", type=float, default=7)
@@ -317,6 +573,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     payload = collect(
         root=args.root,
+        all_accounts=args.all_accounts,
+        namespace=args.namespace,
         policy=args.policy,
         fak=args.fak,
         since_days=args.since_days,

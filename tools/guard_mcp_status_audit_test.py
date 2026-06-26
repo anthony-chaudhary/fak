@@ -2,7 +2,9 @@
 """Hermetic tests for tools/guard_mcp_status_audit.py."""
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -55,6 +57,10 @@ def seed_tree(
                 mod.OPENAI_HOSTED_MD,
                 "actionability.status=PASS",
                 "post-gate lens shows no `git_write`",
+                "Default-On Blocker Queue",
+                "WORKSPACE_RECENT_STOPFAILURE_API_WALL",
+                "WORKSPACE_STALE_STOPFAILURE_MARKERS",
+                "CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION",
                 "codex_login",
             ]
         )
@@ -98,13 +104,70 @@ def seed_tree(
         mod.CODEX_DOS_AUDIT,
         {
             "status": "WARN",
+            "summary": {
+                "workspace_stop_failures_total": 1,
+                "workspace_stop_failure_active_markers": 1,
+                "workspace_stop_failure_active_consecutive_total": 1,
+                "workspace_stop_failure_active_recent_threshold_hours": 6,
+                "workspace_stop_failure_recent_active_markers": 1,
+                "workspace_stop_failure_recent_active_consecutive_total": 1,
+                "workspace_stop_failure_stale_active_markers": 1,
+                "workspace_stop_failure_stale_active_consecutive_total": 2,
+                "workspace_stop_failure_healed_nonzero_markers": 0,
+                "workspace_stop_failure_transcript_evidence_tags": {"HOOK_OR_API_WALL_FEEDBACK": 1},
+                "workspace_stop_failure_origin_counts": {"claude_transcript": 1, "marker_only": 1},
+                "workspace_stop_failure_recent_active_origin_counts": {"claude_transcript": 1},
+                "workspace_stop_failure_stale_active_origin_counts": {"marker_only": 1},
+                "workspace_stop_failure_active_settlement_action_counts": {
+                    "RECENT_REVIEW": 1,
+                    "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 1,
+                },
+                "workspace_stop_failure_recent_active_settlement_action_counts": {"RECENT_REVIEW": 1},
+                "workspace_stop_failure_stale_active_settlement_action_counts": {
+                    "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 1,
+                },
+            },
             "actionability": {
-                "status": "PASS",
+                "status": "WARN",
+                "reasons": ["stop blocks or uncleared StopFailure API-wall breaker markers are present"],
                 "residual": sorted(mod.RESIDUALS),
+                "post_repair_shell_shape_counts": {"shell_no_write_target_detected": 3},
+                "post_repair_shell_family_counts": {"git_write": 2, "search_rg": 1},
+                "post_repair_mutating_shell_family_counts": {"git_write": 2},
             },
             "git_gate_evidence": {
                 "status": "PASS",
+                "proved_at": "2026-06-25T22:38:12Z",
                 "post_gate_command_shapes": {"shell_family_counts": families},
+            },
+            "workspace_stop_failures": {
+                "top_recent_active": [
+                    {
+                        "session_id": "s-stop",
+                        "total": 2,
+                        "consecutive": 1,
+                        "transcript": {"status": "FOUND", "project": "C--work-fak"},
+                        "transcript_summary": {"evidence_tags": ["HOOK_OR_API_WALL_FEEDBACK"]},
+                    }
+                ],
+                "top_active": [
+                    {
+                        "session_id": "s-stop",
+                        "total": 2,
+                        "consecutive": 1,
+                        "transcript": {"status": "FOUND", "project": "C--work-fak"},
+                        "transcript_summary": {"evidence_tags": ["HOOK_OR_API_WALL_FEEDBACK"]},
+                    }
+                ],
+                "top_stale_active": [
+                    {
+                        "session_id": "s-stale",
+                        "total": 2,
+                        "consecutive": 2,
+                        "transcript": {"status": "FOUND", "project": "C--work-fak"},
+                        "transcript_summary": {"evidence_tags": ["HOOK_OR_API_WALL_FEEDBACK"]},
+                    }
+                ],
             },
         },
     )
@@ -133,6 +196,8 @@ def seed_tree(
         {
             "schema": "fak-claude-historical-guard-audit/1",
             "status": "PASS",
+            "all_accounts": True,
+            "root_labels": [".claude/C--work-fak", ".claude-worker/C--work-fak"],
             "sessions_discovered": 10,
             "sessions_audited": 6,
             "tool_calls_seen": 39,
@@ -140,6 +205,21 @@ def seed_tree(
             "truncated": False,
             "verdict_counts": historical_verdicts,
             "reason_counts": historical_reasons,
+            "transcript_shape": {
+                "summarized_sessions": 10,
+                "evidence_tag_counts": {
+                    "HOOK_OR_API_WALL_FEEDBACK": 4,
+                    "HOST_PERMISSION_INTERRUPT": 3,
+                },
+            },
+            "top_friction_sessions": [
+                {
+                    "session_digest": "abc123",
+                    "root_label": ".claude/C--work-fak",
+                    "marker_lines": 7,
+                    "evidence_tags": ["HOOK_OR_API_WALL_FEEDBACK"],
+                },
+            ],
             "privacy": {
                 "dropped": ["prompts", "tool arguments", "tool results", "raw transcript text"],
             },
@@ -149,6 +229,7 @@ def seed_tree(
     (root / mod.CLAUDE_HISTORICAL_MD).write_text(
         "# Claude Code historical guard replay\n\n"
         "- status: **`PASS`**\n\n"
+        "## Transcript Friction Signals\n\n"
         "It never writes prompts, tool arguments, tool results, or raw transcript text.\n",
         encoding="utf-8",
     )
@@ -244,6 +325,35 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
             payload = mod.collect(root)
             self.assertEqual(payload["status"], "PASS")
             self.assertEqual(payload["summary"]["failed"], 0)
+            self.assertGreaterEqual(payload["summary"]["default_blockers"], 4)
+            self.assertGreaterEqual(payload["summary"]["active_default_blockers"], 2)
+            codes = [row["code"] for row in payload["default_blockers"]]
+            self.assertEqual(codes[0], "WORKSPACE_RECENT_STOPFAILURE_API_WALL")
+            self.assertIn("WORKSPACE_STALE_STOPFAILURE_MARKERS", codes)
+            self.assertIn("CODEX_HOST_SHELL_OPACITY", codes)
+            self.assertIn("CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION", codes)
+            self.assertIn("OPENAI_AGENTS_SDK_NOT_INSTALLED", codes)
+            first = payload["default_blockers"][0]
+            self.assertEqual(first["surface"], "workspace_dos")
+            self.assertEqual(first["evidence"]["recent_active_origin_counts"], {"claude_transcript": 1})
+            self.assertEqual(first["evidence"]["recent_active_settlement_action_counts"], {"RECENT_REVIEW": 1})
+
+    def test_main_writes_json_out_file(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed_tree(root)
+            out = root / "experiments" / "agent-live" / "guard-mcp-status-audit.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = mod.main(["--root", str(root), "--out", str(out)])
+            self.assertEqual(code, 0)
+            self.assertTrue(out.exists())
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema"], mod.SCHEMA)
+            self.assertEqual(payload["status"], "PASS")
+            self.assertIn("default-on blocker queue", stdout.getvalue())
+            self.assertIn("WORKSPACE_RECENT_STOPFAILURE_API_WALL", json.dumps(payload))
 
     def test_collect_fails_on_post_gate_git_write(self) -> None:
         mod = load()

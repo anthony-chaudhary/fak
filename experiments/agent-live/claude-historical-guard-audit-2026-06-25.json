@@ -1,36 +1,128 @@
 {
-  "created_at": "2026-06-25T14:58:24.018378Z",
+  "all_accounts": true,
+  "created_at": "2026-06-26T02:24:20.264335Z",
   "max_calls": 500,
-  "max_sessions": 10,
+  "max_sessions": 20,
+  "namespace": "C--work-fak",
   "non_allow_samples": [
     {
-      "args_bytes": 37,
-      "args_digest": "052a79b7f944",
+      "args_bytes": 35,
+      "args_digest": "bb01c4a444db",
       "by": "monitor",
-      "call_digest": "c38bdf84780b2f80",
+      "call_digest": "79a8e7ad26a04cf3",
       "claim": "",
       "reason": "DEFAULT_DENY",
       "tool": "TaskUpdate",
       "verdict": "DENY"
     },
     {
-      "args_bytes": 10616,
-      "args_digest": "0ebc86741a5c",
+      "args_bytes": 53,
+      "args_digest": "05b85c6ec2a8",
       "by": "monitor",
-      "call_digest": "228e30224e260877",
+      "call_digest": "b72886ffb73ac7aa",
       "claim": "",
       "reason": "DEFAULT_DENY",
-      "tool": "Workflow",
+      "tool": "TaskOutput",
       "verdict": "DENY"
     },
     {
-      "args_bytes": 857,
-      "args_digest": "ae45085a31a6",
+      "args_bytes": 53,
+      "args_digest": "a78cb61807eb",
       "by": "monitor",
-      "call_digest": "f5a056b4348603d3",
-      "claim": "Bash.command deny_regex /\\brm\\s+-[A-Za-z]*[rRfF]/",
-      "reason": "POLICY_BLOCK",
-      "tool": "Bash",
+      "call_digest": "c5cee59184a30614",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 53,
+      "args_digest": "7182ee989ddb",
+      "by": "monitor",
+      "call_digest": "212ed19fd0804ba5",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 53,
+      "args_digest": "dcd054eb9639",
+      "by": "monitor",
+      "call_digest": "1efc96a44b137e31",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 53,
+      "args_digest": "f84349b41ce0",
+      "by": "monitor",
+      "call_digest": "674924f5562ca309",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 52,
+      "args_digest": "48dcb8bbed3e",
+      "by": "monitor",
+      "call_digest": "1e51e1031b86b69a",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 52,
+      "args_digest": "bc67d9d73cf3",
+      "by": "monitor",
+      "call_digest": "82713e2d6f1c3e62",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 52,
+      "args_digest": "52dc9438cac6",
+      "by": "monitor",
+      "call_digest": "6d0d16ddbc53699d",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 53,
+      "args_digest": "69a31ca3fcfd",
+      "by": "monitor",
+      "call_digest": "8aac1bf9e47e908d",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 52,
+      "args_digest": "8e2cab634c3b",
+      "by": "monitor",
+      "call_digest": "60f58c4809dfdbb2",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 52,
+      "args_digest": "dbb2d0b83d27",
+      "by": "monitor",
+      "call_digest": "b89b00f4a0fac60a",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskOutput",
       "verdict": "DENY"
     }
   ],
@@ -40,7 +132,9 @@
       "tool names",
       "verdict metadata",
       "counts",
-      "hash digests"
+      "hash digests",
+      "root labels",
+      "derived transcript-shape tags"
     ],
     "dropped": [
       "prompts",
@@ -50,8 +144,8 @@
     ]
   },
   "reason_counts": {
-    "DEFAULT_DENY": 2,
-    "POLICY_BLOCK": 1
+    "DEFAULT_DENY": 39,
+    "POLICY_BLOCK": 7
   },
   "replay_engine": {
     "binary": ".\\fak.exe",
@@ -59,78 +153,800 @@
     "policy": "examples\\dogfood-claude-policy.json"
   },
   "replay_errors": [],
-  "root": "C:\\Users\\USER\\.claude\\projects\\C--work-fak",
+  "root": "<all-claude-accounts>",
+  "root_labels": [
+    ".claude/C--work-fak",
+    ".claude-76461889/C--work-fak",
+    ".claude-7cc12304/C--work-fak",
+    ".claude-8cb1f2d8/C--work-fak",
+    ".claude-c232771c/C--work-fak",
+    ".claude-b3724e41/C--work-fak",
+    ".claude-4e449ab2/C--work-fak",
+    ".claude-482e91e7/C--work-fak",
+    ".claude-8167eb3d/C--work-fak",
+    ".claude-4ce5ea06/C--work-fak"
+  ],
   "schema": "fak-claude-historical-guard-audit/1",
   "sessions": [
     {
-      "mtime": "2026-06-25T14:58:22.652034Z",
-      "session_digest": "92014df3bf88e5f2",
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY"
+      ],
+      "mtime": "2026-06-26T02:24:06.478151Z",
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "0f7d6355089611fe",
+      "tool_calls": 0
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T02:22:01.260418Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "a585f940822d0d52",
+      "tool_calls": 129
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T02:17:01.695215Z",
+      "root_label": ".claude-7cc12304/C--work-fak",
+      "session_digest": "4c03751e6c6c01b0",
       "tool_calls": 1
     },
     {
-      "mtime": "2026-06-25T14:58:20.378519Z",
-      "session_digest": "baa0e44a0032e6da",
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T02:13:16.880715Z",
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "c1159ea078fb24b8",
+      "tool_calls": 7
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T01:55:26.877000Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "5bc67363724625d9",
+      "tool_calls": 24
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T01:54:44.046000Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "4b2e843b571dedd8",
+      "tool_calls": 7
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "mtime": "2026-06-26T01:50:38.426683Z",
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "c89ff77fba19639f",
       "tool_calls": 0
     },
     {
-      "mtime": "2026-06-25T14:58:19.919692Z",
-      "session_digest": "72c8ef06f9570fe1",
-      "tool_calls": 0
-    },
-    {
-      "mtime": "2026-06-25T14:58:18.325444Z",
-      "session_digest": "2cff391bfb6d86de",
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY"
+      ],
+      "mtime": "2026-06-26T01:49:47.072000Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "fc9f446759315222",
       "tool_calls": 4
     },
     {
-      "mtime": "2026-06-25T14:58:08.577781Z",
-      "session_digest": "a413f8e6663b9a00",
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "mtime": "2026-06-26T01:47:24.279515Z",
+      "root_label": ".claude-7cc12304/C--work-fak",
+      "session_digest": "6824bce576a535e2",
       "tool_calls": 0
     },
     {
-      "mtime": "2026-06-25T14:57:45.675771Z",
-      "session_digest": "feff8be1968a0c58",
-      "tool_calls": 1
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T01:44:41.037000Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "9b2bbc8a51e22227",
+      "tool_calls": 12
     },
     {
-      "mtime": "2026-06-25T14:57:43.870550Z",
-      "session_digest": "3aa69467cac7453f",
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T01:44:14.157000Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "f08be8fbd74c6b9d",
+      "tool_calls": 2
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T01:43:56.057964Z",
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "c3a9efb44990a645",
+      "tool_calls": 2
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY"
+      ],
+      "mtime": "2026-06-26T01:41:03.475000Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "2aebf2311ce77698",
+      "tool_calls": 8
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "mtime": "2026-06-26T01:18:07.402471Z",
+      "root_label": ".claude-7cc12304/C--work-fak",
+      "session_digest": "7fbfc0e6155f4277",
       "tool_calls": 0
     },
     {
-      "mtime": "2026-06-25T14:43:15.895125Z",
-      "session_digest": "3dbf0dbc166b15ed",
-      "tool_calls": 3
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "mtime": "2026-06-26T01:14:18.226995Z",
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "eebde36dc2ca80c5",
+      "tool_calls": 2
     },
     {
-      "mtime": "2026-06-25T14:43:08.228210Z",
-      "session_digest": "6b83e5b3108eba9d",
-      "tool_calls": 11
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "mtime": "2026-06-26T01:02:26.483326Z",
+      "root_label": ".claude-7cc12304/C--work-fak",
+      "session_digest": "1637cfea96d565b8",
+      "tool_calls": 0
     },
     {
-      "mtime": "2026-06-25T14:41:51.470166Z",
-      "session_digest": "327f6e8ff30159e3",
-      "tool_calls": 19
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "mtime": "2026-06-26T01:00:23.824250Z",
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "f5770132f058da8b",
+      "tool_calls": 0
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "mtime": "2026-06-26T00:57:17.873821Z",
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "570b06d60553c594",
+      "tool_calls": 2
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "mtime": "2026-06-26T00:49:35.154368Z",
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "7cb3d3b0088c9072",
+      "tool_calls": 30
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT"
+      ],
+      "mtime": "2026-06-26T00:49:34.889357Z",
+      "root_label": ".claude-7cc12304/C--work-fak",
+      "session_digest": "0158220da1192ddd",
+      "tool_calls": 0
     }
   ],
-  "sessions_audited": 6,
-  "sessions_discovered": 10,
+  "sessions_audited": 13,
+  "sessions_discovered": 20,
   "since_days": 1.0,
   "status": "PASS",
-  "tool_calls_seen": 39,
+  "tool_calls_seen": 230,
   "tool_counts": {
-    "Bash": 11,
-    "Edit": 16,
-    "Read": 9,
-    "TaskUpdate": 1,
-    "Workflow": 1,
-    "Write": 1
+    "AskUserQuestion": 1,
+    "Bash": 79,
+    "Edit": 58,
+    "ExitPlanMode": 1,
+    "Monitor": 15,
+    "Read": 44,
+    "SendMessage": 2,
+    "TaskCreate": 2,
+    "TaskOutput": 14,
+    "TaskUpdate": 6,
+    "Write": 7,
+    "mcp__dos__dos_commit_audit": 1
+  },
+  "top_friction_sessions": [
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 212,
+        "error_recovery": 741,
+        "hook_or_api_wall": 332,
+        "permission": 200
+      },
+      "marker_lines": 1485,
+      "max_result_chars": 26764,
+      "mtime": "2026-06-26T02:22:01.260418Z",
+      "result_shape_counts": {
+        "error_text": 76,
+        "list": 4,
+        "other_text": 659,
+        "permission_text": 1,
+        "tool_use_result_dict": 714,
+        "tool_use_result_str": 26
+      },
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "a585f940822d0d52",
+      "tool_calls": 129,
+      "tool_counts": {
+        "Agent": 4,
+        "Bash": 397,
+        "Edit": 64,
+        "Glob": 2,
+        "Monitor": 22,
+        "Read": 97,
+        "ScheduleWakeup": 3,
+        "TaskCreate": 12,
+        "TaskOutput": 40,
+        "TaskStop": 6,
+        "TaskUpdate": 22,
+        "Write": 63
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 36,
+        "error_recovery": 130,
+        "hook_or_api_wall": 24,
+        "permission": 32
+      },
+      "marker_lines": 222,
+      "max_result_chars": 20399,
+      "mtime": "2026-06-26T01:55:26.877000Z",
+      "result_shape_counts": {
+        "error_text": 24,
+        "other_text": 113,
+        "tool_use_result_dict": 133,
+        "tool_use_result_str": 4
+      },
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "5bc67363724625d9",
+      "tool_calls": 24,
+      "tool_counts": {
+        "Bash": 81,
+        "Edit": 20,
+        "Read": 20,
+        "TaskCreate": 4,
+        "TaskUpdate": 6,
+        "Write": 5,
+        "mcp__dos__dos_commit_audit": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 4,
+        "error_recovery": 51,
+        "hook_or_api_wall": 2,
+        "permission": 2
+      },
+      "marker_lines": 59,
+      "max_result_chars": 38156,
+      "mtime": "2026-06-26T01:00:23.824250Z",
+      "result_shape_counts": {
+        "error_text": 12,
+        "other_text": 40,
+        "tool_use_result_dict": 47,
+        "tool_use_result_str": 5
+      },
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "f5770132f058da8b",
+      "tool_calls": 0,
+      "tool_counts": {
+        "Bash": 44,
+        "Read": 7,
+        "mcp__dos__dos_arbitrate": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 2,
+        "error_recovery": 25,
+        "hook_or_api_wall": 10,
+        "permission": 2
+      },
+      "marker_lines": 39,
+      "max_result_chars": 58302,
+      "mtime": "2026-06-26T02:17:01.695215Z",
+      "result_shape_counts": {
+        "error_text": 5,
+        "list": 1,
+        "other_text": 25,
+        "tool_use_result_dict": 28,
+        "tool_use_result_str": 3
+      },
+      "root_label": ".claude-7cc12304/C--work-fak",
+      "session_digest": "4c03751e6c6c01b0",
+      "tool_calls": 1,
+      "tool_counts": {
+        "Bash": 19,
+        "Edit": 2,
+        "Read": 5,
+        "ToolSearch": 1,
+        "Write": 2,
+        "mcp__dos__dos_arbitrate": 1,
+        "mcp__dos__dos_commit_audit": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 80,
+        "error_recovery": 219,
+        "hook_or_api_wall": 34,
+        "permission": 68
+      },
+      "marker_lines": 401,
+      "max_result_chars": 18936,
+      "mtime": "2026-06-26T00:49:35.154368Z",
+      "result_shape_counts": {
+        "error_text": 28,
+        "list": 1,
+        "other_text": 183,
+        "permission_text": 7,
+        "tool_use_result_dict": 214,
+        "tool_use_result_str": 5
+      },
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "7cb3d3b0088c9072",
+      "tool_calls": 30,
+      "tool_counts": {
+        "AskUserQuestion": 1,
+        "Bash": 128,
+        "Edit": 39,
+        "EnterPlanMode": 1,
+        "Grep": 1,
+        "Monitor": 3,
+        "Read": 35,
+        "TaskCreate": 1,
+        "TaskStop": 2,
+        "TaskUpdate": 4,
+        "ToolSearch": 1,
+        "Write": 2
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 12,
+        "error_recovery": 65,
+        "hook_or_api_wall": 9,
+        "permission": 24
+      },
+      "marker_lines": 110,
+      "max_result_chars": 55614,
+      "mtime": "2026-06-26T01:44:41.037000Z",
+      "result_shape_counts": {
+        "error_text": 17,
+        "other_text": 82,
+        "tool_use_result_dict": 94,
+        "tool_use_result_str": 5
+      },
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "9b2bbc8a51e22227",
+      "tool_calls": 12,
+      "tool_counts": {
+        "AskUserQuestion": 1,
+        "Bash": 21,
+        "Edit": 16,
+        "EnterPlanMode": 1,
+        "ExitPlanMode": 1,
+        "Grep": 18,
+        "Read": 24,
+        "TaskCreate": 5,
+        "TaskUpdate": 9,
+        "Write": 2,
+        "mcp__dos__dos_commit_audit": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 8,
+        "error_recovery": 41,
+        "hook_or_api_wall": 4,
+        "permission": 12
+      },
+      "marker_lines": 65,
+      "max_result_chars": 55614,
+      "mtime": "2026-06-26T01:54:44.046000Z",
+      "result_shape_counts": {
+        "error_text": 15,
+        "list": 2,
+        "other_text": 23,
+        "tool_use_result_dict": 40
+      },
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "4b2e843b571dedd8",
+      "tool_calls": 7,
+      "tool_counts": {
+        "Agent": 1,
+        "Bash": 20,
+        "Edit": 2,
+        "EnterPlanMode": 1,
+        "ExitPlanMode": 1,
+        "Grep": 1,
+        "Read": 8,
+        "SendMessage": 1,
+        "TaskCreate": 2,
+        "TaskOutput": 1,
+        "TaskUpdate": 2,
+        "Write": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 4,
+        "error_recovery": 16,
+        "hook_or_api_wall": 10,
+        "permission": 12
+      },
+      "marker_lines": 42,
+      "max_result_chars": 32162,
+      "mtime": "2026-06-26T01:44:14.157000Z",
+      "result_shape_counts": {
+        "error_text": 7,
+        "other_text": 17,
+        "permission_text": 1,
+        "tool_use_result_dict": 25
+      },
+      "root_label": ".claude/C--work-fak",
+      "session_digest": "f08be8fbd74c6b9d",
+      "tool_calls": 2,
+      "tool_counts": {
+        "Bash": 6,
+        "Edit": 1,
+        "Grep": 3,
+        "Read": 10,
+        "TaskOutput": 3,
+        "Workflow": 1,
+        "Write": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 7,
+        "error_recovery": 15,
+        "hook_or_api_wall": 15,
+        "permission": 2
+      },
+      "marker_lines": 39,
+      "max_result_chars": 56309,
+      "mtime": "2026-06-26T01:43:56.057964Z",
+      "result_shape_counts": {
+        "error_text": 3,
+        "list": 1,
+        "other_text": 22,
+        "tool_use_result_dict": 25,
+        "tool_use_result_str": 1
+      },
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "c3a9efb44990a645",
+      "tool_calls": 2,
+      "tool_counts": {
+        "Bash": 12,
+        "Edit": 3,
+        "Grep": 1,
+        "Read": 6,
+        "ToolSearch": 1,
+        "Write": 2,
+        "mcp__dos__dos_arbitrate": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "LARGE_RESULT"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 5,
+        "error_recovery": 27,
+        "hook_or_api_wall": 4,
+        "permission": 2
+      },
+      "marker_lines": 38,
+      "max_result_chars": 64944,
+      "mtime": "2026-06-26T02:13:16.880715Z",
+      "result_shape_counts": {
+        "error_text": 5,
+        "list": 1,
+        "other_text": 43,
+        "tool_use_result_dict": 45,
+        "tool_use_result_str": 4
+      },
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "c1159ea078fb24b8",
+      "tool_calls": 7,
+      "tool_counts": {
+        "Bash": 22,
+        "Edit": 14,
+        "Grep": 3,
+        "Read": 6,
+        "TaskCreate": 1,
+        "ToolSearch": 1,
+        "mcp__dos__dos_arbitrate": 1,
+        "mcp__dos__dos_commit_audit": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 4,
+        "error_recovery": 22,
+        "hook_or_api_wall": 3,
+        "permission": 4
+      },
+      "marker_lines": 33,
+      "max_result_chars": 19707,
+      "mtime": "2026-06-26T00:57:17.873821Z",
+      "result_shape_counts": {
+        "error_text": 3,
+        "other_text": 25,
+        "permission_text": 2,
+        "tool_use_result_dict": 26,
+        "tool_use_result_str": 4
+      },
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "570b06d60553c594",
+      "tool_calls": 2,
+      "tool_counts": {
+        "Bash": 21,
+        "Edit": 1,
+        "Read": 3,
+        "Write": 2,
+        "mcp__dos__dos_arbitrate": 1,
+        "mcp__dos__dos_commit_audit": 1,
+        "mcp__dos__dos_verify": 1
+      }
+    },
+    {
+      "evidence_tags": [
+        "HOOK_OR_API_WALL_FEEDBACK",
+        "HOST_PERMISSION_INTERRUPT",
+        "DENY_OR_BLOCKED_FEEDBACK",
+        "TOOL_ERROR_RECOVERY",
+        "SHELL_HEAVY_SESSION"
+      ],
+      "marker_line_counts": {
+        "deny_or_blocked": 4,
+        "error_recovery": 10,
+        "hook_or_api_wall": 8,
+        "permission": 2
+      },
+      "marker_lines": 24,
+      "max_result_chars": 5249,
+      "mtime": "2026-06-26T01:50:38.426683Z",
+      "result_shape_counts": {
+        "list": 1,
+        "other_text": 13,
+        "tool_use_result_dict": 14
+      },
+      "root_label": ".claude-4e449ab2/C--work-fak",
+      "session_digest": "c89ff77fba19639f",
+      "tool_calls": 0,
+      "tool_counts": {
+        "Bash": 10,
+        "Grep": 1,
+        "Read": 2,
+        "ToolSearch": 1
+      }
+    }
+  ],
+  "transcript_shape": {
+    "evidence_tag_counts": {
+      "DENY_OR_BLOCKED_FEEDBACK": 17,
+      "HOOK_OR_API_WALL_FEEDBACK": 20,
+      "HOST_PERMISSION_INTERRUPT": 20,
+      "LARGE_RESULT": 9,
+      "SHELL_HEAVY_SESSION": 11,
+      "TOOL_ERROR_RECOVERY": 19
+    },
+    "marker_line_counts": {
+      "deny_or_blocked": 429,
+      "error_recovery": 1527,
+      "hook_or_api_wall": 508,
+      "permission": 421
+    },
+    "max_result_chars": 64944,
+    "result_shape_counts": {
+      "error_text": 230,
+      "list": 25,
+      "other_text": 1463,
+      "permission_text": 13,
+      "tool_use_result_dict": 1665,
+      "tool_use_result_str": 66
+    },
+    "summarized_sessions": 20,
+    "tool_counts": {
+      "Agent": 10,
+      "Bash": 888,
+      "Edit": 186,
+      "Grep": 49,
+      "Monitor": 25,
+      "PowerShell": 12,
+      "Read": 273,
+      "TaskCreate": 30,
+      "TaskOutput": 47,
+      "TaskUpdate": 52,
+      "ToolSearch": 12,
+      "Write": 84
+    }
   },
   "truncated": false,
-  "unique_tool_calls": 38,
-  "unique_tool_calls_replayed": 38,
+  "unique_tool_calls": 227,
+  "unique_tool_calls_replayed": 227,
   "verdict_counts": {
-    "ALLOW": 35,
-    "DENY": 3
+    "ALLOW": 181,
+    "DENY": 46
   }
 }

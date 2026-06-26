@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+import hashlib
 import importlib.util
 import json
 import os
@@ -26,6 +27,7 @@ import urllib.request
 
 SCHEMA = "fak-codex-dos-recent-audit/1"
 THREAD_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+ACTIVE_STOP_FAILURE_RECENT_HOURS = 6
 GIT_WRITE_SUBCOMMANDS = {
     "add",
     "checkout",
@@ -132,7 +134,8 @@ def discover_codex_threads(home: Path, *, since_days: int = 7) -> dict[str, Path
     if not sessions.exists():
         return {}
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, since_days))
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=max(1, since_days))
     found: dict[str, Path] = {}
     for path in sessions.rglob("*.jsonl"):
         try:
@@ -192,6 +195,421 @@ def discover_streams(repo_root: Path, codex_threads: dict[str, Path], limit: int
         candidates.append((mtime, thread_id, path))
     candidates.sort(reverse=True)
     return [(thread_id, path) for _, thread_id, path in candidates[: max(1, limit)]]
+
+
+def safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def short_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+
+
+def find_claude_transcript_path(session_id: str, user_home: Path) -> Path | None:
+    for account_dir in sorted(user_home.glob(".claude*")):
+        projects = account_dir / "projects"
+        if not projects.is_dir():
+            continue
+        for path in sorted(projects.glob(f"*/{session_id}.jsonl")):
+            return path
+    return None
+
+
+def public_claude_transcript(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {"status": "MISSING"}
+    try:
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        mtime = None
+    return {
+        "status": "FOUND",
+        "account": public_claude_account_label(path.parent.parent.parent.name),
+        "project": path.parent.name,
+        "mtime": mtime.isoformat().replace("+00:00", "Z") if mtime is not None else None,
+    }
+
+
+def find_claude_transcript(session_id: str, user_home: Path) -> dict[str, Any]:
+    return public_claude_transcript(find_claude_transcript_path(session_id, user_home))
+
+
+def limited_counter(counter: Counter[str], limit: int = 12) -> dict[str, int]:
+    return {key: int(value) for key, value in counter.most_common(limit) if value}
+
+
+def public_claude_account_label(name: str) -> str:
+    if name == ".claude":
+        return name
+    if name.startswith(".claude"):
+        return ".claude-" + short_digest(name)
+    return short_digest(name)
+
+
+def stop_failure_origin(entry: dict[str, Any]) -> str:
+    labels = entry.get("origin_labels")
+    if isinstance(labels, list) and labels:
+        return "+".join(str(label) for label in labels if str(label))
+    return str(entry.get("origin") or "marker_only")
+
+
+def stop_failure_origin_counts(entries: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for entry in entries:
+        counts[stop_failure_origin(entry)] += 1
+    return limited_counter(counts)
+
+
+def stop_failure_settlement_action(entry: dict[str, Any]) -> str:
+    total = safe_int(entry.get("total"))
+    consecutive = safe_int(entry.get("consecutive"))
+    if total <= 0:
+        return "ZERO_TOTAL"
+    if consecutive <= 0:
+        return "HEALED_NONZERO"
+    if bool(entry.get("active_recent")):
+        return "RECENT_REVIEW"
+    if stop_failure_origin(entry) == "marker_only":
+        return "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"
+    return "STALE_RESET_CANDIDATE"
+
+
+def stop_failure_settlement_counts(entries: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for entry in entries:
+        counts[stop_failure_settlement_action(entry)] += 1
+    return limited_counter(counts)
+
+
+def summarize_claude_transcript_shape(path: Path) -> dict[str, Any]:
+    line_count = 0
+    malformed = 0
+    row_types: Counter[str] = Counter()
+    roles: Counter[str] = Counter()
+    block_types: Counter[str] = Counter()
+    tools: Counter[str] = Counter()
+    marker_lines: Counter[str] = Counter()
+    result_shapes: Counter[str] = Counter()
+    first_ts = None
+    last_ts = None
+    max_tool_result_chars = 0
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return {"status": "UNREADABLE", "error_type": type(exc).__name__}
+
+    markers = {
+        "stopfailure": ("stopfailure", "stop failure"),
+        "api_wall": ("api-wall", "api wall"),
+        "hook": ("hook",),
+        "blocked": ("blocked",),
+        "denied": ("denied", "deny"),
+        "permission": ("permission",),
+        "error": ("error", "exception", "traceback"),
+    }
+    for line in lines:
+        line_count += 1
+        lower = line.lower()
+        for marker, needles in markers.items():
+            if any(needle in lower for needle in needles):
+                marker_lines[marker] += 1
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            malformed += 1
+            continue
+        if not isinstance(row, dict):
+            malformed += 1
+            continue
+        row_types[str(row.get("type") or "unknown")] += 1
+        ts = row.get("timestamp") or row.get("created_at")
+        if isinstance(ts, str) and ts:
+            first_ts = first_ts or ts
+            last_ts = ts
+        msg = row.get("message") if isinstance(row.get("message"), dict) else {}
+        if msg:
+            roles[str(msg.get("role") or "unknown")] += 1
+            content = msg.get("content") if isinstance(msg.get("content"), list) else []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                block_type = str(block.get("type") or "unknown")
+                block_types[block_type] += 1
+                if block_type == "tool_use":
+                    tools[str(block.get("name") or "unknown")] += 1
+                if block_type == "tool_result":
+                    result = block.get("content")
+                    if isinstance(result, str):
+                        max_tool_result_chars = max(max_tool_result_chars, len(result))
+                        result_lower = result.lower()
+                        if "stopfailure" in result_lower or "stop failure" in result_lower:
+                            result_shapes["tool_result_stopfailure_text"] += 1
+                        elif "permission" in result_lower:
+                            result_shapes["tool_result_permission_text"] += 1
+                        elif "error" in result_lower or "exception" in result_lower or "traceback" in result_lower:
+                            result_shapes["tool_result_error_text"] += 1
+                        else:
+                            result_shapes["tool_result_other_text"] += 1
+                    elif isinstance(result, list):
+                        result_shapes["tool_result_list"] += 1
+                    elif result is None:
+                        result_shapes["tool_result_null"] += 1
+                    else:
+                        result_shapes[f"tool_result_{type(result).__name__}"] += 1
+        tool_result = row.get("toolUseResult")
+        if isinstance(tool_result, dict):
+            result_shapes["toolUseResult_dict"] += 1
+            if tool_result.get("isError"):
+                result_shapes["toolUseResult_isError"] += 1
+        elif isinstance(tool_result, str):
+            result_shapes["toolUseResult_str"] += 1
+            max_tool_result_chars = max(max_tool_result_chars, len(tool_result))
+
+    tool_total = sum(tools.values())
+    evidence_tags: list[str] = []
+    if marker_lines.get("hook") or marker_lines.get("api_wall") or result_shapes.get("tool_result_stopfailure_text"):
+        evidence_tags.append("HOOK_OR_API_WALL_FEEDBACK")
+    if marker_lines.get("permission") or result_shapes.get("tool_result_permission_text"):
+        evidence_tags.append("HOST_PERMISSION_INTERRUPT")
+    if marker_lines.get("blocked") or marker_lines.get("denied"):
+        evidence_tags.append("DENY_OR_BLOCKED_FEEDBACK")
+    if marker_lines.get("error") or result_shapes.get("tool_result_error_text") or result_shapes.get("toolUseResult_isError"):
+        evidence_tags.append("TOOL_ERROR_RECOVERY")
+    if tool_total and tools.get("Bash", 0) / tool_total >= 0.5:
+        evidence_tags.append("SHELL_HEAVY_SESSION")
+    if max_tool_result_chars >= 20000:
+        evidence_tags.append("LARGE_TOOL_RESULT")
+
+    return {
+        "status": "SUMMARIZED",
+        "lines": line_count,
+        "malformed_lines": malformed,
+        "first_timestamp": first_ts,
+        "last_timestamp": last_ts,
+        "row_type_counts": limited_counter(row_types),
+        "role_counts": limited_counter(roles),
+        "block_type_counts": limited_counter(block_types),
+        "tool_counts": limited_counter(tools),
+        "marker_line_counts": limited_counter(marker_lines),
+        "tool_result_shape_counts": limited_counter(result_shapes),
+        "max_tool_result_chars": max_tool_result_chars,
+        "evidence_tags": evidence_tags,
+        "privacy": {
+            "copied_fields": ["counts", "timestamps", "tool names", "derived evidence tags", "maximum tool-result length"],
+            "dropped": ["prompts", "tool arguments", "tool result text", "commands", "model text"],
+        },
+    }
+    return {"status": "MISSING"}
+
+
+def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int = 20) -> dict[str, Any]:
+    stop_dir = repo_root / ".dos" / "stop-failures"
+    if not stop_dir.exists():
+        return {
+            "status": "MISSING",
+            "path": ".dos/stop-failures",
+            "reason": "no workspace stop-failure directory",
+        }
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=max(1, since_days))
+    active_recent_seconds = ACTIVE_STOP_FAILURE_RECENT_HOURS * 3600
+    user_home = Path(os.environ.get("FLEET_USER_HOME") or str(Path.home()))
+    entries: list[dict[str, Any]] = []
+    transcript_paths: dict[str, Path] = {}
+    malformed = 0
+    for path in stop_dir.glob("*.json"):
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            continue
+        if mtime < cutoff:
+            continue
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            malformed += 1
+            continue
+        if not isinstance(raw, dict):
+            malformed += 1
+            continue
+        session_id = path.stem
+        transcript_path = find_claude_transcript_path(session_id, user_home)
+        if transcript_path is not None:
+            transcript_paths[session_id] = transcript_path
+        stream_path = repo_root / ".dos" / "streams" / f"{session_id}.jsonl"
+        origin_labels: list[str] = []
+        if stream_path.exists():
+            origin_labels.append("dos_stream")
+        if transcript_path is not None:
+            origin_labels.append("claude_transcript")
+        if not origin_labels:
+            origin_labels.append("marker_only")
+        entry = {
+            "session_id": session_id,
+            "mtime": mtime.isoformat().replace("+00:00", "Z"),
+            "total": safe_int(raw.get("total")),
+            "consecutive": safe_int(raw.get("consecutive")),
+            "transcript": public_claude_transcript(transcript_path),
+            "origin": "+".join(origin_labels),
+            "origin_labels": origin_labels,
+        }
+        age_seconds = max(0, int((now - mtime).total_seconds()))
+        entry["age_seconds"] = age_seconds
+        entry["active_recent"] = bool(entry["consecutive"] > 0 and age_seconds <= active_recent_seconds)
+        entry["settlement_action"] = stop_failure_settlement_action(entry)
+        entries.append(entry)
+
+    entries.sort(key=lambda item: str(item.get("mtime") or ""), reverse=True)
+    nonzero = [entry for entry in entries if int(entry.get("total") or 0) > 0]
+    active = [entry for entry in entries if int(entry.get("consecutive") or 0) > 0]
+    recent_active = [entry for entry in active if bool(entry.get("active_recent"))]
+    stale_active = [entry for entry in active if not bool(entry.get("active_recent"))]
+    healed_nonzero = [entry for entry in nonzero if int(entry.get("consecutive") or 0) == 0]
+    top_nonzero = sorted(
+        nonzero,
+        key=lambda item: (
+            int(item.get("total") or 0),
+            int(item.get("consecutive") or 0),
+            str(item.get("mtime") or ""),
+        ),
+        reverse=True,
+    )
+    top_active = sorted(
+        active,
+        key=lambda item: (
+            int(item.get("consecutive") or 0),
+            int(item.get("total") or 0),
+            str(item.get("mtime") or ""),
+        ),
+        reverse=True,
+    )
+    top_recent_active = sorted(
+        recent_active,
+        key=lambda item: (
+            int(item.get("consecutive") or 0),
+            int(item.get("total") or 0),
+            str(item.get("mtime") or ""),
+        ),
+        reverse=True,
+    )
+    top_stale_active = sorted(
+        stale_active,
+        key=lambda item: (
+            int(item.get("consecutive") or 0),
+            int(item.get("total") or 0),
+            str(item.get("mtime") or ""),
+        ),
+        reverse=True,
+    )
+    summary_targets: dict[str, dict[str, Any]] = {}
+    for entry in (
+        top_nonzero[: max(1, limit)]
+        + top_active[: max(1, limit)]
+        + top_recent_active[: max(1, limit)]
+        + top_stale_active[: max(1, limit)]
+    ):
+        session_id = str(entry.get("session_id") or "")
+        if session_id:
+            summary_targets[session_id] = entry
+    transcript_evidence_tags: Counter[str] = Counter()
+    summarized_transcripts = 0
+    for session_id, entry in summary_targets.items():
+        transcript_path = transcript_paths.get(session_id)
+        if transcript_path is None:
+            continue
+        summary = summarize_claude_transcript_shape(transcript_path)
+        entry["transcript_summary"] = summary
+        if summary.get("status") == "SUMMARIZED":
+            summarized_transcripts += 1
+            for tag in summary.get("evidence_tags") or []:
+                transcript_evidence_tags[str(tag)] += 1
+    total_failures = sum(int(entry.get("total") or 0) for entry in entries)
+    max_consecutive = max((int(entry.get("consecutive") or 0) for entry in entries), default=0)
+    active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in active)
+    recent_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in recent_active)
+    stale_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in stale_active)
+    by_day: dict[str, dict[str, int]] = {}
+    for entry in entries:
+        day = str(entry.get("mtime") or "")[:10] or "unknown"
+        bucket = by_day.setdefault(
+            day,
+            {
+                "markers": 0,
+                "nonzero_total_markers": 0,
+                "active_consecutive_markers": 0,
+                "recent_active_consecutive_markers": 0,
+                "stale_active_consecutive_markers": 0,
+                "healed_nonzero_markers": 0,
+                "total_failures": 0,
+                "active_consecutive_total": 0,
+                "recent_active_consecutive_total": 0,
+                "stale_active_consecutive_total": 0,
+                "max_consecutive": 0,
+            },
+        )
+        bucket["markers"] += 1
+        total = int(entry.get("total") or 0)
+        consecutive = int(entry.get("consecutive") or 0)
+        if total:
+            bucket["nonzero_total_markers"] += 1
+        if consecutive:
+            bucket["active_consecutive_markers"] += 1
+            if entry.get("active_recent"):
+                bucket["recent_active_consecutive_markers"] += 1
+                bucket["recent_active_consecutive_total"] += consecutive
+            else:
+                bucket["stale_active_consecutive_markers"] += 1
+                bucket["stale_active_consecutive_total"] += consecutive
+        if total and not consecutive:
+            bucket["healed_nonzero_markers"] += 1
+        bucket["total_failures"] += total
+        bucket["active_consecutive_total"] += consecutive
+        bucket["max_consecutive"] = max(bucket["max_consecutive"], consecutive)
+    return {
+        "status": "WARN" if total_failures else "PASS",
+        "path": ".dos/stop-failures",
+        "scope": "workspace StopFailure API-wall breaker markers; includes non-Codex hook sessions",
+        "markers": len(entries),
+        "zero_total_markers": len(entries) - len(nonzero),
+        "nonzero_total_markers": len(nonzero),
+        "active_consecutive_markers": len(active),
+        "active_consecutive_total": active_consecutive_total,
+        "active_recent_threshold_hours": ACTIVE_STOP_FAILURE_RECENT_HOURS,
+        "recent_active_consecutive_markers": len(recent_active),
+        "recent_active_consecutive_total": recent_active_consecutive_total,
+        "stale_active_consecutive_markers": len(stale_active),
+        "stale_active_consecutive_total": stale_active_consecutive_total,
+        "origin_counts": stop_failure_origin_counts(entries),
+        "active_origin_counts": stop_failure_origin_counts(active),
+        "recent_active_origin_counts": stop_failure_origin_counts(recent_active),
+        "stale_active_origin_counts": stop_failure_origin_counts(stale_active),
+        "nonzero_origin_counts": stop_failure_origin_counts(nonzero),
+        "settlement_action_counts": stop_failure_settlement_counts(entries),
+        "active_settlement_action_counts": stop_failure_settlement_counts(active),
+        "recent_active_settlement_action_counts": stop_failure_settlement_counts(recent_active),
+        "stale_active_settlement_action_counts": stop_failure_settlement_counts(stale_active),
+        "nonzero_settlement_action_counts": stop_failure_settlement_counts(nonzero),
+        "healed_nonzero_markers": len(healed_nonzero),
+        "total_failures": total_failures,
+        "max_consecutive": max_consecutive,
+        "malformed_markers": malformed,
+        "by_day": {day: by_day[day] for day in sorted(by_day)},
+        "recent": entries[: max(1, limit)],
+        "top_nonzero": top_nonzero[: max(1, limit)],
+        "top_active": top_active[: max(1, limit)],
+        "top_recent_active": top_recent_active[: max(1, limit)],
+        "top_stale_active": top_stale_active[: max(1, limit)],
+        "summarized_transcripts": summarized_transcripts,
+        "transcript_evidence_tag_counts": limited_counter(transcript_evidence_tags),
+        "privacy": {
+            "copied_fields": ["session id", "marker timestamps", "counts", "Claude account/project names", "sanitized transcript-shape counts"],
+            "dropped": ["prompts", "tool arguments", "tool results", "commands", "model text"],
+        },
+    }
 
 
 def compact_session(audit: dict[str, Any], codex_path: Path) -> dict[str, Any]:
@@ -780,7 +1198,7 @@ def actionable_gate(
         reasons.append(f"{delegate_source} delegate count exceeds budget")
 
     if stop_total:
-        reasons.append("stop blocks or stop failures are present")
+        reasons.append("stop blocks or uncleared StopFailure API-wall breaker markers are present")
 
     shape_counts = command_shapes.get("shell_shape_counts") if isinstance(command_shapes.get("shell_shape_counts"), dict) else {}
     family_counts = command_shapes.get("shell_family_counts") if isinstance(command_shapes.get("shell_family_counts"), dict) else {}
@@ -849,6 +1267,7 @@ def build_report(
     args = argparse.Namespace(repo_root=repo_root)
     hook_fast_path = codex_hook_fast_path(home)
     post_repair = codex_observations_since(repo_root, hook_fast_path.get("repaired_at"))
+    workspace_stop = workspace_stop_failure_audit(repo_root, since_days=since_days, limit=limit)
     audited_codex_threads = {thread_id: codex_threads[thread_id] for thread_id, _path in streams if thread_id in codex_threads}
     git_gate = git_gate_evidence(gate_reports or [])
     if hook_fast_path.get("repaired_at"):
@@ -926,14 +1345,24 @@ def build_report(
         recommendations.append("structured git gates have stale evidence; rerun expected-deny git gate probes after the latest opaque git mutation")
     if sum(s["stop_blocks"] + s["stop_failures_total"] for s in sessions):
         recommendations.append("stop-hook blocks/failures appeared; review before treating affected sessions as closed")
+    workspace_stop_total = int(workspace_stop.get("total_failures") or 0)
+    workspace_stop_active_total = int(workspace_stop.get("active_consecutive_total") or 0)
+    workspace_stop_recent_active_total = int(workspace_stop.get("recent_active_consecutive_total") or 0)
+    workspace_stop_stale_active_total = int(workspace_stop.get("stale_active_consecutive_total") or 0)
+    if workspace_stop_total:
+        recommendations.append("workspace StopFailure API-wall breaker markers appeared outside the audited Codex streams; inspect .dos/stop-failures")
+    if workspace_stop_recent_active_total:
+        recommendations.append("recent workspace StopFailure markers are still consecutive; clear the underlying stop-hook/API-wall failure before treating the seat as healed")
+    if workspace_stop_stale_active_total:
+        recommendations.append("stale workspace StopFailure markers still have nonzero consecutive counts; classify them as uncleared breaker state before treating them as live blockage")
 
     status = "PASS"
     if not sessions:
         status = "UNKNOWN"
         recommendations.append("no recent Codex sessions matched DOS streams")
-    elif warned or hook_fast_path.get("status") == "WARN":
+    if warned or hook_fast_path.get("status") == "WARN" or workspace_stop.get("status") == "WARN":
         status = "WARN"
-    stop_total = sum(s["stop_blocks"] + s["stop_failures_total"] for s in sessions)
+    stop_total = sum(s["stop_blocks"] + s["stop_failures_total"] for s in sessions) + workspace_stop_active_total
     actionability = actionable_gate(
         hook_fast_path=hook_fast_path,
         post_repair=post_repair,
@@ -954,6 +1383,7 @@ def build_report(
         "dos_version": local_dos_version(repo_root, check_latest=check_latest),
         "codex_hook_fast_path": hook_fast_path,
         "git_gate_evidence": git_gate,
+        "workspace_stop_failures": workspace_stop,
         "budgets": {
             "max_unknown_tree_rate": unknown_threshold,
             "max_delegates": max_delegates,
@@ -971,6 +1401,28 @@ def build_report(
             "delegate_count": delegate_total,
             "stop_blocks": sum(s["stop_blocks"] for s in sessions),
             "stop_failures_total": sum(s["stop_failures_total"] for s in sessions),
+            "workspace_stop_failures_total": workspace_stop_total,
+            "workspace_stop_failure_markers": workspace_stop.get("markers"),
+            "workspace_stop_failure_zero_markers": workspace_stop.get("zero_total_markers"),
+            "workspace_stop_failure_nonzero_markers": workspace_stop.get("nonzero_total_markers"),
+            "workspace_stop_failure_active_markers": workspace_stop.get("active_consecutive_markers"),
+            "workspace_stop_failure_active_consecutive_total": workspace_stop_active_total,
+            "workspace_stop_failure_active_recent_threshold_hours": workspace_stop.get("active_recent_threshold_hours"),
+            "workspace_stop_failure_recent_active_markers": workspace_stop.get("recent_active_consecutive_markers"),
+            "workspace_stop_failure_recent_active_consecutive_total": workspace_stop_recent_active_total,
+            "workspace_stop_failure_stale_active_markers": workspace_stop.get("stale_active_consecutive_markers"),
+            "workspace_stop_failure_stale_active_consecutive_total": workspace_stop_stale_active_total,
+            "workspace_stop_failure_healed_nonzero_markers": workspace_stop.get("healed_nonzero_markers"),
+            "workspace_stop_failure_transcript_evidence_tags": workspace_stop.get("transcript_evidence_tag_counts"),
+            "workspace_stop_failure_origin_counts": workspace_stop.get("origin_counts"),
+            "workspace_stop_failure_active_origin_counts": workspace_stop.get("active_origin_counts"),
+            "workspace_stop_failure_recent_active_origin_counts": workspace_stop.get("recent_active_origin_counts"),
+            "workspace_stop_failure_stale_active_origin_counts": workspace_stop.get("stale_active_origin_counts"),
+            "workspace_stop_failure_nonzero_origin_counts": workspace_stop.get("nonzero_origin_counts"),
+            "workspace_stop_failure_settlement_action_counts": workspace_stop.get("settlement_action_counts"),
+            "workspace_stop_failure_active_settlement_action_counts": workspace_stop.get("active_settlement_action_counts"),
+            "workspace_stop_failure_recent_active_settlement_action_counts": workspace_stop.get("recent_active_settlement_action_counts"),
+            "workspace_stop_failure_stale_active_settlement_action_counts": workspace_stop.get("stale_active_settlement_action_counts"),
             "warned_sessions": len(warned),
         },
         "actionability": actionability,
@@ -988,6 +1440,55 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def compact_stop_failure_session(entry: dict[str, Any]) -> dict[str, Any]:
+    transcript = entry.get("transcript") if isinstance(entry.get("transcript"), dict) else {}
+    summary = entry.get("transcript_summary") if isinstance(entry.get("transcript_summary"), dict) else {}
+    return {
+        "session_id": entry.get("session_id"),
+        "total": safe_int(entry.get("total")),
+        "consecutive": safe_int(entry.get("consecutive")),
+        "mtime": entry.get("mtime"),
+        "origin": entry.get("origin"),
+        "settlement_action": entry.get("settlement_action"),
+        "transcript_status": transcript.get("status"),
+        "transcript_account": transcript.get("account"),
+        "transcript_project": transcript.get("project"),
+        "transcript_evidence_tags": summary.get("evidence_tags") or [],
+    }
+
+
+def stop_failure_top_sessions(stop: dict[str, Any], limit: int = 5, key: str = "top_nonzero") -> list[dict[str, Any]]:
+    entries = stop.get(key) if isinstance(stop.get(key), list) else []
+    out: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or safe_int(entry.get("total")) <= 0:
+            continue
+        out.append(compact_stop_failure_session(entry))
+        if len(out) >= max(1, limit):
+            break
+    return out
+
+
+def format_stop_failure_session(entry: dict[str, Any]) -> str:
+    bits = [
+        str(entry.get("session_id")),
+        f"total={safe_int(entry.get('total'))}",
+        f"consecutive={safe_int(entry.get('consecutive'))}",
+    ]
+    if entry.get("transcript_status"):
+        bits.append(f"transcript={entry.get('transcript_status')}")
+    if entry.get("origin"):
+        bits.append(f"origin={entry.get('origin')}")
+    if entry.get("settlement_action"):
+        bits.append(f"settlement={entry.get('settlement_action')}")
+    if entry.get("transcript_project"):
+        bits.append(f"project={entry.get('transcript_project')}")
+    tags = entry.get("transcript_evidence_tags") if isinstance(entry.get("transcript_evidence_tags"), list) else []
+    if tags:
+        bits.append("evidence=" + ",".join(str(tag) for tag in tags[:3]))
+    return " ".join(bits)
+
+
 def render_debt_packet(report: dict[str, Any]) -> str:
     summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
     hook = report.get("codex_hook_fast_path") if isinstance(report.get("codex_hook_fast_path"), dict) else {}
@@ -996,8 +1497,33 @@ def render_debt_packet(report: dict[str, Any]) -> str:
     actionability = report.get("actionability") if isinstance(report.get("actionability"), dict) else {}
     dos_version = report.get("dos_version") if isinstance(report.get("dos_version"), dict) else {}
     git_gate = report.get("git_gate_evidence") if isinstance(report.get("git_gate_evidence"), dict) else {}
+    workspace_stop = report.get("workspace_stop_failures") if isinstance(report.get("workspace_stop_failures"), dict) else {}
+    stop_top = stop_failure_top_sessions(workspace_stop)
+    stop_active = stop_failure_top_sessions(workspace_stop, key="top_active")
+    stop_recent_active = stop_failure_top_sessions(workspace_stop, key="top_recent_active")
     mutating_families = actionability.get("post_repair_mutating_shell_family_counts") or {}
-    if mutating_families:
+    action_reasons = [str(reason) for reason in actionability.get("reasons") or []]
+    if any("StopFailure API-wall" in reason for reason in action_reasons):
+        interpretation = (
+            "The DOS native fast path is repaired and post-repair delegate count is zero. "
+            "The current actionable WARN is workspace StopFailure API-wall breaker state: "
+            f"{summary.get('workspace_stop_failure_recent_active_markers')} markers are recent "
+            f"(<= {summary.get('workspace_stop_failure_active_recent_threshold_hours')}h) with "
+            f"{summary.get('workspace_stop_failure_recent_active_consecutive_total')} consecutive "
+            f"StopFailure counts, while {summary.get('workspace_stop_failure_stale_active_markers')} "
+            f"older markers still carry {summary.get('workspace_stop_failure_stale_active_consecutive_total')} "
+            "uncleared consecutive counts. Recent marker origins are "
+            f"{json.dumps(summary.get('workspace_stop_failure_recent_active_origin_counts') or {}, sort_keys=True)}. "
+            "Recommended settlement classes are "
+            f"{json.dumps(summary.get('workspace_stop_failure_active_settlement_action_counts') or {}, sort_keys=True)}. "
+            "The one-day historical friction total is "
+            f"{summary.get('workspace_stop_failures_total')} API-wall failures across "
+            f"{summary.get('workspace_stop_failure_nonzero_markers')} nonzero markers; "
+            f"{summary.get('workspace_stop_failure_healed_nonzero_markers')} of those are healed "
+            "to consecutive=0. This is separate from Codex verify-on-stop blocks, which remain "
+            "zero in the audited Codex streams."
+        )
+    elif any("mutating operations" in reason for reason in action_reasons):
         interpretation = (
             "The DOS native fast path is repaired and post-repair delegate count is zero. "
             "The current actionable WARN is opaque mutating shell usage: Codex ran shell "
@@ -1029,6 +1555,31 @@ def render_debt_packet(report: dict[str, Any]) -> str:
         "",
         f"- recent_window_unknown_tree_rate: `{summary.get('unknown_tree_warning_rate')}`",
         f"- recent_window_delegates: `{summary.get('delegate_count')}`",
+        f"- workspace_stop_failure_markers: `{summary.get('workspace_stop_failure_markers')}`",
+        f"- workspace_stop_failure_nonzero_markers: `{summary.get('workspace_stop_failure_nonzero_markers')}`",
+        f"- workspace_stop_failure_zero_markers: `{summary.get('workspace_stop_failure_zero_markers')}`",
+        f"- workspace_stop_failure_active_markers: `{summary.get('workspace_stop_failure_active_markers')}`",
+        f"- workspace_stop_failure_active_consecutive_total: `{summary.get('workspace_stop_failure_active_consecutive_total')}`",
+        f"- workspace_stop_failure_active_recent_threshold_hours: `{summary.get('workspace_stop_failure_active_recent_threshold_hours')}`",
+        f"- workspace_stop_failure_recent_active_markers: `{summary.get('workspace_stop_failure_recent_active_markers')}`",
+        f"- workspace_stop_failure_recent_active_consecutive_total: `{summary.get('workspace_stop_failure_recent_active_consecutive_total')}`",
+        f"- workspace_stop_failure_stale_active_markers: `{summary.get('workspace_stop_failure_stale_active_markers')}`",
+        f"- workspace_stop_failure_stale_active_consecutive_total: `{summary.get('workspace_stop_failure_stale_active_consecutive_total')}`",
+        f"- workspace_stop_failure_healed_nonzero_markers: `{summary.get('workspace_stop_failure_healed_nonzero_markers')}`",
+        f"- workspace_stop_failure_origin_counts: `{json.dumps(summary.get('workspace_stop_failure_origin_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_active_origin_counts: `{json.dumps(summary.get('workspace_stop_failure_active_origin_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_recent_active_origin_counts: `{json.dumps(summary.get('workspace_stop_failure_recent_active_origin_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_stale_active_origin_counts: `{json.dumps(summary.get('workspace_stop_failure_stale_active_origin_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_settlement_action_counts: `{json.dumps(summary.get('workspace_stop_failure_settlement_action_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_active_settlement_action_counts: `{json.dumps(summary.get('workspace_stop_failure_active_settlement_action_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_recent_active_settlement_action_counts: `{json.dumps(summary.get('workspace_stop_failure_recent_active_settlement_action_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_stale_active_settlement_action_counts: `{json.dumps(summary.get('workspace_stop_failure_stale_active_settlement_action_counts') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failures_total: `{summary.get('workspace_stop_failures_total')}`",
+        f"- workspace_stop_failures_by_day: `{json.dumps(workspace_stop.get('by_day') or {}, sort_keys=True)}`",
+        f"- workspace_stop_failure_top_sessions: `{json.dumps(stop_top, sort_keys=True)}`",
+        f"- workspace_stop_failure_top_recent_active_sessions: `{json.dumps(stop_recent_active, sort_keys=True)}`",
+        f"- workspace_stop_failure_top_active_sessions: `{json.dumps(stop_active, sort_keys=True)}`",
+        f"- workspace_stop_failure_transcript_evidence_tags: `{json.dumps(summary.get('workspace_stop_failure_transcript_evidence_tags') or {}, sort_keys=True)}`",
         f"- post_repair_observations: `{post.get('observations')}`",
         f"- post_repair_delegates: `{post.get('delegate_count')}`",
         f"- post_repair_unknown_tree_warnings: `{post.get('unknown_tree_admission_warnings')}`",
@@ -1046,6 +1597,8 @@ def render_debt_packet(report: dict[str, Any]) -> str:
         "",
         "## Requested Upstream Improvement",
         "",
+        "- Review `.dos/stop-failures` as StopFailure API-wall breaker state before treating actionability as PASS; prioritize recent nonzero `consecutive` markers, then decide whether stale nonzero markers need a success reset or can be archived as old breaker state.",
+        "- Start with `workspace_stop_failure_top_recent_active_sessions`, then `workspace_stop_failure_top_active_sessions`, then `workspace_stop_failure_top_sessions`: these are already mapped to sanitized Claude transcript account/project metadata and count-only transcript evidence when available.",
         "- Route mutating Git operations through structured fak-gated tools such as `git_add`, `git_commit`, and `git_push`; do not run them as opaque shell commands.",
         "- Include path/footprint metadata in Codex tool-call hook payloads, or expose host-visible read/search/list tools with path arguments.",
         "- Preserve the current privacy boundary: the audit needs tool names, path metadata, timestamps, and counts, not prompts, command bodies, tool output, diffs, or model text.",
@@ -1067,6 +1620,7 @@ def write_debt_packet(path: Path, report: dict[str, Any]) -> None:
 
 def render(report: dict[str, Any]) -> str:
     summary = report.get("summary") or {}
+    workspace_stop = report.get("workspace_stop_failures") if isinstance(report.get("workspace_stop_failures"), dict) else {}
     lines = [
         f"codex DOS recent audit: {report.get('status')}",
         f"  sessions audited: {report.get('sessions_audited')} of {report.get('codex_threads_discovered')} discovered Codex threads",
@@ -1074,7 +1628,38 @@ def render(report: dict[str, Any]) -> str:
         f"  unknown-tree warnings: {summary.get('unknown_tree_admission_warnings')} / {summary.get('pretool_calls')} pretool calls"
         f" ({summary.get('unknown_tree_warning_rate')})",
         f"  delegates: {summary.get('delegate_count')}  stop blocks: {summary.get('stop_blocks')}  stop failures: {summary.get('stop_failures_total')}",
+        "  workspace StopFailure API-wall failures: "
+        f"{summary.get('workspace_stop_failures_total')} across "
+        f"{summary.get('workspace_stop_failure_nonzero_markers')} nonzero markers "
+        f"({summary.get('workspace_stop_failure_zero_markers')} zero-total markers)",
+        "  active StopFailure blockers: "
+        f"{summary.get('workspace_stop_failure_active_markers')} markers, "
+        f"{summary.get('workspace_stop_failure_active_consecutive_total')} consecutive failures "
+        f"({summary.get('workspace_stop_failure_recent_active_markers')} recent <= "
+        f"{summary.get('workspace_stop_failure_active_recent_threshold_hours')}h, "
+        f"{summary.get('workspace_stop_failure_stale_active_markers')} stale; "
+        f"{summary.get('workspace_stop_failure_healed_nonzero_markers')} healed nonzero markers; "
+        f"recent_origins={json.dumps(summary.get('workspace_stop_failure_recent_active_origin_counts') or {}, sort_keys=True)}; "
+        f"settlement={json.dumps(summary.get('workspace_stop_failure_active_settlement_action_counts') or {}, sort_keys=True)})",
     ]
+    top_recent_active_stop = stop_failure_top_sessions(workspace_stop, limit=3, key="top_recent_active")
+    if top_recent_active_stop:
+        lines.append(
+            "  top recent active StopFailure sessions: "
+            + "; ".join(format_stop_failure_session(entry) for entry in top_recent_active_stop)
+        )
+    top_active_stop = stop_failure_top_sessions(workspace_stop, limit=3, key="top_active")
+    if top_active_stop:
+        lines.append(
+            "  top active StopFailure sessions: "
+            + "; ".join(format_stop_failure_session(entry) for entry in top_active_stop)
+        )
+    top_stop = stop_failure_top_sessions(workspace_stop, limit=3)
+    if top_stop:
+        lines.append(
+            "  top StopFailure sessions: "
+            + "; ".join(format_stop_failure_session(entry) for entry in top_stop)
+        )
     hook_fast_path = report.get("codex_hook_fast_path") if isinstance(report.get("codex_hook_fast_path"), dict) else {}
     if hook_fast_path:
         lines.append(

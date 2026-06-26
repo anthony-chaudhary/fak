@@ -1,0 +1,438 @@
+{
+  "checks": [
+    {
+      "detail": "status packet names the evidence and residual interpretation",
+      "name": "status packet present",
+      "status": "PASS"
+    },
+    {
+      "detail": "all required guard default tests are present",
+      "name": "guard default tests present",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=PASS deny={'by': 'monitor', 'disposition': 'TERMINAL', 'kind': 'DENY', 'reason': 'POLICY_BLOCK'} allow={'by': 'monitor', 'kind': 'ALLOW'}",
+      "name": "mcp stdio adjudication",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=DENIED_EXPECTED reason=DEFAULT_DENY",
+      "name": "structured git gate git_add",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=DENIED_EXPECTED reason=DEFAULT_DENY",
+      "name": "structured git gate git_commit",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=DENIED_EXPECTED reason=POLICY_BLOCK",
+      "name": "structured git gate git_push",
+      "status": "PASS"
+    },
+    {
+      "detail": "audit=WARN actionability=WARN workspace_stop_failures=95 active_consecutive=57 reasons=['stop blocks or uncleared StopFailure API-wall breaker markers are present'] residual=['HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE'] post_gate={}",
+      "name": "historical codex/dos actionability",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=PASS sessions=13 calls=230 verdicts={'ALLOW': 181, 'DENY': 46} tags={'DENY_OR_BLOCKED_FEEDBACK': 17, 'HOOK_OR_API_WALL_FEEDBACK': 20, 'HOST_PERMISSION_INTERRUPT': 20, 'LARGE_RESULT': 9, 'SHELL_HEAVY_SESSION': 11, 'TOOL_ERROR_RECOVERY': 19} leaked_payload=False",
+      "name": "claude code historical replay",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=PASS same_session=True",
+      "name": "claude code live pilot",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=PASS denied=True continued=True",
+      "name": "codex mcp live pilot",
+      "status": "PASS"
+    },
+    {
+      "detail": "demo and captured output prove deny/run/quarantine mapping",
+      "name": "openai agents adapter proof",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=PARTIAL blockers=['importable agents module is not an installed OpenAI Agents SDK distribution', 'openai-agents distribution is not installed'] secret_leak=False",
+      "name": "openai hosted live prereqs",
+      "status": "PASS"
+    },
+    {
+      "detail": "status=PASS blockers=[] secret_leak=False",
+      "name": "openai hosted live pilot",
+      "status": "PASS"
+    }
+  ],
+  "default_blockers": [
+    {
+      "code": "WORKSPACE_RECENT_STOPFAILURE_API_WALL",
+      "evidence": {
+        "active_consecutive_total": 57,
+        "active_markers": 48,
+        "active_recent_threshold_hours": 6,
+        "active_settlement_action_counts": {
+          "RECENT_REVIEW": 3,
+          "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
+          "STALE_RESET_CANDIDATE": 41
+        },
+        "healed_nonzero_markers": 15,
+        "one_day_failures_total": 95,
+        "origin_counts": {
+          "claude_transcript": 41,
+          "dos_stream": 54,
+          "dos_stream+claude_transcript": 80,
+          "marker_only": 25
+        },
+        "recent_active_consecutive_total": 3,
+        "recent_active_markers": 3,
+        "recent_active_origin_counts": {
+          "claude_transcript": 2,
+          "dos_stream+claude_transcript": 1
+        },
+        "recent_active_settlement_action_counts": {
+          "RECENT_REVIEW": 3
+        },
+        "stale_active_consecutive_total": 54,
+        "stale_active_markers": 45,
+        "stale_active_origin_counts": {
+          "claude_transcript": 31,
+          "dos_stream+claude_transcript": 10,
+          "marker_only": 4
+        },
+        "stale_active_settlement_action_counts": {
+          "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
+          "STALE_RESET_CANDIDATE": 41
+        },
+        "top_recent_active_sessions": [
+          {
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY"
+            ],
+            "session_id": "3af9576f-4e22-4eac-bc59-fb7935196e31",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY"
+            ],
+            "session_id": "e7f31ce8-185b-4b6b-8e41-9db98bd1f4e6",
+            "total": 1,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "consecutive": 1,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY"
+            ],
+            "session_id": "2a660dbb-9d35-4502-9a8c-5f14ceac1686",
+            "total": 1,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          }
+        ],
+        "transcript_evidence_tags": {
+          "DENY_OR_BLOCKED_FEEDBACK": 19,
+          "HOOK_OR_API_WALL_FEEDBACK": 28,
+          "HOST_PERMISSION_INTERRUPT": 28,
+          "LARGE_TOOL_RESULT": 11,
+          "SHELL_HEAVY_SESSION": 6,
+          "TOOL_ERROR_RECOVERY": 28
+        }
+      },
+      "next_action": "Clear or rotate the recent workspace sessions with nonzero consecutive StopFailure markers before treating fak-by-default actionability as healthy.",
+      "rank": 10,
+      "status": "ACTIVE",
+      "surface": "workspace_dos"
+    },
+    {
+      "code": "CODEX_HOST_SHELL_OPACITY",
+      "evidence": {
+        "shell_family_counts": {
+          "build_test": 253,
+          "git_read": 523,
+          "git_write": 45,
+          "other_shell": 491,
+          "powershell_inspect": 49,
+          "powershell_read": 496,
+          "python_test": 68,
+          "search_rg": 281
+        },
+        "shell_no_write_target_detected": 2290,
+        "shell_shape_counts": {
+          "non_shell_tool": 408,
+          "shell_in_tree_or_safe_write_target": 37,
+          "shell_no_write_target_detected": 2290
+        },
+        "unknown_tree_warning_rate": 0.169815
+      },
+      "next_action": "Prefer path-visible host tools or structured tool payloads so DOS can assign file-tree footprints instead of warning on opaque shell calls.",
+      "rank": 20,
+      "status": "ACTIVE_DEBT",
+      "surface": "codex_hooks"
+    },
+    {
+      "code": "CLAUDE_ALL_ACCOUNT_OPERATIONAL_FRICTION",
+      "evidence": {
+        "evidence_tag_counts": {
+          "DENY_OR_BLOCKED_FEEDBACK": 17,
+          "HOOK_OR_API_WALL_FEEDBACK": 20,
+          "HOST_PERMISSION_INTERRUPT": 20,
+          "LARGE_RESULT": 9,
+          "SHELL_HEAVY_SESSION": 11,
+          "TOOL_ERROR_RECOVERY": 19
+        },
+        "marker_line_counts": {
+          "deny_or_blocked": 429,
+          "error_recovery": 1527,
+          "hook_or_api_wall": 508,
+          "permission": 421
+        },
+        "max_result_chars": 64944,
+        "reason_counts": {
+          "DEFAULT_DENY": 39,
+          "POLICY_BLOCK": 7
+        },
+        "root_count": 10,
+        "sessions_audited": 13,
+        "sessions_discovered": 20,
+        "tool_calls_seen": 230,
+        "top_friction_sessions": [
+          {
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION",
+              "LARGE_RESULT"
+            ],
+            "marker_lines": 1485,
+            "max_result_chars": 26764,
+            "root_label": ".claude/C--work-fak",
+            "session_digest": "a585f940822d0d52",
+            "tool_calls": 129
+          },
+          {
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION",
+              "LARGE_RESULT"
+            ],
+            "marker_lines": 222,
+            "max_result_chars": 20399,
+            "root_label": ".claude/C--work-fak",
+            "session_digest": "5bc67363724625d9",
+            "tool_calls": 24
+          },
+          {
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION",
+              "LARGE_RESULT"
+            ],
+            "marker_lines": 59,
+            "max_result_chars": 38156,
+            "root_label": ".claude-4e449ab2/C--work-fak",
+            "session_digest": "f5770132f058da8b",
+            "tool_calls": 0
+          },
+          {
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION",
+              "LARGE_RESULT"
+            ],
+            "marker_lines": 39,
+            "max_result_chars": 58302,
+            "root_label": ".claude-7cc12304/C--work-fak",
+            "session_digest": "4c03751e6c6c01b0",
+            "tool_calls": 1
+          },
+          {
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION"
+            ],
+            "marker_lines": 401,
+            "max_result_chars": 18936,
+            "root_label": ".claude/C--work-fak",
+            "session_digest": "7cb3d3b0088c9072",
+            "tool_calls": 30
+          }
+        ],
+        "verdict_counts": {
+          "ALLOW": 181,
+          "DENY": 46
+        }
+      },
+      "next_action": "Triage the top Claude friction sessions by tag: hook/API-wall and permission interruptions first, then large-result and shell-heavy sessions.",
+      "rank": 30,
+      "status": "ACTIVE_DEBT",
+      "surface": "claude_code"
+    },
+    {
+      "code": "WORKSPACE_STALE_STOPFAILURE_MARKERS",
+      "evidence": {
+        "active_recent_threshold_hours": 6,
+        "stale_active_consecutive_total": 54,
+        "stale_active_markers": 45,
+        "stale_active_origin_counts": {
+          "claude_transcript": 31,
+          "dos_stream+claude_transcript": 10,
+          "marker_only": 4
+        },
+        "stale_active_settlement_action_counts": {
+          "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE": 4,
+          "STALE_RESET_CANDIDATE": 41
+        },
+        "top_stale_active_sessions": [
+          {
+            "consecutive": 4,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "session_id": "b33eca05-c71e-4a51-979b-b4c8bcb43b1e",
+            "total": 4,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "consecutive": 3,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "session_id": "3f29f826-b400-476b-811c-374e61fd75ad",
+            "total": 3,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "SHELL_HEAVY_SESSION",
+              "LARGE_TOOL_RESULT"
+            ],
+            "session_id": "dde358da-6862-4e56-992a-e1527b02c89f",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "session_id": "0b2c4844-23b3-4ccf-ab02-032c50cab607",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          },
+          {
+            "consecutive": 2,
+            "evidence_tags": [
+              "HOOK_OR_API_WALL_FEEDBACK",
+              "HOST_PERMISSION_INTERRUPT",
+              "DENY_OR_BLOCKED_FEEDBACK",
+              "TOOL_ERROR_RECOVERY",
+              "LARGE_TOOL_RESULT"
+            ],
+            "session_id": "f7198142-f77b-47ba-8e9a-453ab3ea27e1",
+            "total": 2,
+            "transcript_project": "C--work-fak",
+            "transcript_status": "FOUND"
+          }
+        ]
+      },
+      "next_action": "Decide whether stale nonzero consecutive markers need a success reset, archival, or a hook fix so old breaker state does not masquerade as live blockage.",
+      "rank": 40,
+      "status": "STALE_DEBT",
+      "surface": "workspace_dos"
+    },
+    {
+      "code": "HISTORICAL_OPAQUE_GIT_WRITE_BEFORE_GATE",
+      "evidence": {
+        "git_gate_status": "PASS",
+        "post_gate_shell_family_counts": {},
+        "post_repair_mutating_shell_family_counts": {
+          "git_write": 45
+        },
+        "proved_at": "2026-06-25T22:38:12.037688Z"
+      },
+      "next_action": "Keep structured git gates in place; this is not current actionability unless git_write reappears after the gate proof timestamp.",
+      "rank": 60,
+      "status": "HISTORICAL",
+      "surface": "codex_hooks"
+    },
+    {
+      "code": "OPENAI_AGENTS_SDK_NOT_INSTALLED",
+      "evidence": {
+        "blockers": [
+          "openai-agents distribution is not installed",
+          "importable agents module is not an installed OpenAI Agents SDK distribution"
+        ],
+        "codex_login_ready": true,
+        "hosted_openai_ready": true,
+        "status": "PARTIAL"
+      },
+      "next_action": "Install the OpenAI Agents SDK only when the hosted Agents path is the target; Codex-login hosted pilot already passes without it.",
+      "rank": 70,
+      "status": "EXTERNAL_PREREQ",
+      "surface": "openai_hosted"
+    }
+  ],
+  "failures": [],
+  "schema": "fak-guard-mcp-status-audit/1",
+  "status": "PASS",
+  "summary": {
+    "active_default_blockers": 3,
+    "default_blockers": 6,
+    "failed": 0,
+    "passed": 13,
+    "total": 13
+  }
+}
