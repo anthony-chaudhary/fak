@@ -67,6 +67,12 @@ One-time per node: discover the ssh user, get your pubkey into the node's
 `~/.ssh/authorized_keys`, then record the node's pinned `host_key` (from `ssh-keyscan -t
 ed25519 <ip>`) into `bench_nodes.json`.
 
+The committed, public-safe roster of which nodes the runner targets and where each stands
+(onboarded vs. pending, with the per-node blocker) lives in the `_onboarding` block of
+`bench_nodes.example.json` — that template already carries a ready-to-fill placeholder entry
+for every node in the roster, so onboarding a pending node is: copy its entry into the
+gitignored `bench_nodes.json`, fill in real identity, bootstrap, and `bench_node.sh <node> tests`.
+
 ## Design decisions (the adversarial-review fixes)
 
 Deliberately **read-only w.r.t. the committed tree** — it never writes a committable artifact,
@@ -84,5 +90,6 @@ needles sidecar) and would **not** redact a CPU brand or hostname. So:
 - **`go` on PATH + toolchain**: prepends the node's `go_bin` and exports `GOTOOLCHAIN=auto`;
   always pipes the remote script to `bash -s` (the node's default zsh is fatal on globs).
 
-See `fak/HARDWARE-CATALOG.md` for the node roster and `run-on-bench-nodes-by-default` for the
+See the `_onboarding` roster in `bench_nodes.example.json` for the node roster (the private
+`HARDWARE-CATALOG.md` is the unsanitized version) and `run-on-bench-nodes-by-default` for the
 placement law.

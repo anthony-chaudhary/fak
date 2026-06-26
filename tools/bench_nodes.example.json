@@ -8,6 +8,16 @@
     "Every run writes lineage.json (utc datetime + fak version/commit + node + go) for traceability.",
     "Results go to tools/_registry/bench-runs/ (gitignored). Promoting a result to a committed path needs a REAL redaction pass (CPU brand + go/git + hostname) — the shape-only scrub audit does NOT do that."
   ],
+  "_onboarding": {
+    "_doc": "Public-safe roster of the bench nodes this runner targets and where each stands (#922). The HARDWARE-CATALOG node roster is private; this block is the committed, sanitized view. 'pending' nodes have a placeholder entry below — onboarding = copy it into the gitignored tools/bench_nodes.json, fill in REAL identity, get the driver pubkey into the node's authorized_keys, pin host_key (ssh-keyscan -t ed25519), then `bench_node.sh <node> tests`.",
+    "roster": [
+      { "node": "macbook", "sanitized_name": "node-macos-a",         "status": "onboarded", "verified": "2026-06-21", "note": "Apple M3 Pro arm64 — tests green, BenchmarkDecide ~317 ns idle." },
+      { "node": "desktop", "sanitized_name": "node-linux-desktop-a", "status": "pending",   "blocker": "host-reachability — desktop answers ICMP but ships with no sshd; enable sshd + add driver pubkey, then pin host_key." },
+      { "node": "laptop",  "sanitized_name": "node-linux-laptop-a",  "status": "pending",   "blocker": "real-identity — reachable over Tailscale from the desktop hub (RTX 4070, Ada/sm_89); fill tailnet_ip/ssh_user/host_key in the gitignored registry." },
+      { "node": "gcp-gpu", "sanitized_name": "node-gcp-gpu-a",       "status": "pending",   "blocker": "ephemeral-host — cloud VM IP + host_key rotate on each provision and the driver's ADC may be stale; (re)bootstrap per provision, then pin." },
+      { "node": "dgx-a100","sanitized_name": "node-dgx-a100",        "status": "pending",   "blocker": "no-direct-ssh — DGX is reached via a relay bridge, not a direct tailnet SSH handshake; needs a reachable sshd path before the driver can poll it." }
+    ]
+  },
   "nodes": [
     {
       "name": "macbook",
@@ -24,6 +34,78 @@
       "toolchain_env": "GOTOOLCHAIN=auto",
       "go_bin": "/usr/local/go/bin",
       "capabilities": ["arm64", "darwin", "metal"],
+      "agent_host": false,
+      "facts": { "go_version": null, "git_commit": null, "bootstrapped_at": null }
+    },
+    {
+      "name": "desktop",
+      "sanitized_name": "node-linux-desktop-a",
+      "tailnet_ip": "198.51.100.20",
+      "magicdns": "node-linux-desktop-a.example.ts.net",
+      "ssh_user": "user",
+      "ssh_key": "~/.ssh/id_ed25519",
+      "ssh_port": 22,
+      "host_key": "",
+      "remote_shell": "bash",
+      "repo_path": "~/work/fleet",
+      "repo_module": "private",
+      "toolchain_env": "GOTOOLCHAIN=auto",
+      "go_bin": "/usr/local/go/bin",
+      "capabilities": ["amd64", "linux"],
+      "agent_host": false,
+      "facts": { "go_version": null, "git_commit": null, "bootstrapped_at": null }
+    },
+    {
+      "name": "laptop",
+      "sanitized_name": "node-linux-laptop-a",
+      "tailnet_ip": "198.51.100.50",
+      "magicdns": "node-linux-laptop-a.example.ts.net",
+      "ssh_user": "user",
+      "ssh_key": "~/.ssh/id_ed25519",
+      "ssh_port": 22,
+      "host_key": "",
+      "remote_shell": "bash",
+      "repo_path": "~/work/fleet",
+      "repo_module": "private",
+      "toolchain_env": "GOTOOLCHAIN=auto",
+      "go_bin": "/usr/local/go/bin",
+      "capabilities": ["amd64", "linux", "cuda", "rtx-4070", "sm_89"],
+      "agent_host": false,
+      "facts": { "go_version": null, "git_commit": null, "bootstrapped_at": null }
+    },
+    {
+      "name": "gcp-gpu",
+      "sanitized_name": "node-gcp-gpu-a",
+      "tailnet_ip": "203.0.113.30",
+      "magicdns": "node-gcp-gpu-a.example.ts.net",
+      "ssh_user": "user",
+      "ssh_key": "~/.ssh/id_ed25519",
+      "ssh_port": 22,
+      "host_key": "",
+      "remote_shell": "bash",
+      "repo_path": "~/work/fleet",
+      "repo_module": "private",
+      "toolchain_env": "GOTOOLCHAIN=auto",
+      "go_bin": "/usr/local/go/bin",
+      "capabilities": ["amd64", "linux", "cuda"],
+      "agent_host": false,
+      "facts": { "go_version": null, "git_commit": null, "bootstrapped_at": null }
+    },
+    {
+      "name": "dgx-a100",
+      "sanitized_name": "node-dgx-a100",
+      "tailnet_ip": "203.0.113.40",
+      "magicdns": "node-dgx-a100.example.ts.net",
+      "ssh_user": "user",
+      "ssh_key": "~/.ssh/id_ed25519",
+      "ssh_port": 22,
+      "host_key": "",
+      "remote_shell": "bash",
+      "repo_path": "~/work/fleet",
+      "repo_module": "private",
+      "toolchain_env": "GOTOOLCHAIN=auto",
+      "go_bin": "/usr/local/go/bin",
+      "capabilities": ["amd64", "linux", "cuda", "a100", "sm_80", "multi-gpu"],
       "agent_host": false,
       "facts": { "go_version": null, "git_commit": null, "bootstrapped_at": null }
     }
