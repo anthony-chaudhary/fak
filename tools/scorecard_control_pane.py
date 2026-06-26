@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Unified scorecard debt control-pane — fold every *-debt into one tracked trend.
 
-The repo has twelve deterministic scorecards, each emitting a debt integer plus a
+The repo has deterministic scorecards, each emitting a debt integer plus a
 control-pane payload (``schema/ok/verdict/finding/reason/next_action``): docs,
-code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene, the one
+README freshness, code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene, the one
 OUTWARD-facing stick — industry-parity (fak vs SOTA) — agent-readiness (can an
 agent discover, adopt, and build on fak), product (can a PERSON pick up each fak
 concept and use it today — durable / real / useful-today), persona (are the
 top-10 personas who land on fak — free-tier dev through researcher — each served),
 and stability (can we tell when a regression / tail-wag / confusion landed, and
 revert to a stable version). They run independently and advisory. Nothing folds
-{doc_debt, code_debt, appeal_debt, seo_debt, demo_debt, robustness_debt,
+{doc_debt, readme_debt, code_debt, appeal_debt, seo_debt, demo_debt, robustness_debt,
 hygiene_debt, parity_debt, friction_debt, product_debt, persona_debt,
 stability_debt} into one number, pins a per-metric baseline, and shows the trend
 commit-over-commit.
@@ -66,6 +66,7 @@ BASELINE_REL = "tools/scorecard_baseline.json"
 # every debt key into one portfolio number.
 SCORECARDS: list[dict[str, str]] = [
     {"key": "doc", "debt": "doc_debt", "script": "docs_scorecard.py", "label": "docs"},
+    {"key": "readme", "debt": "readme_debt", "script": "readme_freshness_audit.py", "label": "readme-freshness"},
     {"key": "code", "debt": "code_debt", "script": "code_quality_scorecard.py", "label": "code"},
     {"key": "appeal", "debt": "appeal_debt", "script": "doc_appeal_scorecard.py", "label": "doc-appeal"},
     {"key": "seo", "debt": "seo_debt", "script": "seo_aeo_scorecard.py", "label": "seo"},

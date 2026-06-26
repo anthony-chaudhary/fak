@@ -86,6 +86,16 @@ def test_metric_from_payload_marks_errors() -> None:
     assert m2["debt"] is None and "missing x_debt" in m2["error"]
 
 
+def test_readme_scorecard_registered() -> None:
+    card = next(c for c in scp.SCORECARDS if c["key"] == "readme")
+    assert card == {
+        "key": "readme",
+        "debt": "readme_debt",
+        "script": "readme_freshness_audit.py",
+        "label": "readme-freshness",
+    }
+
+
 # --- fold: portfolio sum + verdict ladder ----------------------------------
 
 def test_fold_sums_portfolio_debt() -> None:
@@ -94,6 +104,13 @@ def test_fold_sums_portfolio_debt() -> None:
     assert out["total_debt"] == 43
     assert out["measured"] == len(scp.SCORECARDS) and out["errored"] == 0
     assert out["schema"] == scp.SCHEMA
+
+
+def test_readme_debt_folds_and_renders() -> None:
+    out = scp.fold(full_metrics(readme=7), None, workspace=".", commit="abc1234")
+    assert out["total_debt"] == 7
+    text = scp.render(out)
+    assert "readme-freshness" in text and "readme_debt" in text and "7" in text
 
 
 def test_fold_all_clear_when_zero_debt() -> None:
@@ -199,6 +216,7 @@ def test_baseline_round_trip() -> None:
     doc = scp.baseline_doc(payload)
     assert doc["schema"] == scp.BASELINE_SCHEMA
     assert doc["total_debt"] == 14 and doc["metrics"]["code"] == 9
+    assert doc["metrics"]["readme"] == 0
     # folding the same numbers against its own baseline reads flat.
     again = scp.fold(full_metrics(code=9, hygiene=5), doc, workspace=".", commit="pin02")
     assert again["trend"]["direction"] == "flat"
@@ -226,6 +244,13 @@ def test_check_gate_red_when_regressed() -> None:
     out = scp.fold(full_metrics(seo=4), base, workspace=".", commit="now01")
     code, msg = scp.check_gate(out)
     assert code == 1 and "RATCHET FAIL" in msg and "seo" in msg
+
+
+def test_check_gate_red_when_readme_debt_regresses() -> None:
+    base = baseline_from(readme=0)
+    out = scp.fold(full_metrics(readme=2), base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 1 and "RATCHET FAIL" in msg and "readme-freshness" in msg
 
 
 def test_check_gate_unpinned_is_distinct_exit() -> None:
