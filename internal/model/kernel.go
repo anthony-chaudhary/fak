@@ -236,7 +236,13 @@ func (m *Model) residentMatRows(name string, x []float32, out, in int) []float32
 	}
 	if qt := m.q4kw[name]; qt != nil {
 		if qt.out != out || qt.in != in {
-			panic("model: resident Q4_K tensor shape mismatch: " + name)
+			// Print stored-vs-requested so a residency/config-dim bug names its operands
+			// (e.g. a MoE expert stored [moe_intermediate,H] but the forward asked
+			// [intermediate,H] because expert_feed_forward_length was not read into
+			// cfg.MoEIntermediateSize). The bare name alone can't distinguish those.
+			panic("model: resident Q4_K tensor shape mismatch: " + name +
+				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
+				" requested=[" + itoa(out) + "," + itoa(in) + "]")
 		}
 		return q4kMatRows(qt, x)
 	}
