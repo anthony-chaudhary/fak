@@ -198,6 +198,7 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | If you want… | Read |
 |---|---|
 | **The principles fak is built to satisfy** | [Charter](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CHARTER.md) |
+| **Structured-output decoding SOTA + fak's ride-mode surface (#907)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-structured-output-decoding-2026-06-26.md) |
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |
 | **What the words mean** (preflight vs inflight vs prefill) | [Glossary](glossary.md) |
