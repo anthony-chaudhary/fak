@@ -6,10 +6,12 @@
 # the apples-to-apples comparison.
 #
 # WHY THIS IS THE PREFERRED PATH (vs the llama.cpp baseline):
-#   * fak serves GLM-5.2 (glm_moe_dsa) through its OWN CUDA kernels — the forward is
-#     bit-exact vs the CPU reference (cosine 1.000000, argmax-exact) on sm_80, witnessed at
-#     experiments/glm-gpu-witness/a100-glm52-*.json. That correctness guarantee is fak's
-#     differentiator; the stock engines do not make it.
+#   * fak serves GLM-5.2 (glm_moe_dsa) through its OWN CUDA kernels — the forward is bit-exact
+#     vs the CPU reference AT Q8 (cosine 1.000000, argmax-exact) on sm_80, witnessed at
+#     experiments/glm-gpu-witness/a100-glm52-*.json (incl. the cpu-offload hybrid). That
+#     correctness guarantee is fak's differentiator; the stock engines do not make it. NOTE:
+#     the --cpu-offload-experts serve below runs the resident-Q4_K path, which is not yet
+#     covered by a full-forward cosine witness (the q8 forward is).
 #   * It is the SAME wire llama.cpp serves (OpenAI /v1) so `fak guard` / the #413 witness
 #     front it identically — but the weights run in fak's kernel, not an external engine.
 #   * llama.cpp stays the honest THROUGHPUT baseline for the comparison ladder
@@ -24,11 +26,13 @@
 #     Q4_K->f32->Q8 round-trip).
 #   * --context-budget-tokens 8192 : the default 1M context plans a 533 GiB KV -> FitTooBig.
 #
-# HONEST SCOPE: this asserts NO throughput/quality number. It builds the cuda fak binary,
-# stages the checkpoint, stands the endpoint up, and health-checks a REAL chat completion.
-# The forward correctness is the witnessed claim; load time on the dynamic-mixed UD-Q4_K_M
-# is the open perf item (the resident-Q4_K path only fully fires on pure-Q4_K tensors). Run
-# tools/glm52_e2e_after_serve_dgx3.sh against this endpoint for the #413 serving evidence.
+# HONEST SCOPE: this asserts NO throughput/quality number, and makes NO live-serve claim. It
+# builds the cuda fak binary, stages the checkpoint, stands the endpoint up, and health-checks
+# a REAL chat completion — a live GLM-5.2 serve turn is hardware+load-gated until that gate
+# passes on a real A100. The witnessed claim is the Q8 forward correctness (cosine 1.0, sm_80);
+# the resident-Q4_K serve path is not yet cosine-witnessed, and load time on the dynamic-mixed
+# UD-Q4_K_M is the open perf item (the resident-Q4_K path only fully fires on pure-Q4_K
+# tensors). Run tools/glm52_e2e_after_serve_dgx3.sh against this endpoint for the #413 evidence.
 #
 # Usage (RUN ON THE GPU HOST, detached so a disconnect does not orphan a large load):
 #   systemd-run --unit=glm52serve --collect bash tools/glm52_fak_native_serve.sh
