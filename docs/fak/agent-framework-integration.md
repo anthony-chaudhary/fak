@@ -390,6 +390,14 @@ The policy floor *is* the task-level tool policy: list the tools each crew legit
 needs in `allow` / `allow_prefix`, and `DEFAULT_DENY` holds everything else (see
 [the policy floor](#the-policy-floor-your-tool-allow-list), below).
 
+**Manager-worker (hierarchical) pattern.** For CrewAI's *hierarchical* process — a
+manager agent delegating subtasks to workers — route the `manager_llm` through fak too,
+so the manager's coordination prompts hit the shared-brief KV cache instead of
+re-prefilling the shared crew context on every delegation. A runnable, dependency-free
+example crew (governance over every worker tool call + the manager-role
+coordination-overhead model) is in
+[`examples/crewai-crew/`](https://github.com/anthony-chaudhary/fak/tree/main/examples/crewai-crew).
+
 ---
 
 ## Other frameworks

@@ -1,0 +1,42 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "delegate_work",
+    "ask_coworker",
+    "web_search",
+    "fetch_url",
+    "read_file",
+    "summarize"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_"
+  ],
+  "deny": {
+    "send_email": "POLICY_BLOCK",
+    "delete_records": "POLICY_BLOCK",
+    "transfer_funds": "SECRET_EXFIL"
+  },
+  "self_modify_globs": [
+    ".git/",
+    "policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ],
+  "sources": {
+    "fetch_url": "untrusted",
+    "web_search": "untrusted",
+    "read_file": "trusted_local"
+  }
+}
