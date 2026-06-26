@@ -2,7 +2,9 @@ package model
 
 import (
 	"math"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestParallelMatchesSerial pins parMatRows and matMulBatch to the serial matRows
@@ -74,6 +76,28 @@ func TestFdot3MatchesFdot(t *testing.T) {
 			math.Abs(float64(c-fdot(r2, x))) > 1e-4 {
 			t.Fatalf("fdot3SIMD n=%d drift too large vs independent fdot calls", n)
 		}
+	}
+}
+
+func TestParForHonorsRequestedWorkers(t *testing.T) {
+	if numWorkers < 4 {
+		t.Skipf("numWorkers=%d is too small to prove a sub-budget cap", numWorkers)
+	}
+	var active int64
+	var maxActive int64
+	parFor(64, 2, func(lo, hi int) {
+		now := atomic.AddInt64(&active, 1)
+		for {
+			old := atomic.LoadInt64(&maxActive)
+			if now <= old || atomic.CompareAndSwapInt64(&maxActive, old, now) {
+				break
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+		atomic.AddInt64(&active, -1)
+	})
+	if maxActive > 2 {
+		t.Fatalf("parFor dispatched %d workers for requested budget 2", maxActive)
 	}
 }
 
