@@ -74,9 +74,10 @@ func fixtureRoot(t *testing.T) string {
   "result_claim_allowed": false,
   "required_before_claim": ["raw predictions", "official reports"]
 }`)
-	write(t, root, "experiments/agent-live/deepswe-adapter-smoke-20260626/summary.json", `{
-  "status": "ADAPTER_FIXTURE_COMPLETE",
-  "result_claim_allowed": false
+	write(t, root, "experiments/agent-live/deepswe-raw-fak-contract-20260626.json", `{
+  "status": "READY_FOR_EXTERNAL_RUN",
+  "result_claim_allowed": false,
+  "required_before_claim": ["raw predictions", "fak predictions", "official reports"]
 }`)
 	write(t, root, "experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json", fixtureReport())
 	write(t, root, "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json", fixtureReport())

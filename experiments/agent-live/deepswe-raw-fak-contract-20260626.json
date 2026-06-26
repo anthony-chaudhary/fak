@@ -1,0 +1,141 @@
+{
+  "schema": "fak.swebench-deepswe-raw-fak-contract.v1",
+  "generated_at": "2026-06-26T02:50:00Z",
+  "benchmark": "SWE-bench Verified",
+  "runner": "deepswe",
+  "status": "READY_FOR_EXTERNAL_RUN",
+  "claim_boundary": "Pre-run contract only: fixes task ids, DeepSWE/R2E-Gym adapter, model id, raw/fak endpoint routing, budget, and official-grader commands. It is not a solve-rate result until both arms produce predictions and the official SWE-bench harness grades them.",
+  "task_selection": {
+    "source": "difficulty map testdata/swebench_smoke.json (5 instances from princeton-nlp/SWE-bench_Verified, bucket-derived geometry)",
+    "filter": "full",
+    "limit": 2,
+    "task_ids": [
+      "django__django-12345",
+      "django__django-23456"
+    ],
+    "difficulty_distribution": {
+      "\u003c15min": 2
+    },
+    "same_task_ids": true
+  },
+  "adapter": {
+    "command": "deepswe-r2e-runner",
+    "same_adapter": true,
+    "required_environment": [
+      "FAK_DEEPSWE_RUNNER",
+      "FAK_DEEPSWE_BASE_URL",
+      "FAK_DEEPSWE_MODEL",
+      "RAW_DEEPSWE_BASE_URL"
+    ]
+  },
+  "model": {
+    "model_id": "DeepSWE-Preview",
+    "raw_base_url": "$env:RAW_DEEPSWE_BASE_URL",
+    "fak_base_url": "http://localhost:8080/v1",
+    "same_model": true
+  },
+  "budget": {
+    "max_steps": 50,
+    "timeout": "30m",
+    "same_budget": true
+  },
+  "arms": [
+    {
+      "name": "raw-deepswe",
+      "harness": "deepswe-r2e-gym-raw",
+      "model": "DeepSWE-Preview",
+      "command": "$env:FAK_DEEPSWE_RUNNER='deepswe-r2e-runner'; $env:FAK_DEEPSWE_RUNNER_ARGS=''; $env:FAK_DEEPSWE_BASE_URL=$env:RAW_DEEPSWE_BASE_URL; $env:FAK_DEEPSWE_MODEL='DeepSWE-Preview'; go run ./cmd/fak swebench run --agent deepswe --filter full --difficulty testdata/swebench_smoke.json --limit 2 --max-steps 50 --timeout 30m --model DeepSWE-Preview --preds-only --output experiments/agent-live/deepswe-raw-smoke-20260626",
+      "output_dir": "experiments/agent-live/deepswe-raw-smoke-20260626",
+      "predictions_path": "experiments/agent-live/deepswe-raw-smoke-20260626/predictions.json",
+      "eval_run_id": "deepswe-raw-smoke",
+      "eval_command": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --predictions_path experiments/agent-live/deepswe-raw-smoke-20260626/predictions.json --run_id deepswe-raw-smoke --max_workers 4"
+    },
+    {
+      "name": "fak-deepswe",
+      "harness": "deepswe-r2e-gym-through-fak-gateway",
+      "model": "DeepSWE-Preview",
+      "command": "$env:FAK_DEEPSWE_RUNNER='deepswe-r2e-runner'; $env:FAK_DEEPSWE_RUNNER_ARGS=''; $env:FAK_DEEPSWE_BASE_URL='http://localhost:8080/v1'; $env:FAK_DEEPSWE_MODEL='DeepSWE-Preview'; go run ./cmd/fak swebench run --agent deepswe --filter full --difficulty testdata/swebench_smoke.json --limit 2 --max-steps 50 --timeout 30m --model DeepSWE-Preview --preds-only --output experiments/agent-live/deepswe-fak-smoke-20260626",
+      "output_dir": "experiments/agent-live/deepswe-fak-smoke-20260626",
+      "predictions_path": "experiments/agent-live/deepswe-fak-smoke-20260626/predictions.json",
+      "eval_run_id": "deepswe-fak-smoke",
+      "eval_command": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --predictions_path experiments/agent-live/deepswe-fak-smoke-20260626/predictions.json --run_id deepswe-fak-smoke --max_workers 4"
+    }
+  ],
+  "gates": [
+    {
+      "name": "fixed_task_ids",
+      "ok": true,
+      "detail": "2 task ids selected"
+    },
+    {
+      "name": "same_task_ids",
+      "ok": true,
+      "detail": "raw and fak arms consume the same selected task id list"
+    },
+    {
+      "name": "same_adapter",
+      "ok": true,
+      "detail": "deepswe-r2e-runner"
+    },
+    {
+      "name": "same_model_id",
+      "ok": true,
+      "detail": "DeepSWE-Preview"
+    },
+    {
+      "name": "raw_model_endpoint",
+      "ok": true,
+      "detail": "$env:RAW_DEEPSWE_BASE_URL"
+    },
+    {
+      "name": "fak_model_endpoint",
+      "ok": true,
+      "detail": "http://localhost:8080/v1"
+    },
+    {
+      "name": "same_budget",
+      "ok": true,
+      "detail": "max_steps=50 timeout=30m"
+    },
+    {
+      "name": "raw_arm_command",
+      "ok": true,
+      "detail": "$env:FAK_DEEPSWE_RUNNER='deepswe-r2e-runner'; $env:FAK_DEEPSWE_RUNNER_ARGS=''; $env:FAK_DEEPSWE_BASE_URL=$env:RAW_DEEPSWE_BASE_URL; $env:FAK_DEEPSWE_MODEL='DeepSWE-Preview'; go run ./cmd/fak swebench run --agent deepswe --filter full --difficulty testdata/swebench_smoke.json --limit 2 --max-steps 50 --timeout 30m --model DeepSWE-Preview --preds-only --output experiments/agent-live/deepswe-raw-smoke-20260626"
+    },
+    {
+      "name": "fak_arm_command",
+      "ok": true,
+      "detail": "$env:FAK_DEEPSWE_RUNNER='deepswe-r2e-runner'; $env:FAK_DEEPSWE_RUNNER_ARGS=''; $env:FAK_DEEPSWE_BASE_URL='http://localhost:8080/v1'; $env:FAK_DEEPSWE_MODEL='DeepSWE-Preview'; go run ./cmd/fak swebench run --agent deepswe --filter full --difficulty testdata/swebench_smoke.json --limit 2 --max-steps 50 --timeout 30m --model DeepSWE-Preview --preds-only --output experiments/agent-live/deepswe-fak-smoke-20260626"
+    },
+    {
+      "name": "official_grader_local",
+      "ok": false,
+      "detail": "swebench python module not importable — `pip install swebench[harness]` (or run scripts/install_swebench.py)"
+    }
+  ],
+  "official_grader": {
+    "docker_present": true,
+    "harness_present": false,
+    "python": "python",
+    "runnable": false,
+    "reason": "swebench python module not importable — `pip install swebench[harness]` (or run scripts/install_swebench.py)"
+  },
+  "compare_metrics": [
+    "solve_rate",
+    "safe_completion",
+    "cost_or_token_budget",
+    "latency",
+    "tool_call_count",
+    "adapter_failures",
+    "policy_blocks",
+    "evidence_completeness"
+  ],
+  "required_before_claim": [
+    "raw-deepswe predictions.json generated by a real DeepSWE/R2E-Gym adapter over the selected task ids",
+    "fak-deepswe predictions.json generated by the same adapter over the same task ids through the fak gateway",
+    "official SWE-bench harness report.json for both arms",
+    "adapter logs or metadata showing the same model id, max steps, timeout, and task id list for both arms",
+    "raw/fak compare artifact that folds solve rate, safe completion, cost or token budget, latency, adapter failures, policy blocks, and evidence completeness"
+  ],
+  "result_claim_allowed": false
+}

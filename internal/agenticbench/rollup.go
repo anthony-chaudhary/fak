@@ -70,7 +70,7 @@ func Build(root string, now time.Time) (*Report, error) {
 		{869, "A", "AgentDojo structural safety floor", "experiments/agent-live/agentdojo-fak-fullstack-20260625.json", false, checkAgentDojo},
 		{870, "B", "GLM-5.2/vLLM agentic battery", "experiments/vllm/glm52-agentic-battery/final-check.json", false, checkGLM},
 		{871, "C", "Opus-class SWE-bench smoke", "experiments/agent-live/swebench-opus-smoke-contract-20260626.json", false, checkOpus},
-		{872, "D", "DeepSWE/R2E-Gym runner", "experiments/agent-live/deepswe-adapter-smoke-20260626/summary.json", false, checkDeepSWE},
+		{872, "D", "DeepSWE/R2E-Gym runner", "experiments/agent-live/deepswe-raw-fak-contract-20260626.json", false, checkDeepSWE},
 		{873, "E", "ToolSandbox/tau3 policy-state", "experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json", false, checkFixture},
 		{874, "F", "Terminal-Bench command boundary", "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json", false, checkFixture},
 		{875, "G", "Browser/computer-use action mediation", "experiments/agent-live/browser-action-mediation-smoke-20260625.json", false, checkFixture},
@@ -193,7 +193,8 @@ func checkDeepSWE(doc map[string]any, child ChildStatus) ChildStatus {
 		return child
 	}
 	child.Gate = "PENDING_EXTERNAL_HARNESS"
-	child.Detail = child.Status + "; fixture adapter only, real DeepSWE/R2E-Gym grading still required"
+	child.Detail = child.Status + "; raw/fak DeepSWE predictions and official SWE-bench reports still required"
+	child.Missing = stringSlice(doc, "required_before_claim")
 	return child
 }
 
