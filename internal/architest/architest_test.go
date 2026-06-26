@@ -48,6 +48,7 @@ var tier = map[string]int{
 
 	"agenticbench": 1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"benchcatalog": 1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"benchids":     1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
 	"benchscore":   1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":    1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"accounts":     1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
@@ -99,6 +100,7 @@ var tier = map[string]int{
 	"sessionreset":    2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
 	"taskmgr":         1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	"stopfailure":     1, // pure StopFailure marker planner/settler over JSON files and transcript existence; stdlib-only, off the hot path.
+	"dogfoodscore":    1, // pure dogfood-loop scorecard over transcripts/markers; imports stopfailure, off the hot path.
 	"dropin":          1,
 	"comm":            2,
 	"cohort":          2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
@@ -115,6 +117,7 @@ var tier = map[string]int{
 	"horizonrecovery": 1, // pure budget-recovery (term r) grounding lens over a ctxplanbench report's already-measured real-transcript fields: surfaces the recovery ratio + its fault-rate FENCE co-located, structurally refuses to emit r/horizon_multiplier; stdlib-only, imports nothing internal, off the hot path.
 	"guardrsi":        1, // pure guard RSI journal fold + scorecard: reads guard-audit bytes, computes deterministic verdict quality, and validates keep/revert iterations; stdlib-only, off the hot path.
 	"hooks":           1, // commit-boundary gates run in ONE process: the Go port of the tools/check_*.py git-hook checkers (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/INDEX_SYNC/PROVENANCE_LABEL + commit-msg), folding one staged-diff read. stdlib-only, imports nothing internal, off the hot path.
+	"workflow": 1, // pure DAG/map-reduce/fan-out orchestration core (#245, D-005): JSON-DSL compiler + topo-validated executor + retry/fail-fast fault tolerance; stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
