@@ -5,6 +5,10 @@ This is the source of truth for the recurring GPU-server/Slack confusion.
 > **Just want to reach the channel?** See [`private-comms-channel.md`](private-comms-channel.md)
 > — the public stub that points to the live Slack control-bridge in `fak-private`. This doc
 > explains *what is public vs private and why*; that stub is the entry point.
+>
+> **Operating the box fleet?** See [`fleet.md`](fleet.md) — the public, transport-agnostic
+> Go core (`fleetctl`: roster + fold + readiness score + render). It folds the per-box report
+> JSON the private bridge writes; the boundary below is the rule it lives inside.
 
 ## Public tree
 
@@ -40,6 +44,13 @@ Private-only paths and concepts:
 
 New public tooling is Go. Add a `fak` subcommand or a small `cmd/<name>/` binary, with
 pure logic under `internal/<name>/` where appropriate. Do not add a new `tools/*.py`.
+
+The public, transport-agnostic fleet core now exists in Go: `cmd/fleetctl/` (`fleetctl`)
+is the Go home the scattered `tools/fleet_*.py` helpers port into — a typed roster, a
+deterministic fold + readiness score, and a render that stays readable at 100+ boxes. It
+reads the per-box report JSON the private Slack bridge writes (the seam is a data contract,
+not a code import), so the live control plane stays private while the core stays public.
+See [`fleet.md`](fleet.md).
 
 Existing Python tools are grandfathered only. The allowlist in `internal/pythongate` can
 shrink when a Python tool is ported or sunset, but it must not grow. Restoring
