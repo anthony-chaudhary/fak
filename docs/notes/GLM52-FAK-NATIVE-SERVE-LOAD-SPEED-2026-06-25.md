@@ -31,11 +31,42 @@ is to re-measure the 466 GB load on the box.
   `Q5/6_K` row in `ResidentReport`. A nonzero `dequant` row for a large expert quant type is the
   slow-load signal — the diagnosis is now legible in-band, no external `gguf-dump` needed.
 
-**Open witness (hardware-gated):** re-run the self-staging serve on DGX3 and confirm the
-load is **< 10 min** with every routed-expert quant type on the resident path. The expected
-shape: `fak_model_load_path_tensors{...,path="dequant"}` ≈ 0 for the expert quant types, and the
-stderr load-path summary shows resident for Q4_K **and** Q5/6_K. The remaining serial cost is the
-small dense set (attention/router/shared/embed/lm_head); the 417 GB expert bulk is now a raw copy.
+## Update 2026-06-27 — WITNESSED on dgx3: 466 GB load ~100 min → **150 s** (3.04 GB/s)
+
+Run on dgx3 (8× A100-80GB, sm_80), `origin/main` `6d727be7`, the staged 466 GB UD-Q4_K_M
+checkpoint on local NVMe, via `tools/glm52_load_witness.sh` (`fak serve --gguf <shard1>
+--backend cuda --cpu-offload-experts --context-budget-tokens 8192`, `FAK_GGUF_LOAD_WORKERS=64`):
+
+```
+BUILD_OK
+LOAD_READY 150s (2m30s)  under_10min=YES        # fak_model_load_duration_seconds = 145.5
+fak: loading model 100% (1809/1809 tensors, 433.8 GB, 2m23s elapsed, 3.04 GB/s)
+fak: load-path breakdown (resident = raw bytes, no dequant; dequant = f32 round-trip):
+fak:   Q4_K  expert  resident=38912 (256.5 GB)  dequant=0 (0.0 GB)
+fak:   Q5_K  expert  resident=18688 (150.6 GB)  dequant=0 (0.0 GB)
+fak:   Q6_K  expert  resident=768   (7.4 GB)    dequant=0 (0.0 GB)
+fak:   Q8_0  dense   resident=0                 dequant=712 (16.9 GB)
+fak:   F32   dense   resident=0                 dequant=706 (0.5 GB)
+```
+
+So **every routed-expert quant type loads resident with zero f32 round-trip** — the 158 GB of
+Q5_K/Q6_K experts that used to take the slow path (the ~100-min cause) now copy raw, and the load
+is I/O-bound at NVMe speed. Only the small dense set (~18 GB Q8/F32) dequants. A warm-cache re-run
+landed in **136 s (3.75 GB/s)**. The `<10-min` load target is **met**.
+
+**Remaining (separate axis):** per-token DECODE is slow — the 753B experts run on the host CPU
+under `--cpu-offload-experts` via the correctness-first scalar k-quant GEMV, so a chat smoke can
+take many seconds/token (raise `SMOKE_S`/lower `SMOKE_TOKENS` on the witness to confirm a token).
+The LOAD is the proven win here; decode throughput is the next perf lever (an int8-SDOT k-quant
+GEMV like q4k already has, and/or paging experts to the device).
+
+### Original open-witness note (now closed by the run above)
+
+Re-run the self-staging serve on DGX3 and confirm the load is **< 10 min** with every
+routed-expert quant type on the resident path. The expected shape:
+`fak_model_load_path_tensors{...,path="dequant"}` ≈ 0 for the expert quant types, and the stderr
+load-path summary shows resident for Q4_K **and** Q5/6_K. The remaining serial cost is the small
+dense set (attention/router/shared/embed/lm_head); the 417 GB expert bulk is now a raw copy.
 
 ## What is fixed and shipped (origin/main)
 
