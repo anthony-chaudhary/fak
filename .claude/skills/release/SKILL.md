@@ -90,9 +90,9 @@ git worktree add --detach <path> origin/main
 git worktree remove <path>     # when done
 ```
 
-Verify the release commit touches ONLY `VERSION`, `docs/releases/vX.Y.Z.md`, and any `INSTALL.md` install-pin bumps. (`release_bump` pin-bumps `INSTALL.md` too — its `targets.install_docs.files[].changed` flags whether `INSTALL.md` actually moved this release; it is a clean no-op when the pins are already current.)
+Verify the release commit touches ONLY `VERSION`, `docs/releases/vX.Y.Z.md`, any `INSTALL.md` install-pin bumps, and the distribution manifests `server.json` + `CITATION.cff`. (`release_bump` pin-bumps `INSTALL.md` via `targets.install_docs` and `server.json`/`CITATION.cff` via `targets.dist_manifests` — each `files[].changed` flags whether that file actually moved this release; all are clean no-ops when already current. Pass `--date YYYY-MM-DD` so `CITATION.cff`'s `date-released` advances too; without it the version still bumps but the date is left alone. `server.json`'s `oci` identifier tag must match the ghcr image `release-container.yml` pushes, or the MCP Registry lists a back-version — see [docs/fak/mcp-registry.md](../../../docs/fak/mcp-registry.md) "Updating on each release".)
 
-Manual fallback: compute the version, write `<release_notes_dir>/vX.Y.Z.md` mirroring the prior release's front-matter + theme shape, run `python <helpers.release_bump> X.Y.Z`, then `git add -- VERSION INSTALL.md docs/releases/vX.Y.Z.md` and `git commit -m "vX.Y.Z: <summary>" -- VERSION INSTALL.md docs/releases/vX.Y.Z.md`. Never `git add -A`. No `Co-Authored-By` line.
+Manual fallback: compute the version, write `<release_notes_dir>/vX.Y.Z.md` mirroring the prior release's front-matter + theme shape, run `python <helpers.release_bump> X.Y.Z --date YYYY-MM-DD`, then `git add -- VERSION INSTALL.md server.json CITATION.cff docs/releases/vX.Y.Z.md` and `git commit -m "vX.Y.Z: <summary>" -- VERSION INSTALL.md server.json CITATION.cff docs/releases/vX.Y.Z.md`. Never `git add -A`. No `Co-Authored-By` line.
 
 ## Step 6: Push the release commit FIRST, then tag
 
