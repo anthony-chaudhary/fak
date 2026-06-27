@@ -223,7 +223,7 @@
       ]
     }
   },
-  "last_updated": "2026-06-25T08:06:34.902089+00:00",
+  "last_updated": "2026-06-27T00:00:00+00:00",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -231,6 +231,17 @@
       "gpu": "NVIDIA A100",
       "hostname": "datacenter-gpu-server",
       "id": "a100",
+      "last_run": null,
+      "os": "Linux",
+      "role": "bench-node",
+      "runs": 0
+    },
+    "cpu-server-a": {
+      "arch": "x86_64",
+      "cpu_cores": 256,
+      "gpu": "none",
+      "hostname": "cpu-server",
+      "id": "cpu-server-a",
       "last_run": null,
       "os": "Linux",
       "role": "bench-node",

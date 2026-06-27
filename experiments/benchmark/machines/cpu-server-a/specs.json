@@ -1,0 +1,31 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "cores_logical": 256,
+      "cores_physical": 128,
+      "model": "x86_64 server CPU (dual-socket, 256-thread; AMD EPYC 7742-class)"
+    },
+    "gpu": [],
+    "ram_gb": 1007
+  },
+  "hostname": "cpu-server",
+  "machine_id": "cpu-server-a",
+  "notes": "CPU-only server class (256-thread x86_64, ~1 TB RAM, NO GPU) — the first CPU-host lane for the full ~433 GB GLM-5.2 UD-Q4_K_M serve. Prebuilt llama-server / llama-bench are on the box (the memory-safe mmap baseline); the fak-native CPU reference path serves via FAK_Q4K=1 (direct-resident-Q4_K loader). Hardware is scrubbed to the generic class — the lab host / channel identifiers stay private. INFERRED, verify at onboarding: cpu.model SKU ('AMD EPYC 7742-class') and cores_physical (128, from 256 logical assuming dual-socket SMT). ram_gb 1007 is the measured total; on the 2026-06-27 run ~512 GB was reserved in non-reclaimable hugepages by a long-running co-tenant, capping normal-allocation RAM at ~495 GB. The first cross-engine GLM-5.2 CPU throughput row (B3 rung, #976) is still OPEN: the llama.cpp mmap (-ngl 0) prefill/decode baseline + the fak-native CPU number (blocked until #974's CPU memory-fit guard / mmap weights land, or on a host WITHOUT the hugepage co-tenant that wedged the box). See docs/notes/GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md and docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md (§4.3 ladder).",
+  "os": {
+    "name": "Linux"
+  },
+  "registered_at": "2026-06-27T00:00:00Z",
+  "role": "bench-node",
+  "runtime": {},
+  "tags": [
+    "x86_64",
+    "cpu-only",
+    "no-gpu",
+    "epyc",
+    "large-ram",
+    "bench-node",
+    "glm52-cpu-host"
+  ]
+}
