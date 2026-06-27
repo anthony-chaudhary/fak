@@ -54,11 +54,17 @@ Q5_K/Q6_K experts that used to take the slow path (the ~100-min cause) now copy 
 is I/O-bound at NVMe speed. Only the small dense set (~18 GB Q8/F32) dequants. A warm-cache re-run
 landed in **136 s (3.75 GB/s)**. The `<10-min` load target is **met**.
 
-**Remaining (separate axis):** per-token DECODE is slow — the 753B experts run on the host CPU
-under `--cpu-offload-experts` via the correctness-first scalar k-quant GEMV, so a chat smoke can
-take many seconds/token (raise `SMOKE_S`/lower `SMOKE_TOKENS` on the witness to confirm a token).
-The LOAD is the proven win here; decode throughput is the next perf lever (an int8-SDOT k-quant
-GEMV like q4k already has, and/or paging experts to the device).
+**End-to-end RUNS (decode proven, but slow).** The served `/v1/chat/completions` completed on
+fak's own kernel — the serve log shows `inkernel_chat model=glm-5.2 q4k=true prompt=33tok
+prefill=33tok/144.49s/0.2tok/s decode=2tok/8.77s/0.2tok/s`: prefill AND decode produce tokens
+through the resident Q4_K/Q5_K/Q6_K experts. (A short `max_tokens` smoke returns empty "content"
+because GLM-5.2 spends the first tokens on `reasoning_content` — a harness caveat, not a serving
+failure.)
+
+**Remaining (separate axis):** per-token throughput is ~**0.2 tok/s** — the 753B experts run on
+the host CPU under `--cpu-offload-experts` via the correctness-first scalar k-quant GEMV. The LOAD
+is the proven win here; decode throughput is the next perf lever (an int8-SDOT k-quant GEMV like
+q4k already has for Q4_K, extended to Q5_K/Q6_K, and/or paging experts to the device).
 
 ### Original open-witness note (now closed by the run above)
 
