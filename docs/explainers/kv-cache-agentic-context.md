@@ -74,7 +74,7 @@ A common worry: a tool call `read(f)` with *identical* arguments — will the lo
 Prefix caching only ever discounts the **input (prefill)** side of a request. How much that is worth is set by the workload's **input:output ratio** — how many tokens you re-send to read versus how many you generate.
 
 - **Chat** — short prompts and comparable-length replies, roughly **2:1**. Input is a small slice of the bill, so even a perfect cache deletes almost nothing.
-- **Agentic** — the entire growing transcript is re-sent every turn against a handful of output tokens. Measured input:output ratios run around **239:1** machine-wide, with long-context research agents exceeding **1000:1**. Input *is* the bill — so the same cache deletes most of it.
+- **Agentic** — the entire growing transcript is re-sent every turn against a handful of output tokens. Measured input:output ratios run around **239:1** machine-wide, with an always-on fleet exceeding **1000:1**. Input *is* the bill — so the same cache deletes most of it.
 
 The share of total spend a prefix cache can delete tracks the ratio directly:
 
