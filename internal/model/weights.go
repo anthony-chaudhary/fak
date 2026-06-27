@@ -233,6 +233,13 @@ type Model struct {
 	// weights at the softmax seam (emission only; the math is untouched). See
 	// attn_observer.go.
 	attnObs AttnObserver
+
+	// lora is the optional set of active LoRA adapters applied dynamically at the
+	// named-projection seam (#291). nil by default — residentMatRows is then
+	// byte-identical and allocation-identical. When set via SetLoRA, each named
+	// projection adds its active adapters' low-rank delta after the base matvec
+	// (decode-time apply, no merged weight copy). See lora.go.
+	lora *LoRASet
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

@@ -267,6 +267,50 @@ func TestLoadLoRAAdapterFromDisk(t *testing.T) {
 	}
 }
 
+// TestResidentMatRowsLoRADecodeApply witnesses the decode-time seam: with no
+// adapter installed residentMatRows is byte-identical to the bare base read, and
+// once SetLoRA installs an adapter the named projection adds exactly that adapter's
+// delta — "apply adapter at decode time" through the real projection path, then
+// ClearLoRA restores the bit-identical base.
+func TestResidentMatRowsLoRADecodeApply(t *testing.T) {
+	cfg := loraTestCfg()
+	m := NewSynthetic(cfg)
+	name := "model.layers.0.self_attn.q_proj.weight"
+	const out, in = 32, 32
+	x := lcgFill(in, 5, 1.0)
+
+	base := m.residentMatRows(name, x, out, in)
+	bare := matRows(m.tensor(name), x, out, in)
+	assertFloat32BitsEqual(t, "unadapted resident read == bare matvec", base, bare)
+
+	set := NewLoRASet()
+	if err := set.Add(newTestAdapter("math", name, out, in, 4, 8, 99)); err != nil {
+		t.Fatal(err)
+	}
+	m.SetLoRA(set)
+	got := m.residentMatRows(name, x, out, in)
+	want := append([]float32(nil), base...)
+	d := set.Delta(name, x)
+	for o := range want {
+		want[o] += d[o]
+	}
+	if diff := loraMaxAbsDiff(got, want); diff > 1e-5 {
+		t.Fatalf("decode-time LoRA apply wrong: max|Δ|=%g", diff)
+	}
+	if loraMaxAbsDiff(got, base) < 1e-6 {
+		t.Fatal("adapter did not change the projection output")
+	}
+
+	// A projection with no adapter is untouched even while a set is installed.
+	other := "model.layers.1.self_attn.q_proj.weight"
+	otherBase := matRows(m.tensor(other), x, out, in)
+	assertFloat32BitsEqual(t, "untargeted projection unchanged with set installed",
+		m.residentMatRows(other, x, out, in), otherBase)
+
+	m.ClearLoRA()
+	assertFloat32BitsEqual(t, "ClearLoRA restores bare matvec", m.residentMatRows(name, x, out, in), bare)
+}
+
 // writeSafetensors writes a minimal f32 safetensors file (8-byte LE header length,
 // JSON header, then the raw f32 data) matching the format the model loader reads.
 func writeSafetensors(t *testing.T, path string, tensors []NamedTensorF32) {

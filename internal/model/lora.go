@@ -288,6 +288,33 @@ func (m *Model) MergeLoRA(set *LoRASet) error {
 	return nil
 }
 
+// SetLoRA installs a set of adapters to apply dynamically at the named-projection
+// seam (residentMatRows), so decode reflects them with no merged weight copy and at
+// the bounded OverheadFraction cost. Passing nil (or ClearLoRA) restores the
+// unadapted, byte-identical path. The set is held by reference, so toggling a
+// bundle on it (Activate/Deactivate) switches adapters live between decode steps.
+func (m *Model) SetLoRA(set *LoRASet) { m.lora = set }
+
+// ClearLoRA removes any installed adapters, restoring the unadapted decode path.
+func (m *Model) ClearLoRA() { m.lora = nil }
+
+// loraApply adds the active LoRA delta for a named projection into y in place. It
+// is the decode-time seam residentMatRows calls: a guarded no-op when no set is
+// installed or no active adapter targets this projection, so the unadapted path
+// pays one nil check and nothing else.
+func (m *Model) loraApply(name string, x, y []float32) {
+	if m.lora == nil {
+		return
+	}
+	d := m.lora.Delta(name, x)
+	if d == nil {
+		return
+	}
+	for o := range y {
+		y[o] += d[o]
+	}
+}
+
 // LoRAConfig is the subset of PEFT's adapter_config.json this loader reads.
 type LoRAConfig struct {
 	R             int      `json:"r"`

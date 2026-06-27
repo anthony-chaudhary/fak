@@ -222,12 +222,22 @@ func (s *Session) glmDsaWeightHAL(name string, out, in int) compute.Tensor {
 	panic("model: glmDsaWeightHAL missing resident weight " + name + " (no f32/q8/q4_k residency)")
 }
 
-// residentMatRows reads a projection by name from either the ordinary f32 store
-// or the memory-lean Q8 store. It is used by architecture-specific reference
-// paths such as GLM-MoE-DSA, where the cacheless/session math is still CPU f32
-// but large projection weights may have been quantized at load and dropped from
-// raw f32 residency.
+// residentMatRows reads a projection by name from any resident store (f32, Q8,
+// int4, Q4_K, k-quant, GPTQ), then adds the active LoRA delta for that projection
+// when an adapter set is loaded (#291). The base read is residentMatRowsBase; the
+// LoRA add is a guarded no-op unless SetLoRA installed adapters, so the
+// unadapted path is byte-identical. Applying the delta to the base RESULT (not the
+// weight) is what lets a dynamic adapter ride on a quantized base the merge path
+// cannot reach.
 func (m *Model) residentMatRows(name string, x []float32, out, in int) []float32 {
+	y := m.residentMatRowsBase(name, x, out, in)
+	m.loraApply(name, x, y)
+	return y
+}
+
+// residentMatRowsBase is the unadapted resident read — the original f32/Q8/int4/
+// Q4_K/k-quant/GPTQ dispatch. residentMatRows wraps it with the optional LoRA seam.
+func (m *Model) residentMatRowsBase(name string, x []float32, out, in int) []float32 {
 	if m.has(name) {
 		return matRows(m.tensor(name), x, out, in)
 	}
