@@ -318,13 +318,9 @@ func RunStochastic(ctx context.Context, base *Trace, rates RateProfile, cm CostM
 	// call Configure per trial, so each trial is a single calibration-free replay.
 	agent.Configure()
 
-	root := rand.New(rand.NewSource(seed))
 	// Derive a deterministic per-trial seed stream from the root RNG so the trial
 	// order is fixed and independent of how many draws each Perturb consumes.
-	seeds := make([]int64, trials)
-	for i := range seeds {
-		seeds[i] = root.Int63()
-	}
+	seeds := deriveSeeds(seed, trials)
 
 	for i := 0; i < trials; i++ {
 		trng := rand.New(rand.NewSource(seeds[i]))
@@ -395,10 +391,7 @@ func withRateProfileVersion(p RateProfile) RateProfile {
 }
 
 // JSON renders the stochastic report.
-func (r *StochasticReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *StochasticReport) JSON() []byte { return marshalArtifact(r) }
 
 // -----------------------------------------------------------------------------
 // break-even.go (kept in this file): the hit-rate -> turns-saved -> amortization

@@ -22,7 +22,6 @@ package turnbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"sort"
@@ -68,10 +67,7 @@ type DivergenceHistogramReport struct {
 }
 
 // JSON renders the report (stable indentation, trailing newline) for an artifact file.
-func (r *DivergenceHistogramReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *DivergenceHistogramReport) JSON() []byte { return marshalArtifact(r) }
 
 // RunDivergenceHistogram scores each corpus trace through RunPolicyReplay and rolls the
 // per-arm divergence witness up into the first_divergence distribution and the exact-cell
@@ -94,12 +90,9 @@ func RunDivergenceHistogram(ctx context.Context, corpus []DivHistInput, cm CostM
 	var cells, exact, bounded int
 
 	for ci, in := range corpus {
-		if in.Trace == nil || len(in.Trace.Calls) == 0 {
-			return nil, fmt.Errorf("turnbench: corpus entry %d has an empty trace", ci)
-		}
-		rep, err := RunPolicyReplay(ctx, in.Trace, in.Arms, in.RefName, cm)
+		rep, err := replayCorpusEntry(ctx, ci, in, cm)
 		if err != nil {
-			return nil, fmt.Errorf("turnbench: corpus entry %d (%s): %w", ci, in.Trace.SliceID, err)
+			return nil, err
 		}
 		// The reference arm replays itself (exact by construction); exclude it from the
 		// cell count so the fraction reflects only the CANDIDATE comparisons.

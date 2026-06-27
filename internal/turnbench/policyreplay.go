@@ -60,7 +60,6 @@ package turnbench
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"time"
@@ -135,10 +134,7 @@ type PolicyReplayReport struct {
 }
 
 // JSON renders the report.
-func (r *PolicyReplayReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *PolicyReplayReport) JSON() []byte { return marshalArtifact(r) }
 
 // observedClass maps a replayed call's disposition to the RESULT CLASS the model would
 // observe: "served" (a usable result — engine dispatch, a vDSO local serve, or an

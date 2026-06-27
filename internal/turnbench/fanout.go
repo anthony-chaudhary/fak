@@ -47,7 +47,6 @@ package turnbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -320,11 +319,7 @@ func RunFanoutCell(ctx context.Context, p FanoutProfile, N, subTurns, trials int
 	cross := make([]int, 0, trials)
 	totalCalls := 0
 
-	root := rand.New(rand.NewSource(seed ^ (int64(N) << 20) ^ (int64(subTurns) << 8)))
-	seeds := make([]int64, trials)
-	for i := range seeds {
-		seeds[i] = root.Int63()
-	}
+	seeds := deriveSeeds(seed^(int64(N)<<20)^(int64(subTurns)<<8), trials)
 
 	for i := 0; i < trials; i++ {
 		trng := rand.New(rand.NewSource(seeds[i]))
@@ -450,10 +445,7 @@ func withFanoutCostModelVersion(cm FanoutCostModel) FanoutCostModel {
 }
 
 // JSON renders the sweep artifact.
-func (s *FanoutSweep) JSON() []byte {
-	b, _ := json.MarshalIndent(s, "", "  ")
-	return append(b, '\n')
-}
+func (s *FanoutSweep) JSON() []byte { return marshalArtifact(s) }
 
 // CSV renders the sweep as a flat grid for curve-fitting (one row per cell). The
 // columns are the headline values: the MEASURED dedup + prefix geometry first, then

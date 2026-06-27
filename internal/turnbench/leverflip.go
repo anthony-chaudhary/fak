@@ -30,7 +30,6 @@ package turnbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime"
 
@@ -109,10 +108,7 @@ type LeverFlipReport struct {
 }
 
 // JSON renders the report.
-func (r *LeverFlipReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *LeverFlipReport) JSON() []byte { return marshalArtifact(r) }
 
 // deltaOf computes masked − baseline for each outcome counter.
 func deltaOf(base, masked KernelCounters) CounterDelta {

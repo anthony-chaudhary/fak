@@ -54,7 +54,6 @@ package turnbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"sort"
@@ -165,10 +164,7 @@ type FleetCounterfactualReport struct {
 
 // JSON renders the report (stable indentation, trailing newline) for an artifact file —
 // mirrors PolicyReplayReport.JSON().
-func (r *FleetCounterfactualReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *FleetCounterfactualReport) JSON() []byte { return marshalArtifact(r) }
 
 // boundedResolveNote is the standard flag a bounded cell carries on the resolve-rate axis:
 // the floor counters are real, but completion past the divergence frontier is fiction the
@@ -219,12 +215,9 @@ func RunFleetCounterfactual(ctx context.Context, corpus []DivHistInput, cm CostM
 	var wallNs int64
 
 	for ci, in := range corpus {
-		if in.Trace == nil || len(in.Trace.Calls) == 0 {
-			return nil, fmt.Errorf("turnbench: corpus entry %d has an empty trace", ci)
-		}
-		rep, err := RunPolicyReplay(ctx, in.Trace, in.Arms, in.RefName, cm)
+		rep, err := replayCorpusEntry(ctx, ci, in, cm)
 		if err != nil {
-			return nil, fmt.Errorf("turnbench: corpus entry %d (%s): %w", ci, in.Trace.SliceID, err)
+			return nil, err
 		}
 		wallNs += rep.ReplayWallNs
 

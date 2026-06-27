@@ -331,11 +331,7 @@ func RunFleetCell(ctx context.Context, p FleetProfile, T, A, trials int, seed in
 	perAgentMilli := make([]int, 0, trials)
 	totalCalls := 0
 
-	root := rand.New(rand.NewSource(seed ^ (int64(T) << 32) ^ (int64(A) << 16)))
-	seeds := make([]int64, trials)
-	for i := range seeds {
-		seeds[i] = root.Int63()
-	}
+	seeds := deriveSeeds(seed^(int64(T)<<32)^(int64(A)<<16), trials)
 
 	for i := 0; i < trials; i++ {
 		trng := rand.New(rand.NewSource(seeds[i]))
@@ -440,10 +436,7 @@ func withFleetProfileVersion(p FleetProfile) FleetProfile {
 }
 
 // JSON renders the sweep artifact.
-func (s *FleetSweep) JSON() []byte {
-	b, _ := json.MarshalIndent(s, "", "  ")
-	return append(b, '\n')
-}
+func (s *FleetSweep) JSON() []byte { return marshalArtifact(s) }
 
 // CSV renders the sweep as a flat grid for curve-fitting (one row per cell). The
 // columns are the headline medians a model is fit against.

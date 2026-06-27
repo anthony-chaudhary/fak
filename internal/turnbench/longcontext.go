@@ -49,7 +49,6 @@
 package turnbench
 
 import (
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"strings"
@@ -349,10 +348,7 @@ type LongContextReport struct {
 }
 
 // JSON renders the report (stable indentation, trailing newline) for an artifact file.
-func (r *LongContextReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *LongContextReport) JSON() []byte { return marshalArtifact(r) }
 
 // RunLongContextLadder computes the exact work floor for every shape in the ladder against
 // one model, picks the two ultra-long headline cells, and stamps provenance. No model call.

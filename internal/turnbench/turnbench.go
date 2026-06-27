@@ -313,10 +313,7 @@ type Report struct {
 }
 
 // JSON renders the report.
-func (r *Report) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *Report) JSON() []byte { return marshalArtifact(r) }
 
 // rawSafety accumulates the per-replay safety observations.
 type rawSafety struct {

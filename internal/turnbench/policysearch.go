@@ -57,7 +57,6 @@ package turnbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -207,10 +206,7 @@ type PolicySearchReport struct {
 }
 
 // JSON renders the report (stable indentation, trailing newline) for an artifact file.
-func (r *PolicySearchReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *PolicySearchReport) JSON() []byte { return marshalArtifact(r) }
 
 // scoreCandidate is the FITNESS ORACLE: score ONE candidate policy over the whole frozen
 // corpus as model-free replay, attributing the harmful-sink outcomes per call and gating

@@ -77,7 +77,6 @@ package turnbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"runtime"
@@ -202,10 +201,7 @@ type TopologySearchReport struct {
 }
 
 // JSON renders the report (stable indentation, trailing newline) for an artifact file.
-func (r *TopologySearchReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *TopologySearchReport) JSON() []byte { return marshalArtifact(r) }
 
 // CSV renders the searched genomes as a flat grid for curve-fitting the
 // savings-vs-arbiter-collision frontier (one row per scored topology) — the structural dual

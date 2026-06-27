@@ -36,7 +36,6 @@ package turnbench
 // matter here" thesis.
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -404,10 +403,7 @@ func parityNote(capP, safeP, costWin bool, c ModelCard) string {
 }
 
 // JSON renders the parity report.
-func (r *ParityReport) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	return append(b, '\n')
-}
+func (r *ParityReport) JSON() []byte { return marshalArtifact(r) }
 
 // Markdown renders the headline comparison table — the shareable artifact. It
 // leads with the per-model card table (capability / safety both arms / cost) then
