@@ -5,7 +5,7 @@ description: "Measures the fused agent kernel's net work-reuse value-add (60.3x 
 
 # SESSION-VALUE-STACK-RESULTS — the net value-add of the fused agent kernel on a realistic multi-agent session, measured on Apple M3 Pro
 
-> **📊 AUTHORITY:** This document's session value-stack results (11.2–14.5× vs naive) are centrally
+> **📊 AUTHORITY:** This document's session value-stack results (60.3× vs naive) are centrally
 > indexed in **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)** alongside all other benchmark
 > claims. That document is the single source of truth with full traceability.
 
