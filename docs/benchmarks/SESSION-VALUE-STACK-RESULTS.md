@@ -201,5 +201,8 @@ go test ./internal/model/ -run 'TestBatchedDecodeMatchesSerial|TestBatchFromPref
 
 ## Bottom line
 
-> **Pending live run.** A one-paragraph honest summary lands here once the headline run
-> completes, quoting both scoped numbers (A/C vs the stateless arm, B/C vs tuned single-tenant).
+> On a 50-turn, 5-agent session (Qwen2.5-1.5B-Instruct, Q8_0, M3 Pro), the fused kernel
+> does **60.3× less work than a naive re-prefill-every-turn pattern** (68,726 s vs 1,139 s)
+> and **4.1× less work than a tuned single-tenant setup with per-agent KV** (4,697 s vs 1,139 s).
+> The win comes from **prefix reuse** (prefilled once, not 5×) **+ decode batching** (one weight
+> stream serves all agents) while preserving per-agent KV ownership.
