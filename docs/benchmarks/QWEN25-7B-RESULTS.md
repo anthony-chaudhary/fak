@@ -23,6 +23,14 @@ description: "fak's first 7B dense run on M3 Pro Q8, reporting the honest throug
 |---|---|---|---|
 | 15.4 tok/s | 16.0 tok/s | 16.1 tok/s | **8.7 tok/s** (115.2 ms/tok) |
 
+> **One Qwen2.5-7B fak decode number, and it is in the Authority (#123).** The pinned figure is the
+> **8.7 tok/s** (115.2 ms/tok) above — artifact `experiments/model-ladder/modelbench-qwen25-7b-q8.json`,
+> indexed in `BENCHMARK-AUTHORITY.md` (the single source of truth). A lower **~8.2 tok/s** decode figure
+> for the same engine/model/box has circulated from a separate `fak`-native-chat run; it is **not** a
+> second authoritative measurement. Read 8.7 tok/s as the number of record and ~8.2 tok/s as a
+> different (earlier/contended) run superseded by it — so the two figures are reconciled here rather
+> than left to circulate unpinned.
+
 ## llama.cpp b9707 reference (Metal, full offload)
 
 `llama-completion -m qwen2.5-7b-instruct-q8_0.gguf -ngl 99 -t 6 -c 4096 -n 32` (load 3.16 s):
