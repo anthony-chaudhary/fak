@@ -190,6 +190,6 @@ box); rung-2/3 probes, decode-time logit-mask, SNAPSHOT/ROLLBACK wrap, and the
 fine-tuned *syscall/adjudication* model are STUB (the fused model is a stock reference,
 not a tuned adjudicator; `internal/harvest` now folds the verdict stream into its
 training corpus, but the model that consumes it is unbuilt). Consistent with the
-cluster's 0/29-NOVEL posture: the contribution is the **assembly** (a fused, fail-open,
+cluster's 0/29-NOVEL posture (0 of 29 audited prior-art primitives are novel): the contribution is the **assembly** (a fused, fail-open,
 witness-gated kernel with the tool call promoted to an in-process syscall), not any
 single primitive.

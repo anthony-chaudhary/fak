@@ -199,7 +199,7 @@ residency `<50%`, faults avoided), `TestGrepIsAReadOnlyMapSearch`,
 
 The reframe is **live SOTA, not exotic** — and the honest read is that the primitives
 ship everywhere; the contribution is the *assembly + the trust gate*, consistent with the
-cluster's `0/29-NOVEL` posture (see [[addressable-context-landscape-verdict]]).
+cluster's `0/29-NOVEL` posture (0 of 29 prior-art primitives are novel; see [[addressable-context-landscape-verdict]]).
 
 - **The OS-paging metaphor is now an active research line.** An Apr-2026 paper review,
   *"The Missing Memory Hierarchy: Why LLM Context Windows Need Demand Paging,"* describes
