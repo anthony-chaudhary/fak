@@ -99,6 +99,32 @@ provider-side: a cache TTL expiry, an eviction, or your client moving its own
 breakpoint. It is not something `fak` broke, and you see it either way instead of
 silently overpaying.
 
+## Checked against real sessions
+
+The break-even rule and the cold-resume planner both rest on one assumption: once a session
+sits idle past the cache TTL, the next turn pays to re-establish the prefix. `fak resume
+validate` checks that assumption against your own history. It reads a corpus of real session
+transcripts, and for every back-to-back pair of turns it compares what the planner would have
+predicted (cold if the gap crossed the TTL, warm if not) against what the provider actually
+billed (did the next turn re-read the prior prefix, or re-write it?).
+
+Run over this machine's session history, about 82,000 real turn-to-turn boundaries, the
+planner's warm-or-cold call matched the provider 97.7% of the time. Where a turn did come back
+cold, it re-wrote essentially the whole prompt, which is exactly what the cold-resume price tag
+assumes. The one systematic miss is in the safe direction: the planner calls a 5-to-15-minute
+gap cold, but the provider often still had the prefix warm. Anthropic's 5-minute cache is a
+floor that refreshes on use, so in practice it survives longer than the clock. The planner
+errs toward declaring cold, which is the conservative way to be wrong: it never claims a warm
+cache that isn't there.
+
+One honest gap remains. A genuine multi-hour resume usually starts a fresh transcript file, so
+counting gaps inside a single file under-samples the very case the planner is built for.
+Measuring those cross-file resumes directly is the next step.
+
+```bash
+fak resume validate --corpus ~/.claude/projects   # back-test the planner on your own sessions
+```
+
 Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
 
 *Last updated: 2026-06-26*

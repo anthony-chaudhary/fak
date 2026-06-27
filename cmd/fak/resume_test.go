@@ -133,4 +133,72 @@ func TestResumeHelp(t *testing.T) {
 	if !strings.Contains(out, "fak resume plan") {
 		t.Errorf("help missing usage:\n%s", out)
 	}
+	if !strings.Contains(out, "fak resume validate") {
+		t.Errorf("help missing the validate verb:\n%s", out)
+	}
+}
+
+// backtestCorpusFixture is a real-shaped single session with two scorable boundaries: a 5s
+// warm pair (the prefix is fully re-served, the projection calls it warm — agree) and a 2h
+// cold pair (nothing re-served and the prompt is re-written, the projection calls it cold —
+// agree, a confirmed-cold boundary whose write ratio validates the cold-cost premise).
+const backtestCorpusFixture = `{"type":"assistant","timestamp":"2026-06-26T10:00:05Z","message":{"role":"assistant","usage":{"input_tokens":1200,"cache_read_input_tokens":0,"cache_creation_input_tokens":1200,"output_tokens":300}}}
+{"type":"assistant","timestamp":"2026-06-26T10:00:10Z","message":{"role":"assistant","usage":{"input_tokens":200,"cache_read_input_tokens":2300,"cache_creation_input_tokens":300,"output_tokens":120}}}
+{"type":"assistant","timestamp":"2026-06-26T12:00:10Z","message":{"role":"assistant","usage":{"input_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":2500,"output_tokens":140}}}
+`
+
+// TestResumeValidateBacktest: validate scans a corpus of real-shaped transcripts and scores
+// the projection — here both boundaries agree (100% accuracy) and the cold pair is confirmed
+// cold with a near-total re-write ratio.
+func TestResumeValidateBacktest(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), []byte(backtestCorpusFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := runResumeAt("validate", "--corpus", dir)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	if !strings.Contains(out, "accuracy: 100.0%") {
+		t.Errorf("want 100%% accuracy on the agreeing fixture:\n%s", out)
+	}
+	if !strings.Contains(out, "1 confirmed-cold") {
+		t.Errorf("want one confirmed-cold boundary:\n%s", out)
+	}
+}
+
+// TestResumeValidateJSON: --json emits a parseable BacktestReport with the scored counts.
+func TestResumeValidateJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "s.jsonl"), []byte(backtestCorpusFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := runResumeAt("validate", "--corpus", dir, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var rep struct {
+		Pairs         int     `json:"pairs"`
+		Scored        int     `json:"scored"`
+		Agree         int     `json:"agree"`
+		Accuracy      float64 `json:"accuracy"`
+		ConfirmedCold int     `json:"confirmed_cold"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if rep.Pairs != 2 || rep.Scored != 2 || rep.Agree != 2 || rep.Accuracy != 1.0 || rep.ConfirmedCold != 1 {
+		t.Errorf("got %+v, want pairs/scored/agree=2, accuracy=1.0, confirmedCold=1", rep)
+	}
+}
+
+// TestResumeValidateNeedsCorpus: validate with no --corpus is a usage error (exit 2); an empty
+// corpus directory is a runtime error (exit 1).
+func TestResumeValidateNeedsCorpus(t *testing.T) {
+	if _, _, code := runResumeAt("validate"); code != 2 {
+		t.Errorf("validate with no --corpus: exit = %d, want 2", code)
+	}
+	if _, _, code := runResumeAt("validate", "--corpus", t.TempDir()); code != 1 {
+		t.Errorf("validate on an empty corpus: exit = %d, want 1", code)
+	}
 }

@@ -21,7 +21,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,11 +46,13 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "plan":
 		return runResumePlan(stdout, stderr, argv[1:])
+	case "validate":
+		return runResumeValidate(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan or validate)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -126,7 +131,192 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-// groundOnImage loads a portable session image and fills the resident-token and idle facts
+// runResumeValidate is the VALIDATION half of the verb: it back-tests the resume-cache
+// projection against billed reality. It scans a corpus of real Claude Code transcripts, lifts
+// each one's per-turn usage records (the cache_read / cache_creation counts the provider
+// actually billed — no transcript content), and feeds them to resume.Backtest, which scores
+// how often the projection's cold/warm posture call agreed with what the provider did and how
+// exactly the cold-cost premise held. It is the deterministic, observable answer to "is the
+// projection's cache-value call EFFECTIVE on our real sessions?" — the honest precursor to
+// auto-firing the plan on a live resume.
+func runResumeValidate(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("resume validate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	corpus := fs.String("corpus", "", "directory of real Claude Code transcripts (.jsonl, scanned recursively) to back-test the projection against")
+	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier to score the projection at: 5m (default) or 1h")
+	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")
+	asJSON := fs.Bool("json", false, "emit the raw BacktestReport JSON instead of the human table")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *corpus == "" {
+		fmt.Fprintln(stderr, "fak resume validate: need --corpus DIR (a directory of .jsonl transcripts)")
+		return 2
+	}
+	ttl, ok := parseResumeTTL(*ttlStr)
+	if !ok {
+		fmt.Fprintf(stderr, "fak resume validate: bad --ttl %q (want 5m or 1h)\n", *ttlStr)
+		return 2
+	}
+
+	files, err := findTranscripts(*corpus)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak resume validate: scan corpus %q: %v\n", *corpus, err)
+		return 1
+	}
+	if *maxFiles > 0 && len(files) > *maxFiles {
+		files = files[:*maxFiles]
+	}
+	if len(files) == 0 {
+		fmt.Fprintf(stderr, "fak resume validate: no .jsonl transcripts under %q\n", *corpus)
+		return 1
+	}
+
+	sessions := make([][]resume.ObservedTurn, 0, len(files))
+	scanned := 0
+	for _, path := range files {
+		turns := loadTranscriptTurns(path)
+		if len(turns) >= 2 { // a session needs at least one adjacent pair to score
+			sessions = append(sessions, turns)
+		}
+		scanned++
+	}
+
+	rep := resume.Backtest(sessions, ttl, resume.DefaultRecoveryBand())
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			fmt.Fprintf(stderr, "fak resume validate: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	renderBacktestReport(stdout, rep, scanned, len(sessions))
+	return 0
+}
+
+// findTranscripts walks a corpus directory and returns every .jsonl file under it (sorted, so
+// the scan and the report are deterministic). A directory it cannot read is an error; a single
+// unreadable file is simply skipped by the loader, never fatal.
+func findTranscripts(root string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip an unreadable subtree rather than abort the whole scan
+		}
+		if !d.IsDir() && strings.HasSuffix(strings.ToLower(d.Name()), ".jsonl") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// loadTranscriptTurns reads one Claude Code transcript and returns its ordered assistant turns
+// as the content-free ObservedTurns the back-test scores: the record timestamp and the three
+// input-token axes. It is best-effort — a malformed or timestamp-less line is skipped, never
+// fatal — and reuses the exact usage shape scanTranscriptResident reads.
+func loadTranscriptTurns(path string) []resume.ObservedTurn {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	type usage struct {
+		InputTokens         int `json:"input_tokens"`
+		CacheReadTokens     int `json:"cache_read_input_tokens"`
+		CacheCreationTokens int `json:"cache_creation_input_tokens"`
+	}
+	type jrec struct {
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+		Message   *struct {
+			Role  string `json:"role"`
+			Usage *usage `json:"usage"`
+		} `json:"message"`
+	}
+	var out []resume.ObservedTurn
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var jr jrec
+		if json.Unmarshal(line, &jr) != nil {
+			continue
+		}
+		if jr.Message == nil || jr.Message.Usage == nil || jr.Message.Role != "assistant" {
+			continue
+		}
+		ts := parseTranscriptUnix(jr.Timestamp)
+		if ts == 0 {
+			continue // a turn with no usable time cannot anchor a gap
+		}
+		out = append(out, resume.ObservedTurn{
+			UnixSeconds:         ts,
+			InputTokens:         jr.Message.Usage.InputTokens,
+			CacheCreationTokens: jr.Message.Usage.CacheCreationTokens,
+			CacheReadTokens:     jr.Message.Usage.CacheReadTokens,
+		})
+	}
+	return out
+}
+
+// renderBacktestReport prints the deterministic validation residual: the headline posture
+// accuracy and the two miss directions, the per-gap cache-survival curve (where the single TTL
+// cutoff agrees with the provider's real reuse window), and the cold-cost validation. Every
+// number is the provider's own usage scored against the projection, never a fak figure.
+func renderBacktestReport(w io.Writer, r resume.BacktestReport, scanned, sessions int) {
+	fmt.Fprintf(w, "resume validate — back-test of the cache-posture projection against billed reality\n")
+	fmt.Fprintf(w, "corpus: %d transcripts scanned, %d scorable sessions  ttl=%s (%ds)\n\n",
+		scanned, sessions, r.TTL, r.TTLSeconds)
+
+	fmt.Fprintf(w, "boundaries: %d pairs  %d scored  %d ambiguous (excluded)\n", r.Pairs, r.Scored, r.Ambiguous)
+	fmt.Fprintf(w, "posture-prediction accuracy: %.1f%% (%d/%d)\n", r.Accuracy*100, r.Agree, r.Scored)
+	fmt.Fprintf(w, "  misses: proj=COLD obs=WARM (TTL shorter than reality): %d\n", r.ProjColdObsWarm)
+	fmt.Fprintf(w, "          proj=WARM obs=COLD (prefix dropped early)      : %d\n\n", r.ProjWarmObsCold)
+
+	fmt.Fprintf(w, "%-16s %9s %10s %7s %7s %7s\n", "gap-bucket(s)", "n", "mean_recov", "warm%", "cold%", "ambig%")
+	for _, b := range r.Buckets {
+		if b.N == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "%-16s %9d %10.2f %6.0f%% %6.0f%% %6.0f%%\n",
+			bucketLabel(b.LoSeconds, b.HiSeconds), b.N, b.MeanRecovery,
+			100*pct(b.WarmN, b.N), 100*pct(b.ColdN, b.N), 100*pct(b.AmbiguousN, b.N))
+	}
+
+	fmt.Fprintf(w, "\ncold-cost validation: %d confirmed-cold boundaries\n", r.ConfirmedCold)
+	if r.ConfirmedCold > 0 {
+		fmt.Fprintf(w, "  cache_creation / prompt on cold turns: %.2f  (1.00 = the projection's 'whole resident re-written')\n", r.ColdWriteRatioMean)
+	}
+	fmt.Fprintln(w, "  (every number is the provider's own usage scored against the projection, not a fak figure)")
+}
+
+// bucketLabel renders a gap bucket's range; the open-ended top bucket prints as "N+".
+func bucketLabel(lo, hi int64) string {
+	if hi >= 1<<61 {
+		return fmt.Sprintf("%d+", lo)
+	}
+	return fmt.Sprintf("%d-%d", lo, hi)
+}
+
+// pct is a zero-safe fraction.
+func pct(n, d int) float64 {
+	if d == 0 {
+		return 0
+	}
+	return float64(n) / float64(d)
+}
+
 // from it (unless the operator set them explicitly). It returns a one-line note about what
 // it derived, and an exit code (0 ok, 1 load/parse error). The resident size is the sum of
 // the trajectory's per-turn token estimates; idle is now - the image's UpdatedUnix.
@@ -363,15 +553,25 @@ func resumeUsage(w io.Writer) {
                   [--input-price F] [--output-price F] [--output-per-turn N]
                   [--image DIR] [--transcript FILE.jsonl] [--json]
 
-Answers "I am resuming a long session — what happens to the prompt cache, and what
+  fak resume validate --corpus DIR [--ttl 5m|1h] [--max-files N] [--json]
+
+plan answers "I am resuming a long session — what happens to the prompt cache, and what
 should I do?" It projects the cache posture (cold if idle exceeds the TTL, warm if not),
 prices RESUME_FULL / CUT / RESET, and recommends a cut-by-default re-entry. Pure and
 deterministic: same facts in, same priced verdict out.
+
+validate back-tests that projection against billed reality: it scans a corpus of real
+Claude Code transcripts, scores how often the cold/warm posture call agreed with the
+provider's own cache_read / cache_creation records, and measures how exactly the cold-cost
+premise held. The deterministic, observable answer to "is the cache-value call effective?".
 
 example (resume a 250k session idle 2h on a 5-minute cache):
   fak resume plan --resident-tokens 250000 --idle-seconds 7200
 
 example (plan the resume of a REAL Claude Code session you are about to --resume):
   fak resume plan --transcript ~/.claude/projects/<ns>/<uuid>.jsonl
+
+example (back-test the projection against your real session history):
+  fak resume validate --corpus ~/.claude/projects
 `)
 }
