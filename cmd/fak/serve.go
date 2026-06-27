@@ -110,6 +110,7 @@ func cmdServe(argv []string) {
 	notifyWebhook := fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
 	notifySlack := fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
 	debugStats := fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
+	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: record each serve session as a dojo episode for later scoring with `fak dojo run`. Episodes are written to a dojo corpus directory under the workspace root.")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
@@ -374,6 +375,13 @@ func cmdServe(argv []string) {
 			}
 		})
 		go func() { _ = watcher.Run(ctx) }()
+
+	// If --dojo is enabled, log the start of a live dojo episode.
+	if *dojoMode {
+		if err := logDojoEpisodeStart("serve"); err != nil {
+			fmt.Fprintf(os.Stderr, "fak: --dojo episode logging failed: %v (continuing without dojo)\n", err)
+		}
+	}
 	}
 
 	if *stdio {

@@ -107,6 +107,7 @@ func cmdGuard(argv []string) {
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
 	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
+	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: record this guard session as a dojo episode for later scoring with `fak dojo run`. The episode is written to a dojo corpus directory under the workspace root.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
 		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
@@ -360,6 +361,13 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	srv.MarkReady()
+	
+	// If --dojo is enabled, log the start of a live dojo episode.
+	if *dojoMode {
+		if err := logDojoEpisodeStart("guard"); err != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: --dojo episode logging failed: %v (continuing without dojo)\n", err)
+		}
+	}
 
 	// 5. Wire the child: inject ONLY the gateway URL into the child's environment —
 	//    never the parent shell, never settings.json. A `claude` in another terminal is
@@ -405,6 +413,58 @@ func cmdGuard(argv []string) {
 }
 
 const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"
+
+// logDojoEpisodeStart records the start of a live dojo episode when --dojo is enabled.
+// This is the minimal implementation for issue #956: create a dojo corpus directory
+// and log the episode start with basic metadata.
+func logDojoEpisodeStart(mode string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getcwd: %w", err)
+	}
+
+	workspaceRoot := findRepoRoot(cwd)
+	dojoDir := filepath.Join(workspaceRoot, ".dojo", "live-episodes")
+	if err := os.MkdirAll(dojoDir, 0755); err != nil {
+		return fmt.Errorf("mkdir dojo corpus: %w", err)
+	}
+
+	episodeFile := filepath.Join(dojoDir, fmt.Sprintf("episode_%s.jsonl", time.Now().Format("20060102_150405")))
+	f, err := os.OpenFile(episodeFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		return fmt.Errorf("open episode file: %w", err)
+	}
+	defer f.Close()
+
+	ep := map[string]any{
+		"mode":      "live",
+		"command":   mode,
+		"started":   time.Now().UTC().Format(time.RFC3339),
+		"cwd":       cwd,
+		"workspace": workspaceRoot,
+	}
+	if err := json.NewEncoder(f).Encode(ep); err != nil {
+		return fmt.Errorf("encode episode: %w", err)
+	}
+
+	return nil
+}
+
+// findRepoRoot walks up from start to the nearest dir containing .git; falls back to start.
+func findRepoRoot(start string) string {
+	cur := filepath.Clean(start)
+	for {
+		if _, err := os.Stat(filepath.Join(cur, ".git")); err == nil {
+			return cur
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return start
+		}
+		cur = parent
+	}
+}
+
 
 type guardOAuthEnvSource struct {
 	key string
