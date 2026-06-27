@@ -14,12 +14,13 @@ name: cadence report
 # downloadable artifact, with a per-tick TREND vs the durable ledger
 # (docs/cadence/history.jsonl).
 #
-# READ-ONLY by design: it never pushes. The durable ledger is extended with
-# `fak cadence --append-history` and committed by hand by an operator, matching
-# this repo's convention that scheduled jobs report (they don't auto-commit the
-# shared trunk — only an explicit manual arm does, cf. release-cadence.yml). The
-# pure fold/trend logic is proven by internal/cadencereport's unit tests (run
-# first below), so a green report is a real signal, not a tool that always passes.
+# Fleet's cadence report is dry-run-first. Scheduled ticks extend the ledger
+# locally but do not push. A manual dispatch with dry_run=false is the explicit
+# arm for commit -> push, matching the release-cadence convention that scheduled
+# jobs report (they don't auto-commit the shared trunk — only an explicit manual
+# arm does, cf. release-cadence.yml). The pure fold/trend logic is proven by
+# internal/cadencereport's unit tests (run first below), so a green report is a
+# real signal, not a tool that always passes.
 on:
   schedule:
     # Mondays 08:17 UTC — an off-the-hour minute clear of the other scheduled
@@ -28,13 +29,17 @@ on:
     - cron: "17 8 * * 1"
   workflow_dispatch:
     inputs:
+      dry_run:
+        description: "Extend the ledger locally, but do not commit or push"
+        type: boolean
+        default: true
       window_days:
         description: "Trailing window (days) the work-done dimension counts over"
         type: string
         default: "7"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: cadence-report
@@ -75,7 +80,7 @@ jobs:
         run: |
           window="${{ github.event_name == 'workflow_dispatch' && inputs.window_days || '7' }}"
           set +e
-          go run ./cmd/fak cadence --json --window "$window" > cadence-report.json
+          go run ./cmd/fak cadence --json --append-history --window "$window" > cadence-report.json
           echo "cadence-exit=$?"
           set -e
           python3 - <<'PY' > cadence-report.txt || echo "(report unreadable)" > cadence-report.txt
@@ -92,6 +97,30 @@ jobs:
           PY
           cat cadence-report.txt
 
+      - name: Dry-run stop
+        if: >-
+          github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        run: |
+          echo "## Dry-run only" >> "$GITHUB_STEP_SUMMARY"
+          echo "Scheduled ticks and default manual runs stop after extending the ledger locally. Dispatch with dry_run=false to commit and push." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push ledger
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          inputs.dry_run == false
+        run: |
+          set -euo pipefail
+          git config user.name "fleet-cadence[bot]"
+          git config user.email "fleet-cadence@users.noreply.github.com"
+          git add docs/cadence/history.jsonl
+          if git diff --staged --quiet; then
+            echo "No ledger changes to commit"
+          else
+            git commit -s -m "docs(cadence): record cadence tick (fak docs)"
+            git push
+          fi
+
       - name: payload -> step summary
         if: always()
         run: |
@@ -107,7 +136,11 @@ jobs:
             echo '```'
             echo '</details>'
             echo
-            echo "_Durable trend: the committed ledger \`docs/cadence/history.jsonl\` is extended with \`fak cadence --append-history\` and committed by hand; this job is read-only._"
+            if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "_Dry-run: the ledger was extended locally but not pushed. Dispatch with dry_run=false to commit and push._"
+            else
+              echo "_Ledger committed and pushed._"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: upload report artifact
