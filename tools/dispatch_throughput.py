@@ -83,7 +83,14 @@ def fetch_closed_issues(root: Path, limit: int = 400) -> list[dict[str, Any]]:
     """Closed issues with their close timestamp + reason — the ground truth."""
     try:
         proc = subprocess.run(
+            # sort:updated-desc is load-bearing: `gh issue list` defaults to
+            # creation order, so a bare --limit returns the most-recently-CREATED
+            # closed issues and MISSES recently-closed OLD-numbered ones (e.g. the
+            # docs backlog the glm pool drains: #135, #150, #161…). Closing updates
+            # an issue, so sorting by updated-desc surfaces the actual recent closes
+            # — without it the windowed rate undercounts the fleet by 2-4x.
             ["gh", "issue", "list", "--state", "closed", "--limit", str(limit),
+             "--search", "sort:updated-desc",
              "--json", "number,closedAt,stateReason,title"],
             cwd=str(root), capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=120)
