@@ -112,4 +112,5 @@ halves, capped at the divergence frontier — not an HPC metric.
 - [PARTITION.md](https://github.com/anthony-chaudhary/fak/blob/main/PARTITION.md) — "one lease per tree": the disjoint-tree rule behind the split.
 - [`internal/agenttopo`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/doc.go) — the DECLARED agent-topology DAG (the `MPI_Graph_create` half).
 - [`internal/turnbench/toposearch.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/turnbench/toposearch.go) — `TopologyGenome` / `TopologyFitness`, the SEARCH half.
+- [collectives.md](collectives.md) — the canonical MPI-collective map (`Combine` reduce / `DistComm` allreduce / `ShareScope` bcast) and the agent-vs-tensor honesty line this doc's rank/size caveat points at.
 - [vdso-revoke-as-comm-revoke.md](explainers/vdso-revoke-as-comm-revoke.md) and [proofs/async-addressing.md](proofs/async-addressing.md) — sibling MPI-analogue docs in the same epic.

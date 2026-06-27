@@ -105,6 +105,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [One binary is the whole surface](docs/explainers/one-binary-one-surface.md): why the governed-serving surface as a single static Go binary beats assembling a multi-component Python/CUDA stack — operational surface, laptop to fleet, not throughput.
 - [Linting agent code at the kernel](docs/explainers/code-linting-at-the-kernel.md): the boundary that adjudicates a tool call is also where a `write_file` can be checked for code that actually parses — language-server packs (Go/JSON in-process, Python/CUDA shell-out) feed parse/compile errors back so the agent fixes them on the same turn.
 - [Model routing (per-aspect + ensemble)](docs/model-routing.md): route any aspect of one request — a single tool call, a sub-query, a reasoning step — to a different model, with first-class ensembles and configurable reductions (vote / best-of / all-reduce / concat), all from one deterministic, reviewable policy. SOTA routers pick one model for the whole request; fak makes routing first-class at every level (`fak route`).
+- [Collectives: the MPI reduce/allreduce/bcast family, mapped honestly](docs/collectives.md): the canonical anti-conflation map for the MPI collective family — `modelroute.Combine` + the `Reduce*` set and `gateway.dispatchEnsemble` and `abi.ShareScope` (the AGENT layer: non-bit-exact, scope-bounded) versus `model.DistComm.AllReduceSum`/`AllGather` (the TENSOR layer: real cross-process HOST float32, explicitly NOT NCCL / not-multi-GPU). Quotes the `dist_collective.go` and `all_reduce` disclaimers verbatim. Part of the MPI-shaped message-passing epic (#639).
 - [Context is not memory](docs/CONTEXT-IS-NOT-MEMORY.md): why fak separates context from memory by how long a fact stays true, gating promotion at write time with an expire-by-default durability class.
 - [The four layers of agent memory](docs/MEMORY-LAYERS-EXPLAINER.md): routing, addressing, fusion, and semantics as four distinct KV-cache problems, and why fak's change lives only at the semantics layer.
 - [Shared state ladder](docs/shared-state-ladder.md): the split between shared live messages, live mutable objects, durable handoff, disaggregated state, and user-level collaborative editing.
@@ -7938,10 +7939,27 @@ fak guard --provider openai --addr 127.0.0.1:8137 --api-key-env OPENAI_API_KEY -
 
 ### Observability
 
-`fak guard` mutes the gateway's request logs by default to keep your terminal clean, but
-the full record is one flag or one env var away — and every count it shows is read from
-the same counters `/metrics` exposes, so the views never disagree:
+**The observable debug layer is on by default.** `fak guard` prints one compact,
+payload-free line per served turn to stderr — the cache and token-value economy of that
+turn:
 
+```
+fak-turn trace=guard wire=anthropic_messages stream=1 finish=end_turn request_tokens=24180 prompt=412 completion=180 cache_read=23012 cache_creation=756 cache_hit=0.95 cache_rebate_tokens=20710.8 compact=none health=healthy_cache reset_score=0.10 recommend=no
+```
+
+It works natively over your Claude subscription OAuth because `cache_read` /
+`cache_creation` / `cache_hit` are the **provider's own usage counters**, read back on each
+`/v1/messages` turn — so the cache hit ratio and the `cache_rebate_tokens` saving (cache
+reads valued at the published 0.1× read multiplier) are real, not estimated. Silence it
+with `--debug-stats=false`, or with `--quiet` (which also drops the banner + exit summary).
+
+The heavier per-request JSON log stays off by default — one flag away — and every count it
+shows is read from the same counters `/metrics` exposes, so the views never disagree:
+
+- **per-turn debug line** (default **ON**) — the `fak-turn …` line above, one per served
+  turn on stderr: `request_tokens`, `cache_read`, `cache_creation`, `cache_hit`,
+  `cache_rebate_tokens`, the `compact` action, and the resetScore `health`. No payload, ever.
+  `--debug-stats=false` or `--quiet` to silence.
 - **`--log FILE`** (or `--log -` for stderr) streams every per-request and per-verdict
   line — `event=gateway_http_request` and `event=gateway_operation`, each carrying the
   `trace_id` that ties the request, its verdicts, and the metrics together.
@@ -13037,45 +13055,34 @@ A small Apple-silicon Mac that stays on is the best always-on dogfood host: it i
 cheap to run, and Metal makes even the local-model in-kernel path usable. It does two
 jobs.
 
-**Job A — run the guarded fleet 24/7.** There is already a launchd template and a cron
-installer for the dispatch supervisor watchdog; today they run only the **watchdog**
-(which keeps `dos loop --enact` alive), not a `fak serve` gateway. Arm the watchdog so
-the guarded fleet runs around the clock:
+**Job A — run the guarded fleet 24/7.** One command wires all three launchd units
+(serve-gateway, dogfood-fleet, dispatch-supervisor), builds the binary, and starts
+the sleep guard. The `fak serve` gateway plist now wraps `fak serve` under `caffeinate -is`
+so the machine cannot idle-sleep while the gateway is running — no separate
+keep-awake step needed:
 
 ```bash
-# Cron path (simplest): arms tools/fleet_dos_dispatch_watchdog.py every 5 min
-FAK_DISPATCH_ENABLE=1 ./tools/register_mac_watchers.sh
+# ONE COMMAND — builds fak, fills all plist templates, loads units, starts caffeinate:
+ANTHROPIC_API_KEY="sk-ant-..." ./tools/install-mac-node.sh
 
-# Or the launchd path (KeepAlive, survives logout): fill the template's
-# __PLACEHOLDER__ tokens and load it as a per-user agent
-sed -e "s#__PYTHON__#$(command -v python3)#" \
-    -e "s#__REPO__#$(cd "$(dirname tools)" && pwd)#" \
-    tools/com.fleet.dispatch-supervisor.plist \
-  > ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
-launchctl load -w ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
+# For off-host access from another machine (Windows or Mac over Tailscale):
+ANTHROPIC_API_KEY="sk-ant-..." ./tools/install-mac-node.sh --bind-all
+# The script prints FAK_GATEWAY_KEY + exact env lines to paste on each client.
+
+# Check status or uninstall:
+./tools/install-mac-node.sh --status
+./tools/install-mac-node.sh --uninstall
 ```
 
-Build the in-tree `fak` binary once so the guard path resolves it (it fails open to an
-unguarded worker if no `fak` is found, so this is what turns coverage on):
+To also put `fak` on PATH system-wide (so `fak guard -- claude` resolves anywhere),
+run `scripts/dogfood-claude.sh --install` once after the node installer.
+Full runbook: [`docs/fak/node-macos-a-activation.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/node-macos-a-activation.md).
 
-```bash
-./scripts/dogfood-claude.sh --install     # builds tools/.bin/fak, installs PATH launchers
-```
-
-**Stay awake.** A Mac sleeps, and a sleeping Mac dogfoods nothing. The node `node-macos-a`
-already exists but **flaps offline roughly every 25 minutes** — it goes to sleep between
-jobs. The fix is `caffeinate` plus launchd `KeepAlive`. Run the supervisor under
-`caffeinate` so the machine cannot idle-sleep while the loop is up:
-
-```bash
-# Keep the host awake for as long as the dispatch loop runs
-caffeinate -dimsu dos loop --enact --workspace "$PWD" --target 4 --interval 120
-```
-
-`-dimsu` blocks display, idle, disk, and system sleep and asserts a user-active state.
-Pair it with launchd `KeepAlive` (set `<key>KeepAlive</key><true/>` in the agent plist)
-so the job restarts if it ever exits. Together: launchd keeps the process alive, and
-`caffeinate` keeps the *machine* alive while it runs — no more 25-minute flap.
+**Stay awake.** The `caffeinate -is` wrapper in `tools/com.fak.serve-gateway.plist`
+holds the idle-sleep and system-sleep assertions while `fak serve` runs. Together with
+launchd `KeepAlive=true`: launchd keeps the process alive, caffeinate keeps the *machine*
+alive — no more 25-minute flap. If only the dispatch supervisor is running (no gateway),
+`tools/mac_keep_awake.sh start` provides the same assertion separately.
 
 **Job B — host a shared `fak serve` gateway for hand-driven sessions.** The fleet covers
 *unattended* workers. To cover *interactive* Claude Code too — yours and anyone else on
@@ -13164,7 +13171,7 @@ all:
 
 - `fleet_leaf_guarded` — the leaf launcher really fronts a claude worker with `fak guard`
   on this host (a behavior check, not a grep).
-- `fak_bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
+- `bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
   dropping coverage to 0%.
 - `guard_default_on` — `FLEET_DOGFOOD_GUARD` is not disabled in the live environment.
 - `issue_dispatch_wired` — the scheduled-task lane routes its spawn through the guard path.
@@ -13208,7 +13215,7 @@ FLEET_DOGFOOD_GUARD=0 python tools/issue_dispatch.py --live   # this node: worke
 in-tree `tools/.bin/fak[.exe]` the dogfood launcher builds, then `fak` on PATH. If none
 resolves it returns nothing and the worker launches **unwrapped** rather than failing.
 A host that has never built `fak` still dispatches — it just dogfoods 0% until you build
-the binary (which is exactly what `dogfood_coverage.py`'s `fak_bin_resolvable` KPI flags).
+the binary (which is exactly what `dogfood_coverage.py`'s `bin_resolvable` KPI flags).
 The fleet must keep moving; coverage is a goal, never a gate on getting work done.
 
 **Timeout floors so the gateway never truncates a long turn.** `fak guard` fronts the
@@ -17187,6 +17194,188 @@ shipped; the rest is wiring, each a tracked issue:
 - Routing observability (per-aspect decisions in `/metrics` + the decision journal).
 - Speculative/draft roles bridged to `internal/polymodel` (drafter/verifier members).
 - Industry-scorecard row positioning vs the surveyed routers.
+
+---
+
+# Collectives: the MPI reduce/allreduce/bcast family, mapped honestly
+
+> Source: `docs/collectives.md`
+
+---
+title: "fak collectives: the MPI reduce/allreduce/bcast family mapped to its real fak symbols, and the agent-vs-tensor honesty line"
+description: "The canonical anti-conflation map for the MPI collective family (MPI_Reduce / MPI_Allreduce / MPI_Bcast) onto the shipped fak symbols they are shaped like — the AGENT layer (non-bit-exact, scope-bounded: modelroute.Combine + the Reduce* set, gateway.dispatchEnsemble, abi.ShareScope as the broadcast bound) versus the TENSOR layer (model.DistComm.AllReduceSum / AllGather, real cross-process HOST float32, explicitly NOT NCCL / not-multi-GPU). Quotes the dist_collective.go and modelroute all_reduce disclaimers verbatim. MPI is the design lens, never an HPC number borrowed."
+---
+
+# collectives: the MPI reduce/allreduce/bcast family, mapped honestly
+
+fak has collective-shaped surfaces in **two different rank spaces**, and the single
+biggest overclaim risk in the MPI-shaped epic (#639) is conflating them. This doc is the
+canonical map every other collective-shaped child links: one row per MPI collective
+primitive → its real fak symbol → which **layer** it lives in, so the rank-space
+distinction is written down once instead of inferred from terse inline comments. It is
+part of the MPI-shaped message-passing epic (#639).
+
+> **Honesty caveat (read first).** fak borrows the **structure** of MPI collectives and
+> the **vocabulary**, never an MPI/HPC number. There are two distinct rank spaces:
+>
+> - The **AGENT layer** is non-bit-exact and scope-bounded. `modelroute.Combine` folds
+>   many *models'* answers into one; its determinism is pinned to the routing decision and
+>   the fold over fixed votes, **not** to the members' outputs (those come from non-bit-exact
+>   engines). `abi.ShareScope` *bounds* where a shared result may become visible — it does
+>   not move bytes. Ranks here index *agents/roles*.
+> - The **TENSOR layer** is `model.DistComm` — a **real** cross-process collective that does
+>   move bytes, but over **HOST float32**, and it is explicitly **NOT NCCL and NOT
+>   multi-GPU**. Ranks here index tensor-parallel shards of **one** model.
+>
+> MPI is the **design lens and vocabulary** that tells us where these boundaries are and
+> what to call them. It is **not** a claim that fak is MPI or inherits any HPC throughput,
+> latency, message-rate, or wire-protocol property.
+
+---
+
+## The map
+
+| MPI primitive | fak symbol | Layer |
+|---|---|---|
+| `MPI_Reduce` / `MPI_Allreduce` (the general fold) | [`modelroute.Combine`](https://github.com/anthony-chaudhary/fak/blob/main/internal/modelroute/modelroute.go) over the `Reduce*` set — `ReduceFirst` / `ReduceVote` / `ReduceBestOf` / `ReduceAllReduce` / `ReduceConcat` | **AGENT** (deterministic on structure only) |
+| `MPI_Allreduce` (the *named* all-reduce) | [`modelroute.ReduceAllReduce`](https://github.com/anthony-chaudhary/fak/blob/main/internal/modelroute/modelroute.go) — weighted mean of the members' **scalar** outputs | **AGENT** (scalars, not tensors) |
+| The live fan-out that *produces* the votes Combine folds | [`gateway.dispatchEnsemble`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/gateway.go) — N independently-adjudicated `Kernel.Syscall` calls in member order (#597) | **AGENT** (each member crosses the default-deny floor) |
+| `MPI_Bcast` (the broadcast *bound*) | [`abi.ShareScope`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go) — `ScopeAgent` / `ScopeFleet` / `ScopeTenant` | **AGENT** (authorizes visibility, moves no bytes) |
+| `MPI_Allreduce` (real cross-process sum) | [`model.DistComm.AllReduceSum`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/dist_collective.go) | **TENSOR** (real cross-process HOST float32) |
+| `MPI_Allgather` (real cross-process gather) | [`model.DistComm.AllGather`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/dist_collective.go) | **TENSOR** (real cross-process HOST float32) |
+
+---
+
+## The AGENT layer — non-bit-exact, scope-bounded
+
+This layer folds and bounds **agent** outputs. It is deterministic on **structure** (the
+routing decision, the reduce order, the scope partition), never on the member text/scalar
+a non-bit-exact engine produced.
+
+### `modelroute.Combine` + the `Reduce*` set ≈ `MPI_Reduce` / `MPI_Allreduce`
+
+`Combine(reduce, votes)` (`internal/modelroute/modelroute.go:559`) is the ensemble
+**reduce**: it folds many members' outputs into one `Result` under a CLOSED, additive set
+of reductions —
+
+- `ReduceFirst` — first member's output (fastest-wins / fallback chain).
+- `ReduceVote` — weighted-majority over discrete answers (self-consistency / quorum).
+- `ReduceBestOf` — the highest-scored member (a judge/verifier picks).
+- `ReduceAllReduce` — the weighted **mean** of the members' **scalar** outputs.
+- `ReduceConcat` — concatenate the members' outputs (fan-out gather).
+
+It is pure and deterministic: every tie is broken by a stable key, and the caller MUST
+pass votes in `Plan.Members` order, so the same votes always fold the same way. That is
+the MPI analogue's load-bearing honesty: like `MPI_Reduce`, the **fold** is deterministic
+on its inputs — but the inputs (member answers) come from non-bit-exact engines, so
+determinism is pinned to the decision and its reduce, **never** to end-to-end answer
+reproducibility.
+
+### `gateway.dispatchEnsemble` — the fan-out that produces the votes
+
+`Combine` is the pure fold; the live dispatch that PRODUCES the votes is
+`dispatchEnsemble` (`internal/gateway/gateway.go:1142`, issue #597). It runs each member
+as its **OWN** independently-adjudicated kernel call — carrying that member's model in
+`abi.ToolCall.Engine` — gathers the ALLOWED members' outputs in `Plan.Members` order, and
+folds them with `modelroute.Combine`. The MPI-shaped invariant it honors: an ensemble
+expands to **N independently-adjudicated `Kernel.Submit` calls**, never one fan-out that
+bypasses the default-deny floor. A member bound for a REMOTE model still crosses the
+residency/policy gate and is denied for a tenant/sensitive payload; on a full wipeout
+(every member refused) it fails closed, surfacing the last refusal verdict rather than a
+silent empty success.
+
+### `abi.ShareScope` ≈ `MPI_Bcast` — but it is the broadcast *bound*, not a broadcast
+
+`ShareScope` (`internal/abi/types.go:93`) is the CLOSED, additive isolation scope a shared
+`Ref` carries:
+
+| `ShareScope` | meaning | broadcast analogue |
+|---|---|---|
+| `ScopeAgent` | private to one agent (the fail-closed default) | not broadcast — rank-private |
+| `ScopeFleet` | shareable across the fleet's trusted partition | the fleet broadcast bound |
+| `ScopeTenant` | shareable within a tenant boundary | the tenant broadcast bound |
+
+The default `ScopeAgent` is fail-closed (private): a value becomes visible to a wider
+audience only when its scope is **explicitly widened**. This is the *bound* on a
+broadcast, not the broadcast itself — widening a scope **authorizes** a later share, it
+does not transport data. A one-sided write can never widen sharing past its `ShareScope`
+(an `Accumulate` into a `ScopeFleet` window cannot publish at `ScopeTenant`); the default
+stays `(TaintTainted, ScopeAgent)`.
+
+---
+
+## The TENSOR layer — real cross-process HOST float32 (NOT NCCL, NOT multi-GPU)
+
+`model.DistComm` (`internal/model/dist_collective.go`) is the first **REAL**
+cross-process collective on fak: a coordinator-rooted process group where each rank holds
+**only its own part**, performing `AllReduceSum` / `AllGather` over a real wire, proven
+byte-identical to the in-process default. Its ranks are tensor-parallel **host-float32
+shards of ONE model** — a completely different rank space from the agent layer above.
+
+This layer carries the load-bearing disclaimer for the whole epic. Quoted **verbatim**
+from the package, this is the rank space that must be held apart from the agent layer:
+
+> **`internal/model/dist_collective.go` (HONESTY), verbatim:**
+>
+> This is a cross-PROCESS collective over HOST float32 — it is NOT multi-GPU and
+> is NOT NCCL. "Multi-GPU" stays unclaimable until a non-cpu-ref compute.CollectiveBackend
+> (the NCCL/RCCL device backend) all-reduces a DEVICE tensor across 2 GPUs and matches
+> cpu-ref on the GPU server. DistComm proves the distributed architecture above the device
+> line; the device line is the next, GPU-node rung. Following the repo's own TCPTransport
+> precedent, the gate runs the ranks as goroutines over a loopback socket — a genuine
+> cross-process send, verifiable on one box.
+
+---
+
+## The all_reduce caveat — the same disclaimer at the agent layer
+
+The agent-layer `ReduceAllReduce` borrows the distributed-systems *name* but is a scalar
+reduce, not a tensor one. Quoted **verbatim** from the package
+(`internal/modelroute/modelroute.go:221`):
+
+> **`modelroute.ReduceAllReduce`, verbatim:**
+>
+> ReduceAllReduce numerically aggregates the members' SCALAR outputs into their
+> weighted mean — the map-reduce / all-reduce form for numeric answers (a score,
+> a count, a probability). It is NOT a tensor all-reduce: outputs that do not
+> parse as a float are an error, not a silent guess. (Name borrows the
+> distributed-systems term for the scalar reduce family; the scope is scalars.)
+
+This is the borrow-the-term / disclaim-the-scope template the whole epic copies: take the
+MPI *word*, then state exactly what scope it does and does **not** cover.
+
+---
+
+## What this is NOT
+
+- **The agent rank space is not the tensor rank space.** `modelroute.Combine` /
+  `dispatchEnsemble` / `ShareScope` index *agents and roles*; `model.DistComm` indexes
+  *tensor-parallel shards of one model*. "fak has MPI collectives" is **not** a performance
+  claim — the agent layer moves no tensor bytes, and the tensor layer is host float32, not
+  a device collective.
+- **`ReduceAllReduce` is a scalar mean, not a tensor reduce.** It folds numeric scalar
+  answers (a score, a count, a probability); a non-numeric output is an error, never a
+  silent guess.
+- **`ShareScope` is a visibility bound, not a `MPI_Bcast`.** Widening a scope authorizes a
+  later share; no collective transports the data at this layer.
+- **`DistComm` is not multi-GPU.** It is cross-process HOST float32; "multi-GPU" stays
+  unclaimable until a non-cpu-ref device `CollectiveBackend` all-reduces a DEVICE tensor
+  across 2 GPUs and matches cpu-ref on the GPU server (see the verbatim disclaimer above).
+- **No MPI/HPC number is borrowed.** MPI is the design lens and the vocabulary; fak
+  inherits no MPI/HPC throughput, latency, message-rate, or wire-protocol property.
+
+---
+
+## See also
+
+- [`internal/modelroute/modelroute.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/modelroute/modelroute.go) — `Combine` + the `Reduce*` set (the agent-layer reduce).
+- [`internal/gateway/gateway.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/gateway.go) — `dispatchEnsemble`, the live N-submit ensemble fan-out (#597).
+- [`internal/abi/types.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go) — `ShareScope`, the broadcast bound.
+- [`internal/model/dist_collective.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/dist_collective.go) — `DistComm.AllReduceSum` / `AllGather`, the real cross-process tensor collective.
+- [comm-as-mpi-split.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/comm-as-mpi-split.md) — the lane lease as `MPI_Comm_split`, `topobench` as `MPI_Cart_create` (sibling MPI-analogue doc).
+- [model-routing.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md) — per-aspect + ensemble routing, the `fak route` surface the reduce sits behind.
+- [explainers/multi-gpu-tensor-parallelism.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/multi-gpu-tensor-parallelism.md) — the tensor-parallel path, the device-collective HAL seam, and the exact NCCL/RCCL swap-in point `DistComm` sits below.
+- [explainers/vdso-revoke-as-comm-revoke.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/vdso-revoke-as-comm-revoke.md) and [proofs/async-addressing.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/proofs/async-addressing.md) — sibling MPI-analogue docs in the same epic (#639).
 
 ---
 
@@ -22428,7 +22617,8 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Rung-0 static parse + rung-1 JSON-Schema validation, cheapest-first, escalate-on-pass; hard-negative label harvesting. Witness: `preflight` tests (units 47–51).
 - [SHIPPED] Grammar rung: positional→named auto-repair (in-syscall TRANSFORM, no model turn) for arity-matched calls; unrepairable ⇒ Deny(MISROUTE); fail-open on unknown grammar; content-addressed grammar dedup. Witness: `grammar` tests (units 52–57). Prior art: GBNF/XGrammar; the tool-invocation-grammar design.
 - [STUB] Rung-2 dry-run probe and rung-3 sandbox probe — the offline/sandbox escalation rungs above rung-1 — are not built in v0.1; only rung-0 static-parse (unit 47) and rung-1 schema-check (unit 48) are implemented in `internal/preflight` (see `STATUS.md`).
-- [STUB] Decode-time logit-mask (grammar-constrained generation) — the strongest form (never-emit a malformed call) — requires owning the decode loop; not in v0.1.
+- [SHIPPED] Native decode-time constraint hook (#929, the in-kernel half of #907/#26): the in-kernel sampler boundary (`internal/model`, the greedy `argmaxF32` path) applies an OpenAI `logit_bias` map (token id → bias, clamped to ±100) and an injected JSON-schema/grammar `LogitMask` (the `AllowedSetMask`/`StepMask` per-step token mask, fed through `GenerateConstrained`) BEFORE argmax. Load-bearing **bit-exact-off**: with no bias and a dormant mask the decode is token-identical to `Session.Generate` (`max|Δ|=0`, same first-max tie-break). The schema mask is opt-in behind `FAK_NATIVE_GUIDED_DECODE` (default OFF); the logit-bias half needs no flag (an empty map is inert). Witness: `internal/model` `constraint_test.go` — bit-exact-off at the sampler and through the decode loop, logit-bias −100-removes/+100-forces, a real masked decode that emits schema-valid `{"name":…,"arguments":{}}` JSON with the mask proven load-bearing, and flag-defaults-off. The RIDE half — forwarding `response_format`/`logit_bias` to a vLLM/SGLang upstream — shipped in #907 (`internal/gateway`). Prior art: XGrammar/outlines/llguidance per-step logit masks; OpenAI `logit_bias`.
+- [STUB] The tokenizer-aware compiler that lowers a `grammar.Grammar` `oneOf`-of-tools JSON-Schema to the per-step token masks above (the fleet-deduped, schema-driven `LogitMask` that fills the `internal/model` seam from `internal/grammar` + the tokenizer) is the named follow-on; #929 ships the sink + the concrete mask primitives, not the schema→token compiler.
 
 ## Context-MMU (write-time result admission)
 
@@ -22466,6 +22656,8 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] `sessionimage`: a portable, versioned, **model-agnostic** SESSION image — composes the drive (`session.json`), the recall core image (`manifest.json`+`cas.json`+`index.json`), and the trajectory (`trajectory.jsonl`) into one bundle with a sha256 integrity index over every part, plus a deterministic single-file `.faksession` tar (`Pack`/`Unpack`, stdlib `archive/tar`, zero deps) for offload/archive across hosts, users, instances, and VMs. `Rehydrate` re-attaches the drive into a fresh table, reloads the gate-armed recall `Session` + ctxplan index, and logs a model/host `Migration`. Model-agnostic by design: it carries logical content only — no KV cache, no token ids — so a restore re-prefills on a DIFFERENT model. Witness: `go test ./internal/sessionimage` (`TestDumpLoadRoundTrip`, `TestTerminalSessionResumesStopped`, `TestPackIsDeterministic`, `TestRehydrateInPlaceRecordsNoMigration`, `TestDriveOnlyImage`).
 - [SHIPPED] The recall moat survives the OFFLOAD boundary: a page the gate sealed stays SEALED after the image is packed to a `.faksession`, shipped, unpacked into a fresh directory, and reloaded under a different model — and a witness `Clear()` still does not launder it (the content re-screen holds); a flipped byte fails the integrity check closed; a path-traversal tar entry is refused. Witness: `go test ./internal/sessionimage` (`TestPackUnpackPreservesQuarantineAcrossBoundary`, `TestLoadDirFailsClosedOnTamper`, `TestUnpackRejectsPathTraversal`).
 - [SHIPPED] `snapshot`: a UNIFORM dump/restore seam over any primitive on the loops ladder (turn → tool → session → fleet → rsi) — a sha256-integrity envelope (`Marshal`/`Parse`/`Into` over any JSON body, digest over the canonical-compacted bytes so a pretty-print round-trip stays verified and a content change fails closed) + a ladder registry (kind/level/desc) + typed codecs for the TURN level (a trajectory's `Turn` rows) and the FLEET level (a `session.Table`'s whole-fleet drive snapshot, restored verbatim via `session.Table.Restore`). The SESSION level has the richer multi-part `sessionimage`; rsi/tool ride the generic seam directly (`Marshal` over any body). Witness: `go test ./internal/snapshot` (`TestGenericRoundTripAnyBody`, `TestParseFailsClosedOnTamper`, `TestFleetRoundTripViaRestore`, `TestTraceRoundTrip`, `TestRegistryLadder`).
+- [SHIPPED] The RESUME-CACHE decision is a first-class, deterministic, observable verb — the priced answer to "I am resuming a 250k-token session, what happens to the prompt cache?" `internal/resume.Plan(Input) Report` projects the cache POSTURE at the resume boundary (COLD when idle ≥ the cache TTL, so the provider prefix has aged out and the first turn re-prefills the whole transcript at the WRITE premium; WARM within the TTL; UNKNOWN when idle is unsupplied), prices RESUME_FULL / CUT / RESET (cold-reprefill, first-turn, and horizon cost each, at a caller-supplied base price), and recommends a CUT-by-default re-entry with a closed reason — keeping the prefix WARM (`warm_prefix_intact`) unless the horizon repays the burst (the cut-vs-keep break-even reproduces `docs/explainers/long-sessions-keep-the-cache-hit.md` exactly: dropping 20k cached tokens against a 40k warm suffix repays in 23 turns), never shedding on a guess (`unknown_idle`). Pure tier-1 leaf, stdlib-only; `fak resume plan [--resident-tokens N --idle-seconds S --ttl 5m|1h ...] [--image DIR | --transcript FILE.jsonl] [--json]` is the observable surface — `--transcript` grounds it on a REAL Claude Code session (resident = the last assistant turn's prompt size = `input + cache_read + cache_creation` tokens; idle from the last record's timestamp), the deterministic counterpart of `claude --resume`; `--image` grounds it on a portable session image's trajectory + timestamp. Honest fence: the posture and every dollar are a PROJECTION over idle-time and the resident-token count, never a fak-witnessed bill (the same OBSERVED-vs-WITNESSED discipline `gateway/cache_pricing.go` keeps); auto-firing the plan on a live `fak guard`/`serve` resume is the named follow-on. Witness: `go test ./internal/resume ./cmd/fak -run "TestHeadline250kColdResume|TestWarmResume|TestUnknownIdle|TestBreakEvenMatchesExplainer|TestResumePlan"`; `fak resume plan --resident-tokens 250000 --idle-seconds 7200` ⇒ `posture=COLD`, `recommended: CUT`; `fak resume plan --transcript <claude.jsonl>` derives the resident size from the real session.
+- [SHIPPED] The resume-cache projection is now BACK-TESTED against billed reality, not just asserted — the validation rung that precedes the live-wiring follow-on. `internal/resume.Backtest([]ObservedTurn, ttl, band) BacktestReport` is a pure tier-1 leaf that scores the posture PROJECTION against the provider's OWN per-turn usage records: for each adjacent assistant-turn pair it compares the projected posture (`idle ≥ TTL ⇒ cold`, the exact call `Plan` makes) against the OBSERVED posture — the prior-prefix RECOVERY (`cache_read` on the later turn ÷ the earlier turn's prompt size), the content-free signal of whether the provider actually still served the prefix — and on confirmed-cold boundaries measures how completely the prompt was re-written (`cache_creation ÷ prompt`). `fak resume validate --corpus DIR [--ttl 5m|1h] [--max-files N] [--json]` is the observable surface: it scans real Claude Code transcripts (token counts + timestamps only, no content) and emits the residual. Findings on this box's real history (~82,483 scored adjacent-turn boundaries across three account namespaces): **97.7% posture-prediction accuracy**; the cold-cost premise holds EXACTLY where cold boundaries occur (`cache_creation ÷ prompt = 1.00` on the confirmed-cold turns — a cold first turn re-prefills essentially the whole resident, validating `Plan`'s RESUME_FULL cost model); and the dominant error is a CONSERVATIVE bias — the projection calls COLD while the provider prefix is still WARM in the 5–15 min band (Anthropic's 5-minute ephemeral TTL is a documented FLOOR refreshed on access, so real reuse runs longer than the cutoff). Honest fences: (1) within-file idle gaps UNDER-SAMPLE the genuine multi-hour cold resume — those start a NEW transcript file — so the confirmed-cold sample is thin; a cross-file first-turn instrument is the named next rung. (2) This is still a PROJECTION-vs-OBSERVED back-test over historical usage, not a plan auto-fired on a live `fak guard`/`serve` resume (that live-wiring remains the other named follow-on). Witness: `go test ./internal/resume -run Backtest`, `go test ./cmd/fak -run ResumeValidate`; `fak resume validate --corpus ~/.claude/projects` ⇒ a posture-accuracy table + the confirmed-cold cost ratio over the operator's own sessions.
 
 ## In-kernel agent-to-agent message channel (`a2achan`)
 
@@ -22497,6 +22689,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Zero ABI / golden-freeze cost: the durability tag rides the additive `Meta` map, so the frozen ABI does not move. Witness: `TestABIGoldenFreeze` green over `internal/abi/testdata/abi_v0.1.golden` with the tag stamped.
 - [SHIPPED] Rung-1 default-expire promotion gate: `recall.Page` carries a `Durability` field, and a `PromotionMode` gates promotion into the persisted core image — the headline inversion as a code gate, only a `durable`-classed benign fact crosses the durable boundary (under `PromotionEnforce` a `turn`/`session`/unknown page never reaches `manifest.json`/`cas.json`, so it cannot be recalled in a later process). This closes the **benign** over-promotion arm of OWASP Memory-Poisoning T1 — an ephemeral observation no longer silently becomes a persistent bias. It is NOT the adversarial-T1 floor: the durability classifier is a lexical prior, so durable-framed poison still classifies `durable`; the adversarial arm is held by the trust/quarantine gate (itself ~100% evadable, deliberately non-load-bearing — see the security-substrate ceiling). The reader fails closed to `turn` for a missing/unknown/reserved (`bounded`) class. Witness: `go test ./internal/recall` (`TestDurabilityPromotionGateBite` — `3pm→turn→refused` / `prefers-afternoon→durable→promoted` end to end; `TestPromotionClassFailsClosed`).
 - [SHIPPED] Two-commit honesty split realized as a posture: `PromotionWarn` (the default) is non-behavior-changing — it stamps the class and counts the would-refuse (`Recorder.RefusedPromotions`) but still persists — so every production `recall.Recorder` caller (`internal/cdb/ingest.go`, plus the recall round-trip tests) stays green and is auditable before the boundary bites; `PromotionEnforce` is opt-in via `WithPromotion`. Witness: the WARN sub-case of `TestDurabilityPromotionGateBite` (page still persists with `Durability` stamped).
+- [SHIPPED] Durability-tiered L3 promotion — the SAME default-expire gate re-pointed at a real multi-tier store (G6 / child C of the L3 epic; #76, study `docs/notes/L3-DISAGGREGATED-CACHE-REIMAGINED.md` §3 G6 + §4): `l3region.L3PromotionGate.Admit` decides admit/deny-to-L3 from a page's write-time `Meta["durability"]` class with a typed reason (`L3Reason`: admitted / denied_below_floor / denied_unknown), a configurable floor (default `bounded`+`durable` admitted, `turn`+`session` denied), and the same `PromotionWarn`/`PromotionEnforce` rollout. This converts CAMA's frequency-based admission (W-TinyLFU/SIEVE) into a truth-duration one: `l3region.L3RegionBackend.PutGated` admits a page to the shared L3 pool ONLY if its class is at/above the floor, so under `L3PromotionEnforce` a hot `turn`-class page is denied even at high access frequency (0 msets reach the store) while a `durable` page is admitted on its first write and round-trips bit-exact. Control-path only (gates `set` admission, not the data path); fails closed on a missing/unknown class. Layering: `l3region` is tier 1 so it cannot import `ctxmmu` (tier 2) — the durability vocabulary is mirrored locally and a drift guard pins it to the source. Witness: `go test ./internal/l3region` (`TestL3PromotionGateBite` — hot-turn-denied / durable-admitted-on-first-write; `TestL3PromotionFailsClosed`, `TestL3PromotionWarnIsNonBehaviorChanging`, `TestL3PromotionConfigurableFloor`, `TestL3DurabilityVocabularyMatchesCtxmmu`).
 - [STUB] Rung-2 bitemporal: `recall.Page` validity interval (`ValidFrom`/`ValidTo`) + an as-of read gate (`ErrExpired`) that makes `bounded` the first temporally-enforced class (the Zep/Graphiti + SQL:2011 spine). Tracked: #81.
 - [STUB] Rung-3 engine-integrated TTL: `kvmmu.Segment` TTL + `Context.Expire` over the bit-exact `model.KVCache.Evict`, so a turn/session span is forgotten on a clock the fact itself sets — bit-identical to never-having-seen-it for spans no later token attended (mid-context expiry is a coherent compaction, not never-saw). Tracked: #80.
 - [STUB] Dream-time durability consolidation (principled sleep-time promotion) over the rung-1 class signal. Tracked under the S7 epic #82; live child remap still needed.
@@ -22630,6 +22823,10 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 
 - [SHIPPED] The vCache **Governor decision engine** (`internal/vcachegov`, #720) — the steady-state policy that turns the future M1-M3 warm set into a self-sustaining, rate-safe, secret-safe warm set. A pure, deterministic, off-path leaf (architest tier 2; stdlib + `cachemeta` only; not registered into the kernel) implements all four #720 acceptance criteria: pin/lazy/evict classification by the reconciled §10 cutoff `λT > ln((w+μ+L)/L)`, the rate-limit warm-budget scheduler `warms/min = min(R-R_real, (X-X_real)/P)`, cross-shard affinity routing with correlated-`p(hit)` collapse detection, and the Law-D4 secret classifier that refuses secrets/regulated content before any economics. The proof surface is `fak vcache status|prove|prove-telemetry`: default Codex-like star-anchor inputs (4096-token anchor, 7 sibling requests, 10-token suffixes, 0.1 read / 1.25 write multipliers) prove 21,094.4 token-equivalents saved (73.4%), below-minimum or unsafe-content workloads are first-class REFUTED outcomes, and observed provider telemetry is reconciled from JSONL instead of assumed. Live Claude Code witness: `go run ./cmd/fak vcache prove-telemetry --file experiments/agent-live/vcache-claude-prefix-probe-2026-06-25.jsonl` proves 13,141.5 input-token-equivalents saved (4.73%) over four prefix-sibling turns with first positive request 4, while the first three turns refute because cache reads did not yet repay the 1h cache-write cost. Codex/OpenAI witness path: raw Responses usage (`usage.input_tokens_details.cached_tokens`), Chat Completions usage (`usage.prompt_tokens_details.cached_tokens`), Codex CLI `token_count` rows (`payload.info.last_token_usage.cached_input_tokens`), and `codex exec --json` `turn.completed` usage are parsed into uncached/cached input portions and proven/refuted by the same telemetry proof; the replayable Codex CLI artifact at `experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl` proves 9,147,340.8 token-equivalents saved (85.98%) over 68 events, while the optional raw OpenAI API probe skips without `OPENAI_API_KEY` instead of overclaiming. `status --json` exposes the verifier-ready state plus a cached-token sample proof and zero-cache refutation. Witnesses: `go test ./internal/vcachegov ./cmd/fak -run "TestRunVCache|TestProve"` covers the §5.4 cutoff, §5.5 warm-budget examples, affinity consistency, secret refusal, CLI JSON, OpenAI/Codex usage parsing, and proven/refuted proof exits; `fak vcache prove-telemetry` covers the live Claude and replayable Codex telemetry arithmetic. HONEST SCOPE: this is the policy/decision layer plus cost proof only — correctness never depends on a provider cache hit, and the live warming loop remains #716-#718. See [`docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md) §5.4/§5.5/§9/§11.4/§13 and [`experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md).
 - [SHIPPED] The vCache **readiness scorecard** (`internal/vcachescore`, the `fak vcache score` verb; #789 dogfood, #791 floor gate) — the one verb the M4/M5 proof leaves fold into a single deterministic 2x agent-dev readiness gate. `Score` composes the planned star-anchor proof, the observed-telemetry proof, anchor concentration plus a payload-free hot-anchor index plan, prediction-error risk, and the §11.0 recall cost-gate into one `fak.vcache.score.v1` report (grade plus `two_x_better`); and when provider telemetry is supplied it emits an `economics` block reporting the four prompt-cache economics the agent-dev gate asks for — **hit** (cache-read share of input), **read** (cached input tokens served, with the cache-write companion), **rebate** (token-equivalents saved), and **cost** (token-equivalents actually paid vs the uncached baseline) — plus the realized 2x multiplier. Every economics value is OBSERVED: relayed straight from the provider's own cache counters, never a fak-caused effect, and emitted ONLY when telemetry is present, so a reported number always carries a provider witness; budgeting still happens at the uncached price, a hit is a realized rebate not a trust claim. The #789 dogfood replays the committed Codex CLI session telemetry — `go run ./cmd/fak vcache score --telemetry experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl --json --out experiments/agent-live/vcache-score-codex-telemetry-2026-06-25.json` (no key, no network) — and the frozen artifact flips `active_source` to telemetry and reports hit 95.53%, read 10,163,712 cached tokens (0 writes), rebate 9,147,340.8 token-equiv (85.98%), cost 1,491,490.2 vs 10,638,831 baseline, multiplier 7.13× ≥ 2.00× → pass, alongside the deterministic planned floor (73.4%, the only fak-guaranteed number). HONEST SCOPE: the observed multiplier is what that provider delivered on that thread, not a fak-caused effect; the planned star-anchor floor is the ceiling fak guarantees without a provider, and the live warming loop remains #716-#718. Witnesses: `go test ./internal/vcachescore ./cmd/fak -run "TestRunVCacheScore|TestEconomicsBlock|TestTelemetryOverrides|TestDefaultScore"`; the repeatable floor gate `tools/vcache_scorecard_gate.py` (#791, default 2x-ready plus unreachable-threshold negative path); the frozen #789 dogfood [`experiments/agent-live/VCACHE-SCORECARD-TELEMETRY-DOGFOOD-2026-06-25.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/VCACHE-SCORECARD-TELEMETRY-DOGFOOD-2026-06-25.md).
+
+## vCache observability (per-sub-concept lens)
+
+- [SHIPPED] The vCache **per-sub-concept observability lens** (`internal/vcacheobserve`, the `fak vcache observe` verb) — the "10x observability" surface that answers, for a real account's own traffic, what every vCache sub-concept does ON TOP of the obvious base cache (any session with `cache_read>0` proves the base case). A pure, deterministic, clock-free, off-path leaf (architest tier 2; composes `vcachecal`/`vcachechain`/`vcachegov`/`vcachescore` + `cachemeta`; not registered) ingests real Claude Code transcripts (`--transcript`, repeatable) or a session-telemetry JSONL (`--telemetry`), groups turns by prefix family (one session = one shared system prefix), and runs the SHIPPED M1-M5 leaves over the real data into one panel per sub-concept, each labeled OBSERVED (relayed from the provider's own counters) or DECISION (fak's deterministic verdict): base cache hit, M2 per-family realized savings + first-positive turn, M1 measured-Zipf-s concentration (§5.2 defeated gate), M1 warmth-belief false-warm/false-cold (Law A1 safety), M3 natural-first warming, the §11.0 recall cost gate at the account's mean prefix, the §5.4 governor pin/lazy/evict verdict, the measured-vs-synthetic score grade, and the cachemeta canonicalization floor. Live Claude-account witness (frozen, replayable, no key/network): `go run ./cmd/fak vcache observe --telemetry experiments/agent-live/vcache-claude-session-telemetry-2026-06-26.jsonl` over 845 real assistant turns / 7 prefix families reports hit 93.0%, saved 77.1% (85,520,048 token-equiv, multiplier 4.37×), measured Zipf s=0.54 (flat → the cross-family hot-anchor sub-concepts are DEFEATED on this account), false-warm 0.00% (the lethal direction — Law A1 verify-then-trust holds on real traffic), and the headline contrast MEASURED C (60/100) vs SYNTHETIC A (100/100): same realized economics, different concentration assumption. Witnesses: `go test ./internal/vcacheobserve ./cmd/fak -run "Observe"` (family grouping + per-family↔aggregate savings reconciliation, the 0%-false-warm safety invariant, the single-unit recall refusal, the busy-family ride-natural verdict, the nine sub-concept panels, transcript + telemetry ingestion). HONEST SCOPE: a pure OBSERVABILITY lens over OBSERVED provider counters — every economics value is the provider's, never a fak-caused effect; correctness never depends on a hit (Law A2); the live warming loop remains #716-#718. See [`experiments/agent-live/VCACHE-SUBCONCEPT-OBSERVABILITY-2026-06-26.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/VCACHE-SUBCONCEPT-OBSERVABILITY-2026-06-26.md).
 
 ## What fak is NOT
 
