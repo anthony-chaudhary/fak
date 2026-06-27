@@ -127,10 +127,8 @@ depend on one process's heap layout. The established answer is **content-address
 name a value by the digest of its bytes (a CAS — content-addressable store). A result
 written by agent A is then reachable by agent B *by digest*, with no shared pointer.
 
-fak **uses** this — the CAS is the substrate under the vDSO (virtual dynamic shared
-object — a fast, safe read path borrowed from the OS-kernel term) tier-2 cache and the
-context-MMU (memory management unit — the hardware/OS unit that maps and protects
-memory; fak's is the software analogue for agent context) page-out
+fak **uses** this — the CAS is the substrate under the [vDSO](glossary.md) tier-2 cache and the
+context-[MMU](glossary.md) page-out
 (`internal/ctxmmu/mmu.go`) — but content-addressing is not fak's
 invention or its differentiator. It is table stakes: the naming precondition that any
 shared tier needs before the *interesting* (semantics) questions even arise. Naming a

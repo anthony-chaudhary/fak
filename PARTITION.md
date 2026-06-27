@@ -11,7 +11,9 @@ human-owned, and unleasable**. (The *import* graph is a layered DAG, not a star 
 leaves import lower-tier leaves, enforced by `internal/architest`; see `fak/GROWTH.md`.
 It is the file-tree disjointness, not import independence, that keeps the leases disjoint.)
 
-## Wave 0 — the serial gate (human, ~6h). NOT fanned out.
+> **Hour notation:** `hN` means `N` hours from the start of the build (e.g., `h6–h30` is the 6–30 hour window).
+
+## Wave 0 — the serial gate (human, ~6h). NOT fanned out. {#h0}
 
 | Tree | Deliverable | Witness (mechanical, non-author) |
 |---|---|---|
@@ -25,16 +27,16 @@ Wave-0 also runs the **vDSO purity profile as a GATE**: extract the tau2 traces,
 measure the provably-unchanged fraction; if <10–15%, scope the vDSO headline to the
 read-only subset (recorded in the fixture) before fan-out.
 
-## Wave 1 — the 4 independent leaves (parallel, h6–h30)
+## Wave 1 — the 4 independent leaves (parallel, h6–h30) {#h6} {#h30}
 
 | Worker | Tree (lease) | Goal | Witness |
 |---|---|---|---|
 | **W1-engine** | `internal/engine/**` | `EngineDriver` over LiteLLM→remote; local↔remote by env. | same prompt → valid completion from stub-local + recorded-remote transport. |
-| **W2-kernelpdp** | `internal/agt/**`, `internal/leasepep/**` | AGT semantic PDP + DOS lease PEP, each `RegisterAdjudicator`'d. | poison fixture denied; transform mutates Args; default-deny on empty policy. |
+| **W2-kernelpdp** | `internal/agent/**`, `internal/gpulease/**` | AGT semantic PDP + DOS lease PEP, each `RegisterAdjudicator`'d. | poison fixture denied; transform mutates Args; default-deny on empty policy. |
 | **W3-vdso** *(strongest worker)* | `internal/vdso/**` | 3 `FastPath` tiers (pure/CAS/static). | bench: N pure/cached calls resolve with engine-counter==0 **and measured hit-rate>0 on the frozen workload**. |
 | **W4-mmu** | `internal/mmu/**` | Write-time `QuarantinePayload` path + Go CAS blob store as `RegionBackend`+`PageOutBackend`+`ProvisionalSink`. | poison fixture absent from assembled context; paged-out result round-trips byte-identical; Rollback(txn) drops scratch. |
 
-## Wave 2 — gated on wave-1 *confirmed* phases (`dos-witness-claim`, h30–h50)
+## Wave 2 — gated on wave-1 *confirmed* phases (`dos-witness-claim`, h30–h50) {#h30} {#h50}
 
 | Worker | Tree | Goal | Witness |
 |---|---|---|---|
@@ -42,7 +44,7 @@ read-only subset (recorded in the fixture) before fan-out.
 | **W6-preflight** | `internal/preflight/**` | Rungs 0–2 as ranked `Adjudicator`s + typed `LabelRow` emitter. | malformed fixture caught pre-fire; a `LabelRow` JSONL line emitted. |
 | **W7-kpi-stewards** | `internal/kpi/**`, `internal/stewards/**` | metrics-service-shaped `Emitter`s; steward population + meta-steward prune. | seeded 4+1 stewards → meta-steward prunes exactly the dead one; counters scraped clean. |
 
-## Serial tail (human-attended, h50–h72)
+## Serial tail (human-attended, h50–h72) {#h50} {#h72}
 
 Real-impl integration checkpoint (~h44): re-run W5 against **real** W1–W4 (not
 stubs) — the re-run is the witness. Then the A/B bench (`--vdso=off` vs `--vdso=on`,

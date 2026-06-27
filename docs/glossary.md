@@ -149,10 +149,15 @@ opposed to `decode`, which emits one token at a time. It lives only in `internal
 
 ## Adjacent kernel vocabulary (so the cluster stops blurring)
 
-- **vDSO** (`internal/vdso`) — a 3-tier local cache (pure / content / static) consulted
-  *before the entire adjudicator chain*. A hit answers a repeated call with no engine
-  round-trip and skips every rung. It's a cache, not a gate; preflight is a gate inside the
-  chain a vDSO *miss* falls through to.
+- **vDSO** (`internal/vdso`) — virtual dynamic shared object, a fast, safe read path borrowed
+  from the OS-kernel term. A 3-tier local cache (pure / content / static) consulted *before
+  the entire adjudicator chain*. A hit answers a repeated call with no engine round-trip
+  and skips every rung. It's a cache, not a gate; preflight is a gate inside the chain a
+  vDSO *miss* falls through to.
+- **MMU** — memory management unit, the hardware/OS unit that maps and protects memory.
+  In fak, context-MMU is the software analogue for agent context: the write-time tool-result
+  gate (`internal/ctxmmu`) that decides whether bytes enter the model's context
+  (allow / quarantine / transform).
 - **adjudicator / fold** (`internal/abi`, `internal/kernel`) — an adjudicator is one
   stackable verdict-producer (preflight is one); the kernel *folds* all of their verdicts into
   one by the most-restrictive lattice, default-deny.
