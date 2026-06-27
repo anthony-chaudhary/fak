@@ -219,6 +219,10 @@ func (r *Resolver) Resolve(ctx context.Context, c *abi.ToolCall, claim string) a
 		return abi.WitnessConfirmed
 	case "exec":
 		return r.resolveExecution(ctx, arg)
+	case "rsl":
+		// The gittuf-RSL ref-move rung (#826): a FLAGGED SPIKE, off by default —
+		// resolveRSL abstains without parsing unless FAK_WITNESS_RSL is opted in.
+		return r.resolveRSL(ctx, arg)
 	}
 	return abi.WitnessAbstain
 }
