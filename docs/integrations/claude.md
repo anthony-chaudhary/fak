@@ -179,10 +179,27 @@ fak guard --provider openai --addr 127.0.0.1:8137 --api-key-env OPENAI_API_KEY -
 
 ### Observability
 
-`fak guard` mutes the gateway's request logs by default to keep your terminal clean, but
-the full record is one flag or one env var away — and every count it shows is read from
-the same counters `/metrics` exposes, so the views never disagree:
+**The observable debug layer is on by default.** `fak guard` prints one compact,
+payload-free line per served turn to stderr — the cache and token-value economy of that
+turn:
 
+```
+fak-turn trace=guard wire=anthropic_messages stream=1 finish=end_turn request_tokens=24180 prompt=412 completion=180 cache_read=23012 cache_creation=756 cache_hit=0.95 cache_rebate_tokens=20710.8 compact=none health=healthy_cache reset_score=0.10 recommend=no
+```
+
+It works natively over your Claude subscription OAuth because `cache_read` /
+`cache_creation` / `cache_hit` are the **provider's own usage counters**, read back on each
+`/v1/messages` turn — so the cache hit ratio and the `cache_rebate_tokens` saving (cache
+reads valued at the published 0.1× read multiplier) are real, not estimated. Silence it
+with `--debug-stats=false`, or with `--quiet` (which also drops the banner + exit summary).
+
+The heavier per-request JSON log stays off by default — one flag away — and every count it
+shows is read from the same counters `/metrics` exposes, so the views never disagree:
+
+- **per-turn debug line** (default **ON**) — the `fak-turn …` line above, one per served
+  turn on stderr: `request_tokens`, `cache_read`, `cache_creation`, `cache_hit`,
+  `cache_rebate_tokens`, the `compact` action, and the resetScore `health`. No payload, ever.
+  `--debug-stats=false` or `--quiet` to silence.
 - **`--log FILE`** (or `--log -` for stderr) streams every per-request and per-verdict
   line — `event=gateway_http_request` and `event=gateway_operation`, each carrying the
   `trace_id` that ties the request, its verdicts, and the metrics together.
