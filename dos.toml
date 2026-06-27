@@ -66,6 +66,15 @@ concurrent = [
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
+  # reconciled 2026-06-27 (#1029): internal/modelreg is a real committed leaf (the
+  # friendly-name -> model-ref registry behind `fak run ornith:9b` / `fak serve --gguf`)
+  # that had NO declared lane -> a `(fak modelreg)` ship-stamp bound but the arbiter could
+  # not detect a same-tree collision on it. (Two sessions raced internal/modelreg/modelreg.go
+  # editing the Ornith #1029 aliases with no serialization precisely because the lane was
+  # undeclared.) Declared here so the referee binds the stamp and the arbiter protects
+  # internal/modelreg/** edits. Tree = internal/modelreg/** only; its cmd/fak shim stays
+  # in the `cmd` lane, keeping every leaf tree pairwise-disjoint per the header invariant.
+  "modelreg",
   "sessionimage",
   "a2achan",
   "snapshot",
@@ -131,6 +140,7 @@ autopick = [
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
+  "modelreg", # #1029: internal/modelreg leaf (the run-by-name model registry), see [lanes].concurrent note
   "sessionimage",
   "a2achan",
   "snapshot",
