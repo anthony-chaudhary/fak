@@ -4,7 +4,7 @@
 > process for creating, verifying, and publishing benchmark results. Every claim traces back
 > to committed artifacts with `dos_commit_audit` verification.
 
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-27
 **Status:** Living process — update when benchmark workflow evolves
 
 ---
