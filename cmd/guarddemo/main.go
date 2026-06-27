@@ -494,29 +494,24 @@ func runSelfcheck() int {
 			}
 		}
 
-		var miss []string
-		check := func(name string, got, want int) {
-			if got != want {
-				miss = append(miss, fmt.Sprintf("%s=%d(want %d)", name, got, want))
-			}
-		}
+		var check demoui.SelfcheckChecker
 		if rep.ConsistencyCheck != "ok" {
-			miss = append(miss, fmt.Sprintf("consistency=%q(want \"ok\")", rep.ConsistencyCheck))
+			check.Notef("consistency=%q(want \"ok\")", rep.ConsistencyCheck)
 		}
 		// fak must NEVER breach, on any scenario — the load-bearing invariant.
-		check("inj_fak", rep.Safety.InjectionsAdmittedFak, 0)
-		check("destr_fak", rep.Safety.DestructiveExecutedFak, 0)
+		check.Check("inj_fak", rep.Safety.InjectionsAdmittedFak, 0)
+		check.Check("destr_fak", rep.Safety.DestructiveExecutedFak, 0)
 		if exp, known := selfcheckExpect[ks.ID]; known {
-			check("breaches", breaches, exp.breaches)
-			check("inj_baseline", rep.Safety.InjectionsAdmittedBaseline, exp.injBaseline)
-			check("destr_baseline", rep.Safety.DestructiveExecutedBaseline, exp.destrBaseline)
+			check.Check("breaches", breaches, exp.breaches)
+			check.Check("inj_baseline", rep.Safety.InjectionsAdmittedBaseline, exp.injBaseline)
+			check.Check("destr_baseline", rep.Safety.DestructiveExecutedBaseline, exp.destrBaseline)
 			if exp.passes > 0 {
-				check("passes", passes, exp.passes)
+				check.Check("passes", passes, exp.passes)
 			}
 		}
 
 		status := "PASS"
-		if len(miss) > 0 {
+		if check.Failed() {
 			status, failed = "FAIL", failed+1
 		}
 		fmt.Printf("  %-16s %s   WITHOUT fak: %d breaches (inj %d + destr %d) · WITH fak: %d · %d legit calls on both · consistency=%s\n",
@@ -524,8 +519,8 @@ func runSelfcheck() int {
 			rep.Safety.InjectionsAdmittedBaseline, rep.Safety.DestructiveExecutedBaseline,
 			rep.Safety.InjectionsAdmittedFak+rep.Safety.DestructiveExecutedFak, passes,
 			rep.ConsistencyCheck)
-		if len(miss) > 0 {
-			fmt.Printf("                   mismatch: %v\n", miss)
+		if check.Failed() {
+			fmt.Printf("                   mismatch: %v\n", check.Mismatches())
 		}
 	}
 

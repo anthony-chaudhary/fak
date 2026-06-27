@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 )
 
 func main() {
@@ -497,39 +499,34 @@ func runSelfcheck() int {
 			continue
 		}
 		ran++
-		var miss []string
-		check := func(name string, got, want int) {
-			if got != want {
-				miss = append(miss, fmt.Sprintf("%s=%d(want %d)", name, got, want))
-			}
-		}
+		var check demoui.SelfcheckChecker
 		if exp, known := selfcheckExpect[ks.ID]; known {
-			check("denies", l.Denies, exp.denies)
-			check("dedups", l.Dedups, exp.dedups)
-			check("context_tokens_kept_out", l.ContextTokensKept, exp.contextTokensKept)
-			check("roundtrips_collapsed", l.RoundtripsCollapsed, exp.roundtripsCollapsed)
-			check("tool_tokens_from_cache", l.ToolTokensFromCache, exp.toolTokensFromCache)
+			check.Check("denies", l.Denies, exp.denies)
+			check.Check("dedups", l.Dedups, exp.dedups)
+			check.Check("context_tokens_kept_out", l.ContextTokensKept, exp.contextTokensKept)
+			check.Check("roundtrips_collapsed", l.RoundtripsCollapsed, exp.roundtripsCollapsed)
+			check.Check("tool_tokens_from_cache", l.ToolTokensFromCache, exp.toolTokensFromCache)
 		}
 		// Invariants true for EVERY suite: the model-context meter never costs MORE
 		// behind fak than raw, and a re-read NEVER cuts model context (it is a tool-side
 		// win only — the honest bound the dedup framing rests on).
 		if l.CtxWith > l.CtxWithout {
-			miss = append(miss, "ctx_with>ctx_without")
+			check.Note("ctx_with>ctx_without")
 		}
 		if l.Dedups > 0 && l.CtxWithout != l.CtxWith {
 			// With no denies, a dedup-only suite must show ZERO model-context delta.
 			if l.Denies == 0 {
-				miss = append(miss, fmt.Sprintf("dedup-only suite cut model context (without=%d with=%d) — overclaim", l.CtxWithout, l.CtxWith))
+				check.Notef("dedup-only suite cut model context (without=%d with=%d) — overclaim", l.CtxWithout, l.CtxWith)
 			}
 		}
 		status := "PASS"
-		if len(miss) > 0 {
+		if check.Failed() {
 			status, failed = "FAIL", failed+1
 		}
 		fmt.Printf("  %-22s %s   win1 ctx-kept=%s tok (%d denies)  win2 roundtrips=%d (%s tool tok from cache)\n",
 			ks.ID, status, commaInt(l.ContextTokensKept), l.Denies, l.RoundtripsCollapsed, commaInt(l.ToolTokensFromCache))
-		if len(miss) > 0 {
-			fmt.Printf("                         mismatch: %v\n", miss)
+		if check.Failed() {
+			fmt.Printf("                         mismatch: %v\n", check.Mismatches())
 		}
 	}
 

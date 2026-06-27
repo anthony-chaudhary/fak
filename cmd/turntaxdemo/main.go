@@ -335,28 +335,23 @@ func runSelfcheck() int {
 			continue
 		}
 
-		var miss []string
-		check := func(name string, got, want int) {
-			if got != want {
-				miss = append(miss, fmt.Sprintf("%s=%d(want %d)", name, got, want))
-			}
-		}
+		var check demoui.SelfcheckChecker
 		if rep.ConsistencyCheck != "ok" {
-			miss = append(miss, fmt.Sprintf("consistency=%q(want \"ok\")", rep.ConsistencyCheck))
+			check.Notef("consistency=%q(want \"ok\")", rep.ConsistencyCheck)
 		}
 		if exp, known := selfcheckExpect[ks.ID]; known {
-			check("turns_saved", rep.Net.TurnsSaved, exp.turnsSaved)
-			check("forced", rep.TurnKinds.Forced, exp.forced)
-			check("elision", rep.TurnKinds.Elision, exp.elision)
-			check("vdso_off", rep.VDSOOffNet.TurnsSaved, exp.vdsoOff)
-			check("inj_baseline", rep.Safety.InjectionsAdmittedBaseline, exp.injBaseline)
-			check("inj_fak", rep.Safety.InjectionsAdmittedFak, exp.injFak)
-			check("destr_baseline", rep.Safety.DestructiveExecutedBaseline, exp.destrBaseline)
-			check("destr_fak", rep.Safety.DestructiveExecutedFak, exp.destrFak)
+			check.Check("turns_saved", rep.Net.TurnsSaved, exp.turnsSaved)
+			check.Check("forced", rep.TurnKinds.Forced, exp.forced)
+			check.Check("elision", rep.TurnKinds.Elision, exp.elision)
+			check.Check("vdso_off", rep.VDSOOffNet.TurnsSaved, exp.vdsoOff)
+			check.Check("inj_baseline", rep.Safety.InjectionsAdmittedBaseline, exp.injBaseline)
+			check.Check("inj_fak", rep.Safety.InjectionsAdmittedFak, exp.injFak)
+			check.Check("destr_baseline", rep.Safety.DestructiveExecutedBaseline, exp.destrBaseline)
+			check.Check("destr_fak", rep.Safety.DestructiveExecutedFak, exp.destrFak)
 		}
 
 		status := "PASS"
-		if len(miss) > 0 {
+		if check.Failed() {
 			status, failed = "FAIL", failed+1
 		}
 		fmt.Printf("  %-16s %s   turns_saved=%d (forced %d + elision %d)  vdso_off=%d  safety inj %d→%d destr %d→%d  consistency=%s\n",
@@ -365,8 +360,8 @@ func runSelfcheck() int {
 			rep.Safety.InjectionsAdmittedBaseline, rep.Safety.InjectionsAdmittedFak,
 			rep.Safety.DestructiveExecutedBaseline, rep.Safety.DestructiveExecutedFak,
 			rep.ConsistencyCheck)
-		if len(miss) > 0 {
-			fmt.Printf("                   mismatch: %v\n", miss)
+		if check.Failed() {
+			fmt.Printf("                   mismatch: %v\n", check.Mismatches())
 		}
 	}
 
