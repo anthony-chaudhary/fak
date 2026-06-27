@@ -92,6 +92,37 @@ RAM can serve the way llama.cpp does).
   (commit `e0d54dbc`).
 - A `say` verb on the private Slack control bridge for operator status notes.
 
+## Finding 3 — the slow load was path-precedence, not (only) the I/O ceiling (root cause, fixed)
+A follow-up diagnosis on the GPU staging host (DGX3) found the ~1h+ loads were **path
+precedence, not a missing copy**: a verified-complete local-NVMe copy already existed, but the
+serve launchers globbed the NFS mount first, so every cold load silently paid the slow path.
+Measured on the box:
+
+| path | type | read speed |
+|---|---|---|
+| NFS (`/projects/…`) | NFSv3, rsize 64 KB, soft | ~0.055 GB/s |
+| local NVMe (`/mnt/…`, xfs) | nvme0n1 | ~2.9 GB/s — **~53×** |
+
+The local copy was verified before relying on it: all 11 shards size-match the NFS source,
+first-64 MB byte-identical, and a full per-shard `sha256` manifest generated on the box. Recorded
+end-to-end effect from a prior on-box load: **~44 min from NVMe vs ~1h41m from NFS**.
+
+**Shipped (`516953e6`, fak):** `tools/glm52_stage_serve_dgx3.sh` + `tools/glm52_fak_native_serve.sh`
+now resolve **NVMe-first** (the pattern `glm52_load_witness.sh` already used) and log the winner
+loudly (`USING_LOCAL_NVME` / a `USING_PRESTAGED` slow-path warning) — so the slow NFS path can
+never be taken silently again (the fail-loud safeguard). They also skip the HF re-download when a
+complete copy is present. The idempotent verify+stage helper and the pinned integrity manifest live
+in `fak-private` (`470b564`: `ops/stage_glm_local.sh` + `ops/glm52-UD-Q4_K_M.sha256`). Proven on
+the real box: the resolver picks the NVMe shard (`USING_LOCAL_NVME`) and `sha256sum -c` against the
+manifest passes. (One honest caveat: no fresh full-load *timing* was taken this pass — two peers'
+GLM serves were live, so the proof rests on the read-speed delta + resolver resolution + the prior
+recorded ~44 min measurement, staying off a busy box.)
+
+This sits *above* the mmap work in priority for the cold-bench cost: NVMe-first already retires the
+~70 min page-in tax that motivated the original "stage into `/dev/shm`" suggestion — staging is no
+longer needed, because the NVMe copy is the fast path. The mmap/demand-paged CPU path (#974-B)
+remains the right fix for the *memory-fit* wall (Finding 2), independent of where the bytes read from.
+
 ## Next steps
 1. Land the llama.cpp CPU baseline on the same host (decode/prefill tok/s) — the comparison row.
 2. #974-A: CPU-path memory-fit pre-flight (refuse, don't wedge).
