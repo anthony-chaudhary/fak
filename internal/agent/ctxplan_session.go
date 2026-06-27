@@ -39,6 +39,7 @@ import (
 	"context"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // SessionPlanner is a persistent per-session context planner: a long-lived lossless store +
@@ -49,6 +50,12 @@ type SessionPlanner struct {
 	// Budget is the O(1) resident-token window each planned turn materializes under — the same
 	// meaning as CtxViewPlanner.Budget.
 	Budget int
+	// baseBudget is the UNTHROTTLED window ApplyPace scales from (#628), captured at construction.
+	// Holding the baseline separately makes ApplyPace idempotent (repeated calls with the same
+	// pace land on the same Budget, never compounding) and restorable (clearing the pace restores
+	// the full window), since Pace.ComposePlannerBudget always scales the baseline, not the
+	// already-throttled value.
+	baseBudget int
 	// Opts tunes the bounded probe (RecencyWindow, MaxCandidates, IncludeDurability). The zero
 	// value is valid — ctxplan fills sensible defaults (DefaultRecencyWindow / DefaultMaxCandidates).
 	Opts ctxplan.ProbeOptions
@@ -85,10 +92,28 @@ func NewSessionPlanner(budget int) *SessionPlanner {
 		budget = DefaultCtxViewBudget
 	}
 	return &SessionPlanner{
-		Budget: budget,
-		store:  ctxplan.NewMemStore(),
-		index:  ctxplan.NewIndex(),
+		Budget:     budget,
+		baseBudget: budget,
+		store:      ctxplan.NewMemStore(),
+		index:      ctxplan.NewIndex(),
 	}
+}
+
+// ApplyPace composes a session's Pace into this planner's resident-context Budget (#628,
+// epic #620 track 5): a session paced BELOW its baseline per-turn output plans under a
+// proportionally smaller window (floored, never starved), so "slow this session" drives its
+// CONTEXT budget down — not just its output cap. This is the genuine wire of
+// session.Pace.MaxTokensPerTurn into agent.SessionPlanner.Budget the design note (§4) named.
+//
+// baselineOutput is the session's unthrottled per-turn output target (the pace cap's
+// reference). The scale is always taken from baseBudget (the window the planner was
+// CONSTRUCTED with), not the current Budget, so ApplyPace is idempotent across turns and a
+// cleared pace (MaxTokensPerTurn 0) restores the full baseline window. A pace that voices no
+// opinion is a no-op — the planner keeps its full Budget, byte-for-byte the pre-compose path.
+// It returns the new Budget.
+func (sp *SessionPlanner) ApplyPace(pace session.Pace, baselineOutput int) int {
+	sp.Budget = pace.ComposePlannerBudget(sp.baseBudget, baselineOutput)
+	return sp.Budget
 }
 
 // NewSession mints a per-session planner seeded from this CtxViewPlanner's Budget — the factory
