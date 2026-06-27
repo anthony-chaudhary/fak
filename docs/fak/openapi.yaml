@@ -66,6 +66,8 @@ tags:
     description: The simplest non-Go integration — one POST, one verdict (`/v1/fak/*`), plus the session DRIVE-state control surface.
   - name: MCP
     description: MCP-over-HTTP — JSON-RPC 2.0 over a single POST (`/mcp`).
+  - name: A2A
+    description: Agent-to-Agent protocol — task-based async control surface (`/a2a/v1/*`).
   - name: Operational
     description: Liveness, metrics, diagnostics (`/healthz`, `/metrics`, `/debug/vars`).
 
@@ -972,8 +974,185 @@ paths:
         '202':
           description: Accepted — a notification (no `id`) was received; no body is returned.
         '400': { $ref: '#/components/responses/BadRequest' }
+         '401': { $ref: '#/components/responses/Unauthorized' }
+         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # -------------------------------------------------------------------------
+  # Agent-to-Agent (A2A) protocol — task-based async control surface
+  # -------------------------------------------------------------------------
+  /a2a/v1/messages:
+    post:
+      tags: [A2A]
+      summary: Send a task request to an agent
+      description: |
+        Creates a new async task that runs in the background and returns a stable
+        task ID (starting with "a2a_") for tracking. Tasks are executed by the
+        agent's in-kernel channel and support tool calls, streaming responses,
+        and cancellation. The initial task state is "processing". Task state
+        transitions: processing -> completed | canceled | failed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/A2ASendMessageRequest' }
+            example:
+              message:
+                role: user
+                content: "Read the file and summarize it"
+              tools:
+                - type: function
+                  function:
+                    name: read_file
+                    description: Read a file
+                    parameters:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                      required: [path]
+      responses:
+        '200':
+          description: Task created and assigned a stable ID.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/A2ASendMessageResponse' }
+              example:
+                task_id: "a2a_7f3a9c2b4e1d8f6a"
+                status: "processing"
+                created_at: "2026-06-27T09:48:59Z"
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /a2a/v1/tasks:
+    get:
+      tags: [A2A]
+      summary: List all tasks
+      description: |
+        Returns a paginated list of all tasks in the task store, with optional
+        filtering by status (processing/completed/canceled/failed). Results are
+        ordered by creation time (newest first).
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [processing, completed, canceled, failed]
+          description: Filter tasks by status.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+          description: Maximum number of tasks to return.
+      responses:
+        '200':
+          description: The list of tasks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/A2ATasksResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /a2a/v1/agent-card:
+    get:
+      tags: [A2A]
+      summary: Get extended agent capabilities (agent card)
+      description: |
+        Returns the agent's capabilities in Agent Card format — name,
+        description, version, skills (tools), and capabilities (features the agent
+        supports: streaming, tool calls, cancellation). Skills are projected from
+        the method registry (e.g., from tools/fleet_agent_link.py).
+      responses:
+        '200':
+          description: The agent's capabilities.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/A2AAgentCardResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /a2a/v1/tasks/{task_id}:
+    get:
+      tags: [A2A]
+      summary: Get a single task by ID
+      description: |
+        Returns the full task object including state, messages, and artifacts.
+        Returns 404 if the task does not exist.
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^a2a_[a-f0-9]{16}$'
+          description: The stable task ID (starts with "a2a_" followed by 16 hex digits).
+      responses:
+        '200':
+          description: The task object.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/A2ATaskResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Task not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "task not found", type: "not_found_error", code: null, param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    post:
+      tags: [A2A]
+      summary: Cancel a task
+      description: |
+        Requests cancellation of a running task. The task state transitions to
+        "canceled" if cancellation succeeds. Already-completed tasks return 409.
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^a2a_[a-f0-9]{16}$'
+          description: The stable task ID to cancel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [cancel]
+                  description: The action to perform (only "cancel" is supported).
+      responses:
+        '200':
+          description: Task canceled successfully.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/A2ACancelTaskResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Task not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409':
+          description: Task already completed or canceled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "task already completed", type: "conflict_error", code: null, param: null } }
 
   # -------------------------------------------------------------------------
   # Operational endpoints
@@ -1549,20 +1728,196 @@ components:
           description: '`-32700` parse error · `-32600` invalid request · `-32601` method not found · `-32602` invalid params · `-32603` internal error.'
         message: { type: string }
 
-    # ----- Error envelope (OpenAI-style) -------------------------------------
-    ErrorResponse:
-      type: object
-      description: The OpenAI-style error envelope used by every route except `/mcp`.
+     # ----- Error envelope (OpenAI-style) -------------------------------------
+     ErrorResponse:
+       type: object
+       description: The OpenAI-style error envelope used by every route except `/mcp`.
+       properties:
+         error:
+           type: object
+           properties:
+             message: { type: string }
+             type:
+               type: string
+               enum: [invalid_request_error, authentication_error, server_error]
+               description: Derived from the HTTP status class so a client can branch on it.
+             code:
+               description: Always `null` (reserved for future use).
+             param:
+               description: Always `null` (reserved for future use).
+
+     # ----- A2A (Agent-to-Agent) protocol schemas ----------------------------
+     A2ASendMessageRequest:
+       type: object
+       required: [message]
       properties:
-        error:
+        message:
           type: object
+          required: [role, content]
           properties:
-            message: { type: string }
-            type:
+            role:
               type: string
-              enum: [invalid_request_error, authentication_error, server_error]
-              description: Derived from the HTTP status class so a client can branch on it.
-            code:
-              description: Always `null` (reserved for future use).
-            param:
+              enum: [user, system]
+              description: The message role (user or system).
+            content:
+              type: string
+              description: The message text.
+        tools:
+          type: array
+          description: Optional tool definitions the agent may call.
+          items:
+            type: object
+            required: [type, function]
+            properties:
+              type:
+                type: string
+                enum: [function]
+                description: The tool type (only "function" is supported).
+              function:
+                type: object
+                required: [name]
+                properties:
+                  name:
+                    type: string
+                    description: The tool name (must be registered in the method registry).
+                  description:
+                    type: string
+                    description: Human-readable description of what the tool does.
+                  parameters:
+                    type: object
+                    description: JSON Schema for the tool's arguments.
+
+     A2ASendMessageResponse:
+       type: object
+       required: [task_id, status, created_at]
+       properties:
+        task_id:
+          type: string
+          pattern: '^a2a_[a-f0-9]{16}$'
+          description: Stable task ID for tracking.
+        status:
+          type: string
+          enum: [processing, completed, canceled, failed]
+          description: Initial task state (always "processing" on create).
+        created_at:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp of task creation.
+
+     A2ATasksResponse:
+       type: object
+       required: [tasks]
+       properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/A2ATaskSummary'
+
+     A2ATaskSummary:
+       type: object
+       required: [task_id, status, created_at]
+       properties:
+        task_id:
+          type: string
+          pattern: '^a2a_[a-f0-9]{16}$'
+        status:
+          type: string
+          enum: [processing, completed, canceled, failed]
+        created_at:
+          type: string
+          format: date-time
+
+     A2AAgentCardResponse:
+       type: object
+       required: [agent, capabilities]
+       properties:
+        agent:
+          type: object
+          required: [name, description, version]
+          properties:
+            name:
+              type: string
+              description: Agent name (e.g., "fleet_agent").
+            description:
+              type: string
+              description: Human-readable agent description.
+            version:
+              type: string
+              description: Agent version string.
+        capabilities:
+          type: object
+          required: [streaming, tool_calls, cancellation]
+          properties:
+            streaming:
+              type: boolean
+              description: Whether the agent supports streaming responses.
+            tool_calls:
+              type: boolean
+              description: Whether the agent supports tool calls.
+            cancellation:
+              type: boolean
+              description: Whether the agent supports task cancellation.
+        skills:
+          type: array
+          description: Skills (tools) the agent exposes, projected from the method registry.
+          items:
+            $ref: '#/components/schemas/A2ASkill'
+
+     A2ASkill:
+       type: object
+       required: [name, description]
+       properties:
+        name:
+          type: string
+          description: Skill name (matches the registered tool name).
+        description:
+          type: string
+          description: Human-readable description of what the skill does.
+
+     A2ATaskResponse:
+       type: object
+       required: [task_id, status, created_at]
+       properties:
+        task_id:
+          type: string
+          pattern: '^a2a_[a-f0-9]{16}$'
+        status:
+          type: string
+          enum: [processing, completed, canceled, failed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: Last state transition timestamp.
+        messages:
+          type: array
+          description: Transcript of messages exchanged for this task.
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [user, assistant, system]
+              content:
+                type: string
+        artifacts:
+          type: object
+          description: Optional artifacts produced by the task (e.g., file outputs).
+        error:
+          type: string
+          description: Error message if status is "failed".
+
+     A2ACancelTaskResponse:
+       type: object
+       required: [task_id, status]
+       properties:
+        task_id:
+          type: string
+          pattern: '^a2a_[a-f0-9]{16}$'
+        status:
+          type: string
+          enum: [canceled]
+          description: New task state (always "canceled" on successful cancellation).
               description: Always `null` (reserved for future use).

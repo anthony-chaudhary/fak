@@ -582,6 +582,11 @@ type Server struct {
 	// tools[] unchanged.
 	toolFloorDenies func(toolName string) bool
 
+	// auditLog is the optional A2A audit logging function. When non-nil, all A2A task
+	// state transitions are logged for tamper-evident tracking. nil disables A2A audit logging.
+	// Set by cmd/fak to wire in the DECISION JOURNAL-backed audit system.
+	auditLog func(log a2aAuditLog)
+
 	// pinUpstreamCredential, when set, makes the Anthropic passthrough authenticate
 	// upstream with the planner's OWN configured credential and ignore the inbound
 	// client's key (the subscription path — see Config.PinUpstreamCredential).

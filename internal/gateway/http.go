@@ -49,6 +49,12 @@ type gatewayRoute struct {
 // registration.
 func (s *Server) routeTable() []gatewayRoute {
 	return []gatewayRoute{
+		// A2A Agent-to-Agent protocol surface (#1019).
+		{"/a2a/v1/messages", s.handleA2ASendMessage},
+		{"/a2a/v1/tasks", s.handleA2AListTasks},
+		{"/a2a/v1/agent-card", s.handleA2AGetExtendedAgentCard},
+		// /a2a/v1/tasks/{id} subtree: GET reads one task, POST /cancel cancels it.
+		{"/a2a/v1/tasks/", s.handleA2ATask},
 		// OpenAI-compatible surface.
 		{"/v1/chat/completions", s.handleChatCompletions},
 		// OpenAI Responses API — a client-facing inbound route so a Responses-native
