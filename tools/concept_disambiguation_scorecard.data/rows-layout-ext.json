@@ -1,0 +1,99 @@
+{
+  "rows": [
+    {
+      "id": "x-layout-recommendlayout",
+      "canonical": "RecommendLayout (cachemeta)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "cachemeta.RecommendLayout produces the cache-optimal re-ordering of one turn's prompt segments, hoisting every volatile segment (position-independent metadata like a timestamp or request id) to the tail so the most contiguous leading tokens survive as a provider-cacheable prefix, returning a LayoutRecommendation with the predicted uplift.",
+      "distinction": "Not ctxplan.PlanLayout, which plans an O(1) context-window view over stored conversation spans; RecommendLayout reorders prompt segments to maximize provider prefix-cache hit length and never pages in span bytes.",
+      "distinct_from": [
+        "layout-ctxplan",
+        "LayoutRecommendation (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "recommendlayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-layout-layoutrecommendation",
+      "canonical": "LayoutRecommendation (cachemeta)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "cachemeta.LayoutRecommendation is the struct returned by RecommendLayout: the reordered segment list, the count of moved volatile segments, the before/after contiguous cacheable-token counts, and the predicted cacheable-token uplift for one turn.",
+      "distinction": "Not the kvLayout interface (a model KV-cache memory layout) nor ctxplan's Layout; it is a prompt-segment reorder recommendation describing how to restructure a turn for provider prefix-cache stability.",
+      "distinct_from": [
+        "kvlayout-interface",
+        "RecommendLayout (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "layoutrecommendation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-layout-mlakvlayout",
+      "canonical": "mlaKVLayout (model)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "model.mlaKVLayout is the kvLayout implementation for MLA models that caches a compressed latent c_KV plus a pre-RoPE decoupled key per position, then up-projects the latent to full per-head K/V and rotates the shared key on read, shrinking the cache ~10-50x versus the per-head width.",
+      "distinction": "Not standardKVLayout, whose reconstruction is the identity over stored post-RoPE K/V; mlaKVLayout decompresses a low-rank latent (decompress-then-attend) rather than handing back stored rows verbatim.",
+      "distinct_from": [
+        "kvlayout-interface",
+        "standardKVLayout (model)"
+      ],
+      "aliases": [],
+      "grounding": "mlakvlayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-layout-standardkvlayout",
+      "canonical": "standardKVLayout (model)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "model.standardKVLayout is the default Llama/Qwen kvLayout: the cache stores post-RoPE K and V directly at width NumKVHeads*HeadDim, so reconstructKV is the identity that splits and hands back the stored rows, keeping the path bit-identical to inline blockStep attention.",
+      "distinction": "Not mlaKVLayout, which stores a compressed latent and up-projects it on read; standardKVLayout does no projection or re-rotation and caches the full per-head K/V uncompressed.",
+      "distinct_from": [
+        "kvlayout-interface",
+        "mlaKVLayout (model)"
+      ],
+      "aliases": [],
+      "grounding": "standardkvlayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-layout-modellayout",
+      "canonical": "modelLayout (model selector)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "model.Model.modelLayout() is the selector method that returns mlaKVLayout when the model has MLA projection geometry (Model.MLA != nil) and otherwise returns the default standardKVLayout, choosing which KV-cache layout a given model uses.",
+      "distinction": "Not the kvLayout interface itself (kvlayout-interface) and not ctxplan's context Layout; modelLayout is the per-Model dispatcher that picks between the two concrete KV layouts at read/write time.",
+      "distinct_from": [
+        "kvlayout-interface",
+        "mlaKVLayout (model)"
+      ],
+      "aliases": [],
+      "grounding": "modellayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "rows": [
+    {
+      "id": "x-evict-evictcoldest",
+      "canonical": "EvictColdest (kvmmu)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "EvictColdest (internal/kvmmu/attention.go) drops the coldest-by-attention-EMA UNPINNED KV spans from a Context until at least targetPositions cache positions are freed (or no unpinned live spans remain), excluding pinned (e.g. system) spans from the candidate set entirely.",
+      "distinction": "It is a recency/attention-pressure evictor that frees the LEAST-attended live spans under a position budget, NOT EvictNode's policy eviction that purges a NAMED poisoned span regardless of how warm it is.",
+      "distinct_from": [
+        "EvictNode (radixkv policy)",
+        "evict-kvcache",
+        "evict-session"
+      ],
+      "aliases": [],
+      "grounding": "evictcoldest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-evict-actionevict",
+      "canonical": "ActionEvict (cachemeta)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "ActionEvict (internal/cachemeta/placement.go) is the PlacementAction constant \"evict\" \u2014 the placement planner's verdict to drop a cache entry entirely and recompute it on demand (FromTier -> TierRecompute), the last resort taken after demote/spill/compress_demote are exhausted or refused.",
+      "distinction": "It is a placement-DECISION enum value (what PlanPlacement DECIDES) emitted in a PlacementDecision, not the EvictColdest/EvictNode routine that actually removes spans, and distinct from ActionCompressDemote which keeps a lossy compressed copy instead of dropping the span.",
+      "distinct_from": [
+        "EvictColdest (kvmmu)",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "actionevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-evict-evictexcesslocked",
+      "canonical": "evictExcessLocked (bounded-FIFO)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "evictExcessLocked (internal/ctxmmu/mmu.go, and the parallel guards in preflight/normgate/secretgate) drops the OLDEST held entries FIFO until the held set is back within its maxHeld bound, releasing each dropped entry's resource (CAS pin / handle) and bumping an evicted counter \u2014 a memory bound on a quarantine / negative-cache, called under the owner's lock.",
+      "distinction": "It is a capacity FIFO trim of a bookkeeping map to cap memory, dropping the OLDEST regardless of warmth or verdict, NOT an attention-driven EvictColdest or a policy EvictNode drop of a specific poisoned span.",
+      "distinct_from": [
+        "EvictColdest (kvmmu)",
+        "EvictNode (radixkv policy)",
+        "evict-session"
+      ],
+      "aliases": [],
+      "grounding": "evictexcesslocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-evict-evictkv",
+      "canonical": "EvictKV (speculative rollback)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "EvictKV (internal/polymodel/polymodel.go, a SpecResult/TreeResult field) is the count of speculative KV positions to ROLL BACK after a speculative-decode verify pass \u2014 the drafted-but-rejected positions (== K - Accepted) fed to model.KVCache.Evict so the cache is bit-exact to never having drafted them.",
+      "distinction": "It is a speculative-decoding rollback COUNT for tokens that were never accepted into the real transcript, NOT a memory-pressure or policy eviction of genuinely attended spans (EvictColdest/EvictNode); the rolled-back positions were provisional.",
+      "distinct_from": [
+        "EvictColdest (kvmmu)",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "evictkv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-evict-evictnode",
+      "canonical": "EvictNode (radixkv policy)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "EvictNode (internal/radixkv/radixkv.go) is POLICY eviction in the radix prefix cache: it removes a node and its ENTIRE subtree regardless of LRU recency or lease state, returning tokens freed \u2014 the seam a quarantine verdict drives to purge a poisoned shared prefix.",
+      "distinction": "It removes a NAMED span because policy says so (a poison verdict), NOT because memory ran out \u2014 the opposite of the LRU leaf eviction tracked by Evictions, and distinct from EvictColdest's attention-pressure drop of the coldest live spans.",
+      "distinct_from": [
+        "Evictions (radixkv LRU counter)",
+        "EvictColdest (kvmmu)",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "evictnode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-evict-evictions",
+      "canonical": "Evictions (radixkv LRU counter)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Evictions (internal/radixkv/radixkv.go Stats, surfaced via the agent KVMemoryStats) counts the LRU leaf evictions the radix prefix cache performed under its token budget \u2014 opportunistic drops of the least-recently-used cached prefix when LRUTokens exceeds the configured MaxTokens.",
+      "distinction": "It is the LRU/memory-pressure eviction counter, reported SEPARATELY from PolicyEvictions; a poison/quarantine purge increments PolicyEvictions (EvictNode), not this opportunistic counter.",
+      "distinct_from": [
+        "EvictNode (radixkv policy)",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "evictions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-evict-evicted",
+      "canonical": "Evicted (revocation count)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "evicted is the return count of internal/vdso VDSO.Revoke (and the Revocation/RevokeResponse.Evicted field in gateway/coherence.go) \u2014 how many pooled cache entries were causally dropped when an external trust witness was refuted, every entry admitted under that witness invalidated MESI-invalidate style.",
+      "distinction": "It is a CAUSAL witness-refutation eviction count (a coherence invalidation that fires only on the entries bound to the refuted witness), NOT the radix LRU Evictions memory-pressure counter nor a span-policy EvictNode drop.",
+      "distinct_from": [
+        "Evictions (radixkv LRU counter)",
+        "EvictNode (radixkv policy)",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "evicted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "rows": [
+    {
+      "id": "x-decision-placementdecision",
+      "canonical": "PlacementDecision (cachemeta)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "A cachemeta planner verdict struct (Action, FromTier, ToTier, Directive, EstMoveBytes, Reason) returned by PlanPlacement that recommends whether a KV span should be kept, promoted, demoted, spilled, compress-demoted, or evicted across residency tiers without ever moving bytes itself.",
+      "distinction": "It is the KV-tier byte-placement recommendation, NOT the gateway's cut-vs-reset cache-health verdict (ResetDecision) nor the kernel adjudication verdict (decision-kernel).",
+      "distinct_from": [
+        "decision-kernel",
+        "ResetDecision (gateway reset)"
+      ],
+      "aliases": [],
+      "grounding": "placementdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-appenddecision",
+      "canonical": "AppendDecision (witness recorder)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "A witness.Recorder method that appends one JSON-encoded Decision as an append-only git note on refs/notes/fak/decisions, anchored to the concerned commit SHA (or the empty-tree sentinel for a pre-commit refusal), never touching branches or force-pushing.",
+      "distinction": "It is the act of WRITING a decision into the witness journal, NOT the adjudication that produces the verdict (decision-kernel) nor the decisions ref itself that stores it (decisions ref).",
+      "distinct_from": [
+        "decision-witness",
+        "decisions ref (witness journal)"
+      ],
+      "aliases": [],
+      "grounding": "appenddecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-governordecision",
+      "canonical": "GovernorDecision (vcachegov)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "A vcachegov string-typed steady-state verdict (ride_natural, heartbeat_pin, lazy_rebuild, evict, no_cache, explicit_cache) the Governor returns for one prompt prefix, deciding how to keep a provider prompt-cache prefix warm based on arrival rate versus TTL and policy law.",
+      "distinction": "It governs PROVIDER prompt-cache prefix warming, NOT KV-tier byte placement (PlacementDecision) nor the gateway's own context cut-vs-reset call (ResetDecision).",
+      "distinct_from": [
+        "PlacementDecision (cachemeta)",
+        "ResetDecision (gateway reset)"
+      ],
+      "aliases": [],
+      "grounding": "governordecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-redundantdecisionevent",
+      "canonical": "RedundantDecisionEvent (abi de-double)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "An abi predicate that reports whether an Event is a SECOND emission of a decision another event already carries (a Deny's paired EvDecide, or a require-witness EvDecide on a submitted call), so a decision-stream folder counts each logical decision exactly once.",
+      "distinction": "It is the de-duplication RULE applied over the event stream, NOT a decision or verdict itself; it adjudicates nothing and only marks redundant EvDecide events for folders like journal, harvest, and trajectory.",
+      "distinct_from": [
+        "decision-kernel",
+        "fak_kernel_decisions_total (metric)"
+      ],
+      "aliases": [],
+      "grounding": "redundantdecisionevent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-resetdecision",
+      "canonical": "ResetDecision (gateway reset)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The advisory verdict struct (ShouldReset bool, Score 0..1, Reason) returned by gateway ResetPolicy.ResetScore recommending whether a session's KV cache should be RESET to a fresh context instead of CUT by dropping middle turns, logged in shadow mode and acted on by nothing yet.",
+      "distinction": "It decides cut-vs-reset on the gateway's own cache-health signal, NOT provider prefix warming (GovernorDecision) nor cross-tier byte movement (PlacementDecision).",
+      "distinct_from": [
+        "GovernorDecision (vcachegov)",
+        "PlacementDecision (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "resetdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-decision-decisions",
+      "canonical": "decisions ref (witness journal)",
+      "family": "decision",
+      "kind": "subsystem",
+      "definition": "refs/notes/fak/decisions, the dedicated append-only git-notes ref (constant decisionsRef) the witness Recorder writes adjudication Decisions to, one JSON line per note anchored to the concerned commit, forming the durable decision journal.",
+      "distinction": "It is the persisted git-notes JOURNAL of decisions, NOT the in-memory verdict the kernel produces (decision-kernel) nor the method that appends one record to it (AppendDecision).",
+      "distinct_from": [
+        "decision-witness",
+        "AppendDecision (witness recorder)"
+      ],
+      "aliases": [],
+      "grounding": "decisions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,434 @@
+{
+  "rows": [
+    {
+      "id": "x-render-materialize-materialize",
+      "canonical": "Materialize (ctxplan view)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "ctxplan.Materialize re-derives a budgeted View of the lossless context store each turn: PlanCells picks which spans fit the budget, the selected ones are paged in through the trust gate, and a faithfulness Witness reconciles rendered-vs-refused so every elided span stays recoverable.",
+      "distinction": "Not the per-id Store.Materialize page-in of a single span's bytes, and not the model.materialize*Tensors manifest rewrite; it is the whole-history context-View builder.",
+      "distinct_from": [
+        "rendered-ctxplan",
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "materialize",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-materializelayout",
+      "canonical": "MaterializeLayout (ctxplan)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "ctxplan.MaterializeLayout is the layout-aware peer of Materialize: it uses a four-area Layout to choose the bounded candidate set and per-area precision, then renders the selected exact spans through the same trust gate and witness reconciliation as the default path.",
+      "distinction": "Not the default budget-only Materialize (which takes no Layout) and not the model tensor materializers; it is the Layout-parameterized context-View builder.",
+      "distinct_from": [
+        "Materialize (ctxplan view)",
+        "rendered-ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "materializelayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-materializeverdict",
+      "canonical": "MaterializeVerdict (cachemeta gate)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "cachemeta.MaterializeVerdict is the central cache gate: given the runtime materialization view, the stored Entry, the requested key, and quality evidence, it returns a LookupVerdict deciding whether a cached prefix/KV span may be served (Hit) or must be refused (Miss).",
+      "distinction": "Not the ctxplan Materialize that builds a context View \u2014 MaterializeVerdict renders no spans; it returns a serve/refuse decision on a cached entry.",
+      "distinct_from": [
+        "Materialize (ctxplan view)"
+      ],
+      "aliases": [],
+      "grounding": "materializeverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-materializer",
+      "canonical": "Materializer (memview)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "memview.Materializer is the producer type whose MaterializeSnippet turns a (source page, offset, length) selector into a provenance-bound MemoryViewRecord plus an admission Verdict, filling the record's Body only when the source page is trusted (Allow) and leaving it nil on a tainted source (Quarantine).",
+      "distinction": "Not the Materialize verb or the model tensor materializers; it is a stateful view-record producer that gates snippet admission on source taint.",
+      "distinct_from": [
+        "Materialize (ctxplan view)",
+        "MaterializeVerdict (cachemeta gate)"
+      ],
+      "aliases": [],
+      "grounding": "materializer",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-materializefalcontensors",
+      "canonical": "materialize*Tensors (model arch)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "materializeFalconTensors and its per-architecture siblings rewrite a loaded source/GGUF tensor manifest into fak's canonical tensor names (aliasing and splitting source-format tensors) for one model family before inference.",
+      "distinction": "Not the ctxplan/cachemeta Materialize (which build or serve a context view) \u2014 these mutate the model's load-time tensor manifest, one function per architecture (falcon/gpt-neox/gpt-oss/mpt/mixtral/qwen3.5/minimax shared-experts).",
+      "distinct_from": [
+        "Materialize (ctxplan view)",
+        "materializeTensorAliases (model)"
+      ],
+      "aliases": [
+        "materializegptneoxtensors",
+        "materializegptosstensors",
+        "materializempttensors",
+        "materializemixtralblocksparsetensors",
+        "materializeqwen35tensors",
+        "materializeminimaxsharedexperts"
+      ],
+      "grounding": "materializefalcontensors",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-materializetensoraliases",
+      "canonical": "materializeTensorAliases (model)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "materializeTensorAliases applies the config's explicit canonical->source tensor-name aliases, creating zero-copy canonical manifest rows before any fused-tensor split, so a loader can point a canonical fused tensor at a source-format fused name.",
+      "distinction": "Not the per-architecture materialize*Tensors functions (each hard-codes one family's name map); this is the generic, config-driven aliasing step shared across all architectures.",
+      "distinct_from": [
+        "materialize*Tensors (model arch)"
+      ],
+      "aliases": [],
+      "grounding": "materializetensoraliases",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderturn",
+      "canonical": "RenderTurn (ctxplan seam)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderTurn (on the agent CtxViewPlanner / SessionPlanner) re-renders a turn's message history through the ctxplan seam \u2014 materializing a budgeted View and paging resident spans back as the agent message list \u2014 and returns its input unchanged when the seam is disabled.",
+      "distinction": "Not renderTurnDebugStats (a debug telemetry line about a served turn); RenderTurn produces the actual turn message list handed to the model.",
+      "distinct_from": [
+        "renderplan-context",
+        "rendered-ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "renderturn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderedtokens",
+      "canonical": "RenderedTokens (ctxplan View)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "ctxplan View.RenderedTokens sums the token cost of every span actually paged into the fresh history \u2014 the realized resident size, which is <= budget by construction.",
+      "distinction": "Not RenderedBytes (a raw byte count of paged-in cells); RenderedTokens is the 4-bytes/token estimate total of a ctxplan View's rendered spans.",
+      "distinct_from": [
+        "rendered-ctxplan",
+        "RenderedBytes (memq stat)"
+      ],
+      "aliases": [],
+      "grounding": "renderedtokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderedbytes",
+      "canonical": "RenderedBytes (memq stat)",
+      "family": "render-materialize",
+      "kind": "metric",
+      "definition": "RenderedBytes (json rendered_bytes, in memq Result.Stats and contextq) is the stat counting the total bytes an OpRender / context query paged into context, accumulated across rendered cells.",
+      "distinction": "Not RenderedTokens (a ctxplan View's token estimate); RenderedBytes is the raw byte tally materialized by a memq/contextq render op.",
+      "distinct_from": [
+        "RenderedTokens (ctxplan View)",
+        "renderitem-memq"
+      ],
+      "aliases": [],
+      "grounding": "renderedbytes",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-oprender",
+      "canonical": "OpRender (memq op)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "memq.OpRender is the query op that materializes the selected cell set into context as a read-only page-in through the trust gate, tallying RenderedBytes.",
+      "distinction": "Not OpScan (which (re)loads/enumerates cells) \u2014 OpRender is the terminal page-in step that produces RenderItem cells and never mutates the store.",
+      "distinct_from": [
+        "renderitem-memq",
+        "RenderedBytes (memq stat)"
+      ],
+      "aliases": [],
+      "grounding": "oprender",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-rendertrace",
+      "canonical": "RenderTrace (agent)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "agent.RenderTrace renders the per-call agent trace log \u2014 each tool call's arm, turn, args, verdict, adjudicator, reason and disposition \u2014 as a human text report.",
+      "distinction": "Not the RenderMarkdown bench-report renderers; RenderTrace emits the per-call adjudication trace of a single agent run, not a benchmark comparison.",
+      "distinct_from": [
+        "rendered-ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "rendertrace",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderverdict",
+      "canonical": "renderVerdict (gateway wire)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "gateway.renderVerdict projects a folded abi.Verdict (plus the admitted result's Meta) onto the wire WireVerdict shape \u2014 naming the kind, refusal reason, adjudicator, and disposition for the HTTP client.",
+      "distinction": "Not cachemeta.MaterializeVerdict (a cache serve/refuse decision); renderVerdict serializes an already-decided kernel verdict to the wire.",
+      "distinct_from": [
+        "MaterializeVerdict (cachemeta gate)"
+      ],
+      "aliases": [],
+      "grounding": "renderverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderturndebugstats",
+      "canonical": "renderTurnDebugStats (gateway)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "gateway Server.renderTurnDebugStats emits one per-turn debug key=val line (trace, wire, token counts, cache read/create, reset-health) when the --debug-stats sink is wired, and is a byte-identical no-op when it is off.",
+      "distinction": "Not RenderTurn (which builds the model's turn message list) \u2014 this only formats a debug telemetry line about an already-served turn.",
+      "distinct_from": [
+        "RenderTurn (ctxplan seam)"
+      ],
+      "aliases": [],
+      "grounding": "renderturndebugstats",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-rendermetrics",
+      "canonical": "renderMetrics (gateway)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "gateway Server.renderMetrics renders the gateway's full Prometheus exposition text \u2014 the metric families scraped at /metrics.",
+      "distinction": "Not renderTurnDebugStats (a single per-turn debug line); renderMetrics emits the whole Prometheus snapshot for the scrape endpoint.",
+      "distinct_from": [
+        "renderTurnDebugStats (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "rendermetrics",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderview",
+      "canonical": "RenderView (accounts registry)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "accounts.Registry.RenderView is a pure function projecting the account registry into the YAML text of a named view (dos/job), so `check` can diff on-disk bytes against a freshly rendered view and `sync` can write them.",
+      "distinction": "Not the ctxplan View / RenderTurn rendering of model context; RenderView renders an accounts-registry projection to YAML.",
+      "distinct_from": [
+        "RenderTurn (ctxplan seam)"
+      ],
+      "aliases": [],
+      "grounding": "renderview",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-rendermarkdown",
+      "canonical": "RenderMarkdown (bench report)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The RenderMarkdown family (benchscore, swebench, terminalbench, webbench, agenticbench, the browseraction action-mediation report, ...) renders a completed Report/Comparison struct of measured results into a Markdown document.",
+      "distinction": "Not the *ContractMarkdown renderers (which emit a pre-run promise before any number exists); RenderMarkdown emits measured results after a run.",
+      "distinct_from": [
+        "rendered-ctxplan"
+      ],
+      "aliases": [
+        "renderactionmediationmarkdown"
+      ],
+      "grounding": "rendermarkdown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderofficialruncontractmarkdown",
+      "canonical": "RenderOfficialRunContractMarkdown (contract)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderOfficialRunContractMarkdown renders a benchmark's official-run CONTRACT to Markdown \u2014 the pre-run promise (target choice, evidence class, claim boundary, whether a result claim is allowed); siblings render the DeepSWE and opus-smoke SWE-bench contracts and the terminalbench rehearsal preflight.",
+      "distinction": "Not RenderMarkdown (post-run measured results); a contract or preflight is the credential-gated promise rendered BEFORE any measured number exists.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [
+        "renderdeepswerawfakcontractmarkdown",
+        "renderopussmokecontractmarkdown",
+        "renderrehearsalpreflightmarkdown"
+      ],
+      "grounding": "renderofficialruncontractmarkdown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-rendertuiloops",
+      "canonical": "renderTUI* (console pane)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The renderTUI* family formats one fak console dashboard pane (loops/agent/garden/guard/issues/overview/sessions) from its typed report struct into a fixed-width terminal text view.",
+      "distinction": "Not the bench RenderMarkdown/contract renderers (which emit Markdown docs); these emit width-bounded terminal panes for the live `fak` console.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [
+        "rendertuiagent",
+        "rendertuigarden",
+        "rendertuiguard",
+        "rendertuiissues",
+        "rendertuioverview",
+        "rendertuisessions"
+      ],
+      "grounding": "rendertuiloops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-rendercapabilities",
+      "canonical": "RenderCapabilities (nightrun)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "nightrun.RenderCapabilities writes the one-line box-capability summary (gpu/weights/datasets/net/creds) that prefixes every nightrun human view; siblings RenderNext and RenderLedger write the focused next-task answer and the durable collection ledger.",
+      "distinction": "Not the fak-console renderTUI* panes; these are the `fak nightrun` operator text views over the local data-collection queue.",
+      "distinct_from": [
+        "renderTUI* (console pane)"
+      ],
+      "aliases": [
+        "rendernext",
+        "renderledger"
+      ],
+      "grounding": "rendercapabilities",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderiteration",
+      "canonical": "RenderIteration (guardrsi)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "guardrsi.RenderIteration formats one guard-verdict-RSI iteration (rows folded, verdict-quality delta, honesty holes, candidate lever, keep/revert rule) as text; sibling RenderScorecard formats the guard-RSI scorecard payload.",
+      "distinction": "Not the nightrun or console renderers; these print the guard RSI self-improvement loop's per-iteration and scorecard summaries.",
+      "distinct_from": [
+        "RenderCapabilities (nightrun)"
+      ],
+      "aliases": [
+        "renderscorecard"
+      ],
+      "grounding": "renderiteration",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-renderreason",
+      "canonical": "renderReason (repoguard)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "repoguard.renderReason builds the human refusal message when a destructive/write op targets a path outside the repo, listing each violating op->target with its resolved path and the remediation.",
+      "distinction": "Not gateway.renderVerdict (which serializes a kernel verdict to the wire); renderReason composes the repo-guard's out-of-workspace refusal prose.",
+      "distinct_from": [
+        "renderVerdict (gateway wire)"
+      ],
+      "aliases": [],
+      "grounding": "renderreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-render-materialize-render",
+      "canonical": "render (verb)",
+      "family": "render-materialize",
+      "kind": "concept",
+      "definition": "render is the repo-wide convention for a pure projection function that turns a typed value into a human/Markdown/wire/terminal text surface (e.g. the bare `func render` in loophealth and dispatchworker), without mutating its input.",
+      "distinction": "Not materialize (which pages real bytes/spans/tensors into a live store or context); render only formats an already-decided value into text.",
+      "distinct_from": [
+        "renderplan-context",
+        "rendered-ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "render",
+      "grounding_kind": "verb",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

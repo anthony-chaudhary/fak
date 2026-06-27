@@ -1,0 +1,1112 @@
+{
+  "rows": [
+    {
+      "id": "x-gateway-engine-matkernel",
+      "canonical": "matKernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The internal/model interface that selects which arithmetic a single decode block's weight matmuls run through \u2014 prep turns a normed activation into the kernel's operand form once, and mul applies a named weight to it \u2014 so the f32 and Q8 decode blocks share one block skeleton.",
+      "distinction": "It is the per-GEMM COMPUTE/arithmetic-dispatch kernel inside the model forward, NOT the coordinator kernel (internal/kernel) that adjudicates and routes tool calls.",
+      "distinct_from": [
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "matkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-f32kernel",
+      "canonical": "f32Kernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The matKernel that runs a decode block fully in f32 \u2014 prep is the identity and every matmul routes through parMatRows (the in-order row-parallel GEMV), preserving the bit-exact reduction order.",
+      "distinction": "It is the f32 arithmetic variant of the model compute kernel, NOT the Q8 (q8Kernel) or int4 (q4Kernel) variant, and not the coordinator kernel.",
+      "distinct_from": [
+        "matKernel (compute)",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "f32kernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-q8kernel",
+      "canonical": "q8Kernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The matKernel that runs a decode block in Q8_0, quantizing the activation once per prep into a q8Vec and multiplying it against the prebuilt Q8_0 weight via qMatRows.",
+      "distinction": "It is the Q8_0 compute variant; unlike sessionQ8Kernel it allocates a fresh operand per prep (safe for nested MoE callers), and it is not the f32 (f32Kernel) variant nor the coordinator kernel.",
+      "distinct_from": [
+        "matKernel (compute)",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "q8kernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-q4kernel",
+      "canonical": "q4Kernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The matKernel that runs a decode block in int4 (Q4): prep is the identity and mul applies the int4-packed weight via the q4 GEMV.",
+      "distinction": "It is the int4 compute variant of the model forward, distinct from q8Kernel (Q8_0) and the resident Q4_K kernel, and is not the coordinator kernel.",
+      "distinct_from": [
+        "matKernel (compute)",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "q4kernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-residentkernel",
+      "canonical": "residentKernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The cacheless Forward matKernel that prefers the exact f32 tensor when present and otherwise reads the quant-on-load Q8_0 resident copy via residentMatRows, keeping ordinary Forward bit-identical.",
+      "distinction": "It is the host-resident compute endpoint of the host/device split, NOT the GPU-backed backendKernel and not the coordinator kernel.",
+      "distinct_from": [
+        "matKernel (compute)",
+        "backendKernel (compute)"
+      ],
+      "aliases": [],
+      "grounding": "residentkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-backendkernel",
+      "canonical": "backendKernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The matKernel that routes the GLM-MoE-DSA forward's dense GEMMs through a compute.Backend (the GPU pure kernels) instead of host residentMatRows, uploading weight+activation, running be.MatMul, and reading the result back.",
+      "distinction": "It is the device (GPU) compute endpoint; unlike residentKernel it executes on a compute.Backend, and unlike the coordinator kernel it does matmuls, not tool-call adjudication.",
+      "distinct_from": [
+        "matKernel (compute)",
+        "residentKernel (compute)",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "backendkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-splitkernel",
+      "canonical": "splitKernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "A thin matKernel that dispatches each named matmul per-weight to a host sub-kernel or a device sub-kernel by a predicate, implementing the --n-cpu-moe split (offloaded experts on host RAM, dense projections/router/attention on GPU).",
+      "distinction": "It introduces no new arithmetic and only decides PLACEMENT between residentKernel and backendKernel; it is not itself a leaf compute kernel nor the coordinator kernel.",
+      "distinct_from": [
+        "residentKernel (compute)",
+        "backendKernel (compute)"
+      ],
+      "aliases": [],
+      "grounding": "splitkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-dsaindexkernel",
+      "canonical": "dsaIndexKernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The optional device-path interface for GLM-MoE-DSA's learned-indexer score + top-k selection (indexSelect), taken only when the backendKernel's compute.Backend advertises DSAIndexBackend; otherwise the host f64 score/top-k loop runs.",
+      "distinction": "It is the indexer-SELECTION device seam, distinct from dsaSparseKernel which runs the sparse-attention compute over already-selected keys.",
+      "distinct_from": [
+        "backendKernel (compute)",
+        "matKernel (compute)"
+      ],
+      "aliases": [],
+      "grounding": "dsaindexkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-dsasparsekernel",
+      "canonical": "dsaSparseKernel (compute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The optional device-path interface for GLM-MoE-DSA's sparse-attention compute (sparseAttend: per-head softmax(scale\u00b7q\u00b7k)\u00b7V over the host-selected keys), taken only when the backend advertises DSASparseBackend.",
+      "distinction": "It runs the attention math over keys already chosen, distinct from dsaIndexKernel which computes the key SELECTION (index scores + top-k).",
+      "distinct_from": [
+        "dsaIndexKernel (compute)",
+        "backendKernel (compute)"
+      ],
+      "aliases": [],
+      "grounding": "dsasparsekernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-kernelcounters",
+      "canonical": "KernelCounters (turnbench)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The turnbench replay harness's snapshot struct of the coordinator kernel's call-path tallies (submits, vDSO hits, engine calls, denies, transforms) gathered over a replayed trace.",
+      "distinction": "It tallies the COORDINATOR kernel's dispatch dispositions, not any model compute (matKernel) work; it mirrors kernel.Counters but is the turnbench-side view.",
+      "distinct_from": [
+        "kernel",
+        "matKernel (compute)"
+      ],
+      "aliases": [],
+      "grounding": "kernelcounters",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fromkernel",
+      "canonical": "FromKernel (toollint)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "toollint.FromKernel builds tool-lint facts (fast-path tables + preflight schemas) from the process-global kernel registries (vdso.Default and the engine registries) for the registry-only lint view.",
+      "distinction": "It READS the coordinator kernel's registries to lint tool surfaces; it is not part of the kernel's dispatch path and is unrelated to the model compute kernels.",
+      "distinct_from": [
+        "kernel",
+        "vdso"
+      ],
+      "aliases": [],
+      "grounding": "fromkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-inkernel",
+      "canonical": "inkernel (engine id)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The id under which internal/modelengine registers internal/model as an abi.EngineDriver, so `--engine inkernel` (or one blank-import) dispatches a tool call to the model fused into the fak process via a real Prefill+Step decode.",
+      "distinction": "It is the in-process model ENGINE id (a dispatch target), distinct from the coordinator kernel (internal/kernel) that adjudicates calls and from the compute kernels (matKernel) that do the arithmetic.",
+      "distinct_from": [
+        "modelengine",
+        "engine",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "inkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-inkernelplanner",
+      "canonical": "InKernelPlanner",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The agent.Planner backed by the in-kernel model: one Complete runs a greedy Prefill+Step decode over a kernel-owned KV cache using the loaded model + tokenizer.",
+      "distinction": "It is the planner that drives the in-kernel model decode, distinct from the modelengine EngineDriver wrapper (inkernel) and from proxy/mock planners that call an external upstream.",
+      "distinct_from": [
+        "inkernel (engine id)",
+        "modelengine"
+      ],
+      "aliases": [],
+      "grounding": "inkernelplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-inkernelcapacityerror",
+      "canonical": "InKernelCapacityError",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The request-time error the InKernelPlanner returns when a request's prompt + max-new tokens would exceed device capacity, refusing before any decode allocation.",
+      "distinction": "It is the PRE-decode capacity refusal (no retry), distinct from InKernelOOMError which is the recovered form of an OOM hit DURING decode.",
+      "distinct_from": [
+        "InKernelOOMError",
+        "InKernelPlanner"
+      ],
+      "aliases": [],
+      "grounding": "inkernelcapacityerror",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-inkerneloomerror",
+      "canonical": "InKernelOOMError",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The agent-level, recovered form of an in-kernel device-allocation OOM during decode, carrying the failed byte count, memory class, and site.",
+      "distinction": "It is the runtime OOM recovered via idle-pool trim retry, distinct from InKernelCapacityError which refuses oversize requests up front.",
+      "distinct_from": [
+        "InKernelCapacityError",
+        "InKernelPlanner"
+      ],
+      "aliases": [
+        "inkerneloom"
+      ],
+      "grounding": "inkerneloomerror",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-inkerneloomobservation",
+      "canonical": "inKernelOOMObservation",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The gateway-side function that classifies an error as a recovered in-kernel OOM and extracts its (class, bytes, site) so the metrics layer can count it.",
+      "distinction": "It is the CLASSIFIER/observer used by gatewayMetrics, not the InKernelOOMError value itself nor the retry mechanism.",
+      "distinct_from": [
+        "InKernelOOMError",
+        "gatewayMetrics (registry)"
+      ],
+      "aliases": [],
+      "grounding": "inkerneloomobservation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-inkerneloomretrystats",
+      "canonical": "InKernelOOMRetryStats",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The struct reporting idle-pool trim retries attempted after in-kernel device OOMs, bucketed by backend, memory class, and outcome, surfaced through the InKernelOOMRetryReporter interface.",
+      "distinction": "It counts decode-time OOM RETRIES, distinct from InKernelMemoryPressureTrimStats which counts PROACTIVE idle-pool trims taken before an OOM.",
+      "distinct_from": [
+        "InKernelOOMError",
+        "InKernelMemoryPressureTrimStats"
+      ],
+      "aliases": [
+        "inkerneloomretryreporter"
+      ],
+      "grounding": "inkerneloomretrystats",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-inkernelmemorypressuretrimstats",
+      "canonical": "InKernelMemoryPressureTrimStats",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The struct reporting PROACTIVE idle-pool trims the in-kernel planner takes under memory pressure, in bounded-label rows per backend and memory class, surfaced via InKernelMemoryPressureTrimReporter.",
+      "distinction": "It counts pre-emptive pressure trims, distinct from InKernelOOMRetryStats which counts trims retried AFTER an allocation already OOM'd.",
+      "distinct_from": [
+        "InKernelOOMRetryStats"
+      ],
+      "aliases": [
+        "inkernelmemorypressuretrimreporter"
+      ],
+      "grounding": "inkernelmemorypressuretrimstats",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakinkernelkvmmu",
+      "canonical": "FAK_INKERNEL_KVMMU",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The environment-variable gate that opts the gateway into the in-kernel KV-MMU slot-reclaim bridge (a real SlotFreed -> KV eviction); default-off, where the bridge is an inert no-op.",
+      "distinction": "It gates the in-kernel KV-MMU reclaim wiring specifically, not the choice of the `inkernel` engine and not the cross-engine KV arena gate FAK_XENGINE_KV.",
+      "distinct_from": [
+        "inkernel (engine id)",
+        "FAK_XENGINE_KV"
+      ],
+      "aliases": [],
+      "grounding": "fakinkernelkvmmu",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakxenginekv",
+      "canonical": "FAK_XENGINE_KV",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The environment-variable gate that opts an Arena into becoming the cross-engine zero-copy KV co-residence RegionBackend (the xenginekv package, #448); unset leaves blob as the default.",
+      "distinction": "It gates the cross-engine KV arena residency, distinct from FAK_INKERNEL_KVMMU which gates the in-kernel KV-MMU slot reclaim.",
+      "distinct_from": [
+        "xenginekv",
+        "FAK_INKERNEL_KVMMU"
+      ],
+      "aliases": [],
+      "grounding": "fakxenginekv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-engineid",
+      "canonical": "EngineID (registry)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The string id that keys an inference engine driver in the abi engine registry (e.g. bench.Options.EngineID, the const EngineID=\"inkernel\"); New(engineID) binds a kernel to it.",
+      "distinction": "It NAMES which registered engine driver to dispatch to, distinct from EngineModel (the model the chosen engine runs) and from EngineRoute (the locality-leading route string).",
+      "distinct_from": [
+        "engine",
+        "engines"
+      ],
+      "aliases": [],
+      "grounding": "engineid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-enginecalls",
+      "canonical": "EngineCalls (counter)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The coordinator-kernel counter (kernel.Counters.EngineCalls, mirrored into agent/gateway metrics) of tool-call reaps that actually dispatched to the engine rather than being served from the vDSO.",
+      "distinction": "It counts REAL engine dispatches, the complement of VDSOHits (calls served locally without an engine round-trip).",
+      "distinct_from": [
+        "VDSOHits (counter)",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "enginecalls",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-enginemodel",
+      "canonical": "EngineModel (provenance)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The model identifier the benchmark engine ran under, recorded in bench.Options.EngineModel and stamped into the report Provenance.",
+      "distinction": "It records WHICH model the engine executed, distinct from EngineID which names the engine driver itself.",
+      "distinct_from": [
+        "EngineID (registry)",
+        "model"
+      ],
+      "aliases": [],
+      "grounding": "enginemodel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-engineroute",
+      "canonical": "EngineRoute (modelroute)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The modelroute.Target method returning the locality-leading route string (e.g. \"local:...\" / \"anthropic:...\") that the host stamps into abi.ToolCall.Engine for residency classification.",
+      "distinction": "It is the per-target ROUTE string (locality + upstream), distinct from EngineID (the registry key) and never carries credential material.",
+      "distinct_from": [
+        "modelroute",
+        "EngineID (registry)"
+      ],
+      "aliases": [],
+      "grounding": "engineroute",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-registerengine",
+      "canonical": "RegisterEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The abi registry function that adds an inference engine driver keyed by id (local/remote/multi); modelengine and others call it from init().",
+      "distinction": "It registers a general inference EngineDriver, distinct from RegisterReadEngine which registers the specific working-tree-confined read engine.",
+      "distinct_from": [
+        "RegisterReadEngine",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "registerengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-registerreadengine",
+      "canonical": "RegisterReadEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "agent.RegisterReadEngine registers the working-tree-confined read engine under FakReadEngineID, so a cache-missed fak_read dispatches to a real confined disk read.",
+      "distinction": "It registers ONE specific read engine (fakread), a specialization of the general RegisterEngine.",
+      "distinct_from": [
+        "RegisterEngine",
+        "FakReadEngineID"
+      ],
+      "aliases": [],
+      "grounding": "registerreadengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakreadengineid",
+      "canonical": "FakReadEngineID",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The const engine id \"fakread\" that fak_read binds on its abi.ToolCall so the kernel routes the call to the confined read engine.",
+      "distinction": "It is the id of the read engine specifically, distinct from the general-purpose engine id EngineID (e.g. \"inkernel\").",
+      "distinct_from": [
+        "RegisterReadEngine",
+        "EngineID (registry)"
+      ],
+      "aliases": [],
+      "grounding": "fakreadengineid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-lifecycleengine",
+      "canonical": "LifecycleEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The optional abi extension interface (admit -> per-step -> stream -> reclaim) an engine implements when it advertises EngineLifecycleCap, giving the gateway a streaming decode lifecycle.",
+      "distinction": "It is the optional streaming-lifecycle extension of an EngineDriver, not the base engine itself nor the per-step EngineToken.",
+      "distinct_from": [
+        "engine",
+        "EngineToken"
+      ],
+      "aliases": [],
+      "grounding": "lifecycleengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-enginerequest",
+      "canonical": "EngineRequest",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "One in-flight decode admitted to a LifecycleEngine; its Tokens() channel streams the decode steps.",
+      "distinction": "It is one admitted decode in flight, distinct from EngineToken (a single streamed step within it).",
+      "distinct_from": [
+        "LifecycleEngine",
+        "EngineToken"
+      ],
+      "aliases": [],
+      "grounding": "enginerequest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-enginetoken",
+      "canonical": "EngineToken",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "One streamed decode step from a LifecycleEngine \u2014 the generated token id plus optional bytes.",
+      "distinction": "It is a single decode step, distinct from EngineRequest (the whole in-flight decode that emits a stream of them).",
+      "distinct_from": [
+        "EngineRequest",
+        "LifecycleEngine"
+      ],
+      "aliases": [],
+      "grounding": "enginetoken",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-enginelifecyclecap",
+      "canonical": "EngineLifecycleCap",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The abi.Capability (\"engine.lifecycle.v1\") an engine advertises from Caps() when it implements LifecycleEngine, so a consumer can detect lifecycle support.",
+      "distinction": "It is the advertised capability flag, distinct from the LifecycleEngine interface it gates discovery of.",
+      "distinct_from": [
+        "LifecycleEngine"
+      ],
+      "aliases": [],
+      "grounding": "enginelifecyclecap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-gatewaymetrics",
+      "canonical": "gatewayMetrics (registry)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The gateway's in-process metrics aggregator struct (constructed by newGatewayMetrics) that tallies HTTP, operation, inference, and in-kernel-OOM counters and renders the /metrics Prometheus exposition.",
+      "distinction": "It is the gateway-scoped metrics state object, distinct from the individual fak_gateway_* metric series it emits and from the coordinator kernel's Counters.",
+      "distinct_from": [
+        "gateway",
+        "kernel"
+      ],
+      "aliases": [
+        "newgatewaymetrics"
+      ],
+      "grounding": "gatewaymetrics",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-gatewayurl",
+      "canonical": "GatewayURL (field)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The gateway base URL a client is pointed at \u2014 e.g. the dropin child's loopback gateway_url and computeTarget.GatewayURL for a gateway-kind compute target.",
+      "distinction": "It is the URL value addressing a gateway, distinct from GatewayAddr (the host:port a Planner integrator binds to) and the gateway subsystem itself.",
+      "distinct_from": [
+        "gateway",
+        "GatewayAddr (swebench)"
+      ],
+      "aliases": [],
+      "grounding": "gatewayurl",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-gatewayaddr",
+      "canonical": "GatewayAddr (swebench)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The fak gateway address (host:port, default localhost:8080) the swebench integrator uses to build a Planner against a running gateway.",
+      "distinction": "It is the swebench host:port used to construct a client, distinct from GatewayURL (the full URL form) and from targetGatewayURL (the compute-target KIND).",
+      "distinct_from": [
+        "GatewayURL (field)",
+        "gateway"
+      ],
+      "aliases": [],
+      "grounding": "gatewayaddr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-targetgatewayurl",
+      "canonical": "targetGatewayURL (compute kind)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The compute-target kind constant (\"gateway-url\") in cmd/fak/computetarget.go selecting an existing fak/OpenAI-compatible gateway reached over HTTP as the compute backend.",
+      "distinction": "It is the TARGET-KIND tag choosing a remote gateway endpoint, distinct from GatewayURL (the URL value such a target carries).",
+      "distinct_from": [
+        "GatewayURL (field)",
+        "gateway"
+      ],
+      "aliases": [],
+      "grounding": "targetgatewayurl",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewaykey",
+      "canonical": "FAK_GATEWAY_KEY",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The environment variable holding the gateway bearer credential that fak CLI subcommands send when a gateway runs with --require-key.",
+      "distinction": "It is the credential ENV var (the secret's holder), distinct from defaultGatewayBearerToken() which RESOLVES its value via the secret loader.",
+      "distinct_from": [
+        "defaultGatewayBearerToken",
+        "gateway"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewaykey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-defaultgatewaybearertoken",
+      "canonical": "defaultGatewayBearerToken",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The cmd/fak helper that resolves the default bearer credential (from FAK_GATEWAY_KEY via the secret loader) used as the --key default across fak CLI subcommands.",
+      "distinction": "It is the RESOLVER returning the token value, distinct from FAK_GATEWAY_KEY which is the env var it reads.",
+      "distinct_from": [
+        "FAK_GATEWAY_KEY",
+        "gateway"
+      ],
+      "aliases": [],
+      "grounding": "defaultgatewaybearertoken",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgateway",
+      "canonical": "FakGateway (browseraction)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The browseraction contract field naming the fak gateway base URL the browser-action agent is pointed at (e.g. http://localhost:8080/v1).",
+      "distinction": "It is a contract FIELD carrying a gateway URL for the browser-action recipe, not the gateway subsystem itself.",
+      "distinct_from": [
+        "gateway",
+        "GatewayURL (field)"
+      ],
+      "aliases": [],
+      "grounding": "fakgateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-statusbadgateway",
+      "canonical": "StatusBadGateway (HTTP 502)",
+      "family": "gateway-engine",
+      "kind": "doc-term",
+      "definition": "The net/http StatusBadGateway (502) constant the gateway returns when an upstream provider is unreachable, returns an unrecognized tool-call format, or fails cache invalidation.",
+      "distinction": "It is the stdlib HTTP 502 status signaling an UPSTREAM failure, NOT the fak gateway subsystem; a 502 reports the provider erred, not that fak's gateway is down.",
+      "distinct_from": [
+        "gateway"
+      ],
+      "aliases": [],
+      "grounding": "statusbadgateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewayup",
+      "canonical": "fak_gateway_up",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus gauge that is 1 when the fak gateway process is scrapeable.",
+      "distinction": "It reports process liveness only, distinct from fak_gateway_time_to_ready_seconds which measures boot-to-ready latency.",
+      "distinct_from": [
+        "gatewayMetrics (registry)"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewayup",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewaybuildinfo",
+      "canonical": "fak_gateway_build_info",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus gauge (value 1) carrying static fak gateway build/runtime labels (version, engine, model, vdso).",
+      "distinction": "It is a static label-carrier gauge, not a dynamic counter like fak_gateway_http_requests_total.",
+      "distinct_from": [
+        "gatewayMetrics (registry)"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewaybuildinfo",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewayhttprequeststotal",
+      "canonical": "fak_gateway_http_requests_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus counter of HTTP requests the gateway served, labeled by route, method, and status.",
+      "distinction": "It counts request COMPLETIONS by status; fak_gateway_http_request_duration_seconds measures their latency and fak_gateway_inflight_requests counts those still executing.",
+      "distinct_from": [
+        "fak_gateway_http_request_duration_seconds",
+        "gatewayMetrics (registry)"
+      ],
+      "aliases": [
+        "gatewayhttprequest"
+      ],
+      "grounding": "fakgatewayhttprequeststotal",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewayhttprequestdurationseconds",
+      "canonical": "fak_gateway_http_request_duration_seconds",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus histogram of gateway HTTP request latency, labeled by route, method, and status.",
+      "distinction": "It measures request LATENCY, distinct from fak_gateway_http_requests_total which only counts requests.",
+      "distinct_from": [
+        "fak_gateway_http_requests_total"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewayhttprequestdurationseconds",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewayoperationstotal",
+      "canonical": "fak_gateway_operations_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus counter of gateway kernel operations labeled by operation, verdict, reason, disposition, and deciding adjudicator (by).",
+      "distinction": "It counts adjudicated KERNEL operations (the same total the exit summary reports), distinct from fak_gateway_http_requests_total which counts raw HTTP requests.",
+      "distinct_from": [
+        "fak_gateway_http_requests_total",
+        "fak_kernel_decisions_total"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewayoperationstotal",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewayinflightrequests",
+      "canonical": "fak_gateway_inflight_requests",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus gauge of HTTP requests currently executing inside the gateway.",
+      "distinction": "It is a point-in-time in-flight GAUGE, distinct from the cumulative fak_gateway_http_requests_total counter.",
+      "distinct_from": [
+        "fak_gateway_http_requests_total"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewayinflightrequests",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewaytimetoreadyseconds",
+      "canonical": "fak_gateway_time_to_ready_seconds",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus gauge of total wall-clock from process start to the gateway becoming ready to serve (0 until ready).",
+      "distinction": "It is the total boot-to-ready time, distinct from fak_gateway_startup_phase_duration_seconds which breaks that time into named phases.",
+      "distinct_from": [
+        "fak_gateway_startup_phase_duration_seconds",
+        "fak_gateway_up"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewaytimetoreadyseconds",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewaystartupphasedurationseconds",
+      "canonical": "fak_gateway_startup_phase_duration_seconds",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus gauge of each named gateway boot phase's wall-clock cost (flag-parse, policy-load, planner-init, vdso-config, kernel-init, listener-bind, model-load).",
+      "distinction": "It is the PER-PHASE breakdown, distinct from fak_gateway_time_to_ready_seconds (the total) and fak_gateway_startup_unaccounted_seconds (the residual).",
+      "distinct_from": [
+        "fak_gateway_time_to_ready_seconds",
+        "fak_gateway_startup_unaccounted_seconds"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewaystartupphasedurationseconds",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakgatewaystartupunaccountedseconds",
+      "canonical": "fak_gateway_startup_unaccounted_seconds",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus gauge of boot wall-clock not explained by any named startup phase (time_to_ready minus the sum of phase durations); near-zero means startup is fully instrumented.",
+      "distinction": "It is the RESIDUAL un-instrumented boot time, distinct from the per-phase fak_gateway_startup_phase_duration_seconds.",
+      "distinct_from": [
+        "fak_gateway_startup_phase_duration_seconds",
+        "fak_gateway_time_to_ready_seconds"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewaystartupunaccountedseconds",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-fakkerneldecisionstotal",
+      "canonical": "fak_kernel_decisions_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus counter of the gateway's passive rung-decision distribution (rungObs), labeled by rung, kind, and reason.",
+      "distinction": "It counts KERNEL adjudication-rung decisions, distinct from fak_gateway_operations_total (operations by verdict) and the http_requests counter.",
+      "distinct_from": [
+        "fak_gateway_operations_total",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "fakkerneldecisionstotal",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsohits",
+      "canonical": "VDSOHits (counter)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The coordinator-kernel counter of tool calls served from the vDSO fast path without dispatching to the engine.",
+      "distinction": "It counts locally-served calls, the complement of EngineCalls; it is a raw COUNT, not the VDSOHitRate ratio.",
+      "distinct_from": [
+        "EngineCalls (counter)",
+        "vdso"
+      ],
+      "aliases": [
+        "vdsohit"
+      ],
+      "grounding": "vdsohits",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsohitrate",
+      "canonical": "VDSOHitRate (ratio)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The fraction of kernel submissions served by the vDSO fast path (VDSOHits/Calls), surfaced as bench.Report.VDSOHitRate and the fak_gateway_vdso_hit_ratio / fak_vdso_hit_rate gauges.",
+      "distinction": "It is the RATIO, distinct from VDSOHits which is the absolute hit count.",
+      "distinct_from": [
+        "VDSOHits (counter)"
+      ],
+      "aliases": [],
+      "grounding": "vdsohitrate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-setvdso",
+      "canonical": "SetVDSO",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The Kernel method that toggles the vDSO fast path on/off (the --vdso ablation, unit 5); off makes every call fall through to adjudication + engine.",
+      "distinction": "It is the SETTER that flips the path, distinct from VDSOEnabled which reports the current state and from the vdsoOff field it writes.",
+      "distinct_from": [
+        "VDSOEnabled",
+        "vdso"
+      ],
+      "aliases": [],
+      "grounding": "setvdso",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsoenabled",
+      "canonical": "VDSOEnabled",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The Kernel method reporting whether the vDSO fast path is currently active.",
+      "distinction": "It READS the fast-path state, distinct from SetVDSO which toggles it.",
+      "distinct_from": [
+        "SetVDSO",
+        "vdso"
+      ],
+      "aliases": [],
+      "grounding": "vdsoenabled",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsooff",
+      "canonical": "vdsoOff (ablation)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The Kernel field / `--vdso=off` ablation flag that, when set, makes Submit skip the FastPath entirely \u2014 the 'off' arm of the A/B benchmark.",
+      "distinction": "It is the OFF ablation state, the opposite of the vdsoOn benchmark arm; SetVDSO writes it.",
+      "distinct_from": [
+        "vdsoOn (arm)",
+        "SetVDSO"
+      ],
+      "aliases": [],
+      "grounding": "vdsooff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsoon",
+      "canonical": "vdsoOn (arm)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The vDSO-enabled benchmark arm \u2014 the RunArm vdsoOn=true call labeled \"vdso_on\" that serves repeats from the fast path.",
+      "distinction": "It is the ON arm of the bench A/B, the opposite of vdsoOff; both come from the same RunArm.",
+      "distinct_from": [
+        "vdsoOff (ablation)",
+        "vdso"
+      ],
+      "aliases": [],
+      "grounding": "vdsoon",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsopure",
+      "canonical": "VDSOPure (tier-1)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The turnbench ClassBreakdown count of tier-1 'pure local serve' vDSO hits (e.g. deterministic calculate calls).",
+      "distinction": "It is the tier-1 pure-compute serve, distinct from VDSODedup (tier-2 duplicate-read cache hit) and VDSOStatic (tier-3 static serve).",
+      "distinct_from": [
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "vdsopure",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsodedup",
+      "canonical": "VDSODedup (tier-2)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The turnbench ClassBreakdown count of tier-2 vDSO hits served from the content cache on a duplicate read (the 'vdso_tier2' source).",
+      "distinction": "It is the tier-2 duplicate-read cache hit, distinct from VDSOPure (tier-1 pure serve) and VDSOStatic (tier-3 static serve).",
+      "distinct_from": [
+        "VDSOPure (tier-1)",
+        "VDSOStatic (tier-3)"
+      ],
+      "aliases": [
+        "vdsotier2"
+      ],
+      "grounding": "vdsodedup",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-gateway-engine-vdsostatic",
+      "canonical": "VDSOStatic (tier-3)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The turnbench ClassBreakdown count of tier-3 'static local serve' vDSO hits (e.g. list_all_airports).",
+      "distinction": "It is the tier-3 static serve, distinct from VDSOPure (tier-1) and VDSODedup (tier-2 dedup).",
+      "distinct_from": [
+        "VDSOPure (tier-1)",
+        "VDSODedup (tier-2)"
+      ],
+      "aliases": [],
+      "grounding": "vdsostatic",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,917 @@
+{
+  "rows": [
+    {
+      "id": "x-plan-httpplanner",
+      "canonical": "HTTPPlanner (agent client)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent's HTTPPlanner is the single outbound chat-completions HTTP client that implements agent.Planner, speaking the OpenAI/Anthropic/Gemini wire to a live upstream model.",
+      "distinction": "It is the network-backed planner that calls a remote model, NOT the in-kernel InKernelPlanner that decodes a local GGUF nor the offline MockPlanner.",
+      "distinct_from": [
+        "plan-planner",
+        "InKernelPlanner (agent)"
+      ],
+      "aliases": [
+        "newhttpplanner",
+        "newproviderhttpplanner"
+      ],
+      "grounding": "httpplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-mockplanner",
+      "canonical": "MockPlanner (offline)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent/mock.go's MockPlanner is a deterministic, offline agent.Planner that emulates a real planner with a fixed scripted sequence, used in CI and as cmd/fak/main.go's fallback.",
+      "distinction": "It is scripted and offline, NOT a live network planner (HTTPPlanner) and NOT the internal/agenttest ScriptedPlanner test fixture.",
+      "distinct_from": [
+        "HTTPPlanner (agent client)"
+      ],
+      "aliases": [
+        "newmockplanner"
+      ],
+      "grounding": "mockplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-streamingplanner",
+      "canonical": "StreamingPlanner (capability)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent's StreamingPlanner is the optional interface a Planner advertises (CompleteStream/StreamingSupported) when it can emit completion tokens incrementally.",
+      "distinction": "It is a capability interface a planner may also implement, NOT a concrete planner like HTTPPlanner nor the gateway's Anthropic SSE bridge streamAnthropicPlannerLive.",
+      "distinct_from": [
+        "HTTPPlanner (agent client)"
+      ],
+      "aliases": [],
+      "grounding": "streamingplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-codeplanner",
+      "canonical": "CodePlanner (swebench)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "swebench's CodePlanner is the domain interface for a code-edit planner over ChatMessage/ChatTool; cmd/fak's httpCodePlanner adapts an agent.HTTPPlanner to it.",
+      "distinction": "It is the swebench-specific code-edit planner contract, NOT the generic agent.Planner nor the fleet wrapper FleetPlanner.",
+      "distinct_from": [
+        "HTTPPlanner (agent client)",
+        "FleetPlanner (swebench fleet)"
+      ],
+      "aliases": [],
+      "grounding": "codeplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-fleetplanner",
+      "canonical": "FleetPlanner (swebench fleet)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak's newFleetPlanner (and the swebench config FleetPlanner field) builds the swebench fleet runner's planner from a gateway address and model.",
+      "distinction": "It is the fleet-runner's per-worker planner built over a gateway, NOT the single CodePlanner interface it satisfies.",
+      "distinct_from": [
+        "CodePlanner (swebench)"
+      ],
+      "aliases": [
+        "newfleetplanner"
+      ],
+      "grounding": "fleetplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planturn",
+      "canonical": "SessionPlanner.PlanTurn (ctxplan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent's SessionPlanner.PlanTurn ingests new messages incrementally, then probes a bounded candidate set to produce a ctxplan resident-context Plan for the turn.",
+      "distinction": "It plans the resident CONTEXT WINDOW for a session, NOT the chat completion itself (HTTPPlanner) nor a memory-fit plan.",
+      "distinct_from": [
+        "plan-planner",
+        "HTTPPlanner (agent client)"
+      ],
+      "aliases": [
+        "ctxplansession"
+      ],
+      "grounding": "planturn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-sessionplanners",
+      "canonical": "sessionPlanners (gateway cache)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's sessionPlanners is the Server's bounded map holding one persistent agent.SessionPlanner per session trace id, minted lazily by sessionPlannerFor.",
+      "distinction": "It is the gateway-side per-trace CACHE of planners, NOT the agent.SessionPlanner type or its PlanTurn method.",
+      "distinct_from": [
+        "SessionPlanner.PlanTurn (ctxplan)"
+      ],
+      "aliases": [
+        "sessionplannerfor"
+      ],
+      "grounding": "sessionplanners",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-ctxplanseam",
+      "canonical": "CtxViewPlanner (ctxplan seam)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent's CtxViewPlanner is the guarded seam (gated by FAK_CTXPLAN_SEAM) whose PlanTurn lowers a turn's running messages into a lossless ctxplan View; disabled, it is an inert identity.",
+      "distinction": "It is the agent-side on/off seam into the ctxplan engine, NOT the gateway-side hook maybePlanMessages that drives it.",
+      "distinct_from": [
+        "maybePlanMessages (gateway)",
+        "SessionPlanner.PlanTurn (ctxplan)"
+      ],
+      "aliases": [
+        "fakctxplanseam"
+      ],
+      "grounding": "ctxplanseam",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-maybeplanmessages",
+      "canonical": "maybePlanMessages (gateway)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's Server.maybePlanMessages is the per-request hook that, when the ctxplan seam is enabled, rewrites the forwarded message history via the per-session planner; otherwise it returns the history byte-for-byte unchanged.",
+      "distinction": "It is the gateway integration hook into the ctxplan seam, NOT the agent-side CtxViewPlanner type it delegates to.",
+      "distinct_from": [
+        "CtxViewPlanner (ctxplan seam)"
+      ],
+      "aliases": [],
+      "grounding": "maybeplanmessages",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-memoryplan",
+      "canonical": "MemoryPlan (compute)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute's MemoryPlan is the classed form of a 'will this fit?' estimate \u2014 a list of MemoryDemand rows split into device- and host-scoped totals.",
+      "distinction": "It is a memory-capacity plan checked against a backend, NOT a context-window plan (ctxplan) nor a routed model plan (modelroute).",
+      "distinct_from": [
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "memoryplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-fitsmemoryplan",
+      "canonical": "FitsMemoryPlan (compute)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute's FitsMemoryPlan returns a fail-open fit verdict for a classed MemoryPlan, checking device-scoped bytes against the device probe and host-scoped bytes against the host probe.",
+      "distinction": "It is the pure fit VERDICT over a MemoryPlan, NOT the MemoryPlan data itself nor the erroring wrapper RefuseMemoryPlanIfTooBig.",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "fitsmemoryplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-refusememoryplaniftoobig",
+      "canonical": "RefuseMemoryPlanIfTooBig (compute)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute's RefuseMemoryPlanIfTooBig turns a too-big MemoryPlan into an error (refusal) against a backend's device headroom, used by serve and the in-kernel planner before admitting a request.",
+      "distinction": "It is the refusing wrapper that ERRORS, NOT the pure verdict FitsMemoryPlan.",
+      "distinct_from": [
+        "FitsMemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "refusememoryplaniftoobig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-estimateloadmemoryplan",
+      "canonical": "EstimateLoadMemoryPlan (ggufload)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ggufload's WeightSource.EstimateLoadMemoryPlan builds a classed compute.MemoryPlan for loading a GGUF model's weights grouped by dtype; the F32-resident and CPU-offload-experts variants specialise it.",
+      "distinction": "It is the WEIGHT-load estimator that produces a MemoryPlan, NOT compute's KV/transient estimators (EstimateKVStoreMemoryPlan).",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [
+        "estimatef32loadmemoryplan",
+        "estimatecpuoffloadexpertsmemoryplan"
+      ],
+      "grounding": "estimateloadmemoryplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-estimatekvstorememoryplan",
+      "canonical": "EstimateKVStoreMemoryPlan (compute)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute's EstimateKVStoreMemoryPlan is the classed form of the KV-cache store estimate; EstimateHALTransientMemoryPlan is the matching transient/scratch-buffer estimator.",
+      "distinction": "These estimate KV-cache and transient scratch demands, NOT the model weight-load demand (EstimateLoadMemoryPlan in ggufload).",
+      "distinct_from": [
+        "EstimateLoadMemoryPlan (ggufload)"
+      ],
+      "aliases": [
+        "estimatehaltransientmemoryplan"
+      ],
+      "grounding": "estimatekvstorememoryplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-requestmemoryplansnapshot",
+      "canonical": "requestMemoryPlanSnapshot (gateway)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's requestMemoryPlanSnapshot is a captured record of the in-kernel planner's per-request memory plan (class/dtype demand rows), accumulated for the debug and metrics surfaces.",
+      "distinction": "It is a gateway metrics SNAPSHOT of a request's memory plan, NOT the compute.MemoryPlan type it is derived from.",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "requestmemoryplansnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-observeplannerrequestmemory",
+      "canonical": "observePlannerRequestMemory (gateway)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's Server.observePlannerRequestMemory samples the in-kernel planner's last per-request memory plan into the gateway's Prometheus gauges.",
+      "distinction": "It is the observe/sample method that publishes metrics, NOT the requestMemoryPlanSnapshot record it reads.",
+      "distinct_from": [
+        "requestMemoryPlanSnapshot (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "observeplannerrequestmemory",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plannererrorstatus",
+      "canonical": "plannerErrorStatus (gateway)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's Server.plannerErrorStatus maps an error returned by the upstream planner to an HTTP status, error code, and message for the chat/messages responses.",
+      "distinction": "It classifies a planner's ERROR into an HTTP reply, NOT the planner backend (plannerKind) nor a planner itself.",
+      "distinct_from": [
+        "plan-planner",
+        "plannerKind (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "plannererrorstatus",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plannerkind",
+      "canonical": "plannerKind (gateway)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's plannerKind classifies the /v1/chat/completions backend (in-kernel / proxy / mock) as a label for the /healthz response.",
+      "distinction": "It names WHICH backend serves, NOT the error mapping plannerErrorStatus nor a fleet replica entry.",
+      "distinct_from": [
+        "plannerErrorStatus (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "plannerkind",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plannerreplica",
+      "canonical": "PlannerReplica (gateway)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's PlannerReplica is one statically-declared upstream (Name + Planner) in a gateway fleet, consumed by the ReplicaRouter.",
+      "distinction": "It is a declared MEMBER of a fleet router, NOT the backend classifier plannerKind.",
+      "distinct_from": [
+        "plannerKind (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "plannerreplica",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-streamanthropicplannerlive",
+      "canonical": "streamAnthropicPlannerLive (gateway)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/gateway's Server.streamAnthropicPlannerLive translates a generic planner's live content stream into Anthropic /v1/messages SSE events.",
+      "distinction": "It is the gateway-side Anthropic SSE BRIDGE over a planner stream, NOT the planner's own StreamingPlanner capability interface.",
+      "distinct_from": [
+        "StreamingPlanner (capability)"
+      ],
+      "aliases": [],
+      "grounding": "streamanthropicplannerlive",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-composeplannerbudget",
+      "canonical": "ComposePlannerBudget (session pace)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/session's Pace.ComposePlannerBudget scales a base resident-context window down by the Pace throttle ratio, floored at base/MinPlannerBudgetDivisor.",
+      "distinction": "It derives the per-session planner BUDGET from a throttle, NOT the planner itself nor a cache warm-keep budget (PlanWarmBudget).",
+      "distinct_from": [
+        "SessionPlanner.PlanTurn (ctxplan)",
+        "PlanWarmBudget (vcachegov)"
+      ],
+      "aliases": [],
+      "grounding": "composeplannerbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plannercomputecum",
+      "canonical": "PlannerComputeCum (ctxplan scaling)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ctxplan's PlannerComputeCum is the cumulative O(N^2) re-planning WORK through turn N in the Planned regime (computed by cumPlannerCompute) \u2014 a scaling-curve cost proxy.",
+      "distinction": "It is the QUADRATIC full-scan re-planning cost, NOT the index-bounded linear version IndexBoundedPlannerCompute.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [
+        "cumplannercompute"
+      ],
+      "grounding": "plannercomputecum",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-indexboundedplannercompute",
+      "canonical": "IndexBoundedPlannerCompute (ctxplan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ctxplan's IndexBoundedPlannerCompute is the cumulative re-planning work through turn N when each turn scores only a bounded candidate set \u2014 Theta(c*N), flattening the quadratic cumPlannerCompute.",
+      "distinction": "It is the BOUNDED linear re-planning cost, NOT the quadratic PlannerComputeCum it flattens.",
+      "distinct_from": [
+        "PlannerComputeCum (ctxplan scaling)"
+      ],
+      "aliases": [],
+      "grounding": "indexboundedplannercompute",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plancells",
+      "canonical": "PlanCells (ctxplan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ctxplan's Index.PlanCells selects spans within a token Budget from a Forecast to produce a resident-context Plan.",
+      "distinction": "It is the flat span-budget planner, NOT the four-area PlanLayout nor a cost metric.",
+      "distinct_from": [
+        "PlanLayout (ctxplan)",
+        "PlannerComputeCum (ctxplan scaling)"
+      ],
+      "aliases": [],
+      "grounding": "plancells",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planlayout",
+      "canonical": "PlanLayout (ctxplan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ctxplan's Index.PlanLayout plans an O(1) resident view using the flexible four-area layout (e.g. Recent/Deep areas with per-area policies).",
+      "distinction": "It plans by LAYOUT AREAS, NOT the flat span-budget selection of PlanCells.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "planlayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-precisionplanned",
+      "canonical": "PrecisionPlanned (ctxplan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ctxplan's PrecisionPlanned ('planned') is the span precision meaning a normal candidate that may be selected exactly or elided by the optimizer.",
+      "distinction": "It is a per-span precision enum value, NOT PrecisionExact/PrecisionPointer and NOT a planning function.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "precisionplanned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plannedtokens",
+      "canonical": "PlannedTokens (inkernel memory)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent's PlannedTokens is the prompt+max-new token count the in-kernel planner's per-request memory plan is sized for, recorded on the request-memory observation.",
+      "distinction": "It is the token count a MEMORY plan budgets for, NOT a ctxplan span precision (PrecisionPlanned).",
+      "distinct_from": [
+        "PrecisionPlanned (ctxplan)",
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "plannedtokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-maxcandidates",
+      "canonical": "MaxCandidates (ctxplan probe)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ctxplan's ProbeOptions.MaxCandidates (default DefaultMaxCandidates) caps the bounded candidate set the per-turn probe scores, keeping re-planning O(1) per turn.",
+      "distinction": "It is the probe-set SIZE cap, NOT a benchmark candidate task nor a routing candidate.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [
+        "defaultmaxcandidates"
+      ],
+      "grounding": "maxcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-candidatetaskids",
+      "canonical": "CandidateTaskIDs (browseraction)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/browseraction's CandidateTaskIDs is the list of benchmark task ids selected for an action-mediation contract, alongside CandidateSuite and CandidateTasks.",
+      "distinction": "These are benchmark task-SELECTION candidates, NOT a ctxplan probe candidate (MaxCandidates) nor a routing candidate.",
+      "distinct_from": [
+        "candidate-planner",
+        "MaxCandidates (ctxplan probe)"
+      ],
+      "aliases": [
+        "candidatesuite",
+        "candidatetasks"
+      ],
+      "grounding": "candidatetaskids",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-contracttaskcandidate",
+      "canonical": "ContractTaskCandidate (browseraction)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/browseraction's ContractTaskCandidate is one task record in a contract's candidate set (built by contractTaskCandidates; candidateTaskDetail renders its count).",
+      "distinction": "It is a single candidate TASK record, NOT the id-list field CandidateTaskIDs.",
+      "distinct_from": [
+        "CandidateTaskIDs (browseraction)"
+      ],
+      "aliases": [
+        "contracttaskcandidates",
+        "candidatetaskdetail"
+      ],
+      "grounding": "contracttaskcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-candidatestokencount",
+      "canonical": "CandidatesTokenCount (Gemini usage)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agent's CandidatesTokenCount is the Gemini usage-metadata field counting tokens across the model's response candidates, mapped into CompletionTokens.",
+      "distinction": "Its 'candidate' is a Gemini RESPONSE candidate (an output), NOT a plan/routing candidate.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "candidatestokencount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-topologycandidate",
+      "canonical": "TopologyCandidate (turnbench)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/turnbench's TopologyCandidate is a scored multi-agent topology shape produced by the topology search.",
+      "distinction": "It is a benchmark TOPOLOGY genome, NOT a policy-search genome (SearchCandidate) nor a routing candidate.",
+      "distinct_from": [
+        "candidate-planner",
+        "SearchCandidate (turnbench)"
+      ],
+      "aliases": [],
+      "grounding": "topologycandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-searchcandidate",
+      "canonical": "SearchCandidate (turnbench)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/turnbench's SearchCandidate is one searched policy genome plus its measured fitness in the policy search.",
+      "distinction": "It is a POLICY-search genome, NOT the topology-search TopologyCandidate.",
+      "distinct_from": [
+        "TopologyCandidate (turnbench)"
+      ],
+      "aliases": [],
+      "grounding": "searchcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-pythoncandidates",
+      "canonical": "pythonCandidates (webbench)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/webbench's pythonCandidates returns the ordered list of python interpreter names/paths to probe when locating a usable interpreter.",
+      "distinction": "Its 'candidates' are filesystem interpreter choices, NOT plan/routing candidates.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "pythoncandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plantemplate",
+      "canonical": "PlanTemplate (cachemeta)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/cachemeta's PlanTemplate is an advisory, reusable plan-template cache artifact keyed by intent (media type MediaPlanTemplate, carrying a PlanSchemaDigest), reused across turns like a prepared statement.",
+      "distinction": "It is a reusable AGENT-plan cache template (a HIT must re-enter plancfi), NOT a memory-fit plan (MemoryPlan) nor a ctxplan view.",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [
+        "mediaplantemplate",
+        "planschema"
+      ],
+      "grounding": "plantemplate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-plancfi",
+      "canonical": "plancfi (package)",
+      "family": "plan",
+      "kind": "subsystem",
+      "definition": "internal/plancfi is control-flow integrity for an agent's PLAN \u2014 a stateful per-trace adjudicator that refuses (or escalates) a tool call that deviates from the operator-approved plan.",
+      "distinction": "It ENFORCES conformance of tool calls to an approved plan (a security gate), NOT a planner that produces a plan, and NOT a reusable plan cache (PlanTemplate).",
+      "distinct_from": [
+        "plan-planner",
+        "PlanTemplate (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "plancfi",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-buildplan",
+      "canonical": "BuildPlan (action planner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "BuildPlan is the verb-named function (in internal/dogfoodissues and internal/stopfailure) that diffs inputs into a concrete list of actions \u2014 e.g. create-vs-update GitHub issues, or stale-session resets.",
+      "distinction": "It builds an ACTION list from a diff, NOT a reusable plan cache (PlanTemplate) nor a context-window plan (PlanCells).",
+      "distinct_from": [
+        "PlanTemplate (cachemeta)",
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "buildplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planreport",
+      "canonical": "PlanReport (nightrun)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/nightrun's PlanReport is the stable --json shape emitted by `fak nightrun plan` \u2014 the ranked overnight collection-task plan.",
+      "distinction": "It is the JSON REPORT of the nightrun plan, NOT the BuildPlan action builder.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [],
+      "grounding": "planreport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planfor",
+      "canonical": "PlanFor (dropin)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/dropin's PlanFor composes the drop-in resolution plan for a named CLI agent (claude/codex/...) against a gateway, autodetecting the provider.",
+      "distinction": "It plans how to WIRE a drop-in CLI to fak, NOT an issue/action plan (BuildPlan) nor a context plan.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [],
+      "grounding": "planfor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planplacementfordevice",
+      "canonical": "PlanPlacementForDevice (engine)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/engine's PlanPlacementForDevice plans a cachemeta placement decision (keep / demote / evict) for a request against the device that actually exists and its resident bytes.",
+      "distinction": "It plans a per-device PLACEMENT decision, NOT a memory-fit plan (MemoryPlan) nor fleet-reuse economics (PlanFleetReuse).",
+      "distinct_from": [
+        "MemoryPlan (compute)",
+        "PlanFleetReuse (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "planplacementfordevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planfleetreuse",
+      "canonical": "PlanFleetReuse (cachemeta)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/cachemeta's PlanFleetReuse computes the three-way fleet economics for one hot prefix shared across the fleet (a deterministic, payload-free calculation).",
+      "distinction": "It plans FLEET-wide reuse of a shared prefix, NOT a single device's placement (PlanPlacementForDevice).",
+      "distinct_from": [
+        "PlanPlacementForDevice (engine)"
+      ],
+      "aliases": [],
+      "grounding": "planfleetreuse",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planwarmbudget",
+      "canonical": "PlanWarmBudget (vcachegov)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/vcachegov's PlanWarmBudget computes the warm-keep token budget for a cache tier from its headroom, RPM, and TTL (the keep-warm crossover).",
+      "distinction": "It is a cache WARM-KEEP budget, NOT the planner context-window budget ComposePlannerBudget.",
+      "distinct_from": [
+        "ComposePlannerBudget (session pace)"
+      ],
+      "aliases": [],
+      "grounding": "planwarmbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-partitionplan",
+      "canonical": "PartitionPlan (model)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/model's PartitionPlan (built by NewPartitionPlan) is a pipeline-partition plan that cuts a model's layers into pipeline stages.",
+      "distinction": "It is the PIPELINE-parallel inter-layer partition, NOT the tensor-parallel intra-layer sharding TPPlan.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [
+        "newpartitionplan"
+      ],
+      "grounding": "partitionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-tpplan",
+      "canonical": "TPPlan (model)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/model's NewTPPlan builds a tensor-parallel plan: the row/column tiling of a layer's matrices across TP ranks.",
+      "distinction": "It is TENSOR-parallel intra-layer sharding, NOT the pipeline-parallel layer partition PartitionPlan.",
+      "distinct_from": [
+        "PartitionPlan (model)"
+      ],
+      "aliases": [
+        "newtpplan"
+      ],
+      "grounding": "tpplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-resolvedplan",
+      "canonical": "ResolvedPlan (modelroute)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/modelroute's ResolvedPlan binds a routed Plan to concrete targets (the optional Scout plus the resolved roster), produced by Roster.ResolvePlan.",
+      "distinction": "It is a ROUTING plan bound to concrete model targets, NOT a memory plan or a context plan.",
+      "distinct_from": [
+        "plan-planner",
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "resolvedplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-replayplan",
+      "canonical": "ReplayPlan (vcachechain)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/vcachechain's ReplayPlan is the topological replay schedule (send-one-then-fan) for warming a set of cache targets, produced by PrefixDAG.TopologicalReplay.",
+      "distinction": "It is a cache-warm REPLAY schedule, NOT a routing plan (ResolvedPlan) nor the test-only ReplayPlanner.",
+      "distinct_from": [
+        "ResolvedPlan (modelroute)"
+      ],
+      "aliases": [],
+      "grounding": "replayplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-toolplan",
+      "canonical": "ToolPlan (promptmmu)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/promptmmu's ToolPlan is the spine's pure, caller-supplied verdict (e.g. a Drop set) over a request's tools, driving inbound tool compaction.",
+      "distinction": "It is a tool-COMPACTION drop plan, NOT a reusable agent plan template (PlanTemplate).",
+      "distinct_from": [
+        "PlanTemplate (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "toolplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-replan",
+      "canonical": "replan (recovery verb)",
+      "family": "plan",
+      "kind": "doc-term",
+      "definition": "In fak's refusal/routing vocabulary (cmd/fak/commit.go, internal/gateway/routing.go) to 'replan' is the recovery action when a commit or route is BLOCKED \u2014 discard the attempt and compute a fresh plan rather than retrying it verbatim.",
+      "distinction": "It is a recovery DISPOSITION an agent takes, NOT a function that builds a plan (BuildPlan).",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [],
+      "grounding": "replan",
+      "grounding_kind": "verb",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

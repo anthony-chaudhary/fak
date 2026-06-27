@@ -1,0 +1,161 @@
+{
+  "rows": [
+    {
+      "id": "x-pool-newpool",
+      "canonical": "Pool (polymodel residency)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "polymodel.NewPool (internal/polymodel/polymodel.go) constructs a model-RESIDENCY pool that keeps many prefill-warm models resident under one weight-byte budget, evicting the coldest UNPINNED model (LRU) when an admission would exceed the cap.",
+      "distinction": "Unlike pool-session's fleet-wide TOKEN-budget Pool (a shared output-token ceiling sessions draw from) or poolprofile-cachemeta's per-tier hardware POOLING profile, this pool bounds resident model WEIGHT BYTES and owns no tokens, KV, or weights \u2014 only residency plus LRU recency bookkeeping.",
+      "distinct_from": [
+        "pool-session",
+        "poolprofile-cachemeta"
+      ],
+      "aliases": [],
+      "grounding": "newpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-pool-defaultpoolprofiles",
+      "canonical": "DefaultPoolProfiles (cachemeta)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "cachemeta.DefaultPoolProfiles returns a representative PoolProfile per residency tier \u2014 HBM/DRAM/NUMA-far host-private, CXL the coherent switch-pooled zero-copy tier, disk local, remote reachable-but-copy-only \u2014 the order-of-magnitude default an operator overrides with their fabric's measured topology.",
+      "distinction": "It is the FACTORY that builds the default per-tier profile map, not the PoolProfile struct describing one tier's pooling character (poolprofile-cachemeta) and not the cross-tenant reuse gate (PoolReuseVerdict (cachemeta gate)).",
+      "distinct_from": [
+        "poolprofile-cachemeta",
+        "PoolReuseVerdict (cachemeta gate)"
+      ],
+      "aliases": [
+        "pools",
+        "pooling"
+      ],
+      "grounding": "defaultpoolprofiles",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-pool-poolreuseverdict",
+      "canonical": "PoolReuseVerdict (cachemeta gate)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "cachemeta.PoolReuseVerdict is the cross-tenant reuse trust GATE for a SHARED pool: it permits a tenant to attend a pooled cell another tenant wrote only when the cell is un-poisoned, declared shareable beyond its agent scope, adjudicated TaintTrusted, and its materialization key matches on every axis.",
+      "distinction": "It decides WHO may alias a pooled cell (the trust/scope axis), not the per-tier physical pooling character (poolprofile-cachemeta / DefaultPoolProfiles (cachemeta)) and not the fleet-economics arithmetic (PlanFleetReuse).",
+      "distinct_from": [
+        "poolprofile-cachemeta",
+        "DefaultPoolProfiles (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "poolreuseverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-pool-pooledprefilltokens",
+      "canonical": "PooledPrefillTokens (fleet-reuse compute)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "FleetReuseResult.PooledPrefillTokens (internal/cachemeta) is the prefill-token COMPUTE cost the chosen pool regime pays for one hot prefix shared by N tenants \u2014 one prefill under a reachable or fabric-shareable pool, N prefills when the tier is host-private.",
+      "distinction": "It is the COMPUTE axis (prefill tokens), distinct from its capacity-axis sibling PooledResidentBytes (fleet-reuse capacity), which counts resident bytes held rather than tokens recomputed.",
+      "distinct_from": [
+        "PooledResidentBytes (fleet-reuse capacity)",
+        "poolprofile-cachemeta"
+      ],
+      "aliases": [],
+      "grounding": "pooledprefilltokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-pool-pooledresidentbytes",
+      "canonical": "PooledResidentBytes (fleet-reuse capacity)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "FleetReuseResult.PooledResidentBytes (internal/cachemeta) is the resident-byte CAPACITY cost the chosen pool regime holds for one hot prefix shared by N tenants \u2014 ONE copy under a coherent fabric-shareable pool, N copies under a copy-only or host-private tier.",
+      "distinction": "It is the CAPACITY axis (resident bytes), distinct from its compute-axis sibling PooledPrefillTokens (fleet-reuse compute), which counts prefill tokens paid rather than bytes resident.",
+      "distinct_from": [
+        "PooledPrefillTokens (fleet-reuse compute)",
+        "poolprofile-cachemeta"
+      ],
+      "aliases": [
+        "pooled"
+      ],
+      "grounding": "pooledresidentbytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-pool-warmpoolfree",
+      "canonical": "WarmPoolFree (prewarm pollution gate)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "compute.PrewarmCandidate.WarmPoolFree is the pollution gate of the tool-latency prewarm admission decision: a bool that is true only when the lowest-eviction-priority warm KV pool has free capacity, so a WarmNow directive never displaces a demand session's resident prefix.",
+      "distinction": "This flags free capacity in the opportunistic lowest-priority KV WARM pool, not a fleet-wide token-budget pool (pool-session) or a model-residency pool (Pool (polymodel residency)).",
+      "distinct_from": [
+        "pool-session",
+        "Pool (polymodel residency)"
+      ],
+      "aliases": [],
+      "grounding": "warmpoolfree",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-pool-sharedpool",
+      "canonical": "SharedPool (fleet-benchmark catalog)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "FleetProfile.SharedPool (internal/turnbench) is a fleet-BENCHMARK knob: the number of DISTINCT shared reference reads the modeled agent fleet draws from (the shared catalog size), the parameter that makes the cross-agent dedup curve SATURATE as agent count rises.",
+      "distinction": "It is a synthetic benchmark catalog-size parameter that shapes a simulated workload, not a real memory/cache pool (poolprofile-cachemeta) or a runtime token budget (pool-session).",
+      "distinct_from": [
+        "poolprofile-cachemeta",
+        "pool-session"
+      ],
+      "aliases": [],
+      "grounding": "sharedpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-pool-cxlpooldemo",
+      "canonical": "cxlpooldemo (CXL pool demo)",
+      "family": "pool",
+      "kind": "subsystem",
+      "definition": "cmd/cxlpooldemo is a no-model, no-GPU command that proves the value of a SWITCH-POOLED multi-host shared memory tier (CXL.mem) by computing \u2014 purely over cachemeta tier/pool profiles \u2014 the three-way fleet economics (per-host private vs copy-only pool vs coherent CXL pool) and the cross-tenant trust gate.",
+      "distinction": "It is the demo DRIVER that exercises the cachemeta policy plane on deterministic profile data, not the policy plane's profile struct (poolprofile-cachemeta) or its reuse gate (PoolReuseVerdict (cachemeta gate)).",
+      "distinct_from": [
+        "poolprofile-cachemeta",
+        "PoolReuseVerdict (cachemeta gate)"
+      ],
+      "aliases": [],
+      "grounding": "cxlpooldemo",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
