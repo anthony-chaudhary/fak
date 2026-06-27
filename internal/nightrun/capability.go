@@ -1,6 +1,8 @@
 package nightrun
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,10 +74,15 @@ func ProbeLocal(root string) Capabilities {
 func probe(root string, e probeEnv) Capabilities {
 	c := Capabilities{Creds: map[string]bool{}}
 
+	// Box id: an operator-chosen FAK_BOX_ID wins (their choice to expose, like the
+	// benchmark-run machine aliases). Otherwise derive a NON-LEAKING stable id from a
+	// hash of the hostname - "box-<8hex>" - so a committed ledger row is still
+	// attributable per-machine without leaking the raw os.Hostname() into the public
+	// repo (which the PUBLIC_LEAK gate refuses; see #970).
 	c.Box = strings.TrimSpace(e.getenv("FAK_BOX_ID"))
 	if c.Box == "" {
 		if h, err := e.hostname(); err == nil {
-			c.Box = strings.TrimSpace(h)
+			c.Box = hashedBoxID(strings.TrimSpace(h))
 		}
 	}
 	if c.Box == "" {
@@ -265,4 +272,17 @@ func localCheckpointPath(run string) string {
 		}
 	}
 	return ""
+}
+
+// hashedBoxID turns a hostname into a stable, non-leaking per-box id "box-<8hex>"
+// (the first 4 bytes of sha256(hostname)). Same host => same id across runs, so the
+// ledger stays per-box attributable, but the raw hostname never reaches a committed
+// artifact (the PUBLIC_LEAK gate refuses a DESKTOP-*/host name, #970). An empty
+// hostname returns "" so the caller's "unknown-box" fallback still applies.
+func hashedBoxID(hostname string) string {
+	if hostname == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(hostname))
+	return "box-" + hex.EncodeToString(sum[:4])
 }
