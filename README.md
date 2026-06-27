@@ -50,6 +50,11 @@ saves you tokens is also where a dangerous call gets refused. That is why teams 
 need a hard security floor reach for it too (see
 [For security teams](#for-security-teams)).
 
+This is the **1-shot kernel**: `fak` adjudicates and enforces the call in one pass,
+without firing an error-code turn back to the model. A SOTA agent loop would send
+a malformed or blocked call back to the model for correction (adding a model turn);
+`fak` resolves it in the syscall itself (repair, quarantine, or deny) and pays once.
+
 ```text
 agent --> proposed tool call --> fak kernel --> allowed tool / denied call
 tool  --> raw result          --> fak kernel --> admitted context / quarantine

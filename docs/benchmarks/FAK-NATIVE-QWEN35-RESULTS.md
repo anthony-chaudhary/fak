@@ -14,8 +14,8 @@ description: "fak's own in-kernel forward pass runs the Qwen3.5/3.6 hybrid Gated
 ## Witness (reproducible)
 
 ```
-$ /tmp/fakchat -hf ~/.cache/fak-models/qwen3.5-0.8b \
-    -p "What is the capital of France? Answer in one short sentence." -n 40
+$ /tmp/fakchat --hf ~/.cache/fak-models/qwen3.5-0.8b \
+    --prompt "What is the capital of France? Answer in one short sentence." --max-new 40
 model=qwen3_5  load=1203ms  prompt_tokens=32  backend=fak in-kernel Gated-DeltaNet (f32, cacheless)
 <think>
 
@@ -47,10 +47,10 @@ OpenAI-compatible proxy, and no llama.cpp in the execution path:
 
 ```sh
 /usr/bin/time -l go -C fak run ./cmd/fakchat \
-  -gguf /Users/USER/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf \
-  -tok /Users/USER/.cache/fak-models/tokenizers/qwen3.6 \
-  -p "Say OK." \
-  -n 1
+  --gguf /Users/USER/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf \
+  --tokenizer /Users/USER/.cache/fak-models/tokenizers/qwen3.6 \
+  --prompt "Say OK." \
+  --max-new 1
 ```
 
 Observed output:
@@ -239,7 +239,7 @@ host-gated, so it is a host-bound witness, not a CI gate:
 llama-cli -m Qwen3.6-27B.q4_k_m.gguf -p "<the shared 22-token ChatML smoke prompt>" \
   -n 3 --temp 0 --top-k 1 --samplers greedy
 # fak's own decode for the same prompt:
-go run ./cmd/fakchat -gguf Qwen3.6-27B.q4_k_m.gguf -tok <tok-dir> -p "Say OK." -n 1
+go run ./cmd/fakchat --gguf Qwen3.6-27B.q4_k_m.gguf --tokenizer <tok-dir> --prompt "Say OK." --max-new 1
 ```
 
 Pinned oracle/measurement artifacts:

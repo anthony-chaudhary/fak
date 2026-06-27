@@ -11,9 +11,9 @@
 // Example:
 //
 //	go build -tags fakmetal -o fakchat ./cmd/fakchat
-//	./fakchat -hf ~/.cache/fak-models/qwen2.5-1.5b-instruct \
-//	          -tok ~/.cache/fak-models/tokenizers/qwen2.5 -metal \
-//	          -p "Explain unified memory in one sentence."
+//	./fakchat --hf ~/.cache/fak-models/qwen2.5-1.5b-instruct \
+//	          --tokenizer ~/.cache/fak-models/tokenizers/qwen2.5 --metal \
+//	          --prompt "Explain unified memory in one sentence."
 package main
 
 import (
@@ -124,10 +124,10 @@ func parseFlags() *cliFlags {
 	fl := &cliFlags{
 		hf:     flag.String("hf", "", "HuggingFace model dir (config.json + model.safetensors[.index.json])"),
 		gguf:   flag.String("gguf", "", "GGUF checkpoint path; loads through the memory-lean quant path"),
-		tokDir: flag.String("tok", "", "tokenizer dir containing tokenizer.json (default: -hf dir/cache, or GGUF sidecar tokenizer.json)"),
+		tokDir: flag.String("tokenizer", "", "tokenizer dir containing tokenizer.json (default: -hf dir/cache, or GGUF sidecar tokenizer.json)"),
 		sys:    flag.String("sys", "You are a helpful assistant.", "system prompt"),
-		prompt: flag.String("p", "", "user prompt — REQUIRED"),
-		maxNew: flag.Int("n", 256, "max new tokens to generate"),
+		prompt: flag.String("prompt", "", "user prompt — REQUIRED"),
+		maxNew: flag.Int("max-new", 256, "max new tokens to generate"),
 		metal:  flag.Bool("metal", false, "run prefill on the Metal GPU (requires -tags fakmetal; decode stays CPU Q8)"),
 		temp:   flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)"),
 		seed:   flag.Int64("seed", 1, "RNG seed for temperature sampling"),
@@ -135,14 +135,14 @@ func parseFlags() *cliFlags {
 	}
 	flag.Parse()
 
-	// Expand a leading ~ so `-hf ~/...`, `-gguf ~/...`, `-tok ~/...` open as intended
+	// Expand a leading ~ so `--hf ~/...`, `--gguf ~/...`, `--tokenizer ~/...` open as intended
 	// (Go and most shells/PowerShell don't expand it for us).
 	*fl.hf = pathutil.ExpandTilde(*fl.hf)
 	*fl.gguf = pathutil.ExpandTilde(*fl.gguf)
 	*fl.tokDir = pathutil.ExpandTilde(*fl.tokDir)
 
 	if (*fl.hf == "") == (*fl.gguf == "") || *fl.prompt == "" {
-		fmt.Fprintln(os.Stderr, "usage: fakchat (-hf <model-dir> | -gguf <model.gguf>) -p <prompt> [-tok <dir>] [-metal] [-n N] [-temp T]")
+		fmt.Fprintln(os.Stderr, "usage: fakchat (--hf <model-dir> | --gguf <model.gguf>) --prompt <prompt> [--tokenizer <dir>] [--metal] [--max-new N] [--temp T]")
 		os.Exit(2)
 	}
 	fl.q4kLoad = os.Getenv("FAK_Q4K") != ""
@@ -216,7 +216,7 @@ func loadModel(fl *cliFlags, cfg model.Config, hybrid bool, spin func(string) fu
 	return m, quantLoaded, loadMS
 }
 
-// loadTokenizer resolves the tokenizer dir (explicit -tok, the -hf dir, the qwen2.5
+// loadTokenizer resolves the tokenizer dir (explicit --tokenizer, the --hf dir, the qwen2.5
 // cache, or the GGUF sidecar) and loads tokenizer.json — exiting 2 on a missing dir and
 // 1 on a load error, exactly as the inline block did.
 func loadTokenizer(fl *cliFlags, cfg model.Config) *tokenizer.Tokenizer {
@@ -231,7 +231,7 @@ func loadTokenizer(fl *cliFlags, cfg model.Config) *tokenizer.Tokenizer {
 		} else if _, err := os.Stat(filepath.Join(filepath.Dir(*fl.gguf), "tokenizer.json")); err == nil {
 			td = filepath.Dir(*fl.gguf)
 		} else {
-			fmt.Fprintln(os.Stderr, "tokenizer: -tok is required with -gguf unless tokenizer.json is next to the GGUF")
+			fmt.Fprintln(os.Stderr, "tokenizer: --tokenizer is required with --gguf unless tokenizer.json is next to the GGUF")
 			os.Exit(2)
 		}
 	}

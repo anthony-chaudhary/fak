@@ -59,7 +59,7 @@ what makes the Apple M3 Pro good for local LLM inference."* → model opened a
 | Metal speedup                        | **2.56×**   | **1.13×**  | — |
 
 (llama.cpp `common_perf_print`; Metal: load 0.98 s. CPU peak RSS from
-`/usr/bin/time -l`. fak row: `cmd/fakchat -gguf ... -tok ... -p "Say OK." -n 1`,
+`/usr/bin/time -l`. fak row: `cmd/fakchat --gguf ... --tokenizer ... --prompt "Say OK." --max-new 1`,
 load 75.51 s, prefill 22 tokens in 40.62 s, one cached decode token in 16.25 s,
 peak RSS 25,785,204,736 bytes.)
 
@@ -127,7 +127,7 @@ peak RSS 25,785,204,736 bytes.)
   DYLD_LIBRARY_PATH=$LL $LL/llama-completion -m $GG -ngl 99 -t 6 -c 4096 -n 96 \
     -p $'<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n'
 
-  go run ./cmd/fakchat -gguf $GG -tok ~/.cache/fak-models/tokenizers/qwen3.6 \
+  go run ./cmd/fakchat --gguf $GG --tokenizer ~/.cache/fak-models/tokenizers/qwen3.6 \
     -p "Say OK." -n 1
   ```
 
