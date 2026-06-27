@@ -10,9 +10,10 @@ package metalgemm
 /*
 void mg_decode_config(int nLayers, int H, int hd, int nH, int nKV, int Im, float eps, float theta, float scale, int attnBias);
 void mg_decode_layer(int layer, int q, int k, int v, int o, int gate, int up, int down, int inNorm, int postNorm, int qb, int kb, int vb);
+void mg_decode_head(int finalNormID, int headWid, int vocab);
 void mg_decode_reset(void);
 int  mg_decode_step(const float* xEmbed, const float* Kctx, const float* Vctx, int L,
-                    float* lastPre, float* newKraw, float* newKpost, float* newV);
+                    float* lastPre, float* newKraw, float* newKpost, float* newV, float* logits);
 */
 import "C"
 
@@ -37,6 +38,13 @@ func DecodeLayer(layer, q, k, v, o, gate, up, down, inNorm, postNorm, qb, kb, vb
 		C.int(up), C.int(down), C.int(inNorm), C.int(postNorm), C.int(qb), C.int(kb), C.int(vb))
 }
 
+// DecodeHead registers the final RMSNorm vector (gW id), the Q8 LM-head weight (q8.m wid) and the
+// vocab size, so DecodeStep (when given a logits buffer) runs the final norm + vocab projection on
+// the GPU and returns logits directly — no CPU head, no post-forward round-trip. Optional.
+func DecodeHead(finalNormID, headWid, vocab int) {
+	C.mg_decode_head(C.int(finalNormID), C.int(headWid), C.int(vocab))
+}
+
 // DecodeReset clears the per-model decode topology (geometry + per-layer weight-id table). The
 // compiled pipelines are model-independent and kept.
 func DecodeReset() { C.mg_decode_reset() }
@@ -47,14 +55,21 @@ func DecodeReset() { C.mg_decode_reset() }
 // the number of cached positions (== the new token's absolute position). Returns the pre-final-norm
 // hidden [H] (caller applies final norm + head) and the new token's per-layer pre-RoPE K, post-RoPE
 // K and V [nLayers*w] (caller appends to its cache). ok is false if the backend declined.
-func DecodeStep(xEmbed, Kctx, Vctx []float32, L, nLayers, w, H int) (lastPre, newKraw, newKpost, newV []float32, ok bool) {
+// vocab > 0 (with DecodeHead registered) makes the forward also run the final norm + LM head on the
+// GPU and return logits [vocab]; vocab == 0 returns logits == nil and the caller applies the head.
+func DecodeStep(xEmbed, Kctx, Vctx []float32, L, nLayers, w, H, vocab int) (lastPre, newKpost, newV, logits []float32, ok bool) {
 	if !Available() || len(xEmbed) < H {
 		return nil, nil, nil, nil, false
 	}
 	lastPre = make([]float32, H)
-	newKraw = make([]float32, nLayers*w)
+	newKraw := make([]float32, nLayers*w) // unused (the fast Q8 decode keeps post-RoPE K/V only)
 	newKpost = make([]float32, nLayers*w)
 	newV = make([]float32, nLayers*w)
+	var lp *C.float
+	if vocab > 0 {
+		logits = make([]float32, vocab)
+		lp = (*C.float)(unsafe.Pointer(&logits[0]))
+	}
 	var kp, vp *C.float
 	if L > 0 {
 		if len(Kctx) < nLayers*L*w || len(Vctx) < nLayers*L*w {
@@ -65,9 +80,9 @@ func DecodeStep(xEmbed, Kctx, Vctx []float32, L, nLayers, w, H int) (lastPre, ne
 	}
 	r := C.mg_decode_step((*C.float)(unsafe.Pointer(&xEmbed[0])), kp, vp, C.int(L),
 		(*C.float)(unsafe.Pointer(&lastPre[0])), (*C.float)(unsafe.Pointer(&newKraw[0])),
-		(*C.float)(unsafe.Pointer(&newKpost[0])), (*C.float)(unsafe.Pointer(&newV[0])))
+		(*C.float)(unsafe.Pointer(&newKpost[0])), (*C.float)(unsafe.Pointer(&newV[0])), lp)
 	if r != 1 {
 		return nil, nil, nil, nil, false
 	}
-	return lastPre, newKraw, newKpost, newV, true
+	return lastPre, newKpost, newV, logits, true
 }

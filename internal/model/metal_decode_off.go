@@ -8,4 +8,4 @@ package model
 
 func (m *Model) metalDecodeConfig() bool { return false }
 
-func (s *Session) metalDecodeStepQ8(id, pos int) []float32 { return nil }
+func (s *Session) metalDecodeLogitsQ8(id, pos int) []float32 { return nil }

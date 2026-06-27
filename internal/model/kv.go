@@ -168,6 +168,12 @@ func (s *Session) token(id, pos int) []float32 {
 		return s.headResident(s.tokenHiddenGPTQ(id, pos))
 	}
 	if s.Quant {
+		// GPU-resident decode forward (#67): run the whole token — forward + final norm + LM head —
+		// in one Metal command buffer and return logits directly (metal_decode.go). Returns nil for a
+		// hybrid/MoE model or when the resident path declines, so this is a cheap gate on the CPU path.
+		if logits := s.metalDecodeLogitsQ8(id, pos); logits != nil {
+			return logits
+		}
 		return s.headQ(s.tokenHiddenQ(id, pos))
 	}
 	return s.head(s.tokenHidden(id, pos))

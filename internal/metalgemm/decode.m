@@ -210,6 +210,11 @@ typedef struct {
 static int gDecNL, gDecH, gDecHd, gDecNH, gDecNKV, gDecI, gDecAttnBias;
 static float gDecEps, gDecTheta, gDecScale;
 static DecLayer gDecL[DEC_MAXL];
+// Optional GPU LM head: final-norm vec id (gW), head Q8 wid (q8.m), vocab. -1/0 = not registered
+// (the caller applies the head on the CPU). Registering them lets the resident forward also run the
+// final RMSNorm + the vocab projection on the GPU and return logits directly — no CPU head, no
+// post-forward round-trip.
+static int gDecFinalNorm = -1, gDecHead = -1, gDecVocab = 0;
 
 static id<MTLComputePipelineState> psoDGemv, psoDNorm, psoDBias, psoDRope, psoDAttn, psoDSilu, psoDAdd;
 static int gDecReady;
@@ -248,10 +253,18 @@ void mg_decode_layer(int layer, int q, int k, int v, int o, int gate, int up, in
     gDecL[layer] = (DecLayer){q, k, v, o, gate, up, down, inNorm, postNorm, qb, kb, vb};
 }
 
+// mg_decode_head registers the final RMSNorm vector (gW id) + the Q8 LM-head weight (q8.m wid) +
+// the vocab size, so mg_decode_step (when handed a logits buffer) runs the final norm + head on the
+// GPU and returns logits directly.
+void mg_decode_head(int finalNormID, int headWid, int vocab) {
+    gDecFinalNorm = finalNormID; gDecHead = headWid; gDecVocab = vocab;
+}
+
 void mg_decode_reset(void) {
     gDecNL = gDecH = gDecHd = gDecNH = gDecNKV = gDecI = gDecAttnBias = 0;
     gDecEps = gDecTheta = gDecScale = 0.0f;
     for (int i = 0; i < DEC_MAXL; i++) gDecL[i] = (DecLayer){0};
+    gDecFinalNorm = -1; gDecHead = -1; gDecVocab = 0;
 }
 
 // ---- encode helpers (one command buffer / encoder per decode step) ----
@@ -372,7 +385,7 @@ static void d_add_buf(id<MTLBuffer> X, id<MTLBuffer> Y, int n) {
 // newKraw/newKpost/newV f32[nL*w] (the new token's per-layer pre-RoPE K, post-RoPE K, V — caller
 // appends to its f32 cache). Returns 1 on success, 0 if the backend declined.
 int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, int L,
-                   float *lastPre, float *newKraw, float *newKpost, float *newV) {
+                   float *lastPre, float *newKraw, float *newKpost, float *newV, float *logits) {
     if (!dec_init()) return 0;
     int prof = getenv("FAK_DECODE_PROF") != NULL;
     CFTimeInterval t0 = prof ? CFAbsoluteTimeGetCurrent() : 0;
@@ -385,6 +398,8 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
         id<MTLBuffer> Xn = dbuf(H), Xn2 = dbuf(H);
         id<MTLBuffer> Qb = dbuf(qrow);
         id<MTLBuffer> attn = dbuf(qrow), tmpH = dbuf(H), Gb = dbuf(Im), Ub = dbuf(Im);
+        int wantLogits = (logits != NULL && gDecHead >= 0 && gDecVocab > 0);
+        id<MTLBuffer> logitBuf = wantLogits ? dbuf(gDecVocab) : nil;
         // per-layer resident KV: the context rows 0..L plus room for the new row at index L. The
         // K/V projections write straight into row L (no temp, no blit), so the whole token stays in
         // ONE compute encoder — Metal's default serial dispatch + automatic hazard tracking order
@@ -434,6 +449,10 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
             d_gemv(L_.down, Gb, tmpH, 0);                  // down
             if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += down
         }
+        if (wantLogits) {
+            d_norm(Xb, gDecFinalNorm, Xn);                  // Xn = final RMSNorm(X)
+            d_gemv(gDecHead, Xn, logitBuf, 0);              // logits = head . Xn (on GPU)
+        }
         dendEnc();
         CFTimeInterval tEnc = prof ? CFAbsoluteTimeGetCurrent() : 0;
         [gDCB commit];
@@ -445,6 +464,7 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
         }
 
         mg_f16_to_f32((const __fp16 *)Xb.contents, lastPre, (long)H);
+        if (wantLogits) mg_f16_to_f32((const __fp16 *)logitBuf.contents, logits, (long)gDecVocab);
         (void)newKraw; // the fast Q8 decode path keeps post-RoPE K/V but not pre-RoPE Kraw
         for (int l = 0; l < gDecNL; l++) {
             mg_f16_to_f32((const __fp16 *)Kbuf[l].contents + (long)L*w, newKpost + (long)l*w, (long)w);

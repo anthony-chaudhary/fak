@@ -180,13 +180,6 @@ func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
 // (f32) K/V to the kernel-owned cache, so Evict/Clone and the KV semantics are unchanged;
 // returns the post-final-norm hidden (caller applies headQ).
 func (s *Session) tokenHiddenQ(id, pos int) []float32 {
-	// GPU-resident decode forward (#67): run the whole token in one command buffer (metal_decode.go)
-	// when enabled (s.Metal or FAK_METAL_DECODE) and the model is dense-eligible. Returns nil to fall
-	// through to the proven CPU Q8 decode for a hybrid/MoE model or when the resident path declines —
-	// so the unconditional call here costs only a cheap gate check on the CPU path.
-	if out := s.metalDecodeStepQ8(id, pos); out != nil {
-		return out
-	}
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads

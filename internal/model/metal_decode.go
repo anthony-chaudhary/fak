@@ -79,6 +79,14 @@ func (m *Model) metalDecodeConfig() bool {
 		}
 		metalgemm.DecodeLayer(l, qid, kid, vid, oid, gid, uid, did, inN, postN, qb, kb, vb)
 	}
+	// Register the final RMSNorm + the Q8 LM head so the resident forward also runs them on the GPU
+	// and returns logits directly (no CPU head). Declines (CPU head) if the head upload fails.
+	finalNorm := metalgemm.UploadVec(m.tensor("model.norm.weight"))
+	headWid := up(m.q8Head())
+	if finalNorm < 0 || headWid < 0 {
+		return false
+	}
+	metalgemm.DecodeHead(finalNorm, headWid, cfg.VocabSize)
 	metalDecReady[m] = true
 	if os.Getenv("FAK_QPROFILE") != "" || os.Getenv("FAK_METAL_DECODE") != "" {
 		fmt.Fprintf(os.Stderr, "[metal-decode] GPU-resident Q8 decode forward engaged: %d layers, H=%d nH=%d nKV=%d I=%d bias=%v\n",
@@ -87,12 +95,12 @@ func (m *Model) metalDecodeConfig() bool {
 	return true
 }
 
-// metalDecodeStepQ8 runs one decode token through the GPU-resident Q8 forward and returns the
-// post-final-norm hidden (the caller applies the head). It mirrors tokenHiddenQ's fast path: gather
-// the per-layer post-RoPE K/V context, run the token, append the new K/V row to the cache, advance
-// pos. Returns nil (so the caller runs the CPU path) when the resident forward is unavailable or
-// declines for this model.
-func (s *Session) metalDecodeStepQ8(id, pos int) []float32 {
+// metalDecodeLogitsQ8 runs one decode token through the GPU-resident Q8 forward — projections,
+// RMSNorm, RoPE, GQA attention over the cache, SwiGLU, the final norm AND the LM head — and returns
+// the vocab logits directly. It mirrors token()'s fast Q8 path: gather the per-layer post-RoPE K/V
+// context, run the token, append the new K/V row to the cache, advance pos. Returns nil (so the
+// caller runs the CPU path) when the resident forward is unavailable or declines for this model.
+func (s *Session) metalDecodeLogitsQ8(id, pos int) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	if !metalDecodeEnabled(s) || !s.Quant || !metalgemm.Available() || !m.metalDecodeConfig() {
 		return nil
@@ -119,8 +127,8 @@ func (s *Session) metalDecodeStepQ8(id, pos int) []float32 {
 	copy(x, embed[id*H:(id+1)*H])
 	scaleEmbedInPlace(x, cfg) // Gemma; no-op for Llama/Qwen
 
-	lastPre, _, newKpost, newV, ok := metalgemm.DecodeStep(x, Kctx, Vctx, L, cfg.NumLayers, w, H)
-	if !ok {
+	_, newKpost, newV, logits, ok := metalgemm.DecodeStep(x, Kctx, Vctx, L, cfg.NumLayers, w, H, cfg.VocabSize)
+	if !ok || logits == nil {
 		return nil
 	}
 	// Append the new token's post-RoPE K and V to the cache (matches the fast Q8 path, which keeps
@@ -130,5 +138,6 @@ func (s *Session) metalDecodeStepQ8(id, pos int) []float32 {
 		s.Cache.V[l] = append(s.Cache.V[l], newV[l*w:(l+1)*w]...)
 	}
 	s.Cache.pos = append(s.Cache.pos, pos)
-	return rmsnormCfg(lastPre, m.tensor("model.norm.weight"), float32(cfg.RMSNormEps), cfg)
+	logitScaleInPlace(logits, cfg) // Cohere/Gemma2; no-op for Llama/Qwen
+	return logits
 }
