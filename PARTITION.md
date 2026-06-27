@@ -34,15 +34,15 @@ read-only subset (recorded in the fixture) before fan-out.
 | **W1-engine** | `internal/engine/**` | `EngineDriver` over LiteLLM→remote; local↔remote by env. | same prompt → valid completion from stub-local + recorded-remote transport. |
 | **W2-kernelpdp** | `internal/agent/**`, `internal/gpulease/**` | AGT semantic PDP + DOS lease PEP, each `RegisterAdjudicator`'d. | poison fixture denied; transform mutates Args; default-deny on empty policy. |
 | **W3-vdso** *(strongest worker)* | `internal/vdso/**` | 3 `FastPath` tiers (pure/CAS/static). | bench: N pure/cached calls resolve with engine-counter==0 **and measured hit-rate>0 on the frozen workload**. |
-| **W4-mmu** | `internal/mmu/**` | Write-time `QuarantinePayload` path + Go CAS blob store as `RegionBackend`+`PageOutBackend`+`ProvisionalSink`. | poison fixture absent from assembled context; paged-out result round-trips byte-identical; Rollback(txn) drops scratch. |
+| **W4-mmu** | `internal/kvmmu/**` | Write-time `QuarantinePayload` path + Go CAS blob store as `RegionBackend`+`PageOutBackend`+`ProvisionalSink`. | poison fixture absent from assembled context; paged-out result round-trips byte-identical; Rollback(txn) drops scratch. |
 
 ## Wave 2 — gated on wave-1 *confirmed* phases (`dos-witness-claim`, h30–h50) {#h30} {#h50}
 
 | Worker | Tree | Goal | Witness |
 |---|---|---|---|
-| **W5-harness** | `internal/harness/**` | Tool loop: every call → `Syscall`; order vdso→adjudicate→dispatch. | trace proves order; 3-tool scripted task completes against real W1–W4. |
+| **W5-harness** | `internal/dojo/**` | Tool loop: every call → `Syscall`; order vdso→adjudicate→dispatch. | trace proves order; 3-tool scripted task completes against real W1–W4. |
 | **W6-preflight** | `internal/preflight/**` | Rungs 0–2 as ranked `Adjudicator`s + typed `LabelRow` emitter. | malformed fixture caught pre-fire; a `LabelRow` JSONL line emitted. |
-| **W7-kpi-stewards** | `internal/kpi/**`, `internal/stewards/**` | metrics-service-shaped `Emitter`s; steward population + meta-steward prune. | seeded 4+1 stewards → meta-steward prunes exactly the dead one; counters scraped clean. |
+| **W7-kpi-stewards** | `internal/metrics/**`, `internal/steward/**` | metrics-service-shaped `Emitter`s; steward population + meta-steward prune. | seeded 4+1 stewards → meta-steward prunes exactly the dead one; counters scraped clean. |
 
 ## Serial tail (human-attended, h50–h72) {#h50} {#h72}
 
