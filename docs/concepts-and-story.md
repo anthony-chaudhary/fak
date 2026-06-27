@@ -111,7 +111,8 @@ speeds are beside the point):
 - **By agents / sessions:** the cross-agent saving is **exactly zero with one agent**.
   It turns positive at the **2nd** agent sharing the prompt and keeps climbing. At **50
   agents over 50 turns** it removes on the order of **thousands** of duplicate tool
-  round-trips. The per-agent benefit flattens out past a few hundred agents.
+  round-trips (**2,344 of 2,500** in the measured 50×50 read-fleet run). The per-agent
+  benefit flattens out past a few hundred agents.
 - **One big "but": read-heavy fleets only.** If agents frequently *write to or change*
   the shared state, this cross-agent sharing can turn into a **net loss** (even a ~1%
   write rate can flip it negative on the default setting). It's a win for read-heavy
@@ -291,7 +292,7 @@ runtime (`fak serve --policy FILE`, also on `run`/`agent`/`preflight`; author/va
   opt-in setting. See [`fak/GPU.md`](https://github.com/anthony-chaudhary/fak/blob/main/GPU.md).)
 - **STUB (labeled):** zero-copy KV co-residence with an *external* serving engine and the
   fine-tuned syscall model are frozen ABI seams, not built in v0.1â€“0.2.
-- **Not novel, and we say so:** a 29-claim, 61-agent prior-art audit scored **0/29
+- **Not novel, and we say so:** a 29-claim prior-art audit (run as a 61-worker DOS research workflow) scored **0/29
   NOVEL**. Every primitive is established or emerging. **The contribution is the
   *assembly***: a fused, fail-open, witness-gated kernel with the tool call promoted to
   an in-process syscall, rather than any single mechanism.
