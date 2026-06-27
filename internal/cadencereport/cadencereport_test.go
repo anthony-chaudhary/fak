@@ -226,6 +226,42 @@ func TestWithGateJSON(t *testing.T) {
 	}
 }
 
+func TestShipsBySubjects(t *testing.T) {
+	// Pin the ship-stamp grammar boundary the WORK-DONE count must honor. Each
+	// subject is decided through hooks.StampOf, the same grammar the pre-commit
+	// lint binds to, so a body-only / merge / release subject is NOT a ship.
+	subjects := []string{
+		"Merge branch 'feat' into main",                                 // merge -> none, not a ship
+		"chore: see (fak gateway) for context then do other work",       // mid-subject mention, not a trailing stamp -> none
+		"fix(gateway): treat same-tick ready as positive (fak gateway)", // trailer -> ship, gateway
+		"fak/blob: add the spool reader",                                // direct -> ship, blob
+		"v1.2.3: release the cut",                                       // release bundle -> not a per-leaf ship
+		"wip: scratch nothing landed yet",                               // bare WIP -> none, not a ship
+		"docs(typo): tidy a heading (fak gatway)",                       // off-lane typo -> still a ship (grammar, not taxonomy)
+	}
+	ships, byLane := shipsBySubjects(subjects)
+	// gateway trailer + blob direct + the gatway typo = 3 grammar-valid ships.
+	if ships != 3 {
+		t.Fatalf("ships = %d, want 3", ships)
+	}
+	want := map[string]int{"gateway": 1, "blob": 1, "gatway": 1}
+	if len(byLane) != len(want) {
+		t.Fatalf("byLane = %v, want %v", byLane, want)
+	}
+	for leaf, n := range want {
+		if byLane[leaf] != n {
+			t.Fatalf("byLane[%q] = %d, want %d (full: %v)", leaf, byLane[leaf], n, byLane)
+		}
+	}
+
+	// No ships -> a nil ByLane map (so the JSON envelope omits by_lane and Render
+	// skips the breakdown line), never an empty non-nil map.
+	none, nilLane := shipsBySubjects([]string{"Merge x", "wip: y", "v1.0.0: z"})
+	if none != 0 || nilLane != nil {
+		t.Fatalf("no-ship case = (%d, %v), want (0, nil)", none, nilLane)
+	}
+}
+
 func TestRenderSmoke(t *testing.T) {
 	r := Fold(okScores(), okWork(), okReleases(), foldOpts())
 	tr := TrendVsLast(RowFromReport(r), []LedgerRow{{Date: "2026-06-20", ScoresDebt: 44, GeneratedAt: "2026-06-20T00:00:00Z"}})

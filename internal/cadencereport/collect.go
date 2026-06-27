@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
 
 // ScoresArgv is the scorecard-control-pane fold, emitting the portfolio debt +
@@ -85,8 +87,14 @@ func RunPyEnvelope(root string, argv []string, python string, timeout time.Durat
 }
 
 // WorkFromGit derives the WORK-DONE dimension from git over the trailing window:
-// the total commit count on HEAD and the subset carrying a `(fak ` ship trailer
-// (the Conventional-Commits leaf stamp every ship commit ends with).
+// the total commit count on HEAD, and the subset whose SUBJECT carries a real
+// per-leaf ship-stamp. The ship count is NOT a bare `--grep=(fak ` count — that
+// over-counts in three ways the real grammar doesn't: it matches a merge subject,
+// a body-line / co-author-trailer mention anywhere in the message (not the
+// anchored subject stamp), and it can't bucket by leaf. Instead we enumerate one
+// `(sha, subject)` per non-merge commit and decide ship-ness per subject through
+// hooks.StampOf — the SAME grammar the pre-commit lint binds to — so this counts
+// exactly what `dos verify` can bind, and buckets each ship by its leaf.
 func WorkFromGit(root string, windowDays int) Work {
 	w := Work{WindowDays: windowDays}
 	since := fmt.Sprintf("%d days ago", windowDays)
@@ -100,21 +108,60 @@ func WorkFromGit(root string, windowDays int) Work {
 	}
 	w.Commits = commits
 
-	// `(fak ` is a literal needle, so fix the regex engine to fixed-strings. A
-	// ship commit ends with a `(fak <leaf>)` trailer; an un-stamped WIP commit
-	// won't match, so this counts SHIPS, not every commit.
-	ships, err := gitCount(root, []string{
-		"rev-list", "--count", "--since=" + since, "--fixed-strings", "--grep=(fak ", "HEAD",
-	})
-	if err != "" {
-		// The commit count already succeeded; a grep-count failure is a partial
-		// signal, not a measurement failure — keep commits, leave ships at 0 with
-		// a soft note folded into the commit count being authoritative.
+	// One subject line per non-merge commit (%s is git's single-line subject, so a
+	// multi-line body can't leak a body-only `(fak x)` into the count). git log over
+	// HEAD is already deduped, so each reachable commit is counted at most once.
+	subjects, gerr := gitShipSubjects(root, since)
+	if gerr != "" {
+		// The commit count already succeeded; a subject-enumeration failure is a
+		// partial signal, not a measurement failure — keep commits authoritative,
+		// leave ships at 0, do NOT set w.Err (matching the prior soft-degrade).
 		w.Ships = 0
 		return w
 	}
-	w.Ships = ships
+	w.Ships, w.ByLane = shipsBySubjects(subjects)
 	return w
+}
+
+// gitShipSubjects returns one subject line per non-merge commit in the trailing
+// window on HEAD. Errors degrade to ("", errString) for the soft-fail path above.
+func gitShipSubjects(root, since string) ([]string, string) {
+	cmd := exec.Command("git", "log", "--no-merges", "--since="+since, "--format=%s", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, "git log failed: " + gitErr(err)
+	}
+	var subjects []string
+	for _, line := range strings.Split(string(out), "\n") {
+		s := strings.TrimSpace(line)
+		if s != "" {
+			subjects = append(subjects, s)
+		}
+	}
+	return subjects, ""
+}
+
+// shipsBySubjects is the pure ship predicate over already-extracted subjects: a
+// subject is a ship iff hooks.StampOf grades it trailer|direct (a real per-leaf
+// stamp). A merge/bookkeeping/body-only subject (kind "none") and a release-bundle
+// subject (kind "release", not a per-leaf ship) are excluded. An off-lane typo
+// like `(fak gatway)` still counts — the count is grammar-based, not taxonomy-
+// validated (that lane check is the pre-commit lint's job, not the ledger's).
+// Kept pure (no git) so it is unit-testable without a repo.
+func shipsBySubjects(subjects []string) (ships int, byLane map[string]int) {
+	byLane = map[string]int{}
+	for _, subj := range subjects {
+		kind, leaf := hooks.StampOf(subj)
+		if kind == "trailer" || kind == "direct" {
+			ships++
+			byLane[leaf]++
+		}
+	}
+	if len(byLane) == 0 {
+		byLane = nil
+	}
+	return ships, byLane
 }
 
 // gitCount runs a git subcommand expected to print a single integer and parses

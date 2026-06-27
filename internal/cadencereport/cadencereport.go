@@ -38,12 +38,17 @@ type Scores struct {
 }
 
 // Work is the WORK-DONE dimension, derived from git over a trailing window: the
-// commit count and the subset that carry a `(fak <leaf>)` ship trailer.
+// commit count and the subset whose SUBJECT carries a real per-leaf ship-stamp
+// (the same `(fak <leaf>)` trailer / `fak/<leaf>:` direct grammar the pre-commit
+// lint binds to — see hooks.StampOf). ByLane buckets those ships by leaf; it is
+// report/render-only and intentionally NOT persisted to the ledger, so the
+// fak-cadence-ledger/1 row schema stays byte-stable.
 type Work struct {
-	WindowDays int    `json:"window_days"`
-	Commits    int    `json:"commits"`
-	Ships      int    `json:"ships"`
-	Err        string `json:"err,omitempty"`
+	WindowDays int            `json:"window_days"`
+	Commits    int            `json:"commits"`
+	Ships      int            `json:"ships"`
+	ByLane     map[string]int `json:"by_lane,omitempty"`
+	Err        string         `json:"err,omitempty"`
 }
 
 // Releases is the RELEASES dimension, distilled from the release-status fold.
@@ -405,6 +410,18 @@ func Render(r Report) string {
 			mark(r.Work.Err == "", r.Work.Err), r.Work.Commits, r.Work.Ships, r.Work.WindowDays),
 		fmt.Sprintf("  %s releases    %s; next: %s — %s",
 			mark(r.Releases.OK, r.Releases.Err), r.Releases.Version, dashIfEmpty(r.Releases.ActionKind), dashIfEmpty(r.Releases.ActionDetail)),
+	}
+	if len(r.Work.ByLane) > 0 {
+		leaves := make([]string, 0, len(r.Work.ByLane))
+		for leaf := range r.Work.ByLane {
+			leaves = append(leaves, leaf)
+		}
+		sort.Strings(leaves)
+		parts := make([]string, len(leaves))
+		for i, leaf := range leaves {
+			parts[i] = fmt.Sprintf("%s %d", leaf, r.Work.ByLane[leaf])
+		}
+		lines = append(lines, "      by lane: "+strings.Join(parts, ", "))
 	}
 	if r.Trend != nil {
 		lines = append(lines, "", "  trend: "+r.Trend.Summary)
