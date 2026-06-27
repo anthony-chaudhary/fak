@@ -236,8 +236,7 @@ the [issue tracker](https://github.com/anthony-chaudhary/fak/issues):
 
 | Gap vs llama.cpp | Consequence |
 |---|---|
-| F32 compute only (no fp16 / tensor cores) | leaves the 4070's tensor cores idle; ~2–4× on the table |
-| No quantized device GEMM (Q8_0 / Q4_K) | a 7B Q4 model can't run weights-in-int4 on device; would dequant-to-f32 (won't fit) |
+| No Q4_K device path | Q4_K GPU throughput vs llama.cpp (Q8 shipped in v0.13.0; F16 shipped in v0.13.0) |
 | Naive decode attention (per-call scratch, one block/head) | no flash/paged attention; launch + memory overhead |
 | Synchronous, one kernel launch per op | batch-1 decode is launch-bound (async + CUDA Graphs) |
 | No GGUF / sharded / quant-on-load | the 7B Q4 target can't be **loaded** by the in-kernel path yet (28 GB f32 won't fit 15 GB WSL RAM) |
