@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -134,6 +136,48 @@ func TestRunDojoDispatch(t *testing.T) {
 	}
 }
 
+func TestRunDojoPostTrendDryRun(t *testing.T) {
+	// A trend post folds the committed ledger with NO corpus scan; --dry-run renders the
+	// card without touching Slack, so the test needs no token or network.
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "history.jsonl")
+	body := `{"schema":"fak-dojo-ledger/1","date":"2026-06-26","commit":"c1","generated_at":"2026-06-26T01:00:00Z","verdict":"OK","mean_calib_err":0.50,"grade":"D","calibrated":2,"measured":3}
+{"schema":"fak-dojo-ledger/1","date":"2026-06-27","commit":"c2","generated_at":"2026-06-27T01:00:00Z","verdict":"OK","mean_calib_err":0.34,"grade":"C","calibrated":2,"measured":3}
+`
+	if err := os.WriteFile(ledger, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runDojoPost(&out, &errb, []string{"--rollup", "trend", "--ledger", ledger, "--dry-run"})
+	if code != 0 {
+		t.Fatalf("trend --dry-run should exit 0, got %d (%s)", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "dojo trend") || !strings.Contains(got, "improved") {
+		t.Fatalf("trend card missing trend/direction:\n%s", got)
+	}
+	if !strings.Contains(got, "2026-06-27") {
+		t.Fatalf("trend card missing the latest tick:\n%s", got)
+	}
+}
+
+func TestRunDojoPostRejectsBadRollup(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runDojoPost(&out, &errb, []string{"--rollup", "bogus", "--dry-run"}); code != 2 {
+		t.Fatalf("unknown --rollup should exit 2, got %d", code)
+	}
+	if !strings.Contains(errb.String(), "unknown --rollup") {
+		t.Fatalf("expected unknown-rollup message, got %q", errb.String())
+	}
+}
+
+func TestRunDojoPostLatestNeedsCorpus(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runDojoPost(&out, &errb, []string{"--rollup", "latest", "--dry-run"}); code != 2 {
+		t.Fatalf("latest without --corpus should exit 2, got %d", code)
+	}
+}
+
 func TestRunDojoList(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := runDojoList(&out, &errb, []string{"--json"}); code != 0 {
@@ -228,6 +272,46 @@ func TestCompactionEpisodesSkipsEmptyMetrics(t *testing.T) {
 	ins := compactionEpisodesFromBacktest(CompactionBacktestReport{})
 	if len(ins) != 0 {
 		t.Fatalf("an empty report should yield no episodes, got %d", len(ins))
+	}
+}
+
+// TestCompactionLeverReportsUnmeasuredNotError pins the honest empty state: the
+// compaction lever has no paired ON/OFF ground truth in a standard transcript
+// corpus, but it must report that as ONE UNMEASURED episode (Measured:false, no
+// Realized) rather than a hard error. A returned error makes dojo.Run drop the
+// lever silently (a 1-lever gym indistinguishable from "never registered"); an
+// UNMEASURED outcome counts the lever toward lever_count, renders UNMEASURED /
+// grade n/a, and invents no number.
+func TestCompactionLeverReportsUnmeasuredNotError(t *testing.T) {
+	ins, err := compactionLever{}.Episodes(dojo.Scenario{Name: "corpus", Mode: "offline"})
+	if err != nil {
+		t.Fatalf("compaction lever must report UNMEASURED honestly, not error: %v", err)
+	}
+	if len(ins) != 1 {
+		t.Fatalf("compaction lever should emit exactly one honest-empty-state episode, got %d", len(ins))
+	}
+	o := ins[0].Outcome
+	if o.Measured {
+		t.Fatalf("the honest empty state must be UNMEASURED (Measured:false), got %+v", o)
+	}
+	if o.Realized != 0 {
+		t.Fatalf("an UNMEASURED outcome must invent no Realized number, got %v", o.Realized)
+	}
+	// It scores UNMEASURED (never a fabricated calibrated zero) and, run through Run +
+	// Fold as the only lever, the lever IS counted but the run is honestly unmeasured.
+	e := dojo.Score("corpus", ins[0].Prediction, o, dojo.DefaultCalibBand())
+	if e.Verdict != dojo.VerdictUnmeasured {
+		t.Fatalf("an UNMEASURED outcome must score VerdictUnmeasured, got %q", e.Verdict)
+	}
+	r := dojo.Fold([]dojo.Episode{e}, dojo.FoldOpts{Workspace: ".", Date: "2026-06-27"})
+	if r.LeverCount != 1 {
+		t.Fatalf("the unmeasured compaction lever must still count toward lever_count, got %d", r.LeverCount)
+	}
+	if r.Measured != 0 || r.Unmeasured != 1 {
+		t.Fatalf("the run must be honestly unmeasured (measured=0 unmeasured=1), got measured=%d unmeasured=%d", r.Measured, r.Unmeasured)
+	}
+	if r.Grade != "n/a" {
+		t.Fatalf("an all-unmeasured run grades n/a, not a vacuous letter, got %q", r.Grade)
 	}
 }
 

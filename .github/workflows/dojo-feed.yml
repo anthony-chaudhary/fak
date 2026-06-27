@@ -1,0 +1,108 @@
+name: dojo-feed
+
+# Publish fak's DOJO CALIBRATION surface to the Slack dojo channel (C0BDP2V51L1,
+# the scoreboard workspace T0BDEJF1HGB). The dojo is the prediction-vs-reality gym:
+# it scores each token-saving lever's THEORY against the provider's billed reality
+# and trends the mean calibration error across ticks in docs/dojo/history.jsonl.
+# This job posts that across-tick TREND — "are our predictors getting better
+# calibrated over time" — so a human watching the dojo channel sees the calibration
+# direction without reading the committed ledger.
+#
+#   * daily 08:37 UTC -> `fak dojo post --rollup trend` — folds the COMMITTED history
+#     ledger (docs/dojo/history.jsonl) into the across-tick trend. This needs NO
+#     corpus scan and NO payload-gen step (it reports the committed evidence), so the
+#     job is pure Go and cheap to run on a cadence.
+#   * workflow_dispatch -> a manual off-cadence run, dry-run by default so an operator
+#     can preview the card without posting.
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), the dual of
+# steering-guard.yml / scoreboard-feed.yml / bench-feed.yml — NOT an issue feeder. It
+# does not open issues or push; it only posts to Slack (permissions: contents: read).
+#
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret being present (the dojo token
+# falls back to it). Without it the job runs in --dry-run and writes the card to the
+# step summary, so a fork or a secret-less run never hard-fails — it just shows what
+# WOULD post. The dojo channel id is the built-in public default; override with the
+# FAK_DOJO_CHANNEL repo variable if you point the surface elsewhere.
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
+# scoreboard-workspace bot token — the same value in the gitignored .env.slack.local)
+# under Settings -> Secrets and variables -> Actions. The dojo channel is the built-in
+# default; no channel variable is required.
+on:
+  schedule:
+    # Daily 08:37 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (bench-signal 08:03, scoreboard-feed 08:17, bench-feed 08:27, capacity-feed
+    # 08:47; garden 06:23, steering-guard 07:33, score-signal 07:41, gate-signal
+    # 07:53). The dojo ledger gets at most a few ticks a day, so a daily trend post
+    # is the right grain — a per-push post would be heartbeat noise.
+    - cron: "37 8 * * *"
+  workflow_dispatch:
+    inputs:
+      rollup:
+        description: "which rollup to render/post (latest needs a corpus this CI node lacks; trend is the cadence default)"
+        type: choice
+        options: [trend]
+        default: trend
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dojo-feed
+  cancel-in-progress: false
+
+jobs:
+  dojo-feed:
+    name: dojo trend -> dojo channel
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_DOJO_CHANNEL: ${{ vars.FAK_DOJO_CHANNEL || 'C0BDP2V51L1' }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Always render the card to the step summary (and as the artifact) so the run is
+      # auditable even when nothing posts (missing secret / manual dry-run / fork).
+      # `fak dojo post --rollup trend` reads docs/dojo/history.jsonl directly — no
+      # payload-gen, no corpus.
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak dojo post --rollup trend --source ci --dry-run | tee dojo-card.txt
+          {
+            echo "## dojo-feed — calibration trend"
+            echo '```'
+            cat dojo-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when the token secret is present. A manual dry_run also skips.
+      - name: post to the dojo channel
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak dojo post --rollup trend --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dojo-card
+          path: dojo-card.txt
+          if-no-files-found: ignore

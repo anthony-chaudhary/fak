@@ -27,8 +27,10 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/dojo"
+	"github.com/anthony-chaudhary/fak/internal/dojopost"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
@@ -42,6 +44,8 @@ usage:
   fak dojo board  --corpus DIR [--ttl 5m|1h] [--max-files N] [--json]
   fak dojo ablate [--trace FILE | --suite NAME] [--engine ID] [--json] [--check]
   fak dojo list   [--json]
+  fak dojo post   [--rollup latest|trend] [--corpus DIR] [--ledger FILE]
+                  [--dry-run] [--channel ID] [--token TOK] [--source WHO]
 
 run    scores every registered lever's predicted saving against billed reality
        over the corpus, folds the episodes, and (with --append-history) trends
@@ -51,6 +55,11 @@ board  folds the same run into a cross-lever leaderboard: one row per lever
 ablate scores the vDSO on-vs-off ablation over a trace as a WITNESSED episode:
        the engine-call elision the fast path actually delivered vs the claim.
 list   shows the registered levers and the metrics each one scores.
+post   posts a calibration rollup to the dojo Slack channel: --rollup trend
+       (default) folds the committed history ledger into the across-tick
+       calibration trend (no corpus scan); --rollup latest scores the corpus
+       and posts the latest run. Safe by default (--dry-run renders without
+       posting); the token falls back to the scoreboard token.
 
 A lever's THEORY is its Claimed number; the provider's own usage records are the
 ground truth; an episode's verdict says whether reality met the claim
@@ -75,11 +84,13 @@ func runDojo(stdout, stderr io.Writer, argv []string) int {
 		return runDojoAblate(stdout, stderr, argv[1:])
 	case "board":
 		return runDojoBoard(stdout, stderr, argv[1:])
+	case "post":
+		return runDojoPost(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, dojoUsage)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dojo: unknown subcommand %q (want run, list, ablate, or board)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dojo: unknown subcommand %q (want run, list, ablate, board, or post)\n", argv[0])
 		return 2
 	}
 }
@@ -358,6 +369,152 @@ func runDojoBoard(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// runDojoPost posts a dojo calibration rollup to the dojo Slack channel. It is the
+// outbound dojo-channel surface — the twin of `fak bench post` / `fak scoreboard post`.
+//
+//	fak dojo post                              # the across-tick calibration trend (default)
+//	fak dojo post --rollup latest --corpus DIR # score the corpus and post the latest run
+//	fak dojo post --dry-run                    # render the card and print it; do not post
+//
+// --rollup trend (default) reads the committed history ledger (docs/dojo/history.jsonl)
+// and folds it into the across-tick trend WITHOUT a corpus scan, so CI can post it on a
+// cadence cheaply. --rollup latest scores the registered levers over --corpus (the same
+// scan `fak dojo run` does) and posts the latest folded run. Safe by default: --dry-run
+// renders without posting, and the channel/token resolve from FAK_DOJO_* (token falls
+// back to the scoreboard token; channel defaults to the public dojo channel).
+func runDojoPost(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("dojo post", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rollup := fs.String("rollup", "trend", "which rollup: trend (committed history, no scan) | latest (score --corpus)")
+	corpus := fs.String("corpus", "", "latest rollup: directory of real Claude Code transcripts to score the levers against")
+	ttlStr := fs.String("ttl", "5m", "latest rollup: provider cache TTL tier the resume-posture lever scores at: 5m or 1h")
+	maxFiles := fs.Int("max-files", 0, "latest rollup: cap the number of transcript files scanned (0 = no cap)")
+	ledger := fs.String("ledger", "", "trend rollup: ledger path override (default: <root>/"+dojo.DefaultLedgerRel+")")
+	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	n := fs.Int("n", 6, "trend rollup: number of recent ticks to show; latest rollup: number of worst episodes to show")
+	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
+	channel := fs.String("channel", "", "override target channel id (default: $FAK_DOJO_CHANNEL / .env.slack.local / the public dojo channel)")
+	token := fs.String("token", "", "override bot token (default: $FAK_DOJO_TOKEN, then scoreboard token)")
+	dryRun := fs.Bool("dry-run", false, "render the message and print it; do not post to Slack")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	} else if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+
+	var post dojopost.Post
+	switch *rollup {
+	case "trend":
+		ledgerPath := *ledger
+		if ledgerPath == "" {
+			ledgerPath = filepath.Join(root, filepath.FromSlash(dojo.DefaultLedgerRel))
+		}
+		rows := readDojoLedgerRows(ledgerPath)
+		post = dojopost.TrendFromLedger(rows, *n)
+	case "latest":
+		if *corpus == "" {
+			fmt.Fprintln(stderr, "fak dojo post --rollup latest: need --corpus DIR (a directory of .jsonl transcripts)")
+			return 2
+		}
+		ttl, ok := parseResumeTTL(*ttlStr)
+		if !ok {
+			fmt.Fprintf(stderr, "fak dojo post: bad --ttl %q (want 5m or 1h)\n", *ttlStr)
+			return 2
+		}
+		report := foldDojoCorpusRun(*corpus, ttl, *maxFiles, root, stderr)
+		// Attach the across-tick trend (read-only) so the latest card also answers
+		// "are we improving" — the same trend `fak dojo run` shows.
+		ledgerPath := *ledger
+		if ledgerPath == "" {
+			ledgerPath = filepath.Join(root, filepath.FromSlash(dojo.DefaultLedgerRel))
+		}
+		row := dojo.RowFromReport(report)
+		trend := dojo.TrendVsLast(row, readDojoLedgerRows(ledgerPath))
+		report.Trend = &trend
+		post = dojopost.RollupFromReport(report, *n)
+	default:
+		fmt.Fprintf(stderr, "fak dojo post: unknown --rollup %q (want: trend | latest)\n", *rollup)
+		return 2
+	}
+	post.Source = resolveDojoSource(*source)
+
+	return emitDojoPost(stdout, stderr, post, *channel, *token, *dryRun)
+}
+
+// foldDojoCorpusRun scores the registered levers over the corpus and folds the
+// episodes into one report — the same path `runDojoRun` takes, factored here so
+// `fak dojo post --rollup latest` reuses it. Run errors are reported to stderr but do
+// not abort (a partial run still folds the episodes it produced, exactly as `fak dojo
+// run` does).
+func foldDojoCorpusRun(corpus string, ttl resume.CacheTTL, maxFiles int, root string, stderr io.Writer) dojo.Report {
+	scenario := dojo.Scenario{
+		Name:   filepath.Base(filepath.Clean(corpus)),
+		Mode:   "offline",
+		Corpus: corpus,
+		Note:   "replay of recorded Claude Code transcripts",
+	}
+	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, registerDojoLevers(ttl, maxFiles), dojo.DefaultCalibBand())
+	dojo.SortEpisodes(episodes)
+	for _, re := range runErrs {
+		fmt.Fprintf(stderr, "fak dojo post: lever %q on %q: %s\n", re.Lever, re.Scenario, re.Err)
+	}
+	now := time.Now().UTC()
+	return dojo.Fold(episodes, dojo.FoldOpts{
+		Workspace:   root,
+		Commit:      dojoHeadCommit(root),
+		GeneratedAt: now.Format(time.RFC3339),
+		Date:        now.Format("2006-01-02"),
+	})
+}
+
+// emitDojoPost is the dry-run / post tail: it prints the rendered card on --dry-run, or
+// resolves the channel + token and posts to Slack. It reuses the scoreboard transport
+// (a plain chat.postMessage client), matching `fak bench post`.
+func emitDojoPost(stdout, stderr io.Writer, post dojopost.Post, channel, token string, dryRun bool) int {
+	if dryRun {
+		fmt.Fprintln(stdout, post.Text())
+		return 0
+	}
+	ch := channel
+	if ch == "" {
+		ch = dojopost.ResolveChannel()
+	}
+	if ch == "" {
+		fmt.Fprintln(stderr, "fak dojo post: no channel: pass --channel, set FAK_DOJO_CHANNEL, or add it to .env.slack.local")
+		return 2
+	}
+	tok := token
+	if tok == "" {
+		tok = dojopost.ResolveToken()
+	}
+	client, err := scoreboard.NewClient(tok)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak dojo post: %v\n", err)
+		return 2
+	}
+	ts, err := client.Post(ctx(), ch, post.Text(), post.Blocks())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak dojo post: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
+	return 0
+}
+
+// resolveDojoSource picks the post source: the flag, else the shared defaultSource
+// ($FAK_SCOREBOARD_SOURCE or hostname).
+func resolveDojoSource(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	return defaultSource()
 }
 
 // --- the lever registry ----------------------------------------------------
@@ -692,7 +849,25 @@ func (compactionLever) Episodes(s dojo.Scenario) ([]dojo.ScoredInput, error) {
 	//     cache_read on compacted turns after fire
 	// This format is not yet standardized — the lever is registered and discoverable
 	// but requires a dedicated compaction corpus to run. See #953 for the intended shape.
-	return nil, fmt.Errorf("compaction lever requires a paired ON/OFF compaction corpus with shed_tokens and provider billing metrics; not available from standard transcripts (see #953)")
+	//
+	// Report that absence HONESTLY as one UNMEASURED episode rather than a hard error.
+	// A returned error makes dojo.Run drop the lever to a stderr RunError, so a run is
+	// silently a 1-lever gym (no row in the fold, the board, or the durable ledger) — an
+	// operator cannot tell "compaction has no ground truth here" from "compaction was
+	// never registered". An UNMEASURED outcome (Measured:false, no Realized) counts the
+	// lever toward lever_count and renders it UNMEASURED/grade n/a, inventing no number.
+	// The pure compactionEpisodesFromBacktest scores the real metric once a paired
+	// ON/OFF corpus exists; until then this is the honest empty state.
+	return []dojo.ScoredInput{{
+		Prediction: dojo.Prediction{
+			Lever: "compaction", Metric: "token_shed_ratio", Claimed: 1.0, Unit: "fraction",
+			Basis: "the projected shed (WITNESSED shed_tokens) matches the billed input_tokens delta (OFF - ON)",
+		},
+		Outcome: dojo.Outcome{
+			Measured: false,
+			Source:   "no paired ON/OFF compaction corpus from standard transcripts (see #953); fak_gateway_compaction_* expose the ON-side counters but not the OFF counterfactual",
+		},
+	}}, nil
 }
 
 // compactionEpisodesFromBacktest adapts a CompactionBacktestReport into the dojo's
