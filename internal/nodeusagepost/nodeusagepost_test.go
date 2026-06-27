@@ -2,6 +2,7 @@ package nodeusagepost
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +124,9 @@ func TestFromSnapshotHealthyFleetIsOKAndGraded(t *testing.T) {
 	if !strings.Contains(lines, "live: 2") {
 		t.Fatalf("expected live count line, got: %s", lines)
 	}
+	if !strings.Contains(lines, "reporting: 2/2") {
+		t.Fatalf("expected reporting line, got: %s", lines)
+	}
 	if !strings.Contains(lines, "a100x8=2") {
 		t.Fatalf("expected per-class line a100x8=2, got: %s", lines)
 	}
@@ -131,11 +135,38 @@ func TestFromSnapshotHealthyFleetIsOKAndGraded(t *testing.T) {
 	}
 }
 
-func TestFromSnapshotDownNodeIsACTIONWithDetail(t *testing.T) {
-	boxes := []fleet.Box{
-		{ID: "a1", Class: "a100x8"},
-		{ID: "a2", Class: "a100x8"},
+// TestFromSnapshotAllSilentIsVisibilityGapNotOutage is the bug regression: a fleet
+// where every box is silent (no report → state unknown) must read as a VISIBILITY GAP
+// (no grade, no verdict → the neutral :bar_chart: glyph), NOT a red F/ACTION outage.
+func TestFromSnapshotAllSilentIsVisibilityGapNotOutage(t *testing.T) {
+	boxes := []fleet.Box{{ID: "a1", Class: "a100x8"}, {ID: "a2", Class: "metal"}}
+	// No reports at all → every box folds to unknown.
+	snap := foldRoster(boxes, nil)
+	up := FromSnapshot(snap, "ci")
+
+	if up.Grade != "" {
+		t.Fatalf("grade = %q, want empty (visibility gap is not a graded failure)", up.Grade)
 	}
+	if up.Verdict != "" {
+		t.Fatalf("verdict = %q, want empty (silence is not ACTION)", up.Verdict)
+	}
+	if strings.Contains(up.Detail, "down or unreachable") {
+		t.Fatalf("detail must NOT call silent boxes down: %q", up.Detail)
+	}
+	if !strings.Contains(up.Detail, "not down") {
+		t.Fatalf("detail = %q, want it to clarify the boxes are silent, not down", up.Detail)
+	}
+	lines := strings.Join(up.Lines, " | ")
+	if !strings.Contains(lines, "reporting: 0/2") {
+		t.Fatalf("expected a 0/N reporting line, got: %s", lines)
+	}
+	if !strings.Contains(lines, "populate liveness") {
+		t.Fatalf("expected the populate-liveness guidance, got: %s", lines)
+	}
+}
+
+func TestFromSnapshotRealDownIsACTIONNamedFromCount(t *testing.T) {
+	boxes := []fleet.Box{{ID: "a1"}, {ID: "a2"}}
 	reports := []fleet.Report{
 		{State: fleet.StateLive, Version: "v1"},
 		{State: fleet.StateDown},
@@ -144,20 +175,125 @@ func TestFromSnapshotDownNodeIsACTIONWithDetail(t *testing.T) {
 	up := FromSnapshot(snap, "ci")
 
 	if up.Verdict != "ACTION" {
-		t.Fatalf("verdict = %q, want ACTION when a node is down", up.Verdict)
+		t.Fatalf("verdict = %q, want ACTION when a node reported down", up.Verdict)
 	}
-	if !strings.Contains(up.Detail, "down or unreachable") {
-		t.Fatalf("detail = %q, want a down/unreachable headline", up.Detail)
+	if up.Grade != "F" {
+		t.Fatalf("grade = %q, want F (a reported-down box forces red)", up.Grade)
 	}
-	// A `down` box IS reachable in the fleet model — knowing a box is down is a real,
-	// trustworthy observation (only silence/unknown is unreachable). So both boxes
-	// count as reachable; the ACTION verdict, not the reachable count, carries "down".
-	if up.Score != "2/2 reachable" {
-		t.Fatalf("score line = %q, want %q (a down box still returned a report)", up.Score, "2/2 reachable")
+	if !strings.Contains(up.Detail, "reported down") {
+		t.Fatalf("detail = %q, want a 'reported down' headline built from the count", up.Detail)
+	}
+	if strings.Contains(up.Detail, "unreachable") {
+		t.Fatalf("detail must name down from the count, not the conflated title: %q", up.Detail)
+	}
+}
+
+// TestFromSnapshotDownWithErrorIsStillACTION is the down-hidden-as-silence regression:
+// a box that reported `down` AND carries a read error drives snap.Reachable to 0, so a
+// Reachable-based silence check would route a total outage into the no-visibility
+// branch and print "not down". Classifying off ByState[StateDown] keeps it ACTION.
+func TestFromSnapshotDownWithErrorIsStillACTION(t *testing.T) {
+	// Hand-build the snapshot shape directly (a deserialized/bridge-produced snapshot),
+	// since fleet.Fold derives Reachable from the report itself.
+	snap := fleet.Snapshot{
+		Schema:    fleet.SnapshotSchema,
+		Total:     2,
+		Reachable: 0, // both boxes errored → not reachable, even though they reported down
+		ByState:   map[fleet.State]int{fleet.StateDown: 2},
+	}
+	up := FromSnapshot(snap, "ci")
+
+	if up.Verdict != "ACTION" {
+		t.Fatalf("verdict = %q, want ACTION (down-with-error is a real outage)", up.Verdict)
+	}
+	if up.Grade != "F" {
+		t.Fatalf("grade = %q, want F for an all-down fleet", up.Grade)
+	}
+	if strings.Contains(up.Detail, "not down") {
+		t.Fatalf("must not print 'not down' over a fleet that reported down: %q", up.Detail)
+	}
+	if !strings.Contains(up.Detail, "reported down") {
+		t.Fatalf("detail = %q, want it to name the down boxes", up.Detail)
+	}
+}
+
+// TestFromSnapshotMostlyHealthyOneDownNotMaskedGreen is the down-hidden-as-green
+// regression: 9 live + 1 down scores ~92, and the card renderer picks its glyph from
+// the grade prefix BEFORE the verdict — so an A/B grade would render green despite
+// ACTION. The grade must be clamped so the glyph is red.
+func TestFromSnapshotMostlyHealthyOneDownNotMaskedGreen(t *testing.T) {
+	var boxes []fleet.Box
+	var reports []fleet.Report
+	for i := 0; i < 9; i++ {
+		boxes = append(boxes, fleet.Box{ID: fmt.Sprintf("h%d", i)})
+		reports = append(reports, fleet.Report{State: fleet.StateLive, Version: "v1"})
+	}
+	boxes = append(boxes, fleet.Box{ID: "d0"})
+	reports = append(reports, fleet.Report{State: fleet.StateDown})
+	snap := foldRoster(boxes, reports)
+	up := FromSnapshot(snap, "ci")
+
+	if up.Verdict != "ACTION" {
+		t.Fatalf("verdict = %q, want ACTION with a real down present", up.Verdict)
+	}
+	if up.Grade == "A" || up.Grade == "B" {
+		t.Fatalf("grade = %q, must NOT be A/B (the renderer would paint a real down green); score=%d", up.Grade, snap.Score)
+	}
+}
+
+func TestFromSnapshotSkewAmongReportersIsACTIONNotGreen(t *testing.T) {
+	var boxes []fleet.Box
+	var reports []fleet.Report
+	for i := 0; i < 9; i++ {
+		boxes = append(boxes, fleet.Box{ID: fmt.Sprintf("h%d", i)})
+		reports = append(reports, fleet.Report{State: fleet.StateLive, Version: "v1"})
+	}
+	boxes = append(boxes, fleet.Box{ID: "skew"})
+	reports = append(reports, fleet.Report{State: fleet.StateLive, Version: "v2"}) // off the modal version
+	snap := foldRoster(boxes, reports)
+	up := FromSnapshot(snap, "ci")
+
+	if up.Verdict != "ACTION" {
+		t.Fatalf("verdict = %q, want ACTION for version skew among reporters", up.Verdict)
+	}
+	if up.Grade == "A" || up.Grade == "B" {
+		t.Fatalf("grade = %q, must be clamped below B so skew is not painted green/yellow", up.Grade)
+	}
+}
+
+func TestFromSnapshotPartialVisibilityIsOKWithReportingLine(t *testing.T) {
+	boxes := []fleet.Box{{ID: "a1"}, {ID: "a2"}, {ID: "a3"}}
+	reports := []fleet.Report{
+		{State: fleet.StateLive, Version: "v1"},
+		// a2, a3 silent (no report aligned → unknown)
+	}
+	snap := foldRoster(boxes, reports)
+	up := FromSnapshot(snap, "ci")
+
+	if up.Verdict != "OK" {
+		t.Fatalf("verdict = %q, want OK (silence alone never escalates)", up.Verdict)
 	}
 	lines := strings.Join(up.Lines, " | ")
-	if !strings.Contains(lines, "down: 1") {
-		t.Fatalf("expected a down-state count line, got: %s", lines)
+	if !strings.Contains(lines, "reporting: 1/3 (2 silent=unknown, not down)") {
+		t.Fatalf("expected the partial-visibility reporting line, got: %s", lines)
+	}
+	if !strings.Contains(up.Detail, "silent (unknown, not down)") {
+		t.Fatalf("detail = %q, want the non-alarming partial-coverage headline", up.Detail)
+	}
+}
+
+func TestFromSnapshotEmptyRosterIsNeutralNotF(t *testing.T) {
+	snap := foldRoster(nil, nil)
+	up := FromSnapshot(snap, "ci")
+
+	if up.Grade == "F" {
+		t.Fatalf("grade = %q, an empty roster is a config state, not an F outage", up.Grade)
+	}
+	if strings.HasPrefix(up.Grade, "A") || strings.HasPrefix(up.Grade, "B") {
+		t.Fatalf("grade = %q must not prefix-match A/B (would render green for an empty roster)", up.Grade)
+	}
+	if up.Detail != "no nodes in the roster" {
+		t.Fatalf("detail = %q, want 'no nodes in the roster'", up.Detail)
 	}
 }
 
@@ -172,6 +308,15 @@ func TestGradeOfBands(t *testing.T) {
 	for _, c := range cases {
 		if got := gradeOf(c.score); got != c.want {
 			t.Errorf("gradeOf(%d) = %q, want %q", c.score, got, c.want)
+		}
+	}
+}
+
+func TestClampBelowB(t *testing.T) {
+	cases := map[string]string{"A": "C", "B": "C", "C": "C", "D": "D", "F": "F", "": ""}
+	for in, want := range cases {
+		if got := clampBelowB(in); got != want {
+			t.Errorf("clampBelowB(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

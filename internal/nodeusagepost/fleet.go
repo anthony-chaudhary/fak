@@ -21,32 +21,229 @@ func ParseSnapshot(raw []byte) (fleet.Snapshot, error) {
 	return s, nil
 }
 
+// bucket is the honest classification of a node-usage snapshot. The whole point of the
+// card is to NOT lie about what the fleet is doing, and the load-bearing distinction is
+// SILENT (no box reported — a visibility gap) vs DOWN (a box reported itself not
+// serving — a real outage). The fleet model already draws this line: a `down` box is
+// "reachable" (knowing it's down is a real observation), an `unknown` box is not. So we
+// classify off the per-state COUNTS (ByState), never off snap.Reachable (which a
+// down-with-error box drives to 0, hiding a real outage behind "no visibility") and
+// never off the fold's conflated "N box(es) down or unreachable" attention TITLE (which
+// lumps unknown in with down — the original bug).
+type bucket int
+
+const (
+	bucketEmpty        bucket = iota // no roster — nothing to report on
+	bucketProblem                    // a real, observed problem: a reported `down`, or skew/stale among reporters
+	bucketNoVisibility               // every box silent — a visibility gap, NOT an outage
+	bucketClean                      // at least one healthy report, no down, no warn (some boxes may still be silent)
+)
+
+// signals are the three honest quantities every decision keys off, read once from the
+// snapshot integers so grade/verdict/detail/lines can never disagree.
+type signals struct {
+	down    int  // boxes that reported "down" (ByState[StateDown]) — a real observation
+	silent  int  // boxes that gave no real word (ByState[StateUnknown]) — silent or errored
+	hasWarn bool // any warn-level attention item: version skew / staleness AMONG reporters
+}
+
+func readSignals(snap fleet.Snapshot) signals {
+	s := signals{
+		down:   snap.ByState[fleet.StateDown],
+		silent: snap.ByState[fleet.StateUnknown],
+	}
+	for _, it := range snap.Attention {
+		if it.Level == "warn" {
+			s.hasWarn = true
+			break
+		}
+	}
+	return s
+}
+
+// classify buckets the snapshot. Order is load-bearing: a REAL problem (down/warn) is
+// checked BEFORE the visibility gap, so an all-down-with-errors fleet (Reachable==0 but
+// down>0) is reported as the outage it is, never swallowed by the no-visibility branch.
+func classify(snap fleet.Snapshot, sig signals) bucket {
+	switch {
+	case snap.Total == 0:
+		return bucketEmpty
+	case sig.down > 0 || sig.hasWarn:
+		return bucketProblem
+	case sig.silent == snap.Total: // every box silent (and down==0, by the case above)
+		return bucketNoVisibility
+	default:
+		return bucketClean
+	}
+}
+
 // FromSnapshot folds a fleet.Snapshot (the node-usage signal) into a scoreboard.Update
 // — the one card shape every Slack feeder posts. It carries the readiness score, the
-// reachable fraction, the per-state and per-class node counts, and the top "what needs
-// me now" attention item, so #node-usage scans the current compute-node usage at a
-// glance.
+// per-state and per-class node counts, and a reporting/visibility line, so #node-usage
+// scans the current compute-node usage at a glance.
 //
-// The verdict is OK unless the snapshot has a `crit` attention item (a box down or
-// unreachable) — a degraded fleet is the operator's real node-usage problem, so it
-// reads ACTION. The grade is a coarse map of the 0-100 readiness score so the channel
-// colors consistently with the other feeders.
+// HONESTY CONTRACT (why this is not the original conflated card):
+//   - A fleet where every box is SILENT (no report) is a VISIBILITY GAP, not an outage:
+//     it reads a neutral card (no grade, no verdict → the :bar_chart: glyph) with the
+//     "populate liveness" guidance the human `fak lab status` footer prints — never a
+//     red F/ACTION.
+//   - A REAL, OBSERVED problem (a box that reported `down`, or version skew / staleness
+//     among reporting boxes) reads ACTION with a clamped grade so it renders red. The
+//     grade is clamped because the card renderer picks its glyph from the grade prefix
+//     BEFORE the verdict, so an A/B grade would otherwise paint a real down green.
+//   - `unknown` (silent) is never counted as `down` and never escalates on its own.
 func FromSnapshot(snap fleet.Snapshot, source string) scoreboard.Update {
-	up := scoreboard.Update{
+	sig := readSignals(snap)
+	b := classify(snap, sig)
+	return scoreboard.Update{
 		Title:   "node usage",
-		Grade:   gradeOf(snap.Score),
+		Grade:   gradeFor(b, snap, sig),
 		Score:   fmt.Sprintf("%d/%d reachable", snap.Reachable, snap.Total),
-		Verdict: verdictOf(snap),
-		Detail:  detailOf(snap),
-		Lines:   linesOf(snap),
+		Verdict: verdictFor(b),
+		Detail:  detailFor(b, snap, sig),
+		Lines:   linesFor(b, snap, sig),
 		Source:  source,
 	}
-	return up
+}
+
+// gradeFor picks the grade per bucket. It does NOT pass snap.Score through blindly: the
+// card renderer's gradeEmoji checks HasPrefix(grade,"A"/"B") before it consults the
+// verdict, so an A/B grade with an ACTION verdict would still render green/yellow and
+// mask a real problem. So a PROBLEM bucket clamps the grade below B, and the
+// NO-VISIBILITY bucket withholds the grade entirely (the neutral glyph).
+func gradeFor(b bucket, snap fleet.Snapshot, sig signals) string {
+	switch b {
+	case bucketEmpty:
+		return "N/A" // starts with 'N', so it never prefix-matches the A/B emoji arms
+	case bucketNoVisibility:
+		return "" // empty grade + empty verdict → the neutral :bar_chart: glyph
+	case bucketProblem:
+		if sig.down > 0 {
+			return "F" // a reported-down box is a real outage — force red
+		}
+		return clampBelowB(gradeOf(snap.Score)) // warn only: never green/yellow
+	default: // bucketClean
+		return gradeOf(snap.Score)
+	}
+}
+
+// clampBelowB caps an A/B grade at C so a real (warn-level) problem can never short-
+// circuit the renderer's grade-first emoji to green/yellow. A grade already C or worse
+// is left as-is.
+func clampBelowB(g string) string {
+	if g == "A" || g == "B" {
+		return "C"
+	}
+	return g
+}
+
+// verdictFor is ACTION only on an OBSERVED problem; silence is never ACTION. The
+// NO-VISIBILITY verdict MUST be empty: a non-empty non-OK verdict would fall through
+// gradeEmoji to the red default and re-introduce the false-outage lie.
+func verdictFor(b bucket) string {
+	switch b {
+	case bucketProblem:
+		return "ACTION"
+	case bucketNoVisibility:
+		return "" // neutral, with the empty grade → :bar_chart:
+	default: // bucketEmpty, bucketClean
+		return "OK"
+	}
+}
+
+// detailFor is the one-line headline per bucket, built from the snapshot COUNTS — never
+// copied from the fold's conflated "N box(es) down or unreachable" title.
+func detailFor(b bucket, snap fleet.Snapshot, sig signals) string {
+	switch b {
+	case bucketEmpty:
+		return "no nodes in the roster"
+	case bucketProblem:
+		if sig.down > 0 {
+			return fmt.Sprintf("%d box(es) reported down", sig.down)
+		}
+		return firstWarnTitle(snap) // skew/stale, already honestly worded by the fold
+	case bucketNoVisibility:
+		return "no live reports — every box reads unknown/errored (not down)"
+	default: // bucketClean
+		if sig.silent > 0 {
+			return fmt.Sprintf("%d of %d reporting; %d silent (unknown, not down)",
+				snap.Total-sig.silent, snap.Total, sig.silent)
+		}
+		return "" // fully clean — Verdict OK already renders the check
+	}
+}
+
+// firstWarnTitle returns the first warn-level attention item's title, or a generic
+// fallback if none is present (defensive: the PROBLEM bucket only reaches here when
+// hasWarn is true, but a snapshot authored without Attention rows could still set it).
+func firstWarnTitle(snap fleet.Snapshot) string {
+	for _, it := range snap.Attention {
+		if it.Level == "warn" {
+			return it.Title
+		}
+	}
+	return "reporting boxes need attention (version skew or staleness)"
+}
+
+// linesFor renders the at-a-glance breakdown: a reporting/visibility line (so silent is
+// never read as down), the per-state counts, the per-class counts, the readiness score,
+// and — for a visibility gap — the populate-liveness guidance the human footer prints.
+func linesFor(b bucket, snap fleet.Snapshot, sig signals) []string {
+	var lines []string
+
+	// Reporting line first (skip for an empty roster, where it is vacuous). Derived from
+	// Total-silent, NOT snap.Reachable, so both numbers stay consistent with the silent
+	// count even on a down-with-error snapshot.
+	if b != bucketEmpty {
+		if sig.silent > 0 {
+			lines = append(lines, fmt.Sprintf("reporting: %d/%d (%d silent=unknown, not down)",
+				snap.Total-sig.silent, snap.Total, sig.silent))
+		} else {
+			lines = append(lines, fmt.Sprintf("reporting: %d/%d", snap.Total, snap.Total))
+		}
+	}
+
+	lines = append(lines, stateLines(snap)...)
+	lines = append(lines, classLines(snap)...)
+	lines = append(lines, fmt.Sprintf("readiness: %d", snap.Score))
+
+	if b == bucketNoVisibility {
+		lines = append(lines,
+			"populate liveness: run the private Slack bridge, or `fak lab report --id <box> --state live` on a box that can self-report")
+	}
+	return lines
+}
+
+// stateLines renders the per-state node counts (live / idle / draining / down /
+// unknown) in a fixed operational order so the line is stable across runs.
+func stateLines(snap fleet.Snapshot) []string {
+	var lines []string
+	for _, st := range []fleet.State{
+		fleet.StateLive, fleet.StateIdle, fleet.StateDraining, fleet.StateDown, fleet.StateUnknown,
+	} {
+		if n := snap.ByState[st]; n > 0 {
+			lines = append(lines, fmt.Sprintf("%s: %d", st, n))
+		}
+	}
+	return lines
+}
+
+// classLines renders the per-class node counts as "class=N" entries, sorted for a
+// stable, scannable line independent of count ties.
+func classLines(snap fleet.Snapshot) []string {
+	out := make([]string, 0, len(snap.ByClass))
+	for _, c := range snap.ByClass {
+		out = append(out, fmt.Sprintf("%s=%d", c.Key, c.Count))
+	}
+	sort.Strings(out)
+	return out
 }
 
 // gradeOf maps the 0-100 fleet readiness score onto an A-F grade — the same coarse
 // banding the capacity feed uses, so a node-usage card and a capacity card read the
-// same way. An empty fleet scores 0 -> F (nothing ready).
+// same way. Used only for the CLEAN bucket and as the pre-clamp input for a warn-level
+// PROBLEM; the NO-VISIBILITY and EMPTY buckets override it (a score of 0 from an
+// all-silent fleet is a visibility artifact, not a graded readiness failure).
 func gradeOf(score int) string {
 	switch {
 	case score >= 90:
@@ -60,60 +257,4 @@ func gradeOf(score int) string {
 	default:
 		return "F"
 	}
-}
-
-// verdictOf is ACTION when any attention item is crit (a box down or unreachable),
-// else OK. A crit item is the only node-usage state worth pulling an operator in; a
-// version-skew or stale warn is informational and stays OK.
-func verdictOf(snap fleet.Snapshot) string {
-	for _, it := range snap.Attention {
-		if it.Level == "crit" {
-			return "ACTION"
-		}
-	}
-	return "OK"
-}
-
-// detailOf is the one-line headline: the top attention item's title (crit first, then
-// warn, then the single healthy line), so the card leads with the thing that matters.
-func detailOf(snap fleet.Snapshot) string {
-	if len(snap.Attention) > 0 {
-		return snap.Attention[0].Title
-	}
-	if snap.Total == 0 {
-		return "no nodes in the roster"
-	}
-	return ""
-}
-
-// linesOf renders the at-a-glance node-usage breakdown: per-state node counts (live /
-// idle / draining / down / unknown), then per-class counts, then the readiness score.
-// States are listed in a fixed operational order so the line is stable across runs.
-func linesOf(snap fleet.Snapshot) []string {
-	var lines []string
-	for _, st := range []fleet.State{
-		fleet.StateLive, fleet.StateIdle, fleet.StateDraining, fleet.StateDown, fleet.StateUnknown,
-	} {
-		if n := snap.ByState[st]; n > 0 {
-			lines = append(lines, fmt.Sprintf("%s: %d", st, n))
-		}
-	}
-	// Per-class counts come pre-sorted (desc count, then key) from the fold; render as
-	// class=N so node usage is visible per hardware class.
-	cls := append([]string{}, classLines(snap)...)
-	sort.Strings(cls)
-	lines = append(lines, cls...)
-	lines = append(lines, fmt.Sprintf("readiness: %d", snap.Score))
-	return lines
-}
-
-// classLines renders the per-class node counts as "class=N" entries. A fleet.Snapshot
-// already orders ByClass deterministically; we re-sort the rendered strings in linesOf
-// for a stable, scannable line independent of count ties.
-func classLines(snap fleet.Snapshot) []string {
-	out := make([]string, 0, len(snap.ByClass))
-	for _, c := range snap.ByClass {
-		out = append(out, fmt.Sprintf("%s=%d", c.Key, c.Count))
-	}
-	return out
 }
