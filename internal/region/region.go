@@ -112,19 +112,22 @@ func (w *Window) Put(ctx context.Context, b []byte, scope abi.ShareScope) (abi.R
 func (w *Window) PutTainted(ctx context.Context, b []byte, scope abi.ShareScope, taint abi.TaintLabel) (abi.Ref, abi.Verdict, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	return w.commitWriteLocked(ctx, ToolPut, "", b, scope, taint, func() ([]byte, error) { return b, nil })
+}
+
+// commitWriteLocked enforces the scope ceiling, then adjudicates and commits a
+// write through the window's own kernel, resolver, and coherence plane, and
+// advances the window value. The caller must hold w.mu. See commitWrite for the
+// store/derivation contract.
+func (w *Window) commitWriteLocked(ctx context.Context, tool, op string, adjudicationPayload []byte, scope abi.ShareScope, taint abi.TaintLabel, store func() ([]byte, error)) (abi.Ref, abi.Verdict, error) {
 	if err := w.checkWriteScopeLocked(scope); err != nil {
 		return abi.Ref{}, abi.Verdict{}, err
 	}
-	call, verdict, err := adjudicate(ctx, w.kernel, ToolPut, b, scope, taint, "")
-	if err != nil {
-		return abi.Ref{}, verdict, err
-	}
-	ref, err := putRef(ctx, w.resolver, b, scope, taint)
+	ref, verdict, err := commitWrite(ctx, w.kernel, w.resolver, w.coherence, tool, op, adjudicationPayload, scope, taint, store)
 	if err != nil {
 		return abi.Ref{}, verdict, err
 	}
 	w.ref, w.hasRef = ref, true
-	emitWrite(w.coherence, call, ref)
 	return ref, verdict, nil
 }
 
@@ -170,24 +173,9 @@ func (w *Window) AccumulateTainted(ctx context.Context, op AccumulateOp, delta [
 			return abi.Ref{}, abi.Verdict{}, err
 		}
 	}
-	if err := w.checkWriteScopeLocked(scope); err != nil {
-		return abi.Ref{}, abi.Verdict{}, err
-	}
-	call, verdict, err := adjudicate(ctx, w.kernel, ToolAccumulate, delta, scope, currentTaint, string(op))
-	if err != nil {
-		return abi.Ref{}, verdict, err
-	}
-	next, err := fold(op, current, delta)
-	if err != nil {
-		return abi.Ref{}, verdict, err
-	}
-	ref, err := putRef(ctx, w.resolver, next, scope, currentTaint)
-	if err != nil {
-		return abi.Ref{}, verdict, err
-	}
-	w.ref, w.hasRef = ref, true
-	emitWrite(w.coherence, call, ref)
-	return ref, verdict, nil
+	return w.commitWriteLocked(ctx, ToolAccumulate, string(op), delta, scope, currentTaint, func() ([]byte, error) {
+		return fold(op, current, delta)
+	})
 }
 
 func (w *Window) checkWriteScopeLocked(scope abi.ShareScope) error {
@@ -218,15 +206,30 @@ func PutTainted(ctx context.Context, k abi.Kernel, b []byte, scope abi.ShareScop
 	if r == nil {
 		return abi.Ref{}, abi.Verdict{}, ErrNoResolver
 	}
-	call, verdict, err := adjudicate(ctx, k, ToolPut, b, scope, taint, "")
+	return commitWrite(ctx, k, r, vdso.Default, ToolPut, "", b, scope, taint, func() ([]byte, error) { return b, nil })
+}
+
+// commitWrite adjudicates an adjudicationPayload write through k, derives the
+// bytes to store via store (run only after a successful adjudication so a
+// derivation error carries the adjudicated verdict), stores them through r, and
+// emits the write-completion event on c. The stored bytes may differ from
+// adjudicationPayload (e.g. Accumulate adjudicates the delta but stores the
+// folded result). It is the shared write path behind both the Window methods
+// and the stateless package functions.
+func commitWrite(ctx context.Context, k abi.Kernel, r abi.Resolver, c Coherence, tool, op string, adjudicationPayload []byte, scope abi.ShareScope, taint abi.TaintLabel, store func() ([]byte, error)) (abi.Ref, abi.Verdict, error) {
+	call, verdict, err := adjudicate(ctx, k, tool, adjudicationPayload, scope, taint, op)
 	if err != nil {
 		return abi.Ref{}, verdict, err
 	}
-	ref, err := putRef(ctx, r, b, scope, taint)
+	stored, err := store()
 	if err != nil {
 		return abi.Ref{}, verdict, err
 	}
-	emitWrite(vdso.Default, call, ref)
+	ref, err := putRef(ctx, r, stored, scope, taint)
+	if err != nil {
+		return abi.Ref{}, verdict, err
+	}
+	emitWrite(c, call, ref)
 	return ref, verdict, nil
 }
 
@@ -282,20 +285,13 @@ func Accumulate(ctx context.Context, k abi.Kernel, target *abi.Ref, op Accumulat
 	if wider(scope, abi.ScopeFleet) {
 		return abi.Ref{}, abi.Verdict{}, ErrScopeWiden
 	}
-	call, verdict, err := adjudicate(ctx, k, ToolAccumulate, delta, scope, taint, string(op))
-	if err != nil {
-		return abi.Ref{}, verdict, err
-	}
-	next, err := fold(op, current, delta)
-	if err != nil {
-		return abi.Ref{}, verdict, err
-	}
-	ref, err := putRef(ctx, r, next, scope, taint)
+	ref, verdict, err := commitWrite(ctx, k, r, vdso.Default, ToolAccumulate, string(op), delta, scope, taint, func() ([]byte, error) {
+		return fold(op, current, delta)
+	})
 	if err != nil {
 		return abi.Ref{}, verdict, err
 	}
 	*target = ref
-	emitWrite(vdso.Default, call, ref)
 	return ref, verdict, nil
 }
 
@@ -412,6 +408,11 @@ func writeArgs(b []byte, scope abi.ShareScope, taint abi.TaintLabel, op string) 
 	if op != "" {
 		body["op"] = op
 	}
+	return inlineRef(body, scope, taint)
+}
+
+// inlineRef JSON-encodes body into an inline Ref tagged with scope and taint.
+func inlineRef(body map[string]any, scope abi.ShareScope, taint abi.TaintLabel) abi.Ref {
 	encoded, _ := json.Marshal(body)
 	return abi.Ref{Kind: abi.RefInline, Inline: encoded, Len: int64(len(encoded)), Scope: scope, Taint: taint}
 }
@@ -430,8 +431,7 @@ func refArgs(ref abi.Ref, op string, extra map[string]any) abi.Ref {
 	if op != "" {
 		body["op"] = op
 	}
-	encoded, _ := json.Marshal(body)
-	return abi.Ref{Kind: abi.RefInline, Inline: encoded, Len: int64(len(encoded)), Scope: ref.Scope, Taint: ref.Taint}
+	return inlineRef(body, ref.Scope, ref.Taint)
 }
 
 func joinTaint(a, b abi.TaintLabel) abi.TaintLabel {
