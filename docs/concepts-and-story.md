@@ -111,7 +111,7 @@ speeds are beside the point):
 - **By agents / sessions:** the cross-agent saving is **exactly zero with one agent**.
   It turns positive at the **2nd** agent sharing the prompt and keeps climbing. At **50
   agents over 50 turns** it removes on the order of **thousands** of duplicate tool
-  round-trips (**2,344 of 2,500** in the measured 50×50 read-fleet run). The per-agent
+  round-trips (**2,344 of 2,500** in the measured 50Ã—50 read-fleet run). The per-agent
   benefit flattens out past a few hundred agents.
 - **One big "but": read-heavy fleets only.** If agents frequently *write to or change*
   the shared state, this cross-agent sharing can turn into a **net loss** (even a ~1%
