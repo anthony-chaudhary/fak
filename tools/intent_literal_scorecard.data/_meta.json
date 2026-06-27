@@ -1,0 +1,35 @@
+{
+  "schema": "fak-intent-literal-scorecard.data/1",
+  "meta": {
+    "as_of": "2026-06-27",
+    "fak_version": "v0.34.0",
+    "title": "fak intent-literal scorecard - does a metric's name invite an intent its definition delivers",
+    "_doc": "Each row is one reported metric, positioned on whether its NAME invites a wider intent than its LITERAL definition delivers - worst of all a SELF-REFERENTIAL denominator ('how much we do of X' where X is our own positioned set, not the external market) - and, if it diverges, whether the surface DISCLOSES the gap where a reader sees it. The scorecard CROSS-CHECKS the tree: the grounding token must appear in the named surface, and a divergent row's disclosure phrase must literally appear in that surface, so coverage cannot be gamed by editing JSON. Distinct from concept-disambiguation (do two NAMES blur) and conflation (a number's PROVENANCE). Regenerate the doc: python tools/intent_literal_scorecard.py --markdown-dir docs/intent-literal-scorecard"
+  },
+  "surfaces": [
+    {
+      "id": "serving-metrics",
+      "name": "Gateway Prometheus metrics",
+      "path": "internal/gateway/metrics.go",
+      "note": "The operator-facing /metrics surface. HELP text is where a divergent denominator is disclosed (or not)."
+    },
+    {
+      "id": "industry-scorecard-doc",
+      "name": "Industry scorecard headline",
+      "path": "docs/industry-scorecard/README.md",
+      "note": "The OUTWARD competitive map. Its 'coverage' and 'composite score' are self-referential (our taxonomy), fenced by 'Read this right'."
+    },
+    {
+      "id": "concept-scorecard-doc",
+      "name": "Concept-disambiguation scorecard headline",
+      "path": "docs/concept-disambiguation-scorecard/README.md",
+      "note": "The INWARD naming map. Its 'coverage' denominator is the whole discovered confusable space - the honest fix to the self-referential framing industry's number exposes."
+    },
+    {
+      "id": "dispatch-status-doc",
+      "name": "Issue-dispatch status headline",
+      "path": "docs/dispatch-status.md",
+      "note": "The fleet operations surface. closure_rate is an HONESTY ratio, not throughput; the formula is printed inline."
+    }
+  ]
+}

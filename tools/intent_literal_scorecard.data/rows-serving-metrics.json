@@ -1,0 +1,70 @@
+{
+  "_about": "Gateway Prometheus metrics (internal/gateway/metrics.go) whose NAME can be over-read. The disciplined tree discloses each divergence in the HELP text; this file pins those fences so a future metric cannot drop one silently.",
+  "rows": [
+    {
+      "id": "vdso-hit-ratio",
+      "canonical": "fak_gateway_vdso_hit_ratio",
+      "surface": "serving-metrics",
+      "kind": "ratio",
+      "invited_intent": "a cache hit rate - reads served from a cache divided by lookups",
+      "literal": "the fraction of kernel submissions served by the vDSO fast path (an adjudication-bypass rate), not cache reads per lookup",
+      "denominator": "self-referential",
+      "grounding": "fak_gateway_vdso_hit_ratio",
+      "disclosure": "over kernel submissions",
+      "verdict": "disclosed",
+      "gaps": []
+    },
+    {
+      "id": "vdso-hits-total",
+      "canonical": "fak_kernel_vdso_hits_total",
+      "surface": "serving-metrics",
+      "kind": "counter",
+      "invited_intent": "cache hits - how often a trust/result cache was effective",
+      "literal": "kernel submissions served by the vDSO fast path (a count of adjudication bypasses), not cache hits",
+      "denominator": "self-referential",
+      "grounding": "fak_kernel_vdso_hits_total",
+      "disclosure": "served by the vDSO fast path",
+      "verdict": "disclosed",
+      "gaps": []
+    },
+    {
+      "id": "inflight-max-age",
+      "canonical": "fak_gateway_inflight_max_age_seconds",
+      "surface": "serving-metrics",
+      "kind": "gauge",
+      "invited_intent": "maximum request latency, or a hung-request detector",
+      "literal": "the age of the oldest in-flight request AT SCRAPE TIME; a request that hangs and finishes between scrapes is never seen",
+      "denominator": "snapshot",
+      "grounding": "fak_gateway_inflight_max_age_seconds",
+      "disclosure": "currently in flight",
+      "verdict": "disclosed",
+      "gaps": ["The HELP discloses 'currently in flight' but not the scrape-time blindness; a stronger fence would name it."]
+    },
+    {
+      "id": "in-kernel-mem-plan-bytes",
+      "canonical": "fak_gateway_in_kernel_request_memory_plan_bytes",
+      "surface": "serving-metrics",
+      "kind": "gauge",
+      "invited_intent": "cumulative or aggregate memory demand / memory pressure",
+      "literal": "the most-recent single served request's memory plan - a last-request gauge, not an aggregate counter",
+      "denominator": "snapshot",
+      "grounding": "fak_gateway_in_kernel_request_memory_plan_bytes",
+      "disclosure": "last-request gauge, not a cumulative counter",
+      "verdict": "disclosed",
+      "gaps": []
+    },
+    {
+      "id": "kernel-decisions-total",
+      "canonical": "fak_kernel_decisions_total",
+      "surface": "serving-metrics",
+      "kind": "counter",
+      "invited_intent": "the distribution of real adjudication decisions the kernel made",
+      "literal": "decisions by winning rung INCLUDING rung=vdso, which means no adjudication happened - a bypass row sits among the real decisions",
+      "denominator": "self-referential",
+      "grounding": "fak_kernel_decisions_total",
+      "disclosure": "passive; re-derived off the hot path",
+      "verdict": "disclosed",
+      "gaps": []
+    }
+  ]
+}

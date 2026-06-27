@@ -1,0 +1,44 @@
+{
+  "_about": "The scorecard headline numbers most prone to the 'how much we do of X but X != market' trap. industry coverage is SELF-REFERENTIAL (our taxonomy) and must be fenced; concept coverage fixes the denominator to the whole discovered space (external-universe) and so is honest by shape - the teaching contrast the PM review surfaced.",
+  "rows": [
+    {
+      "id": "industry-coverage",
+      "canonical": "Coverage (industry scorecard)",
+      "surface": "industry-scorecard-doc",
+      "kind": "coverage",
+      "invited_intent": "fak covers / serves ~100% of the LLM-serving market",
+      "literal": "100% = 89/89 industry dimensions fak has POSITIONED itself against in its OWN taxonomy; the standing is 5 lead / 11 parity / 8 trails / 66 honest gaps - it grades map completeness, not market share or wins",
+      "denominator": "self-referential",
+      "grounding": "89/89",
+      "disclosure": "Read this right",
+      "verdict": "disclosed",
+      "gaps": []
+    },
+    {
+      "id": "industry-composite-grade",
+      "canonical": "Composite score (industry scorecard)",
+      "surface": "industry-scorecard-doc",
+      "kind": "scalar",
+      "invited_intent": "fak is an A-grade product - fak is winning the field",
+      "literal": "98.8/100 grades how complete and honest fak's competitive MAP is (honesty x 60% + coverage x 40%), explicitly not how much fak wins",
+      "denominator": "self-referential",
+      "grounding": "98.8",
+      "disclosure": "not how much fak wins",
+      "verdict": "disclosed",
+      "gaps": []
+    },
+    {
+      "id": "concept-coverage",
+      "canonical": "Coverage (concept-disambiguation scorecard)",
+      "surface": "concept-scorecard-doc",
+      "kind": "coverage",
+      "invited_intent": "the namespace is only 11.5% disambiguated - mostly broken",
+      "literal": "11.5% = 55/480 confusable tokens DISCOVERED in the tree that are positioned; the denominator is the whole discovered confusable space (not a hand-picked set), so a low number is the honest 'most names are not yet disambiguated' - the positioned ones carry zero clarity defects",
+      "denominator": "external-universe",
+      "grounding": "55/480",
+      "disclosure": "Read this right",
+      "verdict": "clear",
+      "gaps": ["Contrast row: this denominator is the discovered universe, the honest fix to the self-referential framing industry-coverage exposes."]
+    }
+  ]
+}

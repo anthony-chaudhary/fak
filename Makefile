@@ -203,6 +203,8 @@ demo-scorecards:
 	@python3 tools/bench_dx_scorecard_test.py
 	@python3 tools/bench_dx_scorecard.py >/dev/null
 	@python3 tools/bench_dx_scorecard.py --check-doc
+	@python3 tools/intent_literal_scorecard_test.py
+	@python3 tools/intent_literal_scorecard.py >/dev/null
 	@echo "demo-scorecards OK"
 # code-slop scorecard: only the unit-test line gates here for now. The bare run +
 # --check-doc both exit 1 while slop-debt > 0 (the scorecard reports honestly), so
