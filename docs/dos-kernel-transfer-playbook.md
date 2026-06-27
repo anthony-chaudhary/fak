@@ -95,8 +95,10 @@ python tools\codex_dos_recent_audit.py `
 
 The rollup matches Codex session IDs to DOS stream files, reports aggregate
 unknown-footprint and delegate rates across the recent sessions, and, with
-`--check-latest`, compares the locally installed `dos-kernel` package with PyPI's
-`https://pypi.org/pypi/dos-kernel/json` `info.version`.
+`--check-latest`, compares the locally installed `dos-kernel` package with the
+configured PyPI index. By default this is the public PyPI at
+`https://pypi.org/pypi/dos-kernel/json`; set the `PYPI_INDEX_URL` environment
+variable to point to a private or mirror index instead.
 
 Freshness is not the same as fast-path wiring. The same report also includes
 `codex_hook_fast_path`: it reads the cached DOS hook manifest under the Codex home

@@ -685,7 +685,7 @@ def compact_session(audit: dict[str, Any], codex_path: Path) -> dict[str, Any]:
 
 
 def pypi_latest_version() -> dict[str, Any]:
-    url = "https://pypi.org/pypi/dos-kernel/json"
+    url = os.environ.get("PYPI_INDEX_URL", "https://pypi.org/pypi/dos-kernel/json")
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310 - fixed HTTPS package index URL.
             data = json.loads(resp.read().decode("utf-8"))
@@ -725,7 +725,8 @@ def local_dos_version(repo_root: Path, *, check_latest: bool = False) -> dict[st
         if latest.get("status") == "FOUND":
             out["using_latest"] = version == latest.get("version")
     else:
-        out["latest_check_note"] = "run with --check-latest to compare against https://pypi.org/pypi/dos-kernel/json"
+        index_url = os.environ.get("PYPI_INDEX_URL", "https://pypi.org/pypi/dos-kernel/json")
+        out["latest_check_note"] = f"run with --check-latest to compare against {index_url}"
     return out
 
 
