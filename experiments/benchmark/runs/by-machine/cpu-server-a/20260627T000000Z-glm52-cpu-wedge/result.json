@@ -5,7 +5,7 @@
   "model": "GLM-5.2-UD-Q4_K_M (~433 GB on disk, 11 shards)",
   "rung": "B3 (real mid/large checkpoint, CPU host) — see docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md",
   "ok": false,
-  "headline": "NO throughput obtained on this host: the fak-native all-resident CPU serve wedged on host RAM at gateway-init; the llama.cpp mmap baseline is pending (host recovery). Both engines' decode/prefill tok/s remain open — this artifact records the attempt + the one real datum (the resident-load curve) honestly, it is NOT a throughput pass.",
+  "headline": "NO usable throughput tok/s obtained on this CPU host. fak-native all-resident CPU serve WEDGED on host RAM at gateway-init (#974). The llama.cpp mmap baseline (CPU-only build, -ngl 0) RAN (memory-safe, no wedge) but its 433 GB warmup paged in from NFS at ~0.11-0.17 GB/s (same order as fak's load => the slow load is NFS-I/O-bound, not dequant — supports the #975 correction) and pure-CPU decode of the 753B MoE proved impractical (a single -n 32 rep did not finish in >30 min compute; decode <<0.05 tok/s, memory-bandwidth-bound). HONEST: the real data here is the load-curve + the cross-engine I/O-bound load witness + the negative 'pure-CPU 753B serving is not practical' finding; NOT a clean decode tok/s.",
   "engines": {
     "fak-native": {
       "engine": "fak-native CPU (reference path, FAK_Q4K=1 direct-resident-Q4_K loader)",
@@ -46,13 +46,16 @@
       }
     },
     "llama": {
-      "engine": "llama.cpp (mmap, -ngl 0)",
+      "engine": "llama.cpp CPU-only build (mmap, -ngl 0), built on-host with -DGGML_CUDA=OFF (the prebuilt llama-server was a CUDA build; this CPU host has no libcudart.so.12, so it could not run — a fresh CPU-only build was required, ~2 min)",
       "ok": false,
-      "status": "pending",
+      "status": "load-measured; pure-CPU decode impractical (no completed tok/s rep within budget)",
       "prefill_tok_per_sec": null,
       "decode_tok_per_sec": null,
-      "reason": "the apples-to-apples CPU baseline (prefill/decode tok/s across a thread sweep) has not yet been captured on this host; prebuilt llama-server/llama-bench are on the box, run pending host recovery",
-      "note": "llama.cpp serves this exact 433 GB model on this exact host via mmap (demand-paged, evictable page cache) — it never needs all weights resident, so it does NOT hit the fak-native RAM wedge; this is the memory-safe reference the fak-native number must be compared against"
+      "mmap_pagein_gb_per_sec": "~0.11-0.17 (the 433 GB warmup page-in from NFS, measured by RSS growth) — the SAME order as fak's resident-Q4_K load (~0.06-0.10 GB/s), so the slow ~70-95 min load is NFS-read-bound for this access pattern, NOT a fak-dequant-specific cost. This is the cross-engine witness supporting the #975 load_curve_cause correction (I/O-bound, not dequant-bound).",
+      "decode_finding": "pure-CPU (ngl 0) decode of the 753B GLM-5.2 MoE is impractically slow on this host: a single llama-bench config (-t 128 -p 128 -n 32 -r 1) did NOT complete its 32-token measured decode within >30 min of compute after the warmup paged the model in (decode well under ~0.05 tok/s), memory-bandwidth-bound across the 8 NUMA nodes, allocating ~200-256 GB of anonymous compute buffers (used 564->800 GB). This is an honest BOUND from a witnessed long-running bench, NOT a fabricated tok/s.",
+      "context": "the published llama.cpp 753B baseline (2.62 tok/s single / 4.84 agg @ conc 2) used GPU attention + --n-cpu-moe expert offload on an 8-GPU host, NOT pure CPU; pure-CPU (no GPU) serving of this 753B model is far slower and is not a practical serving config.",
+      "provenance": "measured 2026-06-27 on cpu-server-a; CPU-only llama.cpp built on-host; bench ran >2 h including the ~70 min NFS warmup page-in",
+      "note": "llama.cpp via mmap is the memory-SAFE path (it never hits the fak-native RAM wedge), but on this NFS-only host it is not load-fast, and pure-CPU decode of a 753B MoE is not throughput-practical. An exact tok/s needs GPU+CPU offload or a far smaller config."
     }
   },
   "correctness": {
