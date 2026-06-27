@@ -210,6 +210,7 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |
 | **How fak serves at scale** | [Serving plans](serving/README.md) — dual-track · poly-model · hardware-aware & regenerable KV |
 | **What's real, what's not** | [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) |
+| **The leadership snapshot** (wins · live goal · risks · the one decision) | [Executive roll-up](EXECUTIVE-ROLLUP.md) |
 | **A machine-readable map (for LLMs)** | [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) |
 
 ---
