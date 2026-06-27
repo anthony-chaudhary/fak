@@ -12,7 +12,8 @@
       "name": "Cache family",
       "roots": ["cache"],
       "ignore": ["cached", "caches", "cacheable", "cacheless", "uncached", "caching",
-                 "cachedir", "cachelen", "cachettl", "flushcache", "defaultcachesize"],
+                 "cachedir", "cachelen", "cachettl", "flushcache", "defaultcachesize",
+                 "cachecreation", "cacheentry", "cacheevent", "cachedecay", "cachestream", "cacherevoke"],
       "min_files": 3,
       "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta)."
     },
@@ -20,7 +21,7 @@
       "id": "attention",
       "name": "Attention family",
       "roots": ["attention", "attn"],
-      "ignore": [],
+      "ignore": ["attentions", "attentive"],
       "min_files": 3,
       "note": "Attention compute vs the attention-witness accumulation (Attended/EMA/Cumulative) vs the DSA AttentionIndex metadata."
     },
@@ -29,7 +30,7 @@
       "name": "Guard / gate family",
       "roots": ["guard", "gate"],
       "exclude": ["gateway"],
-      "ignore": [],
+      "ignore": ["gated", "gates", "guarded", "guards", "gating", "ungated"],
       "min_files": 3,
       "note": "The kernel (guard) vs the many decision points (gate): adjudicators pre-call, result admitters post-call, git-hook gates, promotion gates."
     },
@@ -37,7 +38,7 @@
       "id": "session-runtime",
       "name": "Session / scheduling family",
       "roots": ["session", "slot", "scheduler"],
-      "ignore": ["sessions"],
+      "ignore": ["sessions", "scheduling", "scheduled"],
       "min_files": 3,
       "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner)."
     },
@@ -45,7 +46,7 @@
       "id": "witness-proof",
       "name": "Witness / evidence family",
       "roots": ["witness", "refut", "revoc", "trustepoch"],
-      "ignore": [],
+      "ignore": ["witnessing", "witnessable", "witnessed", "witnesses", "refuted", "refutes", "revocations"],
       "min_files": 3,
       "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims."
     },
@@ -61,7 +62,7 @@
       "id": "policy-capability",
       "name": "Policy / authorization family",
       "roots": ["policy", "capability", "posture", "adjudicat", "preflight"],
-      "ignore": ["policies"],
+      "ignore": ["policies", "adjudicators", "capabilities", "postures", "adjudication", "adjudicate", "adjudicated", "adjudicates", "policyblocks"],
       "min_files": 3,
       "note": "Capability floor (intent) vs policy manifest (on-disk JSON) vs loaded Policy (compiled table) vs the adjudicator (enforcer) vs verdict/reason-code (its output)."
     },
@@ -69,7 +70,7 @@
       "id": "context-ctx",
       "name": "Context-management family",
       "roots": ["ctx", "context", "recall", "compaction"],
-      "ignore": ["contexts"],
+      "ignore": ["contexts", "recalling", "recalled"],
       "min_files": 3,
       "note": "context-MMU (gates result bytes) vs KV-MMU (evicts K/V spans) vs recall (the persisted core dump) vs compaction (provider prefix reuse) vs the ctx* planners."
     },
