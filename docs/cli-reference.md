@@ -89,8 +89,11 @@ long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
 > internal packages, CI green, and the A/B benchmark gate passes. Confirmed not by self-report
 > but by the DOS truth syscall (`dos_verify`): the shipped line runs from **`v0.1.0`** (the
 > syscall skeleton, sha `c72ddf1`) through **`v0.2.0`** (model fusion + security substrate +
-> gateway) and **`v0.2.1`** (gateway hardening + the turn-tax bench) onward to the current
-> release — see `../docs/releases/`.
+> gateway) and **`v0.2.1`** (gateway hardening + the turn-tax bench). Note: `dos verify` on
+> the v0.2.0/v0.2.1 release-bump tags returns `shipped:false` because those commits touch only
+> `VERSION` + release notes; the actual code ships across the commits each tag caps (see
+> `../STATUS.md` §1 for the caveat). The truth syscall confirms the *code* ships, not the
+> version bump — see `../docs/releases/`.
 >
 > **What v0.2 added on top of the v0.1 syscall skeleton** (each its own witnessed lane):
 > a **real model fused into the kernel** (a pure-Go SmolLM2-135M forward pass, every rung
