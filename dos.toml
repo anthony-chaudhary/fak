@@ -60,6 +60,7 @@ concurrent = [
   "cohort",
   "agenttopo",
   "promptmmu",
+  "vcacheobserve",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -89,6 +90,7 @@ concurrent = [
   # bind and the arbiter could not detect a same-tree collision. Declared per #763's fence.
   "loopmgr",
   "fakrpc",
+  "vcacheobserve",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -131,6 +133,7 @@ autopick = [
   "session", # #756: internal/session leaf, see [lanes].concurrent note
   "loopmgr", # #763: internal/loopmgr leaf, see [lanes].concurrent note
   "fakrpc",
+  "vcacheobserve",
   # new-leaf:lane
 ]
 
@@ -251,6 +254,7 @@ promptmmu = ["internal/promptmmu/**"]
 session = ["internal/session/**"] # #756 (Pillar 2 / #748): per-session DRIVE state + cost ring
 loopmgr = ["internal/loopmgr/**"] # #763 (#749 `fak cron` / #748): loop ledger + governor + recurring-job schedule
 fakrpc = ["internal/fakrpc/**"]
+vcacheobserve = ["internal/vcacheobserve/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

@@ -38,6 +38,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheProveTelemetry(stdout, stderr, argv[1:])
 	case "prove-recall":
 		return runVCacheProveRecall(stdout, stderr, argv[1:])
+	case "observe":
+		return runVCacheObserve(stdout, stderr, argv[1:])
 	case "score", "bench":
 		return runVCacheScore(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -60,6 +62,8 @@ func vcacheUsage(w io.Writer) {
                    [--read-mult F] [--write-5m-mult F] [--write-1h-mult F]
   fak vcache prove-recall [--json] [--prefix-tokens N] [--unit-tokens N]
                    [--read-mult F] [--siblings N]
+  fak vcache observe [--transcript FILE]... [--telemetry FILE] [--json]
+                   [--read-mult F] [--write-5m-mult F] [--write-1h-mult F]
   fak vcache score|bench [--json] [--out FILE] [--telemetry FILE] [--two-x F]
                    [--anchor-tokens N --suffix-tokens N --requests N]
                    [--read-mult F --write-mult F --write-5m-mult F --write-1h-mult F]
@@ -84,6 +88,11 @@ so the gate REFUSES it; rebuild wins only for amortized fan-out. Exit 0 = rebuil
 allowed (PROVEN); exit 1 = refused (REFUTED); exit 2 = usage error.
 score/bench composes planned or observed savings, workload concentration,
 false-warm risk, recall risk, and a hot-anchor index into one 2x agent-dev gate.
+observe is the 10x per-sub-concept observability lens: it ingests REAL Claude Code
+transcripts (--transcript, repeatable) or a session-telemetry JSONL (--telemetry),
+groups turns by prefix family (one session = one shared system prefix), and runs the
+shipped M1-M5 decision leaves over that real data — one panel per sub-concept, each
+labeled OBSERVED (relayed from the provider's counters) or DECISION (fak's verdict).
 
 `)
 }
