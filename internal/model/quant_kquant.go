@@ -154,6 +154,19 @@ func kQuantMatRows(qt *kQuantTensor, x []float32) []float32 {
 
 func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 	y = y[:qt.out]
+	if kQuantSDOTEnabled(qt.kind) {
+		// int8 Q5_K decode path (quant_kquant_int8.go): quantize the activation ONCE and reuse it
+		// across every output row, so the per-row work is the compact int8 reduction instead of a
+		// 256-wide f32 dequant+dot — the lever for GLM-5.2's mixed-quant offloaded experts. The f32
+		// kQuantMatRowsRange below is untouched + byte-identical (TestKQuantMatRowsMatchesF32).
+		qv := quantizeVecQ8(x)
+		if numWorkers <= 1 || qt.out*qt.in < parThreshold {
+			q5kMatRowsRangeInt8(qt, qv, y, 0, qt.out)
+			return
+		}
+		parFor(qt.out, numWorkers, func(lo, hi int) { q5kMatRowsRangeInt8(qt, qv, y, lo, hi) })
+		return
+	}
 	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
 		kQuantMatRowsRange(qt, x, y, 0, qt.out)
 		return
