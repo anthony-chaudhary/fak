@@ -203,6 +203,19 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
     }
 }
 
+// --- accessors for the GPU-resident decode forward (decode.m) ---
+// The resident decode forward (issue #67) chains all of a token's matmuls into ONE command
+// buffer, so it needs to BIND each projection's resident Q8 weight buffers directly into its
+// own encoder rather than go through mg_q8_gemv's standalone commit. These expose the persistent
+// device buffers + dims for a wid without copying. id<MTLBuffer> crosses the .m boundary fine
+// (same ObjC compile unit set, one binary). nil/zero for an out-of-range wid.
+id<MTLBuffer> mg_q8_codes_buf(int wid)  { return (wid >= 0 && wid < gNQ8) ? (__bridge id<MTLBuffer>)gQ8[wid].codes  : nil; }
+id<MTLBuffer> mg_q8_scales_buf(int wid) { return (wid >= 0 && wid < gNQ8) ? (__bridge id<MTLBuffer>)gQ8[wid].scales : nil; }
+void mg_q8_dims(int wid, int* out, int* in, int* nblk) {
+    if (wid < 0 || wid >= gNQ8) { *out = *in = *nblk = 0; return; }
+    *out = gQ8[wid].out; *in = gQ8[wid].in; *nblk = gQ8[wid].nblk;
+}
+
 // mg_q8_reset releases every resident Q8 weight buffer and the reused scratch, returning the Q8
 // table to empty. Mirrors mg_q4k_reset. Call only when no Q8Weight handle is still in use.
 void mg_q8_reset(void) {
