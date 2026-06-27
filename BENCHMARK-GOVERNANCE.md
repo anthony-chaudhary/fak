@@ -123,6 +123,21 @@ they measure different baselines.
 
 ---
 
+## Within-Run Ratios — Single-Box Discipline
+
+**Definition:** A *within-run ratio* is a speedup or comparison measured during a single benchmark execution on the same machine (same hardware, same configuration, same workload). This eliminates cross-run variability (machine state, OS scheduling, thermal throttling) and makes the ratio robust even when absolute wall-clocks are hardware-dependent.
+
+**What this means:**
+- Deterministic metrics (token counts, cache hit rates, cell counts) are **hardware-independent** — they reproduce exactly on any machine because they count discrete events.
+- Live wall-clock ratios are **single-box** — they are authoritative *as within-run ratios* because the baseline and optimized arms run back-to-back on the same box under the same conditions.
+- Within-run ratios may vary across hardware (e.g., 4.87× on Mac M3, 2.60× on x86_64 for the same 135M RadixAttention benchmark), but the *trend* is hardware-independent (climbs toward the 7.50× token-speedup ceiling as model size grows).
+
+**Governance rule:** When citing wall-clock ratios, always specify whether they are:
+1. **Within-run** (same box, same run — authoritative for the trend)
+2. **Cross-run** (different runs, possibly different boxes — must disclose hardware and conditions)
+
+---
+
 ## The Anti-Inflation Rules
 
 To prevent benchmark inflation:

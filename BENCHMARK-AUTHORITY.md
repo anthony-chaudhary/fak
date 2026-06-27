@@ -75,7 +75,7 @@
 > architectural limit. The deterministic metrics (token speedup, hit rate) are
 > hardware-independent and reproduce the committed JSON exactly; only the live
 > wall-clocks are single-box (within-run ratios authoritative per
-> [BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md) regime rules).
+> [BENCHMARK-GOVERNANCE.md#Within-Run-Ratios](BENCHMARK-GOVERNANCE.md#Within-Run-Ratios)).
 
 ---
 
