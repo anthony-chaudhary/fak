@@ -18,7 +18,7 @@
   "deny": {
     "delete_account": "POLICY_BLOCK",
     "rotate_credentials": "POLICY_BLOCK",
-    "exfiltrate": "SECRET_EXFIL",
+    "exfiltrate": "POLICY_BLOCK",
     "transfer_funds": "POLICY_BLOCK"
   },
   "self_modify_globs": [

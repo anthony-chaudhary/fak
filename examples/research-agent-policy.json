@@ -20,7 +20,7 @@
   "deny": {
     "delete_file": "POLICY_BLOCK",
     "drop_table": "POLICY_BLOCK",
-    "exfiltrate": "SECRET_EXFIL",
+    "exfiltrate": "POLICY_BLOCK",
     "post_message": "POLICY_BLOCK",
     "run_command": "POLICY_BLOCK",
     "send_email": "POLICY_BLOCK",

@@ -28,7 +28,7 @@
     "find_"
   ],
   "deny": {
-    "exfiltrate": "SECRET_EXFIL"
+    "exfiltrate": "POLICY_BLOCK"
   },
   "self_modify_globs": [
     "internal/abi/",

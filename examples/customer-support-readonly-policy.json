@@ -17,7 +17,7 @@
   ],
   "deny": {
     "delete_account": "POLICY_BLOCK",
-    "export_customer_data": "SECRET_EXFIL",
+    "export_customer_data": "POLICY_BLOCK",
     "refund_payment": "POLICY_BLOCK",
     "rotate_credentials": "POLICY_BLOCK",
     "send_customer_email": "POLICY_BLOCK",
