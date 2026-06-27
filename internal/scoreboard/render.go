@@ -19,8 +19,20 @@ type Update struct {
 	Debt    string   // the debt value, pre-formatted (optional)
 	Verdict string   // OK | ACTION (optional)
 	Detail  string   // one-line finding/reason
+	Notes   string   // free-form multi-paragraph body (e.g. a product-direction note); rendered as-is
 	Lines   []string // optional extra lines (e.g. per-KPI scores)
 	Source  string   // who posted: "ci" | "agent" | hostname (optional)
+	Actions []Action // "do this next" affordances (e.g. an alert -> owning skill)
+}
+
+// Action is a "do this next" affordance attached to a card — e.g. an alert that
+// points the heaviest drift signal at the skill that retires it. A URL renders a
+// Slack link-button (a button with a `url` needs NO interactivity endpoint, so the
+// card stays stateless and within the "just chat.postMessage" constraint); when URL
+// is empty the action degrades to a plain text line in the fallback.
+type Action struct {
+	Label string // button text, e.g. "Run /steerability-score"
+	URL   string // optional link target (a docs/skill/repo URL)
 }
 
 // FromPayload folds a scorecard control-pane Payload into an Update. debtKey selects
@@ -91,8 +103,18 @@ func (u Update) Text() string {
 	if u.Detail != "" {
 		fmt.Fprintf(&b, "\n%s", u.Detail)
 	}
+	if u.Notes != "" {
+		fmt.Fprintf(&b, "\n%s", u.Notes)
+	}
 	if len(u.Lines) > 0 {
 		fmt.Fprintf(&b, "\n`%s`", strings.Join(u.Lines, "`  `"))
+	}
+	for _, a := range u.Actions {
+		if a.URL != "" {
+			fmt.Fprintf(&b, "\n• %s — %s", a.Label, a.URL)
+		} else {
+			fmt.Fprintf(&b, "\n• %s", a.Label)
+		}
 	}
 	if u.Source != "" {
 		fmt.Fprintf(&b, "\n_posted by %s_", u.Source)
@@ -135,6 +157,15 @@ func (u Update) Blocks() []any {
 			"text": map[string]any{"type": "mrkdwn", "text": u.Detail},
 		})
 	}
+	if u.Notes != "" {
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]any{"type": "mrkdwn", "text": u.Notes},
+		})
+	}
+	if elems := u.actionElements(); len(elems) > 0 {
+		blocks = append(blocks, map[string]any{"type": "actions", "elements": elems})
+	}
 	ctxParts := append([]string{}, u.Lines...)
 	if u.Source != "" {
 		ctxParts = append(ctxParts, "posted by "+u.Source)
@@ -146,6 +177,28 @@ func (u Update) Blocks() []any {
 		})
 	}
 	return blocks
+}
+
+// actionElements renders u.Actions as Block Kit button elements. Slack caps an
+// actions block at 5 elements, so extras are dropped (the Text() fallback still
+// carries all of them). A button is only emitted when it has a URL — a link-button
+// needs no interactivity endpoint; a URL-less action lives only in the text fallback.
+func (u Update) actionElements() []any {
+	var elems []any
+	for _, a := range u.Actions {
+		if a.URL == "" || a.Label == "" {
+			continue
+		}
+		elems = append(elems, map[string]any{
+			"type": "button",
+			"text": map[string]any{"type": "plain_text", "text": a.Label, "emoji": true},
+			"url":  a.URL,
+		})
+		if len(elems) == 5 {
+			break
+		}
+	}
+	return elems
 }
 
 func firstNonEmpty(vs ...string) string {

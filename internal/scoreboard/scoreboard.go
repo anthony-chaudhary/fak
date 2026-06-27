@@ -41,17 +41,24 @@ const slackAPI = "https://slack.com/api/"
 // lab SLACK_BOT_TOKEN — posting fak status to the lab control channel would be a
 // cross-workspace mistake, so an unset scoreboard token is an error, not a silent
 // reuse of the bridge token.
+//
+// The scoreboard workspace has TWO post targets that share the one bot token:
+// #scoreboard (FAK_SCOREBOARD_CHANNEL) carries scores and scorecard numbers; #product
+// (FAK_PRODUCT_CHANNEL, see ResolveProductChannel) carries product direction, persona
+// findings, and product-status snapshots. Same workspace, same token, different channel
+// — so the channel resolvers are split but the token resolver is shared.
 var (
-	tokenEnvs   = []string{"FAK_SCOREBOARD_TOKEN"}
-	channelEnvs = []string{"FAK_SCOREBOARD_CHANNEL"}
+	tokenEnvs          = []string{"FAK_SCOREBOARD_TOKEN"}
+	channelEnvs        = []string{"FAK_SCOREBOARD_CHANNEL"}
+	productChannelEnvs = []string{"FAK_PRODUCT_CHANNEL"}
 )
 
 // Client is a minimal Slack Web API client scoped to posting scoreboard updates.
 type Client struct {
-	token   string
-	http    *http.Client
-	apiBase string // override for tests
-	lastMu  sync.RWMutex
+	token    string
+	http     *http.Client
+	apiBase  string // override for tests
+	lastMu   sync.RWMutex
 	lastPost map[string]Update // keyed by title
 }
 
@@ -76,9 +83,9 @@ func NewClient(token string, opts ...Option) (*Client, error) {
 			strings.Join(tokenEnvs, "/"))
 	}
 	c := &Client{
-		token:   token,
-		http:    &http.Client{Timeout: 40 * time.Second},
-		apiBase: slackAPI,
+		token:    token,
+		http:     &http.Client{Timeout: 40 * time.Second},
+		apiBase:  slackAPI,
 		lastPost: make(map[string]Update),
 	}
 	for _, o := range opts {
@@ -107,6 +114,21 @@ func ResolveChannel() string {
 		}
 	}
 	return envFileValue("FAK_SCOREBOARD_CHANNEL")
+}
+
+// ResolveProductChannel returns the #product channel id from FAK_PRODUCT_CHANNEL, then a
+// FAK_PRODUCT_CHANNEL= line in .env.slack.local. It mirrors ResolveChannel but targets the
+// product-direction channel rather than #scoreboard; returns "" if none found so a caller
+// can require an explicit --channel. The two never share a default: a product post must not
+// silently fall back to #scoreboard, so `fak product post` requires this key (or --channel)
+// and does not call ResolveChannel.
+func ResolveProductChannel() string {
+	for _, e := range productChannelEnvs {
+		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
+			return v
+		}
+	}
+	return envFileValue("FAK_PRODUCT_CHANNEL")
 }
 
 // envFileValue walks up from the cwd looking for .env.slack.local and returns the value

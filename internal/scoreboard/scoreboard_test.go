@@ -257,6 +257,67 @@ func TestPostGatesOnNoChange(t *testing.T) {
 	}
 }
 
+func TestResolveProductChannelFromEnv(t *testing.T) {
+	t.Setenv("FAK_PRODUCT_CHANNEL", "C_PRODUCT")
+	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C_SCOREBOARD")
+	if got := ResolveProductChannel(); got != "C_PRODUCT" {
+		t.Fatalf("ResolveProductChannel env = %q, want C_PRODUCT", got)
+	}
+	// The two channels must not collide: the product resolver must NOT return the
+	// #scoreboard id (a product post landing in the number feed is the mistake we guard).
+	if got := ResolveChannel(); got != "C_SCOREBOARD" {
+		t.Fatalf("ResolveChannel env = %q, want C_SCOREBOARD", got)
+	}
+	if ResolveProductChannel() == ResolveChannel() {
+		t.Fatal("product and scoreboard channels resolved to the same id")
+	}
+}
+
+func TestResolveProductChannelFromEnvFileWhenEnvUnset(t *testing.T) {
+	t.Setenv("FAK_PRODUCT_CHANNEL", "")
+	t.Setenv("FAK_SCOREBOARD_CHANNEL", "")
+
+	dir := t.TempDir()
+	envBody := "# comment\n" +
+		"FAK_PRODUCT_CHANNEL=C_PRODUCT_FILE\n" +
+		"export FAK_SCOREBOARD_CHANNEL=C_SCOREBOARD_FILE\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env.slack.local"), []byte(envBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, dir)
+
+	if got := ResolveProductChannel(); got != "C_PRODUCT_FILE" {
+		t.Fatalf("ResolveProductChannel file = %q, want C_PRODUCT_FILE", got)
+	}
+	if got := ResolveChannel(); got != "C_SCOREBOARD_FILE" {
+		t.Fatalf("ResolveChannel file = %q, want C_SCOREBOARD_FILE", got)
+	}
+}
+
+func TestNotesRenderInTextAndBlocks(t *testing.T) {
+	body := "fak ships 11 durable products today.\nNext product surface: the disk cache tier (#986)."
+	u := Update{Title: "fak product direction", Notes: body, Source: "agent"}
+
+	txt := u.Text()
+	for _, want := range []string{"fak product direction", "11 durable products", "#986", "posted by agent"} {
+		if !strings.Contains(txt, want) {
+			t.Fatalf("Text() missing %q in:\n%s", want, txt)
+		}
+	}
+
+	blocks := u.Blocks()
+	raw, _ := json.Marshal(blocks)
+	if !strings.Contains(string(raw), "11 durable products") {
+		t.Fatalf("Blocks() missing notes body in:\n%s", raw)
+	}
+
+	// An empty Notes leaves the card identical to today (no stray empty section).
+	plain := Update{Title: "code-debt", Score: "10", Grade: "A"}
+	if strings.Contains(plain.Text(), "\n\n") {
+		t.Fatalf("empty Notes introduced a blank line:\n%q", plain.Text())
+	}
+}
+
 // chdir switches to dir for the test and restores the prior cwd after.
 func chdir(t *testing.T, dir string) {
 	t.Helper()
