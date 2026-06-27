@@ -13,9 +13,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* Speculative decoding accelerates single-stream decode but consumes extra compute per step, so at the high batch sizes a busy server runs it can REDUCE throughput. The differentiating question for a serving operator is not the single-request speedup but whether the method still nets a throughput gain at production batch sizes; only newer drafters do.
 
-- **SOTA bar:** On a single H100 (SGLang), EAGLE-3 gives 1.81x throughput at batch 2 and still 1.38x at batch 64, whereas EAGLE-2 drops to 0.93x at batch 24 (a net loss); acceptance rates approach ~80% with ~1.74-2.4 accepted tokens/step.
-- **Leading systems:** EAGLE-3, EAGLE-2 (regresses at batch), vLLM / SGLang / TensorRT-LLM speculative backends
-- **Source:** [https://docs.sglang.ai/backend/speculative_decoding.html](https://docs.sglang.ai/backend/speculative_decoding.html) (2025)
+- **SOTA bar:** EAGLE-3 remains the named SOTA: ~1.38x throughput at batch 64 in SGLang on a single H100, peaking at ~1.81x at batch 2 and up to ~6.5x single-stream, ~1.4x over EAGLE-2.
+- **Leading systems:** EAGLE-3 (SafeAILab), SGLang speculative backend, vLLM/TensorRT-LLM spec backends
+- **Source:** [https://arxiv.org/abs/2503.01840](https://arxiv.org/abs/2503.01840) (2025-03)
 - **fak:** no-claim — no number (stub)
 - **fak note:** OUT OF SCOPE for fak's shipped engine: fak borrows the speculative-decoding PATTERN for batched adjudication (verify a set of decisions in one pass) but does not ship a draft/target speculative-decoding generation backend, so there is no EAGLE-style acceptance-rate or batch-scaling throughput number. No fak value exists; named as out-of-scope rather than a measured gap.
 - **Trace:** No speculative-decoding throughput-vs-batch number in BENCHMARK-AUTHORITY.md. CLAIMS.md L28 references speculative-decoding only as inverted PRIOR ART for batch ADJUDICATION (set-shape decision equals serial in one pass), not as a generation-speed spec-decode backend; no acceptance-rate or batch-scaling tok/s is measured.
@@ -46,9 +46,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* Acceptance length tau is the upstream driver of every spec-decode speedup; it is the engine-independent quality metric of a draft method and the thing that determines whether the verify-step overhead pays off. Operators tune draft depth/tree against measured tau on their own traffic.
 
-- **SOTA bar:** EAGLE-class drafts reach ~0.6-0.8 per-token acceptance (tau ~3-5+ tokens/step with tree decoding); DeepSeek-V3 native MTP shows 85-90% acceptance of the 2nd token (~1.8x TPS); Medusa heads are lower, typically 0.55-0.70
-- **Leading systems:** EAGLE-3, DeepSeek-V3 MTP, Medusa
-- **Source:** [https://arxiv.org/pdf/2412.19437](https://arxiv.org/pdf/2412.19437) (2024-12)
+- **SOTA bar:** EAGLE-3 reports per-task acceptance rate ~0.80-0.88 (coding/instruction) and mean accepted length ~4.5-5.0 tokens per draft-verify cycle, exceeding the older DeepSeek-V3 MTP ~0.85 second-token figure.
+- **Leading systems:** EAGLE-3 (SafeAILab), DeepSeek-V3 MTP, FastMTP / FastEagle (2025 successors)
+- **Source:** [https://arxiv.org/abs/2503.01840](https://arxiv.org/abs/2503.01840) (2025-03)
 - **fak:** no-claim — no number (projected)
 - **fak note:** REAL GAP fak should measure. fak proves the accept/rollback ACCOUNTING is correct (KEEP+EVICT conservation, lossless), but reports no empirical tau / acceptance rate from a real draft+target pair. EAGLE-class ~0.6-0.8 per-token and DeepSeek-V3 MTP ~85-90% 2nd-token are measured on real models; fak's only number is a parameterized model, so it cannot claim an acceptance rate. Competitor value shown is DeepSeek-V3 MTP 2nd-token acceptance.
 - **Trace:** CLAIMS.md: polymodel.EffectiveTokensPerVerify is a geometric-series speedup MODEL (closed-form arithmetic), not an empirical acceptance rate; AcceptGreedy/AcceptTree KEEP/EVICT counts are proven conserved against the bit-exact KVCache.Evict rollback but are exercised on synthetic/adversarial drafts (cmd/polymodelbench forces a rollback every round), not measured on a real draft model against a real target.
@@ -68,9 +68,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* A zero-draft-model, zero-extra-VRAM acceleration that works whenever the output echoes the input (summarization, RAG, code edit/refactor, structured rewrite). It is the cheapest spec-decode to deploy and a key differentiator for grounded agent workloads where outputs reuse prompt substrings.
 
-- **SOTA bar:** Prompt-lookup decoding shows up to 2.8x speedup on summarization (CNN/DailyMail) and 2x-4x on input-grounded tasks with no quality change; requires no separate draft model
-- **Leading systems:** vLLM (ngram / prompt-lookup), TensorRT-LLM (Lookahead)
-- **Source:** [https://blog.vllm.ai/2024/10/17/spec-decode.html](https://blog.vllm.ai/2024/10/17/spec-decode.html) (2024-10)
+- **SOTA bar:** SuffixDecoding (NeurIPS 2025, model-free suffix-tree drafting) is the new prompt-lookup-family SOTA: outperforms classic PLD/n-gram by 1.3-3x and delivers up to 5.3x speculative speedup (and ~4x end-to-end on SWE-Bench agentic tasks) over vanilla decoding.
+- **Leading systems:** SuffixDecoding (Snowflake Arctic Inference + vLLM), vLLM PLD/n-gram (prior bar), TensorRT-LLM Lookahead
+- **Source:** [https://www.snowflake.com/en/engineering-blog/suffixdecoding-arctic-inference-vllm/](https://www.snowflake.com/en/engineering-blog/suffixdecoding-arctic-inference-vllm/) (2025-05)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP fak should measure (it is adjacent to fak's thesis). Prompt-lookup is input-grounded reuse — the SAME family as fak's cross-agent prefix reuse — and needs no draft model, so it is a natural fit for a reuse kernel and worth a measured row. fak has zero evidence today. Competitor value is the up-to-2.8x summarization figure.
 - **Trace:** No fak evidence: CLAIMS.md / BENCHMARK-AUTHORITY.md contain no n-gram, prompt-lookup, or retrieval-drafting claim. fak's PickDrafter selects among drafters but no n-gram/prompt-lookup drafter exists.
@@ -79,9 +79,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* Speculative decoding must not change what the model would have produced; rejection-sampling verification preserves the target distribution exactly at T=0 and T>0. An engine that silently alters outputs (or only matches at greedy) fails reproducibility, eval parity, and audit requirements - this is the honesty gate operators must verify, not assume.
 
-- **SOTA bar:** vLLM's implementation is algorithmically validated lossless via rejection sampling, preserving the target distribution under both greedy and sampled decoding up to hardware floating-point precision
-- **Leading systems:** vLLM, speculative sampling (Leviathan et al.)
-- **Source:** [https://docs.vllm.ai/en/latest/features/speculative_decoding/](https://docs.vllm.ai/en/latest/features/speculative_decoding/) (2025-06)
+- **SOTA bar:** EAGLE 3.1 (vLLM/EAGLE/TorchSpec, May 2026) is the current SOTA lossless speculative-decoding method: up to 2x longer acceptance length and up to ~2.03x per-user output throughput vs EAGLE-3 (Kimi-K2.6-NVFP4, GB200), fixing 'attention drift' robustness; correctness is preserved by rejection-sampling verification that matches the target distribution (greedy spec == greedy non-spec).
+- **Leading systems:** EAGLE 3.1 (vLLM + TorchSpec), EAGLE-3, SpecForge training framework
+- **Source:** [https://vllm.ai/blog/2026-05-26-eagle-3-1](https://vllm.ai/blog/2026-05-26-eagle-3-1) (2026-05)
 - **fak:** parity — no number (shipped)
 - **fak note:** Correctness-oracle => parity (a losslessness property is matched, never beaten). fak's speculative path is proven token-identical to plain greedy decode (the accepted path is bit-exact via KVCache.Evict rollback), the GREEDY-equivalence guarantee. HONEST FENCE vs the SOTA bar: this is proven for GREEDY only on the CPU synthetic PreNorm model; fak has NOT shown distribution-preserving rejection sampling under STOCHASTIC (temperature>0) decoding the way vLLM's implementation does — fak's in-kernel decode is greedy-only, so the sampled-decoding half of the losslessness bar is unaddressed. The greedy half is at parity; the stochastic half is unbuilt.
 - **Trace:** CLAIMS.md In-kernel model (#533): spec.SpeculativeGreedy verifies a k-token draft in ONE VerifyForward pass and stays token-identical to plain greedy; spec.VerifyTree/SpeculativeTree commit only the accepted path and are token-identical to plain greedy decode. Witnesses: TestSpeculativeTreeLosslessGreedyPath (21/63 accepted, distractors rejected by the tree mask), TestSpeculativeTreeLosslessArbitrary (lossless regardless of drafter quality), TestVerifyTreeRewindsAndCommitsCleanly (target cache byte-exact to a greedy session after the round), TestVerifyForwardChainMatchesSerial. go test ./internal/model ./internal/spec.
@@ -90,9 +90,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* Spec decode helps latency at low load but can REGRESS throughput once the GPU is compute-bound - the single most common production footgun. Operators must know the break-even batch and whether the engine auto-disables or has a batch-robust drafter, or they pay for slowdowns at peak QPS.
 
-- **SOTA bar:** Naive spec-decode break-even is ~8-16 concurrent requests; beyond ~32 it adds verify overhead with no benefit. MagicDec uses a fixed-window draft so the draft:target cost ratio falls as batch grows, restoring speedup at large batch for moderate-to-long contexts
-- **Leading systems:** MagicDec, vLLM continuous batching, SGLang
-- **Source:** [https://arxiv.org/html/2408.11049v1](https://arxiv.org/html/2408.11049v1) (2024-08)
+- **SOTA bar:** EAGLE-3's measured high-concurrency behavior: positive throughput uplift sustained to batch ~64 in SGLang (1.38x at batch 64), with the speedup approaching break-even beyond that as baseline throughput rises; EAGLE-2 already regresses (0.93x at batch 24).
+- **Leading systems:** EAGLE-3 (SGLang), MagicDec (fixed-window draft, prior reference), vLLM/SGLang continuous batching
+- **Source:** [https://arxiv.org/abs/2503.01840](https://arxiv.org/abs/2503.01840) (2025-03)
 - **fak:** no-claim — no number (stub)
 - **fak note:** OUT OF SCOPE for a reuse kernel, and a real gap relative to a full serving stack. Spec-decode-under-high-concurrency (MagicDec fixed-window draft restoring speedup at large batch) presupposes continuous batching, which fak does not have on the live path (continuous-batching is [SIMULATED]; the decode lane is serial by construction). fak makes no batch-scaling claim. Reuses the existing 'continuous-batching' / 'served-throughput-vs-sglang' gap framing.
 - **Trace:** CLAIMS.md In-kernel model: the polymodel decode lane is explicitly SERIAL (the at-most-one-model-decodes-per-step invariant is asserted); CLAIMS Engine labels continuous-batching [SIMULATED] (read-only telemetry, not on the live serving path). No batch-scaling / break-even measurement exists.
@@ -103,9 +103,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* Guaranteed-valid JSON/regex/grammar output is table stakes for tool-calling and structured APIs, but a slow mask-compute step throttles tokens/sec. The per-token mask overhead is the dominant cost in steady-state constrained generation and the number that decides whether structured output is 'free' or a tax.
 
-- **SOTA bar:** XGrammar (default backend in vLLM/SGLang/TensorRT-LLM) achieves under 40 microseconds per-token overhead via precompiled bitmask FSM; SGLang is reported ~3x faster than vLLM on constrained workloads; LLGuidance is competitive/faster on unique (uncached) schemas
-- **Leading systems:** XGrammar, LLGuidance, SGLang, vLLM
-- **Source:** [https://blog.squeezebits.com/70642](https://blog.squeezebits.com/70642) (2025-03)
+- **SOTA bar:** XGrammar-2 (arXiv 2601.04426, Jan 2026) drops grammar-mask per-token overhead to ~12-20us (Llama tool-calling ~12-13us, OpenAI Harmony ~15-20us) with <6% end-to-end overhead vs unconstrained and ~10ms (>100x faster) dynamic compilation; it is the new SOTA, far below LLGuidance's ~250us (Harmony) / >1000us (tool-calling) on the agentic workloads.
+- **Leading systems:** XGrammar-2 (vLLM/SGLang/TensorRT-LLM default backend), XGrammar, LLGuidance (Rust Earley)
+- **Source:** [https://arxiv.org/html/2601.04426](https://arxiv.org/html/2601.04426) (2026-01)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP. Constrained/guided decoding (JSON-schema/regex/CFG bitmask per token) is explicitly [STUB] in fak — fak owns its decode loop in the in-kernel model but has not built the logit-mask. XGrammar's <40 microsecond/token is the bar; fak has no per-token mask overhead to report. Competitor value is XGrammar's <40us/token.
 - **Trace:** CLAIMS.md Pre-flight ladder: '[STUB] Decode-time logit-mask (grammar-constrained generation) — the strongest form (never-emit a malformed call) — requires owning the decode loop; not in v0.1.' fak's grammar rung is a post-hoc positional->named TRANSFORM at the syscall boundary, not a per-token decode-time bitmask FSM.
@@ -125,9 +125,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* Constrained decoding can guarantee 100% schema-valid output yet DEGRADE task accuracy by forcing answer fields before chain-of-thought. Buyers must weigh validity rate against the reasoning hit; this is the dimension a naive 'we always emit valid JSON' scorecard hides.
 
-- **SOTA bar:** Strict format constraints can cause ~10-30% reasoning degradation when the schema forces answer-before-reasoning; JSONSchemaBench (10K real schemas) is the standard cross-framework benchmark for validity/coverage; mitigation is deferring structure until reasoning completes
-- **Leading systems:** JSONSchemaBench (Outlines/XGrammar/Guidance/llama.cpp/OpenAI/Gemini), OpenAI Structured Outputs
-- **Source:** [https://arxiv.org/pdf/2501.10868](https://arxiv.org/pdf/2501.10868) (2025-01)
+- **SOTA bar:** Constrained decoding guarantees ~100% syntactic/schema validity (JSON-Pass/Type-Safety >.95) but does NOT guarantee semantic quality and can REDUCE accuracy: ExtractBench (2026) shows structured mode dropping overall validity 51%->37% and GPT-5 credit-agreement pass rate 86.9%->70.0% vs prompt-based extraction. The honest SOTA bar is 'validity is solved; value accuracy is the open gap (13.7pt spread across models).'
+- **Leading systems:** XGrammar (vLLM/SGLang/TRT-LLM default), LLGuidance (guidance-ai), OpenAI Structured Outputs
+- **Source:** [https://arxiv.org/pdf/2602.12247](https://arxiv.org/pdf/2602.12247) (2026-02)
 - **fak:** no-claim — no number (stub)
 - **fak note:** OUT OF SCOPE for a reuse kernel. Structured-output validity-vs-reasoning-tax (JSONSchemaBench, the answer-before-reasoning degradation) is a property of a constrained-generation engine fak does not have. fak claims nothing here; the related answershape consumer witness measures a different thing (degeneration), not schema conformance.
 - **Trace:** No fak evidence: fak runs no constrained generation ([STUB] decode-time logit-mask) and has no JSONSchemaBench run. fak's answershape witness grades degeneration/repetition shape, not schema validity, and its grammar rung repairs tool-arg arity, not output schemas.
@@ -147,9 +147,9 @@ description: "The decoding dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* Sampling controls the quality/diversity/coherence tradeoff and must be implemented correctly and identically across engines for eval parity. min-p in particular keeps outputs coherent at high temperature and is now an ecosystem default; missing or buggy samplers force operators to over-constrain temperature and lose quality.
 
-- **SOTA bar:** min-p (dynamic confidence-scaled truncation) improves quality and diversity over top-p/top-k at high temperature on GPQA/GSM8K/AlpacaEval and is now natively supported across vLLM, llama.cpp, SGLang, HF Transformers, Ollama, ExLlamaV2; TensorRT-LLM supports top-k/top-p/combined plus beam search
-- **Leading systems:** vLLM, llama.cpp, SGLang, TensorRT-LLM
-- **Source:** [https://arxiv.org/abs/2407.01082](https://arxiv.org/abs/2407.01082) (2024-07)
+- **SOTA bar:** Reference samplers cover the full mainstream set: temperature, top_p, top_k, min_p, typical, presence/frequency/repetition penalties, logit_bias, seed/n/best_of, plus pluggable custom logits processors (argmax-invariant classification). vLLM and llama.cpp converge on Temperature+Min-P as the 2026 default power-user combo.
+- **Leading systems:** vLLM SamplingParams + logits processors, llama.cpp sampler chain, SGLang sampler
+- **Source:** [https://docs.vllm.ai/en/latest/design/logits_processors/](https://docs.vllm.ai/en/latest/design/logits_processors/) (2026-01)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP. fak's in-kernel model decodes greedily only (argmax), which is what makes its losslessness proofs tractable, but it ships NO stochastic samplers (temperature/top-p/top-k/min-p). min-p is now native across vLLM/llama.cpp/SGLang/TensorRT-LLM; fak has none. A production serving engine needs samplers; fak makes no claim. (When fronting an external engine via fak guard / fak serve, sampling passes through to that engine untouched — fak's own engine has no sampler.)
 - **Trace:** No fak evidence: CLAIMS.md In-kernel model describes 'a real greedy Prefill+Step decode' and 'real greedy speculative decode is token-identical to plain greedy' — the decode path is GREEDY-ONLY. No temperature, top-p, top-k, or min-p sampler is mentioned in CLAIMS.md or BENCHMARK-AUTHORITY.md.

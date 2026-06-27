@@ -13,9 +13,9 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 *Why it matters:* At fleet scale a naive load balancer scatters requests so the same prefix is recomputed on every replica. Locality-aware routing turns single-node prefix caching into a fleet-wide property, the difference between a cache that works at 1 GPU and one that works at 100.
 
-- **SOTA bar:** NVIDIA Dynamo's KV-cache-aware Smart Router reports TTFT and average-request-latency speedups by routing to replicas already holding matching KV (measured on 100K real DeepSeek-R1 requests, 4K/800 in/out, 8x R1-Distill-Llama-70B on 2x HGX-H100); SGLang's cache-aware router and the Meta/vLLM router pioneered the pattern. Combined with disaggregation Dynamo cites up to 30x more requests served (DeepSeek-R1 671B on GB200 NVL72). Exact tokens/GPU/s not disclosed (projected).
-- **Leading systems:** NVIDIA Dynamo (Smart Router), SGLang router, vLLM production router
-- **Source:** [https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/](https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/) (2025-03-18)
+- **SOTA bar:** Cross-region KV-locality-aware routing (GORGO-proxy) makes network latency an explicit routing term and cuts median TTFT ~2.5x vs least-load / prefix-trie baselines (224ms vs 568ms) while preserving prefix-cache locality across regions.
+- **Leading systems:** GORGO / GORGO-proxy (cross-region, arXiv 2602.11688), SkyWalker (locality-aware cross-region LB, EuroSys 2026, arXiv 2505.24095)
+- **Source:** [https://arxiv.org/html/2602.11688v1](https://arxiv.org/html/2602.11688v1) (2026-02)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP fak should measure if it ever scales beyond one engine. fak is a single in-process kernel: it owns one KV cache and has a cross-agent coherence BUS (vdso.Revoke broadcast, causal invalidation witnessed) but NO multi-replica router that steers a request to the worker already holding its prefix (the Dynamo Smart Router / SGLang cache-aware router pattern). fak's cache-aware scheduling is intra-kernel (FCFS->DFS recovers 62.1%->86.7%), not cross-replica routing. No fak number exists; honest verdict is no-claim, not parity.
 - **Trace:** No row in BENCHMARK-AUTHORITY.md; CLAIMS.md has coherence_broadcast (causal-invalidation) but no replica-routing claim
@@ -26,9 +26,9 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 *Why it matters:* fak's product category. When a fleet of agents shares a large system/context prefix, fusing that prefix once across all agents eliminates re-prefill work that even a tuned per-agent cache repeats. This is the axis fak is built to win.
 
-- **SOTA bar:** A tuned warm per-agent KV cache (the SGLang / vLLM APC / OpenAI prompt-caching discipline) is the honest floor a serious operator already runs; fak measures the work eliminated ON TOP of it.
-- **Leading systems:** SGLang RadixAttention, vLLM Automatic Prefix Caching, OpenAI prompt caching
-- **Source:** [https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html) (2024-12)
+- **SOTA bar:** The competing floor remains tuned warm per-agent KV reuse (vLLM Automatic Prefix Caching / SGLang RadixAttention / OpenAI prompt caching); fak's own measured 50x5 fleet-serving result (19 min vs 78 min warm-KV baseline, 4.1x from cross-agent prefix fusion) is the live number on this dim and no external SOTA has displaced the warm-KV-reuse baseline class.
+- **Leading systems:** vLLM Automatic Prefix Caching, SGLang RadixAttention, OpenAI prompt caching (warm-KV reuse floor)
+- **Source:** [https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/) (2026-01)
 - **fak:** lead — 19 min (shipped)
 - **fak note:** Both arms run live on ONE shared kernel held constant, so the 4.1× isolates cross-agent prefix fusion — work ELIMINATED, not a faster kernel. A production vLLM/SGLang would shrink both arms' absolute minutes but is expected to leave the reuse ratio ~intact (κ·N: uniform per-token speedup scales both arms).
 - **Trace:** 2bbda6f · experiments/session/headline-qwen-50x5.json · BENCHMARK-AUTHORITY.md
@@ -37,9 +37,9 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 *Why it matters:* The honest few-fold: not the headline-vs-naive number, but the gain over the tuned warm-cache a real operator runs. This is the conservative claim a skeptic should be shown.
 
-- **SOTA bar:** An already-hot per-agent KV cache (1×). fak's cross-agent fusion adds a conservative 2.4–2.7× on top, measured on its own kernel held constant (SmolLM2-135M, A=4 — smaller model than the 1.5B headline).
-- **Leading systems:** Tuned warm per-agent KV cache
-- **Source:** [https://www.lmsys.org/blog/2024-01-17-sglang/](https://www.lmsys.org/blog/2024-01-17-sglang/) (2024-01)
+- **SOTA bar:** The conservative SOTA point is fak's own already-warm per-agent KV arm (baseline 1.0x); cross-agent prefix fusion on top of it yields a measured ~2.4-2.7x marginal gain. No external benchmark redefines the already-warm-cache baseline for this dim.
+- **Leading systems:** Tuned warm per-agent KV cache, already hot (vLLM APC / SGLang RadixAttention class)
+- **Source:** [https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/) (2026-01)
 - **fak:** lead — 2.4 × (shipped)
 - **fak note:** Cross-agent prefix fusion ON TOP of an already-warm per-agent cache — the honest marginal few-fold (2.4–2.7×, conservative end shown), NOT the 60× headline vs naive. FENCE: the 'tuned' baseline is fak's OWN warm-KV arm B (bit-exact, kernel held constant), NOT a live SGLang/vLLM process — a real competing engine also fuses a shared prefix once, so the marginal-vs-a-live-tuned-process number is unmeasured (see row 'marginal-vs-tuned-process').
 - **Trace:** 92896a4 · SESSION-VALUE-STACK-RESULTS.md · BENCHMARK-AUTHORITY.md
@@ -48,9 +48,9 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 *Why it matters:* A live SGLang/vLLM ALSO fuses a shared prefix once. The marginal win vs a real competing process — not vs fak's own warm-KV arm — is the number a buyer comparing engines actually wants, and fak has not measured it.
 
-- **SOTA bar:** SGLang/vLLM fuse a shared prefix once across requests; on the WebVoyager-style workload the marginal-vs-tuned win is only ~1.0–1.10×.
-- **Leading systems:** SGLang RadixAttention, vLLM Automatic Prefix Caching
-- **Source:** [https://arxiv.org/abs/2312.07104](https://arxiv.org/abs/2312.07104) (2024-01)
+- **SOTA bar:** Head-to-head marginal value of cross-agent reuse vs a LIVE tuned shared-prefix engine (vLLM APC / SGLang RadixAttention, which also fuses a shared prefix once) remains UNMEASURED; fak's own WebVoyager stratification puts the marginal-vs-tuned win at only ~1.0-1.10x on that workload.
+- **Leading systems:** SGLang RadixAttention (live process), vLLM Automatic Prefix Caching (live process)
+- **Source:** [https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/) (2026-01)
 - **fak:** no-claim — no number (projected)
 - **fak note:** Every committed fleet multiplier (4.1×, 60.3×, 139×) is measured vs NAIVE re-prefill or fak's OWN kernel held constant in warm-KV mode — NOT a head-to-head against a live SGLang/vLLM process, which ALSO fuses a shared prefix once. The honest marginal-vs-a-real-tuned-process number is UNMEASURED; the repo's WebVoyager baseline-stratification record puts the marginal-vs-tuned win at only ~1.0–1.10× on that workload. Naming this gap stops the 4.1× from being read as a vs-live-competitor result.
 - **Trace:** HERO-BENCHMARK-2026-06-21.md · docs/webbench-real-measurements-summary.md
@@ -63,7 +63,7 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 - **SOTA bar:** Surveyed 2025-2026 routers/gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) all route the WHOLE request to ONE model; OpenRouter Fusion is the only shipped model ensemble and it is a fixed parallel-synthesize recipe, not a configurable per-aspect reduction. None routes a sub-request aspect to its own model. (Aurelio Semantic-Router routes to an intent, not a model; vLLM/SGLang routers balance replicas of ONE model for KV locality — a different layer.)
 - **Leading systems:** RouteLLM (LMSYS), Martian, NotDiamond, Unify.ai, OpenRouter (+ Fusion), Portkey, LiteLLM Router
-- **Source:** [docs/model-routing.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md) (2026-06)
+- **Source:** [https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md) (2026-06)
 - **fak:** lead — no number (shipped)
 - **fak note:** To our knowledge / among surveyed 2025-2026 routers and gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router), every one routes the WHOLE request to ONE model and the only shipped model ensemble is OpenRouter Fusion — a fixed parallel-synthesize recipe, not a configurable reduction. fak routes at the ASPECT level (request | tool_call | query | step), so one request can send different aspects to different models, with first-class ENSEMBLES folded by a configurable reduction (first | vote | best_of | all_reduce | concat), expressed as one deterministic, verifiable policy. The decision spine (Route + Combine) and the offline benchmark (fak routebench) are SHIPPED (commit 2298421, witnessed by go test), so this is a CATEGORICAL capability lead on routing granularity and ensemble expressiveness — NOT a benchmarked speed/quality win. Any '10x' is a target to be measured, never an inferred or borrowed number; the live multi-model dispatch that executes a decision on real engines is STUB, so the end-to-end competitive latency/cost/quality delta is unmeasured.
 - **Trace:** 2298421 · docs/model-routing.md (survey + status); BENCHMARK-AUTHORITY.md (fak routebench)

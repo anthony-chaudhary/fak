@@ -37,9 +37,9 @@ description: "The models dimensions that matter in LLM serving, the current SOTA
 
 *Why it matters:* The first capability question for any serving stack is which models it can actually run. The hard end is the 671B-class sparse MoE (DeepSeek-V3/R1) plus Qwen MoE and Mixtral; supporting these requires MoE kernels, EP, FP8 weights, and MLA/MTP support, not just more memory. A stack that tops out at dense 70B is in a different market than one that serves 671B MoE at scale.
 
-- **SOTA bar:** Production serving of DeepSeek-V3/R1 671B sparse MoE (37B activated) is supported by SGLang, vLLM, and TensorRT-LLM with dedicated MoE/MLA paths; llama.cpp covers the broadest open-weight architecture catalog (Llama 1/2/3, Mistral, Mixtral, Phi, Gemma, Qwen, DeepSeek, etc.) via GGUF, while MLC-LLM supports a curated, pre-compiled subset.
-- **Leading systems:** SGLang, vLLM, TensorRT-LLM, llama.cpp
-- **Source:** [https://docs.sglang.io/basic_usage/deepseek_v3.html](https://docs.sglang.io/basic_usage/deepseek_v3.html) (2025-05-05)
+- **SOTA bar:** Kimi K2 (Moonshot AI) -- 1 trillion total parameters / 32B active, 384 experts (8+1 active) -- is the largest open-weight MoE routinely served by vLLM and SGLang, exceeding DeepSeek-V3/R1's 671B.
+- **Leading systems:** Kimi K2 / K2.x (Moonshot AI, 1T MoE; vLLM + SGLang + KTransformers), DeepSeek-V3/R1 671B (prior bar), Qwen3 MoE / Llama-4 (other frontier MoE)
+- **Source:** [https://huggingface.co/moonshotai/Kimi-K2-Instruct](https://huggingface.co/moonshotai/Kimi-K2-Instruct) (2025-07)
 - **fak:** trails — 7 B params (max on own engine) (shipped)
 - **fak note:** fak's OWN engine ceiling is ~7B on 36 GB (GGUF dequant-to-f32 OOMs above; no MoE/sparse-activation; two arch families fail at load; f32 27B = 108 GB > 80 GB VRAM). Above 7B fak is NOT in the race on its own engine and must FRONT llama.cpp/SGLang — exactly what the 27B GPU server run does (SGLang-serves + fak-adjudicates). A hard, disclosed capability ceiling that bounds where any fak engine 'win' can apply. apples_to_apples=false: fak's f32-dequant engine vs llama.cpp quantized/CPU and SGLang multi-GPU TP are different configs by construction.
 - **Trace:** HERO-BENCHMARK-2026-06-21.md (honest fence) · CLAIMS.md
@@ -70,9 +70,9 @@ description: "The models dimensions that matter in LLM serving, the current SOTA
 
 *Why it matters:* Multi-tenant and per-customer customization is delivered cheaply by serving many LoRA adapters over one shared base model instead of one full model per tenant. The differentiating axes are how many adapters can be resident on GPU concurrently, how many can be cached in CPU (LRU), and whether adapters can be hot-swapped/updated at runtime without restarting (critical for async-RL weight updates). This is the economics of fine-tune-once-serve-many.
 
-- **SOTA bar:** vLLM serves multiple LoRA adapters concurrently over one base model with --max-loras (GPU-resident) plus an LRU CPU cache (--max-cpu-loras), and supports runtime hot-swap / in-place update (VLLM_ALLOW_RUNTIME_LORA_UPDATING, load_inplace) with negligible switch time; practical adapter count is bounded by GPU memory and adapter rank, not a fixed cap.
-- **Leading systems:** vLLM, SGLang, TensorRT-LLM
-- **Source:** [https://docs.vllm.ai/en/latest/features/lora/](https://docs.vllm.ai/en/latest/features/lora/) (2025-01-01)
+- **SOTA bar:** The peer-reviewed SOTA is S-LoRA (MLSys'24, arXiv:2311.03285): ~2000 LoRA adapters served over one base model on a single A100-80GB at up to 4x vLLM throughput, via unified paging of adapter weights + custom MBGMM/MBGMV kernels. vLLM Multi-LoRA integrated S-LoRA-style techniques as a follow-on (max_loras GPU-resident + max_cpu_loras LRU CPU cache + runtime hot-swap); SGLang/TensorRT-LLM offer comparable multi-adapter batching. Practical resident count is bounded by GPU memory and adapter rank.
+- **Leading systems:** S-LoRA (MLSys'24, ~2000 adapters/A100-80GB), vLLM Multi-LoRA, SGLang, TensorRT-LLM
+- **Source:** [https://www.lmsys.org/blog/2023-11-15-slora/](https://www.lmsys.org/blog/2023-11-15-slora/) (2025-08)
 - **fak:** no-claim — no number (stub)
 - **fak note:** OUT OF SCOPE for the reuse/adjudication kernel. fak has no LoRA adapter loading, no multi-adapter batching, no hot-swap path. Its multi-model story is the polymodel residency Pool (host many full models, share prefill, decode one) — a DIFFERENT primitive (full models, not low-rank adapters) and itself off-mainline/policy-only (CLAIMS polymodel rows, FAK_POLYMODEL default off). No fak LoRA number; verdict no-claim.
 - **Trace:** none — no LoRA in CLAIMS

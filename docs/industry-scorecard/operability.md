@@ -24,9 +24,9 @@ description: "The operability dimensions that matter in LLM serving, the current
 
 *Why it matters:* TTFT and tail latency are flat at low load and explode past a knee point as the request queue grows. The location of that knee, and how steeply latency climbs past it, determine real capacity. Testing at concurrency=1 is meaningless; operators must characterize TTFT/P99 across a concurrency sweep up to and beyond their P95 concurrent-request count.
 
-- **SOTA bar:** Qualitative: TTFT decomposes into queueing delay + prefill compute; at P50 queueing dominates and request latency grows sharply once RPS pushes the queue to build. The diagnostic is a load sweep showing the rate at which P99 TTFT crosses the SLO; P99 climbing while P50 is flat is the saturation signature.
-- **Leading systems:** vLLM benchmark_serving (request-rate sweep), NVIDIA GenAI-Perf (concurrency sweep)
-- **Source:** [https://tianpan.co/blog/2026-03-10-llm-latency-decomposition-ttft-vs-throughput](https://tianpan.co/blog/2026-03-10-llm-latency-decomposition-ttft-vs-throughput) (2026-03)
+- **SOTA bar:** Under concurrency, single-GPU TTFT P99 explodes (e.g. ~8.6 s at C=180, ~34 s at C=420); pipeline parallelism (PP=2) holds it to ~3 s at C=180 and ~13 s at C=420 (~2.5-3x improvement). At 100 concurrent requests TensorRT-LLM P95 TTFT ~1,280 ms vs vLLM ~1,450 ms; vLLM sustains QoS to C=32 and stays usable to C=64.
+- **Leading systems:** TensorRT-LLM (lowest P95 TTFT under load), SGLang, vLLM (most robust queueing/scheduling)
+- **Source:** [https://www.spheron.network/blog/vllm-vs-tensorrt-llm-vs-sglang-benchmarks/](https://www.spheron.network/blog/vllm-vs-tensorrt-llm-vs-sglang-benchmarks/) (2026-01)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP fak should measure. fak has the harness to vary concurrency (it ran 1->128 on the GPU server) but reports the throughput envelope, not the saturation diagnostic (P99 TTFT climbing while P50 stays flat as the queue builds). Since the gateway proxy adds queueing of its own, the TTFT-under-load curve is exactly what an honest operability claim needs; not yet measured, so no-claim.
 - **Trace:** The GPU server concurrency sweep (conc 1->128, QWEN36-27B-GPU-SERVER-RESULTS.md) varies LOAD but records completion-tokens/sec, not a TTFT/queueing curve: there is no committed P99-TTFT-vs-RPS saturation sweep showing the rate at which the SLO is crossed.
@@ -35,9 +35,9 @@ description: "The operability dimensions that matter in LLM serving, the current
 
 *Why it matters:* The first request after a scale-out or a scale-to-zero wake pays a model-load tax - weights fetched and loaded into GPU memory before any token streams - inflating TTFT by tens of seconds. For elastic/serverless deployments this dominates worst-case latency and decides whether scale-to-zero is even viable for interactive use, so cold-start TTFT and warm-up time are core operability dimensions buyers must score.
 
-- **SOTA bar:** Naive serverless GPU cold starts are 30-120s (often >40s to first token). ServerlessLLM's multi-tier checkpoint loading cuts startup 6-8x; RunPod FlashBoot reports sub-250ms cold starts for most requests (≈half under 200ms), making scale-to-zero viable for real-time serving.
-- **Leading systems:** RunPod FlashBoot, ServerlessLLM, HydraServe, PipeBoost
-- **Source:** [https://regolo.ai/scale-to-zero-cold-start-latency-why-serverless-gpu-breaks-real-time-ai-and-how-to-fix-it/](https://regolo.ai/scale-to-zero-cold-start-latency-why-serverless-gpu-breaks-real-time-ai-and-how-to-fix-it/) (2025-01)
+- **SOTA bar:** GPU-snapshotting cold start is now sub-200 ms: RunPod FlashBoot achieves sub-200 ms for ~48% of requests (<250 ms generally) and Modal GPU memory snapshots cut Ministral-3 3B median cold start ~10x (118 s -> 12 s) - the corroborable bar. InferX additionally claims an industry-leading 177 ms on H100 via GPU snapshotting, but that single number traces to one vendor source and is not independently confirmable, so the defensible figure is sub-200 ms.
+- **Leading systems:** RunPod FlashBoot (sub-200 ms / <250 ms), Modal GPU memory snapshots (10x: 118 s -> 12 s), InferX (177 ms vendor claim, GPU snapshot, uncorroborated)
+- **Source:** [https://www.runpod.io/articles/guides/flashboot-instant-cold-starts](https://www.runpod.io/articles/guides/flashboot-instant-cold-starts) (2026)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP, partially out of scope. Cold-start/scale-to-zero latency (RunPod FlashBoot sub-250ms; ServerlessLLM 6-8x faster load) is a serverless-platform metric for the weight-loading path fak's own engine does not yet exercise at scale (its largest faithfully-served model is ~7B, it fronts external engines above that). fak has a residency/page-out POLICY but no measured load-latency number; no-claim.
 - **Trace:** No cold-start, scale-to-zero, or autoscaling latency is measured in CLAIMS.md / BENCHMARK-AUTHORITY.md. fak has a model-residency/budget policy plane (internal/residency, internal/cachemeta) but it is off-mainline (FAK_POLYMODEL-gated) and moves no weight bytes - no checkpoint-load or startup-to-first-token timing is committed.
@@ -68,9 +68,9 @@ description: "The operability dimensions that matter in LLM serving, the current
 
 *Why it matters:* Agents depend on machine-parseable tool calls; a malformed JSON object breaks the loop. OpenAI-compatibility plus near-guaranteed schema conformance is what lets an operator swap engines/models without rewriting clients, a primary procurement criterion.
 
-- **SOTA bar:** Guided/constrained decoding (XGrammar, LLGuidance) in vLLM and SGLang raises JSON-schema conformance from ~90-94% (free generation) to >96%, up to 98.2%, behind a drop-in OpenAI-compatible /v1/chat/completions surface with guided_json/regex/grammar/choice. OpenAI-compat is the de facto integration contract; LiteLLM unifies 100+ providers behind the same format.
-- **Leading systems:** vLLM (XGrammar/guided decoding), SGLang, LiteLLM (gateway)
-- **Source:** [https://blog.squeezebits.com/guided-decoding-performance-vllm-sglang](https://blog.squeezebits.com/guided-decoding-performance-vllm-sglang) (2025-01-01)
+- **SOTA bar:** Constrained/guided decoding now guarantees 100% schema-valid structured output by construction (XGrammar-2 is the default engine across vLLM/SGLang/TensorRT-LLM, <40 us/token), with the OpenAI-compatible /v1/chat/completions + response_format json_schema surface as the de facto contract.
+- **Leading systems:** vLLM + XGrammar-2 (default), SGLang, TensorRT-LLM, OpenAI Structured Outputs (response_format)
+- **Source:** [https://arxiv.org/pdf/2601.04426](https://arxiv.org/pdf/2601.04426) (2026-01)
 - **fak:** parity — no number (shipped)
 - **fak note:** Parity on the INTEGRATION CONTRACT, not on guided-decoding conformance. fak ships the de facto OpenAI-compatible surface (/v1/chat/completions adjudication proxy, /v1/models, MCP over stdio/HTTP, base_url-swappable client) so a non-Go agent routes through the same boundary, and a grammar rung does in-syscall positional->named tool-call repair. But the STRONGEST structured-output form, decode-time logit-mask / grammar-constrained generation (XGrammar-style never-emit-malformed, the >96-98.2% JSON-conformance lever vLLM/SGLang cite) is explicitly [STUB] because it requires owning the decode loop. apples_to_apples=false: no committed JSON-schema conformance % to compare, so this is a capability-presence parity on the API surface, a gap on guaranteed schema decoding.
 - **Trace:** CLAIMS.md Gateway [SHIPPED] (/v1/chat/completions, /v1/models, /healthz, MCP); Engine [SHIPPED] OpenAI-compatible client base_url-swappable; Pre-flight grammar rung [SHIPPED] positional->named repair; decode-time logit-mask [STUB]
@@ -79,9 +79,9 @@ description: "The operability dimensions that matter in LLM serving, the current
 
 *Why it matters:* You cannot meet an SLO you cannot see. Per-request TTFT/TPOT histograms and KV/cache-hit telemetry are what drive autoscaling, capacity planning, and incident response; their absence is disqualifying for a production buyer.
 
-- **SOTA bar:** vLLM v1 exposes a Prometheus /metrics endpoint with per-request TTFT (vllm:time_to_first_token_seconds), TPOT/inter-token latency, queue depth, running/waiting requests, KV-cache usage and prefix-cache hit-rate, plus OpenTelemetry distributed traces for per-request spans. This metric set (TTFT, TPOT, goodput, cache-hit) is the de facto observability contract serving systems are judged against.
-- **Leading systems:** vLLM, SGLang, NVIDIA Dynamo
-- **Source:** [https://docs.vllm.ai/en/latest/design/metrics/](https://docs.vllm.ai/en/latest/design/metrics/) (2025-01-01)
+- **SOTA bar:** vLLM v1 exposes an extensive Prometheus /metrics surface (vllm:time_to_first_token_seconds, TPOT/inter-token, vllm:num_requests_running, vllm:kv_cache_usage_perc, prefix-cache hit) plus native OpenTelemetry distributed tracing via --otlp-traces-endpoint -- the de facto serving-observability contract.
+- **Leading systems:** vLLM v1 (Prometheus + OpenTelemetry), SGLang, NVIDIA Dynamo / GenAI-Perf
+- **Source:** [https://docs.vllm.ai/en/latest/design/metrics/](https://docs.vllm.ai/en/latest/design/metrics/) (2026-01)
 - **fak:** trails — no number (shipped)
 - **fak note:** fak exposes ADJUDICATION observability (a /metrics endpoint backing the exit AdjudicationSummary operation counters, an end-to-end TraceID the IFC ledger / plan-CFI key on) but NOT the serving-systems observability contract it is judged against: there is no committed per-request TTFT (vllm:time_to_first_token_seconds), TPOT/inter-token, queue depth, KV-cache usage or prefix-cache-hit-rate Prometheus series, and the metrics-service scrape adapter is [SIMULATED] telemetry. OpenTelemetry distributed traces per the vLLM v1 spec are not shipped. fak's tracing is adjudication-plane, the de facto serving metric-set is the gap. Honest trails.
 - **Trace:** CLAIMS.md Gateway [SHIPPED] /metrics + Server.AdjudicationSummary + TraceID threaded end-to-end; Engine [SIMULATED] metrics-service scrape adapter (unit 43); no committed TTFT/TPOT/queue-depth/cache-hit Prometheus series
@@ -101,9 +101,9 @@ description: "The operability dimensions that matter in LLM serving, the current
 
 *Why it matters:* A shared cluster serving many agents/tenants must stop a noisy neighbor from starving everyone else and must hold each tenant's latency SLO under load. Fairness, quotas, and SLO-attainment-under-contention are exactly the properties a multi-tenant platform buyer evaluates.
 
-- **SOTA bar:** Virtual Token Counter (VTC) is the first work-conserving fair scheduler for LLM serving, tracking cumulative per-client input/output tokens to prevent any tenant monopolizing the batch; follow-ups (QLM, Prism, Equinox, FairBatching, PROSERVE) optimize multi-priority SLO attainment. At the gateway layer LiteLLM enforces per-key/project token budgets and spend caps. The SOTA bar is provable fairness + per-tenant SLO under contention, not raw throughput.
-- **Leading systems:** VTC (Sheng et al.), LiteLLM (virtual keys/budgets), Equinox / FairBatching
-- **Source:** [https://arxiv.org/abs/2401.00588](https://arxiv.org/abs/2401.00588) (2024-01-01)
+- **SOTA bar:** VTC (the 2024 first fair scheduler) is now superseded by a 2025 family: Equinox (holistic fair scheduling), FairBatching (fairness-aware batch formation), PROSERVE (multi-priority SLO-aware), and DLPM (locality-aware fair scheduling) -- all addressing VTC's gaps on prefix-locality, SLO, and diverse workloads.
+- **Leading systems:** Equinox (2025), FairBatching (2025), PROSERVE (2025), DLPM locality-aware fair scheduling (2025), VTC (2024, prior bar), LiteLLM virtual-keys/budgets
+- **Source:** [https://arxiv.org/pdf/2508.16646](https://arxiv.org/pdf/2508.16646) (2025-08)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP for the multi-agent regime fak targets. fak has per-agent KV ownership and a lease-disjointness steward (isolation primitives) and an agent-scoped tainted Ref per wire client, but NO work-conserving fair scheduler (VTC-style cumulative per-client token tracking), no per-tenant token budgets / spend caps (the LiteLLM virtual-key axis), and no measured SLO-attainment-under-contention number. Since fak's product is fleets of agents, provable fairness is a gap it arguably SHOULD measure rather than out-of-scope. No fak number exists; honest no-claim.
 - **Trace:** No VTC-style fair-scheduler or per-tenant quota/budget claim in CLAIMS.md; lease-disjointness steward + per-agent KV ownership are isolation, not provable batch fairness

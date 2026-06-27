@@ -25,8 +25,8 @@ Two numbers are driven:
 | Standing | 5 lead · 11 parity · 8 trails · 66 honest gap |
 | Measured vs gap | 23 measured · 67 honest gaps |
 | Tracked | 89 dimensions · 103 competitors · 90 positions |
-| As of | 2026-06-23 (fak 0.31.0) |
-| Advisory signals | 8 fak-freshness · 47 industry-drift |
+| As of | 2026-06-27 (fak 0.31.0) |
+| Advisory signals | 8 fak-freshness · 21 industry-drift |
 
 > **Read this right.** The score grades how *complete and honest fak's competitive map is* — not how much fak wins. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
 
@@ -181,5 +181,5 @@ coverage by group:
 | honesty | `apples_disclosed` | 100 | 0 | every non-comparable row discloses what differs |
 | traceability | `fak_traced` | 100 | 0 | every shipped claim traces to evidence |
 | traceability | `competitor_sourced` | 100 | 0 | every competitor number is sourced |
-| traceability | `freshness` | 100 | 0 | every fak measurement within 150d of 2026-06-23 |
+| traceability | `freshness` | 100 | 0 | every fak measurement within 150d of 2026-06-27 |
 

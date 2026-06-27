@@ -13,8 +13,8 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 
 *Why it matters:* Raw throughput overcounts: a request that violates its latency SLO is wasted work. Goodput, the max request rate at which a target fraction of requests meet BOTH TTFT and TPOT SLOs, is the metric a buyer running an interactive product actually pays against. It exposes systems that win on aggregate tokens/s but collapse under tail-latency constraints.
 
-- **SOTA bar:** DistServe serves up to 7.4x more requests or holds a 12.6x tighter SLO than prior SOTA while keeping >90% of requests within latency bounds; MuxWise reports 1.3x (Llama-8B) to 1.62x (Llama-70B) higher goodput than SGLang-PD at the 99th-percentile SLO.
-- **Leading systems:** DistServe (introduced goodput, P/D disaggregation), SGLang-PD, MuxWise (P/D multiplexing)
+- **SOTA bar:** DistServe's headline 7.4x more goodput (or 12.6x tighter SLO) over prior systems remains the canonical bar; newer 2025-26 work (TaiChi, PD-Multiplexing, DOPD, NVIDIA Dynamo) reports only incremental gains relative to disaggregation itself rather than a new baseline-relative record.
+- **Leading systems:** DistServe, NVIDIA Dynamo (incremental: 38% over best aggregated config, 2026), PD-Multiplexing/GreenContext (1.62x over PD-disagg, 2025-09)
 - **Source:** [https://arxiv.org/abs/2401.09670](https://arxiv.org/abs/2401.09670) (2024-01)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP fak should measure. fak ships no goodput-under-SLA number (no TTFT/TPOT SLO attainment curve). The GPU server run measured raw peak throughput at fixed concurrency, not requests meeting joint latency bounds. DistServe/MuxWise-style goodput is a standard serving-systems axis fak has zero evidence on; named as a gap, not parity.
@@ -24,9 +24,9 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 
 *Why it matters:* Raw throughput (tokens/s) is gameable by sacrificing latency. Goodput - the max request rate served while still meeting the TTFT and TPOT SLO for >=X% (e.g. 90%) of requests, normalized per GPU - is the metric that actually maps to cost-per-served-user. It is the central buyer's KPI because it unifies latency and throughput into one defensible number.
 
-- **SOTA bar:** DistServe reports up to 4.48x higher goodput (or 7.4x higher sustainable request rate / 12.6x tighter SLO at 90% attainment) over prior SOTA serving systems by disaggregating prefill and decode. GenAI-Perf can directly measure goodput against user-set TTFT/TPOT constraints.
-- **Leading systems:** DistServe, DynaServe, NVIDIA Dynamo, GenAI-Perf goodput mode
-- **Source:** [https://arxiv.org/html/2401.09670v1](https://arxiv.org/html/2401.09670v1) (2024-01)
+- **SOTA bar:** DistServe's 4.48x SLO-constrained goodput (the conservative per-workload figure under strict TTFT+TPOT SLOs) still stands as the canonical bar; no 2025-26 system reports a higher SLO-constrained goodput multiplier against the same baseline.
+- **Leading systems:** DistServe, DOPD (>99% SLO attainment, up to 1.5x over vLLM/DistServe, 2026-03), TaiChi (90% SLO attainment, 29-77% over PD-disagg, 2025-08)
+- **Source:** [https://arxiv.org/abs/2401.09670](https://arxiv.org/abs/2401.09670) (2024-01)
 - **fak:** no-claim — no number (stub)
 - **fak note:** OUT OF SCOPE for a reuse kernel. SLO-constrained goodput is the metric of a full PD-disaggregating serving STACK (DistServe 4.48x goodput, GenAI-Perf goodput mode); fak is a kernel/adjudication plane that FRONTS such a stack (the GPU server run is SGLang-serves + fak-adjudicates) and does not own the scheduler that goodput measures. no-claim.
 - **Trace:** No goodput-under-SLO number exists. CLAIMS.md labels continuous-batching [SIMULATED] (read-only telemetry, not on the live serving path) and the polymodel decode lane is explicitly SERIAL/off-mainline, so fak has no SLO-constrained per-GPU goodput measurement.
@@ -35,9 +35,9 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 
 *Why it matters:* All the mechanisms above only matter if they raise the requests an operator can serve within latency SLOs on fixed hardware. The integrated, trace-driven gain (effective capacity, cost per token) is the bottom-line metric a buyer uses to compare whole KV-centric architectures rather than individual features. It captures the 'trade storage for compute' thesis at the system level.
 
-- **SOTA bar:** Mooncake's KVCache-centric disaggregated architecture raises effective request capacity 59%-498% on real Kimi traces while meeting SLOs; runs across thousands of nodes serving 100B+ tokens/day
-- **Leading systems:** Mooncake, LMCache + vLLM, NVIDIA Dynamo
-- **Source:** [https://www.usenix.org/conference/fast25/presentation/qin](https://www.usenix.org/conference/fast25/presentation/qin) (2025-02)
+- **SOTA bar:** Mooncake's KVCache-centric disaggregated architecture increases effective request capacity by 59%-498% on real traces (up to 525% in simulation) while meeting SLOs; this remains the headline effective-capacity-under-SLO bar, now republished in ACM Transactions on Storage (2026).
+- **Leading systems:** Mooncake (Moonshot AI / Kimi), NVIDIA Dynamo (KVBM + NIXL KV transfer)
+- **Source:** [https://arxiv.org/abs/2407.00079](https://arxiv.org/abs/2407.00079) (2024-07)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP / honestly a non-win. fak has no Mooncake-style 'effective request capacity under SLO' number, and its one real concurrent-serving head-to-head (fak-gateway in front of SGLang on 8-GPU datacenter server) TRAILS raw SGLang (0.75x at peak) because the value added there is the adjudication/coherence/measurement plane, not throughput. So fak cannot claim the 59-498% capacity gain axis; conflating its reuse-work multipliers with SLO capacity would be dishonest.
 - **Trace:** No SLO-bound effective-capacity figure exists. The fleet multipliers (60.3x naive / 4.1x tuned, headline-qwen-50x5.json) are work-ELIMINATION on fak's own kernel held constant, not SLO-bounded request capacity; the only live concurrent-serving head-to-head (data.json served-throughput-vs-sglang, compare.json) shows fak at 0.60x->0.75x->~0.97x of raw SGLang, i.e. a gateway TAX, not a capacity gain.
