@@ -88,7 +88,7 @@ this out explicitly so you never deploy an empty floor by accident.
 
 The one opt-in exception is `"posture": "admit_and_log"`: after explicit deny,
 self-modify, redaction, and arg-rule checks have passed, a read-shaped default
-deny (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, or `calc_`) is
+deny (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, `calc`, or `calculate`) is
 admitted with verdict metadata `posture=admit_and_log` and
 `would_deny=DEFAULT_DENY`. Write-shaped calls and explicit denials still fail
 closed.
