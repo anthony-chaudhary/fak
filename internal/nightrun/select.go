@@ -22,12 +22,13 @@ type Scored struct {
 	Staleness     float64 `json:"staleness"`
 }
 
-// selector weights blend the three signals that decide collection priority. They
-// sum to 1.0. Novelty dominates — a first-ever datum on this box is the single
-// highest-value thing to collect — but the Value class and staleness reorder
-// within the novelty tiers. Mirrors the spirit of tools/bench_plan.py's
-// coverage-first-by-dominance, value-aware-within-tier scoring, resolved for the
-// LOCAL box.
+// selector weights blend the three signals that decide collection priority into a
+// single weighted SUM (they total 1.0). Novelty is the largest term — a first-ever
+// datum on this box is the most valuable thing to collect — but it is a blend, NOT
+// a strict tier: a long-stale high-value collected datum can edge ahead of a
+// never-collected low-value one. The Value class and staleness reorder within that
+// blend. Loosely mirrors tools/bench_plan.py's coverage-leaning, value-aware
+// scoring, resolved for the LOCAL box.
 const (
 	wNovelty   = 0.45
 	wValue     = 0.35
