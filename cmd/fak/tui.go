@@ -407,28 +407,31 @@ type tuiOverviewAction struct {
 }
 
 type tuiAgentReport struct {
-	Schema          string        `json:"schema"`
-	At              string        `json:"at"`
-	Backend         string        `json:"backend"`
-	Mode            string        `json:"mode"`
-	Provider        string        `json:"provider"`
-	Auth            string        `json:"auth"`
-	GatewayURL      string        `json:"gateway_url,omitempty"`
-	Account         string        `json:"account,omitempty"`
-	ResolvedAccount string        `json:"resolved_account,omitempty"`
-	AccountIdentity string        `json:"account_identity,omitempty"`
-	ClaudeConfigDir string        `json:"claude_config_dir,omitempty"`
-	ConfigSource    string        `json:"config_source,omitempty"`
-	SessionID       string        `json:"session_id,omitempty"`
-	Policy          string        `json:"policy,omitempty"`
-	Model           string        `json:"model,omitempty"`
-	ContextBudget   int           `json:"context_budget_tokens,omitempty"`
-	RestartOnBudget bool          `json:"restart_on_budget,omitempty"`
-	RestartLimit    int           `json:"restart_limit,omitempty"`
-	Command         []string      `json:"command"`
-	Launch          []string      `json:"launch"`
-	Env             []tuiAgentEnv `json:"env,omitempty"`
-	Notes           []string      `json:"notes,omitempty"`
+	Schema              string        `json:"schema"`
+	At                  string        `json:"at"`
+	Backend             string        `json:"backend"`
+	Mode                string        `json:"mode"`
+	Provider            string        `json:"provider"`
+	Auth                string        `json:"auth"`
+	GatewayURL          string        `json:"gateway_url,omitempty"`
+	Account             string        `json:"account,omitempty"`
+	ResolvedAccount     string        `json:"resolved_account,omitempty"`
+	AccountIdentity     string        `json:"account_identity,omitempty"`
+	ClaudeConfigDir     string        `json:"claude_config_dir,omitempty"`
+	ConfigSource        string        `json:"config_source,omitempty"`
+	SessionID           string        `json:"session_id,omitempty"`
+	Policy              string        `json:"policy,omitempty"`
+	Model               string        `json:"model,omitempty"`
+	ContextBudget       int           `json:"context_budget_tokens,omitempty"`
+	RestartOnBudget     bool          `json:"restart_on_budget,omitempty"`
+	RestartLimit        int           `json:"restart_limit,omitempty"`
+	DebugStats          bool          `json:"debug_stats,omitempty"`
+	CompactHistoryLimit int           `json:"compact_history_limit_tokens,omitempty"`
+	ElideResultBytes    int           `json:"elide_result_bytes,omitempty"`
+	Command             []string      `json:"command"`
+	Launch              []string      `json:"launch"`
+	Env                 []tuiAgentEnv `json:"env,omitempty"`
+	Notes               []string      `json:"notes,omitempty"`
 }
 
 type tuiAgentEnv struct {
@@ -458,6 +461,7 @@ type tuiAgentOptions struct {
 	GatewayURL          string
 	GatewayKeyEnv       string
 	APITimeoutMS        int
+	DebugStats          bool
 }
 
 func cmdTUI(argv []string) { os.Exit(runTUI(os.Stdout, os.Stderr, argv)) }
@@ -962,6 +966,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	gatewayURL := fs.String("gateway-url", "", "existing fak serve gateway to use instead of starting a local guard, e.g. http://node:8080")
 	gatewayKeyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the existing gateway bearer for --gateway-url")
 	apiTimeoutMS := fs.Int("api-timeout-ms", 1800000, "API_TIMEOUT_MS for --gateway-url launches; 0 leaves it inherited")
+	debugStats := fs.Bool("debug-stats", true, "print one compact token-usage overlay line per served turn to stderr (request/cache_read/cache_creation tokens, compaction, health); wired to fak guard --debug-stats")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for dry-run human rendering")
 	dryRun := fs.Bool("dry-run", false, "render the launch plan without starting the backend agent")
@@ -1012,6 +1017,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		GatewayURL:          *gatewayURL,
 		GatewayKeyEnv:       *gatewayKeyEnv,
 		APITimeoutMS:        *apiTimeoutMS,
+		DebugStats:          *debugStats,
 	}, at, tuiExecutable(), os.Getenv)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console agent: %v\n", err)
@@ -1193,32 +1199,50 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	if opt.RestartLimit > 0 {
 		guardArgs = append(guardArgs, "--restart-limit", strconv.Itoa(opt.RestartLimit))
 	}
+	// Token-saving defaults: compact-history-budget and elide-result-bytes are already
+	// default-on in guard, but we pass them explicitly so they appear in dry-run output
+	// and the operator can see the active savings without reading guard's defaults.
+	guardArgs = append(guardArgs,
+		"--compact-history-budget", strconv.Itoa(gateway.DefaultCompactHistoryBudget),
+		"--elide-result-bytes", strconv.Itoa(gateway.DefaultElideResultBytes),
+	)
+	notes = append(notes,
+		fmt.Sprintf("compact-history-budget=%d: guard sheds un-cached middle turns once resident tokens exceed this threshold, preserving the upstream cache prefix", gateway.DefaultCompactHistoryBudget),
+		fmt.Sprintf("elide-result-bytes=%d: guard shrinks oversized tool results outside the active working set to a bounded head+tail form", gateway.DefaultElideResultBytes),
+	)
+	if opt.DebugStats {
+		guardArgs = append(guardArgs, "--debug-stats")
+		notes = append(notes, "debug-stats=on: one compact token-usage overlay line per served turn to stderr (cache_hit, cache_rebate_tokens, compact action, health state)")
+	}
 	guardArgs = append(guardArgs, "--")
 	launch := append([]string{fakPath}, guardArgs...)
 	launch = append(launch, command...)
 
 	return tuiAgentReport{
-		Schema:          tuiAgentSchema,
-		At:              at.UTC().Format(time.RFC3339),
-		Backend:         backend,
-		Mode:            "launch",
-		Provider:        "anthropic",
-		Auth:            auth,
-		Account:         strings.TrimSpace(opt.Account),
-		ResolvedAccount: resolvedAccount,
-		AccountIdentity: identity,
-		ClaudeConfigDir: cfgDir,
-		ConfigSource:    cfgSource,
-		SessionID:       sessionID,
-		Policy:          strings.TrimSpace(opt.Policy),
-		Model:           strings.TrimSpace(opt.Model),
-		ContextBudget:   opt.ContextBudgetTokens,
-		RestartOnBudget: opt.RestartOnBudget,
-		RestartLimit:    opt.RestartLimit,
-		Command:         command,
-		Launch:          launch,
-		Env:             env,
-		Notes:           notes,
+		Schema:              tuiAgentSchema,
+		At:                  at.UTC().Format(time.RFC3339),
+		Backend:             backend,
+		Mode:                "launch",
+		Provider:            "anthropic",
+		Auth:                auth,
+		Account:             strings.TrimSpace(opt.Account),
+		ResolvedAccount:     resolvedAccount,
+		AccountIdentity:     identity,
+		ClaudeConfigDir:     cfgDir,
+		ConfigSource:        cfgSource,
+		SessionID:           sessionID,
+		Policy:              strings.TrimSpace(opt.Policy),
+		Model:               strings.TrimSpace(opt.Model),
+		ContextBudget:       opt.ContextBudgetTokens,
+		RestartOnBudget:     opt.RestartOnBudget,
+		RestartLimit:        opt.RestartLimit,
+		DebugStats:          opt.DebugStats,
+		CompactHistoryLimit: gateway.DefaultCompactHistoryBudget,
+		ElideResultBytes:    gateway.DefaultElideResultBytes,
+		Command:             command,
+		Launch:              launch,
+		Env:                 env,
+		Notes:               notes,
 	}, nil
 }
 

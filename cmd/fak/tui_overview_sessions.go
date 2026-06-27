@@ -310,13 +310,17 @@ func renderTUIAgent(report tuiAgentReport, width int) string {
 	if report.AccountIdentity != "" {
 		fmt.Fprintf(&b, "identity=%s\n", report.AccountIdentity)
 	}
-	if report.Policy != "" || report.Model != "" || report.ContextBudget > 0 || report.RestartOnBudget {
+	if report.Policy != "" || report.Model != "" || report.ContextBudget > 0 || report.RestartOnBudget || report.DebugStats || report.CompactHistoryLimit > 0 {
 		label := "guard_options"
 		if report.Provider == "existing-fak-gateway" {
 			label = "agent_options"
 		}
 		fmt.Fprintf(&b, "%s policy=%s model=%s context=%d restart=%v limit=%d\n",
 			label, blankTUI(report.Policy), blankTUI(report.Model), report.ContextBudget, report.RestartOnBudget, report.RestartLimit)
+		if report.CompactHistoryLimit > 0 || report.ElideResultBytes > 0 || report.DebugStats {
+			fmt.Fprintf(&b, "token_savings compact_history=%d elide_result=%d debug_stats=%v\n",
+				report.CompactHistoryLimit, report.ElideResultBytes, report.DebugStats)
+		}
 	}
 	if len(report.Env) > 0 {
 		fmt.Fprintln(&b, "\nEnv")

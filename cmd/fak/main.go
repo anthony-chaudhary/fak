@@ -90,6 +90,8 @@ func main() {
 		cmdSignal(os.Args[2:])
 	case "task":
 		cmdTask(os.Args[2:])
+	case "c":
+		cmdTUI(append([]string{"agent"}, os.Args[2:]...))
 	case "console":
 		cmdTUI(os.Args[2:])
 	case "tui":
@@ -143,6 +145,8 @@ func main() {
 		cmdHook()
 	case "hooks":
 		cmdHooks(os.Args[2:])
+	case "hygiene":
+		cmdHygiene(os.Args[2:])
 	case "rungstats":
 		cmdRungStats(os.Args[2:])
 	case "swebench":
@@ -215,6 +219,13 @@ func usage() {
                  FLEET_<NAME>_GUARD block|warn|off + one-shot escape env. Exit 0 clean,
                  1 a block gate fired, 2 could-not-run (the shell hook then falls back to
                  the Python checkers — fail-open). The shell hooks prefer this.)
+  fak hygiene   [--root DIR] [--json] [--gates A,B,...]
+                (the WHOLE-TREE hygiene gates in ONE process — the --audit-tree twin of
+                 fak hooks. Runs the ported make-hygiene checkers (DOC_PLACEMENT/BROKEN_LINK/
+                 FILE_ADMISSION/SECRET_SHAPE/PROVENANCE_LABEL/INDEX_SYNC) over ONE
+                 git-ls-files read instead of spawning a Python interpreter per checker.
+                 Exit 0 clean, 1 a gate fired, 2 could-not-run (make/CI then falls back to
+                 the Python path — fail-open). make hygiene / make index-sync prefer this.)
   fak preflight --tool NAME --args JSON [--policy FILE]
   fak attest    --policy FILE [--probes FILE] [--out FILE] [--json] [--quiet]
                  (the COMPLIANCE ATTESTATION GENERATOR: prove the capability floor
@@ -377,6 +388,14 @@ func usage() {
   fak task      sample [--json] [--done N --total N --unit UNIT]
                 (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
                  sample plus task/step/concept progress and ETA when progress is known)
+  fak c         [--dry-run] [--account ACCT] [--model MODEL] [--policy FILE] ...
+                (shorthand for 'fak console agent': the ACCOUNT LAUNCHER that
+                 starts a fak-guard-wrapped interactive Claude Code session.
+                 --debug-stats is ON by default: one compact token-usage overlay
+                 line per served turn (cache_hit, cache_rebate_tokens, compact
+                 action, health state). Token-saving defaults — compact-history-
+                 budget and elide-result-bytes — are passed explicitly so they
+                 appear in --dry-run output. 'fak c' is the canonical shortcut)
   fak console   issues [--epic N] [--issues-json FILE] [--json] |
                 loops [--ledger FILE] [--json] | sessions [--sessions-json FILE] [--json] |
                 garden [--garden-json FILE] [--json] [--check] |
@@ -488,6 +507,8 @@ func usage() {
   fak hook      < call.json     (spawned-hook decide; the A/B baseline transport)
   fak hooks     pre-commit | commit-msg <file>
                 (in-process repo git-hook gates; exit 2 lets shell hooks fall back)
+  fak hygiene   [--gates A,B,...]   (in-process --audit-tree hygiene gates; the
+                make hygiene / make index-sync backstop; exit 2 lets make fall back)
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
   fak version
