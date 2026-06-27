@@ -615,6 +615,35 @@ func RefuseMemoryPlanIfTooBig(b Backend, plan MemoryPlan, headroom float64) erro
 	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: scope}
 }
 
+// RefuseMemoryPlanIfTooBigForHost is the NO-BACKEND, host-RAM counterpart of
+// RefuseMemoryPlanIfTooBig for the pure-CPU reference serve path, where there is no HAL backend
+// to ask its capacity — the weights are copied to ANONYMOUS process RAM, so the only ceiling is
+// what the kernel will hand the process. It checks the plan's GRAND total (every demand, device-
+// or host-scoped, since on a CPU serve they are all anonymous host RAM) against the process
+// host's allocatable memory (HostSystemMemoryInfo → Linux MemAvailable, which already excludes
+// hugepage-locked and unreclaimable RAM — the exact ceiling a co-tenant's reserved hugepages
+// impose). It is fail-open: a platform that cannot report host memory yields FitUnknown → nil,
+// so the load proceeds exactly as before. headroom in [0,1) reserves a fraction of the budget for
+// the bytes NOT in the header estimate — the resident-Q4K struct overshoot over the raw-payload
+// estimate, gateway/KV init, and MemAvailable jitter while clean cache is evicted during the load.
+// Without it the CPU path loads until the host OOM-wedges instead of refusing cleanly (#974).
+func RefuseMemoryPlanIfTooBigForHost(plan MemoryPlan, headroom float64) error {
+	total, free, known := HostSystemMemoryInfo()
+	return refuseMemoryPlanForHostMem(plan, total, free, known, headroom)
+}
+
+// refuseMemoryPlanForHostMem is the injectable core of RefuseMemoryPlanIfTooBigForHost: it takes
+// the host (total, free, known) explicitly so the refusal logic is testable without a live
+// /proc/meminfo. The FitError's Scope is host, since the demand is anonymous host RAM.
+func refuseMemoryPlanForHostMem(plan MemoryPlan, total, free int64, known bool, headroom float64) error {
+	want := plan.Total()
+	verdict, avail := fitsWithinReportedMemory(total, free, known, want, headroom)
+	if verdict != FitTooBig {
+		return nil
+	}
+	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: MemoryScopeHost}
+}
+
 // DeviceAllocError is the typed form of a RUNTIME in-kernel device allocation failure — the
 // allocation that actually returned nil, as opposed to FitError's pre-flight refusal. It is
 // raised (as a panic, since the failing alloc sits deep below a CGO boundary with no error

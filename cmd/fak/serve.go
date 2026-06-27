@@ -595,6 +595,14 @@ func resolveServeChatBackend(backendName string) (compute.Backend, error) {
 
 const serveGGUFDeviceHeadroom = 0.15
 
+// serveGGUFHostHeadroom reserves a fraction of the process host's allocatable RAM (MemAvailable)
+// for the pure-CPU reference serve path's costs NOT in the header estimate: the resident-Q4K
+// struct overshoot over the raw-payload estimate (~458 GiB resident vs ~433 GiB on-disk on
+// GLM-5.2 UD-Q4_K_M, #974), gateway and KV init, and MemAvailable jitter as clean page cache is
+// evicted during the multi-minute load. Matched to serveGGUFDeviceHeadroom for parity with the
+// device fit plan, and comfortably above the observed ~6% resident overshoot.
+const serveGGUFHostHeadroom = 0.15
+
 func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool, contextBudgetTokens int) error {
 	if ws == nil || be == nil {
 		return nil
@@ -686,6 +694,25 @@ func fitServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident b
 	}
 	_, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, be, f32Resident, contextBudgetTokens)
 	return err
+}
+
+// fitServeGGUFPathOnHost is the pure-CPU reference-path memory-fit pre-flight (#974). The CPU
+// serve path (loadServeInKernelModel's FAK_Q4K and default cases) copies every super-block to
+// ANONYMOUS host RAM with NO HAL backend to refuse via RefuseMemoryPlanIfTooBig, so without this
+// it loads until the host OOM-wedges. It sizes the resident weights + KV + scratch off the GGUF
+// HEADER ALONE (no tensor read — same EstimateLoadMemoryPlan proxy the device lean path uses) and
+// refuses with a typed FitTooBig naming the shortfall when the plan exceeds MemAvailable less
+// headroom — parity with the device path's fit plan. Fail-open: a platform that cannot report
+// host memory loads exactly as before.
+func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetTokens int) error {
+	if ggufPath == "" {
+		return nil
+	}
+	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens)
+	if err != nil {
+		return err
+	}
+	return compute.RefuseMemoryPlanIfTooBigForHost(plan, serveGGUFHostHeadroom)
 }
 
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
@@ -833,6 +860,10 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		}), memPlan, backend)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case os.Getenv("FAK_Q4K") != "":
+		// CPU-path memory-fit pre-flight (#974): refuse cleanly with a typed FitTooBig BEFORE the
+		// all-resident load can drive MemAvailable to ~0 and OOM-wedge the host (parity with the
+		// device path's fit plan). Fail-open where host RAM is not probeable.
+		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens))
 		// Pure-CPU reference serve via the direct-resident-Q4_K loader. That loader already
 		// routes the mixed Q5_K/Q6_K experts (GLM-5.2's ~417 GB bulk) to a raw-resident byte
 		// copy keyed on the GGUF quant type — the SAME resident-K-quant lever the device
@@ -856,6 +887,9 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		profile := toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos))
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	default:
+		// CPU-path memory-fit pre-flight (#974): same clean FitTooBig refusal as the FAK_Q4K arm
+		// above, so the default lean CPU serve cannot OOM-wedge the host either.
+		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens))
 		prof := ggufload.NewLoadProfiler()
 		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
