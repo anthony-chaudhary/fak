@@ -186,8 +186,13 @@ type Tally struct {
 	StaleMiss    int     `json:"stale_miss"`    // entries validated, found invalidated, re-dispatched (folds into EngineCalls live; explicit here for analysis).
 	HardDeny     int     `json:"hard_deny"`     // fast-rejects with no forward guidance — symmetric, no amplification.
 	Redirects    []int   `json:"redirects"`     // each entry is the bounded futile-variant fan-out a PRODUCTIVE deny pruned.
-	ValidateCost float64 `json:"validate_cost"` // v charged to a MemoHit / StaleMiss (default 0).
-	CaptureCost  float64 `json:"capture_cost"`  // c charged to an Execute / StaleMiss (default 0).
+	// WitnessedRedirects are the productive denies whose pruned fan-out is backed by an
+	// enumerated, deduplicated variant set (a non-forgeable witness) rather than an asserted
+	// count. Account credits these from their own variants and nets them out of HardDeny; the
+	// realized credit comes from the witness, not the count it replaced.
+	WitnessedRedirects []WitnessedRedirect `json:"witnessed_redirects,omitempty"`
+	ValidateCost       float64             `json:"validate_cost"` // v charged to a MemoHit / StaleMiss (default 0).
+	CaptureCost        float64             `json:"capture_cost"`  // c charged to an Execute / StaleMiss (default 0).
 
 	// MaxRedirectFanout caps each Redirect entry; 0 uses DefaultMaxRedirectFanout.
 	MaxRedirectFanout int `json:"max_redirect_fanout"`
