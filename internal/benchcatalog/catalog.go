@@ -218,8 +218,8 @@ var registry = []Bench{
 	{
 		Name: "sessionbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "Net value-add of the fused agent kernel on a multi-turn session vs a tuned warm-cache baseline.",
-		Run:     "go run ./cmd/sessionbench -synthetic smollm2-135m",
-		Flags:   []string{"-synthetic  -  weightless shape (ratios faithful, wall-clock this-box)", "-hf/-dir  -  live arm", "-quant"},
+		Run:     "go run ./cmd/sessionbench -synthetic tiny",
+		Flags:   []string{"-synthetic  -  weightless shape (tiny = CPU-tractable wiring shape; 135m+ are slow on CPU)", "-hf/-dir  -  live arm", "-quant"},
 		Doc:     "docs/production-benchmark-methodology.md",
 	},
 	{
