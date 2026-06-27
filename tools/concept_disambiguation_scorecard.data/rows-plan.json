@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "id": "plan-planner",
+      "canonical": "Plan (planner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Planner's chosen resident view: selected set, elided set, and accounting",
+      "distinction": "Planner's resident view selection - NOT Plan (memq) (static explain output)",
+      "distinct_from": ["plan-memq"],
+      "aliases": [],
+      "grounding": "Plan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "plan-memq",
+      "canonical": "Plan (memq)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Static pre-execution Explain output: pipeline steps, effects, and mutations",
+      "distinction": "Static pre-execution explain output - NOT Plan (planner) (resident view)",
+      "distinct_from": ["plan-planner"],
+      "aliases": [],
+      "grounding": "Plan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "candidate-planner",
+      "canonical": "Candidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Scored span the planner may keep resident with cost, benefit, and density metrics",
+      "distinction": "Scored span input to planner - NOT Plan (planner's output)",
+      "distinct_from": ["plan-planner"],
+      "aliases": [],
+      "grounding": "Candidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

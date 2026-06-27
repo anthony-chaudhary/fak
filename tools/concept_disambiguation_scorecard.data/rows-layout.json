@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "id": "layout-tensor",
+      "canonical": "Layout (tensor)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Tensor element physical arrangement: RowMajor, ColMajor, or other ordering",
+      "distinction": "Tensor element ordering - NOT Layout (ctxplan) (planning profile)",
+      "distinct_from": ["layout-ctxplan", "mla-kv-layout-seam"],
+      "aliases": [],
+      "grounding": "Layout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "layout-ctxplan",
+      "canonical": "Layout (ctxplan)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Base/Current/Recent/Deep region profile for layout-aware planning",
+      "distinction": "Region profile for layout-aware planning - NOT Layout (tensor) (element ordering)",
+      "distinct_from": ["layout-tensor", "mla-kv-layout-seam"],
+      "aliases": [],
+      "grounding": "Layout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "kvlayout-interface",
+      "canonical": "MLA KV layout seam",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Attention cache variant seam interface: standardKVLayout vs mlaKVLayout",
+      "distinction": "Cache variant interface - NOT Layout (tensor) (element ordering)",
+      "distinct_from": ["layout-tensor", "layout-ctxplan"],
+      "aliases": [],
+      "grounding": "kvLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

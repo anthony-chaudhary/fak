@@ -1,29 +1,29 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
-  "commit": "6a1fb8b",
-  "total_debt": 1245,
+  "commit": "12dd9468",
+  "total_debt": 1432,
   "metrics": {
     "doc": 1,
     "readme": 0,
-    "code": 12,
+    "code": 15,
     "appeal": 15,
-    "seo": 7,
+    "seo": 9,
     "demo": 0,
     "robustness": 0,
-    "hygiene": 21,
+    "hygiene": 23,
     "parity": 0,
     "agent": 0,
-    "product": 0,
+    "product": 1,
     "persona": 0,
     "stability": 0,
-    "slop": 760,
+    "slop": 812,
     "steer": 2,
     "conflation": 0,
-    "disambiguation": 425,
+    "disambiguation": 550,
     "intent_literal": 0,
     "tokendefaults": 0,
     "guard_rsi": 0,
-    "dogfood": 2
+    "dogfood": 4
   },
   "_doc": "Pinned per-metric scorecard-debt baseline for the unified control pane. Re-pin after a debt drop to ratchet the trend down: python tools/scorecard_control_pane.py --pin"
 }

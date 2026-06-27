@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "id": "renderplan-context",
+      "canonical": "RenderPlan",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Prompt-assembly layout: stable prefix of reused views plus volatile tail of raw faults",
+      "distinction": "Prompt-assembly layout - NOT RenderItem (one cell materialized)",
+      "distinct_from": ["renderitem-memq", "rendered-ctxplan"],
+      "aliases": [],
+      "grounding": "RenderPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "renderitem-memq",
+      "canonical": "RenderItem",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "One cell materialized into context by OpRender query effect",
+      "distinction": "One cell materialized by OpRender - NOT RenderPlan (whole layout)",
+      "distinct_from": ["renderplan-context", "rendered-ctxplan"],
+      "aliases": [],
+      "grounding": "RenderItem",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "rendered-ctxplan",
+      "canonical": "Rendered",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "One span paged into fresh history through the trust gate",
+      "distinction": "Span paged through trust gate - NOT RenderItem (memq effect)",
+      "distinct_from": ["renderitem-memq", "renderplan-context"],
+      "aliases": [],
+      "grounding": "Rendered",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -81,6 +81,62 @@
       "ignore": [],
       "min_files": 3,
       "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member."
+    },
+    {
+      "id": "cross-cluster",
+      "name": "Cross-cluster canonical collisions",
+      "roots": [],
+      "ignore": [],
+      "min_files": 99,
+      "note": "Curated registry of same-token, two-meaning collisions across UNRELATED packages (Manifest, Verdict, Backend, Observer, Index, Store, Refusal). Each is positioned as TWO distinct rows that draw the line against each other and anchor it in the glossary. roots is empty BY DESIGN: these tokens (manifest/verdict/backend/observer/index/store/refusal) over-match hundreds of unrelated identifiers in their own packages, so this family is hand-curated, never discovered - a discovering root would flood coverage with non-confusable tokens (verdictAllow, indexByte, storeInt32)."
+    },
+    {
+      "id": "evict",
+      "name": "Eviction family",
+      "roots": ["evict", "evicted", "eviction"],
+      "ignore": ["evictable", "evictSupported"],
+      "min_files": 3,
+      "note": "Three disjoint eviction planes: physical KV tensor span removal, logical playbook pruning under token budget, and model instance LRU eviction from a session pool."
+    },
+    {
+      "id": "decision",
+      "name": "Decision family",
+      "roots": ["decision"],
+      "ignore": [],
+      "min_files": 3,
+      "note": "Four disjoint Decision types: witness adjudication verdict, kernel tool-call explanation trace, scheduler loop admission advisory, and shared-task execution state tracking."
+    },
+    {
+      "id": "render-materialize",
+      "name": "Render / materialize family",
+      "roots": ["render", "RenderPlan", "RenderItem", "Rendered", "materialize"],
+      "ignore": ["rendered", "rendering"],
+      "min_files": 2,
+      "note": "Three disjoint render/materialize concepts: prompt-assembly layout (RenderPlan), memq cell materialization (RenderItem), and ctxplan span paging (Rendered)."
+    },
+    {
+      "id": "plan",
+      "name": "Plan family",
+      "roots": ["plan", "Plan", "Candidate"],
+      "ignore": ["planner", "plans", "planning", "Candidates", "candidates"],
+      "min_files": 2,
+      "note": "Two disjoint Plan types: ctxplanner's chosen resident view selection vs memq's static pre-execution explain output. Candidate is scored span input to ctxplanner."
+    },
+    {
+      "id": "pool",
+      "name": "Pool family",
+      "roots": ["pool", "Pool", "PoolProfile"],
+      "ignore": [],
+      "min_files": 2,
+      "note": "Two disjoint pool concepts: session bounded-LRU container vs cachemeta pooling character profile describing a tier's host/coherence/share properties."
+    },
+    {
+      "id": "layout",
+      "name": "Layout family",
+      "roots": ["layout", "Layout", "kvLayout"],
+      "ignore": [],
+      "min_files": 2,
+      "note": "Three disjoint layout concepts: tensor element physical arrangement (RowMajor/ColMajor), ctxplan region profile for layout-aware planning, and attention cache variant seam (standardKVLayout vs mlaKVLayout)."
     }
   ]
 }

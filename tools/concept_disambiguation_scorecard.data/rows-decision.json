@@ -1,0 +1,68 @@
+{
+  "rows": [
+    {
+      "id": "decision-witness",
+      "canonical": "Decision (witness)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Git evidence adjudication verdict with CONFIRMED/REFUTED/ABSTAIN labels",
+      "distinction": "Git evidence adjudication verdict - NOT kernel Decision (explanation trace)",
+      "distinct_from": ["decision-kernel", "decision-scheduler", "decision-task"],
+      "aliases": [],
+      "grounding": "Decision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "decision-kernel",
+      "canonical": "Decision (kernel)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Tool-call verdict explanation trace showing why fak gave this verdict",
+      "distinction": "Tool-call verdict explanation trace - NOT witness Decision (adjudication verdict)",
+      "distinct_from": ["decision-witness", "decision-scheduler", "decision-task"],
+      "aliases": [],
+      "grounding": "Decision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "decision-scheduler",
+      "canonical": "Decision (scheduler)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Loop admission advisory: whether to fire a scheduled loop now",
+      "distinction": "Loop admission advisory - NOT kernel Decision (tool-call verdict explanation)",
+      "distinct_from": ["decision-kernel", "decision-witness", "decision-task"],
+      "aliases": [],
+      "grounding": "Decision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "decision-task",
+      "canonical": "Decision (shared-task)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Shared-task execution state tracking and reconciliation record",
+      "distinction": "Task execution state tracking - NOT scheduler Decision (loop advisory)",
+      "distinct_from": ["decision-scheduler", "decision-kernel", "decision-witness"],
+      "aliases": [],
+      "grounding": "Decision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

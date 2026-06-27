@@ -329,5 +329,78 @@ the spelling; nothing in the kernel's safety layer touches the model's tensors.
 - **Layout (ctxplan)** - Base/Current/Recent/Deep region profile for layout-aware planning.
   *Not* Layout (tensor) (that is tensor storage order, not a planning profile).
 
-- **kvLayout** - attention cache variant seam interface: standardKVLayout vs mlaKVLayout.
+- **MLA KV layout seam** - attention cache variant seam interface: standardKVLayout vs mlaKVLayout.
   *Not* Layout (tensor) (that is element ordering, not cache variant).
+
+---
+
+## Cross-cluster canonical-name collisions
+
+The worst confusability is one TOKEN that names two unrelated things in two unrelated
+packages: a reader meets the name in package A, builds a mental model, then meets it in
+package B and is already wrong. These seven are not renamed (each is the natural local
+name in its own package), so the line is drawn here instead - one sentence on what each
+IS and what it is NOT. The concept-disambiguation scorecard positions both halves as a
+`cross-cluster` pair that cite each other in `distinct_from`.
+
+- **core-image manifest** (`recall.Manifest`) - the persisted core image of a finished
+  session: page table, frozen quarantine clearance, and a frozen world-version marker.
+  *Not* the **policy manifest** (`policy` package), which is the on-disk capability-floor
+  JSON; same token, a session snapshot vs an authorization config.
+
+- **policy manifest** (`policy` package) - the on-disk JSON an operator edits to configure
+  the capability floor. *Not* `recall.Manifest` (the session core-image snapshot).
+
+- **session.Verdict** (`session.Decide`) - the per-turn loop gate: Proceed, MaxTokens, the
+  drive State, Stop, and a closed Reason for why the slot freed. *Not* **abi.Verdict** (the
+  discriminated-union adjudication decision); same token, a turn-boundary control value vs
+  a tool-call authorization decision.
+
+- **abi.Verdict** (`abi` package) - the adjudicator's discriminated-union decision (Allow,
+  Deny, Defer, Transform, Quarantine, RequireWitness). *Not* `session.Verdict` (the per-turn
+  boundary gate).
+
+- **compute backend** (`compute.Backend`) - the small whole-op HAL interface the forward
+  loop targets (MatMul, RMSNorm, RoPE, Attention, NewKV). *Not* the **memq cell backend**
+  (`memq.Backend`), which supplies memory cells and trust-gated byte access; same token, a
+  tensor-op surface vs a cell/page-in source.
+
+- **memq cell backend** (`memq.Backend`) - supplies memory cells (the page table as safe
+  metadata) and trust-gated byte access (Materialize). *Not* `compute.Backend` (the
+  model-math HAL interface).
+
+- **rung observer** (`rungobs.Observer`) - the passive rung-decision distribution counter:
+  histograms adjudication decisions by rung x kind x reason. *Not* the **cache-reuse
+  observer** (`cacheobs.Observer`), which accumulates KV-prefix reuse; same token, the
+  verdict mix vs prefill reuse.
+
+- **cache-reuse observer** (`cacheobs.Observer`) - accumulates in-kernel KV-prefix reuse
+  across served turns, bucketed frozen/partial/cold. *Not* `rungobs.Observer` (the
+  decision-distribution counter).
+
+- **planner candidate index** (`ctxplan.Index`) - the planner's candidate access path over
+  a history store: an inverted token index plus recency tail and durable set, so a Probe
+  returns a bounded candidate set. *Not* the **simhash index** (`simhash.Index`), the
+  brute-force nearest-neighbor vector store; same token, an inverted span index vs a
+  cosine-similarity corpus.
+
+- **simhash index** (`simhash.Index`) - an in-memory brute-force nearest-neighbor store
+  (add a Vector, then TopK by cosine). *Not* `ctxplan.Index` (the planner's inverted
+  candidate access path).
+
+- **history-image store** (`ctxplan.Store`) - the trust-gated history image the planner
+  views: it supplies spans and gated byte access (Materialize). *Not* the **blob CAS store**
+  (`blob.Store`), the content-addressed digest->bytes store; same token, a gated span view
+  vs a content store.
+
+- **blob CAS store** (`blob.Store`) - the content-addressed blob store: digest->bytes with
+  pin-aware bounded eviction. *Not* `ctxplan.Store` (the planner's gated span interface).
+
+- **page-in refusal** (`ctxplan.Refusal`) - a selected span the trust gate declined to page
+  in (sealed, or its bytes went missing), reported but never rendered. *Not* the **effect
+  refusal** (`memq.Refusal`), a memory cell an effect declined to touch; same token, a
+  context span vs a memory cell.
+
+- **effect refusal** (`memq.Refusal`) - a cell an effect declined to touch (sealed /
+  tombstoned / page-in refused), recorded with a reason. *Not* `ctxplan.Refusal` (a planner
+  span the gate declined to page in).

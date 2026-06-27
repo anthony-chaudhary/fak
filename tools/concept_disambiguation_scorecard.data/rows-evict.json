@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "id": "evict-kvcache",
+      "canonical": "evict (KV cache)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Physical tensor span removal and RoPE re-rotation in KV cache for memory compaction",
+      "distinction": "Physical tensor compaction in the attention cache - NOT playbook pruning (logical span removal)",
+      "distinct_from": ["evict-playbook", "evict-session"],
+      "aliases": [],
+      "grounding": "Evict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "evict-playbook",
+      "canonical": "evict (playbook)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Logical span pruning from rendered playbook under token budget",
+      "distinction": "Logical pruning under token budget returning evicted bullets - NOT KV cache eviction (tensor compaction)",
+      "distinct_from": ["evict-kvcache", "evict-session"],
+      "aliases": [],
+      "grounding": "Prune",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "evict-session",
+      "canonical": "evict (session pool)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Model instance eviction from a bounded LRU session pool",
+      "distinction": "LRU session pool eviction to stay within budget - NOT playbook pruning (removes context spans)",
+      "distinct_from": ["evict-playbook", "evict-kvcache"],
+      "aliases": [],
+      "grounding": "Admit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

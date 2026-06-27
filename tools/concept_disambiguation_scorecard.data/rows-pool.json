@@ -1,0 +1,36 @@
+{
+  "rows": [
+    {
+      "id": "pool-session",
+      "canonical": "Pool (session)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Bounded-LRU session state container with a fixed ceiling on concurrent sessions",
+      "distinction": "Session container - NOT PoolProfile (tier pooling character)",
+      "distinct_from": ["poolprofile-cachemeta"],
+      "aliases": [],
+      "grounding": "Pool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "poolprofile-cachemeta",
+      "canonical": "PoolProfile",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Pooling character of a residency tier describing host count, coherence model, and shareability",
+      "distinction": "Tier pooling character profile - NOT Pool (container)",
+      "distinct_from": ["pool-session"],
+      "aliases": [],
+      "grounding": "PoolProfile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
