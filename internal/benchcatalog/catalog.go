@@ -272,7 +272,7 @@ var registry = []Bench{
 	{
 		Name: "webbench", Kind: KindVerb, Need: NeedNone, Level: LevelE2E,
 		Summary: "Frontier web/browser agent benchmarking (describe | eval | compare). describe prints the offline prefill-work geometry.",
-		Run:     "fak webbench describe --dataset testdata/webvoyager/sample.json",
+		Run:     "fak webbench describe --dataset testdata/webbench/sample-tasks.jsonl",
 		Flags:   []string{"describe  -  offline geometry (needs --dataset)", "eval  -  graded (gated)", "compare  -  vs a results file"},
 		Doc:     "docs/webbench-baselines.md",
 	},
