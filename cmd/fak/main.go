@@ -199,6 +199,8 @@ func main() {
 		cmdLeaseref(os.Args[2:])
 	case "node":
 		cmdNode(os.Args[2:])
+	case "lab":
+		cmdLab(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
