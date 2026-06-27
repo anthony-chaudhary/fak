@@ -352,12 +352,19 @@ type configJSONHints struct {
 	MultiQuery        *bool    `json:"multi_query"`
 	NumKVHeadsAlt     *int     `json:"num_kv_heads"`
 	NormTopKProb      *bool    `json:"norm_topk_prob"`
-	Alibi             *bool    `json:"alibi"`
-	SlidingWindow     *int     `json:"sliding_window"`
-	UseSlidingWindow  *bool    `json:"use_sliding_window"`
-	Window            []int    `json:"sliding_window_per_layer"`
-	HiddenAct         string   `json:"hidden_act"`
-	HiddenActivation  string   `json:"hidden_activation"`
+	// Ornith / Qwen3.5-MoE drift: the expert count is serialized under "num_experts"
+	// (not "num_local_experts") and the always-on shared-expert FFN width under
+	// "shared_expert_intermediate_size" (not "shared_intermediate_size"). These alts
+	// fill the canonical fields only when the canonical key is absent, so num_local_experts
+	// families (Mixtral etc.) stay untouched.
+	NumExpertsAlt               *int   `json:"num_experts"`
+	SharedExpertIntermediateAlt *int   `json:"shared_expert_intermediate_size"`
+	Alibi                       *bool  `json:"alibi"`
+	SlidingWindow               *int   `json:"sliding_window"`
+	UseSlidingWindow            *bool  `json:"use_sliding_window"`
+	Window                      []int  `json:"sliding_window_per_layer"`
+	HiddenAct                   string `json:"hidden_act"`
+	HiddenActivation            string `json:"hidden_activation"`
 }
 
 // UnmarshalJSON decodes config.json, then folds the scalar-or-list eos_token_id into
@@ -512,6 +519,19 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 			// export can still pin qk_norm=false explicitly to opt out.
 			c.QKNorm = true
 		}
+	}
+	// Ornith / Qwen3.5-MoE serialize the expert count under "num_experts" and the
+	// shared-expert width under "shared_expert_intermediate_size". Fold the alts into
+	// the canonical fields only when the canonical key was absent (the alt pointer is
+	// nil unless the JSON literally carried that key), so without this an Ornith MoE
+	// config resolves NumExperts==0, IsMoE() returns false, and the 35B/397B silently
+	// load as a dense model. num_local_experts / shared_intermediate_size families are
+	// unaffected (their alt pointers stay nil).
+	if c.NumExperts == 0 && h.NumExpertsAlt != nil && *h.NumExpertsAlt > 0 {
+		c.NumExperts = *h.NumExpertsAlt
+	}
+	if c.SharedIntermediateSize == 0 && h.SharedExpertIntermediateAlt != nil && *h.SharedExpertIntermediateAlt > 0 {
+		c.SharedIntermediateSize = *h.SharedExpertIntermediateAlt
 	}
 	if strings.Contains(family, "mixtral") && c.NumExperts > 0 && h.NormTopKProb == nil {
 		// HF Mixtral does not serialize norm_topk_prob, but MixtralSparseMoeBlock
