@@ -6,11 +6,11 @@
 > **⚠️ RESULT STATUS:** **PENDING — Results not yet collected.** This document describes the result packet shape and what will be measured once the live run executes on datacenter compute. The observation seam (`fak swebench cache-witness`) is shipped and tested; the live GLM-5.2 cache-value number is the box residual.
 
 **Date:** 2026-06-27
-**Commit:** _pending — results not yet shipped_
-**DOS Verify:** N/A (no results to audit yet)
+**Commit:** _live cache-value pending — see [DOS Binding](#dos-binding--provenance-of-every-number)_
+**DOS Verify:** the offline WITNESSED headline (the deterministic prefill-elimination floor) is bound to its commit and resolves under `dos verify`; the live WITNESSED cache value is reported `not yet` (host-gated on [#1012](https://github.com/anthony-chaudhary/fak/issues/1012)). See [DOS Binding](#dos-binding--provenance-of-every-number).
 **Epic:** [#1010](https://github.com/anthony-chaudhary/fak/issues/1010) — GLM-5.2 on the pure fak kernel
-**Child Issue:** [#1014](https://github.com/anthony-chaudhary/fak/issues/1014) — this result packet
-**Observation Seam:** [`internal/cachewitness/`](../internal/cachewitness/) + `fak swebench cache-witness` (commit `52dfea0d`, diff-witnessed)
+**Child Issues:** [#1014](https://github.com/anthony-chaudhary/fak/issues/1014) — this result packet · [#1013](https://github.com/anthony-chaudhary/fak/issues/1013) — DOS binding + provenance of every number
+**Observation Seam:** [`internal/cachewitness/`](../internal/cachewitness/) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
 
 ## Summary
 
@@ -59,13 +59,57 @@ This proves the in-kernel cache-value lever end-to-end even if the full patch is
 | **Partial turns** | `kv_prefix.partial_turns` | **PENDING** | WITNESSED |
 | **Cold turns (reuse < 0.10)** | `kv_prefix.cold_turns` | **PENDING** | WITNESSED |
 
+### Prefill Work-Elimination Floor — WITNESSED-derived (deterministic, offline)
+
+This is the **offline WITNESSED headline** the epic names: the prefill-token work each
+arm processes, computed *deterministically* from the SWE-bench instance geometry
+(`internal/swebench/cost.go`, `PrefillAgg.AOverC`/`AOverB`). It needs **no box, no GPU,
+no model** — it is timing-free arithmetic, so it resolves under `dos verify` today, bound
+to the shipped `cost.go` commit. It is **WITNESSED-derived** (fak computes it), distinct
+from the live WITNESSED cache count below and from any OBSERVED provider/box reading.
+
+| Metric | Source field | Value | Provenance |
+|---|---|---|---|
+| **A/C — re-prefill vs fak-fused** | `PrefillAgg.AOverC` | **17.9× → 23.4×** (workers 1→16) | WITNESSED-derived — deterministic from geometry |
+| **B/C — per-agent-KV vs fak-fused** | `PrefillAgg.BOverC` | **1.0× → 1.31×** (workers 1→16) | WITNESSED-derived |
+| **A/B — turn-tax** | `PrefillAgg.AOverB` | computed per geometry | WITNESSED-derived |
+
+These figures are the committed value-stack floor (see
+[SWEBENCH-RESULTS.md](SWEBENCH-RESULTS.md)); they are a *related but distinct* quantity
+from the live in-kernel `reused_tokens` and must never be reported as the live cache
+value. The deterministic floor answers "how much prefill work the geometry lets fak
+eliminate"; the live `reused_tokens` answers "how much fak's RadixAttention actually
+served from cache on this run."
+
 ### Provider Cache — OBSERVED (upstream, not fak's)
 
 | Metric | Expected Artifact Field | Value | Provenance |
 |---|---|---|---|
 | **Provider cache read tokens** | `provider_cache_read_tokens` | **0** | OBSERVED — always 0 on pure in-kernel path (no provider) |
 
-**Honesty fence:** The two numbers are DISTINCT signals over distinct caches. A record that summed them would conflate trust classes (WITNESSED vs OBSERVED). The `cachewitness.Record` keeps them in separate fields and never derives one from the other.
+### Live Decode Reading — OBSERVED (a reading of the box, not a fak claim)
+
+| Metric | Source | Value | Provenance |
+|---|---|---|---|
+| **Decode throughput (tok/s)** | live serve on the dgx box | **`not yet`** (~0.03–0.17 expected under `--cpu-offload-experts`) | OBSERVED — relayed reading of a live box |
+
+The tok/s is a reading of the hardware under the [#996](https://github.com/anthony-chaudhary/fak/issues/996)/[#971](https://github.com/anthony-chaudhary/fak/issues/971)
+expert-GEMM wall. It is **OBSERVED**, never WITNESSED, and the slow figure is **never
+attributed to a fak action** — it is the host's MoE-offload cost, not a kernel fault.
+
+**Honesty fence (all four number-classes).** The packet keeps **two trust classes**
+strictly apart:
+
+- **WITNESSED** (fak controls): the live in-kernel `kv_prefix.reused_tokens`, and the
+  WITNESSED-*derived* deterministic prefill-elimination floor (`AOverC`/`AOverB`).
+- **OBSERVED** (relayed from an external party): the provider `cache_read` (0 here), and
+  the live box decode tok/s.
+
+No number sums or derives across the line: the `cachewitness.Record` keeps the WITNESSED
+and OBSERVED cache fields separate and never derives one from the other, the deterministic
+floor is never reported as the live cache value, and a slow OBSERVED tok/s is never blamed
+on a fak action. This is the `fak conflation-scorecard` discipline applied to the result
+packet (`internal/conflationscore`, A / `conflation_debt 0`).
 
 ## Methodology — The Observation Seam
 
@@ -101,6 +145,34 @@ See [GLM52-FAK-KERNEL-CACHE-VALUE-RUNBOOK.md](GLM52-FAK-KERNEL-CACHE-VALUE-RUNBO
 The cache **BIT** milestone: `cache-witness.json` shows `reused_tokens > 0` on turns 2..N from a live GLM-5.2 fak-kernel serve. This proves the cache-value lever end-to-end through fak's own kernel.
 
 **Stretch (gated on #996/#971):** A non-zero resolve-rate from GLM-5.2-fak-kernel, graded by the official harness (`fak swebench eval`). Not required to close #1010.
+
+## DOS Binding — Provenance of Every Number
+
+The rule (epic #1010, child #1013): **the cache-value number that graduates must be
+diff-witnessed, not self-reported.** It is bound by `dos verify` / `dos commit-audit` to
+the commit that produced it — never to a worker's narration. An unproven step is reported
+`not yet` with the missing witness, never shipped.
+
+**Bound now (resolves under `dos verify` today):**
+
+| Number | Trust class | Binding |
+|---|---|---|
+| Observation seam (`fak swebench cache-witness`) | WITNESSED tooling | commit `52dfea0d` — `dos commit-audit` → **diff-witnessed** |
+| Deterministic prefill-elimination floor (A/C, B/C, A/B) | WITNESSED-derived | bound to the shipped `internal/swebench/cost.go` commit; timing-free, resolves offline under `dos verify` |
+| Provider `cache_read` = 0 (pure in-kernel path) | OBSERVED | structural (no provider on the in-kernel path) — not a fak claim |
+
+**`not yet` (the missing witness is named, not faked):**
+
+| Number | Trust class | Missing witness |
+|---|---|---|
+| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8×A100 dgx box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
+| Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
+
+When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
+
+**Conflation contract:** every number above carries its trust class; no number sums or
+derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
+(grade A, `conflation_debt 0`) on the reporting surfaces.
 
 ## Provenance and Discipline
 
