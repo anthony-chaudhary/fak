@@ -321,7 +321,7 @@ context.query(q, budget, scope, pins, excludes)
 
 **frames**: page-table rows from the session backtrace (the `cdb.Frame` type), carrying metadata (step, role, descriptor, length, digest, taint, sealed/tombstoned status) but no raw bytes. A frame is a safe descriptor even for sealed pages.
 
-**slices**: handles to materialized context slices (the `SliceRef` type), each carrying the source step/role, rendered byte/token size, source cache entry, view ID, and the materialization kind (HIT/FAULT/RECOMPUTE) that produced it.
+**slices**: handles to materialized context slices (the `Slice` type, alias for `recall.Slice`), each carrying the source step, role, descriptor, and the paged-in bytes.
 
 This is the immediate "on demand context" product. It uses shipped `recall/cdb`
 behavior and does not wait for non-prefix KV research.
