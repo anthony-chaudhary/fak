@@ -123,9 +123,9 @@
       "aliases": [],
       "grounding": "sessionstate",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "session",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["session.State (live) vs sessionimage.Image (persisted) is defined-only"]
     },
     {
@@ -139,9 +139,9 @@
       "aliases": ["sessionimage"],
       "grounding": "sessionimage",
       "grounding_kind": "path",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["sessionimage.Image (persisted archive) vs session.State (live) is defined-only"]
     },
     {
@@ -155,9 +155,9 @@
       "aliases": [],
       "grounding": "sessionplanner",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["SessionPlanner (stateful) vs CtxViewPlanner (stateless) is defined-only"]
     },
     {

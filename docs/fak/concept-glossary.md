@@ -174,6 +174,17 @@ the spelling; nothing in the kernel's safety layer touches the model's tensors.
   (Proceed / Stop) vs the kernel adjudication decision (Allow / Deny / Defer). Same
   word, two layers.
 
+- **session.State** vs **sessionimage.Image** - session.State is the LIVE, mutable
+  per-session control record (run-state, budget, priority, pace, revision);
+  sessionimage.Image is the PERSISTED, integrity-verified archive bundling the drive
+  (session.json), the recall manifest, the ctxplan index, and the trajectory corpus.
+  Live drive record vs persisted archive.
+
+- **SessionPlanner** vs **session.State** - SessionPlanner holds the per-session
+  CONTEXT-PLANNER state (a long-lived lossless store plus candidate index); session.State
+  holds the per-session RUN-CONTROL state (run-state / budget / pace). Context planning
+  vs run control.
+
 ---
 
 ## The gateway / engine family
@@ -228,6 +239,27 @@ the spelling; nothing in the kernel's safety layer touches the model's tensors.
 - **recall** vs **compaction** - recall is the persisted session core-dump (a page
   table over a content-addressed swap device); compaction is provider prefix reuse on
   the wire. Persistence vs reuse - unrelated beyond both touching "context".
+
+- **contextq** vs **ctxplan** - contextq is the on-demand MATERIALIZER: it turns a
+  search query into typed handles, materialization verdicts, omissions, and a render
+  plan over CDB images. ctxplan is the OPTIMIZER: a bounded-candidate planner that
+  forecasts which spans keep resident under a token budget. Materializer vs optimizer -
+  one fetches the spans, the other chooses which stay.
+
+- **memq** vs **contextq** - memq is the general memory-operation ALGEBRA (a pipeline
+  of scan / filter / rank / limit / budget / render / tombstone / consolidate ops over
+  typed cells); contextq is ONE concrete materialization expressed through that algebra.
+  Algebra vs operation.
+
+- **CtxViewPlanner** vs **SessionPlanner** - CtxViewPlanner is the STATELESS shared
+  seam (one per server, shared across every request, off by default); SessionPlanner is
+  the STATEFUL per-session planner (a long-lived lossless store plus candidate index
+  that ingests each turn incrementally). Stateless-shared vs stateful-per-session
+  (SessionPlanner also appears under the session family below).
+
+- **CompactionView** vs **compaction** - CompactionView is the LOSSY savings MODEL: it
+  strips recovery handles off elided spans to show token savings without recoverability;
+  compaction is provider prefix reuse on the wire. Savings model vs wire reuse.
 
 ---
 

@@ -59,9 +59,9 @@
       "aliases": [],
       "grounding": "compaction",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["compaction vs provider prompt-cache reuse is defined-only"]
     },
     {
@@ -75,9 +75,9 @@
       "aliases": [],
       "grounding": "ctxplan",
       "grounding_kind": "path",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["the ctx* planner family is defined-only, not yet in the glossary"]
     },
     {
@@ -91,9 +91,9 @@
       "aliases": [],
       "grounding": "contextq",
       "grounding_kind": "path",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["contextq (materializer) vs ctxplan (optimizer) is defined-only"]
     },
     {
@@ -107,9 +107,9 @@
       "aliases": [],
       "grounding": "ctxviewplanner",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["stateless CtxViewPlanner vs stateful SessionPlanner is defined-only"]
     },
     {
@@ -123,9 +123,9 @@
       "aliases": [],
       "grounding": "compactionview",
       "grounding_kind": "symbol",
-      "glossary_anchor": "",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "compaction",
-      "verdict": "defined",
+      "verdict": "crystal",
       "gaps": ["CompactionView (lossy model) vs compaction (wire reuse) is defined-only"]
     },
     {
