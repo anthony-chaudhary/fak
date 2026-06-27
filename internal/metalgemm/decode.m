@@ -57,11 +57,13 @@ using namespace metal;
 // per-block sum of int8(code)*f16(x), scaled by the per-block weight scale wd[b].
 #define Q8DQ_ROWS_PER_TG 8
 kernel void q8dq_gemv(device const char*  W    [[buffer(0)]],  // out*in int8 codes, row-major
-                      device const float* WD   [[buffer(1)]],  // out*nblk f32 block scales
+                      device const half*  WD   [[buffer(1)]],  // out*nblk f16 block scales (GGUF Q8_0 std)
                       device const half*  X    [[buffer(2)]],  // in f16 activation
                       device half*        Y    [[buffer(3)]],
                       constant int&       nblk [[buffer(4)]],
                       constant int&       out_ [[buffer(5)]],
+                      device const half*  Bias [[buffer(6)]],  // [out] bias, or a placeholder when hasBias==0
+                      constant int&    hasBias [[buffer(7)]],
                       uint tgid [[threadgroup_position_in_grid]],
                       uint litg [[thread_index_in_threadgroup]]) {
     // Q8DQ_ROWS_PER_TG simdgroups per threadgroup (256 threads): one output row per simdgroup. Packing
@@ -72,18 +74,18 @@ kernel void q8dq_gemv(device const char*  W    [[buffer(0)]],  // out*in int8 co
     uint lane = litg % 32;
     uint o = tgid * Q8DQ_ROWS_PER_TG + sg;
     if (o >= (uint)out_) return;
-    device const char*  wrow = W  + (long)o * nblk * 32;
-    device const float* wd   = WD + (long)o * nblk;
+    device const char* wrow = W  + (long)o * nblk * 32;
+    device const half* wd   = WD + (long)o * nblk;
     float acc = 0.0f;
     for (int b = (int)lane; b < nblk; b += 32) {
         device const char4* wb = (device const char4*)(wrow + (long)b * 32);
         device const half4* xb = (device const half4*)(X    + (long)b * 32);
         float s = 0.0f;
         for (int i = 0; i < 8; i++) s += dot(float4(wb[i]), float4(xb[i]));
-        acc += s * wd[b];
+        acc += s * float(wd[b]);
     }
     acc = simd_sum(acc);
-    if (lane == 0) Y[o] = half(acc);
+    if (lane == 0) Y[o] = half(acc + (hasBias ? float(Bias[o]) : 0.0f)); // fused projection bias
 }
 
 // d_rmsnorm: ONE threadgroup over the single token's H-vector. The TG threads cooperatively sum
@@ -216,6 +218,25 @@ static DecLayer gDecL[DEC_MAXL];
 // post-forward round-trip.
 static int gDecFinalNorm = -1, gDecHead = -1, gDecVocab = 0;
 
+// gDecSF16[wid] = an f16 copy of weight wid's per-block scales (q8.m stores them f32). The decode
+// GEMV reads f16 scales — the GGUF Q8_0 standard — so the weight stream is ~6% fewer bytes than the
+// f32-scale read, the last bandwidth lever toward the llama.cpp-Metal bar. Built once per weight.
+#define DEC_MAX_W 8192
+static id<MTLBuffer> gDecSF16[DEC_MAX_W];
+static void ensureScaleF16(int wid) {
+    if (wid < 0 || wid >= DEC_MAX_W || gDecSF16[wid] != nil) return;
+    int out, in, nblk; mg_q8_dims(wid, &out, &in, &nblk);
+    long n = (long)out * nblk;
+    if (n <= 0) return;
+    id<MTLBuffer> f32 = mg_q8_scales_buf(wid);
+    if (f32 == nil) return;
+    id<MTLBuffer> b = [gDev newBufferWithLength:(NSUInteger)(n*2) options:MTLResourceStorageModeShared];
+    const float *src = (const float *)f32.contents;
+    __fp16 *dst = (__fp16 *)b.contents;
+    for (long i = 0; i < n; i++) dst[i] = (__fp16)src[i];
+    gDecSF16[wid] = b;
+}
+
 static id<MTLComputePipelineState> psoDGemv, psoDNorm, psoDBias, psoDRope, psoDAttn, psoDSilu, psoDAdd;
 static int gDecReady;
 
@@ -251,6 +272,8 @@ void mg_decode_layer(int layer, int q, int k, int v, int o, int gate, int up, in
                      int inNorm, int postNorm, int qb, int kb, int vb) {
     if (layer < 0 || layer >= DEC_MAXL) return;
     gDecL[layer] = (DecLayer){q, k, v, o, gate, up, down, inNorm, postNorm, qb, kb, vb};
+    ensureScaleF16(q); ensureScaleF16(k); ensureScaleF16(v); ensureScaleF16(o);
+    ensureScaleF16(gate); ensureScaleF16(up); ensureScaleF16(down);
 }
 
 // mg_decode_head registers the final RMSNorm vector (gW id) + the Q8 LM-head weight (q8.m wid) +
@@ -258,6 +281,7 @@ void mg_decode_layer(int layer, int q, int k, int v, int o, int gate, int up, in
 // GPU and returns logits directly.
 void mg_decode_head(int finalNormID, int headWid, int vocab) {
     gDecFinalNorm = finalNormID; gDecHead = headWid; gDecVocab = vocab;
+    ensureScaleF16(headWid);
 }
 
 void mg_decode_reset(void) {
@@ -265,6 +289,7 @@ void mg_decode_reset(void) {
     gDecEps = gDecTheta = gDecScale = 0.0f;
     for (int i = 0; i < DEC_MAXL; i++) gDecL[i] = (DecLayer){0};
     gDecFinalNorm = -1; gDecHead = -1; gDecVocab = 0;
+    for (int i = 0; i < DEC_MAX_W; i++) gDecSF16[i] = nil; // ARC frees the f16-scale buffers
 }
 
 // ---- encode helpers (one command buffer / encoder per decode step) ----
@@ -293,16 +318,21 @@ static void d1d(id<MTLComputeCommandEncoder> e, id<MTLComputePipelineState> pso,
 // q8 dequant-GEMV: Y[yoff..yoff+out](f16) = dequant(W_q8[wid]) . X(f16). One 8-row threadgroup
 // of 256 threads per group. yoff (f16 elems) lets the K/V projection write straight into the
 // resident KV at row L, so no blit/encoder-switch is needed to append it.
-static void d_gemv(int wid, id<MTLBuffer> X, id<MTLBuffer> Y, long yoff) {
+static void d_gemv(int wid, id<MTLBuffer> X, id<MTLBuffer> Y, long yoff, int biasID) {
     int out, in, nblk; mg_q8_dims(wid, &out, &in, &nblk);
     id<MTLComputeCommandEncoder> e = denc();
     [e setComputePipelineState:psoDGemv];
-    [e setBuffer:mg_q8_codes_buf(wid)  offset:0 atIndex:0];
-    [e setBuffer:mg_q8_scales_buf(wid) offset:0 atIndex:1];
+    [e setBuffer:mg_q8_codes_buf(wid) offset:0 atIndex:0];
+    [e setBuffer:gDecSF16[wid]        offset:0 atIndex:1]; // f16 block scales (built at registration)
     [e setBuffer:X offset:0 atIndex:2];
     [e setBuffer:Y offset:(NSUInteger)(yoff*2) atIndex:3];
     [e setBytes:&nblk length:4 atIndex:4];
     [e setBytes:&out  length:4 atIndex:5];
+    // Fused projection bias: bind the bias vector (gW f16) at index 6, or the scales as a harmless
+    // placeholder when there is none (Metal requires the bound buffer to exist; hasBias gates the read).
+    int hasBias = (biasID >= 0) ? 1 : 0;
+    [e setBuffer:(hasBias ? wbufOfDec(biasID) : mg_q8_scales_buf(wid)) offset:0 atIndex:6];
+    [e setBytes:&hasBias length:4 atIndex:7];
     NSUInteger ntg = (NSUInteger)((out + 7) / 8);
     [e dispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
 }
@@ -321,15 +351,6 @@ static void d_norm(id<MTLBuffer> X, int normID, id<MTLBuffer> Out) {
     NSUInteger p = 1; while (p*2 <= TG) p *= 2; TG = p;
     [e setThreadgroupMemoryLength:(NSUInteger)(TG*4) atIndex:0];
     [e dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(TG,1,1)];
-}
-
-static void d_bias(id<MTLBuffer> Buf, int biasID, int n, long off) {
-    id<MTLComputeCommandEncoder> e = denc();
-    [e setComputePipelineState:psoDBias];
-    [e setBuffer:Buf offset:(NSUInteger)(off*2) atIndex:0];
-    [e setBuffer:wbufOfDec(biasID) offset:0 atIndex:1];
-    uint nn = n; [e setBytes:&nn length:4 atIndex:2];
-    d1d(e, psoDBias, (NSUInteger)n);
 }
 
 static void d_rope_at(id<MTLBuffer> Buf, int nHeads, int base, long off) {
@@ -426,32 +447,28 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
 
         for (int l = 0; l < gDecNL; l++) {
             DecLayer L_ = gDecL[l];
+            int qb = gDecAttnBias ? L_.qb : -1, kb = gDecAttnBias ? L_.kb : -1, vb = gDecAttnBias ? L_.vb : -1;
             if (!matOnly) d_norm(Xb, L_.inNorm, Xn);        // Xn = rmsnorm(X)
-            d_gemv(L_.q, Xn, Qb, 0);                       // Q
-            d_gemv(L_.k, Xn, Kbuf[l], rowOff);             // K written straight to resident row L
-            d_gemv(L_.v, Xn, Vbuf[l], rowOff);             // V written straight to resident row L
-            if (!matOnly && gDecAttnBias) {
-                d_bias(Qb, L_.qb, qrow, 0);
-                d_bias(Kbuf[l], L_.kb, w, rowOff);
-                d_bias(Vbuf[l], L_.vb, w, rowOff);
-            }
+            d_gemv(L_.q, Xn, Qb, 0, qb);                   // Q (+bias fused)
+            d_gemv(L_.k, Xn, Kbuf[l], rowOff, kb);         // K written straight to resident row L (+bias)
+            d_gemv(L_.v, Xn, Vbuf[l], rowOff, vb);         // V written straight to resident row L (+bias)
             if (!matOnly) {
                 d_rope_at(Qb, nH, L, 0);                    // RoPE Q
                 d_rope_at(Kbuf[l], nKV, L, rowOff);        // RoPE the new K row in place
                 d_attn(Qb, Kbuf[l], Vbuf[l], attn, ctx);   // single-query attention over ctx keys
             }
-            d_gemv(L_.o, attn, tmpH, 0);                   // O
+            d_gemv(L_.o, attn, tmpH, 0, -1);               // O
             if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += O
             if (!matOnly) d_norm(Xb, L_.postNorm, Xn2);    // Xn2 = rmsnorm(X)
-            d_gemv(L_.gate, Xn2, Gb, 0);                   // gate
-            d_gemv(L_.up, Xn2, Ub, 0);                     // up
+            d_gemv(L_.gate, Xn2, Gb, 0, -1);               // gate
+            d_gemv(L_.up, Xn2, Ub, 0, -1);                 // up
             if (!matOnly) d_silu(Gb, Ub, Im);               // G = silu(G)*U
-            d_gemv(L_.down, Gb, tmpH, 0);                  // down
+            d_gemv(L_.down, Gb, tmpH, 0, -1);              // down
             if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += down
         }
         if (wantLogits) {
             d_norm(Xb, gDecFinalNorm, Xn);                  // Xn = final RMSNorm(X)
-            d_gemv(gDecHead, Xn, logitBuf, 0);              // logits = head . Xn (on GPU)
+            d_gemv(gDecHead, Xn, logitBuf, 0, -1);          // logits = head . Xn (on GPU)
         }
         dendEnc();
         CFTimeInterval tEnc = prof ? CFAbsoluteTimeGetCurrent() : 0;
