@@ -26,8 +26,7 @@ const (
 	OutcomeCollected Outcome = "collected" // ran clean, artifact captured
 	OutcomeFailed    Outcome = "failed"    // ran, non-zero exit / no artifact
 	OutcomeTimeout   Outcome = "timeout"   // exceeded the per-task wall-clock budget; killed (partial artifact kept)
-	OutcomeDryRun    Outcome = "dry-run"   // printed only; nothing executed
-	OutcomeSkipped   Outcome = "skipped"   // not feasible / deliberately passed
+	OutcomeDryRun    Outcome = "dry-run"   // printed only; nothing executed (a summary state — never written to the ledger)
 )
 
 // CollectRow is one durable, append-only collection record. It is a flat
@@ -42,7 +41,7 @@ type CollectRow struct {
 	Command     string  `json:"command"`                // the exact command run (or that would run)
 	Outcome     string  `json:"outcome"`                // collected | failed | dry-run | skipped
 	Artifact    string  `json:"artifact,omitempty"`     // captured output path, when any
-	Number      string  `json:"number,omitempty"`       // an OBSERVED headline, when parsed (else empty)
+	Number      string  `json:"number,omitempty"`       // first parsed unit-bearing token, best-effort (else empty)
 	DurationSec float64 `json:"duration_sec,omitempty"` // wall time of the run
 	GeneratedAt string  `json:"generated_at"`           // RFC3339 stamp
 }
@@ -111,7 +110,7 @@ func lastCollected(rows []CollectRow, taskID, box string) (CollectRow, bool) {
 		if r.TaskID != taskID || r.Outcome != string(OutcomeCollected) {
 			continue
 		}
-		if box != "" && r.Box != "" && r.Box != box {
+		if box != "" && r.Box != box { // empty/other-box row is "not collected here"
 			continue
 		}
 		if !found || laterThan(r, best) {
