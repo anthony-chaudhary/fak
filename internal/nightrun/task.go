@@ -164,18 +164,6 @@ func (t Task) timeout() time.Duration {
 	return time.Duration(DefaultTaskTimeoutSec) * time.Second
 }
 
-// offline reports whether the Task needs nothing — no requirement and no cred.
-func (t Task) offline() bool {
-	if len(t.CredEnv) > 0 {
-		return false
-	}
-	for _, r := range t.Requires {
-		if r != ReqOffline {
-			return false
-		}
-	}
-	return true
-}
 
 // DefaultRecheckDays is the fall-back staleness horizon for a Task that does not
 // declare its own — the same 14-day default tools/bench_plan.py uses, so the two
