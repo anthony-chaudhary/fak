@@ -225,6 +225,37 @@ def test_scanner_balanced_iface_in_signature_no_early_break():
     assert info["long_funcs"] and info["long_funcs"][0][0] == "F"
 
 
+def test_scanner_one_line_body_not_run_into_following_decls():
+    # Regression: a one-line function body `func f() { return x }` is net-zero on
+    # its header line. The old per-line-net scan never saw depth go positive, so it
+    # ran PAST the real `}` into the following package-level declarations and forged
+    # a 200+-line "god-function" out of a one-liner (e.g. catalog.go:Offline). The
+    # one-liner must measure as length 1, and the long block below it must NOT be
+    # attributed to it.
+    src = ("package x\n"
+           "func One() bool { return true }\n"
+           "var registry = []int{\n"
+           + "\t1,\n" * (cq.FUNC_HARD_MAX + 50)
+           + "}\n")
+    info = cq.scan_go_file(src)
+    longs = [(n, ln) for n, ln in info["long_funcs"] if ln > cq.FUNC_HARD_MAX]
+    assert longs == [], f"one-liner forged a god-function: {longs}"
+
+
+def test_scanner_real_one_line_body_then_real_god_function():
+    # The fix must still SEE a genuine god-function that sits right after a
+    # one-line wrapper (e.g. accounts.go: a one-line `cmdAccounts` then the real
+    # 380-line `runAccounts`). The wrapper is length 1; the long one is flagged.
+    src = ("package x\n"
+           "func Wrap() { run() }\n"
+           "func Big() {\n"
+           + "\tz := 1\n" * (cq.FUNC_HARD_MAX + 5)
+           + "}\n")
+    info = cq.scan_go_file(src)
+    names = {n for n, ln in info["long_funcs"] if ln > cq.FUNC_HARD_MAX}
+    assert names == {"Big"}, names
+
+
 def test_scanner_func_inside_raw_string_not_counted():
     src = "package x\nvar q = `\nfunc Fake() {\n`\n"
     info = cq.scan_go_file(src)

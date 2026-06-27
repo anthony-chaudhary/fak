@@ -596,18 +596,45 @@ def scan_go_file(text: str) -> dict[str, Any]:
         in_literal = sr or sb  # this line begins inside a raw string / block comment
         if not in_literal and _FUNC_HEADER_RE.match(raw):
             n_funcs += 1
-            # scan to the matching closing brace using net brace depth per line.
-            # `seen_open` only flips once depth has actually been positive, so a
-            # BALANCED `interface{}` / `struct{}` on a multi-line signature line
-            # (net 0) no longer trips an early break.
+            # Scan to the matching closing brace of the function body. Brace depth
+            # is tracked over the IN-ORDER stream of `{`/`}` characters (literals
+            # already blanked by `_code_only`), not as a per-line net, so the body
+            # closes at the exact `}` that returns depth to zero. An EMPTY brace
+            # pair `{}` (a `{` whose next non-space char is `}`) is a type literal
+            # — `interface{}` / `struct{}` in a signature — and never opens the
+            # body; only a `{` with content after it does. This distinguishes the
+            # two net-zero-per-line shapes the old per-line-net scan got wrong: a
+            # balanced `interface{}` on a multi-line signature line must NOT open
+            # the body (else the scan ends at the signature), while a complete
+            # ONE-LINE body `func f() { return x }` MUST end on its own line (the
+            # old scan, seeing net 0, ran on into the following declarations and
+            # forged a 200+-line "god-function" out of a one-liner).
             depth = 0
             seen_open = False
+            closed = False
             j = i
             while j < len(lines):
-                depth += code_lines[j].count("{") - code_lines[j].count("}")
-                if depth > 0:
-                    seen_open = True
-                if seen_open and depth <= 0:
+                code = code_lines[j]
+                k = 0
+                while k < len(code):
+                    ch = code[k]
+                    if ch == "{":
+                        # peek past spaces/tabs for an immediately-closing `}`
+                        p = k + 1
+                        while p < len(code) and code[p] in " \t":
+                            p += 1
+                        if p < len(code) and code[p] == "}":
+                            k = p + 1  # empty `{}` type literal — skip the pair
+                            continue
+                        depth += 1
+                        seen_open = True
+                    elif ch == "}":
+                        depth -= 1
+                        if seen_open and depth <= 0:
+                            closed = True
+                            break
+                    k += 1
+                if closed:
                     break
                 j += 1
             length = j - i + 1
