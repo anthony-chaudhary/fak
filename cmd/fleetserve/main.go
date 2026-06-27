@@ -28,7 +28,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -66,25 +65,7 @@ type point struct {
 	ResultTokens int `json:"result_tokens_between_turns"`
 	Reps         int `json:"reps"`
 
-	// fak with cross-agent prefix reuse (prefill once + clone C + batched decode)
-	ReusePrefillMS     float64 `json:"reuse_prefill_ms"` // one prefix prefill
-	ReuseCloneMS       float64 `json:"reuse_clone_ms"`   // C deep-copies of the prefix KV
-	ReuseDecodeMS      float64 `json:"reuse_decode_ms"`  // T*D batched decode steps
-	ReuseResultMS      float64 `json:"reuse_result_prefill_ms"`
-	ReuseTotalMS       float64 `json:"reuse_total_ms"`
-	ReuseAgentsSec     float64 `json:"reuse_agents_per_sec"`
-	ReuseAgentTurnsSec float64 `json:"reuse_agent_turns_per_sec"`
-
-	// fak without reuse (C independent prefix prefills + same batched decode) — the ablation
-	// that prices the prefix-reuse lever while keeping the rest of the workload fixed.
-	NoReusePrefillMS     *float64 `json:"noreuse_prefill_ms,omitempty"`
-	NoReuseDecodeMS      *float64 `json:"noreuse_decode_ms,omitempty"`
-	NoReuseResultMS      *float64 `json:"noreuse_result_prefill_ms,omitempty"`
-	NoReuseTotalMS       *float64 `json:"noreuse_total_ms,omitempty"`
-	NoReuseAgentsSec     *float64 `json:"noreuse_agents_per_sec,omitempty"`
-	NoReuseAgentTurnsSec *float64 `json:"noreuse_agent_turns_per_sec,omitempty"`
-
-	ReuseSpeedup *float64 `json:"reuse_speedup_vs_noreuse,omitempty"` // reuse agents/sec ÷ no-reuse agents/sec
+	reuseMetrics
 }
 
 func main() {
@@ -165,17 +146,7 @@ func main() {
 				resultPrompts := buildResultPrompts(T, C, *resultTokens, vocab, r)
 
 				// ---- fak REUSE: prefill once, clone C, batched decode ----
-				t0 := time.Now()
-				base := m.NewSession()
-				base.Quant = *quant
-				base.Prefill(prefix)
-				tPre := time.Since(t0)
-
-				t1 := time.Now()
-				bs := m.NewBatchFromPrefixReserve(base.Cache, C, tailTokens)
-				bs.SetQuant(*quant)
-				tClone := time.Since(t1)
-
+				bs, tPre, tClone := newReuseBatch(m, *quant, prefix, C, tailTokens)
 				tDec, tResult := runTurns(bs, ids0, resultPrompts, *decodeSteps, vocab)
 				reuseTotals = append(reuseTotals, tPre+tClone+tDec+tResult)
 				reusePre = append(reusePre, tPre)
@@ -185,17 +156,7 @@ func main() {
 
 				if *ablation {
 					// ---- fak NO-REUSE: C independent prefix prefills, same batched decode ----
-					prompts := make([][]int, C)
-					for b := range prompts {
-						prompts[b] = prefix
-					}
-					n0 := time.Now()
-					nbs := m.NewBatchSession(C)
-					nbs.SetQuant(*quant)
-					nbs.PrefillEachNoLogits(prompts)
-					nbs.Reserve(tailTokens)
-					nPre := time.Since(n0)
-
+					nbs, nPre := newNoReuseBatch(m, *quant, prefix, C, tailTokens)
 					nDec, nResult := runTurns(nbs, ids0, resultPrompts, *decodeSteps, vocab)
 					noReuseTotals = append(noReuseTotals, nPre+nDec+nResult)
 					noReusePre = append(noReusePre, nPre)
@@ -206,32 +167,20 @@ func main() {
 				runtime.GC()
 			}
 
-			ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
-			rTot := ms(minDur(reuseTotals))
+			rTot := msFromDur(minDur(reuseTotals))
 			rAgents := float64(C) / (rTot / 1e3)
 			rTurns := float64(C*T) / (rTot / 1e3)
 			pt := point{
 				Turns: T, Concurrency: C, PrefixLen: *prefixLen, DecodeSteps: *decodeSteps,
 				ResultTokens: *resultTokens, Reps: *reps,
-				ReusePrefillMS: ms(minDur(reusePre)), ReuseCloneMS: ms(minDur(reuseClone)),
-				ReuseDecodeMS: ms(minDur(reuseDec)), ReuseResultMS: ms(minDur(reuseResult)),
-				ReuseTotalMS: rTot, ReuseAgentsSec: rAgents, ReuseAgentTurnsSec: rTurns,
+				reuseMetrics: reuseMetrics{
+					ReusePrefillMS: msFromDur(minDur(reusePre)), ReuseCloneMS: msFromDur(minDur(reuseClone)),
+					ReuseDecodeMS: msFromDur(minDur(reuseDec)), ReuseResultMS: msFromDur(minDur(reuseResult)),
+					ReuseTotalMS: rTot, ReuseAgentsSec: rAgents, ReuseAgentTurnsSec: rTurns,
+				},
 			}
 			if *ablation {
-				nTot := ms(minDur(noReuseTotals))
-				nAgents := float64(C) / (nTot / 1e3)
-				nTurns := float64(C*T) / (nTot / 1e3)
-				nPre := ms(minDur(noReusePre))
-				nDec := ms(minDur(noReuseDec))
-				nResult := ms(minDur(noReuseResult))
-				speedup := rAgents / nAgents
-				pt.NoReusePrefillMS = &nPre
-				pt.NoReuseDecodeMS = &nDec
-				pt.NoReuseResultMS = &nResult
-				pt.NoReuseTotalMS = &nTot
-				pt.NoReuseAgentsSec = &nAgents
-				pt.NoReuseAgentTurnsSec = &nTurns
-				pt.ReuseSpeedup = &speedup
+				pt.fillNoReuse(noReuseTotals, noReusePre, noReuseDec, noReuseResult, C, T, rAgents)
 			}
 			points = append(points, pt)
 			if *ablation {
@@ -263,16 +212,7 @@ func main() {
 		"ablation":                    *ablation,
 		"points":                      points,
 	}
-	blob, _ := json.MarshalIndent(report, "", "  ")
-	if *out != "" {
-		if err := os.WriteFile(*out, blob, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "write %s: %v\n", *out, err)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "wrote %s\n", *out)
-	} else {
-		fmt.Println(string(blob))
-	}
+	writeReport(report, *out)
 }
 
 func buildResultPrompts(turns, agents, resultTokens, vocab, rep int) [][][]int {
