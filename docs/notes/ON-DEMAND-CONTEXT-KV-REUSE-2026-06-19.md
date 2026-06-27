@@ -115,7 +115,7 @@ full recompute and requires identical argmax, continuation, and `max|delta|=0`.
 `fak/internal/radixkv` extends this from declared prefix to discovered prefix.
 
 External baselines agree. vLLM's automatic prefix caching hashes blocks using
-parent prefix, block tokens, and extra identity axes (the "Extra hashes" vLLM cites: LoRA IDs, multimodality input hashes, cache salts). SGLang RadixAttention
+parent prefix, block tokens, and extra identity axes (the "Extra hashes" vLLM cites: LoRA IDs, multimodality input hashes, cache salts[[https://docs.vllm.ai/en/stable/design/prefix_caching/]](https://docs.vllm.ai/en/stable/design/prefix_caching/)). SGLang RadixAttention
 stores token prefixes in a radix tree and reuses the matched prefix. OpenAI and
 Anthropic prompt caches both require exact prefix structure.
 
