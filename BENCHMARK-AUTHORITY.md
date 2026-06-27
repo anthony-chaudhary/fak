@@ -38,7 +38,7 @@
 | Session value-add (1.5B "realistic model") | 7.2× → 10.0× | Qwen2.5-1.5B Q8, T=8 → T=16 | Naive stateless | `92896a4` | `smoke-qwen2.5-1.5b-T8-16-fresh-20260619.json` |
 | ~~Session value-add 11.2–14.5× (SmolLM2, P=512)~~ | ❌ STALE | SmolLM2-135M Q8 | Naive stateless | `5b0f40d` | superseded by re-measured row below |
 | Session value-add (SmolLM2 P=512, re-measured) | **5.3–7.4×** | SmolLM2-135M Q8 | Naive stateless | `885ae8a` | `benchmark-run-opencode-20260619/sessionbench-smollm2-135m-q8-authority.json` |
-| Qwen2.5-7B fak decode | 8.7 tok/s | Qwen2.5-7B Q8 | llama.cpp Metal 17.27 tok/s | `34c74f4` | `model-ladder/modelbench-qwen25-7b-q8.json` |
+| Qwen2.5-7B fak decode | 8.7 tok/s | Qwen2.5-7B Q8 | llama.cpp Metal 17.6 tok/s | `34c74f4` | `model-ladder/modelbench-qwen25-7b-q8.json` |
 | Qwen2.5-7B fak/llama.cpp ratio | 0.50× decode / 0.083× prefill | Qwen2.5-7B Q8 | llama.cpp Metal | `34c74f4` | `QWEN25-7B-RESULTS.md` |
 | Qwen2.5-7B greedy parity | ✅ full 7-token match | Qwen2.5-7B Q8 | llama.cpp ("2+2 is 4.") | `34c74f4` | `QWEN25-7B-RESULTS.md` |
 | Qwen3.5-0.8B hybrid-GDN runs in fak | ✅ coherent ("pong") | Qwen3.5-0.8B f32 | instruction-following | `6a376b8` | `QWEN35-0.8B-RESULTS.md` |
@@ -656,7 +656,7 @@ The **11.2–14.5×** value-add is **vs naive stateless serving**, not vs SGLang
 | 4.58× → 6.95× | Full re-prefill per request | RadixAttention live ladder (135M → 1.5B), climbing to the 7.50× ceiling |
 | 7.50× | Token count reduction | Theoretical compute saved (deterministic, model-independent) |
 | 86.7% | SGLang's published 50-99% band | Cache hit rate (FCFS 62.1% → cache-aware, 100% of optimal) |
-| 11.2–14.5× (T=8/16) → 139.3× (T=512) | Naive stateless (no KV persistence) | Session value-add, O(T²)→O(T) as T grows |
+| 5.3–7.4× (T=8/16) → 139.3× (T=512) | Naive stateless (no KV persistence) | Session value-add, O(T²)→O(T) as T grows |
 | 2.4–2.7× | Tuned single-tenant (per-agent KV) | Marginal value over warm cache |
 
 ---
