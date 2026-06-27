@@ -219,6 +219,64 @@ TIERS: tuple[AccelTier, ...] = (
         ),
     ),
     AccelTier(
+        slug="a2-ultra-a100-80gb-1g",
+        machine_type="a2-ultragpu-1g",
+        # The 80GB A100 dropped the "Tesla" prefix (see the 8g tier above).
+        accelerator_type="nvidia-a100-80gb",
+        gpu_label="NVIDIA A100 80GB (Ampere)",
+        gpu_count=1,
+        gpu_mem_gb_each=80,
+        vcpus=12,
+        host_mem_gb=170,
+        gen_rank=21,
+        arch="ampere",
+        compute_capability="80",
+        approx_usd_per_hour=5.07,
+        common_zones=(
+            "us-central1-a",
+            "us-east4-c",
+            "europe-west4-a",
+            "asia-southeast1-c",
+        ),
+        blackwell=False,
+        notes=(
+            "SINGLE A100-80GB (sm_80). The cheap 'one A100 node' tier for a model that "
+            "fits one GPU whole: Qwen3.6-27B q4_k_m is ~16-17 GB resident, so it serves "
+            "via the PURE FAK KERNEL (FAK_Q4K=1 fak serve --backend cuda) with VRAM to "
+            "spare for KV -- NO expert offload, NO multi-GPU. The headroom variant of "
+            "a2-high-a100-40gb-1g; see scripts/gcp-qwen-serve.sh."
+        ),
+    ),
+    AccelTier(
+        slug="a2-high-a100-40gb-1g",
+        machine_type="a2-highgpu-1g",
+        # The 40GB A100 keeps the legacy "Tesla" prefix (see the 8g tier above).
+        accelerator_type="nvidia-tesla-a100",
+        gpu_label="NVIDIA A100 40GB (Ampere)",
+        gpu_count=1,
+        gpu_mem_gb_each=40,
+        vcpus=12,
+        host_mem_gb=85,
+        gen_rank=19,
+        arch="ampere",
+        compute_capability="80",
+        approx_usd_per_hour=3.67,
+        common_zones=(
+            "us-central1-a",
+            "us-east1-b",
+            "europe-west4-a",
+            "asia-southeast1-c",
+        ),
+        blackwell=False,
+        notes=(
+            "SINGLE A100-40GB (sm_80) -- the DEFAULT, cheapest 'one A100 node' that still "
+            "holds a 27B whole. Qwen3.6-27B q4_k_m (~16-17 GB) is resident with ~23 GB left "
+            "for KV/activations, served via the PURE FAK KERNEL (FAK_Q4K=1 fak serve "
+            "--backend cuda) -- NO expert offload. The coding-fallback serve tier; "
+            "stand it up with scripts/gcp-qwen-serve.sh."
+        ),
+    ),
+    AccelTier(
         slug="g2-l4",
         machine_type="g2-standard-8",
         accelerator_type="nvidia-l4",
