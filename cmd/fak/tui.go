@@ -421,6 +421,7 @@ type tuiAgentReport struct {
 	ClaudeConfigDir     string        `json:"claude_config_dir,omitempty"`
 	ConfigSource        string        `json:"config_source,omitempty"`
 	SessionID           string        `json:"session_id,omitempty"`
+	PermissionMode      string        `json:"permission_mode,omitempty"`
 	Policy              string        `json:"policy,omitempty"`
 	Model               string        `json:"model,omitempty"`
 	ContextBudget       int           `json:"context_budget_tokens,omitempty"`
@@ -448,6 +449,7 @@ type tuiAgentOptions struct {
 	Command             string
 	CommandArgs         []string
 	Prompt              string
+	PermissionMode      string
 	Account             string
 	ClaudeConfigDir     string
 	Registry            string
@@ -969,6 +971,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	registry := fs.String("registry", regDefault, "path to the fak accounts registry.json")
 	home := fs.String("home", defHome, "home dir used when discovering Claude account homes")
 	prompt := fs.String("prompt", "", "append `claude -p PROMPT` for a non-interactive backend run")
+	permissionMode := fs.String("permission-mode", "bypassPermissions", "Claude --permission-mode for every spawned account session (default bypassPermissions so the guarded backend, not Claude's own prompt, mediates tools); pass \"\" to omit, or override it in the trailing `claude args`")
 	policyPath := fs.String("policy", "", "capability-floor manifest for the guard child (default: built-in guard floor)")
 	model := fs.String("model", "", "upstream Claude model override for the guard child")
 	sessionID := fs.String("session-id", "tui-agent", "trace/session id for the guard session")
@@ -1035,6 +1038,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		Command:             *command,
 		CommandArgs:         fs.Args(),
 		Prompt:              *prompt,
+		PermissionMode:      *permissionMode,
 		Account:             *account,
 		ClaudeConfigDir:     *claudeConfigDir,
 		Registry:            *registry,
@@ -1272,6 +1276,20 @@ func parseTUITime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("--at must be RFC3339 or YYYY-MM-DD")
 }
 
+// claudeArgsHavePermissionMode reports whether the operator already set a
+// --permission-mode in the trailing `claude args`, in which case the default
+// bypassPermissions must not be injected (Claude rejects a duplicated flag).
+// It matches both the split form (`--permission-mode X`) and the joined form
+// (`--permission-mode=X`).
+func claudeArgsHavePermissionMode(args []string) bool {
+	for _, a := range args {
+		if a == "--permission-mode" || strings.HasPrefix(a, "--permission-mode=") {
+			return true
+		}
+	}
+	return false
+}
+
 func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, getenv func(string) string) (tuiAgentReport, error) {
 	backend := strings.ToLower(strings.TrimSpace(opt.Backend))
 	if backend == "" {
@@ -1295,7 +1313,22 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 		fakPath = "fak"
 	}
 
-	command := append([]string{commandName}, opt.CommandArgs...)
+	// Every spawned account session defaults to Claude's --permission-mode
+	// bypassPermissions: the launch is already wrapped by `fak guard` (or pinned
+	// at a fak serve gateway), so the reference monitor — not Claude's own
+	// interactive permission prompt — mediates tool calls. Forcing it here means
+	// ALL accounts spawn non-interactively-gated by default. An operator override
+	// in the trailing `claude args` wins (we don't duplicate the flag), and
+	// --permission-mode "" opts out entirely.
+	permissionMode := strings.TrimSpace(opt.PermissionMode)
+	if permissionMode != "" && claudeArgsHavePermissionMode(opt.CommandArgs) {
+		permissionMode = "" // operator already set it in the passthrough args
+	}
+	command := []string{commandName}
+	if permissionMode != "" {
+		command = append(command, "--permission-mode", permissionMode)
+	}
+	command = append(command, opt.CommandArgs...)
 	if strings.TrimSpace(opt.Prompt) != "" {
 		command = append(command, "-p", opt.Prompt)
 	}
@@ -1304,8 +1337,11 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	if err != nil {
 		return tuiAgentReport{}, err
 	}
+	if permissionMode != "" {
+		notes = append(notes, fmt.Sprintf("permission-mode=%s: every spawned account session is launched with this Claude --permission-mode by default, so the guarded backend mediates tools instead of Claude's interactive prompt (override in the trailing claude args, or pass --permission-mode \"\" to omit)", permissionMode))
+	}
 	if strings.TrimSpace(opt.GatewayURL) != "" {
-		return buildTUIAgentGatewayReport(opt, at, backend, command, env, cfgDir, cfgSource, resolvedAccount, identity, notes, getenv)
+		return buildTUIAgentGatewayReport(opt, at, backend, command, permissionMode, env, cfgDir, cfgSource, resolvedAccount, identity, notes, getenv)
 	}
 	guardArgs := []string{"guard", "--provider", "anthropic", "--session-id", sessionID}
 	auth := "claude-subscription-oauth"
@@ -1363,6 +1399,7 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 		ClaudeConfigDir:     cfgDir,
 		ConfigSource:        cfgSource,
 		SessionID:           sessionID,
+		PermissionMode:      permissionMode,
 		Policy:              strings.TrimSpace(opt.Policy),
 		Model:               strings.TrimSpace(opt.Model),
 		ContextBudget:       opt.ContextBudgetTokens,
@@ -1378,7 +1415,7 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	}, nil
 }
 
-func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend string, command []string, env []tuiAgentEnv, cfgDir, cfgSource, resolvedAccount, identity string, notes []string, getenv func(string) string) (tuiAgentReport, error) {
+func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend string, command []string, permissionMode string, env []tuiAgentEnv, cfgDir, cfgSource, resolvedAccount, identity string, notes []string, getenv func(string) string) (tuiAgentReport, error) {
 	if strings.TrimSpace(opt.Policy) != "" || opt.ContextBudgetTokens > 0 || opt.RestartOnBudget || opt.RestartLimit > 0 || opt.Passthrough {
 		return tuiAgentReport{}, fmt.Errorf("--gateway-url launches an existing gateway; guard-only options (--policy, --context-budget-tokens, --restart-on-budget, --restart-limit, --passthrough) do not apply")
 	}
@@ -1451,6 +1488,7 @@ func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend strin
 		ClaudeConfigDir: cfgDir,
 		ConfigSource:    cfgSource,
 		SessionID:       sessionID,
+		PermissionMode:  permissionMode,
 		Model:           model,
 		Command:         command,
 		Launch:          command,

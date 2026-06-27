@@ -435,7 +435,8 @@ Alias: fak tui
   fak console agent [<target> | --target NAME] [--list-targets]
                 [--account NAME | --claude-config-dir DIR] [--dry-run]
                 [--prompt STR] [--session-id ID] [--passthrough]
-                [--gateway-url URL --gateway-key-env VAR --model MODEL] [--json]
+                [--permission-mode MODE] [--gateway-url URL]
+                [--gateway-key-env VAR --model MODEL] [--json]
                 [--] [claude args...]
   fak console overview [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
                    [--garden-json FILE] [--guard-json FILE ...] [--json]
@@ -459,7 +460,10 @@ denials, reasons, audit status, and proof-packet gaps without replaying calls.
 The agent pane launches a real Claude Code backend. By default it starts a local
 `+"`fak guard`"+` and pins CLAUDE_CONFIG_DIR from `+"`fak accounts`"+`; with
 --gateway-url it instead launches Claude Code directly against an already-running
-`+"`fak serve`"+` gateway, reading the bearer from --gateway-key-env.
+`+"`fak serve`"+` gateway, reading the bearer from --gateway-key-env. Every spawned
+account session defaults to `+"`--permission-mode bypassPermissions`"+` (the guarded
+backend mediates tools, not Claude's interactive prompt); override it in the trailing
+claude args or pass `+"`--permission-mode \"\"`"+` to omit.
 
 A leading `+"`fak c <target>`"+` (or --target NAME) selects a named compute backend
 from the registry (mac/gcp/local/anthropic + ~/.fak/targets.json; see --list-targets):

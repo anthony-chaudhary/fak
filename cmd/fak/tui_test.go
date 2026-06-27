@@ -886,10 +886,69 @@ func TestTUIAgentDryRunDefaultsToClaudeGuardOAuth(t *testing.T) {
 		t.Fatalf("runTUI agent dry-run code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak console agent", "backend=claude", "auth=claude-subscription-oauth", "fak", "guard", "--provider anthropic", "--anthropic-oauth", "claude -p"} {
+	for _, want := range []string{"fak console agent", "backend=claude", "auth=claude-subscription-oauth", "fak", "guard", "--provider anthropic", "--anthropic-oauth", "claude --permission-mode bypassPermissions -p"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("agent dry-run output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestTUIAgentDefaultsBypassPermissions proves the fix: spawning an account
+// session injects Claude's --permission-mode bypassPermissions by DEFAULT (no
+// manual passthrough flag), so every account launches with the guarded backend
+// — not Claude's interactive prompt — mediating tools.
+func TestTUIAgentDefaultsBypassPermissions(t *testing.T) {
+	home := t.TempDir()
+	seat := mkHome(t, home, ".claude-seat", "seat@example.test", true)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"seat","dir":"` + jsonPath(seat) + `","default":true}` +
+		`]}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent", "--json",
+		"--account", "seat",
+		"--registry", regPath,
+		"--home", home,
+		"--at", "2026-06-25T12:00:00Z",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI agent json code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal agent report: %v\n%s", err, stdout.String())
+	}
+	if got := strings.Join(report.Command, " "); got != "claude --permission-mode bypassPermissions" {
+		t.Fatalf("default backend command = %q, want claude --permission-mode bypassPermissions", got)
+	}
+	if report.PermissionMode != "bypassPermissions" {
+		t.Fatalf("permission_mode = %q, want bypassPermissions", report.PermissionMode)
+	}
+
+	// --permission-mode "" opts out: no flag injected.
+	var off, offErr bytes.Buffer
+	code = runTUI(&off, &offErr, []string{
+		"agent", "--json",
+		"--account", "seat",
+		"--permission-mode", "",
+		"--registry", regPath,
+		"--home", home,
+		"--at", "2026-06-25T12:00:00Z",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI agent opt-out code=%d stderr=%s", code, offErr.String())
+	}
+	var offReport tuiAgentReport
+	if err := json.Unmarshal(off.Bytes(), &offReport); err != nil {
+		t.Fatalf("unmarshal opt-out report: %v\n%s", err, off.String())
+	}
+	if got := strings.Join(offReport.Command, " "); got != "claude" {
+		t.Fatalf("opt-out backend command = %q, want bare claude", got)
 	}
 }
 
@@ -963,7 +1022,7 @@ func TestTUIAgentGatewayDryRunRedactsBearer(t *testing.T) {
 		t.Fatalf("runTUI agent gateway dry-run code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"provider=existing-fak-gateway", "auth=gateway-bearer", "gateway=http://node.example:8080", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "<redacted from FAK_GATEWAY_KEY>", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "API_TIMEOUT_MS", "claude -p"} {
+	for _, want := range []string{"provider=existing-fak-gateway", "auth=gateway-bearer", "gateway=http://node.example:8080", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "<redacted from FAK_GATEWAY_KEY>", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "API_TIMEOUT_MS", "claude --permission-mode bypassPermissions -p"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("gateway dry-run output missing %q:\n%s", want, out)
 		}
@@ -1004,8 +1063,11 @@ func TestTUIAgentGatewayJSONDoesNotEmbedBearer(t *testing.T) {
 	if hasTUIString(report.Launch, "guard") {
 		t.Fatalf("gateway launch should not include guard: %v", report.Launch)
 	}
-	if got := strings.Join(report.Command, " "); got != "claude -p hello" {
+	if got := strings.Join(report.Command, " "); got != "claude --permission-mode bypassPermissions -p hello" {
 		t.Fatalf("backend command = %q", got)
+	}
+	if report.PermissionMode != "bypassPermissions" {
+		t.Fatalf("permission_mode = %q, want bypassPermissions", report.PermissionMode)
 	}
 	if !hasTUIAgentEnvFrom(report.Env, "ANTHROPIC_API_KEY", "FAK_GATEWAY_KEY", true) {
 		t.Fatalf("env = %+v, want sensitive ANTHROPIC_API_KEY from FAK_GATEWAY_KEY", report.Env)
