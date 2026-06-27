@@ -56,10 +56,11 @@ handing the terminal to Claude Code, `claude-mac-fak` probes the gateway
 
 ```text
 fak debug · gateway http://node-macos-a.local:8080
-health: ok  engine=metal  planner=inkernel
+health: ok  engine(build)=metal  planner(live)=inkernel
 vdso=on  cache-hit 0.88  inflight 0  up 3h12m
 model qwen3.6-27b  auth gateway-bearer
-metrics: http://node-macos-a.local:8080/metrics · …/debug/vars · grafana http://localhost:3000
+metrics: run  fak claude-mac-fak --metrics   (fetches /metrics + /debug/vars with the gateway's own bearer)
+  urls: http://node-macos-a.local:8080/metrics · …/debug/vars  (open on the gateway host; off-box needs the bearer)
 -> launching claude ...
 ```
 
@@ -67,6 +68,22 @@ It proves the gateway is the live in-kernel `fak serve` (a `planner=mock` line
 would mean scripted, non-model responses) and aborts the interactive launch
 instead of starting Claude against an unreachable gateway. Pass `--debug=false`
 to skip it.
+
+**Read the metrics without token wrangling.** `/metrics` and `/debug/vars` are
+loopback-exempt: they open without a bearer from the gateway host itself, but a
+bare browser click from your laptop hits the remote IP and 401s. Rather than
+hand-build a `curl` with the header, `--metrics` reuses the bearer the launcher
+already loaded to fetch both surfaces and print them (the token is sent, never
+printed):
+
+```powershell
+fak claude-mac-fak --metrics
+# == /debug/vars ==   (indented JSON diagnostics)
+# == /metrics ==      (Prometheus text, verbatim — pipe into promtool/grep)
+```
+
+`--metrics` never launches Claude. A 401 prints an actionable hint (set
+`FAK_GATEWAY_KEY`, or run on the gateway host where these are loopback-exempt).
 
 **Live overlay** — run this in a second pane next to the session; it polls
 `/debug/vars` and prints one fak line per tick (Ctrl-C to stop):

@@ -5,7 +5,7 @@ description: "Explains the internal/compute HAL seam that lets fak's in-kernel f
 
 # Hardware portability for the in-kernel forward pass — the `internal/compute` HAL seam
 
-> **Status:** the seam is shipped and now carries **two real device backends** beside the
+> **Status:** the seam is shipped and can carry **two real device backends** beside the
 > pure-Go CPU reference. `internal/compute` (the contract) registers `cpu-ref` (Reference),
 > plus `cuda` (Approx, `//go:build cuda`) and `vulkan` (Approx, `//go:build vulkan`) — each
 > proven on actual silicon: CUDA runs the in-kernel Llama decode on this box's RTX 4070
