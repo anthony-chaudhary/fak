@@ -231,6 +231,32 @@ func TestCompactionEpisodesSkipsEmptyMetrics(t *testing.T) {
 	}
 }
 
+func TestCompactionEpisodesUnderClaimShedSurfaces(t *testing.T) {
+	// Bug #6: when the billed delta EXCEEDS the projected shed (the projection
+	// under-estimated the saving), the ratio is > 1.0 and must surface as a real
+	// UNDER_CLAIM, not be clamped to 1.0 and hidden as perfect calibration.
+	// Projected shed 10k, billed delta 15k -> raw ratio 1.5.
+	rep := CompactionBacktestReport{
+		FiredAttempts:     10,
+		ShedTokensSum:     10000,
+		InputTokensOffSum: 50000,
+		InputTokensOnSum:  35000, // delta = 15k > 10k projected
+	}
+	got := map[string]dojo.ScoredInput{}
+	for _, in := range compactionEpisodesFromBacktest(rep) {
+		got[in.Prediction.Metric] = in
+	}
+	shed := got["token_shed_ratio"]
+	if shed.Outcome.Realized < 1.49 || shed.Outcome.Realized > 1.51 {
+		t.Fatalf("billed 15k vs projected 10k should yield ~1.5 (unclamped), got %.3f", shed.Outcome.Realized)
+	}
+	// Scored against the 1.0 claim, realized 1.5 is a free saving the model under-projected.
+	e := dojo.Score("corpus", shed.Prediction, shed.Outcome, dojo.DefaultCalibBand())
+	if e.Verdict != dojo.VerdictUnderClaim {
+		t.Fatalf("realized 1.5 vs claim 1.0 should be UNDER_CLAIM (provider shed more than projected), got %s", e.Verdict)
+	}
+}
+
 func TestCompactionEpisodesScoreIntoExpectedVerdicts(t *testing.T) {
 	// Mix of calibrated (0.99 vs 1.0, CalibErr=0.01 <= 0.10), over-claim (0.5 vs 1.0, CalibErr=0.5 > 0.10, Residual<0)
 	rep := CompactionBacktestReport{

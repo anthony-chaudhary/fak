@@ -733,13 +733,13 @@ func compactionEpisodesFromBacktest(rep CompactionBacktestReport) []dojo.ScoredI
 			billedDelta = 0
 		}
 		ratio := billedDelta / float64(rep.ShedTokensSum)
-		// Cap at 1.0: the billed delta cannot exceed the projected shed by more than
-		// the compaction's actual savings (the provider might cache-read more than
-		// expected). Values > 1.0 are clamped to 1.0 for the OVER_CLAIM/UNDER_CLAIM
-		// verdict interpretation.
-		if ratio > 1.0 {
-			ratio = 1.0
-		}
+		// Do NOT clamp the over-performance side to the claim. When the billed delta
+		// EXCEEDS the projected shed (the projection under-estimated the saving), the
+		// raw ratio is > 1.0 and must surface as UNDER_CLAIM — a real, recurring
+		// under-projection the model is not crediting. Clamping it to 1.0 hid that as
+		// perfect calibration, so token_shed_ratio could structurally never score
+		// UNDER_CLAIM. calibErr caps the downstream magnitude at MaxCalibErr, so an
+		// unbounded ratio cannot dominate the fold.
 		sample := rep.FiredAttempts
 		if sample == 0 {
 			sample = 1
