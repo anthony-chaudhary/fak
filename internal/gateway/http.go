@@ -148,17 +148,21 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// socket indefinitely (slow-loris-on-body / idle-keepalive DoS). ReadTimeout
 	// also caps body-delivery TIME (MaxBytesReader only caps SIZE).
 	//
-	// WriteTimeout bounds the WHOLE handler, and a live upstream model round-trip
-	// rides it — so a SLOW LOCAL backend (a multi-thousand-token prefill on a CPU
-	// model can take minutes) needs a far higher ceiling than a hosted API. The
-	// default stays conservative for a network-exposed deployment; FAK_HTTP_*_TIMEOUT_S
-	// raises (or, with 0, disables) it for local dogfood serving. The dogfood
-	// launchers set FAK_HTTP_WRITE_TIMEOUT_S generously.
+	// WriteTimeout bounds the WHOLE handler measured from the end of the request
+	// headers — and a NON-streaming turn writes the body only AFTER the model finishes,
+	// so a slow LOCAL backend whose single turn takes minutes (a multi-thousand-token
+	// prefill, or an in-kernel cpu-offload GLM-5.2 decode at ~0.17 tok/s) trips the
+	// deadline DURING the decode: the handler logs a clean 200 but the connection is
+	// already torn down, so the client sees an empty reply with zero bytes (#1015). The
+	// default therefore depends on the backend the gateway is actually serving
+	// (serveWriteTimeoutDefault): a local in-kernel model gets NO write timeout, while a
+	// proxy-to-hosted-API (the fast, network-exposed surface) keeps the conservative
+	// 90s. FAK_HTTP_WRITE_TIMEOUT_S overrides either way.
 	hs := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       durEnv("FAK_HTTP_READ_TIMEOUT_S", 30*time.Second),
-		WriteTimeout:      durEnv("FAK_HTTP_WRITE_TIMEOUT_S", 90*time.Second),
+		WriteTimeout:      durEnv("FAK_HTTP_WRITE_TIMEOUT_S", serveWriteTimeoutDefault(plannerKind(s.planner))),
 		IdleTimeout:       durEnv("FAK_HTTP_IDLE_TIMEOUT_S", 120*time.Second),
 	}
 	// Disable Nagle on accepted TCP connections. Without TCP_NODELAY the kernel
@@ -1198,6 +1202,22 @@ func errType(status int) string {
 	default:
 		return "invalid_request_error"
 	}
+}
+
+// serveWriteTimeoutDefault picks the WriteTimeout default for the backend the gateway is
+// serving, so a non-streaming turn never trips the deadline DURING a long synchronous decode
+// (#1015). A LOCAL model — the in-kernel fused model — answers a single turn in seconds to
+// MINUTES (a cpu-offload GLM-5.2 decode is multi-minute), and the whole response is written
+// only after that turn finishes, so any finite write deadline measured from the request
+// headers races the decode: 0 (no timeout) is the only correct default there. A "proxy" to a
+// hosted API is fast and is the network-exposed surface a slow-loris cares about, so it keeps
+// the conservative 90s. The mock/unknown backends are instant; the conservative default is
+// harmless for them. FAK_HTTP_WRITE_TIMEOUT_S overrides this in every case (durEnv).
+func serveWriteTimeoutDefault(kind string) time.Duration {
+	if kind == "inkernel" {
+		return 0 // a local model turn can legitimately run for minutes — no whole-handler deadline
+	}
+	return 90 * time.Second
 }
 
 // durEnv reads an integer-seconds timeout override from the environment, returning
