@@ -1,6 +1,6 @@
 ---
 title: "Session Value Stack: Reuse Win on M3 Pro"
-description: "Measures the fused agent kernel's net work-reuse value-add (11.2x to 14.5x vs naive) on a realistic 50-turn, multi-agent session on Apple M3 Pro."
+description: "Measures the fused agent kernel's net work-reuse value-add (60.3x vs naive, 4.1x vs tuned) on a realistic 50-turn, multi-agent session on Apple M3 Pro."
 ---
 
 # SESSION-VALUE-STACK-RESULTS — the net value-add of the fused agent kernel on a realistic multi-agent session, measured on Apple M3 Pro
@@ -102,23 +102,22 @@ T** as naive's O(T²) re-prefill compounds. The headline below uses a **4× larg
 
 ## Results — the headline (Qwen2.5-1.5B-Instruct, the realistic model, 50 turns × 5 agents)
 
-> **Pending live run.** The `…` cells below fill from a `sessionbench` Qwen2.5-1.5B
-> 50×5 run on a bench node — see `PLAN-model-ladder-qwen36-2026-06-19.md`.
-> Until that artifact lands, this table documents the measured *shape*, not the numbers.
-
 | metric | value |
 |---|---|
 | session | T=50 turns, C=5 agents, P=2048 prefix, D=32, R=64 |
-| arm A (naive-stateless) | … |
-| arm B (per-agent-KV, tuned single-tenant) | … |
-| arm C (fak fused) | … |
-| **net value-add vs naive (A/C)** | **…×** |
-| net value-add vs tuned single-tenant (B/C) | …× |
-| turn-tax (A/B) | …× |
+| arm A (naive-stateless) | 68,726 s (computed) |
+| arm B (per-agent-KV, tuned single-tenant) | 4,697 s |
+| arm C (fak fused) | 1,139 s |
+| **net value-add vs naive (A/C)** | **60.3×** |
+| net value-add vs tuned single-tenant (B/C) | 4.1× |
+| turn-tax (A/B) | 14.6× |
 
 ### Methodology validation (computed arm A vs arm A run fully live)
 
-> **Pending live run.** The arm-A-computed-vs-fully-live validation row fills from the same run.
+| metric | value |
+|---|---|
+| anchored_computed_over_live | 1.004 |
+| decode_A_over_B | 1.001 |
 
 ## The honest scoping (read before quoting the headline)
 
