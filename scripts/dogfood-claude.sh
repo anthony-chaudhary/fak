@@ -16,7 +16,7 @@
 #   ./scripts/dogfood-claude.sh --smoke         # curl the wire (no model intelligence needed), then exit
 #   ./scripts/dogfood-claude.sh --print-env     # print the export lines for your own `claude` invocation
 #   ./scripts/dogfood-claude.sh --list-accounts # show the account switcher's roster, then exit
-#   ./scripts/dogfood-claude.sh --install       # symlink `fak-dogfood`, `fak-qwen36-claude`, `claude-glm-gcp`, and `fak` onto PATH
+#   ./scripts/dogfood-claude.sh --install       # COPY `fak` (repo-independent) + symlink the `fak-dogfood`/`fak-qwen36-claude`/`claude-glm-gcp` launchers onto PATH
 #   fak-qwen36-claude --probe "hi"              # installed Qwen3.6 local preset
 #   claude-glm-gcp --probe "say pong"           # installed GLM-5.2-on-GCP preset (set FAK_GLM_GCP_BASE_URL first)
 #
@@ -219,8 +219,13 @@ esac
 # --- --install: put `fak-dogfood`, `fak-qwen36-claude`, and `fak` on PATH -----
 # Idempotent. Picks the first writable PATH dir among ~/.local/bin, /opt/homebrew/bin,
 # /usr/local/bin (or $FAK_DOGFOOD_BINDIR), symlinks this script there as generic
-# `fak-dogfood` and preset `fak-qwen36-claude`, and builds+symlinks the repo CLI as
-# `fak` so `fak serve ...` works from any cwd.
+# `fak-dogfood` and preset `fak-qwen36-claude`, and builds+COPIES the repo CLI as
+# `fak` so `fak serve ...` works from any cwd. The `fak` binary is COPIED, not
+# symlinked (mirrors the .ps1 twin's Copy-Item): a copy is repo-independent, so it
+# keeps working even if the clone is later moved or deleted. The launcher symlinks
+# (fak-dogfood/…) still point INTO the clone — they RUN the in-tree script, so they
+# cannot be copied free of it; --install warns clearly that they depend on the clone
+# staying put (the second half of the install-path contract).
 if [ "$MODE" = "install" ]; then
   name="fak-dogfood"
   qwen_name="fak-qwen36-claude"
@@ -244,11 +249,20 @@ if [ "$MODE" = "install" ]; then
   ln -sf "$target" "$bindir/$glm_name"
   log "building fak -> $BIN"
   build_fak "$BIN"
-  ln -sf "$BIN" "$bindir/fak"
+  # COPY the built binary onto PATH (not `ln -sf`): a copy is repo-independent, so the
+  # installed `fak` keeps working if the clone is later moved or deleted — a symlink into
+  # $BIN would silently dangle. Mirrors the .ps1 twin (Copy-Item fak.exe). The copy goes
+  # stale after a rebuild until you re-run --install, the same as the Windows path.
+  cp -f "$BIN" "$bindir/fak"
   log "installed: $bindir/$name -> $target"
   log "installed: $bindir/$qwen_name -> $target"
   log "installed: $bindir/$glm_name -> $target"
-  log "installed: $bindir/fak -> $BIN"
+  log "installed: $bindir/fak  (copied; re-run --install to refresh)"
+  # The launcher symlinks RUN the in-tree script, so they depend on the clone staying put
+  # — only the copied `fak` binary above is repo-independent. Warn clearly so a later
+  # move/delete of the clone is not a silent breakage (the install-path contract).
+  warn "the $name/$qwen_name/$glm_name launchers are symlinks INTO this clone ($SCRIPT_DIR);"
+  warn "they break if you move or delete it. The copied \`fak\` binary survives a move — re-run --install after one."
   case ":$PATH:" in
     *":$bindir:"*) log "ready — run \`fak serve --help\`, \`$name --probe\`, \`$qwen_name --probe\`, or \`$glm_name --probe\` from anywhere" ;;
     *)             log "NOTE: $bindir is not on PATH — add it: export PATH=\"$bindir:\$PATH\"" ;;
