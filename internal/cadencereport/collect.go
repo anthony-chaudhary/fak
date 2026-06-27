@@ -8,6 +8,7 @@ package cadencereport
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,46 @@ func Collect(root, python string, timeout time.Duration, windowDays int) (Scores
 	return InterpretScores(scoresPayload, scoresErr),
 		WorkFromGit(root, windowDays),
 		InterpretReleases(releasesPayload, releasesErr)
+}
+
+// InterpretScoresFromFile reads a scorecard-control-pane JSON payload from path
+// (or os.Stdin when path is "-") and folds it into the SCORES dimension via the
+// SAME InterpretScores the live run uses — so a payload captured once (e.g. by
+// the garden bundle) can drive `fak cadence --scores-from` instead of re-running
+// the ~4-minute pane. A missing or garbled file degrades to an ERRORED SCORES
+// dimension (Err set, OK=false), identical in shape to a failed live run, never a
+// silent zero. The reader is injectable for testing the stdin path.
+func InterpretScoresFromFile(path string, stdin io.Reader) Scores {
+	var (
+		data []byte
+		err  error
+	)
+	if path == "-" {
+		data, err = io.ReadAll(stdin)
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return InterpretScores(nil, "--scores-from "+path+": "+err.Error())
+	}
+	var payload map[string]any
+	if jerr := json.Unmarshal(data, &payload); jerr != nil || payload == nil {
+		return InterpretScores(nil, "--scores-from "+path+": not a scorecard control-pane JSON payload")
+	}
+	return InterpretScores(payload, "")
+}
+
+// CollectWithScores runs the WORK-DONE (git) and RELEASES (release-status) live
+// dimensions but takes the SCORES dimension as a pre-interpreted value, so the
+// scorecard pane is NOT shelled when --scores-from supplied it. The default path
+// (Collect) is unchanged, so the standalone command and the weekly cadence run
+// are unaffected.
+func CollectWithScores(root, python string, scores Scores, timeout time.Duration, windowDays int) (Scores, Work, Releases) {
+	if python == "" {
+		python = defaultPython()
+	}
+	releasesPayload, releasesErr := RunPyEnvelope(root, ReleasesArgv, python, timeout)
+	return scores, WorkFromGit(root, windowDays), InterpretReleases(releasesPayload, releasesErr)
 }
 
 // RunPyEnvelope runs a Python control-pane member and parses its JSON stdout. It

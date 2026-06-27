@@ -2,6 +2,8 @@ package cadencereport
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -46,6 +48,55 @@ func TestInterpretScores(t *testing.T) {
 	failed := InterpretScores(nil, "timed out after 300s")
 	if failed.Err != "timed out after 300s" || failed.TrendDirection != "unknown" {
 		t.Fatalf("failed run = %+v", failed)
+	}
+}
+
+func TestInterpretScoresFromFile(t *testing.T) {
+	payload := `{"total_debt": 40, "measured": 13, "errored": 0, "trend": {"direction": "improved", "summary": "improved -4 vs @abc"}}`
+
+	// A good payload via --scores-from must fold to the SAME SCORES as the live
+	// interpret path (so the captured pane drives an identical result).
+	dir := t.TempDir()
+	good := filepath.Join(dir, "scores.json")
+	if err := os.WriteFile(good, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fromFile := InterpretScoresFromFile(good, nil)
+	live := InterpretScores(jsonMap(t, payload), "")
+	if fromFile != live {
+		t.Fatalf("--scores-from = %+v, want it to equal the live interpret %+v", fromFile, live)
+	}
+
+	// Stdin path ("-") reads the same payload from the injected reader.
+	fromStdin := InterpretScoresFromFile("-", strings.NewReader(payload))
+	if fromStdin != live {
+		t.Fatalf("--scores-from - = %+v, want %+v", fromStdin, live)
+	}
+
+	// A garbled file degrades to an ERRORED SCORES dimension (Err set, not OK,
+	// trend unknown) — never a silent zero.
+	garbled := filepath.Join(dir, "garbled.json")
+	if err := os.WriteFile(garbled, []byte("not json at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := InterpretScoresFromFile(garbled, nil)
+	if g.OK || g.Err == "" || g.TrendDirection != "unknown" {
+		t.Fatalf("garbled file should degrade to errored, got %+v", g)
+	}
+
+	// A missing file likewise degrades to errored.
+	m := InterpretScoresFromFile(filepath.Join(dir, "nope.json"), nil)
+	if m.OK || m.Err == "" {
+		t.Fatalf("missing file should degrade to errored, got %+v", m)
+	}
+
+	// And an errored SCORES dimension drives Fold -> cadence_unmeasured -> gate exit 1.
+	report := Fold(g, okWork(), okReleases(), foldOpts())
+	if report.Finding != "cadence_unmeasured" {
+		t.Fatalf("errored scores should fold to cadence_unmeasured, got %q", report.Finding)
+	}
+	if code, _ := CheckGate(report); code != 1 {
+		t.Fatalf("cadence_unmeasured should gate exit 1, got %d", code)
 	}
 }
 
