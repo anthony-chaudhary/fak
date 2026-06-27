@@ -2,3 +2,4 @@
 {"schema":"fak-dojo-ledger/1","date":"2026-06-27","commit":"037497cf","generated_at":"2026-06-27T05:52:00Z","verdict":"OK","lever_count":1,"episode_count":3,"measured":3,"calibrated":2,"mean_calib_err":0.3666727483707595,"grade":"D"}
 {"schema":"fak-dojo-ledger/1","date":"2026-06-27","commit":"6a2a325e","generated_at":"2026-06-27T05:57:56Z","verdict":"OK","lever_count":1,"episode_count":3,"measured":3,"calibrated":2,"mean_calib_err":0.3409325648392343,"grade":"C"}
 {"schema":"fak-dojo-ledger/1","date":"2026-06-27","commit":"aeb5c607","generated_at":"2026-06-27T09:59:20Z","verdict":"OK","lever_count":1,"episode_count":3,"measured":3,"calibrated":2,"mean_calib_err":0.34158782526888976,"grade":"C"}
+{"schema":"fak-dojo-ledger/1","date":"2026-06-27","commit":"ed47aa37","generated_at":"2026-06-27T16:03:08Z","verdict":"OK","lever_count":3,"episode_count":6,"measured":5,"calibrated":4,"mean_calib_err":0.04535621296032531,"grade":"A"}
