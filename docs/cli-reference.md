@@ -333,7 +333,7 @@ attaches through a registry.
 | security substrate | `internal/ifc`,`provenance`,`plancfi`,`witness`,`canon`,`normgate`,`agentdojo`,`harvest` | the kernel stops believing the model: source-stamped taint + sink-gated flows (ifc), kernel-authored trust/provenance, plan-CFI (`RequireApproval`), an effect-verifying `dos_verify` witness gate, a normalize-and-rescan admission driver (normgate), and a dynamic ASR-gated attack battery (agentdojo) | `go test` (per pkg); `cmd/ctxbench -chain` |
 | KV-quarantine bridge | `internal/kvmmu` | the same ctxmmu `Quarantine` verdict mechanically evicts the poison's K/V span, leaving the kernel-owned attention cache bit-identical (max\|Δ\|=0) to never-having-seen it | `go test` (5); `KV-QUARANTINE-BRIDGE-RESULTS.md` |
 | session core-dump + debugger + dream cleanup | `internal/recall`,`internal/cdb` | persist a finished session as a page-table-over-CAS core image; `fak debug` attaches to it (incl. a REAL transcript) and demand-pages only the working set a question touches; agent/requester tombstones suppress unwanted memories from future context without deleting audit bytes; `fak dream` auto-cleans the sleeping image by re-screening, pre-sealing refuted witnesses, and pruning dead CAS bytes | `go test` + `recall-report.json`,`cdb-report.json`,`dream-report.json` |
-| in-kernel model | `internal/model` | a pure-Go SmolLM2-135M forward pass the kernel owns (KV cache as a Go structure), every rung proven bit-for-bit vs HuggingFace, then made parity-fast (parallel matmul + batched GEMM, decoding faster than same-precision HF f32); an int8/Q8 SIMD lane at near-parity with llama.cpp Q8_0 is the active **in-flight** extension | `go test` (oracle argmax-exact); `MODEL-BASELINE-RESULTS.md` |
+ | in-kernel model | `internal/model` | a pure-Go forward pass the kernel owns (KV cache as a Go structure), with proven bit-for-bit correctness for SmolLM2-135M (Llama family) and first-token parity for Qwen3.6-27B (Gated-DeltaNet); an int8/Q8 SIMD lane at near-parity with llama.cpp Q8_0 is the active **in-flight** extension | `go test` (oracle argmax-exact); `MODEL-BASELINE-RESULTS.md`; `FAK-NATIVE-QWEN35-RESULTS.md` |
 | gateway | `internal/gateway` | `fak serve`: OpenAI-compatible HTTP (`/v1/chat/completions` adjudication proxy, `/v1/fak/*`) + MCP over stdio/HTTP, so any-language agents route tool calls through the syscall boundary; mints a tainted agent-scoped `Ref` from raw bytes (IFC/secret/self-modify rungs stay armed) | `go test`; v0.2.1 adversarial-review hardening |
 | model routing (decision) | `internal/modelroute` | `fak route`: per-aspect + ensemble model routing as a pure, deterministic policy — `Route(Subject)→Decision` (a tool call / sub-query / step routes to its own model or ensemble) + `Combine(reduction,votes)→Result` (`first`/`vote`/`best_of`/`all_reduce`/`concat`); version-tagged JSON manifest, `--dump`↔`--check`. Live dispatch is the wiring tracked in the model-routing epic | `go test` (`internal/modelroute`, `cmd/fak` route tests); `docs/model-routing.md` |
 | dispatch fusion | `internal/kernel` | one in-process chain; no `os/exec` on the hot path | `go test` (ABSENCE proof) |
@@ -344,9 +344,8 @@ attaches through a registry.
 ## What this is NOT (labeled, not hidden — see `CLAIMS.md`)
 
 - **The in-kernel model is a reference forward pass; GPU throughput is real, but it is not
-  yet a full production serving engine.** v0.2 fuses a real pure-Go SmolLM2-135M forward pass
-  into the kernel with the KV cache as a kernel-owned Go structure (proven bit-for-bit vs
-  HuggingFace, then made decode-parity-fast incl. an int8 SIMD lane). The CUDA backend takes
+   yet a full production serving engine.** The kernel ships proven bit-for-bit correctness for
+   SmolLM2-135M (Llama family) and first-token parity for Qwen3.6-27B (Gated-DeltaNet). The CUDA backend takes
   it onto the GPU and reaches **decode parity with llama.cpp Q8_0 (≈120 tok/s on an RTX 4070;
   `GPU.md` §3b)** — so GPU throughput is **not** out of scope. What *is* still future work is
   production *serving* (continuous batching, paged attention, multi-tenant scheduling); the
