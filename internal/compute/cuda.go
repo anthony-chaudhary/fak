@@ -158,6 +158,7 @@ const cudaFlashAttnCosineMin = 0.999
 // assert the path passes it. The realized cosine is measured on a CUDA node by the GLM-DSA on-device
 // witness (TestCUDAGLMMoeDsaBackendForward, run via tools/dgx_glm_gpu_witness.sh); the win32 build host
 // has no CUDA toolkit / GPU. Do not read a pass from this value alone.
+//slop:keep RECORDED contract value, checked only by the out-of-tree dgx GPU witness
 const cudaDsaSparseAttnCosineMin = 0.999
 
 // cudaDsaIndexSelectionExact records the cuda backend's gate for the GLM-MoE-DSA indexer
@@ -174,6 +175,7 @@ const cudaDsaSparseAttnCosineMin = 0.999
 // assert the path holds it. The realized selection equality is measured on a CUDA node by the
 // GLM-DSA on-device witness (TestCUDAGLMMoeDsaIndexSelectMatches, run via the dgx witness script);
 // the win32 build host has no CUDA toolkit / GPU. Do not read a pass from this value alone.
+//slop:keep RECORDED contract value, checked only by the out-of-tree dgx GPU witness
 const cudaDsaIndexSelectionExact = true
 
 // q8DeviceBlock is the Q8_0 per-block size the device narrow-at-H2D quant uses (llama.cpp block_q8_0
