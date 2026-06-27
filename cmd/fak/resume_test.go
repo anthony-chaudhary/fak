@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,6 +82,45 @@ func TestResumeUsageErrors(t *testing.T) {
 		if _, _, code := runResumeAt(argv...); code != 2 {
 			t.Errorf("argv %v: exit = %d, want 2", argv, code)
 		}
+	}
+}
+
+// claudeTranscriptFixture is a real-shaped Claude Code session: the last assistant turn
+// reports a 250k-token prompt (4000 uncached + 230000 cache-read + 16000 cache-creation),
+// which is the resident context a resume would re-prefill.
+const claudeTranscriptFixture = `{"type":"user","timestamp":"2026-06-26T10:00:00Z","message":{"role":"user","content":"start"}}
+{"type":"assistant","timestamp":"2026-06-26T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":1200,"cache_read_input_tokens":0,"cache_creation_input_tokens":1200,"output_tokens":300}}}
+{"type":"assistant","timestamp":"2026-06-26T10:05:09Z","message":{"role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":4000,"cache_read_input_tokens":230000,"cache_creation_input_tokens":16000,"output_tokens":520}}}
+`
+
+// TestResumePlanFromTranscript: --transcript grounds the plan on a real Claude Code session,
+// deriving the 250k resident size from the last assistant turn's prompt.
+func TestResumePlanFromTranscript(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte(claudeTranscriptFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := runResumeAt("plan", "--transcript", path, "--idle-seconds", "7200")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	if !strings.Contains(out, "resident=250000 tok") {
+		t.Errorf("did not derive 250000 resident tokens from the last assistant turn:\n%s", out)
+	}
+	if !strings.Contains(out, "posture=COLD") || !strings.Contains(out, "recommended: CUT") {
+		t.Errorf("expected COLD/CUT for a 2h-idle 250k transcript:\n%s", out)
+	}
+}
+
+// TestResumeTranscriptNoUsage: a transcript with no assistant usage cannot derive a resident
+// size and exits 1 (pass --resident-tokens), rather than silently planning a zero session.
+func TestResumeTranscriptNoUsage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"role":"user","content":"hi"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := runResumeAt("plan", "--transcript", path); code != 1 {
+		t.Errorf("transcript with no usage: exit = %d, want 1", code)
 	}
 }
 

@@ -15,11 +15,14 @@ package main
 // exact split session_cmd.go uses — the decision lives in the leaf, the wire lives here.
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/resume"
@@ -65,6 +68,7 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 	outputPrice := fs.Float64("output-price", 25, "model base output price per million tokens (default: Opus 4.8 = 25)")
 	outputPerTurn := fs.Int("output-per-turn", 0, "completion tokens per modeled turn (0 = default)")
 	imageDir := fs.String("image", "", "ground the plan on a portable session image directory: derive resident tokens from its trajectory and idle from its timestamp")
+	transcript := fs.String("transcript", "", "ground the plan on a REAL Claude Code session transcript (.jsonl): derive resident tokens from the last assistant turn's prompt size and idle from its timestamp")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
 	if err := fs.Parse(argv); err != nil {
 		return 2 // flag already printed the error
@@ -87,17 +91,24 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 		OutputTokensPerTurn: *outputPerTurn,
 	}
 
-	var imgNote string
+	var groundNote string
 	if *imageDir != "" {
 		note, code := groundOnImage(stderr, *imageDir, &in, fs)
 		if code != 0 {
 			return code
 		}
-		imgNote = note
+		groundNote = note
+	}
+	if *transcript != "" {
+		note, code := groundOnTranscript(stderr, *transcript, &in, fs)
+		if code != 0 {
+			return code
+		}
+		groundNote = note
 	}
 
 	if in.ResidentTokens <= 0 {
-		fmt.Fprintln(stderr, "fak resume plan: need --resident-tokens > 0 (or an --image whose trajectory carries token estimates)")
+		fmt.Fprintln(stderr, "fak resume plan: need --resident-tokens > 0 (or an --image / --transcript that carries token usage)")
 		return 2
 	}
 
@@ -111,7 +122,7 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 	}
-	renderResumeReport(stdout, rep, imgNote)
+	renderResumeReport(stdout, rep, groundNote)
 	return 0
 }
 
@@ -154,8 +165,110 @@ func groundOnImage(stderr io.Writer, dir string, in *resume.Input, fs *flag.Flag
 	return fmt.Sprintf("image %s (model %s, %d turns, resident≈%d tok)", dir, model, len(turns), sum), 0
 }
 
+// groundOnTranscript reads a REAL Claude Code session transcript (.jsonl) and fills the
+// resident-token and idle facts from it (unless the operator pinned them). The resident
+// context that a resume re-prefills is the prompt size of the MOST RECENT assistant turn:
+// the provider's reported input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+// for that turn (the full prompt the model last had to read). Idle is now minus the last
+// record's timestamp. This is the deterministic, observable counterpart to `claude --resume`:
+// it answers "this exact session I am about to resume — what happens to the cache?".
+func groundOnTranscript(stderr io.Writer, path string, in *resume.Input, fs *flag.FlagSet) (string, int) {
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak resume plan: open transcript %q: %v\n", path, err)
+		return "", 1
+	}
+	defer f.Close()
+
+	resident, model, lastUnix, turns, ok := scanTranscriptResident(f)
+	if !ok {
+		fmt.Fprintf(stderr, "fak resume plan: transcript %q has no assistant turn with usage — pass --resident-tokens\n", path)
+		return "", 1
+	}
+	if !flagSet(fs, "resident-tokens") && resident > 0 {
+		in.ResidentTokens = resident
+	}
+	if !flagSet(fs, "idle-seconds") && lastUnix > 0 {
+		idle := time.Now().Unix() - lastUnix
+		if idle < 0 {
+			idle = 0
+		}
+		in.IdleSeconds = idle
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	return fmt.Sprintf("transcript %s (model %s, %d turns, resident=%d tok from last assistant prompt)", path, model, turns, resident), 0
+}
+
+// scanTranscriptResident scans a Claude Code transcript JSONL and returns the resident
+// context size (the last assistant turn's total prompt tokens), the model that turn used,
+// the last record's unix timestamp, the number of assistant turns seen, and whether any
+// assistant usage was found. It is best-effort over real data: a malformed line is skipped,
+// never fatal. Only the fields it needs are typed (forward-compatible by construction).
+func scanTranscriptResident(r io.Reader) (resident int, model string, lastUnix int64, turns int, ok bool) {
+	type usage struct {
+		InputTokens         int `json:"input_tokens"`
+		CacheReadTokens     int `json:"cache_read_input_tokens"`
+		CacheCreationTokens int `json:"cache_creation_input_tokens"`
+	}
+	type jrec struct {
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+		Message   *struct {
+			Role  string `json:"role"`
+			Model string `json:"model"`
+			Usage *usage `json:"usage"`
+		} `json:"message"`
+	}
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 1<<20), 64<<20) // a single tool-result line can be large
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var jr jrec
+		if json.Unmarshal(line, &jr) != nil {
+			continue
+		}
+		if t := parseTranscriptUnix(jr.Timestamp); t > lastUnix {
+			lastUnix = t
+		}
+		if jr.Message == nil || jr.Message.Usage == nil || jr.Message.Role != "assistant" {
+			continue
+		}
+		turns++
+		// The most recent assistant turn's prompt size IS the resident context a resume
+		// re-prefills: the uncached remainder plus whatever the provider had cached.
+		resident = jr.Message.Usage.InputTokens + jr.Message.Usage.CacheReadTokens + jr.Message.Usage.CacheCreationTokens
+		if jr.Message.Model != "" {
+			model = jr.Message.Model
+		}
+		ok = true
+	}
+	return resident, model, lastUnix, turns, ok
+}
+
+// parseTranscriptUnix parses a Claude Code transcript timestamp (RFC3339, e.g.
+// "2026-06-26T18:31:17.123Z") into unix seconds, returning 0 on any parse failure so a
+// missing/odd timestamp simply does not advance the idle clock.
+func parseTranscriptUnix(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.Unix()
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t.Unix()
+	}
+	return 0
+}
+
 // flagSet reports whether a flag was explicitly provided on the command line (vs left at its
-// default), so --image only fills the facts the operator did not pin.
+// default), so --image / --transcript only fill the facts the operator did not pin.
 func flagSet(fs *flag.FlagSet, name string) bool {
 	set := false
 	fs.Visit(func(f *flag.Flag) {
@@ -248,7 +361,7 @@ func resumeUsage(w io.Writer) {
   fak resume plan [--resident-tokens N] [--idle-seconds S] [--ttl 5m|1h]
                   [--horizon N] [--shed-budget N] [--seed-tokens N]
                   [--input-price F] [--output-price F] [--output-per-turn N]
-                  [--image DIR] [--json]
+                  [--image DIR] [--transcript FILE.jsonl] [--json]
 
 Answers "I am resuming a long session — what happens to the prompt cache, and what
 should I do?" It projects the cache posture (cold if idle exceeds the TTL, warm if not),
@@ -257,5 +370,8 @@ deterministic: same facts in, same priced verdict out.
 
 example (resume a 250k session idle 2h on a 5-minute cache):
   fak resume plan --resident-tokens 250000 --idle-seconds 7200
+
+example (plan the resume of a REAL Claude Code session you are about to --resume):
+  fak resume plan --transcript ~/.claude/projects/<ns>/<uuid>.jsonl
 `)
 }
