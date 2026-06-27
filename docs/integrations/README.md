@@ -68,6 +68,8 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](continue.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](../../examples/mcp/README.md) |
 
+**All guides requested in #87 (Claude Code, VS Code, Continue, Aider, Cline, Zed, JetBrains) are now complete and available above.**
+
 **Adopting from outside the repo?** The [adopter playbook](adopter-playbook.md) is the
 end-to-end, bare-serve production checklist — prerequisites → `policy.json` → auth-key
 env → build/start → `/healthz` → `ANTHROPIC_BASE_URL` wiring — plus the manual Claude
