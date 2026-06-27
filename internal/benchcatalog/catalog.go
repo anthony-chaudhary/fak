@@ -176,8 +176,12 @@ var registry = []Bench{
 	{
 		Name: "fleetbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "2-D turn-tax sweep (turns-per-agent T x fleet size A) over the real kernel; emits JSON + CSV for curve fitting.",
-		Run:     "go run ./cmd/fleetbench",
-		Doc:     "docs/explainers/fleet-benchmarks.md",
+		// Bound the grid so the smoke datum fits an unattended sweep: the default
+		// 2500-cell grid takes ~9m and blew the 15m nightrun budget. The log-spaced
+		// 49-cell grid (-grid log -turn-max 8 -agent-max 8 -trials 4) runs in <1s and
+		// still emits the JSON+CSV curve. The full grid stays available by hand.
+		Run: "go run ./cmd/fleetbench -grid log -turn-max 8 -agent-max 8 -trials 4",
+		Doc: "docs/explainers/fleet-benchmarks.md",
 	},
 	{
 		Name: "longctxbench", Kind: KindCmd, Need: NeedNone,
