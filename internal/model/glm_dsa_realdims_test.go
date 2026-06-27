@@ -127,8 +127,11 @@ func buildGLMDsaTensorsFromCfg(t *testing.T, dtype string, cfg Config) map[strin
 	return tensors
 }
 
-func TestGLMDsaAsymmetricDimsContextDependent(t *testing.T) {
-	cfg := tinyGLMDsaAsymmetricCfg()
+// promptCosine builds a GLM-DSA model from cfg and returns cosine(logits(promptA), logits(promptB))
+// + the two argmaxes. A context-DEPENDENT forward gives cosine < 1 (different prompts -> different
+// logits); the context-blind bug gives cosine == 1.
+func promptCosine(t *testing.T, cfg Config) (float64, int, int) {
+	t.Helper()
 	tensors := buildGLMDsaTensorsFromCfg(t, "F32", cfg)
 	path := writeTinySafetensors(t, tensors)
 	lean, err := LoadSafetensorsQuant(path, cfg)
@@ -138,32 +141,49 @@ func TestGLMDsaAsymmetricDimsContextDependent(t *testing.T) {
 	if !lean.Cfg.isGLMMoeDsa() {
 		t.Fatalf("family = %q, want glm_moe_dsa", lean.Cfg.archFamilyKey())
 	}
-
-	logitsFor := func(prompt []int) []float32 {
-		s := lean.NewSession()
-		return s.Prefill(prompt)
-	}
-
-	// Two clearly different prompts (different tokens, different length-1 context).
+	logitsFor := func(prompt []int) []float32 { return lean.NewSession().Prefill(prompt) }
 	lA := logitsFor([]int{3, 17, 5})
 	lB := logitsFor([]int{29, 7, 31})
 	if len(lA) != cfg.VocabSize || len(lB) != cfg.VocabSize {
 		t.Fatalf("logits shape A=%d B=%d want vocab=%d", len(lA), len(lB), cfg.VocabSize)
 	}
-
-	// A correct, context-dependent forward gives DIFFERENT distributions for different prompts.
-	// The context-blind bug makes them ~identical (cosine ~1, same argmax). Gate on both.
-	cos := realDimsCosine(lA, lB)
-	aA, aB := glmDsaArgmax(lA), glmDsaArgmax(lB)
-	t.Logf("GLM-DSA asymmetric-dims: prompt-A argmax=%d prompt-B argmax=%d cosine(A,B)=%.6f", aA, aB, cos)
-	if cos > 0.9999 {
-		t.Fatalf("CONTEXT-BLIND: two different prompts gave cosine %.6f (~identical logits) at asymmetric dims — the forward ignores its input (the real GLM-5.2 'apel' bug class)", cos)
-	}
-
-	// Also assert the forward isn't producing a degenerate constant logit vector (all-equal logits
-	// would also yield the same argmax regardless of input). The std-dev of the logits must be > 0.
 	if std := stddev(lA); std < 1e-6 {
 		t.Fatalf("degenerate logits: prompt-A logit std-dev %.3e ~0 (constant output)", std)
+	}
+	return realDimsCosine(lA, lB), glmDsaArgmax(lA), glmDsaArgmax(lB)
+}
+
+// tinyGLMDsaSymmetricCfg is the asymmetric cfg made SYMMETRIC (qkNope==qkRope, vHead==qkNope) — the
+// control: same weights/structure, only the per-head dims are balanced like the existing synthetic
+// fixture. It must stay context-DEPENDENT. If both this and the asymmetric case were context-blind,
+// the bug would be in the fixture, not the asymmetric-dim handling.
+func tinyGLMDsaSymmetricCfg() Config {
+	c := tinyGLMDsaAsymmetricCfg()
+	c.QKNopeHeadDim = 32 // == QKRopeHeadDim
+	c.QKRopeHeadDim = 32
+	c.VHeadDim = 32 // == qkNope; qkHead = 64
+	// keep reduction dims 32-aligned: o_proj in = nH*vHead = 2*32 = 64 (ok), kv_b in = kvLora = 32 (ok).
+	return c
+}
+
+// TestGLMDsaAsymmetricDimsContextDependent reproduces the real GLM-5.2 "apel" context-blind bug in a
+// fast CPU unit test: at ASYMMETRIC per-head dims (qkNope != qkRope, like real 192 != 64) the forward
+// returns IDENTICAL logits for different prompts, while the SYMMETRIC control (qkNope == qkRope, the
+// shape the existing synthetic fixture uses) stays context-dependent. The symmetric control proves
+// the bug is the asymmetric-dim handling, not the fixture.
+func TestGLMDsaAsymmetricDimsContextDependent(t *testing.T) {
+	// Control: symmetric dims MUST be context-dependent (cosine < 1).
+	symCos, symA, symB := promptCosine(t, tinyGLMDsaSymmetricCfg())
+	t.Logf("SYMMETRIC control: argmax A=%d B=%d cosine=%.6f", symA, symB, symCos)
+	if symCos > 0.9999 {
+		t.Fatalf("the SYMMETRIC control is ALSO context-blind (cosine %.6f) — the fixture is degenerate, not the asymmetric-dim handling; fix the fixture before trusting the asymmetric case", symCos)
+	}
+
+	// The real bug: asymmetric dims go context-blind.
+	asymCos, aA, aB := promptCosine(t, tinyGLMDsaAsymmetricCfg())
+	t.Logf("ASYMMETRIC: argmax A=%d B=%d cosine=%.6f", aA, aB, asymCos)
+	if asymCos > 0.9999 {
+		t.Fatalf("CONTEXT-BLIND: at ASYMMETRIC dims two different prompts gave cosine %.6f (identical logits) while the symmetric control gave %.6f — the GLM-DSA forward ignores its input at qkNope != qkRope (the real GLM-5.2 'apel' bug)", asymCos, symCos)
 	}
 }
 
