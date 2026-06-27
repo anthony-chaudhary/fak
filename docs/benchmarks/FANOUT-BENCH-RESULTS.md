@@ -106,11 +106,12 @@ sibling's warmed read, the honest invalidation tension §4's write-goal profile 
 `no-share` profile gives exactly 0 cross-uplift at every N (the anti-inflation control,
 `internal/bench.TestFanrunNoShareZeroUplift`).
 
-**Still open (the real-MODEL rung).** fanrun's sub-agents are driven by a deterministic
-offline planner, so the wall-clock is the **kernel's** orchestration + dedup cost, not live
-decode. A real-model fan-out (live token generation per sub-agent) across the N grid is
-reachable on the lab GPU fleet and is the next rung; it does not change the measured
-orchestration/dedup numbers above, which stand on their own.
+**Still open (the real-MODEL rung, [#982](https://github.com/anthony-chaudhary/fak/issues/982)).**
+fanrun's sub-agents are driven by a deterministic offline planner, so the wall-clock is the
+**kernel's** orchestration + dedup cost, not live decode. A real-model fan-out (live token
+generation per sub-agent) across the N grid is reachable on the lab GPU fleet and is the next
+rung; it does not change the measured orchestration/dedup numbers above, which stand on their
+own.
 
 Reproduce (deterministic counter+geometry — no model, runs on any agent host):
 `go run ./cmd/fanrun -agent-max 1024 -grid log -prefix 2048 -out experiments/fanout/fanrun.json`.
