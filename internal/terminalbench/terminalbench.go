@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/browseraction"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
@@ -429,7 +430,7 @@ func commandEvent(step CommandStep, tool string, v abi.Verdict) CommandEvent {
 		Command:         strings.TrimSpace(step.Command),
 		CWD:             valueOr(strings.TrimSpace(step.CWD), "."),
 		FilesystemScope: strings.TrimSpace(step.FilesystemScope),
-		Verdict:         verdictName(v.Kind),
+		Verdict:         browseraction.VerdictName(v.Kind),
 		Reason:          abi.ReasonName(v.Reason),
 		Milestone:       step.Milestone,
 		Minefield:       step.Minefield,
@@ -469,27 +470,6 @@ func evidenceCheckpoint(task Task, step CommandStep, tool string) EvidenceCheckp
 		Command:   strings.TrimSpace(step.Command),
 		CWD:       cwd,
 		StateHash: "sha256:" + hex.EncodeToString(sum[:]),
-	}
-}
-
-func verdictName(k abi.VerdictKind) string {
-	switch k {
-	case abi.VerdictAllow:
-		return "ALLOW"
-	case abi.VerdictDeny:
-		return "DENY"
-	case abi.VerdictTransform:
-		return "TRANSFORM"
-	case abi.VerdictQuarantine:
-		return "QUARANTINE"
-	case abi.VerdictRequireWitness:
-		return "REQUIRE_WITNESS"
-	case abi.VerdictDefer:
-		return "DEFER"
-	case abi.VerdictIndeterminate:
-		return "INDETERMINATE"
-	default:
-		return fmt.Sprintf("VERDICT_%d", k)
 	}
 }
 

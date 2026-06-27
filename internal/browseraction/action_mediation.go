@@ -446,7 +446,7 @@ func browserActionEvent(step ActionStep, tool string, v abi.Verdict) BrowserActi
 		Tool:       tool,
 		ActionType: strings.ToLower(strings.TrimSpace(step.Action.Type)),
 		Target:     step.Action.Target,
-		Verdict:    browserVerdictName(v.Kind),
+		Verdict:    VerdictName(v.Kind),
 		Reason:     abi.ReasonName(v.Reason),
 		Milestone:  step.Milestone,
 		Minefield:  step.Minefield,
@@ -498,7 +498,10 @@ func evidenceCheckpoint(task ActionMediationTask, step ActionStep, tool string) 
 	}
 }
 
-func browserVerdictName(k abi.VerdictKind) string {
+// VerdictName renders an abi.VerdictKind as its canonical upper-case label.
+// It is the shared adjudication-verdict event helper for the action-mediation
+// bench adapters (browseraction, terminalbench, toolsandbox).
+func VerdictName(k abi.VerdictKind) string {
 	switch k {
 	case abi.VerdictAllow:
 		return "ALLOW"

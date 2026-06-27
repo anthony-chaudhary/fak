@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/browseraction"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
@@ -352,7 +353,7 @@ func eventFor(c Call, v abi.Verdict) CallEvent {
 	return CallEvent{
 		Turn:      c.Turn,
 		Tool:      c.Tool,
-		Verdict:   verdictName(v.Kind),
+		Verdict:   browseraction.VerdictName(v.Kind),
 		Reason:    abi.ReasonName(v.Reason),
 		Milestone: c.Milestone,
 		Minefield: c.Minefield,
@@ -394,27 +395,6 @@ func callArgs(c Call) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	return c.Args
-}
-
-func verdictName(k abi.VerdictKind) string {
-	switch k {
-	case abi.VerdictAllow:
-		return "ALLOW"
-	case abi.VerdictDeny:
-		return "DENY"
-	case abi.VerdictTransform:
-		return "TRANSFORM"
-	case abi.VerdictQuarantine:
-		return "QUARANTINE"
-	case abi.VerdictRequireWitness:
-		return "REQUIRE_WITNESS"
-	case abi.VerdictDefer:
-		return "DEFER"
-	case abi.VerdictIndeterminate:
-		return "INDETERMINATE"
-	default:
-		return fmt.Sprintf("VERDICT_%d", k)
-	}
 }
 
 func hasAll(done map[string]bool, required []string) bool {
