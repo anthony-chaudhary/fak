@@ -119,7 +119,7 @@ This is corpus-robust, not a quirk of the heaviest sessions. Re-run over 100 ses
 
 ### Sensitivity: the crossover widens as the cache degrades (a B-only dial)
 
-The 12% figure is the *best case for the cache* — a perfectly warm one. Real caches are not perfectly warm: a tool call slower than the ~5-minute TTL evicts the prefix, and the next turn re-prefills it all at full price. Model that as a fraction of turns forced cold. Note this degrades regime **B only** — C and D hold no provider cache, so eviction never touches them; their cost is byte-identical across every scenario. So the table below is a *sensitivity* dial, not a second empirical measurement: it shows the crossover rising because B's bill rises against an invariant C, which is definitional, not a discovery. The eviction fraction is illustrative, not a measured tool-latency-versus-TTL distribution on this corpus.
+The 12% figure is the *best case for the cache* — a perfectly warm one. Real caches are not perfectly warm: policy events like TTL expiration (e.g., a tool call slower than the ~5-minute cache TTL) evict the prefix, and the next turn re-prefills it all at full price. Model that as a fraction of turns forced cold. Note this degrades regime **B only** — C and D hold no provider cache, so eviction never touches them; their cost is byte-identical across every scenario. So the table below is a *sensitivity* dial, not a second empirical measurement: it shows the crossover rising because B's bill rises against an invariant C, which is definitional, not a discovery. The eviction fraction is illustrative, not a measured tool-latency-versus-TTL distribution on this corpus.
 
 | cache scenario (B degraded) | crossover (window beats B) | as % of billed prompt |
 |---|--:|--:|
