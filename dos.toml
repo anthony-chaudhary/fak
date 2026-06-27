@@ -144,6 +144,7 @@ autopick = [
   "leaseref", # #825: internal/leaseref leaf, see [lanes].concurrent note
   "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate), see [lanes].concurrent note
+  "nightrun", # internal/nightrun leaf (the run-it-all-night data-collection door), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -164,6 +165,7 @@ agent = ["internal/agent/**"]
 agentdojo = ["internal/agentdojo/**"]
 architest = ["internal/architest/**"]
 windowgate = ["internal/windowgate/**"]
+nightrun = ["internal/nightrun/**"]
 bench = ["internal/bench/**"]
 blob = ["internal/blob/**"]
 canon = ["internal/canon/**"]
