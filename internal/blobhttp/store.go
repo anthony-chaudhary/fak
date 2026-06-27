@@ -107,15 +107,11 @@ func (s *Store) urlFor(digest string) string { return s.base + "/" + digest }
 // ones are PUT content-addressed to <base>/<digest>, with a HEAD dedup probe so a
 // byte-identical payload already in the bucket is not re-uploaded.
 func (s *Store) Put(ctx context.Context, b []byte) (abi.Ref, error) {
-	d := blob.Digest(b)
-	r := abi.Ref{Digest: d, Len: int64(len(b)), Taint: abi.TaintTainted, Scope: abi.ScopeAgent}
-	if len(b) <= InlineMax {
-		r.Kind = abi.RefInline
-		r.Inline = append([]byte(nil), b...)
+	r, inline := blob.PreparePut(b)
+	if inline {
 		return r, nil
 	}
-	r.Kind = abi.RefBlob
-	if err := s.commit(ctx, d, b); err != nil {
+	if err := s.commit(ctx, r.Digest, b); err != nil {
 		return abi.Ref{}, err
 	}
 	return r, nil
@@ -215,11 +211,7 @@ func (s *Store) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 
 // PageIn re-materializes a paged-out handle Ref into an inline Ref.
 func (s *Store) PageIn(ctx context.Context, handle abi.Ref) (abi.Ref, error) {
-	b, err := s.Resolve(ctx, handle)
-	if err != nil {
-		return abi.Ref{}, err
-	}
-	return abi.Ref{Kind: abi.RefInline, Digest: handle.Digest, Inline: b, Len: int64(len(b)), Taint: handle.Taint, Scope: handle.Scope}, nil
+	return blob.PageIn(ctx, s, handle)
 }
 
 // Delete removes the object for a digest (the provable-deletion / retention hook a

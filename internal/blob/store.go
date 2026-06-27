@@ -188,17 +188,47 @@ func Digest(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// PreparePut builds the addressable Ref header every content-addressed Store's Put
+// shares — the digest, length, default taint/scope, and the InlineMax split. A
+// payload at or below InlineMax rides inline on the Ref (no store round-trip) and
+// is returned with inline=true and Kind=RefInline; a larger payload is returned
+// with inline=false and Kind=RefBlob, leaving the caller to persist the bytes in
+// its own backing store (memory map, disk, remote object endpoint) before handing
+// the Ref back. It is the shared prologue hoisted out of blob/blobfs/blobhttp Put.
+func PreparePut(b []byte) (r abi.Ref, inline bool) {
+	r = abi.Ref{Digest: Digest(b), Len: int64(len(b)), Taint: abi.TaintTainted, Scope: abi.ScopeAgent}
+	if len(b) <= InlineMax {
+		r.Kind = abi.RefInline
+		r.Inline = append([]byte(nil), b...)
+		return r, true
+	}
+	r.Kind = abi.RefBlob
+	return r, false
+}
+
+// PageIn re-materializes a paged-out handle Ref into an inline Ref by resolving its
+// bytes through res (the backend the handle belongs to). It is the byte-identical
+// PageIn shared by every content-addressed Store (memory/disk/remote): the only
+// per-backend difference is which Resolver reads the bytes, so callers pass their
+// own Store as res. The returned Ref carries the handle's identity (digest, taint,
+// scope) with the resolved bytes inline.
+func PageIn(ctx context.Context, res abi.Resolver, handle abi.Ref) (abi.Ref, error) {
+	b, err := res.Resolve(ctx, handle)
+	if err != nil {
+		return abi.Ref{}, err
+	}
+	return abi.Ref{Kind: abi.RefInline, Digest: handle.Digest, Inline: b, Len: int64(len(b)), Taint: handle.Taint, Scope: handle.Scope}, nil
+}
+
 // Put stores b and returns an addressable Ref. Small payloads are returned
 // inline; larger ones are stored in the CAS. A byte-identical payload is stored
 // exactly once (content-addressed dedup) — the property the vDSO and MMU rely on.
 func (s *Store) Put(ctx context.Context, b []byte) (abi.Ref, error) {
-	d := Digest(b)
-	r := abi.Ref{Digest: d, Len: int64(len(b)), Taint: abi.TaintTainted, Scope: abi.ScopeAgent}
-	if len(b) <= InlineMax {
-		r.Kind = abi.RefInline
-		r.Inline = append([]byte(nil), b...)
+	r, inline := PreparePut(b)
+	if inline {
 		return r, nil
 	}
+	d := r.Digest
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.puts++
@@ -207,7 +237,6 @@ func (s *Store) Put(ctx context.Context, b []byte) (abi.Ref, error) {
 	} else {
 		s.storeLocked(d, b)
 	}
-	r.Kind = abi.RefBlob
 	return r, nil
 }
 
@@ -248,11 +277,7 @@ func (s *Store) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 
 // PageIn re-materializes a paged-out handle Ref into an inline Ref.
 func (s *Store) PageIn(ctx context.Context, handle abi.Ref) (abi.Ref, error) {
-	b, err := s.Resolve(ctx, handle)
-	if err != nil {
-		return abi.Ref{}, err
-	}
-	return abi.Ref{Kind: abi.RefInline, Digest: handle.Digest, Inline: b, Len: int64(len(b)), Taint: handle.Taint, Scope: handle.Scope}, nil
+	return PageIn(ctx, s, handle)
 }
 
 // Stats reports store activity (puts, dedup hits, resolves) for KPI taps.
