@@ -566,9 +566,12 @@ func exl2ReadGroups(sf *safetensorsFile, name string) ([]exl2Group, int, error) 
 	return groups, off, nil
 }
 
-// exl2ReadInvPerm parses q_invperm (int32 [in]) into the inverse act-order
-// permutation. A length mismatch against the group-derived `in` is an error.
-func exl2ReadInvPerm(sf *safetensorsFile, name string, in int) ([]int32, error) {
+// exl2ReadU32Words reads an I32/U32 tensor's raw bytes into little-endian uint32
+// words: it fetches the bytes, checks the dtype is I32/U32 and the byte length is a
+// multiple of 4, then decodes. The caller validates the word count against its own
+// expectation (so it can phrase that error precisely). Shared by exl2ReadInvPerm /
+// exl2ReadCodes.
+func exl2ReadU32Words(sf *safetensorsFile, name string) ([]uint32, error) {
 	raw, e, err := exl2TensorRaw(sf, name)
 	if err != nil {
 		return nil, err
@@ -580,12 +583,26 @@ func exl2ReadInvPerm(sf *safetensorsFile, name string, in int) ([]int32, error) 
 		return nil, fmt.Errorf("%s byte length %d not /4", name, len(raw))
 	}
 	n := len(raw) / 4
-	if n != in {
-		return nil, fmt.Errorf("%s len %d != group-derived in %d", name, n, in)
-	}
-	perm := make([]int32, n)
+	words := make([]uint32, n)
 	for i := 0; i < n; i++ {
-		perm[i] = int32(binary.LittleEndian.Uint32(raw[i*4:]))
+		words[i] = binary.LittleEndian.Uint32(raw[i*4:])
+	}
+	return words, nil
+}
+
+// exl2ReadInvPerm parses q_invperm (int32 [in]) into the inverse act-order
+// permutation. A length mismatch against the group-derived `in` is an error.
+func exl2ReadInvPerm(sf *safetensorsFile, name string, in int) ([]int32, error) {
+	words, err := exl2ReadU32Words(sf, name)
+	if err != nil {
+		return nil, err
+	}
+	if len(words) != in {
+		return nil, fmt.Errorf("%s len %d != group-derived in %d", name, len(words), in)
+	}
+	perm := make([]int32, len(words))
+	for i, w := range words {
+		perm[i] = int32(w)
 	}
 	return perm, nil
 }
@@ -609,23 +626,12 @@ func exl2ReadF16Vec(sf *safetensorsFile, name string) ([]float32, error) {
 
 // exl2ReadCodes reads q_weight (int32 bit-stream) into out*rowWords uint32 words.
 func exl2ReadCodes(sf *safetensorsFile, name string, out, rowWords int) ([]uint32, error) {
-	raw, e, err := exl2TensorRaw(sf, name)
+	codes, err := exl2ReadU32Words(sf, name)
 	if err != nil {
 		return nil, err
 	}
-	if e.Dtype != "I32" && e.Dtype != "U32" {
-		return nil, fmt.Errorf("%s dtype %q, want I32/U32", name, e.Dtype)
-	}
-	if len(raw)%4 != 0 {
-		return nil, fmt.Errorf("%s byte length %d not /4", name, len(raw))
-	}
-	n := len(raw) / 4
-	if n != out*rowWords {
-		return nil, fmt.Errorf("%s holds %d words, want out*rowWords %d", name, n, out*rowWords)
-	}
-	codes := make([]uint32, n)
-	for i := 0; i < n; i++ {
-		codes[i] = binary.LittleEndian.Uint32(raw[i*4:])
+	if len(codes) != out*rowWords {
+		return nil, fmt.Errorf("%s holds %d words, want out*rowWords %d", name, len(codes), out*rowWords)
 	}
 	return codes, nil
 }

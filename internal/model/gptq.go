@@ -241,24 +241,11 @@ func appendGPTQF32FileInto(sf *safetensorsFile, skip map[string]bool, man map[st
 		if _, ok := man[name]; ok {
 			return fmt.Errorf("safetensors: duplicate tensor %s", name)
 		}
-		var e stEntry
-		if err := json.Unmarshal(sf.hdr[name], &e); err != nil {
-			return fmt.Errorf("safetensors: entry %s: %w", name, err)
-		}
-		if skipSafetensorsTensor(name, e) {
+		if skipped, err := decodeAppendF32Tensor(sf, name, man, raw, off); err != nil {
+			return err
+		} else if skipped {
 			continue
 		}
-		src, err := sf.tensorBytes(e)
-		if err != nil {
-			return fmt.Errorf("safetensors: tensor %s: %w", name, err)
-		}
-		f32, err := decodeSafetensorF32(name, e, src)
-		if err != nil {
-			return err
-		}
-		man[name] = tensorMeta{Dtype: "f32", Shape: append([]int(nil), e.Shape...), Offset: *off, Nbytes: len(f32)}
-		*raw = append(*raw, f32...)
-		*off += len(f32)
 	}
 	return nil
 }

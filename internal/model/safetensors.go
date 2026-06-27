@@ -435,24 +435,11 @@ func appendSafetensorsFileInto(sf *safetensorsFile, man map[string]tensorMeta, r
 				continue
 			}
 		}
-		var e stEntry
-		if err := json.Unmarshal(sf.hdr[name], &e); err != nil {
-			return fmt.Errorf("safetensors: entry %s: %w", name, err)
-		}
-		if skipSafetensorsTensor(name, e) {
+		if skipped, err := decodeAppendF32Tensor(sf, name, man, raw, off); err != nil {
+			return err
+		} else if skipped {
 			continue
 		}
-		src, err := sf.tensorBytes(e)
-		if err != nil {
-			return fmt.Errorf("safetensors: tensor %s: %w", name, err)
-		}
-		f32, err := decodeSafetensorF32(name, e, src)
-		if err != nil {
-			return err
-		}
-		man[name] = tensorMeta{Dtype: "f32", Shape: e.Shape, Offset: *off, Nbytes: len(f32)}
-		*raw = append(*raw, f32...)
-		*off += len(f32)
 	}
 	return nil
 }
@@ -461,6 +448,32 @@ func skipSafetensorsTensor(name string, e stEntry) bool {
 	return e.Dtype == "U8" &&
 		strings.HasPrefix(name, "gpt_neox.layers.") &&
 		strings.HasSuffix(name, ".attention.bias")
+}
+
+// decodeAppendF32Tensor parses tensor `name`'s safetensors entry, decodes its bytes
+// to f32, and appends it into (man, raw, off) as a flat-f32 tensor — the common tail
+// of the per-file load loops. It returns skipped=true (with no store) when the entry
+// is one skipSafetensorsTensor drops, so the caller can `continue`.
+func decodeAppendF32Tensor(sf *safetensorsFile, name string, man map[string]tensorMeta, raw *[]byte, off *int) (skipped bool, err error) {
+	var e stEntry
+	if err := json.Unmarshal(sf.hdr[name], &e); err != nil {
+		return false, fmt.Errorf("safetensors: entry %s: %w", name, err)
+	}
+	if skipSafetensorsTensor(name, e) {
+		return true, nil
+	}
+	src, err := sf.tensorBytes(e)
+	if err != nil {
+		return false, fmt.Errorf("safetensors: tensor %s: %w", name, err)
+	}
+	f32, err := decodeSafetensorF32(name, e, src)
+	if err != nil {
+		return false, err
+	}
+	man[name] = tensorMeta{Dtype: "f32", Shape: append([]int(nil), e.Shape...), Offset: *off, Nbytes: len(f32)}
+	*raw = append(*raw, f32...)
+	*off += len(f32)
+	return false, nil
 }
 
 var mxfp4Values = [16]float32{

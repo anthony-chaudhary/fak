@@ -138,22 +138,31 @@ func initHALQ8BatchLayers() int {
 	return 2
 }
 
-func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
-	key := "q8:" + name
+// weightHALStaged caches one resident quantized weight on the backend under key,
+// uploading it as dtype exactly once. On a cache hit the cached tensor is returned
+// without ever calling mk; only a miss builds the src via mk (which carries the
+// per-format construction + its own nil-tensor guard) and uploads it. Shared by
+// weightHALQ8 / weightHALQ4K.
+func (s *Session) weightHALStaged(key string, mk func() compute.Tensor, dtype compute.Dtype) compute.Tensor {
 	if s.halW != nil {
 		if t, ok := s.halW[key]; ok {
 			return t
 		}
 	}
-	if qt == nil {
-		panic("model: missing Q8 tensor " + name)
-	}
-	src := compute.NewQ8(compute.Default(), []int{qt.out, qt.in}, qt.q, qt.d, qBlk)
-	t := s.Backend.Upload(src, compute.Q8_0)
+	t := s.Backend.Upload(mk(), dtype)
 	if s.halW != nil {
 		s.halW[key] = t
 	}
 	return t
+}
+
+func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
+	return s.weightHALStaged("q8:"+name, func() compute.Tensor {
+		if qt == nil {
+			panic("model: missing Q8 tensor " + name)
+		}
+		return compute.NewQ8(compute.Default(), []int{qt.out, qt.in}, qt.q, qt.d, qBlk)
+	}, compute.Q8_0)
 }
 
 // weightHALQ4K stages a resident Q4_K weight (raw GGUF super-block bytes) onto the backend, the
@@ -163,21 +172,12 @@ func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 // lets the GLM-DSA forward run its dense projections from a memory-lean Q4_K model on the device —
 // the Q4_K majority of a 753B GLM-5.2 on the GPU, with only ~0.56 B/weight resident.
 func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
-	key := "q4k:" + name
-	if s.halW != nil {
-		if t, ok := s.halW[key]; ok {
-			return t
+	return s.weightHALStaged("q4k:"+name, func() compute.Tensor {
+		if qt == nil {
+			panic("model: missing Q4_K tensor " + name)
 		}
-	}
-	if qt == nil {
-		panic("model: missing Q4_K tensor " + name)
-	}
-	src := compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
-	t := s.Backend.Upload(src, compute.Q4_K)
-	if s.halW != nil {
-		s.halW[key] = t
-	}
-	return t
+		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
+	}, compute.Q4_K)
 }
 
 func (s *Session) matWeightHAL(name string) compute.Tensor {

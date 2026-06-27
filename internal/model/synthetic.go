@@ -6,6 +6,47 @@ import (
 	"strings"
 )
 
+// synthTensor is one (name, shape) entry in a synthetic checkpoint's tensor list.
+type synthTensor struct {
+	name  string
+	shape []int
+}
+
+// synthBuildRaw turns a synthetic tensor list into the flat-f32 manifest+raw the
+// real Load path produces, filling each element from fill(name, next). next is a
+// fixed-seed LCG in [-1,1) shared across the whole checkpoint, so the bytes are
+// deterministic; fill decides whether a given tensor is a fixed constant (norm/bias
+// inits) or a scaled LCG draw. Shared by every NewSynthetic* constructor.
+func synthBuildRaw(tensors []synthTensor, fill func(name string, next func() float32) float32) (map[string]tensorMeta, []byte) {
+	man := make(map[string]tensorMeta, len(tensors))
+	off := 0
+	for _, t := range tensors {
+		n := 1
+		for _, d := range t.shape {
+			n *= d
+		}
+		man[t.name] = tensorMeta{Dtype: "F32", Shape: t.shape, Offset: off, Nbytes: n * 4}
+		off += n * 4
+	}
+
+	raw := make([]byte, off)
+	seed := uint64(0x9E3779B97F4A7C15)
+	next := func() float32 {
+		seed = seed*6364136223846793005 + 1442695040888963407
+		u := float32(seed>>40) / float32(1<<24) // [0,1)
+		return u*2 - 1                          // [-1,1)
+	}
+	for _, t := range tensors {
+		m := man[t.name]
+		n := m.Nbytes / 4
+		for i := 0; i < n; i++ {
+			f := fill(t.name, next)
+			binary.LittleEndian.PutUint32(raw[m.Offset+i*4:], math.Float32bits(f))
+		}
+	}
+	return man, raw
+}
+
 // NewSynthetic builds an in-memory Model with deterministic pseudo-random weights
 // for an arbitrary (small) Config — no files, no torch, no 538MB HF export.
 //
@@ -32,10 +73,7 @@ func NewSynthetic(cfg Config) *Model {
 	nH, nKV, hd := cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim
 	H, I, V := cfg.HiddenSize, cfg.IntermediateSize, cfg.VocabSize
 
-	type ts struct {
-		name  string
-		shape []int
-	}
+	type ts = synthTensor
 	var tensors []ts
 	tensors = append(tensors, ts{"model.embed_tokens.weight", []int{V, H}})
 	for l := 0; l < cfg.NumLayers; l++ {
@@ -84,42 +122,17 @@ func NewSynthetic(cfg Config) *Model {
 	}
 	tensors = append(tensors, ts{"model.norm.weight", []int{H}})
 
-	man := make(map[string]tensorMeta, len(tensors))
-	off := 0
-	for _, t := range tensors {
-		n := 1
-		for _, d := range t.shape {
-			n *= d
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		norm := strings.HasSuffix(name, "layernorm.weight") || strings.HasSuffix(name, "linear_attn.norm.weight") || name == "model.norm.weight"
+		if norm {
+			return 1.0
 		}
-		man[t.name] = tensorMeta{Dtype: "F32", Shape: t.shape, Offset: off, Nbytes: n * 4}
-		off += n * 4
-	}
-
-	raw := make([]byte, off)
-	seed := uint64(0x9E3779B97F4A7C15)
-	next := func() float32 {
-		seed = seed*6364136223846793005 + 1442695040888963407
-		u := float32(seed>>40) / float32(1<<24) // [0,1)
-		return u*2 - 1                          // [-1,1)
-	}
-	for _, t := range tensors {
-		m := man[t.name]
-		n := m.Nbytes / 4
-		norm := strings.HasSuffix(t.name, "layernorm.weight") || strings.HasSuffix(t.name, "linear_attn.norm.weight") || t.name == "model.norm.weight"
 		scale := float32(0.1)
-		if strings.Contains(t.name, "embed_tokens") {
+		if strings.Contains(name, "embed_tokens") {
 			scale = 0.2 // wider so distinct ids separate cleanly
 		}
-		for i := 0; i < n; i++ {
-			var f float32
-			if norm {
-				f = 1.0
-			} else {
-				f = next() * scale
-			}
-			binary.LittleEndian.PutUint32(raw[m.Offset+i*4:], math.Float32bits(f))
-		}
-	}
+		return next() * scale
+	})
 
 	cfg.TieWordEmbeddings = true // synthetic head is tied to the embedding
 	return &Model{Cfg: cfg, manifest: man, raw: raw}
@@ -138,10 +151,7 @@ func NewSyntheticMoE(cfg Config) *Model {
 	nH, nKV, hd := cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim
 	H, I, V, E := cfg.HiddenSize, cfg.IntermediateSize, cfg.VocabSize, cfg.NumExperts
 
-	type ts struct {
-		name  string
-		shape []int
-	}
+	type ts = synthTensor
 	var tensors []ts
 	tensors = append(tensors, ts{"model.embed_tokens.weight", []int{V, H}})
 	for l := 0; l < cfg.NumLayers; l++ {
@@ -165,42 +175,17 @@ func NewSyntheticMoE(cfg Config) *Model {
 	}
 	tensors = append(tensors, ts{"model.norm.weight", []int{H}})
 
-	man := make(map[string]tensorMeta, len(tensors))
-	off := 0
-	for _, t := range tensors {
-		n := 1
-		for _, d := range t.shape {
-			n *= d
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		norm := strings.HasSuffix(name, "layernorm.weight") || name == "model.norm.weight"
+		if norm {
+			return 1.0
 		}
-		man[t.name] = tensorMeta{Dtype: "F32", Shape: t.shape, Offset: off, Nbytes: n * 4}
-		off += n * 4
-	}
-
-	raw := make([]byte, off)
-	seed := uint64(0x9E3779B97F4A7C15)
-	next := func() float32 {
-		seed = seed*6364136223846793005 + 1442695040888963407
-		u := float32(seed>>40) / float32(1<<24) // [0,1)
-		return u*2 - 1                          // [-1,1)
-	}
-	for _, t := range tensors {
-		mm := man[t.name]
-		n := mm.Nbytes / 4
-		norm := strings.HasSuffix(t.name, "layernorm.weight") || t.name == "model.norm.weight"
 		scale := float32(0.1)
-		if strings.Contains(t.name, "embed_tokens") {
+		if strings.Contains(name, "embed_tokens") {
 			scale = 0.2
 		}
-		for i := 0; i < n; i++ {
-			var f float32
-			if norm {
-				f = 1.0
-			} else {
-				f = next() * scale
-			}
-			binary.LittleEndian.PutUint32(raw[mm.Offset+i*4:], math.Float32bits(f))
-		}
-	}
+		return next() * scale
+	})
 
 	cfg.TieWordEmbeddings = true
 	return &Model{Cfg: cfg, manifest: man, raw: raw}
@@ -241,10 +226,7 @@ func NewSyntheticGLMDsa(cfg Config) *Model {
 	H, I, V := cfg.HiddenSize, cfg.IntermediateSize, cfg.VocabSize
 	qkHead := cfg.QKNopeHeadDim + cfg.QKRopeHeadDim
 
-	type ts struct {
-		name  string
-		shape []int
-	}
+	type ts = synthTensor
 	var tensors []ts
 	add := func(name string, shape ...int) { tensors = append(tensors, ts{name, shape}) }
 
@@ -275,48 +257,23 @@ func NewSyntheticGLMDsa(cfg Config) *Model {
 	}
 	add("model.norm.weight", H)
 
-	man := make(map[string]tensorMeta, len(tensors))
-	off := 0
-	for _, t := range tensors {
-		n := 1
-		for _, d := range t.shape {
-			n *= d
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		isOne := strings.HasSuffix(name, "layernorm.weight") ||
+			strings.HasSuffix(name, "k_norm.weight") ||
+			name == "model.norm.weight"
+		isZero := strings.HasSuffix(name, "k_norm.bias")
+		switch {
+		case isOne:
+			return 1.0
+		case isZero:
+			return 0.0
 		}
-		man[t.name] = tensorMeta{Dtype: "F32", Shape: t.shape, Offset: off, Nbytes: n * 4}
-		off += n * 4
-	}
-
-	raw := make([]byte, off)
-	seed := uint64(0x9E3779B97F4A7C15)
-	next := func() float32 {
-		seed = seed*6364136223846793005 + 1442695040888963407
-		u := float32(seed>>40) / float32(1<<24) // [0,1)
-		return u*2 - 1                          // [-1,1)
-	}
-	for _, t := range tensors {
-		mm := man[t.name]
-		n := mm.Nbytes / 4
-		isOne := strings.HasSuffix(t.name, "layernorm.weight") ||
-			strings.HasSuffix(t.name, "k_norm.weight") ||
-			t.name == "model.norm.weight"
-		isZero := strings.HasSuffix(t.name, "k_norm.bias")
 		scale := float32(0.1)
-		if strings.Contains(t.name, "embed_tokens") {
+		if strings.Contains(name, "embed_tokens") {
 			scale = 0.2
 		}
-		for i := 0; i < n; i++ {
-			var f float32
-			switch {
-			case isOne:
-				f = 1.0
-			case isZero:
-				f = 0.0
-			default:
-				f = next() * scale
-			}
-			binary.LittleEndian.PutUint32(raw[mm.Offset+i*4:], math.Float32bits(f))
-		}
-	}
+		return next() * scale
+	})
 
 	cfg.TieWordEmbeddings = true
 	return &Model{Cfg: cfg, manifest: man, raw: raw}

@@ -465,10 +465,12 @@ func fastExp32(x float32) float32 {
 
 func fastSilu(z float32) float32 { return z / (1 + fastExp32(-z)) }
 
-func swigluInPlace(g, u []float32) {
+// swigluInPlaceAct applies g[i] = act(g[i]) * u[i] in place, parallelized over the
+// same parFor scaffold for any element-wise gate activation act.
+func swigluInPlaceAct(g, u []float32, act func(float32) float32) {
 	body := func(lo, hi int) {
 		for i := lo; i < hi; i++ {
-			g[i] = silu(g[i]) * u[i]
+			g[i] = act(g[i]) * u[i]
 		}
 	}
 	if len(g) < parThreshold || numWorkers <= 1 {
@@ -478,18 +480,9 @@ func swigluInPlace(g, u []float32) {
 	parFor(len(g), numWorkers, body)
 }
 
-func swigluFastInPlace(g, u []float32) {
-	body := func(lo, hi int) {
-		for i := lo; i < hi; i++ {
-			g[i] = fastSilu(g[i]) * u[i]
-		}
-	}
-	if len(g) < parThreshold || numWorkers <= 1 {
-		body(0, len(g))
-		return
-	}
-	parFor(len(g), numWorkers, body)
-}
+func swigluInPlace(g, u []float32) { swigluInPlaceAct(g, u, silu) }
+
+func swigluFastInPlace(g, u []float32) { swigluInPlaceAct(g, u, fastSilu) }
 
 func addBias(y, b []float32) {
 	for i := range y {
