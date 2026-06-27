@@ -57,21 +57,11 @@ func (f *File) GGMLTokenizer() (*GGMLTokenizer, bool) {
 // unsigned integer element type (token_type is typically stored as int32, but
 // some writers use uint32); values outside int32 range fail the read.
 func (f *File) Int32Array(key string) ([]int32, bool) {
-	v, ok := f.Metadata[key]
-	if !ok || v.Type != TypeArray {
-		return nil, false
-	}
-	items, ok := v.Value.([]Value)
-	if !ok {
-		return nil, false
-	}
-	out := make([]int32, len(items))
-	for i, item := range items {
+	return metadataArray(f, key, func(item Value) (int32, bool) {
 		u, ok := valueUint64(item)
 		if !ok || u > uint64(^uint32(0)>>1) {
-			return nil, false
+			return 0, false
 		}
-		out[i] = int32(u)
-	}
-	return out, true
+		return int32(u), true
+	})
 }
