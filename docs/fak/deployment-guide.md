@@ -367,13 +367,16 @@ fak version
 ```
 
 **Prebuilt release assets.** Releases attach static binaries for **linux/amd64**,
-**darwin/amd64**, **darwin/arm64**, and **windows/amd64** (each with a `.sha256`,
-plus an aggregate `SHA256SUMS`) at
+**linux/arm64**, **darwin/amd64**, **darwin/arm64**, and **windows/amd64** (each with a
+`.sha256`, plus an aggregate `SHA256SUMS`) at
 <https://github.com/anthony-chaudhary/fak/releases/latest>. The
-`curl | sh` installer covers macOS (amd64/arm64) and linux/amd64; Windows users
+`curl | sh` installer covers macOS (amd64/arm64) and linux (amd64/arm64); Windows users
 download the `.zip` manually.
 
-**linux/arm64 has no prebuilt binary** — build it from source:
+**linux/arm64 is a first-class published target** — the same pure-Go binary on a
+Raspberry Pi / Jetson / arm64 edge gateway as on a datacenter host (`CGO_ENABLED=0`, so
+nothing to port). Install it the same way as any other target (the one-line installer, or
+the manual download). To build a specific commit from source instead:
 
 ```bash
 git clone https://github.com/anthony-chaudhary/fak.git

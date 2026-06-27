@@ -77,7 +77,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
 - [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
 - [Always-on dogfood server](docs/fak/always-on-dogfood-server.md): run the kernel in front of the REAL dev loop 24/7 — the guarded dispatch fleet plus a shared `fak serve` gateway — across a laptop, an always-on Mac (launchd + caffeinate), and GCP; with the `dogfood_coverage.py` scorecard to measure it and the `FLEET_DOGFOOD_GUARD` kill switch.
-- [Lab dev loop](docs/fak/lab-dev-loop.md): develop fak ON a lab GPU box you choose and drive it from Slack — `fak guard --remote-serve <box>:8080 -- claude` runs a kernel-adjudicated dev turn whose inference is on the lab box, the private Slack bridge drives it out-of-band, and `fleetctl` folds the per-box report. The public/private boundary is a data contract, not a code import.
+- [Lab dev loop](docs/fak/lab-dev-loop.md): develop fak ON a lab GPU box you choose and drive it from Slack — `fak guard --remote-serve <box>:8080 -- codex` runs a kernel-adjudicated dev turn whose inference is on the lab box (the OpenAI wire `fak serve` exposes; the agent reads `OPENAI_BASE_URL`), the private Slack bridge drives it out-of-band, and `fleetctl` folds the per-box report. The public/private boundary is a data contract, not a code import.
 
 ## Supported (what fak works with)
 
@@ -113,6 +113,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Multi-agent coordination protocol (RFC)](docs/multi-agent-coordination-protocol.md): the single normative spec for agent-to-agent coordination — the message format (`a2achan`), the shared-state API (`sharedtask`), and the wave coordination primitives (`comm`/`agenttopo`) — every coordination act adjudicated on the same default-deny capability floor as a tool call. The D-007 (#241) capstone.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
 - [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
+- [The cross-platform spine (IoT to hyperscaler)](docs/explainers/cross-platform-spine.md): why the same pure-Go kernel is the invariant spine across the whole deployment spectrum — IoT, edge, laptop, hyperscaler — the way Linux is one kernel under a phone and a datacenter. The hardware specifics change; the agentic workload shape and the kernel's invariants (default-deny, bit-exact reuse, tamper-evident audit, one static binary) do not. Draws the deployment-substrate axis the scale and hardware-depth explainers leave implicit, grounded in shipped artifacts with honest fences on the constrained end.
 
 ## Security
 
@@ -350,7 +351,9 @@ on the parts of a real agent loop that get expensive or go wrong:
 [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). On a 50-turn × 5-agent run, `fak`'s
 reuse does **~4.1× less work than a tuned warm-cache stack** (and ~60× less than the
 naive re-send loop); reuse of the shared prompt prefix climbs to **6.95×** across the
-model ladder. The guard is cheap where it counts — the kernel's allow/deny decision is
+model ladder. (For speedup figures: 45× = Phase-0 batched-decode gate currently failing
+at 40.98×; ~60× = headline session wall-time vs naive stateless; ~1.5–4× = realistic gain
+vs tuned warm-cache stack.) The guard is cheap where it counts — the kernel's allow/deny decision is
 ~362 ns in-process per call (measured, Apple M3 Pro), not a network hop, and on the
 gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`) the in-kernel GPU decode holds
 ~120 tok/s on an RTX 4070 (SmolLM2-135M), at parity with llama.cpp Q8_0.
@@ -7402,7 +7405,15 @@ front of the engine. → [One binary is the whole surface](https://github.com/an
 | **Claude Code** / the Anthropic API or SDK | [`claude.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md) |
 | **Cursor** (IDE — MCP *or* OpenAI proxy) | [`cursor.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/cursor.md) |
 | **OpenAI Codex** / the OpenAI API or SDK | [`openai-codex.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai-codex.md) |
+| **VS Code + GitHub Copilot** (IDE — OpenAI/Anthropic proxy) | [`vscode.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/vscode.md) |
+| **Zed** (AI-native editor — OpenAI/Anthropic/MCP) | [`zed.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/zed.md) |
+| **JetBrains IDEs** (IntelliJ/PyCharm/WebStorm/… — OpenAI/Anthropic) | [`jetbrains.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/jetbrains.md) |
+| **Aider** (CLI pair-programmer, OpenAI wire) | [`aider.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/aider.md) |
+| **Cline** (VS Code — OpenAI-Compatible provider) | [`cline.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/cline.md) |
+| **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/continue.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
+
+**All guides requested in #87 (Claude Code, VS Code, Continue, Aider, Cline, Zed, JetBrains) are now complete and available above.**
 
 **Adopting from outside the repo?** The [adopter playbook](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/adopter-playbook.md) is the
 end-to-end, bare-serve production checklist — prerequisites → `policy.json` → auth-key
@@ -9058,10 +9069,13 @@ There are two useful fak entry points:
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
 proxy to an OpenAI Responses upstream with `--provider openai-responses`. The public
-gateway clients hit today are `/v1/chat/completions`, `/v1/messages`, `/mcp`, and
-`/v1/fak/*`. fak does not expose a client-facing `/v1/responses` route. For current
-Codex CLI/IDE sessions, use MCP first. For OpenAI-compatible SDKs and Chat Completions
-agents, use the base-URL proxy path below.
+gateway clients hit today are `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
+`/mcp`, and `/v1/fak/*`. fak now exposes a client-facing **`/v1/responses`** inbound
+route (#925): a Responses-API agent repoints its OpenAI base URL at fak and every
+proposed tool call crosses the kernel's capability floor, the same as the chat wire.
+It is **buffered** — a `stream:true` request is refused with a 400, so a client that
+needs SSE should use MCP. For current Codex CLI/IDE sessions either path works; for
+OpenAI-compatible SDKs and Chat Completions agents, use the base-URL proxy path below.
 
 ## Why this matters to Codex
 
@@ -9560,9 +9574,9 @@ the gateway's upstream client:
 Clients still call fak's supported inbound routes. That means:
 
 - OpenAI-compatible clients call `http://127.0.0.1:8080/v1/chat/completions`.
+- Responses-API clients (Codex CLI/IDE, `terminus`) call `http://127.0.0.1:8080/v1/responses`
+  — the buffered inbound Responses route (#925); use MCP instead if you need streaming.
 - Anthropic-wire clients call `http://127.0.0.1:8080/v1/messages`.
-- Codex CLI/IDE should use the MCP path unless fak grows a client-facing `/v1/responses`
-  route.
 
 ## Troubleshooting
 
@@ -12787,13 +12801,16 @@ fak version
 ```
 
 **Prebuilt release assets.** Releases attach static binaries for **linux/amd64**,
-**darwin/amd64**, **darwin/arm64**, and **windows/amd64** (each with a `.sha256`,
-plus an aggregate `SHA256SUMS`) at
+**linux/arm64**, **darwin/amd64**, **darwin/arm64**, and **windows/amd64** (each with a
+`.sha256`, plus an aggregate `SHA256SUMS`) at
 <https://github.com/anthony-chaudhary/fak/releases/latest>. The
-`curl | sh` installer covers macOS (amd64/arm64) and linux/amd64; Windows users
+`curl | sh` installer covers macOS (amd64/arm64) and linux (amd64/arm64); Windows users
 download the `.zip` manually.
 
-**linux/arm64 has no prebuilt binary** — build it from source:
+**linux/arm64 is a first-class published target** — the same pure-Go binary on a
+Raspberry Pi / Jetson / arm64 edge gateway as on a datacenter host (`CGO_ENABLED=0`, so
+nothing to port). Install it the same way as any other target (the one-line installer, or
+the manual download). To build a specific commit from source instead:
 
 ```bash
 git clone https://github.com/anthony-chaudhary/fak.git
@@ -13288,6 +13305,11 @@ or the VPC), never the public internet.
 
 > Source: `docs/fak/lab-dev-loop.md`
 
+---
+title: "Lab dev loop: develop fak on a remote box from Slack"
+description: "Run and develop fak on a remote lab GPU, driven from Slack: the kernel and dev turn stay public while the lab transport stays private."
+---
+
 # Lab dev loop — develop fak ON a lab box, drive it from Slack
 
 This is the end-to-end loop for **running and developing fak on lab compute you choose**,
@@ -13322,8 +13344,14 @@ JSON — not a code import. See [the GPU-server / Slack boundary](https://github
 a lab box you chose. The kernel still adjudicates every tool call locally on the box, but
 the model forward runs on the lab GPU. Port defaults to `8080` (the documented `fak serve`
 addr). It is shorthand for the OpenAI-compatible wire `fak serve` exposes, with the `/v1`
-suffix handled for you, and it **preflights `GET /healthz`** so a box that is not serving
-fails loud before the gateway binds rather than 502-ing on the first turn.
+suffix the chat route lives under added to the upstream base for you, and it **preflights
+`GET /healthz` AND `GET /v1/models`** so a box that is down — or that answers health but is
+not serving the `/v1` surface — fails loud before the gateway binds rather than 404-ing on
+the first turn.
+
+Because `--remote-serve` forces the OpenAI-compatible wire, the wrapped agent must be one
+that reads `OPENAI_BASE_URL` (Codex, OpenCode, Aider) — not Claude Code, which speaks the
+Anthropic wire (guard rejects `--remote-serve` with `--provider anthropic`).
 
 ```bash
 # on the lab box: serve a model in fak's own kernel on the GPU
@@ -13333,8 +13361,8 @@ FAK_Q4K=1 fak serve \
   --addr 0.0.0.0:8080
 
 # from the box (or the bridge session on it): run a kernel-adjudicated dev turn,
-# inference on this box's GPU, kernel local
-fak guard --remote-serve localhost:8080 -- claude
+# inference on this box's GPU, kernel local. The agent reads OPENAI_BASE_URL.
+fak guard --remote-serve localhost:8080 -- codex
 ```
 
 The banner shows the upstream as a **remote fak serve on a lab box** so you can see at a
@@ -13351,7 +13379,8 @@ in `fak-private`. The shape of the loop, with no lab identifiers, is:
 2. The bridge runs, on a persistent session on the box you chose:
    `cd <repo> && fak guard --remote-serve localhost:8080 -- <agent> '<task>'`.
 3. The box posts the guard exit summary back to the channel and writes one
-   `fak.fleet.report/v1` line into the reports directory.
+   `fak.fleet.report/v1` line into the reports directory (via `fak lab report`, or the
+   bridge's own writer) so `fak lab status` folds it into the public fleet view.
 
 Because the work runs in a session on the box, the body of the work never crosses Slack —
 only the task line in and the summary out. You drive it from anywhere; the compute stays
@@ -13359,12 +13388,36 @@ on the machine you picked.
 
 ## Folding the result (public)
 
-`fleetctl` reads the per-box report JSON the bridge wrote and gives you a bounded,
-readable fleet view and a 0–100 readiness score — see [fleet.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fleet.md):
+The fast front door is `fak lab status` — one command, no flags, that answers "which
+lab nodes are alive right now?" It ships a **generic** default roster (the lab boxes
+written down as `dgx-a`/`a100x8`/`lab`, never a real host or channel), folds the per-box
+report JSON against it, and renders the same bounded view + 0–100 readiness score
+`fleetctl` does (they share `internal/fleet`):
 
 ```bash
-fleetctl status --roster roster.json --reports DIR
+fak lab status            # the embedded roster, reports from ~/.config/fak/fleet/reports
+fak lab status --all      # add a per-box table
+fak lab ls                # just list the boxes in the roster
 ```
+
+When no live reports exist yet, `fak lab status` degrades **honestly** — every box reads
+`unknown` (not down) and it tells you how to populate liveness. The reports dir resolves
+`--reports` → `$FAK_FLEET_REPORTS` → `~/.config/fak/fleet/reports` (the bridge's drop
+path). The standalone `fleetctl status --roster R --reports DIR` is still there for an
+explicit roster/reports pair — see [fleet.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fleet.md).
+
+### Self-reporting a box (no bridge needed)
+
+A box can write its own `fak.fleet.report/v1` line with `fak lab report`, closing the
+loop for that box without the private bridge — useful on a box you can run `fak` on
+directly (the CPU GLM host, a Mac verify node):
+
+```bash
+fak lab report --id da-cpu --state live --version "$(fak version)"
+```
+
+Keep `--note` generic (no host/IP/channel/token) — it is rendered verbatim in the public
+fleet view.
 
 ## Boundary rules (do not trip)
 
@@ -14623,6 +14676,7 @@ One last honest note, the one the repo leads with. A prior-art audit found 0 of 
 - [Policy in the kernel](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/policy-in-the-kernel.md) — why a default-deny check on the call path beats an external recognizer that fails open.
 - [Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md) — how mid-run causal span eviction stays bit-exact.
 - [The O(1) context window](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/o1-context-window-economics.md) — when reconstructing a bounded context each turn beats leaning on the prefix cache.
+- [The cross-platform spine](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cross-platform-spine.md) — the third axis: the *same* kernel and the *same* invariants across the whole deployment substrate, from an IoT node to a hyperscaler, the way this doc's scale axis runs from one tool call to the fleet.
 - [The issue-dispatch loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/dispatch-loop.md) — the witness-gated fleet loop in full.
 - [The RSI loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/rsi-loop.md) — the self-improvement loop and its non-forgeable keep-bit.
 
@@ -16040,12 +16094,12 @@ what those optimizations are, which are common in production stacks, and fak's s
 
 A **tuned SOTA stack** is a production serving setup with these characteristics:
 
-1. **KV cache / prefix caching** — Reuse computation across requests with shared prefixes
-2. **Batched inference** — Process multiple requests simultaneously on the same GPU
-3. **Quantization** — Use lower-precision weights (Q8, Q4, Q2) to reduce memory and increase speed
-4. **Serving engine optimizations** — SIMD, fused kernels, optimized attention implementations
-5. **Multi-GPU / tensor parallelism** — Distribute large models across multiple GPUs
-6. **Paged attention** — KV cache management that handles varying context lengths efficiently
+ 1. **KV cache / prefix caching** — Reuse computation across requests with shared prefixes
+ 2. **Batched inference** — Process multiple requests simultaneously on the same GPU
+ 3. **Quantization** — Use lower-precision weights (Q8, Q4, Q2) to reduce memory and increase speed
+ 4. **SIMD / Fused Kernels** — CPU SIMD instructions and GPU fused kernels for faster matrix ops
+ 5. **Paged attention** — KV cache management that handles varying context lengths efficiently
+ 6. **Multi-GPU / tensor parallelism** — Distribute large models across multiple GPUs
 7. **Speculative decoding** — Use a smaller draft model to accelerate larger model decoding
 8. **Continuous batching** — Dynamic scheduling that adds/removes requests as they complete
 9. **Request routing** — Route requests to appropriate model tiers or endpoints
@@ -19393,7 +19447,7 @@ description: "Explains the internal/compute HAL seam that lets fak's in-kernel f
 
 # Hardware portability for the in-kernel forward pass — the `internal/compute` HAL seam
 
-> **Status:** the seam is shipped and now carries **two real device backends** beside the
+> **Status:** the seam is shipped and can carry **two real device backends** beside the
 > pure-Go CPU reference. `internal/compute` (the contract) registers `cpu-ref` (Reference),
 > plus `cuda` (Approx, `//go:build cuda`) and `vulkan` (Approx, `//go:build vulkan`) — each
 > proven on actual silicon: CUDA runs the in-kernel Llama decode on this box's RTX 4070
@@ -19608,6 +19662,245 @@ evidence. The existing R2/R14/oracle tests in `internal/model` remain the equiva
 for the reference path — they must stay max|Δ|=0, argmax-exact. Run the suite via WSL
 (`.\fak\test.ps1`) for full verification on Windows when native WDAC policy flakes unsigned test
 binaries on this host.
+
+---
+
+# The cross-platform spine (IoT to hyperscaler)
+
+> Source: `docs/explainers/cross-platform-spine.md`
+
+---
+title: "The cross-platform spine: one agent kernel from IoT to hyperscaler"
+description: "Why the same fak kernel is the invariant spine across the whole deployment spectrum — IoT, edge, laptop, hyperscaler — the way Linux is one kernel under an Android phone and a datacenter. The hardware changes; the workload shape and the invariants do not."
+slug: cross-platform-spine
+keywords:
+  - cross-platform agent kernel
+  - deployment spectrum
+  - IoT edge hyperscaler
+  - workload shape invariant
+  - one binary laptop to fleet
+  - hardware abstraction layer
+  - portable by construction
+---
+
+# The cross-platform spine — one kernel from a sensor to a datacenter
+
+Linux is one kernel. It runs the phone in your pocket, the Wi‑Fi router on your
+shelf, the car's infotainment head unit, and the rack of GPUs training the model
+on that phone. The silicon underneath spans four orders of magnitude in power and
+price, and almost none of the kernel changes to cross that range. The drivers at
+the bottom differ; the system-call contract in the middle does not. That stable
+middle — the same `read`, `write`, `mmap`, the same process and scheduling model
+on every box — is the **spine**. It is why "learn Linux once" pays off from a
+Raspberry Pi to a hyperscaler, and why an application written against the contract
+runs on hardware its author never owned.
+
+Agents are arriving at the same shape, and they need the same kind of spine.
+
+The thesis of this page: **`fak` is that spine for the agentic workload.** The
+deployment target changes enormously — a battery-powered IoT box, an edge gateway,
+a laptop, a fleet of datacenter GPUs — but the *workload shape* (an agent running a
+loop that proposes tool calls a kernel must adjudicate) and the *invariants the
+kernel keeps* (default-deny on every call, bit-exact reuse of work already done, a
+tamper-evident line per decision) do not change shape with the hardware. So the
+same kernel is present at every point on the spectrum, and an operator who learns
+it on a laptop already knows it on a fleet. This is the cross-platform claim, drawn
+one axis wider than the two the rest of the docs draw.
+
+*Who this is for:* anyone deciding where an agent will run and worrying they'll
+need a different stack at each scale. No prior `fak` knowledge needed beyond the
+one-line idea — the model proposes a tool call, the kernel disposes. By the end
+you'll be able to name what stays invariant across the whole deployment spectrum,
+why that invariance is structural rather than aspirational, and the honest edge of
+where it stops.
+
+## The three axes (and the one this page adds)
+
+The repo already draws two axes of "the same rule, everywhere":
+
+- **The scale axis** ([engineering is building loops](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/engineering-is-building-loops.md)):
+  the same observe → decide → act → verify shape, and the same trust invariant,
+  recurs from one tool call up through the turn, the session, the fleet, and the
+  loop that improves the loop. That axis is *internal* — it's about how much of the
+  stack lives in one address space.
+- **The depth axis** ([hardware portability](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md)): the
+  in-kernel forward pass runs on a CPU reference, then CUDA, Vulkan, or Metal, by
+  *registration* against the `internal/compute` HAL rather than a re-fork. That
+  axis is about *which silicon runs the matmul*.
+
+This page draws a third: **the deployment-substrate axis.** Not "which chip runs
+the matmul," but "what *kind of box* is this, and how big" — from a microcontroller-
+class edge node to a multi-GPU datacenter host. The claim is that the kernel is
+invariant along this axis the same way it is along the other two, and for the same
+structural reason: the part that changes is pushed below a contract, and the part
+above the contract is the spine.
+
+```
+            THE DEPLOYMENT-SUBSTRATE AXIS
+   (hardware specifics change ->; the spine does not)
+
+   IoT / MCU-class   edge gateway     laptop / desktop   hyperscaler
+   sensor+actuator   Pi / Jetson      dev box            8-GPU host, fleet
+   --------------    -------------    ----------------    ---------------
+   ^ HARDWARE: power, RAM, ISA, accelerator, network — all change 1000x
+
+   ====================== THE SPINE (invariant) =======================
+   tool call = syscall   |  default-deny capability floor (fail closed)
+   result quarantine     |  bit-exact KV reuse / addressable eviction
+   tamper-evident audit  |  one static pure-Go binary, CGO_ENABLED=0
+   deterministic verdict |  same wire (OpenAI / Anthropic / MCP)
+   ====================================================================
+
+   v WORKLOAD SHAPE: an agent loop proposing tool calls — same at every box
+```
+
+## Why the workload shape is invariant even when the hardware isn't
+
+The goal that motivates this page is a real observation about the field: the
+*hardware specifics* of where agents run are diverging fast (NPUs on phones,
+microcontrollers with TinyML, Vulkan desktops, Ampere/Hopper datacenters), but the
+*shape of the work* is converging. Wherever it runs, an agent is a loop:
+
+1. it observes some bytes (a sensor reading, a file, an API response),
+2. it orients (assembles context for this step),
+3. it **proposes an action** — a tool call,
+4. something must decide whether that action is allowed, and
+5. it acts and verifies.
+
+Step 3 → 4 is the load-bearing seam, and it has the *same security and economic
+structure on every box*. On a $35 edge node a malicious sensor reading can drive
+the local agent to exhaust the battery or actuate a relay it shouldn't; on a
+datacenter host a poisoned tool result can walk into a shared context and corrupt a
+fleet. Different blast radius, identical mechanism: an untrusted program proposing
+an effect that a gate must adjudicate **before** it happens, failing closed, and
+leaving an auditable record. That is a syscall boundary, and it does not get
+simpler or more complex with the size of the box — it just *is* the shape of the
+work. A kernel that owns that boundary is therefore the same kernel at every scale.
+
+This is exactly the Linux insight. The reason one kernel spans a phone and a
+datacenter is not that Linux is magic; it's that "a process makes a system call the
+kernel must mediate" is the invariant shape of computation on shared hardware, and
+Linux is the thing that owns that shape. fak's bet is that "an agent proposes a
+tool call the kernel must adjudicate" is the invariant shape of *agentic*
+computation, and that owning that shape — not the token throughput below it — is
+what earns a spine.
+
+## What the spine actually is — five invariants, all shipped
+
+The spine is not a slogan; it is a specific, small set of properties that are the
+same artifact on every target. Each is grounded in shipped code, and each is
+*hardware-independent by construction*, which is what lets it be invariant across
+the substrate axis.
+
+| Invariant | Why it doesn't change with the box | Where it lives |
+|---|---|---|
+| **One static pure-Go binary, zero deps, `CGO_ENABLED=0`** | Nothing to link or port; the same ~13 MB artifact cross-compiles to every target. The arm64 NEON Q8 path is the same one Apple silicon ships, so the edge build is not a special build. | `go.mod` (stdlib only, no `go.sum`); `release-artifacts.yml` (5 static targets incl. `linux/arm64`); `internal/model/quant_arm64.go` |
+| **Default-deny capability floor, fail closed** | The lever is never wired up rather than caught after the fact, so it costs the same whether the model is a 1.5B on a Pi or a frontier API. The same booby-trapped policy walls identically across a weak cloud model and a local CPU model. | `internal/adjudicator`, `internal/policy`, `POLICY.md`, `docs/repro-packet.md` |
+| **Result quarantine at the write-time boundary** | A poisoned tool result is held out of context by structure, not by a classifier — identical logic whether the "tool" is a sensor on an untrusted bus or a cloud API. | `internal/ctxmmu/mmu.go` |
+| **Bit-exact KV reuse + addressable eviction** | The deterministic metrics (token-count reuse, evict == never-saw at `max\|Δ\|=0`) are hardware-independent and reproduce **byte-for-byte** across arm64 and x86_64. | `internal/model/kvcache.go`, `internal/kvmmu`; cross-platform witness in `HARDWARE-MATRIX.md` |
+| **Tamper-evident audit: append-only, SHA-256 hash-chained** | One verifiable line per decision, the same on a regulated edge device and a fleet host; verified offline with `fak audit verify`. | `internal/journal/journal.go`, `docs/proofs/journal.md` |
+
+Notice what is *not* on that list: tokens per second. The spine is the governance,
+reuse, and provenance band — the half of the stack a fast token engine
+([vLLM/SGLang/llama.cpp](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/one-binary-one-surface.md)) deliberately leaves empty.
+Below the spine, the substrate-specific half is exactly where the **HAL**
+([hardware portability](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md)) and the **engine seam**
+(`EngineDriver`, the `--base-url` proxy) live: a CUDA kernel on the datacenter
+host, a Metal kernel on the laptop, a phone-native NPU runtime behind the gate on a
+handset, a CPU-only forward pass on the Pi. The hardware-specific part is pushed
+*below the contract*; the part above it is the same everywhere. That split is the
+whole portability mechanism, and it is the same split Linux uses: drivers below,
+syscall contract above.
+
+## Reading the spectrum end to end
+
+The same kernel, four very different boxes, one contract:
+
+- **IoT / constrained edge node** (battery, small RAM, an MCU-class or low-end
+  arm64 SoC, often air-gapped). The win here is the part fak ships and the part the
+  platform leaves thin: a default-deny gate the on-device model can't argue past, a
+  poisoned-result fence, and a tamper-evident log — all CPU-only, all offline. The
+  compute is somebody else's (a vendor NPU runtime behind the gate, or a tiny CPU
+  model). *Honest edge: there is no measured RAM/power footprint on a real Pi or
+  Jetson yet, and no 32-bit-ARM or phone-NDK binding — these are named net-new work
+  in the [mobile/edge/IoT strategy note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MOBILE-EDGE-IOT-STRATEGY-2026-06-24.md),
+  not shipped claims.*
+- **Edge gateway** (Pi 5 / Jetson Orin / arm64 industrial gateway). With
+  `linux/arm64` now a published release target, "download fak on an arm64 edge box"
+  is a true statement backed by an official binary, not a build step. The
+  determinism guarantee says the *verdicts* are bit-identical to the laptop, so
+  porting risk is structurally low.
+- **Laptop / desktop** (the dev box). The canonical adoption rung: `fak serve`
+  fronts a local Ollama/llama.cpp/LM Studio, or runs the small in-kernel reference
+  model. Same binary, same flags as production minus the hardening switches.
+- **Hyperscaler / fleet** (multi-GPU host, many sessions). The same `fak serve`
+  plus `--policy floor.json`, `--require-key-env`, Prometheus scrape, and the
+  cross-session shared-KV reuse that pays off most when the fan-out is widest. The
+  multi-GPU serving lane is the [hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) Platform 4.
+
+You don't graduate from a dev tool to a different production system as you climb,
+and you don't strip down to a different embedded build as you descend. You add or
+remove flags. That "same binary, two scales" property
+([one binary is the whole surface](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/one-binary-one-surface.md)) is exactly the same
+property as "same kernel, two ends of the substrate axis" — this page is just that
+claim drawn all the way down to the constrained end, not only up to the fleet.
+
+## Why this is structural, not a marketing reframe
+
+Three properties make the spine real rather than aspirational, and all three are
+the *same* properties that make Linux portable:
+
+1. **The hardware-specific part is below a typed contract.** The seven CPU-monoculture
+   assumptions are lifted into the `internal/compute` types, so a new accelerator is
+   a `Backend` registration, not an edit to the forward loop. A new wire is a new
+   handler, not a new core. A new engine is an `EngineDriver`, not a fork. The spine
+   above the contract never sees the silicon below it.
+2. **The invariants are independent of the silicon by construction.** Default-deny,
+   quarantine, and the hash-chain are pure-Go logic with no hardware dependency;
+   the deterministic reuse metrics are *proven* byte-for-byte identical across two
+   ISAs (the Mac↔Windows reproduction in `HARDWARE-MATRIX.md`). Invariance isn't
+   claimed — it's witnessed.
+3. **The artifact is one statically-linked binary with no dependency tree.** There
+   is no Python env to drift, no CUDA/PyTorch pin to match per target, no libc to
+   match. The supply-chain surface is identical on a Pi and a fleet host: one file
+   to pin and audit. That is what makes "the same artifact everywhere" literally
+   true rather than "a similar artifact, rebuilt per platform."
+
+## The honest fences
+
+This page widens an existing, honest story; it does not smuggle in new claims.
+
+- **The spine is the governance/reuse/provenance band, not throughput.** fak is not
+  a faster token engine on *any* box, large or small, and does not try to be
+  (`README.md`, [`FAQ`](https://github.com/anthony-chaudhary/fak/blob/main/docs/FAQ.md)). The compute half is the substrate-specific
+  half the HAL and the engine seam own; on constrained hardware that half is the
+  vendor's runtime, not fak.
+- **The constrained end is partly published, partly net-new.** `linux/arm64` is now
+  a first-class release target and the determinism story makes the verdicts
+  portable by construction — but there is no measured footprint on real Pi/Jetson
+  hardware, no 32-bit ARM, and no Android-NDK/iOS bindings yet. Those gaps are
+  enumerated, not hidden, in the [strategy note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MOBILE-EDGE-IOT-STRATEGY-2026-06-24.md).
+- **The cache-reuse multiples are self-host only.** An app that merely *calls* a
+  frontier API from an edge box gets the gate, the quarantine, and the audit line,
+  but not the KV-reuse savings — those need fak to own the cache.
+- **0 of 29 primitives are novel** (`CLAIMS.md`). The contribution here is the same
+  as everywhere in the repo: the *assembly*. The new framing is that the assembly is
+  invariant across the deployment substrate too, not only across the internal scale
+  and hardware-depth axes — the crossing point is one kernel present at the most
+  *kinds of box*, carrying the same invariant through all of them.
+
+## Read next
+
+- [One binary is the whole surface](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/one-binary-one-surface.md) — the same-binary,
+  laptop-to-fleet operational claim this page extends down to the IoT end.
+- [Hardware portability via the compute HAL](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md) — the depth
+  axis: how a new accelerator plugs in by registration, the contract under the spine.
+- [Engineering is building loops](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/engineering-is-building-loops.md) — the scale
+  axis and the two-axis grid this page adds a third axis to.
+- [Mobile / edge / IoT strategy](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MOBILE-EDGE-IOT-STRATEGY-2026-06-24.md) —
+  the go-to-market for the constrained end, with the honest net-new inventory.
+- [Hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) — every box fak's gates have been proven
+  on, and the cross-platform bit-exact determinism witness.
 
 ---
 
@@ -20225,7 +20518,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 
 > **🧠 The *why*:** `WHY-REUSE-WINS-2026-06-21.md` (private companion — not published) (v1) argues — and stress-tests — *why* these reuse numbers matter more than the headline alone: reuse is a **different class** of optimization (work-elimination on the `N` axis, not work-acceleration on the `κ` axis), so it's **exact, training-free, and composes multiplicatively** on top of every per-token trick. Follows the v2 SOTA-only framing — leads with the absolute competitive number (**19.0 min vs 78 min = 4.1× less work**, conservative marginal 2.4–2.7×), shows **no naive-loop numbers**, and centers cross-agent reuse as the layer that is `fak`'s. No new numbers; fences where the "works across everything / no fine-tuning" framing is overstated (and where addressable reuse, [#228](https://github.com/anthony-chaudhary/fak/issues/228), widens it).
 
-**Last updated:** 2026-06-25
+**Last updated:** 2026-06-27
 **Status:** Living document — update when new model results ship
 
 > **🔁 Provenance vs. public reproducibility (read before you `git show` a commit below).**
@@ -20264,6 +20557,8 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | Qwen3.6-27B fak **Metal Q4_K** decode / prefill | **1.2 / 0.6 tok/s** (0.16× / 0.012× of SOTA) | Qwen3.6-27B q4_k_m, M3 Pro (`-tags fakmetal`, `FAK_Q4K=1 FAK_METAL=1`, llama-server stopped) | llama.cpp Metal 7.29 / 51.55 | _this commit_ | `runs/by-machine/node-macos-a/20260626T055239Z-q4k-metal-decode-27b/score.json` — kernels are **bit-correct** (GEMV cosine 1.000000, greedy token-parity vs CPU) but decode is launch-bound: ~336 per-token command-buffer GEMVs @ ~360 µs fixed overhead each (epic #59 / #67), plus low kernel util (GEMV 32 GB/s ≈21% BW, GEMM 364 GFLOP/s ≈5%). Lever = one-command-buffer resident decode forward + kernel pass. Full diagnosis: `docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md` |
 | Qwen3.6-27B token parity | 2-token match (drift @3) | Qwen3.6-27B q4_k_m | llama.cpp oracle | `d03be46` | `model-ladder/qwen36-resident-q4k-parity-20260619.json` |
 | Qwen3.6-27B surface smoke | 4/4 surfaces PASS | Qwen3.6-27B (served) | agent/gateway/mcp/dogfood | `8a0f5bc` | `model-ladder/qwen36-surfaces-dogfood-opencode-20260619.json` |
+| **Qwen3.6-27B 8-GPU SGLang serving — fak-gateway vs raw-SGLang (model-ladder Rung 4 headline, [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak C=64: fak-gateway 1085.6 vs raw-SGLang 1451.6 completion tok/s = 0.75×; gateway tax converges to ~3% at saturation (C=128: 1074.4 vs 1103.2 = 0.97×); 3/3 fak surfaces PASS (agent / gateway-OpenAI single-stream decode 59.3 tok/s / MCP-HTTP)** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8-GPU datacenter server | raw SGLang 0.5.10.post1 (TP=8, bf16) | `a2559041` | `experiments/qwen36/dgx-r4-20260622/compare.json` (+ `COMPARE.md`, `fak-gateway.json`, `raw-sglang.json`, `surface-smoke.json`); results doc `docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md`. **SGLang-serves + fak-adjudicates, NOT fak's native CUDA engine** (no quantized multi-GPU 27B path yet; f32 27B is 108 GB > 80 GB). fak's axis is the adjudication/coherence/measurement plane, not raw tok/s — the gateway tax is the cost of mediation and amortizes to ~3% at load. Marker-compliance caveat: the load harness requires a literal `FAK_DGX_REQ_` echo the reasoning model emits only ~35–66% of the time, so throughput is over the compliant subset (`--max-error-rate 0.9`); per-point ok/requests in the JSONs (C=64: fak 55/64, raw 59/64). Single-stream rates ≪ batched and not fak's axis |
+| **Qwen3.6-27B cold standup on 8×DGX-A100-40GB — raw-SGLang serving baseline (Rung-4 fresh-standup witness, [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak 820.5 completion tok/s @ C=64 (16.5k total tok/s incl. prompt) · 0 errors across all 6 points C=1→64 · single-stream 77.8 completion tok/s @ C=1** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8×A100-SXM4-40GB, TP=8 | raw SGLang (`--tp 8 --mem-fraction-static 0.85`), cold standup from all-GPUs-idle (0 MiB) | _this commit_ | `experiments/qwen36/dgx-standup-27b-20260624/raw-sglang.json` (`fak.dgx-endpoint-bench.v1`, 6-point sweep + 8×A100 topology/driver provenance) + `STANDUP.md` (narrative) + `samples.json` (3 live temperature-0 completions). **Cold-standup witness**: at start all 8 GPUs idle and nothing on `:30000`; weights load + CUDA-graph capture, then a real OpenAI-compatible sweep. This is the **raw SGLang serving baseline** (fresh bring-up proof), NOT a fak-gateway number — the gateway-tax comparison is the dgx-r4 Rung-4 row above. C=64 cap ⇒ 820.5 is a floor, not a ceiling (throughput still climbing monotonically at the top of the sweep); the wider C=128 sweep on the same box is the dgx-r4 row (raw 1451.6 @ C=64 → 1103.2 @ C=128). Marker gate disabled (`--no-require-response-marker`: the reasoning model echoes the literal `FAK_DGX_REQ_` only ~35–66% of the time), throughput measured over completed requests (`errors=0` at every point) |
 | Synthetic model live ratio | 1.64× | 64h/4L wiring | Full re-prefill | `a200c3d` | `radixbench-synthetic.json` |
 | **GPU Q8 decode (Vulkan, RX 7600)** | **24.6 tok/s · 1.49× vs GPU f32** | SmolLM2-135M Q8 | Same forward, f32 weights on GPU | `60db592` | `q8gpu-smollm2-135m-{gpu-q8,gpu-f32}-20260619.json` |
 | **GPU/CPU Q8 decode crossover** | **CPU lead 7.2× (135M) → 1.16× (1.5B)** | SmolLM2-135M → Qwen2.5-1.5B Q8 | CPU Q8 (legacy) | `7bf666b` | `crossover-qwen2.5-1.5b-{gpu,cpu}-q8-20260619.json` |
@@ -21096,7 +21391,7 @@ determinism check that proves the deterministic metrics are not arm64-specific.
 - **F16 parity** — Qwen2.5-1.5B f16 **36.6 tok/s** vs llama.cpp F16 34.3 (parity);
   SmolLM2-135M **~100–120 tok/s** (CUDA Graph).
 - **Batched multi-user decode curve** — SmolLM2-135M Q8 peaks at **862 agg tok/s** at
-  batch 512, **44.92×** over the naive f32 serial baseline.
+  batch 512, **44.92×** over the unbatched f32-serial baseline.
   → [`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md)
 - **Cross-platform bit-exact determinism** — the RadixAttention deterministic fields
   reproduce **byte-for-byte on Windows x86_64** vs the Mac arm64 artifact (hit 86.7%,
@@ -22980,7 +23275,9 @@ throughput, the 45x fleet claim, or a win over a long-lived policy sidecar. The
 spawned baseline is intentionally a worst-case boundary-tax control; an
 in-process function beating a process spawn is expected. The production gates
 remain Phase 0 clean-node reproduction and Phase 1 non-reference backend plus
-7-9B local-GPU evidence.
+7-9B local-GPU evidence. (For speedup figures: 45× = Phase-0 batched-decode gate
+currently failing at 40.98×; ~60× = headline session wall-time vs naive stateless;
+~1.5–4× = realistic gain vs tuned warm-cache stack.)
 
 The vDSO hit-rate (~0.5 on the cache-favorable demo trace; ~0.7% addressable on
 real tau2-airline) and the 47% token delta are reported as **soft secondaries**,
@@ -24940,7 +25237,7 @@ choosing a GPU path.
 |---|---|---|---|---|
 | `FAK_GPU_BUDGET_MB` | int, MiB | unset / `0` / invalid = **unbounded** for budgeted weight-upload paths | The **Spills** lever. Cap device-local weight residency on a card whose VRAM is smaller than the weight set; weights past the cap spill *in upload order* (early/hot layers stay device-local, the cold tail spills by choice instead of losing the allocation race): Vulkan uses host-visible memory, CUDA uses managed memory. | `internal/compute/vulkan.go:57`, `internal/compute/cuda.go:185` |
 | `FAK_VULKAN_SPIRV` | filesystem path (compiled SPIR-V dir) | unset = **Vulkan backend not registered** | Point at the compiled shader dir to register and use the Windows Vulkan backend at runtime. `build_vulkan.ps1` sets it after a build. Without it, `init()` returns early and only the Reference floor is available. (Requires the `vulkan` build tag.) | `internal/compute/vulkan.go:28` |
-| `FAK_METAL` | flag (set/unset) | unset (CPU prefill) | Apple GPU: route the resident-Q4_K hybrid **prefill** q4_k GEMMs through the Metal dequant-GEMM (Qwen3.6-27B path). Needs `-tags fakmetal`; a no-op on the pure-Go build. Decode stays on CPU. | `cmd/fakchat/main.go:205` |
+| `FAK_METAL` | flag (set/unset) | unset (CPU forward) | Apple GPU. In `fak serve` it is the env-equivalent of `--metal`: with `--gguf` and no `--base-url` it runs the in-kernel chat through the metalgemm GPU — **prefill + GPU-resident Q8 decode** on a dense Qwen-class Q8 model (#67). In `cmd/fakchat` it routes the resident-Q4_K hybrid **prefill** q4_k GEMMs through the Metal dequant-GEMM (Qwen3.6-27B path; decode stays CPU there). Needs `-tags fakmetal`; a no-op on the pure-Go build (and `fak serve --metal` **fails loud** if requested without the build/device, rather than serving on CPU). | `cmd/fak/serve.go` (`--metal`/`resolveServeMetal`), `cmd/fakchat/main.go:205` |
 | `FAK_CUDA_GRAPH` | `1`-flag | off | Enable the reusable-CUDA-graph decode path — the load-bearing GPU lever, not a marginal toggle. On a model that fits the GPU it captures the decode op stream once and replays it via `cudaGraphExecUpdate`, collapsing ~600 host launches/token into one: a **16× decode speedup (7.5 → ~120 tok/s), at parity with `llama.cpp` Q8_0** (`GPU.md` §3b). Off by default because the path pins a **fixed-capacity (1024-position) device KV** so capture never hits a `cudaMalloc`; dynamic/ring KV is the follow-up. (The earlier per-token *re-instantiate* approach was the measured no-win — not this reusable path.) | `internal/compute/cuda.go:191` |
 | `FAK_CUDA_Q8` | `1`-flag | off | `gpucheck`: exercise the CUDA Q8 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
 | `FAK_CUDA_F16` | `1`-flag | off | `gpucheck`: exercise the CUDA f16 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
@@ -25916,6 +26213,11 @@ python3 tools/fleet_supervisor_watchdog.py
 
 > Source: `docs/private-comms-channel.md`
 
+---
+title: "Private comms channel (public stub)"
+description: "A public stub that names fak's private Slack control-bridge to the lab GPU servers and shows how to reach it, without leaking any host, channel, or token."
+---
+
 # Private comms channel (stub → `fak-private`)
 
 **This is a stub.** It names the private comms channel and tells you how to reach it.
@@ -25969,6 +26271,11 @@ gate refuses it (see [the boundary doc](https://github.com/anthony-chaudhary/fak
 # GPU-server / Slack boundary
 
 > Source: `docs/dgx-slack-boundary.md`
+
+---
+title: "GPU-server / Slack boundary: public vs private"
+description: "The source of truth for what is public versus private in fak's GPU-server work, and the scrub and file-admission gates that enforce the boundary."
+---
 
 # GPU-Server / Slack Boundary
 
@@ -26156,7 +26463,8 @@ speeds are beside the point):
 - **By agents / sessions:** the cross-agent saving is **exactly zero with one agent**.
   It turns positive at the **2nd** agent sharing the prompt and keeps climbing. At **50
   agents over 50 turns** it removes on the order of **thousands** of duplicate tool
-  round-trips. The per-agent benefit flattens out past a few hundred agents.
+  round-trips (**2,344 of 2,500** in the measured 50×50 read-fleet run). The per-agent
+  benefit flattens out past a few hundred agents.
 - **One big "but": read-heavy fleets only.** If agents frequently *write to or change*
   the shared state, this cross-agent sharing can turn into a **net loss** (even a ~1%
   write rate can flip it negative on the default setting). It's a win for read-heavy
@@ -26184,7 +26492,7 @@ For the measured 50-turn × 5-agent run:
 
 - **Time:** the naive path is "start after dinner, check tomorrow." The fused path is
   "run it during a meeting." Same model, same tokens, same answers.
-- **Machines:** to make the naive path finish in the same ~19 minutes by brute force, you
+- **Machines:** to make the naive path finish in the fused path's ~19 minutes by brute force, you
   would need roughly **60 identical boxes** doing duplicate work. With the fused path, the
   measured run fits on **one** box. Against a competent warm-cache setup, the gap is
   smaller but still meaningful: roughly **4 boxes of tuned single-tenant work** versus one
@@ -26336,7 +26644,7 @@ runtime (`fak serve --policy FILE`, also on `run`/`agent`/`preflight`; author/va
   opt-in setting. See [`fak/GPU.md`](https://github.com/anthony-chaudhary/fak/blob/main/GPU.md).)
 - **STUB (labeled):** zero-copy KV co-residence with an *external* serving engine and the
   fine-tuned syscall model are frozen ABI seams, not built in v0.1–0.2.
-- **Not novel, and we say so:** a 29-claim, 61-agent prior-art audit scored **0/29
+- **Not novel, and we say so:** a 29-claim prior-art audit (run as a 61-worker DOS research workflow) scored **0/29
   NOVEL**. Every primitive is established or emerging. **The contribution is the
   *assembly***: a fused, fail-open, witness-gated kernel with the tool call promoted to
   an in-process syscall, rather than any single mechanism.
@@ -26352,7 +26660,7 @@ battery** (`agentdojo`, replacing the static fixture). Three things are genuinel
 
 - Generalizing to a full attack matrix (× the model ladder).
 - Wiring the **KV-quarantine bridge** into the live loop (proven today on a synthetic model).
-- The honest detector residual. It is ~100% evadable by design, non-load-bearing under
+- The honest detector residual. It is deliberately evadable by design, non-load-bearing under
   the capability floor, but the ceiling on the "uninjectable" framing.
 
 ---

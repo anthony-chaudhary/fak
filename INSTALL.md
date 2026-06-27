@@ -22,9 +22,10 @@ status](#about-go-install) are at the end.
 Next: once `fak` is on your PATH, the [first-session tutorial](docs/fak/tutorial.md)
 walks you from the binary to your first adjudicated tool call — fully offline, no key or GPU.
 
-The published targets are **`linux/amd64`, `darwin/amd64`, `darwin/arm64`,
-`windows/amd64`**. Each `vX.Y.Z` release attaches one archive per target plus a
-`SHA256SUMS` file; the release workflow that produces them is
+The published targets are **`linux/amd64`, `linux/arm64`, `darwin/amd64`,
+`darwin/arm64`, `windows/amd64`** — the same pure-Go binary on a Raspberry Pi / Jetson /
+arm64 edge gateway as on a datacenter host. Each `vX.Y.Z` release attaches one archive
+per target plus a `SHA256SUMS` file; the release workflow that produces them is
 [`.github/workflows/release-artifacts.yml`](.github/workflows/release-artifacts.yml).
 
 ---
@@ -167,8 +168,8 @@ gateway.
 
 ## Build from source
 
-If your platform isn't a published target (e.g. `linux/arm64`), or you want to build a
-specific commit, the Go module is the repository root:
+If your platform isn't a published target (e.g. 32-bit `linux/arm`), or you want to build
+a specific commit, the Go module is the repository root:
 
 ```sh
 git clone https://github.com/anthony-chaudhary/fak.git

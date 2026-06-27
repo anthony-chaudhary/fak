@@ -107,6 +107,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Multi-agent coordination protocol (RFC)](docs/multi-agent-coordination-protocol.md): the single normative spec for agent-to-agent coordination — the message format (`a2achan`), the shared-state API (`sharedtask`), and the wave coordination primitives (`comm`/`agenttopo`) — every coordination act adjudicated on the same default-deny capability floor as a tool call. The D-007 (#241) capstone.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
 - [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
+- [The cross-platform spine (IoT to hyperscaler)](docs/explainers/cross-platform-spine.md): why the same pure-Go kernel is the invariant spine across the whole deployment spectrum — IoT, edge, laptop, hyperscaler — the way Linux is one kernel under a phone and a datacenter. The hardware specifics change; the agentic workload shape and the kernel's invariants (default-deny, bit-exact reuse, tamper-evident audit, one static binary) do not. Draws the deployment-substrate axis the scale and hardware-depth explainers leave implicit, grounded in shipped artifacts with honest fences on the constrained end.
 
 ## Security
 

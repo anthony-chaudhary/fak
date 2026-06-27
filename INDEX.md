@@ -55,6 +55,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Partitioning](PARTITION.md) — how the kernel splits work across lanes and leaves.
 - [Extending fak](EXTENDING.md) — plug in an optimization, prove it correct, prove it faster.
 - [SOTA comparison](SOTA-COMPARISON.md) — where fak sits next to the state of the art.
+- [The cross-platform spine (IoT to hyperscaler)](docs/explainers/cross-platform-spine.md) — why the same pure-Go kernel is the invariant spine across the whole deployment spectrum (IoT, edge, laptop, hyperscaler), the way Linux is one kernel under a phone and a datacenter: the hardware specifics change, the agentic workload shape and the kernel's invariants do not. The deployment-substrate axis, alongside the scale axis ([loops](docs/explainers/engineering-is-building-loops.md)) and the hardware-depth axis ([HAL](docs/explainers/hardware-portability.md)).
 - [Interoperability stance](docs/integrations/interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the floor) + the honest per-wire grade for the flagship harnesses and every interop protocol.
 - [Agent-to-agent value](docs/a2a-value-opportunities.md) — where the cross-agent cache pays off.
 - [Multi-agent coordination protocol (RFC, D-007)](docs/multi-agent-coordination-protocol.md) — the normative spec binding message passing (a2achan), shared state (sharedtask), and coordination primitives (comm) under one default-deny floor.

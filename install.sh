@@ -50,10 +50,9 @@ case "$arch" in
   arm64|aarch64) GOARCH=arm64 ;;
   *) err "unsupported arch '$arch' — see INSTALL.md §2 (Manual download), or build from source: go build ./cmd/fak" ;;
 esac
-# Only the four published targets exist; linux/arm64 + windows are not built today.
-if [ "$GOOS" = linux ] && [ "$GOARCH" = arm64 ]; then
-  err "no prebuilt linux/arm64 binary yet — build from source: go build ./cmd/fak"
-fi
+# Every combination the OS/arch cases above can produce — {linux,darwin}/{amd64,arm64} —
+# is now a published .tar.gz target, including linux/arm64 (Raspberry Pi / Jetson / arm64
+# gateway). Windows already errored in the OS case above (it ships a .zip, not this tarball).
 
 # --- resolve version -----------------------------------------------------------
 VERSION="${FAK_VERSION:-}"

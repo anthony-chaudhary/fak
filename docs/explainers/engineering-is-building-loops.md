@@ -245,5 +245,6 @@ One last honest note, the one the repo leads with. A prior-art audit found 0 of 
 - [Policy in the kernel](policy-in-the-kernel.md) — why a default-deny check on the call path beats an external recognizer that fails open.
 - [Addressable KV cache](addressable-kv-cache.md) — how mid-run causal span eviction stays bit-exact.
 - [The O(1) context window](o1-context-window-economics.md) — when reconstructing a bounded context each turn beats leaning on the prefix cache.
+- [The cross-platform spine](cross-platform-spine.md) — the third axis: the *same* kernel and the *same* invariants across the whole deployment substrate, from an IoT node to a hyperscaler, the way this doc's scale axis runs from one tool call to the fleet.
 - [The issue-dispatch loop](../dispatch-loop.md) — the witness-gated fleet loop in full.
 - [The RSI loop](../rsi-loop.md) — the self-improvement loop and its non-forgeable keep-bit.
