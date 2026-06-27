@@ -84,7 +84,7 @@ integer token counts, identical on any model since they depend only on the token
 | workload (SGLang shape) | reqs | hit rate | prefill-token speedup | inside SGLang 50–99%? |
 |---|---|---|---|---|
 | **few-shot** (MMLU 5-shot: N share a preamble) | 16 | **88.2 %** | 8.50× | ✅ |
-| **multi-turn chat** (each turn reuses full history) | 8 | **79.5 %** | 4.89× | ✅ |
+| **multi-turn chat** (each turn reuses full history; 8 turns vs paper's 4) | 8 | **79.5 %** | 4.89× | ✅ |
 | **tree-of-thought** (ToT/GSM-8K: branching, siblings share ancestors) | 27 | **77.2 %** | 4.40× | ✅ |
 | **agents** (ReAct: C concurrent agents share a system prefix) | 30 | **86.7 %** | 7.50× | ✅ |
 
