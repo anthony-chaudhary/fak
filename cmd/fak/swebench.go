@@ -55,6 +55,8 @@ func cmdSwebench(argv []string) {
 		cmdSwebenchDeepSWEContract(rest)
 	case "sota-snapshot":
 		os.Exit(runSwebenchSotaSnapshot(os.Stdout, os.Stderr, rest))
+	case "cache-witness":
+		cmdSwebenchCacheWitness(rest)
 	case "-h", "--help", "help":
 		swebenchUsage()
 	default:
@@ -116,6 +118,16 @@ usage:
         Emit the DeepSWE/R2E-Gym raw-vs-fak pre-run contract: same task ids, same
         adapter, same model id and budget, raw/fak endpoint routing, official grader
         commands, and the gates that must pass before any result claim is allowed.
+
+  fak swebench cache-witness [--gateway URL | --metrics-file PATH] [--out FILE]
+        Scrape a live fak serve gateway's /metrics and fold the in-kernel KV-prefix
+        cache family into ONE provenance-labeled record: the cache VALUE a fak-served
+        model (e.g. GLM-5.2 on the pure kernel) realized across the run — reused
+        prefill tokens as WITNESSED (fak's OWN RadixAttention), beside the provider
+        cache_read as OBSERVED (relayed). The observation seam for the agentic run:
+        after 'fak swebench run --agent fleet --gateway ...' drives the harness, this
+        reads off whether fak's cache actually bit on turns 2..N. --metrics-file reads
+        a body captured on a box reachable only over the lab bridge.
 
 the metrics most relevant to us, on the real SWE-bench Verified set:
   A/C  net prefill work-elimination vs the naive re-prefill-every-turn harness
