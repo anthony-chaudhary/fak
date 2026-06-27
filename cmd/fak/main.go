@@ -155,6 +155,12 @@ func main() {
 		cmdWebbench(os.Args[2:])
 	case "model":
 		cmdModel(os.Args[2:])
+	case "pull":
+		// Top-level alias for `fak model pull`: the Ollama-style run-by-name download.
+		cmdModelPull(os.Args[2:])
+	case "ls":
+		// Top-level alias for `fak model ls`: list known model aliases + cache status.
+		cmdModelLs(os.Args[2:])
 	case "route":
 		cmdRoute(os.Args[2:])
 	case "routebench":
