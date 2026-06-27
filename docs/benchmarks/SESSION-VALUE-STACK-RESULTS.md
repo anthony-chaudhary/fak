@@ -176,7 +176,7 @@ becoming expensive garbage (every regime). The second is the non-optional one.
 | contention did not bias the headline | `prefill_anchor` per cell re-scales the sampled model to arm B's live prefix prefill | "the number is a busy-box artifact" |
 
 The literal `dos verify` truth-syscall over the ship commit runs on the Windows DOS host
-(`C:\work\fleet`, the `dos` package is not installed on this Mac); here the discipline is the
+(the `dos` package is not installed on this Mac); here the discipline is the
 witness set above + the committed JSON artifacts + an independent adversarial skeptic pass.
 
 ## Reproduce
