@@ -8,12 +8,13 @@
   shared inference seam every dispatch worker on this node dials, so it must
   outlive any single session.
 
-  The M-series mac node sleeps ~every 25 minutes, which drops the gateway off the
-  fleet. KeepAlive only restarts a CRASHED process — it does NOT stop the OS from
-  sleeping the whole box. This plist wraps fak serve under `caffeinate -is` so the
-  machine itself cannot idle-sleep or system-sleep while the gateway is running.
-  For OFF-LAN reach from another node, install with `--bind-all` (see below) and
-  keep both machines on the same Tailscale network.
+  Sleep prevention: the M-series mac node sleeps ~every 25 minutes. This plist
+  routes fak serve through tools/fak-serve-caffeinate.sh, which asserts -is
+  (idle+system) sleep prevention via `caffeinate -is -w $$` then execs fak serve.
+  After exec, launchd's direct child IS fak serve (KeepAlive tracks the right
+  process) and fak serve's stdio flows to StandardOutPath/StandardErrorPath.
+  For OFF-LAN reach, install with `--bind-all` (see below) and keep both machines
+  on the same Tailscale network.
 
   This is a TEMPLATE: replace the __PLACEHOLDER__ tokens with absolute paths
   for your node, then install it as a per-user agent. Use the one-command
