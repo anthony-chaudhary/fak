@@ -1,0 +1,221 @@
+package gateway
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
+)
+
+// TestLogInferenceTurnPopulatesVCacheWindow proves the LIVE wiring: a served turn flowing
+// through the per-turn chokepoint logInferenceTurn records into the per-family window even
+// with both sinks (--log, --debug-stats) off, so /debug/vars exposes the per-family view
+// on real traffic. The family is the trace; the axes are the provider's own usage.
+func TestLogInferenceTurnPopulatesVCacheWindow(t *testing.T) {
+	s := newResetShadowServer() // debugStatsf nil, logf nil — the bare live path
+	s.logInferenceTurn("trace-A", "anthropic_messages", true,
+		agent.Usage{PromptTokens: 100, CacheCreationInputTokens: 40000}, "end_turn", time.Millisecond, false)
+	s.logInferenceTurn("trace-A", "anthropic_messages", true,
+		agent.Usage{PromptTokens: 50, CacheReadInputTokens: 40000}, "end_turn", time.Millisecond, false)
+	s.logInferenceTurn("trace-B", "anthropic_messages", false,
+		agent.Usage{PromptTokens: 80, CacheReadInputTokens: 8000}, "end_turn", time.Millisecond, false)
+
+	turns, capped := s.metrics.vcacheTurnsSnapshot()
+	if len(turns) != 3 {
+		t.Fatalf("live window retained %d turns, want 3", len(turns))
+	}
+	block := vcacheFamiliesVars(turns, capped)
+	if block == nil {
+		t.Fatal("served turns with cache activity must populate the live per-family block")
+	}
+	if block.FamilyCount != 2 {
+		t.Fatalf("expected 2 prefix families (trace-A, trace-B), got %d", block.FamilyCount)
+	}
+}
+
+// TestVCacheFamiliesReconcilesWithObserve proves the live per-family block the gateway
+// exposes over its rolling window is byte-identical to what `fak vcache observe` computes
+// offline on the same traffic — the #935 acceptance ("reconciling with `fak vcache
+// observe` on the same traffic"). The live block is built by feeding the retained turns to
+// the SAME vcacheobserve.Observe engine, so this also guards against a field being
+// dropped or mis-mapped on the way to the surface.
+func TestVCacheFamiliesReconcilesWithObserve(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	// Two prefix families. s1 warms then reads back (a proven, concentrated family);
+	// s2 is a sparse second session. Distinct timestamps so the warmth-belief sequencing
+	// and arrival rate are real.
+	turns := []vcacheobserve.Turn{
+		{Family: "s1", UnixMillis: 0, InputTokens: 100, CacheCreation: 40000},
+		{Family: "s1", UnixMillis: 1000, InputTokens: 50, CacheRead: 40000, CacheCreation: 500},
+		{Family: "s1", UnixMillis: 2000, InputTokens: 50, CacheRead: 40000, CacheCreation: 500},
+		{Family: "s2", UnixMillis: 1500, InputTokens: 80, CacheCreation: 8000},
+		{Family: "s2", UnixMillis: 3000, InputTokens: 40, CacheRead: 8000},
+	}
+	for _, tn := range turns {
+		m.observeVCacheTurn(tn.Family, tn.UnixMillis, int(tn.InputTokens), int(tn.CacheRead), int(tn.CacheCreation))
+	}
+
+	snap, capped := m.vcacheTurnsSnapshot()
+	if len(snap) != len(turns) {
+		t.Fatalf("snapshot retained %d turns, want %d", len(snap), len(turns))
+	}
+	if capped {
+		t.Fatal("window must not be capped under the cap")
+	}
+	block := vcacheFamiliesVars(snap, capped)
+	if block == nil {
+		t.Fatal("active per-family block must be populated")
+	}
+
+	want := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers())
+
+	if block.TurnsObserved != want.Turns {
+		t.Fatalf("turns_observed: got %d want %d", block.TurnsObserved, want.Turns)
+	}
+	if block.FamilyCount != want.FamilyCount || block.FamilyCount != 2 {
+		t.Fatalf("family_count: got %d want %d", block.FamilyCount, want.FamilyCount)
+	}
+	if !approxEq(block.SavedTokenEquiv, want.Aggregate.SavedTokenEquiv) {
+		t.Fatalf("window saved: got %.3f want %.3f", block.SavedTokenEquiv, want.Aggregate.SavedTokenEquiv)
+	}
+	if block.Status != string(want.Aggregate.Status) {
+		t.Fatalf("window status: got %q want %q", block.Status, want.Aggregate.Status)
+	}
+	if block.GradeMeasured != want.GradeMeasured || block.GradeSynthetic != want.GradeSynthetic {
+		t.Fatalf("grades: got measured=%q synthetic=%q want measured=%q synthetic=%q",
+			block.GradeMeasured, block.GradeSynthetic, want.GradeMeasured, want.GradeSynthetic)
+	}
+	if block.Concentration.ZipfS != want.Concentration.ZipfS ||
+		block.Concentration.Measured != want.Concentration.Measured ||
+		block.Concentration.Defeated != want.Concentration.Defeated {
+		t.Fatalf("concentration: got %+v want zipfS=%.3f measured=%v defeated=%v",
+			block.Concentration, want.Concentration.ZipfS, want.Concentration.Measured, want.Concentration.Defeated)
+	}
+
+	// Every family row must equal the offline family it came from — keyed, so order is
+	// not assumed.
+	wantFam := map[string]vcacheobserve.Family{}
+	for _, f := range want.Families {
+		wantFam[f.Key] = f
+	}
+	if len(block.Families) != len(want.Families) {
+		t.Fatalf("family rows: got %d want %d", len(block.Families), len(want.Families))
+	}
+	for _, got := range block.Families {
+		wf, ok := wantFam[got.Key]
+		if !ok {
+			t.Fatalf("live block has family %q absent from offline observe", got.Key)
+		}
+		if got.Turns != wf.Turns {
+			t.Fatalf("family %q turns: got %d want %d", got.Key, got.Turns, wf.Turns)
+		}
+		if !approxEq(got.HitRate, wf.HitRate) {
+			t.Fatalf("family %q hit_rate: got %.4f want %.4f", got.Key, got.HitRate, wf.HitRate)
+		}
+		if !approxEq(got.SavedTokenEquiv, wf.Economics.SavedTokenEquiv) {
+			t.Fatalf("family %q saved: got %.3f want %.3f", got.Key, got.SavedTokenEquiv, wf.Economics.SavedTokenEquiv)
+		}
+		if got.Status != string(wf.Economics.Status) {
+			t.Fatalf("family %q status: got %q want %q", got.Key, got.Status, wf.Economics.Status)
+		}
+		if got.GovernorDecision != string(wf.GovernorDecision) {
+			t.Fatalf("family %q governor: got %q want %q", got.Key, got.GovernorDecision, wf.GovernorDecision)
+		}
+		if !approxEq(got.ArrivalRatePerSec, wf.ArrivalRatePerSec) {
+			t.Fatalf("family %q arrival: got %.4f want %.4f", got.Key, got.ArrivalRatePerSec, wf.ArrivalRatePerSec)
+		}
+		if got.WarmthTrueWarm != wf.Prediction.TrueWarm || got.WarmthFalseWarm != wf.Prediction.FalseWarm ||
+			got.WarmthTrueCold != wf.Prediction.TrueCold || got.WarmthFalseCold != wf.Prediction.FalseCold {
+			t.Fatalf("family %q warmth: got tw=%d fw=%d tc=%d fc=%d want tw=%d fw=%d tc=%d fc=%d",
+				got.Key, got.WarmthTrueWarm, got.WarmthFalseWarm, got.WarmthTrueCold, got.WarmthFalseCold,
+				wf.Prediction.TrueWarm, wf.Prediction.FalseWarm, wf.Prediction.TrueCold, wf.Prediction.FalseCold)
+		}
+	}
+
+	// The window aggregate must also reconcile with the cumulative-counter engine on the
+	// same totals — the same number the headline `vcache` block and fak_vcache_* family
+	// report — so the per-family and aggregate surfaces never disagree.
+	var sumIn, sumRead, sumCreate uint64
+	for _, tn := range turns {
+		sumIn += uint64(tn.InputTokens)
+		sumRead += uint64(tn.CacheRead)
+		sumCreate += uint64(tn.CacheCreation)
+	}
+	cumulative := vcacheProofFromCounters(sumIn, sumRead, sumCreate)
+	if !approxEq(block.SavedTokenEquiv, cumulative.SavedTokenEquiv) {
+		t.Fatalf("window saved %.3f != cumulative-counter saved %.3f", block.SavedTokenEquiv, cumulative.SavedTokenEquiv)
+	}
+}
+
+// TestVCacheFamiliesNoPhantomAndProvenance proves the no-phantom zero guard (idle, and a
+// no-cache workload, emit no block) and that an active block carries explicit OBSERVED /
+// DECISION provenance labels on every value class plus the governor + warmth view.
+func TestVCacheFamiliesNoPhantomAndProvenance(t *testing.T) {
+	idle := newGatewayMetrics(time.Now())
+	turns, capped := idle.vcacheTurnsSnapshot()
+	if vcacheFamiliesVars(turns, capped) != nil {
+		t.Fatal("idle gateway must emit no per-family block")
+	}
+
+	// A served turn with NO provider cache activity must still produce no block — the
+	// block tracks the cache, not raw traffic (no phantom).
+	noCache := newGatewayMetrics(time.Now())
+	noCache.observeVCacheTurn("s1", 0, 900, 0, 0)
+	turns, capped = noCache.vcacheTurnsSnapshot()
+	if vcacheFamiliesVars(turns, capped) != nil {
+		t.Fatal("a no-cache turn must not mint a per-family block")
+	}
+
+	// Cache activity → block present with provenance + governor + warmth.
+	m := newGatewayMetrics(time.Now())
+	m.observeVCacheTurn("s1", 0, 100, 0, 40000)
+	m.observeVCacheTurn("s1", 1000, 50, 40000, 0)
+	turns, capped = m.vcacheTurnsSnapshot()
+	block := vcacheFamiliesVars(turns, capped)
+	if block == nil {
+		t.Fatal("active gateway must populate the per-family block")
+	}
+	if block.Provenance["hit_rate"] != "OBSERVED" || block.Provenance["governor_decision"] != "DECISION" {
+		t.Fatalf("provenance labels missing/wrong: %+v", block.Provenance)
+	}
+	if len(block.Families) != 1 || block.Families[0].GovernorDecision == "" {
+		t.Fatalf("expected one family with a governor decision, got %+v", block.Families)
+	}
+
+	// The block must serialize with both provenance labels so an operator scraping
+	// /debug/vars sees who owns each value.
+	raw, err := json.Marshal(block)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{"OBSERVED", "DECISION", "governor_decision", "warmth_false_warm", "concentration", "grade_measured"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("serialized block missing %q:\n%s", want, raw)
+		}
+	}
+}
+
+// TestVCacheTurnWindowBounded proves the live window stays flat under a long-running
+// gateway: past the cap it keeps the most-recent vcacheTurnCap turns and flags the trim.
+func TestVCacheTurnWindowBounded(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	total := vcacheTurnCap + 250
+	for i := 0; i < total; i++ {
+		// Tag the family with the index so the most-recent-kept turns are identifiable.
+		m.observeVCacheTurn("s", int64(i), 10, 5, 0)
+	}
+	snap, capped := m.vcacheTurnsSnapshot()
+	if len(snap) != vcacheTurnCap {
+		t.Fatalf("window length: got %d want cap %d", len(snap), vcacheTurnCap)
+	}
+	if !capped {
+		t.Fatal("window_capped must be true once drop-oldest has trimmed the window")
+	}
+	// The oldest survivor is turn index (total-cap); the head was dropped.
+	if snap[0].UnixMillis != int64(total-vcacheTurnCap) {
+		t.Fatalf("oldest retained turn millis: got %d want %d", snap[0].UnixMillis, total-vcacheTurnCap)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
@@ -128,6 +129,21 @@ type gatewayMetrics struct {
 	// /debug/vars keeps the most recent site for operator drilldown.
 	oomMu       sync.Mutex
 	inKernelOOM map[string]*inKernelOOMClassStats
+
+	// vcacheMu guards the per-family live-observe accumulator (#935). The cumulative
+	// fak_vcache_* family above is one aggregate row; this retains the per-turn,
+	// family-tagged provider-cache telemetry so the live gateway can expose the SAME
+	// per-family / governor / warmth / concentration view `fak vcache observe` gives
+	// offline — fed through the SAME vcacheobserve.Observe engine, so it reconciles
+	// with the offline verb on the same traffic by construction. It is purely
+	// observational: nothing in the request path reads it, so correctness never
+	// depends on a cache hit (Law A2). Bounded to vcacheTurnCap turns (drop-oldest) so
+	// a 24/7 gateway stays flat in memory; the view is over that rolling window, and
+	// vcacheTurnsDropped records whether the window has been trimmed. Kept off
+	// inferenceMu — folded only at turn-log / scrape time, never on the hot path.
+	vcacheMu           sync.Mutex
+	vcacheTurns        []vcacheobserve.Turn
+	vcacheTurnsDropped bool
 }
 
 type inflightEntry struct {
@@ -705,6 +721,13 @@ func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent
 	if s == nil {
 		return
 	}
+	// Record this turn into the per-family live-observe window (#935) BEFORE the sink
+	// gates below, so the per-family / governor / warmth view is populated even with
+	// --log off and --debug-stats off. The family is the session/trace prefix; the token
+	// axes are the provider's own counters (OBSERVED). This is purely observational — it
+	// never feeds the request path (Law A2).
+	s.metrics.observeVCacheTurn(traceID, time.Now().UnixMilli(),
+		usage.PromptTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
 	// The per-turn human debug render (#793) fires independently of the JSON --log sink, so
 	// --debug-stats works on a clean (--log off) terminal. It is a no-op unless debugStatsf is
 	// wired, and reuses the #792 rolling health (read-only peek; no double-roll).

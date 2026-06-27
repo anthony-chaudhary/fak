@@ -11,15 +11,16 @@ import (
 )
 
 type debugVarsResponse struct {
-	Gateway       debugGatewayVars        `json:"gateway"`
-	Runtime       debugRuntimeVars        `json:"runtime"`
-	Kernel        debugKernelVars         `json:"kernel"`
-	Inference     debugInferenceVars      `json:"inference"`
-	VCache        *debugVCacheVars        `json:"vcache,omitempty"`
-	ModelLoad     *debugModelLoadVars     `json:"model_load,omitempty"`
-	KVMemory      *debugKVMemoryVars      `json:"kv_memory,omitempty"`
-	RequestMemory *debugRequestMemoryVars `json:"request_memory,omitempty"`
-	Metrics       debugMetricsVars        `json:"metrics"`
+	Gateway        debugGatewayVars         `json:"gateway"`
+	Runtime        debugRuntimeVars         `json:"runtime"`
+	Kernel         debugKernelVars          `json:"kernel"`
+	Inference      debugInferenceVars       `json:"inference"`
+	VCache         *debugVCacheVars         `json:"vcache,omitempty"`
+	VCacheFamilies *debugVCacheFamiliesVars `json:"vcache_families,omitempty"`
+	ModelLoad      *debugModelLoadVars      `json:"model_load,omitempty"`
+	KVMemory       *debugKVMemoryVars       `json:"kv_memory,omitempty"`
+	RequestMemory  *debugRequestMemoryVars  `json:"request_memory,omitempty"`
+	Metrics        debugMetricsVars         `json:"metrics"`
 }
 
 // debugInferenceVars surfaces the model-generation throughput the kernel/vDSO counters
@@ -317,6 +318,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 	oomRows := m.inKernelOOMSnapshotData()
 	reqMemoryRows := m.requestMemoryAggregateSnapshotData()
 	infer := m.inferenceSnapshotData()
+	vcacheTurns, vcacheCapped := m.vcacheTurnsSnapshot()
 	_, inflightMaxAge := m.inflightSnapshot(now)
 
 	return debugVarsResponse{
@@ -362,11 +364,12 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			Admitted:     c.Admitted,
 			VDSOHitRatio: ratio,
 		},
-		Inference:     inferenceVarsFromSnapshot(infer, inflightMaxAge),
-		VCache:        vcacheVarsFromSnapshot(infer),
-		ModelLoad:     debugModelLoadProfile(s.modelLoadProfile()),
-		KVMemory:      debugKVMemory(s.planner),
-		RequestMemory: debugRequestMemory(s.planner),
+		Inference:      inferenceVarsFromSnapshot(infer, inflightMaxAge),
+		VCache:         vcacheVarsFromSnapshot(infer),
+		VCacheFamilies: vcacheFamiliesVars(vcacheTurns, vcacheCapped),
+		ModelLoad:      debugModelLoadProfile(s.modelLoadProfile()),
+		KVMemory:       debugKVMemory(s.planner),
+		RequestMemory:  debugRequestMemory(s.planner),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
