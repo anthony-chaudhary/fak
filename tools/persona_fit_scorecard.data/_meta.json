@@ -1,0 +1,261 @@
+{
+  "schema": "fak-persona-fit-scorecard.data/1",
+  "meta": {
+    "as_of": "2026-06-26",
+    "fak_version": "v0.34.0",
+    "title": "fak persona-fit scorecard — across each feature space, how much would each persona like fak?",
+    "_doc": "A persona × feature-space FIT matrix. Each persona carries a WEIGHT vector over the fixed value dimensions (what that person values across any feature); each feature space (rows-*.json) carries a DELIVERY vector grounded against the real tree (a path that exists, a command that resolves, a CLAIMS section that is tagged). The cell fit = weighted match (persona weights · feature delivery). The score cannot be gamed by editing data alone: a delivery claim must name a grounding check that resolves in the tree, and a persona's declared favourite must match the computed argmax. Regenerate the doc: python tools/persona_fit_scorecard.py --markdown-dir docs/persona-fit-scorecard"
+  },
+  "feature_groups": [
+    {
+      "id": "trust",
+      "name": "Trust floor",
+      "note": "the kernel stops believing the model; memory + tools governed"
+    },
+    {
+      "id": "throughput",
+      "name": "Throughput / model",
+      "note": "the in-kernel model, KV reuse, the serving path"
+    },
+    {
+      "id": "adoption",
+      "name": "Platform / adoption",
+      "note": "the binary, the gateway, the way a person lands"
+    }
+  ],
+  "required_features": [
+    {
+      "id": "security",
+      "name": "Security floor",
+      "group": "trust"
+    },
+    {
+      "id": "performance",
+      "name": "Performance / reuse",
+      "group": "throughput"
+    },
+    {
+      "id": "memory",
+      "name": "Agent memory",
+      "group": "trust"
+    },
+    {
+      "id": "model",
+      "name": "In-kernel model",
+      "group": "throughput"
+    },
+    {
+      "id": "tooling",
+      "name": "Agent tooling",
+      "group": "trust"
+    },
+    {
+      "id": "platform",
+      "name": "Platform / adoption",
+      "group": "adoption"
+    }
+  ],
+  "required_personas": [
+    {
+      "id": "free-tier-dev",
+      "name": "Free-tier solo dev",
+      "tier": "consume"
+    },
+    {
+      "id": "app-developer",
+      "name": "App developer / vibe-coder",
+      "tier": "consume"
+    },
+    {
+      "id": "backend-integrator",
+      "name": "Backend integrator",
+      "tier": "consume"
+    },
+    {
+      "id": "infra-engineer",
+      "name": "Infra / platform engineer (SRE)",
+      "tier": "operate"
+    },
+    {
+      "id": "security-engineer",
+      "name": "Security engineer",
+      "tier": "operate"
+    },
+    {
+      "id": "ml-researcher",
+      "name": "ML researcher",
+      "tier": "evaluate"
+    },
+    {
+      "id": "benchmark-engineer",
+      "name": "Benchmark / eval engineer",
+      "tier": "evaluate"
+    },
+    {
+      "id": "decision-maker",
+      "name": "Evaluator / decision-maker (PM)",
+      "tier": "evaluate"
+    },
+    {
+      "id": "oss-contributor",
+      "name": "Open-source contributor",
+      "tier": "build"
+    },
+    {
+      "id": "ai-agent",
+      "name": "AI coding agent",
+      "tier": "build"
+    }
+  ],
+  "personas": [
+    {
+      "id": "free-tier-dev",
+      "persona": "Free-tier solo dev",
+      "tier": "consume",
+      "values": "Will download a binary and run it; spends seconds. Cares almost only that something runs RIGHT NOW with no key, no GPU, no reading.",
+      "weights": {
+        "runs_today": 6,
+        "documented": 2,
+        "trustworthy": 1,
+        "proven": 1,
+        "efficient": 2
+      },
+      "top_feature": "platform",
+      "importance": 3
+    },
+    {
+      "id": "app-developer",
+      "persona": "App developer / vibe-coder",
+      "tier": "consume",
+      "values": "Drops fak in front of an existing agent harness. Wants it to run today, to govern tool calls (trust), to be wired in (extensible), and documented.",
+      "weights": {
+        "runs_today": 4,
+        "trustworthy": 3,
+        "extensible": 2,
+        "documented": 2
+      },
+      "top_feature": "platform",
+      "importance": 3
+    },
+    {
+      "id": "backend-integrator",
+      "persona": "Backend integrator",
+      "tier": "consume",
+      "values": "Embeds fak into a real service against a frozen interface. Weighs extensibility + a config/ops surface + docs + the trust floor it is buying.",
+      "weights": {
+        "extensible": 4,
+        "operable": 3,
+        "documented": 2,
+        "trustworthy": 2,
+        "runs_today": 1
+      },
+      "top_feature": "platform",
+      "importance": 2
+    },
+    {
+      "id": "infra-engineer",
+      "persona": "Infra / platform engineer (SRE)",
+      "tier": "operate",
+      "values": "Has to run it in production. Weighs an operable deploy/config surface + metrics to watch (measured) + the trust floor; runs it today.",
+      "weights": {
+        "operable": 4,
+        "measured": 4,
+        "trustworthy": 2,
+        "runs_today": 1,
+        "documented": 1,
+        "efficient": 2
+      },
+      "top_feature": "platform",
+      "importance": 2
+    },
+    {
+      "id": "security-engineer",
+      "persona": "Security engineer",
+      "tier": "operate",
+      "values": "Is here for the security floor. Weighs trustworthiness above all, then proof it holds and metrics to audit it.",
+      "weights": {
+        "trustworthy": 6,
+        "proven": 2,
+        "measured": 1,
+        "operable": 1,
+        "documented": 1
+      },
+      "top_feature": "security",
+      "importance": 1
+    },
+    {
+      "id": "ml-researcher",
+      "persona": "ML researcher",
+      "tier": "evaluate",
+      "values": "Wants to reproduce and understand. Weighs proof (a witness/results doc), benchmarks vs the field, and being able to run it today.",
+      "weights": {
+        "proven": 4,
+        "benchmarked": 3,
+        "runs_today": 2,
+        "measured": 1,
+        "documented": 1,
+        "efficient": 1
+      },
+      "top_feature": "performance",
+      "importance": 1
+    },
+    {
+      "id": "benchmark-engineer",
+      "persona": "Benchmark / eval engineer",
+      "tier": "evaluate",
+      "values": "Lives in the numbers. Weighs benchmark harnesses above all, then proof and the ability to run a sweep today.",
+      "weights": {
+        "benchmarked": 6,
+        "proven": 2,
+        "runs_today": 2,
+        "measured": 1
+      },
+      "top_feature": "performance",
+      "importance": 1
+    },
+    {
+      "id": "decision-maker",
+      "persona": "Evaluator / decision-maker (PM)",
+      "tier": "evaluate",
+      "values": "A product manager deciding to adopt. Weighs competitive benchmarks, metrics/observability, docs, proof, and the trust story.",
+      "weights": {
+        "benchmarked": 3,
+        "measured": 3,
+        "documented": 2,
+        "proven": 2,
+        "trustworthy": 1,
+        "efficient": 2
+      },
+      "top_feature": "performance",
+      "importance": 2
+    },
+    {
+      "id": "oss-contributor",
+      "persona": "Open-source contributor",
+      "tier": "build",
+      "values": "Wants to add a leaf without forking. Weighs extension seams above all, then docs, proof (tests), and a fast local run.",
+      "weights": {
+        "extensible": 5,
+        "documented": 3,
+        "proven": 2,
+        "runs_today": 2
+      },
+      "top_feature": "platform",
+      "importance": 1
+    },
+    {
+      "id": "ai-agent",
+      "persona": "AI coding agent",
+      "tier": "build",
+      "values": "A machine that discovers + drives fak. Weighs runnable verbs + machine-readable docs, then extension seams and the trust floor it operates under.",
+      "weights": {
+        "runs_today": 3,
+        "documented": 3,
+        "extensible": 2,
+        "trustworthy": 2
+      },
+      "top_feature": "platform",
+      "importance": 3
+    }
+  ]
+}

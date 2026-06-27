@@ -1,0 +1,259 @@
+{
+  "_doc": "The trust-floor feature spaces: the security substrate, agent memory, and agent tooling. Delivery is grounded against the real tree (packages that exist, commands that resolve, CLAIMS sections that are tagged). A check that does not resolve is persona-fit-debt.",
+  "rows": [
+    {
+      "id": "security",
+      "feature": "Security floor",
+      "group": "trust",
+      "what": "the kernel stops believing the model — capability floor, the in-process adjudicator, result quarantine, the norm/IFC/wire gates",
+      "delivery": [
+        {
+          "dim": "trustworthy",
+          "note": "the floor itself: policy + adjudicator + the quarantine/norm gates, backed by the honesty ledger",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/adjudicator"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/policy"
+            },
+            {
+              "kind": "claim_section",
+              "section": "Security substrate",
+              "tags": [
+                "SHIPPED"
+              ]
+            }
+          ]
+        },
+        {
+          "dim": "runs_today",
+          "note": "offline, no-key first commands to see a denial",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak policy --dump"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak preflight --tool search_kb"
+            }
+          ]
+        },
+        {
+          "dim": "proven",
+          "note": "the gate implementations that witness the floor exist",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/normgate"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/ifc"
+            }
+          ]
+        },
+        {
+          "dim": "documented",
+          "note": "a policy reference + the cli-reference",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "POLICY.md"
+            },
+            {
+              "kind": "doc_mentions",
+              "doc": "docs/cli-reference.md",
+              "tokens": [
+                "preflight"
+              ]
+            }
+          ]
+        },
+        {
+          "dim": "operable",
+          "note": "a config surface for the policy / capability floor",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "POLICY.md"
+            }
+          ]
+        }
+      ],
+      "top_persona": "security-engineer"
+    },
+    {
+      "id": "memory",
+      "feature": "Agent memory",
+      "group": "trust",
+      "what": "context is not memory — write-time result admission (Context-MMU), the session core-dump + cdb debugger, the durability gate, portable session images",
+      "delivery": [
+        {
+          "dim": "trustworthy",
+          "note": "write-time admission keeps a poisoned result out of memory",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/ctxmmu"
+            },
+            {
+              "kind": "claim_section",
+              "section": "Context-MMU",
+              "tags": [
+                "SHIPPED"
+              ]
+            }
+          ]
+        },
+        {
+          "dim": "runs_today",
+          "note": "the context debugger runs on a transcript today",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak debug --session your-transcript.jsonl"
+            }
+          ]
+        },
+        {
+          "dim": "proven",
+          "note": "the recall + cdb + session-image implementations exist",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/recall"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/cdb"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/sessionimage"
+            }
+          ]
+        },
+        {
+          "dim": "documented",
+          "note": "a session-control doc + the cli-reference",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "docs/fak/session-control.md"
+            },
+            {
+              "kind": "doc_mentions",
+              "doc": "docs/cli-reference.md",
+              "tokens": [
+                "debug"
+              ]
+            }
+          ]
+        },
+        {
+          "dim": "measured",
+          "note": "trajectory observability over the session",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/trajectory"
+            }
+          ]
+        }
+      ],
+      "top_persona": "security-engineer"
+    },
+    {
+      "id": "tooling",
+      "feature": "Agent tooling",
+      "group": "trust",
+      "what": "the agent-facing tools: the pre-flight ladder, grammar repair, the answer-shape witness, codelint packs over agent-written code, fak doctor",
+      "delivery": [
+        {
+          "dim": "runs_today",
+          "note": "offline tool commands a person runs today",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak preflight --tool search_kb"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak codelint cmd/fak/main.go"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak doctor"
+            }
+          ]
+        },
+        {
+          "dim": "trustworthy",
+          "note": "the pre-flight ladder + codelint adjudicator gate tool calls",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/preflight"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/adjudicator"
+            }
+          ]
+        },
+        {
+          "dim": "proven",
+          "note": "the codelint + answer-shape + grammar implementations exist",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/codelint"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/answershape"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/grammar"
+            }
+          ]
+        },
+        {
+          "dim": "documented",
+          "note": "the cli-reference documents the tool verbs",
+          "checks": [
+            {
+              "kind": "doc_mentions",
+              "doc": "docs/cli-reference.md",
+              "tokens": [
+                "preflight",
+                "codelint"
+              ],
+              "match": "any"
+            }
+          ]
+        },
+        {
+          "dim": "measured",
+          "note": "trajectory observability primitives over tool use",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/trajectory"
+            },
+            {
+              "kind": "path_exists",
+              "target": "docs/observability/trajectory.md"
+            }
+          ]
+        }
+      ],
+      "top_persona": "free-tier-dev"
+    }
+  ]
+}

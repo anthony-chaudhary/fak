@@ -1,0 +1,133 @@
+{
+  "_doc": "The platform / adoption feature space: the one static binary, the governed gateway, the MCP server, the Claude-Code passthrough, the RSI ship-gate, the a2a channel, the task manager. This is how a person (or an agent) actually lands on fak. Delivery grounded against the tree.",
+  "rows": [
+    {
+      "id": "platform",
+      "feature": "Platform / adoption",
+      "group": "adoption",
+      "what": "how a person lands — one static binary, fak serve (the governed gateway + MCP), guard -- claude passthrough, the RSI ship-gate, the in-kernel a2a channel, the task manager",
+      "delivery": [
+        {
+          "dim": "runs_today",
+          "note": "build the binary / start the MCP server / sample the task manager — offline",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go build ./cmd/fak"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak serve --stdio"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak task sample"
+            }
+          ]
+        },
+        {
+          "dim": "documented",
+          "note": "a getting-started, an integrations index, and the cli-reference",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "GETTING-STARTED.md"
+            },
+            {
+              "kind": "path_exists",
+              "target": "docs/integrations/README.md"
+            },
+            {
+              "kind": "path_exists",
+              "target": "docs/cli-reference.md"
+            }
+          ]
+        },
+        {
+          "dim": "operable",
+          "note": "a serve-config reference + the gateway listens on a real addr",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "docs/serve-config.md"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak serve --addr 127.0.0.1:8080"
+            }
+          ]
+        },
+        {
+          "dim": "extensible",
+          "note": "the frozen-ABI + extension seams an integrator builds on",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "EXTENDING.md"
+            },
+            {
+              "kind": "path_exists",
+              "target": "ARCHITECTURE.md"
+            }
+          ]
+        },
+        {
+          "dim": "trustworthy",
+          "note": "guard fronts any agent so every tool call is governed",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak guard -- claude"
+            }
+          ]
+        },
+        {
+          "dim": "measured",
+          "note": "the gateway exposes Prometheus metrics + an observability doc",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/gateway/metrics.go"
+            },
+            {
+              "kind": "doc_mentions",
+              "doc": "docs/fak/observability.md",
+              "tokens": [
+                "metric"
+              ]
+            }
+          ]
+        },
+        {
+          "dim": "proven",
+          "note": "the gateway + RSI-loop implementations witness the platform",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/gateway"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/rsiloop"
+            }
+          ]
+        },
+        {
+          "dim": "benchmarked",
+          "note": "the RSI ship-gate + a2a demos are runnable measured surfaces",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/rsiloop"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/a2ademo"
+            }
+          ]
+        }
+      ],
+      "top_persona": "oss-contributor"
+    }
+  ]
+}

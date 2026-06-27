@@ -1,0 +1,224 @@
+{
+  "_doc": "The throughput / model feature spaces: performance & reuse (the benchmark harnesses, vDSO, KV reuse, ablation) and the in-kernel model (the fused kernel, KV-MMU, routing, GPU backends). Delivery grounded against the tree.",
+  "rows": [
+    {
+      "id": "performance",
+      "feature": "Performance / reuse",
+      "group": "throughput",
+      "what": "the throughput story — tool vDSO, prefill/KV reuse, the turn-tax / fan-out / long-context benchmarks, the self-ablation sweep, vCache",
+      "delivery": [
+        {
+          "dim": "benchmarked",
+          "note": "runnable benchmark harnesses that measure fak against itself / the field",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fanbench -profile research"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/turntaxdemo -print"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/longctxbench -ladder"
+            }
+          ]
+        },
+        {
+          "dim": "runs_today",
+          "note": "offline ablation + bench commands a person runs today",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak ablate --sweep vdso"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak bench --suite tau2-smoke"
+            }
+          ]
+        },
+        {
+          "dim": "proven",
+          "note": "the vdso / ablate / turnbench implementations witness the numbers",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/vdso"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/ablate"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/turnbench"
+            }
+          ]
+        },
+        {
+          "dim": "measured",
+          "note": "the real gateway/metrics surfaces expose the vDSO ratio + cache reuse",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/gateway/metrics.go"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/metrics/metrics.go"
+            }
+          ]
+        },
+        {
+          "dim": "documented",
+          "note": "the cli-reference documents the bench/ablate verbs",
+          "checks": [
+            {
+              "kind": "doc_mentions",
+              "doc": "docs/cli-reference.md",
+              "tokens": [
+                "ablate",
+                "bench"
+              ],
+              "match": "any"
+            }
+          ]
+        },
+        {
+          "dim": "efficient",
+          "note": "the token-economy levers — tool vDSO fast path + vCache reuse cut tokens/compute",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/vdso"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/vcachegov"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/vcachechain"
+            }
+          ]
+        }
+      ],
+      "top_persona": "benchmark-engineer"
+    },
+    {
+      "id": "model",
+      "feature": "In-kernel model",
+      "group": "throughput",
+      "what": "the model fused into the kernel — the fused decode kernel, KV-MMU planned eviction, radix KV, cross-engine KV seam, model routing, GPU backends",
+      "delivery": [
+        {
+          "dim": "proven",
+          "note": "the model / kv-mmu / radixkv implementations witness the in-kernel mode",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/model"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/kvmmu"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/radixkv"
+            }
+          ]
+        },
+        {
+          "dim": "runs_today",
+          "note": "offline routing + context-planner self-check run today",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/fak route --manifest examples/model-routing.example.json"
+            },
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/ctxplanbench -selfcheck"
+            }
+          ]
+        },
+        {
+          "dim": "operable",
+          "note": "a GPU operating guide for running the model on real hardware",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "GPU.md"
+            }
+          ]
+        },
+        {
+          "dim": "documented",
+          "note": "the architecture doc + GPU doc explain the model layering",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "ARCHITECTURE.md"
+            },
+            {
+              "kind": "path_exists",
+              "target": "GPU.md"
+            }
+          ]
+        },
+        {
+          "dim": "extensible",
+          "note": "the cross-engine KV seam lets another engine plug in",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/xenginekv"
+            },
+            {
+              "kind": "path_exists",
+              "target": "ARCHITECTURE.md"
+            }
+          ]
+        },
+        {
+          "dim": "trustworthy",
+          "note": "the KV-quarantine bridge is the model's trust boundary",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/kvmmu"
+            }
+          ]
+        },
+        {
+          "dim": "benchmarked",
+          "note": "the context-planner benchmark measures the planning path",
+          "checks": [
+            {
+              "kind": "command_resolves",
+              "command": "go run ./cmd/ctxplanbench -selfcheck"
+            }
+          ]
+        },
+        {
+          "dim": "efficient",
+          "note": "KV reuse — radix prefix-KV + planned KV-MMU eviction cut recompute",
+          "checks": [
+            {
+              "kind": "path_exists",
+              "target": "internal/radixkv"
+            },
+            {
+              "kind": "path_exists",
+              "target": "internal/kvmmu"
+            }
+          ]
+        }
+      ],
+      "top_persona": "oss-contributor"
+    }
+  ]
+}
