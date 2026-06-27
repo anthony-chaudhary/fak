@@ -183,7 +183,7 @@ RawPage
 
 ViewRecord
   view_id
-  view_type: snippet | fact | QA | summary | timeline | graph_edge | skill_context | kv_prefix
+  view_type: snippet | fact | QA | summary | timeline | graph_edge | skill_context | kv
   source_pages
   source_digests
   producer
@@ -455,7 +455,7 @@ Primary/external:
 Local:
 
 - `AGENTIC-CACHING-SOTA-2026-06-19.md`
-- `MEMORY-COMPACTION-SOTA-2026-06-19.md`
+- `MEMORY-VIEW-CONTRACT-2026-06-26.md`
 - `docs/explainers/kv-cache-agentic-context.md`
 - `fak/RECALL-RESULTS.md`
 - `fak/RADIXATTENTION-RESULTS.md`
