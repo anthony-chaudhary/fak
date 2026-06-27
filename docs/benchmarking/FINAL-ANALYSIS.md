@@ -168,13 +168,12 @@ both_completed: true
 ### Staged Documents (ready to commit)
 
 > These are private mid-June 2026 fleet docs, absent from this public repo and all its
-> history; `GLM-5.2-ON-FAK-PLAN-2026-06-19.md` is one of the three #917 cites and its
-> out-of-scope posture is superseded by the staged plan above. Do not treat this list as a
+> history; their conflicting out-of-scope postures are superseded by the staged plan above. Do not treat this list as a
 > pointer to a reachable file.
 
 - `GLM-5.2-ON-FAK-PLAN-2026-06-19.md`
-- `GLM52-IN-KERNEL-ARCH-2026-06-19.md`
-- `GLM52-HOSTED-CACHE-COHERENCE-2026-06-19.md`
+- `GLM52-SCOPE-DECISION-2026-06-19.md`
+- `GLM-5.2-NATIVE-ENGINE-GAP-2026-06-20.md`
 
 ---
 
