@@ -166,6 +166,7 @@ front page.
 - [GLM-5.2 DSA index selection on the pure kernel (2026-06-23)](docs/notes/GLM52-DSA-INDEX-SELECTION-ON-PURE-KERNEL-2026-06-23.md)
 - [GLM-5.2 full DSA forward on the pure kernel, sm_80 GPU server (2026-06-23)](docs/notes/GLM52-DSA-FULL-FORWARD-ON-PURE-KERNEL-GPU-SERVER-2026-06-23.md)
 - [GLM-5.2 fak-native serve: load works, load-speed open (2026-06-25)](docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md) — full 466 GB GLM-5.2 loads in fak's own kernel; loader + MLA-dims panic fixed; the open item is a CPU-bound (not disk) ~100-min load and the path to <=10 min.
+- [GLM-5.2 fak-native CPU serve: load works, the all-resident serve wedges on RAM (2026-06-27)](docs/notes/GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md) — first fak-native attempt to serve the full ~433 GB GLM-5.2 UD-Q4_K_M on a 256-core/1 TB CPU-only host; the resident-Q4_K load (~95 min, ~0.06–0.10 GB/s) reaches ~458 GB resident and the all-resident serve wedges the host at gateway-init (no CPU-path memory-fit guard, #974); llama.cpp's mmap path is the memory-safe baseline.
 - [GLM-5.2 five GPU server benchmarks (2026-06-22)](docs/notes/GLM52-PERFORMANT-GPU-SERVER-FIVE-BENCHMARKS-2026-06-22.md)
 - [GLM-5.2 kernel + turn demos (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)
 - [GLM-5.2 pure kernel on GPU server (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md)
