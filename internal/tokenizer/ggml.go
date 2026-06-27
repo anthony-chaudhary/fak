@@ -85,6 +85,8 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 	split := preTokenizeByteLevel
 	if isQwenPreTokenizer(pre) {
 		split = preTokenizeQwen
+	} else if isGLM4PreTokenizer(pre) {
+		split = preTokenizeGLM4
 	}
 
 	return &Tokenizer{
@@ -129,4 +131,11 @@ func isWrappedSpecial(s string) bool {
 // drives llama.cpp's own dispatch, so trusting it keeps us byte-exact with it.
 func isQwenPreTokenizer(pre string) bool {
 	return strings.Contains(strings.ToLower(pre), "qwen")
+}
+
+// isGLM4PreTokenizer recognizes GLM-4 / ChatGLM4 (GLM-5.2's tokenizer.ggml.pre=glm4). llama.cpp's
+// LLAMA_VOCAB_PRE_TYPE_CHATGLM4 is the GPT-4-style split (close to Qwen2), NOT GPT-2 ByteLevel.
+func isGLM4PreTokenizer(pre string) bool {
+	p := strings.ToLower(pre)
+	return strings.Contains(p, "glm4") || strings.Contains(p, "glm-4") || strings.Contains(p, "chatglm")
 }

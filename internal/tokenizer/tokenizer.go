@@ -582,6 +582,42 @@ func isL(r rune) bool  { return unicode.IsLetter(r) }
 func isN(r rune) bool  { return unicode.IsNumber(r) }
 func isWS(r rune) bool { return unicode.IsSpace(r) }
 
+// preTokenizeGLM4 implements the GLM-4 / ChatGLM4 (llama.cpp LLAMA_VOCAB_PRE_TYPE_CHATGLM4)
+// pre-tokenizer. Its regex is IDENTICAL to Qwen2's EXCEPT the number alternative: GLM-4 groups
+// digits in runs of 1-3 (`\p{N}{1,3}`) where Qwen2 emits one digit at a time (`\p{N}`). GLM-5.2's
+// GGUF carries tokenizer.ggml.pre=glm4; before this it fell through to GPT-2 ByteLevel (a different
+// regex family), so GLM-5.2 prompts tokenized WRONG and the model produced garbage output.
+func preTokenizeGLM4(text string) []string {
+	rs := []rune(text)
+	n := len(rs)
+	var out []string
+	for i := 0; i < n; {
+		if m := matchGLM4At(rs, i); m > 0 {
+			out = append(out, string(rs[i:i+m]))
+			i += m
+		} else {
+			out = append(out, string(rs[i:i+1]))
+			i++
+		}
+	}
+	return out
+}
+
+// matchGLM4At is matchQwenAt with the number alternative widened to \p{N}{1,3}. A leading digit is
+// never consumed by the contraction or letter alternatives, so intercepting it here — before
+// delegating the rest to matchQwenAt — reproduces GLM-4's digit-triplet grouping while sharing
+// Qwen's (byte-exact, oracle-gated) handling of every other alternative.
+func matchGLM4At(rs []rune, i int) int {
+	if isN(rs[i]) {
+		j := i
+		for j < len(rs) && j-i < 3 && isN(rs[j]) {
+			j++
+		}
+		return j - i
+	}
+	return matchQwenAt(rs, i)
+}
+
 // matchQwenAt returns the rune length of the first Qwen alternative matching at i.
 func matchQwenAt(rs []rune, i int) int {
 	n := len(rs)
