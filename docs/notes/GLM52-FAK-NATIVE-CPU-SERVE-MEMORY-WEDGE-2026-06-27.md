@@ -36,10 +36,26 @@ Resident-bytes vs wall-clock (single process, `FAK_GGUF_LOAD_WORKERS=64`):
 | ~91m | 416 GB | 0.057 |
 | ~101m | 450 GB | — |
 
-Steady ~0.06–0.10 GB/s ⇒ a **~95 min** full load. This re-confirms the open load-speed witness:
-the parallel-quant-load (S1) + resident-Q5/6_K (S2) levers do **not** bring the pure-CPU serve
-under 10 min — UD-Q4_K_M's mixed Q5_K/Q6_K experts still take the slow dequant path on the CPU
-reference serve (the resident-Q5/6_K lever `6b9fbc3` is wired for the GPU cpu-offload path).
+Steady ~0.06–0.10 GB/s ⇒ a **~95 min** full load. The parallel-quant-load (S1) + resident-Q5/6_K
+(S2) levers did **not** bring this pure-CPU serve under 10 min.
+
+> **Correction (#975, 2026-06-27):** the original cause stated here — "UD-Q4_K_M's mixed
+> Q5_K/Q6_K experts still take the slow dequant path on the CPU reference serve; the
+> resident-Q5/6_K lever `6b9fbc3` is wired for the GPU cpu-offload path" — was **unwitnessed
+> and is wrong about the loader**. `6b9fbc3` generalized the expert split in the CPU loader
+> `QuantModelQ4KProfile` (the `FAK_Q4K` path's loader, `internal/ggufload/quant_q4k_loader.go`):
+> it routes Q4_K **and** Q5_K/Q6_K experts to a raw-resident byte copy keyed on `info.Type`,
+> not just on the GPU path. `6b9fbc3` is an **ancestor of this run's `ed4dc8dc`**, so the run
+> *had* that routing. The real gap was **observability, not routing**: the `FAK_Q4K` case in
+> `cmd/fak/serve.go` threaded **no `LoadProfiler`**, so — unlike the device cpu-offload case —
+> the serve emitted **no per-quant-type load-path summary**, and the "slow dequant path"
+> diagnosis above was inferred from the GB/s alone, never witnessed. That witness is now wired
+> in (`(#975)`): the `FAK_Q4K` serve path threads a profiler and streams the
+> `fak: load-path breakdown … resident=… dequant=…` summary + the resident report. The next
+> CPU-host run settles it: if the expert rows show `dequant≈0`, the ~95 min is **I/O-bound**
+> (433 GB at ~0.08 GB/s is disk/NFS read-bound — the mmap/demand-paged work tracked as
+> **#974-B**), not dequant-bound; if a residual `dequant` slice remains, *that* is the routing
+> bug to chase.
 
 ## Finding 2 — the all-resident serve wedges the host (the load-bearing result)
 The resident set grew **past the on-disk GGUF size**: the 433 GB model became **~458 GB resident**
@@ -81,5 +97,8 @@ RAM can serve the way llama.cpp does).
 2. #974-A: CPU-path memory-fit pre-flight (refuse, don't wedge).
 3. #974-B: mmap/demand-paged CPU weights, or run the all-resident path on a host without the
    hugepage co-tenant to capture the fak-native CPU throughput.
-4. Extend the resident-Q5/6_K lever to the pure-CPU serve path so the load is I/O-bound, not
-   dequant-bound (the <10 min target).
+4. **(#975, done)** The resident-Q5/6_K expert routing was already in the CPU loader (`6b9fbc3`);
+   the `FAK_Q4K` serve path now threads a `LoadProfiler` so the load streams its per-quant-type
+   load-path summary (`resident=… dequant=…`) + resident report. Re-run on the CPU host and read
+   the summary: `dequant≈0` for the expert rows ⇒ the bottleneck is I/O (→ #974-B mmap), not
+   dequant; a residual `dequant` slice ⇒ a routing bug to chase.

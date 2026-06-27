@@ -805,21 +805,27 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		}), memPlan, backend)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case os.Getenv("FAK_Q4K") != "":
-		mm, err := ggufload.LoadModelQ4K(ggufPath)
+		// Pure-CPU reference serve via the direct-resident-Q4_K loader. That loader already
+		// routes the mixed Q5_K/Q6_K experts (GLM-5.2's ~417 GB bulk) to a raw-resident byte
+		// copy keyed on the GGUF quant type — the SAME resident-K-quant lever the device
+		// cpu-offload case above uses (internal/ggufload/quant_q4k_loader.go). The only thing
+		// missing on this path was the WITNESS: the old call threaded no LoadProfiler, so a
+		// multi-minute GLM-5.2 load ran silent AND emitted no per-quant-type load-path summary,
+		// leaving an operator unable to SEE whether the expert bulk took the raw-resident path
+		// (dequant≈0) or the slow f32 round-trip. Thread a real profiler here too (parity with
+		// the device cpu-offload case) so both the streamed summary and the gateway /metrics
+		// profile carry the resident-vs-dequant breakdown — the witness #975 needs.
+		prof := ggufload.NewLoadProfiler()
+		prof.Progress = os.Stderr // stream load % + the load-path summary to stderr so the load is not silent
+		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
 		must(err)
 		modelengine.PreloadQ4K(mm)
+		// Operator visibility: the post-load resident split confirms at a glance that the
+		// mixed-quant expert bulk loaded resident (the slow f32 round-trip avoided), alongside
+		// the per-quant-type load-path summary the profiler already streamed.
+		fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
 		loadNanos := time.Since(tLoad).Nanoseconds()
-		// LoadModelQ4K does not thread a LoadProfiler (the direct-q4 path has no
-		// dequant/re-quant phases to break down), so surface the load as a single
-		// measured phase rather than an empty profile.
-		profile := toGatewayLoadProfile(&ggufload.LoadProfile{
-			Mode:       "gguf-resident-q4k",
-			Source:     ggufPath,
-			TotalNanos: loadNanos,
-			TotalMS:    float64(loadNanos) / 1e6,
-			Phases:     []ggufload.LoadPhaseStat{{Phase: "q4k-direct-load", Calls: 1, Nanos: loadNanos, MS: float64(loadNanos) / 1e6, TimePct: 100}},
-			Bottleneck: "q4k-direct-load",
-		})
+		profile := toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos))
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	default:
 		prof := ggufload.NewLoadProfiler()
