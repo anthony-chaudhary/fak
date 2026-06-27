@@ -129,6 +129,10 @@ var tier = map[string]int{
 	"resume":          1, // deterministic resume-cache decision (#745/#774 family): prices RESUME_FULL/CUT/RESET against the projected cold/warm prompt-cache posture at the resume boundary and recommends a cut-by-default re-entry; pure Plan(Input) Report, stdlib-only, imports nothing internal, off the hot path. The computable answer to "resume a 250k session — what happens to the cache".
 	"vcacheobserve":   2,
 	"cadencereport":   3, // the consolidated regular-cadence report: a read-only fold-over-folds that distills the scorecard control pane (scores), git (work-done), and release-status (releases) into one schema/ok/verdict/finding envelope + a durable JSONL trend ledger. Composer (like gardenbundle): shells to the Python folds + git off the hot path, imports nothing internal.
+	"dispatchorder":   1, // pure dispatch-ordering helper; stdlib-only, imports nothing internal, off the hot path.
+	"dojo":            1, // the prediction-vs-reality gym's pure scoring/fold/ledger/board core: Prediction/Outcome/Episode scoring + the cross-lever leaderboard fold; stdlib-only, imports nothing internal (the corpus-scanning levers live in cmd/fak), off the hot path.
+	"looprecover":     1, // pure loop-recovery decision helper; stdlib-only, imports nothing internal, off the hot path.
+	"nightrun":        1, // RUN-IT-ALL-NIGHT local-capability data-collection planner: probes the box + ranks feasible-here collection tasks over the benchmark grid; imports benchcatalog(1)+stdlib, off the hot path.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
