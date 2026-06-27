@@ -481,7 +481,7 @@ green on every run.
 - Token counts (`prefill_token_speedup=7.5`, `radix_computed_tokens=848`) are exact
   integers, hardware-independent.
 - **Cross-platform reproduction (2026-06-19):** the 135M `agents` deterministic fields
-  reproduce **bit-for-bit on Windows x86_64** (hit 86.7%, token 7.50×, reused 5512,
+  reproduce **exactly on Windows x86_64** (hit 86.7%, token 7.50×, reused 5512,
   computed 848) vs the Mac M3 arm64 committed artifact; the live ratio moves (2.60× on
   x86 vs 4.58× on Mac) exactly as the small-model clone-overhead thesis predicts. See
   [`experiments/radixattention/CROSS-PLATFORM-REPRO-20260619.md`](experiments/radixattention/CROSS-PLATFORM-REPRO-20260619.md).

@@ -20071,7 +20071,7 @@ scheduler lifts FCFS's **62.1% → 86.7%** (100% of the DFS-optimal bound the pa
   memory pressure. Same primitive as SGLang, opposite control.
 - The prefill-token speedup radixbench also prints is measured vs a **cold no-cache**
   baseline — a worst-case reference, not a serving baseline anyone ships.
-- The deterministic hit rates reproduce bit-for-bit across platforms (Windows x86_64 vs Mac
+- The deterministic hit rates reproduce exactly across platforms (Windows x86_64 vs Mac
   M3 arm64); add `-hf <snapshot> -lean` for the live wall-clock arm on a real checkpoint.
 
 **Full results:** [`docs/benchmarks/RADIXATTENTION-RESULTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/RADIXATTENTION-RESULTS.md)

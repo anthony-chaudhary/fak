@@ -122,7 +122,7 @@ The same way Opus 4.5's announcement showed GPQA and Humanity's Last Exam where 
 | **harnesses** | `cmd/{modelbench,radixbench,sessionbench,fleetbench}` (fak) · `llama-bench` (llama.cpp) |
 | **bit-exactness** | `TestBatchedDecodeMatchesSerial`, `TestBatchFromPrefixMatchesIndependentPrefill`, `internal/radixkv` split-reuse == recompute (max\|Δ\|=0) |
 
-> **Regime rules (per [BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md)):** the deterministic metrics (token speedup, hit rate, cell counts) are hardware-independent and reproduce the committed JSON bit-for-bit; only the live wall-clocks are single-box and authoritative as *within-run ratios*.
+> **Regime rules (per [BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md)):** the deterministic metrics (token speedup, hit rate, cell counts) are hardware-independent and reproduce the committed JSON exactly; only the live wall-clocks are single-box and authoritative as *within-run ratios*.
 
 ---
 
