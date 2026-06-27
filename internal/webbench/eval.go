@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 )
 
 // EvalCapability reports whether the official web benchmark harness can run on this box.
@@ -94,11 +95,14 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 		return res, nil
 	}
 
-	// Run the harness (placeholder - actual invocation depends on benchmark).
-	// This would call something like:
-	// python -m browser_use.eval --predictions <path> --run_id <id>
-	// For now, use a mock with placeholder values.
-	cmd := exec.Command(cap.Python, "-c", mockHarnessEval(0, 0))
+	// Run the harness - actual invocation depends on benchmark.
+	// For browser-agent benchmark, invoke the evaluation script.
+	harnessCmd := buildHarnessCommand(cfg)
+	cmdParts := strings.Fields(harnessCmd)
+	if len(cmdParts) < 2 {
+		return res, fmt.Errorf("invalid harness command: %s", harnessCmd)
+	}
+	cmd := exec.Command(cmdParts[0], cmdParts[1:]...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return res, fmt.Errorf("harness failed: %w: %s", err, string(output))
@@ -123,8 +127,17 @@ func buildHarnessCommand(cfg EvalConfig) string {
 	if py == "" {
 		py = "python3"
 	}
-	// Placeholder - real command depends on the benchmark.
-	return fmt.Sprintf("%s -m <harness> --predictions %s --run_id %s", py, cfg.PredictionsPath, cfg.RunID)
+	// Build actual harness command based on benchmark type.
+	switch cfg.Benchmark {
+	case "browser-agent", "webvoyager":
+		// Use browser-use evaluation harness
+		return fmt.Sprintf("%s -m browser_use.eval --predictions %s --run_id %s --max_workers %d",
+			py, cfg.PredictionsPath, cfg.RunID, cfg.MaxWorkers)
+	default:
+		// Generic harness invocation
+		return fmt.Sprintf("%s -m %s.eval --predictions %s --run_id %s",
+			py, cfg.Benchmark, cfg.PredictionsPath, cfg.RunID)
+	}
 }
 
 func parseInt(s string) int {

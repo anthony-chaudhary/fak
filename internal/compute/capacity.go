@@ -401,6 +401,13 @@ func HostSystemMemoryInfo() (total, free int64, known bool) {
 	return hostSystemMemory()
 }
 
+// DiskInfo reports filesystem total/free bytes for path without requiring a backend.
+// It is for disk-tier cache placement against real free space; unsupported platforms or
+// inaccessible paths return known=false, preserving the fail-open capacity contract.
+func DiskInfo(path string) (total, free int64, known bool) {
+	return diskInfo(path)
+}
+
 func fitsWithinReportedMemory(total, free int64, known bool, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
 	if wantBytes <= 0 {
 		return FitOK, 0
