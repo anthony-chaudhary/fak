@@ -158,8 +158,22 @@ in-process turn-saving depends on *who owns the serving stack* (see
 The frequently-quoted **$200k** is the model's only un-anchored number and is a
 bare knob; the honest self-host total — a divergent KV-splice fork (~3 eng-yr,
 "out of reach" on OSS vLLM) plus recurring format re-train and fork-maintenance —
-is **~$2.8M over 3 years (~14× the knob)**. The turn-savings in this section
-therefore apply only to the self-host / provider-ships regime; an API consumer
+is **~$2.8M over 3 years (~14× the knob)**.
+
+**Derivation of the $2.8M figure:**
+- Divergent KV-splice fork: ~3 engineer-years × ~$600k/yr ≈ $1.8M
+- Format re-train: one-time cost ≈ $500k
+- Fork-maintenance over 3 years: ≈ $500k
+- **Total: ~$2.8M over 3 years**
+
+**Derivation of the $200k knob:**
+The $200k figure comes from `inline_tool_roi.py` (not published in this repo),
+which models the GPU-side re-prefill tax of two-pass loops at fleet scale.
+That script treats $200k as a sensitivity knob (a BUILD_COST constant) rather
+than a measured benchmark. The derivation of this knob is not available in
+the public repo; it is intentionally marked as "un-anchored" here because it
+does not reflect a measured build cost.
+The turn-savings in this section therefore apply only to the self-host / provider-ships regime; an API consumer
 gets the safety floor and **none** of this.
 
 **Prior-art honesty — no single lever is novel.** Each mechanism the 9 is built
