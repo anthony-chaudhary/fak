@@ -11,7 +11,7 @@ human-owned, and unleasable**. (The *import* graph is a layered DAG, not a star 
 leaves import lower-tier leaves, enforced by `internal/architest`; see `fak/GROWTH.md`.
 It is the file-tree disjointness, not import independence, that keeps the leases disjoint.)
 
-> **Hour notation:** `hN` means `N` hours from the start of the build (e.g., `h6–h30` is the 6–30 hour window).
+> **Hour notation:** `hN` means `N` hours from the start of the build (e.g., [`h6`](#h6)–[`h30`](#h30) is the 6–30 hour window).
 
 ## Wave 0 — the serial gate (human, ~6h). NOT fanned out. {#h0}
 
