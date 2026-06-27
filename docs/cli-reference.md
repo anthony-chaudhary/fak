@@ -118,9 +118,9 @@ binary and times the **in-process tool-call adjudication boundary** against a
 transports — apples-to-apples):
 
 ```
-in-process adjudication p50 : ~1,300 ns
-spawned-hook        p50     : ~6,000,000–50,000,000 ns  (process-per-decide)
-PRIMARY GATE                : pass   (~5,000–39,000x fusion speedup)
+in-process adjudication p50 : 2,427 ns
+spawned-hook        p50     : 6.913 ms  (process-per-decide, this machine, n=100)
+PRIMARY GATE                : pass   (~2,849x fusion speedup)
 ```
 
 This is the headline because it is **independent of the tool mix**: it times the
