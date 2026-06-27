@@ -159,8 +159,15 @@ func (c Config) expertIntermediate() int {
 func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 {
 	cfg := m.Cfg
 	H, I := cfg.HiddenSize, cfg.expertIntermediate()
-	g := mat.mul(expertName(layer, expert, "gate_proj.weight"), xn, I, H)
-	u := mat.mul(expertName(layer, expert, "up_proj.weight"), xn, I, H)
+	// gate+up share the same activation xn, so dispatch them as ONE group: a Q4_K session kernel
+	// quantizes xn once and runs both output sets under a single goroutine barrier (the same
+	// fused-dispatch the dense FFN already uses via mulGroup), and every other kernel falls back
+	// to the identical two separate muls. Bit-for-bit equal to the prior gate-then-up calls.
+	gu := mulGroup(mat, []string{
+		expertName(layer, expert, "gate_proj.weight"),
+		expertName(layer, expert, "up_proj.weight"),
+	}, xn, []int{I, I}, H)
+	g, u := gu[0], gu[1]
 	m.addBiasIfPresent(g, expertName(layer, expert, "gate_proj.bias"))
 	m.addBiasIfPresent(u, expertName(layer, expert, "up_proj.bias"))
 	for i := 0; i < I; i++ {
