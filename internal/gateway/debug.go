@@ -15,6 +15,7 @@ type debugVarsResponse struct {
 	Runtime       debugRuntimeVars        `json:"runtime"`
 	Kernel        debugKernelVars         `json:"kernel"`
 	Inference     debugInferenceVars      `json:"inference"`
+	VCache        *debugVCacheVars        `json:"vcache,omitempty"`
 	ModelLoad     *debugModelLoadVars     `json:"model_load,omitempty"`
 	KVMemory      *debugKVMemoryVars      `json:"kv_memory,omitempty"`
 	RequestMemory *debugRequestMemoryVars `json:"request_memory,omitempty"`
@@ -362,6 +363,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			VDSOHitRatio: ratio,
 		},
 		Inference:     inferenceVarsFromSnapshot(infer, inflightMaxAge),
+		VCache:        vcacheVarsFromSnapshot(infer),
 		ModelLoad:     debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:      debugKVMemory(s.planner),
 		RequestMemory: debugRequestMemory(s.planner),
@@ -420,6 +422,54 @@ func inferenceVarsFromSnapshot(snap inferenceSnapshot, inflightMaxAge float64) d
 		out.MeanTTFTSeconds = snap.prefillSecs / float64(snap.ttftTurns)
 	}
 	return out
+}
+
+// debugVCacheVars surfaces the NET realized provider-cache economics (read rebate MINUS
+// write premium) the same way `fak vcache observe` does — computed via
+// vcachegov.ProveTelemetrySavings over the session's cumulative cache counters, so the
+// /debug/vars block, the fak_vcache_* metrics, and the offline observe Aggregate all
+// agree on the same totals. Every value is OBSERVED (provider-relayed); a hit is a
+// realized rebate, never local trust. Nil until a turn carries provider cache activity.
+type debugVCacheVars struct {
+	CacheReadTokens     uint64  `json:"cache_read_tokens"`     // OBSERVED read axis
+	CacheCreationTokens uint64  `json:"cache_creation_tokens"` // OBSERVED write axis
+	InputTokens         uint64  `json:"input_tokens"`          // OBSERVED uncached remainder
+	BaselineTokenEquiv  float64 `json:"baseline_token_equiv"`
+	ActualTokenEquiv    float64 `json:"actual_token_equiv"`
+	SavedTokenEquiv     float64 `json:"saved_token_equiv"` // NET; negative until reads repay writes
+	SavedPct            float64 `json:"saved_pct"`
+	HitRate             float64 `json:"hit_rate"`
+	Multiplier          float64 `json:"multiplier"`
+	Status              string  `json:"status"` // PROVEN / REFUTED
+}
+
+// vcacheVarsFromSnapshot builds the /debug/vars vcache block from the same inference
+// snapshot the Prometheus writeVCacheMetrics reads, so the two surfaces never disagree.
+// It returns nil (the block is omitted) until a turn carried provider cache activity.
+func vcacheVarsFromSnapshot(snap inferenceSnapshot) *debugVCacheVars {
+	if snap.cachedTok == 0 && snap.cacheCreateTok == 0 {
+		return nil
+	}
+	proof := vcacheProofFromCounters(snap.promptTok, snap.cachedTok, snap.cacheCreateTok)
+	hit, mult := 0.0, 0.0
+	if proof.BaselineTokenEquiv > 0 {
+		hit = proof.CacheReadTokens / proof.BaselineTokenEquiv
+	}
+	if proof.ActualTokenEquiv > 0 {
+		mult = proof.BaselineTokenEquiv / proof.ActualTokenEquiv
+	}
+	return &debugVCacheVars{
+		CacheReadTokens:     snap.cachedTok,
+		CacheCreationTokens: snap.cacheCreateTok,
+		InputTokens:         snap.promptTok,
+		BaselineTokenEquiv:  proof.BaselineTokenEquiv,
+		ActualTokenEquiv:    proof.ActualTokenEquiv,
+		SavedTokenEquiv:     proof.SavedTokenEquiv,
+		SavedPct:            proof.SavedPct,
+		HitRate:             hit,
+		Multiplier:          mult,
+		Status:              string(proof.Status),
+	}
 }
 
 func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {

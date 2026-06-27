@@ -163,7 +163,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		})
 		return true
 	}
-	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, time.Since(began))
+	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, time.Since(began))
 	s.observePlannerRequestMemory()
 	s.debitServedSessionTurn(r.Context(), sessionTurn, comp.Usage, req.Messages)
 

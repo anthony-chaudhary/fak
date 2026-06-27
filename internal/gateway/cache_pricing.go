@@ -24,6 +24,8 @@ package gateway
 // keeping with the same OBSERVED-vs-WITNESSED discipline metrics.go applies to the
 // raw counters (see [AdjudicationSummary.CachedPromptTokens]).
 
+import "github.com/anthony-chaudhary/fak/internal/vcachegov"
+
 // Anthropic prompt-cache price multipliers, expressed RELATIVE to the model's base
 // input per-token price. These are the published cache economics:
 //
@@ -143,4 +145,52 @@ func (p CachePricing) SavingsUSD(u CacheUsage) float64 {
 // not retained on the summary, so this never overstates the saving by ignoring a cost.
 func (s AdjudicationSummary) ProviderCacheSavingsUSD(inputPerMTokUSD float64) float64 {
 	return float64(s.CachedPromptTokens) * perToken(inputPerMTokUSD) * (1 - CacheReadMultiplier)
+}
+
+// ProviderCacheNetSavings prices the NET realized provider prompt-cache effect this
+// summary has OBSERVED across the session: the read rebate (each cache_read token
+// billed at 0.1x instead of 1x) MINUS the write premium (each cache_creation token
+// billed ABOVE 1x). Unlike ProviderCacheSavingsUSD, which folds the READ axis only,
+// this accounts for BOTH axes, so a cold-write-only session reads NEGATIVE (REFUTED)
+// until the reads repay the writes — the same break-even per-turn SavingsUSD models.
+//
+// It is computed by the SAME engine `fak vcache observe` uses
+// (vcachegov.ProveTelemetrySavings) over ONE aggregate row, so the live gateway numbers
+// (saved-token-equiv, hit rate, multiplier) are byte-identical to the offline observe
+// Aggregate on the same totals — the model is linear, so one aggregate row reproduces
+// the sum of N per-turn rows. The 1h/5m write split is not on the live wire, so the whole
+// creation total is priced at the 5-minute write multiplier, exactly the convention
+// ProveTelemetrySavings applies to unsplit creation.
+//
+// PROVENANCE: every input is OBSERVED (provider-relayed); the saving is a realized
+// rebate, never a fak trust claim. The result is in INPUT-TOKEN-EQUIVALENTS (the $ dual
+// is ProviderCacheSavingsUSD). Note the InputTokens axis is the uncached remainder under
+// the Anthropic convention this gateway's Claude path reports; on an OpenAI-style upstream
+// whose prompt_tokens already fold in cached tokens, saved-token-equiv stays exact (the
+// input cancels in baseline-minus-actual) while hit_rate/multiplier read conservatively.
+func (s AdjudicationSummary) ProviderCacheNetSavings() vcachegov.TelemetrySavingsProof {
+	return vcacheProofFromCounters(s.InputTokens, s.CachedPromptTokens, s.CacheCreationTokens)
+}
+
+// vcacheProofFromCounters prices NET realized provider-cache economics over cumulative
+// (uncached input, cache_read, cache_creation) token counts using THIS gateway's
+// published cache multipliers — the single source the /metrics, /debug/vars, and the
+// guard exit summary all read, so the three surfaces cannot drift. The multipliers are
+// passed EXPLICITLY: vcachegov defaults the WRITE multipliers but NOT the read one, so
+// an unset ReadMult would price cache reads at 0x (free) and overstate the saving. They
+// equal vcachegov's defaults (0.1 / 1.25 / 2.0), so the result is byte-identical to
+// `fak vcache observe` on the same totals. The 1h/5m split is not on the live wire, so
+// the whole creation total is priced at the 5m write tier (the unsplit-creation
+// convention ProveTelemetrySavings itself applies).
+func vcacheProofFromCounters(input, read, creation uint64) vcachegov.TelemetrySavingsProof {
+	return vcachegov.ProveTelemetrySavings(vcachegov.TelemetrySavingsInput{
+		Rows: []vcachegov.TelemetryRow{{
+			InputTokens:              float64(input),
+			CacheReadInputTokens:     float64(read),
+			CacheCreationInputTokens: float64(creation),
+		}},
+		ReadMult:    CacheReadMultiplier,
+		Write5mMult: CacheWrite5mMultiplier,
+		Write1hMult: CacheWrite1hMultiplier,
+	})
 }

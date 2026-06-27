@@ -247,9 +247,9 @@ func TestAdjudicationSummaryReportsProviderCache(t *testing.T) {
 
 	// Two served turns: the first reads 4096 tokens from the provider cache, the second
 	// reads 1024; a third reads nothing.
-	m.observeInference(10, 5, 4096, "end_turn", time.Second)
-	m.observeInference(10, 5, 1024, "end_turn", time.Second)
-	m.observeInference(900, 5, 0, "end_turn", time.Second)
+	m.observeInference(10, 5, 4096, 0, "end_turn", time.Second)
+	m.observeInference(10, 5, 1024, 0, "end_turn", time.Second)
+	m.observeInference(900, 5, 0, 0, "end_turn", time.Second)
 
 	s := m.adjudicationSummary()
 	if s.CachedPromptTokens != 5120 {
@@ -296,8 +296,8 @@ func TestInferenceMetricsAccumulateAcrossTurns(t *testing.T) {
 		t.Fatalf("idle inference scrape should report 0 completion tokens:\n%s", idle)
 	}
 
-	m.observeInference(100, 40, 8, "stop", 2*time.Second)
-	m.observeInference(50, 10, 0, "tool_calls", 1*time.Second)
+	m.observeInference(100, 40, 8, 0, "stop", 2*time.Second)
+	m.observeInference(50, 10, 0, 0, "tool_calls", 1*time.Second)
 
 	live := renderInference(m)
 	for _, want := range []string{
@@ -381,11 +381,11 @@ func TestInferencePrefillDecodeSplit(t *testing.T) {
 	// A buffered turn: 200 prompt tokens, 100 completion, 5s all-up, NO TTFT boundary.
 	// It must contribute to the all-up duration/output rate but leave the measured
 	// (prefill/decode) denominators untouched.
-	m.observeInference(200, 100, 0, "stop", 5*time.Second)
+	m.observeInference(200, 100, 0, 0, "stop", 5*time.Second)
 	// A streamed turn: 1000 prompt tokens, prefill took 4s (cold ingest), then decode
 	// generated 200 tokens in the remaining 1s → 8s total? No: dur=5s, ttft=4s, so
 	// decode=1s. prefill rate = 1000/4 = 250 tok/s; decode rate = 200/1 = 200 tok/s.
-	m.observeInferenceTimed(1000, 200, 0, "end_turn", 5*time.Second, 4*time.Second)
+	m.observeInferenceTimed(1000, 200, 0, 0, "end_turn", 5*time.Second, 4*time.Second)
 
 	live := renderInference(m)
 	for _, want := range []string{
@@ -415,7 +415,7 @@ func TestInferencePrefillDecodeSplit(t *testing.T) {
 // hand-computed values.
 func TestInferenceVarsMatchPrometheus(t *testing.T) {
 	m := newGatewayMetrics(time.Now())
-	m.observeInferenceTimed(1000, 200, 0, "end_turn", 5*time.Second, 4*time.Second)
+	m.observeInferenceTimed(1000, 200, 0, 0, "end_turn", 5*time.Second, 4*time.Second)
 	v := inferenceVarsFromSnapshot(m.inferenceSnapshotData(), 12.5)
 	if v.Turns != 1 || v.TTFTTurns != 1 {
 		t.Fatalf("turns=%d ttftTurns=%d, want 1/1", v.Turns, v.TTFTTurns)

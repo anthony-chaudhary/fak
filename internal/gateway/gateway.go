@@ -990,7 +990,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 		}
 		return nil, err
 	}
-	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, dur)
+	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, dur)
 	s.observePlannerRequestMemory()
 	return comp, nil
 }

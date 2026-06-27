@@ -19,8 +19,8 @@ func TestProviderCacheTelemetryIsPerformanceNotTrust(t *testing.T) {
 	// One real adjudication verdict (TRUST evidence) and two provider cache reads
 	// (PERFORMANCE evidence) recorded on the same gateway.
 	m.observeOperation("proxy_admit", WireVerdict{Kind: "ALLOW"}, nil, time.Millisecond)
-	m.observeInference(10, 5, 4096, "end_turn", time.Second)
-	m.observeInference(10, 5, 1024, "end_turn", time.Second)
+	m.observeInference(10, 5, 4096, 0, "end_turn", time.Second)
+	m.observeInference(10, 5, 1024, 0, "end_turn", time.Second)
 
 	s := m.adjudicationSummary()
 

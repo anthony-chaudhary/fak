@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
@@ -55,7 +56,12 @@ type gatewayMetrics struct {
 	inferComplTokens  uint64
 	inferCachedTokens uint64
 	inferCachedHits   uint64 // served turns whose prompt got a provider cache READ (>0 cached tokens)
-	inferDecodeSecs   float64
+	// inferCacheCreationTokens is the cumulative provider cache_creation_input_tokens —
+	// the WRITE axis the read-only ProviderCacheSavingsUSD never retained. With it and
+	// the read total, the session can report NET realized vcache economics (read saving
+	// minus write premium) via the same engine `fak vcache observe` uses offline.
+	inferCacheCreationTokens uint64
+	inferDecodeSecs          float64
 	// Prefill (time-to-first-token) is split from decode ONLY on a path that can
 	// observe the first content delta — the streaming Anthropic passthrough. On a
 	// buffered turn the planner returns one all-up duration with no observable
@@ -397,6 +403,13 @@ type AdjudicationSummary struct {
 	// operator SEES the cache reuse rather than having to scrape /metrics.
 	CachedPromptTokens uint64 `json:"cached_prompt_tokens"`
 	CachedTurns        uint64 `json:"cached_turns"`
+	// InputTokens (the uncached input remainder) and CacheCreationTokens (the cache
+	// WRITE axis) are retained alongside CachedPromptTokens (the READ axis) so the
+	// summary can price the NET realized provider-cache saving — read rebate MINUS
+	// write premium — via ProviderCacheNetSavings, the axis the read-only
+	// ProviderCacheSavingsUSD deliberately omits. Both OBSERVED (provider-relayed).
+	InputTokens         uint64 `json:"input_tokens"`
+	CacheCreationTokens uint64 `json:"cache_creation_tokens"`
 
 	// Compaction* folds the Anthropic history-compaction visibility into the same guard exit
 	// summary, split WITNESSED (what fak authored) vs OBSERVED (what the provider reported):
@@ -426,6 +439,8 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	m.inferenceMu.Lock()
 	sum.CachedPromptTokens = m.inferCachedTokens
 	sum.CachedTurns = m.inferCachedHits
+	sum.InputTokens = m.inferPromptTokens
+	sum.CacheCreationTokens = m.inferCacheCreationTokens
 	m.inferenceMu.Unlock()
 
 	comp := m.compactionSnapshotData()
@@ -510,11 +525,11 @@ func (s AdjudicationSummary) ProviderCacheEvidence() cachemeta.LookupVerdict {
 // a busy gateway look busy: fak_kernel_*/fak_vdso_* stay 0 on a pure chat workload
 // (no syscall, no fast-path lookup), so without this family every panel reads 0 while
 // the box is in fact decoding tokens.
-func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, finishReason string, dur time.Duration) {
+func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur time.Duration) {
 	// A buffered turn cannot observe the first-token boundary, so prefill is "not
 	// measured": ttft<=0 routes the whole duration into the decode-total accumulator
 	// and leaves the prefill split untouched (it stays an honest 0, never a phantom).
-	m.observeInferenceTimed(promptTok, complTok, cachedTok, finishReason, dur, 0)
+	m.observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, 0)
 }
 
 // observeInferenceTimed is observeInference with an explicit time-to-first-token
@@ -527,7 +542,7 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, fi
 // decode total and the prefill split is left untouched. inferDecodeSecs stays the
 // FULL inference wall-clock in both cases so the existing output_tokens_per_second and
 // the fleet-value agent-seconds denominator are byte-identical to before.
-func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok int, finishReason string, dur, ttft time.Duration) {
+func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
 	if m == nil {
 		return
 	}
@@ -548,6 +563,9 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok in
 	if cachedTok > 0 {
 		m.inferCachedTokens += uint64(cachedTok)
 		m.inferCachedHits++ // this turn got a provider prompt-cache READ
+	}
+	if cacheCreateTok > 0 {
+		m.inferCacheCreationTokens += uint64(cacheCreateTok) // this turn WROTE the provider cache
 	}
 	if dur > 0 {
 		m.inferDecodeSecs += dur.Seconds()
@@ -916,6 +934,7 @@ func (s *Server) renderMetrics() string {
 	s.writeRequestMemoryMetrics(&b)
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
+	m.writeVCacheMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
 	s.writeInKernelPressureTrimMetrics(&b)
@@ -1387,12 +1406,13 @@ func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
 }
 
 type inferenceSnapshot struct {
-	reqs       map[string]uint64
-	promptTok  uint64
-	complTok   uint64
-	cachedTok  uint64
-	cachedHits uint64
-	decodeSecs float64
+	reqs           map[string]uint64
+	promptTok      uint64
+	complTok       uint64
+	cachedTok      uint64
+	cacheCreateTok uint64
+	cachedHits     uint64
+	decodeSecs     float64
 	// prefillSecs is the cumulative TTFT wall-clock over the ttftTurns that measured
 	// it; prefillPromptTok is the prompt-token sum over those same turns. ttftTurns is
 	// the denominator that keeps the prefill rate honest on a mixed workload.
@@ -1464,6 +1484,7 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		promptTok:          m.inferPromptTokens,
 		complTok:           m.inferComplTokens,
 		cachedTok:          m.inferCachedTokens,
+		cacheCreateTok:     m.inferCacheCreationTokens,
 		cachedHits:         m.inferCachedHits,
 		decodeSecs:         m.inferDecodeSecs,
 		prefillSecs:        m.inferPrefillSecs,
@@ -1710,6 +1731,51 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 	}
 	fmt.Fprintf(b, "fak_gateway_inference_decode_tokens_per_second %s\n", promFloat(decodeTPS))
 	return snap
+}
+
+// writeVCacheMetrics emits the fak_vcache_* family: the NET realized provider-cache
+// economics (read rebate MINUS write premium) over the session's cumulative cache
+// counters, computed by the SAME engine `fak vcache observe` uses
+// (vcachegov.ProveTelemetrySavings over one aggregate row), so the live gauge equals
+// the offline observe Aggregate on the same totals. It is the write-premium-aware
+// companion to fak_gateway_inference_cached_prompt_tokens_total (the read axis): a
+// cold-write-dominated session reads NEGATIVE saved / proven=0 until the reads repay
+// the writes — the honest break-even the read-only surface cannot show. Every value is
+// OBSERVED (provider-relayed counters); a hit is a realized rebate, never local trust.
+// Until a turn carries provider cache activity it emits nothing (no phantom series).
+func (m *gatewayMetrics) writeVCacheMetrics(b *strings.Builder) {
+	snap := m.inferenceSnapshotData()
+	if snap.cachedTok == 0 && snap.cacheCreateTok == 0 {
+		return
+	}
+	proof := vcacheProofFromCounters(snap.promptTok, snap.cachedTok, snap.cacheCreateTok)
+	writeCounter(b, "fak_vcache_cache_creation_tokens_total", "OBSERVED (provider-relayed): cumulative cache_creation_input_tokens — the provider-cache WRITE axis, companion to fak_gateway_inference_cached_prompt_tokens_total (the READ axis). Net saving = read rebate minus this write premium.", int64(snap.cacheCreateTok))
+	writeHelpType(b, "fak_vcache_baseline_token_equiv", "OBSERVED-derived: input-token-equivalents the session WOULD have cost with NO provider cache (every prompt token at 1x).", "gauge")
+	fmt.Fprintf(b, "fak_vcache_baseline_token_equiv %s\n", promFloat(proof.BaselineTokenEquiv))
+	writeHelpType(b, "fak_vcache_actual_token_equiv", "OBSERVED-derived: input-token-equivalents the session actually cost under provider caching (read at 0.1x, unsplit write at the 5m 1.25x tier).", "gauge")
+	fmt.Fprintf(b, "fak_vcache_actual_token_equiv %s\n", promFloat(proof.ActualTokenEquiv))
+	writeHelpType(b, "fak_vcache_saved_token_equiv", "NET realized provider-cache saving in input-token-equivalents (baseline minus actual). NEGATIVE on a cold-write-dominated session until reads repay writes. Same engine and number as `fak vcache observe`.", "gauge")
+	fmt.Fprintf(b, "fak_vcache_saved_token_equiv %s\n", promFloat(proof.SavedTokenEquiv))
+	writeHelpType(b, "fak_vcache_saved_ratio", "NET saved-token-equiv as a fraction of the uncached baseline (saved_pct/100).", "gauge")
+	fmt.Fprintf(b, "fak_vcache_saved_ratio %s\n", promFloat(proof.SavedPct/100))
+	hit := 0.0
+	if proof.BaselineTokenEquiv > 0 {
+		hit = proof.CacheReadTokens / proof.BaselineTokenEquiv
+	}
+	writeHelpType(b, "fak_vcache_hit_rate", "OBSERVED: cache_read share of the uncached baseline (equals `fak vcache observe` Report.HitRate).", "gauge")
+	fmt.Fprintf(b, "fak_vcache_hit_rate %s\n", promFloat(hit))
+	mult := 0.0
+	if proof.ActualTokenEquiv > 0 {
+		mult = proof.BaselineTokenEquiv / proof.ActualTokenEquiv
+	}
+	writeHelpType(b, "fak_vcache_multiplier", "OBSERVED-derived: baseline/actual token-equiv (equals `fak vcache observe` Report.Multiplier). 1.0 = no net saving.", "gauge")
+	fmt.Fprintf(b, "fak_vcache_multiplier %s\n", promFloat(mult))
+	proven := 0
+	if proof.Status == vcachegov.ProofProven {
+		proven = 1
+	}
+	writeHelpType(b, "fak_vcache_proven", "1 when the session's observed cache reads repaid the write premium (NET positive); else 0 (cold/write-dominated). The honest break-even gate.", "gauge")
+	fmt.Fprintf(b, "fak_vcache_proven %d\n", proven)
 }
 
 // writeFleetValueMetrics renders the hero-axis KPIs the live gateway can derive from
