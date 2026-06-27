@@ -159,6 +159,26 @@ else
   log "skipped: com.fleet.dispatch-supervisor (set FAK_DISPATCH_ENABLE=1 to arm)"
 fi
 
+# --- put `fak` on PATH so `fak guard -- claude` works from any terminal ---
+# dogfood-claude.sh --install builds tools/.bin/fak (already done above) and
+# symlinks it as `fak` into the first writable dir among ~/.local/bin,
+# /opt/homebrew/bin, /usr/local/bin. Non-fatal: the daemon units use absolute
+# paths and still work if PATH install fails.
+log "installing fak on PATH"
+if "$REPO/scripts/dogfood-claude.sh" --install 2>/dev/null; then
+  log "fak is on PATH — run: fak guard -- claude"
+else
+  # Fallback: just symlink the binary we already built
+  _bindir="${FAK_DOGFOOD_BINDIR:-$HOME/.local/bin}"
+  mkdir -p "$_bindir"
+  ln -sf "$BIN" "$_bindir/fak"
+  log "installed fak -> $_bindir/fak"
+  case ":$PATH:" in
+    *":$_bindir:"*) log "fak guard -- claude  is ready" ;;
+    *) warn "add $_bindir to PATH: export PATH=\"$_bindir:\$PATH\"" ;;
+  esac
+fi
+
 # --- upstream credential: persist in login env so launchd units inherit it ---
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   launchctl setenv ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
