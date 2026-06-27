@@ -83,9 +83,14 @@ log "-- /metrics model-load --"
 curl -s -m 10 "http://127.0.0.1:$PORT/metrics" 2>/dev/null | grep -E '^fak_model_load_(duration_seconds|path_tensors|tensors|bytes) ' | head -40 | tee -a "$OUT"
 
 log "-- serve smoke (resident k-quant experts decode) --"
-SM=$(curl -s -m 180 "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \
-  -d '{"model":"glm-5.2","messages":[{"role":"user","content":"Reply with the single word: ok"}],"max_tokens":8}')
-log "SMOKE=${SM:0:300}"
+# SMOKE_S bounds the decode wait (default 180s). The 753B experts run on the HOST CPU under
+# --cpu-offload-experts via the correctness-first k-quant GEMV, so per-token decode is slow;
+# raise SMOKE_S (and lower max_tokens) to confirm decode produces a token without a fast bound.
+SMOKE_S="${SMOKE_S:-180}"; SMOKE_TOKENS="${SMOKE_TOKENS:-8}"
+ts=$(date +%s)
+SM=$(curl -s -m "$SMOKE_S" "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"glm-5.2\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}],\"max_tokens\":$SMOKE_TOKENS}")
+log "SMOKE(${SMOKE_TOKENS}tok,$(( $(date +%s) - ts ))s)=${SM:0:300}"
 printf '%s' "$SM" | grep -q '"content"' && ! printf '%s' "$SM" | grep -q '"error"' && log "SMOKE_OK" || log "SMOKE_FAIL"
 
 kill "$SRV" 2>/dev/null
