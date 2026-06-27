@@ -165,6 +165,10 @@ func main() {
 		cmdGarden(os.Args[2:])
 	case "cadence":
 		cmdCadence(os.Args[2:])
+	case "nightrun":
+		cmdNightrun(os.Args[2:])
+	case "dojo":
+		cmdDojo(os.Args[2:])
 	case "guard-verdict-rsi":
 		cmdGuardVerdictRSI(os.Args[2:])
 	case "guard-rsi-scorecard":
@@ -189,6 +193,8 @@ func main() {
 		cmdCluster(os.Args[2:])
 	case "leaseref":
 		cmdLeaseref(os.Args[2:])
+	case "node":
+		cmdNode(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -495,6 +501,16 @@ func usage() {
                  records a dated row in docs/cadence/history.jsonl so the trend accrues
                  across weeks; --check is advisory (non-zero only if a dimension could
                  not be measured; the scorecard ratchet owns debt regressions))
+  fak nightrun  next | plan | run [--apply] [--loop] [--max N] | ledger | caps  [--json]
+                (RUN IT ALL NIGHT: the local-capability-aware data-collection door.
+                 Probes THIS box (gpu/weights/datasets/creds), ranks the feasible-here
+                 collection tasks  -  the benchmark grid PLUS the curated open-witness
+                 backlog  -  by novelty x value x staleness, and answers "what is the
+                 single most important datum to collect here right now" (next). run is
+                 DRY-RUN unless --apply; --apply executes + appends an OBSERVED row to
+                 docs/nightrun/collected.jsonl, --loop collects the whole feasible queue.
+                 A task the box can't run is never selected, so the loop can't claim a
+                 datum the hardware can't produce)
   fak audit     verify <journal.jsonl> | export <journal.jsonl>
                 (the AUDIT-TRAIL consumer: 'verify' re-reads a decision journal (the
                  'fak guard' / FAK_AUDIT_JOURNAL trail) and validates its hash chain
