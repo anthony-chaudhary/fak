@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "id": "scorecard",
+      "canonical": "scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "One deterministic measurement of a surface that folds reality into a single *_debt integer plus an A-F grade (the family is documented in the scorecard skill).",
+      "distinction": "The per-surface MEASUREMENT - NOT the control pane (the fold that sums every *_debt) and NOT a single *_debt integer it emits.",
+      "distinct_from": ["control-pane", "disambiguation-debt"],
+      "aliases": [],
+      "grounding": "scorecard",
+      "grounding_kind": "doc",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "control-pane",
+      "canonical": "scorecard control pane",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The fold that sums every scorecard's *_debt into one portfolio number with a pinned ratchet that reds only on a regression above baseline.",
+      "distinction": "The FOLD over all scorecards - NOT a single scorecard (one surface) and NOT a single *_debt integer (one metric).",
+      "distinct_from": ["scorecard", "disambiguation-debt"],
+      "aliases": ["controlpane"],
+      "grounding": "controlpane",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "disambiguation-debt",
+      "canonical": "disambiguation-debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "This scorecard's integer: clarity defects of positioned concepts plus coverage gaps (confusable tree tokens with no row).",
+      "distinction": "NAMING clarity (distinct names for distinct concepts) - NOT conflation-debt (provenance honesty: a number labeled WITNESSED vs OBSERVED), the other easily-confused honesty axis.",
+      "distinct_from": ["scorecard", "control-pane"],
+      "aliases": [],
+      "grounding": "debt",
+      "grounding_kind": "doc",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "scorecard",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
