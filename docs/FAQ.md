@@ -61,6 +61,14 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
     },
     {
       "@type": "Question",
+      "name": "What is the deployment-substrate axis?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The deployment-substrate axis is the third axis along which the same ak kernel is invariant — from a battery-powered IoT sensor, through edge gateways and laptops, up to multi-GPU hyperscaler fleets. The scale axis runs vertical: tool call to turn to session to fleet to RSI (how much of the stack lives in one address space). The depth axis runs down through the hardware abstraction layer: CPU reference to CUDA to Vulkan to Metal (which silicon runs the matmul). The deployment-substrate axis runs across the whole deployment spectrum: different boxes, same kernel, same invariants. The claim is that the workload shape (an agent loop proposing tool calls) and the invariants (default-deny, quarantine, bit-exact reuse, tamper-evident audit) do not change with the box, so an operator who learns ak on a laptop already knows it on a fleet. See The cross-platform spine."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Is fak a faster model server? How does it compare to vLLM, SGLang, or llama.cpp?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -1688,6 +1696,26 @@ kept run and evict a single span: a poisoned result, an expired secret. It leave
 **bit-for-bit identical** to a run that never saw it, verified at `max|Δ| = 0`. `fak`
 can do this because it owns the cache as a kernel object instead of renting it from a
 serving engine. See [Addressable KV cache](explainers/addressable-kv-cache.md).
+
+
+
+## What is the deployment-substrate axis?
+
+The **deployment-substrate axis** is the third axis along which the same ak kernel
+is invariant — from a battery-powered IoT sensor, through edge gateways and laptops,
+up to multi-GPU hyperscaler fleets.
+
+- The **scale axis** runs vertical: tool call to turn to session to fleet to RSI (how
+  much of the stack lives in one address space).
+- The **depth axis** runs down through the hardware abstraction layer: CPU reference
+  to CUDA to Vulkan to Metal (which silicon runs the matmul).
+- The **deployment-substrate axis** runs across the whole deployment spectrum: different
+  boxes, same kernel, same invariants.
+
+The claim is that the workload shape (an agent loop proposing tool calls) and the
+invariants (default-deny, quarantine, bit-exact reuse, tamper-evident audit) do not
+change with the box, so an operator who learns ak on a laptop already knows it on a
+fleet. See [The cross-platform spine](explainers/cross-platform-spine.md).
 
 ## Is fak a faster model server? How does it compare to vLLM, SGLang, or llama.cpp?
 

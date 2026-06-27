@@ -237,6 +237,7 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 | vCache proof tools | Planned and observed provider-cache savings/refutation | shipped as proof/control plane |
 | Model routing | Per-aspect routing, ensembles, routebench, gateway seam | shipped spine; deploy with current flags/docs checked |
 | In-kernel model | Pure-Go reference model, kernel-owned KV cache, GPU/backend witnesses | correctness/reference path |
+| Cross-platform spine | One kernel across the whole deployment substrate (IoT → edge → laptop → hyperscaler) | shipped (docs/explainers/cross-platform-spine.md) |
 
 Every claim in [CLAIMS.md](CLAIMS.md) carries exactly one tag:
 `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
@@ -411,6 +412,25 @@ can be blocked by OS Application Control on freshly compiled test binaries. Use
 - In-kernel model: the shipped path is a correctness/reference witness with real
   tests. Use a tuned serving stack for production throughput.
 - Dangerous tools: keep irreversible and exfil-shaped tools off the allow-list.
+
+## Three axes of the same kernel
+
+`fak`'s invariants repeat along three dimensions:
+
+- **Scale axis** (vertical): tool call → turn → session → fleet → RSI. How much of
+  the stack lives in one address space. The same observe → decide → act → verify
+  shape and trust invariant recur at every ring.
+- **Depth axis** (downward): CPU reference → CUDA → Vulkan → Metal. Which silicon
+  runs the matmul. New backends plug in via registration against the compute HAL.
+- **Deployment-substrate axis** (across): IoT → edge → laptop → hyperscaler.
+  What *kind of box* and how big. The same workload shape (agent loop proposing
+  tool calls) and the same invariants (default-deny, quarantine, bit-exact reuse,
+  tamper-evident audit) do not change with the box.
+
+The crossing point is one kernel present at the most scales, depths, and substrate
+targets, carrying the same invariants through all of them — the way Linux runs on
+the phone in your pocket and the rack training the model on it. See [the
+cross-platform spine](docs/explainers/cross-platform-spine.md).
 
 ## Docs Map
 
