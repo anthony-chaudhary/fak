@@ -90,6 +90,17 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(rest[lead:]); err != nil {
 		return 2
 	}
+	// Defense-in-depth against a view-clobber footgun: the dos-view default is computed
+	// from the process home (os.UserHomeDir) at flag-definition time, so a caller that
+	// redirects --home to an isolated tree (every accounts test does) would STILL write the
+	// dos roster into the REAL ~/.claude/accounts.yaml — the exact way a `remove`/`add` test
+	// once overwrote a live operator's switcher roster with a temp-dir seat. When --home is
+	// overridden but --dos-view is left at its default, re-derive the dos view under the
+	// chosen home so --home alone makes the whole command hermetic. An explicit --dos-view (or
+	// FAK_DOS_ROSTER) still wins.
+	if !flagSet(fs, "dos-view") && flagSet(fs, "home") && *homeDir != "" {
+		*dosView = defaultDosView(*homeDir)
+	}
 	*registryPath = pathutil.ExpandTilde(*registryPath)
 	*homeDir = pathutil.ExpandTilde(*homeDir)
 	*gateDir = pathutil.ExpandTilde(*gateDir)
