@@ -307,7 +307,7 @@ battery** (`agentdojo`, replacing the static fixture). Three things are genuinel
 
 - Generalizing to a full attack matrix (× the model ladder).
 - Wiring the **KV-quarantine bridge** into the live loop (proven today on a synthetic model).
-- The honest detector residual. It is ~100% evadable by design, non-load-bearing under
+- The honest detector residual. It is deliberately evadable by design, non-load-bearing under
   the capability floor, but the ceiling on the "uninjectable" framing.
 
 ---
