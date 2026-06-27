@@ -1,0 +1,177 @@
+package dispatchorder
+
+import (
+	"fmt"
+	"testing"
+)
+
+// base is a fixed "now" the tests reason against; recency/cooldown are offsets from it.
+const base = 1_000_000
+
+// dispoOf returns the disposition the planner gave the unit with id, or "" if absent.
+func dispoOf(r Result, id string) Disposition {
+	for _, x := range r.Order {
+		if x.ID == id {
+			return x.Disposition
+		}
+	}
+	return ""
+}
+
+// TestSupersedeKeepsFreshest is the headline scenario: 25 tasks spawned for the SAME target
+// (one shared key) collapse to the single freshest unit — that one is kept and picked, the
+// other 24 are superseded (not eligible, not re-attempted), and the pick is the freshest.
+func TestSupersedeKeepsFreshest(t *testing.T) {
+	var cands []Candidate
+	for i := 0; i < 25; i++ {
+		cands = append(cands, Candidate{
+			ID:          fmt.Sprintf("task-%02d", i),
+			Key:         "X",
+			UpdatedUnix: int64(base - 10_000 + i*100), // task-24 is the most recently updated
+		})
+	}
+	r := Plan(Input{Candidates: cands, NowUnix: base})
+
+	if r.KeepCount != 1 || r.SupersededCount != 24 {
+		t.Fatalf("counts = keep %d superseded %d, want 1/24", r.KeepCount, r.SupersededCount)
+	}
+	if r.Pick() != "task-24" {
+		t.Errorf("pick = %q, want task-24 (the freshest)", r.Pick())
+	}
+	if dispoOf(r, "task-24") != DispKeep {
+		t.Errorf("freshest task-24 disposition = %q, want keep", dispoOf(r, "task-24"))
+	}
+	if dispoOf(r, "task-00") != DispSuperseded {
+		t.Errorf("stale task-00 disposition = %q, want superseded", dispoOf(r, "task-00"))
+	}
+	// Every superseded unit names the winner.
+	for _, x := range r.Order {
+		if x.Disposition == DispSuperseded && x.SupersededBy != "task-24" {
+			t.Errorf("%s superseded_by = %q, want task-24", x.ID, x.SupersededBy)
+		}
+	}
+}
+
+// TestDistinctKeysAllKeptFreshestFirst: units with DIFFERENT keys are all distinct targets, so
+// all are kept and ordered freshest-first (by recency, not by id).
+func TestDistinctKeysAllKeptFreshestFirst(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "a", Key: "A", UpdatedUnix: base - 300},
+		{ID: "b", Key: "B", UpdatedUnix: base - 100}, // freshest
+		{ID: "c", Key: "C", UpdatedUnix: base - 200},
+	}})
+	if r.KeepCount != 3 {
+		t.Fatalf("keep = %d, want 3 (distinct keys never supersede)", r.KeepCount)
+	}
+	want := []string{"b", "c", "a"} // freshest-first
+	for i, id := range want {
+		if r.Keep[i] != id {
+			t.Errorf("keep[%d] = %q, want %q (freshest-first order)", i, r.Keep[i], id)
+		}
+	}
+}
+
+// TestEmptyKeyNeverSuperseded: an empty Key opts a unit out of collapse — two empty-key units
+// are both kept even though they would otherwise look like duplicates.
+func TestEmptyKeyNeverSuperseded(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "u1", Key: "", UpdatedUnix: base - 50},
+		{ID: "u2", Key: "", UpdatedUnix: base - 60},
+	}})
+	if r.KeepCount != 2 || r.SupersededCount != 0 {
+		t.Errorf("empty-key units: keep %d superseded %d, want 2/0", r.KeepCount, r.SupersededCount)
+	}
+}
+
+// TestLiveWinnerYieldsNoKeep: when the freshest unit for a key is already running, the group
+// yields NO keep this tick — the older duplicates are superseded (not run), and the live one is
+// reported live, so the dispatcher does not start a stale duplicate behind a running fresh one.
+func TestLiveWinnerYieldsNoKeep(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "fresh", Key: "X", UpdatedUnix: base - 100, Live: true},
+		{ID: "stale", Key: "X", UpdatedUnix: base - 500},
+	}})
+	if r.KeepCount != 0 {
+		t.Fatalf("keep = %d, want 0 (freshest is live)", r.KeepCount)
+	}
+	if dispoOf(r, "fresh") != DispLive {
+		t.Errorf("fresh disposition = %q, want live", dispoOf(r, "fresh"))
+	}
+	if dispoOf(r, "stale") != DispSuperseded {
+		t.Errorf("stale disposition = %q, want superseded", dispoOf(r, "stale"))
+	}
+	if r.Pick() != "" {
+		t.Errorf("pick = %q, want empty (nothing dispatchable)", r.Pick())
+	}
+}
+
+// TestCooldownHoldsFreshestNoFallback: the freshest unit attempted within the cooldown window is
+// held (cooling) — and the planner does NOT fall back to an older duplicate, so the group still
+// yields no keep. This is the deliberate v1 posture (freshest-or-wait).
+func TestCooldownHoldsFreshestNoFallback(t *testing.T) {
+	r := Plan(Input{NowUnix: base, CooldownSeconds: 600, Candidates: []Candidate{
+		{ID: "fresh", Key: "X", UpdatedUnix: base - 100, LastAttemptUnix: base - 60}, // attempted 60s ago < 600s
+		{ID: "stale", Key: "X", UpdatedUnix: base - 900},
+	}})
+	if dispoOf(r, "fresh") != DispCooling {
+		t.Fatalf("fresh disposition = %q, want cooling", dispoOf(r, "fresh"))
+	}
+	if dispoOf(r, "stale") != DispSuperseded {
+		t.Errorf("stale disposition = %q, want superseded (no fallback to older dup)", dispoOf(r, "stale"))
+	}
+	if r.Pick() != "" || r.KeepCount != 0 {
+		t.Errorf("pick=%q keep=%d, want empty/0 (freshest cooling, no fallback)", r.Pick(), r.KeepCount)
+	}
+}
+
+// TestCooldownExpiredKeeps: once the cooldown window passes, the freshest unit is keepable again.
+func TestCooldownExpiredKeeps(t *testing.T) {
+	r := Plan(Input{NowUnix: base, CooldownSeconds: 600, Candidates: []Candidate{
+		{ID: "fresh", Key: "X", UpdatedUnix: base - 100, LastAttemptUnix: base - 700}, // 700s ago > 600s
+	}})
+	if r.Pick() != "fresh" {
+		t.Errorf("pick = %q, want fresh (cooldown expired)", r.Pick())
+	}
+}
+
+// TestUpdatedBeatsCreatedAndId: recency is UPDATED time, not creation and not id — a unit
+// created later but updated earlier loses to one updated more recently. This is the fix for the
+// old "freshest = largest issue number" behavior.
+func TestUpdatedBeatsCreatedAndId(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "zzz-new", Key: "X", CreatedUnix: base - 10, UpdatedUnix: base - 900}, // newest+highest id, but stale update
+		{ID: "aaa-old", Key: "X", CreatedUnix: base - 999, UpdatedUnix: base - 50}, // oldest+lowest id, freshest update
+	}})
+	if r.Pick() != "aaa-old" {
+		t.Errorf("pick = %q, want aaa-old (most recently UPDATED, not highest id/newest created)", r.Pick())
+	}
+}
+
+// TestDeterministicAndTotal: identical inputs give identical results, and the empty input yields
+// a defined empty result.
+func TestDeterministicAndTotal(t *testing.T) {
+	in := Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "a", Key: "K", UpdatedUnix: base - 1},
+		{ID: "b", Key: "K", UpdatedUnix: base - 2},
+		{ID: "c", Key: "", UpdatedUnix: base - 3},
+	}}
+	a, b := Plan(in), Plan(in)
+	if fmt.Sprint(a) != fmt.Sprint(b) {
+		t.Errorf("Plan is not deterministic:\n%v\n%v", a, b)
+	}
+	empty := Plan(Input{NowUnix: base})
+	if len(empty.Order) != 0 || empty.Pick() != "" {
+		t.Errorf("empty input = %+v, want empty/no-pick", empty)
+	}
+}
+
+// TestNegativeCooldownDisables: a negative cooldown disables the hold — an attempted freshest is
+// still keepable.
+func TestNegativeCooldownDisables(t *testing.T) {
+	r := Plan(Input{NowUnix: base, CooldownSeconds: -1, Candidates: []Candidate{
+		{ID: "fresh", Key: "X", UpdatedUnix: base - 10, LastAttemptUnix: base - 1},
+	}})
+	if r.Pick() != "fresh" {
+		t.Errorf("pick = %q, want fresh (cooldown disabled)", r.Pick())
+	}
+}
