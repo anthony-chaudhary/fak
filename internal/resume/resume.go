@@ -132,6 +132,32 @@ const (
 // the number; it is never a hand-tuned constant.
 const ColdWriteShare = 0.852
 
+// EffectiveReuse5mSeconds / EffectiveReuse1hSeconds are the calibrated reuse windows the
+// cold/warm POSTURE cutoff uses, distinct from the BILLING TTL the write-premium math uses
+// (#940). The billing TTL is a documented FLOOR — Anthropic refreshes the ephemeral cache
+// on access, so a prefix stays provider-warm well past the 5m/1h billing window. The resume
+// back-test over this box's real history measured reuse staying ≈98% warm at 5–15 min and
+// ≈76–100% warm at 15–60 min, so projecting COLD the instant idle passes the billing TTL is
+// the dominant projection error (proj=COLD / obs=WARM — conservative, but it would still
+// recommend bursting a live cache). These widen the cold cutoff to a corpus-derived window:
+// 15 min for the 5m tier, 60 min for the 1h tier. They are an upper bound on "reliably warm",
+// chosen so the cutoff is past the high-warm band but not into the long tail; like
+// ColdWriteShare they are re-derivable by re-running the back-test, never hand-tuned policy.
+const (
+	EffectiveReuse5mSeconds = 900  // the 5m billing tier stays projectably warm to ~15 min.
+	EffectiveReuse1hSeconds = 3600 // the 1h billing tier's effective window matches its billing TTL.
+)
+
+// EffectiveReuseSeconds is the corpus-calibrated cold/warm posture cutoff for a TTL tier — the
+// window past which the projection calls the prefix cold. It is >= the billing TTL.Seconds()
+// (the billing TTL is a floor), so it only ever WIDENS the warm window, never narrows it.
+func (t CacheTTL) EffectiveReuseSeconds() int64 {
+	if t == TTL1h {
+		return EffectiveReuse1hSeconds
+	}
+	return EffectiveReuse5mSeconds
+}
+
 // Conservative defaults applied to a zero/unset Input axis. They match the shipped
 // surfaces they mirror so the plan agrees with what the live path would actually do.
 const (
@@ -164,6 +190,12 @@ const (
 	// PostureUnknown: idle time was not supplied, so warm-vs-cold cannot be told apart —
 	// the plan recommends RESUME_FULL (do not shed on a guess) and prices the cold case.
 	PostureUnknown Posture = "unknown"
+	// PostureWarmHit: a CROSS-SESSION warm hit (#940) — the resume opened straight onto a
+	// prefix the PROVIDER reports still warm (positive cache_read on the first turn), so the
+	// first turn bills as a READ even though within-session idle-vs-TTL would have projected
+	// cold. Unlike PostureWarm (a projection over idle time), this is evidence the caller
+	// carries from the provider's own counters; it is only set when Input.PriorSessionWarm is.
+	PostureWarmHit Posture = "warm_hit"
 )
 
 // Strategy names a way to re-enter a dormant session.
@@ -229,6 +261,20 @@ type Input struct {
 	SeedTokens int `json:"seed_tokens"`
 	// OutputTokensPerTurn prices each modeled turn's completion (0 => default).
 	OutputTokensPerTurn int `json:"output_tokens_per_turn"`
+	// EffectiveReuseSeconds OVERRIDES the corpus-calibrated cold/warm posture cutoff for this
+	// plan (#940). 0 uses TTL.EffectiveReuseSeconds() (the measured default, wider than the
+	// billing TTL because the provider refreshes the cache on access). A caller with a tighter
+	// or looser fit for its own corpus supplies it; a value below the billing TTL is floored to
+	// the billing TTL (the cutoff never goes BELOW the billing floor — a cold verdict stays
+	// conservative). Negative is treated as unset.
+	EffectiveReuseSeconds int64 `json:"effective_reuse_seconds"`
+	// PriorSessionWarm marks that this resume opened straight onto a still-provider-warm prefix
+	// from the PRIOR session (a cross-session cache hit — the back-test found 307+ of these on
+	// this box). When true, the first turn is priced as a warm READ, not a cold re-prefill, even
+	// though within-session idle-vs-TTL would project cold — the provider, not idle time, is the
+	// authority here. Default false: the conservative within-session model is unchanged unless a
+	// caller has positive evidence (its own cache_read on the first turn) of the warm hit.
+	PriorSessionWarm bool `json:"prior_session_warm"`
 }
 
 // withDefaults returns a copy with zero/unset axes filled and out-of-range values clamped,
@@ -264,6 +310,21 @@ func (in Input) withDefaults() Input {
 	return out
 }
 
+// effectiveCutoffSeconds is the cold/warm posture cutoff this plan uses: the caller's
+// EffectiveReuseSeconds override when set (>0), else the TTL's corpus-calibrated default. The
+// result is floored to the billing TTL.Seconds() so the effective window can only WIDEN the
+// warm band past the billing floor, never narrow it below — a cold verdict stays conservative.
+func (in Input) effectiveCutoffSeconds() int64 {
+	cutoff := in.TTL.EffectiveReuseSeconds()
+	if in.EffectiveReuseSeconds > 0 {
+		cutoff = in.EffectiveReuseSeconds
+	}
+	if floor := in.TTL.Seconds(); cutoff < floor {
+		cutoff = floor
+	}
+	return cutoff
+}
+
 // StrategyCost is one re-entry strategy priced end to end. Every dollar figure is a
 // projection over the resident-token count at the supplied base price (see the package
 // fence); none is a witnessed bill.
@@ -291,13 +352,18 @@ type StrategyCost struct {
 // a table, and the same value a gateway/guard resume hook would fold into an audit row.
 type Report struct {
 	// Echoed, defaulted inputs so the record is self-describing.
-	ResidentTokens      int      `json:"resident_tokens"`
-	IdleSeconds         int64    `json:"idle_seconds"`
-	TTL                 CacheTTL `json:"ttl"`
-	TTLSeconds          int64    `json:"ttl_seconds"`
-	HorizonTurns        int      `json:"horizon_turns"`
-	OutputTokensPerTurn int      `json:"output_tokens_per_turn"`
-	Pricing             Pricing  `json:"pricing"`
+	ResidentTokens int      `json:"resident_tokens"`
+	IdleSeconds    int64    `json:"idle_seconds"`
+	TTL            CacheTTL `json:"ttl"`
+	TTLSeconds     int64    `json:"ttl_seconds"`
+	// EffectiveReuseSeconds is the cold/warm posture cutoff this plan actually used — the
+	// corpus-calibrated reuse window (>= TTLSeconds), which the projection compares idle time
+	// against instead of the bare billing TTL (#940). Surfaced so a reader sees the cutoff that
+	// produced the posture, not just the billing floor.
+	EffectiveReuseSeconds int64   `json:"effective_reuse_seconds"`
+	HorizonTurns          int     `json:"horizon_turns"`
+	OutputTokensPerTurn   int     `json:"output_tokens_per_turn"`
+	Pricing               Pricing `json:"pricing"`
 
 	// Posture is the projected cache state and PostureReason the closed token explaining it.
 	Posture       Posture `json:"posture"`
@@ -326,7 +392,7 @@ type Report struct {
 // (see withDefaults).
 func Plan(in Input) Report {
 	in = in.withDefaults()
-	post, postReason := projectPosture(in.IdleSeconds, in.TTL)
+	post, postReason := projectPosture(in.IdleSeconds, in.TTL, in.effectiveCutoffSeconds(), in.PriorSessionWarm)
 
 	full := priceStrategy(StrategyResumeFull, in.ResidentTokens, in, post)
 	cut := priceStrategy(StrategyCut, in.ShedBudgetTokens, in, post)
@@ -352,6 +418,7 @@ func Plan(in Input) Report {
 		IdleSeconds:           in.IdleSeconds,
 		TTL:                   in.TTL,
 		TTLSeconds:            in.TTL.Seconds(),
+		EffectiveReuseSeconds: in.effectiveCutoffSeconds(),
 		HorizonTurns:          in.HorizonTurns,
 		OutputTokensPerTurn:   in.OutputTokensPerTurn,
 		Pricing:               in.Pricing,
@@ -365,17 +432,24 @@ func Plan(in Input) Report {
 	}
 }
 
-// projectPosture maps idle time to a cache posture. Negative idle is unknown; idle at or
-// past the TTL is cold (the prefix has aged out); within the TTL is warm (may still be
-// cached — a projection, never a guarantee).
-func projectPosture(idle int64, ttl CacheTTL) (Posture, string) {
+// projectPosture maps idle time to a cache posture. priorWarm (a provider-evidenced
+// cross-session hit) wins outright. Otherwise: negative idle is unknown; idle at or past the
+// EFFECTIVE reuse cutoff is cold (the prefix has aged out of the provider's real reuse window,
+// not merely the billing TTL); within it is warm (may still be cached — a projection, never a
+// guarantee). cutoff is the effective reuse window (>= the billing TTL), supplied by Plan from
+// Input.effectiveCutoffSeconds so the cold/warm line uses measured reuse, not the billing floor.
+func projectPosture(idle int64, ttl CacheTTL, cutoff int64, priorWarm bool) (Posture, string) {
+	if priorWarm {
+		// The provider reports the prior-session prefix still warm — evidence beats projection.
+		return PostureWarmHit, "cross_session_warm_hit"
+	}
 	if idle < 0 {
 		return PostureUnknown, "idle_unknown"
 	}
-	if idle >= ttl.Seconds() {
-		return PostureCold, "idle_exceeds_ttl"
+	if idle >= cutoff {
+		return PostureCold, "idle_exceeds_effective_ttl"
 	}
-	return PostureWarm, "idle_within_ttl"
+	return PostureWarm, "idle_within_effective_ttl"
 }
 
 // priceStrategy prices one strategy that re-prefills `prefill` tokens. The first turn is a
@@ -394,8 +468,10 @@ func priceStrategy(s Strategy, prefill int, in Input, post Posture) StrategyCost
 	warmRead := float64(prefill) * inPerTok * CacheReadMultiplier
 
 	firstTurn := coldReprefill + output // cold / unknown: establish the prefix
-	if post == PostureWarm {
-		firstTurn = warmRead + output // warm: the prefix may still be served from cache
+	if post == PostureWarm || post == PostureWarmHit {
+		// warm (idle within the effective reuse window) OR a provider-evidenced cross-session
+		// warm hit: the prefix is served from cache, so the first turn bills as a READ (#940).
+		firstTurn = warmRead + output
 	}
 	warmTurn := warmRead + output
 	horizon := firstTurn + float64(in.HorizonTurns-1)*warmTurn
@@ -433,7 +509,9 @@ func recommend(in Input, post Posture, breakEven int) (Strategy, string) {
 		return StrategyResumeFull, ReasonUnknownIdle
 	case in.ResidentTokens <= in.ShedBudgetTokens:
 		return StrategyResumeFull, ReasonSmallSession
-	case post == PostureWarm:
+	case post == PostureWarm || post == PostureWarmHit:
+		// A warm prefix (projected or a provider-evidenced cross-session hit) is kept unless
+		// the horizon is long enough that the cut repays bursting it.
 		if in.HorizonTurns > breakEven {
 			return StrategyCut, ReasonWarmHorizonPaysBurst
 		}

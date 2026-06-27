@@ -225,7 +225,11 @@ func Backtest(sessions [][]ObservedTurn, ttl CacheTTL, band RecoveryBand) Backte
 				continue
 			}
 			rep.Scored++
-			proj, _ := projectPosture(gap, ttl) // gap >= 0, so cold or warm, never unknown
+			// Score the projection against the EFFECTIVE reuse cutoff (#940), not the bare
+			// billing TTL: the provider keeps the prefix warm past the billing window, so the
+			// effective window is what the live Plan now compares idle time against. This is the
+			// change whose effect the ProjColdObsWarm miss rate measures.
+			proj, _ := projectPosture(gap, ttl, ttl.EffectiveReuseSeconds(), false) // gap >= 0, so cold or warm, never unknown
 			switch {
 			case proj == obs:
 				rep.Agree++

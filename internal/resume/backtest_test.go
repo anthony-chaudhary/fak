@@ -53,14 +53,32 @@ func TestBacktestColdPairAgreesAndValidatesCost(t *testing.T) {
 	}
 }
 
-// TestBacktestProjColdObsWarm: a gap PAST the 5m TTL where the prefix was nonetheless fully
-// re-served — the empirical case the corpus shows (the documented 5m TTL is a floor, the real
-// reuse window is longer). The projection calls cold, reality is warm: a counted disagreement
-// in the proj-cold/obs-warm direction (the projection would burst a still-warm cache).
-func TestBacktestProjColdObsWarm(t *testing.T) {
+// TestBacktestEffectiveTTLResolves10MinMiss is the #940 acceptance witness: a 10-min gap whose
+// prefix was fully re-served used to be a proj-cold/obs-warm MISS (10 min > the 300s billing
+// TTL), because the projection compared idle time to the BILLING floor. Now that the back-test
+// scores against the EFFECTIVE reuse window (900s for the 5m tier), the same boundary AGREES —
+// proj=WARM, obs=WARM — so the dominant miss class drops. This is the "miss rate drop after the
+// effective-TTL change" the issue asks the back-test to demonstrate.
+func TestBacktestEffectiveTTLResolves10MinMiss(t *testing.T) {
 	sess := [][]ObservedTurn{{
 		turn(0, 2, 1000, 19000),  // prior prompt 20002
-		turn(600, 2, 500, 20000), // 10 min later, still fully served from cache
+		turn(600, 2, 500, 20000), // 10 min later, still fully served from cache — within the 900s effective window
+	}}
+	r := Backtest(sess, TTL5m, DefaultRecoveryBand())
+	if r.Agree != 1 || r.ProjColdObsWarm != 0 {
+		t.Fatalf("agree=%d projColdObsWarm=%d, want 1/0 (the effective window resolves the 10-min miss)", r.Agree, r.ProjColdObsWarm)
+	}
+}
+
+// TestBacktestProjColdObsWarm: a gap PAST the EFFECTIVE reuse window (20 min > the 900s 5m
+// cutoff) where the prefix was nonetheless fully re-served — the residual long-tail case the
+// corpus still shows past the effective window. The projection calls cold, reality is warm: a
+// counted disagreement in the proj-cold/obs-warm direction (the projection would burst a still-
+// warm cache). Widening the cutoff shrinks this class but cannot eliminate the long tail.
+func TestBacktestProjColdObsWarm(t *testing.T) {
+	sess := [][]ObservedTurn{{
+		turn(0, 2, 1000, 19000),   // prior prompt 20002
+		turn(1200, 2, 500, 20000), // 20 min later, still fully served from cache — past the 900s effective window
 	}}
 	r := Backtest(sess, TTL5m, DefaultRecoveryBand())
 	if r.Disagree != 1 || r.ProjColdObsWarm != 1 {

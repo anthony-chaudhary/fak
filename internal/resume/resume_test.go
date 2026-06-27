@@ -31,10 +31,15 @@ func TestHeadline250kColdResume(t *testing.T) {
 		HorizonTurns:   20,
 	})
 	if r.Posture != PostureCold {
-		t.Fatalf("posture = %q, want cold (idle 7200s exceeds 300s TTL)", r.Posture)
+		t.Fatalf("posture = %q, want cold (idle 7200s exceeds the 900s effective 5m cutoff)", r.Posture)
 	}
-	if r.PostureReason != "idle_exceeds_ttl" {
-		t.Errorf("posture reason = %q, want idle_exceeds_ttl", r.PostureReason)
+	if r.PostureReason != "idle_exceeds_effective_ttl" {
+		t.Errorf("posture reason = %q, want idle_exceeds_effective_ttl", r.PostureReason)
+	}
+	// The cold/warm cutoff is the EFFECTIVE reuse window (#940), wider than the 300s billing
+	// TTL and surfaced on the report; 2h idle clears it comfortably so the cold verdict holds.
+	if r.EffectiveReuseSeconds != EffectiveReuse5mSeconds {
+		t.Errorf("effective reuse = %d, want %d (the calibrated 5m window)", r.EffectiveReuseSeconds, EffectiveReuse5mSeconds)
 	}
 	if r.Recommended != StrategyCut || r.Reason != ReasonColdPrefillShed {
 		t.Errorf("recommend = (%q,%q), want (cut, cold_prefill_shed)", r.Recommended, r.Reason)
@@ -272,5 +277,67 @@ func TestTotalOnDegenerateInput(t *testing.T) {
 	neg := Plan(Input{ResidentTokens: -5, Pricing: opusPricing})
 	if strat(neg, StrategyResumeFull).ColdReprefillUSD != 0 {
 		t.Errorf("negative resident should clamp to a zero-cost plan")
+	}
+}
+
+// TestEffectiveTTLWidensWarmWindow is #940 correction 1: an idle gap PAST the 300s billing TTL
+// but WITHIN the calibrated 900s effective window now projects WARM, not cold — the provider
+// keeps the prefix warm past the billing floor, so the projection no longer calls a 6-min idle
+// reliably cold (the dominant proj=COLD/obs=WARM error class).
+func TestEffectiveTTLWidensWarmWindow(t *testing.T) {
+	r := Plan(Input{ResidentTokens: 200000, IdleSeconds: 360, TTL: TTL5m, Pricing: opusPricing})
+	if r.Posture != PostureWarm {
+		t.Fatalf("posture = %q, want warm (360s is past the 300s billing TTL but within the 900s effective window)", r.Posture)
+	}
+	if r.PostureReason != "idle_within_effective_ttl" {
+		t.Errorf("posture reason = %q, want idle_within_effective_ttl", r.PostureReason)
+	}
+	// Past the billing TTL under the OLD (billing-floor) model this would have been cold; the
+	// effective window keeps it warm, so the first turn bills as a read, not a write.
+	full := strat(r, StrategyResumeFull)
+	warmFirst := 200000*(5.0/1e6)*CacheReadMultiplier + float64(r.OutputTokensPerTurn)*(25.0/1e6)
+	if !approx(full.FirstTurnUSD, warmFirst) {
+		t.Errorf("warm first turn = %.6f, want a cache READ %.6f", full.FirstTurnUSD, warmFirst)
+	}
+}
+
+// TestEffectiveReuseOverrideAndFloor: a caller may override the cutoff, but it can never go
+// BELOW the billing TTL (a cold verdict stays conservative). A wide override widens the warm
+// window; a too-small override is floored back up to the billing TTL.
+func TestEffectiveReuseOverrideAndFloor(t *testing.T) {
+	// Override wider: 1800s window keeps a 1200s idle warm.
+	wide := Plan(Input{ResidentTokens: 100000, IdleSeconds: 1200, TTL: TTL5m, EffectiveReuseSeconds: 1800, Pricing: opusPricing})
+	if wide.Posture != PostureWarm || wide.EffectiveReuseSeconds != 1800 {
+		t.Errorf("wide override: posture=%q effective=%d, want warm/1800", wide.Posture, wide.EffectiveReuseSeconds)
+	}
+	// Override below the billing floor is clamped UP to the 300s billing TTL, so a 200s idle is
+	// still warm but the cutoff never drops below the floor.
+	floored := Plan(Input{ResidentTokens: 100000, IdleSeconds: 400, TTL: TTL5m, EffectiveReuseSeconds: 100, Pricing: opusPricing})
+	if floored.EffectiveReuseSeconds != TTL5m.Seconds() {
+		t.Errorf("sub-floor override: effective=%d, want floored to %d", floored.EffectiveReuseSeconds, TTL5m.Seconds())
+	}
+	if floored.Posture != PostureCold { // 400s > 300s floor.
+		t.Errorf("400s idle with a floored cutoff should be cold, got %q", floored.Posture)
+	}
+}
+
+// TestCrossSessionWarmHit is #940 correction 3: a resume that opened straight onto a still-warm
+// prior-session prefix (PriorSessionWarm) is priced as a warm READ, not a cold re-prefill, even
+// when within-session idle would project cold. The provider's evidence beats the idle projection.
+func TestCrossSessionWarmHit(t *testing.T) {
+	// Idle 2h would normally be COLD; the cross-session warm flag overrides to a warm hit.
+	r := Plan(Input{ResidentTokens: 200000, IdleSeconds: 7200, TTL: TTL5m, PriorSessionWarm: true, Pricing: opusPricing})
+	if r.Posture != PostureWarmHit || r.PostureReason != "cross_session_warm_hit" {
+		t.Fatalf("posture = (%q,%q), want (warm_hit, cross_session_warm_hit) despite 2h idle", r.Posture, r.PostureReason)
+	}
+	full := strat(r, StrategyResumeFull)
+	warmFirst := 200000*(5.0/1e6)*CacheReadMultiplier + float64(r.OutputTokensPerTurn)*(25.0/1e6)
+	if !approx(full.FirstTurnUSD, warmFirst) {
+		t.Errorf("warm-hit first turn = %.6f, want a cache READ %.6f (not a cold re-prefill)", full.FirstTurnUSD, warmFirst)
+	}
+	// A cold plan with the same idle would have priced the first turn as a write — strictly more.
+	cold := Plan(Input{ResidentTokens: 200000, IdleSeconds: 7200, TTL: TTL5m, Pricing: opusPricing})
+	if !(strat(cold, StrategyResumeFull).FirstTurnUSD > full.FirstTurnUSD) {
+		t.Errorf("the warm hit must price below the cold re-prefill of the same resident")
 	}
 }
