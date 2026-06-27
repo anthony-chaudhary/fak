@@ -22,7 +22,7 @@ func cmdHooks(argv []string) { os.Exit(runHooks(os.Stdout, os.Stderr, argv)) }
 
 func runHooks(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file>)")
+		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | lane-audit)")
 		return 2
 	}
 	switch argv[0] {
@@ -30,10 +30,58 @@ func runHooks(stdout, stderr io.Writer, argv []string) int {
 		return runHooksPreCommit(stdout, stderr, argv[1:])
 	case "commit-msg":
 		return runHooksCommitMsg(stdout, stderr, argv[1:])
+	case "lane-audit":
+		return runHooksLaneAudit(stdout, stderr, argv[1:])
 	default:
-		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg)\n", argv[0])
+		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | lane-audit)\n", argv[0])
 		return 2
 	}
+}
+
+// runHooksLaneAudit reports every internal/<leaf> Go package with no declared dos.toml lane —
+// the standing, whole-tree form of the per-commit leaf check the commit-msg stamp lint runs. Each
+// such leaf's `(fak <leaf>)` ship-stamp binds to a phantom unit and the arbiter cannot protect its
+// edits. --gate N exits 1 when the count EXCEEDS N, so a ratchet can drive the drift to zero
+// without reding the trunk on day one. Exit 0 report/at-or-under-gate, 1 over-gate, 2 could-not-run.
+func runHooksLaneAudit(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("hooks lane-audit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
+	asJSON := fs.Bool("json", false, "emit the undeclared leaves as JSON")
+	gate := fs.Int("gate", -1, "exit 1 if the count of undeclared-lane leaves exceeds this threshold (-1 = report only)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	r := resolveRoot(*root)
+	if r == "" {
+		return 2
+	}
+	gaps, err := hooks.UndeclaredLeaves(r)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak hooks lane-audit: %v\n", err)
+		return 2
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if encErr := enc.Encode(map[string]any{"undeclared": gaps, "count": len(gaps)}); encErr != nil {
+			fmt.Fprintf(stderr, "fak hooks lane-audit: %v\n", encErr)
+			return 2
+		}
+	} else {
+		fmt.Fprintf(stdout, "lane-audit: %d internal leaf(s) with a real Go package but NO declared dos.toml lane\n", len(gaps))
+		for _, g := range gaps {
+			fmt.Fprintf(stdout, "  - %s/%s — a `(fak %s)` stamp binds to a phantom unit; declare lane `%s` in dos.toml\n", g.Base, g.Leaf, g.Leaf, g.Leaf)
+		}
+		if len(gaps) == 0 {
+			fmt.Fprintln(stdout, "  (every internal leaf has a declared lane)")
+		}
+	}
+	if *gate >= 0 && len(gaps) > *gate {
+		fmt.Fprintf(stderr, "lane-audit: %d undeclared leaves exceeds gate %d\n", len(gaps), *gate)
+		return 1
+	}
+	return 0
 }
 
 // gateMode resolves a gate's FLEET_<NAME>_GUARD env to block (default) / warn / off, and its
