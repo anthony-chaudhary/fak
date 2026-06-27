@@ -22,11 +22,21 @@ import (
 // pinned to it (a tombstone's rehome target, followed transitively). See
 // internal/accounts for the model.
 //
+// registry.json is the SINGLE SOURCE OF TRUTH (identity + policy attributes per account); the
+// dos roster (~/.claude/accounts.yaml) and the job roster (job/config/claude_accounts.yaml)
+// are GENERATED VIEWS of it — `sync` writes them, `check` flags drift, never hand-edit them.
+//
 // Subcommands:
 //
+//	fak accounts add <name> [--reserved] [--chrome-profile P] [--no-login --token -]
+//	                                   enroll a NEW account end-to-end: isolated-dir login (never
+//	                                   ~/.claude), identity probe, twin-check, registry + views
+//	fak accounts remove --name <n>     tombstone an account in the registry + regenerate views
 //	fak accounts list                  table of every seat: name, status, TRUE identity, creds, rehome, flags
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
-//	fak accounts discover              emit a starter registry.json from ~/.claude* (disk truth)
+//	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
+//	fak accounts sync                  project the registry into the dos + job roster views
+//	fak accounts check                 RED (exit 1) if a generated view drifts from the registry
 //	fak accounts validate              load the registry and check every invariant (incl. tombstones resolve)
 func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv)) }
 
