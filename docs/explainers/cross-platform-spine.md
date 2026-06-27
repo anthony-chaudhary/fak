@@ -174,6 +174,29 @@ remove flags. That "same binary, two scales" property
 property as "same kernel, two ends of the substrate axis" — this page is just that
 claim drawn all the way down to the constrained end, not only up to the fleet.
 
+### The datacenter end keeps the same invariants — and that's the witness, not throughput
+
+The interesting claim at the hyperscaler end is *not* a throughput number. It is
+that the five invariants above are the **same artifact** on a multi-GPU fleet host
+as on the laptop — and for the two that are deterministic, "same" means
+**byte-for-byte**, by construction. The bit-exact KV reuse and addressable-eviction
+metrics (`max\|Δ\|=0`, evict == never-saw) are pure-Go logic with no hardware
+dependency, so they don't merely *approximate* the laptop result on a bigger box —
+they reproduce it exactly, the same way the [hardware matrix](../HARDWARE-MATRIX.md)
+already witnesses them reproducing across arm64 and x86_64. A datacenter host is one
+more point on that determinism axis: a faster forward pass below the contract, the
+identical verdict above it. The default-deny floor and the SHA-256 hash-chained
+audit line are likewise pure-Go and hardware-independent, so an offline
+`fak audit verify` over a fleet host's journal is the same check it is on a Pi.
+
+What is **witnessed today** vs. what is a **TARGET**, kept provenance-honest:
+
+| Datacenter-end claim | Status |
+|---|---|
+| Deterministic invariants (bit-exact KV reuse, addressable eviction, default-deny, hash-chained audit) reproduce byte-for-byte on any box, fleet host included | **Witnessed by construction** — the metrics carry no hardware dependency, and the cross-ISA reproduction is recorded in `HARDWARE-MATRIX.md`. The same logic on a bigger box yields the same numbers; there is nothing silicon-specific left to drift. |
+| A *dedicated* datacenter-scale run that re-records those same invariants on a multi-GPU fleet host, alongside [hardware matrix](../HARDWARE-MATRIX.md) Platform 4 | **TARGET / not-yet-witnessed** — the multi-GPU serving lane exists, but a fleet-host re-run of the determinism witness has not been captured yet. Until it is, the byte-for-byte claim rests on the construction argument plus the cross-ISA witness, not on a recorded datacenter row. |
+| Any hyperscaler *throughput* result | **Not claimed.** The spine is the governance/reuse/provenance band; tokens per second is the substrate-specific half the HAL and engine seam own (see the fences below). |
+
 ## Why this is structural, not a marketing reframe
 
 Three properties make the spine real rather than aspirational, and all three are
