@@ -50,15 +50,6 @@ saves you tokens is also where a dangerous call gets refused. That is why teams 
 need a hard security floor reach for it too (see
 [For security teams](#for-security-teams)).
 
-**1-shot** means resolving a call in a single pass, without requiring a model turn for correction. A
-traditional agent loop would send malformed or blocked calls back to the model, paying again each time.
-`fak` resolves those conditions in the syscall itself (repair, quarantine, or deny) and pays once.
-
-This is the **1-shot kernel**: `fak` adjudicates and enforces the call in one pass,
-without firing an error-code turn back to the model. A SOTA agent loop would send
-a malformed or blocked call back to the model for correction (adding a model turn);
-`fak` resolves it in the syscall itself (repair, quarantine, or deny) and pays once.
-
 ```text
 agent --> proposed tool call --> fak kernel --> allowed tool / denied call
 tool  --> raw result          --> fak kernel --> admitted context / quarantine
@@ -80,10 +71,15 @@ fak preflight --tool exfiltrate     --args "{}"     # -> DENY  (SECRET_EXFIL)
 fak agent --offline                                 # the injection / destructive-op A/B, fully offline
 ```
 
-**Cloned the repo** (you have the Go source tree + )? Build first, then run the same proof against a
+**Cloned the repo** (you have the Go source tree + `examples/`)? Build first, then run the same proof against a
 named example floor, where the deny is by *argument value*:
 
-
+```bash
+go build -o fak ./cmd/fak
+./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
+./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
+./fak agent --offline
+```
 
 Either way, the core proof is the same: the dangerous action is refused by structure
 before a model interpretation matters.
