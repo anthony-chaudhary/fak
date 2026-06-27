@@ -46,6 +46,66 @@ func medianMS(ds []time.Duration) float64 {
 	return float64(cp[len(cp)/2].Nanoseconds()) / 1e6
 }
 
+// glmDims is the subset of the synthetic glm_moe_dsa config the throughput SWEEP varies —
+// the dimensions that move the native per-token cost curve (depth, width, FFN, DSA selection
+// size). It is the bisection unit: a "bad" config that triggers the device-kernel
+// illegal-memory-access at the largest sweep points
+// (docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md §3 P0) and a known-good
+// neighbour differ in one or more of these.
+type glmDims struct {
+	Layers int `json:"layers"`
+	Hidden int `json:"hidden"`
+	Heads  int `json:"heads"`
+	Inter  int `json:"inter"`
+	TopK   int `json:"index_topk"`
+}
+
+// bisectStep is one single-variable-reverted config the operator runs (in a FRESH process — a
+// CUDA illegal access corrupts the context, so configs cannot share a process) to attribute the
+// fault to one dimension: it is the failing `bad` config with exactly one dim reverted to the
+// known-good `good` value. If `bad` faults but a step RUNS clean, that step's `dim` (held at
+// bad's value) is the one carrying the out-of-bounds.
+type bisectStep struct {
+	Dim string `json:"dim"`
+	glmDims
+}
+
+// bisectPlan emits the note's prescribed P0 next step — "single-variable on-box bisection (vary
+// layers / hidden / heads / topk one at a time)" — as a deterministic, runnable plan instead of
+// a manual discipline. For each dimension where good and bad differ, it yields `bad` with that
+// one dimension reverted to good's value, in a stable order (layers, hidden, heads, inter, topk)
+// so the plan is reproducible. Dims that already agree are skipped (reverting them is a no-op).
+func bisectPlan(good, bad glmDims) []bisectStep {
+	var steps []bisectStep
+	add := func(dim string, d glmDims) { steps = append(steps, bisectStep{Dim: dim, glmDims: d}) }
+	if good.Layers != bad.Layers {
+		d := bad
+		d.Layers = good.Layers
+		add("layers", d)
+	}
+	if good.Hidden != bad.Hidden {
+		d := bad
+		d.Hidden = good.Hidden
+		add("hidden", d)
+	}
+	if good.Heads != bad.Heads {
+		d := bad
+		d.Heads = good.Heads
+		add("heads", d)
+	}
+	if good.Inter != bad.Inter {
+		d := bad
+		d.Inter = good.Inter
+		add("inter", d)
+	}
+	if good.TopK != bad.TopK {
+		d := bad
+		d.TopK = good.TopK
+		add("index_topk", d)
+	}
+	return steps
+}
+
 func main() {
 	layers := flag.Int("layers", 8, "number of glm_moe_dsa layers (all full-indexer)")
 	hidden := flag.Int("hidden", 2048, "hidden size H")
@@ -66,7 +126,35 @@ func main() {
 	backendName := flag.String("backend", "cuda", "compute backend name (cuda); empty/legacy = host")
 	quant := flag.Bool("quant", true, "Q8_0 quantized weight path (required for the device Q8 kernels)")
 	emitJSON := flag.Bool("json", false, "emit one compact JSON record line (machine-readable) in addition to the human report")
+	bisectBaseline := flag.String("bisect-baseline", "", "known-GOOD config \"layers hidden heads inter topk\"; with it set, do NOT benchmark — emit the single-variable bisection plan (this run's -layers/-hidden/-heads/-inter/-index-topk are the failing config) to pin the P0 device-kernel illegal-memory-access one dim at a time. GPU-free.")
 	flag.Parse()
+
+	// Bisection-plan mode: emit the deterministic single-variable sweep that pins the largest-
+	// config device-kernel illegal-memory-access (the carried P0), then exit. This runs on ANY
+	// host (no backend, no model build) — it is a plan the GPU runner executes, one fresh process
+	// per step. See docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md §3.
+	if *bisectBaseline != "" {
+		var good glmDims
+		if n, err := fmt.Sscan(*bisectBaseline, &good.Layers, &good.Hidden, &good.Heads, &good.Inter, &good.TopK); err != nil || n != 5 {
+			fmt.Fprintf(os.Stderr, "-bisect-baseline must be 5 ints \"layers hidden heads inter topk\" (got %q)\n", *bisectBaseline)
+			os.Exit(2)
+		}
+		bad := glmDims{Layers: *layers, Hidden: *hidden, Heads: *heads, Inter: *inter, TopK: *idxTopK}
+		plan := bisectPlan(good, bad)
+		fmt.Printf("=== glm_moe_dsa P0 single-variable bisection plan ===\n")
+		fmt.Printf("good(no-fault): layers=%d hidden=%d heads=%d inter=%d topk=%d\n", good.Layers, good.Hidden, good.Heads, good.Inter, good.TopK)
+		fmt.Printf("bad (faults)  : layers=%d hidden=%d heads=%d inter=%d topk=%d\n", bad.Layers, bad.Hidden, bad.Heads, bad.Inter, bad.TopK)
+		if len(plan) == 0 {
+			fmt.Printf("(no differing dims — good == bad; nothing to bisect)\n")
+		}
+		for _, s := range plan {
+			fmt.Printf("  revert %-10s -> layers=%d hidden=%d heads=%d inter=%d topk=%d  (if THIS runs clean, dim %q at bad's value carries the OOB)\n",
+				s.Dim, s.Layers, s.Hidden, s.Heads, s.Inter, s.TopK, s.Dim)
+		}
+		b, _ := json.Marshal(plan)
+		fmt.Printf("GLMBISECT_JSON %s\n", b)
+		return
+	}
 
 	indexerTypes := make([]string, *layers)
 	for i := range indexerTypes {
