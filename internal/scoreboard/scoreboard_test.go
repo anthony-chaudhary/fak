@@ -189,6 +189,74 @@ func TestBlocksCarrySameFacts(t *testing.T) {
 	}
 }
 
+func TestPostGatesOnNoChange(t *testing.T) {
+	postCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		postCount++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"ts":"123.456","channel":"C1"}`)
+	}))
+	defer srv.Close()
+
+	c, err := NewClient("xoxb-test", WithAPIBase(srv.URL+"/"), WithHTTPClient(srv.Client()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	up := Update{Title: "test", Grade: "A", Score: "100"}
+	ctx := context.Background()
+
+	// First post: should succeed
+	ts, err := c.PostWithUpdate(ctx, "C1", up, "test", nil)
+	if err != nil {
+		t.Fatalf("first post failed: %v", err)
+	}
+	if ts == "" {
+		t.Fatal("first post returned empty ts (should have posted)")
+	}
+	if postCount != 1 {
+		t.Fatalf("first post: want 1 HTTP call, got %d", postCount)
+	}
+
+	// Second post with identical data: should skip
+	ts, err = c.PostWithUpdate(ctx, "C1", up, "test", nil)
+	if err != nil {
+		t.Fatalf("second post (no change) failed: %v", err)
+	}
+	if ts != "" {
+		t.Fatal("second post (no change) returned non-empty ts (should have skipped)")
+	}
+	if postCount != 1 {
+		t.Fatalf("second post (no change): want still 1 HTTP call, got %d", postCount)
+	}
+
+	// Third post with changed grade: should succeed
+	up.Grade = "B"
+	ts, err = c.PostWithUpdate(ctx, "C1", up, "test", nil)
+	if err != nil {
+		t.Fatalf("third post (grade changed) failed: %v", err)
+	}
+	if ts == "" {
+		t.Fatal("third post (grade changed) returned empty ts (should have posted)")
+	}
+	if postCount != 2 {
+		t.Fatalf("third post (grade changed): want 2 HTTP calls, got %d", postCount)
+	}
+
+	// Different title: should post even with same values
+	up2 := Update{Title: "other", Grade: "B", Score: "100"}
+	ts, err = c.PostWithUpdate(ctx, "C1", up2, "test", nil)
+	if err != nil {
+		t.Fatalf("fourth post (different title) failed: %v", err)
+	}
+	if ts == "" {
+		t.Fatal("fourth post (different title) returned empty ts (should have posted)")
+	}
+	if postCount != 3 {
+		t.Fatalf("fourth post (different title): want 3 HTTP calls, got %d", postCount)
+	}
+}
+
 // chdir switches to dir for the test and restores the prior cwd after.
 func chdir(t *testing.T, dir string) {
 	t.Helper()

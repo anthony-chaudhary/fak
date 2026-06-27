@@ -77,10 +77,14 @@ func runScoreboardPost(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak scoreboard post: %v\n", err)
 		return 2
 	}
-	ts, err := client.Post(ctx(), ch, up.Text(), up.Blocks())
+	ts, err := client.PostWithUpdate(ctx(), ch, up, up.Text(), up.Blocks())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak scoreboard post: %v\n", err)
 		return 1
+	}
+	if ts == "" {
+		fmt.Fprintln(stdout, "skipped: no change from last post for this title")
+		return 0
 	}
 	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
 	return 0

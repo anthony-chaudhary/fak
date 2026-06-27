@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,6 +51,8 @@ type Client struct {
 	token   string
 	http    *http.Client
 	apiBase string // override for tests
+	lastMu  sync.RWMutex
+	lastPost map[string]Update // keyed by title
 }
 
 // Option configures a Client.
@@ -72,7 +75,12 @@ func NewClient(token string, opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("no scoreboard token: set %s, or add FAK_SCOREBOARD_TOKEN=... to .env.slack.local",
 			strings.Join(tokenEnvs, "/"))
 	}
-	c := &Client{token: token, http: &http.Client{Timeout: 40 * time.Second}, apiBase: slackAPI}
+	c := &Client{
+		token:   token,
+		http:    &http.Client{Timeout: 40 * time.Second},
+		apiBase: slackAPI,
+		lastPost: make(map[string]Update),
+	}
 	for _, o := range opts {
 		o(c)
 	}
@@ -130,6 +138,29 @@ func envFileValue(key string) string {
 	return ""
 }
 
+// shouldPost returns true if the update differs from the last posted update
+// for the same title. Posts are gated so #scoreboard stays signal, not heartbeat.
+func (c *Client) shouldPost(up Update) bool {
+	c.lastMu.RLock()
+	defer c.lastMu.RUnlock()
+
+	last, ok := c.lastPost[up.Title]
+	if !ok {
+		return true // first post for this title
+	}
+	return up.Grade != last.Grade ||
+		up.Score != last.Score ||
+		up.Debt != last.Debt ||
+		up.Verdict != last.Verdict
+}
+
+// recordLast saves the update as the last posted for its title.
+func (c *Client) recordLast(up Update) {
+	c.lastMu.Lock()
+	defer c.lastMu.Unlock()
+	c.lastPost[up.Title] = up
+}
+
 // postMessageResp carries the chat.postMessage outcome (Slack returns ok=false in
 // the body even on HTTP 200).
 type postMessageResp struct {
@@ -142,7 +173,20 @@ type postMessageResp struct {
 // Post sends text to a channel and returns the posted message ts. blocks, when
 // non-empty, attaches a Block Kit payload (used for the formatted scorecard card);
 // text is the notification fallback Slack shows in the sidebar/badge.
+// Posts are gated to avoid heartbeat noise: only posts when the key fields
+// (grade, score, debt, verdict) change from the last post for the same title.
 func (c *Client) Post(ctx context.Context, channel, text string, blocks []any) (string, error) {
+	return c.PostWithUpdate(ctx, channel, Update{}, text, blocks)
+}
+
+// PostWithUpdate sends an update with explicit Update state for gating.
+// It is the low-level entry point used by the scoreboard CLI; Post is a
+// convenience wrapper for callers without an Update struct.
+func (c *Client) PostWithUpdate(ctx context.Context, channel string, up Update, text string, blocks []any) (string, error) {
+	if up.Title != "" && !c.shouldPost(up) {
+		return "", nil // skip: no change from last post for this title
+	}
+
 	body := map[string]any{"channel": channel, "text": text}
 	if len(blocks) > 0 {
 		body["blocks"] = blocks
@@ -169,6 +213,9 @@ func (c *Client) Post(ctx context.Context, channel, text string, blocks []any) (
 	}
 	if !r.OK {
 		return "", fmt.Errorf("chat.postMessage: %s", r.Error)
+	}
+	if up.Title != "" {
+		c.recordLast(up)
 	}
 	return r.TS, nil
 }
