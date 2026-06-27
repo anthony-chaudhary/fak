@@ -26,11 +26,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -288,21 +285,7 @@ func (r *Recorder) Manifest() Manifest {
 // every digest the page table references, so the image is fully self-contained and
 // reloadable in a fresh process.
 func (r *Recorder) Persist(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	mb, err := json.MarshalIndent(r.Manifest(), "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), mb, 0o644); err != nil {
-		return err
-	}
-	cb, err := json.MarshalIndent(r.cas, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "cas.json"), cb, 0o644)
+	return writeImage(dir, r.Manifest(), r.cas)
 }
 
 // ---------------------------------------------------------------------------
@@ -330,24 +313,9 @@ type Session struct {
 // address (a tampered swap device fails closed). The returned Session resolves
 // against its own loaded bytes, never the global store.
 func Load(dir string) (*Session, error) {
-	mb, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	m, cas, err := loadImageRaw(dir)
 	if err != nil {
 		return nil, err
-	}
-	var m Manifest
-	if err := json.Unmarshal(mb, &m); err != nil {
-		return nil, fmt.Errorf("recall: bad manifest: %w", err)
-	}
-	if m.Version != ManifestVersion {
-		return nil, fmt.Errorf("recall: manifest version %q != %q", m.Version, ManifestVersion)
-	}
-	cb, err := os.ReadFile(filepath.Join(dir, "cas.json"))
-	if err != nil {
-		return nil, err
-	}
-	var cas map[string][]byte
-	if err := json.Unmarshal(cb, &cas); err != nil {
-		return nil, fmt.Errorf("recall: bad cas: %w", err)
 	}
 	// Content-address integrity: a persisted blob MUST hash to its key, or the swap
 	// device was tampered with and we refuse to serve any of it.

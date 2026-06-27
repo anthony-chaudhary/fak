@@ -3,11 +3,8 @@ package recall
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -121,21 +118,7 @@ func (s *Session) ContextChanges() []ContextChange {
 // directory. This is used by the context-control plane after tombstoning: the
 // manifest changes, the CAS bytes are preserved byte-for-byte.
 func (s *Session) Persist(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	mb, err := json.MarshalIndent(s.Manifest, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), mb, 0o644); err != nil {
-		return err
-	}
-	cb, err := json.MarshalIndent(s.cas, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "cas.json"), cb, 0o644)
+	return writeImage(dir, s.Manifest, s.cas)
 }
 
 func (s *Session) tombstoneFor(step int) (ContextChange, bool) {
