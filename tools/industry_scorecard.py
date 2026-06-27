@@ -534,10 +534,20 @@ def industry_freshness(dims: list[dict[str, Any]], systems: list[dict[str, Any]]
     if as_of is None:
         return {"stale_dimensions": [], "stale_systems": [], "window_days": window_days}
     for d in dims:
-        sd = parse_date(d.get("source_date"))
-        if sd is not None and (as_of - sd).days > window_days:
-            stale_dims.append(f"{d.get('id')}: SOTA bar sourced {(as_of - sd).days}d ago "
-                              f"({d.get('source_date')}) — re-check the current best")
+        # Prefer last_reviewed (tracks when the bar was re-confirmed);
+        # fall back to source_date for backward compatibility.
+        rd = parse_date(d.get("last_reviewed") or d.get("source_date"))
+        if rd is not None and (as_of - rd).days > window_days:
+            # Show both dates when they differ: original source_date vs last_reviewed
+            src = d.get("source_date", "?")
+            last = d.get("last_reviewed", src)
+            if src != last:
+                stale_dims.append(f"{d.get('id')}: SOTA bar sourced {src}, "
+                                  f"last reviewed {(as_of - rd).days}d ago ({last}) — "
+                                  f"re-check the current best")
+            else:
+                stale_dims.append(f"{d.get('id')}: SOTA bar sourced {(as_of - rd).days}d ago "
+                                  f"({src}) — re-check the current best")
     for s in systems:
         rd = parse_date(s.get("last_reviewed"))
         if rd is not None and (as_of - rd).days > window_days:

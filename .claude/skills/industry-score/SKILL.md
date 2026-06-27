@@ -139,12 +139,18 @@ This is what stops the scorecard rotting — in both directions.
 - A **new dimension** the field starts competing on → add it to `_taxonomy.json`. It is
   immediately uncovered, so `coverage` drops and it shows in `--gaps` until fak is
   positioned on it. (This is the mechanism that surfaces "we're missing this.")
-- A **stale SOTA bar** → `--stale` lists every dimension whose `source_date` (or
-  competitor `last_reviewed`) is past the `industry_review_window_days` window. Re-check
-  it on the web, update the number + bump the date. Advisory, never parity-debt — a
-  number doesn't become false the day it crosses the window, it wants a look. For a
-  larger sweep, fan out a workflow of web-grounded researchers (one per group) to
-  refresh the SOTA bars + sources.
+- A **stale SOTA bar** → `--stale` lists every dimension whose `last_reviewed` (or
+  `source_date` for backward compatibility) is past the `industry_review_window_days`
+  window. Re-check it on the web and update accordingly:
+  - If the bar **changed** (new SOTA number or system): update `sota_bar`, `sota_systems`,
+    `notes`, and set both `source_date` AND `last_reviewed` to the re-check date.
+  - If the bar **is still accurate** (no new SOTA found): update ONLY `last_reviewed`
+    to the re-check date (keep `source_date` unchanged). This is the "re-confirmed"
+    case that prevents silent regrowth — the bar stays stale-checked-out without
+    fabricating a new source date.
+  Advisory, never parity-debt — a number doesn't become false the day it crosses the
+  window, it wants a look. For a larger sweep, fan out a workflow of web-grounded
+  researchers (one per group) to refresh the SOTA bars + sources on a recurring cadence.
 
 **As fak moves.** A benchmark lands → turn the relevant `no-claim` into a measured
 `lead`/`parity`/`trails`, citing the commit/artifact, and bump `measured_on`. The

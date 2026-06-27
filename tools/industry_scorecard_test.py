@@ -213,6 +213,23 @@ def test_industry_freshness_flags_old_sources() -> None:
     assert len(f["stale_systems"]) == 1 and "vLLM" in f["stale_systems"][0]
 
 
+def test_industry_freshness_last_reviewed_preferred_over_source_date() -> None:
+    as_of = isc.parse_date("2026-06-23")
+    # d1: old source_date, but recent last_reviewed → NOT stale
+    # d2: old source_date, no last_reviewed → stale (falls back to source_date)
+    # d3: old source_date, old last_reviewed → stale
+    dims = [
+        dim(id="d1", source_date="2024-01", last_reviewed="2026-05"),
+        dim(id="d2", source_date="2024-01"),
+        dim(id="d3", source_date="2024-01", last_reviewed="2024-02"),
+    ]
+    f = isc.industry_freshness(dims, [], as_of, 180)
+    assert len(f["stale_dimensions"]) == 2
+    stale_ids = [s.split(":")[0] for s in f["stale_dimensions"]]
+    assert "d2" in stale_ids and "d3" in stale_ids
+    assert "d1" not in stale_ids
+
+
 # --- modular disk shell (merge a data directory) ---------------------------
 
 def test_load_data_dir_merges_modular_files() -> None:
