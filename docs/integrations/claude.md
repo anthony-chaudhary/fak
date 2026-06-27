@@ -97,6 +97,64 @@ fak guard --provider openai -- codex            # an OpenAI-compatible coding ag
 fak guard --policy my-floor.json -- claude      # enforce your own reviewed allow-list
 ```
 
+### Local model: no key, no network, one command
+
+`fak guard --gguf` runs a local GGUF model in-kernel as the upstream for your agent. No API key, no network, no second terminal — the whole stack (local model + your harness + kernel floor) is one command:
+
+```bash
+fak guard --gguf qwen2.5:7b -- claude
+```
+
+What you'll see on first run (the GGUF is cached locally after the first pull):
+
+```
+fak guard: --gguf qwen2.5:7b → hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+GET https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+fak guard: listening on http://127.0.0.1:54321 (in-process gateway)
+fak guard: loading in-kernel model: Qwen2.5-7B-Instruct-Q4_K_M.gguf
+fak guard: Claude child started (PID 12345)
+[... Claude session runs with the local model ...]
+fak guard: 23 kernel decision(s) — 19 allowed, 2 denied, 0 repaired, 0 quarantined, 2 deferred
+  blocked: POLICY_BLOCK     x2
+```
+
+**What happens:**
+
+1. The GGUF model downloads from Hugging Face on first run (~5 GB, cached in `~/.cache/fak-models/`).
+2. fak loads the model in-kernel (no separate server process).
+3. Claude Code connects to the in-process gateway over `http://127.0.0.1:<random-port>/v1`.
+4. Every tool call Claude proposes crosses the same kernel adjudication floor as the proxy path.
+5. Your data never leaves your box — no network traffic after the initial GGUF pull.
+
+**Model aliases:**
+
+The `--gguf` flag accepts a model alias (from `fak ls`), an `hf://` URI, or a local `.gguf` path:
+
+```bash
+fak ls    # list available aliases: qwen2.5:7b, qwen2.5:1.5b, smollm2, ornith:9b
+fak guard --gguf qwen2.5:1.5b -- claude               # smaller 1.5B model (~1.6 GB)
+fak guard --gguf /path/to/model.gguf -- claude       # local file
+fak guard --gguf hf://owner/repo/model.gguf -- claude # download on demand
+```
+
+**GPU acceleration (optional):**
+
+Use `--backend cuda` or `--backend metal` to run decode on GPU (requires a `-tags cuda` or `-tags fakmetal` build):
+
+```bash
+FAK_GGUF_LOAD_WORKERS=8 fak guard --gguf qwen2.5:7b --backend cuda -- claude
+```
+
+**The honest fence:**
+
+Small-model agentic quality is a ramp. `qwen2.5:7b` (or any 7B-class local model) can answer well-formed questions and follow simple instructions, but for complex coding tasks, frontier-quality reasoning, or multi-step refactoring, the proxy path (`fak guard -- claude`, which reaches Claude Sonnet/Opus via Anthropic's API) is still the default. Use `--gguf` for:
+- Offline development on air-gapped systems
+- Privacy-sensitive work where data cannot leave the box
+- Testing the kernel floor without API costs
+- Learning how local agentic models behave
+
+When you need the best coding quality and you have a subscription, use `fak guard -- claude` (proxy).
+
 ### Long-context reset budget
 
 `fak guard` can also seed a stable served-session budget for wrapped Claude Code:

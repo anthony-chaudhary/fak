@@ -15,6 +15,7 @@ setup cost, and **nothing new gets installed between them**:
 |---|---|---|---|
 | **0 — Try the kernel** | Run/measure the adjudication boundary offline | `go build` | none |
 | **1 — Front a real model** | Put the kernel in front of a model you serve elsewhere (Ollama / vLLM / llama.cpp / a cloud provider) | + a running OpenAI-compatible server | a chat model |
+| **1b — Local model in one command** | Run a local GGUF model in-kernel with your existing agent — no key, no network, no second terminal | `fak guard --gguf qwen2.5:7b -- claude` | ~5 GB GGUF (cached) |
 | **2 — The fused in-kernel model** | The pure-Go SmolLM2 forward pass the kernel owns | + (real weights) Python export | ~135M params |
 | **2b — Expert: Qwen3.6 in-kernel** | Run Qwen3.6-27B through fak's own GGUF->Q8 Gated-DeltaNet path | local GGUF (tokenizer optional — embedded by default) | ~15 GB GGUF, ~26 GB RSS |
 
@@ -402,13 +403,8 @@ whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
 
 ## Where to go next
 
-- **`fak guard -- claude`: the one-command front door.** Run the Claude Code (or any
-  agent) you already use, with the kernel adjudicating every tool call it proposes. It
-  starts the gateway in-process, injects the base URL into the child only (your shell is
-  untouched), proxies your real Anthropic key + prompt cache through in passthrough mode,
-  and prints what it allowed vs blocked on exit. No script, no second terminal, any OS.
-  Embedded secure floor (`fak guard --dump-policy` to see it). See
-  [`docs/integrations/claude.md`](docs/integrations/claude.md).
+- **`fak guard --gguf <model> -- claude`: local model, one command.** Run Claude Code (or any OpenAI-compatible agent) with a local GGUF model behind the kernel — no API key, no network, no second terminal. The model loads in-kernel, the kernel adjudicates every tool call, and your data never leaves your box. Example: `fak guard --gguf qwen2.5:7b -- claude` (downloads on first run, ~5 GB cached). Small-model agentic quality is a ramp; for frontier-quality coding, `fak guard -- claude` (proxy to Anthropic) is still the default. See [`docs/integrations/claude.md`](docs/integrations/claude.md).
+- **`fak guard -- claude`: the one-command proxy front door.** Run the Claude Code (or any agent) you already use, with the kernel adjudicating every tool call it proposes. It starts the gateway in-process, injects the base URL into the child only (your shell is untouched), proxies your real Anthropic key + prompt cache through in passthrough mode, and prints what it allowed vs blocked on exit. No script, no second terminal, any OS. Embedded secure floor (`fak guard --dump-policy` to see it). See [`docs/integrations/claude.md`](docs/integrations/claude.md).
 - [`docs/fak/tutorial.md`](docs/fak/tutorial.md): **the guided first session**. It walks
   step by step through Tiers 0–2 with the real, captured output of every command
   (the friendliest on-ramp if this reference felt dense).

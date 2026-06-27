@@ -15,6 +15,7 @@ and runs on CPU — no GPU needed for small models.
 | **Prove the safety gate in 60 seconds** (no model, no download, no key) | [See it in 2 minutes](README.md#see-it-in-2-minutes-no-key-no-model-no-gpu) — one structural DENY |
 | **See the gate stop a live attack** (Go only, ~1 min, no downloads) | [AgentDojo red-team demo](examples/agentdojo-redteam/README.md) |
 | **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
+| **Run a local model behind my existing coding agent** (no key, no network, one command) | `fak guard --gguf qwen2.5:7b -- claude` |
 | **Chat with a local AI** (most fun — needs a ~1.6 GB model download) | [Simple Demo](cmd/simpledemo/README.md) — 5 minutes |
 | **Follow a guided first session** (real output at every step) | [Tutorial](docs/fak/tutorial.md) — 15 minutes ⭐ |
 | **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 98 courses, six levels ⭐ |
