@@ -94,8 +94,10 @@ PATH_BY_SOURCE: dict[str, str] = {
     "loop-audit": "tools/fleet_loop_audit.py",
 }
 
-# The doc/workflow that schedules each source, named in the body so a scheduled-gate
-# finding also path-confirms the `ci` lane when the source path is a workflow.
+# The workflow that schedules each source, named in the body for human context. It
+# path-confirms the `ci` lane ONLY when it is the finding's OWNING path (a genuine
+# workflow-only finding); alongside a distinct owning tool path it is rendered by
+# basename so it never competes as a second routing signal. See render_issue.
 WORKFLOW_BY_SOURCE: dict[str, str] = {
     "security-audit": ".github/workflows/security-audit.yml",
     "security_audit": ".github/workflows/security-audit.yml",
@@ -253,16 +255,26 @@ def render_issue(finding: dict[str, Any], today: str) -> dict[str, Any]:
     sev_word = "BLOCKING" if severity >= 4 else "FAIL"
     title = f"gate-signal: {label} is {sev_word}"
 
-    # Route line: name the owning path(s) in the doc-link convention so the dispatch
-    # router's path-grep rung confirms a lane. Without a resolvable path the ticket
-    # still files (with the source named) but routes by label/scope, not path.
+    # Route line: name the owning path in the doc-link convention so the dispatch
+    # router's path-grep rung confirms a lane. The owning path is the SINGLE
+    # authoritative routing signal — a finding's fix lives at its owning path, so
+    # that path names the lane the worker needs. The scheduling workflow is human
+    # context, NOT a second routing signal: emitting `.github/workflows/X.yml` as a
+    # greppable path alongside a distinct owning `tools/...` path makes the router see
+    # two lanes (the tool's + `ci`) and route AMBIGUOUSLY. So name it by basename
+    # (non-greppable) when a distinct owning path exists; keep the full `.github/...`
+    # path (which path-confirms `ci`) only when the workflow IS the owning path — a
+    # genuine workflow-only finding (the gate's own source is the `.yml`).
     route_lines = []
     if owning:
         route_lines.append(f"**Owning tool:** `{owning}` — route to its lane "
                            f"(the dispatch router path-confirms it).")
-    if workflow:
-        route_lines.append(f"**Scheduled by:** `{workflow}`.")
-    if not route_lines:
+        if workflow and workflow != owning:
+            route_lines.append(f"**Scheduled by:** the `{Path(workflow).name}` workflow.")
+    elif workflow:
+        route_lines.append(f"**Scheduled by:** `{workflow}` — route to its lane "
+                           f"(the dispatch router path-confirms it).")
+    else:
         route_lines.append(f"**Source:** `{source}` (no owning path resolved; "
                            f"routes by label/scope).")
 
@@ -277,9 +289,15 @@ def render_issue(finding: dict[str, Any], today: str) -> dict[str, Any]:
     next_line = f"\n**Suggested next action (from the envelope):** {next_action}\n" \
         if next_action else ""
 
+    # Provenance names the filer by BASENAME, never `tools/gate_signal.py`: a full
+    # `tools/...` path here is an incidental router-greppable signal that pollutes the
+    # path-grep rung — harmless for a tools-owned finding (same lane) but it makes a
+    # ci-owned (workflow-only) finding route AMBIGUOUSLY. The ONLY greppable path in
+    # the body is the finding's owning path (the route line), so routing is robust for
+    # EVERY lane, not just by a `ci < tools` tie-break.
     body = (
-        f"> Auto-filed by **gate-signal** (`tools/gate_signal.py`, {today}) from a "
-        f"non-scorecard CI finding. A red gate — **needs a worker**; close as "
+        f"> Auto-filed by **gate-signal** (the `gate_signal.py` feeder, {today}) from "
+        f"a non-scorecard CI finding. A red gate — **needs a worker**; close as "
         f"`wontfix` if the finding is intentional/accepted.\n\n"
         f"**Finding:** `{label}` ({key})\n"
         f"**Detail:** {detail}\n"
@@ -289,8 +307,9 @@ def render_issue(finding: dict[str, Any], today: str) -> dict[str, Any]:
         + "\n".join(do_lines)
         + "\n\n---\n"
         "_gate-signal is the non-scorecard sibling of score-signal "
-        "(`tools/score_signal.py`). After this issue is closed, a future recurrence "
-        "of the same finding files a FRESH issue — only on an armed `--live` run._\n"
+        "(the `score_signal.py` feeder). After this issue is closed, a future "
+        "recurrence of the same finding files a FRESH issue — only on an armed "
+        "`--live` run._\n"
         + marker(key)
     )
 

@@ -19,6 +19,15 @@ TREES = {"tools": ["tools/**"], "ci": [".github/**"], "cmd": ["cmd/**"]}
 CONCURRENT = ["tools", "ci", "cmd"]
 
 
+def _route(issue: dict) -> dict:
+    """Route a rendered gate-signal issue through the real dispatch router."""
+    import issue_lane_router as router
+    return router.route_issue(
+        {"number": 1, "title": issue["title"], "body": issue["body"],
+         "labels": [{"name": lab} for lab in issue["labels"]]},
+        CONCURRENT, TREES)
+
+
 # --- fixtures ---------------------------------------------------------------
 def _posture(findings: list[dict]) -> dict:
     """The security_audit.py --json envelope shape."""
@@ -175,8 +184,9 @@ def test_garden_finding_routes_to_owning_tool_lane():
     import issue_lane_router as router
     # A garden-red finding's FIX lives in its owning tool (tools/garden_bundle.py via
     # PATH_BY_SOURCE), so the rendered ticket path-confirms the `tools` lane — the
-    # lane a worker actually needs. (`.github/` workflow paths do not path-confirm
-    # through the router's _PATH_RE today; the owning *tool* is the routable signal.)
+    # lane a worker actually needs. The scheduling workflow (.github/workflows/
+    # garden.yml) IS routable through the router now, but render_issue names it by
+    # basename so it never competes: the owning *tool* stays the single routing signal.
     env = _generic([{"source": "garden", "verdict": "REGRESSED", "ok": False,
                      "finding": "garden red"}])
     f = gs.normalize_findings(env)[0]
@@ -188,6 +198,26 @@ def test_garden_finding_routes_to_owning_tool_lane():
         CONCURRENT, TREES)
     assert routed["lane"] == "tools", f"owning tool routes to tools, got {routed!r}"
     assert routed["confidence"] == "path-confirmed"
+
+
+def test_workflow_only_finding_routes_to_ci_lane():
+    import issue_lane_router as router
+    # The genuinely NEW case the dotted-root router fix unlocks: a finding whose own
+    # source IS the workflow (a scheduled advisory `.yml` gate broke) has a `.github/`
+    # owning path, so the rendered ticket path-confirms the `ci` lane — and CLEANLY,
+    # not by a `ci < tools` tie-break: the body's filer provenance is named by basename
+    # so the owning `.github/...` path is the body's ONLY router-greppable path.
+    env = _posture([{"check": "broken-link-gate", "level": "FAIL",
+                     "msg": "scheduled advisory gate is failing",
+                     "where": ".github/workflows/security-audit.yml"}])
+    f = gs.normalize_findings(env)[0]
+    assert f["owning_path"] == ".github/workflows/security-audit.yml", \
+        "the finding's own .github/ path is the owning path (lstrip kept the dot)"
+    routed = _route(gs.render_issue(f, today="2026-06-27"))
+    assert routed["lane"] == "ci", f"workflow-only finding routes to ci, got {routed!r}"
+    assert routed["confidence"] == "path-confirmed"
+    assert routed["signal"] == "path:ci", \
+        f"ci is the SOLE path signal (no tools pollution), got {routed['signal']!r}"
 
 
 def _run() -> int:

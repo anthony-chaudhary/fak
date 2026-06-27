@@ -81,6 +81,42 @@ class PathNormalizationTest(unittest.TestCase):
         self.assertEqual(m.path_matches_lane("tools/issue_triage.py", TREES), ["tools"])
 
 
+class DottedRootPathTest(unittest.TestCase):
+    """A leading-dot repo root (`.github/...`, `.claude/...`) must path-confirm — a
+    `\\b` cannot anchor before a leading dot, so a workflow-only finding (e.g. a
+    scheduled `.github/workflows/security-audit.yml` gate, the #978 ci-lane case)
+    used to path-confirm NO lane. Covers the gate-signal feeder's routability."""
+
+    CI_TREES = {"tools": ["tools/**"], "ci": [".github/**"], "claude": [".claude/**"]}
+    CI_LANES = ["tools", "ci", "claude"]
+
+    def test_github_path_is_extracted(self):
+        # The natural backtick-wrapped position the old `\\b\\.github` never matched.
+        found = m._PATH_RE.findall("scheduled by `.github/workflows/security-audit.yml`")
+        self.assertEqual(found, [".github/workflows/security-audit.yml"])
+
+    def test_github_path_confirms_ci_lane(self):
+        iss = issue(101, "gate-signal: scheduled gate is RED",
+                    body="the failing gate lives in `.github/workflows/security-audit.yml`")
+        r = m.route_issue(iss, self.CI_LANES, self.CI_TREES)
+        self.assertEqual(r["lane"], "ci")
+        self.assertEqual(r["confidence"], "path-confirmed")
+
+    def test_claude_path_confirms_its_lane(self):
+        self.assertEqual(
+            m._PATH_RE.findall("edit `.claude/skills/foo/SKILL.md` please"),
+            [".claude/skills/foo/SKILL.md"])
+
+    def test_embedded_dot_root_not_falsely_matched(self):
+        # `x.github/y` is preceded by a word char -> the lookbehind rejects it, so a
+        # mid-token dotted root never becomes a false path signal.
+        self.assertEqual(m._PATH_RE.findall("see x.github/y here"), [])
+
+    def test_word_root_partial_prefix_still_rejected(self):
+        # The `\\b` half is untouched: `mytools/` must not match the `tools` root.
+        self.assertEqual(m._PATH_RE.findall("the mytools/x dir"), [])
+
+
 class RoutingRungTest(unittest.TestCase):
     def test_exact_scope(self):
         r = route(issue(1, "fix(gateway): silent MockPlanner fallback"))

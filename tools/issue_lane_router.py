@@ -39,8 +39,18 @@ _SCOPE_RE = re.compile(r"\b(\w+)\(([^)]+)\)")  # feat(scope), fix(scope), ...
 _BARE_PREFIX_RE = re.compile(r"^([A-Za-z][\w-]*):\s")
 
 # Concrete repo paths an issue body/title may name (the strongest routing signal).
+# The root alternation splits on its leading char: word-rooted roots (tools, docs,
+# fak/...) keep a `\b` so a partial prefix like `mytools/` never matches; DOT-rooted
+# roots (.github, .claude) cannot use `\b` — a `\b` needs a word char on one side, but
+# `.github` is non-word-then-word preceded by a backtick/space (both non-word), so the
+# boundary is absent and `\b\.github` silently never matched a `.github/...` path in its
+# natural `\`.github/...\`` position. A `(?<![\w.])` lookbehind anchors the dotted root
+# instead: it matches when preceded by a non-word/non-dot char (start, space, backtick)
+# and still rejects an embedded `x.github`. Without this a workflow-only finding (e.g. a
+# scheduled `.github/workflows/security-audit.yml` gate) path-confirmed NO lane.
 _PATH_RE = re.compile(
-    r"\b((?:fak/(?:internal|cmd|experiments)|tools|docs|visuals|\.github|\.claude)"
+    r"((?:\b(?:fak/(?:internal|cmd|experiments)|tools|docs|visuals)"
+    r"|(?<![\w.])\.(?:github|claude))"
     r"/[\w./-]+)"
 )
 
@@ -179,7 +189,14 @@ def _glob_to_re(glob: str) -> re.Pattern[str]:
 
 def path_matches_lane(path: str, trees: dict[str, list[str]]) -> list[str]:
     """All lanes whose tree globs match `path` (normalized, repo-relative)."""
-    p = path.replace("\\", "/").lstrip("./")
+    # Strip ONLY a leading `./` prefix — NOT `str.lstrip("./")`, which is a
+    # character-set strip that also eats the leading `.` of a dotted root like
+    # `.github/...`, leaving `github/...` that the `.github/**` glob then never
+    # matches (so a workflow-only #978 finding path-confirmed NO lane). Same trap
+    # gate_signal.py's `where`-path handling already fixed.
+    p = path.replace("\\", "/")
+    if p.startswith("./"):
+        p = p[2:]
     # Issue text names files in the `fak/internal/...` doc-link convention (AGENTS.md
     # writes the repo as `fak/`), but the Go module is the repository ROOT and the
     # dos.toml trees are repo-relative (`internal/...`, `cmd/...`). Strip a leading
