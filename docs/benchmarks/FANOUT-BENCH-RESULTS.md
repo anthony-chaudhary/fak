@@ -258,7 +258,7 @@ heads × 128 head-dim) so the memory ceiling is a quantity, not a guess. Artifac
 `longctx-measure-p524288.json`, `longctx-measure-p1048576.json`, and the rolled-up
 `longctx-measure.csv`.
 
-On the reference host that produced the checked-in artifacts (win32, 253.6 GiB RAM, no
+On the reference host that produced the checked-in artifacts (win32, 256 GB RAM, no
 dedicated GPU VRAM) every target P is `SKIPPED_NO_LONGCTX_PATH`:
 
 | candidate path | reason | recorded ceiling |
@@ -270,8 +270,8 @@ dedicated GPU VRAM) every target P is `SKIPPED_NO_LONGCTX_PATH`:
 Two honest facts fall out, neither visible in the modeled table:
 
 1. **The blocker on this host is the missing long-context checkpoint, not memory.** The
-   KV cache is 14.0 GiB at P=262144, 28.0 GiB at 524288, and 56.0 GiB at 1048576 — all of
-   which **fit** this host's 253.6 GiB RAM (`kv_fits_host_ram: true`). A real 256K–1M
+   KV cache is 14.0 GiB at P=262144, 28.0 GiB at P=524288, and 56.0 GiB at 1048576 — all of
+   which **fit** this host's 256 GB RAM (`kv_fits_host_ram: true`). A real 256K–1M
    validation is gated on a checkpoint and a backend that *admit* the context length, not
    on this host's memory.
 2. **The skip is recorded, never extrapolated.** `ttft_ms` / `prefill_ms` stay `null` for
