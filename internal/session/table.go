@@ -43,6 +43,15 @@ type Table struct {
 	// the lock — the source of the gateway's /v1/fak/session/changes drive-state
 	// stream. nil (the default) is the byte-identical no-op.
 	revObs RevisionObserver
+
+	// spliceFn + resumeWaiters are the live-resume loop seam (#916): WaitResume parks a
+	// one-shot channel per trace in resumeWaiters while a session is Paused, and the
+	// transition write path closes those channels when the session leaves Paused (a resume
+	// or a stop). spliceFn is the host-wired warm-KV reattach seam consulted on the
+	// Paused->Running edge; nil (the default) makes every resume cold — the byte-identical
+	// pre-resume path. Both are nil/empty on a fresh table.
+	spliceFn      WarmKVSplicer
+	resumeWaiters map[string][]chan struct{}
 }
 
 // NewTable returns a Table bounded by DefaultTableLimit sessions.
@@ -222,6 +231,13 @@ func (t *Table) Transition(trace string, to RunState, reason string) (State, boo
 		cur.Reason = ""
 	}
 	out := t.putLocked(cur)
+	// A session LEAVING Paused (a resume back to live, or a paused->stop) wakes every
+	// WaitResume parked on it (#916). Done under the lock so a waiter registered concurrently
+	// is either signalled here or observes the new non-Paused state on its next read — never
+	// orphaned. close() is cheap and non-blocking; the woken loop re-reads the live state.
+	if from == Paused && to != Paused {
+		t.signalResumeLocked(trace)
+	}
 	obs := t.transObs
 	fire := obs != nil && notableTransition(from, to)
 	t.mu.Unlock()
@@ -321,6 +337,11 @@ func (t *Table) CompareAndSet(trace string, expectRev uint64, want State) (State
 	from := cur.Run
 	want.TraceID = trace
 	out := t.putLocked(want)
+	// A CAS flip OFF Paused (the operator --if-rev resume path) wakes parked WaitResume
+	// waiters, the same as a direct Transition off Paused (#916).
+	if from == Paused && out.Run != Paused {
+		t.signalResumeLocked(trace)
+	}
 	// A CAS-driven run-state flip (the operator --if-rev path) fires the transition observer
 	// too — without this, a pause/stop applied with --if-rev would notify nothing. Staged
 	// under the lock, fired after release (the same discipline as Transition).

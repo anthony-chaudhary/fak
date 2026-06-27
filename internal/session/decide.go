@@ -26,13 +26,14 @@ type Verdict struct {
 // not run" is a checkable field, never free text. They mirror the refusal-reason
 // discipline the kernel uses elsewhere.
 const (
-	ReasonBudgetTurns   = "BUDGET_TURNS_EXHAUSTED"   // TurnsLeft hit zero
-	ReasonBudgetTokens  = "BUDGET_TOKENS_EXHAUSTED"  // TokensLeft hit zero
-	ReasonBudgetContext = "BUDGET_CONTEXT_EXHAUSTED" // ContextTokensLeft hit zero
-	ReasonPaused        = "PAUSED"                   // operator hold; not terminal, the loop waits
-	ReasonDrained       = "DRAINING"                 // operator stop, taken at this boundary
-	ReasonStopped       = "STOPPED"                  // already terminal
-	ReasonBudgetReset   = "BUDGET_RESET"             // budget-drained, then re-armed on a fresh window (Recontinue)
+	ReasonBudgetTurns     = "BUDGET_TURNS_EXHAUSTED"   // TurnsLeft hit zero
+	ReasonBudgetTokens    = "BUDGET_TOKENS_EXHAUSTED"  // TokensLeft hit zero
+	ReasonBudgetContext   = "BUDGET_CONTEXT_EXHAUSTED" // ContextTokensLeft hit zero
+	ReasonPaused          = "PAUSED"                   // operator hold; not terminal, the loop waits
+	ReasonDrained         = "DRAINING"                 // operator stop, taken at this boundary
+	ReasonStopped         = "STOPPED"                  // already terminal
+	ReasonBudgetReset     = "BUDGET_RESET"             // budget-drained, then re-armed on a fresh window (Recontinue)
+	ReasonResumeCancelled = "RESUME_CANCELLED"         // a WaitResume parked on a Paused session ended because its context was cancelled (#916)
 )
 
 // Decide is the per-turn boundary gate. Given a session's TraceID it:

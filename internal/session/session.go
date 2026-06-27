@@ -216,8 +216,15 @@ type State struct {
 	// goal set", and a session with no goal behaves exactly as today. Advisory only: a
 	// goal field that gated any decision would be a bug. Zero readers required — the
 	// field is inert until a consumer (the scheduler, #627) acts on it.
-	Goal Goal   `json:"goal,omitempty,omitzero"`
-	Rev  uint64 `json:"rev"`
+	Goal Goal `json:"goal,omitempty,omitzero"`
+	// Cost is the bounded per-session ring of the last CostRingSize turns' token cost
+	// (issue #756, epic #748 Pillar 2), recorded by DebitUsage and carried out through
+	// Snapshot so `fak ps` can render a true cost-PER-ITERATION column — the metric that
+	// spikes ~200x on a runaway loop. Advisory/observability only, never trust: a renderer
+	// reads it, no decision gates on it. The zero ring is the safe "no cost history yet"
+	// default and, via omitzero, marshals byte-identically to a pre-ring State.
+	Cost CostRing `json:"cost,omitempty,omitzero"`
+	Rev  uint64   `json:"rev"`
 }
 
 // Goal is the structural root descriptor carried on State (issue #849). It names the

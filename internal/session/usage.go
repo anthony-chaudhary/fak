@@ -34,6 +34,12 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 		return cur
 	}
 	changed := false
+	// Record this turn's cost in the bounded per-session ring (#756) BEFORE the budget
+	// arms — the ring tracks the cost a turn actually incurred, so it fills even for a
+	// session with unbounded budgets (the runaway `fak ps` most needs to see is one with
+	// no cap to drain). The push is O(1) on a fixed array; it never grows.
+	cur.Cost = cur.Cost.push(TurnCost{OutputTokens: u.OutputTokens, ContextTokens: u.ContextTokens})
+	changed = true
 	if u.OutputTokens > 0 && !cur.Budget.tokensUnbounded() {
 		cur.Budget.TokensLeft -= u.OutputTokens
 		changed = true
