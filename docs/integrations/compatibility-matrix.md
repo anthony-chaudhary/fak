@@ -1,6 +1,6 @@
 ---
 title: "Compatibility matrix — what speaks a wire fak can sit on"
-description: "A sourced reference of 44 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
+description: "A sourced reference of 45 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
 ---
 
 # Compatibility matrix
@@ -8,7 +8,7 @@ description: "A sourced reference of 44 agent harnesses, frameworks, model backe
 `fak serve` adjudicates over the wires your stack already speaks — OpenAI Chat
 Completions, Anthropic Messages, and MCP. So the practical question for any tool is
 narrow: **does it let you repoint its base URL?** If yes, the gate drops in front with no
-code change. This page answers that question for 44 surveyed targets, with the exact key
+code change. This page answers that question for 45 surveyed targets, with the exact key
 you set and a link to the docs that prove it.
 
 It's a reference, not a tutorial. For the copy-paste recipe, start at the
