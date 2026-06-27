@@ -70,29 +70,43 @@ gate: PASS
 
 ## Packet B: GLM-5.2 over vLLM live agentic battery
 
-Status: `hardware-gated`.
+Status: `run-contract-shipped`; the raw-vLLM vs fak-gateway run contract and the
+fak-native floors are checked in (`final-check.json` is at `6/11` required
+artifacts, `PENDING_MEASUREMENT`), but the five live-serving arms remain
+`hardware-gated` on a GLM-5.2-capable serving node.
 
 Why second: this is the existing GLM-5.2 open-weight path. It compares a raw
 vLLM GLM-5.2 endpoint against the same endpoint behind `fak serve`, then adds a
 20-task SWE-bench Verified slice and fak-native floors.
 
-Manifest command:
+Manifest command (the `--run-contract` flag is required: without it the
+generated manifest drops the `raw_fak_run_contract` step and leaves
+`run_contract_artifact` empty, so it would not regenerate the checked-in
+artifacts):
 
 ```powershell
 python tools/glm52_vllm_agentic_battery.py `
   --out experiments/vllm/glm52-agentic-battery/manifest.json `
   --markdown experiments/vllm/glm52-agentic-battery/MANIFEST.md `
   --script experiments/vllm/glm52-agentic-battery/run.sh `
+  --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json `
   --swebench-difficulty $env:FAK_SWEBENCH_DIFFICULTY `
   --allow-pending
 ```
 
 Run command: use the generated
-`experiments/vllm/glm52-agentic-battery/run.sh` on a GLM-5.2-capable node.
+`experiments/vllm/glm52-agentic-battery/run.sh` on a GLM-5.2-capable node. The
+full reproduce runbook is
+[`docs/benchmarks/DGX-GLM52-VLLM-AGENTIC-BENCHMARKS.md`](../benchmarks/DGX-GLM52-VLLM-AGENTIC-BENCHMARKS.md).
 
 Evidence that would count:
 
-- `experiments/vllm/glm52-agentic-battery/final-check.json` is complete.
+- `experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json`
+  records both arms (`raw-vllm`, `fak-gateway`) and their shared GLM-5.2/vLLM
+  configuration. This is the same-model raw-vs-fak artifact, shipped with
+  `result_claim_allowed=false` until the live arms pass.
+- `experiments/vllm/glm52-agentic-battery/final-check.json` is complete (every
+  required artifact passes; it tracks progress while the live arms are pending).
 - The final checker emits
   `experiments/vllm/glm52-agentic-battery/BENCHMARK-AUTHORITY-DRAFT.md`.
 - The live serving witness is `PASS`.
