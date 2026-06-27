@@ -52,6 +52,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	push := fs.Bool("push", false, "push after a VERIFIED commit (plain push, never --force)")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
+	requireIssue := fs.Bool("require-issue", false, "treat a missing bindable issue link (#N in subject / `Closes #N` in body) as BLOCKING, not advisory — the dispatch-worker contract so a close binds in `issue_closure_audit` (#312)")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -68,7 +69,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		if code != 0 {
 			return code
 		}
-		return runCommitPreview(stdout, stderr, message, paths, resolveRoot(*dir), *asJSON)
+		return runCommitPreview(stdout, stderr, message, paths, resolveRoot(*dir), *asJSON, *requireIssue)
 	}
 
 	if len(paths) == 0 {
@@ -79,6 +80,18 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	message, code := assembleMessage(stdin(), *msg, *msgFile, stderr)
 	if code != 0 {
 		return code
+	}
+
+	// --require-issue pre-lints the message before touching git: a real commit on the shared trunk
+	// cannot be amended (a sibling may push it first), so a missing bindable `#N` is caught here as a
+	// PRE-commit refusal (exit 3) rather than discovered weeks later as a CLAIMED_CLOSED row (#312).
+	if *requireIssue {
+		rep := hooks.LintCommitMessageWithOptions(message, paths, resolveRoot(*dir), true)
+		if !rep.OK {
+			fmt.Fprintln(stderr, "fak commit: --require-issue refused this commit:")
+			renderPreview(stderr, rep)
+			return 3
+		}
 	}
 
 	res, err := commitFn(context.Background(), safecommit.Options{
@@ -194,8 +207,8 @@ func short(sha string) string {
 
 // runCommitPreview lints a proposed commit (message + the paths it would touch) and reports the
 // verdict WITHOUT running git. Exit 0 when nothing blocking was found, 1 otherwise.
-func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root string, asJSON bool) int {
-	rep := hooks.LintCommitMessage(message, paths, root)
+func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root string, asJSON, requireIssue bool) int {
+	rep := hooks.LintCommitMessageWithOptions(message, paths, root, requireIssue)
 	if asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -227,6 +240,15 @@ func renderPreview(w io.Writer, r hooks.CommitLintReport) {
 	if len(r.PathLanes) > 0 {
 		fmt.Fprintf(w, "  path lane: %s\n", strings.Join(r.PathLanes, ", "))
 	}
+	fmt.Fprintf(w, "  issue link: resolving=%v", r.IssueResolving)
+	if len(r.IssueRefs) > 0 {
+		refs := make([]string, len(r.IssueRefs))
+		for i, n := range r.IssueRefs {
+			refs[i] = fmt.Sprintf("#%d", n)
+		}
+		fmt.Fprintf(w, " (refs %s)", strings.Join(refs, ", "))
+	}
+	fmt.Fprintln(w)
 	for _, is := range r.Issues {
 		fmt.Fprintf(w, "  ✗ %s\n", is)
 	}

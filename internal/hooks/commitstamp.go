@@ -49,6 +49,8 @@ type CommitLintReport struct {
 	PathLanes      []string `json:"path_lanes,omitempty"`      // the lanes the paths fall in (deduped, sorted)
 	LeafMatches    bool     `json:"leaf_matches"`              // <leaf> is an acceptable stamp for those lanes
 	SuggestTrailer string   `json:"suggest_trailer,omitempty"` // the trailer the paths imply, e.g. "(fak gateway)"
+	IssueRefs      []int    `json:"issue_refs,omitempty"`      // every #N referenced in the message (#312)
+	IssueResolving bool     `json:"issue_resolving"`           // a #N is in a resolving position the closure audit binds (#312)
 	Issues         []string `json:"issues,omitempty"`          // BLOCKING defects, each with a fix
 	Notes          []string `json:"notes,omitempty"`           // advisory observations
 	OK             bool     `json:"ok"`                        // len(Issues)==0
@@ -58,7 +60,19 @@ type CommitLintReport struct {
 // set of repo-relative paths it will commit. root is the repo root (for reading dos.toml); ""
 // or an unreadable dos.toml degrades gracefully — the leaf-recognition check is then SKIPPED
 // rather than failing (parity with commit_stamp_doctor.py's empty-set behaviour).
+//
+// The missing issue-link is ADVISORY here (a Note); use LintCommitMessageWithOptions with
+// requireIssue=true to make it a BLOCKING issue (the dispatch-worker contract, #312).
 func LintCommitMessage(message string, paths []string, root string) CommitLintReport {
+	return LintCommitMessageWithOptions(message, paths, root, false)
+}
+
+// LintCommitMessageWithOptions is LintCommitMessage plus the #312 author-time issue-link gate:
+// when requireIssue is true, a message that carries no bindable resolving `#N` (the form the
+// closure auditor counts) becomes a BLOCKING issue instead of an advisory note. Opt-in because
+// not every commit closes an issue — a hard block belongs on a worker spawned to resolve `#N`,
+// not on every mid-feature human commit.
+func LintCommitMessageWithOptions(message string, paths []string, root string, requireIssue bool) CommitLintReport {
 	r := CommitLintReport{Subject: firstSubjectLine(message)}
 	r.StampKind, r.Leaf = stampOf(r.Subject)
 	// A release (vX.Y.Z:) / merge / revert / bookkeeping subject is intentionally NOT
@@ -124,6 +138,25 @@ func LintCommitMessage(message string, paths []string, root string) CommitLintRe
 
 	if len(paths) > 0 && len(r.PathLanes) == 0 {
 		r.Notes = append(r.Notes, "no lane could be inferred for these paths (root-level files?); the stamp/path match was not checked")
+	}
+
+	// 3. Issue-link bindability (#312). A close with no resolving commit reads as CLAIMED_CLOSED;
+	// detect whether this message carries a `#N` the closure auditor will bind to. An exempt
+	// (merge/revert/release/bookkeeping) subject owes no issue link.
+	il := lintIssueLink(message)
+	r.IssueRefs = il.refs
+	r.IssueResolving = il.resolving
+	if !il.resolving && !exempt {
+		fix := "name the issue this resolves — put `#N` in the subject, or `Closes #N` in the body — so `issue_closure_audit` binds the close (lifts closure_rate; baseline 0.196)"
+		if len(il.refs) > 0 {
+			// It references issues but only as a MENTION (a body `#N` with no closing verb).
+			fix = "this commit mentions an issue but in a non-resolving position; to bind the close, put `#N` in the SUBJECT or write `Closes #N` in the body"
+		}
+		if requireIssue {
+			r.Issues = append(r.Issues, "no bindable issue link: "+fix)
+		} else {
+			r.Notes = append(r.Notes, "no bindable issue link: "+fix)
+		}
 	}
 
 	r.OK = len(r.Issues) == 0
