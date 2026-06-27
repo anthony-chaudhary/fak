@@ -80,7 +80,7 @@ multi-session fleet load. Before quoting a result:
 - run the full, uncapped command above;
 - keep the raw JSON/CSV, not just pasted tables;
 - compare nodes with `python tools/fak_node_compare.py --json`.
-- close the gate with:
+- Run the Phase 0 clean-node reproduction gate with:
 
 ```bash
 python tools/fak_phase0_gate.py fak/experiments/fleet-nodes/<host> --clean-node
