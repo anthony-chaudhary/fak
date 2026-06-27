@@ -91,13 +91,10 @@ two-stage build: stage one compiles `cmd/fak` static (`CGO_ENABLED=0`); the fina
 image is `gcr.io/distroless/static-debian12:nonroot` plus the single binary — no
 shell, no package manager, runs as `nonroot`, exposes `8080`.
 
-> **Official image on ghcr.io.** Releases publish an official image to
-> `ghcr.io/anthony-chaudhary/fak:<version>` (and `:latest`). Pull it directly
-> instead of building locally:
-> ```bash
-> docker pull ghcr.io/anthony-chaudhary/fak:0.32.0
-> ```
-> Building from the Dockerfile remains supported for custom builds.
+> **No public registry image yet.** There is no official image on a public
+> registry; you build from this Dockerfile and push to a registry you control.
+> Building the static binary is the documented Docker adopter path (the
+> `static-binary / Docker` route).
 
 ### Build
 
@@ -167,7 +164,7 @@ the observability stack:
 # compose.yaml
 services:
   fak:
-    image: ghcr.io/anthony-chaudhary/fak:0.32.0
+    image: fak:0.32.0          # built from the repo Dockerfile, pushed to your registry
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -263,7 +260,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: fak
-          image: ghcr.io/anthony-chaudhary/fak:0.32.0
+          image: REGISTRY/fak:0.32.0
           args:
             - serve
             - --addr=0.0.0.0:8080
