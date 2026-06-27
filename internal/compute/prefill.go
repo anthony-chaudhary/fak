@@ -202,6 +202,89 @@ func ratio(num, den int64) float64 {
 	return float64(num) / float64(den)
 }
 
+// ---- roofline TIME view: the bottleneck in the issue's own units -----------------
+//
+// The issue states the gap in time (146ms vs 82.9ms at P=256), but PrefillCostModel /
+// Profile count FLOPs and bytes and flag the FLOP-heaviest stage (PrefillRoofline.Dominant).
+// For a memory-bound prefill the TIME bottleneck is the byte-heaviest stage, not the
+// FLOP-heaviest one — so the FLOP-only Dominant can aim the kernel work at the wrong stage.
+// RooflineSeconds / PredictTime convert the EXACT FLOP/byte counts into a per-stage time
+// LOWER BOUND given two device-measured peak scalars (peak FLOP/s, peak bytes/s) — the same
+// honesty discipline as StageCost.Bound's caller-supplied ridge: the device supplies the
+// peaks, the counts stay exact and host-computed, and no timer runs. This is the piece the
+// B-001 notes' "next agent on a CUDA node" step 3 needs — compare a stage's MEASURED time
+// against its roofline floor to find the stage with the most headroom to attack.
+
+// RooflineSeconds is the roofline LOWER BOUND on this stage's execution time at a device's
+// peak compute (peakFLOPs, FLOP/s) and peak memory bandwidth (peakBytesPerSec, bytes/s): the
+// larger of the compute-bound time (FLOPs/peakFLOPs) and the memory-bound time
+// (totalBytes/peakBytesPerSec). It is a LOWER bound — a real kernel can beat neither
+// "stream every operand" nor "do every multiply-add" — so a measured stage time below it
+// signals a counting error, and a measured time well above it is headroom to optimize. A
+// non-positive peak is treated as "unknown" and drops out of the max (a zero/zero call
+// yields 0), never a divide-by-zero.
+func (s StageCost) RooflineSeconds(peakFLOPs, peakBytesPerSec float64) float64 {
+	var computeT, memoryT float64
+	if peakFLOPs > 0 {
+		computeT = float64(s.FLOPs) / peakFLOPs
+	}
+	if peakBytesPerSec > 0 {
+		memoryT = float64(s.totalBytes()) / peakBytesPerSec
+	}
+	if computeT > memoryT {
+		return computeT
+	}
+	return memoryT
+}
+
+// PrefillTimePrediction is the roofline TIME view of a whole prefill: the lower-bound
+// seconds per stage (parallel to PrefillRoofline.Stages), their sum (the floor a perfectly
+// scheduled prefill cannot beat at this geometry/device), and the stage that dominates that
+// TIME. The time-dominant stage is NOT in general PrefillRoofline.Dominant (the
+// FLOP-heaviest): a memory-bound stage costs time per BYTE, so the two diverge exactly when
+// the prefill is memory-bound — which is the regime the cost model already flags naive
+// attention into (~0.5 FLOP/byte). Aim kernel work at the time-dominant stage first.
+type PrefillTimePrediction struct {
+	PerStage        []float64 // roofline lower-bound seconds, parallel to PrefillRoofline.Stages
+	TotalSeconds    float64   // Σ PerStage — the roofline floor on total prefill time
+	Dominant        StageCost // the stage with the largest roofline time (the TIME bottleneck)
+	DominantSeconds float64   // Dominant's roofline seconds (== max of PerStage)
+}
+
+// PredictTime folds the roofline into its time view at a device's peak compute and
+// bandwidth. It sums each stage's RooflineSeconds (each already max(compute-time,
+// memory-time)), so TotalSeconds is the floor a perfectly scheduled prefill cannot beat —
+// the honest answer to "is within-1.2×-llama.cpp even reachable on this device, and which
+// stage must improve to get there." It runs no timer; the two peaks are the only
+// device-measured inputs, and a CUDA node compares its MEASURED per-stage times against
+// PerStage to locate the stage with the most optimization headroom.
+func (r PrefillRoofline) PredictTime(peakFLOPs, peakBytesPerSec float64) PrefillTimePrediction {
+	p := PrefillTimePrediction{PerStage: make([]float64, len(r.Stages))}
+	for i, s := range r.Stages {
+		sec := s.RooflineSeconds(peakFLOPs, peakBytesPerSec)
+		p.PerStage[i] = sec
+		p.TotalSeconds += sec
+		if sec > p.DominantSeconds {
+			p.DominantSeconds = sec
+			p.Dominant = s
+		}
+	}
+	return p
+}
+
+// WithinTarget is B-001's acceptance predicate in code: a prefill time meets the gate when
+// it is within factor× the llama.cpp Q8_0 baseline (the issue fixes factor = 1.2). A CUDA
+// bench node calls it on its MEASURED prefill time and the measured llama.cpp baseline to
+// grade the gate, rather than re-deriving "1.2×" by hand — keeping the pass/fail rule in one
+// tested place. Both times are the caller's (measured on the device); this is a pure
+// comparison. A non-positive baseline or factor is treated as no valid target → false.
+func WithinTarget(prefillSeconds, baselineSeconds, factor float64) bool {
+	if baselineSeconds <= 0 || factor <= 0 {
+		return false
+	}
+	return prefillSeconds <= factor*baselineSeconds
+}
+
 // ---- batched-GEMM prefill kernel skeleton ---------------------------------------
 
 // PrefillGEMM computes Y[P,out] = X[P,in] @ Wᵀ over an out-tile × token-tile blocking —

@@ -160,6 +160,121 @@ func TestStageBoundClassification(t *testing.T) {
 	}
 }
 
+// ---- roofline TIME view: the bottleneck in the issue's own units -----------------
+
+// TestStageRooflineSeconds pins the per-stage roofline floor: it is the LARGER of the
+// compute-bound and memory-bound times (so a kernel can beat neither), and a non-positive
+// peak drops out instead of dividing by zero.
+func TestStageRooflineSeconds(t *testing.T) {
+	// FLOPs=2000, totalBytes=1000. At peakFLOPs=1000/s, peakBW=2000/s: compute-time=2s,
+	// memory-time=0.5s → max is the compute time, 2s.
+	s := StageCost{FLOPs: 2000, ActBytes: 1000}
+	if got := s.RooflineSeconds(1000, 2000); math.Abs(got-2.0) > 1e-12 {
+		t.Fatalf("compute-bound stage: want 2s, got %v", got)
+	}
+	// Flip the bandwidth so memory dominates: peakBW=100/s → memory-time=10s > compute 2s.
+	if got := s.RooflineSeconds(1000, 100); math.Abs(got-10.0) > 1e-12 {
+		t.Fatalf("memory-bound stage: want 10s, got %v", got)
+	}
+	// Non-positive peaks are "unknown" and drop out; both zero yields 0, never a panic.
+	if got := s.RooflineSeconds(0, 0); got != 0 {
+		t.Fatalf("both peaks zero must yield 0, got %v", got)
+	}
+	if got := s.RooflineSeconds(0, 2000); math.Abs(got-0.5) > 1e-12 {
+		t.Fatalf("zero compute peak must fall back to memory time 0.5s, got %v", got)
+	}
+}
+
+// TestPredictTimeBottleneckDivergesFromFLOPs is the load-bearing rung for this view: the
+// TIME-dominant stage is the byte-heaviest under a memory-bound device and the FLOP-heaviest
+// under a compute-bound device — proving the roofline time picks a genuinely different
+// bottleneck than PrefillRoofline.Dominant (FLOP-only) exactly when the prefill is
+// memory-bound. It also checks PerStage sums to TotalSeconds and the dominant time is the max.
+func TestPredictTimeBottleneckDivergesFromFLOPs(t *testing.T) {
+	r := Profile(llamaLikeGeom(512))
+
+	// Find the byte-heaviest and FLOP-heaviest stages independently.
+	var maxBytes, maxFLOPs StageCost
+	for _, s := range r.Stages {
+		if s.totalBytes() > maxBytes.totalBytes() {
+			maxBytes = s
+		}
+		if s.FLOPs > maxFLOPs.FLOPs {
+			maxFLOPs = s
+		}
+	}
+	if maxFLOPs.Name != r.Dominant.Name {
+		t.Fatalf("sanity: Profile.Dominant should be the FLOP-heaviest stage (%q != %q)",
+			r.Dominant.Name, maxFLOPs.Name)
+	}
+
+	// Deeply MEMORY-bound device (enormous compute, tiny bandwidth): every stage's time is
+	// bytes/BW, so the time bottleneck is the byte-heaviest stage.
+	mem := r.PredictTime(1e18, 1.0)
+	if mem.Dominant.Name != maxBytes.Name {
+		t.Fatalf("memory-bound: time bottleneck must be byte-heaviest %q, got %q",
+			maxBytes.Name, mem.Dominant.Name)
+	}
+	// Deeply COMPUTE-bound device (tiny compute, enormous bandwidth): time is FLOPs/peak, so
+	// the bottleneck collapses back onto the FLOP-heaviest stage (== Profile.Dominant).
+	comp := r.PredictTime(1.0, 1e18)
+	if comp.Dominant.Name != maxFLOPs.Name {
+		t.Fatalf("compute-bound: time bottleneck must be FLOP-heaviest %q, got %q",
+			maxFLOPs.Name, comp.Dominant.Name)
+	}
+	// The two regimes must actually disagree for this geometry — otherwise the time view
+	// would add nothing over the FLOP-only Dominant.
+	if mem.Dominant.Name == comp.Dominant.Name {
+		t.Fatalf("time bottleneck should diverge across regimes, both picked %q", mem.Dominant.Name)
+	}
+
+	// PerStage must parallel Stages, sum to TotalSeconds, and the dominant time is the max.
+	if len(mem.PerStage) != len(r.Stages) {
+		t.Fatalf("PerStage len %d != stages %d", len(mem.PerStage), len(r.Stages))
+	}
+	var sum, max float64
+	for _, sec := range mem.PerStage {
+		sum += sec
+		if sec > max {
+			max = sec
+		}
+	}
+	if math.Abs(sum-mem.TotalSeconds) > 1e-6*sum {
+		t.Fatalf("PerStage must sum to TotalSeconds: %v != %v", sum, mem.TotalSeconds)
+	}
+	if mem.DominantSeconds != max {
+		t.Fatalf("DominantSeconds must be the max per-stage time: %v != %v", mem.DominantSeconds, max)
+	}
+	if mem.TotalSeconds <= 0 {
+		t.Fatal("roofline floor must be strictly positive")
+	}
+}
+
+// TestWithinTargetGrades the B-001 acceptance predicate against the issue's OWN numbers:
+// the current 146ms vs 82.9ms llama.cpp baseline is 1.76× and must FAIL the 1.2× gate; an
+// improved 95ms (1.15×) must PASS; exactly 1.2× passes (≤); and a non-positive baseline or
+// factor is no valid target → false.
+func TestWithinTargetGradesIssueNumbers(t *testing.T) {
+	const base = 0.0829 // llama.cpp Q8_0 baseline, seconds (issue: 82.9ms at P=256)
+	const factor = 1.2  // the acceptance gate
+
+	if WithinTarget(0.146, base, factor) {
+		t.Fatal("current 146ms is 1.76× the 82.9ms baseline — must FAIL the 1.2× gate")
+	}
+	if !WithinTarget(0.095, base, factor) {
+		t.Fatal("an improved 95ms is 1.15× the baseline — must PASS the 1.2× gate")
+	}
+	if !WithinTarget(factor*base, base, factor) {
+		t.Fatal("exactly 1.2× the baseline must pass (the gate is ≤)")
+	}
+	if WithinTarget(0.1, 0, factor) {
+		t.Fatal("a non-positive baseline is no valid target → false")
+	}
+	if WithinTarget(0.1, base, 0) {
+		t.Fatal("a non-positive factor is no valid target → false")
+	}
+}
+
 // ---- CUDA-graph seam: both branches on a non-CUDA build --------------------------
 
 // fakeGraphBE is a PrefillGraphCapturer built on the cpu-ref backend, so the captured
