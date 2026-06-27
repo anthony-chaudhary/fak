@@ -17,7 +17,7 @@ Use with:
 - [Performance spectrum visual](../../visuals/41-performance-spectrum.svg)
 - Session value-stack deck — `SESSION-VALUE-STACK-DECK.md` (private companion — not published)
 - Fleet value projection — `FLEET-VALUE-PROJECTION.md` (private companion — not published)
-- Implications memo — `IMPLICATIONS-fak-agentic-os-2026-06-18.md` (private companion — not published)
+- Implications memo — `IMPLICATIONS-fak-agentic-os-2026-06-18.md` (private companion — not published; for the permission-floor framing it leans on, see [the capability floor](SECURITY-capability-floor-2026-06-18.md))
 
 ---
 
