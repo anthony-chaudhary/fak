@@ -59,10 +59,7 @@ func newSessionFeed(capacity int) *sessionFeed {
 func (f *sessionFeed) add(st SessionState) {
 	f.mu.Lock()
 	f.seq++
-	f.ring = append(f.ring, SessionChangeEvent{Seq: f.seq, SessionState: st})
-	if len(f.ring) > f.cap {
-		f.ring = f.ring[len(f.ring)-f.cap:] // drop the oldest
-	}
+	f.ring = appendRingCapped(f.ring, SessionChangeEvent{Seq: f.seq, SessionState: st}, f.cap)
 	f.mu.Unlock()
 }
 

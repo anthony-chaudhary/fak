@@ -80,12 +80,21 @@ func newCoherenceFeed(capacity int) *coherenceFeed {
 	return f
 }
 
+// appendRingCapped appends ev to a bounded ring buffer, dropping the oldest events
+// so the slice never exceeds capacity. A non-positive capacity leaves the ring
+// unbounded. Shared by the coherence and session-change feeds, which keep
+// element-typed rings with the same trim policy.
+func appendRingCapped[T any](ring []T, ev T, capacity int) []T {
+	ring = append(ring, ev)
+	if capacity > 0 && len(ring) > capacity {
+		ring = ring[len(ring)-capacity:] // drop the oldest
+	}
+	return ring
+}
+
 func (f *coherenceFeed) add(ev CoherenceEvent) {
 	f.mu.Lock()
-	f.ring = append(f.ring, ev)
-	if len(f.ring) > f.cap {
-		f.ring = f.ring[len(f.ring)-f.cap:] // drop the oldest
-	}
+	f.ring = appendRingCapped(f.ring, ev, f.cap)
 	f.mu.Unlock()
 }
 

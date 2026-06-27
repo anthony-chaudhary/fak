@@ -484,10 +484,7 @@ func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {
 	if !st.Observed {
 		return nil
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	out := &debugRequestMemoryVars{
 		Backend:       backend,
 		PromptTokens:  st.PromptTokens,
@@ -634,10 +631,7 @@ func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
 	if scope == "" {
 		scope = "host"
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	dtype := modelLoadDType(st.DType)
 	return &debugKVMemoryVars{
 		Enabled:            st.Enabled,
@@ -743,10 +737,7 @@ func debugInKernelOOMRetryRows(p agent.Planner) []debugInKernelOOMRetryVars {
 	if len(st.Rows) == 0 {
 		return nil
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	out := make([]debugInKernelOOMRetryVars, 0, len(st.Rows))
 	for _, row := range st.Rows {
 		out = append(out, debugInKernelOOMRetryVars{
@@ -771,10 +762,7 @@ func debugInKernelPressureTrimRows(p agent.Planner) []debugInKernelPressureTrimV
 	if len(st.Rows) == 0 {
 		return nil
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	out := make([]debugInKernelPressureTrimVars, 0, len(st.Rows))
 	for _, row := range st.Rows {
 		out = append(out, debugInKernelPressureTrimVars{

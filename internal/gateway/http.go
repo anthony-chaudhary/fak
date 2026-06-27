@@ -525,10 +525,20 @@ func validateSampling(req ChatRequest) string {
 	if req.MaxTokens < 0 {
 		return "max_tokens: must be a positive integer"
 	}
-	if req.Temperature != nil && (*req.Temperature < 0 || *req.Temperature > 2) {
+	return validateSamplingRanges(req.Temperature, req.TopP)
+}
+
+// validateSamplingRanges enforces the temperature/top_p range contract shared by
+// every inbound wire (chat, completions, responses): a present temperature must be
+// in [0, 2] and a present top_p in [0, 1]. A nil pointer (the field was omitted) is
+// always valid. Returns the first client-facing 400 message, or "" when both are in
+// range. Each wire keeps its own max-tokens check inline because the field name
+// differs (max_tokens vs max_output_tokens).
+func validateSamplingRanges(temperature, topP *float64) string {
+	if temperature != nil && (*temperature < 0 || *temperature > 2) {
 		return "temperature: must be in [0, 2]"
 	}
-	if req.TopP != nil && (*req.TopP < 0 || *req.TopP > 1) {
+	if topP != nil && (*topP < 0 || *topP > 1) {
 		return "top_p: must be in [0, 1]"
 	}
 	return ""
@@ -1056,17 +1066,10 @@ func (s *Server) handleFakTraceObserve(w http.ResponseWriter, r *http.Request) {
 // 404 (never a silent clean reading) — the same fail-closed posture as the trace
 // routes with no ledger.
 func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/v1/fak/session/")
-	rest = strings.TrimSuffix(rest, "/")
-	parts := strings.Split(rest, "/")
-	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+	traceID, verb, ok := splitPathIDVerb(r.URL.Path, "/v1/fak/session/")
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "trace_id is required")
 		return
-	}
-	traceID := strings.TrimSpace(parts[0])
-	verb := ""
-	if len(parts) >= 2 {
-		verb = strings.TrimSpace(parts[1])
 	}
 
 	switch r.Method {

@@ -926,22 +926,7 @@ func streamAnthropicBlocks(send func(string, any), blocks []agent.AnthropicBlock
 	// input_tokens (the uncached remainder) plus the cache counters, so a passthrough
 	// turn's cache hit reaches the client's accounting. Counters are omitted when zero
 	// (a local-model turn streams the same shape as before).
-	finalUsage := map[string]int{
-		"input_tokens":  usage.InputTokens,
-		"output_tokens": usage.OutputTokens,
-	}
-	if usage.CacheReadInputTokens > 0 {
-		finalUsage["cache_read_input_tokens"] = usage.CacheReadInputTokens
-	}
-	if usage.CacheCreationInputTokens > 0 {
-		finalUsage["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
-	}
-	send("message_delta", map[string]any{
-		"type":  "message_delta",
-		"delta": map[string]any{"stop_reason": stop, "stop_sequence": nil},
-		"usage": finalUsage,
-	})
-	send("message_stop", map[string]any{"type": "message_stop"})
+	sendAnthropicTerminal(send, stop, usage)
 }
 
 // handleAnthropicCountTokens answers POST /v1/messages/count_tokens with a cheap,

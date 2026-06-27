@@ -622,10 +622,7 @@ func (m *gatewayMetrics) observeRequestMemory(st agent.RequestMemoryStats) {
 	if m == nil || !st.Observed {
 		return
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	planRows := requestMemoryPlanByClassScopeDType(st.MemoryPlan)
 	fitRows := requestMemoryFitRows(st.MemoryPlan, st.Capacities, st.HeadroomRatio)
 
@@ -695,7 +692,23 @@ func (m *gatewayMetrics) observeRequestMemoryTokenLocked(backend, kind string, v
 	}
 }
 
-func addPositiveInt64ToUint64(total uint64, value int64) uint64 {
+// defaultBackendLabel trims a reported backend name and substitutes "unknown" for
+// an empty one, so every metric/debug label that keys on the backend carries a
+// stable, non-empty value. Centralizes the trim-or-unknown idiom the request/OOM/
+// pressure-trim reporters each repeated verbatim.
+func defaultBackendLabel(backend string) string {
+	backend = strings.TrimSpace(backend)
+	if backend == "" {
+		return "unknown"
+	}
+	return backend
+}
+
+// addPositiveSignedToUint64 saturating-adds a signed counter delta onto a uint64
+// running total: a non-positive delta is a no-op, and an add that would overflow
+// clamps at the uint64 max instead of wrapping. Generic over the signed input so
+// both the int64 byte counters and the int token counters share one body.
+func addPositiveSignedToUint64[T ~int | ~int64](total uint64, value T) uint64 {
 	if value <= 0 {
 		return total
 	}
@@ -706,15 +719,12 @@ func addPositiveInt64ToUint64(total uint64, value int64) uint64 {
 	return total + v
 }
 
+func addPositiveInt64ToUint64(total uint64, value int64) uint64 {
+	return addPositiveSignedToUint64(total, value)
+}
+
 func addPositiveIntToUint64(total uint64, value int) uint64 {
-	if value <= 0 {
-		return total
-	}
-	v := uint64(value)
-	if ^uint64(0)-total < v {
-		return ^uint64(0)
-	}
-	return total + v
+	return addPositiveSignedToUint64(total, value)
 }
 
 func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted bool) {
@@ -991,10 +1001,7 @@ func (s *Server) writeRequestMemoryMetrics(b *strings.Builder) {
 	if !st.Observed {
 		return
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_bytes", "Most recent served in-kernel backend request memory plan, by class/scope/dtype. This is a last-request gauge, not a cumulative counter.", "gauge")
 	for _, row := range requestMemoryPlanByClassScopeDType(st.MemoryPlan) {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_bytes{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
@@ -1129,10 +1136,7 @@ func (s *Server) writeInKernelOOMRetryMetrics(b *strings.Builder) {
 	if len(st.Rows) == 0 {
 		return
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	writeHelpType(b, "fak_gateway_in_kernel_oom_retry_total", "Idle-pool trim retries attempted after local in-kernel device allocation OOMs, bucketed by backend, memory class, and outcome. These are decode retries only; capacity precheck refusals do not retry.", "counter")
 	for _, row := range st.Rows {
 		class := oomClassLabel(row.Class)
@@ -1162,10 +1166,7 @@ func (s *Server) writeInKernelPressureTrimMetrics(b *strings.Builder) {
 	if len(st.Rows) == 0 {
 		return
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	writeHelpType(b, "fak_gateway_in_kernel_memory_pressure_trim_total", "Idle-pool trims attempted before local in-kernel decode when a known request memory plan is refused or close to the headroom-adjusted budget. resolved means a capacity-precheck refusal fit after trimming.", "counter")
 	for _, row := range st.Rows {
 		scope := modelLoadScope(row.Scope)
@@ -1360,10 +1361,7 @@ func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
 	if scope == "" {
 		scope = "host"
 	}
-	backend := strings.TrimSpace(st.Backend)
-	if backend == "" {
-		backend = "unknown"
-	}
+	backend := defaultBackendLabel(st.Backend)
 	labels := fmt.Sprintf("class=\"%s\",scope=\"%s\",backend=\"%s\"", promQuote(class), promQuote(scope), promQuote(backend))
 	dtype := modelLoadDType(st.DType)
 	enabled := 0

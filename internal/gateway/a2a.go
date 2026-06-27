@@ -21,29 +21,29 @@ type a2aTaskStore struct {
 }
 
 type a2aTask struct {
-	TaskID      string                 `json:"task_id"`
-	Title       string                 `json:"title,omitempty"`
-	State       string                 `json:"state"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	Method      string                 `json:"method,omitempty"`
-	Params      map[string]interface{} `json:"params,omitempty"`
-	Result      interface{}            `json:"result,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	CallerID    string                 `json:"caller_id,omitempty"`
-	TenantID    string                 `json:"tenant_id,omitempty"`
-	AgentCardURL string                `json:"agent_card_url,omitempty"`
-	Message     map[string]interface{} `json:"message,omitempty"`
+	TaskID       string                 `json:"task_id"`
+	Title        string                 `json:"title,omitempty"`
+	State        string                 `json:"state"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Method       string                 `json:"method,omitempty"`
+	Params       map[string]interface{} `json:"params,omitempty"`
+	Result       interface{}            `json:"result,omitempty"`
+	Error        string                 `json:"error,omitempty"`
+	CallerID     string                 `json:"caller_id,omitempty"`
+	TenantID     string                 `json:"tenant_id,omitempty"`
+	AgentCardURL string                 `json:"agent_card_url,omitempty"`
+	Message      map[string]interface{} `json:"message,omitempty"`
 }
 
 // a2aMessage represents an A2A message
 type a2aMessage struct {
-	MessageID   string                 `json:"message_id"`
-	From        string                 `json:"from"`
-	To          string                 `json:"to"`
-	Content     map[string]interface{} `json:"content"`
-	ContextID   string                 `json:"context_id,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
+	MessageID string                 `json:"message_id"`
+	From      string                 `json:"from"`
+	To        string                 `json:"to"`
+	Content   map[string]interface{} `json:"content"`
+	ContextID string                 `json:"context_id,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
 }
 
 // a2aAgentCard represents an A2A Agent Card
@@ -68,11 +68,11 @@ type a2aSkill struct {
 }
 
 type a2aSecurity struct {
-	Schemes         []a2aSecurityScheme   `json:"schemes"`
-	Authorization   string                `json:"authorization,omitempty"`
-	TenantRequired  bool                  `json:"tenant_required"`
-	AuditEnabled    bool                  `json:"audit_enabled"`
-	QuarantineAware bool                  `json:"quarantine_aware"`
+	Schemes         []a2aSecurityScheme `json:"schemes"`
+	Authorization   string              `json:"authorization,omitempty"`
+	TenantRequired  bool                `json:"tenant_required"`
+	AuditEnabled    bool                `json:"audit_enabled"`
+	QuarantineAware bool                `json:"quarantine_aware"`
 }
 
 type a2aSecurityScheme struct {
@@ -82,16 +82,16 @@ type a2aSecurityScheme struct {
 
 // a2aAuditLog represents an audit log entry for task transitions
 type a2aAuditLog struct {
-	TaskID      string                 `json:"task_id"`
-	ContextID   string                 `json:"context_id,omitempty"`
-	CallerID    string                 `json:"caller_id"`
-	TenantID    string                 `json:"tenant_id,omitempty"`
-	Method      string                 `json:"method,omitempty"`
-	ParamsHash  string                 `json:"params_hash,omitempty"`
-	Transition  string                 `json:"transition"` // "created", "running", "completed", "failed", "canceled"
-	ArtifactPaths []string              `json:"artifact_paths,omitempty"`
-	DenialReason string                `json:"denial_reason,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
+	TaskID        string    `json:"task_id"`
+	ContextID     string    `json:"context_id,omitempty"`
+	CallerID      string    `json:"caller_id"`
+	TenantID      string    `json:"tenant_id,omitempty"`
+	Method        string    `json:"method,omitempty"`
+	ParamsHash    string    `json:"params_hash,omitempty"`
+	Transition    string    `json:"transition"` // "created", "running", "completed", "failed", "canceled"
+	ArtifactPaths []string  `json:"artifact_paths,omitempty"`
+	DenialReason  string    `json:"denial_reason,omitempty"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 // a2aMethodSpec represents a reviewed method in the registry
@@ -263,17 +263,17 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	task := &a2aTask{
-		TaskID:      taskID,
-		Title:       fmt.Sprintf("A2A: %s", method),
-		State:       "created",
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Method:      method,
-		Params:      params,
-		CallerID:    callerID,
-		TenantID:    tenantID,
+		TaskID:       taskID,
+		Title:        fmt.Sprintf("A2A: %s", method),
+		State:        "created",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Method:       method,
+		Params:       params,
+		CallerID:     callerID,
+		TenantID:     tenantID,
 		AgentCardURL: "https://fleet.example.com/a2a/agent-card",
-		Message:     msg.Content,
+		Message:      msg.Content,
 	}
 
 	// Store task
@@ -284,14 +284,14 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Log audit entry for task creation
 	s.logAuditEntry(a2aAuditLog{
-		TaskID:       taskID,
-		ContextID:    msg.ContextID,
-		CallerID:     callerID,
-		TenantID:     tenantID,
-		Method:       method,
-		ParamsHash:   hashParams(params),
-		Transition:   "created",
-		Timestamp:    now,
+		TaskID:     taskID,
+		ContextID:  msg.ContextID,
+		CallerID:   callerID,
+		TenantID:   tenantID,
+		Method:     method,
+		ParamsHash: hashParams(params),
+		Transition: "created",
+		Timestamp:  now,
 	})
 
 	// Dispatch the method call (validated against method registry #1019)
@@ -300,12 +300,12 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 	task.UpdatedAt = time.Now()
 
 	s.logAuditEntry(a2aAuditLog{
-		TaskID:      taskID,
-		CallerID:    callerID,
-		TenantID:    tenantID,
-		Method:      method,
-		Transition:  "running",
-		Timestamp:   task.UpdatedAt,
+		TaskID:     taskID,
+		CallerID:   callerID,
+		TenantID:   tenantID,
+		Method:     method,
+		Transition: "running",
+		Timestamp:  task.UpdatedAt,
 	})
 
 	// Simulate method execution
@@ -318,20 +318,20 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logAuditEntry(a2aAuditLog{
-		TaskID:      taskID,
-		CallerID:    callerID,
-		TenantID:    tenantID,
-		Method:      method,
-		Transition:  "completed",
-		Timestamp:   task.UpdatedAt,
+		TaskID:     taskID,
+		CallerID:   callerID,
+		TenantID:   tenantID,
+		Method:     method,
+		Transition: "completed",
+		Timestamp:  task.UpdatedAt,
 	})
 
 	s.logf("gateway: A2A SendMessage task %s created for method %s", taskID, method)
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"task_id":     taskID,
-		"state":       task.State,
-		"created_at":  task.CreatedAt.UTC().Format(time.RFC3339),
-		"message_id":  msg.MessageID,
+		"task_id":    taskID,
+		"state":      task.State,
+		"created_at": task.CreatedAt.UTC().Format(time.RFC3339),
+		"message_id": msg.MessageID,
 	})
 }
 
@@ -377,13 +377,13 @@ func (s *Server) handleA2AListTasks(w http.ResponseWriter, r *http.Request) {
 	taskList := make([]map[string]interface{}, 0, len(tasks))
 	for _, task := range tasks {
 		taskList = append(taskList, map[string]interface{}{
-			"task_id":       task.TaskID,
-			"title":         task.Title,
-			"state":         task.State,
-			"created_at":    task.CreatedAt.UTC().Format(time.RFC3339),
-			"updated_at":    task.UpdatedAt.UTC().Format(time.RFC3339),
-			"caller_id":     task.CallerID,
-			"tenant_id":     task.TenantID,
+			"task_id":    task.TaskID,
+			"title":      task.Title,
+			"state":      task.State,
+			"created_at": task.CreatedAt.UTC().Format(time.RFC3339),
+			"updated_at": task.UpdatedAt.UTC().Format(time.RFC3339),
+			"caller_id":  task.CallerID,
+			"tenant_id":  task.TenantID,
 		})
 	}
 
@@ -396,19 +396,29 @@ func (s *Server) handleA2AListTasks(w http.ResponseWriter, r *http.Request) {
 // handleA2ATask is the subtree handler for /a2a/v1/tasks/{id}.
 // GET /a2a/v1/tasks/{id} reads one task.
 // POST /a2a/v1/tasks/{id}/cancel cancels one task.
-func (s *Server) handleA2ATask(w http.ResponseWriter, r *http.Request) {
-	// Extract path after /a2a/v1/tasks/
-	rest := strings.TrimPrefix(r.URL.Path, "/a2a/v1/tasks/")
-	rest = strings.TrimSuffix(rest, "/")
+// splitPathIDVerb parses a "{prefix}{id}[/{verb}]" request path into its leading
+// id segment and optional verb. It strips prefix, drops a trailing slash, splits on
+// "/", and trims whitespace from each of the first two segments. ok is false when no
+// non-empty id is present, so callers can emit their own resource-specific 400.
+func splitPathIDVerb(path, prefix string) (id, verb string, ok bool) {
+	rest := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
 	parts := strings.Split(rest, "/")
 	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
-		writeErr(w, http.StatusBadRequest, "task_id required")
-		return
+		return "", "", false
 	}
-	taskID := strings.TrimSpace(parts[0])
-	verb := ""
+	id = strings.TrimSpace(parts[0])
 	if len(parts) >= 2 {
 		verb = strings.TrimSpace(parts[1])
+	}
+	return id, verb, true
+}
+
+func (s *Server) handleA2ATask(w http.ResponseWriter, r *http.Request) {
+	// Extract path after /a2a/v1/tasks/
+	taskID, verb, ok := splitPathIDVerb(r.URL.Path, "/a2a/v1/tasks/")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "task_id required")
+		return
 	}
 
 	switch r.Method {
@@ -446,16 +456,16 @@ func (s *Server) handleA2AGetTaskByID(w http.ResponseWriter, r *http.Request, ta
 
 	// Return task snapshot
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"task_id":       task.TaskID,
-		"title":         task.Title,
-		"state":         task.State,
-		"created_at":    task.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at":    task.UpdatedAt.UTC().Format(time.RFC3339),
-		"method":        task.Method,
-		"result":        task.Result,
-		"error":         task.Error,
-		"caller_id":     task.CallerID,
-		"tenant_id":     task.TenantID,
+		"task_id":        task.TaskID,
+		"title":          task.Title,
+		"state":          task.State,
+		"created_at":     task.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":     task.UpdatedAt.UTC().Format(time.RFC3339),
+		"method":         task.Method,
+		"result":         task.Result,
+		"error":          task.Error,
+		"caller_id":      task.CallerID,
+		"tenant_id":      task.TenantID,
 		"agent_card_url": task.AgentCardURL,
 	})
 }
@@ -486,20 +496,20 @@ func (s *Server) handleA2ACancelTaskByID(w http.ResponseWriter, r *http.Request,
 
 	// Log audit entry
 	s.logAuditEntry(a2aAuditLog{
-		TaskID:      taskID,
-		CallerID:    task.CallerID,
-		TenantID:    task.TenantID,
-		Method:      task.Method,
-		Transition:  "canceled",
-		Timestamp:   task.UpdatedAt,
+		TaskID:     taskID,
+		CallerID:   task.CallerID,
+		TenantID:   task.TenantID,
+		Method:     task.Method,
+		Transition: "canceled",
+		Timestamp:  task.UpdatedAt,
 	})
 
 	s.logf("gateway: A2A task %s canceled", taskID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"task_id":     taskID,
-		"state":       task.State,
-		"updated_at":  task.UpdatedAt.UTC().Format(time.RFC3339),
-		"canceled":    true,
+		"task_id":    taskID,
+		"state":      task.State,
+		"updated_at": task.UpdatedAt.UTC().Format(time.RFC3339),
+		"canceled":   true,
 	})
 }
 
@@ -554,10 +564,10 @@ func (s *Server) handleA2AGetExtendedAgentCard(w http.ResponseWriter, r *http.Re
 			QuarantineAware: true,
 		},
 		Metadata: map[string]interface{}{
-			"caller_id":      callerID,
-			"tenant_id":      tenantID,
+			"caller_id":       callerID,
+			"tenant_id":       tenantID,
 			"method_registry": "fleet",
-			"policy_scopes":  []string{"read", "act"},
+			"policy_scopes":   []string{"read", "act"},
 		},
 	}
 

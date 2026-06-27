@@ -605,13 +605,7 @@ func validateResponsesSampling(req ResponsesRequest) string {
 	if req.MaxOutputTokens < 0 {
 		return "max_output_tokens: must be a positive integer"
 	}
-	if req.Temperature != nil && (*req.Temperature < 0 || *req.Temperature > 2) {
-		return "temperature: must be in [0, 2]"
-	}
-	if req.TopP != nil && (*req.TopP < 0 || *req.TopP > 1) {
-		return "top_p: must be in [0, 1]"
-	}
-	return ""
+	return validateSamplingRanges(req.Temperature, req.TopP)
 }
 
 // trimLeadingWS returns raw with leading JSON whitespace stripped, so a caller can
