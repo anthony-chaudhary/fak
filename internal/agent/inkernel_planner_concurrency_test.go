@@ -86,7 +86,7 @@ func TestInKernelConcurrentDeviceCompleteSerializes(t *testing.T) {
 	m := model.NewSynthetic(tinyConcurrencyConfig())
 	tok := loadProbeTok(t)
 
-	p := NewInKernelPlanner(m, tok, "tiny-gpu", false, be)
+	p := NewInKernelPlanner(m, tok, "tiny-gpu", false, be, false)
 	p.maxNew = 8
 
 	msgs := []Message{{Role: "user", Content: "hello there, decode a few tokens please"}}
@@ -130,8 +130,8 @@ func TestInKernelConcurrentDeviceCompleteSerializes(t *testing.T) {
 func TestInKernelCPUPathUnaffectedByDevMu(t *testing.T) {
 	m := model.NewSynthetic(tinyConcurrencyConfig())
 	tok := loadProbeTok(t)
-	p := NewInKernelPlanner(m, tok, "tiny-cpu", false, nil) // nil backend -> CPU path, devMu never taken
-	p.quant = false                                         // exercise the proven f32 reuse path (no Q8 cache on a synthetic)
+	p := NewInKernelPlanner(m, tok, "tiny-cpu", false, nil, false) // nil backend -> CPU path, devMu never taken
+	p.quant = false                                                // exercise the proven f32 reuse path (no Q8 cache on a synthetic)
 	p.maxNew = 4
 	comp, err := p.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {

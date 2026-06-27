@@ -49,6 +49,7 @@ type InKernelPlanner struct {
 	q4k               bool            // resident-Q4_K load: decode runs Session.Q4K (SDOT int8 GEMV)
 	quant             bool            // Q8_0 decode/prefill path (the served default); tests flip it to exercise the proven f32 reuse path
 	backend           compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
+	metal             bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-fakmetal builds.
 	cpuOffloadExperts bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
 	maxNew            int
 	temp              float64
@@ -136,7 +137,7 @@ type requestPressureTrimStats struct {
 // q4k flags a resident-Q4_K load so the decode engages Session.Q4K. Generation
 // depth/sampling default to a greedy 256-token turn but are overridable via
 // FAK_INKERNEL_MAX_TOKENS / FAK_INKERNEL_TEMP / FAK_INKERNEL_SEED.
-func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, cpuOffloadExpertsOpt ...bool) *InKernelPlanner {
+func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool, cpuOffloadExpertsOpt ...bool) *InKernelPlanner {
 	cpuOffloadExperts := false
 	if len(cpuOffloadExpertsOpt) > 0 {
 		cpuOffloadExperts = cpuOffloadExpertsOpt[0]
@@ -148,6 +149,7 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		q4k:               q4k,
 		quant:             true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
 		backend:           backend,
+		metal:             metal,
 		cpuOffloadExperts: cpuOffloadExperts,
 		maxNew:            envInt("FAK_INKERNEL_MAX_TOKENS", 256),
 		temp:              envFloat("FAK_INKERNEL_TEMP", 0),
@@ -1054,6 +1056,17 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 	// decode Q4_K directly — no f32/Q8 round-trip. (The old gate forced Q8/F32 on any backend.)
 	s.Q4K = p.q4k
 	s.CPUOffloadExperts = p.cpuOffloadExperts
+	// Apple-Silicon Metal GPU forward (`fak serve --metal`): engage the metalgemm GPU
+	// prefill + GPU-resident Q8 decode on the CPU session. Guarded to backend==nil — Metal
+	// is the CPU-session seam (s.Backend stays nil), and setting s.Metal on a device session
+	// is incoherent; serve also rejects --metal with --backend up front. s.MetalQ4K mirrors
+	// cmd/fakchat (s.MetalQ4K = q4k && metal). Inert on non-fakmetal builds (the model
+	// package's metal dispatch falls back to CPU) and the resident decode self-declines any
+	// non-dense-Qwen-Q8 model, so this never forces an unsupported GPU path.
+	if p.backend == nil && p.metal {
+		s.Metal = true
+		s.MetalQ4K = p.q4k
+	}
 
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss).
 	tp := time.Now()

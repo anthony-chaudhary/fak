@@ -150,6 +150,14 @@ type Config struct {
 	// `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4)
 	// serve at all. Set by `fak serve --cpu-offload-experts`; ignored without a Backend.
 	CPUOffloadExperts bool
+	// Metal, when true, runs the in-kernel chat through the Apple-Silicon metalgemm GPU
+	// forward (GPU prefill + GPU-resident Q8 decode) on the CPU session. Set by
+	// `fak serve --metal` (or FAK_METAL). It is the CPU-session seam (the session keeps
+	// s.Backend nil and gets s.Metal=true), so it is MUTUALLY EXCLUSIVE with Backend —
+	// serve rejects --metal together with --backend. A no-op on non-fakmetal builds
+	// (the metalgemm stub makes the decode/prefill dispatch fall back to CPU), and the
+	// resident decode self-declines anything but a dense Qwen-class Q8 model.
+	Metal bool
 	// RequireKey, if non-empty, is the bearer token the gateway REQUIRES on every
 	// request (except /healthz). Empty => no auth (drop-in compatible, loopback).
 	RequireKey string
@@ -662,7 +670,7 @@ func New(cfg Config) (*Server, error) {
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
 		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
 		// into a Planner. Falls through to MockPlanner if the host didn't preload.
-		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend, cfg.CPUOffloadExperts)
+		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, cfg.CPUOffloadExperts)
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
 		// chat surface silently fell back to the deterministic offline mock. Warn

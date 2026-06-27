@@ -109,7 +109,7 @@ func liveInKernelPlanner(t *testing.T) *agent.InKernelPlanner {
 	// f32 KV cache (and thus Evict's re-RoPE + renumber) is identical either way, so the
 	// reposition stays bit-exact and the two Q8 sessions decode identical logits.
 	m.Quantize()
-	return agent.NewInKernelPlanner(m, newByteLevelTokenizer(t), "synthetic-live", false, nil)
+	return agent.NewInKernelPlanner(m, newByteLevelTokenizer(t), "synthetic-live", false, nil, false)
 }
 
 func newKVMMUResultStackServer(t *testing.T) *Server {
@@ -191,7 +191,7 @@ func TestLiveKVSpanEvictionDefaultOff(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_KVMMU", "")
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	m := model.NewSynthetic(kvmmuSynthCfg())
-	planner := agent.NewInKernelPlanner(m, newByteLevelTokenizer(t), "synthetic-off", false, nil)
+	planner := agent.NewInKernelPlanner(m, newByteLevelTokenizer(t), "synthetic-off", false, nil, false)
 
 	// It still implements the KVSpanEvictor interface, but the method is inert when off.
 	ev, ok := any(planner).(agent.KVSpanEvictor)

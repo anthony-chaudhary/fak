@@ -18,8 +18,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
+	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -104,6 +106,7 @@ func cmdServe(argv []string) {
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
+	metal := fs.Bool("metal", false, "with --gguf (no --base-url), run the in-kernel chat through the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Requires a `-tags fakmetal` build AND a Metal device; fails loud if requested but unavailable so a typo never silently runs on CPU. Equivalent to FAK_METAL=1. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
 	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
 	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
@@ -120,6 +123,17 @@ func cmdServe(argv []string) {
 	// docs and the --tokenizer help itself show) would otherwise fail to open.
 	*ggufPath = pathutil.ExpandTilde(*ggufPath)
 	*tokPath = pathutil.ExpandTilde(*tokPath)
+
+	// A friendly alias (`--gguf smollm2`) resolves through the model registry to its
+	// target ref (an hf:// URI or a local path) before anything else, so the run-by-name
+	// surface (`fak pull` / `fak ls`) reaches `fak serve` too. A bare hf:// URI or an
+	// existing path passes through unchanged.
+	if *ggufPath != "" {
+		if resolved, expanded := modelreg.Resolve(*ggufPath); expanded {
+			fmt.Fprintf(os.Stderr, "fak serve: --gguf %s → %s\n", *ggufPath, resolved)
+			*ggufPath = resolved
+		}
+	}
 
 	// An hf:// --gguf resolves to a locally cached file before the loader sees it,
 	// so `fak serve --gguf hf://owner/repo/model.gguf` works without a manual
@@ -170,6 +184,18 @@ func cmdServe(argv []string) {
 	}
 	if chatBackend != nil {
 		fmt.Printf("fak: in-kernel chat decode → device backend %q\n", chatBackend.Name())
+	}
+	// Resolve the Apple-Silicon Metal GPU forward (`--metal` or FAK_METAL=1) BEFORE eager
+	// loading, same fail-loud posture as --backend: a requested-but-unavailable Metal (wrong
+	// build tag or no device) exits 2 with the fix, rather than silently serving on CPU. Metal
+	// is the CPU-session seam, so it conflicts with a device --backend.
+	useMetal, err := resolveServeMetal(*metal, os.Getenv("FAK_METAL") != "", *backendName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if useMetal {
+		fmt.Println("fak: in-kernel chat decode → Apple-Silicon Metal GPU (prefill + resident Q8 decode)")
 	}
 	// --cuda-graph flips the (init-time, FAK_CUDA_GRAPH-gated) graph-replay decode path on
 	// from a parsed flag. graphEnabled is consulted per token at GraphBegin, so this post-init
@@ -313,6 +339,7 @@ func cmdServe(argv []string) {
 		InKernelQ4K:                 inKernelQ4K,
 		Backend:                     chatBackend,
 		CPUOffloadExperts:           *cpuOffloadExperts,
+		Metal:                       useMetal,
 		RequireKey:                  requireKey,
 		VDSO:                        *vdso,
 		Invalidation:                *invalidation,
@@ -382,12 +409,12 @@ func cmdServe(argv []string) {
 		})
 		go func() { _ = watcher.Run(ctx) }()
 
-	// If --dojo is enabled, log the start of a live dojo episode.
-	if *dojoMode {
-		if err := logDojoEpisodeStart("serve"); err != nil {
-			fmt.Fprintf(os.Stderr, "fak: --dojo episode logging failed: %v (continuing without dojo)\n", err)
+		// If --dojo is enabled, log the start of a live dojo episode.
+		if *dojoMode {
+			if err := logDojoEpisodeStart("serve"); err != nil {
+				fmt.Fprintf(os.Stderr, "fak: --dojo episode logging failed: %v (continuing without dojo)\n", err)
+			}
 		}
-	}
 	}
 
 	if *stdio {
@@ -591,6 +618,35 @@ func resolveServeChatBackend(backendName string) (compute.Backend, error) {
 		return nil, fmt.Errorf("fak serve: --backend %q is not available (registered backends: %v). A device backend needs both a matching build tag (e.g. -tags %s) and a reachable device at runtime.", backendName, compute.Registered(), backendName)
 	}
 	return be, nil
+}
+
+// resolveServeMetal decides whether `fak serve` runs the in-kernel chat through the
+// Apple-Silicon Metal GPU forward, from the --metal flag OR the FAK_METAL env (the
+// --cuda-graph ↔ FAK_CUDA_GRAPH pattern). It is the fail-loud counterpart to
+// resolveServeChatBackend: when Metal is requested but unusable it returns an error (the
+// caller exit(2)s), never a silent CPU fallback — serve's posture is fail-loud so a typo
+// or a wrong build never masquerades as GPU serving. The error distinguishes a wrong build
+// (`metalgemm.Compiled()` false → rebuild with -tags fakmetal) from a right build with no
+// device (`Available()` false). Metal is the CPU-session seam (the served session keeps
+// s.Backend nil and gets s.Metal=true), so it is mutually exclusive with a device
+// --backend; the two together is a configuration error, rejected here. Kept side-effect
+// free (no os.Exit) so the decision is unit-testable; on a non-fakmetal build
+// metalgemm.Available()/Compiled() are the stub's deterministic false, so the
+// requested-but-unavailable branch is exercisable on CI without a GPU.
+func resolveServeMetal(flag, env bool, backendName string) (bool, error) {
+	if !flag && !env {
+		return false, nil
+	}
+	if strings.TrimSpace(backendName) != "" {
+		return false, fmt.Errorf("fak serve: --metal and --backend %q are mutually exclusive — Metal is the Apple-Silicon CPU-session forward, not a compute HAL device. Pass one.", backendName)
+	}
+	if !metalgemm.Available() {
+		if !metalgemm.Compiled() {
+			return false, fmt.Errorf("fak serve: --metal requested but this binary has no Metal support — rebuild with `-tags fakmetal` (Apple Silicon + cgo).")
+		}
+		return false, fmt.Errorf("fak serve: --metal requested but no usable Metal device is available on this host.")
+	}
+	return true, nil
 }
 
 const serveGGUFDeviceHeadroom = 0.15

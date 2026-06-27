@@ -63,7 +63,7 @@ func TestInKernelForwardEmitsLiftableToolCall(t *testing.T) {
 
 	// nil backend = the CPU reference decode path (the fak serve --gguf default without
 	// --backend); q4k=false matches the Q8 fixture.
-	p := NewInKernelPlanner(m, tok, "Qwen2.5-1.5B-Instruct", false, nil)
+	p := NewInKernelPlanner(m, tok, "Qwen2.5-1.5B-Instruct", false, nil, false)
 
 	tools := []ToolDef{{
 		Type: "function",

@@ -82,7 +82,7 @@ func TestLiveKVResidencyDefaultOff(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_KVMMU", "") // explicitly OFF (the default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	m := model.NewSynthetic(kvmmuSynthCfg())
-	planner := agent.NewInKernelPlanner(m, newByteLevelTokenizer(t), "synthetic-elide-off", false, nil)
+	planner := agent.NewInKernelPlanner(m, newByteLevelTokenizer(t), "synthetic-elide-off", false, nil, false)
 
 	ev, ok := any(planner).(agent.KVSpanElider)
 	if !ok {
