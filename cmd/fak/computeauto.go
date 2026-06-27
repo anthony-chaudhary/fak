@@ -27,9 +27,10 @@ import (
 //  2. COST / LOCALITY (witnessed, from the registry): rank candidates by costClass —
 //     local in-kernel (free) < your-own-Mac (free, remote hop) < paid GCP GPU <
 //     metered Anthropic. Cheapest/most-local wins.
-//  3. FIT: for a remote target, a live /healthz already proves the gateway hosts its
-//     model; for the local in-kernel target we consult internal/compute HostMemoryInfo
-//     (a precise FitsMemoryPlan verdict needs a declared model, noted in the row).
+//  3. FIT: a remote target's /healthz proves LIVENESS, not model fit (and fak never reads
+//     the body), so a remote fit is reported n/a — the remote host owns its memory. The
+//     local in-kernel target consults internal/compute HostMemoryInfo (a precise
+//     FitsMemoryPlan verdict needs a declared model, noted in the row).
 //  4. QUOTA: a [stub] signal — NOT yet wired to a live `fak accounts` rotation read
 //     (order=by_reset,near_cap_util,avoid_reserved). It is labeled honestly and never
 //     marks a seat down, so --auto cannot claim a quota read it does not perform.
@@ -127,12 +128,13 @@ func healthSignal(h targetHealth) autoSignal {
 	}
 }
 
-// fitForTarget reports the memory-fit signal. A remote target that answered /healthz has
-// already loaded its model (fit proven by health); the local in-kernel target consults
-// internal/compute HostMemoryInfo for a witnessed host-memory read (a precise
-// FitsMemoryPlan verdict needs a declared model, which the registry's local target does
-// not carry — noted honestly rather than fabricated).
-func fitForTarget(t computeTarget, h targetHealth) autoSignal {
+// fitForTarget reports the memory-fit signal. A remote target's /healthz proves LIVENESS,
+// not model fit — and probe() never reads the body, so a 200 (even from a mock-mode
+// gateway) is no evidence the model fits — so a remote fit is reported n/a, never a
+// fabricated witnessed "ok". The local in-kernel target consults internal/compute
+// HostMemoryInfo for a witnessed host-memory read (a precise FitsMemoryPlan verdict needs
+// a declared model, which the registry's local target does not carry — noted honestly).
+func fitForTarget(t computeTarget) autoSignal {
 	if t.Kind == targetLocalSpawn {
 		total, free, known := compute.HostMemoryInfo(compute.Default())
 		if !known {
@@ -142,10 +144,7 @@ func fitForTarget(t computeTarget, h targetHealth) autoSignal {
 			Detail: fmt.Sprintf("%s free of %s host memory; declare a model (fak serve --gguf) for a precise FitsMemoryPlan verdict",
 				humanBytes(free), humanBytes(total))}
 	}
-	if h.State == "up" {
-		return autoSignal{State: "ok", Provenance: "witnessed", Detail: "remote gateway answered /healthz — it already hosts its model"}
-	}
-	return autoSignal{State: "n/a", Provenance: "n/a", Detail: "remote backend; memory fit is the remote host's concern"}
+	return autoSignal{State: "n/a", Provenance: "n/a", Detail: "remote backend; /healthz proves liveness, not model fit — the remote host's concern"}
 }
 
 // quotaForTarget reports the quota signal. It is a [stub] for a metered provider seat
@@ -197,10 +196,12 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 	// Health gate: a DOWN probe is unhealthy; up and n/a (unprobed, assumed reachable)
 	// stay candidates. Quota is a [stub] and never marks a seat down.
 	candidate := make(map[string]bool, len(ps))
+	healthByName := make(map[string]targetHealth, len(ps))
 	for _, p := range ps {
 		up := p.health.State != "down"
 		router.SetHealth(p.t.Name, up)
 		candidate[p.t.Name] = up
+		healthByName[p.t.Name] = p.health
 	}
 
 	report := autoDecisionReport{Schema: computeTargetAutoSchema, Strategy: string(gateway.StrategyCostBased)}
@@ -214,8 +215,14 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 			rank[fb.Name] = i + 2
 		}
 		report.Winner = winnerName
-		report.Reason = fmt.Sprintf("cheapest healthy target: %s (cost_class=%d); %s",
-			winnerName, byName[winnerName].costClass(), dec.Reason)
+		// "healthy" only when a real /healthz probe answered; a no-/healthz target (the
+		// real Anthropic API) is "assumed-reachable", never claimed as witnessed-healthy.
+		winnerDesc := "cheapest healthy target"
+		if healthByName[winnerName].State == "n/a" {
+			winnerDesc = "cheapest reachable target (assumed-reachable, no /healthz)"
+		}
+		report.Reason = fmt.Sprintf("%s: %s (cost_class=%d); %s",
+			winnerDesc, winnerName, byName[winnerName].costClass(), dec.Reason)
 	} else {
 		report.Reason = routeErr.Error()
 	}
@@ -226,7 +233,7 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 			Locality:  p.t.Locality,
 			CostClass: p.t.costClass(),
 			Health:    healthSignal(p.health),
-			Fit:       fitForTarget(p.t, p.health),
+			Fit:       fitForTarget(p.t),
 			Quota:     quotaForTarget(p.t),
 			Candidate: candidate[p.t.Name],
 			Selected:  p.t.Name == winnerName,
@@ -266,7 +273,7 @@ func renderAutoDecision(w io.Writer, rep autoDecisionReport) {
 	} else {
 		fmt.Fprintf(w, "no winner: %s\n", rep.Reason)
 	}
-	fmt.Fprintln(w, "policy: healthy first (live /healthz), then cheapest/most-local (cost_class asc: local<mac<gcp<anthropic).")
+	fmt.Fprintln(w, "policy: healthy or assumed-reachable first (live /healthz where present), then cheapest/most-local (cost_class asc: local<mac<gcp<anthropic).")
 	fmt.Fprintln(w, "quota is a [stub] signal — not yet a live `fak accounts` rotation read; it never excludes a target.")
 }
 

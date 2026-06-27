@@ -94,6 +94,16 @@ func TestAutoSelectPicksCheapestHealthy(t *testing.T) {
 	if cr.Health.State != "up" || cr.Health.Provenance != "witnessed" {
 		t.Fatalf("cheap health = %+v, want witnessed up", cr.Health)
 	}
+	// AC3 fit signal: a remote target's /healthz proves liveness, not model fit — so its
+	// fit must be the honest n/a, never a fabricated witnessed "ok".
+	if pr.Fit.State != "n/a" || pr.Fit.Provenance != "n/a" {
+		t.Fatalf("pricier (remote) fit = %+v, want n/a/n/a (/healthz proves liveness, not fit)", pr.Fit)
+	}
+	// The local in-kernel target's fit is a genuine read: witnessed host-memory advisory,
+	// or n/a when the backend (cpu-ref floor) cannot probe — never a fabricated provenance.
+	if cr.Fit.Provenance != "witnessed" && cr.Fit.Provenance != "n/a" {
+		t.Fatalf("local fit provenance = %q, want witnessed or n/a", cr.Fit.Provenance)
+	}
 }
 
 // TestAutoSelectFailsOverPastDead: the CHEAPEST target is down, so --auto fails over to
@@ -199,4 +209,100 @@ func TestTUIAgentAutoConflicts(t *testing.T) {
 			t.Fatalf("stderr=%q", se.String())
 		}
 	})
+}
+
+// TestAutoSelectFailoverLadderOrder: with THREE healthy targets at distinct cost classes,
+// the rank ladder (winner=1, fallbacks=2,3) strictly follows ascending cost_class — proving
+// the failover ORDER, not just the winner (the earlier tests have a degenerate 2-row ladder).
+func TestAutoSelectFailoverLadderOrder(t *testing.T) {
+	a, b, c := upHealthzServer(t), upHealthzServer(t), upHealthzServer(t)
+	localCheap := computeTarget{Name: "localCheap", Kind: targetLocalSpawn, GatewayURL: a.URL, SpawnSpec: "fak serve", Locality: localityLocal, HealthzPath: "/healthz", CostNote: "no per-token cost"} // 0
+	gwMid := computeTarget{Name: "gwMid", Kind: targetGatewayURL, GatewayURL: b.URL, Locality: localityRemote, HealthzPath: "/healthz", CostNote: "no per-token cost"}                                  // 110
+	proxyHigh := computeTarget{Name: "proxyHigh", Kind: targetProviderProxy, GatewayURL: c.URL, Locality: localityRemote, HealthzPath: "/healthz", CostNote: "metered per token"}                       // 150
+	reg := &targetRegistry{targets: []computeTarget{proxyHigh, localCheap, gwMid}}                                                                                                                      // shuffled
+
+	hc := &http.Client{Timeout: 2 * time.Second}
+	rep, winner, err := autoSelectComputeTarget(context.Background(), reg, hc, 2*time.Second)
+	if err != nil {
+		t.Fatalf("autoSelect: %v", err)
+	}
+	if winner.Name != "localCheap" {
+		t.Fatalf("winner = %q, want localCheap (cheapest)", winner.Name)
+	}
+	for name, wantRank := range map[string]int{"localCheap": 1, "gwMid": 2, "proxyHigh": 3} {
+		row, ok := autoRowByName(rep, name)
+		if !ok {
+			t.Fatalf("row %q missing from decision", name)
+		}
+		if row.Rank != wantRank {
+			t.Errorf("rank(%s) = %d, want %d (ladder must follow ascending cost_class)", name, row.Rank, wantRank)
+		}
+	}
+	lc, _ := autoRowByName(rep, "localCheap")
+	gm, _ := autoRowByName(rep, "gwMid")
+	ph, _ := autoRowByName(rep, "proxyHigh")
+	if !(lc.CostClass < gm.CostClass && gm.CostClass < ph.CostClass) {
+		t.Fatalf("cost ladder not strictly increasing: localCheap=%d gwMid=%d proxyHigh=%d", lc.CostClass, gm.CostClass, ph.CostClass)
+	}
+}
+
+// TestRenderAutoDecision exercises the human decision table + the provenance cell tagging
+// (the [stub]/[n/a] honesty surface) — which the --json path never reaches and no other
+// test covered.
+func TestRenderAutoDecision(t *testing.T) {
+	up, down := upHealthzServer(t), downHealthzServer(t)
+	gwUp := computeTarget{Name: "gwUp", Kind: targetGatewayURL, GatewayURL: up.URL, Locality: localityRemote, HealthzPath: "/healthz", CostNote: "no per-token cost"}       // 110, up -> winner
+	gwDown := computeTarget{Name: "gwDown", Kind: targetGatewayURL, GatewayURL: down.URL, Locality: localityRemote, HealthzPath: "/healthz", CostNote: "no per-token cost"} // down -> excluded
+	proxy := computeTarget{Name: "proxy", Kind: targetProviderProxy, GatewayURL: "https://api.example", Locality: localityRemote, CostNote: "metered per token"}            // no /healthz -> n/a, [stub] quota
+	reg := &targetRegistry{targets: []computeTarget{gwUp, gwDown, proxy}}
+
+	hc := &http.Client{Timeout: 2 * time.Second}
+	rep, winner, err := autoSelectComputeTarget(context.Background(), reg, hc, 2*time.Second)
+	if err != nil {
+		t.Fatalf("autoSelect: %v", err)
+	}
+	if winner.Name != "gwUp" {
+		t.Fatalf("winner = %q, want gwUp (cheapest healthy)", winner.Name)
+	}
+	var buf bytes.Buffer
+	renderAutoDecision(&buf, rep)
+	out := buf.String()
+	for _, want := range []string{
+		"gwUp *",                   // the winner row is marked
+		"assumed-available [stub]", // a stub quota cell is tagged
+		"[n/a]",                    // an n/a cell is tagged, never bare
+		"down",                     // the excluded target shows its witnessed down state
+		"policy: healthy or assumed-reachable first", // the honest policy line
+		"quota is a [stub] signal",                   // the honest quota footer
+		"winner: gwUp",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestTUIAgentAutoDryRunLaunchPlan exercises the non-JSON --auto launch glue (selectedTarget
+// = winner.Name; the preflight skip): it logs the ranked decision to stderr and, with
+// --dry-run, renders the WINNER's resolved launch plan to stdout.
+func TestTUIAgentAutoDryRunLaunchPlan(t *testing.T) {
+	hermeticTargets(t)
+	up := upHealthzServer(t)
+	t.Setenv("FAK_GATEWAY_KEY", "test-bearer")
+	t.Setenv("FAK_MAC_GATEWAY", up.URL)                       // mac is up (cost 110) -> winner
+	t.Setenv("FAK_GLM_GCP_BASE_URL", "http://127.0.0.1:1/v1") // gcp down
+	t.Setenv("FAK_LOCAL_GATEWAY", "http://127.0.0.1:1")       // local down
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{"agent", "--auto", "--dry-run", "--width", "1000"})
+	if code != 0 {
+		t.Fatalf("--auto --dry-run code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "RANK") || !strings.Contains(stderr.String(), "winner: mac") {
+		t.Fatalf("ranked decision not logged to stderr:\n%s", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "existing-fak-gateway") || !strings.Contains(out, up.URL) {
+		t.Fatalf("dry-run plan did not resolve to the mac winner gateway %q:\n%s", up.URL, out)
+	}
 }
