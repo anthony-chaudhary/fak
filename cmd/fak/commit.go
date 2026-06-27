@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
@@ -50,12 +51,26 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	trunk := fs.String("trunk", "", "expected trunk branch (default: main)")
 	push := fs.Bool("push", false, "push after a VERIFIED commit (plain push, never --force)")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
-	asJSON := fs.Bool("json", false, "emit the commit result as JSON")
+	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)
 	paths = append(paths, fs.Args()...)
+
+	// --preview is a no-op dry run: lint the message + paths so a bad subject/stamp is caught
+	// BEFORE the commit lands (on the shared trunk you cannot amend — a sibling may push your
+	// local commit first). It needs a message but tolerates zero paths (the lane match is then
+	// skipped with a note).
+	if *preview {
+		message, code := assembleMessage(stdin(), *msg, *msgFile, stderr)
+		if code != 0 {
+			return code
+		}
+		return runCommitPreview(stdout, stderr, message, paths, resolveRoot(*dir), *asJSON)
+	}
+
 	if len(paths) == 0 {
 		fmt.Fprintln(stderr, "fak commit: at least one --path (or a path after --) is required")
 		return 2
@@ -175,4 +190,50 @@ func short(sha string) string {
 		return sha[:12]
 	}
 	return sha
+}
+
+// runCommitPreview lints a proposed commit (message + the paths it would touch) and reports the
+// verdict WITHOUT running git. Exit 0 when nothing blocking was found, 1 otherwise.
+func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root string, asJSON bool) int {
+	rep := hooks.LintCommitMessage(message, paths, root)
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			fmt.Fprintf(stderr, "fak commit: %v\n", err)
+			return 1
+		}
+	} else {
+		renderPreview(stdout, rep)
+	}
+	if rep.OK {
+		return 0
+	}
+	return 1
+}
+
+func renderPreview(w io.Writer, r hooks.CommitLintReport) {
+	if r.OK {
+		fmt.Fprintln(w, "commit-preview OK — subject is witness-gradeable and bindable")
+	} else {
+		fmt.Fprintf(w, "commit-preview: %d blocking issue(s)\n", len(r.Issues))
+	}
+	fmt.Fprintf(w, "  subject  : %s\n", r.Subject)
+	fmt.Fprintf(w, "  gradeable: %v   stamp: %s", r.Gradeable, r.StampKind)
+	if r.Leaf != "" {
+		fmt.Fprintf(w, " (fak %s, recognized=%v)", r.Leaf, r.LeafRecognized)
+	}
+	fmt.Fprintln(w)
+	if len(r.PathLanes) > 0 {
+		fmt.Fprintf(w, "  path lane: %s\n", strings.Join(r.PathLanes, ", "))
+	}
+	for _, is := range r.Issues {
+		fmt.Fprintf(w, "  ✗ %s\n", is)
+	}
+	for _, n := range r.Notes {
+		fmt.Fprintf(w, "  · %s\n", n)
+	}
+	if !r.OK && r.SuggestTrailer != "" {
+		fmt.Fprintf(w, "  → suggested trailer: %s\n", r.SuggestTrailer)
+	}
 }

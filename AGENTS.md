@@ -123,6 +123,12 @@ until it clears.
   binds to the `cmd` lane (which owns `cmd/**` as one tree) and keeps per-demo attribution
   in the subject; `tools/commit_stamp_doctor.py` recognizes any real `cmd/<dir>` leaf, so a
   residual off-lane warning means a genuine typo, not a `cmd/` demo (#518).
+  *Check the subject BEFORE you commit:* `fak commit --preview -m "<subject>" --path <p> …`
+  lints the message + paths without touching git — is it witness-gradeable, does it carry a
+  bindable `(fak <leaf>)` stamp, and does the leaf match the lane those paths live in? It
+  catches a noun-led subject, a missing/typo'd trailer, or a stamp/lane mismatch up front,
+  the only place you can fix them: on the shared trunk a peer can push your local commit
+  before you amend, so the FIRST subject has to be right (exit 0 clean / 1 issues / 2 usage).
 - **Every claim carries a tag.** Each `- [` line in [`fak/CLAIMS.md`](CLAIMS.md) must
   carry exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]` (lint-enforced by
   `make claims-lint`). Don't overclaim; the repo keeps an honesty ledger.
