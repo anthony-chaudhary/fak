@@ -171,5 +171,31 @@ func TestRunAccountsUsage(t *testing.T) {
 	}
 }
 
+func TestRunAccountsVersion(t *testing.T) {
+	// The version surface must name the build, the registry schema it supports, and the verb
+	// set — the three facts that let an operator see a stale binary instead of hitting a raw
+	// "flag provided but not defined" on a verb the binary predates.
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"version"}); rc != 0 {
+		t.Fatalf("version rc=%d stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"fak ", "fak-config-homes/v1", "remove", "version"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("version output missing %q:\n%s", want, got)
+		}
+	}
+
+	// --json emits a machine-readable object carrying the same facts.
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"version", "--json"}); rc != 0 {
+		t.Fatalf("version --json rc=%d stderr=%s", rc, errb.String())
+	}
+	if j := out.String(); !strings.Contains(j, `"registry_version"`) || !strings.Contains(j, `"verbs"`) {
+		t.Fatalf("version --json missing keys:\n%s", j)
+	}
+}
+
 // jsonPath escapes a Windows path's backslashes for embedding in a JSON string literal.
 func jsonPath(p string) string { return strings.ReplaceAll(p, `\`, `\\`) }
