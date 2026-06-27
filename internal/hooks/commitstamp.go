@@ -130,6 +130,18 @@ func LintCommitMessage(message string, paths []string, root string) CommitLintRe
 	return r
 }
 
+// StampOf is the exported wrapper over stampOf: it returns the ship-stamp
+// ("trailer"|"direct"|"release"|"none") and the lowercased <leaf> token (empty
+// unless trailer/direct) for a commit SUBJECT line. It exists so callers outside
+// the hooks package (e.g. internal/cadencereport's WORK-DONE ships count) decide
+// ship-ness with the SAME grammar the pre-commit lint binds to, instead of a
+// second copy of the regexes drifting out of sync. A merge/bookkeeping/body-only
+// `(fak x)` subject returns kind=="none"; only kind in {trailer,direct} is a
+// per-leaf ship attribution.
+func StampOf(subject string) (kind, leaf string) {
+	return stampOf(subject)
+}
+
 // stampOf returns the ship-stamp ("trailer"|"direct"|"release"|"none") and the lowercased
 // <leaf> token (empty unless trailer/direct) for a subject line.
 func stampOf(subject string) (kind, leaf string) {
