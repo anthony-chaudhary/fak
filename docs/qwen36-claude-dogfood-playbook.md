@@ -358,6 +358,117 @@ llama.cpp generated-token comparison on the real 27B artifact, and the honest bo
 live in
 [`docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md`](benchmarks/FAK-NATIVE-QWEN35-RESULTS.md).
 
+## In-kernel A100 / 27B coding-loop witness — run contract (#933)
+
+Everything above this section fronts an **external** OpenAI-compatible model server
+(`llama-server`, LM Studio, vLLM, …). This section is the other variant: Claude Code
+driving a **real multi-turn coding loop** on fak's **own in-kernel CUDA forward** serving
+Qwen3.6-27B on a single A100 — no external engine in the loop. That is the usability bar
+for the "coding fallback when the subscription is down" goal (#933, the A100/27B extension
+of the general agentic-loop witness #610).
+
+**Status: pre-run contract, not a result.** The serve build is `-tags cuda` and the decode
+runs on the GPU HAL, so the live turn is **hardware-gated on a real A100** — it cannot be
+witnessed on a GPU-less host (there, this is RECORD-only; a SKIP is not a PASS). The
+witnessed claim today is the CPU-forward correctness above (#442); this contract pins the
+*exact* reproducible procedure and the acceptance gate so the live A100 run produces a
+witness an auditor can grade, not a self-report.
+
+Why the `say pong` probe above is **not** this: a one-shot headless turn proves the wire
+(gateway translate + one decode), not *coding competence under the agent harness* — reading
+files, proposing edits, consuming `tool_result` round-trips, and converging without
+derailing or timing out. This contract drives the latter.
+
+### Step 1 — stand the in-kernel serve up (on the A100 host)
+
+```bash
+# RUN ON THE A100 HOST, detached so a disconnect does not orphan the ~16 GB load:
+FAK_GATEWAY_KEY=sk-fak-... systemd-run --unit=qwen36serve --collect \
+  bash tools/qwen36_a100_fak_serve.sh
+# poll the phase file until it reads QWEN36_A100_FAK_SERVE_READY:
+cat /opt/qwen36-q4k/PHASE
+```
+
+`tools/qwen36_a100_fak_serve.sh` builds the cuda fak binary, fetches the q4_k_m GGUF,
+serves it through `FAK_Q4K=1 fak serve --backend cuda` (the resident-Q4_K decode path),
+and only prints `QWEN36_A100_FAK_SERVE_READY` after a real `/v1/chat/completions` smoke
+answers. The gateway keeps Claude Code alive through the long prefill with SSE `ping`
+events (`internal/gateway/messages.go`), so a healthy turn is not cancelled at ~60s.
+
+### Step 2 — connect Claude Code to the gateway
+
+```bash
+#  bash/zsh — must be sourced so the env vars land in your shell:
+source scripts/connect-fak-node.sh <a100-tailscale-ip> sk-fak-... --probe
+#  PowerShell — must be dot-sourced:
+. scripts\connect-fak-node.ps1 -GatewayHost <a100-tailscale-ip> -GatewayKey sk-fak-... -Probe
+```
+
+`--probe`/`-Probe` curls `/healthz` first; a green probe means `claude` will route every
+turn through the in-kernel forward.
+
+### Step 3 — drive a real coding task and capture the transcript
+
+Use a **scratch package** (not a repo file) so the witness is deterministic, re-runnable,
+and side-effect-free on the shared trunk. Seed a deliberately-failing stub, then ask the
+agent to make it pass and add a test — a genuine read → edit → run → iterate loop:
+
+```bash
+mkdir -p /tmp/fak-coding-witness/strpad && cd /tmp/fak-coding-witness
+printf 'module witness\n\ngo 1.26\n' > go.mod
+cat > strpad/strpad.go <<'EOF'
+package strpad
+
+// LeftPad pads s on the left with the rune p until it is at least n wide.
+// TODO: this stub is wrong — it ignores n and p. Make it correct.
+func LeftPad(s string, n int, p rune) string { return s }
+EOF
+```
+
+Then drive one witnessable, captured turn (headless), writing the witness under
+`experiments/agent-live/`:
+
+```bash
+claude -p "Read strpad/strpad.go. Implement LeftPad correctly, add a table-driven \
+strpad_test.go covering the no-pad, exact-width, and pad cases, then run 'go test ./...' \
+and iterate until it passes. Report the final go test output." \
+  --output-format json \
+  > /path/to/fak/experiments/agent-live/qwen36-a100-coding-loop-$(date -u +%Y%m%d).json
+```
+
+(Interactive `claude` works too; capture the session transcript to the same path.)
+
+### Step 4 — record the witness numbers
+
+Record, in the witness JSON / a sibling `.md`, the four numbers #933 asks for:
+
+| field | what it is |
+|---|---|
+| `turns_to_completion` | assistant turns until `go test ./...` passed |
+| `tool_round_trips_survived` | read/edit/bash `tool_result` cycles the stream completed without a schema reject or timeout |
+| `wall_time_s` | end-to-end from first request to the green test |
+| `decode_tok_s` | observed in-kernel decode rate (from the gateway/server log) |
+
+### Pass / fail
+
+- **PASS** = the task actually completes: `strpad/strpad.go` is correct, a real test exists,
+  `go test ./...` is green, and the transcript shows the agent reaching it through tool
+  round-trips on the in-kernel forward — captured under `experiments/agent-live/`.
+- **Not a pass** = a green-looking transcript with wrong edits, or a SKIP because no A100
+  was present. Record those honestly; do not file a SKIP as a PASS.
+
+### Honest failure modes → their own follow-ons
+
+Note which (if any) bit, so they become tracked work rather than silent flake:
+
+- tool-schema rejection / the in-kernel forward not emitting a liftable tool call → #609, #610.
+- derailment across `tool_result` turns (poison not evicted) → #612.
+- stream timeout / premature cancel — should be removed by the SSE `ping`
+  (`internal/gateway/messages.go`); if it recurs, that is a regression to file.
+
+Single-stream only for now (drive one request at a time); batched throughput is its own
+item (#401).
+
 ## Troubleshooting
 
 If the launcher cannot resolve the model, check `/v1/models` and either pass a
