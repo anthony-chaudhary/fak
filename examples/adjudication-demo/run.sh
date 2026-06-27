@@ -10,7 +10,9 @@
 #   ./run.sh --dry-run             # show verdicts without executing the allowed commands
 #   FAK_DEMO_MODEL=qwen2.5:14b ./run.sh   # stronger/larger model (any tool-capable one)
 #
-# Requires: Go (to build fak), ollama (https://ollama.com), Python 3.
+# Requires: Go (to build fak), Python 3. ollama is OPTIONAL — when it is absent the
+# demo automatically falls back to fak's own in-kernel gguf forward (a cached GGUF
+# under ~/.cache/fak-models/gguf, else a one-time scripts/fetch-gguf.sh 7b fetch).
 # Env knobs:
 #   FAK_DEMO_MODEL   ollama model id behind the kernel   (default qwen2.5:7b)
 #   FAK_DEMO_PORT    kernel port                          (default 8080)
@@ -46,47 +48,77 @@ if [ -z "$BIN" ]; then
   ( cd "$FAK_DIR" && go build -o "$BIN" ./cmd/fak )
 fi
 
-# 2) a tool-capable local model behind ollama (the kernel proxies to it)
-command -v ollama >/dev/null || {
-  log "ollama not found. This demo proxies the kernel to a tool-capable model behind ollama."
-  log "  - install ollama (https://ollama.com), then re-run; or"
-  log "  - point the kernel at fak's OWN in-kernel forward instead (no ollama, no python model):"
-  log "      $BIN serve --addr 127.0.0.1:$PORT --gguf <path/to/Qwen2.5-7B-Instruct-Q8_0.gguf> --policy '$POLICY'"
-  log "      then in another shell:  FAK_DEMO_KERNEL=http://127.0.0.1:$PORT python3 '$HERE/demo.py' $*"
-  log "    (fetch a GGUF once with scripts/fetch-gguf.sh; see DOGFOOD-CLAUDE.md)"
-  exit 1
-}
-if ! curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; then
-  log "starting 'ollama serve'"; ollama serve >"$TMP/fak-demo-ollama.log" 2>&1 & OLLAMA_PID=$!
-  tries=0
-  until curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; do
-    kill -0 "$OLLAMA_PID" 2>/dev/null || { log "ollama failed to start (see $TMP/fak-demo-ollama.log)"; exit 1; }
-    tries=$((tries + 1)); [ "$tries" -ge 60 ] && { log "ollama did not answer within ~60s — giving up (see $TMP/fak-demo-ollama.log)"; exit 1; }
-    sleep 1
-  done
-fi
-if ! curl -s "http://$OLLAMA/api/tags" 2>/dev/null | grep -q "\"name\":\"$MODEL\""; then
-  log "pulling $MODEL (one-time; model downloads can be multi-GB — set FAK_DEMO_MODEL to choose)"
-  ollama pull "$MODEL"
+# 2) pick a backend: the ollama proxy (default when present), or — when ollama is
+#    absent — fall back AUTOMATICALLY to fak's OWN in-kernel gguf forward (no ollama,
+#    no python model). demo.py is backend-agnostic (it only POSTs to FAK_DEMO_KERNEL),
+#    so the swap is invisible to it.
+SERVE_ARGS=()              # the model/source flags handed to `fak serve`
+SERVE_DESC=""              # human label for the startup log
+ASSERT_INKERNEL=0          # in the gguf fall-back, require planner=inkernel on /healthz
+if command -v ollama >/dev/null 2>&1; then
+  if ! curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; then
+    log "starting 'ollama serve'"; ollama serve >"$TMP/fak-demo-ollama.log" 2>&1 & OLLAMA_PID=$!
+    tries=0
+    until curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; do
+      kill -0 "$OLLAMA_PID" 2>/dev/null || { log "ollama failed to start (see $TMP/fak-demo-ollama.log)"; exit 1; }
+      tries=$((tries + 1)); [ "$tries" -ge 60 ] && { log "ollama did not answer within ~60s — giving up (see $TMP/fak-demo-ollama.log)"; exit 1; }
+      sleep 1
+    done
+  fi
+  if ! curl -s "http://$OLLAMA/api/tags" 2>/dev/null | grep -q "\"name\":\"$MODEL\""; then
+    log "pulling $MODEL (one-time; model downloads can be multi-GB — set FAK_DEMO_MODEL to choose)"
+    ollama pull "$MODEL"
+  fi
+  SERVE_ARGS=(--model "$MODEL" --base-url "http://$OLLAMA/v1")
+  SERVE_DESC="model=$MODEL via ollama proxy"
+else
+  log "ollama not found — falling back to fak's in-kernel gguf forward (no ollama needed)."
+  GGUF_CACHE="$HOME/.cache/fak-models/gguf"
+  GGUF=""
+  [ -d "$GGUF_CACHE" ] && GGUF="$(ls -1t "$GGUF_CACHE"/*.gguf 2>/dev/null | head -1 || true)"
+  if [ -z "$GGUF" ]; then
+    log "no cached GGUF under $GGUF_CACHE — fetching the 7B Qwen2.5 once (scripts/fetch-gguf.sh 7b)"
+    # --yes drives fetch-gguf non-interactively so the fall-back never hangs on a prompt.
+    "$FAK_DIR/scripts/fetch-gguf.sh" 7b --yes >&2 || true
+    [ -d "$GGUF_CACHE" ] && GGUF="$(ls -1t "$GGUF_CACHE"/*.gguf 2>/dev/null | head -1 || true)"
+  fi
+  if [ -z "$GGUF" ]; then
+    log "could not locate or fetch a GGUF — install ollama (https://ollama.com) and re-run, or"
+    log "  fetch one by hand:  scripts/fetch-gguf.sh 7b   then re-run."
+    exit 1
+  fi
+  log "using in-kernel gguf: $GGUF"
+  SERVE_ARGS=(--gguf "$GGUF")
+  SERVE_DESC="in-kernel gguf $(basename "$GGUF")"
+  ASSERT_INKERNEL=1
 fi
 
-# 3) start the kernel in front of the model (fail loud if the port is already taken)
+# 3) start the kernel in front of the chosen backend (fail loud if the port is taken)
 if curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
   log "port $PORT already has a kernel — stop it or set FAK_DEMO_PORT"; exit 1
 fi
 FAKLOG="$TMP/fak-demo-kernel.log"
-log "starting kernel: fak serve :$PORT  (model=$MODEL, capability floor = examples/dogfood-claude-policy.json)"
-"$BIN" serve --addr "127.0.0.1:$PORT" --model "$MODEL" \
-  --base-url "http://$OLLAMA/v1" --policy "$POLICY" >"$FAKLOG" 2>&1 & KPID=$!
+log "starting kernel: fak serve :$PORT  ($SERVE_DESC, capability floor = examples/dogfood-claude-policy.json)"
+"$BIN" serve --addr "127.0.0.1:$PORT" "${SERVE_ARGS[@]}" --policy "$POLICY" >"$FAKLOG" 2>&1 & KPID=$!
 tries=0
 until curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; do
   if ! kill -0 "$KPID" 2>/dev/null; then
-    log "kernel died on startup (model=$MODEL, addr=127.0.0.1:$PORT) — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1
+    log "kernel died on startup ($SERVE_DESC, addr=127.0.0.1:$PORT) — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1
   fi
   tries=$((tries + 1)); if [ "$tries" -ge 200 ]; then log "kernel did not become healthy within ~60s — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1; fi
   sleep 0.3
 done
-log "kernel healthy: $(curl -s "http://127.0.0.1:$PORT/healthz")"
+HEALTH="$(curl -s "http://127.0.0.1:$PORT/healthz")"
+log "kernel healthy: $HEALTH"
+# In the gguf fall-back, assert the kernel is really doing its OWN in-kernel forward
+# (planner=inkernel) — so a misconfigured fall-back fails loud instead of silently
+# proxying nowhere. Field semantics: internal/gateway/gateway_test.go.
+if [ "$ASSERT_INKERNEL" = "1" ]; then
+  case "$HEALTH" in
+    *'"planner":"inkernel"'*|*'"planner": "inkernel"'*) : ;;
+    *) log "expected planner=inkernel on /healthz but got: $HEALTH"; exit 1 ;;
+  esac
+fi
 echo
 
 # 4) run the demo through the kernel
