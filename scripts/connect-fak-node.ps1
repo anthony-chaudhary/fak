@@ -4,8 +4,7 @@
 # `claude`, `fak guard -- claude`, and any tool that reads those env vars will route
 # through the always-on fak kernel on the target Mac node.
 #
-# Usage:
-#   # In the current shell (env vars live only for this session):
+# Usage (MUST be dot-sourced so env vars reach your shell — use . or &lt;dot&gt; before the path):
 #   . scripts\connect-fak-node.ps1 -GatewayHost 100.x.y.z -GatewayKey sk-fak-...
 #
 #   # Or with named values written to $PROFILE for persistence:
