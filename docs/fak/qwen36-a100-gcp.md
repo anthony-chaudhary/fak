@@ -18,11 +18,33 @@ on fak's forward on the A100, and `fak guard` adjudicates every tool call on the
 └──────────────┘              └───────────────────────────┘           └──────────────────┘
 ```
 
+## Status — witnessed on a live A100 (2026-06-27)
+
+The whole **infra** is proven end-to-end on a single GCP A100-40GB: `--apply` → `-tags cuda`
+build (sm_80) → GGUF load → gateway → connect from the laptop → a real coding turn comes back.
+But two honest constraints shape what to serve:
+
+- **The literal `Qwen3.6-27B` does NOT run on fak's forward yet.** That checkpoint
+  (`lmstudio-community/Qwen3.6-27B-GGUF`) is a **Gated-DeltaNet/SSM hybrid** (every layer is a
+  fused `attn_qkv` + `attn_gate` + a full `ssm_*` recurrence — no `self_attn.q_proj`). fak's
+  in-kernel forward implements the standard separate-projection attention path, so it loads and
+  binds but **panics on the first decode**. Tracked as **#934** (the real blocker; #65/#67 family).
+- **The working default is `Qwen2.5-Coder-14B`** — a standard dense arch fak's forward *does*
+  serve. Witnessed: correct code out, **~6.7 tok/s** (the decode is launch/op bound — the perf
+  levers are #483/#279/#401), ~16 GiB Q8-resident + a 32K context fits one A100-40GB. A standard
+  **32B** is ~32 GiB Q8-resident — no KV room on 40GB (use the 80GB tier for 32B).
+- **Keep `--cuda-graph` OFF** (the default). At 14B/A100 it was witnessed to *crash* the serve
+  (lazy KV `cudaMalloc` during graph capture, **#932**), not speed it up — until KV is
+  pre-allocated before capture.
+
+So `scripts/gcp-qwen-serve.sh` and `tools/qwen36_a100_fak_serve.sh` default to the **supported
+coder**; point them at Qwen3.6-27B (via `QWEN_REPO`/`MODEL_ID`) once #934 lands.
+
 ## Why a single A100 is enough
 
-Qwen3.6-27B `q4_k_m` is **~16–17 GB resident**, so it fits **one A100-40GB whole** with
-~23 GB left for the KV cache and activations. No `--cpu-offload-experts`, no multi-GPU, no
-466 GB MoE staging (that is the GLM-5.2 frontier path —
+A ~14–16B coder `q4_k_m` is **~14–16 GB Q8-resident**, so it fits **one A100-40GB whole** with
+room for a 32K KV cache (which holds a full Claude Code agent prompt). No `--cpu-offload-experts`,
+no multi-GPU, no 466 GB MoE staging (that is the GLM-5.2 frontier path —
 [`claude-glm-gcp.md`](claude-glm-gcp.md) / `scripts/gcp-glm-serve.sh`). This is the cheap,
 "actually available" single-GPU tier: `a2-highgpu-1g`, ~\$3.67/hr.
 
@@ -83,32 +105,29 @@ about keeping the memory system saturated and not paying per-kernel launch gaps.
 | lever | flag / env | what it does | status |
 |---|---|---|---|
 | direct-resident Q4_K | `FAK_Q4K=1` | native q4_k device GEMV, no dequant-to-f32 (#484/#485) | wired; default in the serve script |
-| CUDA-graph decode replay | `--cuda-graph` / `FAK_CUDA_GRAPH=1` | capture each token's op stream, replay as ONE launch instead of N (#483) | wired through the HAL; **OFF by default — witness tok/s before trusting** |
+| CUDA-graph decode replay | `--cuda-graph` / `FAK_CUDA_GRAPH=1` | capture each token's op stream, replay as ONE launch instead of N (#483) | wired, but **witnessed to CRASH the serve** at 14B/A100 — lazy KV `cudaMalloc` during capture (#932). KEEP OFF until KV is pre-allocated before capture. |
 | fused flash attention | (automatic) | one online-softmax kernel, no `scores[nPos]` row materialized (#486) | wired |
 
-The `--cuda-graph` lever was a **measured no-win on a tiny 0.5B model on an L4** (launch
-overhead is already small there), which is why it is off by default. The 27B-on-A100
-calculus is different — far more, larger kernels per token — so it is worth witnessing.
-Capture the before/after on **your** node and only then rely on it:
-
-```bash
-# A: graph off (default). B: graph on.
-CUDA_GRAPH=0 ... ; CUDA_GRAPH=1 ...   # via the serve script, or pass --cuda-graph directly
-# then compare warm steady-state decode tok/s (discard the first, cold, token).
-```
+**Witnessed (14B coder, A100-40GB, 2026-06-27): ~6.7 tok/s** — only ~6% of the bandwidth
+ceiling, so the decode is **launch/op bound**, not BW bound. That is exactly the regime where
+graph replay (#483) should win (unlike the 0.5B/L4, where it was a measured no-win). But
+`--cuda-graph` currently **crashes** the in-kernel serve (the KV cache is allocated lazily
+during the first captured token, violating the "no cudaMalloc during capture" precondition,
+#932). So the headline perf work is: pre-allocate KV before capture (#932), then the launch-gap
+lever (#483) + fused kernels (#279) + continuous batching (#401).
 
 ## Honest scope
 
-- **Correctness is witnessed on the CPU reference**: fak's own `qwen35` forward is cosine
-  ≥ 0.9999 vs HF and argmax-exact (the `#442` oracle gates — see
-  [`qwen36-claude-dogfood-playbook.md`](../qwen36-claude-dogfood-playbook.md), "Native parity
-  witnesses").
-- **The CUDA resident-Q4_K decode at 27B is hardware-gated**: this runbook stands the
-  endpoint up and smoke-tests a real chat answer, but a live 27B serve turn and its **tok/s**
-  must be measured on a real A100. fak's live in-kernel CUDA serve is witnessed today at the
-  0.5B scale (466 tok/s warm on an L4 —
-  [`docs/notes/L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md`](../notes/L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md));
-  the 27B/A100 number is the open perf item this path exists to measure.
+- **The literal Qwen3.6-27B does not run on fak's forward yet** — it's a GDN/SSM hybrid; fak
+  panics on the first decode (#934). See the Status section at the top. The runbook serves a
+  **supported** standard-arch coder (Qwen2.5-Coder-14B) meanwhile.
+- **Proven end-to-end on a live A100 (2026-06-27)**: provision → `-tags cuda` build (sm_80) →
+  GGUF load → gateway (`/healthz`, `/v1/models`) → **a real coding turn from the laptop through
+  an SSH-forward tunnel** (`is_prime`, a reverse-string lambda — correct code from fak's own
+  forward, weights resident on-GPU at ~16 GiB). fak's prior live CUDA-serve witness was 0.5B on
+  an L4 (466 tok/s — [`L4-INKERNEL...`](../notes/L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md)); this is the first 14B/A100 one.
+- **Perf is the open item**: ~6.7 tok/s is usable-but-slow for interactive coding; the levers
+  above (#932 → #483 → #279 → #401) are the path to the bandwidth ceiling.
 - The device serve is **single-stream**; drive it one request at a time until batched device
   decode lands (the concurrency-safety fix is shipped; throughput batching is `#401`).
 

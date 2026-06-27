@@ -31,9 +31,12 @@
 #                                                        also a2-ultra-a100-80gb-1g — see tools/gcp_accel.py)
 #   GCP_ZONE        compute zone                       (default: the tier's first common zone)
 #   VM_NAME         instance name                      (default fak-qwen-serve)
-#   QWEN_REPO       HF repo for the GGUF               (default lmstudio-community/Qwen3.6-27B-GGUF)
+#   QWEN_REPO       HF repo for the GGUF               (default bartowski/Qwen2.5-Coder-14B-Instruct-GGUF,
+#                                                        a fak-supported coder; Qwen3.6-27B is #934-blocked)
+#   MODEL_ID        model id the gateway advertises    (default qwen2.5-coder-14b)
+#   CTX             in-kernel context budget (KV cap)  (default 32768)
 #   QWEN_PORT       served gateway port on the VM      (default 8080 — the connect-fak-node default)
-#   CUDA_GRAPH      1 => serve with --cuda-graph (#483) (default 0; witness tok/s before trusting)
+#   CUDA_GRAPH      1 => serve with --cuda-graph (#483) (default 0; KEEP 0 — crashes the serve, #932)
 #   FAK_GATEWAY_KEY inbound bearer key clients present  (default: generated with openssl on --apply)
 #   HF_TOKEN        Hugging Face token (only if the repo is gated; this one is public)
 #   FAK_REPO_URL    repo to clone on the VM            (default the public fak remote)
@@ -47,9 +50,15 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 GCP_TIER="${GCP_TIER:-a2-high-a100-40gb-1g}"
 VM_NAME="${VM_NAME:-fak-qwen-serve}"
-QWEN_REPO="${QWEN_REPO:-lmstudio-community/Qwen3.6-27B-GGUF}"
+# Default to a fak-SUPPORTED coder. The literal Qwen3.6-27B is a Gated-DeltaNet/SSM hybrid
+# fak's in-kernel forward can't decode yet (#934 — it loads but panics); Qwen2.5-Coder-14B
+# (standard arch) is witnessed working. Override QWEN_REPO/MODEL_ID once #934 lands. See
+# docs/fak/qwen36-a100-gcp.md.
+QWEN_REPO="${QWEN_REPO:-bartowski/Qwen2.5-Coder-14B-Instruct-GGUF}"
+MODEL_ID="${MODEL_ID:-qwen2.5-coder-14b}"
 QWEN_PORT="${QWEN_PORT:-8080}"
-CUDA_GRAPH="${CUDA_GRAPH:-0}"
+CTX="${CTX:-32768}"             # in-kernel context budget (caps planned KV; 32K fits 14B on 40GB)
+CUDA_GRAPH="${CUDA_GRAPH:-0}"   # KEEP 0: --cuda-graph (#483) crashes the serve at 14B/A100 (#932)
 FAK_REPO_URL="${FAK_REPO_URL:-https://github.com/anthony-chaudhary/fak.git}"
 
 MODE="plan"
@@ -124,7 +133,8 @@ export HUGGING_FACE_HUB_TOKEN="${RENDER_HF_TOKEN}"
 systemd-run --unit=qwen36serve --collect \\
   --setenv=QWEN_REPO="${QWEN_REPO}" \\
   --setenv=PORT="${QWEN_PORT}" \\
-  --setenv=MODEL_ID="qwen3.6-27b" \\
+  --setenv=MODEL_ID="${MODEL_ID}" \\
+  --setenv=CTX="${CTX}" \\
   --setenv=CUDA_GRAPH="${CUDA_GRAPH}" \\
   --setenv=FAK_CUDA_ARCH="sm_${cap}" \\
   --setenv=FAK_GATEWAY_KEY="${RENDER_KEY}" \\

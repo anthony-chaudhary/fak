@@ -39,16 +39,32 @@
 # then poll:  cat "$QWEN_DIR/PHASE"   and on QWEN36_A100_FAK_SERVE_READY connect from the client.
 set -uo pipefail
 
-QWEN_DIR="${QWEN_DIR:-/opt/qwen36-q4k}"
-REPO="${QWEN_REPO:-lmstudio-community/Qwen3.6-27B-GGUF}"
+# MODEL SUPPORT (witnessed on a live A100-40GB, 2026-06-27):
+#   * Qwen2.5-Coder-14B (standard dense arch) WORKS on fak's in-kernel forward — this is the
+#     DEFAULT: ~16 GiB Q8-resident + 32K KV fits one A100-40GB, real code out at ~6.7 tok/s
+#     (the decode is launch/op bound; the perf levers are #483/#279/#401).
+#   * The literal Qwen3.6-27B (lmstudio-community/Qwen3.6-27B-GGUF) is a Gated-DeltaNet/SSM
+#     HYBRID (fused attn_qkv + per-layer ssm_*, no self_attn.q_proj) that fak's forward does
+#     NOT yet support — it loads + binds but PANICS on the first decode (#934). Point this at
+#     it (QWEN_REPO=lmstudio-community/Qwen3.6-27B-GGUF MODEL_ID=qwen3.6-27b) only once #934 lands.
+#   * A standard 32B (Qwen2.5-Coder-32B) is ~32 GiB Q8-resident — does NOT leave KV room on a
+#     40GB A100 (FitTooBig). Use the 80GB tier for 32B, or the 14B here.
+QWEN_DIR="${QWEN_DIR:-/opt/fak-serve-model}"
+REPO="${QWEN_REPO:-bartowski/Qwen2.5-Coder-14B-Instruct-GGUF}"
 # Glob that matches the q4_k_m shard in the repo (the file name carries the quant tag).
 QWEN_FILE_GLOB="${QWEN_FILE_GLOB:-*[Qq]4_[Kk]_[Mm]*.gguf}"
 PORT="${PORT:-8080}"
 ADDR="${ADDR:-0.0.0.0:${PORT}}"
-MODEL_ID="${MODEL_ID:-qwen3.6-27b}"
+MODEL_ID="${MODEL_ID:-qwen2.5-coder-14b}"
 FAK_BIN="${FAK_BIN:-/usr/local/bin/fak}"
 GO_VERSION="${GO_VERSION:-1.26.4}"
-CUDA_GRAPH="${CUDA_GRAPH:-0}"        # 1 => pass --cuda-graph (#483); witness tok/s before trusting
+# Context budget: caps the planned KV cache (the in-kernel default plans the model's FULL
+# context → a 100s-of-GiB KV → FitTooBig on any single GPU). 32K holds a full Claude Code
+# agent prompt and fits a 14B+KV on a 40GB A100. Drop it if you see a FitTooBig refusal.
+CTX="${CTX:-32768}"
+CUDA_GRAPH="${CUDA_GRAPH:-0}"        # 1 => --cuda-graph (#483). KEEP 0: witnessed to CRASH the
+                                     # in-kernel serve (cudaMalloc-during-capture on lazy KV
+                                     # prealloc, #932) until KV is pre-allocated before capture.
 export FAK_CUDA_ARCH="${FAK_CUDA_ARCH:-sm_80}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 export HOME="${HOME:-/root}" GOCACHE="${GOCACHE:-/tmp/gocache}" GOPATH="${GOPATH:-/tmp/gopath}"
@@ -107,7 +123,7 @@ export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}
 # 4. Serve via the PURE FAK KERNEL, resident-Q4_K decode. The embedded GGUF tokenizer makes
 #    /v1/chat/completions AND /v1/messages serve real in-kernel chat; the eager load binds the
 #    listener only AFTER the weights are resident, so /v1/models answering means it is loaded.
-SERVE_ARGS=(serve --addr "$ADDR" --gguf "$GGUF" --backend cuda --model "$MODEL_ID")
+SERVE_ARGS=(serve --addr "$ADDR" --gguf "$GGUF" --backend cuda --model "$MODEL_ID" --context-budget-tokens "$CTX")
 [ "$CUDA_GRAPH" = "1" ] && SERVE_ARGS+=(--cuda-graph)
 # Inbound bearer auth: a network-facing gateway must require a key. connect-fak-node uses it.
 if [ -n "${FAK_GATEWAY_KEY:-}" ]; then
