@@ -1,0 +1,120 @@
+name: bench-signal
+
+# Turn a benchmark THROUGHPUT regression (a tok/s drop vs a pinned perf baseline)
+# into a specific, deduped, lane-routed GitHub issue the dispatch loop can resolve —
+# the PERF dual of score-signal (a scorecard-debt regression) and a sibling of
+# gate-signal (a non-scorecard CI finding). On a daily cadence it reads the committed
+# benchmark corpus (experiments/benchmark/catalog.json) and the pinned perf baseline
+# (tools/bench_baseline.json); for every machine-scoped benchmark whose latest tok/s
+# dropped past BOTH the relative-% and absolute-tok/s noise floors it files ONE scoped
+# issue naming the benchmark, machine, before->after numbers, and the re-measure path.
+#
+# SAFE BY DEFAULT: the scheduled run is DRY-RUN — it plans the issues, surfaces them
+# to the step summary + an artifact, and files NOTHING. Filing is an explicit operator
+# arm: `workflow_dispatch` with `live=true`. The pure threshold/dedup logic is proven
+# by tools/bench_signal_test.py (run FIRST below), so a green plan is a real signal.
+#
+# Baseline lifecycle: an intentional perf change (or the first run on a new benchmark)
+# re-floors the baseline with `python tools/bench_signal.py --pin`, committed to
+# tools/bench_baseline.json — so an accepted trade-off stops re-filing.
+on:
+  schedule:
+    # Daily 08:03 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, score-signal 07:41,
+    # gate-signal 07:53).
+    - cron: "3 8 * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Actually CREATE the issues (default: dry-run plan only)"
+        type: boolean
+        default: false
+      min_drop_pct:
+        description: "Relative % drop below baseline to file (noise threshold)"
+        type: string
+        default: "15"
+      max_issues:
+        description: "Hard cap on issues filed per run (worst-drop-first)"
+        type: string
+        default: "5"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: bench-signal
+  cancel-in-progress: false
+
+jobs:
+  bench-signal:
+    name: throughput regression -> issue
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The threshold/dedup logic FIRST: a planned issue below is only meaningful if
+      # the pure core that produced it is itself proven correct.
+      - name: bench-signal self-test
+        run: python tools/bench_signal_test.py
+
+      # Plan the issues (dry-run) — always, so the step summary shows what WOULD be
+      # filed even on an armed run. Operator inputs are bound to env (not spliced
+      # into the script body) so an input value can't break out into shell. A missing
+      # pinned baseline is a clean "nothing to signal", not a failure.
+      - name: plan bench-signal issues
+        env:
+          MIN_DROP_PCT: ${{ github.event.inputs.min_drop_pct || '15' }}
+          MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
+        run: |
+          python tools/bench_signal.py --min-drop-pct "$MIN_DROP_PCT" \
+            --max-issues "$MAX_ISSUES" --json > bench-signal-plan.json
+          python tools/bench_signal.py --min-drop-pct "$MIN_DROP_PCT" \
+            --max-issues "$MAX_ISSUES" > bench-signal-plan.txt
+          cat bench-signal-plan.txt
+
+      # File the issues — ONLY on an explicit `workflow_dispatch` arm with live=true.
+      - name: file bench-signal issues (armed)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' }}
+        env:
+          MIN_DROP_PCT: ${{ github.event.inputs.min_drop_pct || '15' }}
+          MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
+        run: |
+          python tools/bench_signal.py --min-drop-pct "$MIN_DROP_PCT" \
+            --max-issues "$MAX_ISSUES" --live
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## bench-signal plan"
+            armed="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' && 'LIVE (issues filed)' || 'dry-run (nothing filed)' }}"
+            echo "_Mode: ${armed}. Scheduled runs are dry-run; arm via workflow_dispatch with live=true._"
+            echo '```'
+            cat bench-signal-plan.txt 2>/dev/null || echo "(no plan)"
+            echo '```'
+            echo '<details><summary>machine plan</summary>'
+            echo
+            echo '```json'
+            cat bench-signal-plan.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-signal-plan
+          path: |
+            bench-signal-plan.json
+            bench-signal-plan.txt
+          if-no-files-found: ignore

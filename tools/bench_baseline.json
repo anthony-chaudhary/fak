@@ -1,0 +1,9 @@
+{
+  "schema": "fak-bench-signal.baseline/1",
+  "commit": "5edb125d",
+  "pinned": "2026-06-27",
+  "baselines": {
+    "node-macos-a/qwen2.5-1.5b-instruct-q8-0": 38.07,
+    "workstation-a/smollm2-135m-instruct-q8": 31.022
+  }
+}
