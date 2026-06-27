@@ -113,117 +113,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "resolve":
-		if len(positional) == 0 {
-			fmt.Fprintln(stderr, "usage: fak accounts resolve <name> [--env]")
-			return 2
-		}
-		name := positional[0]
-		reg, err := loadOrDiscover(*registryPath, *homeDir)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		// Rehome is the DEFAULT (a seat that can't serve falls forward to a live one);
-		// --pin is the strict opt-in. Serve needs disk-derived identity, so refresh.
-		reg = reg.Refresh()
-		var home accounts.Home
-		var chain []string
-		if *pin {
-			home, chain, err = reg.Resolve(name)
-		} else {
-			home, chain, err = reg.Serve(name)
-		}
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		for i, hop := range chain {
-			to := home.Name
-			if i+1 < len(chain) {
-				to = chain[i+1]
-			}
-			fmt.Fprintf(stderr, "note: %q can't serve -> rehoming to %q\n", hop, to)
-		}
-		id := accounts.DeriveIdentity(home.Dir)
-		if !id.HasCreds {
-			fmt.Fprintf(stderr, "warning: %q (%s) has no live credentials — claude will prompt for /login\n", home.Name, home.Dir)
-		}
-		if *asEnv {
-			fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", home.Dir)
-		} else {
-			fmt.Fprintln(stdout, home.Dir)
-		}
-		return 0
+		return accountsResolve(stdout, stderr, positional, *registryPath, *homeDir, *pin, *asEnv)
 
 	case "pull":
-		if len(positional) == 0 {
-			fmt.Fprintln(stderr, "usage: fak accounts pull <name> [--dry-run]")
-			return 2
-		}
-		name := positional[0]
-		reg, err := loadOrDiscover(*registryPath, *homeDir)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		reg = reg.Refresh()
-		plan, err := reg.Plan(name)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		if len(plan.From) == 0 {
-			fmt.Fprintf(stdout, "nothing to pull: %q serves directly from %s\n", name, plan.Into.Dir)
-			return 0
-		}
-		for _, bundle := range plan.From {
-			if *dryRun {
-				fmt.Fprintf(stdout, "would pull %s -> %s\n", bundle, plan.Into.Dir)
-				continue
-			}
-			n, err := copyTree(bundle, plan.Into.Dir)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak accounts: pull %s: %v\n", bundle, err)
-				return 1
-			}
-			fmt.Fprintf(stdout, "pulled %d files: %s -> %s\n", n, bundle, plan.Into.Dir)
-		}
-		return 0
+		return accountsPull(stdout, stderr, positional, *registryPath, *homeDir, *dryRun)
 
 	case "discover":
-		if *write {
-			// Regenerator mode: load the canonical registry (or start empty), MERGE the disk
-			// scan in (refresh identities, add new dirs, PRESERVE authored policy fields), and
-			// write it back atomically. This is how the registry becomes the single source of
-			// truth without a human re-typing identities — it derives them from disk.
-			base := accounts.Registry{}
-			if _, err := os.Stat(*registryPath); err == nil {
-				base, err = accounts.LoadRegistry(*registryPath)
-				if err != nil {
-					fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-					return 1
-				}
-			}
-			merged, err := base.MergeDiscovered(*homeDir)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-				return 1
-			}
-			if err := accounts.SaveRegistry(*registryPath, merged); err != nil {
-				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-				return 1
-			}
-			fmt.Fprintf(stdout, "wrote %d home(s) to %s\n", len(merged.Homes), *registryPath)
-			return 0
-		}
-		homes, err := accounts.Discover(*homeDir)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		reg := accounts.Registry{Homes: homes}
-		stdout.Write(reg.JSON())
-		return 0
+		return accountsDiscover(stdout, stderr, *registryPath, *homeDir, *write)
 
 	case "validate":
 		reg, err := accounts.LoadRegistry(*registryPath)
@@ -235,58 +131,10 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "check-twins":
-		// The audit gate for Regression A: red (exit 1) when two config homes logged into
-		// DIFFERENT accounts share one setup-token fingerprint (the cross-account smear
-		// that surfaces as "subscription disabled"). Homes that share a token but resolve
-		// to ONE account (~/.claude + its named dir) are legitimate and pass.
-		findings, err := accounts.AuditTokenTwins(*homeDir)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		if *asJSON {
-			stdout.Write(mustJSON(map[string]any{"clean": len(findings) == 0, "findings": findings}))
-			fmt.Fprintln(stdout)
-		}
-		if len(findings) == 0 {
-			if !*asJSON {
-				fmt.Fprintln(stdout, "ok: no cross-account token-twins — every shared setup token is one account")
-			}
-			return 0
-		}
-		if !*asJSON {
-			for _, f := range findings {
-				fmt.Fprintf(stdout, "TOKEN-TWIN: homes [%s] share one setup token but log into %d accounts [%s]\n",
-					strings.Join(f.Homes, ", "), len(f.Accounts), strings.Join(f.Accounts, ", "))
-			}
-			fmt.Fprintf(stderr, "fak accounts: %d cross-account token-twin(s) — a foreign token will surface as "+
-				"\"subscription disabled\". Give each account its OWN setup token in its OWN dir.\n", len(findings))
-		}
-		return 1
+		return accountsCheckTwins(stdout, stderr, *homeDir, *asJSON)
 
 	case "gate-write":
-		// Pre-write gate: decide whether writing a setup token (stdin) into --dir is safe,
-		// BEFORE any flow persists it. Exit 0 = safe to write; exit 1 = refused (would
-		// create a cross-account token-twin). The token is read from stdin only, never
-		// argv, and is fingerprinted, never echoed.
-		if *gateDir == "" {
-			fmt.Fprintln(stderr, "usage: fak accounts gate-write --dir <config-dir> < token")
-			return 2
-		}
-		tokBytes, _ := io.ReadAll(os.Stdin)
-		verdict := accounts.GateTokenWrite(*gateDir, string(tokBytes), *homeDir)
-		if *asJSON {
-			stdout.Write(mustJSON(verdict))
-			fmt.Fprintln(stdout)
-		} else if verdict.Allow {
-			fmt.Fprintf(stdout, "ok: safe to write into %s (login: %s)\n", *gateDir, verdict.DirAccount)
-		} else {
-			fmt.Fprintf(stderr, "REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
-		}
-		if verdict.Allow {
-			return 0
-		}
-		return 1
+		return accountsGateWrite(stdout, stderr, *gateDir, *homeDir, *asJSON)
 
 	case "add":
 		// The end-to-end "enroll a brand-new account" verb: log in to an ISOLATED config dir
@@ -369,68 +217,254 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "check":
-		// Drift detector: RED (exit 1) if any on-disk view differs from a freshly-rendered
-		// projection of the registry. This is the ratchet that keeps the generated views from
-		// silently diverging from the canonical source again.
-		reg, err := accounts.LoadRegistry(*registryPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		reg = reg.Refresh()
-		drift := 0
-		for _, t := range viewTargets(*dosView, *jobView) {
-			want, err := reg.RenderView(t.view)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-				return 1
-			}
-			got, err := os.ReadFile(t.path)
-			if err != nil {
-				fmt.Fprintf(stdout, "DRIFT %s: cannot read %s (%v)\n", t.view, t.path, err)
-				drift++
-				continue
-			}
-			if string(got) != want {
-				fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection — run `fak accounts sync`\n", t.view, t.path)
-				drift++
-				continue
-			}
-			fmt.Fprintf(stdout, "ok %s: %s matches registry\n", t.view, t.path)
-		}
-		if drift > 0 {
-			return 1
-		}
-		return 0
+		return accountsCheck(stdout, stderr, *registryPath, *dosView, *jobView)
 
 	case "version":
-		// The tool-version surface. A stale binary is the trap this closes: it silently lacks a
-		// newer verb and fails with a raw "flag provided but not defined" instead of saying it is
-		// behind. Printing the build + the registry schema/family it supports + the verb set makes
-		// the staleness VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
-		verbs := []string{
-			"add", "remove", "set-role", "set-default", "list", "resolve", "pull",
-			"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
-		}
-		if *asJSON {
-			stdout.Write(mustJSON(map[string]any{
-				"fak":              appversion.Current(),
-				"registry_version": accounts.RegistryVersion,
-				"registry_family":  accounts.RegistryFamily + "*",
-				"verbs":            verbs,
-			}))
-			fmt.Fprintln(stdout)
-			return 0
-		}
-		fmt.Fprintf(stdout, "fak %s\n", appversion.Current())
-		fmt.Fprintf(stdout, "registry schema: %s (family %s*)\n", accounts.RegistryVersion, accounts.RegistryFamily)
-		fmt.Fprintf(stdout, "verbs: %s\n", strings.Join(verbs, " "))
-		return 0
+		return accountsVersion(stdout, *asJSON)
 
 	default:
 		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
+}
+
+// accountsVersion prints the tool-version surface. A stale binary is the trap this closes: it
+// silently lacks a newer verb and fails with a raw "flag provided but not defined" instead of
+// saying it is behind. Printing the build + registry schema/family + verb set makes staleness
+// VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
+func accountsVersion(stdout io.Writer, asJSON bool) int {
+	verbs := []string{
+		"add", "remove", "set-role", "set-default", "list", "resolve", "pull",
+		"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
+	}
+	if asJSON {
+		stdout.Write(mustJSON(map[string]any{
+			"fak":              appversion.Current(),
+			"registry_version": accounts.RegistryVersion,
+			"registry_family":  accounts.RegistryFamily + "*",
+			"verbs":            verbs,
+		}))
+		fmt.Fprintln(stdout)
+		return 0
+	}
+	fmt.Fprintf(stdout, "fak %s\n", appversion.Current())
+	fmt.Fprintf(stdout, "registry schema: %s (family %s*)\n", accounts.RegistryVersion, accounts.RegistryFamily)
+	fmt.Fprintf(stdout, "verbs: %s\n", strings.Join(verbs, " "))
+	return 0
+}
+
+// accountsResolve prints the config dir that serves <name>: rehoming to a live seat by default
+// (Serve), or pinning to the exact seat with --pin (Resolve). With --env it prints
+// CLAUDE_CONFIG_DIR=<dir> for eval/wrappers, else the bare dir.
+func accountsResolve(stdout, stderr io.Writer, positional []string, registryPath, homeDir string, pin, asEnv bool) int {
+	if len(positional) == 0 {
+		fmt.Fprintln(stderr, "usage: fak accounts resolve <name> [--env]")
+		return 2
+	}
+	name := positional[0]
+	reg, err := loadOrDiscover(registryPath, homeDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	// Rehome is the DEFAULT (a seat that can't serve falls forward to a live one);
+	// --pin is the strict opt-in. Serve needs disk-derived identity, so refresh.
+	reg = reg.Refresh()
+	var home accounts.Home
+	var chain []string
+	if pin {
+		home, chain, err = reg.Resolve(name)
+	} else {
+		home, chain, err = reg.Serve(name)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	for i, hop := range chain {
+		to := home.Name
+		if i+1 < len(chain) {
+			to = chain[i+1]
+		}
+		fmt.Fprintf(stderr, "note: %q can't serve -> rehoming to %q\n", hop, to)
+	}
+	id := accounts.DeriveIdentity(home.Dir)
+	if !id.HasCreds {
+		fmt.Fprintf(stderr, "warning: %q (%s) has no live credentials — claude will prompt for /login\n", home.Name, home.Dir)
+	}
+	if asEnv {
+		fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", home.Dir)
+	} else {
+		fmt.Fprintln(stdout, home.Dir)
+	}
+	return 0
+}
+
+// accountsPull copies the credential bundles a name's seat depends on INTO its serving dir,
+// following the registry's pull plan. With dryRun it prints the plan without copying.
+func accountsPull(stdout, stderr io.Writer, positional []string, registryPath, homeDir string, dryRun bool) int {
+	if len(positional) == 0 {
+		fmt.Fprintln(stderr, "usage: fak accounts pull <name> [--dry-run]")
+		return 2
+	}
+	name := positional[0]
+	reg, err := loadOrDiscover(registryPath, homeDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	reg = reg.Refresh()
+	plan, err := reg.Plan(name)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	if len(plan.From) == 0 {
+		fmt.Fprintf(stdout, "nothing to pull: %q serves directly from %s\n", name, plan.Into.Dir)
+		return 0
+	}
+	for _, bundle := range plan.From {
+		if dryRun {
+			fmt.Fprintf(stdout, "would pull %s -> %s\n", bundle, plan.Into.Dir)
+			continue
+		}
+		n, err := copyTree(bundle, plan.Into.Dir)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: pull %s: %v\n", bundle, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "pulled %d files: %s -> %s\n", n, bundle, plan.Into.Dir)
+	}
+	return 0
+}
+
+// accountsDiscover scans the home dir for config homes. With write it MERGES the scan into the
+// canonical registry (preserving authored policy) and saves it; otherwise it emits the scanned
+// homes as JSON to stdout.
+func accountsDiscover(stdout, stderr io.Writer, registryPath, homeDir string, write bool) int {
+	if write {
+		// Regenerator mode: load the canonical registry (or start empty), MERGE the disk
+		// scan in (refresh identities, add new dirs, PRESERVE authored policy fields), and
+		// write it back atomically. This is how the registry becomes the single source of
+		// truth without a human re-typing identities — it derives them from disk.
+		base := accounts.Registry{}
+		if _, err := os.Stat(registryPath); err == nil {
+			base, err = accounts.LoadRegistry(registryPath)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+				return 1
+			}
+		}
+		merged, err := base.MergeDiscovered(homeDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		if err := accounts.SaveRegistry(registryPath, merged); err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "wrote %d home(s) to %s\n", len(merged.Homes), registryPath)
+		return 0
+	}
+	homes, err := accounts.Discover(homeDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	reg := accounts.Registry{Homes: homes}
+	stdout.Write(reg.JSON())
+	return 0
+}
+
+// accountsCheckTwins is the audit gate for Regression A: RED (exit 1) when two config homes
+// logged into DIFFERENT accounts share one setup-token fingerprint (the cross-account smear that
+// surfaces as "subscription disabled"). Homes that share a token but resolve to ONE account pass.
+func accountsCheckTwins(stdout, stderr io.Writer, homeDir string, asJSON bool) int {
+	findings, err := accounts.AuditTokenTwins(homeDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		stdout.Write(mustJSON(map[string]any{"clean": len(findings) == 0, "findings": findings}))
+		fmt.Fprintln(stdout)
+	}
+	if len(findings) == 0 {
+		if !asJSON {
+			fmt.Fprintln(stdout, "ok: no cross-account token-twins — every shared setup token is one account")
+		}
+		return 0
+	}
+	if !asJSON {
+		for _, f := range findings {
+			fmt.Fprintf(stdout, "TOKEN-TWIN: homes [%s] share one setup token but log into %d accounts [%s]\n",
+				strings.Join(f.Homes, ", "), len(f.Accounts), strings.Join(f.Accounts, ", "))
+		}
+		fmt.Fprintf(stderr, "fak accounts: %d cross-account token-twin(s) — a foreign token will surface as "+
+			"\"subscription disabled\". Give each account its OWN setup token in its OWN dir.\n", len(findings))
+	}
+	return 1
+}
+
+// accountsGateWrite is the pre-write gate: decide whether writing a setup token (stdin) into
+// gateDir is safe BEFORE any flow persists it. Exit 0 = safe; exit 1 = refused (would create a
+// cross-account token-twin). The token is read from stdin only, never argv, and is fingerprinted.
+func accountsGateWrite(stdout, stderr io.Writer, gateDir, homeDir string, asJSON bool) int {
+	if gateDir == "" {
+		fmt.Fprintln(stderr, "usage: fak accounts gate-write --dir <config-dir> < token")
+		return 2
+	}
+	tokBytes, _ := io.ReadAll(os.Stdin)
+	verdict := accounts.GateTokenWrite(gateDir, string(tokBytes), homeDir)
+	if asJSON {
+		stdout.Write(mustJSON(verdict))
+		fmt.Fprintln(stdout)
+	} else if verdict.Allow {
+		fmt.Fprintf(stdout, "ok: safe to write into %s (login: %s)\n", gateDir, verdict.DirAccount)
+	} else {
+		fmt.Fprintf(stderr, "REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
+	}
+	if verdict.Allow {
+		return 0
+	}
+	return 1
+}
+
+// accountsCheck is the drift detector: RED (exit 1) if any on-disk view differs from a
+// freshly-rendered projection of the registry. The ratchet that keeps the generated views from
+// silently diverging from the canonical source.
+func accountsCheck(stdout, stderr io.Writer, registryPath, dosView, jobView string) int {
+	reg, err := accounts.LoadRegistry(registryPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	reg = reg.Refresh()
+	drift := 0
+	for _, t := range viewTargets(dosView, jobView) {
+		want, err := reg.RenderView(t.view)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		got, err := os.ReadFile(t.path)
+		if err != nil {
+			fmt.Fprintf(stdout, "DRIFT %s: cannot read %s (%v)\n", t.view, t.path, err)
+			drift++
+			continue
+		}
+		if string(got) != want {
+			fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection — run `fak accounts sync`\n", t.view, t.path)
+			drift++
+			continue
+		}
+		fmt.Fprintf(stdout, "ok %s: %s matches registry\n", t.view, t.path)
+	}
+	if drift > 0 {
+		return 1
+	}
+	return 0
 }
 
 // syncViews projects the canonical registry (at registryPath) into the named roster views and
