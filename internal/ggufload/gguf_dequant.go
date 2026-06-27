@@ -102,6 +102,16 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s MXFP4 element count %d is not a multiple of %d", t.Name, elems, qkMXFP4)
 		}
 		return elems / qkMXFP4 * blockMXFP4Bytes, nil
+	case TensorIQ4_NL:
+		if elems%qkIQ4NL != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ4_NL element count %d is not a multiple of %d", t.Name, elems, qkIQ4NL)
+		}
+		return elems / qkIQ4NL * blockIQ4NLBytes, nil
+	case TensorIQ4_XS:
+		if elems%qkK != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ4_XS element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		return elems / qkK * blockIQ4XSBytes, nil
 	default:
 		return 0, fmt.Errorf("gguf: tensor %s type %d does not have a simple f32 payload", t.Name, t.Type)
 	}
@@ -286,6 +296,24 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, fmt.Errorf("gguf: tensor %s MXFP4 payload has %d bytes, want %d", t.Name, len(raw), want)
 		}
 		dequantMXFP4(out, raw)
+	case TensorIQ4_NL:
+		if elems%qkIQ4NL != 0 {
+			return nil, fmt.Errorf("gguf: tensor %s IQ4_NL element count %d is not a multiple of %d", t.Name, elems, qkIQ4NL)
+		}
+		want := int(elems / qkIQ4NL * blockIQ4NLBytes)
+		if len(raw) != want {
+			return nil, fmt.Errorf("gguf: tensor %s IQ4_NL payload has %d bytes, want %d", t.Name, len(raw), want)
+		}
+		dequantIQ4NL(out, raw)
+	case TensorIQ4_XS:
+		if elems%qkK != 0 {
+			return nil, fmt.Errorf("gguf: tensor %s IQ4_XS element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		want := int(elems / qkK * blockIQ4XSBytes)
+		if len(raw) != want {
+			return nil, fmt.Errorf("gguf: tensor %s IQ4_XS payload has %d bytes, want %d", t.Name, len(raw), want)
+		}
+		dequantIQ4XS(out, raw)
 	default:
 		return nil, fmt.Errorf("gguf: tensor %s type %d cannot dequantize to f32 yet", t.Name, t.Type)
 	}
@@ -341,6 +369,60 @@ func dequantMXFP4(out []float32, raw []byte) {
 		for j := 0; j < qkMXFP4/2; j++ {
 			out[yi+j] = kvaluesMXFP4[qs[j]&0x0f] * d
 			out[yi+j+qkMXFP4/2] = kvaluesMXFP4[qs[j]>>4] * d
+		}
+	}
+}
+
+// kvaluesIQ4NL is GGML's non-linear 4-bit codebook (kvalues_iq4nl): a 4-bit code
+// indexes one of 16 fixed int8 reconstruction levels, spaced non-uniformly to put
+// finer resolution near zero. IQ4_NL and IQ4_XS share this single table — they differ
+// only in how the per-block scale is encoded, not in the codebook itself.
+var kvaluesIQ4NL = [16]float32{-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113}
+
+// dequantIQ4NL expands the GGML IQ4_NL 32-element block: a little-endian f16 scale d
+// followed by qkIQ4NL/2 bytes of packed 4-bit codes. The GGML layout
+// (dequantize_row_iq4_nl) is sequential — byte j holds element 2j in its low nibble and
+// element 2j+1 in its high nibble — and each code indexes kvaluesIQ4NL before the block
+// scale: y = d*kvaluesIQ4NL[code].
+func dequantIQ4NL(out []float32, raw []byte) {
+	for block := 0; block < len(out)/qkIQ4NL; block++ {
+		base := block * blockIQ4NLBytes
+		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		qs := raw[base+2 : base+blockIQ4NLBytes]
+		yi := block * qkIQ4NL
+		for j := 0; j < qkIQ4NL/2; j++ {
+			out[yi+2*j] = d * kvaluesIQ4NL[qs[j]&0x0f]
+			out[yi+2*j+1] = d * kvaluesIQ4NL[qs[j]>>4]
+		}
+	}
+}
+
+// dequantIQ4XS expands the GGML IQ4_XS 256-element super-block: a little-endian f16
+// super-scale d, a little-endian u16 high-bit scale field scales_h, qkK/64 low-bit scale
+// bytes scales_l, then qkK/2 bytes of packed 4-bit codes. The GGML layout
+// (dequantize_row_iq4_xs) splits the super-block into eight 32-element sub-blocks; each
+// sub-block ib carries a 6-bit scale ls — its low 4 bits from a scales_l nibble, its high
+// 2 bits from a scales_h field — applied as dl = d*(ls-32). Within a sub-block byte j holds
+// element j in its low nibble and element j+16 in its high nibble: y = dl*kvaluesIQ4NL[code].
+func dequantIQ4XS(out []float32, raw []byte) {
+	for block := 0; block < len(out)/qkK; block++ {
+		base := block * blockIQ4XSBytes
+		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		scalesH := binary.LittleEndian.Uint16(raw[base+2:])
+		scalesL := raw[base+4 : base+4+qkK/64]
+		qs := raw[base+4+qkK/64 : base+blockIQ4XSBytes]
+		yi := block * qkK
+		for ib := 0; ib < qkK/32; ib++ {
+			lo := int(scalesL[ib/2]>>(4*uint(ib%2))) & 0x0f
+			hi := int((scalesH >> (2 * uint(ib))) & 3)
+			ls := lo | hi<<4
+			dl := d * float32(ls-32)
+			sub := qs[ib*16 : ib*16+16]
+			off := yi + ib*32
+			for j := 0; j < 16; j++ {
+				out[off+j] = dl * kvaluesIQ4NL[sub[j]&0x0f]
+				out[off+j+16] = dl * kvaluesIQ4NL[sub[j]>>4]
+			}
 		}
 	}
 }

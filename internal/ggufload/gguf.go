@@ -30,6 +30,17 @@ const (
 	// MXFP4 (gpt-oss): a 1-byte E8M0 shared scale + qkMXFP4/2 bytes of packed
 	// 4-bit E2M1 codes (two per byte) = 17 bytes per 32-element block.
 	blockMXFP4Bytes = 1 + qkMXFP4/2
+	// IQ4_NL: a non-linear-codebook 4-bit quant — a single f16 scale d shared by
+	// a 32-element block, then qkIQ4NL/2 bytes of packed 4-bit codes (two per
+	// byte) that index the 16-entry kvaluesIQ4NL codebook = 18 bytes per block.
+	qkIQ4NL         = 32
+	blockIQ4NLBytes = 2 + qkIQ4NL/2
+	// IQ4_XS: the super-block sibling of IQ4_NL over a 256-element block — one
+	// f16 super-scale d, a u16 high-bit scale field, qkK/64 low-bit scale bytes,
+	// then qkK/2 bytes of packed 4-bit codes = 136 bytes per super-block. Each of
+	// the eight 32-element sub-blocks carries a 6-bit scale ls (4 low bits from
+	// scales_l, 2 high bits from scales_h) applied as d*(ls-32).
+	blockIQ4XSBytes = 2 + 2 + qkK/64 + qkK/2
 )
 
 // ValueType is the GGUF metadata value type tag (uint8/int32/string/array/... per the
@@ -53,24 +64,27 @@ const (
 )
 
 // TensorType is the GGUF tensor element/quantization encoding (F32, F16, the Q*_0/Q*_1
-// and K-quant blocks, BF16, MXFP4) that fixes a tensor's on-disk block layout.
+// and K-quant blocks, the IQ4 non-linear-codebook quants, BF16, MXFP4) that fixes a
+// tensor's on-disk block layout.
 type TensorType uint32
 
 const (
-	TensorF32   TensorType = 0
-	TensorF16   TensorType = 1
-	TensorQ4_0  TensorType = 2
-	TensorQ4_1  TensorType = 3
-	TensorQ5_0  TensorType = 6
-	TensorQ5_1  TensorType = 7
-	TensorQ8_0  TensorType = 8
-	TensorQ2_K  TensorType = 10
-	TensorQ3_K  TensorType = 11
-	TensorQ4_K  TensorType = 12
-	TensorQ5_K  TensorType = 13
-	TensorQ6_K  TensorType = 14
-	TensorBF16  TensorType = 30
-	TensorMXFP4 TensorType = 39
+	TensorF32    TensorType = 0
+	TensorF16    TensorType = 1
+	TensorQ4_0   TensorType = 2
+	TensorQ4_1   TensorType = 3
+	TensorQ5_0   TensorType = 6
+	TensorQ5_1   TensorType = 7
+	TensorQ8_0   TensorType = 8
+	TensorQ2_K   TensorType = 10
+	TensorQ3_K   TensorType = 11
+	TensorQ4_K   TensorType = 12
+	TensorQ5_K   TensorType = 13
+	TensorQ6_K   TensorType = 14
+	TensorIQ4_NL TensorType = 20
+	TensorIQ4_XS TensorType = 23
+	TensorBF16   TensorType = 30
+	TensorMXFP4  TensorType = 39
 )
 
 // Value is one decoded GGUF metadata value: its ValueType tag and the Go value it
@@ -91,8 +105,8 @@ type TensorInfo struct {
 	FileOffset int64
 }
 
-// String renders the TensorType as its GGUF type name (e.g. "F32", "Q4_K", "MXFP4"),
-// falling back to "TensorType(n)" for an unrecognized code.
+// String renders the TensorType as its GGUF type name (e.g. "F32", "Q4_K", "IQ4_XS",
+// "MXFP4"), falling back to "TensorType(n)" for an unrecognized code.
 func (t TensorType) String() string {
 	switch t {
 	case TensorF32:
@@ -119,6 +133,10 @@ func (t TensorType) String() string {
 		return "Q5_K"
 	case TensorQ6_K:
 		return "Q6_K"
+	case TensorIQ4_NL:
+		return "IQ4_NL"
+	case TensorIQ4_XS:
+		return "IQ4_XS"
 	case TensorBF16:
 		return "BF16"
 	case TensorMXFP4:
