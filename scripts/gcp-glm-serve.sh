@@ -56,6 +56,12 @@
 #   FAK_REPO_URL    repo to clone on the VM            (default the public fak remote)
 #   TAILSCALE_AUTHKEY  optional tailscale authkey to join the private overlay on boot
 #   LOCAL_TUNNEL_PORT  local port the printed tunnel binds (default 8200 — the preset default)
+#   ON_IDLE         stop | delete — idle-gardener action when this box serves no model turns
+#                   for IDLE_MINUTES (default delete: zero residual cost; a crashed control
+#                   session can't leave this multi-A100 box burning). scripts/gcp-idle-reaper.sh.
+#                   ON_IDLE=none disables the reaper.
+#   IDLE_MINUTES    idle window before the reaper acts        (default 60)
+#   GRACE_MINUTES   boot grace floor (never reap mid-load)    (default 90; GLM loads ~40min)
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]}"
@@ -75,6 +81,9 @@ GLM_GGUF_SUBDIR="${GLM_GGUF_SUBDIR:-UD-Q4_K_M}"
 NCPU_MOE="${NCPU_MOE:-999}"
 GLM_STAGE_DIR="${GLM_STAGE_DIR:-/opt/glm52-q4}"
 LLAMA_DIR="${LLAMA_DIR:-/opt/llama.cpp}"
+ON_IDLE="${ON_IDLE:-delete}"        # idle-gardener action; ON_IDLE=none disables the reaper
+IDLE_MINUTES="${IDLE_MINUTES:-60}"  # reap after this many minutes of no model turns
+GRACE_MINUTES="${GRACE_MINUTES:-90}" # never reap within this many minutes of boot (GLM load ~40min)
 
 MODE="plan"
 case "${1:-}" in
@@ -233,12 +242,55 @@ systemd-run --unit=glm52serve --collect \\
 TAIL
 }
 
+# render_idle_reaper <serve-port> — emit the cloud-init lines that install the idle
+# gardener (scripts/gcp-idle-reaper.sh, already in the /opt/fak clone) as a systemd
+# timer. The box watches its OWN inference counter and self-${ON_IDLE}s after
+# ${IDLE_MINUTES}min of no model turns, so a crashed control-session can't leave this
+# multi-A100 node burning. ON_IDLE=none disables it. The systemd unit bodies use a
+# QUOTED ('UNIT') heredoc so the inner cat never expands $-vars; the Environment=
+# values are baked from the OUTER shell here. Shared shape with gcp-qwen-serve.sh.
+render_idle_reaper() {
+  local port="$1"
+  if [ "$ON_IDLE" = "none" ]; then
+    echo "# idle reaper disabled (ON_IDLE=none)"
+    return 0
+  fi
+  echo "# --- idle-GPU gardener (scripts/gcp-idle-reaper.sh) ---"
+  echo "install -d -m 0755 /var/lib/fak-idle-reaper"
+  echo "cat >/etc/systemd/system/fak-idle-reaper.service <<'UNIT'"
+  echo "[Unit]"
+  echo "Description=fak idle-GPU reaper (self-${ON_IDLE} after idle)"
+  echo "After=network-online.target"
+  echo "[Service]"
+  echo "Type=oneshot"
+  printf 'Environment=PORT=%s\n' "$port"
+  printf 'Environment=IDLE_MINUTES=%s\n' "$IDLE_MINUTES"
+  printf 'Environment=GRACE_MINUTES=%s\n' "$GRACE_MINUTES"
+  printf 'Environment=ON_IDLE=%s\n' "$ON_IDLE"
+  echo "Environment=ON_IDLE_LIVE=1"
+  echo "ExecStart=/usr/bin/env bash /opt/fak/scripts/gcp-idle-reaper.sh --live"
+  echo "UNIT"
+  echo "cat >/etc/systemd/system/fak-idle-reaper.timer <<'UNIT'"
+  echo "[Unit]"
+  echo "Description=run the fak idle-GPU reaper every 5 minutes"
+  echo "[Timer]"
+  echo "OnBootSec=5min"
+  echo "OnUnitActiveSec=5min"
+  echo "AccuracySec=30s"
+  echo "[Install]"
+  echo "WantedBy=timers.target"
+  echo "UNIT"
+  echo "systemctl daemon-reload"
+  echo "systemctl enable --now fak-idle-reaper.timer"
+}
+
 render_startup_script() {
   case "$SERVE" in
     fak)      render_startup_preamble "build-essential cmake"; render_startup_tail_fak ;;
     llamacpp) render_startup_preamble "build-essential cmake"; render_startup_tail_llamacpp ;;
     *)        render_startup_preamble ""; render_startup_tail_dsa ;;
   esac
+  render_idle_reaper "$GLM_PORT"
 }
 
 # one-line human description of the resolved serve path, for the plan summary.

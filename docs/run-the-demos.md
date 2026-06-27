@@ -391,6 +391,23 @@ audit, command-reference audit, browser-contract audit, and smoke-test harnesses
 `make demo-smoke` runs the same dynamic browser check as the local/CI gate.
 `make demo-headless-smoke` runs the same deterministic terminal witness set.
 
+## Updating the demos on the long-lived serve box
+
+Our live demos are backed by a **persistent, low-cost serve VM** (a single NVIDIA L4)
+that runs the fak kernel's own forward (`fak serve --backend cuda`) behind
+`/v1/messages`. Unlike the on-demand A100 serve nodes — which carry an idle gardener
+that self-stops or self-deletes them after an idle window (`scripts/gcp-idle-reaper.sh`)
+so a crashed control-session can't leave a GPU burning — this demo box is meant to
+**stay up**, so it has no reaper.
+
+To refresh what it serves: pull `/opt/fak`, rebuild if the kernel changed, and restart
+the serve systemd unit, then re-check `/healthz` and the `/metrics`
+`fak_gateway_inference_requests_total` counter. The box self-documents these exact
+steps in `/opt/fak/DEMO-HOST.md`, which `scripts/gcp-realmodel-note.sh` writes (and
+re-writes) onto it — so whoever lands on the box next knows what it is and how to
+update it without reading the whole repo. The note carries no project id or key; the
+private deployment specifics stay out of the repo (see below).
+
 > **Note on our hosted copy.** The scripts that drive *our* specific GCP deployment are
 > intentionally **not** in the repo — they embed our private project id and host details.
 > Everything you need to stand up your *own* copy is above; nothing about it depends on our

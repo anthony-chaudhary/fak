@@ -60,6 +60,9 @@ QWEN_PORT="${QWEN_PORT:-8080}"
 CTX="${CTX:-32768}"             # in-kernel context budget (caps planned KV; 32K fits 14B on 40GB)
 CUDA_GRAPH="${CUDA_GRAPH:-0}"   # KEEP 0: --cuda-graph (#483) crashes the serve at 14B/A100 (#932)
 FAK_REPO_URL="${FAK_REPO_URL:-https://github.com/anthony-chaudhary/fak.git}"
+ON_IDLE="${ON_IDLE:-delete}"        # idle-gardener action; ON_IDLE=none disables the reaper
+IDLE_MINUTES="${IDLE_MINUTES:-60}"  # reap after this many minutes of no model turns
+GRACE_MINUTES="${GRACE_MINUTES:-90}" # never reap within this many minutes of boot
 
 MODE="plan"
 case "${1:-}" in
@@ -105,6 +108,49 @@ fi
 # durable systemd unit (Restart=on-failure). Binds 0.0.0.0:${QWEN_PORT}; reach it ONLY over
 # Tailscale or an SSH/IAP tunnel (the create command adds no public ingress), and the serve
 # REQUIRES the bearer key on every request.
+
+# render_idle_reaper <serve-port> — emit the cloud-init lines that install the idle
+# gardener (scripts/gcp-idle-reaper.sh, already in the /opt/fak clone) as a systemd
+# timer. The box watches its OWN inference counter and self-${ON_IDLE}s after
+# ${IDLE_MINUTES}min of no model turns, so a crashed control-session can't leave the
+# GPU burning. ON_IDLE=none disables it. The systemd unit bodies use a QUOTED ('UNIT')
+# heredoc so the inner cat never expands $-vars; the Environment= values are baked from
+# the OUTER shell here via printf. Shared shape with gcp-glm-serve.sh.
+render_idle_reaper() {
+  local port="$1"
+  if [ "$ON_IDLE" = "none" ]; then
+    echo "# idle reaper disabled (ON_IDLE=none)"
+    return 0
+  fi
+  echo "# --- idle-GPU gardener (scripts/gcp-idle-reaper.sh) ---"
+  echo "install -d -m 0755 /var/lib/fak-idle-reaper"
+  echo "cat >/etc/systemd/system/fak-idle-reaper.service <<'UNIT'"
+  echo "[Unit]"
+  echo "Description=fak idle-GPU reaper (self-${ON_IDLE} after idle)"
+  echo "After=network-online.target"
+  echo "[Service]"
+  echo "Type=oneshot"
+  printf 'Environment=PORT=%s\n' "$port"
+  printf 'Environment=IDLE_MINUTES=%s\n' "$IDLE_MINUTES"
+  printf 'Environment=GRACE_MINUTES=%s\n' "$GRACE_MINUTES"
+  printf 'Environment=ON_IDLE=%s\n' "$ON_IDLE"
+  echo "Environment=ON_IDLE_LIVE=1"
+  echo "ExecStart=/usr/bin/env bash /opt/fak/scripts/gcp-idle-reaper.sh --live"
+  echo "UNIT"
+  echo "cat >/etc/systemd/system/fak-idle-reaper.timer <<'UNIT'"
+  echo "[Unit]"
+  echo "Description=run the fak idle-GPU reaper every 5 minutes"
+  echo "[Timer]"
+  echo "OnBootSec=5min"
+  echo "OnUnitActiveSec=5min"
+  echo "AccuracySec=30s"
+  echo "[Install]"
+  echo "WantedBy=timers.target"
+  echo "UNIT"
+  echo "systemctl daemon-reload"
+  echo "systemctl enable --now fak-idle-reaper.timer"
+}
+
 render_startup_script() {
   cat <<PRE
 #!/usr/bin/env bash
@@ -144,6 +190,7 @@ systemd-run --unit=qwen36serve --collect \\
   --property=Restart=on-failure --property=RestartSec=15 \\
   /usr/bin/env bash /opt/fak/tools/qwen36_a100_fak_serve.sh
 PRE
+  render_idle_reaper "$QWEN_PORT"
 }
 
 # --- the gcloud create command (printed in plan, run in apply) -----------------
