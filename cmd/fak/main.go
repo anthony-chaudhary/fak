@@ -183,6 +183,10 @@ func main() {
 		cmdConflationScorecard(os.Args[2:])
 	case "scoreboard":
 		cmdScoreboard(os.Args[2:])
+	case "steering":
+		cmdSteering(os.Args[2:])
+	case "product":
+		cmdProduct(os.Args[2:])
 	case "callavoid":
 		cmdCallavoid(os.Args[2:])
 	case "savings-vector":

@@ -1,0 +1,9 @@
+{
+  "schema": "fak-steering-baseline/1",
+  "commit": "d72dd49d",
+  "index": 89.9,
+  "steerability_debt": 0,
+  "soft_signals": 5,
+  "stamp": "2026-06-27T00:00:00Z",
+  "_doc": "Pinned steerability floor for `fak steering alert`. Re-pin after an improvement: fak steering pin"
+}

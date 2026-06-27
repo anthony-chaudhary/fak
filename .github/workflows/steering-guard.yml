@@ -1,0 +1,127 @@
+name: steering-guard
+
+# Publish fak's STEERABILITY surface to Slack #steering-guard (the scoreboard
+# workspace, T0BDEJF1HGB). Two cadences, one command (`fak steering`):
+#
+#   * push to main  -> `fak steering alert`  — posts ONLY on a regression at the
+#     commit that caused it (hard steerability-debt > 0, the index dropped vs the
+#     pinned floor tools/steering_baseline.json, or a NEW drift signal appeared).
+#     A clean push posts nothing, so the channel stays signal, not heartbeat.
+#   * daily 07:33 UTC -> `fak steering report` — the full per-KPI + per-group
+#     snapshot, a heartbeat regardless of change.
+#   * workflow_dispatch -> a manual off-cadence run (alert or report), dry-run by
+#     default so an operator can preview the card without posting.
+#
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret being present. Without it
+# the job runs in --dry-run and writes the card to the step summary, so a fork or a
+# secret-less run never hard-fails — it just shows what WOULD post.
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
+# scoreboard-workspace bot token — the same value in the gitignored
+# .env.slack.local) under Settings -> Secrets and variables -> Actions. The
+# channel #steering-guard (C0BD5J4ERL7) is the built-in default; override with the
+# FAK_STEERING_CHANNEL repo variable if you point the surface elsewhere.
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    # Daily 07:33 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (dogfood-coverage 07:13, score-signal 07:41, garden 06:23, dogfood 06:41).
+    - cron: "33 7 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "status | report | alert"
+        type: choice
+        options: [report, status, alert]
+        default: report
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steering-guard
+  cancel-in-progress: false
+
+jobs:
+  steering-guard:
+    name: steerability -> #steering-guard
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_STEERING_CHANNEL: ${{ vars.FAK_STEERING_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The scorecard tool is the single source of the numbers; generate the payload
+      # once so the post step (and the dry-run summary) read the SAME snapshot.
+      - name: generate steerability payload
+        run: |
+          python tools/steerability_scorecard.py --json > steer.json
+          test -s steer.json || { echo "steerability scorecard produced no JSON"; exit 1; }
+
+      # Pick the mode: a push fires the regression-gated alert; the daily schedule
+      # posts the full report; a manual run uses the chosen input.
+      - name: select mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "mode=report" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=alert" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Always render the card to the step summary (and as the artifact) so the run
+      # is auditable even when nothing posts (clean alert / missing secret / fork).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak steering ${{ steps.mode.outputs.mode }} \
+            --scorecard-json steer.json --dry-run | tee steering-card.txt
+          {
+            echo "## steering-guard — ${{ steps.mode.outputs.mode }}"
+            echo '```'
+            cat steering-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when the token secret is present. A manual dry_run also skips.
+      # The alert mode self-gates on a regression, so a clean push posts nothing
+      # even though this step runs.
+      - name: post to #steering-guard
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak steering ${{ steps.mode.outputs.mode }} \
+            --scorecard-json steer.json
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: steering-card
+          path: |
+            steering-card.txt
+            steer.json
+          if-no-files-found: ignore

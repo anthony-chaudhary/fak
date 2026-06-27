@@ -319,6 +319,14 @@ func usageScorecardVerbs() {
   fak conflation-scorecard [--json] [--markdown] [--compare FILE]
                 (native provenance-honesty control-pane payload: every reported number/status
                  labels its provenance -- WITNESSED vs OBSERVED -- folded into conflation_debt)
+  fak steering  status | report | alert [--index-delta N] [--pin] | pin
+                [--channel ID] [--scorecard-json FILE] [--dry-run]
+                (the STEERABILITY Slack surface for #steering-guard: status posts the
+                 current index card, report posts the full per-KPI + per-group snapshot,
+                 alert posts ONLY on a regression vs the pinned floor (tools/steering_baseline.json)
+                 -- hard debt > 0, index drop, or a NEW drift signal -- with action buttons
+                 pointing each drift at the skill that retires it; pin re-baselines the floor.
+                 Posts via FAK_SCOREBOARD_TOKEN, never the lab SLACK_BOT_TOKEN)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
                 (the CONSOLIDATED regular-cadence report: folds the three dimensions
                  an operator tracks  -  SCORES (scorecard control pane), WORK-DONE
