@@ -61,47 +61,11 @@ func gateFileAdmission(d *StagedDiff) ([]Finding, error) {
 			continue
 		}
 		seen[p] = true
-		if why := classifyFile(d, p); why != "" {
+		if why := classifyFileWith(d, p); why != "" {
 			findings = append(findings, Finding{Gate: "FILE_ADMISSION", File: p, Detail: why})
 		}
 	}
 	return findings, nil
-}
-
-// classifyFile reproduces _classify's exact precedence (L127-150).
-func classifyFile(d *StagedDiff, path string) string {
-	for _, sf := range secretFiles {
-		if sf.re.MatchString(path) {
-			return sf.why
-		}
-	}
-	for _, po := range privateOnly {
-		if po.re.MatchString(path) {
-			return po.why
-		}
-	}
-	if keepExceptions[path] {
-		if sz, ok := d.Size(path); ok && sz > fileAdmissionMaxBytes {
-			return largeFileMsg(sz)
-		}
-		return ""
-	}
-	for _, hj := range hardJunk {
-		if hj.MatchString(path) {
-			return "build artifact / cache / compiled output"
-		}
-	}
-	if !startsWithAny(path, exemptDataDirs) {
-		for _, sj := range softJunk {
-			if sj.MatchString(path) {
-				return "log / temp / demo-output (regenerable)"
-			}
-		}
-	}
-	if sz, ok := d.Size(path); ok && sz > fileAdmissionMaxBytes {
-		return oversizedBlobMsg(sz)
-	}
-	return ""
 }
 
 func startsWithAny(s string, prefixes []string) bool {

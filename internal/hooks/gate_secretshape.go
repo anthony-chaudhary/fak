@@ -77,22 +77,28 @@ type shapeHit struct{ shape, text string }
 // scanShapes ports _scan_text (check_secret_shapes.py L58-71).
 func scanShapes(line string) []shapeHit {
 	var hits []shapeHit
-	for _, m := range opPathRE.FindAllStringSubmatch(line, -1) {
-		if !placeholderUsers[strings.ToLower(m[1])] {
-			hits = append(hits, shapeHit{"operator-path", m[0]})
-		}
-	}
-	for _, m := range macPathRE.FindAllStringSubmatch(line, -1) {
-		if !placeholderUsers[strings.ToLower(m[1])] {
-			hits = append(hits, shapeHit{"operator-path", m[0]})
-		}
-	}
+	// Both home-path families (Windows C:\Users\X and macOS /Users/X) share the same per-match
+	// decision: flag the captured username unless it is a documentation placeholder.
+	hits = append(hits, operatorPathHits(opPathRE, line)...)
+	hits = append(hits, operatorPathHits(macPathRE, line)...)
 	for _, m := range mslHostRE.FindAllString(line, -1) {
 		hits = append(hits, shapeHit{"internal-host", m})
 	}
 	for _, m := range labHostRE.FindAllString(line, -1) {
 		if !strings.HasSuffix(strings.ToLower(m), "example.lab") {
 			hits = append(hits, shapeHit{"internal-host", m})
+		}
+	}
+	return hits
+}
+
+// operatorPathHits runs a home-path regex (capture group 1 = username) and emits an
+// operator-path shapeHit for every match whose username is not a documentation placeholder.
+func operatorPathHits(re *regexp.Regexp, line string) []shapeHit {
+	var hits []shapeHit
+	for _, m := range re.FindAllStringSubmatch(line, -1) {
+		if !placeholderUsers[strings.ToLower(m[1])] {
+			hits = append(hits, shapeHit{"operator-path", m[0]})
 		}
 	}
 	return hits

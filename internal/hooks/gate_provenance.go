@@ -107,11 +107,11 @@ func mustAll(pats ...string) []*regexp.Regexp {
 }
 
 func mustAllI(pats ...string) []*regexp.Regexp {
-	out := make([]*regexp.Regexp, len(pats))
+	ci := make([]string, len(pats))
 	for i, p := range pats {
-		out[i] = regexp.MustCompile(`(?i)` + p)
+		ci[i] = `(?i)` + p
 	}
-	return out
+	return mustAll(ci...)
 }
 
 func trim160(s string) string {

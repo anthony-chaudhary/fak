@@ -41,65 +41,17 @@ func gateBrokenLink(d *StagedDiff) ([]Finding, error) {
 		}
 		content := string(b)
 		dir := path.Dir(f)
-		findings = append(findings, deadLinks(d, f, dir, content)...)
-		findings = append(findings, deadInlineRefs(d, f, dir, content)...)
+		findings = append(findings, findDeadLinks(d, f, dir, content)...)
+		findings = append(findings, findDeadInlineRefs(d, f, dir, content)...)
 		findings = append(findings, scrubPrivateRefs(f, dir, content)...)
 	}
 	return findings, nil
-}
-
-// resolves ports _resolves (check_links.py L66-74): try normpath(join(dir,ref)), ref, and the
-// fak/-stripped form; resolve if any exists.
-func (d *StagedDiff) resolves(dir, ref string) bool {
-	cands := []string{path.Clean(path.Join(dir, ref)), ref}
-	if strings.HasPrefix(ref, "fak/") {
-		cands = append(cands, ref[len("fak/"):])
-	}
-	for _, c := range cands {
-		if d.Exists(c) {
-			return true
-		}
-	}
-	return false
 }
 
 func skipLinkTarget(link string) bool {
 	return strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") ||
 		strings.HasPrefix(link, "mailto:") || strings.HasPrefix(link, "#") ||
 		strings.HasPrefix(link, "/") || strings.HasPrefix(link, "data:")
-}
-
-func deadLinks(d *StagedDiff, f, dir, content string) []Finding {
-	var out []Finding
-	for _, m := range linkRE.FindAllStringSubmatch(content, -1) {
-		link := m[1]
-		if skipLinkTarget(link) {
-			continue
-		}
-		p := stripFragment(link)
-		if p == "" || d.resolves(dir, p) {
-			continue
-		}
-		out = append(out, Finding{Gate: "BROKEN_LINK", File: f, Detail: "](" + link + ")  ->  missing " + p})
-	}
-	return out
-}
-
-func deadInlineRefs(d *StagedDiff, f, dir, content string) []Finding {
-	seen := map[string]bool{}
-	var out []Finding
-	for _, m := range inlineRE.FindAllStringSubmatch(content, -1) {
-		span := m[1]
-		ref := stripFragment(firstField(span))
-		if !mdTokenRE.MatchString(ref) || seen[ref] {
-			continue
-		}
-		seen[ref] = true
-		if !d.resolves(dir, ref) {
-			out = append(out, Finding{Gate: "BROKEN_LINK", File: f, Detail: "`" + span + "`  ->  missing " + ref})
-		}
-	}
-	return out
 }
 
 func scrubPrivateRefs(f, dir, content string) []Finding {

@@ -55,64 +55,12 @@ func gateBrokenLinkTree(t *TrackedTree) ([]Finding, error) {
 		}
 		content := string(body)
 		dir := path.Dir(f)
-		findings = append(findings, treeDeadLinks(t, f, dir, content)...)
-		findings = append(findings, treeDeadInlineRefs(t, f, dir, content)...)
+		findings = append(findings, findDeadLinks(t, f, dir, content)...)
+		findings = append(findings, findDeadInlineRefs(t, f, dir, content)...)
 		// scrubPrivateRefs is a pure-text check (no disk read) — reuse the staged helper verbatim.
 		findings = append(findings, scrubPrivateRefs(f, dir, content)...)
 	}
 	return findings, nil
-}
-
-// treeResolves replicates StagedDiff.resolves over a TrackedTree: try normpath(join(dir,ref)),
-// ref, and the fak/-stripped form; resolve if any exists. (StagedDiff.resolves is a method on
-// *StagedDiff, so the tree path needs its own resolver over t.Exists — same candidate logic.)
-func treeResolves(t *TrackedTree, dir, ref string) bool {
-	cands := []string{path.Clean(path.Join(dir, ref)), ref}
-	if strings.HasPrefix(ref, "fak/") {
-		cands = append(cands, ref[len("fak/"):])
-	}
-	for _, c := range cands {
-		if t.Exists(c) {
-			return true
-		}
-	}
-	return false
-}
-
-// treeDeadLinks / treeDeadInlineRefs mirror deadLinks / deadInlineRefs (gate_brokenlink.go) but
-// resolve against the TrackedTree. The link-skip set, regexes, dedupe, and finding wording are
-// identical to the staged helpers.
-func treeDeadLinks(t *TrackedTree, f, dir, content string) []Finding {
-	var out []Finding
-	for _, m := range linkRE.FindAllStringSubmatch(content, -1) {
-		link := m[1]
-		if skipLinkTarget(link) {
-			continue
-		}
-		p := stripFragment(link)
-		if p == "" || treeResolves(t, dir, p) {
-			continue
-		}
-		out = append(out, Finding{Gate: "BROKEN_LINK", File: f, Detail: "](" + link + ")  ->  missing " + p})
-	}
-	return out
-}
-
-func treeDeadInlineRefs(t *TrackedTree, f, dir, content string) []Finding {
-	seen := map[string]bool{}
-	var out []Finding
-	for _, m := range inlineRE.FindAllStringSubmatch(content, -1) {
-		span := m[1]
-		ref := stripFragment(firstField(span))
-		if !mdTokenRE.MatchString(ref) || seen[ref] {
-			continue
-		}
-		seen[ref] = true
-		if !treeResolves(t, dir, ref) {
-			out = append(out, Finding{Gate: "BROKEN_LINK", File: f, Detail: "`" + span + "`  ->  missing " + ref})
-		}
-	}
-	return out
 }
 
 // gateFileAdmissionTree is the --audit-tree FILE_ADMISSION gate. The Python tree branch runs
@@ -127,50 +75,11 @@ func gateFileAdmissionTree(t *TrackedTree) ([]Finding, error) {
 			continue
 		}
 		seen[p] = true
-		if why := classifyFileTree(t, p); why != "" {
+		if why := classifyFileWith(t, p); why != "" {
 			findings = append(findings, Finding{Gate: "FILE_ADMISSION", File: p, Detail: why})
 		}
 	}
 	return findings, nil
-}
-
-// classifyFileTree reproduces _classify's exact precedence (check_committed_files.py L133-156),
-// identical to classifyFile (gate_fileadmission.go) but with the size cap read from the tree.
-// The secret/private/junk regexes, exempt dirs, keep-exceptions, and both size wordings are the
-// shared package-level values.
-func classifyFileTree(t *TrackedTree, p string) string {
-	for _, sf := range secretFiles {
-		if sf.re.MatchString(p) {
-			return sf.why
-		}
-	}
-	for _, po := range privateOnly {
-		if po.re.MatchString(p) {
-			return po.why
-		}
-	}
-	if keepExceptions[p] {
-		if sz, ok := t.Size(p); ok && sz > fileAdmissionMaxBytes {
-			return largeFileMsg(sz)
-		}
-		return ""
-	}
-	for _, hj := range hardJunk {
-		if hj.MatchString(p) {
-			return "build artifact / cache / compiled output"
-		}
-	}
-	if !startsWithAny(p, exemptDataDirs) {
-		for _, sj := range softJunk {
-			if sj.MatchString(p) {
-				return "log / temp / demo-output (regenerable)"
-			}
-		}
-	}
-	if sz, ok := t.Size(p); ok && sz > fileAdmissionMaxBytes {
-		return oversizedBlobMsg(sz)
-	}
-	return ""
 }
 
 // gateSecretShapeTree is the --audit-tree SECRET_SHAPE gate. The Python tree branch (_tracked_text)
