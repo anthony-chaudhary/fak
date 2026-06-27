@@ -152,6 +152,28 @@ def test_plan_skips_already_open_key():
     assert to_file == [] and stats["already-open"] == 1
 
 
+def test_steady_state_all_open_files_nothing():
+    # Storm bound (the #979 report->arm acceptance): on a day when EVERY current
+    # regression is already tracked by an OPEN bench-signal issue, the autonomous
+    # run (the daily schedule is dry-run; an armed `--live` dispatch is the only
+    # mutator) plans ZERO new issues — no new file — regardless of the cap. So a
+    # live run over an unchanged-but-open backlog is idempotent: the no-storm
+    # guarantee rests entirely on the planner's label-scoped dedup, not on a human
+    # in the loop. Distinct from test_plan_skips_already_open_key (one reg): this
+    # locks the MULTI-regression steady state under a cap large enough to file all.
+    runs = [_run(f"m{i}", "x", "q8", 30.0 - (i + 2) * 4, "t") for i in range(4)]
+    cur = bs.current_by_key(runs)
+    regs = bs.regressions(cur, _baseline({k: 30.0 for k in cur}),
+                          min_drop_pct=15.0, min_abs=1.0)
+    assert len(regs) == 4, "fixture: four real regressions to suppress"
+    open_keys = {r["key"] for r in regs}            # every one already tracked open
+    to_file, stats = bs.plan_issues(regs, open_keys=open_keys, max_issues=99,
+                                    today="2026-06-27")
+    assert to_file == [], "all-open steady state files nothing"
+    assert stats["already-open"] == 4
+    assert stats["over-cap"] == 0, "nothing planned -> nothing capped (idempotent)"
+
+
 def test_plan_caps_worst_first():
     runs = [_run(f"m{i}", "x", "q8", 30.0 - (i + 2) * 3, "t") for i in range(5)]
     cur = bs.current_by_key(runs)
