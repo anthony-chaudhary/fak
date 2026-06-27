@@ -1,0 +1,30 @@
+{
+  "name": "fak",
+  "owner": {
+    "name": "anthony-chaudhary",
+    "url": "https://github.com/anthony-chaudhary/fak"
+  },
+  "metadata": {
+    "description": "The Fused Agent Kernel as a Claude Code plugin: a default-deny tool-call firewall + result quarantine you put in front of your agent over MCP.",
+    "version": "0.34.0"
+  },
+  "plugins": [
+    {
+      "name": "fak",
+      "source": "./plugins/fak",
+      "description": "Adjudicate every tool call like a syscall. fak's MCP server exposes capability-gated adjudication verbs (fak_adjudicate / fak_syscall / fak_admit) so Claude Code can screen a proposed tool call, run one through the kernel, or quarantine a result before it enters context.",
+      "version": "0.34.0",
+      "license": "Apache-2.0",
+      "homepage": "https://anthony-chaudhary.github.io/fak/",
+      "repository": "https://github.com/anthony-chaudhary/fak",
+      "keywords": [
+        "mcp",
+        "agent-security",
+        "tool-poisoning",
+        "prompt-injection",
+        "capability-security",
+        "kv-cache"
+      ]
+    }
+  ]
+}
