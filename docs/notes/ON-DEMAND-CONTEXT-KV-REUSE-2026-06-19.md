@@ -164,8 +164,7 @@ Non-prefix reuse can be exact in narrower cases:
   reducing reuse to lower-level or partial reuse.
 - The model architecture treats the chunk as separate encoder/cross-attention
   memory rather than ordinary decoder KV.
-- The preceding context, position, model, tokenizer, serializer, and all relevant
-  cache axes match exactly, which collapses back toward prefix/radix conditions.
+- The preceding context, position, model, tokenizer, serializer, and all relevant cache axes match exactly, which collapses back toward prefix/radix conditions. (A **cache axis** is any dimension of the binding key that a cache lookup must match — for a KV manifest this includes model ID, tokenizer ID, precision, position convention, adapter ID, and other identity dimensions; see [`docs/proofs/cachemeta.md`](../proofs/cachemeta.md).)
 
 Everything else needs a fault budget.
 
