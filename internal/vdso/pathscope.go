@@ -137,14 +137,23 @@ func fileShapedButUnnamed(args []byte) bool {
 // coarser granularities a read already reaches its target depth via the namespace/root
 // chain, and a per-path leaf would be stranded by a namespace-level write it should ignore.
 func (v *VDSO) fileReadChain(args []byte) []string {
-	if v.GranularityOf() != Resource {
-		return nil
-	}
-	ent := fileEntityOf(args)
+	ent := v.fileLeafEntity(args)
 	if ent == "" {
 		return nil
 	}
 	return []string{rootTag, filesNamespace, filePathTag(ent)}
+}
+
+// fileLeafEntity returns the single filesystem path a file-shaped call names — the leaf
+// both fileReadChain and fileWriteTags bind to "files:<path>" — or "" when per-path scope
+// does not apply (coarser than Resource granularity, or the call names no single path, so
+// the caller falls back to the namespace/root chain). Shared so the read and write sides
+// derive the leaf identically and can never drift in what counts as a file-shaped call.
+func (v *VDSO) fileLeafEntity(args []byte) string {
+	if v.GranularityOf() != Resource {
+		return ""
+	}
+	return fileEntityOf(args)
 }
 
 // fileWriteTags returns the single finest tag a file-shaped WRITE must bump — the path's
@@ -153,10 +162,7 @@ func (v *VDSO) fileReadChain(args []byte) []string {
 // "files:P", which strands exactly the reads whose chain contains "files:P" (that file's
 // reads) and leaves every other file's cached reads warm.
 func (v *VDSO) fileWriteTags(args []byte) []string {
-	if v.GranularityOf() != Resource {
-		return nil
-	}
-	ent := fileEntityOf(args)
+	ent := v.fileLeafEntity(args)
 	if ent == "" {
 		return nil
 	}

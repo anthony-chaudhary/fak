@@ -109,7 +109,7 @@ func (v *VDSO) Revoke(witness string) (evicted int) {
 		TrustEpoch: epoch,
 		Seq:        v.mutSeq,
 	}
-	subs := append([]*revSub(nil), v.revSubs...)
+	subs := v.revSubs.snapshot()
 	v.mu.Unlock()
 
 	atomic.AddInt64(&v.revocations, 1)
@@ -247,11 +247,6 @@ type Revocation struct {
 	Seq        uint64 // shared coherence-bus sequence (ordering without a wall clock)
 }
 
-type revSub struct {
-	id uint64
-	fn func(Revocation)
-}
-
 // SubscribeRevocations registers an observer of refutations and returns a cancel func.
 // It is the integrity-direction companion to Subscribe(func(Mutation)): the cache's own
 // eviction is already done inside Revoke, so subscribers are ADDITIONAL observers (a
@@ -259,22 +254,5 @@ type revSub struct {
 // synchronously AFTER the eviction and OUTSIDE v.mu, so a subscriber may re-enter the
 // vDSO. Only refutations fire it — never the read hot path.
 func (v *VDSO) SubscribeRevocations(fn func(Revocation)) (cancel func()) {
-	if fn == nil {
-		return func() {}
-	}
-	v.mu.Lock()
-	v.subSeq++
-	id := v.subSeq
-	v.revSubs = append(v.revSubs, &revSub{id: id, fn: fn})
-	v.mu.Unlock()
-	return func() {
-		v.mu.Lock()
-		for i, s := range v.revSubs {
-			if s.id == id {
-				v.revSubs = append(v.revSubs[:i], v.revSubs[i+1:]...)
-				break
-			}
-		}
-		v.mu.Unlock()
-	}
+	return subscribe(v, &v.revSubs, fn)
 }

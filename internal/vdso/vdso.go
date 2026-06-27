@@ -75,10 +75,10 @@ type VDSO struct {
 	nodeCap   int
 	nodeLRU   *list.List
 	nodeIndex map[string]*list.Element
-	subs      []*subscription // coherence-bus observers of write mutations
-	subSeq    uint64          // subscriber id allocator (mutation + revocation subs)
-	mutSeq    uint64          // monotone coherence-bus sequence (one order over writes+refutations)
-	mutations int64           // write-shaped completions observed (bus event count)
+	subs      subList[Mutation] // coherence-bus observers of write mutations
+	subSeq    uint64            // subscriber id allocator (mutation + revocation subs)
+	mutSeq    uint64            // monotone coherence-bus sequence (one order over writes+refutations)
+	mutations int64             // write-shaped completions observed (bus event count)
 
 	// Integrity-direction eraser (revoke.go) — the mutable TRUST EPOCH layered over the
 	// durable, content-addressed CAS. revoked names the external world-state witnesses a
@@ -91,7 +91,7 @@ type VDSO struct {
 	revokedIndex    map[string]*list.Element
 	revokedOverflow bool   // exact ledger overflowed; unknown witnesses fail closed
 	trustEpoch      uint64 // monotone refutation epoch — dual of worldVer
-	revSubs         []*revSub
+	revSubs         subList[Revocation]
 	revocations     int64 // refutations observed (integrity-bus event count)
 
 	// cachemeta emission (§2.5). cacheSink observes tier-2 lifecycle events as
