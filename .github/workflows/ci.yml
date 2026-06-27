@@ -623,3 +623,73 @@ jobs:
         # default 10m per-package binary timeout. This only grants wall-clock; it
         # changes nothing about which tests run.
         run: go test -race -count=1 -timeout=25m ./...
+
+  # head-snapshot-build (#966): the build-vet-test job above builds the TIP of a
+  # push. On this high-churn shared trunk a single push often carries SEVERAL
+  # commits from a fast session, and a peer who pulls and lands on an INTERMEDIATE
+  # commit gets whatever that commit's tree compiles to — not the tip's. The escape
+  # #966 names (a path-scoped commit that referenced a symbol whose definition was
+  # only in the author's uncommitted working tree) is exactly this class: the tip
+  # built, an earlier commit did not. This job builds EACH committed snapshot in the
+  # pushed range in isolation (a clean checkout per commit, no working-tree extras),
+  # so a non-compiling intermediate commit fails CI instead of silently reaching a
+  # peer's pull. Bounded to the last 25 commits of the range (logged if truncated)
+  # so a force-rebuild or a first push can't run unbounded.
+  head-snapshot-build:
+    name: per-commit build · every pushed snapshot compiles
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    env:
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need the full pushed range, not a shallow tip
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: build each committed snapshot in the pushed range
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Resolve the commit range. On the first push to a ref, BEFORE is all-zeros;
+          # fall back to just the tip so a new branch doesn't try to build all of history.
+          if [ -z "${BEFORE:-}" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            range="${AFTER}~1..${AFTER}"
+            git cat-file -e "${AFTER}~1^{commit}" 2>/dev/null || range="${AFTER}"
+          else
+            range="${BEFORE}..${AFTER}"
+          fi
+          # Oldest-first, so a break is reported at the first bad commit. If the range
+          # resolves to nothing (e.g. a tag push with no new commits), fall back to the tip.
+          mapfile -t commits < <(git rev-list --reverse "$range" 2>/dev/null || true)
+          if [ "${#commits[@]}" -eq 0 ]; then
+            commits=("${AFTER}")
+          fi
+          total=${#commits[@]}
+          cap=25
+          if [ "$total" -gt "$cap" ]; then
+            echo "::notice::pushed range has $total commits; building the last $cap (older commits in this push are not per-commit-built)"
+            commits=("${commits[@]: -$cap}")
+          fi
+          echo "building ${#commits[@]} committed snapshot(s) from range $range"
+          work="$(mktemp -d)"
+          git worktree add --detach "$work" "${AFTER}" >/dev/null
+          trap 'git worktree remove --force "$work" >/dev/null 2>&1 || true' EXIT
+          for sha in "${commits[@]}"; do
+            git -C "$work" checkout --quiet --detach "$sha"
+            if ! ( cd "$work" && go build ./... ); then
+              echo "::error::commit $sha does not compile in isolation (go build ./... failed). A path-scoped commit likely referenced a symbol defined only in an uncommitted/later file."
+              exit 1
+            fi
+            echo "  ok  $sha"
+          done
+          echo "all pushed snapshots compile"
