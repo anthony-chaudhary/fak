@@ -100,8 +100,14 @@ type Store struct {
 	dir string
 }
 
-// New is the real-git lease store.
+// New is the real-git lease store (git discovers the repo from the process cwd).
 func New() *Store { return &Store{run: gitRunner} }
+
+// NewInDir is the real-git lease store operating in dir — the repo whose
+// refs/fak/locks/* namespace it reads and writes. dir == "" is identical to New()
+// (git discovers the repo from the process cwd). The CLI surface uses this to honor
+// a --dir flag without exposing the unexported real-git runner.
+func NewInDir(dir string) *Store { return &Store{run: gitRunner, dir: dir} }
 
 // NewWithRunner injects a Runner + dir — the SAME seam as the production path, so a
 // test exercises the whole acquire/read/reap algorithm with no real git.
@@ -259,6 +265,57 @@ func (s *Store) Live(ctx context.Context, now time.Time) (live []Record, expired
 		live = append(live, r)
 	}
 	return live, expired, nil
+}
+
+// ArbiterLease is the projection of a live lease record into the shape a
+// dos_arbitrate-style admission kernel consumes as one of its live_leases:
+// {lane, lane_kind, tree}. It is the READ-SIDE seam named gap #3 (cross-machine
+// atomicity) asked for — the source that lets an arbiter on machine B fold a
+// peer's lease (an ordinary `git fetch` put the ref into the local
+// refs/fak/locks/* store) into its admission decision, instead of being blind to
+// a lease machine A is holding right now.
+//
+// The mapping is deterministic and lossless for the arbiter's purpose: Lane is
+// the lease id (the ref basename), Tree is the record's leased globs (the field
+// the disjointness rung actually reasons over), and LaneKind is always "cluster"
+// — a refs/fak/locks record is a TREE-SCOPED lease, which is exactly the
+// arbiter's cluster kind (a keyword / global lane is not a tree the ref store
+// carries). This stays VISIBILITY, not atomic acquisition: it lets the arbiter
+// SEE a cross-machine conflict, it does not arbitrate a same-fetch-window race.
+type ArbiterLease struct {
+	Lane     string   `json:"lane"`
+	LaneKind string   `json:"lane_kind"`
+	Tree     []string `json:"tree"`
+}
+
+// arbiterLaneKind is the kind every refs/fak/locks lease projects to: a
+// tree-scoped (cluster) lane. Named so the constant is greppable and the one
+// honest mapping decision lives in one place.
+const arbiterLaneKind = "cluster"
+
+// LiveLeases reads the non-expired records under refs/fak/locks/* and projects
+// each into the arbiter's live_leases shape. This is the read side of the
+// cross-machine substrate: after an ordinary `git fetch`, a peer's pushed lease
+// is in the local ref store, Live reads it, and this projection hands it to an
+// admission kernel as a live lease it must respect. EXPIRED records are dropped
+// (they are reapable, not blocking — see Live), so the arbiter never refuses on
+// a crashed holder's lapsed lease. The slice is non-nil-and-empty when nothing
+// is live, so a JSON encoder emits `[]`, the empty live_leases an arbiter reads
+// as "nothing held".
+func (s *Store) LiveLeases(ctx context.Context, now time.Time) ([]ArbiterLease, error) {
+	live, _, err := s.Live(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ArbiterLease, 0, len(live))
+	for _, r := range live {
+		tree := r.TreeGlobs
+		if tree == nil {
+			tree = []string{} // a record with no globs still projects a concrete empty tree
+		}
+		out = append(out, ArbiterLease{Lane: r.ID, LaneKind: arbiterLaneKind, Tree: tree})
+	}
+	return out, nil
 }
 
 // has reports whether ref exists, via `git rev-parse --verify --quiet <ref>` (exit 0 =

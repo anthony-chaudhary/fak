@@ -91,6 +91,12 @@ concurrent = [
   "loopmgr",
   "fakrpc",
   "vcacheobserve",
+  # reconciled 2026-06-26 (#825): internal/leaseref is a real committed leaf (the
+  # cross-machine lease VISIBILITY substrate, refs/fak/locks/*) that landed by hand in
+  # f0cf3f6 with NO declared lane -> a `(fak leaseref)` ship-stamp bound to a phantom unit
+  # and the arbiter could not detect a same-tree collision on it. Declared here so the
+  # referee binds the stamp and the arbiter protects internal/leaseref/** edits.
+  "leaseref",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -134,6 +140,7 @@ autopick = [
   "loopmgr", # #763: internal/loopmgr leaf, see [lanes].concurrent note
   "fakrpc",
   "vcacheobserve",
+  "leaseref", # #825: internal/leaseref leaf, see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -255,6 +262,7 @@ session = ["internal/session/**"] # #756 (Pillar 2 / #748): per-session DRIVE st
 loopmgr = ["internal/loopmgr/**"] # #763 (#749 `fak cron` / #748): loop ledger + governor + recurring-job schedule
 fakrpc = ["internal/fakrpc/**"]
 vcacheobserve = ["internal/vcacheobserve/**"]
+leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY substrate (refs/fak/locks/*)
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

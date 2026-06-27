@@ -276,6 +276,57 @@ func TestRecordExpired(t *testing.T) {
 	}
 }
 
+// TestLiveLeasesProjection pins the READ-SIDE seam (#825): the live records under
+// refs/fak/locks/* project into the dos_arbitrate live_leases shape {lane,lane_kind,tree},
+// expired records are dropped, and an empty namespace yields a non-nil empty slice (encodes
+// as `[]`, the "nothing held" an arbiter reads).
+func TestLiveLeasesProjection(t *testing.T) {
+	g := newFakeGit()
+	s := NewWithRunner(g.run, "")
+
+	// Empty namespace -> a non-nil empty slice so JSON renders [].
+	empty, err := s.LiveLeases(ctx(), time.Now())
+	if err != nil {
+		t.Fatalf("LiveLeases (empty): %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("LiveLeases over an empty namespace = %#v, want a non-nil empty slice", empty)
+	}
+	if b, _ := json.Marshal(empty); string(b) != "[]" {
+		t.Fatalf("empty LiveLeases JSON = %s, want []", b)
+	}
+
+	// One live lease and one already-expired lease.
+	if _, err := s.Acquire(ctx(), Record{ID: "docs-lane", TreeGlobs: []string{"docs/**"}, Holder: "A:1", AcquiredAt: time.Now().Unix(), TTLSeconds: 3600}); err != nil {
+		t.Fatalf("Acquire live: %v", err)
+	}
+	if _, err := s.Acquire(ctx(), Record{ID: "dead-lane", TreeGlobs: []string{"internal/x/**"}, Holder: "B:2", AcquiredAt: 100, TTLSeconds: 10}); err != nil {
+		t.Fatalf("Acquire dead: %v", err)
+	}
+
+	leases, err := s.LiveLeases(ctx(), time.Now())
+	if err != nil {
+		t.Fatalf("LiveLeases: %v", err)
+	}
+	if len(leases) != 1 {
+		t.Fatalf("LiveLeases = %+v, want only the one non-expired lease", leases)
+	}
+	got := leases[0]
+	if got.Lane != "docs-lane" || got.LaneKind != "cluster" {
+		t.Fatalf("projection lane/kind = %q/%q, want docs-lane/cluster", got.Lane, got.LaneKind)
+	}
+	if len(got.Tree) != 1 || got.Tree[0] != "docs/**" {
+		t.Fatalf("projection tree = %v, want [docs/**]", got.Tree)
+	}
+
+	// The projected element marshals to exactly the arbiter's live_leases entry shape.
+	b, _ := json.Marshal(got)
+	want := `{"lane":"docs-lane","lane_kind":"cluster","tree":["docs/**"]}`
+	if string(b) != want {
+		t.Fatalf("ArbiterLease JSON = %s, want %s", b, want)
+	}
+}
+
 // TestRealGitRoundTrip exercises the package against the REAL git binary in a temp repo.
 // Skipped when git is unavailable (e.g. the native-Windows test path); it runs under the
 // WSL suite. It proves the actual plumbing — hash-object/update-ref/for-each-ref/cat-file

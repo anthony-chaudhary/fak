@@ -185,6 +185,8 @@ func main() {
 		cmdStopFailure(os.Args[2:])
 	case "cluster":
 		cmdCluster(os.Args[2:])
+	case "leaseref":
+		cmdLeaseref(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -447,6 +449,14 @@ func usage() {
                  the path bit-exact vs the in-process reference over loopback, no second box.
                  Host-layer, CPU-runnable today; the NCCL/RCCL device collective is the
                  separate GPU rung  -  see docs/serving/multi-node-compute.md)
+  fak leaseref  live [--dir DIR] | list [--json] [--dir DIR] | reap [--dir DIR]
+                (CROSS-MACHINE LEASE VISIBILITY (#825): read the refs/fak/locks/* ref
+                 namespace internal/leaseref persists leases under, so a peer's lease
+                 rides ordinary git fetch/push between clones. 'live' emits the
+                 non-expired records as the dos_arbitrate live_leases JSON
+                 [{lane,lane_kind,tree}] so an arbiter on another box SEES the lease;
+                 'reap' deletes the expired (reapable) records. VISIBILITY, not atomic
+                 acquisition  -  see docs/cli-reference.md)
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
                 [--restart-limit N] [--restart-seed-dir DIR]

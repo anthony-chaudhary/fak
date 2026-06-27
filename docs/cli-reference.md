@@ -150,6 +150,7 @@ fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simu
 fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
 fak vcache    status | prove | prove-telemetry           # virtual provider-cache status plus planned/observed token-savings proof/refutation
 fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
+fak leaseref  live [--dir DIR] | list [--json] [--dir DIR] | reap [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
@@ -194,6 +195,33 @@ echo '{"stale_miss":5}' | fak callavoid account --gate    # exit 1 (regressing)
 It exits `0` on a valid decision, `2` on malformed input (an unknown field or non-JSON,
 caught loudly — never a silent zero-value decision), and `1` only under `--gate` on a
 regressing window. Field names are the snake_case struct tags shown above.
+
+`fak leaseref` is the operator-facing READ side of the cross-machine lease
+substrate (`#825`). `internal/leaseref` persists a lease record (tree globs,
+holder, acquire time, TTL) under the `refs/fak/locks/<id>` ref namespace, so the
+lease rides ordinary `git fetch` / `git push` between clones — the same mechanism
+`grite` uses with `refs/grite/locks`. This verb projects that ref store into an
+admission decision:
+
+```bash
+# make a peer's lease (held on another machine) visible locally, then feed an arbiter
+git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'
+dos arbitrate --lane docs --tree 'docs/**' --leases "$(fak leaseref live)"
+
+fak leaseref list           # every record under refs/fak/locks/*, marked LIVE / EXPIRED
+fak leaseref reap           # delete the expired (reapable) records — a crashed holder is bounded
+```
+
+`live` emits the **non-expired** records as the `dos_arbitrate` `live_leases`
+array `[{lane,lane_kind,tree}, …]` (each ref-stored lease is a tree-scoped
+`cluster` lane), so an arbiter on machine B can *see* a lease machine A pushed.
+The write side is `internal/safecommit` (opt-in `FAK_LEASEREF=1`), which publishes
+its commit lock here alongside the same-host `flock`. The honest boundary, kept in
+the code and these docs: this is **distribution / visibility, not atomic
+acquisition** — it lets the arbiter *see* a cross-machine conflict, it does not
+arbitrate a same-fetch-window race; a signature envelope over the record is
+deferred follow-up. Exits `0` ok, `2` on a usage/parse error, `1` on a git/store
+failure.
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
 from a declarative JSON **manifest** instead of the compiled-in default — so WHICH
