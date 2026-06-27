@@ -36,6 +36,9 @@ import (
 //	                                   --archive ALSO renames the dir to .DELETED-<date> + repoints the registry, in one go
 //	fak accounts set-role <role> --name <n> point a role (active|anchor) at <n> + regenerate views
 //	fak accounts set-default --name <n> alias for `set-role active` (the launch/active seat)
+//	fak accounts launch [--name <n>]   start claude UNDER `fak guard` on a seat (the active role by
+//	                                   default): cache/vCache ON + the kernel as the permission system
+//	                                   (--dangerously-skip-permissions). --guard=false / --skip-permissions=false opt out
 //	fak accounts list                  table of every seat: name, status, TRUE identity, creds, rehome, flags
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
 //	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
@@ -47,7 +50,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -64,7 +67,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	asEnv := fs.Bool("env", false, "(resolve) print CLAUDE_CONFIG_DIR=<dir> for eval/wrappers")
 	pin := fs.Bool("pin", false, "(resolve) PIN to the exact seat (strict); default rehomes to a live seat")
-	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying")
+	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying; (launch) print the launch plan without starting the agent")
 	gateDir := fs.String("dir", "", "(gate-write) target config dir to gate a stdin setup-token write against")
 	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout")
 	dosView := fs.String("dos-view", firstNonEmpty(os.Getenv("FAK_DOS_ROSTER"), defaultDosView(defHome)), "(sync/check) path to the generated dos roster view (~/.claude/accounts.yaml)")
@@ -80,6 +83,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry")
 	rmArchive := fs.Bool("archive", false, "(remove) ALSO rename the config dir to <dir>.DELETED-<date> and repoint the registry (name+dir+rehome refs) in one command; refuses the live CLAUDE_CONFIG_DIR seat")
 	roleFlag := fs.String("role", "", "(set-role) the role to point at --name (active|anchor); may also be given as the first positional")
+	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
+	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
+	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -213,6 +219,26 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			noSync:       *addNoSync,
 		})
 
+	case "launch":
+		// The account-switcher LAUNCHER: resolve a seat (the active role by default, or
+		// --name <seat>, or a leading positional) and start the agent UNDER `fak guard` with
+		// that seat's CLAUDE_CONFIG_DIR — cache/vCache ON and the kernel as the permission
+		// system by default. Everything after `--` is passed through to the agent.
+		seat := strings.TrimSpace(*addName)
+		if seat == "" && lead > 0 {
+			seat = strings.TrimSpace(rest[0])
+		}
+		return runAccountsLaunch(stdout, stderr, launchParams{
+			name:         seat,
+			command:      *launchCommand,
+			useGuard:     *launchGuard,
+			skipPerms:    *launchSkipPerms,
+			dryRun:       *dryRun,
+			passthrough:  fs.Args(),
+			registryPath: *registryPath,
+			homeDir:      *homeDir,
+		})
+
 	case "sync":
 		// Project the canonical registry into the generated roster views and write them. The
 		// registry is the single source of truth; these files are caches of it, never
@@ -234,7 +260,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return accountsVersion(stdout, *asJSON)
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
@@ -245,7 +271,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 // VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
 func accountsVersion(stdout io.Writer, asJSON bool) int {
 	verbs := []string{
-		"add", "remove", "set-role", "set-default", "list", "resolve", "pull",
+		"add", "remove", "set-role", "set-default", "launch", "list", "resolve", "pull",
 		"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
 	}
 	if asJSON {
