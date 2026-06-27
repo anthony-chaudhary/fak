@@ -251,13 +251,6 @@ func registerDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
 	}
 }
 
-func registerDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
-	return []dojo.Lever{
-		resumePostureLever{ttl: ttl, maxFiles: maxFiles},
-		compactionLever{},
-	}
-}
-
 func filterDojoLevers(all []dojo.Lever, names []string) []dojo.Lever {
 	want := map[string]bool{}
 	for _, n := range names {
