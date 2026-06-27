@@ -67,7 +67,7 @@ _FAULT_HINTS = {
     "driver": "a kernel-mode driver faulted - identify it with WinDbg `!analyze -v <dump>`",
     "cpu_hw": "hardware machine-check - CPU, PSU, motherboard, or a severe memory error",
     "storage": "the storage stack stalled - disk/controller/driver timeout",
-    "software": "a critical user-mode process died - usually software, not hardware",
+    "software": "a critical user-mode process died - usually a user-mode software fault",
     "power_loss": "no bugcheck recorded - power loss, hard lockup, or thermal cutoff (no dump)",
     "unknown": "uncommon/unmapped bugcheck - analyze the dump directly",
 }
@@ -669,7 +669,7 @@ def _verdict(bugchecks, powerloss, classes, mem_hits, is_ecc, dimm_count, downcl
 
     # 5. Software.
     if classes & {"software"}:
-        return ("SOFTWARE - a critical process terminated; usually not a hardware fault.",
+        return ("SOFTWARE - a critical process terminated; usually a user-mode software fault.",
                 "low", ["Inspect the dump and recent app/update history."] + side)
 
     return ("Inconclusive - analyze the dump directly with WinDbg `!analyze -v`.", "low",
