@@ -82,25 +82,28 @@ jobs:
           test -s pane.json || { echo "control pane produced no JSON"; exit 1; }
 
       # Plan the issues (dry-run) — always, so the step summary shows what WOULD be
-      # filed even on an armed run.
+      # filed even on an armed run. Operator inputs are bound to env (not spliced
+      # into the script body) so an input value can't break out into shell.
       - name: plan score-signal issues
+        env:
+          MIN_DELTA: ${{ github.event.inputs.min_delta || '1' }}
+          MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
         run: |
-          MIN="${{ github.event.inputs.min_delta || '1' }}"
-          MAX="${{ github.event.inputs.max_issues || '5' }}"
-          python tools/score_signal.py --from pane.json --min-delta "$MIN" \
-            --max-issues "$MAX" --json > score-signal-plan.json
-          python tools/score_signal.py --from pane.json --min-delta "$MIN" \
-            --max-issues "$MAX" > score-signal-plan.txt
+          python tools/score_signal.py --from pane.json --min-delta "$MIN_DELTA" \
+            --max-issues "$MAX_ISSUES" --json > score-signal-plan.json
+          python tools/score_signal.py --from pane.json --min-delta "$MIN_DELTA" \
+            --max-issues "$MAX_ISSUES" > score-signal-plan.txt
           cat score-signal-plan.txt
 
       # File the issues — ONLY on an explicit `workflow_dispatch` arm with live=true.
       - name: file score-signal issues (armed)
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' }}
+        env:
+          MIN_DELTA: ${{ github.event.inputs.min_delta || '1' }}
+          MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
         run: |
-          MIN="${{ github.event.inputs.min_delta || '1' }}"
-          MAX="${{ github.event.inputs.max_issues || '5' }}"
-          python tools/score_signal.py --from pane.json --min-delta "$MIN" \
-            --max-issues "$MAX" --live
+          python tools/score_signal.py --from pane.json --min-delta "$MIN_DELTA" \
+            --max-issues "$MAX_ISSUES" --live
 
       - name: payload -> step summary
         if: always()

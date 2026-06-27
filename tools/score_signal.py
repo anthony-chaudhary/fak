@@ -25,10 +25,12 @@ The hard part of an UNATTENDED issue filer is NOT detecting — it is NOT spammi
 Dedup is intentionally different from idea_scout's permanent seen-cache: a score
 regression is RECURRING work. Once a worker retires it and the issue is CLOSED, a
 LATER regression of the SAME scorecard SHOULD file a fresh issue. So score-signal
-dedups against OPEN issues only, by a stable per-scorecard marker stamped in the
-body (`<!-- fak-score-signal: <key> -->`): at most one OPEN issue per scorecard at a
-time, re-fileable after a close. A hard CAP (--max-issues, worst-regression-first)
-keeps even a multi-metric regression from storming the tracker.
+dedups against the OPEN score-signal-labelled issues only, by a stable per-scorecard
+marker stamped in the body (`<!-- fak-score-signal: <key> -->`): at most one OPEN
+issue per scorecard at a time, re-fileable after a close. Scoping the dedup fetch to
+the tool's own label makes that bound EXACT regardless of total backlog size. A hard
+CAP (--max-issues, worst-regression-first) keeps a multi-metric regression from
+storming the tracker.
 
 "if relevant" — the relevance filter, in order:
   * baseline must be PINNED (an unpinned pane has no delta to act on -> nothing).
@@ -83,22 +85,23 @@ MARKER_RE = re.compile(r"fak-score-signal:\s*([A-Za-z0-9_\-]+)")
 DEFAULTS = {
     "min_delta": 1,        # a metric must rise by at least this to be actionable
     "max_issues": 5,       # hard cap on issues filed per run (anti-storm)
-    "issue_scan_limit": 800,  # open issues fetched for the dedup index
+    "issue_scan_limit": 800,  # open score-signal issues fetched for the dedup index
 }
 
 # The owning RSI skill per scorecard key — the "do this next" hint baked into each
 # issue so the worker (or a human) knows which repeatable pass retires the debt. A
-# HINT, not a hard claim: the authoritative re-run command is the scorecard's own
-# tool path (pulled from the control pane), and the generic /score-2x conductor is
-# always offered as a fallback, so an unmapped/renamed key never files a false lead.
+# HINT, not a hard claim: a mapped skill is offered ONLY when it resolves on disk
+# (.claude/skills/<name>/SKILL.md, checked at render time via available_skills);
+# otherwise the issue degrades to the generic /score-2x conductor, so a removed or
+# renamed skill can never become a false lead. Keys whose retire path is a native
+# `fak` subcommand (no slash skill) are absent here and carry a SOURCE_BY_KEY
+# Go-source pointer instead.
 SKILL_BY_KEY: dict[str, str] = {
     "readme": "/refresh-readme",
     "code": "/quality-score",
     "appeal": "/appeal-score",
-    "hygiene": "/repo-hygiene",
     "parity": "/industry-score",
     "agent": "/agent-readiness",
-    "product": "/product-score",
     "persona": "/persona-score",
     "stability": "/stability-score",
     "slop": "/slop-score",
@@ -107,8 +110,18 @@ SKILL_BY_KEY: dict[str, str] = {
     "disambiguation": "/disambiguation-score",
     "tokendefaults": "/token-defaults-score",
     "guard_rsi": "/guard-rsi-score",
-    "dogfood": "/dogfood-score",
     "doc": "/curate-cluster",
+}
+
+# Native-cmd scorecards: their debt is retired in Go source, not a tools/ script.
+# The body names the owning Go file in the `fak/cmd/...` doc-link form the dispatch
+# router (issue_lane_router.path_matches_lane) normalizes to the repo-relative
+# `cmd/**` tree — so these tickets route to the `cmd` lane, not the `tools` lane the
+# incidental tools/ references would otherwise pull them to.
+SOURCE_BY_KEY: dict[str, str] = {
+    "tokendefaults": "fak/cmd/fak/token_defaults.go",
+    "guard_rsi": "fak/cmd/fak/guardrsi.go",
+    "dogfood": "fak/cmd/fak/dogfoodscore.go",
 }
 
 
@@ -130,6 +143,21 @@ def tool_by_key() -> dict[str, str]:
             out[key] = card["cmd"]
         elif card.get("script"):
             out[key] = f"tools/{card['script']}"
+    return out
+
+
+def available_skills(root: Path) -> set[str]:
+    """The slash-skills that actually resolve on disk (.claude/skills/<name>/SKILL.md).
+    A SKILL_BY_KEY hint is offered only when its name is in this set; otherwise the
+    issue degrades to the generic /score-2x fallback, so a removed/renamed skill is
+    never asserted as a false lead. Empty (degrade-all) when the dir is absent."""
+    out: set[str] = set()
+    try:
+        for child in (root / ".claude" / "skills").iterdir():
+            if (child / "SKILL.md").is_file():
+                out.add(child.name)
+    except OSError:
+        return out
     return out
 
 
@@ -190,10 +218,11 @@ def regressions(payload: dict[str, Any], min_delta: int) -> list[dict[str, Any]]
 
 
 def render_issue(cand: dict[str, Any], commit: str, today: str,
-                 tools: dict[str, str]) -> dict[str, Any]:
+                 tools: dict[str, str], available: set[str]) -> dict[str, Any]:
     """Build the {title, body, labels} an issue is created from. The per-scorecard
-    marker is the load-bearing dedup anchor; the body names the owning skill + the
-    exact re-measure command so the resolving worker has a closed contract."""
+    marker is the load-bearing dedup anchor; the body names the owning skill (only
+    when it resolves on disk) + the exact re-measure command so the resolving worker
+    has a closed contract. `available` is the set of on-disk skill names."""
     label = cand["label"]
     key = cand["key"]
     delta, frm, to = cand["delta"], cand["from"], cand["to"]
@@ -212,15 +241,19 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
                     "rose under it (#712). Retire it BEFORE the next `--pin` re-floors "
                     "the rise as the new baseline.")
 
+    # The skill hint is offered ONLY when it resolves on disk; a stale/absent mapping
+    # degrades to the generic /score-2x conductor rather than asserting a false lead.
     skill = SKILL_BY_KEY.get(key)
+    skill_ok = bool(skill) and skill.lstrip("/") in available
     remeasure = tools.get(key, "")
+    source = SOURCE_BY_KEY.get(key, "")
     do_lines = []
-    if skill:
+    if skill_ok:
         do_lines.append(f"1. Run the owning RSI pass: `{skill}` "
                         f"(or the generic `/score-2x {label}` conductor).")
     else:
-        do_lines.append(f"1. Run the generic `/score-2x {label}` conductor (no "
-                        f"dedicated skill is mapped for `{key}`).")
+        do_lines.append(f"1. Run the generic `/score-2x {label}` conductor "
+                        f"(no dedicated skill resolves on disk for `{key}`).")
     do_lines.append("2. Retire the regressed debt worst-first; change no claim, "
                     "number, or link the metric does not cover.")
     if remeasure:
@@ -233,6 +266,15 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
     do_lines.append("4. Ship a commit citing this issue's `#N` in the subject + a "
                     "`(fak <leaf>)` trailer, so the witness can bind and close it.")
 
+    # Native-cmd scorecards: the fix lives in Go, not tools/. Naming the owning Go
+    # source routes the ticket to the `cmd` lane (the router strips the `fak/` and
+    # matches `cmd/**`), correcting the otherwise-tools-lane misroute.
+    fix_loc = ""
+    if source:
+        fix_loc = (f"**Fix location:** this scorecard is a native `fak` subcommand — "
+                   f"its debt is retired in Go source (`{source}`), NOT under "
+                   f"`tools/`; route to the `cmd` lane.\n\n")
+
     body = (
         f"> Auto-filed by **score-signal** (`tools/score_signal.py`, {today}) from "
         f"the CI scorecard control pane @{commit or 'unknown'}. A measured debt "
@@ -243,12 +285,13 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
         + (f" @{cand['baseline_commit']}" if cand.get("baseline_commit") else "")
         + ".\n\n"
         f"**Severity:** {severity}\n\n"
-        "**What to do**\n"
+        + fix_loc
+        + "**What to do**\n"
         + "\n".join(do_lines)
         + "\n\n---\n"
-        "_The scorecard family + its skills are listed in "
-        "`tools/scorecard_control_pane.py`. This issue re-opens automatically on a "
-        "future regression of the same metric only after it is closed._\n"
+        "_The scorecard family is listed in `tools/scorecard_control_pane.py`. After "
+        "this issue is closed, a future regression of the same metric files a FRESH "
+        "issue — only on an armed `--live` run; the scheduled CI run is dry-run._\n"
         + marker(key)
     )
 
@@ -263,9 +306,11 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
 
 def plan_issues(payload: dict[str, Any], open_keys: set[str], *,
                 min_delta: int, max_issues: int, today: str,
+                available: set[str] | None = None,
                 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """relevance filter -> dedup vs OPEN issues -> CAP. Returns (issues, skip_stats).
     Deterministic: regressions are worst-first, deduped by key, then capped."""
+    available = available if available is not None else set()
     stats = {"already-open": 0, "below-min-delta": 0, "within-run-dup": 0,
              "over-cap": 0}
     commit = str(payload.get("commit") or "")
@@ -286,7 +331,7 @@ def plan_issues(payload: dict[str, Any], open_keys: set[str], *,
         if key in open_keys:
             stats["already-open"] += 1
             continue
-        out.append(render_issue(cand, commit, today, tools))
+        out.append(render_issue(cand, commit, today, tools, available))
 
     if len(out) > max_issues:
         stats["over-cap"] = len(out) - max_issues
@@ -312,9 +357,15 @@ def gh_json(args: list[str], timeout: int = 60) -> Any:
 
 
 def fetch_open_issues(limit: int) -> list[dict[str, Any]]:
+    """Open issues carrying the score-signal label — the dedup index. Scoping to the
+    tool's OWN label bounds the index to the ~one-per-scorecard issues it could have
+    filed, so dedup stays EXACT no matter how large the total open backlog grows
+    (an unlabelled repo-wide fetch could drop an older still-open marker past the
+    limit and re-file a duplicate). `gh issue list --label X` returns [] cleanly when
+    the label does not exist yet, so this is safe on a fresh repo."""
     return gh_json([
-        "issue", "list", "--state", "open", "--limit", str(limit),
-        "--json", "number,title,body",
+        "issue", "list", "--state", "open", "--label", SIGNAL_LABEL,
+        "--limit", str(limit), "--json", "number,title,body",
     ])
 
 
@@ -397,7 +448,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="repo root. Default: cwd.")
     ap.add_argument("--from", dest="from_arg", default="",
                     help="read a pre-folded control-pane JSON from this file "
-                         "('-' = stdin). Default: fold it live.")
+                         "('-' = stdin). Default: fold it live. NOTE: a STALE pane "
+                         "under --live can re-file an already-resolved regression; "
+                         "prefer a live fold when arming --live.")
     ap.add_argument("--min-delta", type=int,
                     help=f"a metric must rise by at least this to file "
                          f"(default {DEFAULTS['min_delta']}).")
@@ -415,6 +468,15 @@ def main(argv: list[str] | None = None) -> int:
     today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
     min_delta = args.min_delta if args.min_delta is not None else DEFAULTS["min_delta"]
     max_issues = args.max_issues if args.max_issues is not None else DEFAULTS["max_issues"]
+
+    # A supplied pane is a point-in-time snapshot; under --live a stale one could
+    # re-file a regression already retired+closed (dedup is open-only by design).
+    # Warn loudly — the automated workflow always folds a fresh pane, so this only
+    # fires on a manual stale-snapshot arm.
+    if args.live and args.from_arg:
+        print("warning: --from with --live trusts a possibly STALE pane; a regression "
+              "already retired and closed could be re-filed. Prefer a live fold when "
+              "arming --live.", file=sys.stderr)
 
     try:
         payload = load_payload(args.from_arg, root, args.timeout)
@@ -435,8 +497,23 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
 
+    available = available_skills(root)
     to_file, skip_stats = plan_issues(
-        payload, open_keys, min_delta=min_delta, max_issues=max_issues, today=today)
+        payload, open_keys, min_delta=min_delta, max_issues=max_issues, today=today,
+        available=available)
+
+    # The RED-ratchet/empty-plan reconciliation: the portfolio can regress with no
+    # per-metric rise attributable (a new/unpinned scorecard adds debt but has no
+    # baseline prior, so it is excluded from early_warning). Surface that gap rather
+    # than leaving an empty plan next to a RED ratchet unexplained.
+    trend = payload.get("trend") or {}
+    note = ""
+    if trend.get("direction") == "regressed" and not regressions(payload, min_delta=1):
+        td = trend.get("total_delta")
+        td_s = f"+{td}" if isinstance(td, int) and td > 0 else "?"
+        note = (f"portfolio regressed ({td_s}) but no per-metric rise is attributable "
+                f"— likely a new/unpinned scorecard; re-pin the baseline "
+                f"(`python tools/scorecard_control_pane.py --pin`) or investigate")
 
     filed: list[dict[str, Any]] = []
     if args.live and to_file:
@@ -449,7 +526,6 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             filed.append({**issue, "issue_url": url})
 
-    trend = payload.get("trend") or {}
     result = {
         "schema": SCHEMA,
         "date": today,
@@ -458,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
         "trend_direction": trend.get("direction", ""),
         "open_signal_issues": sorted(open_keys),
         "skipped": skip_stats,
+        "note": note,
         "planned": [
             {"title": i["title"], "key": i["key"], "delta": i["delta"],
              "labels": i["labels"]}
@@ -494,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.live:
                 mark = f"  {f['issue_url']}" if f else "  (create failed)"
             print(f"     [+{i['delta']:>2}] {i['title']}{mark}")
+    if note:
+        print(f"  note: {note}")
     if errors:
         print("  errors:")
         for e in errors:
