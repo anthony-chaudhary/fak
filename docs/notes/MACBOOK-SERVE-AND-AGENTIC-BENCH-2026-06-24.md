@@ -49,7 +49,7 @@ at the repo root (single source of truth — read, don't hardcode):
 | Model | fak own-forward decode | llama.cpp Metal | ratio | usable for an agent loop? |
 |---|---:|---:|---:|---|
 | Qwen2.5-1.5B Q8 | **38.1 tok/s** | 68.7 | 0.55× | yes — snappy |
-| Qwen2.5-7B Q8 | **8.7 tok/s** | 17.27 (Metal) | 0.50× | yes — usable, the realistic ceiling |
+| Qwen2.5-7B Q8 | **8.7 tok/s** | 17.6 (Metal) | 0.50× | yes — usable, the realistic ceiling |
 | Qwen3.6-27B q4_k | **0.9 tok/s** | 7.29 (Metal) | 0.12× | no — a correctness witness, not an agent |
 
 So on **fak's own forward**, the strongest model that is still *agentically usable*

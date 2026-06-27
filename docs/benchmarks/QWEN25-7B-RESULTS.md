@@ -37,7 +37,7 @@ description: "fak's first 7B dense run on M3 Pro Q8, reporting the honest throug
 
 | prefill | decode |
 |---|---|
-| **192.92 tok/s** | **17.27 tok/s** |
+| **192.92 tok/s** | **17.6 tok/s** |
 
 ## fak vs llama.cpp (the honest throughput gap)
 
