@@ -124,6 +124,88 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
               example: { error: { message: "upstream model error", type: "server_error", code: null, param: null } }
 
+  /v1/responses:
+    post:
+      tags: [OpenAI]
+      summary: Adjudicating Responses-API proxy
+      description: |
+        The OpenAI **Responses API** wire, for a Responses-native agent (the OpenAI
+        Codex CLI, the Terminal-Bench `terminus` agent) that repoints its OpenAI base
+        URL at fak. The request `input` (a bare string or an array of typed input
+        items — `message`, `function_call`, `function_call_output`) and flat
+        `tools` are normalized onto the same served-turn core as
+        `/v1/chat/completions`: every **proposed** function call is run through the
+        kernel BEFORE the caller sees it (denied calls are absent from `output`,
+        grammar-repaired calls carry rewritten `arguments`), and a fak-aware client
+        gets the per-call verdict in the `fak` extension. Inbound
+        `function_call_output` results cross the result-side quarantine floor. The
+        gateway NEVER executes the client's tools. **Buffered only:** `stream: true`
+        is refused with a 400 (the kernel boundary forces buffering the whole turn
+        before adjudication, so there is no time-to-first-token benefit on the tool
+        path); the SSE rung is a labeled fast-follow.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              additionalProperties: true
+              properties:
+                model: { type: string }
+                input:
+                  description: A bare string, or an array of typed input items.
+                  oneOf:
+                    - { type: string }
+                    - { type: array, items: { type: object, additionalProperties: true } }
+                instructions: { type: string }
+                tools: { type: array, items: { type: object, additionalProperties: true } }
+                max_output_tokens: { type: integer }
+                temperature: { type: number }
+                top_p: { type: number }
+                stream: { type: boolean }
+            examples:
+              plain:
+                summary: A plain Responses turn
+                value:
+                  model: gpt-5.5
+                  input: "Say hello."
+              withTools:
+                summary: A turn proposing a function call
+                value:
+                  model: gpt-5.5
+                  input: [{ type: message, role: user, content: "Read test.txt" }]
+                  tools:
+                    - { type: function, name: read_file, description: "Read a file", parameters: { type: object, properties: { path: { type: string } }, required: [path] } }
+      responses:
+        '200':
+          description: The adjudicated response. Denied function calls are absent from `output`; the `fak` extension carries every proposed call's verdict (including dropped ones).
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  id: { type: string }
+                  object: { type: string }
+                  status: { type: string, enum: [completed, incomplete] }
+                  model: { type: string }
+                  output: { type: array, items: { type: object, additionalProperties: true } }
+                  output_text: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '502':
+          description: Upstream model error, or the upstream announced tool calls but none parsed (fail-closed). The provider's raw error body never crosses the trust boundary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "upstream model error", type: "server_error", code: null, param: null } }
+
   /v1/embeddings:
     post:
       tags: [OpenAI]
