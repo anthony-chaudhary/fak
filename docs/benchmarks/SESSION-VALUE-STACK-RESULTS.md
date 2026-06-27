@@ -92,7 +92,7 @@ The value-add **grows with session length**, exactly as the O(T²) re-prefill pr
 |---:|---:|---:|---:|---:|---:|---:|---:|
 | 8 | 4 | 135.1 s | 32.4 s | 12.0 s | **11.2×** | 2.70× | 4.2× |
 | 16 | 4 | 409.4 s | 67.9 s | 28.2 s | **14.5×** | 2.41× | 6.0× |
-| 32 | 4 | <!--T32A--> | <!--T32B--> | <!--T32C--> | **…×** | …× | …× |
+| 32 | 4 | 1220.0 s | 137.4 s | 110.8 s | **11.0×** | 1.24× | 8.9× |
 
 The vs-tuned (B/C) number holds steady at **~2.4–2.7×** (prefix-reuse + decode batching — the
 genuine marginal value over an already-warm KV cache), while the turn-tax (A/B) **grows with
