@@ -1,11 +1,12 @@
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
 flowchart LR
   r0["Rung 0 — re-output a stored result<br/>0 model tokens · SHIPPED"]
+  r1["Rung 1 — classify durability at write time<br/>0 model tokens · SHIPPED"]
   r2["Rung 2 — demand-page top-k<br/>k pages, not 350k · SHIPPED"]
   r3["Rung 3 — vDSO-cached recall<br/>0 on a hit · NOT BUILT<br/>(worldVer caveat: any unrelated write invalidates cache)"]
   r4["Rung 4 — witness-gated re-admit (THE MOAT)<br/>microseconds, no tokens · SHIPPED"]
   r5["Rung 5 — KV-checkpoint re-attach<br/>OFF-THESIS (caching already banks ~94%)"]
-  r0 --> r2 --> r3 --> r4 --> r5
+  r0 --> r1 --> r2 --> r3 --> r4 --> r5
   kn["⚡ lead with rung 4 (the moat); the 'free' rungs are the least defensible"]
   r4 -.- kn
   classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
@@ -18,7 +19,7 @@ flowchart LR
   classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
   classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
   classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
-  class r0,r2,r4 pass;
+  class r0,r1,r2,r4 pass;
   class r3 cheap;
   class r5 deny;
   class kn note;
