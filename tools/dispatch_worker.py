@@ -46,6 +46,24 @@ SCHEMA = "fleet-dispatch-worker/1"
 BACKENDS = ("claude", "opencode", "codex")
 DEFAULT_BACKEND = "claude"
 
+# CREATE_NO_WINDOW — a console child spawned WITHOUT it forces Windows to allocate a
+# fresh, VISIBLE console window whenever the parent is windowless, which the scheduled
+# dispatch tasks are (Task Scheduler launches them via pythonw.exe, no console of their
+# own). Every windowless dispatch tick that then runs a console tool — taskkill,
+# tasklist, cmd/mklink, gh, git, fak — pops its OWN window: the "random popup windows"
+# the detached-worker path already suppresses (issue_resolve_dispatch.win_creationflags
+# / claude_agent_chat.detached_creationflags). This is the SHARED suppressor every
+# helper subprocess call in the dispatch family routes through so the suppression is
+# total, not just on the worker spawn.
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def no_window_creationflags() -> int:
+    """``creationflags`` that keep a synchronously-spawned console child from popping a
+    visible window on Windows; ``0`` on POSIX (where ``creationflags`` must be 0). Spread
+    into every helper ``subprocess.run``/``Popen`` in the dispatch path."""
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 # Default wall-clock cap on a spawned worker session (seconds). A dispatch worker
 # is a full agentic `claude -p` / `opencode run` session that runs UNATTENDED, so
 # an unbounded run (the old default=None) let a wedged or runaway session burn
@@ -345,7 +363,12 @@ def launch(
     # for the un-guarded path too).
     popen_kwargs: dict[str, Any] = {"cwd": str(cwd), "env": env}
     if os.name == "nt":
-        popen_kwargs["creationflags"] = 0x00000200  # CREATE_NEW_PROCESS_GROUP
+        # CREATE_NEW_PROCESS_GROUP (tree-killable on timeout) OR'd with CREATE_NO_WINDOW
+        # so this synchronously-spawned worker — and every git/gh/fak tool it spawns —
+        # inherits one HIDDEN console instead of each popping a visible window when we run
+        # windowless (pythonw) from a scheduled dispatch tick. Inherited stdio still flows
+        # to the parent (CREATE_NO_WINDOW suppresses the window, not the handles).
+        popen_kwargs["creationflags"] = 0x00000200 | _CREATE_NO_WINDOW
     else:
         popen_kwargs["start_new_session"] = True
     try:
@@ -369,7 +392,8 @@ def terminate_tree(proc: "subprocess.Popen[Any]") -> None:
     try:
         if os.name == "nt":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30,
+                           creationflags=no_window_creationflags())
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except (OSError, ValueError, subprocess.SubprocessError):

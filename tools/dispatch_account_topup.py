@@ -37,7 +37,8 @@ RUNS = REPO / ".dispatch-runs"
 
 def _alive(pid: int) -> bool:
     out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True,
+                         creationflags=ird.no_window_creationflags())
     return str(pid) in (out.stdout or "")
 
 
@@ -102,7 +103,8 @@ def main(argv=None) -> int:
 
     rec = json.loads(subprocess.run(
         [sys.executable, str(REPO / "tools" / "fleet_accounts.py"), "resolve",
-         "--account", args.account], capture_output=True, text=True).stdout or "{}")
+         "--account", args.account], capture_output=True, text=True,
+        creationflags=ird.no_window_creationflags()).stdout or "{}")
     if not rec.get("ok"):
         print(json.dumps({"account": args.account, "spawned": 0,
                           "reason": f"unavailable: {rec.get('block_reason') or rec.get('reason')}"}))

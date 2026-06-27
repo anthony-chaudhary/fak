@@ -53,6 +53,15 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+
+def _no_window_creationflags() -> int:
+    """``creationflags`` that stop a console child — the gh/git/fak JSON helpers and the
+    PowerShell CIM/liveness probes below — from popping a visible window when preflight
+    runs windowless (pythonw) from a scheduled dispatch tick; ``0`` on POSIX. Mirrors
+    dispatch_worker.no_window_creationflags, kept local so this module imports only
+    stdlib."""
+    return 0x08000000 if os.name == "nt" else 0
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
@@ -107,7 +116,8 @@ def run_json(cmd: list[str], cwd: Path, timeout: int = 90,
     ok_codes = ok_codes if ok_codes is not None else {0}
     try:
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              timeout=timeout)
+                              timeout=timeout,
+                              creationflags=_no_window_creationflags())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"_error": str(exc), "_cmd": cmd, "_returncode": None}
     payload = _last_json(proc.stdout)
@@ -270,7 +280,8 @@ def _cmdline_worker_pids() -> set[int]:
                  "$all = @(Get-CimInstance Win32_Process); "
                  "$all | Where-Object { $_.CommandLine -match 'dos-dispatch-loop|resolve GitHub issue #' } | "
                  "ForEach-Object { \"$($_.ProcessId),$($_.ParentProcessId)\" }"],
-                capture_output=True, text=True, timeout=30).stdout
+                capture_output=True, text=True, timeout=30,
+                creationflags=_no_window_creationflags()).stdout
             pids: set[int] = set()
             parent_by_pid: dict[int, int | None] = {}
             for ln in out.splitlines():
@@ -377,6 +388,7 @@ def _cim_process_probe(pid: int) -> dict[str, Any] | None:
              "$p | Select-Object ProcessId,Name,CreationDate,CommandLine | "
              "ConvertTo-Json -Compress"],
             capture_output=True, text=True, timeout=5,
+            creationflags=_no_window_creationflags(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -475,6 +487,7 @@ def _pid_is_alive(pid: int) -> bool:
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                  f"Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id"],
                 capture_output=True, text=True, timeout=5,
+                creationflags=_no_window_creationflags(),
             )
             return proc.returncode == 0 and bool((proc.stdout or "").strip())
         except (OSError, subprocess.TimeoutExpired):

@@ -39,7 +39,8 @@ GLM_MODEL = "zai-coding-plan/glm-4.5-air"
 
 
 def _alive(pid: int) -> bool:
-    o = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True)
+    o = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
+                       creationflags=ird.no_window_creationflags())
     return str(pid) in (o.stdout or "")
 
 

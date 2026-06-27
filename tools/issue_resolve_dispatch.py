@@ -56,6 +56,11 @@ import issue_worker_prompt  # noqa: E402  (render the per-issue resolution promp
 import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
 
+# Re-export the shared console-window suppressor so the account-topup / glm-docs
+# entry scripts (which import THIS module as `ird`) route every helper subprocess
+# through the one canonical guard. See dispatch_worker.no_window_creationflags.
+no_window_creationflags = dispatch_worker.no_window_creationflags
+
 SCHEMA = "fleet-issue-resolve-dispatch/1"
 RUNS_DIRNAME = ".dispatch-runs"
 # Per-worker membership sidecar (rank/wave/size/shortfall), written next to the
@@ -190,7 +195,8 @@ def terminate_issue_worker_tree(pid: int) -> dict[str, Any]:
     try:
         if os.name == "nt":
             proc = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                                  capture_output=True, text=True, timeout=30)
+                                  capture_output=True, text=True, timeout=30,
+                                  creationflags=no_window_creationflags())
             return {"ok": proc.returncode == 0, "returncode": proc.returncode,
                     "stdout": (proc.stdout or "").strip()[-500:],
                     "stderr": (proc.stderr or "").strip()[-500:]}
@@ -377,7 +383,8 @@ def _opencode_config_home(account_dir: str, runs_dir: Path) -> str:
             # Windows without symlink privilege: a directory junction needs none.
             subprocess.run(["cmd", "/c", "mklink", "/J", str(link), account_dir],
                            capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace",
+                           creationflags=no_window_creationflags())
     if not link.exists():
         raise RuntimeError(f"could not pin opencode account dir {account_dir!r}")
     return str(pin)
@@ -1011,7 +1018,8 @@ def append_loop_event(root: Path, ledger: Path, event: dict[str, Any],
     cmd += _loop_evidence_args(event.get("evidence") or [])
     try:
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=60)
+                              encoding="utf-8", errors="replace", timeout=60,
+                              creationflags=no_window_creationflags())
     except (OSError, subprocess.SubprocessError) as exc:
         return {"ok": False, "kind": event.get("kind"), "error": str(exc)}
     return {

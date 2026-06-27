@@ -37,7 +37,7 @@ description: "The agent dimensions that matter in LLM serving, the current SOTA 
 
 *Why it matters:* The honest few-fold: not the headline-vs-naive number, but the gain over the tuned warm-cache a real operator runs. This is the conservative claim a skeptic should be shown.
 
-- **SOTA bar:** An already-hot per-agent KV cache (1×). fak's cross-agent fusion adds a conservative 2.4–2.7× on top, measured on its own kernel held constant.
+- **SOTA bar:** An already-hot per-agent KV cache (1×). fak's cross-agent fusion adds a conservative 2.4–2.7× on top, measured on its own kernel held constant (SmolLM2-135M, A=4 — smaller model than the 1.5B headline).
 - **Leading systems:** Tuned warm per-agent KV cache
 - **Source:** [https://www.lmsys.org/blog/2024-01-17-sglang/](https://www.lmsys.org/blog/2024-01-17-sglang/) (2024-01)
 - **fak:** lead — 2.4 × (shipped)

@@ -35,10 +35,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+
+def _no_window_creationflags() -> int:
+    """``creationflags`` that stop a console child (the ``gh issue view`` below) from
+    popping a visible window when this renders windowless (pythonw) from a scheduled
+    dispatch tick; ``0`` on POSIX. Mirrors dispatch_worker.no_window_creationflags,
+    kept local so this leaf prompt module imports only stdlib."""
+    return 0x08000000 if os.name == "nt" else 0
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
@@ -67,7 +76,8 @@ def fetch_issue(number: int, *, workspace: Path, timeout: int = 60) -> dict[str,
             ["gh", "issue", "view", str(number), "--json",
              "number,title,body,labels,state"],
             cwd=str(workspace), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout)
+            encoding="utf-8", errors="replace", timeout=timeout,
+            creationflags=_no_window_creationflags())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"number": number, "_error": str(exc)}
     if proc.returncode != 0:
