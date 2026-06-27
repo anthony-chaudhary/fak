@@ -451,6 +451,28 @@ func TestRunLoopSkipsManualTask(t *testing.T) {
 	}
 }
 
+func TestExecTaskRunsInRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX `test -f` probe; the suite runs under WSL on this host")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "MARKER"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	art := filepath.Join(t.TempDir(), "out.log")
+	// The task only succeeds if its relative-path probe resolves in root (not the
+	// process CWD) — the regression the cmd.Dir fix closes.
+	task := Task{ID: "cwd-check", Run: "test -f MARKER && echo ok"}
+	outcome, _, _, err := execTask(context.Background(), root, nil, task, art)
+	if outcome != OutcomeCollected {
+		t.Fatalf("want collected (ran in root where MARKER exists), got %s err=%v", outcome, err)
+	}
+	data, _ := os.ReadFile(art)
+	if !strings.Contains(string(data), "ok") {
+		t.Errorf("command should have found MARKER in the root cwd, artifact=%q", data)
+	}
+}
+
 func TestParseNumberObservedOnly(t *testing.T) {
 	if got := parseNumber("decode: 17.73 tok/s steady"); got != "17.73 tok/s" {
 		t.Errorf("parseNumber = %q, want 17.73 tok/s", got)

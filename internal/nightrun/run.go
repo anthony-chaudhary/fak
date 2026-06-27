@@ -226,6 +226,16 @@ func execTask(ctx context.Context, root string, cache *goRunCache, t Task, artif
 	runCtx, cancel := context.WithTimeout(ctx, t.timeout())
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, shell, flag, run)
+	// Run in the resolved repo root, not the process CWD: feasibility (Satisfies'
+	// local-checkpoint check), the prebuild (cmd.Dir=root), and the ledger/artifact
+	// paths are ALL resolved against root, so a task's own relative args
+	// (`-dir internal/model/.cache/...`, `-root experiments/...`) must resolve there
+	// too. Without this, `cd internal && fak nightrun run --apply` (or --workspace)
+	// marks a task feasible at root yet runs it in the subdir, recording a false
+	// failure. DefaultExecutor passes root="" to keep its back-compat CWD behaviour.
+	if root != "" {
+		cmd.Dir = root
+	}
 	if len(envPrefix) > 0 {
 		cmd.Env = append(os.Environ(), envPrefix...)
 	}
