@@ -210,6 +210,54 @@ func TestCUDAMatMulApproxMatchesRef(t *testing.T) {
 	t.Logf("MatMul: cosine=%.8f maxAbs=%.2e (device=%s tier=%s class=%s)", c, maxAbs, cb.Name(), cb.Tier(), cb.Class())
 }
 
+// TestCUDAMatMulNonAlignedShapes — the regression set #972 asked for: op-level GEMV (P=1) and
+// batched GEMM (P>1) across output dims that are NOT multiples of the device block width (64/256).
+// The first sm_80 / CUDA-13.0 witness saw out=257 come back as 64 rows (a one-block write), so the
+// grid/launch math has to cover ceil(out/BLK) rows for every dtype path. Each case checks the
+// exact result length (the structural gate that fired on the GPU) then the cosine vs the cpuref.
+func TestCUDAMatMulNonAlignedShapes(t *testing.T) {
+	cb := cudaOrSkip(t)
+	ref := Default()
+	// out dims straddling the 64- and 256-block boundaries; in dims off the boundary too.
+	cases := []struct{ out, in, P int }{
+		{257, 192, 1},  // the original #972 witness shape (out just over 4*64)
+		{65, 128, 1},   // out just over one 64-block
+		{255, 256, 1},  // out just under a 256-block
+		{1000, 320, 1}, // large non-aligned out
+		{257, 192, 3},  // batched: non-aligned out, P>1
+		{130, 96, 5},   // batched: out just over 2*64, P>1
+	}
+	var seed lcg = 99
+	g := &seed
+	for _, tc := range cases {
+		w := rscale(g, tc.out*tc.in, 0.2)
+		wRefT := mkResident(ref, []int{tc.out, tc.in}, w)
+		wCuT := mkResident(cb, []int{tc.out, tc.in}, w)
+		if tc.P == 1 {
+			x := rscale(g, tc.in, 1.0)
+			yRef := ref.Read(ref.MatMul(wRefT, mkResident(ref, []int{tc.in}, x)))
+			yCu := cb.Read(cb.MatMul(wCuT, mkResident(cb, []int{tc.in}, x)))
+			if len(yCu) != tc.out {
+				t.Fatalf("MatMul out=%d in=%d: got %d rows want %d", tc.out, tc.in, len(yCu), tc.out)
+			}
+			if c := cosine(yRef, yCu); c < 0.9999 {
+				t.Fatalf("MatMul out=%d in=%d: cosine %.6f < 0.9999", tc.out, tc.in, c)
+			}
+		} else {
+			x := rscale(g, tc.P*tc.in, 1.0)
+			yRef := ref.Read(ref.BatchedMatMul(wRefT, mkResident(ref, []int{tc.P, tc.in}, x), tc.P))
+			yCu := cb.Read(cb.BatchedMatMul(wCuT, mkResident(cb, []int{tc.P, tc.in}, x), tc.P))
+			if len(yCu) != tc.P*tc.out {
+				t.Fatalf("BatchedMatMul out=%d in=%d P=%d: got %d want %d", tc.out, tc.in, tc.P, len(yCu), tc.P*tc.out)
+			}
+			if c := cosine(yRef, yCu); c < 0.9999 {
+				t.Fatalf("BatchedMatMul out=%d in=%d P=%d: cosine %.6f < 0.9999", tc.out, tc.in, tc.P, c)
+			}
+		}
+	}
+	t.Logf("MatMul non-aligned shapes: %d cases pass (device=%s)", len(cases), cb.Name())
+}
+
 // TestCUDAForwardMatchesRef — the headline: a full multi-layer Llama decode forward,
 // greedily run for several tokens, on the GPU vs the CPU reference. The Approx gate:
 // every step's argmax must be EXACT (same next token) and the logit cosine ≥ the recorded

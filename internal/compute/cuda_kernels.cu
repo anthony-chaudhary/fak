@@ -23,6 +23,7 @@
 #include <vector>
 
 static cublasHandle_t g_blas = nullptr;
+static void *g_blas_workspace = nullptr; // explicit cuBLAS workspace so it never cudaMalloc's mid-capture (#969)
 // All device work runs on g_stream (a blocking stream, so a synchronous cudaMemcpy on the
 // legacy default stream still fences it). One stream is what makes the whole per-token op
 // sequence CAPTURABLE into a CUDA graph — the only way to collapse ~600 WSL CUDA calls/
@@ -60,6 +61,19 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   cublasSetPointerMode(g_blas, CUBLAS_POINTER_MODE_HOST);
   if (!g_stream) CK(cudaStreamCreate(&g_stream));
   cublasSetStream(g_blas, g_stream);
+  // Pre-allocate an explicit cuBLAS workspace (#969). With NO user workspace, cuBLAS lazily
+  // cudaMalloc's its own internal workspace the first time it sees a given GEMM problem — and
+  // CUDA forbids cudaMalloc while g_stream is mid stream-capture. Because the decode GEMMs are
+  // captured into the CUDA-graph (cuda_graph_test.go / the HAL fast path), that lazy alloc fired
+  // INSIDE capture on a fresh A100 (sm_80, CUDA 12.8/13.0) and crashed graph replay with
+  // "cudaMalloc(256 bytes) ... operation not permitted when stream is capturing". Handing cuBLAS
+  // a user-owned workspace makes it use that buffer exclusively and never allocate during capture.
+  // 32 MiB is NVIDIA's recommended size for Hopper and is safe (a superset) on Ampere/Ada too.
+  if (!g_blas_workspace) {
+    const size_t ws = (size_t)32 * 1024 * 1024;
+    if (cudaMalloc(&g_blas_workspace, ws) == cudaSuccess)
+      cublasSetWorkspace(g_blas, g_blas_workspace, ws);
+  }
   return 0;
 }
 
@@ -153,13 +167,20 @@ extern "C" void fcuda_hostxfer_reset(void) { g_host_bytes = 0; }
 // [in,P] (op=N); the col-major out[out,P] result IS row-major Y[P,out]. Verified by index.
 extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P) {
   const float alpha = 1.0f, beta = 0.0f;
-  cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N,
+  // F32 SGEMM. The F16 HGEMM peer below checks its status; this path historically did NOT, so a
+  // failed launch (e.g. a cuBLAS/launch-config change on a new arch+toolkit pair — #972 first
+  // surfaced on sm_80 / CUDA 13.0) left dY stale and the device output looked structurally wrong
+  // (a non-block-aligned out dim came back short) with no diagnostic. Check + name the dims so the
+  // next witness run pinpoints the failure instead of reporting silent garbage.
+  cublasStatus_t st = cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N,
               out, P, in,
               &alpha,
               dW, in,
               dX, in,
               &beta,
               dY, out);
+  if (st != CUBLAS_STATUS_SUCCESS)
+    fprintf(stderr, "fak-cuda: cublasSgemm(out=%d,in=%d,P=%d) failed: %d\n", out, in, P, (int)st);
 }
 
 // ---- fp16 compute path (#484): F16 weights + tensor-core HGEMM ------------------
@@ -302,16 +323,34 @@ __global__ void k_q8_gemm(const signed char *W, const float *Wscale,
   if (threadIdx.x == 0) Y[(size_t)t * out + o] = red[0];
 }
 
+// Persistent Q8 activation-quantization scratch (#969), grown ONCE and reused like g_attn_scratch.
+// The per-call fcuda_malloc/fcuda_free pair tripped graph capture: the pooled allocator misses
+// (-> cudaMalloc) the first time a given size class is requested, and Q8 GEMV is the decode hot
+// path captured into the graph, so a fresh size class mid-capture crashed replay. Two static
+// buffers sized to the largest (P*in)/(P*nblk) ever seen, reused across calls — safe because
+// g_stream serializes calls and each quant-then-GEMM writes-then-reads its scratch within one call.
+static signed char *g_q8_qX = nullptr;
+static int g_q8_qX_cap = 0; // bytes
+static float *g_q8_xScale = nullptr;
+static int g_q8_xScale_cap = 0; // floats
 extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                     float *dY, int out, int in, int P, int block) {
   int nblk = in / block;
-  signed char *qX = (signed char *)fcuda_malloc((size_t)P * in);          // int8 activation codes
-  float *xScale = (float *)fcuda_malloc((size_t)P * nblk * sizeof(float)); // per-block act scales
-  k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, qX, xScale, P, in, block);
-  k_q8_gemm<<<dim3(out, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, qX, xScale,
+  int needQX = P * in;          // int8 activation codes
+  int needScale = P * nblk;     // per-block act scales (floats)
+  if (needQX > g_q8_qX_cap) {
+    if (g_q8_qX) cudaFree(g_q8_qX);
+    CK(cudaMalloc(&g_q8_qX, (size_t)needQX));
+    g_q8_qX_cap = needQX;
+  }
+  if (needScale > g_q8_xScale_cap) {
+    if (g_q8_xScale) cudaFree(g_q8_xScale);
+    CK(cudaMalloc(&g_q8_xScale, (size_t)needScale * sizeof(float)));
+    g_q8_xScale_cap = needScale;
+  }
+  k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block);
+  k_q8_gemm<<<dim3(out, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
                                                 dY, out, in, P, block);
-  fcuda_free(qX);
-  fcuda_free(xScale); // pooled, stream-ordered: the GEMM reads them before any reuse
 }
 
 // getScaleMinK4_dev reproduces the GGUF loader's getScaleMinK4 (internal/ggufload) bit-for-bit:
@@ -884,13 +923,25 @@ extern "C" int fcuda_graph_end_launch(void) {
   return rc;
 }
 
+// Persistent argmax index buffer (#969), grown ONCE and reused, exactly like g_attn_scratch
+// above. The previous code did fcuda_malloc(sizeof(int)) + fcuda_free per call; the pooled
+// allocator misses (-> cudaMalloc) on the first argmax of any size class, and CUDA forbids
+// cudaMalloc while g_stream is mid-capture ("operation not permitted when stream is capturing").
+// Since argmax is the final op of the captured decode graph, that lazy alloc crashed graph
+// capture/replay. A single persistent device int touched on every token never allocates inside
+// capture. fcuda_graph_warm() (called once before the first cudaStreamBeginCapture) forces it
+// resident so even the very first captured token finds it already allocated.
+static int *g_argmax_idx = nullptr;
+static void ensure_argmax_idx(void) {
+  if (!g_argmax_idx) CK(cudaMalloc(&g_argmax_idx, sizeof(int)));
+}
+
 extern "C" int fcuda_argmax_f32(const float *dLogits, int n) {
   int hIdx = 0;
-  int *dIdx = (int *)fcuda_malloc(sizeof(int));
-  k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, dIdx);
-  CK(cudaMemcpy(&hIdx, dIdx, sizeof(int), cudaMemcpyDeviceToHost));
+  ensure_argmax_idx(); // no-op after the first call; never allocates inside a capture
+  k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, g_argmax_idx);
+  CK(cudaMemcpy(&hIdx, g_argmax_idx, sizeof(int), cudaMemcpyDeviceToHost));
   g_host_bytes += sizeof(int); // only the token id crosses host-ward — the #482 witness
-  fcuda_free(dIdx);
   return hIdx;
 }
 

@@ -887,36 +887,40 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
+	var y Tensor
 	switch w.Dtype {
 	case F32:
-		y, _ := c.devTr([]int{out}, F32)
+		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_matmul_f32(c.cf(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
-		return y
 	case F16:
 		// tensor-core HGEMM (#484): F16 weight, f32 activation (converted to __half C-side), f32
 		// accumulate/output. P=1 (decode GEMV); the activation x stays F32-resident.
-		y, _ := c.devTr([]int{out}, F32)
+		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_matmul_f16(c.cptr(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1, colMajorFlag(w))
-		return y
 	case Q8_0:
 		// native Q8_0 GEMV (#485): int8 codes + per-block f32 scales resident, the activation
 		// quantized to int8 ON DEVICE; integer per-block dot scaled by (weight·activation block
 		// scales), F32 accumulate. No dequant-to-f32 round trip — the weight stays int8 in VRAM.
 		wb := w.buf.(*cudaBuf)
-		y, _ := c.devTr([]int{out}, F32)
+		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
 			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
-		return y
 	case Q4_K:
 		// native Q4_K GEMV (#485): the dequant (w = d·scale·code − dmin·min) is fused into the
 		// GEMM tile straight off the resident super-block bytes; the weight stays int4 in VRAM.
 		wb := w.buf.(*cudaBuf)
-		y, _ := c.devTr([]int{out}, F32)
+		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
-		return y
 	default:
 		panic("compute: cuda MatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up")
 	}
+	// Shape post-condition (#972): the GEMV must yield exactly `out` rows. A wrong-shaped result
+	// (the sm_80 / CUDA-13.0 witness saw a non-block-aligned out=257 come back as 64) is a launch
+	// or binding fault — fail loud at the call site naming the dtype + dims, not silently downstream.
+	if n := y.Numel(); n != out {
+		panic("compute: cuda MatMul " + w.Dtype.String() + " out=" + itoaC(out) + " in=" + itoaC(in) + " produced " + itoaC(n) + " rows")
+	}
+	return y
 }
 
 // BatchedMatMul computes the prefill GEMM Y = X @ Wᵀ for P activation rows, dispatching on the
@@ -925,34 +929,37 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
+	var y Tensor
 	switch w.Dtype {
 	case F32:
-		y, _ := c.devTr([]int{P, out}, F32)
+		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_matmul_f32(c.cf(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
-		return y
 	case F16:
 		// tensor-core HGEMM (#484): the prefill GEMM where fp16/tensor-cores pay off most.
-		y, _ := c.devTr([]int{P, out}, F32)
+		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_matmul_f16(c.cptr(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P), colMajorFlag(w))
-		return y
 	case Q8_0:
 		// native Q8_0 prefill GEMM (#485): each of the P activation rows is quantized to int8 on
 		// device, then the per-block integer dot against the resident int8 weight, F32 accumulate.
 		wb := w.buf.(*cudaBuf)
-		y, _ := c.devTr([]int{P, out}, F32)
+		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
 			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
-		return y
 	case Q4_K:
 		// native Q4_K prefill GEMM (#485): dequant fused into the tile off the resident super-block
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
 		wb := w.buf.(*cudaBuf)
-		y, _ := c.devTr([]int{P, out}, F32)
+		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
-		return y
 	default:
 		panic("compute: cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + ")")
 	}
+	// Shape post-condition (#972): the batched GEMM must yield exactly P*out elements. Catch a
+	// short/wrong-shaped device result loud at the call site rather than as silent garbage.
+	if n, want := y.Numel(), P*out; n != want {
+		panic("compute: cuda BatchedMatMul " + w.Dtype.String() + " out=" + itoaC(out) + " in=" + itoaC(in) + " P=" + itoaC(P) + " produced " + itoaC(n) + " want " + itoaC(want))
+	}
+	return y
 }
 
 // RMSNorm runs the RMS-normalization kernel over each row of x (one weight-width row at a time),
