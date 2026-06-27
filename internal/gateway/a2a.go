@@ -94,6 +94,53 @@ type a2aAuditLog struct {
 	Timestamp   time.Time              `json:"timestamp"`
 }
 
+// a2aMethodSpec represents a reviewed method in the registry
+type a2aMethodSpec struct {
+	Name        string
+	Scope       string // "read" or "act"
+	Description string
+}
+
+// a2aMethodRegistry is the reviewed method registry (#1019)
+// Methods are reviewed in tools/fleet_agent_link.py build_registry()
+var a2aMethodRegistry = map[string]a2aMethodSpec{
+	"agent.info": {
+		Name:        "agent.info",
+		Scope:       "read",
+		Description: "Return host, repo, tool, and method metadata.",
+	},
+	"agent.ping": {
+		Name:        "agent.ping",
+		Scope:       "read",
+		Description: "Cheap liveness check.",
+	},
+	"protocol.manifest": {
+		Name:        "protocol.manifest",
+		Scope:       "read",
+		Description: "Return the Fleet Agent Link method manifest.",
+	},
+	"laptop.check": {
+		Name:        "laptop.check",
+		Scope:       "act",
+		Description: "Run tools/fak_laptop_test.py check with reviewed parameters.",
+	},
+	"laptop.status": {
+		Name:        "laptop.status",
+		Scope:       "read",
+		Description: "Run tools/fak_laptop_test.py status against saved proof reports.",
+	},
+	"laptop.verify": {
+		Name:        "laptop.verify",
+		Scope:       "act",
+		Description: "Run tools/fak_laptop_test.py verify against saved proof reports.",
+	},
+	"laptop.accept": {
+		Name:        "laptop.accept",
+		Scope:       "act",
+		Description: "Run tools/fak_laptop_test.py accept.",
+	},
+}
+
 var (
 	a2aStore *a2aTaskStore
 	a2aOnce  sync.Once
@@ -137,6 +184,16 @@ func (s *Server) logAuditEntry(log a2aAuditLog) {
 	s.auditLog(log)
 }
 
+// validateMethodAgainstRegistry validates a method name against the reviewed registry (#1019)
+// Returns the method spec if valid, otherwise an error
+func validateMethodAgainstRegistry(method string) (a2aMethodSpec, error) {
+	spec, ok := a2aMethodRegistry[method]
+	if !ok {
+		return a2aMethodSpec{}, fmt.Errorf("method not in reviewed registry: %s", method)
+	}
+	return spec, nil
+}
+
 // handleA2ASendMessage implements POST /a2a/v1/messages
 // Parses a single skill invocation, validates params, dispatches short method or creates task
 func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +231,13 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 	method, ok := msg.Content["method"].(string)
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "method name required")
+		return
+	}
+
+	// Validate method against reviewed registry (#1019)
+	methodSpec, err := validateMethodAgainstRegistry(method)
+	if err != nil {
+		writeErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -230,7 +294,7 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		Timestamp:    now,
 	})
 
-	// Dispatch the method call (simplified - in production this would validate against method registry)
+	// Dispatch the method call (validated against method registry #1019)
 	// For now, just mark as running and complete
 	task.State = "running"
 	task.UpdatedAt = time.Now()
@@ -250,6 +314,7 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 	task.Result = map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Method %s executed successfully", method),
+		"scope":   methodSpec.Scope,
 	}
 
 	s.logAuditEntry(a2aAuditLog{
@@ -440,6 +505,7 @@ func (s *Server) handleA2ACancelTaskByID(w http.ResponseWriter, r *http.Request,
 
 // handleA2AGetExtendedAgentCard implements GET /a2a/v1/agent-card
 // Return the authenticated/private card when allowed
+// Skills are projected from the reviewed method registry (#1019)
 func (s *Server) handleA2AGetExtendedAgentCard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "use GET")
@@ -456,6 +522,17 @@ func (s *Server) handleA2AGetExtendedAgentCard(w http.ResponseWriter, r *http.Re
 	// Get tenant from headers
 	tenantID := r.Header.Get("X-Tenant-ID")
 
+	// Build skills from the reviewed method registry (#1019)
+	skills := make([]a2aSkill, 0, len(a2aMethodRegistry))
+	for _, spec := range a2aMethodRegistry {
+		skills = append(skills, a2aSkill{
+			ID:          spec.Name,
+			Name:        spec.Name,
+			Description: spec.Description,
+			Scope:       spec.Scope,
+		})
+	}
+
 	// Generate Agent Card with skills from method registry
 	card := a2aAgentCard{
 		ID:          "fleet-fak",
@@ -463,38 +540,7 @@ func (s *Server) handleA2AGetExtendedAgentCard(w http.ResponseWriter, r *http.Re
 		Description: "A Fleet agent with reviewed method registry and policy-scoped skills",
 		Version:     a2aVersion,
 		Endpoint:    "https://fleet.example.com/a2a",
-		Skills: []a2aSkill{
-			{
-				ID:          "laptop.status",
-				Name:        "laptop.status",
-				Description: "Get laptop status information",
-				Scope:       "read",
-			},
-			{
-				ID:          "laptop.accept",
-				Name:        "laptop.accept",
-				Description: "Accept a task on the laptop",
-				Scope:       "act",
-			},
-			{
-				ID:          "agent.info",
-				Name:        "agent.info",
-				Description: "Get agent information",
-				Scope:       "read",
-			},
-			{
-				ID:          "agent.ping",
-				Name:        "agent.ping",
-				Description: "Ping the agent",
-				Scope:       "read",
-			},
-			{
-				ID:          "protocol.manifest",
-				Name:        "protocol.manifest",
-				Description: "Get protocol manifest",
-				Scope:       "read",
-			},
-		},
+		Skills:      skills,
 		Security: a2aSecurity{
 			Schemes: []a2aSecurityScheme{
 				{
