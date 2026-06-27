@@ -34,7 +34,13 @@
           {"wall": "~91m", "resident_gb": 416, "inst_gb_per_s": 0.057},
           {"wall": "~101m", "resident_gb": 450, "inst_gb_per_s": null}
         ],
-        "load_curve_finding": "resident-Q4_K CPU load is dequant-bound at ~0.06-0.10 GB/s => a ~95 min full load; the parallel-quant-load + resident-Q5/6_K levers do not bring the pure-CPU serve under 10 min (UD-Q4_K_M's mixed Q5_K/Q6_K experts take the slow dequant path on the CPU reference serve)",
+        "load_curve_finding": "resident-Q4_K CPU load measured at ~0.06-0.10 GB/s => a ~95 min full load on this host; the parallel-quant-load + resident-Q5/6_K levers did not bring the pure-CPU serve under 10 min here. The rate is the measured datum; the bottleneck CAUSE is NOT witnessed (see load_curve_cause).",
+        "load_curve_cause": {
+          "status": "unwitnessed-inferred",
+          "note": "the ~0.06-0.10 GB/s rate's bottleneck (dequant CPU work vs demand-read/page-fault I/O across the 433 GB GGUF on NFS) was NOT measured on this wedged run: the load-path summary (resident=N dequant=N) requires the #975 LoadProfiler, which this pre-bind wedge never emitted.",
+          "correction": "an earlier draft attributed the slow rate to 'dequant-bound' load and to 'mixed Q5_K/Q6_K experts taking the slow dequant path'. #975 established the CPU loader already routes Q4_K + Q5_K/Q6_K experts resident by info.Type (no slow Q8/dequant fallback path), so that attribution is NOT supported; an I/O-bound load (#974-B mmap / demand-paged weights reading 433 GB off NFS) is at least as likely.",
+          "resolve_by": "re-run on a host without the ~512 GB hugepage co-tenant and capture the #975 load-path witness (resident=N dequant=N) to settle dequant-vs-I/O."
+        },
         "blocked_by": "#974 (CPU-path memory-fit pre-flight + mmap/demand-paged CPU weights); re-runnable on a host WITHOUT the ~512 GB hugepage co-tenant",
         "provenance": "measured 2026-06-27 on cpu-server-a; fak built from origin/main ed4dc8dc; see docs/notes/GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md"
       }
