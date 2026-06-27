@@ -139,7 +139,7 @@ For the measured 50-turn × 5-agent run:
 
 - **Time:** the naive path is "start after dinner, check tomorrow." The fused path is
   "run it during a meeting." Same model, same tokens, same answers.
-- **Machines:** to make the naive path finish in the same ~19 minutes by brute force, you
+- **Machines:** to make the naive path finish in the fused path's ~19 minutes by brute force, you
   would need roughly **60 identical boxes** doing duplicate work. With the fused path, the
   measured run fits on **one** box. Against a competent warm-cache setup, the gap is
   smaller but still meaningful: roughly **4 boxes of tuned single-tenant work** versus one
