@@ -228,6 +228,18 @@ type TurnReport struct {
 	SpeculativePrunedTurns     int  `json:"speculative_pruned_turns"`     // bounded aggregate futile round-trips a productive deny MAY have spared (excluded from the grade).
 	SpeculativeAggregateCapped bool `json:"speculative_aggregate_capped"` // true when the aggregate hit DefaultMaxSpeculativePrunedTurns (the upper bound saturated).
 
+	// REALIZED witnessed axis (#820): unlike the speculative axis above, a WITNESSED
+	// productive deny carries the ENUMERATED variants it pruned, so its fan-out is folded
+	// INTO the graded EffectiveTurns/Amplification — realized credit backed by a
+	// non-forgeable, deduplicated set rather than an asserted count. The counts are bounded
+	// per-deny (WitnessedCapped) and in aggregate (WitnessedAggregateCapped); an empty/blank
+	// witness credits nothing and is surfaced as WitnessedEmpty so it can never inflate.
+	WitnessedDenies          int  `json:"witnessed_denies"`           // productive denies whose enumerated variant set credited a non-zero realized fan-out.
+	WitnessedPruned          int  `json:"witnessed_pruned"`           // total realized futile round-trips the witnessed denies pruned (folded into EffectiveTurns).
+	WitnessedEmpty           int  `json:"witnessed_empty"`            // witnessed redirects that named no variants — effective hard denies, credited nothing.
+	WitnessedCapped          int  `json:"witnessed_capped"`           // how many witnessed fan-outs were clamped to the per-deny cap (surfaced, not silent).
+	WitnessedAggregateCapped bool `json:"witnessed_aggregate_capped"` // true when the witnessed total saturated DefaultMaxSpeculativePrunedTurns.
+
 	Actions []string `json:"actions,omitempty"`
 	Risks   []string `json:"risks,omitempty"`
 }
@@ -300,10 +312,20 @@ func Account(t Tally) TurnReport {
 	}
 	// HardDeny adds 0 to both sides; it is symmetric and intentionally not credited.
 
-	// The graded amplification is built ONLY from realized, Counter-backed dispositions
-	// (Execute/MemoHit/Repair/StaleMiss). The speculative `pruned` upper bound is
+	// REALIZED witnessed axis (#820): a WITNESSED productive deny names the futile variants
+	// it pruned, so — unlike the speculative `pruned` above — its deduplicated fan-out IS
+	// folded into the graded `naive` (the round-trips a naive agent would have spent walking
+	// those variants). The credit is bounded per-deny (fanoutCap) and in aggregate, and an
+	// empty/blank witness credits nothing. This is the line that lets enumerated pruning
+	// graduate from a speculative upper bound to realized credit.
+	witFanout, witDenies, witEmpty, witCapped, witAggCapped := witnessedTotals(t.WitnessedRedirects, fanoutCap)
+	naive += float64(witFanout)
+
+	// The graded amplification is built from realized, Counter-backed dispositions
+	// (Execute/MemoHit/Repair/StaleMiss) PLUS the witnessed productive-deny fan-out (whose
+	// variants are enumerated, hence realized). The speculative `pruned` upper bound stays
 	// excluded — "an avoided call is a realized rebate, never a trust claim" (#816).
-	raw := execute + memoHit + repair + staleMiss + hardDeny + len(t.Redirects)
+	raw := execute + memoHit + repair + staleMiss + hardDeny + len(t.Redirects) + witDenies
 	amp := safeRatio(naive, executed)
 
 	rep := TurnReport{
@@ -322,6 +344,11 @@ func Account(t Tally) TurnReport {
 		RedirectCapped:             capped,
 		SpeculativePrunedTurns:     pruned,
 		SpeculativeAggregateCapped: aggCapped,
+		WitnessedDenies:            witDenies,
+		WitnessedPruned:            witFanout,
+		WitnessedEmpty:             witEmpty,
+		WitnessedCapped:            witCapped,
+		WitnessedAggregateCapped:   witAggCapped,
 	}
 	rep.Status = turnStatus(amp)
 	rep.Grade = turnGrade(amp)
@@ -356,6 +383,22 @@ func turnGrade(amp float64) string {
 }
 
 func turnActionsAndRisks(t Tally, rep TurnReport) (actions, risks []string) {
+	// REALIZED witnessed axis (#820): enumerated productive-deny pruning that DID fold into
+	// the grade. Surface the realized credit as an action, and the bounds/empties as risks
+	// so a witness can never inflate the headline silently.
+	if rep.WitnessedDenies > 0 {
+		actions = append(actions, fmt.Sprintf("%d witnessed productive deny(ies) pruned %d enumerated futile round-trip(s) — REALIZED credit folded into the graded amplification (the variants are named, not asserted)",
+			rep.WitnessedDenies, rep.WitnessedPruned))
+	}
+	if rep.WitnessedEmpty > 0 {
+		risks = append(risks, fmt.Sprintf("%d witnessed redirect(s) named NO variants — credited nothing and treated as effective hard denies, so an un-enumerated \"productive\" deny cannot inflate the realized headline", rep.WitnessedEmpty))
+	}
+	if rep.WitnessedCapped > 0 {
+		risks = append(risks, fmt.Sprintf("%d witnessed fan-out(s) were clamped to the per-deny cap (%d); the realized witnessed credit is a LOWER bound, never inflated", rep.WitnessedCapped, DefaultMaxRedirectFanout))
+	}
+	if rep.WitnessedAggregateCapped {
+		risks = append(risks, fmt.Sprintf("the witnessed pruned total saturated the aggregate cap (%d); the realized credit is a floor of the true count, never inflated", DefaultMaxSpeculativePrunedTurns))
+	}
 	if rep.SpeculativePrunedTurns > 0 {
 		actions = append(actions, fmt.Sprintf("productive denies MAY have pruned %d futile round-trip(s) across %d deny(ies); keep enriching deny reasons with forward guidance — but this is a speculative rebate, not realized work",
 			rep.SpeculativePrunedTurns, rep.ProductiveDenies))
