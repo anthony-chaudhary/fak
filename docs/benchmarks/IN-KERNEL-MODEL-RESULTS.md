@@ -145,7 +145,7 @@ green; locally the oracle is the real, non-forgeable witness.
 
 A real open-source model now runs **inside the fak kernel's address space** on CPU,
 with the **KV cache as a kernel-owned Go data structure**, and every step — the
-forward pass, the cache, greedy decode, and KV-level quarantine — is proven equal to
+forward pass, the cache, greedy decode, KV-level quarantine, and KV-prefix reuse — is proven equal to
 HuggingFace transformers to f32 tolerance or token-for-token. The deepest fusion the
 build plan called out of reach is reachable as a **reference**; what stays out of
 scope (GPU serving throughput, the live tokenizer wire-up, a tuned model) is labeled,
