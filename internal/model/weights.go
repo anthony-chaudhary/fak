@@ -195,6 +195,13 @@ type Model struct {
 	q4kw    map[string]*q4kTensor
 	q4khead *q4kTensor // pinned when lm_head is held raw in q4kw; headName() can't see q4kw
 
+	// kqw holds the optional resident Q5_K/Q6_K (k-quant super-block) copy of MoE EXPERT
+	// matmul weights, built straight from the GGUF payload (no f32 round trip) for GLM-5.2's
+	// mixed-quant UD-Q4_K_M experts and consumed on the host expert seam (residentMatRows ->
+	// kQuantMatRows; quant_kquant.go). It is the load-time twin of q4kw for the non-Q4_K
+	// experts. nil unless such experts loaded; the f32/Q8/Q4_K paths never read it.
+	kqw map[string]*kQuantTensor
+
 	// awqw holds the optional resident AWQ (Activation-aware Weight Quantization) 4-bit
 	// copy of the matmul weights, populated by LoadAWQ straight from an AutoAWQ
 	// safetensors export and consumed only by the opt-in AWQ path (awq.go). nil unless
@@ -378,6 +385,11 @@ func (m *Model) hasWeight(name string) bool {
 	}
 	if m.q4kw != nil {
 		if _, ok := m.q4kw[name]; ok {
+			return true
+		}
+	}
+	if m.kqw != nil {
+		if _, ok := m.kqw[name]; ok {
 			return true
 		}
 	}

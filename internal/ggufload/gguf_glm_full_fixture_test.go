@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -168,10 +169,26 @@ func isNaNOrInf(v float32) bool {
 // blob is written {in,out,E}; modelShapeFromGGUFDims reverses them back. Tensor-data offsets are
 // the cumulative payload sizes aligned to general.alignment (32).
 func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI int) []byte {
+	return glmMoeDsaFullGGUFTyped(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI, TensorF32)
+}
+
+// glmMoeDsaFullGGUFTyped is glmMoeDsaFullGGUF with the batched routed-expert blobs
+// (ffn_{gate,up,down}_exps) written in expertType (TensorF32 / TensorQ4_K / TensorQ5_K /
+// TensorQ6_K), so a test can exercise the loader's resident k-quant expert routing. The
+// k-quant payloads are written as all-zero super-blocks (valid: dequant to 0), which keeps the
+// forward finite while letting the loader take the raw-resident split.
+func glmMoeDsaFullGGUFTyped(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI int, expertType TensorType) []byte {
 	qkHead := qkNope + qkRope
 	type tw struct {
 		name string
 		dims []uint64
+	}
+	// The batched routed-expert blobs take expertType; everything else is F32.
+	typeOf := func(name string) TensorType {
+		if strings.Contains(name, "_exps.weight") {
+			return expertType
+		}
+		return TensorF32
 	}
 	// dims low-to-high (GGUF order).
 	ts := []tw{
@@ -208,6 +225,18 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 			n *= int(d)
 		}
 		return n
+	}
+	payloadBytes := func(typ TensorType, n int) int {
+		switch typ {
+		case TensorQ6_K:
+			return n / 256 * blockQ6KBytes
+		case TensorQ5_K:
+			return n / 256 * blockQ5KBytes
+		case TensorQ4_K:
+			return n / 256 * blockQ4KBytes
+		default: // TensorF32
+			return n * 4
+		}
 	}
 
 	// KV section.
@@ -249,8 +278,8 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 	var ti bytes.Buffer
 	off := 0
 	for _, t := range ts {
-		writeTensorInfoForTest(&ti, t.name, t.dims, TensorF32, uint64(off))
-		off = align(off + numValues(t.dims)*4)
+		writeTensorInfoForTest(&ti, t.name, t.dims, typeOf(t.name), uint64(off))
+		off = align(off + payloadBytes(typeOf(t.name), numValues(t.dims)))
 	}
 
 	var b bytes.Buffer
@@ -264,11 +293,18 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 	for _, t := range ts {
 		padToLen(&b, dataStart+off)
 		n := numValues(t.dims)
-		for i := 0; i < n; i++ {
-			writeF32ForTest(&b, float32(seed%97)*0.25-12) // bounded, finite, deterministic
-			seed++
+		typ := typeOf(t.name)
+		if typ == TensorF32 {
+			for i := 0; i < n; i++ {
+				writeF32ForTest(&b, float32(seed%97)*0.25-12) // bounded, finite, deterministic
+				seed++
+			}
+		} else {
+			// k-quant blob: all-zero super-blocks (valid; dequant to 0) so the loader takes
+			// the raw-resident split and the forward stays finite.
+			b.Write(bytes.Repeat([]byte{0}, payloadBytes(typ, n)))
 		}
-		off = align(off + n*4)
+		off = align(off + payloadBytes(typ, n))
 	}
 	return b.Bytes()
 }

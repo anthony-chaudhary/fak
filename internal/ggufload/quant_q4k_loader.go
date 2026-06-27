@@ -98,10 +98,11 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 				tw.pending = []pendingTensor{{isKVBHalf: true, layer: layer, half: half, shape: shape, f32: append([]float32(nil), data...)}}
 				return tw
 			}
-			// Batched routed experts: split the [E,out,in] blob 1->E. A Q4_K block-aligned
-			// blob splits as RAW bytes -> resident (no dequant): the experts are GLM-5.2's
-			// 417 GB bulk, so this is the load-time lever. A non-Q4_K (Q6_K/Q5_K mixed-quant)
-			// blob falls to the f32 dequant-split — the slow path the load-path breakdown names.
+			// Batched routed experts: split the [E,out,in] blob 1->E. A block-aligned Q4_K /
+			// Q5_K / Q6_K blob splits as RAW bytes -> resident (no dequant): the experts are
+			// GLM-5.2's 417 GB bulk and unsloth UD-Q4_K_M is a MIXED quant, so handling all
+			// three k-quants resident (not just Q4_K) is the load-time lever that turns the
+			// whole expert load I/O-bound. Any other type falls to the f32 dequant-split.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {
@@ -114,18 +115,18 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 					return tw
 				}
 				tw.acctType, tw.acctExpert, tw.acctBytes = info.Type.String(), true, tensorOnDiskBytes(info)
-				if info.Type == TensorQ4_K {
-					q4kExperts, aligned, err := splitGLMMoeDsaExpertsQ4KRaw(layer, proj, shape, raw)
+				if blockBytes, residentable := residentExpertBlockBytes(info.Type); residentable {
+					kqExperts, aligned, err := splitGLMMoeDsaExpertsKQuantRaw(layer, proj, shape, raw, blockBytes)
 					if err != nil {
 						tw.err = err
 						return tw
 					}
-					if aligned && model.ResidentQ4KEligible(cfg, q4kExperts[0].Name) {
-						tw.pending = make([]pendingTensor, len(q4kExperts))
-						for i, ex := range q4kExperts {
-							tw.pending[i] = pendingTensor{resident: true, name: ex.Name, shape: ex.Shape, raw: ex.Raw}
+					if aligned && model.ResidentKQuantEligible(cfg, kqExperts[0].Name) {
+						tw.pending = make([]pendingTensor, len(kqExperts))
+						for i, ex := range kqExperts {
+							tw.pending[i] = pendingTensor{resident: true, residentType: info.Type, name: ex.Name, shape: ex.Shape, raw: ex.Raw}
 						}
-						tw.acctResident, tw.acctTensors = true, len(q4kExperts)
+						tw.acctResident, tw.acctTensors = true, len(kqExperts)
 						return tw
 					}
 				}
@@ -167,7 +168,7 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 		// skipping dequantF32 (Q4→f32) and the f32→Q8 re-quant entirely. raw is a fresh
 		// TensorBytes copy, so handing it straight to the builder is safe.
 		if info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
-			tw.pending = []pendingTensor{{resident: true, name: canon, shape: shape, raw: raw}}
+			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 			tw.acctResident = true
 			return tw
 		}
@@ -209,8 +210,19 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 					}
 				}
 			case pt.resident:
-				if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
-					return err
+				switch pt.residentType {
+				case TensorQ6_K:
+					if err := builder.AddResidentQ6K(pt.name, pt.shape, pt.raw); err != nil {
+						return err
+					}
+				case TensorQ5_K:
+					if err := builder.AddResidentQ5K(pt.name, pt.shape, pt.raw); err != nil {
+						return err
+					}
+				default: // TensorQ4_K
+					if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
+						return err
+					}
 				}
 			default:
 				if err := builder.AddF32Tensor(pt.name, pt.shape, pt.f32); err != nil {

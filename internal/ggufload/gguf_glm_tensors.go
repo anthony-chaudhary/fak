@@ -219,6 +219,17 @@ const (
 // split, so the caller falls back to the f32 split. Each expert's bytes are copied into their own
 // backing array so a later resident-store cannot alias across experts.
 func splitGLMMoeDsaExpertsQ4KRaw(layer int, proj string, shape []int, raw []byte) ([]NamedResidentQ4K, bool, error) {
+	return splitGLMMoeDsaExpertsKQuantRaw(layer, proj, shape, raw, q4kSuperBlockBytes)
+}
+
+// splitGLMMoeDsaExpertsKQuantRaw is the by-quant-type generalization of the Q4_K raw split: it
+// expands a batched k-quant routed-expert tensor (model shape [E,out,in]) into E per-expert
+// resident byte slices WITHOUT dequantizing, for ANY k-quant whose super-block packs 256 weights
+// into blockBytes bytes (Q4_K=144, Q5_K=176, Q6_K=210). This lets GLM-5.2's MIXED-quant experts
+// (unsloth UD-Q4_K_M is a dynamic mix) ALL load resident — the load-time lever that turns the
+// 417 GB expert bulk from f32-dequant-bound into a raw byte copy. ok=false (no error) means the
+// dims are not block-aligned for a clean raw split, so the caller dequant-splits to f32.
+func splitGLMMoeDsaExpertsKQuantRaw(layer int, proj string, shape []int, raw []byte, blockBytes int) ([]NamedResidentQ4K, bool, error) {
 	if len(shape) != 3 {
 		return nil, false, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor must be 3-D [E,out,in], got shape %v", shape)
 	}
@@ -226,13 +237,19 @@ func splitGLMMoeDsaExpertsQ4KRaw(layer int, proj string, shape []int, raw []byte
 	if e <= 0 || out <= 0 || in <= 0 {
 		return nil, false, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor has non-positive dim in [%d,%d,%d]", e, out, in)
 	}
-	per := out * in
-	if per%q4kSuperBlockWeights != 0 {
-		return nil, false, nil // not block-aligned -> caller dequant-splits to f32 instead
+	// Gate on the REDUCTION dim (in), not out*in: a resident k-quant row must be a whole
+	// number of 256-weight super-blocks, since the GEMV dequantizes super-blocks ALONG each
+	// row. out*in%256 alone can pass while in%256 fails (e.g. [out=8,in=32]) and would then
+	// mis-super-block every row — quantize{Q4K,KQuant}FromRaw panics. Real k-quant tensors
+	// always have in%256==0 (llama.cpp requires it to quantize), so this never rejects a real
+	// expert; it only fails closed to the f32 split for a non-quantizable shape.
+	if in%q4kSuperBlockWeights != 0 {
+		return nil, false, nil // not row-aligned -> caller dequant-splits to f32 instead
 	}
-	perBytes := (per / q4kSuperBlockWeights) * q4kSuperBlockBytes
+	per := out * in
+	perBytes := (per / q4kSuperBlockWeights) * blockBytes
 	if len(raw) != e*perBytes {
-		return nil, false, fmt.Errorf("gguf: glm_moe_dsa Q4_K expert blob [%d,%d,%d] has %d raw bytes, want %d", e, out, in, len(raw), e*perBytes)
+		return nil, false, fmt.Errorf("gguf: glm_moe_dsa k-quant expert blob [%d,%d,%d] has %d raw bytes, want %d (blockBytes=%d)", e, out, in, len(raw), e*perBytes, blockBytes)
 	}
 	tensors := make([]NamedResidentQ4K, e)
 	for x := 0; x < e; x++ {

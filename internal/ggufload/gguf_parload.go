@@ -64,14 +64,32 @@ func loadWorkers() int {
 // is the order the serial loader emitted them (e.g. expert 0..E-1), so insertion order — and
 // thus the built model — is byte-identical to the serial path.
 type pendingTensor struct {
-	resident  bool // true -> AddResidentQ4K(raw); false -> AddF32Tensor(f32)
-	isKVBHalf bool // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
-	name      string
-	shape     []int
-	raw       []byte    // resident raw super-block bytes (resident==true)
-	f32       []float32 // dequantized + normalized values (resident==false, or a KV-b half)
-	layer     int
-	half      string
+	resident     bool       // true -> AddResident{Q4K,Q5K,Q6K}(raw) by residentType; false -> AddF32Tensor(f32)
+	residentType TensorType // which resident k-quant store (Q4_K / Q5_K / Q6_K), when resident
+	isKVBHalf    bool       // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
+	name         string
+	shape        []int
+	raw          []byte    // resident raw super-block bytes (resident==true)
+	f32          []float32 // dequantized + normalized values (resident==false, or a KV-b half)
+	layer        int
+	half         string
+}
+
+// residentExpertBlockBytes returns the GGUF super-block byte size for a k-quant type that can be
+// held RESIDENT (raw bytes, dequant fused in the GEMV) for the CPU-offloaded MoE experts:
+// Q4_K=144, Q5_K=176, Q6_K=210, each packing 256 weights. ok=false for any other type, which
+// keeps that expert blob on the f32 dequant→Q8 fallback. This is what lets GLM-5.2's MIXED-quant
+// experts (unsloth UD-Q4_K_M) ALL load resident, not just the Q4_K subset.
+func residentExpertBlockBytes(t TensorType) (int, bool) {
+	switch t {
+	case TensorQ4_K:
+		return blockQ4KBytes, true
+	case TensorQ5_K:
+		return blockQ5KBytes, true
+	case TensorQ6_K:
+		return blockQ6KBytes, true
+	}
+	return 0, false
 }
 
 // tensorWork is one GGUF tensor's parallel-load result: the progress byte count, the builder

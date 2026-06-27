@@ -14,8 +14,13 @@ type ResidentReport struct {
 	Q8Tensors  int   `json:"q8_tensors"`  // matmul weights held as Q8_0 (normalize-sensitive + Q6_K)
 	Q8Bytes    int64 `json:"q8_bytes"`    // their resident bytes
 	Q8Params   int64 `json:"q8_params"`
-	F32Tensors int   `json:"f32_tensors"` // small f32 manifest tensors (norms, embed, biases)
-	F32Bytes   int64 `json:"f32_bytes"`   // their resident bytes
+	// KQuantTensors are MoE experts held as RAW Q5_K/Q6_K (the mixed-quant bulk that no longer
+	// pays the f32 round-trip; quant_kquant.go). For GLM-5.2 these are the 417 GB expert weights.
+	KQuantTensors int   `json:"kquant_tensors"`
+	KQuantBytes   int64 `json:"kquant_bytes"`
+	KQuantParams  int64 `json:"kquant_params"`
+	F32Tensors    int   `json:"f32_tensors"` // small f32 manifest tensors (norms, embed, biases)
+	F32Bytes      int64 `json:"f32_bytes"`   // their resident bytes
 
 	TotalResidentBytes int64 `json:"total_resident_bytes"` // q4k + q8 + f32
 	// DecodeBytesPerToken is the weight-byte stream one batch=1 decode step walks: every
@@ -48,14 +53,20 @@ func (m *Model) ResidentReport() *ResidentReport {
 		r.Q8Bytes += int64(len(qt.q)) + int64(len(qt.d))*4
 		r.Q8Params += int64(qt.out) * int64(qt.in)
 	}
+	for _, qt := range m.kqw {
+		r.KQuantTensors++
+		r.KQuantBytes += int64(len(qt.raw))
+		// Each super-block (176 B Q5_K / 210 B Q6_K) encodes 256 weights.
+		r.KQuantParams += int64(len(qt.raw) / qt.kind.blockBytes() * qkK)
+	}
 	for _, meta := range m.manifest {
 		r.F32Tensors++
 		r.F32Bytes += int64(meta.Nbytes)
 	}
-	r.TotalResidentBytes = r.Q4KBytes + r.Q8Bytes + r.F32Bytes
-	// The matmul weights read per decode token = all of q4kw + q8w (the LM head is in one
-	// of them; every projection + MLP weight streams once). This is the decode bandwidth.
-	r.DecodeBytesPerToken = r.Q4KBytes + r.Q8Bytes
+	r.TotalResidentBytes = r.Q4KBytes + r.Q8Bytes + r.KQuantBytes + r.F32Bytes
+	// The matmul weights read per decode token = all of q4kw + q8w + kqw (the LM head is in
+	// one of them; every projection + MLP weight streams once). This is the decode bandwidth.
+	r.DecodeBytesPerToken = r.Q4KBytes + r.Q8Bytes + r.KQuantBytes
 	r.DecodeGiBPerToken = float64(r.DecodeBytesPerToken) / (1 << 30)
 	return r
 }
@@ -79,6 +90,7 @@ func (r *ResidentReport) DecodeTokSCeiling(memBWGBps float64) float64 {
 func FormatResidentReport(r *ResidentReport) string {
 	mib := func(b int64) float64 { return float64(b) / (1 << 20) }
 	return "resident: Q4_K=" + itoa(r.Q4KTensors) + " tensors/" + fmtFloat(mib(r.Q4KBytes)) + "MiB" +
+		"  Q5/6_K=" + itoa(r.KQuantTensors) + "/" + fmtFloat(mib(r.KQuantBytes)) + "MiB" +
 		"  Q8=" + itoa(r.Q8Tensors) + "/" + fmtFloat(mib(r.Q8Bytes)) + "MiB" +
 		"  f32=" + itoa(r.F32Tensors) + "/" + fmtFloat(mib(r.F32Bytes)) + "MiB" +
 		"  total=" + fmtFloat(mib(r.TotalResidentBytes)) + "MiB" +

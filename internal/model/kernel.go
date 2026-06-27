@@ -246,6 +246,14 @@ func (m *Model) residentMatRows(name string, x []float32, out, in int) []float32
 		}
 		return q4kMatRows(qt, x)
 	}
+	if qt := m.kqw[name]; qt != nil {
+		if qt.out != out || qt.in != in {
+			panic("model: resident k-quant tensor shape mismatch: " + name +
+				" stored=[" + itoa(qt.out) + "," + itoa(qt.in) + "]" +
+				" requested=[" + itoa(out) + "," + itoa(in) + "]")
+		}
+		return kQuantMatRows(qt, x)
+	}
 	if qt := m.gptqw[name]; qt != nil {
 		if qt.out != out || qt.in != in {
 			panic("model: GPTQ tensor shape mismatch: " + name)
