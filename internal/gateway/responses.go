@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -26,11 +27,11 @@ import (
 // gateway-local DTOs are its inbound mirror, exactly as ChatRequest mirrors the chat
 // adapter.
 //
-// Streaming is deliberately NOT supported on this wire yet: the Responses SSE event
-// vocabulary is large, and the kernel boundary forces buffering the whole turn before
-// adjudication anyway (zero time-to-first-token benefit on the tool path), so a
-// stream:true request is refused with a 400 rather than half-supported. Codex/terminus
-// operate against a buffered response; the SSE rung is a labeled fast-follow.
+// Streaming is SYNTHESIZED from the buffered turn: the gateway adjudicates the
+// complete proposed-tool-call set, then re-serializes a well-formed SSE stream
+// (response.created → response.output_item.added → response.output_item.done →
+// response.done). This matches the non-tool-path behavior of the chat wire, where
+// the kernel's adjudication invariant forces buffering before any byte hits the wire.
 
 // ResponsesRequest is the inbound POST /v1/responses body (the minimal faithful
 // subset of the OpenAI Responses API). Input is raw because the Responses wire
@@ -40,14 +41,14 @@ import (
 // store, reasoning, metadata, previous_response_id) are accepted and ignored for
 // drop-in compatibility; there is, by construction, no Ref field to smuggle.
 type ResponsesRequest struct {
-	Model           string           `json:"model"`
-	Input           json.RawMessage  `json:"input"`
-	Instructions    string           `json:"instructions,omitempty"`
-	Tools           []responsesTool  `json:"tools,omitempty"`
-	MaxOutputTokens int              `json:"max_output_tokens,omitempty"`
-	Temperature     *float64         `json:"temperature,omitempty"`
-	TopP            *float64         `json:"top_p,omitempty"`
-	Stream          bool             `json:"stream,omitempty"`
+	Model           string          `json:"model"`
+	Input           json.RawMessage `json:"input"`
+	Instructions    string          `json:"instructions,omitempty"`
+	Tools           []responsesTool `json:"tools,omitempty"`
+	MaxOutputTokens int             `json:"max_output_tokens,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	TopP            *float64        `json:"top_p,omitempty"`
+	Stream          bool            `json:"stream,omitempty"`
 	// PreviousResponseID is accepted and ignored: fak does not (yet) persist a
 	// server-side response store, so a client threading conversation state must send
 	// the full input each turn (the same posture the chat wire has — it is stateless).
@@ -89,16 +90,16 @@ type responsesInputItem struct {
 // denied call (it is absent from `output`). OutputText is the convenience flattened
 // assistant text the Responses SDK surfaces as response.output_text.
 type responsesResponse struct {
-	ID                string                   `json:"id"`
-	Object            string                   `json:"object"`
-	CreatedAt         int64                    `json:"created_at"`
-	Model             string                   `json:"model"`
-	Status            string                   `json:"status"`
-	IncompleteDetails *responsesIncomplete     `json:"incomplete_details,omitempty"`
-	Output            []responsesOutputItem    `json:"output"`
-	OutputText        string                   `json:"output_text,omitempty"`
-	Usage             responsesUsage           `json:"usage"`
-	Fak               *FakExt                  `json:"fak,omitempty"`
+	ID                string                `json:"id"`
+	Object            string                `json:"object"`
+	CreatedAt         int64                 `json:"created_at"`
+	Model             string                `json:"model"`
+	Status            string                `json:"status"`
+	IncompleteDetails *responsesIncomplete  `json:"incomplete_details,omitempty"`
+	Output            []responsesOutputItem `json:"output"`
+	OutputText        string                `json:"output_text,omitempty"`
+	Usage             responsesUsage        `json:"usage"`
+	Fak               *FakExt               `json:"fak,omitempty"`
 }
 
 type responsesIncomplete struct {
@@ -111,9 +112,9 @@ type responsesIncomplete struct {
 // function_call_output). The two shapes share a struct; only the fields for the
 // active type are populated (the rest are omitempty).
 type responsesOutputItem struct {
-	Type   string                  `json:"type"`
-	ID     string                  `json:"id,omitempty"`
-	Status string                  `json:"status,omitempty"`
+	Type   string `json:"type"`
+	ID     string `json:"id,omitempty"`
+	Status string `json:"status,omitempty"`
 	// message fields:
 	Role    string                 `json:"role,omitempty"`
 	Content []responsesContentPart `json:"content,omitempty"`
@@ -136,6 +137,14 @@ type responsesUsage struct {
 	TotalTokens  int `json:"total_tokens"`
 }
 
+// responsesStreamEvent is an SSE event on the Responses wire. The event type is
+// the event field ("response.created", "response.output_item.added", etc.); the
+// data field carries the event-specific payload.
+type responsesStreamEvent struct {
+	Event string      `json:"event"`
+	Data  interface{} `json:"data"`
+}
+
 // handleResponses serves POST /v1/responses. Its spine is handleChatCompletions
 // step-for-step over the same served-turn core; only the request decode and the
 // response render differ (the Responses shape vs the chat shape).
@@ -147,12 +156,6 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	var req ResponsesRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
-		return
-	}
-	// Streaming is not yet supported on this wire (see file header). Refuse loudly
-	// rather than silently buffering, so a client that needs SSE knows immediately.
-	if req.Stream {
-		writeErr(w, http.StatusBadRequest, "stream: Responses streaming is not supported by the fak gateway yet; retry with stream:false")
 		return
 	}
 	messages, err := decodeResponsesInput(req.Input, req.Instructions)
@@ -257,12 +260,12 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	s.logInferenceTurn(reqTrace, "openai_responses", false, comp.Usage, finish, time.Since(began), false)
 
 	resp := responsesResponse{
-		ID:        "resp_fak_" + itoa(uint64(time.Now().UnixNano())),
-		Object:    "response",
-		CreatedAt: time.Now().Unix(),
-		Model:     respModel,
-		Status:    responsesStatusFor(comp.FinishReason),
-		Output:    responsesOutputFromAssistant(asst),
+		ID:         "resp_fak_" + itoa(uint64(time.Now().UnixNano())),
+		Object:     "response",
+		CreatedAt:  time.Now().Unix(),
+		Model:      respModel,
+		Status:     responsesStatusFor(comp.FinishReason),
+		Output:     responsesOutputFromAssistant(asst),
 		OutputText: asst.Content,
 		Usage: responsesUsage{
 			InputTokens:  comp.Usage.PromptTokens,
@@ -276,7 +279,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if len(adjs) > 0 || len(resultAdmissions) > 0 {
 		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	if req.Stream {
+		s.writeResponsesStream(w, resp)
+	} else {
+		writeJSON(w, http.StatusOK, resp)
+	}
 }
 
 // decodeResponsesInput folds the Responses `input` (a bare string OR an array of
@@ -491,6 +498,100 @@ func responsesStatusFor(finishReason string) string {
 		return "incomplete"
 	}
 	return "completed"
+}
+
+// writeResponsesStream synthesizes a well-formed Responses SSE stream from a
+// buffered response, matching the request's stream flag. It emits the sequence:
+// response.created → response.output_item.added (per item) → response.output_item.done
+// (per item) → response.done. This is the synthesized-stream analogue of
+// writeChatCompletionStream: the gateway buffers the entire turn, adjudicates the
+// proposed tool calls, then re-serializes the adjudicated turn as SSE.
+func (s *Server) writeResponsesStream(w http.ResponseWriter, resp responsesResponse) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	// response.created: initial event with response metadata
+	type responseCreatedData struct {
+		ID        string         `json:"id"`
+		Object    string         `json:"object"`
+		CreatedAt int64          `json:"created_at"`
+		Model     string         `json:"model"`
+		Status    string         `json:"status"`
+		Usage     responsesUsage `json:"usage"`
+	}
+	_ = writeSSEEvent(w, "response.created", responseCreatedData{
+		ID:        resp.ID,
+		Object:    resp.Object,
+		CreatedAt: resp.CreatedAt,
+		Model:     resp.Model,
+		Status:    resp.Status,
+		Usage:     resp.Usage,
+	})
+
+	// Emit each output item: added → done
+	for _, item := range resp.Output {
+		// response.output_item.added
+		type outputItemAdded struct {
+			Index int                 `json:"index"`
+			Item  responsesOutputItem `json:"item"`
+		}
+		_ = writeSSEEvent(w, "response.output_item.added", outputItemAdded{Index: len(resp.Output), Item: item})
+
+		// response.output_item.done
+		type outputItemDone struct {
+			Index int    `json:"index"`
+			Item  string `json:"item"`
+		}
+		_ = writeSSEEvent(w, "response.output_item.done", outputItemDone{Index: len(resp.Output), Item: "done"})
+	}
+
+	// response.done: terminal event with optional fak extension and incomplete details
+	type responseDoneData struct {
+		ID                string                `json:"id"`
+		Object            string                `json:"object"`
+		CreatedAt         int64                 `json:"created_at"`
+		Model             string                `json:"model"`
+		Status            string                `json:"status"`
+		Output            []responsesOutputItem `json:"output"`
+		OutputText        string                `json:"output_text,omitempty"`
+		Usage             responsesUsage        `json:"usage"`
+		Fak               *FakExt               `json:"fak,omitempty"`
+		IncompleteDetails *responsesIncomplete  `json:"incomplete_details,omitempty"`
+	}
+	_ = writeSSEEvent(w, "response.done", responseDoneData{
+		ID:                resp.ID,
+		Object:            resp.Object,
+		CreatedAt:         resp.CreatedAt,
+		Model:             resp.Model,
+		Status:            resp.Status,
+		Output:            resp.Output,
+		OutputText:        resp.OutputText,
+		Usage:             resp.Usage,
+		Fak:               resp.Fak,
+		IncompleteDetails: resp.IncompleteDetails,
+	})
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// writeSSEEvent writes a single SSE event with a typed event name. The Responses
+// wire uses named event types (response.created, response.done) rather than the
+// generic data: frames the chat wire uses.
+func writeSSEEvent(w http.ResponseWriter, event string, data interface{}) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "event: %s\n", event)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	return nil
 }
 
 // validateResponsesSampling enforces the Responses sampling-param contract on

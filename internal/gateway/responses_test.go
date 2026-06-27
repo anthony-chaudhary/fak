@@ -298,12 +298,14 @@ func TestResponsesEmptyInputIsBadRequest(t *testing.T) {
 	}
 }
 
-// TestResponsesStreamIsRejected proves stream:true is refused with a 400 (the wire
-// is buffered-only in v1) rather than silently buffered.
-func TestResponsesStreamIsRejected(t *testing.T) {
+// TestResponsesStreamEmitsSSE proves the Responses wire synthesizes a well-formed
+// SSE sequence when stream:true: response.created → response.output_item.added
+// → response.output_item.done → response.done.
+func TestResponsesStreamEmitsSSE(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = stubPlanner{comp: &agent.Completion{
-		Message: agent.Message{Role: agent.RoleAssistant, Content: "planner must not be reached"},
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "hello back"},
+		FinishReason: "stop",
 	}}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -313,14 +315,89 @@ func TestResponsesStreamIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	respRaw, _ := io.ReadAll(httpResp.Body)
-	httpResp.Body.Close()
-	if httpResp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", httpResp.StatusCode, respRaw)
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(httpResp.Body)
+		t.Fatalf("status = %d, want 200: %s", httpResp.StatusCode, body)
 	}
-	if !strings.Contains(string(respRaw), "stream") {
-		t.Errorf("response = %s, want a stream-not-supported message", respRaw)
+
+	ct := httpResp.Header.Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
 	}
+
+	// Parse SSE events and verify the sequence
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := parseTypedSSE(t, string(body))
+
+	// Should have at least: response.created, response.output_item.added,
+	// response.output_item.done, response.done
+	if len(events) < 4 {
+		t.Fatalf("got %d SSE events, want at least 4 (created, added, done, done): %v", len(events), events)
+	}
+
+	// response.created should be first
+	if events[0].Event != "response.created" {
+		t.Errorf("first event = %q, want response.created", events[0].Event)
+	}
+
+	// response.done should be last
+	if events[len(events)-1].Event != "response.done" {
+		t.Errorf("last event = %q, want response.done", events[len(events)-1].Event)
+	}
+
+	// Verify we have output_item events
+	var foundAdded, foundDone bool
+	for _, ev := range events {
+		if ev.Event == "response.output_item.added" {
+			foundAdded = true
+		}
+		if ev.Event == "response.output_item.done" {
+			foundDone = true
+		}
+	}
+	if !foundAdded {
+		t.Error("no response.output_item.added event found")
+	}
+	if !foundDone {
+		t.Error("no response.output_item.done event found")
+	}
+}
+
+// typedSSEEvent is a parsed SSE event with a typed event name (like Anthropic/Responses)
+type typedSSEEvent struct {
+	Event string
+	Data  string
+}
+
+// parseTypedSSE parses an SSE body with typed events (event: ..., data: ...) into
+// a slice of typed events.
+func parseTypedSSE(t *testing.T, body string) []typedSSEEvent {
+	t.Helper()
+	var out []typedSSEEvent
+	var ev, data string
+	flush := func() {
+		if data != "" {
+			out = append(out, typedSSEEvent{Event: ev, Data: data})
+		}
+		ev, data = "", ""
+	}
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case line == "":
+			flush()
+		case strings.HasPrefix(line, "event:"):
+			ev = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			data += strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		}
+	}
+	flush()
+	return out
 }
 
 // TestResponsesInputStringForm proves the bare-string input form decodes to a single
