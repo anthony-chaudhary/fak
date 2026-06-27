@@ -261,7 +261,7 @@ named ABSTAIN.
 
 **SOTA baseline.** The current memory SOTA is converging on typed, multi-view
 memory: raw pages plus summaries, facts, QA pairs, graphs, timelines, and task
-views. The companion memo `MEMORY-COMPACTION-SOTA-2026-06-19.md` maps this.
+views. The companion memo `MEMORY-VIEW-CONTRACT-2026-06-26.md` maps this.
 
 **Parity requirement.**
 
@@ -321,7 +321,7 @@ revalidated, transformed, quarantined, or faulted.
 | `fak/internal/plancfi` | approved plan/tool graph enforcement after plan reuse |
 | `fak/internal/abi.Ref` | digest, taint, scope, inline/blob distinction |
 | `docs/explainers/kv-cache-agentic-context.md` | agent-specific prefix cache mechanics and failure modes |
-| `MEMORY-COMPACTION-SOTA-2026-06-19.md` | virtual memory/view-cache direction |
+| `MEMORY-VIEW-CONTRACT-2026-06-26.md` | virtual memory/view-cache direction |
 
 This is enough to justify treating agentic caching as a first-class workstream.
 It is not enough to claim the full primitive is shipped.
