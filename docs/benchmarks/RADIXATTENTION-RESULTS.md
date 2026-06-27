@@ -1,6 +1,6 @@
 ---
 title: "fak vs SGLang RadixAttention: KV Cache Hit Rate"
-description: "Head-to-head of fak's KV-cache reuse against SGLang's RadixAttention on cache hit rate, the hardware-independent axis, with a 4.87x live speedup."
+description: "Head-to-head of fak's KV-cache reuse against SGLang's RadixAttention on cache hit rate, the hardware-independent axis, with a 4.58x live speedup."
 ---
 
 # Benchmarking fak against SGLang's KV-cache RadixAttention
@@ -10,7 +10,7 @@ description: "Head-to-head of fak's KV-cache reuse against SGLang's RadixAttenti
 > of truth with full traceability to commits and artifacts. This doc provides the detailed
 > context and explanation.
 >
-> **Headline Result:** **4.87×** live wall-clock speedup on SmolLM2-135M Q8 (agents workload).
+> **Headline Result:** **4.58×** live wall-clock speedup on SmolLM2-135M Q8 (agents workload).
 > See Authority for full details.
 
 > New here? Read **RADIXATTENTION-EXPLAINER.md** first — a
