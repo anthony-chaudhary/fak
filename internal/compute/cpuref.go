@@ -64,24 +64,9 @@ func QuantizeQ8(be Backend, shape []int, w []float32, block int) Tensor {
 	codes := make([]int8, out*in)
 	scale := make([]float32, out*nblk)
 	for o := 0; o < out; o++ {
-		for b := 0; b < nblk; b++ {
-			blk := w[o*in+b*block : o*in+b*block+block]
-			var amax float32
-			for _, v := range blk {
-				if a := absf(v); a > amax {
-					amax = a
-				}
-			}
-			d := amax / 127
-			scale[o*nblk+b] = d
-			if d == 0 {
-				continue
-			}
-			inv := 1.0 / d
-			for i := 0; i < block; i++ {
-				codes[o*in+b*block+i] = q8round(blk[i] * inv)
-			}
-		}
+		q, d := quantizeVecQ8(w[o*in:o*in+in], block)
+		copy(codes[o*in:o*in+in], q)
+		copy(scale[o*nblk:o*nblk+nblk], d)
 	}
 	return NewQ8(be, shape, codes, scale, block)
 }
@@ -114,6 +99,12 @@ func (c *cpuBackend) result(shape []int, data []float32) Tensor {
 	return makeTensor(c, F32, RowMajor, shape, nil, &hostBuf{f32: data})
 }
 
+// q4kRows views a Q4_K weight tensor's codes as raw bytes and returns the per-output-row
+// byte stride — the shared preamble of the MatMul/BatchedMatMul Q4_K row-dot loops.
+func (c *cpuBackend) q4kRows(w Tensor, in int) (raw []byte, rowBytes int) {
+	return i8AsBytes(c.i8(w)), (in / q4kSuper) * q4kSuperBlock
+}
+
 // ---- matmul family (dtype-dispatched on the WEIGHT — the f32/Q8 twin collapse) -----
 
 // MatMul: y[o] = Σ_i W[o,i]·x[i]. F32 reproduces matRows/parMatRows (fdot reduction);
@@ -138,8 +129,7 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 			y[o] = qdot8scalar(wc[o*in:o*in+in], ws[o*nblk:o*nblk+nblk], qx, dx, blk)
 		}
 	case Q4_K:
-		raw := i8AsBytes(c.i8(w))
-		rowBytes := (in / q4kSuper) * q4kSuperBlock
+		raw, rowBytes := c.q4kRows(w, in)
 		buf := make([]float32, q4kSuper)
 		for o := 0; o < out; o++ {
 			y[o] = q4kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
@@ -184,8 +174,7 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q4_K:
 		// Per-(o,t) GEMV — bit-identical to MatMul's Q4_K row dot for each row t, which is the
 		// q4kGemm correctness contract (Y[t,o] == q4kMatRows(X_t)[o]).
-		raw := i8AsBytes(c.i8(w))
-		rowBytes := (in / q4kSuper) * q4kSuperBlock
+		raw, rowBytes := c.q4kRows(w, in)
 		buf := make([]float32, q4kSuper)
 		for o := 0; o < out; o++ {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
@@ -222,14 +211,8 @@ func (c *cpuBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Ten
 	xf := c.f32(x)
 	out := append([]float32(nil), xf...)
 	cos, sin := ropeRow(theta, headDim, pos)
-	half := headDim / 2
 	for h := 0; h < nHeads; h++ {
-		hv := out[h*headDim : (h+1)*headDim]
-		for j := 0; j < half; j++ {
-			a, b := hv[j], hv[j+half]
-			hv[j] = a*cos[j] - b*sin[j]
-			hv[j+half] = b*cos[j] + a*sin[j]
-		}
+		applyRope(out[h*headDim:(h+1)*headDim], cos, sin)
 	}
 	return c.result(append([]int(nil), x.Shape...), out)
 }
@@ -338,17 +321,17 @@ func (k *cpuKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 func (k *cpuKV) Len() int   { return len(k.pos) }
 func (k *cpuKV) Pos() []int { return append([]int(nil), k.pos...) }
 
-func (k *cpuKV) KeysView(layer int) Tensor {
-	w := k.stride()
-	n := len(k.K[layer]) / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &hostBuf{f32: k.K[layer]})
-}
+func (k *cpuKV) KeysView(layer int) Tensor { return k.layerView(k.K[layer]) }
 
 // ValuesView returns the layer's cached values as a flat [pos, nKV*hd] host tensor view (zero-copy on the reference).
-func (k *cpuKV) ValuesView(layer int) Tensor {
+func (k *cpuKV) ValuesView(layer int) Tensor { return k.layerView(k.V[layer]) }
+
+// layerView wraps a layer's flat row-major cache slice as a [pos, nKV*hd] host tensor
+// view (zero-copy on the reference) — the shared body of KeysView/ValuesView.
+func (k *cpuKV) layerView(data []float32) Tensor {
 	w := k.stride()
-	n := len(k.V[layer]) / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &hostBuf{f32: k.V[layer]})
+	n := len(data) / w
+	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &hostBuf{f32: data})
 }
 
 // Evict reproduces model.KVCache.Evict exactly: compact survivors out of every layer,
