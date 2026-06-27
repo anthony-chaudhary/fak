@@ -94,21 +94,23 @@ def test_plan_skips_already_open_key():
     pane = _pane(direction="regressed",
                  early_warning=[_ew("slop", "code-slop", 2, 4, 6),
                                 _ew("code", "code", 9, 30, 39)])
-    to_file, stats = ss.plan_issues(pane, open_keys={"code"},
-                                    min_delta=1, max_issues=10, today="2026-06-26",
-                                    available=SKILLS)
+    to_file, refreshes, stats = ss.plan_issues(pane, open_keys={"code"},
+                                               min_delta=1, max_issues=10,
+                                               today="2026-06-26", available=SKILLS)
     keys = [i["key"] for i in to_file]
     assert keys == ["slop"], "the open 'code' regression is deduped out"
     assert stats["already-open"] == 1
+    # With no open_index passed, the original skip-only behavior holds: no refresh.
+    assert refreshes == [], "no index -> no refresh (back-compat)"
 
 
 # --- cap --------------------------------------------------------------------
 def test_plan_caps_worst_first():
     ew = [_ew(f"k{i}", f"label{i}", i + 1, 0, i + 1) for i in range(6)]
     pane = _pane(direction="regressed", early_warning=ew)
-    to_file, stats = ss.plan_issues(pane, open_keys=set(),
-                                    min_delta=1, max_issues=2, today="2026-06-26",
-                                    available=SKILLS)
+    to_file, _refreshes, stats = ss.plan_issues(pane, open_keys=set(),
+                                                min_delta=1, max_issues=2,
+                                                today="2026-06-26", available=SKILLS)
     assert [i["key"] for i in to_file] == ["k5", "k4"]
     assert stats["over-cap"] == 4
 
@@ -116,8 +118,9 @@ def test_plan_caps_worst_first():
 def test_plan_below_min_delta_is_accounted():
     pane = _pane(direction="regressed",
                  early_warning=[_ew("a", "a", 1, 0, 1), _ew("b", "b", 5, 0, 5)])
-    to_file, stats = ss.plan_issues(pane, open_keys=set(), min_delta=3,
-                                    max_issues=5, today="2026-06-26", available=SKILLS)
+    to_file, _refreshes, stats = ss.plan_issues(pane, open_keys=set(), min_delta=3,
+                                                max_issues=5, today="2026-06-26",
+                                                available=SKILLS)
     assert [i["key"] for i in to_file] == ["b"]
     assert stats["below-min-delta"] == 1, "the +1 drop is reported, not silent"
 
@@ -202,9 +205,111 @@ def test_no_stale_skill_mappings():
 
 def test_plan_unpinned_files_nothing():
     pane = _pane(direction="unpinned", early_warning=[_ew("code", "code", 9, 0, 9)])
-    to_file, _ = ss.plan_issues(pane, open_keys=set(), min_delta=1,
-                                max_issues=5, today="2026-06-26", available=SKILLS)
-    assert to_file == []
+    to_file, refreshes, _ = ss.plan_issues(pane, open_keys=set(), min_delta=1,
+                                           max_issues=5, today="2026-06-26",
+                                           available=SKILLS)
+    assert to_file == [] and refreshes == []
+
+
+# --- #981: refresh an already-open ticket when its regression worsens -------
+def test_delta_marker_roundtrips_through_open_index():
+    # An issue body carrying both markers yields {number, noted_delta}.
+    body = ("text\n" + ss.marker("slop") + "\n" + ss.delta_marker("slop", 6))
+    idx = ss.open_issue_index([{"number": 42, "title": "x", "body": body}])
+    assert idx == {"slop": {"number": 42, "noted_delta": 6}}
+
+
+def test_open_index_falls_back_to_title_delta_when_no_marker():
+    # An OLD issue filed before the delta-marker existed: noted delta read from title.
+    body = "legacy body\n" + ss.marker("code")
+    idx = ss.open_issue_index(
+        [{"number": 7, "title": "score-signal: code debt rose +9 (30->39)", "body": body}])
+    assert idx["code"]["noted_delta"] == 9, "title +N is the fallback"
+    assert idx["code"]["number"] == 7
+
+
+def test_open_index_floor_zero_when_no_marker_no_title_delta():
+    body = "no delta anywhere\n" + ss.marker("code")
+    idx = ss.open_issue_index([{"number": 5, "title": "no plus here", "body": body}])
+    assert idx["code"]["noted_delta"] == 0, "conservative floor so a real rise trips"
+
+
+def test_plan_refreshes_open_ticket_that_worsened():
+    # 'code' is already open at noted +4; it now reads +9 (grew by 5 >= worsen 2).
+    pane = _pane(direction="regressed",
+                 early_warning=[_ew("code", "code", 9, 30, 39)])
+    open_idx = {"code": {"number": 7, "noted_delta": 4}}
+    to_file, refreshes, stats = ss.plan_issues(
+        pane, open_keys={"code"}, min_delta=1, max_issues=5, today="2026-06-26",
+        available=SKILLS, open_index=open_idx, worsen_delta=2)
+    assert to_file == [], "no NEW issue — it is already open"
+    assert len(refreshes) == 1, "worsened open ticket is REFRESHED, not dropped"
+    r = refreshes[0]
+    assert r["action"] == "refresh" and r["number"] == 7 and r["key"] == "code"
+    assert r["delta"] == 9 and r["noted_delta"] == 4
+    assert "+9" in r["title"] and "(30->39)" in r["title"], "title bumped to current"
+    assert "+4" in r["comment"] and "+9" in r["comment"], "comment shows old->new"
+    assert ss.delta_marker("code", 9) in r["comment"], "new noted-delta recorded"
+    assert stats["refresh"] == 1 and stats["already-open"] == 1
+
+
+def test_plan_does_not_refresh_a_flat_open_ticket():
+    # 'code' open at noted +9, still reads +9 (grew by 0 < worsen 2) -> left alone.
+    pane = _pane(direction="regressed",
+                 early_warning=[_ew("code", "code", 9, 30, 39)])
+    open_idx = {"code": {"number": 7, "noted_delta": 9}}
+    to_file, refreshes, stats = ss.plan_issues(
+        pane, open_keys={"code"}, min_delta=1, max_issues=5, today="2026-06-26",
+        available=SKILLS, open_index=open_idx, worsen_delta=2)
+    assert to_file == [] and refreshes == [], "a flat metric is never re-commented"
+    assert stats["open-but-flat"] == 1 and stats["refresh"] == 0
+
+
+def test_plan_refresh_below_threshold_is_not_fired():
+    # grew by exactly 1, below worsen-delta 2 -> no refresh (bounded).
+    pane = _pane(direction="regressed",
+                 early_warning=[_ew("code", "code", 10, 30, 40)])
+    open_idx = {"code": {"number": 7, "noted_delta": 9}}
+    _to, refreshes, stats = ss.plan_issues(
+        pane, open_keys={"code"}, min_delta=1, max_issues=5, today="2026-06-26",
+        available=SKILLS, open_index=open_idx, worsen_delta=2)
+    assert refreshes == [] and stats["open-but-flat"] == 1
+
+
+def test_plan_refresh_is_bounded_once_per_metric_per_run():
+    # Even with the same key surfacing once (dedup), at most ONE refresh is planned.
+    pane = _pane(direction="regressed",
+                 early_warning=[_ew("code", "code", 20, 0, 20)])
+    open_idx = {"code": {"number": 7, "noted_delta": 1}}
+    _to, refreshes, _stats = ss.plan_issues(
+        pane, open_keys={"code"}, min_delta=1, max_issues=5, today="2026-06-26",
+        available=SKILLS, open_index=open_idx, worsen_delta=2)
+    assert len(refreshes) == 1, "one open issue per key -> one refresh max"
+
+
+def test_plan_no_index_keeps_skip_only_behavior():
+    # An already-open key with NO index entry (number unknown) is still skipped, not
+    # refreshed — there is nothing to comment on.
+    pane = _pane(direction="regressed",
+                 early_warning=[_ew("code", "code", 9, 30, 39)])
+    _to, refreshes, stats = ss.plan_issues(
+        pane, open_keys={"code"}, min_delta=1, max_issues=5, today="2026-06-26",
+        available=SKILLS, open_index={}, worsen_delta=2)
+    assert refreshes == [] and stats["already-open"] == 1
+
+
+def test_rendered_new_issue_carries_delta_marker():
+    # A freshly-filed issue must seed the noted-delta marker so a later worsening
+    # has a baseline to compare against.
+    cand = {"key": "slop", "label": "code-slop", "delta": 6, "from": 4, "to": 10,
+            "grade": "B", "portfolio_regressed": False, "baseline_commit": "b"}
+    issue = ss.render_issue(cand, commit="c", today="2026-06-26",
+                            tools={}, available=SKILLS)
+    assert ss.delta_marker("slop", 6) in issue["body"], "noted-delta seeded on file"
+    # And it round-trips: reading it back yields the same noted delta.
+    idx = ss.open_issue_index([{"number": 1, "title": issue["title"],
+                                "body": issue["body"]}])
+    assert idx["slop"]["noted_delta"] == 6
 
 
 def _run() -> int:

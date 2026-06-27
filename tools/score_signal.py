@@ -81,11 +81,17 @@ SCHEMA = "fak-score-signal/1"
 SIGNAL_LABEL = "score-signal"
 DEBT_LABEL = "tech-debt"
 MARKER_RE = re.compile(r"fak-score-signal:\s*([A-Za-z0-9_\-]+)")
+# The NOTED-DELTA marker (#981): a second stable comment recording the delta the
+# issue currently reports, so a worsening regression on an already-open ticket can
+# be detected and REFRESHED — while a flat metric is never re-commented. Kept
+# separate from MARKER_RE so the dedup anchor regex stays byte-for-byte unchanged.
+DELTA_MARKER_RE = re.compile(r"fak-score-signal-delta:\s*([A-Za-z0-9_\-]+)=(-?\d+)")
 
 DEFAULTS = {
     "min_delta": 1,        # a metric must rise by at least this to be actionable
     "max_issues": 5,       # hard cap on issues filed per run (anti-storm)
     "issue_scan_limit": 800,  # open score-signal issues fetched for the dedup index
+    "worsen_delta": 2,     # an already-open metric must worsen by >= this to REFRESH
 }
 
 # The owning RSI skill per scorecard key — the "do this next" hint baked into each
@@ -166,6 +172,12 @@ def marker(key: str) -> str:
     return f"<!-- fak-score-signal: {key} -->"
 
 
+def delta_marker(key: str, delta: int) -> str:
+    """The noted-delta anchor (#981): records the delta the issue currently reports
+    so a later worsening can be detected and a flat metric never re-commented."""
+    return f"<!-- fak-score-signal-delta: {key}={delta} -->"
+
+
 def open_issue_keys(issues: list[dict[str, Any]]) -> set[str]:
     """The set of scorecard keys already tracked by an OPEN issue (its body carries
     the marker). These are skipped — at most one open issue per scorecard."""
@@ -174,6 +186,32 @@ def open_issue_keys(issues: list[dict[str, Any]]) -> set[str]:
         for m in MARKER_RE.findall(iss.get("body") or ""):
             keys.add(m.strip())
     return keys
+
+
+def open_issue_index(issues: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """key -> {number, noted_delta} for every OPEN score-signal issue (#981). The
+    noted delta is read from the delta-marker; an older issue filed before the marker
+    existed has no recorded delta, so its noted value falls back to the delta parsed
+    from the title (`+N`), and finally to 0 — a conservative floor that lets a real
+    worsening still trip the threshold rather than being hidden by a missing marker.
+    The LAST marker/title wins, so a refreshed issue's bumped value is the one read."""
+    idx: dict[str, dict[str, Any]] = {}
+    for iss in issues:
+        body = iss.get("body") or ""
+        keys = [m.strip() for m in MARKER_RE.findall(body)]
+        if not keys:
+            continue
+        key = keys[-1]
+        noted: int | None = None
+        dm = DELTA_MARKER_RE.findall(body)
+        for k, v in dm:
+            if k.strip() == key:
+                noted = int(v)  # last wins
+        if noted is None:
+            tm = re.search(r"\+(\d+)", str(iss.get("title") or ""))
+            noted = int(tm.group(1)) if tm else 0
+        idx[key] = {"number": iss.get("number"), "noted_delta": noted}
+    return idx
 
 
 def regressions(payload: dict[str, Any], min_delta: int) -> list[dict[str, Any]]:
@@ -291,8 +329,12 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
         + "\n\n---\n"
         "_The scorecard family is listed in `tools/scorecard_control_pane.py`. After "
         "this issue is closed, a future regression of the same metric files a FRESH "
-        "issue — only on an armed `--live` run; the scheduled CI run is dry-run._\n"
+        "issue — only on an armed `--live` run; the scheduled CI run is dry-run. While "
+        "this issue stays open, a materially worse delta REFRESHES it in place rather "
+        "than filing a duplicate._\n"
         + marker(key)
+        + "\n"
+        + delta_marker(key, delta)
     )
 
     return {
@@ -304,18 +346,65 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
     }
 
 
+def render_refresh(cand: dict[str, Any], number: int, noted: int, today: str,
+                   ) -> dict[str, Any]:
+    """Build the in-place REFRESH of an already-open issue whose tracked regression
+    worsened (#981): a dated comment with the new before->after numbers, the bumped
+    title (so the backlog reflects current severity), and the new noted-delta marker
+    appended so a later stable run never re-comments. Strictly bounded — the caller
+    emits at most one refresh per metric per run, only past the --worsen-delta
+    threshold; this function just renders the chosen refresh."""
+    label = cand["label"]
+    key = cand["key"]
+    delta, frm, to = cand["delta"], cand["from"], cand["to"]
+    base = cand.get("baseline_commit") or ""
+    base_s = f" @{base}" if base else ""
+    comment = (
+        f"> **score-signal refresh** ({today}) — the tracked regression worsened.\n\n"
+        f"`{label}` ({key}) debt is now **+{delta}** ({frm} -> {to}) vs the pinned "
+        f"baseline{base_s} — up from the **+{noted}** this issue last recorded. The "
+        f"underlying debt grew while this ticket stayed open; the title is bumped to "
+        f"the current severity.\n\n"
+        f"_Bounded: refreshed at most once per run and only when the delta grew "
+        f"materially. Re-measure + retire per the contract above._\n"
+        + delta_marker(key, delta)
+    )
+    title = f"score-signal: {label} debt rose +{delta} ({frm}->{to})"
+    return {
+        "action": "refresh",
+        "number": number,
+        "title": title,
+        "comment": comment,
+        "key": key,
+        "delta": delta,
+        "noted_delta": noted,
+    }
+
+
 def plan_issues(payload: dict[str, Any], open_keys: set[str], *,
                 min_delta: int, max_issues: int, today: str,
                 available: set[str] | None = None,
-                ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """relevance filter -> dedup vs OPEN issues -> CAP. Returns (issues, skip_stats).
-    Deterministic: regressions are worst-first, deduped by key, then capped."""
+                open_index: dict[str, dict[str, Any]] | None = None,
+                worsen_delta: int = DEFAULTS["worsen_delta"],
+                ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """relevance filter -> dedup vs OPEN issues -> CAP, with a REFRESH branch (#981).
+    Returns (new_issues, refreshes, skip_stats). Deterministic: regressions are
+    worst-first, deduped by key, then capped.
+
+    An already-open metric is NOT silently dropped: if its current delta exceeds the
+    delta the open issue last recorded by >= worsen_delta, it is planned as a REFRESH
+    (at most one per metric per run — there is at most one open issue per key) instead
+    of being skipped. `open_index` carries the per-key {number, noted_delta} needed to
+    decide; when it is omitted the behavior is the original skip-only dedup, so callers
+    that pass only `open_keys` keep the same semantics with an empty refresh list."""
     available = available if available is not None else set()
+    open_index = open_index or {}
     stats = {"already-open": 0, "below-min-delta": 0, "within-run-dup": 0,
-             "over-cap": 0}
+             "over-cap": 0, "refresh": 0, "open-but-flat": 0}
     commit = str(payload.get("commit") or "")
     tools = tool_by_key()
     out: list[dict[str, Any]] = []
+    refreshes: list[dict[str, Any]] = []
     seen_run: set[str] = set()
     # All risen metrics (delta >= 1); the min-delta filter is accounted as a skip so
     # the stats honestly report what was dropped and why, not silently swallowed.
@@ -330,13 +419,25 @@ def plan_issues(payload: dict[str, Any], open_keys: set[str], *,
             continue
         if key in open_keys:
             stats["already-open"] += 1
+            # #981: an already-open metric that worsened materially is refreshed in
+            # place rather than dropped. Without an index entry (older index that
+            # only knew keys) we keep the original skip — no number to comment on.
+            entry = open_index.get(key)
+            if entry is not None and entry.get("number") is not None:
+                noted = int(entry.get("noted_delta", 0))
+                if cand["delta"] - noted >= worsen_delta:
+                    refreshes.append(render_refresh(
+                        cand, int(entry["number"]), noted, today))
+                    stats["refresh"] += 1
+                else:
+                    stats["open-but-flat"] += 1
             continue
         out.append(render_issue(cand, commit, today, tools, available))
 
     if len(out) > max_issues:
         stats["over-cap"] = len(out) - max_issues
         out = out[:max_issues]
-    return out, stats
+    return out, refreshes, stats
 
 
 # ============================================================================
@@ -408,6 +509,26 @@ def create_issue(issue: dict[str, Any]) -> str:
     return proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
 
 
+def refresh_issue(refresh: dict[str, Any]) -> None:
+    """Apply a planned REFRESH (#981): post the dated comment, then bump the title to
+    the current severity. The comment carries the new noted-delta marker, so a later
+    flat run reads the bumped value and does not re-comment. A failure on either step
+    raises RuntimeError, surfaced per-refresh by the caller's error list."""
+    num = str(refresh["number"])
+    c = subprocess.run(
+        ["gh", "issue", "comment", num, "--body", refresh["comment"]],
+        capture_output=True, text=True, encoding="utf-8")
+    if c.returncode != 0:
+        raise RuntimeError(f"gh issue comment {num} -> {c.returncode}: "
+                           f"{c.stderr.strip()[:300]}")
+    e = subprocess.run(
+        ["gh", "issue", "edit", num, "--title", refresh["title"]],
+        capture_output=True, text=True, encoding="utf-8")
+    if e.returncode != 0:
+        raise RuntimeError(f"gh issue edit {num} -> {e.returncode}: "
+                           f"{e.stderr.strip()[:300]}")
+
+
 def load_payload(from_arg: str, root: Path, timeout: int) -> dict[str, Any]:
     """The folded control-pane payload: read it from --from (a file or '-' for
     stdin), else fold it live by invoking tools/scorecard_control_pane.py --json.
@@ -454,6 +575,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min-delta", type=int,
                     help=f"a metric must rise by at least this to file "
                          f"(default {DEFAULTS['min_delta']}).")
+    ap.add_argument("--worsen-delta", type=int,
+                    help=f"an already-open metric must worsen by at least this past "
+                         f"the delta its ticket last recorded to REFRESH it in place "
+                         f"(default {DEFAULTS['worsen_delta']}); below it the open "
+                         f"ticket is left untouched (#981).")
     ap.add_argument("--max-issues", type=int,
                     help=f"hard cap on issues filed, worst-first "
                          f"(default {DEFAULTS['max_issues']}).")
@@ -468,6 +594,8 @@ def main(argv: list[str] | None = None) -> int:
     today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
     min_delta = args.min_delta if args.min_delta is not None else DEFAULTS["min_delta"]
     max_issues = args.max_issues if args.max_issues is not None else DEFAULTS["max_issues"]
+    worsen_delta = (args.worsen_delta if args.worsen_delta is not None
+                    else DEFAULTS["worsen_delta"])
 
     # A supplied pane is a point-in-time snapshot; under --live a stale one could
     # re-file a regression already retired+closed (dedup is open-only by design).
@@ -492,15 +620,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         issues = fetch_open_issues(DEFAULTS["issue_scan_limit"])
         open_keys = open_issue_keys(issues)
+        open_idx = open_issue_index(issues)
     except Exception as e:  # noqa: BLE001
         print(f"refuse: cannot fetch open issues for the dedup index ({e})",
               file=sys.stderr)
         return 2
 
     available = available_skills(root)
-    to_file, skip_stats = plan_issues(
+    to_file, refreshes, skip_stats = plan_issues(
         payload, open_keys, min_delta=min_delta, max_issues=max_issues, today=today,
-        available=available)
+        available=available, open_index=open_idx, worsen_delta=worsen_delta)
 
     # The RED-ratchet/empty-plan reconciliation: the portfolio can regress with no
     # per-metric rise attributable (a new/unpinned scorecard adds debt but has no
@@ -516,7 +645,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"(`python tools/scorecard_control_pane.py --pin`) or investigate")
 
     filed: list[dict[str, Any]] = []
-    if args.live and to_file:
+    refreshed: list[dict[str, Any]] = []
+    if args.live and (to_file or refreshes):
         ensure_labels()
         for issue in to_file:
             try:
@@ -525,6 +655,13 @@ def main(argv: list[str] | None = None) -> int:
                 errors.append(f"create[{issue['key']}]: {e}")
                 continue
             filed.append({**issue, "issue_url": url})
+        for r in refreshes:
+            try:
+                refresh_issue(r)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"refresh[{r['key']}#{r['number']}]: {e}")
+                continue
+            refreshed.append(r)
 
     result = {
         "schema": SCHEMA,
@@ -539,8 +676,14 @@ def main(argv: list[str] | None = None) -> int:
             {"title": i["title"], "key": i["key"], "delta": i["delta"],
              "labels": i["labels"]}
             for i in to_file],
+        "refreshes": [
+            {"number": r["number"], "key": r["key"], "delta": r["delta"],
+             "noted_delta": r["noted_delta"], "title": r["title"]}
+            for r in refreshes],
         "filed": [{"title": f["title"], "key": f["key"],
                    "issue_url": f.get("issue_url", "")} for f in filed],
+        "refreshed": [{"number": r["number"], "key": r["key"],
+                       "delta": r["delta"]} for r in refreshed],
         "errors": errors,
     }
 
@@ -571,6 +714,17 @@ def main(argv: list[str] | None = None) -> int:
             if args.live:
                 mark = f"  {f['issue_url']}" if f else "  (create failed)"
             print(f"     [+{i['delta']:>2}] {i['title']}{mark}")
+    if refreshes:
+        verb = "REFRESHED" if args.live else "would refresh"
+        print(f"  → {verb} {len(refreshes)} open ticket(s) that worsened "
+              f"(worsen-delta {worsen_delta}):")
+        for r in refreshes:
+            done = any(x["number"] == r["number"] for x in refreshed)
+            mark = ""
+            if args.live:
+                mark = "  ok" if done else "  (refresh failed)"
+            print(f"     refresh #{r['number']} {r['key']} "
+                  f"(+{r['noted_delta']} → +{r['delta']}){mark}")
     if note:
         print(f"  note: {note}")
     if errors:
