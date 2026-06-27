@@ -55,4 +55,30 @@
 // what was OBSERVED (exit status, artifact path) and NEVER a fabricated number. A
 // task the box cannot run is never selected, so the loop can never claim to have
 // collected HW-gated data on hardware that cannot produce it.
+//
+// UNATTENDED / DETACHED RUNS. Starting `fak nightrun run --apply --loop` from a
+// detached session (a `setsid`/`nohup` job, a cron line, a minimal-env container)
+// has two environment requirements an interactive shell hides:
+//
+//   - A Go BUILD CACHE. The loop pre-builds each `go run ./cmd/<x>` bench once
+//     (prebuild.go) to avoid paying compile cost per task. `go build` aborts with
+//     "build cache is required, but could not be located" when neither GOCACHE nor
+//     a derivable default (HOME on unix, LocalAppData on Windows) is present — so a
+//     minimal-env detached run would lose EVERY go-run bench. The preflight
+//     (preflightGoCache) provisions a per-run GOCACHE under the build temp dir so
+//     the benches still build, and the artifact names the durable fix. For a
+//     persistent cache across runs, export HOME or GOCACHE before starting.
+//   - A per-task TIMEOUT for heavy collections. Each --apply attempt is bounded by
+//     Task.timeout() (DefaultTaskTimeoutSec = 15 min), generous for the
+//     offline/smoke lane but short for a cold model load + serve + throughput
+//     sweep. Heavy witnesses carry an explicit TimeoutSec (a cold GLM load: 30 min;
+//     a serve+throughput sweep: 1 h). For a one-off heavy collection, raise it
+//     WITHOUT recompiling via the overlay file (DefaultOverlayRel): add a row with
+//     `"timeout_sec": 3600`. A task that exceeds its budget is killed and recorded
+//     OBSERVED as a timeout, never a success, so one hung run cannot stall the loop.
+//
+// A curated witness whose Run is a HUMAN RECIPE (a `<placeholder>`, a prose arrow,
+// or a bare `script.sh   # comment` that needs operator setup) carries Manual:true
+// and is recorded OutcomeSkipped — surfaced by plan/next for a human, never
+// auto-run and never a spurious ledger failure (see Task.autoRunnable).
 package nightrun

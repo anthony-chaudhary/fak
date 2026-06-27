@@ -38,10 +38,84 @@ type goRunCache struct {
 	mu   sync.Mutex
 	dir  string            // temp output dir (created lazily)
 	bins map[string]string // "./cmd/radixbench" -> "<dir>/radixbench[.exe]" ("" = build failed, do not retry)
+	// gocache is the GOCACHE the prebuild `go build` runs under, resolved once by the
+	// detached-run preflight: "" means the ambient environment is fine (a derivable default),
+	// a non-empty path is a per-run default this cache owns when the box has neither GOCACHE
+	// nor a HOME to derive one from (the detached/unattended `setsid` case, #991).
+	gocache string
 }
 
 // newGoRunCache returns an empty per-run build cache.
 func newGoRunCache() *goRunCache { return &goRunCache{bins: map[string]string{}} }
+
+// gocacheStatus is the verdict of the detached-run build-cache preflight (#991): whether
+// `go build` can locate a cache, and — when it cannot be derived from the ambient
+// environment — the per-run default we will set instead, plus a one-line remediation an
+// operator/agent can act on. It distinguishes a missing cache (fixable: we set a default)
+// from a real compile error, so a detached run's artifact says which one happened.
+type gocacheStatus struct {
+	// Usable is true when `go build` will find a cache: either GOCACHE is set, or HOME (the
+	// source of the default os.UserCacheDir-derived GOCACHE) is set, or we provisioned a default.
+	Usable bool
+	// Default is the GOCACHE path this run will export when the ambient env has none, or "" when
+	// the ambient environment already resolves a cache (nothing to override).
+	Default string
+	// Remediation names the env var an operator should export for a durable fix (HOME or GOCACHE),
+	// "" when the ambient cache is already usable.
+	Remediation string
+}
+
+// preflightGoCache decides whether the prebuild `go build` can locate a build cache, and when
+// it cannot be derived from the ambient environment (no GOCACHE AND no HOME / no per-OS user
+// cache dir — the minimal-environment detached run), names a per-run default under buildDir so
+// the offline go-run benches still build instead of every one failing with "build cache is
+// required, but could not be located" (#991). It is pure over its getenv/cachedir seams so a
+// test drives every branch without touching the real environment.
+//
+// Resolution order mirrors cmd/go's own: an explicit GOCACHE wins; else a derivable default
+// (os.UserCacheDir, which needs HOME on unix / LocalAppData on Windows); else our per-run
+// default. The remediation always names the durable fix (export HOME or GOCACHE) so a detached
+// run's artifact is actionable rather than a bare build failure.
+func preflightGoCache(getenv func(string) string, userCacheDir func() (string, error), buildDir string) gocacheStatus {
+	if strings.TrimSpace(getenv("GOCACHE")) != "" {
+		return gocacheStatus{Usable: true} // explicit GOCACHE — nothing to do
+	}
+	if _, err := userCacheDir(); err == nil {
+		return gocacheStatus{Usable: true} // a default is derivable (HOME / LocalAppData present)
+	}
+	// Neither set nor derivable: the detached/minimal-environment case. Provision a per-run
+	// GOCACHE under the build dir so the benches build, and still surface the durable fix.
+	def := filepath.Join(buildDir, "gocache")
+	return gocacheStatus{
+		Usable:      true,
+		Default:     def,
+		Remediation: "set HOME or GOCACHE for a durable build cache (nightrun used a per-run default at " + def + ")",
+	}
+}
+
+// resolveGoCache runs the preflight once per cache lifetime (guarded by the caller holding mu)
+// and memoizes the chosen per-run GOCACHE. It is a no-op after the first call. dir must already
+// be created so the per-run default lives under the run's temp tree (removed by cleanup).
+func (c *goRunCache) resolveGoCache() {
+	if c.gocache != "" || c.dir == "" {
+		return
+	}
+	st := preflightGoCache(os.Getenv, os.UserCacheDir, c.dir)
+	if st.Default != "" {
+		_ = os.MkdirAll(st.Default, 0o755)
+		c.gocache = st.Default
+	}
+}
+
+// buildEnv returns the environment for the prebuild `go build` subprocess: the ambient
+// environment, with GOCACHE forced to the per-run default when the preflight provisioned one
+// (the detached-run case) and otherwise inherited unchanged. nil means "inherit os.Environ()".
+func (c *goRunCache) buildEnv() []string {
+	if c.gocache == "" {
+		return nil
+	}
+	return append(os.Environ(), "GOCACHE="+c.gocache)
+}
 
 // cleanup removes the build dir and resets the cache. RunLoop defers it so the compiled
 // binaries are explicitly removed at the end of the run (the OS does not reclaim TMPDIR on exit).
@@ -106,6 +180,11 @@ func (c *goRunCache) binaryFor(ctx context.Context, root, pkg string) string {
 		}
 		c.dir = d
 	}
+	// Detached-run preflight (#991): if the environment has neither GOCACHE nor a derivable
+	// default (HOME / per-OS user cache dir), `go build` would abort with "build cache is
+	// required, but could not be located" and EVERY go-run bench would be lost. Provision a
+	// per-run GOCACHE under the build dir once so the benches build anyway.
+	c.resolveGoCache()
 	name := filepath.Base(pkg)
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -117,6 +196,7 @@ func (c *goRunCache) binaryFor(ctx context.Context, root, pkg string) string {
 	defer cancel()
 	cmd := exec.CommandContext(buildCtx, "go", "build", "-o", out, pkg)
 	cmd.Dir = root
+	cmd.Env = c.buildEnv() // nil => inherit os.Environ(); set only when the preflight provisioned a default
 	if err := cmd.Run(); err != nil {
 		c.bins[pkg] = "" // remember the failure so the loop falls back to go run, once
 		return ""

@@ -134,18 +134,35 @@ func witnessTasks() []Task {
 			Run:         "FAK_GGUF_LOAD_WORKERS=8 fak serve --gguf <glm-5.2.gguf> --backend cuda --load-only",
 			Acceptance:  "a recorded wall-clock load time under 10 minutes captured from the load-path visibility log",
 			RecheckDays: 14,
-			Doc:         "docs/serving",
+			// A cold GLM-5.2 native load targets <10 min but needs headroom for first-run
+			// compile/warmup over a 466GB checkpoint; 30 min bounds a genuinely-hung load
+			// without truncating a healthy one (#992).
+			TimeoutSec: 1800,
+			// The Run carries a <glm-5.2.gguf> fill-me-in placeholder: an operator points it at
+			// the local checkpoint. Authoritative recipe marker so it is never auto-run (#989).
+			Manual: true,
+			Doc:    "docs/serving",
 		},
 		{
-			ID:          "witness-glm52-vllm-throughput-parity",
-			Title:       "collect raw GLM-5.2/vLLM throughput on a live H200 endpoint to close the #870 agentic battery (6/11 artifacts; the 5 remaining all need a live endpoint)",
-			Source:      SourceWitness,
-			Value:       ValueFrontier,
-			Requires:    []Requirement{ReqCUDA, ReqNet},
+			ID:     "witness-glm52-vllm-throughput-parity",
+			Title:  "collect raw GLM-5.2/vLLM throughput on a live H200 endpoint to close the #870 agentic battery (6/11 artifacts; the 5 remaining all need a live endpoint)",
+			Source: SourceWitness,
+			Value:  ValueFrontier,
+			// Loading the model to serve it needs local weights — ANDed with the GPU + live
+			// endpoint requirements. On a weightless GPU box this is now reported infeasible
+			// with the "needs local model weights" reason instead of feasible-but-failing (#990).
+			Requires:    []Requirement{ReqCUDA, ReqNet, ReqWeights},
 			Run:         "experiments/agent-live/run.sh   # the committed H200 GLM-5.2/vLLM recipe",
 			Acceptance:  "the 5 PENDING_MEASUREMENT artifacts populated from a real :8000/:8080 endpoint (no AUTHORITY row without a measured number)",
 			RecheckDays: 30,
-			Doc:         "BENCHMARK-AUTHORITY.md",
+			// A live serve + throughput sweep (cold load, warmup, then a measured run) needs a
+			// large budget; 1h bounds a wedged endpoint without truncating a real sweep (#992).
+			TimeoutSec: 3600,
+			// The Run is a bare `script.sh   # comment` recipe — no placeholder, no arrow, so the
+			// autoRunnable heuristic alone would exec it every sweep and record a spurious
+			// failure. The explicit marker is the authoritative no-auto-run signal (#989).
+			Manual: true,
+			Doc:    "BENCHMARK-AUTHORITY.md",
 		},
 		{
 			ID:          "witness-terminalbench-live-credentialed",
@@ -157,18 +174,30 @@ func witnessTasks() []Task {
 			Run:         "go run ./cmd/terminalbench -suite <official-suite> -out experiments/agent-live/terminalbench-live.json",
 			Acceptance:  "a graded result_claim_allowed=true artifact from a credentialed run (#900/#925)",
 			RecheckDays: 30,
-			Doc:         "docs/notes/TERMINALBENCH",
+			// The Run carries an <official-suite> placeholder an operator fills in; authoritative
+			// no-auto-run marker so it is surfaced for a human, not exec'd as prose (#989).
+			Manual: true,
+			Doc:    "docs/notes/TERMINALBENCH",
 		},
 		{
-			ID:          "witness-a100-qwen-serve-first-run",
-			Title:       "collect the first-ever Qwen3.6-27B-on-one-A100 pure-fak-kernel serve numbers (tok/s + correctness) via the gcp-qwen-serve path",
-			Source:      SourceWitness,
-			Value:       ValueFrontier,
-			Requires:    []Requirement{ReqCUDA},
+			ID:     "witness-a100-qwen-serve-first-run",
+			Title:  "collect the first-ever Qwen3.6-27B-on-one-A100 pure-fak-kernel serve numbers (tok/s + correctness) via the gcp-qwen-serve path",
+			Source: SourceWitness,
+			Value:  ValueFrontier,
+			// A pure-fak-kernel serve must load the Qwen3.6-27B weights to collect tok/s +
+			// correctness — ReqWeights ANDed with the GPU requirement, so a weightless A100 box
+			// reports it infeasible ("needs local model weights") rather than feasible-failing (#990).
+			Requires:    []Requirement{ReqCUDA, ReqWeights},
 			Run:         "experiments/benchmark gcp-qwen-serve.sh  →  fak serve + fak agent (qwen3.6-27b)",
 			Acceptance:  "a recorded tok/s and a correctness cosine in an experiments/benchmark/runs/by-machine/a100 artifact",
 			RecheckDays: 30,
-			Doc:         "docs/HARDWARE-MATRIX.md",
+			// A cold 27B load + serve + a correctness/throughput pass needs a large budget; 1h
+			// bounds a wedged run without truncating a healthy cold collection (#992).
+			TimeoutSec: 3600,
+			// The Run is a prose `script.sh  →  fak serve + fak agent` recipe (the arrow heuristic
+			// already skips it); the explicit marker makes the registry intent authoritative (#989).
+			Manual: true,
+			Doc:    "docs/HARDWARE-MATRIX.md",
 		},
 		{
 			ID:          "witness-resume-cache-calibration",

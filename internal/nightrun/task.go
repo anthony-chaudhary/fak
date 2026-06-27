@@ -146,6 +146,16 @@ type Task struct {
 	// falls back to DefaultTaskTimeoutSec. A live serving/throughput collection can
 	// raise it via the overlay (`"timeout_sec": 3600`) without recompiling.
 	TimeoutSec int `json:"timeout_sec,omitempty"`
+	// Manual marks a curated witness whose Run is a HUMAN RECIPE, not an executable
+	// command — an operator-setup datum that must never be auto-run regardless of how
+	// its Run string happens to read. It is the AUTHORITATIVE form of the autoRunnable
+	// placeholder/arrow heuristic: a recipe whose Run is a bare `script.sh   # comment`
+	// (no placeholder, no arrow) is still NOT auto-runnable when Manual is set, closing
+	// the gap where such a row was exec'd every sweep and recorded a spurious failure.
+	// A manual Task stays surfaced by plan/next (an operator runs it by hand) and is
+	// recorded OutcomeSkipped by run --apply — never a ledger failed/collected row,
+	// never counted against --max. The heuristic remains a backstop for un-flagged rows.
+	Manual bool `json:"manual,omitempty"`
 	// Doc is the in-repo methodology / issue / authority pointer, or "".
 	Doc string `json:"doc,omitempty"`
 }
@@ -180,7 +190,15 @@ var placeholderRE = regexp.MustCompile(`<[^>\s][^>]*>`)
 // surfaced (plan/next still show it as the manual recipe to run by hand) but skipped
 // by `run --apply`. Conservative by construction: a concrete command (no placeholder,
 // no arrow, non-empty) is auto-runnable, so a real benchmark is never wrongly skipped.
+//
+// The registry's explicit Manual flag is AUTHORITATIVE: a row marked Manual is never
+// auto-run even when its Run reads as a clean command (the `script.sh   # comment`
+// shape that has no placeholder and no arrow but still needs operator setup). The
+// placeholder/arrow heuristic remains the backstop for any un-flagged recipe row.
 func (t Task) autoRunnable() bool {
+	if t.Manual {
+		return false
+	}
 	run := strings.TrimSpace(t.Run)
 	if run == "" {
 		return false
