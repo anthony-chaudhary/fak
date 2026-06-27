@@ -130,6 +130,61 @@ The injection detector is ~100% evadable — on purpose. It's not the floor. The
 
 ---
 
+## STANDALONE FANRUN THREAD (5 posts) — the measured 1024-agent result
+
+> A self-contained thread for the fan-out capstone. Lead with the fence, as always. Strip the `[VISUAL: …]` tags before posting.
+
+**Post 1/5** — *scroll-stopper*
+`[VISUAL: a screen-capture of `go run ./cmd/fanrun -agent-max 1024 -grid log` scrolling to the N=1024 line]`
+
+We ran **1,024 real agent sessions** decomposing one shared goal, end-to-end through the kernel, in **364 ms** on a laptop with **no GPU and no model**.
+
+Not a simulation of 1,024 agents. 1,024 real agent loops, real tool dispatch, all finishing the task. 🧵
+
+---
+
+**Post 2/5** — *the one number that matters*
+`[VISUAL: a 2-col table — N vs vdso_fills, showing fills flat at 3 from N=1 to N=1024]`
+
+The fan-out everyone runs gives each subagent its own warm prompt cache. That's N copies of the same shared work.
+
+fak's kernel dedups it *across* agents. So when 1,024 siblings read the same goal sources:
+
+a **per-agent** cache fills 3·N = 3,072 entries.
+fak fills **3**. Flat. For every N.
+
+---
+
+**Post 3/5** — *the dedup, measured*
+
+Those aren't modeled numbers — they're the kernel's own counters.
+
+At N=1,024: **3,069 real cross-agent cache hits** (the sibling-only delta over a lone agent), and **2,095,104 prefix tokens the kernel never re-prefills** = exactly (N−1)·P.
+
+With a tiny model wired in, the per-clone prefill speedup is wall-clocked at 3.4× / 8.2× / 11.7× as N grows.
+
+---
+
+**Post 4/5** — *the honest fence*
+
+The fence, inline: this is **serial**. The kernel's cache world-version is process-global, so the 1,024 agents share one epoch (that's *why* the dedup is real) and run one after another. The 364 ms is a sum — **not** a parallel-throughput claim, and I'm not claiming 1,024-way parallelism.
+
+The win is deleted redundant work + prefill the kernel skips. Reproducible byte-for-byte, no GPU, no key.
+
+---
+
+**Post 5/5** — *run it yourself*
+
+No model, no GPU, no API key — a deterministic offline planner drives every subagent, so you get the identical artifact:
+
+`go run ./cmd/fanrun -agent-max 1024 -grid log`
+
+It's the measured capstone to the modeled fan-out sweep (`fanbench`). Disclosure: I wrote it. Every number traces to `experiments/fanout/fanrun.json` and a test gate that refuses to let a modeled field into the artifact.
+
+github.com/anthony-chaudhary/fak
+
+---
+
 
 ---
 
@@ -175,3 +230,29 @@ The draft was **not** clean — it shipped a proof command that the binary refus
 - **Tuned-gain band (P4):** rewrote "~1.5–4.1x" → "~1.5–4x (conservative headline: 4.1x)" in Post 5 and Bluesky, so 4.1x reads as the conservative single number the ledger names, not the max of a spread.
 
 Every remaining number traces to the ledger: max|Δ|=0 (bit-exact eviction, vs HF oracle, self-signed v1 cert / self-reported EvictedCount fenced); no-mid-run-eviction in vLLM/SGLang/OpenAI/Anthropic; two independent gates + ~100%-evadable-by-design detector; 8.8x→9.7x naive **always** paired with the tuned ~1.5–4x; ~13MB / zero-deps / no go.sum framed as operational surface not tok/s; 0/29 novel; self-host + read-heavy and not-a-token-engine fences intact; 643 WebVoyager tasks. No ~60x / agent-city projections and no simulated power/dollar numbers appear. All tagged visuals confirmed on disk (`social-preview.png` 46KB, plus `45-`, `46-`, `48-`, `39-`, `31-`, `29-`, `agent-kernel-video.gif`). `deletioncert -selfcheck` and the 8-rung count verified against the binary.
+
+### Fanrun thread (added 2026-06-27) — fact-check
+
+Every number in the standalone fanrun thread is read directly from the committed artifact
+`experiments/fanout/fanrun.json` (the `cmd/fanrun` capstone, shipped on `main`), not from a
+model or a projection:
+- **1,024 real agent sessions / 364 ms / 0 errors** — the N=1024 cell's `tasks_completed=1024`,
+  `tool_errors_total=0`, `agents_wall_serial_ms=363.95`. Each subagent is a real
+  `internal/agent.RunArm` loop (not a synthetic stream).
+- **vdso_fills flat at 3 / 3·N for a per-agent cache** — `vdso_fills=3` in every cell from
+  N=1 to N=1024 (the artifact); 3·N is the per-agent-cache arithmetic stated as a contrast,
+  clearly labelled as the comparison, not a measured fak number.
+- **3,069 cross-agent hits / 2,095,104 elided** — the N=1024 cell's `cross_hits` and
+  `prefix_tokens_elided = (N−1)·P` with P=2048. Anti-inflation: the no-share control gives
+  exactly 0 (`TestFanrunNoShareZeroUplift`).
+- **3.4× / 8.2× / 11.7× prefill speedup** — the measured `prefill_reuse_speedup` from a
+  `-model-dir` run on a tiny CPU model (reuse-vs-no-reuse, the `cmd/fleetserve` methodology),
+  N=4/16/64; labelled as the prefill lever, separate from the planner.
+- **SERIAL fence (load-bearing)** — the thread states inline that this is serial and the
+  364 ms is a sum, NOT a parallel rate, and that fanrun does **not** claim fanbench's modeled
+  72.8×. This matches the artifact, which carries zero modeled fields (enforced by
+  `TestFanrunReportShape`). Do not let any edit drop the serial fence — it is the one claim a
+  skeptic would (correctly) attack if removed.
+- **Reproduce command** — `go run ./cmd/fanrun -agent-max 1024 -grid log` runs with no model,
+  no GPU, no key (deterministic offline planner) and writes the identical counter+geometry
+  artifact. Verified on this host (full sweep N=1…1024 in <2 s).
