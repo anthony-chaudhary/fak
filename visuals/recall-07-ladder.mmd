@@ -2,7 +2,7 @@
 flowchart LR
   r0["Rung 0 — re-output a stored result<br/>0 model tokens · SHIPPED"]
   r2["Rung 2 — demand-page top-k<br/>k pages, not 350k · SHIPPED"]
-  r3["Rung 3 — vDSO-cached recall<br/>0 on a hit · NOT BUILT (global worldVer caveat)"]
+  r3["Rung 3 — vDSO-cached recall<br/>0 on a hit · NOT BUILT<br/>(worldVer caveat: any unrelated write invalidates cache)"]
   r4["Rung 4 — witness-gated re-admit (THE MOAT)<br/>microseconds, no tokens · SHIPPED"]
   r5["Rung 5 — KV-checkpoint re-attach<br/>OFF-THESIS (caching already banks ~94%)"]
   r0 --> r2 --> r3 --> r4 --> r5
