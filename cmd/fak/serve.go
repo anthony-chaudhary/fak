@@ -343,6 +343,16 @@ func cmdServe(argv []string) {
 	must(err)
 	srv.SetModelLoadProfile(loadProfile)
 
+	// Stream every drive-state revision on /v1/fak/session/changes (#630). Wired
+	// AFTER gateway.New so srv exists: each Rev bump of the process-local table
+	// (a control verb, a debit, a continuation) is projected to the wire DTO and
+	// pushed onto the gateway's bounded revision ring, where an operator drains it
+	// by cursor — the live "what is every session doing right now" tail. The sink is
+	// a cheap ring append and never re-enters the table (see session.RevisionObserver).
+	serveSessions.WatchRevisions(func(s session.State) {
+		srv.PublishSessionRevision(toGatewaySessionState(s))
+	})
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 

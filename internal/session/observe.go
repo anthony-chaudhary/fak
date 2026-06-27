@@ -81,6 +81,19 @@ type TransitionEvent struct {
 // fan-out and failure policy; the table only delivers typed transition values.
 type TransitionObserver func(TransitionEvent)
 
+// RevisionObserver is the EVERY-revision callback seam (#630): unlike a
+// TransitionObserver (which fires only on the few notable run-state moves) it is
+// invoked on every monotonic Rev bump — a budget cut, a pace change, a priority
+// re-rank, an intent/goal update, a debit, a transition — so a host can stream the
+// drive table as a live "what is every session doing right now" tail and key each
+// event on State.Rev. It is delivered SYNCHRONOUSLY under the table lock in strict
+// Rev order, so the sink MUST be fast and MUST NOT call back into the table (it
+// would deadlock on the held lock): the one production consumer is the in-process
+// gateway change-ring append, which only takes its own cheap mutex. The lock-held,
+// in-order delivery is deliberate — a cursor feed needs revisions in Rev order, not
+// the reordering an after-unlock fan-out (TransitionObserver/BudgetObserver) allows.
+type RevisionObserver func(State)
+
 // WatchBudget wires the pre-exhaustion warning + exhaustion observer. warnFraction is the
 // consumed share (0..1) at which BudgetWarn fires — 0.8 warns at 80% of the context budget
 // spent; a value <=0 or >=1 disables the warning (only BudgetExhausted then fires). obs==nil
@@ -104,6 +117,19 @@ func (t *Table) WatchTransitions(obs TransitionObserver) {
 	}
 	t.mu.Lock()
 	t.transObs = obs
+	t.mu.Unlock()
+}
+
+// WatchRevisions wires the every-revision observer (#630) — the source of the
+// gateway's /v1/fak/session/changes drive-state stream. obs==nil clears the seam
+// (back to the byte-identical no-op default; the write path is unchanged when
+// nothing is watching). Safe to call on a live table; a nil receiver is a no-op.
+func (t *Table) WatchRevisions(obs RevisionObserver) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.revObs = obs
 	t.mu.Unlock()
 }
 

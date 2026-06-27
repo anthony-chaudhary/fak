@@ -251,13 +251,26 @@ host wiring tested; the serve-*loop* still reads `Decide` only on the harness ar
   process and one loop, lowering a session's priority records a value that no yield acts on. The
   multi-session scheduler that consumes `Snapshot` (the scheduling intersection) is the epic's
   load-bearing track.
-- **The two real budgets compose only on paper.** Wiring `Pace.MaxTokensPerTurn` into
-  `SessionPlanner.Budget` and the matmul-cores `FAK_BUDGET` (§4) is not implemented; the static
-  `model/budget.go` doc explicitly rejected live-load sensing, so making it per-session-live is a
-  deliberate, measured change.
+- **The two real budgets now compose — one consumer wired, the other named (#628).** The
+  composition itself shipped: `internal/session/compose.go` makes `Pace.MaxTokensPerTurn` the
+  SINGLE knob, deriving both budgets from one throttle ratio (relative to the session's
+  unthrottled per-turn output) — `ComposePlannerBudget` (the resident-context window, floored at
+  base/8 so a throttle never starves it) and `ComposeWorkerFraction` (the matmul `FAK_BUDGET`
+  fraction). The per-session planner budget is genuinely wired: `agent.SessionPlanner.ApplyPace`
+  lowers `SessionPlanner.Budget` from the composition (idempotent, restorable, behaviorally
+  tested — a throttled window elides spans a full one keeps). Two rungs remain. (a) The served
+  turn does not yet CALL `ApplyPace` — that is the same served-`req.Raw`-turn deferral the
+  Decide-consumption fence above carries (the operator surface ships; the served-loop read is the
+  next track). (b) The matmul side stays composed-not-applied: `ComposeWorkerFraction` derives the
+  fraction, but a live `model.SetWorkerBudget` mutates a process-WIDE worker pool, so applying it
+  per session is sound only in a SINGLE-session process — the "deliberate, measured" change
+  `model/budget.go`'s doc flagged, not a multi-session gateway one-liner.
 - **No persistence yet.** §5's `session.json` sibling beside the recall core image is unbuilt —
   a process restart re-attaches a session at its defaults, not the budget/priority/run-state it
-  held. `Rev` does not yet stream on `/v1/fak/changes`.
+  held. (Drive-state revisions DO now stream — track 7 shipped: every `Rev` bump is published on
+  the dedicated `/v1/fak/changes`-style feed `GET /v1/fak/session/changes`, fed by
+  `session.Table.WatchRevisions`, so "what is every session doing right now" is a live cursor-drained
+  tail — #630.)
 - **Boundary-only stop assumes a turn is short.** A `DRAINING` session with a long decode still
   finishes that decode before exiting. That is the *correct* trade (no torn turn) but it means
   "stop" is "stop at the next boundary," not a mid-token kill — the design owns that word.

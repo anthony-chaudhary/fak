@@ -478,6 +478,50 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /v1/fak/session/changes:
+    get:
+      tags: [fak-native]
+      summary: Drain the drive-state revision stream (GET)
+      description: |
+        Every revision of the per-session DRIVE table (run-state/budget/priority/pace)
+        after the `?since=` cursor — the `/v1/fak/changes` protocol applied to session
+        control state rather than the vDSO coherence bus. `since=0` (or omitted) returns
+        everything retained. "What is every session doing right now" becomes a live tail,
+        and every scheduling preemption is a first-class, auditable wire event. Each event
+        carries the feed's monotone `seq` (the drain cursor) plus the session's own `rev`
+        (its optimistic-concurrency cursor).
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: The Seq of the last revision the client saw (its cursor). Non-numeric yields `400`.
+      responses:
+        '200':
+          description: The drained revisions plus the client's next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionChangesResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [fak-native]
+      summary: Drain the drive-state revision stream (POST)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangesRequest' }
+            example: { since: 42 }
+      responses:
+        '200':
+          description: The drained revisions plus the client's next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionChangesResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /v1/fak/events:
     get:
       tags: [fak-native]
@@ -1176,6 +1220,27 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SessionState' }
         count: { type: integer, description: len(sessions), surfaced so a "0 live sessions" reading is explicit. }
+
+    SessionChangeEvent:
+      description: |
+        One drive-state revision on the wire (#630): a session's full drive snapshot AT
+        the revision, plus the feed's monotone `seq`. A SessionState with one extra
+        `seq` field — `seq` is the global drain cursor; the embedded `rev` is the
+        per-session cursor.
+      allOf:
+        - $ref: '#/components/schemas/SessionState'
+        - type: object
+          properties:
+            seq: { type: integer, description: The feed-local monotone sequence (this revision's drain cursor). }
+
+    SessionChangesResponse:
+      type: object
+      description: The drained drive-state revision slice plus the client's next cursor.
+      properties:
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/SessionChangeEvent' }
+        cursor: { type: integer, description: The client's next cursor (the highest seq now known). }
 
     # ----- OpenAI chat wire ---------------------------------------------------
     ChatRequest:

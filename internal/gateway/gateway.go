@@ -481,6 +481,7 @@ type Server struct {
 	logf           func(format string, args ...any)
 	debugStatsf    func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
 	feed           *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
+	sessionFeed    *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
 	metrics        *gatewayMetrics
 	traceSeq       uint64 // mints a non-empty TraceID when the wire omits one (atomic)
 	reloadPolicy   PolicyReloadFunc
@@ -742,6 +743,7 @@ func New(cfg Config) (*Server, error) {
 		cacheStream:          cacheStream,
 		rungObs:              rungObs,
 		feed:                 newCoherenceFeed(0),
+		sessionFeed:          newSessionFeed(0),
 		metrics:              newGatewayMetrics(time.Now()),
 		route:                newRouteLive(cfg.RouteManifest),
 

@@ -37,6 +37,12 @@ type Table struct {
 	obs      BudgetObserver
 	warnFrac float64
 	transObs TransitionObserver
+
+	// revObs is the optional every-revision sink (#630): when wired via
+	// WatchRevisions, putLocked invokes it on every Rev bump, in Rev order, under
+	// the lock — the source of the gateway's /v1/fak/session/changes drive-state
+	// stream. nil (the default) is the byte-identical no-op.
+	revObs RevisionObserver
 }
 
 // NewTable returns a Table bounded by DefaultTableLimit sessions.
@@ -112,6 +118,13 @@ func (t *Table) putLocked(st State) State {
 	t.state[st.TraceID] = st
 	t.touchLocked(st.TraceID)
 	t.trimLocked()
+	// Stream this revision (#630). Fired under the lock, in Rev order, so a cursor
+	// feed sees every drive change exactly once and monotonically; the sink is a
+	// cheap in-process ring append that never re-enters the table (see
+	// RevisionObserver). nil — the default — is a zero-overhead skip.
+	if t.revObs != nil {
+		t.revObs(st)
+	}
 	return st
 }
 

@@ -2146,7 +2146,7 @@ func routeForMetrics(path string) string {
 	switch path {
 	case "/v1/chat/completions", "/v1/messages", "/v1/messages/count_tokens",
 		"/v1/fak/syscall", "/v1/fak/adjudicate", "/v1/fak/admit",
-		"/v1/fak/changes", "/v1/fak/revoke", "/v1/fak/policy/reload",
+		"/v1/fak/changes", "/v1/fak/session/changes", "/v1/fak/revoke", "/v1/fak/policy/reload",
 		"/v1/fak/trace/reset", "/v1/models", "/mcp", "/healthz", "/metrics",
 		"/debug/vars":
 		return path
