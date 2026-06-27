@@ -1,0 +1,1 @@
+{"schema":"fak-cadence-ledger/1","date":"2026-06-27","commit":"9a10d29","generated_at":"2026-06-27T04:42:05Z","verdict":"OK","scores_debt":1295,"scores_trend":"regressed","work_window_days":7,"work_commits":1685,"work_ships":1524,"release_version":"v0.34.0","release_action":"fix_ci"}

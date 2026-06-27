@@ -1,0 +1,121 @@
+name: cadence report
+
+# The consolidated regular-cadence report — folds the three dimensions an
+# operator tracks into ONE control-pane envelope on a weekly cadence:
+#
+#   * SCORES    — the scorecard control pane (portfolio debt + trend).
+#   * WORK-DONE — git commits + `(fak ` ship-trailer count over a trailing window
+#                 (the dimension that had NO durable cadence report before this).
+#   * RELEASES  — the release-status fold (latest tag + next action).
+#
+# Today each lands in a SEPARATE place (garden.yml folds scores daily,
+# release-cadence.yml folds releases every 6h, work-done was nowhere). This makes
+# the fold default-on weekly, surfaced to the run's step summary and uploaded as a
+# downloadable artifact, with a per-tick TREND vs the durable ledger
+# (docs/cadence/history.jsonl).
+#
+# READ-ONLY by design: it never pushes. The durable ledger is extended with
+# `fak cadence --append-history` and committed by hand by an operator, matching
+# this repo's convention that scheduled jobs report (they don't auto-commit the
+# shared trunk — only an explicit manual arm does, cf. release-cadence.yml). The
+# pure fold/trend logic is proven by internal/cadencereport's unit tests (run
+# first below), so a green report is a real signal, not a tool that always passes.
+on:
+  schedule:
+    # Mondays 08:17 UTC — an off-the-hour minute clear of the other scheduled
+    # jobs (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, security-audit
+    # Mon 06:17) so the weekly cadence tick doesn't pile onto them.
+    - cron: "17 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Trailing window (days) the work-done dimension counts over"
+        type: string
+        default: "7"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cadence-report
+  cancel-in-progress: false
+
+jobs:
+  cadence:
+    name: consolidated cadence report
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The work-done dimension counts commits over a trailing window, so the
+          # full history must be present (a shallow checkout would undercount).
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The fold/trend logic FIRST: a green report below is only meaningful if the
+      # fold that produced it is itself proven correct.
+      - name: cadence fold self-test
+        run: go test ./internal/cadencereport/
+
+      # The REPORT. Tolerate a non-zero exit (a flaky sub-tool must not suppress
+      # the report) — the verdict is surfaced below, not swallowed.
+      - name: cadence report
+        run: |
+          window="${{ github.event_name == 'workflow_dispatch' && inputs.window_days || '7' }}"
+          set +e
+          go run ./cmd/fak cadence --json --window "$window" > cadence-report.json
+          echo "cadence-exit=$?"
+          set -e
+          python3 - <<'PY' > cadence-report.txt || echo "(report unreadable)" > cadence-report.txt
+          import json
+          d = json.load(open("cadence-report.json"))
+          s, w, r = d["scores"], d["work"], d["releases"]
+          print(f"{d['verdict']} ({d['finding']}) @{d['commit']} {d['date']}")
+          print(f"  scores    debt {s['debt']} across {s.get('measured', 0)} scorecard(s); trend {s.get('trend_direction')}")
+          print(f"  work      {w['commits']} commit(s) / {w['ships']} ship(s) in {w['window_days']}d")
+          print(f"  releases  {r['version']}; next {r['action_kind']}")
+          if d.get("trend"):
+              print(f"  trend     {d['trend']['summary']}")
+          print(f"  -> {d['next_action']}")
+          PY
+          cat cadence-report.txt
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## cadence report"
+            echo '```'
+            cat cadence-report.txt 2>/dev/null || echo "(no report)"
+            echo '```'
+            echo '<details><summary>control-pane payload</summary>'
+            echo
+            echo '```json'
+            cat cadence-report.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+            echo
+            echo "_Durable trend: the committed ledger \`docs/cadence/history.jsonl\` is extended with \`fak cadence --append-history\` and committed by hand; this job is read-only._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cadence-report
+          path: |
+            cadence-report.json
+            cadence-report.txt
+          if-no-files-found: ignore

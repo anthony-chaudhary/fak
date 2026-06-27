@@ -163,6 +163,8 @@ func main() {
 		cmdAccounts(os.Args[2:])
 	case "garden":
 		cmdGarden(os.Args[2:])
+	case "cadence":
+		cmdCadence(os.Args[2:])
 	case "guard-verdict-rsi":
 		cmdGuardVerdictRSI(os.Args[2:])
 	case "guard-rsi-scorecard":
@@ -485,6 +487,14 @@ func usage() {
                 (native token-saving-defaults control-pane payload)
   fak skill-effectiveness-scorecard [--json] [--markdown]
                 (native skill-pack effectiveness control-pane payload)
+  fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
+                (the CONSOLIDATED regular-cadence report: folds the three dimensions
+                 an operator tracks  -  SCORES (scorecard control pane), WORK-DONE
+                 (git commits + '(fak ' ships over a trailing window), RELEASES
+                 (release-status)  -  into one control-pane envelope. --append-history
+                 records a dated row in docs/cadence/history.jsonl so the trend accrues
+                 across weeks; --check is advisory (non-zero only if a dimension could
+                 not be measured; the scorecard ratchet owns debt regressions))
   fak audit     verify <journal.jsonl> | export <journal.jsonl>
                 (the AUDIT-TRAIL consumer: 'verify' re-reads a decision journal (the
                  'fak guard' / FAK_AUDIT_JOURNAL trail) and validates its hash chain
