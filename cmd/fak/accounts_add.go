@@ -1,0 +1,236 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
+)
+
+// addParams carries the resolved flags for `fak accounts add` from the dispatcher.
+type addParams struct {
+	name     string
+	reserved bool
+	chrome   string
+	noLogin  bool
+	token    string
+	suffix   string
+	noSync   bool
+
+	homeDir      string
+	registryPath string
+	dosView      string
+	jobView      string
+}
+
+// runAccountsAdd is the end-to-end "enroll a brand-new account" flow. It is deliberately the
+// ONLY place the multi-file account-enrollment runbook lives, so adding an account is one
+// command instead of: hand-edit three rosters, hand-derive the uuid, work around the
+// out-of-tree guard, remember the projects/ marker. The steps, in order:
+//
+//  1. resolve an ISOLATED config dir (~/.claude-<name>[-suffix]); refuse to clobber ~/.claude
+//     or an existing dir, so a stray login never lands on the live session.
+//  2. obtain the setup-token — either by running `CLAUDE_CONFIG_DIR=<dir> claude setup-token`
+//     (inheriting the TTY for the browser+paste), or from --token/stdin with --no-login.
+//  3. write <dir>/.oauth-token, but twin-check FIRST (GateTokenWrite) so we never enroll a
+//     token that belongs to a DIFFERENT account already on disk (the cross-account smear).
+//  4. probe the OAuth profile endpoint for the email + account UUID — ground truth that also
+//     proves the credential works.
+//  5. seed the dir's markers so every consumer recognizes it: .claude.json (identity, so the
+//     roster shows WHO it is, not "-") and projects/ (the fleet discovery gate).
+//  6. upsert the canonical registry record (identity + policy) and SaveRegistry.
+//  7. regenerate the roster views (sync) so the dos + job rosters reflect the new account.
+func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
+	if p.name == "" {
+		fmt.Fprintln(stderr, "usage: fak accounts add --name <name> [--reserved] [--chrome-profile P] [--no-login [--token -]]")
+		return 2
+	}
+	if p.homeDir == "" {
+		fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
+		return 1
+	}
+
+	dir := accountDir(p.homeDir, p.name, p.suffix)
+	// Refuse to ever target the live default seat or an existing dir — a new account gets a
+	// fresh, isolated home so no login can clobber ~/.claude.
+	if filepath.Clean(dir) == filepath.Clean(filepath.Join(p.homeDir, ".claude")) {
+		fmt.Fprintln(stderr, "fak accounts: refusing to add into the default ~/.claude seat")
+		return 1
+	}
+	if _, err := os.Stat(dir); err == nil {
+		fmt.Fprintf(stderr, "fak accounts: config dir already exists: %s (pick another --name)\n", dir)
+		return 1
+	}
+
+	// Load the canonical registry up front so a duplicate name fails before we log in.
+	reg := accounts.Registry{}
+	if _, err := os.Stat(p.registryPath); err == nil {
+		loaded, err := accounts.LoadRegistry(p.registryPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		reg = loaded
+	}
+	for _, h := range reg.Homes {
+		if h.Name == p.name {
+			fmt.Fprintf(stderr, "fak accounts: %q is already in the registry\n", p.name)
+			return 1
+		}
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: mkdir %s: %v\n", dir, err)
+		return 1
+	}
+
+	// Step 2: obtain the token.
+	token, err := obtainToken(stdout, stderr, dir, p)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	token = strings.TrimSpace(token)
+	if !strings.HasPrefix(token, "sk-ant-oat") {
+		fmt.Fprintf(stderr, "fak accounts: not a setup-token (want sk-ant-oat…), got %d chars\n", len(token))
+		return 1
+	}
+
+	// Step 3: twin-check BEFORE persisting, then write the token.
+	verdict := accounts.GateTokenWrite(dir, token, p.homeDir)
+	if !verdict.Allow {
+		fmt.Fprintf(stderr, "fak accounts: REFUSED (%s): %s\n", verdict.Reason, verdict.Detail)
+		return 1
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".oauth-token"), []byte(token+"\n"), 0o600); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: write token: %v\n", err)
+		return 1
+	}
+
+	// Step 4: probe identity (ground truth + proves the credential works).
+	id, err := accounts.ProbeToken(nil, "", token)
+	if err != nil {
+		// A probe failure is not fatal to enrollment (the dir + token are written), but it
+		// means we cannot record identity and the credential may be bad — surface it loudly.
+		fmt.Fprintf(stderr, "fak accounts: warning: identity probe failed: %v\n", err)
+		fmt.Fprintln(stderr, "  the seat is created with a token but no recorded identity; run `fak accounts discover --write` after first login")
+	} else {
+		fmt.Fprintf(stdout, "probed identity: %s (%s)\n", id.Email, id.AccountUUID)
+	}
+
+	// Step 5: seed markers so every consumer recognizes the seat.
+	if err := seedClaudeJSON(dir, id); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: warning: seed .claude.json: %v\n", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "projects"), 0o755); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: warning: create projects/ marker: %v\n", err)
+	}
+
+	// Step 6: upsert the canonical registry record.
+	home := accounts.Home{
+		Name:          p.name,
+		Dir:           dir,
+		Reserved:      p.reserved,
+		ChromeProfile: p.chrome,
+		Identity:      accounts.DeriveIdentity(dir),
+	}
+	reg.Homes = append(reg.Homes, home)
+	if err := accounts.SaveRegistry(p.registryPath, reg); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "registry: added %s -> %s\n", p.name, dir)
+
+	// Step 7: regenerate the roster views.
+	if !p.noSync {
+		synced, serr := syncViews(stdout, stderr, p.registryPath, p.dosView, p.jobView)
+		if serr != 0 {
+			return serr
+		}
+		fmt.Fprintf(stdout, "synced %d roster view(s)\n", synced)
+	}
+
+	fmt.Fprintf(stdout, "added account %q (dir=%s, reserved=%v) — ~/.claude untouched\n", p.name, dir, p.reserved)
+	return 0
+}
+
+// accountDir resolves the isolated config dir for a new account: ~/.claude-<name> when <name>
+// already ends with the suffix, else ~/.claude-<name><suffix>. The suffix matches the host's
+// roster convention (default "-netra") so a new seat sits alongside its peers.
+func accountDir(home, name, suffix string) string {
+	base := name
+	if suffix != "" && !strings.HasSuffix(name, suffix) {
+		base = name + suffix
+	}
+	return filepath.Join(home, ".claude-"+base)
+}
+
+// obtainToken returns the setup-token, either by running `claude setup-token` in the isolated
+// dir or by reading --token / stdin under --no-login.
+func obtainToken(stdout, stderr io.Writer, dir string, p addParams) (string, error) {
+	if p.noLogin || p.token != "" {
+		if p.token != "" && p.token != "-" {
+			return p.token, nil
+		}
+		fmt.Fprintln(stderr, "reading setup-token from stdin…")
+		b, err := io.ReadAll(bufio.NewReader(os.Stdin))
+		if err != nil {
+			return "", fmt.Errorf("read token from stdin: %w", err)
+		}
+		return string(b), nil
+	}
+	// Interactive: run `claude setup-token` with CLAUDE_CONFIG_DIR pointed at the isolated dir
+	// so the login lands there, NOT in ~/.claude. Inherit the TTY for the browser + paste.
+	fmt.Fprintf(stdout, "running `claude setup-token` for %s (CLAUDE_CONFIG_DIR=%s)…\n", p.name, dir)
+	cmd := exec.Command("claude", "setup-token")
+	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+dir)
+	cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
+	// Capture stdout so we can recover the printed token, while still echoing it for the user.
+	var buf strings.Builder
+	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("claude setup-token: %w", err)
+	}
+	return extractToken(buf.String()), nil
+}
+
+// extractToken pulls the sk-ant-oat… token out of `claude setup-token` output (which prints
+// some preamble around it).
+func extractToken(out string) string {
+	for _, f := range strings.Fields(out) {
+		if strings.HasPrefix(f, "sk-ant-oat") {
+			return f
+		}
+	}
+	return strings.TrimSpace(out)
+}
+
+// seedClaudeJSON writes a minimal .claude.json carrying the probed identity, so a fresh seat
+// shows WHO it is in the roster (not "-") before its first interactive `claude` run. It does
+// nothing when the identity is empty, and never overwrites an existing .claude.json.
+func seedClaudeJSON(dir string, id accounts.ProbedIdentity) error {
+	if id.Email == "" && id.AccountUUID == "" {
+		return nil
+	}
+	path := filepath.Join(dir, ".claude.json")
+	if _, err := os.Stat(path); err == nil {
+		return nil // never clobber claude's own file
+	}
+	doc := map[string]any{
+		"oauthAccount": map[string]any{
+			"emailAddress": id.Email,
+			"accountUuid":  id.AccountUUID,
+		},
+	}
+	b, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}

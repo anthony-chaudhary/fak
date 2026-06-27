@@ -32,7 +32,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -54,6 +54,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout")
 	dosView := fs.String("dos-view", firstNonEmpty(os.Getenv("FAK_DOS_ROSTER"), defaultDosView(defHome)), "(sync/check) path to the generated dos roster view (~/.claude/accounts.yaml)")
 	jobView := fs.String("job-view", os.Getenv("FAK_JOB_ROSTER"), "(sync/check) path to the generated job roster view; empty skips the job view")
+	addName := fs.String("name", "", "(add) roster name for the new account")
+	addReserved := fs.Bool("reserved", false, "(add) hold the new account OUT of routine rotation (last-resort fallback)")
+	addChrome := fs.String("chrome-profile", "", "(add) Chrome profile provenance for the new account (informational)")
+	addNoLogin := fs.Bool("no-login", false, "(add) do NOT run `claude setup-token`; read the token from --token/stdin instead")
+	addToken := fs.String("token", "", "(add) the setup-token (sk-ant-oat…); '-' or empty with --no-login reads stdin")
+	addSuffix := fs.String("suffix", firstNonEmpty(os.Getenv("FAK_ACCOUNT_SUFFIX"), "-netra"), "(add) config-dir suffix: dir is ~/.claude-<name> when <name> already ends with it, else ~/.claude-<name><suffix>")
+	addNoSync := fs.Bool("no-sync", false, "(add) skip regenerating the roster views after adding (just write the registry)")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -262,29 +269,32 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 1
 
+	case "add":
+		// The end-to-end "enroll a brand-new account" verb: log in to an ISOLATED config dir
+		// (never ~/.claude), probe its identity, upsert the canonical registry, seed the
+		// account dir's markers, and regenerate the roster views — one command for what was a
+		// multi-file, multi-tool runbook.
+		return runAccountsAdd(stdout, stderr, addParams{
+			name:         *addName,
+			reserved:     *addReserved,
+			chrome:       *addChrome,
+			noLogin:      *addNoLogin,
+			token:        *addToken,
+			suffix:       *addSuffix,
+			noSync:       *addNoSync,
+			homeDir:      *homeDir,
+			registryPath: *registryPath,
+			dosView:      *dosView,
+			jobView:      *jobView,
+		})
+
 	case "sync":
 		// Project the canonical registry into the generated roster views and write them. The
 		// registry is the single source of truth; these files are caches of it, never
-		// hand-edited. Refresh identities from disk first so emitted emails are current.
-		reg, err := accounts.LoadRegistry(*registryPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-			return 1
-		}
-		reg = reg.Refresh()
-		wrote := 0
-		for _, t := range viewTargets(*dosView, *jobView) {
-			text, err := reg.RenderView(t.view)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-				return 1
-			}
-			if err := writeViewFile(t.path, text); err != nil {
-				fmt.Fprintf(stderr, "fak accounts: write %s: %v\n", t.path, err)
-				return 1
-			}
-			fmt.Fprintf(stdout, "synced %s view -> %s\n", t.view, t.path)
-			wrote++
+		// hand-edited.
+		wrote, code := syncViews(stdout, stderr, *registryPath, *dosView, *jobView)
+		if code != 0 {
+			return code
 		}
 		if wrote == 0 {
 			fmt.Fprintln(stderr, "fak accounts: no view targets (set --dos-view/--job-view or FAK_DOS_ROSTER/FAK_JOB_ROSTER)")
@@ -328,9 +338,37 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
 		return 2
 	}
+}
+
+// syncViews projects the canonical registry (at registryPath) into the named roster views and
+// writes them atomically, refreshing identities from disk first so emitted emails are current.
+// It returns the number of views written and a process exit code (0 on success). Shared by the
+// `sync` verb and `add`'s final step so both regenerate views identically.
+func syncViews(stdout, stderr io.Writer, registryPath, dosView, jobView string) (int, int) {
+	reg, err := accounts.LoadRegistry(registryPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 0, 1
+	}
+	reg = reg.Refresh()
+	wrote := 0
+	for _, t := range viewTargets(dosView, jobView) {
+		text, err := reg.RenderView(t.view)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return wrote, 1
+		}
+		if err := writeViewFile(t.path, text); err != nil {
+			fmt.Fprintf(stderr, "fak accounts: write %s: %v\n", t.path, err)
+			return wrote, 1
+		}
+		fmt.Fprintf(stdout, "synced %s view -> %s\n", t.view, t.path)
+		wrote++
+	}
+	return wrote, 0
 }
 
 // viewTarget pairs a view name with its on-disk path.
