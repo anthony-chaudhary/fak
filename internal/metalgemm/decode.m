@@ -267,18 +267,19 @@ static void d1d(id<MTLComputeCommandEncoder> e, id<MTLComputePipelineState> pso,
     [e dispatchThreads:MTLSizeMake(n,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
 }
 
-// q8 dequant-GEMV: Y[out](f16) = dequant(W_q8[wid]) . X(f16). One 32-lane threadgroup per row.
-static void d_gemv(int wid, id<MTLBuffer> X, id<MTLBuffer> Y) {
+// q8 dequant-GEMV: Y[yoff..yoff+out](f16) = dequant(W_q8[wid]) . X(f16). One 8-row threadgroup
+// of 256 threads per group. yoff (f16 elems) lets the K/V projection write straight into the
+// resident KV at row L, so no blit/encoder-switch is needed to append it.
+static void d_gemv(int wid, id<MTLBuffer> X, id<MTLBuffer> Y, long yoff) {
     int out, in, nblk; mg_q8_dims(wid, &out, &in, &nblk);
     id<MTLComputeCommandEncoder> e = denc();
     [e setComputePipelineState:psoDGemv];
     [e setBuffer:mg_q8_codes_buf(wid)  offset:0 atIndex:0];
     [e setBuffer:mg_q8_scales_buf(wid) offset:0 atIndex:1];
     [e setBuffer:X offset:0 atIndex:2];
-    [e setBuffer:Y offset:0 atIndex:3];
+    [e setBuffer:Y offset:(NSUInteger)(yoff*2) atIndex:3];
     [e setBytes:&nblk length:4 atIndex:4];
     [e setBytes:&out  length:4 atIndex:5];
-    // 8 rows per threadgroup (256 threads = 8 simdgroups); ceil(out/8) threadgroups cover all rows.
     NSUInteger ntg = (NSUInteger)((out + 7) / 8);
     [e dispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
 }
@@ -294,19 +295,19 @@ static void d_norm(id<MTLBuffer> X, int normID, id<MTLBuffer> Out) {
     [e dispatchThreads:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(1,1,1)];
 }
 
-static void d_bias(id<MTLBuffer> Buf, int biasID, int n) {
+static void d_bias(id<MTLBuffer> Buf, int biasID, int n, long off) {
     id<MTLComputeCommandEncoder> e = denc();
     [e setComputePipelineState:psoDBias];
-    [e setBuffer:Buf offset:0 atIndex:0];
+    [e setBuffer:Buf offset:(NSUInteger)(off*2) atIndex:0];
     [e setBuffer:wbufOfDec(biasID) offset:0 atIndex:1];
     uint nn = n; [e setBytes:&nn length:4 atIndex:2];
     d1d(e, psoDBias, (NSUInteger)n);
 }
 
-static void d_rope_at(id<MTLBuffer> Buf, int nHeads, int base) {
+static void d_rope_at(id<MTLBuffer> Buf, int nHeads, int base, long off) {
     id<MTLComputeCommandEncoder> e = denc();
     [e setComputePipelineState:psoDRope];
-    [e setBuffer:Buf offset:0 atIndex:0];
+    [e setBuffer:Buf offset:(NSUInteger)(off*2) atIndex:0];
     uint nh = nHeads, hd = gDecHd, b = base; [e setBytes:&nh length:4 atIndex:1];
     [e setBytes:&hd length:4 atIndex:2];
     [e setBytes:&b length:4 atIndex:3];
@@ -367,12 +368,16 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
         id<MTLBuffer> Xb = dbuf(H);
         mg_f32_to_f16(xEmbed, (__fp16 *)Xb.contents, (long)H);
         id<MTLBuffer> Xn = dbuf(H), Xn2 = dbuf(H);
-        id<MTLBuffer> Qb = dbuf(qrow), K1 = dbuf(w), V1 = dbuf(w);
+        id<MTLBuffer> Qb = dbuf(qrow);
         id<MTLBuffer> attn = dbuf(qrow), tmpH = dbuf(H), Gb = dbuf(Im), Ub = dbuf(Im);
-        // per-layer resident KV (context + the new row at index L) and the new pre-RoPE K stash.
-        id<MTLBuffer> Kbuf[DEC_MAXL] = {0}, Vbuf[DEC_MAXL] = {0}, Kraw[DEC_MAXL] = {0};
+        // per-layer resident KV: the context rows 0..L plus room for the new row at index L. The
+        // K/V projections write straight into row L (no temp, no blit), so the whole token stays in
+        // ONE compute encoder — Metal's default serial dispatch + automatic hazard tracking order
+        // the dependent kernels without an encoder switch.
+        long rowOff = (long)L * w;
+        id<MTLBuffer> Kbuf[DEC_MAXL] = {0}, Vbuf[DEC_MAXL] = {0};
         for (int l = 0; l < gDecNL; l++) {
-            Kbuf[l] = dbuf((long)ctx*w); Vbuf[l] = dbuf((long)ctx*w); Kraw[l] = dbuf(w);
+            Kbuf[l] = dbuf((long)ctx*w); Vbuf[l] = dbuf((long)ctx*w);
             if (L > 0) {
                 mg_f32_to_f16(Kctx + (long)l*L*w, (__fp16 *)Kbuf[l].contents, (long)L*w);
                 mg_f32_to_f16(Vctx + (long)l*L*w, (__fp16 *)Vbuf[l].contents, (long)L*w);
@@ -383,41 +388,29 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
 
         gDCB = [gQueue commandBuffer];
         gDEnc = nil;
-        id<MTLBlitCommandEncoder> blit;
 
         for (int l = 0; l < gDecNL; l++) {
             DecLayer L_ = gDecL[l];
-            d_norm(Xb, L_.inNorm, Xn);                 // Xn = rmsnorm(X)
-            d_gemv(L_.q, Xn, Qb);                       // Q
-            d_gemv(L_.k, Xn, K1);                       // K (new row)
-            d_gemv(L_.v, Xn, V1);                       // V (new row)
+            d_norm(Xb, L_.inNorm, Xn);                     // Xn = rmsnorm(X)
+            d_gemv(L_.q, Xn, Qb, 0);                       // Q
+            d_gemv(L_.k, Xn, Kbuf[l], rowOff);             // K written straight to resident row L
+            d_gemv(L_.v, Xn, Vbuf[l], rowOff);             // V written straight to resident row L
             if (gDecAttnBias) {
-                d_bias(Qb, L_.qb, qrow);
-                d_bias(K1, L_.kb, w);
-                d_bias(V1, L_.vb, w);
+                d_bias(Qb, L_.qb, qrow, 0);
+                d_bias(Kbuf[l], L_.kb, w, rowOff);
+                d_bias(Vbuf[l], L_.vb, w, rowOff);
             }
-            // stash pre-RoPE K, then RoPE Q and the new K at absolute position L
-            dendEnc();
-            blit = [gDCB blitCommandEncoder];
-            [blit copyFromBuffer:K1 sourceOffset:0 toBuffer:Kraw[l] destinationOffset:0 size:(NSUInteger)w*2];
-            [blit endEncoding];
-            d_rope_at(Qb, nH, L);
-            d_rope_at(K1, nKV, L);
-            // append the new (post-RoPE) K and V at row L of the resident KV
-            dendEnc();
-            blit = [gDCB blitCommandEncoder];
-            [blit copyFromBuffer:K1 sourceOffset:0 toBuffer:Kbuf[l] destinationOffset:(NSUInteger)L*w*2 size:(NSUInteger)w*2];
-            [blit copyFromBuffer:V1 sourceOffset:0 toBuffer:Vbuf[l] destinationOffset:(NSUInteger)L*w*2 size:(NSUInteger)w*2];
-            [blit endEncoding];
-            d_attn(Qb, Kbuf[l], Vbuf[l], attn, ctx);   // single-query attention over ctx keys
-            d_gemv(L_.o, attn, tmpH);                   // O
-            d_add_buf(Xb, tmpH, H);                     // X += O
-            d_norm(Xb, L_.postNorm, Xn2);              // Xn2 = rmsnorm(X)
-            d_gemv(L_.gate, Xn2, Gb);                   // gate
-            d_gemv(L_.up, Xn2, Ub);                     // up
-            d_silu(Gb, Ub, Im);                          // G = silu(G)*U
-            d_gemv(L_.down, Gb, tmpH);                  // down
-            d_add_buf(Xb, tmpH, H);                     // X += down
+            d_rope_at(Qb, nH, L, 0);                        // RoPE Q
+            d_rope_at(Kbuf[l], nKV, L, rowOff);            // RoPE the new K row in place
+            d_attn(Qb, Kbuf[l], Vbuf[l], attn, ctx);       // single-query attention over ctx keys
+            d_gemv(L_.o, attn, tmpH, 0);                   // O
+            d_add_buf(Xb, tmpH, H);                         // X += O
+            d_norm(Xb, L_.postNorm, Xn2);                  // Xn2 = rmsnorm(X)
+            d_gemv(L_.gate, Xn2, Gb, 0);                   // gate
+            d_gemv(L_.up, Xn2, Ub, 0);                     // up
+            d_silu(Gb, Ub, Im);                             // G = silu(G)*U
+            d_gemv(L_.down, Gb, tmpH, 0);                  // down
+            d_add_buf(Xb, tmpH, H);                         // X += down
         }
         dendEnc();
         CFTimeInterval tEnc = prof ? CFAbsoluteTimeGetCurrent() : 0;
@@ -430,8 +423,8 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
         }
 
         mg_f16_to_f32((const __fp16 *)Xb.contents, lastPre, (long)H);
+        (void)newKraw; // the fast Q8 decode path keeps post-RoPE K/V but not pre-RoPE Kraw
         for (int l = 0; l < gDecNL; l++) {
-            mg_f16_to_f32((const __fp16 *)Kraw[l].contents, newKraw + (long)l*w, (long)w);
             mg_f16_to_f32((const __fp16 *)Kbuf[l].contents + (long)L*w, newKpost + (long)l*w, (long)w);
             mg_f16_to_f32((const __fp16 *)Vbuf[l].contents + (long)L*w, newV + (long)l*w, (long)w);
         }
