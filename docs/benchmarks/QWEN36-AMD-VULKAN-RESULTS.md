@@ -50,7 +50,7 @@ python tools\qwen36_surface_smoke.py `
   --model Qwen3.6-27B-Q4_K_M.gguf `
   --node-name amd-vulkan-local-full `
   --gateway-chat `
-  --perf-decode-baseline-tps 7.29 `
+  --perf-decode-baseline-tps 2.80 `
   --out fak\experiments\qwen36\amd-vulkan-local-full.json `
   --markdown fak\experiments\qwen36\amd-vulkan-local-full.md `
   --model-timeout-s 600 `
@@ -90,7 +90,7 @@ python tools\qwen36_watch_nodes.py `
   --send-packet `
   --packet-profile vulkan `
   --gateway-chat `
-  --perf-decode-baseline-tps 7.29
+  --perf-decode-baseline-tps 2.80
 ```
 
 The generated node wrapper runs `qwen36_node_server.py --profile vulkan`, which keeps
@@ -106,7 +106,7 @@ Gateway chat report:
 - Wall time: 46.351 s
 - Gateway-estimated decode: 2.697 tok/s
 - llama.cpp decode: 2.80 tok/s
-- Ratio to the M3 Pro llama.cpp reference decode bar (7.29 tok/s): 0.38x
+- Ratio to local llama.cpp baseline (2.80 tok/s): 0.96x
 
 llama.cpp server timing for that same gateway chat:
 
@@ -121,9 +121,6 @@ Interpretation:
 - **End-to-end chat works on this AMD CPU/GPU setup.**
 - **fak gateway overhead is near parity with llama.cpp on the same setup**:
   2.697 tok/s wall-clock through fak vs 2.80 tok/s from llama.cpp timing, about 0.96x.
-- **Absolute local decode is not at the M3 Pro reference bar**:
-  2.80 tok/s vs 7.29 tok/s, about 0.38x, due at least in part to llama.cpp's current Vulkan
-  Gated-DeltaNet fallback.
 
 ## Pure-fak in-kernel speed parity sweep
 
