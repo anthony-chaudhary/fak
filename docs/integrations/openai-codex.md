@@ -28,10 +28,13 @@ There are two useful fak entry points:
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
 proxy to an OpenAI Responses upstream with `--provider openai-responses`. The public
-gateway clients hit today are `/v1/chat/completions`, `/v1/messages`, `/mcp`, and
-`/v1/fak/*`. fak does not expose a client-facing `/v1/responses` route. For current
-Codex CLI/IDE sessions, use MCP first. For OpenAI-compatible SDKs and Chat Completions
-agents, use the base-URL proxy path below.
+gateway clients hit today are `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
+`/mcp`, and `/v1/fak/*`. fak now exposes a client-facing **`/v1/responses`** inbound
+route (#925): a Responses-API agent repoints its OpenAI base URL at fak and every
+proposed tool call crosses the kernel's capability floor, the same as the chat wire.
+It is **buffered** — a `stream:true` request is refused with a 400, so a client that
+needs SSE should use MCP. For current Codex CLI/IDE sessions either path works; for
+OpenAI-compatible SDKs and Chat Completions agents, use the base-URL proxy path below.
 
 ## Why this matters to Codex
 
@@ -530,9 +533,9 @@ the gateway's upstream client:
 Clients still call fak's supported inbound routes. That means:
 
 - OpenAI-compatible clients call `http://127.0.0.1:8080/v1/chat/completions`.
+- Responses-API clients (Codex CLI/IDE, `terminus`) call `http://127.0.0.1:8080/v1/responses`
+  — the buffered inbound Responses route (#925); use MCP instead if you need streaming.
 - Anthropic-wire clients call `http://127.0.0.1:8080/v1/messages`.
-- Codex CLI/IDE should use the MCP path unless fak grows a client-facing `/v1/responses`
-  route.
 
 ## Troubleshooting
 

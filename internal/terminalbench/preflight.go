@@ -159,7 +159,7 @@ func BuildRehearsalPreflight(in RehearsalPreflightInput) RehearsalPreflight {
 		KnownDependencies: []string{
 			"a running Docker engine for every Harbor task container (oracle, raw, and fak arms)",
 			"OPENAI_API_KEY in the rehearsal shell for the credentialed raw baseline (#900)",
-			"the fak Codex /v1/responses client wire so the fak arm routes through the gateway (#925)",
+			"a running, reachable fak gateway so the fak arm routes through it (the client-facing /v1/responses inbound route shipped in #925; the remaining requirement is that the gateway is up on this host)",
 			"explicit paid-spend authority before the credentialed raw/fak smoke pair",
 			"the official Harbor grader output as the sole authority for any pass-rate number",
 		},
@@ -240,7 +240,7 @@ func preflightNextAction(reasons []string) string {
 	case ReasonOpenAIKeyMissing:
 		return "run the oracle smoke first, then set OPENAI_API_KEY in the rehearsal shell for the bounded raw paid smoke"
 	case ReasonFakGatewayUnreach:
-		return "start the fak gateway and land the Codex /v1/responses wire (#925), then re-check the fak arm"
+		return "start the fak gateway (the /v1/responses inbound route is shipped, #925) and confirm it is reachable, then re-check the fak arm"
 	default:
 		return "resolve the blocking reasons above, then re-run the preflight"
 	}
