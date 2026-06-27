@@ -45,7 +45,8 @@ fak guard -- claude    # your normal Claude Code, kernel-adjudicated, on your su
 ```
 
 (No API key needed — `fak guard` uses your logged-in Claude Pro/Max subscription by
-default; set `ANTHROPIC_API_KEY` to use API billing instead.)
+default, **even if `ANTHROPIC_API_KEY` is exported**. To use API billing instead, name the
+key explicitly: `--api-key-env ANTHROPIC_API_KEY`.)
 
 `fak guard`:
 
@@ -54,8 +55,8 @@ default; set `ANTHROPIC_API_KEY` to use API billing instead.)
    directory — print it with `fak guard --dump-policy`, override with `--policy FILE`).
 3. Injects `ANTHROPIC_BASE_URL` into the **child process only** — your shell, your
    `settings.json`, and any other `claude` in another terminal are untouched.
-4. Proxies to the **real Anthropic API in passthrough mode**: your credential
-   (subscription OAuth by default, or an API key if `ANTHROPIC_API_KEY` is set) and the
+4. Proxies to the **real Anthropic API**: your credential (subscription OAuth by default,
+   or an API key when you opt in with `--api-key-env ANTHROPIC_API_KEY`) and the
    `cache_control` prompt-cache breakpoints flow through byte-for-byte (no cost regression),
    while every tool call Claude proposes crosses the capability floor first.
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
@@ -71,19 +72,23 @@ admit — typically an inbound tool result let through the result-side floor —
 normal outcome, not an error.)
 
 > **Your Claude Pro/Max subscription is the default — no API key needed.** When the
-> upstream is Anthropic and `ANTHROPIC_API_KEY` is unset, `fak guard` uses your
-> **subscription**: it sources the OAuth token (from `CLAUDE_CODE_OAUTH_TOKEN`, then
+> upstream is Anthropic, `fak guard` uses your **subscription** unless you explicitly name
+> an API key: it sources the OAuth token (from `CLAUDE_CODE_OAUTH_TOKEN`, then
 > `<claude-config>/.oauth-token`, then `~/.claude/.credentials.json`) and sends it
 > upstream as `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` — the scheme
 > the API accepts an `sk-ant-oat…` token under (sent as `x-api-key` it 401s). So
 > `fak guard -- claude` just works on a logged-in subscription. fak holds the token and
-> ignores the client's own credential (it injects a placeholder key into the child).
+> ignores the client's own credential (it injects a placeholder key into the child). A
+> bare `ANTHROPIC_API_KEY` exported in your shell **no longer** switches this — a global
+> SDK key must not silently bill your API account when you hold a subscription; guard
+> prints a one-line note when it holds the subscription token past an ambient key.
 >
 > - **Long-running / headless:** prefer a `claude setup-token` (a long-lived token, read
 >   from `<claude-config>/.oauth-token` or `CLAUDE_CODE_OAUTH_TOKEN`) — the interactive
 >   `~/.claude/.credentials.json` token expires and Claude Code refreshes it out-of-band.
-> - **Use API billing instead:** set `ANTHROPIC_API_KEY` (or `--api-key-env`) and fak
->   forwards that as `x-api-key`. `--anthropic-oauth` forces the subscription path.
+> - **Use API billing instead:** opt in explicitly with `--api-key-env ANTHROPIC_API_KEY`
+>   (fak forwards it as `x-api-key`). `--anthropic-oauth` forces the subscription path and
+>   fails loud if no token is found.
 
 Wrap a different agent or upstream by naming it after `--` and switching the provider:
 
@@ -213,8 +218,10 @@ your subscription OAuth token. Copy-paste it.
   interactive login token, which expires — prefer a setup token for anything
   long-running). If you have used `claude` interactively on this box, the third source
   already exists.
-- `ANTHROPIC_API_KEY` is **unset**. With it set, guard uses API billing instead of the
-  subscription and this proof does not apply.
+- `ANTHROPIC_API_KEY` is **unset**. The subscription is the default even with it set, but
+  Check 3 below witnesses the **injected placeholder** key, which guard hands the child
+  only when `ANTHROPIC_API_KEY` is unset — so keep it unset for this exact proof. (To
+  deliberately use API billing instead, opt in with `--api-key-env ANTHROPIC_API_KEY`.)
 
 Run one headless, machine-checkable turn from the repo root (the Go module is the repo
 root), with the gateway log and the audit journal on:
