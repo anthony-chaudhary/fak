@@ -73,7 +73,8 @@ func (r Registry) tombstonedHomes() []Home {
 }
 
 // renderDos emits the dos roster: `accounts:` rows of name+config_dir for every active home,
-// then the view's config blocks (rotation/defaults).
+// the active-default seat (so a launcher/watchdog can pick the default account without
+// re-reading the registry), then the view's config blocks (rotation/defaults).
 func (r Registry) renderDos() string {
 	var b strings.Builder
 	b.WriteString(generatedHeader)
@@ -81,6 +82,14 @@ func (r Registry) renderDos() string {
 	for _, h := range r.activeHomes() {
 		b.WriteString("  - name: " + yamlScalar(h.Name) + "\n")
 		b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
+	}
+	// active_default: the name+config_dir of the seat marked default in the registry. It is the
+	// account a bare launch / watchdog should use. Emitted as a top-level scalar so the existing
+	// flat `accounts:` parsers ignore it; a new consumer reads it directly. Omitted when no seat
+	// is marked default (Validate guarantees at most one, never tombstoned).
+	if def, ok := r.Default(); ok && def.Active() {
+		b.WriteString("\nactive_default: " + yamlScalar(def.Name) + "\n")
+		b.WriteString("active_default_dir: " + yamlScalar(def.Dir) + "\n")
 	}
 	b.WriteString(r.renderBlocks(ViewDos))
 	return b.String()

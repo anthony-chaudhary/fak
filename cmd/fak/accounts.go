@@ -32,6 +32,7 @@ import (
 //	                                   enroll a NEW account end-to-end: isolated-dir login (never
 //	                                   ~/.claude), identity probe, twin-check, registry + views
 //	fak accounts remove --name <n>     tombstone an account in the registry + regenerate views
+//	fak accounts set-default --name <n> make <n> the single default (active) seat + regenerate views
 //	fak accounts list                  table of every seat: name, status, TRUE identity, creds, rehome, flags
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
 //	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
@@ -42,7 +43,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-default|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -315,6 +316,18 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			noSync:       *addNoSync,
 		})
 
+	case "set-default":
+		// Make <name> the single default (active) seat — the deterministic one-command inverse
+		// of hand-editing `default: true`. The default is what a bare launch / the watchdog
+		// picks; it is surfaced as `active_default` in the dos view.
+		return runAccountsSetDefault(stdout, stderr, setDefaultParams{
+			name:         *addName,
+			registryPath: *registryPath,
+			dosView:      *dosView,
+			jobView:      *jobView,
+			noSync:       *addNoSync,
+		})
+
 	case "sync":
 		// Project the canonical registry into the generated roster views and write them. The
 		// registry is the single source of truth; these files are caches of it, never
@@ -365,7 +378,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-default|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }

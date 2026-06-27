@@ -256,6 +256,73 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	return 0
 }
 
+// setDefaultParams carries the resolved flags for `fak accounts set-default`.
+type setDefaultParams struct {
+	name         string
+	registryPath string
+	dosView      string
+	jobView      string
+	noSync       bool
+}
+
+// runAccountsSetDefault makes <name> the single default (active) seat: it clears any existing
+// default and marks the named active home default, then validates and regenerates the views.
+// This is the deterministic one-command inverse of hand-editing `default: true` in the
+// registry — the default is what a bare launch / the watchdog picks, surfaced as
+// `active_default` in the dos view. Refuses a missing or tombstoned target (a tombstone can
+// never serve, so it can never be the default).
+func runAccountsSetDefault(stdout, stderr io.Writer, p setDefaultParams) int {
+	if p.name == "" {
+		fmt.Fprintln(stderr, "usage: fak accounts set-default --name <name>")
+		return 2
+	}
+	reg, err := accounts.LoadRegistry(p.registryPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	idx := -1
+	for i := range reg.Homes {
+		if reg.Homes[i].Name == p.name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		fmt.Fprintf(stderr, "fak accounts: %q not in registry\n", p.name)
+		return 1
+	}
+	if !reg.Homes[idx].Active() {
+		fmt.Fprintf(stderr, "fak accounts: %q is tombstoned and cannot be the default\n", p.name)
+		return 1
+	}
+	if reg.Homes[idx].Default {
+		fmt.Fprintf(stdout, "%q is already the default seat\n", p.name)
+		return 0
+	}
+	// Clear any prior default (Validate allows at most one), then set the new one.
+	for i := range reg.Homes {
+		reg.Homes[i].Default = false
+	}
+	reg.Homes[idx].Default = true
+	if err := reg.Validate(); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	if err := accounts.SaveRegistry(p.registryPath, reg); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "registry: default seat -> %s\n", p.name)
+	if !p.noSync {
+		if _, code := syncViews(stdout, stderr, p.registryPath, p.dosView, p.jobView); code != 0 {
+			return code
+		}
+	}
+	fmt.Fprintf(stdout, "set default account %q (active_default in the dos view)\n", p.name)
+	return 0
+}
+
 // accountDir resolves the isolated config dir for a new account: ~/.claude-<name> when <name>
 // already ends with the suffix, else ~/.claude-<name><suffix>. The suffix matches the host's
 // roster convention (default "-netra") so a new seat sits alongside its peers.

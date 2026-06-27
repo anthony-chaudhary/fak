@@ -73,6 +73,16 @@ func TestRenderDosView(t *testing.T) {
 	if strings.Contains(got, "name: q-netra") {
 		t.Errorf("tombstoned q-netra leaked into dos active rows:\n%s", got)
 	}
+	// The active-default seat is surfaced so a launcher/watchdog can pick it without re-reading
+	// the registry.
+	for _, want := range []string{
+		"\nactive_default: gem8-netra\n",
+		`active_default_dir: "C:\\Users\\U\\.claude-gem8-netra"` + "\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dos view missing active-default line %q in:\n%s", want, got)
+		}
+	}
 	// Config blocks emitted in order, nested correctly.
 	for _, want := range []string{
 		"\nrotation:\n",
