@@ -111,6 +111,13 @@ func reasonFor(s Scored, infeasibleWhy string) string {
 	if !s.Feasible {
 		return "not feasible here — " + infeasibleWhy
 	}
+	// A Manual task's requirements are met, but its Run is an operator recipe the
+	// unattended loop SKIPS (it needs a credential/GPU/browser the prober cannot
+	// express). Say so up front so plan/next never present a skip-only task as the
+	// next datum an --apply sweep will collect — the loop records OutcomeSkipped.
+	if s.Task.Manual {
+		return "operator recipe — run by hand; the unattended `run --apply` loop skips it (needs a setup the prober can't gate)"
+	}
 	switch {
 	case s.LastCollected == "":
 		return fmt.Sprintf("never collected on this box — a first-ever %s datum", s.Task.Value)
