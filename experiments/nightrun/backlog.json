@@ -1,0 +1,14 @@
+[
+  {
+    "id": "witness-glm52-cpu-throughput",
+    "title": "GLM-5.2 native CPU serve on a high-RAM no-GPU box: resident-Q4_K load wall-clock + GB/s and single-stream prefill/decode tok/s for the full ~433GB UD-Q4_K_M (no GPU, experts host-resident)",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": ["weights"],
+    "run": "FAK_Q4K=1 FAK_GGUF_LOAD_WORKERS=64 fak serve --gguf $FAK_GGUF --context-budget-tokens 8192 --addr 127.0.0.1:8080   # then POST /v1/chat/completions and read the response timings (prompt/predicted tok/s)",
+    "acceptance": "a recorded resident-Q4_K load wall-clock + GB/s and a single-stream prefill+decode tok/s for GLM-5.2 UD-Q4_K_M on a CPU-only host, captured in an experiments/benchmark/runs artifact and compared against the llama.cpp CPU baseline (the apples-to-apples reference in the benchmarking-plan note)",
+    "recheck_days": 30,
+    "timeout_sec": 7200,
+    "doc": "docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md"
+  }
+]
