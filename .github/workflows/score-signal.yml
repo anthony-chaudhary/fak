@@ -35,6 +35,10 @@ on:
         description: "Hard cap on issues filed per run (worst-regression-first)"
         type: string
         default: "5"
+      worsen_delta:
+        description: "An already-open ticket is REFRESHED only when its delta grew by at least this (#981)"
+        type: string
+        default: "2"
 
 permissions:
   contents: read
@@ -82,28 +86,32 @@ jobs:
           test -s pane.json || { echo "control pane produced no JSON"; exit 1; }
 
       # Plan the issues (dry-run) — always, so the step summary shows what WOULD be
-      # filed even on an armed run. Operator inputs are bound to env (not spliced
-      # into the script body) so an input value can't break out into shell.
+      # filed AND what would be refreshed even on an armed run. Operator inputs are
+      # bound to env (not spliced into the script body) so an input value can't break
+      # out into shell.
       - name: plan score-signal issues
         env:
           MIN_DELTA: ${{ github.event.inputs.min_delta || '1' }}
           MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
+          WORSEN_DELTA: ${{ github.event.inputs.worsen_delta || '2' }}
         run: |
           python tools/score_signal.py --from pane.json --min-delta "$MIN_DELTA" \
-            --max-issues "$MAX_ISSUES" --json > score-signal-plan.json
+            --max-issues "$MAX_ISSUES" --worsen-delta "$WORSEN_DELTA" --json > score-signal-plan.json
           python tools/score_signal.py --from pane.json --min-delta "$MIN_DELTA" \
-            --max-issues "$MAX_ISSUES" > score-signal-plan.txt
+            --max-issues "$MAX_ISSUES" --worsen-delta "$WORSEN_DELTA" > score-signal-plan.txt
           cat score-signal-plan.txt
 
-      # File the issues — ONLY on an explicit `workflow_dispatch` arm with live=true.
+      # File NEW issues + REFRESH worsened open ones — ONLY on an explicit
+      # `workflow_dispatch` arm with live=true.
       - name: file score-signal issues (armed)
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' }}
         env:
           MIN_DELTA: ${{ github.event.inputs.min_delta || '1' }}
           MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
+          WORSEN_DELTA: ${{ github.event.inputs.worsen_delta || '2' }}
         run: |
           python tools/score_signal.py --from pane.json --min-delta "$MIN_DELTA" \
-            --max-issues "$MAX_ISSUES" --live
+            --max-issues "$MAX_ISSUES" --worsen-delta "$WORSEN_DELTA" --live
 
       - name: payload -> step summary
         if: always()
