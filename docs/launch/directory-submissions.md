@@ -10,7 +10,7 @@ are copy-paste ready. The programmatic ones are already handled in the repo and 
 form:
 
 - **Glama** — auto-indexes from [`glama.json`](https://github.com/anthony-chaudhary/fak/blob/main/glama.json) (committed; approves in minutes).
-- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image; one interactive publish step in [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md).
+- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, now at **0.34.0** and matching the published image. As of 2026-06-27 `ghcr.io/anthony-chaudhary/fak:0.34.0` + `:latest` are built and **anonymously pullable** (the prereq is satisfied), so only the one interactive publish step in [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md) remains — see Fresh leads #6 below.
 - **Awesome-list PRs** — already submitted across ~12 lists (don't duplicate).
 
 Reusable description (≈140 chars): *In-process default-deny permission gate for AI agents — fronts OpenAI/Anthropic/MCP wires and adjudicates every tool call like a syscall (prompt-injection / tool-poisoning containment).*
@@ -71,6 +71,64 @@ but a hosted HTTPS endpoint (`fak serve --addr ...` behind TLS) gets the richest
 | Platforms | Linux, macOS, Windows, Self-Hosted |
 | Link | `https://github.com/anthony-chaudhary/fak` |
 | List it as an alternative to | LangChain guardrails, NeMo Guardrails, E2B, vLLM (governance layer) |
+
+---
+
+## Fresh leads (added 2026-06-27)
+
+Researched + adversarially verified this session. The first is a brand-new
+agent/MCP marketplace not in the original campaign; the rest are state changes that
+unblock or extend what was already wired.
+
+### 5. Cline MCP Marketplace — GitHub issue (NEW, non-duplicate)
+
+The Cline IDE-agent's marketplace drives installs to a large audience. The sibling
+project `DOS` was already submitted ([cline/mcp-marketplace#1794](https://github.com/cline/mcp-marketplace/issues/1794)), but **fak has not been** — confirmed no open `fak` submission. Submission is a GitHub issue (not a PR).
+
+**Submit:** open a new issue on [`cline/mcp-marketplace`](https://github.com/cline/mcp-marketplace/issues/new/choose) with the *Server Submission* template.
+
+- **GitHub Repo URL:** `https://github.com/anthony-chaudhary/fak`
+- **Logo:** a **400×400 PNG** attached to the issue. *This is the one missing asset — the repo has wide diagrams (`visuals/*.png`) and a 1200×630 `visuals/social-preview.png`, but no square icon. Make/crop a 400×400 fak icon and drag it onto the issue (GitHub issue image upload is web-UI only).* 
+- **Reason for addition (paste):**
+  ```
+  fak is the Fused Agent Kernel: a default-deny tool-call firewall + result quarantine you put in front of an agent over MCP. Its server (fak serve --stdio) exposes fak_adjudicate / fak_syscall / fak_admit so Cline can screen a proposed tool call BEFORE running it, run one through the kernel, or hold a poisoned tool result out of context entirely — addressing the MCP Top-10 (Tool Poisoning, Memory Poisoning) by structure, not a classifier. One static Go binary, Apache-2.0, zero deps.
+  ```
+- **README-install confirmation (required checkbox):** TRUE. The repo README + [`examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) give a README-alone install (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest`, then `fak serve --stdio` / a project `.mcp.json`). Test it with Cline first, then tick the box.
+
+### 6. Official MCP Registry — the final publish is now unblocked
+
+The blocker the old notes flagged (no OCI artifact) is **gone**: `release-container.yml` ran green for the v0.34.0 tag and `ghcr.io/anthony-chaudhary/fak:0.34.0` + `:latest` are publicly pullable (verified via an anonymous ghcr token). `server.json` is now bumped to 0.34.0 to match. Remaining steps (owner-only, can't be automated):
+
+1. **Make the ghcr `fak` package public** (first publish only) — repo *Packages* tab → set visibility to public.
+2. `brew install mcp-publisher` (or the release tarball — see [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md)).
+3. `mcp-publisher login github` — interactive GitHub device flow that claims the `io.github.anthony-chaudhary/*` namespace.
+4. `mcp-publisher publish` from the repo root (reads `server.json`).
+
+Future releases now keep `server.json` current automatically (`release_bump.py`'s `dist_manifests` target), so step 2-4 is the only recurring cost.
+
+### 7. Claude Code plugin — SHIPPED, just announce + smoke-test
+
+A self-hosted plugin marketplace is now in the repo ([`.claude-plugin/marketplace.json`](https://github.com/anthony-chaudhary/fak/blob/main/.claude-plugin/marketplace.json) + `plugins/fak/`). Users adopt fak in two commands:
+
+```text
+/plugin marketplace add anthony-chaudhary/fak
+/plugin install fak@fak
+```
+
+Smoke-test it once (`/plugin marketplace add` against the live repo, install, `/mcp` shows the `fak` server), then it's a one-paste adopt path you can cite in the README and the social posts.
+
+### 8. Integration / guardrail docs PRs — high value, human-authored
+
+These add fak to the docs of tools fak fronts, reaching THEIR users (not just a backlink). They overlap fak's own interop epic **#1016** (#1017-1020) — coordinate so the outbound PR and the inbound wire land together. Ranked by merge-likelihood:
+
+| Target | PR shape | Why it fits |
+|---|---|---|
+| [BerriAI/litellm](https://github.com/BerriAI/litellm) | A guardrail-provider doc page under `docs/my-website` (model it on `presidio.md`/`lakera.md`), or register in `SupportedGuardrailIntegrations` / the `litellm-guardrails` registry, or expose fak via the no-PR *Generic Guardrail API*. | LiteLLM already documents third-party guardrails returning BLOCKED/NONE/GUARDRAIL_INTERVENED — exactly fak's default-deny tool gate. Reciprocal: fak already has [`docs/integrations/litellm.md`](../integrations/litellm.md). |
+| [openai/openai-agents-python](https://github.com/openai/openai-agents-python) | A runnable example under `examples/model_providers/` repointing `base_url` at `fak serve` for a governed gateway. | The SDK ships `examples/model_providers/` and resolves via custom base_url; fak drops in with zero agent-side change. |
+| [block/goose](https://github.com/block/goose) | A docs recipe (custom OpenAI-compatible provider) pointing Goose at `fak serve`. | Model-agnostic CLI agent, any OpenAI-compatible endpoint, community-PR-friendly docs. |
+| [vercel/ai](https://github.com/vercel/ai) | A community-provider / `createOpenAICompatible` example. | High-traffic TS audience; community providers are an established category. |
+
+*Not actionable yet:* **awesome-go** — its ≥5-month-commit-history gate is provably failed (repo created 2026-06-21); earliest eligibility ~2026-11-21, and only if Go Report Card grades A-/A/A+ (note: Go Report Card is sunsetting). **Homebrew core** needs ~225 stars; a personal tap (`homebrew-fak`) is available now if Mac reach matters.
 
 ---
 
