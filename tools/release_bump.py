@@ -68,6 +68,29 @@ _INSTALL_CTX_RE = re.compile(
 # A bumpable semver token: bare MAJOR.MINOR.PATCH, optionally v- or "-prefixed.
 _PIN_SEMVER_RE = re.compile(r"(?P<pre>v?)(?P<ver>\d+\.\d+\.\d+)")
 
+# Distribution manifests that pin the release version on a machine-read line a
+# downstream registry parses - not prose, so they drift silently. server.json is
+# the Official MCP Registry manifest (its `version` and the `oci` package
+# `identifier`/`version` must match the ghcr image release-container.yml pushes,
+# or the registry lists a back-version / fails image validation). CITATION.cff is
+# the academic-citation card (its `version`/`date-released`). Both stranded
+# behind a release (server.json at 0.33.0, CITATION.cff at 0.30.0 after the
+# 0.34.0 cut) because the only thing this helper bumped was VERSION + INSTALL.md;
+# this list closes that root cause. docs/fak/mcp-registry.md's "Updating on each
+# release" step prescribes the server.json bump by hand - this automates it. The
+# whole-line context guard mirrors INSTALL_DOC_PINS: only a semver on a pin line
+# is rewritten, so a description that happens to contain a version is left alone.
+DIST_MANIFEST_PINS = ["server.json", "CITATION.cff"]
+
+# A pin LINE in a distribution manifest - a JSON `"version":`/`"identifier":`
+# field or a YAML `version:`/`date-released:` key. Only semvers (and the
+# CITATION date) on these lines are bumped.
+_DIST_CTX_RE = re.compile(
+    r"(\"version\"\s*:|\"identifier\"\s*:|^version\s*:|^date-released\s*:)",
+)
+# An ISO date token (CITATION.cff `date-released`).
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -117,11 +140,55 @@ def bump_install_doc(root: Path, rel: str, new: str, *, dry_run: bool) -> dict:
     return {"path": rel, "new": new, "changed": changed, "replaced": replaced, "ok": True}
 
 
+def bump_dist_manifest(root: Path, rel: str, new: str, *, date, dry_run: bool) -> dict:
+    """Bump the release version (and CITATION date) in a distribution manifest.
+
+    Only rewrites a semver on a line `_DIST_CTX_RE` recognizes as a version/identifier
+    pin, so the project description or abstract is never touched. For CITATION.cff,
+    a `date-released:` line is updated to `date` when one is supplied (a bump with no
+    `--date` leaves the date alone, staying idempotent and pure). Returns the same
+    shape as `bump_install_doc`: {path, new, changed, replaced, ok}.
+    """
+    path = root / rel
+    if not path.exists():
+        return {"path": rel, "ok": False, "reason": f"{rel} not found"}
+    replaced = []
+    out_lines = []
+    for line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+        if not _DIST_CTX_RE.search(line):
+            out_lines.append(line)
+            continue
+        if "date-released" in line:
+            if date is not None:
+                def _sub_date(m):
+                    if m.group(0) == date:
+                        return m.group(0)
+                    replaced.append(f"{m.group(0)}->{date}")
+                    return date
+                line = _ISO_DATE_RE.sub(_sub_date, line)
+            out_lines.append(line)
+            continue
+
+        def _sub(m):
+            if m.group("ver") == new:
+                return m.group(0)
+            replaced.append(f"{m.group('ver')}->{new}")
+            return f"{m.group('pre')}{new}"
+
+        out_lines.append(_PIN_SEMVER_RE.sub(_sub, line))
+    new_text = "".join(out_lines)
+    changed = new_text != path.read_text(encoding="utf-8")
+    if changed and not dry_run:
+        path.write_text(new_text, encoding="utf-8")
+    return {"path": rel, "new": new, "changed": changed, "replaced": replaced, "ok": True}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Bump fleet version-marker file(s).")
     ap.add_argument("version", help="New semver, e.g. 0.2.0 (no leading v)")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--skip", action="append", default=[], choices=["version", "install_docs"], help="Skip a target (repeatable)")
+    ap.add_argument("--date", default=None, help="Release date YYYY-MM-DD (updates CITATION.cff date-released; omit to leave dates alone)")
+    ap.add_argument("--skip", action="append", default=[], choices=["version", "install_docs", "dist_manifests"], help="Skip a target (repeatable)")
     ap.add_argument("--owner", default=None, help="release-lock owner to gate on (default: session id)")
     ap.add_argument("--no-lock", action="store_true", help="bypass the single-writer release lock (solo/CI only)")
     args = ap.parse_args()
@@ -149,13 +216,22 @@ def main() -> int:
                 "owner_checked": owner,
             }, indent=2))
             return 4
+    if args.date is not None and not _ISO_DATE_RE.fullmatch(args.date):
+        print(f"ERROR: --date {args.date!r} is not YYYY-MM-DD", file=sys.stderr)
+        return 2
+
     def _install_docs() -> dict:
         files = [bump_install_doc(root, rel, new_version, dry_run=args.dry_run) for rel in INSTALL_DOC_PINS]
+        return {"ok": all(f.get("ok", False) for f in files), "files": files}
+
+    def _dist_manifests() -> dict:
+        files = [bump_dist_manifest(root, rel, new_version, date=args.date, dry_run=args.dry_run) for rel in DIST_MANIFEST_PINS]
         return {"ok": all(f.get("ok", False) for f in files), "files": files}
 
     actions = {
         "version": lambda: bump_plain_file(root, "VERSION", new_version, dry_run=args.dry_run),
         "install_docs": _install_docs,
+        "dist_manifests": _dist_manifests,
     }
 
     report: dict = {"new_version": new_version, "dry_run": args.dry_run, "targets": {}}
