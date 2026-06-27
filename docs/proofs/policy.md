@@ -60,7 +60,7 @@ refuses to weaken it:
 
 The witnesses pin these for the empty floor, an explicit load-bearing floor, the shipped
 dogfood floor, and the malformed-manifest cases. `TestLoadedPolicyIsLoadBearing` asserts
-declared deny `exfiltrate` → `DENY/SECRET_EXFIL` (reason preserved) and unlisted
+declared deny `exfiltrate` → `DENY/POLICY_BLOCK` (reason preserved) and unlisted
 `delete_account` → `DENY/DEFAULT_DENY` (floor preserved). `TestEmptyManifestIsFailClosed`
 asserts an empty manifest denies *everything*. `TestUnknownDenyReasonRejected` /
 `TestUnknownFieldRejected` assert the loosening-via-typo paths are rejected at load.

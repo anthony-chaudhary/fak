@@ -16,7 +16,7 @@
   "deny": {
     "delete_repo": "POLICY_BLOCK",
     "force_push": "POLICY_BLOCK",
-    "exfiltrate_secrets": "SECRET_EXFIL"
+    "exfiltrate_secrets": "POLICY_BLOCK"
   },
   "self_modify_globs": [
     ".git/",

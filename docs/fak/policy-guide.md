@@ -170,7 +170,7 @@ exfil-shaped tool is an explicit named deny, and the `ssn` field is redacted. Sh
   "allow_prefix": ["read_", "get_", "search_", "list_", "lookup_", "find_"],
   "deny": {
     "delete_account": "POLICY_BLOCK",
-    "export_customer_data": "SECRET_EXFIL",
+    "export_customer_data": "POLICY_BLOCK",
     "refund_payment": "POLICY_BLOCK",
     "rotate_credentials": "POLICY_BLOCK",
     "send_customer_email": "POLICY_BLOCK",
@@ -211,7 +211,7 @@ verdict=TRANSFORM reason=NONE by=monitor       # the ssn is redacted to [REDACTE
 
 **Testing checklist for this floor.**
 - [ ] `fak policy --check` passes — every deny cites a closed-vocabulary reason.
-- [ ] `preflight` every `deny` entry → `POLICY_BLOCK` / `SECRET_EXFIL` (not `DEFAULT_DENY` — you want the *named* refusal in the audit log).
+- [ ] `preflight` every `deny` entry → `POLICY_BLOCK` (not `DEFAULT_DENY` — you want the *named* refusal in the audit log).
 - [ ] `preflight` an unlisted exfil-shaped tool (e.g. `dump_table`) → `DEFAULT_DENY` (the structural backstop).
 - [ ] `preflight create_support_ticket` with an oversize body → `OVERSIZE`.
 - [ ] `preflight read_customer_record` carrying an `ssn` arg → `TRANSFORM` (secret stripped before dispatch).
@@ -305,7 +305,7 @@ wedged by one unlisted read-shaped tool. Shipped at
   "allow_prefix": ["read_", "get_", "search_", "list_", "lookup_", "find_", "calc"],
   "deny": {
     "delete_file": "POLICY_BLOCK", "drop_table": "POLICY_BLOCK",
-    "exfiltrate": "SECRET_EXFIL", "post_message": "POLICY_BLOCK",
+    "exfiltrate": "POLICY_BLOCK", "post_message": "POLICY_BLOCK",
     "run_command": "POLICY_BLOCK", "send_email": "POLICY_BLOCK",
     "transfer_funds": "POLICY_BLOCK", "upload_file": "POLICY_BLOCK"
   },

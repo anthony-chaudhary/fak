@@ -19,7 +19,7 @@
   "deny": {
     "send_email": "POLICY_BLOCK",
     "delete_records": "POLICY_BLOCK",
-    "transfer_funds": "SECRET_EXFIL"
+    "transfer_funds": "POLICY_BLOCK"
   },
   "self_modify_globs": [
     ".git/",

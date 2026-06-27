@@ -489,7 +489,7 @@ may call**. That lives in one reviewable JSON manifest (`fak-policy/v1`), loaded
   "posture": "fail_closed",
   "allow":        ["read_file", "http_get", "run_sql"],
   "allow_prefix": ["read_", "get_", "search_", "list_"],
-  "deny":         { "delete_account": "POLICY_BLOCK", "exfiltrate": "SECRET_EXFIL" },
+  "deny":         { "delete_account": "POLICY_BLOCK", "exfiltrate": "POLICY_BLOCK" },
   "self_modify_globs": [".git/", "policy.json"],
   "redact_fields":     ["password", "secret", "api_key", "token"]
 }

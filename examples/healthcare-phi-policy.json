@@ -19,7 +19,7 @@
     "fetch_"
   ],
   "deny": {
-    "export_patient_data": "SECRET_EXFIL",
+    "export_patient_data": "POLICY_BLOCK",
     "email_phi": "POLICY_BLOCK",
     "delete_medical_record": "POLICY_BLOCK",
     "transfer_funds": "POLICY_BLOCK",

@@ -373,7 +373,7 @@ A manifest is plain JSON (`fak-policy/v1`):
   "posture": "fail_closed",
   "allow":        ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
   "allow_prefix": ["read_", "get_", "search_", "list_"],
-  "deny":         { "git_push": "POLICY_BLOCK", "exfiltrate": "SECRET_EXFIL" },
+  "deny":         { "git_push": "POLICY_BLOCK", "exfiltrate": "POLICY_BLOCK" },
   "self_modify_globs": [".git/", "policy.json", "internal/kernel/"],
   "redact_fields":     ["password", "secret", "api_key", "token"]
 }

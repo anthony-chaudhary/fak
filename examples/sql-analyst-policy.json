@@ -24,8 +24,8 @@
     "drop_table": "POLICY_BLOCK",
     "alter_table": "POLICY_BLOCK",
     "create_table": "POLICY_BLOCK",
-    "copy_to": "SECRET_EXFIL",
-    "pg_dump": "SECRET_EXFIL",
+    "copy_to": "POLICY_BLOCK",
+    "pg_dump": "POLICY_BLOCK",
     "shell": "POLICY_BLOCK",
     "transfer_funds": "POLICY_BLOCK"
   },

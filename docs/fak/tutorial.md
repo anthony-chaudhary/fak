@@ -285,7 +285,7 @@ redaction rules. The top of it looks like this (real):
     "read_", "get_", "search_", "list_", "lookup_", "find_", "calc"
   ],
   "deny": {
-    "exfiltrate": "SECRET_EXFIL",
+    "exfiltrate": "POLICY_BLOCK",
     "shell_rm_rf": "POLICY_BLOCK"
   },
   ...

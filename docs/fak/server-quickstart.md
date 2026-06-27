@@ -237,7 +237,7 @@ curl -X POST http://127.0.0.1:8080/v1/fak/syscall \
   "allow_prefix": ["read_", "get_"],
   "deny": {
     "delete_account": "POLICY_BLOCK",
-    "exfiltrate": "SECRET_EXFIL"
+    "exfiltrate": "POLICY_BLOCK"
   },
   "self_modify_globs": [".git/", "policy.json"],
   "redact_fields": ["password", "secret", "api_key"]

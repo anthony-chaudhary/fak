@@ -20,7 +20,7 @@
   "deny": {
     "refund_payment": "POLICY_BLOCK",
     "cancel_booking": "POLICY_BLOCK",
-    "export_pnr": "SECRET_EXFIL",
+    "export_pnr": "POLICY_BLOCK",
     "transfer_funds": "POLICY_BLOCK",
     "rotate_credentials": "POLICY_BLOCK"
   },
