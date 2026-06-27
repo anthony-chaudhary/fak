@@ -190,6 +190,11 @@ void fcuda_graph_reset(void);
  * half of fcuda_graph_begin for a Go-side panic mid-capture. Clears the stream's capture
  * state (and any sticky error) so the next op/request runs normally instead of cascading. */
 void fcuda_graph_abort(void);
+/* fcuda_graph_prewarm deepens every pooled scratch size class by `extra` spare buffers,
+ * called OUTSIDE capture right before fcuda_graph_begin so a captured decode forward that
+ * holds several same-size transients live at once (per-layer RMSNorm outputs, etc.) is served
+ * entirely from the free list and never hits an illegal mid-capture cudaMalloc (#969). */
+void fcuda_graph_prewarm(int extra);
 
 #ifdef __cplusplus
 }
