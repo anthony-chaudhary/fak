@@ -470,6 +470,29 @@ summary  = "a destructive or write op targets a path OUTSIDE this repo -- it wou
 fix      = "operate inside the workspace; send scratch to a temp dir (/tmp, ~/.cache), never a sibling. Floor: tools/repo_guard.py (a Claude Code PreToolUse hook in .claude/settings.json) resolves each target against the repo root and denies out-of-tree ones; set FAK_REPO_GUARD=warn for advisory, off to disable. FAK regex twin: examples/repo-guard-policy.json."
 see_also = ["tools/repo_guard.py", "examples/repo-guard-policy.json", ".claude/settings.json", "DOGFOOD-CLAUDE.md", "tools/check_committed_files.py"]
 
+# L3 cross-tenant prefix-share gate (#57): the two typed REFUSE reasons the read-path
+# admission gate (internal/gateway/l3share.go -> AdmitL3SharedPage) cites when it refuses
+# a cross-tenant L3 page. fak rides the control/admission path in FRONT of the external L3
+# store's `mget`: that store is semantics-free (trusts the client hash, no content verify,
+# no tenancy notion), so fak supplies the two rungs it structurally cannot -- G1 full
+# content-verify and G4 scope/capability. Declared here so the tokens are CLOSED
+# (validateable via `dos_check_reason`), DISTINCT (a collision is distinguishable from an
+# access denial), and refusable -- the issue's "two REFUSE reasons are distinct, closed
+# tokens" acceptance. Floor: `go test ./internal/gateway -run TestL3Share`.
+[reasons.L3_CROSS_TENANT_SCOPE_DENIED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "G4 scope rung: a cross-tenant reader asked for an L3 page whose ShareScope does not reach across the trust boundary -- a page private to one agent (ScopeAgent) or bound to the owner's tenant (ScopeTenant), fetched by a DIFFERENT tenant. A capability check, not a namespace-prefix match."
+fix      = "the page is not shareable across tenants; only an owner-marked fleet/public (ScopeFleet) page crosses the boundary. Mark the prefix ScopeFleet at the producer if it is genuinely public, or serve the reader its own tenant-scoped page. Floor: go test ./internal/gateway -run TestL3Share_CrossTenant."
+see_also = ["internal/gateway/l3share.go", "internal/abi/types.go", "L3-DISAGGREGATED-CACHE-REIMAGINED.md"]
+
+[reasons.L3_PAGE_DIGEST_MISMATCH]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "G1 verify rung: the bytes the L3 get returned do not hash to the digest the page CLAIMS (Ref.Digest) -- a hash collision or a mis-tag the semantics-free store cannot detect. Refused for EVERY reader, same-tenant included: a corrupt/ambiguous page is served to no one. A full-content digest recompute, not a truncated locality hash."
+fix      = "do not admit the page -- the content address does not match its bytes. Re-fetch / re-key at the store, or re-mint the page so its Ref.Digest is the true hex(sha256) of its content. Floor: go test ./internal/gateway -run TestL3Share_DigestMismatch."
+see_also = ["internal/gateway/l3share.go", "internal/abi/types.go", "internal/model/evict_test.go"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).

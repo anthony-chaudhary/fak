@@ -55,6 +55,10 @@ const l3ShareBy = "gateway-l3-cross-tenant-gate"
 // They are gateway control-path tokens (the same closed-string-vocabulary posture as
 // the session run-state tokens), distinct from the kernel's abi.ReasonCode space so a
 // gateway test that resets the abi registry (abi.ResetForTest) cannot strand them.
+// Both are ALSO declared in the DOS closed refusal vocabulary (dos.toml [reasons], #57),
+// so a caller can validate either with dos_check_reason and tell a content collision
+// (L3_PAGE_DIGEST_MISMATCH, the G1 bite) apart from an access denial
+// (L3_CROSS_TENANT_SCOPE_DENIED, the G4 bite) — distinct, closed, refusable tokens.
 const (
 	// L3ReasonScopeDenied is the G4 bite: a cross-tenant reader asked for a page whose
 	// ShareScope does not reach across the trust boundary (private or tenant-bound).

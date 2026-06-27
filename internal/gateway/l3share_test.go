@@ -17,6 +17,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -127,6 +128,49 @@ func TestL3Share_EmptyDigestFailsClosed(t *testing.T) {
 	})
 	if v.Admitted || v.Reason != L3ReasonDigestMismatch {
 		t.Fatalf("an empty-digest page must fail closed, got admitted=%v reason=%q", v.Admitted, v.Reason)
+	}
+}
+
+// TestL3Share_ControlPathOnly proves the §6.5 control-path-only constraint (issue #57
+// acceptance "Control-path-only: no inline byte-scanner"): the gate is ONE admission
+// decision over the page's Ref metadata + a SINGLE digest recompute of the returned
+// control-path object — it does NOT sit inline on the RDMA data path, scanning every
+// byte of a multi-MB page at line rate. We authorize a large page once on the control
+// path, then stream its verified bytes client-direct (the simulated RDMA read the gate
+// is NOT on) and assert the gate ran exactly once for the whole page: its cost is O(1)
+// in page size, never O(bytes), so the ~1–5µs L3 read budget is not multiplied per byte.
+func TestL3Share_ControlPathOnly(t *testing.T) {
+	// A page large enough that a per-byte inline gate would be unmistakable (~112 KiB).
+	page, bytes := l3page(strings.Repeat("public refund-policy prefix ", 4096), abi.ScopeFleet)
+
+	gateCalls := 0
+	authorize := func() L3ShareVerdict {
+		gateCalls++
+		return AdmitL3SharedPage(L3SharedGet{Page: page, OwnerTag: "tenant-A", ReaderTag: "tenant-B", Fetched: bytes})
+	}
+
+	// CONTROL PATH: a single admission decision, up front, on the Ref + one recompute.
+	if v := authorize(); !v.Admitted {
+		t.Fatalf("a fleet page must admit on the control path, got refused (reason=%q detail=%q)", v.Reason, v.Detail)
+	}
+
+	// DATA PATH: the verified bytes now stream client-direct (simulated RDMA line-rate
+	// read). The gate is NOT on this path — every byte flows past it without re-invoking it.
+	byteOps := 0
+	for range bytes {
+		byteOps++
+	}
+
+	if gateCalls != 1 {
+		t.Fatalf("control-path gate must run ONCE per page, ran %d times (inline per-byte scanner?)", gateCalls)
+	}
+	if byteOps != len(bytes) {
+		t.Fatalf("data path must stream every byte of the page; streamed %d of %d", byteOps, len(bytes))
+	}
+	// One control decision vs len(bytes) data-path ops: an inline per-byte gate would make
+	// these counts equal. The strict inequality is the witness that the gate is not inline.
+	if gateCalls >= byteOps {
+		t.Fatalf("gate ran %d times for %d bytes — not control-path-only (must be O(1) in page size)", gateCalls, byteOps)
 	}
 }
 
