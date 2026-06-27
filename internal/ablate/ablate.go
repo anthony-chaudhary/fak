@@ -6,12 +6,15 @@
 // hold the model and the tool calls constant, and read the delta straight off the
 // kernel counters.
 //
-// SCOPE (rung 1). Only RUNTIME-SETTABLE kernel knobs are swept here — for now the
-// per-kernel vDSO fast path (kernel.SetVDSO), reused through bench.RunArm. The ~40
-// env-gated features (FAK_NORMGATE, FAK_INKERNEL_RADIX, FAK_COMPRESSOR, …) are read
-// at PROCESS START, so sweeping them means re-exec'ing one arm per child env — a
-// follow-on rung tracked on the epic. FeatureConfig.Descriptor reports ONLY the
-// knobs an arm actually flips, so a report never claims a feature it did not ablate.
+// SCOPE. Two runners share one schema. The RUNTIME knob — the per-kernel vDSO fast
+// path (kernel.SetVDSO), reused through bench.RunArm — flips in-process (rung 1). The
+// ~40 env-gated features (FAK_NORMGATE, FAK_INKERNEL_RADIX, FAK_COMPRESSOR, …) are read
+// at PROCESS START, so sweeping them means re-exec'ing one arm per child env: rung 2
+// adds RunOneArm (the single-arm runner the CLI arm-mode calls), execArmRunner (the
+// production re-exec) and SweepViaSubprocess (the parent fan-out that merges the
+// children into one Report under the same identical-workload guard). FeatureConfig.
+// Descriptor reports ONLY the knobs an arm actually carries, so a report never claims
+// a feature it did not ablate.
 //
 // VALIDITY. Every arm replays the SAME *bench.Trace, so one Trace.WorkloadHash binds
 // them all; Report.Validate refuses the report if any arm ran a different workload —
@@ -42,49 +45,130 @@ import (
 
 // FeatureVDSO is the one runtime-settable feature rung 1 can sweep: the vDSO fast
 // path (kernel.SetVDSO), the cache that lets Submit serve a repeated decision without
-// re-adjudicating + re-calling the engine.
+// re-adjudicating + re-calling the engine. It is the ONLY feature flippable in a live
+// process; every other feature below is env-gated (read at process start) and so only
+// sweepable through the rung-2 subprocess re-exec path.
 const FeatureVDSO = "vdso"
 
-// KnownFeatures is the CLOSED set of features this rung knows how to flip at runtime.
-// A new entry is a new knob (extend FeatureConfig + apply + Descriptor). Env-gated
-// features (FAK_NORMGATE, FAK_INKERNEL_RADIX, …) read at process start and belong to
-// the subprocess re-exec rung — they are deliberately NOT listed here, so `--sweep
-// normgate` fails loud today instead of silently measuring nothing.
-var KnownFeatures = []string{FeatureVDSO}
+// The env-gated feature names. Each maps to a FAK_* environment variable that the
+// kernel reads ONCE at process start, so the only way to ablate it is to re-exec a
+// child process with the var set per arm (rung 2). The name here is the sweep token a
+// caller passes (`--sweep normgate,radix`); EnvVar maps it to the FAK_* the child env
+// actually carries. This list is the rung-2 half of KnownFeatures.
+const (
+	FeatureNormgate    = "normgate"
+	FeatureRadix       = "radix"
+	FeatureCompressor  = "compressor"
+	FeatureIFC         = "ifc"
+	FeatureGitgate     = "gitgate"
+	FeatureCtxplanSeam = "ctxplan_seam"
+	FeatureWireScreen  = "wire_screen"
+	FeatureWireRedact  = "wire_redact"
+)
 
-// knownFeature reports whether f is a feature this rung can sweep at runtime.
-func knownFeature(f string) bool {
-	for _, k := range KnownFeatures {
-		if k == f {
-			return true
-		}
-	}
-	return false
+// envFeatureVars is the CLOSED token -> FAK_* mapping for the env-gated features.
+// BuildSweep consults it to turn a sweep token into the env var a child arm carries,
+// and Descriptor reads it back so a report names the knob honestly. A new env feature
+// is one row here (and, if it wants its own assertion, a counter the child surfaces).
+var envFeatureVars = map[string]string{
+	FeatureNormgate:    "FAK_NORMGATE",
+	FeatureRadix:       "FAK_INKERNEL_RADIX",
+	FeatureCompressor:  "FAK_COMPRESSOR",
+	FeatureIFC:         "FAK_IFC",
+	FeatureGitgate:     "FAK_GITGATE",
+	FeatureCtxplanSeam: "FAK_CTXPLAN_SEAM",
+	FeatureWireScreen:  "FAK_WIRE_SCREEN",
+	FeatureWireRedact:  "FAK_WIRE_REDACT",
 }
 
-// FeatureConfig is the set of RUNTIME-SETTABLE kernel knobs ONE arm runs under, plus
-// the arm's name. Rung 1 exposes only the per-kernel vDSO toggle; the struct grows a
-// field per knob as runtime setters land (e.g. a PolicyFloor bool once SetPolicyFloor
-// exists), and Descriptor grows with it.
+// KnownFeatures is the CLOSED set of features the harness can sweep. FeatureVDSO is the
+// runtime-settable knob rung 1 flips in-process; the rest are env-gated (read at process
+// start) and sweepable only through the rung-2 subprocess re-exec path. A token not in
+// this set fails loud in BuildSweep, so `--sweep typo` never silently measures nothing.
+var KnownFeatures = func() []string {
+	out := []string{FeatureVDSO}
+	for f := range envFeatureVars {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}()
+
+// envFeature reports whether f is one of the env-gated (process-start) features —
+// the ones that need the subprocess re-exec path, not a runtime setter.
+func envFeature(f string) bool {
+	_, ok := envFeatureVars[f]
+	return ok
+}
+
+// knownFeature reports whether f is a feature the harness can sweep (runtime or env).
+func knownFeature(f string) bool {
+	if f == FeatureVDSO {
+		return true
+	}
+	return envFeature(f)
+}
+
+// FeatureConfig is the set of kernel knobs ONE arm runs under, plus the arm's name.
+// VDSO is the runtime-settable knob applied in-process (rung 1). EnvFeatures is the
+// env-gated half (rung 2): the FAK_* toggles a child process is re-exec'd with, keyed
+// by sweep token (e.g. "normgate") and valued "on"/"off". A parent fans one child per
+// config, setting envFeatureVars[token] from EnvFeatures; the in-process runner cannot
+// honor them (they are read at process start), so it ignores them — they only bite
+// across the subprocess boundary. Descriptor reports the union it actually applied.
 type FeatureConfig struct {
-	Name string // the arm id (unique within a sweep)
-	VDSO bool   // kernel.SetVDSO — the vDSO fast path on/off
+	Name        string            // the arm id (unique within a sweep)
+	VDSO        bool              // kernel.SetVDSO — the vDSO fast path on/off
+	EnvFeatures map[string]string `json:"env_features,omitempty"` // sweep-token -> on|off, env-gated
 }
 
 // apply flips feature f on this config. Unknown features are rejected by the caller
-// (BuildSweep), so apply only handles the closed KnownFeatures set.
+// (BuildSweep), so apply only handles the closed KnownFeatures set. The runtime knob
+// lands on its field; an env-gated feature lands in EnvFeatures, where the subprocess
+// runner reads it to build the child env (the in-process runner cannot honor it).
 func (c *FeatureConfig) apply(f string, on bool) {
-	switch f {
-	case FeatureVDSO:
+	if f == FeatureVDSO {
 		c.VDSO = on
+		return
+	}
+	if envFeature(f) {
+		if c.EnvFeatures == nil {
+			c.EnvFeatures = map[string]string{}
+		}
+		c.EnvFeatures[f] = onOff(on)
 	}
 }
 
 // Descriptor renders the {feature: on|off} map recorded in the arm's report. It lists
-// ONLY the knobs this rung actually applies, so the artifact never overclaims an
-// ablation it did not perform.
+// ONLY the knobs this config actually carries — the vDSO field plus every env-gated
+// toggle in EnvFeatures — so the artifact never overclaims an ablation it did not set.
 func (c FeatureConfig) Descriptor() map[string]string {
-	return map[string]string{FeatureVDSO: onOff(c.VDSO)}
+	d := map[string]string{FeatureVDSO: onOff(c.VDSO)}
+	for f, v := range c.EnvFeatures {
+		d[f] = v
+	}
+	return d
+}
+
+// childEnv renders this config's env-gated toggles as KEY=VALUE strings to splice onto
+// a child process's environment (the rung-2 re-exec). Each FAK_* var is set to "1" when
+// the feature is on and "0" when off, so the child's process-start read sees the arm's
+// intent deterministically (no "unset means default" ambiguity across arms).
+func (c FeatureConfig) childEnv() []string {
+	keys := make([]string, 0, len(c.EnvFeatures))
+	for f := range c.EnvFeatures {
+		keys = append(keys, f)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, f := range keys {
+		v := "0"
+		if c.EnvFeatures[f] == "on" {
+			v = "1"
+		}
+		out = append(out, envFeatureVars[f]+"="+v)
+	}
+	return out
 }
 
 // onOff renders a bool as the report's on/off vocabulary.
@@ -184,9 +268,20 @@ func BuildSweep(features []string) ([]FeatureConfig, error) {
 		return nil, errors.New("ablate: no features to sweep (try --sweep " + strings.Join(KnownFeatures, ",") + ")")
 	}
 
-	configs := []FeatureConfig{{Name: "all-off"}} // every known knob off
+	// allOff explicitly pins every swept feature OFF — for env-gated features that
+	// means FAK_*=0 in the child env, not "unset" (so an arm never inherits a default
+	// the parent did not choose). The single-feature arms turn exactly one on and pin
+	// the rest off, isolating each delta.
+	off := func(name string) FeatureConfig {
+		c := FeatureConfig{Name: name}
+		for _, f := range feats {
+			c.apply(f, false)
+		}
+		return c
+	}
+	configs := []FeatureConfig{off("all-off")}
 	for _, f := range feats {
-		c := FeatureConfig{Name: f}
+		c := off(f)
 		c.apply(f, true)
 		configs = append(configs, c)
 	}

@@ -117,11 +117,13 @@ func TestValidate_RefusesMismatchedWorkloadHash(t *testing.T) {
 	}
 }
 
-// BuildSweep fails loud on a feature this rung cannot flip at runtime, collapses
-// duplicates, and rejects an empty request — so a typo never silently measures nothing.
+// BuildSweep fails loud on a feature the harness cannot sweep, collapses duplicates,
+// and rejects an empty request — so a typo never silently measures nothing. As of
+// rung 2 the env-gated features (normgate, radix, …) ARE known (they sweep through the
+// subprocess path), so only a genuine non-feature is refused.
 func TestBuildSweep_UnknownAndDuplicate(t *testing.T) {
-	if _, err := BuildSweep([]string{"normgate"}); err == nil {
-		t.Error("BuildSweep([normgate]) should fail (env-gated, not a rung-1 runtime knob)")
+	if _, err := BuildSweep([]string{"nope-not-a-feature"}); err == nil {
+		t.Error("BuildSweep([nope]) should fail on a token that is no known feature")
 	}
 	if _, err := BuildSweep(nil); err == nil {
 		t.Error("BuildSweep(nil) should fail with no features to sweep")
