@@ -60,14 +60,16 @@ type SubAlloc struct {
 // It holds no device handle — only byte arithmetic — so its packing invariants are
 // unit-testable on any host.
 type SubAllocator struct {
-	align     int64
-	blockSize int64
-	cur       int     // index of the block currently being filled (advances on overflow; Reset -> 0)
-	caps      []int64 // capacity of each backing block (blockSize, or the size of a dedicated oversize block)
-	used      []int64 // bump cursor (bytes consumed, including alignment padding) per block
-	requested int64   // sum of requested payload bytes currently outstanding (Reset -> 0)
-	peakReq   int64   // high-water of `requested` — the working set the device must hold resident
-	reserved  int64   // total device bytes reserved = Σ caps (monotonic; Reset does not free)
+	align      int64
+	blockSize  int64
+	cur        int     // index of the block currently being filled (advances on overflow; Reset -> 0)
+	caps       []int64 // capacity of each backing block (blockSize, or the size of a dedicated oversize block)
+	used       []int64 // bump cursor (bytes consumed, including alignment padding) per block
+	requested  int64   // sum of requested payload bytes currently outstanding (Reset -> 0)
+	peakReq    int64   // high-water of `requested` — the working set the device must hold resident
+	reserved   int64   // total device bytes reserved = Σ caps (monotonic; Reset does not free)
+	allocs     int     // count of live (non-empty) sub-ranges handed out since the last Reset
+	peakAllocs int     // high-water of `allocs` — the per-tensor device-allocation count the packer replaces
 }
 
 // NewSubAllocator makes a suballocator that packs into `blockSize`-byte backing blocks with
@@ -117,6 +119,10 @@ func (a *SubAllocator) Alloc(size int64) SubAlloc {
 			if a.requested > a.peakReq {
 				a.peakReq = a.requested
 			}
+			a.allocs++
+			if a.allocs > a.peakAllocs {
+				a.peakAllocs = a.allocs
+			}
 			return SubAlloc{Block: a.cur, Offset: off, Size: size}
 		}
 		a.cur++ // this block can't fit the aligned request; try (or open) the next one
@@ -133,6 +139,7 @@ func (a *SubAllocator) Reset() {
 		a.used[i] = 0
 	}
 	a.requested = 0
+	a.allocs = 0
 }
 
 // Blocks is the number of backing device allocations the packer has opened — the count that
@@ -153,6 +160,26 @@ func (a *SubAllocator) PeakRequested() int64 { return a.peakReq }
 // memory is live payload (the rest is alignment padding + unfilled block tails). 0 when nothing
 // has been reserved yet.
 func (a *SubAllocator) PackingEfficiency() float64 { return ratio(a.peakReq, a.reserved) }
+
+// Allocations is the number of live (non-empty) sub-ranges handed out since the last Reset — the
+// per-pass tensor count packed into the backing blocks.
+func (a *SubAllocator) Allocations() int { return a.allocs }
+
+// PeakAllocations is the high-water of Allocations: the largest number of tensors held live in
+// one pass, which is exactly how many device allocations the naive one-fvk_malloc-per-tensor path
+// would hold at once. This is the count the packer collapses down to Blocks(), and the number
+// that must stay under the device's maxMemoryAllocationCount.
+func (a *SubAllocator) PeakAllocations() int { return a.peakAllocs }
+
+// FitsAllocCount reports whether the packer's backing-block count — the real number of device
+// allocations (one fvk_malloc per block) — stays within maxAllocs, a device's
+// maxMemoryAllocationCount (~4096 on desktop drivers; the shim flags this exact cap in
+// vulkan_shim.cpp). A non-positive maxAllocs means "no cap" (always true). This is the safety
+// property the sub-buffer refactor exists to guarantee: a deep model whose PeakAllocations would
+// blow the cap under per-tensor allocation still fits, because Blocks() ≪ PeakAllocations.
+func (a *SubAllocator) FitsAllocCount(maxAllocs int) bool {
+	return maxAllocs <= 0 || a.Blocks() <= maxAllocs
+}
 
 // ---- single command-buffer per forward pass -------------------------------------
 

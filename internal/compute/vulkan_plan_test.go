@@ -122,6 +122,62 @@ func TestSubAllocatorOversize(t *testing.T) {
 	}
 }
 
+// TestSubAllocatorAllocCountCap pins the safety property the sub-buffer refactor exists for: the
+// device caps the NUMBER of live allocations (maxMemoryAllocationCount, ~4096 on desktop drivers,
+// flagged in vulkan_shim.cpp), so a deep model that would need thousands of per-tensor
+// allocations must collapse to a handful of packed backing blocks that fit under the cap.
+func TestSubAllocatorAllocCountCap(t *testing.T) {
+	const align, blockSize = 256, 1 << 20 // 1 MiB blocks
+	const capLimit = 4096                 // a typical desktop maxMemoryAllocationCount
+	a := NewSubAllocator(align, blockSize)
+	const n, sz = 5000, 2048 // more tensors than the cap, each tiny
+	for i := 0; i < n; i++ {
+		a.Alloc(sz)
+	}
+	if a.PeakAllocations() != n {
+		t.Fatalf("peak allocations = %d, want %d (the naive per-tensor count)", a.PeakAllocations(), n)
+	}
+	if a.PeakAllocations() <= capLimit {
+		t.Fatalf("test premise broken: %d tensors must exceed the %d-allocation cap", a.PeakAllocations(), capLimit)
+	}
+	// The naive one-allocation-per-tensor path would blow the cap; the packer must fit under it.
+	if !a.FitsAllocCount(capLimit) {
+		t.Fatalf("packed %d backing blocks must fit under the %d-allocation cap", a.Blocks(), capLimit)
+	}
+	if a.Blocks() >= n {
+		t.Fatalf("packing must use far fewer blocks (%d) than tensors (%d)", a.Blocks(), n)
+	}
+	// A cap below the packed block count must report unfit (no false safety); a non-positive cap
+	// means "uncapped" and always fits.
+	if a.FitsAllocCount(a.Blocks() - 1) {
+		t.Fatalf("cap %d below block count %d must report unfit", a.Blocks()-1, a.Blocks())
+	}
+	if !a.FitsAllocCount(0) {
+		t.Fatal("a non-positive cap means uncapped (always fits)")
+	}
+}
+
+// TestSubAllocatorResetZerosLiveAllocCount checks Reset rewinds the live tensor count for the next
+// pass while the peak (the residency high-water the device cap is checked against) and the packed
+// block count persist — the per-pass recycle must not forget the cap-safety high-water.
+func TestSubAllocatorResetZerosLiveAllocCount(t *testing.T) {
+	a := NewSubAllocator(64, 4096)
+	for _, s := range []int64{100, 256, 1000} {
+		a.Alloc(s)
+	}
+	if a.Allocations() != 3 {
+		t.Fatalf("live allocations = %d, want 3", a.Allocations())
+	}
+	blocks, peak := a.Blocks(), a.PeakAllocations()
+	a.Reset()
+	if a.Allocations() != 0 {
+		t.Fatalf("Reset must zero live allocations, got %d", a.Allocations())
+	}
+	if a.PeakAllocations() != peak || a.Blocks() != blocks {
+		t.Fatalf("Reset must preserve peak/blocks: peak %d->%d blocks %d->%d", peak, a.PeakAllocations(), blocks, a.Blocks())
+	}
+}
+
 // ---- single command-buffer per forward pass -------------------------------------
 
 // buildForwardPlan records a representative transformer forward pass: per layer a
