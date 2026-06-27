@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 )
@@ -317,6 +318,33 @@ func TestVcacheEpisodesFromObserve(t *testing.T) {
 func TestVcacheEpisodesSkipsEmptyMetrics(t *testing.T) {
 	if ins := vcacheEpisodesFromObserve(vcachecal.PredictionError{}); len(ins) != 0 {
 		t.Fatalf("an empty prediction-error should yield no episodes, got %d", len(ins))
+	}
+}
+
+func TestAblateEpisodesFromArms(t *testing.T) {
+	// OFF sent 100 engine calls; ON sent 30 (70 elided) -> realized elision 0.70.
+	on := metrics.Arm{Label: "vdso-on", EngineCalls: 30}
+	off := metrics.Arm{Label: "vdso-off", EngineCalls: 100}
+	ins := ablateEpisodesFromArms(on, off)
+	if len(ins) != 1 {
+		t.Fatalf("want 1 ablation episode, got %d", len(ins))
+	}
+	e := ins[0]
+	if e.Prediction.Metric != "engine_call_elision" || e.Prediction.Claimed != 1.0 {
+		t.Fatalf("prediction wrong: %+v", e.Prediction)
+	}
+	if e.Outcome.Realized != 0.70 || e.Outcome.Sample != 100 {
+		t.Fatalf("outcome wrong: realized=%v sample=%d, want 0.70/100", e.Outcome.Realized, e.Outcome.Sample)
+	}
+	if e.Outcome.Provenance != dojo.Witnessed || !e.Outcome.Measured {
+		t.Fatalf("ablation outcome must be WITNESSED + measured: %+v", e.Outcome)
+	}
+}
+
+func TestAblateEpisodesNoEngineCalls(t *testing.T) {
+	// An OFF arm that sent zero engine calls has no elision to score.
+	if ins := ablateEpisodesFromArms(metrics.Arm{}, metrics.Arm{}); len(ins) != 0 {
+		t.Fatalf("zero off engine-calls should yield no episode, got %d", len(ins))
 	}
 }
 

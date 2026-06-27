@@ -25,7 +25,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/dojo"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -34,14 +36,20 @@ import (
 const dojoUsage = `fak dojo — the prediction-vs-reality gym
 
 usage:
-  fak dojo run --corpus DIR [--ttl 5m|1h] [--lever a,b] [--max-files N]
-               [--json] [--check] [--append-history] [--ledger FILE]
-               [--workspace DIR] [--date YYYY-MM-DD]
-  fak dojo list [--json]
+  fak dojo run    --corpus DIR [--ttl 5m|1h] [--lever a,b] [--max-files N]
+                  [--json] [--check] [--append-history] [--ledger FILE]
+                  [--workspace DIR] [--date YYYY-MM-DD]
+  fak dojo board  --corpus DIR [--ttl 5m|1h] [--max-files N] [--json]
+  fak dojo ablate [--trace FILE | --suite NAME] [--engine ID] [--json] [--check]
+  fak dojo list   [--json]
 
 run    scores every registered lever's predicted saving against billed reality
        over the corpus, folds the episodes, and (with --append-history) trends
        the mean calibration error across runs in docs/dojo/history.jsonl.
+board  folds the same run into a cross-lever leaderboard: one row per lever
+       (verdict distribution, mean calib-err, worst metric, grade), worst-first.
+ablate scores the vDSO on-vs-off ablation over a trace as a WITNESSED episode:
+       the engine-call elision the fast path actually delivered vs the claim.
 list   shows the registered levers and the metrics each one scores.
 
 A lever's THEORY is its Claimed number; the provider's own usage records are the
@@ -63,11 +71,15 @@ func runDojo(stdout, stderr io.Writer, argv []string) int {
 		return runDojoRun(stdout, stderr, argv[1:])
 	case "list":
 		return runDojoList(stdout, stderr, argv[1:])
+	case "ablate":
+		return runDojoAblate(stdout, stderr, argv[1:])
+	case "board":
+		return runDojoBoard(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, dojoUsage)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dojo: unknown subcommand %q (want run or list)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dojo: unknown subcommand %q (want run, list, ablate, or board)\n", argv[0])
 		return 2
 	}
 }
@@ -205,6 +217,145 @@ func runDojoList(stdout, stderr io.Writer, argv []string) int {
 		for _, m := range l.Metrics {
 			fmt.Fprintf(stdout, "      - %-28s %s\n", m.Name, m.Theory)
 		}
+	}
+	return 0
+}
+
+// runDojoAblate scores the vDSO ablation: it replays a trace through the kernel
+// with the fast path ON vs OFF and folds the measured engine-call elision into a
+// WITNESSED dojo episode. The claim is "vDSO ON elides every call the OFF arm
+// sent to the engine"; reality is the measured (off-on)/off engine-call drop.
+// CPU-only and corpus-free (the offline mock engine + a built-in suite trace).
+func runDojoAblate(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("dojo ablate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	tracePath := fs.String("trace", "", "trace file to replay (default: the built-in suite)")
+	suite := fs.String("suite", "", "named suite under the trace dir (default: the first suite)")
+	engine := fs.String("engine", "mock", "engine id (the offline mock by default)")
+	asJSON := fs.Bool("json", false, "emit the dojo report as JSON instead of the human table")
+	check := fs.Bool("check", false, "advisory gate: exit non-zero only if the run could not be measured")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	path := *tracePath
+	if path == "" {
+		path = resolveSuite(traceDir(), *suite)
+	}
+	tr, err := bench.LoadTrace(path)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak dojo ablate:", err)
+		return 1
+	}
+	on, err := bench.RunArm(ctx(), tr, *engine, true, "vdso-on")
+	if err != nil {
+		fmt.Fprintln(stderr, "fak dojo ablate: on arm:", err)
+		return 1
+	}
+	off, err := bench.RunArm(ctx(), tr, *engine, false, "vdso-off")
+	if err != nil {
+		fmt.Fprintln(stderr, "fak dojo ablate: off arm:", err)
+		return 1
+	}
+
+	var episodes []dojo.Episode
+	for _, in := range ablateEpisodesFromArms(on, off) {
+		episodes = append(episodes, dojo.Score("vdso-ablation", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
+	dojo.SortEpisodes(episodes)
+	report := dojo.Fold(episodes, dojo.FoldOpts{
+		Workspace:   repoRoot(),
+		Commit:      dojoHeadCommit(repoRoot()),
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Date:        time.Now().UTC().Format("2006-01-02"),
+	})
+	if *check {
+		code, message := dojo.CheckGate(report)
+		if *asJSON {
+			emitDojoJSON(stdout, report.WithGate(code, message))
+		} else {
+			fmt.Fprintln(stdout, message)
+		}
+		return code
+	}
+	if *asJSON {
+		emitDojoJSON(stdout, report)
+	} else {
+		fmt.Fprintln(stdout, dojo.Render(report))
+	}
+	if report.OK {
+		return 0
+	}
+	return 1
+}
+
+// ablateEpisodesFromArms adapts an ON/OFF arm pair into WITNESSED dojo episodes.
+// It is pure so the mapping is unit-testable without running the kernel. The
+// engine-call elision is the headline: vDSO theory is it serves every fast-path
+// call locally, so the claim is 1.0 (full elision of the OFF arm's engine calls)
+// and reality is the measured drop fraction.
+func ablateEpisodesFromArms(on, off metrics.Arm) []dojo.ScoredInput {
+	var out []dojo.ScoredInput
+	if off.EngineCalls > 0 {
+		elided := float64(off.EngineCalls-on.EngineCalls) / float64(off.EngineCalls)
+		if elided < 0 {
+			elided = 0
+		}
+		out = append(out, dojo.ScoredInput{
+			Prediction: dojo.Prediction{
+				Lever: "vdso-ablation", Metric: "engine_call_elision", Claimed: 1.0, Unit: "fraction",
+				Basis: "vDSO ON serves every fast-path call locally, eliding it from the engine",
+			},
+			Outcome: dojo.Outcome{
+				Realized: elided, Provenance: dojo.Witnessed, Measured: true, Sample: int(off.EngineCalls),
+				Source: "(off.engine_calls - on.engine_calls) / off.engine_calls over the replayed trace (WITNESSED)",
+			},
+		})
+	}
+	return out
+}
+
+// runDojoBoard runs the registered levers over the corpus and folds the scored
+// episodes into the cross-lever leaderboard (one row per lever, worst-first).
+func runDojoBoard(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("dojo board", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	corpus := fs.String("corpus", "", "directory of real Claude Code transcripts to score the levers against")
+	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier the resume-posture lever scores at: 5m or 1h")
+	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")
+	asJSON := fs.Bool("json", false, "emit the board as JSON instead of the human table")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *corpus == "" {
+		fmt.Fprintln(stderr, "fak dojo board: need --corpus DIR (a directory of .jsonl transcripts)")
+		return 2
+	}
+	ttl, ok := parseResumeTTL(*ttlStr)
+	if !ok {
+		fmt.Fprintf(stderr, "fak dojo board: bad --ttl %q (want 5m or 1h)\n", *ttlStr)
+		return 2
+	}
+	scenario := dojo.Scenario{
+		Name:   filepath.Base(filepath.Clean(*corpus)),
+		Mode:   "offline",
+		Corpus: *corpus,
+		Note:   "replay of recorded Claude Code transcripts",
+	}
+	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, registerDojoLevers(ttl, *maxFiles), dojo.DefaultCalibBand())
+	for _, re := range runErrs {
+		fmt.Fprintf(stderr, "fak dojo board: lever %q on %q: %s\n", re.Lever, re.Scenario, re.Err)
+	}
+	board := dojo.BoardFromEpisodes(episodes)
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(board)
+		return 0
+	}
+	fmt.Fprintln(stdout, dojo.RenderBoard(board))
+	if len(board.Rows) == 0 {
+		return 1
 	}
 	return 0
 }
