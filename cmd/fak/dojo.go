@@ -725,7 +725,8 @@ func compactionEpisodesFromBacktest(rep CompactionBacktestReport) []dojo.ScoredI
 	// matches the billed delta (input_tokens off - on); reality: the ratio of
 	// billed delta to projected shed. Claim 1.0 = perfect calibration.
 	if rep.ShedTokensSum > 0 && rep.InputTokensOnSum > 0 {
-		billedDelta := float64(rep.InputTokensOffSum - rep.InputTokensOnSum)
+		// Convert to int64 before subtraction to avoid uint64 underflow when ON > OFF.
+		billedDelta := float64(int64(rep.InputTokensOffSum) - int64(rep.InputTokensOnSum))
 		// Guard against pathological cases: billed delta can't be negative (ON must be
 		// <= OFF for a successful compaction). A negative delta is OVER_CLAIM.
 		if billedDelta < 0 {
