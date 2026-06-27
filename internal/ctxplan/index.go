@@ -252,10 +252,7 @@ func (ix *Index) Probe(f Forecast, opts ProbeOptions) []Span {
 		mark(i, tierRecency)
 	}
 	// tier 3 — durability: the bounded/durable set, filtered to the admitted classes.
-	admit := map[string]bool{}
-	for _, c := range opts.IncludeDurability {
-		admit[NormDurability(c)] = true
-	}
+	admit := durabilityAdmitSet(opts.IncludeDurability)
 	for _, i := range ix.durable {
 		if admit[NormDurability(ix.spans[i].Durability)] {
 			mark(i, tierDurable)

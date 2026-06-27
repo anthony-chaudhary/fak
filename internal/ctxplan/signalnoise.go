@@ -98,14 +98,8 @@ func (s SignalNoise) FaultRatio() float64 {
 // ignored (fail-closed: a stale or fabricated id cannot move the metric). The function is
 // pure and deterministic — same (plan, outcome) yields the same breakdown.
 func ComputeSignalNoise(p Plan, o Outcome) SignalNoise {
-	hit := make(map[string]bool, len(o.Hits))
-	for _, id := range o.Hits {
-		hit[id] = true
-	}
-	wasted := make(map[string]bool, len(o.Wasted))
-	for _, id := range o.Wasted {
-		wasted[id] = true
-	}
+	hit := stringSet(o.Hits)
+	wasted := stringSet(o.Wasted)
 	var sn SignalNoise
 	for _, sel := range p.Selected {
 		c := sel.Cost
@@ -123,22 +117,41 @@ func ComputeSignalNoise(p Plan, o Outcome) SignalNoise {
 		}
 	}
 	// Fault cost: an Outcome.Faults id names an ELIDED span (paged out, then needed).
-	if len(o.Faults) > 0 {
-		faulted := make(map[string]bool, len(o.Faults))
-		for _, id := range o.Faults {
-			faulted[id] = true
-		}
-		for _, el := range p.Elided {
-			if faulted[el.ID] {
-				c := el.Cost
-				if c < 0 {
-					c = 0
-				}
-				sn.FaultTokens += c
+	sn.FaultTokens = faultTokens(p, o)
+	return sn
+}
+
+// stringSet folds a slice of ids into a presence set — the slice-to-set idiom shared by the
+// S/N and refcount witnesses (Hits / Wasted / Faults lookups). Pure: a nil/empty slice
+// yields an empty (non-nil) map.
+func stringSet(ids []string) map[string]bool {
+	m := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		m[id] = true
+	}
+	return m
+}
+
+// faultTokens sums the planned cost of every ELIDED span the Outcome marks faulted (a span
+// the turn needed but the plan had paged out) — the under-resident axis. Negative costs
+// clamp to zero. Shared by the boolean and attention-witnessed S/N paths, which compute the
+// fault axis identically (attention covers resident spans only). Returns 0 when no faults.
+func faultTokens(p Plan, o Outcome) int {
+	if len(o.Faults) == 0 {
+		return 0
+	}
+	faulted := stringSet(o.Faults)
+	total := 0
+	for _, el := range p.Elided {
+		if faulted[el.ID] {
+			c := el.Cost
+			if c < 0 {
+				c = 0
 			}
+			total += c
 		}
 	}
-	return sn
+	return total
 }
 
 // SpanMass is the WITNESSED attention mass a turn placed on one resident span — the
@@ -220,21 +233,7 @@ func SignalNoiseFromAttention(p Plan, attribution Attribution, o Outcome) Signal
 	}
 	// Fault cost is identical to the boolean path: attention covers resident spans only, so an
 	// elided-then-faulted span (no resident mass) is read from the Outcome's Faults, as before.
-	if len(o.Faults) > 0 {
-		faulted := make(map[string]bool, len(o.Faults))
-		for _, id := range o.Faults {
-			faulted[id] = true
-		}
-		for _, el := range p.Elided {
-			if faulted[el.ID] {
-				c := el.Cost
-				if c < 0 {
-					c = 0
-				}
-				sn.FaultTokens += c
-			}
-		}
-	}
+	sn.FaultTokens = faultTokens(p, o)
 	return sn
 }
 

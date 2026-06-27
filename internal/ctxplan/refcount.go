@@ -137,14 +137,8 @@ func (rw *RefcountWitness) Observe(p Plan, o Outcome, goal LiveGoal) Refcount {
 	if rw.wastedStreak == nil {
 		rw.wastedStreak = map[string]int{}
 	}
-	hit := make(map[string]bool, len(o.Hits))
-	for _, id := range o.Hits {
-		hit[id] = true
-	}
-	wasted := make(map[string]bool, len(o.Wasted))
-	for _, id := range o.Wasted {
-		wasted[id] = true
-	}
+	hit := stringSet(o.Hits)
+	wasted := stringSet(o.Wasted)
 
 	var rc Refcount
 	k := rw.threshold()

@@ -238,10 +238,7 @@ func (ix *Index) ProbeLayout(f Forecast, layout Layout, cost CostModel) []AreaSp
 				deep[j] = true
 			}
 		}
-		admit := map[string]bool{}
-		for _, c := range layout.IncludeDurability {
-			admit[NormDurability(c)] = true
-		}
+		admit := durabilityAdmitSet(layout.IncludeDurability)
 		for _, i := range ix.durable {
 			if admit[NormDurability(ix.spans[i].Durability)] {
 				deep[i] = true

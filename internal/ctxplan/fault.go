@@ -2,7 +2,6 @@ package ctxplan
 
 import (
 	"context"
-	"errors"
 	"sort"
 )
 
@@ -101,15 +100,8 @@ func DemandPage(ctx context.Context, store Store, in View, spanID string) (View,
 		// The gate held (sealed / tombstoned / bytes missing). The View is unchanged —
 		// the span stays elided (recoverable by handle for audit) and the lossless store
 		// keeps it; the caller routes around a refused fault, the fact is not lost.
-		reason := "page_in_refused"
-		switch {
-		case errors.Is(err, ErrSealed):
-			reason = "sealed_by_trust_gate"
-		case errors.Is(err, ErrTombstoned):
-			reason = "tombstoned_by_context_control"
-		}
 		fault.Status = FaultRefused
-		fault.Reason = reason
+		fault.Reason = pageInReason(err)
 		return in, fault, nil
 	}
 

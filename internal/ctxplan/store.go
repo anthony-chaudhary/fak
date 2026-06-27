@@ -53,6 +53,18 @@ func NormDurability(s string) string {
 	return DurabilityTurn
 }
 
+// durabilityAdmitSet folds a list of durability classes into a NORMALIZED admit set — the
+// lookup the durability tier (default index) and the deep area (layout) both build to filter
+// the durable spans to the configured classes. Each class is run through NormDurability so an
+// unknown class collapses to the same canonical key the spans are matched against.
+func durabilityAdmitSet(classes []string) map[string]bool {
+	admit := make(map[string]bool, len(classes))
+	for _, c := range classes {
+		admit[NormDurability(c)] = true
+	}
+	return admit
+}
+
 // ErrSealed is returned by a Store.Materialize that refuses a page-in because the span is
 // quarantined by the trust gate. A real backend (a recall image, a memq backend) wraps its
 // own seal error in this so a caller can branch on "the gate held" vs a lookup miss.

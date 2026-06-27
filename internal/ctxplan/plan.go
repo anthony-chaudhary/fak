@@ -492,6 +492,13 @@ func betterRep(a, b Candidate, pins map[string]bool) bool {
 	if pa != pb {
 		return pa // a pinned candidate is the better representative
 	}
+	return candidateStepIDLess(a, b)
+}
+
+// candidateStepIDLess is the deterministic total tie-break the planners share: lower step
+// wins, then lower ID. It is the final fallback after each planner's primary key (pin
+// preference, marginal benefit, …), so identical inputs always order byte-identically.
+func candidateStepIDLess(a, b Candidate) bool {
 	if a.Cell.Step != b.Cell.Step {
 		return a.Cell.Step < b.Cell.Step
 	}
@@ -587,10 +594,7 @@ func coverageTieBreak(a, b Candidate, margA, margB float64) bool {
 	if margA != margB {
 		return margA > margB
 	}
-	if a.Cell.Step != b.Cell.Step {
-		return a.Cell.Step < b.Cell.Step
-	}
-	return a.Cell.ID < b.Cell.ID
+	return candidateStepIDLess(a, b)
 }
 
 func selectionOf(c Candidate, pinned bool) Selection {

@@ -123,6 +123,20 @@ func MaterializeLayout(ctx context.Context, store Store, f Forecast, budget Budg
 	return materializePlan(ctx, store, spans, p)
 }
 
+// pageInReason maps a Store.Materialize error to the canonical refusal reason both the
+// fault path and the plan-materialize path record. The two trust-gate sentinels get their
+// own reason; anything else is the generic "page_in_refused".
+func pageInReason(err error) string {
+	switch {
+	case errors.Is(err, ErrSealed):
+		return "sealed_by_trust_gate"
+	case errors.Is(err, ErrTombstoned):
+		return "tombstoned_by_context_control"
+	default:
+		return "page_in_refused"
+	}
+}
+
 func materializePlan(ctx context.Context, store Store, spans []Span, p Plan) (View, error) {
 	// declared[id] = the Span.Bytes the planner priced each span at — the cost basis the
 	// page-in must honor. The planner charged ceil(Span.Bytes/4); the render realizes
@@ -135,14 +149,7 @@ func materializePlan(ctx context.Context, store Store, spans []Span, p Plan) (Vi
 	for _, s := range p.Selected {
 		body, err := store.Materialize(ctx, s.ID)
 		if err != nil {
-			reason := "page_in_refused"
-			switch {
-			case errors.Is(err, ErrSealed):
-				reason = "sealed_by_trust_gate"
-			case errors.Is(err, ErrTombstoned):
-				reason = "tombstoned_by_context_control"
-			}
-			v.Refused = append(v.Refused, Refusal{ID: s.ID, Step: s.Step, Role: s.Role, Reason: reason})
+			v.Refused = append(v.Refused, Refusal{ID: s.ID, Step: s.Step, Role: s.Role, Reason: pageInReason(err)})
 			continue
 		}
 		v.Rendered = append(v.Rendered, Rendered{
