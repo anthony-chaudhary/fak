@@ -226,6 +226,13 @@ func turnKey(t Turn) string { return t.TraceID + ":" + itoa(t.Seq) }
 // cleanly when absent — so the same recorder works whether or not the producer
 // enriches the stream.
 func turnFromEvent(ev abi.Event) (Turn, bool) {
+	// The kernel pairs a deny's EvDecide with a dedicated EvDeny (and a Submit-path
+	// require-witness intermediate with its resolved event); recording a Turn for the
+	// redundant re-emit would append two DENY turns for one denied call. Skip it so a
+	// decision is one turn — the shared rule the decision-stream folders use.
+	if abi.RedundantDecisionEvent(ev) {
+		return Turn{}, false
+	}
 	switch ev.Kind {
 	case abi.EvDecide, abi.EvDeny, abi.EvResultDeny, abi.EvQuarantine, abi.EvVDSOHit:
 		// analysis-bearing kinds proceed

@@ -69,6 +69,23 @@ func TestHarvestsDeniesAsLabels(t *testing.T) {
 	}
 }
 
+// A denied call must contribute ONE training row, not two. The kernel pairs an
+// EvDecide(DENY) with a dedicated EvDeny for the same call (see kernel.Decide /
+// kernel.Submit); deriving a LabelRow from both would double every catch in the
+// corpus. This reproduces the exact emit pair and asserts a single positive.
+func TestDeniedCallHarvestedOnce(t *testing.T) {
+	c := NewCorpus()
+	h := New(c)
+	call := &abi.ToolCall{Tool: "send_email", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"to":"x@evil.com"}`)}}
+	deny := &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, By: "ifc-sink"}
+	h.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: deny})
+	h.Emit(abi.Event{Kind: abi.EvDeny, Call: call, Verdict: deny})
+
+	if rows := c.Positives(); len(rows) != 1 {
+		t.Fatalf("denied call harvested %d rows, want exactly 1: %+v", len(rows), rows)
+	}
+}
+
 func TestHarvestsResultDeniesAsLabels(t *testing.T) {
 	c := NewCorpus()
 	h := New(c)

@@ -121,6 +121,14 @@ func (h *Harvester) Emit(ev abi.Event) {
 	if ev.Verdict == nil {
 		return
 	}
+	// The kernel pairs a deny's EvDecide with a dedicated EvDeny (and a Submit-path
+	// require-witness intermediate with its resolved event); deriving a LabelRow from
+	// BOTH would double the deny/require-witness rows in the training corpus
+	// (Positives/ByReason then over-count each catch). Skip the redundant re-emit so a
+	// decision contributes one row — the shared rule the decision-stream folders use.
+	if abi.RedundantDecisionEvent(ev) {
+		return
+	}
 	switch ev.Kind {
 	case abi.EvDecide, abi.EvDeny, abi.EvResultDeny, abi.EvQuarantine:
 		h.corpus.add(abi.LabelRow{

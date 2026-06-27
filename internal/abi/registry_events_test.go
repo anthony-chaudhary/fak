@@ -102,3 +102,33 @@ func TestEmittersForZeroAlloc(t *testing.T) {
 		t.Errorf("EmittersFor(fallback kind) allocates %.2f/op; want 0", a)
 	}
 }
+
+// TestRedundantDecisionEvent pins the shared de-double rule the decision-stream
+// folders (journal/harvest/trajectory) agree on: an EvDecide is redundant iff a
+// following dedicated event re-carries the SAME decision — a deny (paired EvDeny),
+// or a Submit-path require-witness intermediate (SeqNo!=0, resolved next). Every
+// other event is the canonical single counting point.
+func TestRedundantDecisionEvent(t *testing.T) {
+	submitted := &ToolCall{SeqNo: 7}
+	proposed := &ToolCall{SeqNo: 0} // pure Decide() path — no follow-up event
+	cases := []struct {
+		name string
+		ev   Event
+		want bool
+	}{
+		{"decide-deny is redundant (EvDeny follows)", Event{Kind: EvDecide, Call: submitted, Verdict: &Verdict{Kind: VerdictDeny}}, true},
+		{"decide-deny on proposed call is still redundant", Event{Kind: EvDecide, Call: proposed, Verdict: &Verdict{Kind: VerdictDeny}}, true},
+		{"decide-allow is canonical", Event{Kind: EvDecide, Call: submitted, Verdict: &Verdict{Kind: VerdictAllow}}, false},
+		{"decide-transform is canonical", Event{Kind: EvDecide, Call: submitted, Verdict: &Verdict{Kind: VerdictTransform}}, false},
+		{"require-witness intermediate on submit is redundant", Event{Kind: EvDecide, Call: submitted, Verdict: &Verdict{Kind: VerdictRequireWitness}}, true},
+		{"require-witness on pure Decide is final, not redundant", Event{Kind: EvDecide, Call: proposed, Verdict: &Verdict{Kind: VerdictRequireWitness}}, false},
+		{"the dedicated EvDeny is never skipped", Event{Kind: EvDeny, Call: submitted, Verdict: &Verdict{Kind: VerdictDeny}}, false},
+		{"a result-side quarantine is never skipped", Event{Kind: EvQuarantine, Call: submitted, Verdict: &Verdict{Kind: VerdictQuarantine}}, false},
+		{"nil verdict is not redundant", Event{Kind: EvDecide, Call: submitted}, false},
+	}
+	for _, tc := range cases {
+		if got := RedundantDecisionEvent(tc.ev); got != tc.want {
+			t.Errorf("%s: RedundantDecisionEvent = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

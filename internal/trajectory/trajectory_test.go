@@ -25,6 +25,26 @@ func mkCall(trace, tool, query string) *abi.ToolCall {
 func allowVerdict() *abi.Verdict { return &abi.Verdict{Kind: abi.VerdictAllow} }
 func denyVerdict() *abi.Verdict  { return &abi.Verdict{Kind: abi.VerdictDeny} }
 
+// A denied call must record ONE turn, not two. The kernel pairs an EvDecide(DENY)
+// with a dedicated EvDeny for the SAME call (see kernel.Decide / kernel.Submit);
+// recording both would append two DENY turns for one denied call. This reproduces
+// the exact emit pair and asserts a single turn.
+func TestDeniedCallRecordsOneTurn(t *testing.T) {
+	r := New()
+	call := mkCall("trace-d", "refund_payment", "refund the customer")
+	deny := &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}
+	r.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: deny})
+	r.Emit(abi.Event{Kind: abi.EvDeny, Call: call, Verdict: deny})
+
+	turns := r.Trace("trace-d")
+	if len(turns) != 1 {
+		t.Fatalf("denied call recorded %d turns, want exactly 1: %+v", len(turns), turns)
+	}
+	if turns[0].Verdict != "DENY" {
+		t.Fatalf("the single turn must be the DENY, got %q", turns[0].Verdict)
+	}
+}
+
 // TestRecorderFoldsTrace — the core: a sequence of events folds into ordered,
 // 1-based turns under the right trace, with query and verdict carried through.
 func TestRecorderFoldsTrace(t *testing.T) {

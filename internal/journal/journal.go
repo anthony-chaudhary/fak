@@ -354,19 +354,16 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 	var kind string
 	switch ev.Kind {
 	case abi.EvDecide:
-		// A DENY decision is ALSO emitted as a dedicated EvDeny — the kernel pairs
-		// them on every deny path (Decide: emit EvDecide then EvDeny; Submit: the
-		// EvDecide at adjudication then an EvDeny in the deny/require-witness/escalate
-		// branches). Recording the EvDecide row too would write the SAME deny twice
-		// into the durable hash-chained journal, double-counting it in every consumer
-		// that folds rows back — the `fak guard` exit summary's "decision(s) appended"
-		// count and the guard-RSI verdict-quality metric (which keys on the `verdict`
-		// field, so a DECIDE(DENY)+DENY pair counts as two denials). Record the
-		// canonical decision ONCE: keep the DECIDE row for the non-deny outcomes
-		// (ALLOW/TRANSFORM/REQUIRE_WITNESS) and let the paired EvDeny carry the deny.
-		// A REQUIRE_WITNESS interim verdict is NOT a deny, so its DECIDE row is kept
-		// and a later EvDeny records the resolved deny as a distinct, intended fact.
-		if ev.Verdict != nil && ev.Verdict.Kind == abi.VerdictDeny {
+		// A DENY (and a Submit-path require-witness intermediate) is ALSO emitted as a
+		// dedicated follow-up event the kernel always pairs with this EvDecide.
+		// Recording this EvDecide row too would write the SAME decision twice into the
+		// durable hash-chained journal, double-counting it in every consumer that folds
+		// rows back — the `fak guard` exit summary's "decision(s) appended" count and
+		// the guard-RSI verdict-quality metric (which keys on the `verdict` field, so a
+		// DECIDE(DENY)+DENY pair counts as two denials). Skip the redundant re-emit so
+		// each decision lands ONCE; abi.RedundantDecisionEvent is the shared rule the
+		// decision-stream folders agree on (rungobs is the reference consumer).
+		if abi.RedundantDecisionEvent(ev) {
 			return Row{}, false
 		}
 		kind = "DECIDE"
