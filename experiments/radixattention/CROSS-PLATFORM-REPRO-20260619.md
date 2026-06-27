@@ -44,7 +44,8 @@ its parallel baseline prefill at 135M is relatively cheaper, so the fixed
 clone/memcpy cost is a larger fraction of the saved work — exactly the
 "clone-overhead is a small-model artifact" regime documented in
 [RADIXATTENTION-RESULTS.md](../../docs/benchmarks/RADIXATTENTION-RESULTS.md). On both boxes the live
-ratio sits below the deterministic 7.50× token ceiling and would climb toward it as
+ratio sits below the deterministic 7.50× token ceiling (hardware-independent
+token-count upper bound) and would climb toward it as
 the model grows (the Mac ladder shows 135M 4.58× → 1.5B 6.95×).
 
 ## Reproduce

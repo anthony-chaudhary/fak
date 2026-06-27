@@ -66,7 +66,8 @@ The box almost every published `fak` number is measured on.
   climbing **24.9× → 139.3×** vs the naive loop.
   → [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)
 - **RadixAttention ladder** — live speedup **4.58× → 6.95×** (135M → 1.5B), **86.7%** hit
-  rate (100% of optimal), climbing to the deterministic 7.50× token ceiling.
+  rate (100% of optimal), climbing to the deterministic 7.50× token ceiling
+  (hardware-independent token-count upper bound).
 - **The pure-kernel latency stack** — canonical Decide **362 ns**, full Admit gate
   3.3–15.8 µs, in-process vs spawned-hook boundary tax **~2,849×**.
 - **Qwen3.6-27B in fak's *own* in-kernel engine** — the 753-tensor `qwen35`
