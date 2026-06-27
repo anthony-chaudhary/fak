@@ -36,6 +36,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopRollup(stdout, stderr, argv[1:])
 	case "admit":
 		return runLoopAdmit(stdout, stderr, argv[1:])
+	case "recover":
+		return runLoopRecover(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		loopUsage(stdout)
 		return 0
@@ -810,6 +812,7 @@ func loopUsage(w io.Writer) {
   fak loop status [--ledger FILE] [--json]
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
+  fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
 
 Append records one scheduler/script/control event in the canonical hash-chained
 ledger. Run wraps an OS scheduler command and records fire/admit/start/end around it.
@@ -819,7 +822,10 @@ counts, cadence, and last-run — reusing the fak ps table format; it is a read-
 aggregation that ingests journals and writes nothing. Admit applies the tunable
 admission policy (default .fak/loop-policy.json, FAK_LOOP_POLICY) to the fold and
 prints admit/refuse per loop — exit 3 when any evaluated loop is refused, so a
-scheduler line can gate work on it. The ledger records events; admission, scheduler
-authority, and completion witnesses live in producers.
+scheduler line can gate work on it. Recover folds the ledger into the cross-run
+RECOVERY worklist: the dispatched runs that started but were never finished
+(orphaned) or never witnessed (unwitnessed) — the work to re-dispatch or re-verify.
+The ledger records events; admission, scheduler authority, and completion witnesses
+live in producers.
 `)
 }
