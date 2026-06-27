@@ -64,7 +64,10 @@ type RunOptions struct {
 // total attempts. It returns the honest summary of what happened.
 func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 	if opts.Executor == nil {
-		opts.Executor = DefaultExecutor
+		root := opts.Root
+		opts.Executor = func(ctx context.Context, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
+			return execTask(ctx, root, t, artifactPath)
+		}
 	}
 	if opts.LedgerPath == "" {
 		opts.LedgerPath = filepath.Join(opts.Root, filepath.FromSlash(DefaultLedgerRel))
@@ -168,8 +171,22 @@ var numberRE = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*(tok/s|tokens/s|GB/s|
 // still captured, and the loop moves on (so one slow/hung task cannot stall an
 // unattended --loop). It parses a headline number only if the output clearly
 // contains one — otherwise the Number is left empty.
+// DefaultExecutor is the back-compat seam (root derived as "" => no prebuild, plain go run).
+// RunLoop wires execTask with the real repo root so go-run benches are pre-built once.
 func DefaultExecutor(ctx context.Context, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
+	return execTask(ctx, "", t, artifactPath)
+}
+
+// execTask runs t.Run through the platform shell, tees output to artifactPath, and reports
+// the OBSERVED outcome. When root != "" and the Run is `go run ./cmd/<x>`, the package is
+// pre-built once (shared build cache) and the Run is rewritten to the binary, so a --loop
+// pass is not dominated by per-task `go run` compile time (#965).
+func execTask(ctx context.Context, root string, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
 	start := time.Now()
+	run := t.Run
+	if root != "" {
+		run = maybePrebuildRun(ctx, root, run)
+	}
 	shell, flag := "sh", "-c"
 	if runtime.GOOS == "windows" {
 		shell, flag = "cmd", "/c"
@@ -183,7 +200,7 @@ func DefaultExecutor(ctx context.Context, t Task, artifactPath string) (Outcome,
 	// the loop is guaranteed to move on.
 	runCtx, cancel := context.WithTimeout(ctx, t.timeout())
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, shell, flag, t.Run)
+	cmd := exec.CommandContext(runCtx, shell, flag, run)
 	configureProcGroup(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	out, err := cmd.CombinedOutput()
