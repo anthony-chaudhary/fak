@@ -59,6 +59,19 @@ Track all benchmark machines with full specs, onboarding procedures, and baselin
 - **Benchmarks**:
   - Multi-GPU serving work planned
 
+### Machine 6: AMD Ryzen 9 9950X + Radeon RX 7600 (`desktop`)
+
+- **CPU**: AMD Ryzen 9 9950X — 16 cores / 32 threads, x86_64, AVX-512
+- **GPU**: AMD Radeon RX 7600 (8 GB, RDNA3 gfx1102, Vulkan 1.4)
+- **RAM**: 256 GiB physical (4×64 GiB DDR5); ≈253.6 GiB / 272 GB usable after hardware-reserved
+- **OS**: Windows 11 Pro 10.0.26200 (native Vulkan)
+- **Status**: ✅ Active
+- **Benchmarks**:
+  - GPU Q8 decode (Vulkan, RX 7600): 24.6 tok/s · 1.49× vs GPU f32 (BENCHMARK-AUTHORITY.md)
+  - GPU/CPU Q8 crossover: 7.2× CPU lead (135M) → 1.16× (1.5B)
+  - Vulkan backend numerical parity: argmax-exact decode, prefill cosine 1.0 (SmolLM2-135M)
+  - Vulkan backend correctness: 7/7 op kernels pass Approx gate
+
 ## Onboarding Checklist
 
 For each new machine:
