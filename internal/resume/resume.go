@@ -25,9 +25,11 @@
 // is a 5-minute TTL (300s); the extended tier is 1 hour (3600s). A resumed session has
 // almost always been idle longer than that — a crashed-and-relaunched Claude Code
 // session, a session re-homed onto a fresh account, an image carried to another host.
-// So the first turn after resume re-prefills the WHOLE resident transcript at the cache
-// WRITE price (1.25x base input at 5m, 2.0x at 1h), with no offsetting read. For a 250k
-// session that is the single most expensive turn the session will ever run. This package
+// So the first turn after resume re-prefills the resident transcript at close to the cache
+// WRITE price, with no offsetting read: the back-test-calibrated ColdWriteShare (~0.852) of
+// it pays the write premium (1.25x base input at 5m, 2.0x at 1h) and the rest re-sends as
+// plain base input. For a 250k session that is the single most expensive turn the session
+// will ever run. This package
 // makes that cost a number you can see BEFORE you pay it, and prices the two ways to make
 // it smaller — CUT (shed the middle, keep prefix + recent tail) and RESET (distill to a
 // compact seed) — against keeping the whole transcript (RESUME_FULL).
