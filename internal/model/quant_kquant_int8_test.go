@@ -72,16 +72,18 @@ func TestQ5KInt8MatchesF32(t *testing.T) {
 	t.Logf("Q5_K int8 vs f32: cosine=%.8f maxRel=%.5f", cos, maxRel)
 }
 
-// TestQ5KInt8GateDefaultOff confirms the int8 path is OFF by default (no FAK env / no test force),
-// so production decode keeps the f32 reduction until the path is explicitly enabled.
-func TestQ5KInt8GateDefaultOff(t *testing.T) {
+// TestQ5KInt8Gate pins the gate contract: the test force defaults to 0 (so the path is decided by
+// FAK_KQ_INT8, not silently on), the gate tracks the resolved env default for Q5_K, and Q6_K is
+// ALWAYS off (no Q6_K int8 kernel). It must hold whether or not FAK_KQ_INT8 is set in the run's env
+// (CI runs it both ways), so it asserts against kQuantSDOTDefault rather than hardcoding false.
+func TestQ5KInt8Gate(t *testing.T) {
 	if kQuantSDOTForce != 0 {
-		t.Fatalf("kQuantSDOTForce must default to 0 (off), got %d", kQuantSDOTForce)
+		t.Fatalf("kQuantSDOTForce must default to 0 (env-decided, not force-on), got %d", kQuantSDOTForce)
 	}
-	if kQuantSDOTEnabled(kindQ5K) {
-		t.Fatal("kQuantSDOTEnabled(Q5_K) must be false by default")
+	if got := kQuantSDOTEnabled(kindQ5K); got != kQuantSDOTDefault {
+		t.Fatalf("kQuantSDOTEnabled(Q5_K)=%v must track the FAK_KQ_INT8 env default %v", got, kQuantSDOTDefault)
 	}
 	if kQuantSDOTEnabled(kindQ6K) {
-		t.Fatal("kQuantSDOTEnabled(Q6_K) must be false (Q6_K int8 not implemented)")
+		t.Fatal("kQuantSDOTEnabled(Q6_K) must always be false (Q6_K int8 not implemented)")
 	}
 }
