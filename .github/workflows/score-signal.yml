@@ -9,13 +9,18 @@ name: score-signal
 # issue naming the owning RSI skill + the re-measure command + the `#N`-stamp
 # contract. The dispatch loop then routes it to a lane and spawns a worker.
 #
-# SAFE BY DEFAULT: the scheduled run is DRY-RUN — it plans the issues, surfaces
-# them to the step summary + an artifact, and files NOTHING. Filing is an explicit
-# operator arm: `workflow_dispatch` with `live=true`. This matches the repo
-# convention that scheduled jobs REPORT and only an explicit manual arm mutates
-# (cf. cadence.yml / release-cadence.yml). The pure plan/dedup logic is proven by
-# tools/score_signal_test.py (run FIRST below), so a green plan is a real signal,
-# not a tool that always passes.
+# AUTONOMOUS LIVE FILING (#980): the daily SCHEDULE now files the issues itself (it
+# no longer only reports). This is the deliberate exception to the "scheduled jobs
+# only report" convention — the point of this feeder is for CI to create the tracked
+# ticket without a human. The storm bound is NOT a human in the loop but the feeder's
+# own discipline: label-scoped dedup means a steady regression files exactly ONE open
+# issue (then only REFRESHES it via #981 when it worsens — no daily re-file), and the
+# worst-first --max-issues cap (default 5) bounds a multi-metric burst. The plan is
+# still surfaced to the step summary + an artifact every run. A manual
+# `workflow_dispatch` with live=true remains for an off-cadence arm; the pure
+# plan/dedup logic is proven by tools/score_signal_test.py (run FIRST below), so a
+# filed issue is a real signal, not a tool that always fires. Posture rationale +
+# soak evidence: docs/notes/SCORE-SIGNAL-AUTO-ARM-2026-06-27.md.
 on:
   schedule:
     # Daily 07:41 UTC — an off-the-hour minute clear of the other scheduled jobs
@@ -101,10 +106,14 @@ jobs:
             --max-issues "$MAX_ISSUES" --worsen-delta "$WORSEN_DELTA" > score-signal-plan.txt
           cat score-signal-plan.txt
 
-      # File NEW issues + REFRESH worsened open ones — ONLY on an explicit
-      # `workflow_dispatch` arm with live=true.
-      - name: file score-signal issues (armed)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' }}
+      # File NEW issues + REFRESH worsened open ones. AUTONOMOUS (#980): the daily
+      # SCHEDULE files live, and a manual `workflow_dispatch` with live=true still
+      # arms an off-cadence run. The storm bound is the feeder's own discipline —
+      # label-scoped dedup (a steady regression files once then only REFRESHES via
+      # #981) + the worst-first --max-issues cap — so a daily live run cannot
+      # duplicate or storm.
+      - name: file score-signal issues (autonomous on schedule, or armed dispatch)
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true') }}
         env:
           MIN_DELTA: ${{ github.event.inputs.min_delta || '1' }}
           MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
@@ -118,8 +127,8 @@ jobs:
         run: |
           {
             echo "## score-signal plan"
-            armed="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' && 'LIVE (issues filed)' || 'dry-run (nothing filed)' }}"
-            echo "_Mode: ${armed}. Scheduled runs are always dry-run; arm via workflow_dispatch with live=true._"
+            armed="${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true')) && 'LIVE (issues filed)' || 'dry-run (nothing filed)' }}"
+            echo "_Mode: ${armed}. The daily schedule files autonomously (#980); a manual workflow_dispatch needs live=true. Dedup + the worst-first cap bound a storm._"
             echo '```'
             cat score-signal-plan.txt 2>/dev/null || echo "(no plan)"
             echo '```'
