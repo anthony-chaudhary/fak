@@ -44,23 +44,19 @@ func (bs *BatchSession) PrefillEachNoLogits(prompts [][]int) {
 }
 
 func rectangularNoLogitsPrefillLen(prompts [][]int) (int, bool) {
-	if len(prompts) == 0 {
-		return 0, false
-	}
-	P := len(prompts[0])
-	if P == 0 || P > batchRectPrefillMaxTokens {
-		return 0, false
-	}
-	for _, p := range prompts[1:] {
-		if len(p) != P {
-			return 0, false
-		}
-	}
-	return P, true
+	return rectangularPrefillLenMin(prompts, 1)
 }
 
 func rectangularPrefillLen(prompts [][]int) (int, bool) {
-	if len(prompts) < 2 {
+	return rectangularPrefillLenMin(prompts, 2)
+}
+
+// rectangularPrefillLenMin returns the common per-prompt length P (and true) when at least
+// minPrompts prompts are present and every prompt is the same non-empty length within the
+// rectangular-prefill token cap; otherwise (0,false). The two callers differ only in
+// minPrompts (the no-logits path admits a single prompt, the batched path needs >=2).
+func rectangularPrefillLenMin(prompts [][]int, minPrompts int) (int, bool) {
+	if len(prompts) < minPrompts {
 		return 0, false
 	}
 	P := len(prompts[0])

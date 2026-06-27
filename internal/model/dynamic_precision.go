@@ -57,44 +57,39 @@ func (m *Model) q8Ready() bool {
 }
 
 func (s *Session) prefillDynamic(ids []int) []float32 {
-	if !s.M.q8Ready() {
-		logits := s.prefillF32(ids)
-		s.recordPrecision(PrecisionF32, len(ids), true, 0, 0)
-		return logits
-	}
-	before := s.Cache.Clone()
-	logits := s.headQ(s.prefillBatchedQ(ids))
-	s.PrecisionStats.Q8Attempts++
-	margin, prob := logitConfidence(logits)
-	if s.PrecisionPolicy.accepts(margin, prob) {
-		s.recordPrecision(PrecisionQ8, len(ids), true, margin, prob)
-		return logits
-	}
-
-	s.Cache = before
-	logits = s.prefillF32(ids)
-	s.recordPrecision(PrecisionF32, len(ids), false, margin, prob)
-	return logits
+	return s.runDynamic(len(ids),
+		func() []float32 { return s.prefillF32(ids) },
+		func() []float32 { return s.headQ(s.prefillBatchedQ(ids)) })
 }
 
 func (s *Session) stepDynamic(id int) []float32 {
+	return s.runDynamic(1,
+		func() []float32 { return s.stepF32(id) },
+		func() []float32 { return s.headQ(s.tokenHiddenQ(id, s.Cache.Len())) })
+}
+
+// runDynamic is the shared Q8-attempt-then-F32-fallback dynamic-precision step: try the
+// quantized path (q8) over `tokens` tokens, accept it when the policy is confident, else
+// roll the KV cache back and recompute in F32 (f32). prefillDynamic and stepDynamic differ
+// only in the two closures and the token count, so they share this control flow.
+func (s *Session) runDynamic(tokens int, f32, q8 func() []float32) []float32 {
 	if !s.M.q8Ready() {
-		logits := s.stepF32(id)
-		s.recordPrecision(PrecisionF32, 1, true, 0, 0)
+		logits := f32()
+		s.recordPrecision(PrecisionF32, tokens, true, 0, 0)
 		return logits
 	}
 	before := s.Cache.Clone()
-	logits := s.headQ(s.tokenHiddenQ(id, s.Cache.Len()))
+	logits := q8()
 	s.PrecisionStats.Q8Attempts++
 	margin, prob := logitConfidence(logits)
 	if s.PrecisionPolicy.accepts(margin, prob) {
-		s.recordPrecision(PrecisionQ8, 1, true, margin, prob)
+		s.recordPrecision(PrecisionQ8, tokens, true, margin, prob)
 		return logits
 	}
 
 	s.Cache = before
-	logits = s.stepF32(id)
-	s.recordPrecision(PrecisionF32, 1, false, margin, prob)
+	logits = f32()
+	s.recordPrecision(PrecisionF32, tokens, false, margin, prob)
 	return logits
 }
 

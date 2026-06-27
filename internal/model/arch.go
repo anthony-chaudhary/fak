@@ -203,14 +203,7 @@ func (m *Model) applyProjBias(l int, q, k, v []float32) {
 // applyLayerQKNorm runs per-head qk-norm on a packed q and k for layer l when QKNorm is
 // on, using that layer's q_norm/k_norm weights. No-op when QKNorm is off (Llama).
 func (m *Model) applyLayerQKNorm(l int, q, k []float32) {
-	cfg := m.Cfg
-	if !cfg.QKNorm {
-		return
-	}
-	p := func(s string) string { return layerName(l, s) }
-	eps := cfg.qkNormEps()
-	applyQKNormCfg(q, m.tensor(p("self_attn.q_norm.weight")), cfg.NumHeads, cfg.HeadDim, eps, cfg)
-	applyQKNormCfg(k, m.tensor(p("self_attn.k_norm.weight")), cfg.NumKVHeads, cfg.HeadDim, eps, cfg)
+	m.tpApplyQKNormBand(l, q, k, m.Cfg.NumHeads, m.Cfg.NumKVHeads)
 }
 
 // ---- per-head qk-norm -------------------------------------------------------------

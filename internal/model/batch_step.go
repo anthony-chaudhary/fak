@@ -304,11 +304,7 @@ func (bs *BatchSession) qgemmBatch(name string, X []float32, B, width int) []flo
 // qgemmBatchInto is qgemmBatch writing the GEMM result into a caller-provided dst (reused
 // across decode steps). Bit-identical to qgemmBatch.
 func (bs *BatchSession) qgemmBatchInto(name string, X []float32, B, width int, dst []float32) {
-	if bs.scratch == nil {
-		bs.scratch = &q8Panel{}
-	}
-	quantizeBatchPanelInto(bs.scratch, X, B, width)
-	qGemm8Into(bs.M.q8(name), bs.scratch, dst)
+	bs.qgemmBatchTensorInto(bs.M.q8(name), X, B, width, dst)
 }
 
 func (bs *BatchSession) qgemmBatchTensorInto(qt *q8Tensor, X []float32, B, width int, dst []float32) {

@@ -558,11 +558,18 @@ func checkedShapeProduct(dims ...int) (int, bool) {
 // of an IEEE-754 f32, so the widening is lossless: f32bits = uint32(bf16) << 16. This
 // is exactly what torch's .float() does, hence bitwise-identical (incl. inf/nan/subnormal).
 func decodeBF16(b []byte) []byte {
+	return decode16(b, func(u16 uint16) uint32 { return uint32(u16) << 16 })
+}
+
+// decode16 widens a little-endian 16-bit float slice to little-endian f32 using conv to
+// turn each 16-bit pattern into its f32 bit pattern. The bf16 and f16 decoders differ only
+// in conv (a shift vs the explicit f16 layout), so they share this loop.
+func decode16(b []byte, conv func(uint16) uint32) []byte {
 	n := len(b) / 2
 	out := make([]byte, n*4)
 	for i := 0; i < n; i++ {
 		u16 := binary.LittleEndian.Uint16(b[i*2:])
-		binary.LittleEndian.PutUint32(out[i*4:], uint32(u16)<<16)
+		binary.LittleEndian.PutUint32(out[i*4:], conv(u16))
 	}
 	return out
 }
@@ -571,13 +578,7 @@ func decodeBF16(b []byte) []byte {
 // f16 has a different exponent bias and subnormal layout, so the conversion is explicit
 // instead of a shift.
 func decodeF16(b []byte) []byte {
-	n := len(b) / 2
-	out := make([]byte, n*4)
-	for i := 0; i < n; i++ {
-		u16 := binary.LittleEndian.Uint16(b[i*2:])
-		binary.LittleEndian.PutUint32(out[i*4:], f16bitsToF32bits(u16))
-	}
-	return out
+	return decode16(b, f16bitsToF32bits)
 }
 
 func f16bitsToF32bits(h uint16) uint32 {

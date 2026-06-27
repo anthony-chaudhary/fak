@@ -74,8 +74,8 @@ func (c *minimaxKVCache) evict(cfg Config, from, end int) {
 	}
 	idxStride := cfg.IndexHeadDim
 	for l := range c.IndexK {
-		c.IndexK[l] = evictFloat32Rows(c.IndexK[l], from, end, idxStride)
-		c.IndexKraw[l] = evictFloat32Rows(c.IndexKraw[l], from, end, idxStride)
+		c.IndexK[l] = evictRows(c.IndexK[l], from, end, idxStride)
+		c.IndexKraw[l] = evictRows(c.IndexKraw[l], from, end, idxStride)
 	}
 }
 

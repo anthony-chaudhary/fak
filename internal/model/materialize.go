@@ -283,11 +283,8 @@ func materializeContiguousQKVBias(cfg Config, dstPrefix, srcName string, man map
 		return nil
 	}
 	qName, kName, vName := dstPrefix+"self_attn.q_proj.bias", dstPrefix+"self_attn.k_proj.bias", dstPrefix+"self_attn.v_proj.bias"
-	if allTensorsPresent(man, qName, kName, vName) {
-		return nil
-	}
-	if anyTensorPresent(man, qName, kName, vName) {
-		return fmt.Errorf("model: cannot materialize %s: one or more q/k/v bias tensors already exist", srcName)
+	if skip, err := qkvDestStatus(man, srcName, "bias", qName, kName, vName); skip || err != nil {
+		return err
 	}
 	qRows, kRows, vRows := cfg.NumHeads*cfg.HeadDim, cfg.NumKVHeads*cfg.HeadDim, cfg.NumKVHeads*cfg.HeadDim
 	if err := requireF32Shape(srcName, src, []int{qRows + kRows + vRows}); err != nil {
@@ -307,6 +304,21 @@ func materializeContiguousQKVBias(cfg Config, dstPrefix, srcName string, man map
 	appendF32Tensor(man, raw, kName, []int{kRows}, k)
 	appendF32Tensor(man, raw, vName, []int{vRows}, v)
 	return nil
+}
+
+// qkvDestStatus reports whether a q/k/v materialization should proceed for the given
+// destination tensor names. It returns skip=true when all three already exist (nothing to
+// do), and a non-nil error when only some exist (a partial/conflicting manifest). `kind`
+// names the components in the conflict message ("bias", "component"). Shared by the
+// contiguous and GPT-NeoX q/k/v materializers, which differ only in the split that follows.
+func qkvDestStatus(man map[string]tensorMeta, srcName, kind, qName, kName, vName string) (skip bool, err error) {
+	if allTensorsPresent(man, qName, kName, vName) {
+		return true, nil
+	}
+	if anyTensorPresent(man, qName, kName, vName) {
+		return false, fmt.Errorf("model: cannot materialize %s: one or more q/k/v %s tensors already exist", srcName, kind)
+	}
+	return false, nil
 }
 
 func manifestHasPrefix(man map[string]tensorMeta, prefix string) bool {
@@ -335,11 +347,8 @@ func materializeGPTNeoXQKVWeight(cfg Config, layer int, man map[string]tensorMet
 	}
 	p := layerPrefix(layer)
 	qName, kName, vName := p+"self_attn.q_proj.weight", p+"self_attn.k_proj.weight", p+"self_attn.v_proj.weight"
-	if allTensorsPresent(man, qName, kName, vName) {
-		return nil
-	}
-	if anyTensorPresent(man, qName, kName, vName) {
-		return fmt.Errorf("model: cannot materialize %s: one or more q/k/v component tensors already exist", srcName)
+	if skip, err := qkvDestStatus(man, srcName, "component", qName, kName, vName); skip || err != nil {
+		return err
 	}
 	if cfg.NumKVHeads != cfg.NumHeads {
 		return fmt.Errorf("model: GPT-NeoX query_key_value split requires NumKVHeads==NumHeads, got %d/%d", cfg.NumKVHeads, cfg.NumHeads)
@@ -374,11 +383,8 @@ func materializeGPTNeoXQKVBias(cfg Config, layer int, man map[string]tensorMeta,
 	}
 	p := layerPrefix(layer)
 	qName, kName, vName := p+"self_attn.q_proj.bias", p+"self_attn.k_proj.bias", p+"self_attn.v_proj.bias"
-	if allTensorsPresent(man, qName, kName, vName) {
-		return nil
-	}
-	if anyTensorPresent(man, qName, kName, vName) {
-		return fmt.Errorf("model: cannot materialize %s: one or more q/k/v bias tensors already exist", srcName)
+	if skip, err := qkvDestStatus(man, srcName, "bias", qName, kName, vName); skip || err != nil {
+		return err
 	}
 	if cfg.NumKVHeads != cfg.NumHeads {
 		return fmt.Errorf("model: GPT-NeoX query_key_value bias split requires NumKVHeads==NumHeads, got %d/%d", cfg.NumKVHeads, cfg.NumHeads)

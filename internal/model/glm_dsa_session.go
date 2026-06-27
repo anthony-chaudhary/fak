@@ -80,22 +80,17 @@ func (c *glmDsaKVCache) evict(cfg Config, from, end int) {
 	vStride := glmDsaAttentionVStride(cfg)
 	idxStride := cfg.IndexHeadDim
 	for l := range c.K {
-		c.K[l] = evictFloat32Rows(c.K[l], from, end, kStride)
-		c.Kraw[l] = evictFloat32Rows(c.Kraw[l], from, end, kStride)
-		c.V[l] = evictFloat32Rows(c.V[l], from, end, vStride)
-		c.IndexK[l] = evictFloat64Rows(c.IndexK[l], from, end, idxStride)
-		c.IndexKraw[l] = evictFloat64Rows(c.IndexKraw[l], from, end, idxStride)
+		c.K[l] = evictRows(c.K[l], from, end, kStride)
+		c.Kraw[l] = evictRows(c.Kraw[l], from, end, kStride)
+		c.V[l] = evictRows(c.V[l], from, end, vStride)
+		c.IndexK[l] = evictRows(c.IndexK[l], from, end, idxStride)
+		c.IndexKraw[l] = evictRows(c.IndexKraw[l], from, end, idxStride)
 	}
 }
 
-func evictFloat32Rows(s []float32, from, end, stride int) []float32 {
-	if len(s) == 0 {
-		return s
-	}
-	return append(s[:from*stride], s[end*stride:]...)
-}
-
-func evictFloat64Rows(s []float64, from, end, stride int) []float64 {
+// evictRows drops the [from,end) row band from a flat row-major slice of `stride`
+// elements per row, preserving the surviving rows in order.
+func evictRows[T any](s []T, from, end, stride int) []T {
 	if len(s) == 0 {
 		return s
 	}
