@@ -175,6 +175,16 @@ both_completed: true
 - `GLM52-SCOPE-DECISION-2026-06-19.md`
 - `GLM-5.2-NATIVE-ENGINE-GAP-2026-06-20.md`
 
+> **Erratum (#188):** the staged `GLM-5.2-ON-FAK-PLAN-2026-06-19.md` reads
+> "FP8 build (~700 GB, fits 8×H100)" — the pairing is arithmetically wrong:
+> 8×H100 = 8 × 80 GB = 640 GB < 700 GB, before any KV-cache or activation
+> overhead. The repo's canonical FP8 footprint is larger still — ~753 GB of
+> weights (~866 GB with a 15% runtime margin). FP8 GLM-5.2 fits 8×H200
+> (1128 GB), **not** 8×H100; on an 8×H100 node the highest-fidelity quant that
+> fits is `w4afp8` (~423 GB). Grounded in the public preflight
+> `tools/glm52_serve_preflight.py` (`required_vram_gb("fp8", 0.0) == 753.0`;
+> `recommended_quant(640.0, 0.15, 9.0) == "w4afp8"`).
+
 ---
 
 ## Batch/KV API Verification
