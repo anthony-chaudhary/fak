@@ -83,7 +83,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "stability", "debt": "stability_debt", "script": "stability_scorecard.py", "label": "stability"},
     {"key": "slop", "debt": "slop_debt", "script": "code_slop_scorecard.py", "label": "code-slop"},
     {"key": "steer", "debt": "steerability_debt", "script": "steerability_scorecard.py", "label": "steerability"},
-    {"key": "conflation", "debt": "conflation_debt", "script": "conflation_scorecard.py", "label": "conflation"},
+    {"key": "conflation", "debt": "conflation_debt", "script": "", "cmd": "go run ./cmd/fak conflation-scorecard --json", "label": "conflation"},
     {"key": "disambiguation", "debt": "disambiguation_debt", "script": "concept_disambiguation_scorecard.py", "label": "concept-disambiguation"},
     {"key": "intent_literal", "debt": "intent_literal_debt", "script": "intent_literal_scorecard.py", "label": "intent-literal"},
     {"key": "tokendefaults", "debt": "token_defaults_debt", "script": "", "cmd": "go run ./cmd/fak token-defaults-scorecard --json", "label": "token-defaults"},

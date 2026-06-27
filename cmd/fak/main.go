@@ -179,6 +179,8 @@ func main() {
 		cmdTokenDefaultsScorecard(os.Args[2:])
 	case "skill-effectiveness-scorecard":
 		cmdSkillEffectivenessScorecard(os.Args[2:])
+	case "conflation-scorecard":
+		cmdConflationScorecard(os.Args[2:])
 	case "callavoid":
 		cmdCallavoid(os.Args[2:])
 	case "savings-vector":
@@ -494,6 +496,9 @@ func usage() {
                 (native token-saving-defaults control-pane payload)
   fak skill-effectiveness-scorecard [--json] [--markdown]
                 (native skill-pack effectiveness control-pane payload)
+  fak conflation-scorecard [--json] [--markdown] [--compare FILE]
+                (native provenance-honesty control-pane payload: every reported number/status
+                 labels its provenance -- WITNESSED vs OBSERVED -- folded into conflation_debt)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
                 (the CONSOLIDATED regular-cadence report: folds the three dimensions
                  an operator tracks  -  SCORES (scorecard control pane), WORK-DONE
