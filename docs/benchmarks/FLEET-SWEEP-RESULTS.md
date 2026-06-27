@@ -161,7 +161,9 @@ the vDSO carries a `Granularity` (`global` = v0.1 full flush · `namespace` =
 per-resource-class · `resource` = per-entity; `internal/vdso/scope.go`), every sweep
 runs under any eraser via `fleetbench --granularity`, and
 `TestFleet_FinerEraserPushesCrossoverOut` asserts the recovery on the live kernel.
-The eraser sweep (A=50, T=30, same generated work) makes the fix one glance:
+The eraser sweep (A=50, T=30, **mean over 32 seeded trials**, same generated work)
+makes the fix one glance — each row is that 32-trial mean, so a lone outlier cannot
+move it:
 
 ![the finer eraser fixes the write-crossover](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-eraser.png)
 
