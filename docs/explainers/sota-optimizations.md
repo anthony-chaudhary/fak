@@ -15,12 +15,12 @@ what those optimizations are, which are common in production stacks, and fak's s
 
 A **tuned SOTA stack** is a production serving setup with these characteristics:
 
-1. **KV cache / prefix caching** — Reuse computation across requests with shared prefixes
-2. **Batched inference** — Process multiple requests simultaneously on the same GPU
-3. **Quantization** — Use lower-precision weights (Q8, Q4, Q2) to reduce memory and increase speed
-4. **Serving engine optimizations** — SIMD, fused kernels, optimized attention implementations
-5. **Multi-GPU / tensor parallelism** — Distribute large models across multiple GPUs
-6. **Paged attention** — KV cache management that handles varying context lengths efficiently
+ 1. **KV cache / prefix caching** — Reuse computation across requests with shared prefixes
+ 2. **Batched inference** — Process multiple requests simultaneously on the same GPU
+ 3. **Quantization** — Use lower-precision weights (Q8, Q4, Q2) to reduce memory and increase speed
+ 4. **SIMD / Fused Kernels** — CPU SIMD instructions and GPU fused kernels for faster matrix ops
+ 5. **Paged attention** — KV cache management that handles varying context lengths efficiently
+ 6. **Multi-GPU / tensor parallelism** — Distribute large models across multiple GPUs
 7. **Speculative decoding** — Use a smaller draft model to accelerate larger model decoding
 8. **Continuous batching** — Dynamic scheduling that adds/removes requests as they complete
 9. **Request routing** — Route requests to appropriate model tiers or endpoints
