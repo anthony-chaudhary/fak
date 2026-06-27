@@ -115,7 +115,9 @@ The defensible, shipped-and-tested claim is about **bit-exactness**:
 
 > `fak` is the only KV cache that can remove a tool-result span from the *middle* of
 > a kept sequence and leave the cache **byte-identical to one that never saw the
-> span** — witnessed token-for-token against HuggingFace at `max|Δ| = 0`
+> span** — its greedy continuation is token-for-token identical to HuggingFace's
+> never-saw run (argmax-exact; the forward-pass logits track HF at `max|Δ| ≈ 4.4e-5`),
+> and the eviction's reposition is bit-identical to recompute at `max|Δ| = 0`
 > (`TestKVQuarantineEqualsNeverSaw`).
 
 Why can it, when the others can't quite? Removing a middle span is only the easy
