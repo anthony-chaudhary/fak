@@ -21,16 +21,19 @@ import (
 // asymmetric-dim slicing, no external oracle needed.
 
 func tinyGLMDsaAsymmetricCfg() Config {
-	// Asymmetric per-head dims mirroring real GLM-5.2's structure at tiny scale:
-	//   qkNope(12) != qkRope(4)  (real 192 != 64),  vHead(16) != qkNope(12)  (real 256 != 192).
-	// kvLora(16) and the index dims kept small but with indexHeadDim != qkHead so the index path's
-	// own slicing is exercised independently of the attention head dims.
+	// Asymmetric per-head dims mirroring real GLM-5.2's structure, but every REDUCTION dim a
+	// multiple of 32 (the Q8_0 quantize-at-load constraint — real GLM-5.2 dims 192/64/256/512 are
+	// all 32-aligned). The asymmetry the synthetic fixture lacks:
+	//   qkNope(64) != qkRope(32)  (real 192 != 64),  vHead(96) != qkNope(64)  (real 256 != 192),
+	//   indexHeadDim(32) != qkHead(96) and != vHead(96).
+	// Reduction dims: q_b_proj in=qLora(64); kv_b_proj in=kvLora(32); o_proj in=nH*vHead(2*96=192);
+	// indexer.wk in=H(64); all multiples of 32.
 	return Config{
-		HiddenSize:        32,
+		HiddenSize:        64,
 		NumLayers:         2,
-		NumHeads:          3,
-		NumKVHeads:        3,
-		HeadDim:           16, // == vHead for the generic-path sanity; the DSA path uses the *_mla dims below
+		NumHeads:          2,
+		NumKVHeads:        2,
+		HeadDim:           96, // == vHead for the generic-path sanity; the DSA path uses the *_mla dims
 		IntermediateSize:  64,
 		VocabSize:         41,
 		RMSNormEps:        1e-5,
@@ -38,13 +41,13 @@ func tinyGLMDsaAsymmetricCfg() Config {
 		EOSTokenID:        -1,
 		ModelType:         "glm_moe_dsa",
 		Architectures:     []string{"GlmMoeDsaForCausalLM"},
-		QLoraRank:         32,
-		KVLoraRank:        16,
-		QKNopeHeadDim:     12, // != QKRopeHeadDim — the asymmetry the synthetic fixture lacks
-		QKRopeHeadDim:     4,
-		VHeadDim:          16, // != QKNopeHeadDim
+		QLoraRank:         64,
+		KVLoraRank:        32,
+		QKNopeHeadDim:     64, // != QKRopeHeadDim — the asymmetry the synthetic fixture lacks
+		QKRopeHeadDim:     32,
+		VHeadDim:          96, // != QKNopeHeadDim
 		IndexNHeads:       2,
-		IndexHeadDim:      8, // != qkHead(16) and != vHead(16)
+		IndexHeadDim:      32, // != qkHead(96) and != vHead(96)
 		IndexTopK:         8,
 		IndexerTypes:      []string{"full", "shared"},
 		TieWordEmbeddings: false,
