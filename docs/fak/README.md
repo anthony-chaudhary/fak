@@ -40,6 +40,9 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Activate the Tier-1 Mac dogfood node | [node-macos-a-activation.md](node-macos-a-activation.md) |
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](gcp-tier2-control-vm.md) |
 | Plan guard-hop RSI tuning | [guard-hop-rsi-loop.md](guard-hop-rsi-loop.md) |
+| Close the guard verdict-quality RSI loop on our own journal | [guard-verdict-rsi-loop.md](guard-verdict-rsi-loop.md) |
+| Score token-saving levers against billed reality (the prediction-vs-reality gym) | [dojo.md](dojo.md) |
+| Make the dojo self-improving — the gym's autonomous RSI loop | [dojo-rsi-loop.md](dojo-rsi-loop.md) |
 | Guard the opencode/GLM dispatch lane | [opencode-glm-guard.md](opencode-glm-guard.md) |
 | Use GLM-5.2 from the GCP kernel setup (the `claude-glm-gcp` preset) | [claude-glm-gcp.md](claude-glm-gcp.md) |
 
