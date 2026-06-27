@@ -192,7 +192,7 @@ similarly and is **to be measured, not assumed**.
 ## 6. Reproduce (run on a serving node)
 
 ```bash
-# Run on a serving node with a CUDA GPU (this laptop has none / is WDAC-blocked).
+# Run on a serving node with a CUDA GPU (on this Windows laptop, the GPU is unavailable / the native exe is WDAC-blocked).
 # status: pending-measurement — the commands below are the gated reproduce path.
 
 # 1. Engine throughput head-to-head (vLLM as a first-class engine vs llama.cpp + fak):

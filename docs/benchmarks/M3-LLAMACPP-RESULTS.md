@@ -21,7 +21,7 @@ description: "Adds an arm64 NEON Q8 kernel that flips int8 to 1.9x faster than f
 > Box: Apple **M3 Pro** (6P+6E, 36 GB unified, ~150 GB/s). fak = pure-Go in-kernel forward
 > pass + the new arm64 NEON SDOT kernel (`internal/model/quant_arm64.{go,s}`), no cgo, no GPU.
 > llama.cpp = Homebrew build **8200** (`541bf3762`), the same machine. Apples-to-apples Q8_0
-> on both sides. Native `go test`/`go run` (this is macOS, not the WDAC-blocked Windows host).
+> on both sides. Native `go test`/`go run` (this is macOS, not the Windows host where WDAC blocks native exes).
 
 ## 1. The kernel flip (what the NEON lane bought) — SmolLM2-135M, the bit-identity fixture
 

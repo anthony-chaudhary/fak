@@ -27,7 +27,7 @@ description: "Measures fak against llama.cpp on CPU across single-stream decode,
 >
 > Model: SmolLM2-135M. Box: 16-core/32-thread Zen5, no GPU. Precision: Q8_0 (apples-to-apples;
 > Q4_K_M where noted). llama.cpp = `llama-cpp-python` 0.3.30 CPU wheel (what `pip install
-> llama-cpp-python` gives). All fak benchmarks run via WSL (native exec is WDAC-blocked here).
+> llama-cpp-python` gives). All fak benchmarks run via WSL on Windows (native exec is WDAC-blocked here).
 >
 > **Cross-arch companion:** `M3-LLAMACPP-RESULTS.md` reruns this comparison on Apple M3 Pro
 > (arm64) — it ships the NEON Q8 lane this doc's Zen5 amd64 lane already had, runs Qwen2.5-1.5B,

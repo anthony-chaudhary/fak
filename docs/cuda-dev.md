@@ -49,7 +49,7 @@ any of it: `make cuda-check` runs without a toolchain.
   detects the system toolchain automatically.
 - **Native Windows** (a Windows box with the CUDA Toolkit + a signing cert): use
   [`tools/build_cuda_windows.ps1`](../tools/build_cuda_windows.ps1), which ports the build off
-  the WSL workaround and code-signs the binary (WDAC blocks unsigned fork/exec).
+   the WSL workaround and code-signs the binary (on Windows, WDAC blocks unsigned fork/exec).
 
 The GPU arch defaults to `sm_89`; override with `FAK_CUDA_ARCH=sm_80` for an older datacenter
 card, or `sm_90` / `sm_100` for a newer one (the four advertised arches are `sm_80`, `sm_89`,

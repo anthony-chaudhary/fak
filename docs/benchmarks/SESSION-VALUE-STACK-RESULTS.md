@@ -21,7 +21,7 @@ description: "Measures the fused agent kernel's net work-reuse value-add (11.2x 
 >
 > Box: Apple **M3 Pro** (6P+6E, 36 GB unified). Model: **Qwen2.5-1.5B-Instruct** (the
 > realistic model fak runs in pure Go here) + **SmolLM2-135M** (the fast model for the full
-> scaling sweep). Precision Q8_0. Native `go run` (macOS, not the WDAC-blocked Windows host).
+> scaling sweep). Precision Q8_0. Native `go run` (macOS, not the Windows host where WDAC blocks native exes).
 > Harness: `cmd/sessionbench`. Raw JSON under `experiments/session/`.
 
 ## The workload (what a 50-turn, 5-agent session is)

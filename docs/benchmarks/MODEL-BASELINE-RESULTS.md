@@ -108,7 +108,7 @@ whole story.
 
 ### The result
 
-The box's Application-Control policy (WDAC / Smart App Control) **intermittently blocks
+**On Windows:** the box's Application-Control policy (WDAC / Smart App Control) **intermittently blocks
 freshly-built native exes** — the same policy the test harness routes around via WSL — so the
 *reproducible, persisted* evidence here is **WSL-16t** (`fak-q8-legacy-wsl.json` →
 `fak-q8-tile-wsl.json`, regenerable any time); the **native-32t** numbers were originally

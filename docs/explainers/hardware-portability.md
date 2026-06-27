@@ -218,5 +218,5 @@ becomes the weight `Tensor`'s `Dtype` (resolved from `Session.Quant`), not a `bo
 and `cmd/modelbench -backend <non-reference> -require-non-reference` records real backend
 evidence. The existing R2/R14/oracle tests in `internal/model` remain the equivalence proof
 for the reference path — they must stay max|Δ|=0, argmax-exact. Run the suite via WSL
-(`.\fak\test.ps1`) for full verification when native WDAC policy flakes unsigned test
+(`.\fak\test.ps1`) for full verification on Windows when native WDAC policy flakes unsigned test
 binaries on this host.
