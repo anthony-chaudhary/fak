@@ -971,8 +971,12 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	width := fs.Int("width", 120, "target terminal width for dry-run human rendering")
 	dryRun := fs.Bool("dry-run", false, "render the launch plan without starting the backend agent")
 	asJSON := fs.Bool("json", false, "emit the launch model as JSON and do not start the backend agent")
+	listTargets := fs.Bool("list-targets", false, "list the named compute targets (mac/gcp/local/anthropic + ~/.fak/targets.json) with a live /healthz column, then exit")
 	if err := fs.Parse(argv); err != nil {
 		return 2
+	}
+	if *listTargets {
+		return runListComputeTargets(stdout, stderr, *asJSON)
 	}
 	if *width < 72 {
 		*width = 72
