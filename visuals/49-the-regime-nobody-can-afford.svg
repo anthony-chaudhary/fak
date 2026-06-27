@@ -80,7 +80,7 @@
     <text x="112" y="744" class="cardBody">&#160;&#160;prefix survives only up to the first divergence point.</text>
     <rect x="94" y="780" width="666" height="74" rx="6" fill="#ffffff" stroke="#e3c98f"/>
     <text x="112" y="808" class="cardBody">• <tspan style="font-weight:800">Forgetting breaks the prefix</tspan> — evict a secret or a poisoned result and</text>
-    <text x="112" y="830" class="cardBody">&#160;&#160;the tail after it must be recomputed. Long horizons force eviction.</text>
+    <text x="112" y="830" class="cardBody">&#160;&#160;the tail after it must be recomputed. Policy events force eviction.</text>
   </g>
 
   <!-- fak -->
