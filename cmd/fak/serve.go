@@ -670,6 +670,11 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
 		must(err)
 		modelengine.PreloadQ4K(mm)
+		// Operator visibility: the post-load resident split (raw Q4_K + raw Q5/6_K experts vs
+		// the Q8 dequant minority) so a glance confirms the mixed-quant expert bulk loaded
+		// resident — the slow f32 round-trip avoided — alongside the per-quant-type load-path
+		// summary the profiler already streamed.
+		fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
 		loadNanos := time.Since(tLoad).Nanoseconds()
 		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}

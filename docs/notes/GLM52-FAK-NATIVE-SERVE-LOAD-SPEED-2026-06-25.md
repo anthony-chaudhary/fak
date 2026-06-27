@@ -5,6 +5,38 @@ the full 466 GB GLM-5.2 (`glm_moe_dsa`, unsloth UD-Q4_K_M, 11 shards) on the 8×
 binds `/v1/*`. Every loader/fit/inference gap that blocked it is fixed and shipped. The one open
 item is **load time** (~100 min) — and the cause is now precisely diagnosed.
 
+## Update 2026-06-26 — load-speed levers shipped (on-box re-measure is the open witness)
+
+The two diagnosed causes below are now **fixed in code on `origin/main`**; the remaining work
+is to re-measure the 466 GB load on the box.
+
+- **S1 — the load loop was SERIAL (one core of 256).** `QuantModelQ4KProfile` now fans the
+  per-tensor read+dequant+split across a bounded worker pool and applies builder mutations
+  serially in tensor order, **byte-identical** to a serial load (pinned by
+  `TestParallelQuantLoadDeterministic`, workers {1,2,4,8,16} → identical forward logits).
+  Tune with `FAK_GGUF_LOAD_WORKERS` (default `min(GOMAXPROCS,16)`). Measured 2.4× on a
+  2-channel dev box (memory-bandwidth bound there); the 256-core box has far more aggregate
+  bandwidth. (`gguf_parload.go`, commit `1436af2`.)
+- **S2 — mixed-quant experts defeated the resident fast path (the dominant cost).** Confirmed:
+  only `Q4_K` experts loaded resident; UD-Q4_K_M's `Q6_K`/`Q5_K` experts (a large share of the
+  417 GB bulk) fell to the f32 dequant→Q8 round-trip (the multi-GB transient + GC thrash that
+  explained "261 threads busy, 0.12 GB/s"). fak now holds `Q5_K`/`Q6_K` experts **resident**
+  too (raw bytes, CPU dequant-fused GEMV — the experts are CPU-offloaded, so no GPU kernel
+  needed), so the whole expert bulk loads as a **raw byte copy (I/O-bound)**, not dequant-bound.
+  Bit-exactness pinned by a hand-derived golden + a GEMV-vs-dequant-ref test; loader routing by
+  `TestGLMMoeDsaQ6KExpertsLoadResident`. (`internal/model/quant_kquant.go`, commit `6b9fbc3`.)
+- **S4 — no per-path visibility.** The loader now records a per-quant-type resident-vs-dequant
+  breakdown, printed to stderr during load (`EmitLoadPathSummary`) and on `/metrics`
+  (`fak_model_load_path_{tensors,bytes}` by `quant_type`/`class`/`path`), plus a resident
+  `Q5/6_K` row in `ResidentReport`. A nonzero `dequant` row for a large expert quant type is the
+  slow-load signal — the diagnosis is now legible in-band, no external `gguf-dump` needed.
+
+**Open witness (hardware-gated):** re-run the self-staging serve on DGX3 and confirm the
+load is **< 10 min** with every routed-expert quant type on the resident path. The expected
+shape: `fak_model_load_path_tensors{...,path="dequant"}` ≈ 0 for the expert quant types, and the
+stderr load-path summary shows resident for Q4_K **and** Q5/6_K. The remaining serial cost is the
+small dense set (attention/router/shared/embed/lm_head); the 417 GB expert bulk is now a raw copy.
+
 ## What is fixed and shipped (origin/main)
 
 - **Serve wiring** — `fak serve --gguf <shard1> --backend cuda --cpu-offload-experts
