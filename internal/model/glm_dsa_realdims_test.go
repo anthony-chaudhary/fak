@@ -75,14 +75,26 @@ func buildGLMDsaTensorsFromCfg(t *testing.T, dtype string, cfg Config) map[strin
 		}
 		tensors[name] = tinySTTensor{dtype: dtype, shape: shape, data: glmTinyTensorBytes(t, dtype, vals)}
 	}
-	seq := float32(0.001)
+	// Varied pseudo-random weights (LCG, ~N(0,0.1)) — NOT the near-constant sequenceFloats ramp,
+	// whose nearly-identical rows collapse the forward to a context-blind output (a degenerate
+	// fixture). Real weights vary per row, so the attention/MLP actually depend on their input.
+	var lcg uint64 = 0x243F6A8885A308D3
+	randf := func() float32 {
+		lcg = lcg*6364136223846793005 + 1442695040888963407
+		// top 24 bits -> [-0.1, 0.1)
+		u := float32(lcg>>40) / float32(1<<24)
+		return (u - 0.5) * 0.2
+	}
 	addSeq := func(name string, shape []int) {
 		n := 1
 		for _, d := range shape {
 			n *= d
 		}
-		add(name, shape, sequenceFloats(n, seq))
-		seq += 0.017
+		vals := make([]float32, n)
+		for i := range vals {
+			vals[i] = randf()
+		}
+		add(name, shape, vals)
 	}
 	addOnes := func(name string, n int) {
 		vals := make([]float32, n)
