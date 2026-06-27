@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -56,6 +57,7 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	debug := fs.Bool("debug", true, "before handoff, probe the gateway (/healthz + /debug/vars) and print a fak debug panel; aborts an interactive launch if the gateway is unreachable")
 	overlay := fs.Bool("overlay", false, "do not launch Claude; instead poll /debug/vars and print one live fak line per tick (run in a second pane next to the session). Ctrl-C to stop")
 	overlayInterval := fs.Duration("overlay-interval", 2*time.Second, "refresh interval for --overlay")
+	metrics := fs.Bool("metrics", false, "do not launch Claude; fetch /metrics + /debug/vars using the gateway's own bearer and print them (the panel links 401 from a bare browser click; this needs no token wrangling)")
 	grafanaURL := fs.String("grafana-url", envOrDefault("FAK_MAC_GRAFANA", defaultClaudeMacGrafana), "Grafana base URL shown in the debug panel (the shipped tools/grafana stack)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -105,6 +107,14 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	// a second pane next to the interactive session to see fak's live cache/throughput.
 	if *overlay {
 		return runClaudeMacOverlay(stdout, stderr, dbg, *model, *overlayInterval)
+	}
+
+	// --metrics is a self-contained one-shot: it never launches Claude. It is the
+	// "easier by default" answer to the panel's metrics/vars links 401ing on a bare
+	// click — instead of making the operator carry the bearer to a browser/curl, fak
+	// reuses the token it already loaded to fetch both surfaces and print them.
+	if *metrics {
+		return runClaudeMacMetrics(stdout, stderr, dbg)
 	}
 
 	// Preflight debug panel (#claude-mac): probe the gateway and print what fak is
@@ -349,6 +359,37 @@ func (c *claudeMacDebugClient) get(path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// getRaw fetches path with the gateway bearer and returns the response body
+// verbatim. /metrics is Prometheus text exposition (not JSON), so the JSON-decoding
+// get cannot read it; getRaw carries the same auth + 2xx-gate so --metrics speaks
+// both the text and JSON surfaces through one client.
+func (c *claudeMacDebugClient) getRaw(path string) (string, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return "", err
+	}
+	if c.key != "" {
+		req.Header.Set("Authorization", "Bearer "+c.key)
+	}
+	hc := c.hc
+	if hc == nil {
+		hc = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("GET %s: status %d", path, resp.StatusCode)
+	}
+	return string(body), nil
+}
+
 func (c *claudeMacDebugClient) health() (claudeMacHealth, error) {
 	var h claudeMacHealth
 	err := c.get("/healthz", &h)
@@ -420,13 +461,13 @@ func renderClaudeMacPreflight(h claudeMacHealth, v claudeMacDebugVars, gatewayUR
 	ageWord := inflightAgeLabel(v.Inference.InflightMaxAgeSeconds, v.Gateway.InflightRequests)
 	fmt.Fprintf(&b, "inflight %d%s\n", v.Gateway.InflightRequests, ageWord)
 	fmt.Fprintf(&b, "model %s  auth %s\n", blankDash(firstNonEmpty(model, h.Model, v.Gateway.Model)), blankDash(auth))
-	// metrics/vars are read-only observability endpoints. On an authenticated
-	// gateway they open WITHOUT a token from the gateway host itself (loopback
-	// exemption, internal/gateway authExempt), but a click from THIS box hits the
-	// remote IP and so needs the bearer — annotate that so a 401 reads as "send
-	// the token", not "the link is broken". The gateway-bearer note is only
-	// printed when auth is actually in force.
-	fmt.Fprintf(&b, "metrics: %s/metrics · %s/debug/vars", gatewayURL, gatewayURL)
+	// metrics/vars are read-only observability endpoints. A bare browser click on
+	// these URLs 401s off-box (they are loopback-exempt only — see authExempt), so
+	// the panel leads with the zero-friction path: `--metrics` reuses the bearer fak
+	// already loaded to fetch both surfaces, no token wrangling. The raw URLs stay
+	// printed for scrapers/tunnels, annotated so a 401 reads as expected, not broken.
+	fmt.Fprintln(&b, "metrics: run  fak claude-mac-fak --metrics   (fetches /metrics + /debug/vars with the gateway's own bearer)")
+	fmt.Fprintf(&b, "  urls: %s/metrics · %s/debug/vars", gatewayURL, gatewayURL)
 	if auth == "gateway-bearer" {
 		fmt.Fprint(&b, "  (open on the gateway host; off-box needs the bearer)")
 	}
@@ -562,6 +603,61 @@ func runClaudeMacOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, mode
 			emit()
 		}
 	}
+}
+
+// runClaudeMacMetrics is the one-shot answer to "the panel's /metrics and
+// /debug/vars links 401 on a bare browser click." Rather than make the operator
+// carry the bearer to a browser or hand-write a curl, it reuses the token the
+// client already holds, fetches both surfaces, and prints them: /debug/vars as
+// indented JSON (the structured diagnostics) and /metrics verbatim (the Prometheus
+// exposition). It never launches Claude. The bearer is sent, never printed.
+func runClaudeMacMetrics(stdout, stderr io.Writer, c *claudeMacDebugClient) int {
+	authNote := "no auth configured"
+	if c.key != "" {
+		authNote = "using the gateway bearer"
+	}
+	fmt.Fprintf(stdout, "fak gateway internals · %s  (%s)\n", c.base, authNote)
+
+	// /debug/vars first: it is the JSON diagnostics block the panel summarizes. Print
+	// it indented so it is readable as a standalone snapshot. A failure here is worth
+	// surfacing but not fatal — /metrics may still answer.
+	var vars json.RawMessage
+	if err := c.get("/debug/vars", &vars); err != nil {
+		fmt.Fprintf(stderr, "fak metrics: /debug/vars: %v%s\n", err, metricsAuthHint(err, c))
+	} else {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, vars, "", "  "); err != nil {
+			pretty.Reset()
+			pretty.Write(vars)
+		}
+		fmt.Fprintf(stdout, "\n== /debug/vars ==\n%s\n", pretty.String())
+	}
+
+	// /metrics is Prometheus text exposition — print it verbatim (no parsing) so it
+	// is pipe-friendly into promtool/grep, exactly what a scrape would see.
+	text, err := c.getRaw("/metrics")
+	if err != nil {
+		fmt.Fprintf(stderr, "fak metrics: /metrics: %v%s\n", err, metricsAuthHint(err, c))
+		return 1
+	}
+	fmt.Fprintf(stdout, "\n== /metrics ==\n%s", text)
+	if !strings.HasSuffix(text, "\n") {
+		fmt.Fprintln(stdout)
+	}
+	return 0
+}
+
+// metricsAuthHint turns a 401 into one actionable line so a missing/expired bearer
+// reads as "set the key", not an opaque status. Empty for any other error (or when a
+// key is already configured, where a 401 means the key is wrong rather than absent).
+func metricsAuthHint(err error, c *claudeMacDebugClient) string {
+	if err == nil || !strings.Contains(err.Error(), "status 401") {
+		return ""
+	}
+	if c.key == "" {
+		return " — set the gateway bearer in FAK_GATEWAY_KEY (or pass --gateway-key-env), or run on the gateway host where these are loopback-exempt"
+	}
+	return " — the configured bearer was rejected; check FAK_GATEWAY_KEY matches the gateway's --require-key"
 }
 
 // claudeMacOverlayLegend expands the terms on the --overlay line. It reuses the shared

@@ -250,6 +250,67 @@ func TestClaudeMacDebugClientProbeUsesBearer(t *testing.T) {
 	}
 }
 
+// TestRunClaudeMacMetricsFetchesBothWithBearer proves the --metrics one-shot:
+// it sends the bearer to both surfaces, prints /debug/vars (JSON, indented) and
+// /metrics (verbatim text), and never echoes the key.
+func TestRunClaudeMacMetricsFetchesBothWithBearer(t *testing.T) {
+	var sawMetrics, sawVars bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer super-secret-test-key" {
+			http.Error(w, "missing or invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/debug/vars":
+			sawVars = true
+			_, _ = w.Write([]byte(`{"gateway":{"up":true,"vdso":true}}`))
+		case "/metrics":
+			sawMetrics = true
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("fak_gateway_up 1\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	c := &claudeMacDebugClient{base: ts.URL, key: "super-secret-test-key", hc: ts.Client()}
+	var stdout, stderr bytes.Buffer
+	if code := runClaudeMacMetrics(&stdout, &stderr, c); code != 0 {
+		t.Fatalf("runClaudeMacMetrics code=%d stderr=%s", code, stderr.String())
+	}
+	if !sawVars || !sawMetrics {
+		t.Fatalf("did not fetch both endpoints: vars=%v metrics=%v", sawVars, sawMetrics)
+	}
+	out := stdout.String()
+	for _, want := range []string{"== /debug/vars ==", `"up": true`, "== /metrics ==", "fak_gateway_up 1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("--metrics output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "super-secret-test-key") || strings.Contains(stderr.String(), "super-secret-test-key") {
+		t.Fatalf("--metrics leaked the bearer:\nstdout=%s\nstderr=%s", out, stderr.String())
+	}
+}
+
+// TestRunClaudeMacMetricsHintsOnUnauthorized proves a 401 surfaces an actionable
+// hint (set the key / run on the gateway host) rather than a bare status line.
+func TestRunClaudeMacMetricsHintsOnUnauthorized(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing or invalid credentials", http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	c := &claudeMacDebugClient{base: ts.URL, key: "", hc: ts.Client()}
+	var stdout, stderr bytes.Buffer
+	if code := runClaudeMacMetrics(&stdout, &stderr, c); code != 1 {
+		t.Fatalf("runClaudeMacMetrics on 401 code=%d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "FAK_GATEWAY_KEY") || !strings.Contains(stderr.String(), "loopback-exempt") {
+		t.Fatalf("401 did not surface an actionable hint:\n%s", stderr.String())
+	}
+}
+
 func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 	var v claudeMacDebugVars
 	v.Gateway.VDSO = true
@@ -272,6 +333,7 @@ func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 		"cache-hit 0.88",
 		"inflight 2",
 		"auth gateway-bearer",
+		"fak claude-mac-fak --metrics",
 		"off-box needs the bearer",
 		"grafana (local stack): http://grafana.example",
 		"WARN: planner=mock",
