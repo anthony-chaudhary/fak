@@ -293,8 +293,12 @@ var registry = []Bench{
 	{
 		Name: "webbench-convert", Kind: KindCmd, Need: NeedDataset,
 		Summary: "Converts a WebVoyager dataset export into the webbench task format.",
-		Run:     "go run ./cmd/webbench-convert",
-		Doc:     "docs/webbench-baselines.md",
+		// A conversion utility, not a number-producing benchmark: it needs
+		// <input.jsonl> <output.jsonl> positionals an unattended sweep cannot supply,
+		// and produces a converted file rather than a measurement. Operator-run.
+		Run:    "go run ./cmd/webbench-convert <webvoyager-export.jsonl> <out.jsonl>",
+		Manual: true,
+		Doc:    "docs/webbench-baselines.md",
 	},
 	{
 		Name: "webbench-run", Kind: KindCmd, Need: NeedDataset, Level: LevelE2E,
@@ -309,8 +313,11 @@ var registry = []Bench{
 	{
 		Name: "webbench-token-measure", Kind: KindCmd, Need: NeedDataset,
 		Summary: "Measures actual token usage from real model-API webbench runs (the measured arm behind the geometry model).",
-		Run:     "go run ./cmd/webbench-token-measure",
-		Doc:     "docs/webbench-real-measurements-summary.md",
+		// Default to --demo (simulated measurements): a bare run needs --responses
+		// (a real model-API run output) the sweep cannot supply, so it failed every
+		// time. --demo is the self-contained arm that exits 0 with a token summary.
+		Run: "go run ./cmd/webbench-token-measure --demo",
+		Doc: "docs/webbench-real-measurements-summary.md",
 	},
 	{
 		Name: "wfmembench", Kind: KindCmd, Need: NeedNone,
