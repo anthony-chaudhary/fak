@@ -410,6 +410,7 @@ type tuiAgentReport struct {
 	Schema              string        `json:"schema"`
 	At                  string        `json:"at"`
 	Backend             string        `json:"backend"`
+	Target              string        `json:"target,omitempty"` // #938: the named compute target this launch resolved (mac/gcp/local/anthropic/...), empty for an unnamed default launch
 	Mode                string        `json:"mode"`
 	Provider            string        `json:"provider"`
 	Auth                string        `json:"auth"`
@@ -942,6 +943,18 @@ func lastSeqOf(rows []journal.Row) uint64 {
 }
 
 func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
+	// #938: a leading non-flag token may NAME a compute target (`fak c mac`). Resolve
+	// it against the registry BEFORE flag parsing, because Go's flag package stops at
+	// the first positional — a leading token would otherwise swallow every trailing
+	// flag. A KNOWN target is stripped here and applied below; an UNKNOWN leading token
+	// is left in place so it still forwards to `claude` verbatim (back-compat: the
+	// `fak c mac`→`claude mac` footgun only changes once `mac` is a real target).
+	reg, regErr := loadComputeTargets(defaultComputeTargetsFile())
+	var leadingTarget string
+	if regErr == nil {
+		leadingTarget, argv = resolveLeadingTarget(argv, reg, stderr)
+	}
+
 	fs := flag.NewFlagSet("tui agent", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	defHome, _ := os.UserHomeDir()
@@ -972,11 +985,26 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	dryRun := fs.Bool("dry-run", false, "render the launch plan without starting the backend agent")
 	asJSON := fs.Bool("json", false, "emit the launch model as JSON and do not start the backend agent")
 	listTargets := fs.Bool("list-targets", false, "list the named compute targets (mac/gcp/local/anthropic + ~/.fak/targets.json) with a live /healthz column, then exit")
+	targetFlag := fs.String("target", "", "named compute target to chat against (mac/gcp/local/anthropic + ~/.fak/targets.json); the explicit form of the leading `fak c <target>` token")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 	if *listTargets {
 		return runListComputeTargets(stdout, stderr, *asJSON)
+	}
+	// Which flags did the user set explicitly? A resolved target fills in only the
+	// fields the user did NOT pass, so `fak c mac --model foo` keeps foo.
+	setFlags := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
+	// The explicit --target flag and the leading positional token must agree; pick the
+	// one that is set (flag value wins if they are equal, errors if they conflict).
+	selectedTarget := strings.TrimSpace(*targetFlag)
+	if selectedTarget != "" && leadingTarget != "" && !strings.EqualFold(selectedTarget, leadingTarget) {
+		fmt.Fprintf(stderr, "fak console agent: conflicting target: positional %q vs --target %q (pass one)\n", leadingTarget, selectedTarget)
+		return 2
+	}
+	if selectedTarget == "" {
+		selectedTarget = leadingTarget
 	}
 	if *width < 72 {
 		*width = 72
@@ -1002,7 +1030,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak console agent: %v\n", err)
 		return 2
 	}
-	report, err := buildTUIAgentReport(tuiAgentOptions{
+	opts := tuiAgentOptions{
 		Backend:             *backend,
 		Command:             *command,
 		CommandArgs:         fs.Args(),
@@ -1022,11 +1050,33 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		GatewayKeyEnv:       *gatewayKeyEnv,
 		APITimeoutMS:        *apiTimeoutMS,
 		DebugStats:          *debugStats,
-	}, at, tuiExecutable(), os.Getenv)
+	}
+	// #938: fold a resolved compute target into the launch options. A positional that
+	// reached here is always a known target; an unknown --target value is an error
+	// (unlike an unknown positional, which already passed through to claude above).
+	var resolvedTarget *computeTarget
+	if selectedTarget != "" {
+		if regErr != nil {
+			fmt.Fprintf(stderr, "fak console agent: load compute targets: %v\n", regErr)
+			return 1
+		}
+		tgt, ok := reg.resolve(selectedTarget)
+		if !ok {
+			fmt.Fprintf(stderr, "fak console agent: unknown --target %q (see `fak c --list-targets`)\n", selectedTarget)
+			if hint := reg.nearest(selectedTarget); hint != "" {
+				fmt.Fprintf(stderr, "  did you mean %q?\n", hint)
+			}
+			return 2
+		}
+		applyComputeTarget(&opts, tgt, setFlags)
+		resolvedTarget = &tgt
+	}
+	report, err := buildTUIAgentReport(opts, at, tuiExecutable(), os.Getenv)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console agent: %v\n", err)
 		return 2
 	}
+	report.Target = selectedTarget
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -1040,7 +1090,85 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprint(stdout, renderTUIAgent(report, *width))
 		return 0
 	}
+	// #938: gate an interactive launch against a resolved remote target on a reachable
+	// gateway — mirror the claude-mac-fak preflight so `fak c mac/gcp/local` never hands
+	// the terminal to Claude against a dead/mock backend. A target with no /healthz (the
+	// real Anthropic API) is n/a and never blocks.
+	if resolvedTarget != nil {
+		if code, gated := preflightComputeTarget(stdout, stderr, *resolvedTarget); gated {
+			return code
+		}
+	}
 	return launchTUIAgent(stdout, stderr, report)
+}
+
+// resolveLeadingTarget peeks at the first arg. When it is a non-flag token that names a
+// registered compute target, it returns that name and the remaining args (the token
+// stripped) so the rest can be flag-parsed normally. An unknown token is left in place —
+// back-compat: it forwards to `claude` exactly as today — with a one-line "did you mean"
+// hint to stderr only when the token is lexically close to a real target name (#938).
+func resolveLeadingTarget(argv []string, reg *targetRegistry, stderr io.Writer) (string, []string) {
+	if len(argv) == 0 || reg == nil {
+		return "", argv
+	}
+	tok := argv[0]
+	if tok == "" || strings.HasPrefix(tok, "-") {
+		return "", argv // a flag (or empty) — never a leading target token
+	}
+	if _, ok := reg.resolve(tok); ok {
+		return tok, argv[1:]
+	}
+	if hint := reg.nearest(tok); hint != "" {
+		fmt.Fprintf(stderr, "fak console agent: %q is not a known compute target (did you mean %q? — `fak c --list-targets`); forwarding it to claude\n", tok, hint)
+	}
+	return "", argv
+}
+
+// applyComputeTarget folds a resolved target into the launch options WITHOUT clobbering
+// any flag the user set explicitly (setFlags wins), so `fak c mac --model foo` keeps foo.
+// A gateway-url / local-spawn target routes the launch through the existing --gateway-url
+// path (gateway + model + the cred env-var NAME); the anthropic provider-proxy target IS
+// the default guard path, so it leaves GatewayURL empty and carries only its model.
+func applyComputeTarget(opt *tuiAgentOptions, tgt computeTarget, setFlags map[string]bool) {
+	switch tgt.Kind {
+	case targetGatewayURL, targetLocalSpawn:
+		if !setFlags["gateway-url"] {
+			opt.GatewayURL = tgt.GatewayURL
+		}
+		if !setFlags["model"] && tgt.Model != "" {
+			opt.Model = tgt.Model
+		}
+		if !setFlags["gateway-key-env"] && tgt.CredEnv != "" {
+			opt.GatewayKeyEnv = tgt.CredEnv
+		}
+	case targetProviderProxy:
+		// The default guard path (provider anthropic, subscription OAuth): leave
+		// GatewayURL empty so buildTUIAgentReport takes the guard branch, and carry
+		// only the named model.
+		if !setFlags["model"] && tgt.Model != "" {
+			opt.Model = tgt.Model
+		}
+	}
+}
+
+// preflightComputeTarget probes a resolved target's /healthz before an interactive launch
+// and gates a launch against a dead gateway (#938), reusing the registry probe. A target
+// with no /healthz endpoint (the real Anthropic API) is n/a and never blocks. It returns
+// gated=true with an exit code ONLY when the launch must be aborted.
+func preflightComputeTarget(stdout, stderr io.Writer, tgt computeTarget) (int, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	health := tgt.probe(ctx, &http.Client{Timeout: 3 * time.Second})
+	switch health.State {
+	case "down":
+		fmt.Fprintf(stderr, "fak console agent: target %q gateway is unreachable: %s\n", tgt.Name, health.Detail)
+		fmt.Fprintf(stderr, "  not launching claude against a dead backend — check the gateway, or pick another target (`fak c --list-targets`)\n")
+		return 1, true
+	case "up":
+		fmt.Fprintf(stdout, "fak console agent: target %q gateway is up — launching claude ...\n", tgt.Name)
+	}
+	// "up" and "n/a" both proceed; "n/a" (no /healthz, e.g. anthropic) prints nothing.
+	return 0, false
 }
 
 func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
@@ -1262,14 +1390,27 @@ func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend strin
 	if keyEnv == "" {
 		keyEnv = "FAK_GATEWAY_KEY"
 	}
-	if strings.TrimSpace(getenv(keyEnv)) == "" {
+	bearer := strings.TrimSpace(getenv(keyEnv))
+	// A loopback gateway is a local `fak serve` that, unless started with
+	// --require-key-env, accepts unauthenticated requests — so tolerate an empty bearer
+	// for it (mirrors claude_mac_fak's gatewayIsLocal tolerance), which is what makes
+	// `fak c local` launch without demanding a bogus key. A REMOTE gateway still requires
+	// the bearer to be set.
+	localGateway := gatewayIsLocal(gatewayURL)
+	if bearer == "" && !localGateway {
 		return tuiAgentReport{}, fmt.Errorf("--gateway-url requires %s to be set (or pass --gateway-key-env VAR)", keyEnv)
 	}
 	notes = filterTUIAgentGatewayNotes(notes)
-	env = append(env,
-		tuiAgentEnv{Name: "ANTHROPIC_BASE_URL", Value: gatewayURL, Source: "gateway-url"},
-		tuiAgentEnv{Name: "ANTHROPIC_API_KEY", Source: "env:" + keyEnv, FromEnv: keyEnv, Sensitive: true},
-	)
+	env = append(env, tuiAgentEnv{Name: "ANTHROPIC_BASE_URL", Value: gatewayURL, Source: "gateway-url"})
+	auth := "gateway-bearer"
+	if bearer != "" {
+		env = append(env, tuiAgentEnv{Name: "ANTHROPIC_API_KEY", Source: "env:" + keyEnv, FromEnv: keyEnv, Sensitive: true})
+	} else {
+		// loopback, no bearer: do not inject an empty ANTHROPIC_API_KEY (Claude Code
+		// reads an empty value as "no key"); record the unauthenticated posture instead.
+		auth = "none"
+		notes = append(notes, fmt.Sprintf("loopback gateway %s with no %s set — launching unauthenticated (a local fak serve without --require-key-env)", gatewayURL, keyEnv))
+	}
 	if strings.TrimSpace(getenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")) == "" {
 		env = append(env, tuiAgentEnv{Name: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1", Source: "gateway-default"})
 	}
@@ -1302,7 +1443,7 @@ func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend strin
 		Backend:         backend,
 		Mode:            "launch",
 		Provider:        "existing-fak-gateway",
-		Auth:            "gateway-bearer",
+		Auth:            auth,
 		GatewayURL:      gatewayURL,
 		Account:         strings.TrimSpace(opt.Account),
 		ResolvedAccount: resolvedAccount,

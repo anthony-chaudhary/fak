@@ -201,6 +201,62 @@ func (r *targetRegistry) all() []computeTarget {
 	return out
 }
 
+// nearest returns the registered target name closest to s (case-insensitive) within a
+// small edit distance, or "" when nothing is close — the seed for a "did you mean" hint
+// on an unknown `fak c <token>` (#938). A prefix relation counts as close (so "an" and
+// "anthropic-x" both suggest "anthropic"); otherwise it is the best Levenshtein match
+// within distance 2. It is a hint surface only, never a hot path.
+func (r *targetRegistry) nearest(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	best := ""
+	bestDist := 3 // suggest only within edit distance <= 2
+	for _, t := range r.targets {
+		name := strings.ToLower(t.Name)
+		if name == s || strings.HasPrefix(name, s) || strings.HasPrefix(s, name) {
+			return t.Name
+		}
+		if d := levenshtein(s, name); d < bestDist {
+			bestDist = d
+			best = t.Name
+		}
+	}
+	return best
+}
+
+// levenshtein is the classic edit-distance DP, used only for the small "did you mean"
+// target hint above.
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			del, ins, sub := prev[j]+1, cur[j-1]+1, prev[j-1]+cost
+			m := del
+			if ins < m {
+				m = ins
+			}
+			if sub < m {
+				m = sub
+			}
+			cur[j] = m
+		}
+		prev = cur
+	}
+	return prev[len(rb)]
+}
+
 // defaultComputeTargetsFile is the optional user override file, additive over the
 // built-ins. FAK_TARGETS_FILE wins; otherwise ~/.fak/targets.json.
 func defaultComputeTargetsFile() string {

@@ -432,7 +432,8 @@ Alias: fak tui
                  [--workspace DIR] [--deep] [--timeout N] [--width N]
   fak console guard  --guard-json FILE [--guard-json FILE ...] [--json]
                  [--width N] [--at RFC3339|YYYY-MM-DD]
-  fak console agent [--account NAME | --claude-config-dir DIR] [--dry-run]
+  fak console agent [<target> | --target NAME] [--list-targets]
+                [--account NAME | --claude-config-dir DIR] [--dry-run]
                 [--prompt STR] [--session-id ID] [--passthrough]
                 [--gateway-url URL --gateway-key-env VAR --model MODEL] [--json]
                 [--] [claude args...]
@@ -459,6 +460,11 @@ The agent pane launches a real Claude Code backend. By default it starts a local
 `+"`fak guard`"+` and pins CLAUDE_CONFIG_DIR from `+"`fak accounts`"+`; with
 --gateway-url it instead launches Claude Code directly against an already-running
 `+"`fak serve`"+` gateway, reading the bearer from --gateway-key-env.
+
+A leading `+"`fak c <target>`"+` (or --target NAME) selects a named compute backend
+from the registry (mac/gcp/local/anthropic + ~/.fak/targets.json; see --list-targets):
+it resolves the target's gateway URL + model and gates an interactive launch on a live
+/healthz probe. An unknown leading token still forwards to claude unchanged.
 
 The overview pane composes selected pane models into one ranked spine so
 operators can see issue, loop, session, garden, and guard pressure together.
