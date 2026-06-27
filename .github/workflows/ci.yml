@@ -37,6 +37,12 @@ jobs:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
 
+      # Fleet guard installation (#19): arm git guards (leak/claim/trunk) on every CI node.
+      # A fresh clone without hooksPath set fails open; this step installs the guards
+      # so pre-commit/pre-push/commit-msg hooks fire during this CI run.
+      - name: git-guards-armed (install leak/claim/trunk hooks)
+        run: python tools/install_trunk_guard.py
+
       - name: build
         run: go build ./...
 
