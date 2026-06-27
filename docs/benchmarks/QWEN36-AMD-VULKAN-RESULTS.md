@@ -105,7 +105,8 @@ Gateway chat report:
 - Completion tokens: 125
 - Wall time: 46.351 s
 - Gateway-estimated decode: 2.697 tok/s
-- Ratio to the M3 Pro llama.cpp reference decode bar (7.29 tok/s): 0.37x
+- llama.cpp decode: 2.80 tok/s
+- Ratio to the M3 Pro llama.cpp reference decode bar (7.29 tok/s): 0.38x
 
 llama.cpp server timing for that same gateway chat:
 
