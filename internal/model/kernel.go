@@ -210,6 +210,15 @@ func (s *Session) glmDsaWeightHAL(name string, out, in int) compute.Tensor {
 	if s.M.has(name) {
 		return s.weightHAL(name)
 	}
+	if s.M.kqw[name] != nil {
+		// A resident Q5_K/Q6_K weight reached the DEVICE upload path. The device has no
+		// k-quant GEMV, and these are MoE experts that must run on the host CPU under
+		// --cpu-offload-experts (the only config that builds m.kqw). Reaching here means the
+		// expert was routed to the device — a misconfiguration, named explicitly instead of
+		// the opaque "missing resident weight" below.
+		panic("model: glmDsaWeightHAL got resident k-quant weight " + name +
+			" on the device path — Q5_K/Q6_K experts are host-resident; serve with --cpu-offload-experts")
+	}
 	panic("model: glmDsaWeightHAL missing resident weight " + name + " (no f32/q8/q4_k residency)")
 }
 
