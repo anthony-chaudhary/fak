@@ -87,6 +87,13 @@ type Bench struct {
 	// Doc is the in-repo methodology/authority doc for this benchmark's numbers,
 	// or "" when the only doc is the source comment.
 	Doc string
+	// Manual marks a benchmark whose Run is an operator recipe, not a command an
+	// unattended sweep may exec — it needs a setup the capability prober cannot
+	// express (e.g. a live model credential, a browser runtime). A manual bench is
+	// still surfaced (its Run is the recipe to run by hand) but the nightrun loop
+	// skips it instead of recording a spurious failure. The authoritative twin of a
+	// Task's Manual flag.
+	Manual bool
 }
 
 // Offline reports whether this benchmark runs with zero external assets  -  the
@@ -285,8 +292,12 @@ var registry = []Bench{
 	{
 		Name: "webbench-run", Kind: KindCmd, Need: NeedDataset, Level: LevelE2E,
 		Summary: "Reproducible end-to-end webbench runner over a converted task set.",
-		Run:     "go run ./cmd/webbench-run",
-		Doc:     "docs/webbench-baselines.md",
+		// An operator recipe: needs both --dataset AND a live model credential
+		// (GLM_API_KEY) the capability prober cannot express, so an unattended sweep
+		// must skip it rather than fail on the missing key every run.
+		Run:    "go run ./cmd/webbench-run --dataset testdata/webbench/sample-tasks.jsonl --api-key $GLM_API_KEY",
+		Manual: true,
+		Doc:    "docs/webbench-baselines.md",
 	},
 	{
 		Name: "webbench-token-measure", Kind: KindCmd, Need: NeedDataset,

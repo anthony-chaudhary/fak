@@ -72,6 +72,7 @@ func benchmarkTasks() []Task {
 			Requires:   benchRequires(b),
 			Run:        b.Run,
 			Acceptance: "a recorded result/number from `" + b.Run + "`",
+			Manual:     b.Manual,
 			Doc:        b.Doc,
 		})
 	}
