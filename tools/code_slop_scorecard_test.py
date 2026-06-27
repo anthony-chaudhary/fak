@@ -623,6 +623,198 @@ def test_markdown_omits_promotion_when_block_absent():
     assert "promotion (#781)" not in body
 
 
+# --- #789 detector PRECISION fixes: each paired (FP must drop, recall must hold) ------
+
+def test_fix1_signature_only_func_header_is_not_a_clone():
+    # FP: two DIFFERENTLY-NAMED funcs whose single signature LINE collides on
+    # param-list/type punctuation is not a body clone (every site e==s on a `func ` line).
+    sig = ("func {n}(stdout, stderr io.Writer, positional []string, reg *Registry) error {{\n"
+           "\t{body}\n}}\n")
+    files = {"a.go": "package a\n" + sig.format(n="runHybrid", body="return hybrid()"),
+             "b.go": "package b\n" + sig.format(n="runStandard", body="return standard()")}
+    # bodies differ; only the long signature line is identical -> must NOT be a clone.
+    assert cs.kpi_duplication(files)["defects"] == []
+
+
+def test_fix1_real_body_clone_with_func_header_still_caught():
+    # RECALL: same header AND same multi-line body is a real clone and MUST stay caught
+    # (the e==s suppression only fires when EVERY site is a one-line signature collision).
+    body = ("func {n}(xs []int) int {{\n"
+            "\ttotal := 0\n\tfor _, v := range xs {{\n\t\tif v > 0 {{\n"
+            "\t\t\ttotal += v * 2\n\t\t\ttotal -= v % 3\n\t\t}}\n\t}}\n\treturn total\n}}\n")
+    files = {"a.go": "package a\n" + body.format(n="sumA"),
+             "b.go": "package b\n" + body.format(n="sumB")}
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
+def _reexec_helper(name: str) -> str:
+    # a re-exec'd *HelperProcess child: os.Exit + out-of-band write + env-guard return.
+    return (f"func {name}(t *testing.T) {{\n"
+            "\tif os.Getenv(\"FAK_PROBE\") != \"1\" {\n\t\treturn\n\t}\n"
+            "\tos.Stdout.WriteString(\"ok\\n\")\n\tos.Exit(0)\n}\n")
+
+
+def test_fix2_reexec_helper_test_not_vacuous():
+    # FP: a re-exec helper asserts through the process boundary (os.Exit/stdout), not t.* .
+    tf = {"x_test.go": "package x\n" + _reexec_helper("TestProbeHelper")}
+    assert cs.kpi_vacuous_tests(tf)["defects"] == []
+
+
+def test_fix2_does_not_panic_test_not_vacuous():
+    # FP: running a production call without panicking IS the assertion (name marker +
+    # single bare call body, composite-literal arg allowed).
+    tf = {"x_test.go": ("package x\n"
+                        "func TestApplyDoesNotPanicOnEmptySpec(t *testing.T) {\n"
+                        "\tapplyHookFloor(RulesetSpec{})\n}\n")}
+    assert cs.kpi_vacuous_tests(tf)["defects"] == []
+
+
+def test_fix2_genuinely_vacuous_test_still_caught():
+    # RECALL: a test that neither asserts, nor exits, nor is marked does-not-panic is
+    # truly vacuous and MUST stay caught (no os.Exit, ordinary name, multi-statement body).
+    tf = {"x_test.go": ("package x\n"
+                        "func TestThing(t *testing.T) {\n"
+                        "\tx := compute()\n\t_ = x\n}\n")}
+    assert len(cs.kpi_vacuous_tests(tf)["defects"]) >= 1
+
+
+def test_fix2_reexec_tell_required_no_free_pass():
+    # RECALL guard on the exemption: os.Exit alone (no env-guard return) does NOT exempt —
+    # a body that exits but never asserts and isn't a guarded helper stays graded.
+    tf = {"x_test.go": ("package x\n"
+                        "func TestNoGuard(t *testing.T) {\n"
+                        "\tdoWork()\n\tos.Exit(0)\n}\n")}
+    # missing the env-guard-return tell -> not exempted -> still vacuous.
+    assert len(cs.kpi_vacuous_tests(tf)["defects"]) >= 1
+
+
+def _flag_block(name: str) -> str:
+    return (f"func {name}(args []string) error {{\n"
+            "\tfs := flag.NewFlagSet(\"x\", flag.ContinueOnError)\n"
+            "\tengine := fs.String(\"engine\", \"auto\", \"engine id\")\n"
+            "\taddr := fs.String(\"addr\", \":0\", \"bind addr\")\n"
+            "\tif err := fs.Parse(args); err != nil {\n\t\treturn err\n\t}\n"
+            "\t_ = engine\n\t_ = addr\n\treturn nil\n}\n")
+
+
+def test_fix3_pure_flag_plumbing_block_dropped():
+    # FP: two subcommands sharing only the uniform flag-decl/parse plumbing.
+    files = {"a.go": "package a\n" + _flag_block("subA"),
+             "b.go": "package b\n" + _flag_block("subB")}
+    assert cs.kpi_duplication(files)["defects"] == []
+
+
+def test_fix3_flag_block_with_real_body_still_caught():
+    # RECALL: a flag preamble FOLLOWED BY a real copy-pasted computation body is a clone —
+    # the group is not ALL-flag-plumbing, so the gate must not drop it. (Uses a NAME
+    # sentinel replace, not .format(), to avoid colliding with the Go literal braces.)
+    blk = ("func NAME(args []string) error {\n"
+           "\tfs := flag.NewFlagSet(\"x\", flag.ContinueOnError)\n"
+           "\tn := fs.Int(\"n\", 0, \"count\")\n"
+           "\tif err := fs.Parse(args); err != nil {\n\t\treturn err\n\t}\n"
+           "\ttotal := 0\n\tfor i := 0; i < *n; i++ {\n\t\ttotal += i * i\n\t\ttotal -= i % 3\n\t}\n"
+           "\tfmt.Println(total)\n\treturn nil\n}\n")
+    files = {"a.go": "package a\n" + blk.replace("NAME", "runA"),
+             "b.go": "package b\n" + blk.replace("NAME", "runB")}
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
+def test_fix4_dispatch_arm_is_advisory_not_debt():
+    # FP: same-file sibling `case X:` arms sharing an identical loop-free preamble ->
+    # advisory soft, not slop-debt. Each arm carries enough identical logic (a guard with
+    # comparisons + a delegating call) to form a clone window, but no loop.
+    # the shared arm must form a clone window (>=34 tokens, >=2 logic) yet merge to a span
+    # <= DISPATCH_ARM_MAX_SPAN(8) lines to qualify as advisory. This mirrors the real
+    # gguf-dequant validate-arm shape (a token-dense fmt.Errorf gives the window length;
+    # ~5 lines keeps the span in-band; no loop).
+    # mirrors the real gguf-dequant validate arm verbatim in shape (two guards + a
+    # delegating call): the shared window spans the elems-guard + the len(raw)-guard,
+    # which clears 34 tokens; the per-arm `dequantX` call and `Tensor` literal differ.
+    def _arm(q: str) -> str:
+        tmpl = ("\tcase TensorQQ:\n"
+                "\t\tif elems%qk != 0 {\n"
+                "\t\t\treturn nil, fmt.Errorf(\"gguf: tensor %s QQ count %d not a multiple of %d\", t.Name, elems, qk)\n"
+                "\t\t}\n"
+                "\t\twant := int(elems / qk * blockBytes)\n"
+                "\t\tif len(raw) != want {\n"
+                "\t\t\treturn nil, fmt.Errorf(\"gguf: tensor %s QQ payload has %d bytes, want %d\", t.Name, len(raw), want)\n"
+                "\t\t}\n"
+                "\t\tdequantQQ(out, raw)\n")
+        return tmpl.replace("QQ", q)
+    sw = ("package a\nfunc decode(k Kind, out []float32, raw []byte, t T, elems, qk, blockBytes int) error {\n"
+          "\tswitch k {\n" + _arm("Q4_0") + _arm("Q4_1") + _arm("Q5_0")
+          + "\t}\n\treturn errKind\n}\n")
+    k = cs.kpi_duplication({"a.go": sw})
+    assert k["defects"] == [], k["defects"]
+    assert any("dispatch-arm" in s for s in k["soft"]), k["soft"]
+
+
+def test_fix4_dispatch_arm_with_loop_stays_debt():
+    # RECALL: a duplicated computation LOOP inside arms is real slop regardless of `case`.
+    sw = ("package a\nfunc decode(k Kind, raw []byte) []float32 {\n"
+          "\tswitch k {\n"
+          "\tcase TensorF32:\n\t\tout := make([]float32, len(raw))\n\t\tfor i := range raw {\n\t\t\tout[i] = float32(raw[i]) * 2\n\t\t}\n\t\treturn out\n"
+          "\tcase TensorF16:\n\t\tout := make([]float32, len(raw))\n\t\tfor i := range raw {\n\t\t\tout[i] = float32(raw[i]) * 2\n\t\t}\n\t\treturn out\n"
+          "\t}\n\treturn nil\n}\n")
+    assert len(cs.kpi_duplication({"a.go": sw})["defects"]) >= 1
+
+
+def test_fix5_sort_scaffold_only_window_skipped():
+    # FP: a shared sort.Slice scaffold with NO comparison operator in the window.
+    blk = ("package {p}\nfunc sort{n}(rows []Row) {{\n"
+           "\tsort.Slice(rows, func(i, j int) bool {{\n"
+           "\t\ta, b := rows[i], rows[j]\n\t\t_ = a\n\t\t_ = b\n\t\treturn false\n\t}})\n}}\n")
+    files = {"a.go": blk.format(p="a", n="A"), "b.go": blk.format(p="b", n="B")}
+    assert cs.kpi_duplication(files)["defects"] == []
+
+
+def test_fix5_real_shared_comparator_still_caught():
+    # RECALL: a sort closure carrying a real comparison (a shared comparator re-implemented
+    # in two places) MUST stay caught.
+    blk = ("package {p}\nfunc sort{n}(eps []Ep) {{\n"
+           "\tsort.SliceStable(eps, func(i, j int) bool {{\n"
+           "\t\tif eps[i].CalibErr != eps[j].CalibErr {{\n\t\t\treturn eps[i].CalibErr < eps[j].CalibErr\n\t\t}}\n"
+           "\t\treturn eps[i].Name < eps[j].Name\n\t}})\n}}\n")
+    files = {"a.go": blk.format(p="a", n="A"), "b.go": blk.format(p="b", n="B")}
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
+def test_fix6_declaration_block_demoted_by_context_gate():
+    # FP: a pure declaration/composite-literal block clears no logic without a
+    # non-assignment logic token, so its `=`/`:=` are demoted and it is not a clone.
+    blk = ("package {p}\nvar cfg{n} = Config{{\n"
+           "\tName: \"x\",\n\tID: 1,\n\tHash: \"h\",\n\tSeed: 2,\n\tCount: 3,\n\tCost: 4.0,\n\tMode: \"fast\",\n}}\n")
+    files = {"a.go": blk.format(p="a", n="A"), "b.go": blk.format(p="b", n="B")}
+    assert cs.kpi_duplication(files)["defects"] == []
+
+
+def test_fix6_assignment_heavy_real_body_still_caught():
+    # RECALL: a real copied statement body keeps its `:=` because it co-occurs with
+    # control/compute (!=, ||) — the 74:1 trap the context-gate avoids vs blunt deletion.
+    body = ("func {n}() error {{\n"
+            "\tvar ol Overlapped\n\tr, _, err := proc.Call(h, 0, 0, 0, ref(&ol))\n"
+            "\tif r != 0 {{\n\t\treturn nil\n\t}}\n"
+            "\tif errors.Is(err, errA) || errors.Is(err, errB) {{\n\t\treturn errBusy\n\t}}\n"
+            "\treturn err\n}}\n")
+    files = {"a.go": "package a\n" + body.format(n="tryLock"),
+             "b.go": "package b\n" + body.format(n="tryFlock")}
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
+def test_fix7_slop_keep_directive_exempts_dead_symbol():
+    # FP: an intentionally-unreferenced symbol marked `//slop:keep` is not dead-code debt.
+    files = {"a.go": ("package a\n"
+                      "//slop:keep symbol-table provenance marker\n"
+                      "const buildTag = \"x+native\"\n")}
+    assert cs.kpi_dead_code(files, {})["defects"] == []
+
+
+def test_fix7_unmarked_dead_symbol_still_caught():
+    # RECALL: an unexported symbol with NO directive and no reference is still dead-code.
+    files = {"a.go": "package a\nconst leftover = \"unused\"\n"}
+    assert len(cs.kpi_dead_code(files, {})["defects"]) >= 1
+
+
 def main() -> int:
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

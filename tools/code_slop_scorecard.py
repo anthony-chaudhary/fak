@@ -92,12 +92,17 @@ VERSION_REL = "VERSION"
 # is roughly a 6-line block: long enough that an idiomatic err-wrap is not "duplication",
 # short enough to catch a copy-pasted body (≈ the old 6-non-trivial-line window).
 CLONE_WINDOW_TOKENS = 34
-# A window counts only if it carries at least this many LOGIC tokens (computation /
-# comparison / assignment operators + control-flow keywords). This ONE structural rule
-# replaces the old hand-tuned line skips: package/import boilerplate, struct/interface
-# field lists and composite-literal `Key: value,` data all carry ZERO logic tokens, so
-# they are never mistaken for a copy-pasted block — duplication is measured on executable
-# structure, not text.
+# A window counts only if its EFFECTIVE logic-token count is at least this many
+# (computation / comparison / assignment operators + control-flow keywords). This ONE
+# structural rule replaces the old hand-tuned line skips: package/import boilerplate,
+# struct/interface field lists and composite-literal `Key: value,` data all carry ZERO
+# logic tokens, so they are never mistaken for a copy-pasted block — duplication is
+# measured on executable structure, not text. The bare assignment ops `=` / `:=` are
+# CONTEXT-GATED (FIX 6): they count toward a window's logic ONLY when the same window
+# also carries >= 1 non-assignment logic token (a comparison/compute op or a control
+# keyword). A window whose only logic is assignment is a pure declaration/literal block
+# (e.g. a run of `x := fs.String(...)` flag-decls) and is demoted to zero — while a real
+# copied statement body keeps its full count via the control/compute it co-occurs with.
 CLONE_MIN_LOGIC_TOKENS = 2
 # A clone group is HARD only if its window appears in >= this many DISTINCT locations
 # (a location = (file, start-line)). Two is the threshold for "copy-pasted".
@@ -345,6 +350,15 @@ _LOGIC_OPS = frozenset({
     "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "&^=", "++", "--",
 })
 _LOGIC_KEYWORDS = frozenset({"if", "for", "switch", "select", "range"})
+# Bare assignment operators. These ARE logic tokens (a copied statement body keeps its
+# assignments), but they are CONTEXT-GATED in the duplication window-qualify loop (#FP):
+# they only contribute to a window's logic count when the SAME window also carries at
+# least one NON-assignment logic token (a comparison/compute op or a control keyword).
+# A window whose only logic is `=`/`:=` is a pure declaration/literal/field-init block
+# (e.g. a run of `engine := fs.String(...)` flag-decls) — data, not copy-pasted logic.
+# A real copied statement body always co-occurs with control/compute, so it keeps its
+# full logic count via the non-assignment token it carries (#780 recall guard).
+_ASSIGN_OPS = frozenset({"=", ":="})
 
 
 def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, int, bool]]:
@@ -452,6 +466,100 @@ def _clone_sample(text: str, lineno: int) -> str:
     return ""
 
 
+# --- duplication group-level false-positive gates --------------------------
+# These run AFTER clone grouping: a whole GROUP is dropped (or demoted to advisory)
+# only when EVERY site in it matches a known not-slop shape, with a RECALL GUARD on
+# each so a true clone of the same surface stays counted.
+
+# FIX 3 — flag/CLI-plumbing groups. A run of `fs.String(...)` / `fs.Parse()` /
+# err-check / brace lines is CLI argument wiring, not copy-pasted logic. The
+# group is dropped iff EVERY site is a flag-plumbing block, where a block is
+# flag-plumbing iff (1) >= FLAG_PLUMB_LINE_FRAC of its covered non-blank,
+# non-`//` lines match a flag-plumbing line shape AND (2) the span actually
+# contains a positive flag-API token. Requirement (2) is the RECALL GUARD:
+# without it, the err-check + brace + return tail of ANY function would match.
+FLAG_PLUMB_LINE_FRAC = 0.7
+_FLAG_API_PRESENT = re.compile(
+    r"(?:fs|flag)\.(?:String|Bool|Int|Int64|Uint|Float64|Duration|Var|Func|"
+    r"NewFlagSet|Parse)\(")
+# A single flag-plumbing line shape: a flag decl (a flag-API call assigned via
+# :=/=), `fs.Parse(`, an `if err != nil {`, a bare `}` / `} else {`, or a small
+# return (`return <int>` / `return err` / `return nil`).
+_FLAG_PLUMBING_LINE = re.compile(
+    r"^\s*(?:"
+    r"[\w.]+\s*(?::=|=)\s*(?:fs|flag)\.(?:String|Bool|Int|Int64|Uint|Float64|"
+    r"Duration|Var|Func|NewFlagSet|Parse)\(|"          # flag decl
+    r"(?:fs|flag)\.Parse\(|"                            # fs.Parse()
+    r"if\s+err\s*!=\s*nil\s*\{|"                        # err check
+    r"\}\s*(?:else\s*\{)?\s*$|"                         # bare } / } else {
+    r"return\s+(?:\d+|err|nil)\s*$"                     # small return
+    r")")
+
+
+def _is_flag_plumbing_block(text: str, sline: int, eline: int) -> bool:
+    """True iff the source span [sline, eline] is CLI flag-plumbing: at least
+    FLAG_PLUMB_LINE_FRAC of its covered code lines (non-blank, non-`//`) match the
+    flag-plumbing line shape AND the span carries a positive flag-API token."""
+    lines = text.splitlines()
+    span = lines[sline - 1:eline]
+    covered = [ln for ln in span if ln.strip() and not ln.lstrip().startswith("//")]
+    if not covered:
+        return False
+    if not any(_FLAG_API_PRESENT.search(ln) for ln in span):  # recall guard
+        return False
+    n_plumb = sum(1 for ln in covered if _FLAG_PLUMBING_LINE.match(ln))
+    return n_plumb / len(covered) >= FLAG_PLUMB_LINE_FRAC
+
+
+# FIX 4 — switch-dispatch-arm boilerplate. A small, same-file group of `case X:`
+# arms with no loop inside is dispatch boilerplate (e.g. a `gguf_dequant` type
+# switch): real, but advisory, not slop-debt. Counted only as a `soft` signal.
+# The NO-LOOP conjunct is the RECALL GUARD — a duplicated computation LOOP stays
+# counted as a real clone.
+DISPATCH_ARM_MAX_SPAN = 8
+_CASE_ARM_RE = re.compile(r"^case\s+\S+\s*:\s*$")
+_LOOP_TOKEN_RE = re.compile(r"\b(for|range)\b")
+
+
+# FIX 5 — sort-scaffold-only windows. A window that calls `sort.Slice` /
+# `sort.SliceStable` / `sort.Sort` / `sort.Strings` but carries NO real-logic token
+# is just the sort scaffolding (the call boilerplate), not the comparator body — two
+# unrelated sort sites share only the scaffold. Dropped at window-keying time.
+#
+# The RECALL GUARD is two-pronged (both are real-logic tells a copied body carries):
+#   (1) a comparison operator (`<`/`!=`/… — a real shared comparator like dojo's
+#       `a.CalibErr != b.CalibErr` stays), AND
+#   (2) a loop / control keyword (`for`/`range`/`if`/`switch`/`select` — a copied
+#       `for k := range m { … }; sort.Strings(…)` helper body like `featStr`/`sortedKeys`
+#       carries `range`+`for` and stays; without this prong FIX 5 wrongly suppressed
+#       genuinely copy-pasted sort-using helpers).
+# A window is dropped ONLY when it has a sort verb and NEITHER prong fires — pure
+# scaffolding, e.g. the `}` + `sort.Slice(rows, func(i,j int) bool {` head shared by
+# two unrelated comparators.
+_SORT_VERBS = frozenset({"Slice", "SliceStable", "Sort", "Strings"})
+_COMPARE_TOKENS = frozenset({"<", ">", "<=", ">=", "!=", "=="})
+_CONTROL_KEYWORDS = frozenset({"for", "range", "if", "switch", "select"})
+
+
+def _is_sort_scaffold_only(key: tuple[str, ...]) -> bool:
+    """True iff the token window contains a `sort.<verb>` call (one of _SORT_VERBS)
+    but NONE of the real-logic tells (a _COMPARE_TOKENS operator or a _CONTROL_KEYWORDS
+    keyword) — pure sort scaffolding, no comparator body and no copied loop."""
+    has_sort = False
+    n = len(key)
+    for i in range(n - 2):
+        if key[i] == "sort" and key[i + 1] == "." and key[i + 2] in _SORT_VERBS:
+            has_sort = True
+            break
+    if not has_sort:
+        return False
+    if any(t in _COMPARE_TOKENS for t in key):  # recall guard (1): comparator
+        return False
+    if any(t in _CONTROL_KEYWORDS for t in key):  # recall guard (2): copied control
+        return False
+    return True
+
+
 def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
     """Copy-paste clones, measured on the normalized Go token stream (#780). For every
     file, slide a CLONE_WINDOW_TOKENS-token window over ``go_tokens`` output, keep only
@@ -473,14 +581,28 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
         m = len(toks)
         quals: list[tuple[int, int, int, int]] = []
         if m >= CLONE_WINDOW_TOKENS:
+            # Per token: is_logic (as before) and is_nonassign_logic (logic AND not a
+            # bare assignment op). FIX 6: bare `=`/`:=` are CONTEXT-GATED — a window's
+            # EFFECTIVE logic count is its full logic count only when it carries >= 1
+            # non-assignment logic token; otherwise the assignments don't count and the
+            # window (a pure declaration/literal/field-init block) is demoted to zero.
             logic = [1 if t[2] else 0 for t in toks]
+            nonassign = [1 if (t[2] and t[0] not in _ASSIGN_OPS) else 0 for t in toks]
             running = sum(logic[:CLONE_WINDOW_TOKENS])
+            running_na = sum(nonassign[:CLONE_WINDOW_TOKENS])
             for start in range(0, m - CLONE_WINDOW_TOKENS + 1):
                 if start > 0:
                     running += logic[start + CLONE_WINDOW_TOKENS - 1] - logic[start - 1]
-                if running < CLONE_MIN_LOGIC_TOKENS:
+                    running_na += (nonassign[start + CLONE_WINDOW_TOKENS - 1]
+                                   - nonassign[start - 1])
+                effective = running if running_na >= 1 else 0
+                if effective < CLONE_MIN_LOGIC_TOKENS:
                     continue
                 key = tuple(toks[j][0] for j in range(start, start + CLONE_WINDOW_TOKENS))
+                # FIX 5: a sort-scaffold-only window (a `sort.<verb>` call with NO
+                # comparison operator) is shared boilerplate, not a comparator clone.
+                if _is_sort_scaffold_only(key):
+                    continue
                 sline = toks[start][1]
                 eline = toks[start + CLONE_WINDOW_TOKENS - 1][1]
                 quals.append((start, sline, eline, key))
@@ -539,9 +661,50 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
             group_sites.append(sites)
     group_sites.sort(key=lambda s: s[0])  # deterministic: by first site
 
+    # code-only lines per file (cached) for the FIX-4 in-span loop scan, so a `for`
+    # inside a string/comment never false-hits the no-loop recall guard.
+    code_cache: dict[str, list[str]] = {}
+
+    def _code_of(rel: str) -> list[str]:
+        if rel not in code_cache:
+            code_cache[rel] = code_lines_of(files.get(rel, ""))
+        return code_cache[rel]
+
     defects: list[str] = []
+    soft: list[str] = []
     groups = 0
     for sites in group_sites:
+        # FIX 1: signature-only func-header FP. When a window's whole 34-token span is
+        # on a single line (e == s) that begins with `func `, it is a param-list/type
+        # collision between two differently-named signatures — never a copied body.
+        if all(e == s and _clone_sample(files.get(f, ""), s).startswith("func ")
+               for f, s, e in sites):
+            continue
+        # FIX 3: flag/CLI-plumbing group. Drop iff EVERY site is a flag-plumbing block
+        # (a positive flag-API token + a high fraction of flag-plumbing line shapes).
+        # The mega-group of real `engine := fs.String` bodies survives: it has real-body
+        # sites that are NOT pure flag-plumbing, so the `all(...)` is False.
+        if all(_is_flag_plumbing_block(files.get(f, ""), s, e) for f, s, e in sites):
+            continue
+        # FIX 4: switch-dispatch-arm boilerplate -> advisory, not debt. Same-file group
+        # of small `case X:` arms with NO loop inside (the no-loop conjunct is the recall
+        # guard — a duplicated computation loop stays a real clone).
+        same_file = len({f for f, _, _ in sites}) == 1
+        all_case = all(
+            _CASE_ARM_RE.match(_clone_sample(files.get(f, ""), s).lstrip())
+            for f, s, e in sites)
+        max_span = max(e - s + 1 for _, s, e in sites)
+        no_loop = not any(
+            _LOOP_TOKEN_RE.search(cl)
+            for f, s, e in sites
+            for cl in _code_of(f)[s - 1:e])
+        if same_file and all_case and max_span <= DISPATCH_ARM_MAX_SPAN and no_loop:
+            f0, s0, e0 = sites[0]
+            span = max(1, e0 - s0 + 1)
+            soft.append(
+                f"dispatch-arm boilerplate ({len(sites)} arms, ~{span} lines): "
+                f"{f0}:{s0}")
+            continue
         groups += 1
         if len(defects) < CLONE_GROUPS_CAP:
             shown = ", ".join(f"{f}:{s}" for f, s, _ in sites[:4])
@@ -555,7 +718,7 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
     detail = ("no copy-paste clones" if groups == 0
               else f"{groups} duplicated block(s) (copy-pasted across 2+ sites)")
     return {"kpi": "duplication", "score": score, "detail": detail,
-            "defects": defects, "soft": []}
+            "defects": defects, "soft": soft}
 
 
 def _func_bodies(code: list[str]) -> list[tuple[str, int, list[str]]]:
@@ -603,6 +766,51 @@ def _func_bodies(code: list[str]) -> list[tuple[str, int, list[str]]]:
     return out
 
 
+# --- vacuous_tests false-positive guards (FIX 2) ---------------------------
+# Two shapes that assert through a channel the `t.*`/`require.`/`assert.` scan can't
+# see, so a no-`t.*` body is NOT vacuous:
+#   (a) a re-exec HELPER test — the `TestXHelperProcess` pattern: when invoked as a
+#       child via os.Exec with an env guard set, it writes to os.Stdout/os.Stderr and
+#       calls os.Exit; the PARENT test asserts on that out-of-band output/exit code.
+#   (b) a *DoesNotPanic* test whose single statement is a bare call — the assertion IS
+#       "this call returns without panicking"; the test fails (panics) if it doesn't.
+_REEXEC_OOB_RE = re.compile(r"\b(os\.Stdout|os\.Stderr|fmt\.Fprint)")
+_REEXEC_EXIT_RE = re.compile(r"\bos\.Exit\(")
+# RAW source — code_only blanks the quotes, so this matches the original lines.
+_REEXEC_ENVGUARD_RE = re.compile(
+    r'if\s+os\.Getenv\([^)]*\)\s*(==|!=)\s*"[^"]*"\s*\{')
+_NOPANIC_NAME_RE = re.compile(r"(?i)does_?not_?panic|no_?panic")
+# a single bare call statement (a composite-literal arg with `{}` is allowed).
+_SINGLE_CALL_RE = re.compile(r"^[\w.]+\([^;]*\)$")
+
+
+def _is_reexec_helper_test(body_blob: str, raw_lines: list[str], lineno: int) -> bool:
+    """True iff the func is a re-exec child helper: its code-only body calls os.Exit(
+    AND writes out-of-band (os.Stdout/os.Stderr/fmt.Fprint), AND its first statement is
+    an env-guard (`if os.Getenv(...) == "..." {`) whose next non-blank line is a bare
+    `return` (the not-the-child early-out). `body_blob` is the code-only body joined;
+    `raw_lines` is text.splitlines() (the env-guard match needs the RAW quotes)."""
+    if not (_REEXEC_EXIT_RE.search(body_blob) and _REEXEC_OOB_RE.search(body_blob)):
+        return False
+    span = raw_lines[lineno - 1:lineno - 1 + 12]
+    for i, rl in enumerate(span):
+        if _REEXEC_ENVGUARD_RE.search(rl):
+            nxt = next((s.strip() for s in span[i + 1:] if s.strip()), "")
+            if nxt.startswith("return"):
+                return True
+    return False
+
+
+def _is_does_not_panic_test(fname: str, body: list[str]) -> bool:
+    """True iff the func name says *does not panic* / *no panic* AND its code-only body
+    is exactly one statement that is a single bare call — the assertion is the absence
+    of a panic, made by the call itself, not by a `t.*` observation."""
+    if not _NOPANIC_NAME_RE.search(fname):
+        return False
+    real = [b.strip() for b in body if b.strip()]
+    return len(real) == 1 and bool(_SINGLE_CALL_RE.match(real[0]))
+
+
 def kpi_vacuous_tests(test_files: dict[str, str]) -> dict[str, Any]:
     """A ``Test*`` func whose body makes zero assertions/observations: no ``t.Error``/
     ``Fatal``/``Skip``/``Run``/…, no ``require.``/``assert.`` helper, AND not a
@@ -630,6 +838,7 @@ def kpi_vacuous_tests(test_files: dict[str, str]) -> dict[str, Any]:
     for rel in sorted(test_files):
         text = test_files[rel]
         code = code_lines_of(text)
+        raw_lines = text.splitlines()
         for header, lineno, body in _func_bodies(code):
             m = hdr_re.match(header.lstrip())
             if not m:
@@ -643,14 +852,29 @@ def kpi_vacuous_tests(test_files: dict[str, str]) -> dict[str, Any]:
                 rf"\b\w+\(\s*{tname}\s*[,)]")
             n_tests += 1
             body_blob = "\n".join(body)
-            if not assert_re.search(body_blob) and not guard_re.search(body_blob):
-                fn = header.lstrip().split("(")[0].replace("func ", "").strip()
-                defects.append(f"vacuous test (no assertion): {rel}:{lineno} {fn}")
+            if assert_re.search(body_blob) or guard_re.search(body_blob):
+                continue
+            fn = header.lstrip().split("(")[0].replace("func ", "").strip()
+            # FIX 2: two NOT-slop shapes assert through a channel the t.* scan can't see —
+            # a re-exec'd `*HelperProcess` child (reports via os.Exit/stdout) and a
+            # does-not-panic test (the act of returning IS the assertion). Each has a
+            # tight, non-forgeable tell; everything else still grades vacuous.
+            if _is_reexec_helper_test(body_blob, raw_lines, lineno) \
+                    or _is_does_not_panic_test(fn, body):
+                continue
+            defects.append(f"vacuous test (no assertion): {rel}:{lineno} {fn}")
     score = _clamp(100 - 10 * len(defects))
     detail = (f"{n_tests} Test func(s), all assert"
               if not defects else f"{len(defects)} vacuous of {n_tests} Test func(s)")
     return {"kpi": "vacuous_tests", "score": score, "detail": detail,
             "defects": defects, "soft": []}
+
+
+# FIX 7: the author-asserted dead-code opt-out directive (#789). `//slop:keep` on the
+# line immediately above an unexported decl marks it intentionally unreferenced (a
+# provenance marker, an out-of-tree-witnessed contract const). A directive, not prose —
+# unambiguous and not gameable by incidental wording. An optional reason may follow.
+_SLOP_KEEP_RE = re.compile(r"^\s*//\s*slop:keep\b")
 
 
 def kpi_dead_code(files: dict[str, str], test_files: dict[str, str]) -> dict[str, Any]:
@@ -672,7 +896,8 @@ def kpi_dead_code(files: dict[str, str], test_files: dict[str, str]) -> dict[str
     # only non-test files declare shipped symbols we grade
     for rel in sorted(files):
         code = code_lines_of(files[rel])
-        for line in code:
+        raw = files[rel].splitlines()
+        for idx, line in enumerate(code):
             s = line.lstrip()
             name = None
             for rx in (_FUNC_DECL_RE, _TYPE_DECL_RE, _VARCONST_DECL_RE):
@@ -687,6 +912,14 @@ def kpi_dead_code(files: dict[str, str], test_files: dict[str, str]) -> dict[str
             if name in ("init", "main"):
                 continue  # runtime entry points, never "referenced"
             if freq.get(name, 0) <= 1:
+                # FIX 7: an explicit, conscious, non-gameable author opt-out. A symbol is
+                # intentionally unreferenced (a symbol-table provenance marker, a contract
+                # const checked only by an out-of-tree witness) when the line immediately
+                # above its declaration is `//slop:keep [reason]`. Keyed on RAW source (a
+                # directive, not prose) so it is unambiguous and not matched by incidental
+                # wording — and it forces the author to state intent.
+                if idx >= 1 and idx - 1 < len(raw) and _SLOP_KEEP_RE.match(raw[idx - 1]):
+                    continue
                 if per_file.get(rel, 0) >= DEAD_CAP_PER_FILE:
                     continue
                 per_file[rel] = per_file.get(rel, 0) + 1
