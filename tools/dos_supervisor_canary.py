@@ -246,7 +246,7 @@ def summarize_history(
             "blocker": blocker,
             "count": count,
             "command": "python tools/dos_supervisor_canary.py --history --json",
-            "route": "add this row to PLAN-fleet-always-on-dispatch-2026-06-19.md section 5 or the fleet findings queue",
+            "route": "file this recurring blocker in the fleet findings queue (GitHub issues)",
         }
         for blocker, count in sorted(blocker_counts.items())
         if count > 1
