@@ -60,6 +60,9 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		cmdRun(os.Args[2:])
+	case "replay":
+		// Explicit, unambiguous spelling of the trace-replay path (`fak run --trace`).
+		cmdRunTrace(os.Args[2:])
 	case "commit":
 		cmdCommit(os.Args[2:])
 	case "preflight":
@@ -228,8 +231,27 @@ func main() {
 
 func ctx() context.Context { return context.Background() }
 
-// fak run  -  replay a trace through the kernel.
+// fak run  -  two modes, split on argv[0] BEFORE any flag parse so the two
+// parsers never collide:
+//
+//   - argv[0] is a non-flag (a model alias, an hf:// URI, or a .gguf path) ->
+//     CHAT mode: load that model into the in-kernel engine and run a one-shot
+//     completion (or an interactive REPL with no prompt). The Ollama `run` analog.
+//   - argv[0] starts with '-' (or is empty) -> the existing TRACE-replay mode,
+//     parsed exactly as before (--trace still required). Every documented
+//     `fak run --trace ...` caller is flag-first, so it is unaffected.
+//
+// `fak replay` is an explicit, unambiguous alias for the trace path.
 func cmdRun(argv []string) {
+	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
+		runChatModel(argv)
+		return
+	}
+	cmdRunTrace(argv)
+}
+
+// cmdRunTrace replays a trace through the kernel (the original `fak run`).
+func cmdRunTrace(argv []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	trace := fs.String("trace", "", "path to a trace JSON file")
 	engineID := fs.String("engine", "inkernel", "engine id (inkernel: the fused in-kernel model; mock; cassette)")
