@@ -1,0 +1,49 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "cpu-server-a-glm52-cpu-wedge-20260627T000000Z",
+  "machine_id": "cpu-server-a",
+  "timestamp": "2026-06-27T00:00:00Z",
+  "git": {
+    "rev": "ed4dc8dc",
+    "branch": "main",
+    "dirty": false
+  },
+  "harness": {
+    "name": "fak-glm52-cpu-bench",
+    "version": "1"
+  },
+  "model": {
+    "name": "GLM-5.2-UD-Q4_K_M",
+    "family": "glm_moe_dsa",
+    "parameters": "753B",
+    "source": "GLM-5.2 UD-Q4_K_M GGUF (11 shards, ~433 GB on disk)",
+    "precision": "q4",
+    "quantization": "UD-Q4_K_M (mixed Q4_K / Q5_K / Q6_K)"
+  },
+  "config": {
+    "engines": [
+      "llama",
+      "fak-native"
+    ],
+    "context_budget_tokens": 8192,
+    "planned_thread_sweep": [
+      64,
+      128,
+      256
+    ],
+    "fak_native_cmd": "FAK_Q4K=1 FAK_GGUF_LOAD_WORKERS=64 fak serve --gguf <GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf> --context-budget-tokens 8192 --addr 127.0.0.1:8080",
+    "llama_cmd": "llama-bench -m <GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf> -ngl 0 -p 512 -n 128 -t 64,128,256 (mmap)"
+  },
+  "tags": [
+    "cpu-only",
+    "glm52",
+    "no-gpu",
+    "b3",
+    "engine-llama-pending",
+    "engine-fak-native-wedged",
+    "negative-result"
+  ],
+  "artifacts": {
+    "result": "result.json"
+  }
+}

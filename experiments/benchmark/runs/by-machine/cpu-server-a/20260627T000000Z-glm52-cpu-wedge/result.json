@@ -1,0 +1,66 @@
+{
+  "schema": "fak.cpu-serve-bench.v1",
+  "machine_id": "cpu-server-a",
+  "host_class": "256-thread x86_64, ~1 TB RAM, no GPU",
+  "model": "GLM-5.2-UD-Q4_K_M (~433 GB on disk, 11 shards)",
+  "rung": "B3 (real mid/large checkpoint, CPU host) — see docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md",
+  "ok": false,
+  "headline": "NO throughput obtained on this host: the fak-native all-resident CPU serve wedged on host RAM at gateway-init; the llama.cpp mmap baseline is pending (host recovery). Both engines' decode/prefill tok/s remain open — this artifact records the attempt + the one real datum (the resident-load curve) honestly, it is NOT a throughput pass.",
+  "engines": {
+    "fak-native": {
+      "engine": "fak-native CPU (reference path, FAK_Q4K=1 direct-resident-Q4_K loader)",
+      "ok": false,
+      "status": "wedged",
+      "prefill_tok_per_sec": null,
+      "decode_tok_per_sec": null,
+      "error": "all-resident serve exhausted host RAM at gateway-init and wedged the box before bind",
+      "detail": {
+        "resident_peak_gb": 458,
+        "on_disk_gb": 433,
+        "note_resident_gt_disk": "fak's resident-Q4_K structures duplicate/expand some tensors, so resident (~458 GB) exceeds the on-disk GGUF (~433 GB)",
+        "hugepages_reserved_gb": 512,
+        "hugepages_reclaimable": false,
+        "normal_alloc_cap_gb": 495,
+        "available_at_wedge_gb": 2,
+        "fork_failure": "at ~2 GB available the host (incl. out-of-band control plane) could no longer fork(); fak never reached a usable bind",
+        "load_curve_measured": [
+          {"wall": "0m38s", "resident_gb": 7.2, "inst_gb_per_s": 0.19},
+          {"wall": "~8m", "resident_gb": 45, "inst_gb_per_s": 0.09},
+          {"wall": "~21m", "resident_gb": 95, "inst_gb_per_s": 0.065},
+          {"wall": "~36m", "resident_gb": 149, "inst_gb_per_s": 0.060},
+          {"wall": "~48m", "resident_gb": 213, "inst_gb_per_s": 0.090},
+          {"wall": "~69m", "resident_gb": 343, "inst_gb_per_s": 0.10},
+          {"wall": "~80m", "resident_gb": 379, "inst_gb_per_s": 0.057},
+          {"wall": "~91m", "resident_gb": 416, "inst_gb_per_s": 0.057},
+          {"wall": "~101m", "resident_gb": 450, "inst_gb_per_s": null}
+        ],
+        "load_curve_finding": "resident-Q4_K CPU load is dequant-bound at ~0.06-0.10 GB/s => a ~95 min full load; the parallel-quant-load + resident-Q5/6_K levers do not bring the pure-CPU serve under 10 min (UD-Q4_K_M's mixed Q5_K/Q6_K experts take the slow dequant path on the CPU reference serve)",
+        "blocked_by": "#974 (CPU-path memory-fit pre-flight + mmap/demand-paged CPU weights); re-runnable on a host WITHOUT the ~512 GB hugepage co-tenant",
+        "provenance": "measured 2026-06-27 on cpu-server-a; fak built from origin/main ed4dc8dc; see docs/notes/GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md"
+      }
+    },
+    "llama": {
+      "engine": "llama.cpp (mmap, -ngl 0)",
+      "ok": false,
+      "status": "pending",
+      "prefill_tok_per_sec": null,
+      "decode_tok_per_sec": null,
+      "reason": "the apples-to-apples CPU baseline (prefill/decode tok/s across a thread sweep) has not yet been captured on this host; prebuilt llama-server/llama-bench are on the box, run pending host recovery",
+      "note": "llama.cpp serves this exact 433 GB model on this exact host via mmap (demand-paged, evictable page cache) — it never needs all weights resident, so it does NOT hit the fak-native RAM wedge; this is the memory-safe reference the fak-native number must be compared against"
+    }
+  },
+  "correctness": {
+    "status": "not-measured",
+    "note": "fak's differentiator column (bit-exact / cosine-1.0 / argmax vs reference) requires both engines actually serving the same model on this host; deferred until a throughput run completes"
+  },
+  "safety_reuse": {
+    "status": "gap-identified",
+    "note": "the GPU path guards an over-size model with a FitTooBig plan (fitAndPlanServeGGUF...OnDevice); the CPU reference path has no equivalent pre-flight (cmd/fak/serve.go loadServeInKernelModel loads unconditionally) — filed as #974. fak's safety/reuse pitch (capability gate + tamper-evident journal + cross-session KV reuse) is unaffected but unmeasured here."
+  },
+  "next_steps": [
+    "Capture the llama.cpp mmap (-ngl 0) prefill/decode tok/s across a 64/128/256 thread sweep on cpu-server-a (the comparison baseline).",
+    "#974-A: add a CPU-path memory-fit pre-flight (refuse cleanly, don't wedge).",
+    "#974-B: mmap/demand-paged CPU weights, OR run the all-resident fak-native path on a host without the hugepage co-tenant, to obtain the fak-native CPU decode/prefill tok/s.",
+    "Then fill both engines' tok/s + the correctness column here to satisfy #976's acceptance."
+  ]
+}
