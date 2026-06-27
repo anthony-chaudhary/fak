@@ -59,6 +59,14 @@ type RecoveryBand struct {
 // projection.
 func DefaultRecoveryBand() RecoveryBand { return RecoveryBand{ColdMax: 0.05, WarmMin: 0.50} }
 
+// FirstTurnResumeThresholdTokens is the prompt size at or above which a session's FIRST
+// assistant turn counts as a genuine RESUME re-prefill (a carried-over transcript) rather than
+// a small fresh start. A multi-hour resume opens a NEW transcript file and re-prefills the
+// prior conversation on turn one; a brand-new session opens small. ~20k separates the two: it
+// is the ~48k shed budget's neighborhood, comfortably above an opening prompt but below a real
+// resumed transcript. The cross-file cold case within-file idle gaps under-sample lives here.
+const FirstTurnResumeThresholdTokens = 20000
+
 // classify returns the observed posture of a turn whose prior prompt was prevPrompt and whose
 // own cache_read was cacheRead, plus the recovery fraction, plus whether it is scorable (false
 // for a zero prior prompt or an ambiguous partial re-serve).
@@ -133,6 +141,24 @@ type BacktestReport struct {
 	// cold first turn re-writes essentially the whole resident at the write premium.
 	ConfirmedCold      int     `json:"confirmed_cold"`
 	ColdWriteRatioMean float64 `json:"cold_write_ratio_mean"`
+
+	// Cross-file resume instrument: a genuine multi-hour resume starts a NEW transcript file
+	// whose FIRST assistant turn re-prefills the carried-over transcript — the cold case the
+	// within-file gap pairs above under-sample. A first turn whose prompt is large (>=
+	// FirstTurnResumeThresholdTokens) is a resume re-prefill; if its cache_read is ~0 it
+	// re-prefilled COLD (FirstTurnCold), and if its cache_read is high the prior session's
+	// prefix was still provider-warm on re-open — a cross-SESSION cache hit (FirstTurnWarmHit),
+	// a reuse the within-session model does not account for.
+	FirstTurnResumes int `json:"first_turn_resumes"`  // large first turns (resume re-prefills)
+	FirstTurnCold    int `json:"first_turn_cold"`     // ...that re-prefilled cold (cache_read ~0)
+	FirstTurnWarmHit int `json:"first_turn_warm_hit"` // ...that hit a still-warm cross-session prefix
+	// ColdWriteShareMean is cache_creation / prompt on the cold first-turn resumes: the share
+	// of the cold re-prefill that actually paid the WRITE premium. Below 1.0 means the resume
+	// re-cached only PART of the transcript and sent the rest as plain input, so the projection
+	// (which prices the whole resident at the write premium) OVER-states the cold cost by the
+	// shortfall.
+	FirstTurnColdWriteShareMean   float64 `json:"first_turn_cold_write_share_mean"`
+	FirstTurnColdReprefillTokMean float64 `json:"first_turn_cold_reprefill_tok_mean"`
 }
 
 // Backtest is THE deterministic validation: same observed sessions in, same residual out — no
@@ -155,8 +181,27 @@ func Backtest(sessions [][]ObservedTurn, ttl CacheTTL, band RecoveryBand) Backte
 		Buckets:    DefaultGapBuckets(),
 	}
 	var coldWriteSum float64
+	var ftColdWriteShareSum, ftColdReprefillSum float64
 	for _, sess := range sessions {
 		turns := sortedByTime(sess)
+		// Cross-file resume instrument: classify the FIRST assistant turn of the session. A
+		// large first turn is a resume re-prefill; whether it came back cold or hit a still-warm
+		// cross-session prefix is the provider's call, read from its own cache_read.
+		if len(turns) > 0 {
+			first := turns[0]
+			if p := first.Prompt(); p >= FirstTurnResumeThresholdTokens {
+				rep.FirstTurnResumes++
+				coldness := float64(first.CacheReadTokens) / float64(p)
+				switch {
+				case coldness < band.ColdMax:
+					rep.FirstTurnCold++
+					ftColdWriteShareSum += float64(first.CacheCreationTokens) / float64(p)
+					ftColdReprefillSum += float64(p)
+				case coldness > band.WarmMin:
+					rep.FirstTurnWarmHit++
+				}
+			}
+		}
 		for i := 1; i < len(turns); i++ {
 			prev, cur := turns[i-1], turns[i]
 			gap := cur.UnixSeconds - prev.UnixSeconds
@@ -205,6 +250,10 @@ func Backtest(sessions [][]ObservedTurn, ttl CacheTTL, band RecoveryBand) Backte
 	}
 	if rep.ConfirmedCold > 0 {
 		rep.ColdWriteRatioMean = coldWriteSum / float64(rep.ConfirmedCold)
+	}
+	if rep.FirstTurnCold > 0 {
+		rep.FirstTurnColdWriteShareMean = ftColdWriteShareSum / float64(rep.FirstTurnCold)
+		rep.FirstTurnColdReprefillTokMean = ftColdReprefillSum / float64(rep.FirstTurnCold)
 	}
 	finalizeBuckets(rep.Buckets)
 	return rep

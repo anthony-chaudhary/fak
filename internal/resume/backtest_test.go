@@ -175,6 +175,34 @@ func TestBacktestDeterministic(t *testing.T) {
 	}
 }
 
+// TestBacktestFirstTurnResumeInstrument: the cross-file instrument classifies the FIRST
+// assistant turn of each session — a large cold first turn is a genuine resume re-prefill, a
+// large warm first turn is a cross-session cache hit, and a small first turn is neither.
+func TestBacktestFirstTurnResumeInstrument(t *testing.T) {
+	sessions := [][]ObservedTurn{
+		// large COLD resume: 30k prompt, nothing served from a prior session (cache_read 0),
+		// 20k re-cached -> write share 20000/30000 = 0.67.
+		{turn(0, 10000, 20000, 0), turn(5, 1, 100, 29900)},
+		// large WARM first turn: 40k prompt fully served from the prior session's warm prefix.
+		{turn(0, 100, 100, 39800)},
+		// small fresh start: below the resume threshold, ignored by the instrument.
+		{turn(0, 500, 500, 0)},
+	}
+	r := Backtest(sessions, TTL5m, DefaultRecoveryBand())
+	if r.FirstTurnResumes != 2 {
+		t.Fatalf("first-turn resumes = %d, want 2 (the two >=20k first turns)", r.FirstTurnResumes)
+	}
+	if r.FirstTurnCold != 1 || r.FirstTurnWarmHit != 1 {
+		t.Errorf("cold=%d warmHit=%d, want 1/1", r.FirstTurnCold, r.FirstTurnWarmHit)
+	}
+	if r.FirstTurnColdWriteShareMean < 0.66 || r.FirstTurnColdWriteShareMean > 0.68 {
+		t.Errorf("cold write share = %.3f, want ~0.67", r.FirstTurnColdWriteShareMean)
+	}
+	if r.FirstTurnColdReprefillTokMean != 30000 {
+		t.Errorf("cold re-prefill tok mean = %.0f, want 30000", r.FirstTurnColdReprefillTokMean)
+	}
+}
+
 // guard against accidental NaN in the cold ratio when there are no cold boundaries.
 func TestBacktestNoColdRatioIsZeroNotNaN(t *testing.T) {
 	sess := [][]ObservedTurn{{

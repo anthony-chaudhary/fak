@@ -296,9 +296,18 @@ func renderBacktestReport(w io.Writer, r resume.BacktestReport, scanned, session
 			100*pct(b.WarmN, b.N), 100*pct(b.ColdN, b.N), 100*pct(b.AmbiguousN, b.N))
 	}
 
-	fmt.Fprintf(w, "\ncold-cost validation: %d confirmed-cold boundaries\n", r.ConfirmedCold)
+	fmt.Fprintf(w, "\ncold-cost validation (within-file gaps): %d confirmed-cold boundaries\n", r.ConfirmedCold)
 	if r.ConfirmedCold > 0 {
 		fmt.Fprintf(w, "  cache_creation / prompt on cold turns: %.2f  (1.00 = the projection's 'whole resident re-written')\n", r.ColdWriteRatioMean)
+	}
+
+	fmt.Fprintf(w, "\ncross-file resume re-prefills (first turn of a session file — the genuine multi-hour resume):\n")
+	fmt.Fprintf(w, "  %d large resume re-prefills: %d cold (re-prefilled) · %d warm (cross-session cache hit)\n",
+		r.FirstTurnResumes, r.FirstTurnCold, r.FirstTurnWarmHit)
+	if r.FirstTurnCold > 0 {
+		fmt.Fprintf(w, "  cold re-prefill: mean %.0f tok, cache_creation/prompt = %.2f (write-premium SHARE of the cold cost;\n",
+			r.FirstTurnColdReprefillTokMean, r.FirstTurnColdWriteShareMean)
+		fmt.Fprintf(w, "    below 1.0 means the resume re-cached only part — the projection over-states cold cost by the rest)\n")
 	}
 	fmt.Fprintln(w, "  (every number is the provider's own usage scored against the projection, not a fak figure)")
 }

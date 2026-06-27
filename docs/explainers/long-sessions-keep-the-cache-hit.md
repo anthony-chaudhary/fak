@@ -117,9 +117,14 @@ floor that refreshes on use, so in practice it survives longer than the clock. T
 errs toward declaring cold, which is the conservative way to be wrong: it never claims a warm
 cache that isn't there.
 
-One honest gap remains. A genuine multi-hour resume usually starts a fresh transcript file, so
-counting gaps inside a single file under-samples the very case the planner is built for.
-Measuring those cross-file resumes directly is the next step.
+There is a subtlety the planner gets slightly wrong. A genuine multi-hour resume usually starts
+a fresh transcript file, and `fak resume validate` now measures those first turns directly.
+They confirm the cold case at scale, but with a twist: a resume re-caches only about two-thirds
+of the carried transcript and re-sends the rest as ordinary input. The planner prices the whole
+thing at the higher cache-write rate, so it over-states the cost of a cold resume by roughly a
+third of that premium. The same scan also turns up plenty of resumes that opened straight onto a
+still-warm prefix from the prior session, a saving the planner does not yet count. Folding both
+corrections back into the price tag is the next step.
 
 ```bash
 fak resume validate --corpus ~/.claude/projects   # back-test the planner on your own sessions

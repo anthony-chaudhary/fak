@@ -192,6 +192,40 @@ func TestResumeValidateJSON(t *testing.T) {
 	}
 }
 
+// largeColdResumeFixture is a session whose FIRST assistant turn is a large cold re-prefill (a
+// 30k prompt with zero cache_read), the cross-file resume case within-file gaps under-sample.
+const largeColdResumeFixture = `{"type":"assistant","timestamp":"2026-06-26T12:00:00Z","message":{"role":"assistant","usage":{"input_tokens":10000,"cache_read_input_tokens":0,"cache_creation_input_tokens":20000,"output_tokens":200}}}
+{"type":"assistant","timestamp":"2026-06-26T12:00:05Z","message":{"role":"assistant","usage":{"input_tokens":50,"cache_read_input_tokens":29900,"cache_creation_input_tokens":100,"output_tokens":150}}}
+`
+
+// TestResumeValidateCrossFileInstrument: validate's cross-file instrument flags a large cold
+// first turn as a genuine resume re-prefill and reports its write-premium share.
+func TestResumeValidateCrossFileInstrument(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "resumed.jsonl"), []byte(largeColdResumeFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := runResumeAt("validate", "--corpus", dir, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var rep struct {
+		FirstTurnResumes int `json:"first_turn_resumes"`
+		FirstTurnCold    int `json:"first_turn_cold"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+	if rep.FirstTurnResumes != 1 || rep.FirstTurnCold != 1 {
+		t.Errorf("got resumes=%d cold=%d, want 1/1", rep.FirstTurnResumes, rep.FirstTurnCold)
+	}
+	// the human table surfaces the cross-file section too.
+	tout, _, _ := runResumeAt("validate", "--corpus", dir)
+	if !strings.Contains(tout, "cross-file resume re-prefills") {
+		t.Errorf("table missing the cross-file section:\n%s", tout)
+	}
+}
+
 // TestResumeValidateNeedsCorpus: validate with no --corpus is a usage error (exit 2); an empty
 // corpus directory is a runtime error (exit 1).
 func TestResumeValidateNeedsCorpus(t *testing.T) {
