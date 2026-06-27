@@ -310,6 +310,10 @@ print_gcloud() {
   printf ' \\\n  --accelerator=%s --maintenance-policy=TERMINATE' "$GLM_ACCEL_FLAG"
   printf ' \\\n  --image-family=%q --image-project=%q' "$GLM_IMAGE_FAMILY" "$GLM_IMAGE_PROJECT"
   printf ' \\\n  --boot-disk-size=1000GB --boot-disk-type=pd-ssd'
+  # cloud-platform scope so the baked-in idle reaper can self-delete via the attached
+  # SA (which also needs roles/compute.instanceAdmin.v1). Without it the reaper would
+  # only ever log REAP_DENIED. ON_IDLE=none if you don't want the box self-managing.
+  printf ' \\\n  --scopes=cloud-platform'
   printf ' \\\n  --metadata-from-file=startup-script=<(rendered startup script)'
   if [ -n "${GCP_PROJECT:-}" ]; then printf ' \\\n  --project=%q' "$GCP_PROJECT"; fi
   echo
@@ -366,6 +370,7 @@ gcloud compute instances create "$VM_NAME" \
   --accelerator="$GLM_ACCEL_FLAG" --maintenance-policy=TERMINATE \
   --image-family="$GLM_IMAGE_FAMILY" --image-project="$GLM_IMAGE_PROJECT" \
   --boot-disk-size=1000GB --boot-disk-type=pd-ssd \
+  --scopes=cloud-platform \
   --metadata-from-file=startup-script="$TMP_STARTUP"
 
 log "VM created. The GLM-5.2 load is multi-hundred-GB and takes minutes; watch it with:"
