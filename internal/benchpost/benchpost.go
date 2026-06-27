@@ -1,0 +1,184 @@
+// Package benchpost posts fak BENCH-CHANNEL rollups — latest benchmark runs, the
+// "what to run next" plan, and tok/s regressions — to a Slack bench channel. It is
+// the OUTBOUND bench half of fak's Slack surface, the twin of internal/scoreboard:
+// a local agent or CI folds the committed benchmark corpus into a channel post the
+// moment a run lands or a plan refreshes, so a human watching the bench channel sees
+// the rollup without reading experiments/benchmark/catalog.json.
+//
+// What it is NOT: there is no inbound listener. "Request bench runs" here means
+// POSTING a structured run-request (the bench_plan do-next, rendered) that a human or
+// the lab bridge bot acts on out-of-band — fak does not dispatch a run from a Slack
+// message. Results return via Taildrop bundles (tools/receive_node_bench.py), not a
+// reply on the channel.
+//
+// Transport is reused verbatim from internal/scoreboard (a plain chat.postMessage
+// client, no third-party deps). Only token/channel resolution and the bench folds are
+// new here.
+//
+// Resolution order (token, channel) mirrors the scoreboard/bridge .env.slack.local
+// idiom so one gitignored file configures every workspace:
+//
+//	FAK_BENCH_TOKEN    then a FAK_BENCH_TOKEN=   line in .env.slack.local,
+//	                   then FALLBACK to the scoreboard token (FAK_SCOREBOARD_TOKEN) so
+//	                   one token can serve both channels when they share a workspace.
+//	FAK_BENCH_CHANNEL  then a FAK_BENCH_CHANNEL= line in .env.slack.local.
+//
+// The channel id is NEVER hard-coded in tracked source (a real id is a gitignored
+// value, per the scrubbing convention) — ResolveChannel returns "" when unset so the
+// caller requires an explicit --channel.
+package benchpost
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
+)
+
+// tokenEnvs / channelEnvs are the dedicated bench keys. The token resolver adds a
+// scoreboard fallback (below); the channel resolver does not — a bench post must go to
+// the bench channel, never silently to #scoreboard.
+var (
+	tokenEnvs   = []string{"FAK_BENCH_TOKEN"}
+	channelEnvs = []string{"FAK_BENCH_CHANNEL"}
+)
+
+// ResolveToken applies the documented order: FAK_BENCH_TOKEN env, then a
+// FAK_BENCH_TOKEN= line in .env.slack.local, then a FALLBACK to the scoreboard token
+// (FAK_SCOREBOARD_TOKEN / its .env.slack.local line). Returns "" if none found.
+//
+// The fallback is deliberate: the bench channel commonly lives in the same Slack
+// workspace as #scoreboard, so one bot token serves both. It falls back only to the
+// scoreboard token, NEVER to the lab SLACK_BOT_TOKEN (posting bench status to the lab
+// control channel would be a cross-workspace mistake — scoreboard.ResolveToken already
+// refuses that fall-through).
+func ResolveToken() string {
+	for _, e := range tokenEnvs {
+		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
+			return v
+		}
+	}
+	if v := envFileValue("FAK_BENCH_TOKEN"); v != "" {
+		return v
+	}
+	return scoreboard.ResolveToken()
+}
+
+// ResolveChannel returns the bench channel id from FAK_BENCH_CHANNEL, then a
+// FAK_BENCH_CHANNEL= line in .env.slack.local. Returns "" if none found so a caller
+// can require an explicit --channel (the real id is never a tracked default).
+func ResolveChannel() string {
+	for _, e := range channelEnvs {
+		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
+			return v
+		}
+	}
+	return envFileValue("FAK_BENCH_CHANNEL")
+}
+
+// envFileValue walks up from the cwd looking for .env.slack.local and returns the
+// value of the first `KEY=...` line for the given key (an optional `export ` prefix is
+// tolerated). Mirrors the scoreboard/bridge resolver so one gitignored file configures
+// every workspace. (scoreboard.envFileValue is unexported, so the walk-up is repeated
+// here rather than exported — it is six lines of file I/O, not logic worth coupling.)
+func envFileValue(key string) string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for i := 0; i < 6; i++ {
+		p := filepath.Join(dir, ".env.slack.local")
+		if b, err := os.ReadFile(p); err == nil {
+			for _, ln := range strings.Split(string(b), "\n") {
+				ln = strings.TrimSpace(ln)
+				ln = strings.TrimPrefix(ln, "export ")
+				ln = strings.TrimSpace(ln)
+				if v, ok := strings.CutPrefix(ln, key+"="); ok {
+					return strings.TrimSpace(v)
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// Run is one benchmark run from experiments/benchmark/catalog.json (schema
+// benchmark/catalog.v1). The fields mirror the committed corpus; a null tok/s is a
+// measurement gap (the run wired the path but recorded no number), carried as a nil
+// *float64 so it renders as "—" rather than a fabricated 0.
+type Run struct {
+	RunID       string   `json:"run_id"`
+	MachineID   string   `json:"machine_id"`
+	Model       string   `json:"model"`
+	Precision   string   `json:"precision"`
+	PeakTokS    *float64 `json:"peak_tok_per_sec"`
+	BaselineTok *float64 `json:"baseline_tok_per_sec"`
+	Speedup     *float64 `json:"speedup"`
+	Timestamp   string   `json:"timestamp"`
+	Tags        []string `json:"tags"`
+	Provenance  string   `json:"provenance"`
+	Path        string   `json:"path"`
+}
+
+// Catalog is the top-level catalog.json shape; only the flat runs[] is read here (the
+// derived index/machines views are regenerated by tools/bench_catalog.py and not
+// needed for a rollup).
+type Catalog struct {
+	Runs []Run `json:"runs"`
+}
+
+// LoadCatalog reads catalog.json and returns its runs[].
+func LoadCatalog(path string) (*Catalog, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c Catalog
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// Baseline mirrors tools/bench_baseline.json (schema fak-bench-signal.baseline/1):
+// the pinned per-`<machine>/<key>` tok/s the regression fold compares the current
+// catalog value against.
+type Baseline struct {
+	Baselines map[string]float64 `json:"baselines"`
+}
+
+// LoadBaseline reads bench_baseline.json. A missing file is not an error to the
+// caller's eye — a nil Baseline yields an empty (clean) regression fold — but the
+// os.ReadFile error is surfaced so a typo in --baseline is visible.
+func LoadBaseline(path string) (*Baseline, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var bl Baseline
+	if err := json.Unmarshal(b, &bl); err != nil {
+		return nil, err
+	}
+	return &bl, nil
+}
+
+// Val returns the throughput number for a run: the HIGHER of peak/baseline tok/s (peak
+// is the headline, baseline a fallback), and false when neither is a real positive
+// number — mirroring tools/bench_signal.py run_value so the Go and Python views agree
+// on what "the number" is.
+func (r Run) Val() (float64, bool) {
+	best, ok := 0.0, false
+	for _, p := range []*float64{r.PeakTokS, r.BaselineTok} {
+		if p != nil && *p > 0 && (!ok || *p > best) {
+			best, ok = *p, true
+		}
+	}
+	return best, ok
+}

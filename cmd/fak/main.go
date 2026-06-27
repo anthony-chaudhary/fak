@@ -286,6 +286,16 @@ func cmdPreflight(argv []string) {
 
 // fak bench  -  A/B ablate the vDSO over a frozen trace.
 func cmdBench(argv []string) {
+	// `fak bench post|request` are the outbound bench-CHANNEL surface (post rollups /
+	// run-requests to Slack); anything else falls through to the benchmark RUNNER below.
+	if len(argv) > 0 {
+		switch argv[0] {
+		case "post":
+			os.Exit(runBenchPost(os.Stdout, os.Stderr, argv[1:]))
+		case "request":
+			os.Exit(runBenchRequest(os.Stdout, os.Stderr, argv[1:]))
+		}
+	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
 	suite := fs.String("suite", "tau2-smoke", "trace suite name (under testdata/tau2)")
 	out := fs.String("out", "report.json", "report output path")
