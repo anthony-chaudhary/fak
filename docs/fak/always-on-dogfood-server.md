@@ -107,45 +107,34 @@ A small Apple-silicon Mac that stays on is the best always-on dogfood host: it i
 cheap to run, and Metal makes even the local-model in-kernel path usable. It does two
 jobs.
 
-**Job A — run the guarded fleet 24/7.** There is already a launchd template and a cron
-installer for the dispatch supervisor watchdog; today they run only the **watchdog**
-(which keeps `dos loop --enact` alive), not a `fak serve` gateway. Arm the watchdog so
-the guarded fleet runs around the clock:
+**Job A — run the guarded fleet 24/7.** One command wires all three launchd units
+(serve-gateway, dogfood-fleet, dispatch-supervisor), builds the binary, and starts
+the sleep guard. The `fak serve` gateway plist now wraps `fak serve` under `caffeinate -is`
+so the machine cannot idle-sleep while the gateway is running — no separate
+keep-awake step needed:
 
 ```bash
-# Cron path (simplest): arms tools/fleet_dos_dispatch_watchdog.py every 5 min
-FAK_DISPATCH_ENABLE=1 ./tools/register_mac_watchers.sh
+# ONE COMMAND — builds fak, fills all plist templates, loads units, starts caffeinate:
+ANTHROPIC_API_KEY="sk-ant-..." ./tools/install-mac-node.sh
 
-# Or the launchd path (KeepAlive, survives logout): fill the template's
-# __PLACEHOLDER__ tokens and load it as a per-user agent
-sed -e "s#__PYTHON__#$(command -v python3)#" \
-    -e "s#__REPO__#$(cd "$(dirname tools)" && pwd)#" \
-    tools/com.fleet.dispatch-supervisor.plist \
-  > ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
-launchctl load -w ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
+# For off-host access from another machine (Windows or Mac over Tailscale):
+ANTHROPIC_API_KEY="sk-ant-..." ./tools/install-mac-node.sh --bind-all
+# The script prints FAK_GATEWAY_KEY + exact env lines to paste on each client.
+
+# Check status or uninstall:
+./tools/install-mac-node.sh --status
+./tools/install-mac-node.sh --uninstall
 ```
 
-Build the in-tree `fak` binary once so the guard path resolves it (it fails open to an
-unguarded worker if no `fak` is found, so this is what turns coverage on):
+To also put `fak` on PATH system-wide (so `fak guard -- claude` resolves anywhere),
+run `scripts/dogfood-claude.sh --install` once after the node installer.
+Full runbook: [`docs/fak/node-macos-a-activation.md`](node-macos-a-activation.md).
 
-```bash
-./scripts/dogfood-claude.sh --install     # builds tools/.bin/fak, installs PATH launchers
-```
-
-**Stay awake.** A Mac sleeps, and a sleeping Mac dogfoods nothing. The node `node-macos-a`
-already exists but **flaps offline roughly every 25 minutes** — it goes to sleep between
-jobs. The fix is `caffeinate` plus launchd `KeepAlive`. Run the supervisor under
-`caffeinate` so the machine cannot idle-sleep while the loop is up:
-
-```bash
-# Keep the host awake for as long as the dispatch loop runs
-caffeinate -dimsu dos loop --enact --workspace "$PWD" --target 4 --interval 120
-```
-
-`-dimsu` blocks display, idle, disk, and system sleep and asserts a user-active state.
-Pair it with launchd `KeepAlive` (set `<key>KeepAlive</key><true/>` in the agent plist)
-so the job restarts if it ever exits. Together: launchd keeps the process alive, and
-`caffeinate` keeps the *machine* alive while it runs — no more 25-minute flap.
+**Stay awake.** The `caffeinate -is` wrapper in `tools/com.fak.serve-gateway.plist`
+holds the idle-sleep and system-sleep assertions while `fak serve` runs. Together with
+launchd `KeepAlive=true`: launchd keeps the process alive, caffeinate keeps the *machine*
+alive — no more 25-minute flap. If only the dispatch supervisor is running (no gateway),
+`tools/mac_keep_awake.sh start` provides the same assertion separately.
 
 **Job B — host a shared `fak serve` gateway for hand-driven sessions.** The fleet covers
 *unattended* workers. To cover *interactive* Claude Code too — yours and anyone else on
@@ -234,7 +223,7 @@ all:
 
 - `fleet_leaf_guarded` — the leaf launcher really fronts a claude worker with `fak guard`
   on this host (a behavior check, not a grep).
-- `fak_bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
+- `bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
   dropping coverage to 0%.
 - `guard_default_on` — `FLEET_DOGFOOD_GUARD` is not disabled in the live environment.
 - `issue_dispatch_wired` — the scheduled-task lane routes its spawn through the guard path.
@@ -278,7 +267,7 @@ FLEET_DOGFOOD_GUARD=0 python tools/issue_dispatch.py --live   # this node: worke
 in-tree `tools/.bin/fak[.exe]` the dogfood launcher builds, then `fak` on PATH. If none
 resolves it returns nothing and the worker launches **unwrapped** rather than failing.
 A host that has never built `fak` still dispatches — it just dogfoods 0% until you build
-the binary (which is exactly what `dogfood_coverage.py`'s `fak_bin_resolvable` KPI flags).
+the binary (which is exactly what `dogfood_coverage.py`'s `bin_resolvable` KPI flags).
 The fleet must keep moving; coverage is a goal, never a gate on getting work done.
 
 **Timeout floors so the gateway never truncates a long turn.** `fak guard` fronts the

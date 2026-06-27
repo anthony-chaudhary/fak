@@ -10,16 +10,24 @@
 
   The M-series mac node sleeps ~every 25 minutes, which drops the gateway off the
   fleet. KeepAlive only restarts a CRASHED process — it does NOT stop the OS from
-  sleeping the whole box. Pair this plist with tools/mac_keep_awake.sh (caffeinate)
-  so the machine itself stays awake while the fleet runs. For OFF-LAN reach to
-  127.0.0.1:8080 from another node, expose it over Tailscale (the gateway stays
-  bound to loopback; Tailscale handles the private overlay).
+  sleeping the whole box. This plist wraps fak serve under `caffeinate -is` so the
+  machine itself cannot idle-sleep or system-sleep while the gateway is running.
+  For OFF-LAN reach from another node, install with `--bind-all` (see below) and
+  keep both machines on the same Tailscale network.
 
-  This is a TEMPLATE: replace the two __PLACEHOLDER__ tokens with absolute paths
-  for your node, then install it as a per-user agent:
+  This is a TEMPLATE: replace the __PLACEHOLDER__ tokens with absolute paths
+  for your node, then install it as a per-user agent. Use the one-command
+  installer (preferred) or the manual sed path below.
 
+  ONE COMMAND (preferred — handles all three units + caffeinate):
+      ./tools/install-mac-node.sh
+      # Off-host access (0.0.0.0 + bearer key):
+      ./tools/install-mac-node.sh --bind-all
+
+  MANUAL (single unit):
       sed -e "s#__FAK__#$(command -v fak)#" \
           -e "s#__REPO__#$(cd "$(dirname "$0")/.." && pwd)#" \
+          -e "s#__ADDR__#127.0.0.1:8080#" \
           tools/com.fak.serve-gateway.plist \
         > ~/Library/LaunchAgents/com.fak.serve-gateway.plist
       launchctl load -w ~/Library/LaunchAgents/com.fak.serve-gateway.plist
@@ -40,6 +48,12 @@
 
     <key>ProgramArguments</key>
     <array>
+      <!-- caffeinate -is wraps fak serve so macOS cannot idle-sleep or system-sleep
+           while the gateway is running. launchd KeepAlive=true restarts the caffeinate
+           process if it exits, which restarts fak serve underneath it. Together: launchd
+           keeps the daemon alive, caffeinate keeps the machine alive. -->
+      <string>/usr/bin/caffeinate</string>
+      <string>-is</string>
       <string>__FAK__</string>
       <string>serve</string>
       <string>--provider</string>
@@ -47,7 +61,7 @@
       <string>--base-url</string>
       <string>https://api.anthropic.com</string>
       <string>--addr</string>
-      <string>127.0.0.1:8080</string>
+      <string>__ADDR__</string>
     </array>
 
     <key>EnvironmentVariables</key>

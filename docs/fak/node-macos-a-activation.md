@@ -27,7 +27,30 @@ Two launchd units run together on the node:
 The gateway proves the wire is **built**; the dogfood-fleet tick proves it is **exercised**.
 The coverage scorecard only counts the second as evidence, so both are required for grade A.
 
-## Steps (run on node-macos-a)
+## Quick setup — one command (preferred)
+
+```bash
+cd <repo>
+
+# Set the upstream key, then run the installer — it builds fak, fills all
+# template placeholders, loads both launchd units, and starts caffeinate.
+# The gateway plist now wraps fak serve under caffeinate so sleep prevention
+# is part of the launchd service itself (no separate keep-awake step).
+ANTHROPIC_API_KEY="sk-ant-..." ./tools/install-mac-node.sh
+
+# Check status any time:
+./tools/install-mac-node.sh --status
+
+# For off-host access (e.g. connecting a Windows/Mac client over Tailscale):
+ANTHROPIC_API_KEY="sk-ant-..." ./tools/install-mac-node.sh --bind-all
+# The script prints FAK_GATEWAY_KEY + exact env lines to paste on the client.
+```
+
+The installer runs `tools/mac_keep_awake.sh start` as a belt-and-suspenders for
+the dispatch units; the gateway itself wraps `fak serve` under `caffeinate -is`
+so a reboot also picks it up without any extra step.
+
+## Manual steps (fallback — single unit at a time)
 
 ```bash
 cd <repo>
@@ -35,7 +58,9 @@ cd <repo>
 # 1. Build fak and install both launchd units (fill the template placeholders).
 go build -o tools/.bin/fak ./cmd/fak
 
-sed -e "s#__FAK__#$(pwd)/tools/.bin/fak#" -e "s#__REPO__#$(pwd)#" \
+sed -e "s#__FAK__#$(pwd)/tools/.bin/fak#" \
+    -e "s#__REPO__#$(pwd)#" \
+    -e "s#__ADDR__#127.0.0.1:8080#" \
     tools/com.fak.serve-gateway.plist > ~/Library/LaunchAgents/com.fak.serve-gateway.plist
 sed -e "s#__PYTHON__#$(command -v python3)#" -e "s#__REPO__#$(pwd)#" \
     tools/com.fak.dogfood-fleet.plist  > ~/Library/LaunchAgents/com.fak.dogfood-fleet.plist
@@ -43,11 +68,8 @@ sed -e "s#__PYTHON__#$(command -v python3)#" -e "s#__REPO__#$(pwd)#" \
 # 2. Set the upstream credential in the login environment (NOT in the template).
 launchctl setenv ANTHROPIC_API_KEY "sk-ant-..."
 
-# 3. Keep the box awake — an M-series node sleeps ~every 25 min, which starves the
-#    cadence and drops the gateway off the fleet.
-nohup ./tools/mac_keep_awake.sh >/tmp/fak-caffeinate.log 2>&1 &
-
-# 4. Load both units (RunAtLoad fires the first tick immediately).
+# 3. Load both units (RunAtLoad fires the first tick immediately).
+#    caffeinate -is is now baked into the gateway plist — no separate keep-awake needed.
 launchctl load -w ~/Library/LaunchAgents/com.fak.serve-gateway.plist
 launchctl load -w ~/Library/LaunchAgents/com.fak.dogfood-fleet.plist
 ```
