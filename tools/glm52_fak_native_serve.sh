@@ -75,7 +75,25 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 ph "GO $(go version 2>/dev/null || echo missing)"
 
+# 1b. Prefer a COMPLETE local-NVMe copy over the slow /projects NFS (~2.9 GB/s vs ~0.055 GB/s,
+#     ~53x; cold load ~44m vs ~1h41m). The verified copy lives FLAT in /mnt/sglang_dv3/glm52-q4/
+#     (no UD-Q4_K_M subdir). Resolve NVMe-first and LOG the winner LOUDLY so a silent
+#     fall-through to the slow NFS path is impossible to miss (the bug that caused a 62-min load).
+PRESTAGED_SHARD1=""
+for _d in /mnt/sglang_dv3/glm52-q4 "$GLM_DIR/$SUBDIR" "$GLM_DIR"; do
+  _s1=$(ls "$_d"/*-00001-of-*.gguf 2>/dev/null | head -1) || true
+  [ -n "$_s1" ] && [ "$(ls "$_d"/GLM-5.2-UD-Q4_K_M-*-of-*.gguf 2>/dev/null | wc -l)" -ge 11 ] || continue
+  PRESTAGED_SHARD1="$_s1"; break
+done
+if [ -n "$PRESTAGED_SHARD1" ]; then
+  case "$PRESTAGED_SHARD1" in
+    /mnt/*|/nvme*|/local*|/raid*|/scratch*) ph "USING_LOCAL_NVME shard1=$PRESTAGED_SHARD1 (fast local read; HF download skipped)";;
+    *) ph "USING_PRESTAGED shard1=$PRESTAGED_SHARD1 (WARN: NOT local NVMe — if this is /projects NFS the load is ~53x slower; stage to /mnt/sglang_dv3/glm52-q4 for the fast path)";;
+  esac
+fi
+
 # 2. Download the GGUF shards (resumable; the HF CLI skips already-complete files).
+if [ -z "$PRESTAGED_SHARD1" ]; then
 ph "DOWNLOAD_START repo=$REPO subdir=$SUBDIR dir=$GLM_DIR"
 if command -v hf >/dev/null 2>&1; then
   hf download "$REPO" --include "$SUBDIR/*" --local-dir "$GLM_DIR" >>"$LOG" 2>&1; DL_RC=$?
@@ -90,6 +108,10 @@ ph "DOWNLOAD_DONE rc=$DL_RC shards=$SHARDS"
 SHARD1=$(ls "$GLM_DIR/$SUBDIR"/*-00001-of-*.gguf 2>/dev/null | head -1)
 [ -n "$SHARD1" ] || SHARD1=$(ls "$GLM_DIR/$SUBDIR"/*.gguf 2>/dev/null | sort | head -1)
 ph "SHARD1=$SHARD1"
+else
+  SHARD1="$PRESTAGED_SHARD1"
+  ph "SHARD1=$SHARD1 (pre-staged; HF download skipped)"
+fi
 
 # 3. Build the -tags cuda fak binary (libfakcuda sm_80 + cmd/fak) via the canonical recipe
 #    (internal/compute/build_cuda.sh resolves the CGO -I/-L/-rpath set for this host).

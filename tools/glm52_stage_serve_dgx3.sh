@@ -58,7 +58,26 @@ done
 mkdir -p "$GLM_DIR"
 ph(){ echo "$(date -u +%H:%M:%S) $*" | tee -a "$LOG"; echo "$*" > "$PHASE"; }
 
+# 0. Prefer a COMPLETE local-NVMe copy over the slow /projects NFS. A verified local copy
+#    reads ~2.9 GB/s (NVMe) vs ~0.055 GB/s (NFSv3) — ~53x — dropping the cold load from
+#    ~1h41m to ~44m. The verified copy lives FLAT in /mnt/sglang_dv3/glm52-q4/ (no UD-Q4_K_M
+#    subdir). Resolve NVMe-first and LOG the winner LOUDLY so a silent fall-through to the slow
+#    NFS path can never go unnoticed (that precedence bug is what caused a 62-min cold load).
+PRESTAGED_SHARD1=""
+for _d in /mnt/sglang_dv3/glm52-q4 "$GLM_DIR/$SUBDIR" "$GLM_DIR"; do
+  _s1=$(ls "$_d"/*-00001-of-*.gguf 2>/dev/null | head -1) || true
+  [ -n "$_s1" ] && [ "$(ls "$_d"/GLM-5.2-UD-Q4_K_M-*-of-*.gguf 2>/dev/null | wc -l)" -ge 11 ] || continue
+  PRESTAGED_SHARD1="$_s1"; break
+done
+if [ -n "$PRESTAGED_SHARD1" ]; then
+  case "$PRESTAGED_SHARD1" in
+    /mnt/*|/nvme*|/local*|/raid*|/scratch*) ph "USING_LOCAL_NVME shard1=$PRESTAGED_SHARD1 (fast local read; HF download skipped)";;
+    *) ph "USING_PRESTAGED shard1=$PRESTAGED_SHARD1 (WARN: NOT local NVMe — if this is /projects NFS the load is ~53x slower; stage to /mnt/sglang_dv3/glm52-q4 for the fast path)";;
+  esac
+fi
+
 # 1. download the GGUF shards (resumable; the HF CLI skips already-complete files).
+if [ -z "$PRESTAGED_SHARD1" ]; then
 ph "DOWNLOAD_START repo=$REPO subdir=$SUBDIR dir=$GLM_DIR"
 if command -v hf >/dev/null 2>&1; then
   hf download "$REPO" --include "$SUBDIR/*" --local-dir "$GLM_DIR" >>"$LOG" 2>&1; DL_RC=$?
@@ -73,6 +92,10 @@ ph "DOWNLOAD_DONE rc=$DL_RC shards=$SHARDS"
 SHARD1=$(ls "$GLM_DIR/$SUBDIR"/*-00001-of-*.gguf 2>/dev/null | head -1)
 [ -n "$SHARD1" ] || SHARD1=$(ls "$GLM_DIR/$SUBDIR"/*.gguf 2>/dev/null | sort | head -1)
 ph "SHARD1=$SHARD1"
+else
+  SHARD1="$PRESTAGED_SHARD1"
+  ph "SHARD1=$SHARD1 (pre-staged; HF download skipped)"
+fi
 
 # 2. build llama.cpp (CUDA sm_80) if the server binary is missing.
 SERVER="$LLAMA/build/bin/llama-server"
