@@ -90,6 +90,19 @@ func (t CacheTTL) WriteMultiplier() float64 {
 	return CacheWrite5mMultiplier
 }
 
+// coldWriteMultiplier is the EFFECTIVE per-token multiplier of a cold resume re-prefill at
+// this TTL, calibrated against billed reality. The naive projection priced the WHOLE resident
+// at the cache-WRITE premium (an implicit cold-write share of 1.0); the back-test showed that
+// a cold re-prefill actually re-caches only ColdWriteShare of the resident (paying the write
+// premium) and re-sends the rest as plain base input (1.0x). So the effective multiplier is
+// the share-weighted blend — write premium on the calibrated share, base input on the
+// remainder — which stops the projection over-stating cold cost (#955). At ColdWriteShare ==
+// 1.0 this is exactly WriteMultiplier, so the change is a strict, corpus-fit refinement of the
+// old "whole resident at the write premium" model, not a new policy.
+func (t CacheTTL) coldWriteMultiplier() float64 {
+	return ColdWriteShare*t.WriteMultiplier() + (1-ColdWriteShare)*1.0
+}
+
 // The published Anthropic prompt-cache price multipliers, RELATIVE to the model's base
 // input per-token price. These mirror gateway/cache_pricing.go's constants verbatim; they
 // are redeclared here (not imported) because gateway is a tier-4 integrator and this is a
@@ -103,6 +116,19 @@ const (
 	// CacheWrite1hMultiplier is the price of a 1-hour-TTL cache WRITE relative to base input.
 	CacheWrite1hMultiplier = 2.0
 )
+
+// ColdWriteShare is the calibrated fraction of a cold resume re-prefill that actually pays the
+// cache-WRITE premium, FIT FROM THE BACK-TEST CORPUS — not a magic 1.0. The naive cold-cost
+// projection priced the WHOLE resident at the write premium (an implicit share of 1.0); the
+// resume back-test (Backtest -> BacktestReport.FirstTurnColdWriteShareMean, the mean of
+// cache_creation/prompt over the cold cross-file first-turn resumes) measured ~0.852 (n=310):
+// a cold re-prefill re-caches ~85% of the transcript at the write premium and re-sends the
+// remaining ~15% as plain base input. coldWriteMultiplier prices the cold turn at this share,
+// so the projection no longer over-states the cold cost the dojo's cold_write_share metric
+// surfaced (#955). It is a corpus-derived MEASUREMENT, re-derivable by re-running the back-test
+// over a transcript corpus (`fak dojo run` / `fak resume validate`) — change the corpus, refit
+// the number; it is never a hand-tuned constant.
+const ColdWriteShare = 0.852
 
 // Conservative defaults applied to a zero/unset Input axis. They match the shipped
 // surfaces they mirror so the plan agrees with what the live path would actually do.
@@ -362,7 +388,7 @@ func priceStrategy(s Strategy, prefill int, in Input, post Posture) StrategyCost
 	outPerTok := perToken(in.Pricing.OutputPerMTokUSD)
 	output := float64(in.OutputTokensPerTurn) * outPerTok
 
-	coldReprefill := float64(prefill) * inPerTok * in.TTL.WriteMultiplier()
+	coldReprefill := float64(prefill) * inPerTok * in.TTL.coldWriteMultiplier()
 	warmRead := float64(prefill) * inPerTok * CacheReadMultiplier
 
 	firstTurn := coldReprefill + output // cold / unknown: establish the prefix

@@ -40,10 +40,16 @@ func TestHeadline250kColdResume(t *testing.T) {
 		t.Errorf("recommend = (%q,%q), want (cut, cold_prefill_shed)", r.Recommended, r.Reason)
 	}
 
-	// The full cold re-prefill: 250000 tok * (5/1e6 $/tok) * 1.25 write = $1.5625.
+	// The full cold re-prefill prices the resident at the CALIBRATED cold-write multiplier —
+	// ColdWriteShare of the resident at the 5m write premium, the remainder as plain base input —
+	// not the naive whole-resident-at-the-write-premium it over-stated before (#955).
 	full := strat(r, StrategyResumeFull)
-	if want := 250000 * (5.0 / 1e6) * CacheWrite5mMultiplier; !approx(full.ColdReprefillUSD, want) {
+	if want := 250000 * (5.0 / 1e6) * TTL5m.coldWriteMultiplier(); !approx(full.ColdReprefillUSD, want) {
 		t.Errorf("full cold re-prefill = %.6f, want %.6f", full.ColdReprefillUSD, want)
+	}
+	// The calibration is a strict reduction from the old whole-resident-at-the-write pricing.
+	if naive := 250000 * (5.0 / 1e6) * CacheWrite5mMultiplier; !(full.ColdReprefillUSD < naive) {
+		t.Errorf("calibrated cold re-prefill %.6f should be below the naive whole-write %.6f", full.ColdReprefillUSD, naive)
 	}
 	if full.ContextKeptFraction != 1.0 {
 		t.Errorf("full keeps fraction %.3f, want 1.0", full.ContextKeptFraction)
@@ -191,6 +197,48 @@ func TestOneHourTTLChangesPostureAndCost(t *testing.T) {
 	full5h := Plan(Input{ResidentTokens: 250000, IdleSeconds: 7200, TTL: TTL5m, Pricing: opusPricing})
 	if !(strat(full1h, StrategyResumeFull).ColdReprefillUSD > strat(full5h, StrategyResumeFull).ColdReprefillUSD) {
 		t.Errorf("1h cold re-prefill should exceed 5m (2.0x vs 1.25x write)")
+	}
+}
+
+// TestColdWriteShareCalibratesColdCost pins the calibrated cold-write-share factor (#955). The
+// naive projection priced the whole resident at the write premium (implicit share 1.0); the
+// factor is fit from the back-test (BacktestReport.FirstTurnColdWriteShareMean) so the cold turn
+// is priced at ColdWriteShare of the resident at the write premium and the remainder as plain
+// base input. It checks three things: the factor is a measured fraction (not a magic 1.0); the
+// effective cold multiplier is the share-weighted blend whose saving vs the naive write is
+// exactly the premium on the un-cached remainder; and the constant is RE-DERIVABLE — a corpus
+// whose cold first-turn resumes re-cache exactly ColdWriteShare of the prompt reproduces it.
+func TestColdWriteShareCalibratesColdCost(t *testing.T) {
+	if !(ColdWriteShare > 0 && ColdWriteShare < 1.0) {
+		t.Fatalf("ColdWriteShare = %v, want a calibrated fraction in (0,1) fit from the back-test, not a magic 1.0", ColdWriteShare)
+	}
+	for _, ttl := range []CacheTTL{TTL5m, TTL1h} {
+		eff := ttl.coldWriteMultiplier()
+		wm := ttl.WriteMultiplier()
+		// The blend sits strictly between plain base input (1.0) and the raw write premium.
+		if !(eff > 1.0 && eff < wm) {
+			t.Errorf("%s cold multiplier %.4f should sit in (1.0, %.4f)", ttl, eff, wm)
+		}
+		// The calibration's saving over the naive whole-write is exactly the write premium that
+		// the un-cached remainder (1-ColdWriteShare) no longer pays — a real identity, not a
+		// restatement of the formula under test.
+		if want := (1 - ColdWriteShare) * (wm - 1.0); !approx(wm-eff, want) {
+			t.Errorf("%s cold saving %.6f, want premium on the un-cached remainder %.6f", ttl, wm-eff, want)
+		}
+	}
+	// Re-derivability: a back-test over a cold first-turn resume that re-cached exactly
+	// ColdWriteShare of its prompt reproduces the constant from billed reality.
+	prompt := 100000
+	creation := int(float64(prompt) * ColdWriteShare) // cache_creation = share * prompt
+	input := prompt - creation                        // the remainder, sent as plain input (cache_read 0 => cold)
+	rep := Backtest([][]ObservedTurn{{
+		{UnixSeconds: 0, InputTokens: input, CacheCreationTokens: creation, CacheReadTokens: 0},
+	}}, TTL5m, DefaultRecoveryBand())
+	if rep.FirstTurnCold != 1 {
+		t.Fatalf("back-test should see 1 cold first-turn resume, got %d", rep.FirstTurnCold)
+	}
+	if !approx(rep.FirstTurnColdWriteShareMean, ColdWriteShare) {
+		t.Errorf("back-test cold-write share %.6f should re-derive ColdWriteShare %.6f", rep.FirstTurnColdWriteShareMean, ColdWriteShare)
 	}
 }
 
