@@ -32,7 +32,8 @@ import (
 //	fak accounts add <name> [--reserved] [--chrome-profile P] [--no-login --token -]
 //	                                   enroll a NEW account end-to-end: isolated-dir login (never
 //	                                   ~/.claude), identity probe, twin-check, registry + views
-//	fak accounts remove --name <n>     tombstone an account in the registry + regenerate views
+//	fak accounts remove --name <n> [--archive]  tombstone an account in the registry + regenerate views;
+//	                                   --archive ALSO renames the dir to .DELETED-<date> + repoints the registry, in one go
 //	fak accounts set-role <role> --name <n> point a role (active|anchor) at <n> + regenerate views
 //	fak accounts set-default --name <n> alias for `set-role active` (the launch/active seat)
 //	fak accounts list                  table of every seat: name, status, TRUE identity, creds, rehome, flags
@@ -77,6 +78,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addNoSync := fs.Bool("no-sync", false, "(add) skip regenerating the roster views after adding (just write the registry)")
 	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry")
+	rmArchive := fs.Bool("archive", false, "(remove) ALSO rename the config dir to <dir>.DELETED-<date> and repoint the registry (name+dir+rehome refs) in one command; refuses the live CLAUDE_CONFIG_DIR seat")
 	roleFlag := fs.String("role", "", "(set-role) the role to point at --name (active|anchor); may also be given as the first positional")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
@@ -314,6 +316,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			name:         *addName,
 			rehomeTo:     *rmRehome,
 			reason:       *rmReason,
+			archive:      *rmArchive,
 			registryPath: *registryPath,
 			dosView:      *dosView,
 			jobView:      *jobView,

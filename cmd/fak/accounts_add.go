@@ -180,11 +180,17 @@ type removeParams struct {
 	name         string
 	rehomeTo     string
 	reason       string
+	archive      bool
 	registryPath string
 	dosView      string
 	jobView      string
 	noSync       bool
 }
+
+// sameDir reports whether two paths name the same directory, tolerant of separators and
+// (on Windows) case — used to refuse archiving the live CLAUDE_CONFIG_DIR out from under the
+// running session.
+func sameDir(a, b string) bool { return strings.EqualFold(filepath.Clean(a), filepath.Clean(b)) }
 
 // runAccountsRemove tombstones an account in the canonical registry and regenerates the
 // views — the single-source inverse of add. It sets the home to status=tombstoned with a
@@ -194,7 +200,7 @@ type removeParams struct {
 // the config dir — that is a separate, destructive operator step.
 func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	if p.name == "" {
-		fmt.Fprintln(stderr, "usage: fak accounts remove --name <name> [--rehome-to <seat>] [--reason <text>]")
+		fmt.Fprintln(stderr, "usage: fak accounts remove --name <name> [--rehome-to <seat>] [--reason <text>] [--archive]")
 		return 2
 	}
 	reg, err := accounts.LoadRegistry(p.registryPath)
@@ -242,6 +248,47 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	reg.Homes[idx].TombstoneReason = reason
 	disabled := false
 	reg.Homes[idx].Enabled = &disabled
+
+	// --archive collapses the whole retirement into one command: rename the config dir to the
+	// house tombstone form (<dir>.DELETED-<date>) and repoint the registry entry (name + dir,
+	// plus any rehome target that named the old seat) to match — the manual dir-rename +
+	// hand-edit-registry + re-sync dance, done for you. It refuses the live CLAUDE_CONFIG_DIR,
+	// since you cannot move the dir the current session runs from.
+	if p.archive {
+		date := time.Now().UTC().Format("2006-01-02")
+		oldName, oldDir := reg.Homes[idx].Name, reg.Homes[idx].Dir
+		if oldDir != "" {
+			if live := os.Getenv("CLAUDE_CONFIG_DIR"); live != "" && sameDir(live, oldDir) {
+				fmt.Fprintf(stderr, "fak accounts: refusing to archive %q — it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", p.name)
+				return 1
+			}
+			newDir := oldDir + ".DELETED-" + date
+			if _, err := os.Stat(newDir); err == nil {
+				fmt.Fprintf(stderr, "fak accounts: archive target already exists: %s\n", newDir)
+				return 1
+			}
+			if _, err := os.Stat(oldDir); err == nil {
+				if err := os.Rename(oldDir, newDir); err != nil {
+					fmt.Fprintf(stderr, "fak accounts: archive rename %s -> %s: %v\n", oldDir, newDir, err)
+					return 1
+				}
+				fmt.Fprintf(stdout, "archived dir: %s -> %s\n", oldDir, newDir)
+			} else {
+				fmt.Fprintf(stdout, "archive: dir %s absent — repointing the registry only\n", oldDir)
+			}
+			reg.Homes[idx].Dir = newDir
+		}
+		// Rename the registry handle and repoint any rehome target that named the old seat, so
+		// no tombstone is left pointing at a name that no longer exists.
+		newName := oldName + ".DELETED-" + date
+		reg.Homes[idx].Name = newName
+		for i := range reg.Homes {
+			if reg.Homes[i].RehomeTo == oldName {
+				reg.Homes[i].RehomeTo = newName
+			}
+		}
+	}
+
 	if err := accounts.SaveRegistry(p.registryPath, reg); err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
@@ -252,7 +299,11 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 			return code
 		}
 	}
-	fmt.Fprintf(stdout, "removed account %q (config dir left in place; tombstoned in registry + views)\n", p.name)
+	if p.archive {
+		fmt.Fprintf(stdout, "removed + archived account %q (now %q; dir renamed, tombstoned in registry + views)\n", p.name, reg.Homes[idx].Name)
+	} else {
+		fmt.Fprintf(stdout, "removed account %q (config dir left in place; tombstoned in registry + views)\n", p.name)
+	}
 	return 0
 }
 

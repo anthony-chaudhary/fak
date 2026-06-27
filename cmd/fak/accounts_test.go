@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 // mkHome creates a fake Claude config home under root with a logged-in identity.
@@ -194,6 +196,63 @@ func TestRunAccountsVersion(t *testing.T) {
 	}
 	if j := out.String(); !strings.Contains(j, `"registry_version"`) || !strings.Contains(j, `"verbs"`) {
 		t.Fatalf("version --json missing keys:\n%s", j)
+	}
+}
+
+func TestRunAccountsRemoveArchive(t *testing.T) {
+	// `remove --archive` must do the WHOLE retirement in one command: tombstone the registry,
+	// rename the config dir to the .DELETED-<date> form, and repoint the registry entry — the
+	// manual dance this used to take. (This is the "super easy to remove" guarantee.)
+	home := t.TempDir()
+	seat := mkHome(t, home, ".claude-old-seat", "old@example.test", true)
+	anchor := mkHome(t, home, ".claude-anchor-seat", "anchor@example.test", true)
+
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"old-seat","dir":"` + jsonPath(seat) + `"},` +
+		`{"name":"anchor-seat","dir":"` + jsonPath(anchor) + `","default":true}` +
+		`]}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"remove", "--name", "old-seat", "--archive",
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 0 {
+		t.Fatalf("remove --archive rc=%d stderr=%s", rc, errb.String())
+	}
+
+	// The original dir is gone; exactly one .DELETED-* archive exists.
+	if _, err := os.Stat(seat); err == nil {
+		t.Fatalf("original dir should have been renamed away: %s", seat)
+	}
+	archived, _ := filepath.Glob(filepath.Join(home, ".claude-old-seat.DELETED-*"))
+	if len(archived) != 1 {
+		t.Fatalf("want exactly one archived dir, got %v\noutput=%s", archived, out.String())
+	}
+
+	// The registry entry is renamed, tombstoned, and its dir repointed at the archive.
+	reg2, err := accounts.LoadRegistry(regPath)
+	if err != nil {
+		t.Fatalf("registry should still validate after archive: %v", err)
+	}
+	var found bool
+	for _, h := range reg2.Homes {
+		if strings.HasPrefix(h.Name, "old-seat.DELETED-") {
+			found = true
+			if h.Active() {
+				t.Fatalf("archived seat must be tombstoned: %+v", h)
+			}
+			if !strings.Contains(h.Dir, ".DELETED-") {
+				t.Fatalf("archived seat dir not repointed: %q", h.Dir)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no archived registry entry found:\n%s", reg2.JSON())
 	}
 }
 
