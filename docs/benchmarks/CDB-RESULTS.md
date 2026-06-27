@@ -182,13 +182,14 @@ residency `<50%`, faults avoided), `TestGrepIsAReadOnlyMapSearch`,
   paraphrase** (an injection with no obfuscation and no marker words), which needs a
   classifier/IFC seam — `cdb` is the durable, queryable *enforcement and inspection* surface
   over whatever the detector decides, not a better detector.
-- **The re-screen is `ctxmmu`-only, not the `normgate` chain.** A page-in re-screens
-  through a fresh `ctxmmu.MMU` (recall's `reScreen`), not the rank-5 `normgate`-fronted
-  admitter chain that catches the obfuscation evasions (zero-width/homoglyph/base64).
-  So the durable re-screen inherits `ctxmmu`'s *weaker* detector, and the same FP shape
-  (a base64 run that looks like `AKIA…`). Wiring the re-screen to the full admitter
-  chain — and giving the frozen `WorldVer` a revocation path — is the named next rung
-  (see the [[addressable-context-landscape-verdict]] memory's two verified gaps).
+- **The re-screen folds the full detector chain.** A page-in re-screens
+  through the full registered ResultAdmitter chain (recall's `reScreen`), including
+  both `canon.Scan` (the de-obfuscating detector that catches zero-width/homoglyph/base64
+  obfuscation) and the rank-5 `normgate`-fronted admitter chain. This is enforced by
+  the `TestRecallReScreenInheritsRegisteredAdmitters` witness: a payload only a
+  registered detector catches is sealed on reload. The honest residue remains:
+  `WorldVer` has no revocation path, and a session recorded under a weak write-time
+  gate is protected only by the detectors present at reload time.
 - **The swap device is a copy on disk** (`cas.json`), base64-inflated (~1.3×), holding the
   full bytes — including any sealed page's bytes — exactly as a real core dump holds the
   process's memory image. They are never paged into a context (the gate stands between
