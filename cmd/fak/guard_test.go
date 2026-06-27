@@ -714,3 +714,40 @@ func TestGuardPassthroughFallbackFlag(t *testing.T) {
 		t.Fatalf("want pinUpstream=true with a token present; got %+v", us)
 	}
 }
+
+// TestGuardSubscriptionDefaultIgnoresAmbientAPIKey proves the OAuth-by-default change: a
+// bare ANTHROPIC_API_KEY in the environment no longer silently flips guard onto API
+// billing. With a subscription token reachable, guard PINS the OAuth token upstream even
+// when ANTHROPIC_API_KEY is set, and flags the override (ambientKeyOverridden) so cmdGuard
+// can point at the explicit opt-in. Naming the key via --api-key-env opts back into billing.
+func TestGuardSubscriptionDefaultIgnoresAmbientAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	const tokenEnv = "FAK_TEST_GUARD_AMBIENT_OAUTH"
+	t.Setenv(tokenEnv, "sk-ant-oat01-present")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api03-ambient")
+
+	// Ambient ANTHROPIC_API_KEY present but NOT named via --api-key-env: subscription wins.
+	us := resolveGuardUpstream("anthropic", "claude", "", "", "", false, tokenEnv)
+	if !us.pinUpstream {
+		t.Fatalf("want pinUpstream=true (subscription OAuth) despite ambient ANTHROPIC_API_KEY; got %+v", us)
+	}
+	if us.apiKey != "sk-ant-oat01-present" {
+		t.Fatalf("want the held credential to be the OAuth token, not the ambient API key; got apiKey=%q", us.apiKey)
+	}
+	if !us.ambientKeyOverridden {
+		t.Fatalf("want ambientKeyOverridden=true so cmdGuard surfaces the override note; got %+v", us)
+	}
+
+	// Naming the key explicitly opts INTO API billing: no pin, the API key is forwarded.
+	us = resolveGuardUpstream("anthropic", "claude", "", "", "ANTHROPIC_API_KEY", false, tokenEnv)
+	if us.pinUpstream {
+		t.Fatalf("explicit --api-key-env must opt out of the subscription pin; got %+v", us)
+	}
+	if us.apiKey != "sk-ant-api03-ambient" {
+		t.Fatalf("explicit --api-key-env must use the named API key; got apiKey=%q", us.apiKey)
+	}
+	if us.ambientKeyOverridden {
+		t.Fatalf("ambientKeyOverridden must be false when API billing was explicitly chosen; got %+v", us)
+	}
+}

@@ -66,9 +66,11 @@ var guardDefaultPolicyJSON []byte
 // `fak guard -- claude` wraps your normal Claude Code: your credential and prompt-cache
 // breakpoints flow through untouched (the gateway forwards the request bytes verbatim),
 // but every tool call Claude proposes crosses the capability floor first. For
-// --provider anthropic with no API key set, fak uses your Claude Pro/Max SUBSCRIPTION
-// by default — it sources the OAuth token and sends it upstream as a bearer token
-// (set ANTHROPIC_API_KEY to use API billing instead; --anthropic-oauth forces it).
+// --provider anthropic, fak uses your Claude Pro/Max SUBSCRIPTION by DEFAULT — it
+// sources the OAuth token and sends it upstream as a bearer token. This holds even when
+// ANTHROPIC_API_KEY is exported (a global SDK key no longer silently switches you to API
+// billing); pass --api-key-env ANTHROPIC_API_KEY to opt INTO API billing, or
+// --anthropic-oauth to force the subscription path and fail loud if no token is found.
 //
 // It also turns the durable DECISION JOURNAL on by default: every verdict the kernel
 // reaches this session is appended to a tamper-evident, hash-chained file you can
@@ -83,8 +85,8 @@ func cmdGuard(argv []string) {
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
 	remoteServe := fs.String("remote-serve", "", "point the guarded turn's INFERENCE at a remote `fak serve` running on a lab box you chose (HOST or HOST:PORT, default port 8080). Forces the OpenAI-compatible wire and base URL http://HOST:PORT, so the dev turn runs on the lab GPU while the kernel still adjudicates locally. Mutually exclusive with --base-url; preflights GET /healthz and fails loud if the box is not serving.")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
-	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key (default: forward the client's own key — passthrough)")
-	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic when no API key is set; the flag forces it and fails loud if no token is found.")
+	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key. For --provider anthropic this is the explicit opt-IN to API billing (e.g. --api-key-env ANTHROPIC_API_KEY); the default is your Claude Pro/Max subscription via OAuth, even when ANTHROPIC_API_KEY is exported. For other providers the default forwards the client's own key (passthrough).")
+	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
 	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
@@ -224,7 +226,10 @@ func cmdGuard(argv []string) {
 	up, providerAutodetected, resolvedBase := us.provider, us.autodetected, us.baseURL
 	apiKey, pinUpstream, oauthSource := us.apiKey, us.pinUpstream, us.oauthSource
 	if us.passthroughFallback && !*quiet {
-		fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — this works only if the wrapped agent is logged in. If you hit a 401, run `claude` once or `claude setup-token`.")
+		fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — the wrapped agent's own credential (a subscription login or ANTHROPIC_API_KEY) is forwarded upstream. If you hit a 401, run `claude` once or `claude setup-token`.")
+	}
+	if us.ambientKeyOverridden && !*quiet {
+		fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
 	}
 
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
@@ -963,14 +968,21 @@ type guardUpstream struct {
 	// so a cold agent that is ALSO not logged in gets a pointer home instead of an opaque
 	// upstream 401 (issue #835, failure 2).
 	passthroughFallback bool
+	// ambientKeyOverridden is set when guard held the Pro/Max subscription OAuth token
+	// upstream even though a bare ANTHROPIC_API_KEY was present in the environment. The
+	// subscription is the default now regardless of that key — a global SDK key must not
+	// silently bill the API account — so cmdGuard surfaces a one-line note pointing at the
+	// explicit API-billing opt-in (--api-key-env ANTHROPIC_API_KEY) for discoverability.
+	ambientKeyOverridden bool
 }
 
 // resolveGuardUpstream picks the upstream wire and credential posture: an explicit
 // --provider wins, else the wire is inferred from the wrapped agent's name (anthropic as
 // the fallback); the base URL defaults to the provider's public API. Subscription is the
-// DEFAULT for Claude — when the upstream is Anthropic and no API key is configured, it
-// sources the Pro/Max OAuth token and pins it upstream; --anthropic-oauth forces that and
-// fails loud if no token is found. It exits(2) on an unresolvable base URL or OAuth misuse.
+// DEFAULT for Claude — when the upstream is Anthropic and no API key was EXPLICITLY named
+// (--api-key-env), it sources the Pro/Max OAuth token and pins it upstream regardless of a
+// bare ambient ANTHROPIC_API_KEY; --anthropic-oauth forces that and fails loud if no token
+// is found. It exits(2) on an unresolvable base URL or OAuth misuse.
 func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase, apiKeyEnv string, forceOAuth bool, oauthTokenEnv string) guardUpstream {
 	// --remote-serve pins the OpenAI-compatible wire and the box's base URL: a remote
 	// `fak serve` speaks the OpenAI routes the gateway proxies, and the caller has already
@@ -994,21 +1006,24 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 		apiKey = os.Getenv(apiKeyEnv)
 	}
 
-	// Subscription is the DEFAULT for Claude: when the upstream is Anthropic and no
-	// API key is configured, fak sources the Claude Pro/Max OAuth token and sends it
-	// upstream as Authorization: Bearer + the oauth beta (the scheme api.anthropic.com
-	// accepts an sk-ant-oat token under), holding the token itself and ignoring the
-	// client's credential. A configured API key (--api-key-env / ANTHROPIC_API_KEY)
-	// opts out (use API billing); --anthropic-oauth forces the subscription path and
-	// fails loud if no token is found.
+	// Subscription is the DEFAULT for Claude: whenever the upstream is Anthropic and no
+	// API key was EXPLICITLY configured (--api-key-env), fak sources the Claude Pro/Max
+	// OAuth token and sends it upstream as Authorization: Bearer + the oauth beta (the
+	// scheme api.anthropic.com accepts an sk-ant-oat token under), holding the token
+	// itself and ignoring the client's credential. A bare ANTHROPIC_API_KEY in the
+	// environment NO LONGER flips this — a global SDK key must not silently bill your API
+	// account when you hold a subscription. To opt INTO API billing, name the key
+	// explicitly: --api-key-env ANTHROPIC_API_KEY. --anthropic-oauth forces the
+	// subscription path and fails loud if no token is found.
 	pinUpstream := false
 	oauthSource := ""
 	passthroughFallback := false
+	ambientKeyOverridden := false
 	if forceOAuth && up != "anthropic" {
 		fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
 		os.Exit(2)
 	}
-	autoOAuth := up == "anthropic" && apiKey == "" && os.Getenv("ANTHROPIC_API_KEY") == ""
+	autoOAuth := up == "anthropic" && apiKey == ""
 	if forceOAuth || autoOAuth {
 		tok, src, terr := resolveAnthropicOAuthToken(oauthTokenEnv)
 		switch {
@@ -1016,20 +1031,26 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 			apiKey = tok
 			pinUpstream = true
 			oauthSource = src
+			// Held the subscription token despite a bare ANTHROPIC_API_KEY in the
+			// environment: flag it so cmdGuard can make the override discoverable (the
+			// user may have expected that key to bill their API account).
+			ambientKeyOverridden = autoOAuth && os.Getenv("ANTHROPIC_API_KEY") != ""
 		case forceOAuth:
 			// Explicitly requested but nothing to use — fail loud.
 			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth: %v\n", terr)
 			os.Exit(2)
 		default:
-			// Auto attempt found no token (normal for an API-key user): fall back to
-			// plain passthrough — Claude Code forwards its own bearer if it is logged in.
+			// Auto attempt found no token: fall back to plain passthrough — the wrapped
+			// agent's own credential (a subscription login OR ANTHROPIC_API_KEY) flows
+			// upstream, so a pure API-billing user is unaffected.
 			passthroughFallback = true
 		}
 	}
 	return guardUpstream{
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
 		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
-		passthroughFallback: passthroughFallback, remoteServe: remote,
+		passthroughFallback: passthroughFallback, ambientKeyOverridden: ambientKeyOverridden,
+		remoteServe: remote,
 	}
 }
 

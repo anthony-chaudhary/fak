@@ -77,6 +77,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
 - [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
 - [Always-on dogfood server](docs/fak/always-on-dogfood-server.md): run the kernel in front of the REAL dev loop 24/7 — the guarded dispatch fleet plus a shared `fak serve` gateway — across a laptop, an always-on Mac (launchd + caffeinate), and GCP; with the `dogfood_coverage.py` scorecard to measure it and the `FLEET_DOGFOOD_GUARD` kill switch.
+- [Lab dev loop](docs/fak/lab-dev-loop.md): develop fak ON a lab GPU box you choose and drive it from Slack — `fak guard --remote-serve <box>:8080 -- claude` runs a kernel-adjudicated dev turn whose inference is on the lab box, the private Slack bridge drives it out-of-band, and `fleetctl` folds the per-box report. The public/private boundary is a data contract, not a code import.
 
 ## Supported (what fak works with)
 
@@ -6843,6 +6844,7 @@ scaling laws, the explainers) live one level up in [`docs/`](https://github.com/
 | Performance, scaling, multi-region, and HA | [advanced-topics.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/advanced-topics.md) |
 | Production deployment | [deployment-guide.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/deployment-guide.md) |
 | Always-on dogfood gateway and guarded fleet | [always-on-dogfood-server.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/always-on-dogfood-server.md) |
+| Develop fak on a lab box, drive it from Slack | [lab-dev-loop.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/lab-dev-loop.md) |
 | Activate the Tier-1 Mac dogfood node | [node-macos-a-activation.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/node-macos-a-activation.md) |
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/gcp-tier2-control-vm.md) |
 | Plan guard-hop RSI tuning | [guard-hop-rsi-loop.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/guard-hop-rsi-loop.md) |
@@ -7802,7 +7804,8 @@ fak guard -- claude    # your normal Claude Code, kernel-adjudicated, on your su
 ```
 
 (No API key needed — `fak guard` uses your logged-in Claude Pro/Max subscription by
-default; set `ANTHROPIC_API_KEY` to use API billing instead.)
+default, **even if `ANTHROPIC_API_KEY` is exported**. To use API billing instead, name the
+key explicitly: `--api-key-env ANTHROPIC_API_KEY`.)
 
 `fak guard`:
 
@@ -7811,8 +7814,8 @@ default; set `ANTHROPIC_API_KEY` to use API billing instead.)
    directory — print it with `fak guard --dump-policy`, override with `--policy FILE`).
 3. Injects `ANTHROPIC_BASE_URL` into the **child process only** — your shell, your
    `settings.json`, and any other `claude` in another terminal are untouched.
-4. Proxies to the **real Anthropic API in passthrough mode**: your credential
-   (subscription OAuth by default, or an API key if `ANTHROPIC_API_KEY` is set) and the
+4. Proxies to the **real Anthropic API**: your credential (subscription OAuth by default,
+   or an API key when you opt in with `--api-key-env ANTHROPIC_API_KEY`) and the
    `cache_control` prompt-cache breakpoints flow through byte-for-byte (no cost regression),
    while every tool call Claude proposes crosses the capability floor first.
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
@@ -7828,19 +7831,23 @@ admit — typically an inbound tool result let through the result-side floor —
 normal outcome, not an error.)
 
 > **Your Claude Pro/Max subscription is the default — no API key needed.** When the
-> upstream is Anthropic and `ANTHROPIC_API_KEY` is unset, `fak guard` uses your
-> **subscription**: it sources the OAuth token (from `CLAUDE_CODE_OAUTH_TOKEN`, then
+> upstream is Anthropic, `fak guard` uses your **subscription** unless you explicitly name
+> an API key: it sources the OAuth token (from `CLAUDE_CODE_OAUTH_TOKEN`, then
 > `<claude-config>/.oauth-token`, then `~/.claude/.credentials.json`) and sends it
 > upstream as `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` — the scheme
 > the API accepts an `sk-ant-oat…` token under (sent as `x-api-key` it 401s). So
 > `fak guard -- claude` just works on a logged-in subscription. fak holds the token and
-> ignores the client's own credential (it injects a placeholder key into the child).
+> ignores the client's own credential (it injects a placeholder key into the child). A
+> bare `ANTHROPIC_API_KEY` exported in your shell **no longer** switches this — a global
+> SDK key must not silently bill your API account when you hold a subscription; guard
+> prints a one-line note when it holds the subscription token past an ambient key.
 >
 > - **Long-running / headless:** prefer a `claude setup-token` (a long-lived token, read
 >   from `<claude-config>/.oauth-token` or `CLAUDE_CODE_OAUTH_TOKEN`) — the interactive
 >   `~/.claude/.credentials.json` token expires and Claude Code refreshes it out-of-band.
-> - **Use API billing instead:** set `ANTHROPIC_API_KEY` (or `--api-key-env`) and fak
->   forwards that as `x-api-key`. `--anthropic-oauth` forces the subscription path.
+> - **Use API billing instead:** opt in explicitly with `--api-key-env ANTHROPIC_API_KEY`
+>   (fak forwards it as `x-api-key`). `--anthropic-oauth` forces the subscription path and
+>   fails loud if no token is found.
 
 Wrap a different agent or upstream by naming it after `--` and switching the provider:
 
@@ -7970,8 +7977,10 @@ your subscription OAuth token. Copy-paste it.
   interactive login token, which expires — prefer a setup token for anything
   long-running). If you have used `claude` interactively on this box, the third source
   already exists.
-- `ANTHROPIC_API_KEY` is **unset**. With it set, guard uses API billing instead of the
-  subscription and this proof does not apply.
+- `ANTHROPIC_API_KEY` is **unset**. The subscription is the default even with it set, but
+  Check 3 below witnesses the **injected placeholder** key, which guard hands the child
+  only when `ANTHROPIC_API_KEY` is unset — so keep it unset for this exact proof. (To
+  deliberately use API billing instead, opt in with `--api-key-env ANTHROPIC_API_KEY`.)
 
 Run one headless, machine-checkable turn from the repo root (the Go module is the repo
 root), with the gateway log and the audit journal on:
@@ -13226,6 +13235,107 @@ or the VPC), never the public internet.
 - `cmd/fak/guard.go` — the `fak guard` front door (child-only base URL, subscription default, default-on hash-chained journal)
 - `tools/dogfood_coverage.py` — the coverage scorecard (run it to measure the 3x)
 - `tools/gcp_accel.py` — the GCP accelerator ladder for the GPU-burst in-kernel path
+
+---
+
+# Lab dev loop
+
+> Source: `docs/fak/lab-dev-loop.md`
+
+# Lab dev loop — develop fak ON a lab box, drive it from Slack
+
+This is the end-to-end loop for **running and developing fak on lab compute you choose**,
+driven out-of-band so you can start it from anywhere (a phone, a laptop) while every byte
+of the actual work runs on the box. It ties together four pieces that already exist: a
+model served on a lab GPU, a kernel-adjudicated dev turn pointed at it, a Slack control
+channel to drive it, and the public fleet view that folds the result.
+
+The split that makes it safe to keep public: the **kernel + the dev turn are public**
+(this repo); the **Slack transport is private** (the lab protocol carries lab identifiers,
+so it lives in `fak-private`). The seam between them is a data contract — a per-box report
+JSON — not a code import. See [the GPU-server / Slack boundary](https://github.com/anthony-chaudhary/fak/blob/main/docs/dgx-slack-boundary.md).
+
+```
+  you (Slack, from anywhere)
+        │  post a task line
+        ▼
+  private bridge ──▶ lab box you chose
+        ▲               │  runs:  fak guard --remote-serve <box>:8080 -- <agent> <task>
+        │               │           ├─ kernel adjudicates every tool call (local, on the box)
+        │  postback      │           └─ INFERENCE runs on the lab GPU (the remote fak serve)
+        └───────────────┘  + writes one fak.fleet.report/v1 line
+                                     │
+                                     ▼
+                            fleetctl status  (public fold + readiness score)
+```
+
+## The one new public piece: `fak guard --remote-serve`
+
+`fak guard` runs its own kernel gateway on a local loopback port and execs the agent;
+`--remote-serve HOST[:PORT]` points that agent's **inference** at a `fak serve` running on
+a lab box you chose. The kernel still adjudicates every tool call locally on the box, but
+the model forward runs on the lab GPU. Port defaults to `8080` (the documented `fak serve`
+addr). It is shorthand for the OpenAI-compatible wire `fak serve` exposes, with the `/v1`
+suffix handled for you, and it **preflights `GET /healthz`** so a box that is not serving
+fails loud before the gateway binds rather than 502-ing on the first turn.
+
+```bash
+# on the lab box: serve a model in fak's own kernel on the GPU
+FAK_Q4K=1 fak serve \
+  --gguf /srv/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf \
+  --engine inkernel --backend cuda \
+  --addr 0.0.0.0:8080
+
+# from the box (or the bridge session on it): run a kernel-adjudicated dev turn,
+# inference on this box's GPU, kernel local
+fak guard --remote-serve localhost:8080 -- claude
+```
+
+The banner shows the upstream as a **remote fak serve on a lab box** so you can see at a
+glance that the turn's compute is where you put it, not on a public API.
+
+## Driving it from Slack (private bridge)
+
+The Slack control channel that reaches the lab boxes is private — it speaks a lab protocol
+and carries a host, a channel id, and a token, none of which ever enter this repo. The
+entry point is [the private comms stub](https://github.com/anthony-chaudhary/fak/blob/main/docs/private-comms-channel.md); the live runbook is
+in `fak-private`. The shape of the loop, with no lab identifiers, is:
+
+1. Post a task line in the control channel.
+2. The bridge runs, on a persistent session on the box you chose:
+   `cd <repo> && fak guard --remote-serve localhost:8080 -- <agent> '<task>'`.
+3. The box posts the guard exit summary back to the channel and writes one
+   `fak.fleet.report/v1` line into the reports directory.
+
+Because the work runs in a session on the box, the body of the work never crosses Slack —
+only the task line in and the summary out. You drive it from anywhere; the compute stays
+on the machine you picked.
+
+## Folding the result (public)
+
+`fleetctl` reads the per-box report JSON the bridge wrote and gives you a bounded,
+readable fleet view and a 0–100 readiness score — see [fleet.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fleet.md):
+
+```bash
+fleetctl status --roster roster.json --reports DIR
+```
+
+## Boundary rules (do not trip)
+
+- The Slack control plane stays in `fak-private`. Never add `cmd|internal/*dgx*` or
+  `*slack*bridge*` paths here — the commit gate (`tools/check_committed_files.py`) refuses
+  them, and `internal/pythongate` refuses a new `tools/*.py`.
+- No real host, IP, channel id, or token in any tracked file. Real values live in
+  gitignored local files (`fak-mac.local.ps1`, `.env.slack.local`) and resolve through
+  `FAK_*` overrides — the convention in [scrubbing real values](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/scrubbing-real-values.md).
+
+## See also
+
+- [Always-on dogfood server](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/always-on-dogfood-server.md) — the 24/7 framing this loop is
+  the lab-GPU lane of; section 2 covers the GPU-burst ladder via `tools/gcp_accel.py`.
+- [GPU-server / Slack boundary](https://github.com/anthony-chaudhary/fak/blob/main/docs/dgx-slack-boundary.md) — what is public vs private.
+- [private-comms-channel](https://github.com/anthony-chaudhary/fak/blob/main/docs/private-comms-channel.md) — how to reach the bridge.
+- [fleet.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fleet.md) — the public fleet fold + readiness score.
 
 ---
 
@@ -22438,7 +22548,7 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] `fak guard -- <agent>` is the one-command adopter front door that collapses the dogfood path (a shell launcher + two terminals + six env vars + manual teardown) into one cross-platform Go verb. It starts the in-process gateway on a private loopback port, injects its URL into the CHILD process env only (never the parent shell or `settings.json`), execs the real agent interactively, and prints a verdict roll-up on exit. The default upstream is the Anthropic API in passthrough mode, so `fak guard -- claude` wraps a normal Claude Code session with the capability floor armed while the user's own key + prompt-cache breakpoints pass through untouched. A secure floor is embedded in the binary so it works from any directory (`--dump-policy` prints it; `--policy FILE` overrides). The exit audit reads `Server.AdjudicationSummary` from the same operation counters `/metrics` exposes, so it cannot overstate the protection. Witness: `go test ./cmd/fak` — `TestGuardDefaultPolicyDeniesDangerAllowsBenign` (the embedded floor denies `rm -rf`/`sudo`/RCE-pipe, allows `Read`, fails closed on unlisted tools), `TestGuardEnvVar`, `TestGuardDefaultBaseURL`, `TestFormatAuditSummary`, `TestGuardWaitHealthy`; end-to-end, a wrapped child posting to `/v1/fak/adjudicate` is denied/allowed by the kernel and the exit line reports the real tally.
 - [SHIPPED] **Serving-latency observability — percentile-capable TTFT / TPOT / end-to-end histograms on `/metrics`.** The gateway emitted TTFT and decode only as cumulative MEANS (`fak_gateway_inference_prefill_seconds_total` / `_ttft_turns_total`, a derived rate), which structurally hide the P95/P99 tail an operator watches under load. `internal/gateway` `writeInferenceMetrics` now also emits three Prometheus HISTOGRAMS, fed on the same turn-completion path under the same `inferenceMu`: `fak_gateway_inference_ttft_seconds` (time-to-first-token, over the streaming turns whose prefill boundary is observable), `fak_gateway_inference_tpot_seconds` (per-output-token / inter-token latency = decode wall-clock ÷ generated tokens), and `fak_gateway_inference_e2e_seconds` (whole model-turn wall-clock, every served turn) — the fak analogues of vLLM's `vllm:time_to_first_token_seconds` / `vllm:inter_token_latency_seconds` / `vllm:e2e_request_latency_seconds`, so P50/P95/P99 are now queryable instead of only a mean. They stay empty (count 0) on an idle gateway, so no phantom distribution is published. With the existing running-request gauge (`fak_gateway_inflight_requests` + `_inflight_max_age_seconds`), the token-level prefix-cache-hit family (`fak_gateway_kv_prefix_{prompt,reused}_tokens_total` + `_reuse_ratio`), and the KV-residency family (`fak_gateway_kv_memory_*`), this brings the de facto vLLM Prometheus metric-SET to parity. Honest fence: OTLP/OpenTelemetry distributed-trace span EXPORT (gen_ai.* spans, vLLM's `--otlp-traces-endpoint`) is NOT shipped — fak threads an end-to-end `TraceID` but does not export OTLP spans. Witness: `go test ./internal/gateway -run TestInferenceLatencyHistograms` (idle histograms count 0; a buffered turn lands in e2e only; a streamed turn lands in all three with the right buckets and sums).
 - [SHIPPED] **Cache-prefix-preserving history compaction — the 100k+-session cost lever on the flagship `fak guard -- claude` / `fak serve` Anthropic passthrough, DEFAULT-ON** (`--compact-history-budget N`, defaulting to ~48k resident tokens via `gateway.DefaultCompactHistoryBudget` so a sprawling conversation is shed with NO operator configuration — a short session stays untouched, and `--compact-history-budget 0` is the explicit byte-for-byte opt-out; `agent.CompactAnthropicHistory` + `internal/gateway/messages.go:maybeCompactAnthropicRaw`; the #555 `req.Raw` transform). On the ONE route that forwards the body byte-for-byte (so the client's prompt-cache breakpoints survive), an append-only long session re-sends the whole transcript every turn. This compactor sheds OLD whole turns to a resident-token budget while keeping the cache_control prefix **byte-identical** — it SPLICES on the original bytes (a memcpy of the protected prefix through the last `cache_control` breakpoint, never a re-marshal that would reorder JSON keys and break the cache), so the upstream cache hit is preserved instead of destroyed. The protected prefix is whole-message-granular and the transform is **fail-safe identity** on any ambiguity (no breakpoint, suffix already under budget, non-JSON, <3 messages, or a splice that fails to re-decode), so it never breaks a turn; tool_use↔tool_result pairs and role alternation are preserved; a `[fak] compacted N earlier turns` stub marks the drop. It is a request-side transform only — the kernel still adjudicates the FULL decoded history, so the trust boundary is unchanged. Honest fence: token counts use the bytes/4 `EstimateAnthropicTokens` proxy (the budget unit); the value is provider-cache survival via byte-identity, and the live provider-side `cache_read_input_tokens` capture is the credentialed-host follow-on (epic #745). Witness: `go test ./internal/agent ./internal/gateway -run Compact` (`TestCompactPreservesCachePrefix`, the 8 fail-safe `TestCompactIdentityCases`, `TestCompactToolPairNotOrphaned`, `TestMaybeCompactOnShortensKeepsPrefix`, `TestMaybeCompactOffIsIdentity`, `TestMaybeCompactNonPassthroughIsIdentity`, the default-on trigger `TestMaybeCompactDefaultBudgetTrigger` + `TestMaybeCompactDefaultBudgetLeavesShortSessionAlone`, and the flag default `go test ./cmd/fak -run TestCompactHistoryBudgetDefaultsToDefaultConst`); end-to-end dogfood on the real wire — `experiments/agent-live/compact-100k-session-dogfood-2026-06-25.json` (142,516-token inbound → 6,597 forwarded, 95.4% shed, OFF/ON cache-prefix sha256 equal).
-- [SHIPPED] **Oversized-result elision TRADEOFF witness — the missing number that lets the `--elide-result-bytes` lever be flipped on a proof, not a guess.** The elision rewrite (`agent.ElideOversizedToolResults`; the third `req.Raw` byte-splice sibling of compaction) is STRUCTURALLY safe — its working-set guard (`DefaultKeepRecentTurnsForElide=6`) only ever shrinks a tool_result that has scrolled ≥6 turns past the active window, and it asserts cache-prefix byte-identity before shipping — but it had no witness QUANTIFYING the shed-vs-keep tradeoff, so it shipped DARK (`gateway.DefaultElideResultBytes=0`) and flipping the default blind would have been the unproven claim the repo refuses. `fak elide-witness` produces that witness: it discovers the operator's own local Claude Code session transcripts (the same `~/.claude*/projects/<ns>/*.jsonl` store `fak debug --list` reads), reconstructs each session's last-turn outbound `/v1/messages` body, and over each runs BOTH `agent.MeasureElisionTradeoff` (classifies every oversized result by zone — Elidable vs working-set-Protected vs prefix-Protected, sharing the exact zone math the rewrite uses, proven no-drift by `TestMeasureMatchesRewrite`) and the real `ElideOversizedToolResults` rewrite (asserting prefix byte-identity + a clean re-decode + zero orphaned tool_use/tool_result pairs on each real body). The headline is the tradeoff PAIR, never a bare shed number: tokens shed AND the count of oversized results the working-set guard HELD BACK. HONEST FENCES: the default is NOT flipped (`DefaultElideResultBytes` stays 0) — the witness makes the flip a deliberate, informed decision (`gateway.DocumentedElideResultBytes=16384` is the candidate), it does not auto-arm it; the shed is a bytes/4 `EstimateAnthropicTokens` proxy; the per-session figure is the worst-case last-turn body (each accumulated oversized result counts once), not a per-turn bill; PRIVACY — the artifact records only counts, byte lengths, token estimates, and session-id digests, never a prompt, tool argument, result body, or any raw transcript text. Witness: `go test ./internal/agent -run 'TestMeasure'` (zone split, no-drift vs the rewrite, whole-body working-set guard, fail-safe) + `go test ./cmd/fak -run TestElideWitness` (the tradeoff both ways on a synthetic 2-session corpus, prefix byte-identity on every fired rewrite, 0 orphaned pairs, NO_CORPUS honesty, privacy leak-scan); real-corpus run — `experiments/agent-live/elide-result-witness-2026-06-26.{json,md}` (200 local sessions: ~1.15M tokens shed across 158 elidable results in 64 sessions, the working-set guard HELD BACK 8 oversized results the model had just fetched in 6 sessions, cache-prefix byte-identity held on all 64 fired rewrites, 0 orphaned pairs).
+- [SHIPPED] **Oversized tool_result elision — the bounded-loss `req.Raw` byte-splice sibling of compaction (`--elide-result-bytes`).** `agent.ElideAnthropicResults` / `ElideAnthropicResultsWithOutcome` shrink an oversized scrolled-past tool_result body (a file dump, a long command output, a giant search result) to a bounded **head+tail** form, byte-splicing on the ORIGINAL bytes so the cached **head** prefix is copied VERBATIM — the same cache guarantee compaction makes, enforced the same way (`internal/agent/anthropic_elide.go`). The working-set guard only ever shrinks a tool_result that is STRICTLY AFTER the protected prefix (the first cache_control breakpoint message), OUTSIDE the recent working-set window (the last `elideRecentKeepMsgs=4` messages), and in a message carrying no cache_control a **deep** detector (`messageHasCacheControlForElide` — one nesting level deeper than compaction's, recursing into `tool_result.content`) can reach. Value byte-ranges are located by KEY (`objectValueSpan`), never a `bytes.Index` over the block a sibling field could mis-hit. Wired into BOTH serving wires so the saver is default-on regardless of which model is fronted: the flagship `fak guard -- claude` Anthropic passthrough (`gateway.maybeElideAnthropicRaw`, the req.Raw byte-splice above) AND the **decoded local-model path** (`gateway.maybeElideMessages` / `agent.ElideMessages` on the `[]Message` history — the OpenAI / in-kernel wire a model served BY fak takes, where `anthropicPassthrough()` is false and the byte-splice never fires, e.g. **GLM-5.2 / Qwen-3.6-27B**; a tool result there is a `Message{Role:"tool"}` string, shrunk deterministically so a local backend's RadixAttention prefix cache stays stable). Across both front doors (`fak guard`, `fak serve`); **ON by default** (`gateway.DefaultElideResultBytes = gateway.DocumentedElideResultBytes = 16384`; pass `--elide-result-bytes 0` to opt out). Fail-safe identity on any ambiguity (no cache anchor, non-JSON, nothing oversized, a splice that fails to re-decode or alters the head prefix); request-side transform only — the kernel adjudicates the FULL decoded history, so the trust boundary is unchanged. **Cache framing (honest):** this is the cascade trade compaction makes, NOT "never touches a cached byte" — editing the middle shifts the bytes a LATER (recent-turn) breakpoint caches, so those cascade-burst while the dominant HEAD-breakpoint prefix stays byte-identical (asserted before ship) and the provider's read walks back to it. **Default-on basis + HONEST FENCES:** flipped on by parity with the compaction sibling (default-on with the same class of evidence) plus a stronger safety basis — two adversarial-verification rounds (below), a synthetic dogfood (`TestElideShedMagnitudeOnLargeCodingSession`: ~56% shed on a 319 KB crafted coding session, recent + head preserved), and a real-corpus prevalence scan (oversized tool_results in ~31% of 600 sampled real Claude Code sessions, ~2.9M estimated tokens of elidable content; `experiments/agent-live/elide-oversized-prevalence-2026-06-26.json`). What is still NOT built: there is NO `fak elide-witness` command and NO `MeasureElisionTradeoff` (an earlier version of this entry described those plus a fabricated 200-session artifact as shipped — they never were; this entry corrected that overclaim). The EXACT per-turn shed measured on reconstructed real `/v1/messages` bodies (the `fak elide-witness` dogfood) is the remaining follow-on; the prevalence scan measures the elidable RAW MATERIAL, not the realized per-turn bill. An adversarial multi-agent review (two rounds, 6 skeptics) found and this implementation CLOSED four real bugs before ship: a cache_control nested in `tool_result.content` missed by the shallow detector (a cache-burst vector), a `bytes.Index` value mis-location when `tool_use_id` equalled the content (field corruption), a "strictly non-bursting" overclaim (corrected to the cascade framing above), and — on re-attack of the fix — an array-branch `decodeArrayElements` re-search that a byte-identical sibling array could still mis-splice (closed by `arrayElementSpans`, base-0 spans, so no `bytes.Index` over a container remains). Witness: `go test ./internal/agent -run 'TestElide|TestObjectValueSpan'` (shrinks an old oversized result; holds the head prefix byte-identical; protects the cache_control, the nested-cache_control, and the recent results; string + array content shapes; the duplicate-`tool_use_id` corruption regression; the deep-anchor regression; fail-safe identity) + `go test ./internal/gateway -run TestMaybeElide` (OFF identity, non-passthrough identity, ON shrinks while the head prefix stays verbatim).
 - [SHIPPED] **ctxplan planned VIEW on the Anthropic passthrough — the deferred #555 `req.Raw` transform (#927).** The buffered `maybePlanMessages` path re-plans the DECODED `[]Message`, which could never reach the flagship `fak guard -- claude` route (that route forwards `req.Raw` byte-for-byte so the client's `cache_control` prefix survives → a real upstream cache hit; a re-marshal would reorder JSON keys and bust the cache). `agent.CompactAnthropicHistoryToView` + `gateway.maybePlanAnthropicRaw` close that gap: when `--ctx-view-budget > 0`, each passthrough turn the gateway plans `req.Messages` into an O(1) resident view and materializes it onto `req.Raw` by REPLACING each elided middle message IN PLACE with a same-role `[fak] ctxview-elided` stub — so the message COUNT and the user/assistant role alternation are preserved EXACTLY (Anthropic accepts the body), the protected `cache_control` prefix bytes and every resident message's original bytes are copied VERBATIM (upstream cache hit survives), and the planner's non-contiguous resident-set misses are shed (strictly harder than compaction's contiguous-suffix drop). Gated behind `--ctx-view-budget` (OFF at 0, same posture as the buffered path); fail-safe identity on any ambiguity (no breakpoint, non-JSON, a would-be-elided message that carries its own `cache_control`, tool_use/tool_result blocks fak cannot confidently match — always kept, so tool pairings stay intact, or a splice that fails to re-decode or alters the prefix). Request-side transform only — the kernel still adjudicates the FULL decoded history, so the trust boundary is unchanged. Honest fence: the same-role-stub approach preserves alternation but does NOT reduce the message count (it shrinks bytes, not slots), so a session near Anthropic's message-count limit gains less headroom than compaction's contiguous drop; and the resident set is the heuristic forecast's selection, not an oracle (a miss costs one demand-page fault, never a lost fact — witnessed at the seam in `internal/agent`). Witness: `go test ./internal/gateway -run TestCtxViewHTTPAnthropicPassthrough` (OFF forwards `req.Raw` byte-for-byte; ON stubs the off-topic middle turn beyond the cached system prefix, prefix bytes byte-identical, the elided span demand-pages back under a permissive re-plan); `go test ./internal/agent -run TestCompactToView` (byte-level stub + identity-when-all-resident + tool-blocks-kept).
 
 ## Model routing (per-aspect + ensemble — `fak route`)
