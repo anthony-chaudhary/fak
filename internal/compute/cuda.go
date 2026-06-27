@@ -372,8 +372,22 @@ func (c *cudaBackend) GraphBegin() bool {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	// #969: deepen every pool bucket BEFORE opening capture. The warm forward pools one set of
+	// each transient size, but a single captured decodeChain holds several same-size transients
+	// (the per-layer RMSNorm outputs, etc.) live at once, so the pool can drain mid-forward and a
+	// same-size devTr then misses -> cudaMalloc, illegal during capture. graphPrewarmDepth spares
+	// per bucket bound the peak same-size concurrency for any realistic layer count; this runs
+	// outside capture, so the cudaMalloc's here are legal and the captured forward is then served
+	// entirely from the free list.
+	C.fcuda_graph_prewarm(C.int(graphPrewarmDepth))
 	return C.fcuda_graph_begin() == 0
 }
+
+// graphPrewarmDepth is the spare-buffer headroom per pool size class seeded before each capture.
+// The peak same-size live transient count in one decode forward scales with layer count (a couple
+// per layer); 128 comfortably covers deep models while costing only a few hundred bytes × 128 per
+// distinct small size — negligible VRAM, paid once per token boundary and almost entirely reused.
+const graphPrewarmDepth = 128
 
 // GraphEndLaunch instantiates, launches, and fences the captured CUDA graph for
 // the token — the replay half of GraphBegin.

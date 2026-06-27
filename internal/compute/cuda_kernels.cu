@@ -148,6 +148,29 @@ extern "C" void fcuda_free(void *d) {
   }
 }
 
+// fcuda_graph_prewarm deepens every pool bucket by `extra` spare buffers (#969). The warm
+// forward before capture pools ONE set of each transient size, but a single captured decodeChain
+// holds several same-size transients live AT ONCE (e.g. the per-layer RMSNorm outputs), so the
+// pool can drain mid-forward and the next same-size devTr misses -> cudaMalloc, which is illegal
+// while g_stream is capturing. Called once right before fcuda_graph_begin (outside capture), this
+// guarantees headroom so the captured forward is served entirely from the free list. Idempotent
+// and cheap: it only tops each bucket up to `extra` spares (a few hundred bytes each).
+extern "C" void fcuda_graph_prewarm(int extra) {
+  if (extra <= 0) return;
+  // Snapshot the sizes first: pushing into g_pool while iterating it would invalidate iterators.
+  std::vector<size_t> sizes;
+  sizes.reserve(g_pool.size());
+  for (auto &kv : g_pool) sizes.push_back(kv.first);
+  for (size_t bytes : sizes) {
+    auto &bucket = g_pool[bytes];
+    while ((int)bucket.size() < extra) {
+      void *d = nullptr;
+      if (cudaMalloc(&d, bytes) != cudaSuccess || !d) break; // best-effort; a real OOM still fails loud later
+      bucket.push_back(d);
+    }
+  }
+}
+
 extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
   for (auto it = g_pool.begin(); it != g_pool.end(); ) {
     if (it->first > max_keep_bytes) {
