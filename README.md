@@ -1,6 +1,6 @@
 # fak - Fused Agent Kernel
 
-<!-- readme-verified: 2026-06-25 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
+<!-- readme-verified: 2026-06-27 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
 **One binary you put in front of the agent you already run — it keeps your key, puts a default-deny floor under every tool call, and makes long sessions cheaper.**
 
@@ -38,9 +38,10 @@ gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`) the in-kernel GPU decode hol
 request gets an answer instead of a shrug.
 
 **Pick your path:** wrap the agent you already run in one command
-([`fak guard`](#use-it-with-your-agent)), put `fak` in front of any OpenAI / Anthropic /
-MCP endpoint ([`fak serve`](#any-openai-compatible-or-anthropic-compatible-client)), or —
-if a hard security floor is why you're here — jump to
+([`fak guard`](#use-it-with-your-agent)), stand up an always-on gateway and point any CLI at
+it ([`fak node`](#an-always-on-gateway-fak-node)), put `fak` in front of any OpenAI /
+Anthropic / MCP endpoint ([`fak serve`](#any-openai-compatible-or-anthropic-compatible-client)),
+or — if a hard security floor is why you're here — jump to
 [For security teams](#for-security-teams).
 
 It does this by sitting on the tool-call path as a kernel. The model *proposes* a
@@ -125,6 +126,28 @@ turn. It guarantees the prefix is byte-identical, then relays the provider's own
 How and why, with the metrics:
 [Long sessions: keep the cache hit](docs/explainers/long-sessions-keep-the-cache-hit.md).
 Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
+
+### An always-on gateway: `fak node`
+
+`fak guard` is per-session. When you want one gateway running all the time — on the laptop
+in front of you, or one always-on box you connect to from a phone or a second machine —
+`fak node` is the durable lifecycle. It installs `fak serve` as a real system service
+(macOS launchd, Linux systemd `--user`, Windows Scheduled Task), points a client at it,
+and tears it down, with the same five commands whether the node is local or fleet-wide.
+
+```bash
+fak node install            # gateway as a system service on this host (loopback by default)
+fak node use HOST:PORT       # on a client: record the node + print the export lines
+fak node run -- claude       # launch the CLI pointed at the configured node
+fak node status              # service state + /healthz for loopback and the node
+fak node forget              # disconnect this client
+```
+
+The upstream credential lives on the host; clients present only the gateway's bearer key,
+never the upstream secret. `--remote` binds beyond loopback and prints connection lines for
+a Tailscale-routed setup.
+
+See [docs/fak/node-setup.md](docs/fak/node-setup.md).
 
 ### Codex, Cursor, MCP hosts
 
@@ -249,8 +272,8 @@ treats a cache hit as a realized rebate, never something the answer depends on. 
 proves or refutes each saving from the provider's own usage counters.
 
 ```bash
-go run ./cmd/fak vcache status
-go run ./cmd/fak vcache prove
+./fak vcache status
+./fak vcache prove
 ```
 
 Evidence from two live traces:
@@ -279,9 +302,9 @@ An ensemble is a first-class plan. Supported reductions include `vote` and
 Try it offline:
 
 ```bash
-go run ./cmd/fak route --aspect tool_call --tool write_file --simulate "approve,deny,deny"
-go run ./cmd/fak route --aspect step --complexity high
-go run ./cmd/fak routebench
+./fak route --aspect tool_call --tool write_file --simulate "approve,deny,deny"
+./fak route --aspect step --complexity high
+./fak routebench
 ```
 
 The router is useful because it sits at the same point as the security floor. A
