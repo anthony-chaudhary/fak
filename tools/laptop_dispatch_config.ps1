@@ -42,7 +42,7 @@ Write-Host "  FLEET_WORKER_BACKEND = $env:FLEET_WORKER_BACKEND"
 Write-Host "  FAK_SUPERVISOR_TARGET = $env:FAK_SUPERVISOR_TARGET"
 Write-Host ""
 Write-Host "To make permanent, re-run with -Permanent"
-Write-Host "To test dry-run: python tools\dispatch_worker.py --dry-run --backend $Backend --lane tools"
+Write-Host "To test dry-run: tools\.bin\dispatchworker --dry-run --backend $Backend --lane tools"
 
 if ($Permanent) {
     # Set permanent environment variables (requires admin)
@@ -51,7 +51,10 @@ if ($Permanent) {
     Write-Host "Set permanent environment variables (User scope)"
 }
 
-# Test the configuration
+# Test the configuration via the interpreter-free Go launcher (cmd/dispatchworker;
+# `make build` drops it at tools/.bin/dispatchworker, the dos.toml [supervise]
+# worker_launch_template). Avoids the bare-'python' ENOENT on a python3-only node
+# (#22) — the live launch path no longer shells a bare 'python'.
 Write-Host ""
-Write-Host "Testing dispatch_worker.py..."
-python tools\dispatch_worker.py --dry-run --backend $Backend --lane tools --json | ConvertFrom-Json | Select-Object ok, lane, backend, workspace
+Write-Host "Testing tools\.bin\dispatchworker..."
+tools\.bin\dispatchworker --dry-run --backend $Backend --lane tools --json | ConvertFrom-Json | Select-Object ok, lane, backend, workspace
