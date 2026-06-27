@@ -85,6 +85,36 @@
       "source": "https://docs.vllm.ai/en/stable/design/prefix_caching/ ; PagedAttention arXiv:2309.06180"
     }
   ],
+  "comparables": {
+    "note": "The four apples-to-apples axes #430 asks each peer to report (TTFT, throughput, KV memory, cache-hit behavior), mapped per engine on the comparable shape. This introduces NO new measurement: every cell restates a peers[]/source field above, and a null cell means 'not measured on this host' (see host_ceiling[]), never an implied zero. fanbench's own side of these axes is col A/B in three_columns_kept_separate (reuse geometry + cache pricing), kept deliberately apart from this tuned-engine column.",
+    "axes": ["ttft", "throughput", "kv_memory", "cache_hit_behavior"],
+    "rows": [
+      {
+        "engine": "llama.cpp",
+        "shape": "P=1024, D=32, C-sweep (the head-to-head fanout point)",
+        "ttft": "shared-prefix prefill ~420 ms at P=1024, flat in C (computed once) — the prefix-share TTFT proxy",
+        "throughput": "peak 17.2 agents/s @ C=32 vs fak 5.2 — llama.cpp AHEAD (preliminary)",
+        "kv_memory": "one unified KV arena; prefix cells shared across sequences via seq_cp, not duplicated, no copy-on-write",
+        "cache_hit_behavior": "prefill cost flat in C — the shared prefix is computed once then reused across all C sequences"
+      },
+      {
+        "engine": "SGLang / RadixAttention",
+        "shape": "agents (ReAct: C concurrent agents share a system prefix)",
+        "ttft": null,
+        "throughput": "SGLang published up to 6.4x (Llama-2 7B-70B fp16, GPU regime); fanbench's batch-1 CPU run does not out-throughput it",
+        "kv_memory": null,
+        "cache_hit_behavior": "86.7% agents cache-hit-rate (fak matches, inside SGLang's 50-99% band); cache-aware scheduling = 100% of optimal"
+      },
+      {
+        "engine": "vLLM Automatic Prefix Caching",
+        "shape": null,
+        "ttft": null,
+        "throughput": null,
+        "kv_memory": null,
+        "cache_hit_behavior": "NOT RUN on this host (SERVER_UNAVAILABLE, no GPU) — recorded as a ceiling, never extrapolated"
+      }
+    ]
+  },
   "host_ceiling": [
     {
       "path": "llama.cpp same-host fresh run",
