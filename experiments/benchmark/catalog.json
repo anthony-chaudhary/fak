@@ -2,6 +2,9 @@
   "$schema": "benchmark/catalog.v1",
   "index": {
     "by_date": {
+      "2026-06-27": [
+        "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
+      ],
       "unknown": [
         "node-agent-live-offline-mock-20260617",
         "workstation-a-unknown-unknown-20260617",
@@ -61,6 +64,9 @@
       ]
     },
     "by_model": {
+      "GLM-5.2-UD-Q4_K_M": [
+        "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
+      ],
       "Qwen2.5-1.5B-Instruct": [
         "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623"
       ],
@@ -194,6 +200,9 @@
         "workstation-a-visualgen-20260620T140700Z",
         "node-macos-a-sessionbench-20260619"
       ],
+      "q4": [
+        "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
+      ],
       "q8": [
         "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
         "workstation-a-radixbench-smollm2-135m-20260618",
@@ -242,10 +251,10 @@
       "gpu": "none",
       "hostname": "cpu-server",
       "id": "cpu-server-a",
-      "last_run": null,
+      "last_run": "2026-06-27T00:00:00Z",
       "os": "Linux",
       "role": "bench-node",
-      "runs": 0
+      "runs": 1
     },
     "desktop": {
       "arch": "x86_64",
@@ -1134,6 +1143,27 @@
         "experiment"
       ],
       "timestamp": "20260625T050017Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "cpu-server-a",
+      "model": "GLM-5.2-UD-Q4_K_M",
+      "path": "experiments\\benchmark\\runs\\by-machine\\cpu-server-a\\20260627T000000Z-glm52-cpu-wedge",
+      "peak_tok_per_sec": null,
+      "precision": "q4",
+      "provenance": "unknown",
+      "run_id": "cpu-server-a-glm52-cpu-wedge-20260627T000000Z",
+      "speedup": null,
+      "tags": [
+        "cpu-only",
+        "glm52",
+        "no-gpu",
+        "b3",
+        "engine-llama-pending",
+        "engine-fak-native-wedged",
+        "negative-result"
+      ],
+      "timestamp": "2026-06-27T00:00:00Z"
     }
   ],
   "version": "1.0"
