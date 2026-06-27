@@ -304,11 +304,12 @@ but not the system's focus; `○` = not addressed; `[GAP]` = fak's own unbuilt r
    SGLang (RadixAttention)  ◐            ●             ●             ○
    llama.cpp                ○            ◐             ●             ◐  (K-shift: approx, not exact)
    ─────────────────────────────────────────────────────────────────────────────────────
-   fak                      ◐ rides      ●  CAS        ● own arena   ●  THE owned layer
-                            above a        (uses,        (in-kernel    coherent middle-evict
-                            router         not its       model) +      (bit-exact) · quarantine
-                            (§1)           moat)         [GAP] ext.    · provenance · capability
-                                                         co-residence  · arbitration · PROVABLE
+    fak                      ◐ rides      ●  CAS        ◐ own arena   ●  THE owned layer
+                             above a        (uses,        (in-kernel    coherent middle-evict
+                             router         not its       model, but     (bit-exact) · quarantine
+                             (§1)           moat)         shipped       · provenance · capability
+                                                          path is       · arbitration · PROVABLE
+                                                          copy-CAS)
 ```
 
 Three things to read off it:
@@ -324,10 +325,7 @@ Three things to read off it:
    need to win it" is **not** "rules it out" — see the next section: several of these
    lower rungs are actually *cheaper in fak's context* than in a serving engine's, and
    they're on the roadmap to integrate, not to avoid.
-3. **fak's only solid-bottom score is a borrowed one.** Its fusion `●` (own in-kernel
-   arena) isn't the differentiator — per the dependency above, it's the *substrate*
-   that lets the one `●` that matters, the semantics column, be **provable** rather
-   than merely claimed.
+3. **fak's fusion `◐` is a substrate, not a differentiator.** Its in-kernel model owns an arena (zero-copy), but the shipped agent path (gateway + external provider) is copy-CAS. The arena-ownership matters only as the *substrate* that lets the one `●` that matters, the semantics column, be **provable** rather than merely claimed.
 
 The matrix is the four-word test rendered as a scoreboard: a win in the first three
 columns is a win at a layer many systems already own; the column that is fak's to win
