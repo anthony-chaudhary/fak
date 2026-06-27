@@ -13,10 +13,11 @@ type serveCapBackend struct {
 	total, free         int64
 	hostTotal, hostFree int64
 	known, hostKnown    bool
+	uploadDtype         bool
 }
 
 func (b serveCapBackend) Caps() compute.Caps {
-	return compute.Caps{CapacityProbe: true, HostCapacityProbe: b.hostKnown}
+	return compute.Caps{CapacityProbe: true, HostCapacityProbe: b.hostKnown, UploadDtype: b.uploadDtype}
 }
 func (b serveCapBackend) DeviceMemory() (int64, int64, bool) { return b.total, b.free, b.known }
 func (b serveCapBackend) HostMemory() (int64, int64, bool) {
@@ -244,6 +245,42 @@ func TestServeGGUFCPUOffloadMemoryPlanKeepsExpertsHostScoped(t *testing.T) {
 	}
 	if fe.Want != deviceWant {
 		t.Fatalf("FitError Want = %d, want device-only dense+KV+HAL transient side", fe.Want)
+	}
+}
+
+// #949: a standard-arch device serve with FAK_Q4K must hold raw Q4_K weights RESIDENT ON THE
+// DEVICE — the same non-offload, quant-aware plan the Q8 arm uses, but charged at raw Q4_K
+// density (~0.56 B/param) instead of Q8 (~1 B/param). The bug was the dispatch ordering, which
+// is exercised end-to-end only on a GPU; here we pin the plan-layer invariant that the standard-
+// arch Q4_K serve routes to the device-RESIDENT plan (no host expert offload), which is what the
+// new arm selects via fitAndPlanServeGGUFPathOnDevice(..., f32Resident=false, ...).
+func TestServeQ4KStandardArchUsesDeviceResidentNotOffloadPlan(t *testing.T) {
+	ws := serveSynthConfiguredWeightSource(t) // a standard llama-arch (qwen2) source, Q4_K weight tensor
+	plan, err := serveGGUFMemoryPlan(ws, false, 8)
+	if err != nil {
+		t.Fatalf("serveGGUFMemoryPlan: %v", err)
+	}
+	by := plan.ByClass()
+	// Raw Q4_K density: tensor "b" (256*4096 elems) charged 589824 bytes (~0.5625 B/elem), plus
+	// the F32 tensor "a" (1048576). This is the resident weight total the new arm fits — NOT the
+	// Q8 ~1 B/param total, and NOT split into an offload class.
+	if got, want := by[compute.MemoryWeights], int64(1048576+589824); got != want {
+		t.Fatalf("device-resident weights = %d, want raw Q4_K density %d", got, want)
+	}
+	if got := by[compute.MemoryOffload]; got != 0 {
+		t.Fatalf("standard-arch no-offload Q4_K serve must charge 0 host-offload bytes, got %d", got)
+	}
+	// The resident plan must fit a device sized for the Q4_K-resident total (the VRAM win that
+	// #949 unlocks): build a backend just large enough for the device side and assert it fits.
+	deviceWant := plan.DeviceTotal()
+	uploadFits := serveCapBackend{Backend: compute.Default(), total: deviceWant + deviceWant/4, free: compute.FreeUnknown, known: true, uploadDtype: true}
+	if err := fitServeGGUFOnDevice(ws, uploadFits, false, 8); err != nil {
+		t.Fatalf("device-resident Q4_K plan should fit a backend sized for it: %v", err)
+	}
+	// And the backend the new arm requires advertises quantized upload — the guard that keeps a
+	// non-quant-upload backend on the f32/Q8 fallback arms unchanged.
+	if !uploadFits.Caps().UploadDtype {
+		t.Fatal("test backend must advertise UploadDtype to reach the resident Q4_K arm")
 	}
 }
 
