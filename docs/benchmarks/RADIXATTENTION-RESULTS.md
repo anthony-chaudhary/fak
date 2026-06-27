@@ -107,9 +107,7 @@ concurrent serving), so a bounded cache thrashes under FCFS:
 | **FCFS** (interleaved arrivals) | 62.1 % | 72 % |
 | **cache-aware** (lexicographic ≡ DFS) | **86.7 %** | **100 %** |
 
-Cache-aware scheduling recovers the full hit rate — reaching 100 % of optimal (vs the
-paper's 96 % average), because our offline lexicographic sort *is* exact DFS pre-order, the
-configuration the theorem says is optimal. The single-prefix workloads (few-shot,
+Cache-aware scheduling recovers the full hit rate — reaching 100 % of optimal (vs the paper's 96 % average across workloads for their online scheduler). Our offline lexicographic sort *is* exact DFS pre-order on the agents workload, the configuration the theorem says is optimal when the full request set is known in advance. The single-prefix workloads (few-shot,
 multi-turn, ToT) are order-insensitive (FCFS already == cache-aware == optimal), which is
 itself the predicted result: scheduling only matters when independent prefix groups
 interleave.
