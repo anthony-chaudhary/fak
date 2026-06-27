@@ -196,6 +196,43 @@ class DosSupervisorCanaryTest(unittest.TestCase):
             self.assertEqual(got["recurring_blockers"][0]["blocker"], "workspace_safety:dirty")
             self.assertIn("--history --json", got["recurring_blockers"][0]["command"])
 
+    def test_recurring_blocker_route_targets_findings_queue_not_a_phantom_plan(self) -> None:
+        # Regression guard for #182: the recurring-blocker route once pointed
+        # operators at "PLAN-fleet-always-on-dispatch-2026-06-19.md section 5",
+        # a plan file that was never migrated into the tree (no such file, no
+        # git history, plan_audit total_plans=0). c3596d1b repointed it to the
+        # live fleet findings queue; lock that so the dead route cannot return.
+        mod = load()
+        event = {
+            "schema": mod.RECORD_SCHEMA,
+            "recorded_utc": "2026-06-19T00:00:00Z",
+            "workspace": "C:/work/fleet",
+            "ok": False,
+            "action": "dry_run",
+            "live": False,
+            "reason": "worktree has 1 dirty path(s)",
+            "next_action": "commit or stash",
+            "audit": {"verdict": "BLOCKED", "finding": "typed_blocker"},
+            "launch": {"action": "would_enact"},
+            "blockers": ["workspace_safety:dirty"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            history_path = Path(td) / "history.jsonl"
+            history_path.write_text(
+                json.dumps(event) + "\n" + json.dumps({**event, "recorded_utc": "2026-06-19T00:01:00Z"}) + "\n",
+                encoding="utf-8",
+            )
+
+            got = mod.summarize_history(Path("C:/work/fleet"), record_dir=Path(td))
+
+            route = got["recurring_blockers"][0]["route"]
+            # The route must not resurrect the phantom plan reference...
+            self.assertNotIn("PLAN-fleet-always-on-dispatch", route)
+            self.assertNotIn(".md section", route)
+            # ...and must point at the real, in-tree destination.
+            self.assertIn("findings queue", route)
+
     def test_history_without_records_is_ok_and_names_record_command(self) -> None:
         mod = load()
 
