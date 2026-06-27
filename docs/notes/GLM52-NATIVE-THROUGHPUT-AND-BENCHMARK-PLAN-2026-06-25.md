@@ -121,6 +121,17 @@ metrics for every engine:
   first honest cross-engine number, at small scale.
 - **B3 — real mid checkpoint, one GPU:** a quantized GLM that fits one datacenter GPU — fak vs
   llama.cpp vs vLLM/SGLang on decode/prefill/throughput@conc **+ correctness**.
+  - **B3 (CPU host):** the same apples-to-apples cross-engine row on a **CPU-only** server
+    (no GPU) for the full ~433 GB GLM-5.2 UD-Q4_K_M — fak-native CPU vs llama.cpp (mmap,
+    `-ngl 0`) on decode/prefill tok/s **+ correctness + safety/reuse**. The bench node is
+    now registered (`cpu-server-a`: 256-thread x86_64, ~1 TB RAM) and the first attempt is
+    committed as an honest *pending/negative* record —
+    `experiments/benchmark/runs/by-machine/cpu-server-a/20260627T000000Z-glm52-cpu-wedge/`
+    (#976). Both engines' tok/s + the correctness column remain **open and host-gated**: the
+    memory-safe llama.cpp baseline is pending host recovery, and the fak-native all-resident
+    CPU serve wedged on host RAM (blocked by **#974**; the load-curve datum and the
+    missing CPU memory-fit pre-flight are recorded in
+    [GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27](GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md)).
 - **B4 — 753B (the wall):** fak (once multi-GPU TP + paged experts land) vs the
   llama.cpp 2.62 tok/s baseline vs vLLM/SGLang on sm_90. The only comparison where a
   753B number means anything.
