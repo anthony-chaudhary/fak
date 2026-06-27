@@ -174,3 +174,68 @@ func TestL3DurabilityVocabularyMatchesCtxmmu(t *testing.T) {
 		t.Fatalf("DurabilityBounded = %q, want the reserved literal %q", DurabilityBounded, "bounded")
 	}
 }
+
+// TestL3PromotionWarnPutGatedStillSets proves the warn-then-enforce rollout (acceptance
+// criterion 4) END-TO-END through PutGated against the REAL L3 store — the counterpart of
+// TestL3PromotionGateBite's ENFORCE arm. Under WARN a below-floor (turn) page is STILL
+// mset into the tier and resolves bit-exact: the rollout is non-behavior-changing, so a
+// misclassification cannot strand a page before enforce bites. Yet the would-deny is
+// counted, so an operator can size the eventual enforce impact before flipping the posture.
+func TestL3PromotionWarnPutGatedStillSets(t *testing.T) {
+	ctx := context.Background()
+	store := NewL3Store()
+	be := New(store)
+	gate := NewL3PromotionGate() // default = WARN
+
+	turnPage := payload(PageBytes - 9) // a single L3 page, so one admitted mset is exact
+	ref, d, err := be.PutGated(ctx, turnPage, ctxmmu.DurabilityTurn, gate)
+	if err != nil {
+		t.Fatalf("PutGated(turn, WARN): %v", err)
+	}
+	// Non-behavior-changing: the turn page IS admitted and lands a real handle...
+	if !d.Admit {
+		t.Fatalf("WARN: a turn page must still be admitted (non-behavior-changing), got Admit=false")
+	}
+	if d.Promotable {
+		t.Fatalf("WARN: a turn page must report Promotable=false (it would be denied under ENFORCE)")
+	}
+	if d.Reason != L3ReasonDeniedBelowFloor {
+		t.Fatalf("WARN: turn reason = %v, want %v", d.Reason, L3ReasonDeniedBelowFloor)
+	}
+	if ref.Digest != digest(turnPage) {
+		t.Fatalf("WARN: Ref.Digest = %q, want %q (a warn-admitted page lands a real handle)", ref.Digest, digest(turnPage))
+	}
+	// ...the bytes actually reached the shared tier (a real mset happened, unlike ENFORCE)...
+	if sets, _, _ := store.Stats(); sets != 1 {
+		t.Fatalf("WARN: mset count = %d, want 1 (a warn-admitted turn page still reaches the tier)", sets)
+	}
+	got, err := be.Resolve(ctx, ref)
+	if err != nil {
+		t.Fatalf("WARN: Resolve(turn): %v", err)
+	}
+	if !bytes.Equal(got, turnPage) {
+		t.Fatal("WARN: turn page did not round-trip bit-exact through the tier")
+	}
+	// ...but the would-deny is still counted so the enforce impact is sized before the flip.
+	if got := gate.DeniedPromotions(); got != 1 {
+		t.Fatalf("WARN: would-deny count = %d, want 1 (the turn page sized for enforce)", got)
+	}
+}
+
+// TestL3ReasonString pins the typed reason's audit/metric rendering — the strings an
+// operator reads on the rollout dashboards when the gate admits or denies a page —
+// including the defensive default that an out-of-range value renders as a deny label
+// (fail-closed: an unrecognized reason is never reported as an admit).
+func TestL3ReasonString(t *testing.T) {
+	cases := map[L3Reason]string{
+		L3ReasonAdmitted:         "admitted",
+		L3ReasonDeniedBelowFloor: "denied_below_floor",
+		L3ReasonDeniedUnknown:    "denied_unknown",
+		L3Reason(255):            "denied_unknown", // out-of-range falls closed to a deny label
+	}
+	for r, want := range cases {
+		if got := r.String(); got != want {
+			t.Fatalf("L3Reason(%d).String() = %q, want %q", uint8(r), got, want)
+		}
+	}
+}
