@@ -1,3 +1,8 @@
+---
+title: "Lab dev loop: develop fak on a remote box from Slack"
+description: "Run and develop fak on a remote lab GPU, driven from Slack: the kernel and dev turn stay public while the lab transport stays private."
+---
+
 # Lab dev loop — develop fak ON a lab box, drive it from Slack
 
 This is the end-to-end loop for **running and developing fak on lab compute you choose**,
@@ -32,8 +37,14 @@ JSON — not a code import. See [the GPU-server / Slack boundary](../dgx-slack-b
 a lab box you chose. The kernel still adjudicates every tool call locally on the box, but
 the model forward runs on the lab GPU. Port defaults to `8080` (the documented `fak serve`
 addr). It is shorthand for the OpenAI-compatible wire `fak serve` exposes, with the `/v1`
-suffix handled for you, and it **preflights `GET /healthz`** so a box that is not serving
-fails loud before the gateway binds rather than 502-ing on the first turn.
+suffix the chat route lives under added to the upstream base for you, and it **preflights
+`GET /healthz` AND `GET /v1/models`** so a box that is down — or that answers health but is
+not serving the `/v1` surface — fails loud before the gateway binds rather than 404-ing on
+the first turn.
+
+Because `--remote-serve` forces the OpenAI-compatible wire, the wrapped agent must be one
+that reads `OPENAI_BASE_URL` (Codex, OpenCode, Aider) — not Claude Code, which speaks the
+Anthropic wire (guard rejects `--remote-serve` with `--provider anthropic`).
 
 ```bash
 # on the lab box: serve a model in fak's own kernel on the GPU
@@ -43,8 +54,8 @@ FAK_Q4K=1 fak serve \
   --addr 0.0.0.0:8080
 
 # from the box (or the bridge session on it): run a kernel-adjudicated dev turn,
-# inference on this box's GPU, kernel local
-fak guard --remote-serve localhost:8080 -- claude
+# inference on this box's GPU, kernel local. The agent reads OPENAI_BASE_URL.
+fak guard --remote-serve localhost:8080 -- codex
 ```
 
 The banner shows the upstream as a **remote fak serve on a lab box** so you can see at a
