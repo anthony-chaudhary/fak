@@ -51,6 +51,11 @@ func (s *Server) routeTable() []gatewayRoute {
 	return []gatewayRoute{
 		// OpenAI-compatible surface.
 		{"/v1/chat/completions", s.handleChatCompletions},
+		// OpenAI Responses API — a client-facing inbound route so a Responses-native
+		// agent (Codex CLI, the Terminal-Bench terminus agent) can route its model
+		// traffic through the kernel's tool-call adjudication, the same as the chat
+		// wire. Buffered only; stream:true is refused (#925).
+		{"/v1/responses", s.handleResponses},
 		{"/v1/embeddings", s.handleEmbeddings},
 		{"/v1/moderations", s.handleModerations},
 		// Anthropic Messages surface.

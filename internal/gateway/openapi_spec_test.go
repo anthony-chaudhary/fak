@@ -24,6 +24,7 @@ import (
 // behind the surface `fak serve` actually exposes.
 var specPathFor = map[string]string{
 	"/v1/chat/completions":      "/v1/chat/completions",
+	"/v1/responses":             "/v1/responses",
 	"/v1/embeddings":            "/v1/embeddings",
 	"/v1/moderations":           "/v1/moderations",
 	"/v1/messages":              "/v1/messages",
