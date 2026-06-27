@@ -47,7 +47,7 @@ description: "fak's first 7B dense run on M3 Pro Q8, reporting the honest throug
 | decode | 8.7 tok/s | 17.27 tok/s | **0.50×** |
 
 Consistent with the repo's standing honesty bound (`SESSION-VALUE-STACK-RESULTS.md`,
-`M3-LLAMACPP-RESULTS.md`: dense fak single-stream ≈0.46× decode / ≈0.15× prefill vs llama.cpp on
+`M3-LLAMACPP-RESULTS.md`: dense fak single-stream ≈0.46× decode / ≈0.15× prefill vs llama.cpp build 8200 on
 M3 Q8). Prefill is compute-bound (Metal GPU gives llama.cpp ~12× here); decode is bandwidth-bound
 so the gap closes to 2×. **fak does not beat llama.cpp on raw tok/s** — the moat is the reuse
 stack + in-kernel integration, not single-stream throughput. The prefill half is the open Metal
