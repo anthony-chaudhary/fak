@@ -46,7 +46,7 @@ Fresh verification pass on 2026-06-18:
 ## 1. The truth syscall (`dos_verify`) — shipped from evidence, not say-so
 
 Both phase commits were confirmed by the DOS kernel's `dos_verify` against the real
-git history of `C:\work\fleet` (source `grep-subject`, rung `direct`):
+git history of the workspace root (source `grep-subject`, rung `direct`):
 
 | Phase | `dos_verify` verdict | sha | interpretation |
 |---|---|---|---|
@@ -145,7 +145,7 @@ REFUTED unless their own evidence confirmed it. **Result: 7/7 CONFIRMED.**
 | C4 no `os/exec` on the hot path | **CONFIRMED** | kernel imports only `{context,errors,fmt,sync,sync/atomic}`; `os/exec` appears only in `bench`+`shipgate` (not the dispatch path); `TestNoOsExecOnHotPath` PASS |
 | C5 full suite green | **CONFIRMED** | `go build`/`go vet` clean; **200+ test functions all PASS** across 30 packages; `claims-lint: 0 violations` |
 | C6 vDSO soundness + invalidation | **CONFIRMED** | canonicalized keys (reordered args hit), `worldVer` bump invalidates stale reads, tier-2 hit == fresh call (`TestUnit38_Soundness…` PASS) |
-| C7 CLAIMS.md honesty ledger accurate | **CONFIRMED** | 4 `[SHIPPED]` claims have backing code+tests; 3 `[STUB]/[SIMULATED]` (zero-copy KV, decode-time mask, metrics-service) confirmed NOT on the critical path |
+| C7 CLAIMS.md honesty ledger accurate | **CONFIRMED** | 142 `[SHIPPED]` claims have backing code+tests; 19 `[STUB]/[SIMULATED]` confirmed NOT on the critical path |
 
 The single caveat (C3): the in-suite fixture test exercises the injection + benign
 payloads explicitly and secrets via a separate test; the skeptic manually confirmed
