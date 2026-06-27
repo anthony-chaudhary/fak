@@ -62,7 +62,7 @@ through?"* before deploying.
   "posture": "fail_closed",
   "allow":        ["search_web", "create_ticket"],
   "allow_prefix": ["read_", "get_", "search_", "list_"],
-  "deny":         { "delete_account": "POLICY_BLOCK", "exfiltrate": "SECRET_EXFIL" },
+  "deny":         { "delete_account": "POLICY_BLOCK", "exfiltrate": "POLICY_BLOCK" },
   "self_modify_globs": [".git/", ".dos/", "policy.json"],
   "redact_fields":     ["password", "secret", "api_key", "token"],
   "rate_limit":   { "max_calls": 50, "max_cost": 0, "key": "trace", "retry_after_ms": 1000 }
@@ -88,7 +88,7 @@ this out explicitly so you never deploy an empty floor by accident.
 
 The one opt-in exception is `"posture": "admit_and_log"`: after explicit deny,
 self-modify, redaction, and arg-rule checks have passed, a read-shaped default
-deny (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, or `calc...`) is
+deny (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, or `calc_`) is
 admitted with verdict metadata `posture=admit_and_log` and
 `would_deny=DEFAULT_DENY`. Write-shaped calls and explicit denials still fail
 closed.
