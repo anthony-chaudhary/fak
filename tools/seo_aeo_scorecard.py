@@ -200,8 +200,15 @@ SELF_REPO_RE = re.compile(
 # that SHOWS `![](x.svg)` syntax as an example is never scored as a real missing-alt
 # image — the same fence-stripping discipline kpi_links / kpi_headings already use.
 _MD_IMG_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)]+)\)")
+# Reference-style image (`![alt][id]`, collapsed `![alt][]`) — renders a live image
+# just like the inline form, so an empty-alt reference is the same HARD defect. The
+# `]\[` shape never overlaps the inline `]\(` form, so the two loops don't double-count.
+_MD_REF_IMG_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\[[^\]]*\]")
 _HTML_IMG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
-_HTML_ALT_RE = re.compile(r'\balt\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE)
+# Anchor `alt` on a tag/quote/space boundary, NOT a bare `\b`: `\b` also fires inside
+# `data-alt=`, letting a non-alt attribute satisfy the check and downgrade a HARD
+# missing-alt to a pass. The leading class requires alt to start an attribute.
+_HTML_ALT_RE = re.compile(r'(?:^|[\s"\'])alt\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 
 # A lone generic filler word is "present" alt that is useless to image search and a
@@ -650,6 +657,9 @@ def kpi_alt_text(text: str) -> dict[str, Any]:
     for m in _MD_IMG_RE.finditer(body):
         n_img += 1
         _check(m.group("alt"), "image", m.group("src").strip())
+    for m in _MD_REF_IMG_RE.finditer(body):
+        n_img += 1
+        _check(m.group("alt"), "image", m.group(0).strip())
     for m in _HTML_IMG_RE.finditer(body):
         n_img += 1
         a = _HTML_ALT_RE.search(m.group(0))
@@ -847,6 +857,12 @@ def _robots_groups(robots: str) -> dict[str, list[str]]:
     for raw in robots.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
+            # A blank line ENDS a record (robots.txt grouping rule): clear the
+            # pending UA group so a trailing global directive after the blank
+            # (`Disallow: /`, `Sitemap:`) can't bleed into the last named UA and
+            # flip ai_crawlers to a false block.
+            pending = []
+            after_directive = False
             continue
         m = re.match(r"(?i)^user-agent:\s*(\S+)", line)
         if m:
@@ -872,7 +888,10 @@ def ai_crawlers_ok(robots: str) -> tuple[bool, str]:
         return False, "robots.txt missing — no welcome for answer-engine crawlers"
     groups = _robots_groups(robots)
     named = set(groups)
-    disallow_all = re.compile(r"(?i)^disallow:\s*/\s*$")
+    # Block-ALL forms: `Disallow: /`, `Disallow: /*`, `Disallow: *` all forbid every
+    # path (the `*` wildcard matches everything). A partial path (`Disallow: /private/`,
+    # `Disallow: /*.json`) is NOT a full block and must still pass — the bot is welcome.
+    disallow_all = re.compile(r"(?i)^disallow:\s*(?:/\*?|\*)\s*$")
     blocked = sorted(
         ua for ua, lines in groups.items()
         if (ua in AI_CRAWLER_UAS or ua == "*") and any(disallow_all.match(l) for l in lines))

@@ -634,6 +634,57 @@ def test_ai_crawlers_wired_into_site_checks(tmp_path: Path) -> None:
     assert "ai_crawlers" in by, by
     assert by["ai_crawlers"]["ok"] is False and by["ai_crawlers"]["hard"] is True, by["ai_crawlers"]
 
+# --- ai_crawlers / alt_text robustness (adversarial-review hardening) -------
+
+def test_ai_crawlers_blocks_wildcard_disallow() -> None:
+    # `Disallow: /*` and `Disallow: *` are canonical block-ALL forms: naming a bot
+    # then blocking it via a wildcard must NOT pass the welcome check (the gameability
+    # hole — improvement without substance).
+    for d in ("Disallow: /*", "Disallow: *"):
+        robots = "User-agent: *\nAllow: /\n"
+        for ua in sc.AI_CRAWLER_REQUIRED:
+            robots += f"\nUser-agent: {ua}\n{d}\n"
+        ok, detail = sc.ai_crawlers_ok(robots)
+        assert ok is False and "Disallow" in detail, (d, ok, detail)
+
+
+def test_ai_crawlers_partial_disallow_still_welcomes() -> None:
+    # Disallowing a SUB-PATH (not the whole site) leaves the bot welcome — must pass.
+    robots = "User-agent: *\nAllow: /\n"
+    for ua in sc.AI_CRAWLER_REQUIRED:
+        robots += f"\nUser-agent: {ua}\nAllow: /\nDisallow: /private/\n"
+    ok, detail = sc.ai_crawlers_ok(robots)
+    assert ok is True, (ok, detail)
+
+
+def test_ai_crawlers_trailing_global_disallow_not_misattributed() -> None:
+    # A global `Disallow: /` after a blank line must NOT bleed into the last named UA
+    # group and flip the gate to a FALSE block (a false RED is worse than a false PASS).
+    robots = "User-agent: *\nAllow: /\n"
+    for ua in sc.AI_CRAWLER_REQUIRED:
+        robots += f"\nUser-agent: {ua}\nAllow: /\n"
+    robots += "\nDisallow: /\n"
+    ok, detail = sc.ai_crawlers_ok(robots)
+    assert ok is True, (ok, detail)
+
+
+def test_alt_text_reference_style_missing_is_hard() -> None:
+    # A reference-style image `![][id]` renders live with no alt — same HARD defect.
+    k = sc.kpi_alt_text("# T\n\n![][hero]\n\n[hero]: ../visuals/h.svg\n")
+    assert k["score"] < 100 and any("no alt text" in d for d in k["defects"]), k
+
+
+def test_alt_text_reference_style_present_is_clean() -> None:
+    k = sc.kpi_alt_text("# T\n\n![a labelled throughput chart][hero]\n\n[hero]: h.svg\n")
+    assert k["defects"] == [], k
+
+
+def test_alt_text_data_alt_does_not_satisfy() -> None:
+    # `data-alt` must NOT count as the alt attribute (the bare-\b false-positive).
+    k = sc.kpi_alt_text('# T\n\n<img src="x.png" data-alt="not real alt">\n')
+    assert k["score"] < 100 and any("no alt text" in d for d in k["defects"]), k
+
+
 
 # --- self-contained runner -------------------------------------------------
 
