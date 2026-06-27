@@ -13,7 +13,10 @@ set -euo pipefail
 # CUDA toolchain location. Default is the WSL user-space micromamba env (~/cudaenv,
 # no sudo). On a datacenter image (GCP DLVM, DGX) CUDA lives at /usr/local/cuda and
 # nvcc is already on PATH — fall back to that so the SAME script builds everywhere.
-CUDA_HOME="${CUDA_HOME:-$HOME/cudaenv}"
+# Guard $HOME: under `set -u` a detached/CI/bg context can have HOME unset, which
+# would abort here before we ever reach the system-nvcc fallback. Default it so the
+# fallback (system nvcc at /usr/local/cuda on a DGX/DLVM) still runs.
+CUDA_HOME="${CUDA_HOME:-${HOME:-/opt}/cudaenv}"
 NVCC="$CUDA_HOME/bin/nvcc"
 if [ ! -x "$NVCC" ]; then
   if command -v nvcc >/dev/null 2>&1; then
