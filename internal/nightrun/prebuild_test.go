@@ -14,8 +14,8 @@ func TestParseGoRun(t *testing.T) {
 		{"fak resume validate -corpus ~/.claude/projects -json", "", "", false}, // not a go run
 		{"go test ./internal/compute", "", "", false},                           // go test, not run
 		{"go run ./internal/foo", "", "", false},                                // not ./cmd/
-		{"go run ./cmd/...", "", "", false},                                     // wildcard package — left to go run
-		{"FAK_X=1 go run ./cmd/y", "", "", false},                               // env prefix — not a bare go run
+		{"go run ./cmd/...", "", "", false},                                     // wildcard package â€” left to go run
+		{"FAK_X=1 go run ./cmd/y", "", "", false},                               // env prefix â€” not a bare go run
 	}
 	for _, c := range cases {
 		pkg, args, ok := parseGoRun(c.run)
@@ -37,7 +37,7 @@ func TestQuoteIfNeeded(t *testing.T) {
 // maybePrebuildRun must return a non-go-run command unchanged even with no toolchain.
 func TestMaybePrebuildRunPassthrough(t *testing.T) {
 	run := "fak resume validate -corpus ~/.claude/projects -json"
-	if got := maybePrebuildRun(nil, "", run); got != run {
+	if got := newGoRunCache().maybePrebuildRun(nil, "", run); got != run {
 		t.Errorf("a non-go-run command must pass through unchanged; got %q", got)
 	}
 }

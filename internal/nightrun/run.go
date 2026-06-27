@@ -13,7 +13,7 @@ import (
 )
 
 // Run is one attempt the loop made on a Task: the OBSERVED outcome, the captured
-// artifact (when any), an OBSERVED headline number (only when parsed — never
+// artifact (when any), an OBSERVED headline number (only when parsed â€” never
 // fabricated), and timing. A dry-run Run executed nothing.
 type Run struct {
 	Task     Task          `json:"task"`
@@ -24,7 +24,7 @@ type Run struct {
 	Duration time.Duration `json:"-"`
 }
 
-// RunSummary is the result of a RunLoop invocation — the sequence of attempts and
+// RunSummary is the result of a RunLoop invocation â€” the sequence of attempts and
 // why the loop stopped. It is the honest record of a "run it all night" session.
 type RunSummary struct {
 	Box        string `json:"box"`
@@ -57,16 +57,18 @@ type RunOptions struct {
 	AppendRow   func(CollectRow) error
 }
 
-// RunLoop drives the collection loop: rank → pick the most important feasible
-// task not yet attempted this session → (dry-run: record the plan / apply:
-// execute + append a ledger row) → repeat. Each Task is attempted at most once
+// RunLoop drives the collection loop: rank â†’ pick the most important feasible
+// task not yet attempted this session â†’ (dry-run: record the plan / apply:
+// execute + append a ledger row) â†’ repeat. Each Task is attempted at most once
 // per invocation (so a failing task cannot spin the loop), and Max bounds the
 // total attempts. It returns the honest summary of what happened.
 func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 	if opts.Executor == nil {
 		root := opts.Root
+		cache := newGoRunCache()
+		defer cache.cleanup()
 		opts.Executor = func(ctx context.Context, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
-			return execTask(ctx, root, t, artifactPath)
+			return execTask(ctx, root, cache, t, artifactPath)
 		}
 	}
 	if opts.LedgerPath == "" {
@@ -157,13 +159,13 @@ func stopReason(ranked []Scored, ran int, applied bool) string {
 		return "nothing to collect"
 	}
 	// Outcome-neutral: the feasible queue was exhausted, but the attempts may have
-	// failed/timed out (and in a dry run nothing executed) — so never claim "collected"
+	// failed/timed out (and in a dry run nothing executed) â€” so never claim "collected"
 	// here. Each attempt's true outcome is in its ledger row.
 	verb := "planned"
 	if applied {
 		verb = "attempted"
 	}
-	return fmt.Sprintf("%s the whole feasible queue (%d task(s)) — nothing left", verb, ran)
+	return fmt.Sprintf("%s the whole feasible queue (%d task(s)) â€” nothing left", verb, ran)
 }
 
 // numberRE best-effort-extracts a headline number with a known unit from a run's
@@ -174,36 +176,36 @@ var numberRE = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*(tok/s|tokens/s|GB/s|
 // DefaultExecutor runs t.Run through the platform shell, tees the combined output
 // to artifactPath, and reports the OBSERVED outcome: a zero exit with captured
 // output is collected; a non-zero exit is failed; exceeding the task's wall-clock
-// budget (t.timeout()) is a timeout — the process is killed, the partial output is
+// budget (t.timeout()) is a timeout â€” the process is killed, the partial output is
 // still captured, and the loop moves on (so one slow/hung task cannot stall an
 // unattended --loop). It parses a headline number only if the output clearly
-// contains one — otherwise the Number is left empty.
+// contains one â€” otherwise the Number is left empty.
 // DefaultExecutor is the back-compat seam (root derived as "" => no prebuild, plain go run).
 // RunLoop wires execTask with the real repo root so go-run benches are pre-built once.
 func DefaultExecutor(ctx context.Context, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
-	return execTask(ctx, "", t, artifactPath)
+	return execTask(ctx, "", nil, t, artifactPath)
 }
 
 // execTask runs t.Run through the platform shell, tees output to artifactPath, and reports
 // the OBSERVED outcome. When root != "" and the Run is `go run ./cmd/<x>`, the package is
 // pre-built once (shared build cache) and the Run is rewritten to the binary, so a --loop
 // pass is not dominated by per-task `go run` compile time (#965).
-func execTask(ctx context.Context, root string, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
+func execTask(ctx context.Context, root string, cache *goRunCache, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
 	start := time.Now()
 	// Peel a leading POSIX `VAR=val ...` env prefix off the command and apply it via
 	// cmd.Env below: that prefix syntax is invalid under Windows `cmd /c`, and cmd.Env
 	// is shell-agnostic (valid under both `sh -c` and `cmd /c`). Stripping it first also
 	// lets a `FAK_X=1 go run ./cmd/<x>` task become prebuild-eligible.
 	envPrefix, run := splitEnvPrefix(t.Run)
-	if root != "" {
-		run = maybePrebuildRun(ctx, root, run)
+	if root != "" && cache != nil {
+		run = cache.maybePrebuildRun(ctx, root, run)
 	}
 	shell, flag := "sh", "-c"
 	if runtime.GOOS == "windows" {
 		shell, flag = "cmd", "/c"
 	}
 	// Bound the attempt: a per-task deadline on top of any caller deadline. The
-	// whole process GROUP is killed on expiry (configureProcGroup) — exec.Command
+	// whole process GROUP is killed on expiry (configureProcGroup) â€” exec.Command
 	// only kills the direct child, so a `go run ./cmd/<bench>` whose compiled binary
 	// is the real worker (or any grandchild) would otherwise outlive the kill AND
 	// keep the output pipe open, blocking CombinedOutput past the deadline. WaitDelay
@@ -225,7 +227,7 @@ func execTask(ctx context.Context, root string, t Task, artifactPath string) (Ou
 	if derr := os.MkdirAll(filepath.Dir(artifactPath), 0o755); derr != nil {
 		return OutcomeFailed, "", dur, fmt.Errorf("create artifact dir: %w", derr)
 	}
-	// Capture whatever output the command produced before it ended — a timed-out
+	// Capture whatever output the command produced before it ended â€” a timed-out
 	// run's partial log is still evidence of how far it got.
 	if werr := os.WriteFile(artifactPath, out, 0o644); werr != nil {
 		return OutcomeFailed, "", dur, fmt.Errorf("capture output: %w", werr)
@@ -249,7 +251,7 @@ func parseNumber(out string) string {
 	return ""
 }
 
-// envAssignRE matches a leading `NAME=` token — the POSIX env-assignment shape.
+// envAssignRE matches a leading `NAME=` token â€” the POSIX env-assignment shape.
 var envAssignRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
 // splitEnvPrefix peels a leading `VAR=val ...` env-assignment prefix off a command,
@@ -282,7 +284,7 @@ func ReadLedgerFile(path string) []CollectRow {
 }
 
 // AppendLedgerFile appends one row to the ledger, creating the parent directory
-// on first write. Append-only — it never rewrites an existing row.
+// on first write. Append-only â€” it never rewrites an existing row.
 func AppendLedgerFile(path string, row CollectRow) error {
 	line, err := AppendLedgerLine(row)
 	if err != nil {
