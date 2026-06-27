@@ -190,18 +190,21 @@ raw path) and asserts `reflect.DeepEqual(a, b)`, plus a second twice-run with a 
 ## C1 · cold‑pass compression (17×: 6699 → 390 bytes)
 
 **THEOREM.** A cold pass over cached views pages 0 raw bytes and renders only the
-cached summary (256‑byte extractive prefix by design), achieving ~17× compression.
+cached summaries, achieving ~17× compression.
 
 **REGIME.** A — algebraic / structural (byte‑identity / lossy summary).
 
 **PROOF.** On the derived‑view path (`PreferView=ViewSummary`), `Query` resolves
 through a `ViewCache`. A HIT returns the cached summary directly; a RECOMPUTE
-rebuilds a new 256‑byte extractive prefix via `buildSummary`. The raw‑page path
-would page in the full page bytes via `im.Examine`, but the warm view cache path
-does not. The warm‑vs‑cold compression is therefore the ratio of raw page size
-to summary size: 6699 raw bytes → 390 rendered bytes ≈ 17×. The compression is
-*lossy* by design (extractive prefix, Coverage<1.0), and the trade‑off is
-documented as the `FaithfulnessProbe` contract in `MemoryViewRecord`.
+rebuilds a new extractive prefix via `buildSummary`. Each summary view is capped at
+256 bytes (`maxSummaryBytes` at `contextq.go:137`), and `buildSummary` trims to the
+last line boundary before that cap, so most summaries are shorter than the maximum.
+The warm‑vs‑cold compression is therefore the ratio of total raw page bytes paged in
+by a cold pass to total rendered summary bytes on a warm pass: 6699 raw bytes across
+three pages → 390 rendered bytes total across three cached summaries (≈130 bytes per
+summary on average) ≈ 17×. The compression is *lossy* by design (extractive prefix,
+Coverage<1.0), and the trade‑off is documented as the `FaithfulnessProbe` contract in
+`MemoryViewRecord`.
 
 **WITNESS.** The demo image in `docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md`
 §1.1 produces three benign slices; the warm view cache serves only summaries,
