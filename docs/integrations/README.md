@@ -60,6 +60,9 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **Claude Code** / the Anthropic API or SDK | [`claude.md`](claude.md) |
 | **Cursor** (IDE — MCP *or* OpenAI proxy) | [`cursor.md`](cursor.md) |
 | **OpenAI Codex** / the OpenAI API or SDK | [`openai-codex.md`](openai-codex.md) |
+| **Aider** (CLI pair-programmer, OpenAI wire) | [`aider.md`](aider.md) |
+| **Cline** (VS Code — OpenAI-Compatible provider) | [`cline.md`](cline.md) |
+| **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](continue.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](../../examples/mcp/README.md) |
 
 **Adopting from outside the repo?** The [adopter playbook](adopter-playbook.md) is the
