@@ -24,6 +24,7 @@
 
 static cublasHandle_t g_blas = nullptr;
 static void *g_blas_workspace = nullptr; // explicit cuBLAS workspace so it never cudaMalloc's mid-capture (#969)
+static bool g_capture_open = false;      // true between fcuda_graph_begin and end/abort: arms the #969 dalloc guard
 // All device work runs on g_stream (a blocking stream, so a synchronous cudaMemcpy on the
 // legacy default stream still fences it). One stream is what makes the whole per-token op
 // sequence CAPTURABLE into a CUDA graph — the only way to collapse ~600 WSL CUDA calls/
@@ -95,6 +96,17 @@ extern "C" void *fcuda_malloc(size_t bytes) {
     d = it->second.back();
     it->second.pop_back();
   } else {
+    if (g_capture_open) {
+      // #969: a device alloc on the captured decode path is the exact bug this guard exists to
+      // kill — CUDA forbids cudaMalloc between BeginCapture and EndCapture, so it would crash the
+      // whole serve with the opaque "operation not permitted while the stream is capturing". Every
+      // graphed-decode scratch (the cuBLAS workspace, the g_q8_* activation-quant buffers, the
+      // argmax index) MUST be pre-warmed before fcuda_graph_begin. Fail LOUD naming the size so the
+      // offending un-pre-warmed allocation is pinpointed instead of surfacing as a generic capture
+      // error. Returning nullptr routes the Go side to its typed DeviceAllocError panic.
+      fprintf(stderr, "fak-cuda: BUG #969: fcuda_malloc(%zu) on a pool miss while a CUDA graph capture is OPEN — pre-warm this scratch before BeginCapture\n", bytes);
+      return nullptr;
+    }
     cudaError_t _e = cudaMalloc(&d, bytes);
     if (_e != cudaSuccess) {
       // Report the TRUE reason instead of letting CK swallow it and the Go caller panic with no
@@ -179,8 +191,15 @@ extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, in
               dX, in,
               &beta,
               dY, out);
-  if (st != CUBLAS_STATUS_SUCCESS)
+  if (st != CUBLAS_STATUS_SUCCESS) {
     fprintf(stderr, "fak-cuda: cublasSgemm(out=%d,in=%d,P=%d) failed: %d\n", out, in, P, (int)st);
+    // FAIL-SAFE (#972): a failed SGEMM leaves dY untouched, and dY is a RECYCLED pool buffer,
+    // so a stale (smaller) prior allocation's content reads back as a plausible-but-wrong vector
+    // (the "out=257 -> got 64" ghost the issue reports). Zero the full out*P result so a failed
+    // launch yields an unambiguous all-zero vector the cosine/shape gate rejects deterministically,
+    // never a short/garbage read that masquerades as a real result.
+    cudaMemsetAsync(dY, 0, (size_t)out * (size_t)P * sizeof(float), g_stream);
+  }
 }
 
 // ---- fp16 compute path (#484): F16 weights + tensor-core HGEMM ------------------
@@ -885,6 +904,7 @@ extern "C" void fcuda_graph_reset(void) {
 // EndCapture still leaves cudaGetLastError cleared so the next op is not poisoned by it.
 extern "C" void fcuda_graph_abort(void) {
   cudaGraph_t graph = nullptr;
+  g_capture_open = false; // #969: capture torn down; the dalloc guard is disarmed again
   cudaStreamEndCapture(g_stream, &graph);
   if (graph) cudaGraphDestroy(graph);
   cudaGetLastError(); // swallow the capture-state error so the next op starts clean
@@ -893,10 +913,13 @@ extern "C" void fcuda_graph_abort(void) {
 extern "C" int fcuda_graph_begin(void) {
   // Global mode: capture every op submitted to g_stream regardless of thread (the Go
   // caller LockOSThread-pins the token, and cudaMu serializes, so nothing else submits).
-  return cudaStreamBeginCapture(g_stream, cudaStreamCaptureModeGlobal) == cudaSuccess ? 0 : 1;
+  if (cudaStreamBeginCapture(g_stream, cudaStreamCaptureModeGlobal) != cudaSuccess) return 1;
+  g_capture_open = true; // #969: arm the dalloc guard for the captured region
+  return 0;
 }
 extern "C" int fcuda_graph_end_launch(void) {
   cudaGraph_t graph = nullptr;
+  g_capture_open = false; // #969: capture closed; device allocation is permitted again
   cudaError_t e = cudaStreamEndCapture(g_stream, &graph);
   if (e != cudaSuccess || !graph) { fprintf(stderr, "fak-cuda: EndCapture: %s\n", cudaGetErrorString(e)); return 1; }
   if (g_exec == nullptr) {
@@ -929,8 +952,12 @@ extern "C" int fcuda_graph_end_launch(void) {
 // cudaMalloc while g_stream is mid-capture ("operation not permitted when stream is capturing").
 // Since argmax is the final op of the captured decode graph, that lazy alloc crashed graph
 // capture/replay. A single persistent device int touched on every token never allocates inside
-// capture. fcuda_graph_warm() (called once before the first cudaStreamBeginCapture) forces it
-// resident so even the very first captured token finds it already allocated.
+// capture. ensure_argmax_idx() runs on the FIRST (uncaptured) fcuda_argmax_f32 call — the same
+// pre-warm role the explicit cuBLAS workspace prealloc in fcuda_init plays for the GEMM scratch
+// and the uncaptured halLogitsWarm step (internal/model/hal.go) plays for every pooled op output —
+// so by the time the first captured token runs, this buffer is already resident. There is no
+// separate fcuda_graph_warm() entry point; warming is exactly these three pre-capture allocations,
+// and the #969 g_capture_open guard in fcuda_malloc fails loud if any scratch was missed.
 static int *g_argmax_idx = nullptr;
 static void ensure_argmax_idx(void) {
   if (!g_argmax_idx) CK(cudaMalloc(&g_argmax_idx, sizeof(int)));
