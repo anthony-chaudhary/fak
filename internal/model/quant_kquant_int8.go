@@ -54,10 +54,12 @@ var kQuantSDOTDefault = func() bool {
 	return false
 }()
 
-// kQuantSDOTEnabled reports whether the int8 Q5_K path runs for this weight kind. Only kindQ5K is
-// implemented here (Q6_K stays f32). The test force wins; otherwise the FAK_KQ_INT8 env decides.
+// kQuantSDOTEnabled reports whether the int8 k-quant decode path runs for this weight kind. Both
+// kindQ5K (q5kMatRowsRangeInt8, this file) and kindQ6K (q6kMatRowsRangeInt8, quant_kquant_int8_q6k.go)
+// are implemented; any other kind keeps the f32 reduction. The test force wins; otherwise the
+// FAK_KQ_INT8 env decides.
 func kQuantSDOTEnabled(kind kQuantKind) bool {
-	if kind != kindQ5K {
+	if kind != kindQ5K && kind != kindQ6K {
 		return false
 	}
 	if kQuantSDOTForce != 0 {
