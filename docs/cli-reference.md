@@ -127,8 +127,11 @@ This is a **subsystem regression sentinel**, deliberately **not** the headline
 product KPI: it is independent of the tool mix — it times the adjudication fold,
 not the workload, so a low vDSO hit-rate can never turn it red — but it does not
 prove production readiness, model quality, serving throughput, or the 45x fleet
-claim. The vDSO hit-rate and token savings are reported as **soft UPSIDE
-secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.md` (unit 82).
+claim. (For speedup figures: 45× = Phase-0 batched-decode gate currently failing at
+40.98×; ~60× = headline session wall-time vs naive stateless; ~1.5–4× = realistic
+gain vs tuned warm-cache stack.) The vDSO hit-rate and token savings are reported
+as **soft UPSIDE secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.md`
+(unit 82).
 
 ## Verbs
 

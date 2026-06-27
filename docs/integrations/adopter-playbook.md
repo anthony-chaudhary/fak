@@ -25,6 +25,15 @@ that launcher.
 > dependencies, no `go.sum`, no Python, no CUDA toolchain). The same artifact serves
 > the HTTP gateway, the stdio MCP server, and the offline CI check — you add flags,
 > not components.
+>
+> > **Three speedup figures — which one applies to you?** The docs cite different numbers:
+> > * **~60×** = headline session wall-time vs naive stateless re-send loop (README.md,
+> >   concepts-and-story.md). This is the "re-send the whole conversation every turn"
+> >   baseline no serving stack ships.
+> > * **45×** = Phase-0 batched-decode gate threshold (production-benchmark-methodology.md).
+> >   Current local evidence is 40.98× — the gate is still open.
+> > * **~1.5–4×** = realistic gain vs a tuned warm-cache stack. This is the honest comparison
+> >   for adoption decisions. The 60× figure is only versus the naive pattern.
 
 ---
 

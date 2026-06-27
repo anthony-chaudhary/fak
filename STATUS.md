@@ -92,7 +92,9 @@ throughput, the 45x fleet claim, or a win over a long-lived policy sidecar. The
 spawned baseline is intentionally a worst-case boundary-tax control; an
 in-process function beating a process spawn is expected. The production gates
 remain Phase 0 clean-node reproduction and Phase 1 non-reference backend plus
-7-9B local-GPU evidence.
+7-9B local-GPU evidence. (For speedup figures: 45× = Phase-0 batched-decode gate
+currently failing at 40.98×; ~60× = headline session wall-time vs naive stateless;
+~1.5–4× = realistic gain vs tuned warm-cache stack.)
 
 The vDSO hit-rate (~0.5 on the cache-favorable demo trace; ~0.7% addressable on
 real tau2-airline) and the 47% token delta are reported as **soft secondaries**,

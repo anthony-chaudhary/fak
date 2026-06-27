@@ -30,7 +30,9 @@ on the parts of a real agent loop that get expensive or go wrong:
 [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). On a 50-turn × 5-agent run, `fak`'s
 reuse does **~4.1× less work than a tuned warm-cache stack** (and ~60× less than the
 naive re-send loop); reuse of the shared prompt prefix climbs to **6.95×** across the
-model ladder. The guard is cheap where it counts — the kernel's allow/deny decision is
+model ladder. (For speedup figures: 45× = Phase-0 batched-decode gate currently failing
+at 40.98×; ~60× = headline session wall-time vs naive stateless; ~1.5–4× = realistic gain
+vs tuned warm-cache stack.) The guard is cheap where it counts — the kernel's allow/deny decision is
 ~362 ns in-process per call (measured, Apple M3 Pro), not a network hop, and on the
 gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`) the in-kernel GPU decode holds
 ~120 tok/s on an RTX 4070 (SmolLM2-135M), at parity with llama.cpp Q8_0.
