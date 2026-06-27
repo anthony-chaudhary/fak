@@ -227,11 +227,11 @@ func dojoLeverCatalog() []dojoLeverInfo {
 		{
 			Name:    "resume-posture",
 			Summary: "the resume cache-posture projection, scored against the provider's billed cache_read/cache_creation",
-			Metrics: []dojoMetricInfo{
-				{Name: "posture_accuracy", Theory: "the projection's per-boundary cold/warm call is correct (claim 1.0)"},
-				{Name: "cold_write_share", Theory: "a cold resume re-prefill rewrites ~85% of the resident at the write premium (claim 0.85)"},
-				{Name: "cross_session_warm_hit_rate", Theory: "~17% of large first-turn resumes hit a still-warm cross-session prefix (claim 0.17)"},
-			},
+		Metrics: []dojoMetricInfo{
+			{Name: "posture_accuracy", Theory: "the projection's per-boundary cold/warm call is correct (claim 1.0)"},
+			{Name: "cold_write_share", Theory: "a cold resume re-prefill rewrites ~85% of the resident at the write premium (claim 0.85)"},
+			{Name: "cross_session_warm_hit_rate", Theory: "~0% by default; workload-dependent and bimodal across corpora (observed 0.00→0.65) (claim 0.0)"},
+		},
 		},
 		{
 			Name:    "compaction",
@@ -335,15 +335,16 @@ func resumeEpisodesFromBacktest(rep resume.BacktestReport) []dojo.ScoredInput {
 		})
 	}
 
-	// cross_session_warm_hit_rate — theory: ~17% of large first-turn resumes hit
-	// a still-warm cross-session prefix (0.17); reality: the share of large
-	// first turns that hit a still-warm cross-session prefix.
+	// cross_session_warm_hit_rate — theory: ~0% of large first-turn resumes hit a still-warm
+	// cross-session prefix by default (0.0), but the rate is highly workload-dependent and
+	// bimodal across corpora (observed 0.00→0.65); reality: the share of large first turns
+	// that hit a still-warm cross-session prefix.
 	if rep.FirstTurnResumes > 0 {
 		warm := float64(rep.FirstTurnWarmHit) / float64(rep.FirstTurnResumes)
 		out = append(out, dojo.ScoredInput{
 			Prediction: dojo.Prediction{
-				Lever: "resume-posture", Metric: "cross_session_warm_hit_rate", Claimed: 0.17, Unit: "fraction",
-				Basis: "~17% of large first-turn resumes hit a still-warm cross-session prefix",
+				Lever: "resume-posture", Metric: "cross_session_warm_hit_rate", Claimed: 0.0, Unit: "fraction",
+				Basis: "~0% of large first-turn resumes hit a still-warm cross-session prefix by default; the rate is workload-dependent and bimodal across corpora (0.00→0.65 observed)",
 			},
 			Outcome: dojo.Outcome{
 				Realized: warm, Provenance: dojo.Observed, Measured: true, Sample: rep.FirstTurnResumes,

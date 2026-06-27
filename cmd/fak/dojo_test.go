@@ -42,8 +42,8 @@ func TestResumeEpisodesFromBacktest(t *testing.T) {
 	}
 
 	warm := got["cross_session_warm_hit_rate"]
-	if warm.Prediction.Claimed != 0.17 {
-		t.Fatalf("warm-hit theory should claim 0.17, got %v", warm.Prediction.Claimed)
+	if warm.Prediction.Claimed != 0.0 {
+		t.Fatalf("warm-hit theory should claim 0.0, got %v", warm.Prediction.Claimed)
 	}
 	if want := 18.0 / 60.0; warm.Outcome.Realized != want {
 		t.Fatalf("warm-hit realized should be 18/60=%.4f, got %.4f", want, warm.Outcome.Realized)
@@ -82,7 +82,7 @@ func TestResumeEpisodesScoreIntoExpectedVerdicts(t *testing.T) {
 		t.Fatalf("0.68 vs 0.85 should be OVER_CLAIM, got %s", byMetric["cold_write_share"].Verdict)
 	}
 	if byMetric["cross_session_warm_hit_rate"].Verdict != dojo.VerdictUnderClaim {
-		t.Fatalf("0.30 vs 0.17 should be UNDER_CLAIM, got %s", byMetric["cross_session_warm_hit_rate"].Verdict)
+		t.Fatalf("0.30 vs 0.0 should be UNDER_CLAIM, got %s", byMetric["cross_session_warm_hit_rate"].Verdict)
 	}
 }
 
@@ -139,5 +139,147 @@ func TestRunDojoList(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "resume-posture") || !strings.Contains(out.String(), "posture_accuracy") {
 		t.Fatalf("list --json should describe the resume-posture lever, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "compaction") || !strings.Contains(out.String(), "cache_prefix_preserved") {
+		t.Fatalf("list --json should describe the compaction lever, got %q", out.String())
+	}
+}
+
+func TestCompactionEpisodesFromBacktest(t *testing.T) {
+	// Perfect compaction: 100 fired, 0 prefix_mismatch, shed matches billed delta
+	rep := CompactionBacktestReport{
+		FiredAttempts:       100,
+		PrefixMismatchBails: 0,
+		ShedTokensSum:       10000,
+		InputTokensOffSum:   50000,
+		InputTokensOnSum:    40000,
+	}
+	ins := compactionEpisodesFromBacktest(rep)
+	if len(ins) != 2 {
+		t.Fatalf("a full report should yield 2 metrics, got %d", len(ins))
+	}
+
+	got := map[string]dojo.ScoredInput{}
+	for _, in := range ins {
+		got[in.Prediction.Metric] = in
+	}
+
+	prefix := got["cache_prefix_preserved"]
+	if prefix.Prediction.Claimed != 1.0 || prefix.Outcome.Realized != 1.0 || prefix.Outcome.Sample != 100 {
+		t.Fatalf("cache_prefix_preserved mapping wrong: %+v", prefix)
+	}
+	if prefix.Outcome.Provenance != dojo.Witnessed || !prefix.Outcome.Measured {
+		t.Fatalf("compaction metrics must be WITNESSED + measured: %+v", prefix.Outcome)
+	}
+
+	shed := got["token_shed_ratio"]
+	if shed.Prediction.Claimed != 1.0 || shed.Outcome.Realized != 1.0 {
+		t.Fatalf("token_shed_ratio mapping wrong for perfect case: %+v", shed)
+	}
+}
+
+func TestCompactionEpisodesPrefixMismatch(t *testing.T) {
+	// Single prefix_mismatch drives cache_prefix_preserved to 0.99 (OVER_CLAIM vs 1.0)
+	rep := CompactionBacktestReport{
+		FiredAttempts:       100,
+		PrefixMismatchBails: 1,
+	}
+	ins := compactionEpisodesFromBacktest(rep)
+	if len(ins) != 1 {
+		t.Fatalf("only cache_prefix_preserved should be emitted when no token data, got %d", len(ins))
+	}
+	prefix := ins[0]
+	if prefix.Outcome.Realized != 0.99 {
+		t.Fatalf("single prefix_mismatch should yield 0.99 preserved, got %.2f", prefix.Outcome.Realized)
+	}
+}
+
+func TestCompactionEpisodesOverClaimShed(t *testing.T) {
+	// Projected shed 10k, billed delta 5k -> 0.5 ratio (OVER_CLAIM vs 1.0)
+	// CalibErr = |0.5 - 1.0| / 1.0 = 0.5 > 0.10, Residual = -0.5 < 0 -> OVER_CLAIM
+	// No prefix data, but FiredAttempts > 0 triggers cache_prefix_preserved emission too
+	rep := CompactionBacktestReport{
+		FiredAttempts:     10,
+		ShedTokensSum:     10000,
+		InputTokensOffSum: 50000,
+		InputTokensOnSum:  45000, // delta = 5k < 10k projected
+	}
+	ins := compactionEpisodesFromBacktest(rep)
+	if len(ins) != 2 {
+		t.Fatalf("both metrics should be emitted when FiredAttempts > 0, got %d", len(ins))
+	}
+	shed := map[string]dojo.ScoredInput{}
+	for _, in := range ins {
+		shed[in.Prediction.Metric] = in
+	}
+	if shed["token_shed_ratio"].Outcome.Realized != 0.5 {
+		t.Fatalf("projected 10k, billed 5k should yield 0.5 ratio, got %.2f", shed["token_shed_ratio"].Outcome.Realized)
+	}
+	// cache_prefix_preserved is 1.0 when PrefixMismatchBails = 0
+	if shed["cache_prefix_preserved"].Outcome.Realized != 1.0 {
+		t.Fatalf("zero prefix_mismatch should yield 1.0 preserved, got %.2f", shed["cache_prefix_preserved"].Outcome.Realized)
+	}
+}
+
+func TestCompactionEpisodesSkipsEmptyMetrics(t *testing.T) {
+	// Empty report -> no episodes
+	ins := compactionEpisodesFromBacktest(CompactionBacktestReport{})
+	if len(ins) != 0 {
+		t.Fatalf("an empty report should yield no episodes, got %d", len(ins))
+	}
+}
+
+func TestCompactionEpisodesScoreIntoExpectedVerdicts(t *testing.T) {
+	// Mix of calibrated (0.99 vs 1.0, CalibErr=0.01 <= 0.10), over-claim (0.5 vs 1.0, CalibErr=0.5 > 0.10, Residual<0)
+	rep := CompactionBacktestReport{
+		FiredAttempts:       100,
+		PrefixMismatchBails: 1,
+		ShedTokensSum:       10000,
+		InputTokensOffSum:   50000,
+		InputTokensOnSum:    45000, // delta = 5k, ratio = 0.5 -> OVER_CLAIM
+	}
+	var eps []dojo.Episode
+	for _, in := range compactionEpisodesFromBacktest(rep) {
+		eps = append(eps, dojo.Score("corpus", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
+	byMetric := map[string]dojo.Episode{}
+	for _, e := range eps {
+		byMetric[e.Metric] = e
+	}
+	// 0.99 vs 1.0 is CALIBRATED (CalibErr=0.01 <= 0.10)
+	if byMetric["cache_prefix_preserved"].Verdict != dojo.VerdictCalibrated {
+		t.Fatalf("0.99 vs 1.0 should be CALIBRATED, got %s", byMetric["cache_prefix_preserved"].Verdict)
+	}
+	// 0.5 vs 1.0 is OVER_CLAIM (CalibErr=0.5 > 0.10, Residual=-0.5 < 0)
+	if byMetric["token_shed_ratio"].Verdict != dojo.VerdictOverClaim {
+		t.Fatalf("0.5 vs 1.0 should be OVER_CLAIM, got %s", byMetric["token_shed_ratio"].Verdict)
+	}
+}
+
+func TestDojoCatalogMatchesCompactionEmittedMetrics(t *testing.T) {
+	// the static catalog must match the metrics the compaction lever emits on a full report
+	rep := CompactionBacktestReport{
+		FiredAttempts:       1,
+		PrefixMismatchBails: 0,
+		ShedTokensSum:       1000,
+		InputTokensOffSum:   10000,
+		InputTokensOnSum:    8000,
+	}
+	emitted := map[string]bool{}
+	for _, in := range compactionEpisodesFromBacktest(rep) {
+		emitted[in.Prediction.Metric] = true
+	}
+	for _, lv := range dojoLeverCatalog() {
+		if lv.Name != "compaction" {
+			continue
+		}
+		for _, m := range lv.Metrics {
+			if !emitted[m.Name] {
+				t.Fatalf("catalog advertises metric %q the lever never emits", m.Name)
+			}
+		}
+		if len(lv.Metrics) != len(emitted) {
+			t.Fatalf("catalog lists %d metrics but the lever emits %d", len(lv.Metrics), len(emitted))
+		}
 	}
 }
