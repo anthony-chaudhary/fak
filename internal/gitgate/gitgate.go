@@ -141,6 +141,16 @@ var defaultHazards = []hazard{
 
 const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (AGENTS.md). Add explicit paths instead."
 
+// unscopedStashLaw fires on a whole-tree stash CREATE in the shared trunk. A bare
+// `git stash` (or `git stash push`/`save` with no pathspec) snapshots EVERY dirty
+// file — including a peer's in-flight WIP — then leaves it parked in a stash that
+// the workflow never pops, stranding that peer's work (the `peer-wip-before-*` /
+// `WIP on main` stash pile this law exists to prevent). The clean-tree move on a
+// shared trunk is to commit your own files by explicit path or, if you must park
+// them, scope the stash to YOUR paths: `git stash push -- <your-paths>`
+// (CLAUDE.md / [[fak-shared-tree-high-churn-commit]]).
+const unscopedStashLaw = "unscoped-stash refused: a bare `git stash`/`git stash push`/`save` snapshots the WHOLE shared tree, sweeping a peer's in-flight WIP into a stash that never gets popped (CLAUDE.md). To reach a clean tree, commit your files by explicit path, or scope the stash to your own paths: `git stash push -- <your-paths>`."
+
 // ToolCollectiveCommit is the synthetic tool name for the collective-commit
 // barrier. It never shells out; its args are a CollectiveCommitPlan JSON object.
 const ToolCollectiveCommit = "gitgate.collective_commit"
@@ -488,6 +498,16 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 			}
 		}
 	}
+
+	// A whole-tree stash CREATE (bare `git stash`, or `git stash push`/`save`
+	// with no pathspec) sweeps every dirty file, incl. a peer's WIP. Only the
+	// stash CREATE forms are hazardous — list/show/pop/apply/drop/branch/clear
+	// inspect or unwind an existing stash and never snapshot the tree. A `--`
+	// (or a trailing pathspec) scopes the snapshot to the agent's own files, so
+	// that form is allowed.
+	if sub == "stash" && isUnscopedStashCreate(rest) {
+		return unscopedStashLaw, true
+	}
 	for _, t := range rest {
 		if t == "--" {
 			break // end of options; the remainder are pathspecs/operands, not flags
@@ -506,6 +526,54 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// isUnscopedStashCreate reports whether the args AFTER `git stash` describe a
+// whole-tree stash CREATE with no pathspec scoping it to the agent's own files.
+// The create forms are: bare `git stash` (no subcommand → defaults to push),
+// `git stash push ...`, and `git stash save ...`. Any other first word
+// (list/show/pop/apply/drop/branch/clear/create/store) is a non-create stash op
+// and is allowed. A create is "scoped" — and so allowed — when a `--` separator
+// appears (everything after it is a pathspec) or, for `push`, when a bare
+// (non-flag) operand follows, which git treats as a pathspec. `save` takes only
+// a message, never a pathspec, so `git stash save ...` is always whole-tree.
+func isUnscopedStashCreate(rest []string) bool {
+	// Skip leading valueless flags to find the stash subcommand word (e.g.
+	// `git stash -k` / `git stash --keep-index` is still a bare create).
+	i := 0
+	for i < len(rest) && strings.HasPrefix(rest[i], "-") && rest[i] != "--" {
+		i++
+	}
+	op := "push" // bare `git stash` defaults to push
+	if i < len(rest) && rest[i] != "--" {
+		op = rest[i]
+		i++
+	}
+	switch op {
+	case "push", "save":
+		// fall through to the scoping check
+	default:
+		return false // list/show/pop/apply/drop/branch/clear/create/store/...
+	}
+	if op == "save" {
+		return true // save never takes a pathspec — always whole-tree
+	}
+	// push: scoped iff a `--` appears OR a bare non-flag operand (a pathspec) follows.
+	for ; i < len(rest); i++ {
+		t := rest[i]
+		if t == "--" {
+			return false // explicit pathspec separator → scoped
+		}
+		if strings.HasPrefix(t, "-") {
+			// a flag; `-m <msg>` consumes its value so the message is not a pathspec
+			if t == "-m" || t == "--message" {
+				i++
+			}
+			continue
+		}
+		return false // a bare operand on push is a pathspec → scoped
+	}
+	return true // push with no pathspec and no `--` → whole-tree create
 }
 
 // gitArgv returns the argument tokens of a git invocation in this segment (the

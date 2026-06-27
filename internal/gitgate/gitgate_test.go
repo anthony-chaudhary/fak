@@ -70,6 +70,30 @@ func TestClassify(t *testing.T) {
 		{"rebase autostash", "git rebase --autostash origin/main", true, "autostash refused"},
 		{"pull rebase autostash", "git pull --rebase --autostash origin main", true, "autostash refused"},
 
+		// ---- unscoped stash (whole-tree snapshot sweeps a peer's WIP) --------
+		{"bare stash", "git stash", true, "unscoped-stash"},
+		{"stash push", "git stash push", true, "unscoped-stash"},
+		{"stash push -m", `git stash push -m "wip"`, true, "unscoped-stash"},
+		{"stash save", "git stash save", true, "unscoped-stash"},
+		{"stash save msg", `git stash save "peer-wip-before-push"`, true, "unscoped-stash"},
+		{"stash keep-index", "git stash --keep-index", true, "unscoped-stash"},
+		{"stash -k short", "git stash -k", true, "unscoped-stash"},
+		{"stash -u include untracked", "git stash -u", true, "unscoped-stash"},
+		{"stash push then chained", "git stash && git pull", true, "unscoped-stash"},
+		// scoped/non-create stash forms are the SAFE escape hatch → DEFER
+		{"stash push -- path OK", "git stash push -- internal/gitgate/gitgate.go", false, ""},
+		{"stash push path operand OK", "git stash push internal/x.go", false, ""},
+		{"stash push -m then -- path OK", `git stash push -m "mine" -- internal/x.go`, false, ""},
+		{"stash list OK", "git stash list", false, ""},
+		{"stash show OK", "git stash show -p stash@{0}", false, ""},
+		{"stash pop OK", "git stash pop", false, ""},
+		{"stash apply OK", "git stash apply stash@{2}", false, ""},
+		{"stash drop OK", "git stash drop stash@{0}", false, ""},
+		{"stash clear OK", "git stash clear", false, ""},
+		{"stash branch OK", "git stash branch tmp stash@{0}", false, ""},
+		// false-positive guard: the word stash inside a quoted message must DEFER
+		{"stash inside message", `git commit -m "remember to git stash first"`, false, ""},
+
 		// ---- allowed git ops (DEFER) ----------------------------------------
 		{"commit explicit OK", `git commit -s -m "fix(x): do y (fak x)"`, false, ""},
 		{"commit -sm OK", `git commit -sm "msg"`, false, ""},
