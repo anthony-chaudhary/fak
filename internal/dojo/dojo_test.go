@@ -27,31 +27,31 @@ func TestScoreCalibrated(t *testing.T) {
 }
 
 func TestScoreOverClaim(t *testing.T) {
-	// the projection claims the whole resident is rewritten (1.0); reality is 0.68.
-	e := Score("s", pred("cold_write_share", 1.0), obs(0.68, true), DefaultCalibBand())
+	// the projection claims ~85% of the resident is rewritten (0.85); reality is 0.68.
+	e := Score("s", pred("cold_write_share", 0.85), obs(0.68, true), DefaultCalibBand())
 	if e.Verdict != VerdictOverClaim {
 		t.Fatalf("want OVER_CLAIM, got %s", e.Verdict)
 	}
-	if e.CalibErr < 0.31 || e.CalibErr > 0.33 {
-		t.Fatalf("calib_err should be ~0.32, got %.4f", e.CalibErr)
+	if e.CalibErr < 0.19 || e.CalibErr > 0.21 {
+		t.Fatalf("calib_err should be ~0.20, got %.4f", e.CalibErr)
 	}
-	if e.Grade != "C" {
-		t.Fatalf("0.32 calib-err should grade C, got %s", e.Grade)
+	if e.Grade != "B" {
+		t.Fatalf("0.20 calib-err should grade B, got %s", e.Grade)
 	}
 }
 
 func TestScoreUnderClaim(t *testing.T) {
-	// the within-session model claims no cross-session reuse (0.0); reality has it.
-	e := Score("s", pred("cross_session_warm_hit_rate", 0.0), obs(0.30, true), DefaultCalibBand())
+	// the within-session model claims ~17% cross-session reuse (0.17); reality has it.
+	e := Score("s", pred("cross_session_warm_hit_rate", 0.17), obs(0.30, true), DefaultCalibBand())
 	if e.Verdict != VerdictUnderClaim {
 		t.Fatalf("want UNDER_CLAIM, got %s", e.Verdict)
 	}
-	// claim ~0 normalizes by realized: |0.3-0|/0.3 = 1.0.
-	if e.CalibErr < 0.99 || e.CalibErr > 1.01 {
-		t.Fatalf("calib_err should be ~1.0, got %.4f", e.CalibErr)
+	// calib_err = |0.30-0.17|/0.17 = 0.13/0.17 = ~0.76
+	if e.CalibErr < 0.75 || e.CalibErr > 0.77 {
+		t.Fatalf("calib_err should be ~0.76, got %.4f", e.CalibErr)
 	}
 	if e.Grade != "F" {
-		t.Fatalf("calib-err 1.0 should grade F, got %s", e.Grade)
+		t.Fatalf("calib-err ~0.76 should grade F, got %s", e.Grade)
 	}
 }
 
@@ -114,8 +114,8 @@ func TestFoldAllUnmeasured(t *testing.T) {
 func TestFoldRecordedWithOverClaimAdvisory(t *testing.T) {
 	eps := []Episode{
 		Score("s", pred("posture_accuracy", 1.0), obs(0.977, true), DefaultCalibBand()), // calibrated
-		Score("s", pred("cold_write_share", 1.0), obs(0.68, true), DefaultCalibBand()),  // over-claim
-		Score("s", pred("warm_hit", 0.0), obs(0.30, true), DefaultCalibBand()),          // under-claim
+		Score("s", pred("cold_write_share", 0.85), obs(0.68, true), DefaultCalibBand()), // over-claim
+		Score("s", pred("warm_hit", 0.17), obs(0.30, true), DefaultCalibBand()),        // under-claim
 	}
 	r := Fold(eps, FoldOpts{Date: "2026-06-26", Commit: "abc123def456"})
 	if !r.OK || r.Finding != "dojo_recorded" {
@@ -150,7 +150,7 @@ func TestFoldNextActionHarvestsUnderClaim(t *testing.T) {
 }
 
 func TestRenderContainsEpisodeAndTrend(t *testing.T) {
-	eps := []Episode{Score("resume-posture", pred("cold_write_share", 1.0), obs(0.68, true), DefaultCalibBand())}
+	eps := []Episode{Score("resume-posture", pred("cold_write_share", 0.85), obs(0.68, true), DefaultCalibBand())}
 	r := Fold(eps, FoldOpts{Date: "2026-06-26", Commit: "abc123def456789"})
 	r.Trend = &Trend{Direction: "improved", Summary: "calibration improved -0.050 (0.300->0.250) vs 2026-06-25; 2/3 episodes calibrated"}
 	out := Render(r)

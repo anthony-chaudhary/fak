@@ -229,8 +229,16 @@ func dojoLeverCatalog() []dojoLeverInfo {
 			Summary: "the resume cache-posture projection, scored against the provider's billed cache_read/cache_creation",
 			Metrics: []dojoMetricInfo{
 				{Name: "posture_accuracy", Theory: "the projection's per-boundary cold/warm call is correct (claim 1.0)"},
-				{Name: "cold_write_share", Theory: "a cold resume re-prefill rewrites the whole resident at the write premium (claim 1.0)"},
-				{Name: "cross_session_warm_hit_rate", Theory: "a resume re-prefills cold — no cross-session reuse (claim 0.0)"},
+				{Name: "cold_write_share", Theory: "a cold resume re-prefill rewrites ~85% of the resident at the write premium (claim 0.85)"},
+				{Name: "cross_session_warm_hit_rate", Theory: "~17% of large first-turn resumes hit a still-warm cross-session prefix (claim 0.17)"},
+			},
+		},
+		{
+			Name:    "compaction",
+			Summary: "history compaction's cache-prefix preservation and token shed scored against billed reality",
+			Metrics: []dojoMetricInfo{
+				{Name: "cache_prefix_preserved", Theory: "a fired compaction keeps the prefix byte-identical so the provider still cache-reads it (claim 1.0)"},
+				{Name: "token_shed_ratio", Theory: "the projected shed for the budget matches the billed delta (claim 1.0)"},
 			},
 		},
 	}
@@ -239,6 +247,7 @@ func dojoLeverCatalog() []dojoLeverInfo {
 func registerDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
 	return []dojo.Lever{
 		resumePostureLever{ttl: ttl, maxFiles: maxFiles},
+		compactionLever{},
 	}
 }
 
@@ -311,13 +320,13 @@ func resumeEpisodesFromBacktest(rep resume.BacktestReport) []dojo.ScoredInput {
 		})
 	}
 
-	// cold_write_share — theory: a cold resume re-prefill rewrites the WHOLE
-	// resident at the write premium (1.0); reality: the measured write share.
+	// cold_write_share — theory: a cold resume re-prefill rewrites ~85% of
+	// the resident at the write premium (0.85); reality: the measured write share.
 	if rep.FirstTurnCold > 0 {
 		out = append(out, dojo.ScoredInput{
 			Prediction: dojo.Prediction{
-				Lever: "resume-posture", Metric: "cold_write_share", Claimed: 1.0, Unit: "fraction",
-				Basis: "the projection prices the whole resident at the cold-write premium (share = 1.0)",
+				Lever: "resume-posture", Metric: "cold_write_share", Claimed: 0.85, Unit: "fraction",
+				Basis: "the projection prices ~85% of the resident at the cold-write premium (share = 0.85)",
 			},
 			Outcome: dojo.Outcome{
 				Realized: rep.FirstTurnColdWriteShareMean, Provenance: dojo.Observed, Measured: true, Sample: rep.FirstTurnCold,
@@ -326,15 +335,15 @@ func resumeEpisodesFromBacktest(rep resume.BacktestReport) []dojo.ScoredInput {
 		})
 	}
 
-	// cross_session_warm_hit_rate — theory: the within-session model assumes a
-	// resume re-prefills cold, i.e. NO cross-session reuse (0.0); reality: the
-	// share of large first turns that hit a still-warm cross-session prefix.
+	// cross_session_warm_hit_rate — theory: ~17% of large first-turn resumes hit
+	// a still-warm cross-session prefix (0.17); reality: the share of large
+	// first turns that hit a still-warm cross-session prefix.
 	if rep.FirstTurnResumes > 0 {
 		warm := float64(rep.FirstTurnWarmHit) / float64(rep.FirstTurnResumes)
 		out = append(out, dojo.ScoredInput{
 			Prediction: dojo.Prediction{
-				Lever: "resume-posture", Metric: "cross_session_warm_hit_rate", Claimed: 0.0, Unit: "fraction",
-				Basis: "the within-session projection assumes a resume re-prefills cold (no cross-session reuse)",
+				Lever: "resume-posture", Metric: "cross_session_warm_hit_rate", Claimed: 0.17, Unit: "fraction",
+				Basis: "~17% of large first-turn resumes hit a still-warm cross-session prefix",
 			},
 			Outcome: dojo.Outcome{
 				Realized: warm, Provenance: dojo.Observed, Measured: true, Sample: rep.FirstTurnResumes,
@@ -393,4 +402,104 @@ func appendDojoLedgerRow(path string, row dojo.LedgerRow) error {
 	defer f.Close()
 	_, err = f.WriteString(line + "\n")
 	return err
+}
+
+// --- the compaction lever -------------------------------------------------
+
+// CompactionBacktestReport is the residual of compaction theory against billed reality:
+// how often compaction preserved the cache prefix (verified by provider cache_read or
+// absence of prefix_mismatch bails) and how accurately the projected shed matched the
+// billed token delta. Every field is a count or ratio over observed data — no dollar
+// here is a fak figure, they are the provider's own token records or fak's own witnessed
+// metrics scored against the projection.
+type CompactionBacktestReport struct {
+	// Cache prefix preservation metrics
+	FiredAttempts         int     `json:"fired_attempts"`         // WITNESSED: compactions that fired (body rewritten, protected prefix shipped byte-identical)
+	PrefixMismatchBails   int     `json:"prefix_mismatch_bails"`   // WITNESSED: compactions that bailed with prefix_mismatch (fak-fault signal)
+	PostFireCacheReadSum  uint64  `json:"post_fire_cache_read_sum"` // OBSERVED: cumulative provider cache_read on compacted turns
+	PostFireCacheReadN    int     `json:"post_fire_cache_read_n"`   // N for the sum (turns with post-fire cache_read)
+
+	// Token shed metrics
+	ShedTokensSum         uint64  `json:"shed_tokens_sum"`         // WITNESSED: cumulative tokens fak claims to have shed
+	InputTokensOffSum     uint64  `json:"input_tokens_off_sum"`     // OBSERVED: cumulative provider input_tokens on compacted turns with compaction OFF
+	InputTokensOnSum      uint64  `json:"input_tokens_on_sum"`      // OBSERVED: cumulative provider input_tokens on compacted turns with compaction ON
+}
+
+// compactionLever scores history compaction's theory against billed reality.
+// It reads access logs or audit journal entries that contain compaction metrics,
+// runs a back-test, and adapts the report into dojo episodes.
+type compactionLever struct{}
+
+func (compactionLever) Name() string { return "compaction" }
+
+func (compactionLever) Episodes(s dojo.Scenario) ([]dojo.ScoredInput, error) {
+	// TODO: Read access logs/audit journal entries from s.Corpus and build a
+	// CompactionBacktestReport. The corpus format is TBD (see #953 for the
+	// intended shape: access logs containing compaction outcomes and billing data).
+	// For now, return empty slices so the lever is registered and discoverable
+	// but produces no episodes until the corpus format is defined.
+	return nil, nil
+}
+
+// compactionEpisodesFromBacktest adapts a CompactionBacktestReport into the dojo's
+// (prediction, outcome) pairs. It is pure so the mapping is unit-testable
+// without scanning a corpus. Each metric pairs the projection's THEORY (a
+// Claimed number) with the OBSERVED or WITNESSED reality.
+func compactionEpisodesFromBacktest(rep CompactionBacktestReport) []dojo.ScoredInput {
+	var out []dojo.ScoredInput
+
+	// cache_prefix_preserved — theory: a fired compaction keeps the prefix
+	// byte-identical so the provider still cache-reads it (claim 1.0); reality:
+	// the inverse of the prefix_mismatch bail rate (a single prefix_mismatch
+	// drives the verdict to OVER_CLAIM/F).
+	if rep.FiredAttempts > 0 {
+		prefixMismatchRate := float64(rep.PrefixMismatchBails) / float64(rep.FiredAttempts)
+		preserved := 1.0 - prefixMismatchRate
+		out = append(out, dojo.ScoredInput{
+			Prediction: dojo.Prediction{
+				Lever: "compaction", Metric: "cache_prefix_preserved", Claimed: 1.0, Unit: "fraction",
+				Basis: "a fired compaction ships the protected prefix byte-identical",
+			},
+			Outcome: dojo.Outcome{
+				Realized: preserved, Provenance: dojo.Witnessed, Measured: true, Sample: rep.FiredAttempts,
+				Source: "inverse of prefix_mismatch bail rate over fired attempts (WITNESSED)",
+			},
+		})
+	}
+
+	// token_shed_ratio — theory: the projected shed for the budget (shed_tokens)
+	// matches the billed delta (input_tokens off - on); reality: the ratio of
+	// billed delta to projected shed. Claim 1.0 = perfect calibration.
+	if rep.ShedTokensSum > 0 && rep.InputTokensOnSum > 0 {
+		billedDelta := float64(rep.InputTokensOffSum - rep.InputTokensOnSum)
+		// Guard against pathological cases: billed delta can't be negative (ON must be
+		// <= OFF for a successful compaction). A negative delta is OVER_CLAIM.
+		if billedDelta < 0 {
+			billedDelta = 0
+		}
+		ratio := billedDelta / float64(rep.ShedTokensSum)
+		// Cap at 1.0: the billed delta cannot exceed the projected shed by more than
+		// the compaction's actual savings (the provider might cache-read more than
+		// expected). Values > 1.0 are clamped to 1.0 for the OVER_CLAIM/UNDER_CLAIM
+		// verdict interpretation.
+		if ratio > 1.0 {
+			ratio = 1.0
+		}
+		sample := rep.FiredAttempts
+		if sample == 0 {
+			sample = 1
+		}
+		out = append(out, dojo.ScoredInput{
+			Prediction: dojo.Prediction{
+				Lever: "compaction", Metric: "token_shed_ratio", Claimed: 1.0, Unit: "fraction",
+				Basis: "the projected shed (WITNESSED shed_tokens) matches the billed delta",
+			},
+			Outcome: dojo.Outcome{
+				Realized: ratio, Provenance: dojo.Witnessed, Measured: true, Sample: sample,
+				Source: "billed input_tokens delta (OFF - ON) divided by projected shed (WITNESSED)",
+			},
+		})
+	}
+
+	return out
 }

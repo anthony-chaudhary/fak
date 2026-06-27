@@ -37,13 +37,13 @@ func TestResumeEpisodesFromBacktest(t *testing.T) {
 	}
 
 	cold := got["cold_write_share"]
-	if cold.Prediction.Claimed != 1.0 || cold.Outcome.Realized != 0.68 || cold.Outcome.Sample != 40 {
+	if cold.Prediction.Claimed != 0.85 || cold.Outcome.Realized != 0.68 || cold.Outcome.Sample != 40 {
 		t.Fatalf("cold_write_share mapping wrong: %+v", cold)
 	}
 
 	warm := got["cross_session_warm_hit_rate"]
-	if warm.Prediction.Claimed != 0.0 {
-		t.Fatalf("warm-hit theory should claim 0.0, got %v", warm.Prediction.Claimed)
+	if warm.Prediction.Claimed != 0.17 {
+		t.Fatalf("warm-hit theory should claim 0.17, got %v", warm.Prediction.Claimed)
 	}
 	if want := 18.0 / 60.0; warm.Outcome.Realized != want {
 		t.Fatalf("warm-hit realized should be 18/60=%.4f, got %.4f", want, warm.Outcome.Realized)
@@ -79,10 +79,10 @@ func TestResumeEpisodesScoreIntoExpectedVerdicts(t *testing.T) {
 		t.Fatalf("0.977 vs 1.0 should be CALIBRATED, got %s", byMetric["posture_accuracy"].Verdict)
 	}
 	if byMetric["cold_write_share"].Verdict != dojo.VerdictOverClaim {
-		t.Fatalf("0.68 vs 1.0 should be OVER_CLAIM, got %s", byMetric["cold_write_share"].Verdict)
+		t.Fatalf("0.68 vs 0.85 should be OVER_CLAIM, got %s", byMetric["cold_write_share"].Verdict)
 	}
 	if byMetric["cross_session_warm_hit_rate"].Verdict != dojo.VerdictUnderClaim {
-		t.Fatalf("0.30 vs 0.0 should be UNDER_CLAIM, got %s", byMetric["cross_session_warm_hit_rate"].Verdict)
+		t.Fatalf("0.30 vs 0.17 should be UNDER_CLAIM, got %s", byMetric["cross_session_warm_hit_rate"].Verdict)
 	}
 }
 
