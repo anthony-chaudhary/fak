@@ -117,6 +117,16 @@ func (s *Session) useHALQ8Weights() bool {
 	return s.Quant && s.M != nil && s.M.q8w != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
 }
 
+// useHALQ4KWeights reports whether this session stages its eligible matmul weights as RAW
+// resident Q4_K (the dequant-fused device GEMM, #485/#949) instead of Q8 — true for a Q4_K
+// model (s.Q4K, m.q4kw populated) on a device backend that consumes quantized uploads. The
+// normalize-sensitive minority (q/k_proj, Q6_K) stays in q8w and the q8 branch serves it; only
+// the q4kw-resident majority (FFN gate/up/down, v/o_proj, lm_head) routes through Q4_K — the
+// same split glmDsaWeightHAL uses for GLM-DSA, now reachable for a plain dense arch on CUDA.
+func (s *Session) useHALQ4KWeights() bool {
+	return s.Q4K && s.M != nil && s.M.q4kw != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
+}
+
 var halQ8BatchLayers = initHALQ8BatchLayers()
 
 func initHALQ8BatchLayers() int {
@@ -176,6 +186,11 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 			return s.weightHALQ8(name, qt)
 		}
 	}
+	if s.useHALQ4KWeights() {
+		if qt, ok := s.M.q4kw[name]; ok {
+			return s.weightHALQ4K(name, qt)
+		}
+	}
 	return s.weightHAL(name)
 }
 
@@ -191,6 +206,12 @@ func (s *Session) lmHeadMatHAL() compute.Tensor {
 		name := s.M.headName()
 		if qt, ok := s.M.q8w[name]; ok {
 			return s.weightHALQ8(name, qt)
+		}
+	}
+	if s.useHALQ4KWeights() {
+		name := s.M.q4kHeadName()
+		if qt, ok := s.M.q4kw[name]; ok {
+			return s.weightHALQ4K(name, qt)
 		}
 	}
 	return s.lmHeadHAL()
