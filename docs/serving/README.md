@@ -48,6 +48,14 @@ orthogonal questions a fleet hits at scale: where reused KV lives, how it is sha
 rebuilt, and which reuse is still *legal* across tenants. See the
 [addressable KV cache](../explainers/addressable-kv-cache.md) explainer for the core idea.
 
+## Epics in flight
+
+- [Multilevel default cache epic](multilevel-default-cache-epic.md) — the progress spine
+  that finishes the hardware-capacity bridge (#706): wire the demote-not-evict executor into
+  a live loop, derive real pressure for every local tier (HBM/DRAM/disk), and make
+  hardware-aware placement the kernel's default. Each rung is a `dos`-verifiable
+  prove-or-refute step; builds on the [hardware-aware KV cache](hardware-aware-cache.md) plane.
+
 ## Witnesses
 
 - [GLM-5.2 full-size serving witness](glm52-full-size-serving-witness.md) — the
