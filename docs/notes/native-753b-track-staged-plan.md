@@ -104,6 +104,20 @@ accessor and a table-driven golden test (`gguf_glm_test.go`).
   MLA + an indexer) and pinned as one named-constant block, so the closing follow-on — a
   golden against a real GGUF header — only re-pins that block.
 
+## Time estimate summary
+
+The remaining uncompleted milestones (7 items) are estimated at **13–20 weeks total**:
+
+- P2 Vulkan Q4_K GEMM: 1–2 weeks
+- P2 Metal HAL (Metal path only, CUDA ✅ done): 1 week
+- P2 Full-model quant forward (Q4_K lane only, Q8 ✅ done): 2 weeks
+- P3 MLA-aware TP + EP: 4 weeks
+- P3 Real cross-process NCCL (device): 3–4 weeks
+- P4 Async expert streaming: 1 week
+- Integration 753B serve: 1–2 weeks
+
+**Range: 13–20 weeks** (1–2 weeks per item × 7 items, with P3 items weighted heavier due to complexity).
+
 ## Staged plan (dependency-ordered)
 
 Each milestone is a shippable green step with a one-line acceptance test. "ships now"
