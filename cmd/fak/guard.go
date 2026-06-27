@@ -24,12 +24,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
+	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelreg"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/secretload"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // guardDefaultPolicyJSON is the day-to-day capability floor `fak guard` enforces when
@@ -108,6 +114,9 @@ func cmdGuard(argv []string) {
 	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
 	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: record this guard session as a dojo episode for later scoring with `fak dojo run`. The episode is written to a dojo corpus directory under the workspace root.")
+	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Mutually exclusive with --base-url / --remote-serve.")
+	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
+	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
 		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
@@ -122,6 +131,13 @@ func cmdGuard(argv []string) {
 	if *landlockHooks {
 		_ = os.Setenv(guard.EnvOptIn, "1")
 	}
+
+	// Expand a leading ~ in the --gguf / --tokenizer paths up front (PowerShell and most
+	// quoting pass ~ through literally and Go never expands it), so `--gguf ~/models/x.gguf`
+	// opens. The alias/URI resolution + download is deferred until AFTER the flag-conflict
+	// check below, so a `--gguf foo --base-url bar` typo fails loud before any multi-GB pull.
+	*ggufPath = pathutil.ExpandTilde(*ggufPath)
+	*tokPath = pathutil.ExpandTilde(*tokPath)
 
 	// Raise the gateway's HTTP write/planner timeout floors for the wrapped session. A
 	// frontier Claude turn with extended thinking can run well past fak serve's 90 s
@@ -212,6 +228,15 @@ func cmdGuard(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak guard: --remote-serve: %v\n", remoteErr)
 		os.Exit(2)
 	}
+
+	// --gguf turns the in-process gateway into a LOCAL in-kernel model server (fak runs the
+	// model itself), so it is mutually exclusive with the upstream-proxy flags — the local
+	// model IS the upstream. Decide + validate up front, before binding or pulling weights.
+	localModel, localConflict := guardLocalModelDecision(*ggufPath, *baseURL, remoteBase)
+	if localConflict != "" {
+		fmt.Fprintln(os.Stderr, "fak guard:", localConflict)
+		os.Exit(2)
+	}
 	if remoteBase != "" {
 		if strings.TrimSpace(*baseURL) != "" && strings.TrimSpace(*baseURL) != remoteBase {
 			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve and --base-url disagree (%s vs %s) — pass only one\n", remoteBase, strings.TrimSpace(*baseURL))
@@ -230,17 +255,36 @@ func cmdGuard(argv []string) {
 		}
 	}
 
-	// 3. Resolve the upstream wire + credential posture (provider autodetect, base URL,
-	//    API key, and the Claude subscription-OAuth default); see resolveGuardUpstream.
-	//    --remote-serve, when set, pins provider=openai + base=the box inside the resolver.
-	us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
-	up, providerAutodetected, resolvedBase := us.provider, us.autodetected, us.baseURL
-	apiKey, pinUpstream, oauthSource := us.apiKey, us.pinUpstream, us.oauthSource
-	if us.passthroughFallback && !*quiet {
-		fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — the wrapped agent's own credential (a subscription login or ANTHROPIC_API_KEY) is forwarded upstream. If you hit a 401, run `claude` once or `claude setup-token`.")
-	}
-	if us.ambientKeyOverridden && !*quiet {
-		fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
+	// 3. Resolve the upstream wire + credential posture. Two worlds:
+	//
+	//    LOCAL (--gguf): fak runs the model itself in-kernel, so there is NO upstream API,
+	//    no API key, and no OAuth. Resolve ONLY the wire (anthropic for claude, openai for
+	//    codex/…) — that still selects which base-URL env var points the child at the
+	//    gateway and labels the banner — and leave the credential posture empty.
+	//
+	//    PROXY (default): resolveGuardUpstream picks the provider, base URL, API key, and
+	//    the Claude subscription-OAuth default. --remote-serve, when set, pins provider=openai
+	//    + base=the box inside the resolver.
+	var (
+		up                   string
+		providerAutodetected bool
+		resolvedBase         string
+		apiKey               string
+		pinUpstream          bool
+		oauthSource          string
+	)
+	if localModel {
+		up, providerAutodetected = resolveGuardProvider(*provider, command[0])
+	} else {
+		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
+		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
+		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
+		if us.passthroughFallback && !*quiet {
+			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — the wrapped agent's own credential (a subscription login or ANTHROPIC_API_KEY) is forwarded upstream. If you hit a 401, run `claude` once or `claude setup-token`.")
+		}
+		if us.ambientKeyOverridden && !*quiet {
+			fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
+		}
 	}
 
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
@@ -277,7 +321,57 @@ func cmdGuard(argv []string) {
 	}
 	restarter := newGuardBudgetRestarter(*restartOnBudget, *contextBudgetTokens, *restartLimit, *restartSeedDir, os.Stderr)
 
-	// 3. Bind the listener up front so the real port is known BEFORE we wire the child,
+	// 3b. LOCAL in-kernel model (--gguf): resolve the alias/URI (downloading on demand),
+	//     pick the decode backend, and load the weights + tokenizer through the SAME serve
+	//     loaders `fak serve --gguf` uses — so a name works here exactly as it does there.
+	//     Done BEFORE binding so a load failure (or a download) is a clean fail-loud, not a
+	//     bound-but-broken gateway. nil/false in the proxy path leaves gateway.New
+	//     byte-for-byte the pre-existing behavior.
+	var (
+		inKernelModel *fakmodel.Model
+		inKernelTok   *tokenizer.Tokenizer
+		inKernelQ4K   bool
+		chatBackend   compute.Backend
+	)
+	if localModel {
+		// Alias (`qwen2.5:7b`) → target ref, then an hf:// URI → a locally cached file.
+		if resolved, expanded := modelreg.Resolve(*ggufPath); expanded {
+			fmt.Fprintf(os.Stderr, "fak guard: --gguf %s → %s\n", *ggufPath, resolved)
+			*ggufPath = resolved
+		}
+		if hfhub.IsURI(*ggufPath) {
+			fctx, fstop := signal.NotifyContext(context.Background(), os.Interrupt)
+			resolved, ferr := hfhub.FetchURI(fctx, *ggufPath, os.Stderr)
+			fstop()
+			if ferr != nil {
+				fmt.Fprintf(os.Stderr, "fak guard: --gguf %v\n", ferr)
+				os.Exit(1)
+			}
+			*ggufPath = resolved
+		}
+		var berr error
+		chatBackend, berr = resolveServeChatBackend(*gpuBackend)
+		if berr != nil {
+			fmt.Fprintln(os.Stderr, "fak guard:", berr)
+			os.Exit(2)
+		}
+		if chatBackend != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: in-kernel decode → device backend %q\n", chatBackend.Name())
+		}
+		inKernelModel, inKernelQ4K, _, _ = loadServeInKernelModel(*ggufPath, chatBackend, false, *contextBudgetTokens)
+		if inKernelModel == nil {
+			fmt.Fprintf(os.Stderr, "fak guard: failed to load %q into the in-kernel engine\n", *ggufPath)
+			os.Exit(1)
+		}
+		var tokOK bool
+		inKernelTok, tokOK = resolveServeTokenizer(*tokPath, *ggufPath)
+		if !tokOK || inKernelTok == nil {
+			fmt.Fprintf(os.Stderr, "fak guard: %q has no usable tokenizer; pass --tokenizer or use a GGUF with an embedded tokenizer\n", *ggufPath)
+			os.Exit(1)
+		}
+	}
+
+	// 4. Bind the listener up front so the real port is known BEFORE we wire the child,
 	//    and so there is no bind race between serving and exec. Serve(ctx, ln) accepts
 	//    immediately on the goroutine below.
 	listenAddr := strings.TrimSpace(*addr)
@@ -297,11 +391,19 @@ func cmdGuard(argv []string) {
 	}
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID:              "inkernel",
-		Model:                 *model,
-		BaseURL:               resolvedBase,
-		Provider:              up,
-		APIKey:                apiKey,
+		EngineID: "inkernel",
+		Model:    *model,
+		BaseURL:  resolvedBase,
+		Provider: up,
+		APIKey:   apiKey,
+		// LOCAL in-kernel model (--gguf): a loaded model + tokenizer with an EMPTY BaseURL
+		// makes the gateway serve BOTH /v1/messages (claude) and /v1/chat/completions (codex)
+		// from fak's own engine — no upstream call. nil/false in the proxy path, so the
+		// default `fak guard -- claude` upstream behavior is unchanged.
+		InKernelModel:         inKernelModel,
+		Tokenizer:             inKernelTok,
+		InKernelQ4K:           inKernelQ4K,
+		Backend:               chatBackend,
 		PinUpstreamCredential: pinUpstream,
 		RequireKey:            requireKey,
 		VDSO:                  true,
@@ -383,15 +485,23 @@ func cmdGuard(argv []string) {
 		for _, kv := range injected[1:] {
 			injectNames += ", " + kv[0]
 		}
-		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, us.remoteServe, command)
+		localLabel := ""
+		if localModel {
+			localLabel = filepath.Base(*ggufPath)
+		}
+		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, remoteBase != "", localModel, localLabel, command)
 		if *debugStats {
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
 		}
-		switch {
-		case pinUpstream:
-			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
-		case up == "anthropic":
-			fmt.Fprintln(os.Stderr, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
+		// A LOCAL in-kernel model has no upstream credential to report; the proxy-path auth
+		// note (subscription OAuth vs passthrough) only applies when fak proxies an API.
+		if !localModel {
+			switch {
+			case pinUpstream:
+				fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
+			case up == "anthropic":
+				fmt.Fprintln(os.Stderr, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
+			}
 		}
 		if *contextBudgetTokens > 0 {
 			fmt.Fprintf(os.Stderr, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, *contextBudgetTokens)
@@ -674,6 +784,27 @@ func guardDefaultBaseURL(provider string) string {
 	}
 }
 
+// guardLocalModelDecision decides whether `fak guard` should run a LOCAL in-kernel model
+// (fak loading the weights into its own engine) and validates that the local-model flag
+// does not collide with an upstream-proxy flag. ggufRef is the raw --gguf value (a
+// non-empty value requests local mode); baseURL is --base-url; remoteServe is the
+// normalized --remote-serve base. It returns local=true when local mode is requested, and
+// a non-empty conflict message (local still true) when the operator ALSO named an upstream —
+// the two are mutually exclusive because a local in-kernel model IS the upstream. Pure (no
+// I/O, no exit) so the precedence is unit-tested without standing a model up.
+func guardLocalModelDecision(ggufRef, baseURL, remoteServe string) (local bool, conflict string) {
+	if strings.TrimSpace(ggufRef) == "" {
+		return false, ""
+	}
+	if strings.TrimSpace(remoteServe) != "" {
+		return true, "--gguf (local in-kernel model) and --remote-serve are mutually exclusive — the local model IS the upstream; pass only one"
+	}
+	if strings.TrimSpace(baseURL) != "" {
+		return true, "--gguf (local in-kernel model) and --base-url are mutually exclusive — the local model IS the upstream; pass only one"
+	}
+	return true, ""
+}
+
 // normalizeRemoteServe turns a --remote-serve operand (HOST or HOST:PORT, with or
 // without a scheme) into the canonical base URL "http://HOST:PORT" the OpenAI-compatible
 // wire expects, defaulting the port to 8080 (the documented `fak serve` addr). It is the
@@ -897,14 +1028,19 @@ func guardLoopbackOnly(addr string) bool {
 // into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
 // audit journal, and the structured log stream. It goes to stderr so it never pollutes a
 // `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, remoteServe bool, command []string) {
+func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, remoteServe, local bool, localLabel string, command []string) {
 	fmt.Fprintf(w, "fak guard — kernel-adjudicated: %s\n", strings.Join(command, " "))
 	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
-	if remoteServe {
+	switch {
+	case local:
+		// The model runs IN-KERNEL on this box; there is no upstream API call at all. Say so
+		// plainly — it is the headline of `fak guard --gguf`: a local model + your harness.
+		fmt.Fprintf(w, "  upstream   : in-kernel %s   (LOCAL — fak runs the model itself; no API key, no network) via the %s wire\n", localLabel, provider)
+	case remoteServe:
 		// Tell the operator the dev turn's INFERENCE is on the lab box they chose, not a
 		// public API — the whole point of --remote-serve.
 		fmt.Fprintf(w, "  upstream   : %s   (remote fak serve on a lab box, %s wire)\n", baseURL, provider)
-	} else {
+	default:
 		fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
 	}
 	fmt.Fprintf(w, "  floor      : %s\n", floorSource)

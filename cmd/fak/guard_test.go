@@ -811,3 +811,49 @@ func TestGuardSubscriptionDefaultIgnoresAmbientAPIKey(t *testing.T) {
 		t.Fatalf("ambientKeyOverridden must be false when API billing was explicitly chosen; got %+v", us)
 	}
 }
+
+// guardLocalModelDecision is the gate that lets `fak guard --gguf <model> -- claude` run a
+// small model in-kernel as the local upstream. It must (a) request local mode iff --gguf is
+// non-empty and (b) reject the two upstream-proxy flags that would otherwise silently win,
+// since a local in-kernel model IS the upstream.
+func TestGuardLocalModelDecision(t *testing.T) {
+	cases := []struct {
+		name         string
+		gguf         string
+		baseURL      string
+		remoteServe  string
+		wantLocal    bool
+		wantConflict bool // we assert presence, and which flag is named
+		nameInMsg    string
+	}{
+		{name: "no gguf is the default proxy path", gguf: "", baseURL: "", remoteServe: "", wantLocal: false, wantConflict: false},
+		{name: "no gguf ignores upstream flags", gguf: "", baseURL: "http://x/v1", remoteServe: "box:8080", wantLocal: false, wantConflict: false},
+		{name: "gguf alone requests local mode", gguf: "qwen2.5:7b", baseURL: "", remoteServe: "", wantLocal: true, wantConflict: false},
+		{name: "gguf path alone requests local mode", gguf: "/models/x.gguf", baseURL: "", remoteServe: "", wantLocal: true, wantConflict: false},
+		{name: "whitespace-only gguf is not local", gguf: "   ", baseURL: "", remoteServe: "", wantLocal: false, wantConflict: false},
+		{name: "gguf + base-url conflicts", gguf: "smollm2", baseURL: "http://localhost:11434/v1", remoteServe: "", wantLocal: true, wantConflict: true, nameInMsg: "--base-url"},
+		{name: "gguf + remote-serve conflicts", gguf: "smollm2", baseURL: "", remoteServe: "http://box:8080", wantLocal: true, wantConflict: true, nameInMsg: "--remote-serve"},
+		{name: "remote-serve wins the conflict message when both set", gguf: "smollm2", baseURL: "http://x/v1", remoteServe: "http://box:8080", wantLocal: true, wantConflict: true, nameInMsg: "--remote-serve"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			local, conflict := guardLocalModelDecision(tc.gguf, tc.baseURL, tc.remoteServe)
+			if local != tc.wantLocal {
+				t.Errorf("local=%v, want %v", local, tc.wantLocal)
+			}
+			if tc.wantConflict {
+				if conflict == "" {
+					t.Fatalf("want a conflict message, got none")
+				}
+				if !strings.Contains(conflict, "--gguf") {
+					t.Errorf("conflict message must name --gguf: %q", conflict)
+				}
+				if tc.nameInMsg != "" && !strings.Contains(conflict, tc.nameInMsg) {
+					t.Errorf("conflict message must name %q: %q", tc.nameInMsg, conflict)
+				}
+			} else if conflict != "" {
+				t.Errorf("want no conflict, got %q", conflict)
+			}
+		})
+	}
+}
