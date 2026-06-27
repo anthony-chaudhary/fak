@@ -312,6 +312,36 @@ def test_rendered_new_issue_carries_delta_marker():
     assert idx["slop"]["noted_delta"] == 6
 
 
+# --- #980: the storm bound holds under AUTONOMOUS live filing -----------------
+def test_steady_autonomous_run_plans_no_mutation_when_backlog_covers_every_rise():
+    # #980 flipped the daily SCHEDULE to file live with no human in the loop, so the
+    # "no storm" guarantee now rests entirely on the planner's own discipline. This
+    # locks the load-bearing steady-state: on a day when every CURRENT regression is
+    # already tracked by an OPEN issue and none worsened past --worsen-delta, the
+    # autonomous run plans ZERO mutations — no new file, no refresh, no duplicate
+    # comment. So a daily live run over an unchanged-but-open backlog is idempotent.
+    pane = _pane(
+        direction="regressed",
+        early_warning=[_ew("code", "code", 9, 30, 39),     # open at +9, still +9 (flat)
+                       _ew("slop", "code-slop", 6, 4, 10),  # open at +5, now +6 (+1 < 2)
+                       _ew("appeal", "doc-appeal", 3, 1, 4)],  # open, number unknown
+    )
+    open_idx = {
+        "code": {"number": 7, "noted_delta": 9},
+        "slop": {"number": 8, "noted_delta": 5},
+        # 'appeal' deliberately has no index entry — an older issue whose number the
+        # dedup fetch knew only as an open KEY; it must still skip, never refresh.
+    }
+    to_file, refreshes, stats = ss.plan_issues(
+        pane, open_keys={"code", "slop", "appeal"}, min_delta=1, max_issues=5,
+        today="2026-06-27", available=SKILLS, open_index=open_idx, worsen_delta=2)
+    assert to_file == [], "every current regression is already open -> nothing NEW filed"
+    assert refreshes == [], "none worsened past --worsen-delta -> no refresh, no storm"
+    assert stats["already-open"] == 3, "all three deduped against the open backlog"
+    assert stats["open-but-flat"] == 2, "the two indexed-but-not-worsened are left alone"
+    assert stats["refresh"] == 0, "a steady autonomous day mutates nothing"
+
+
 def _run() -> int:
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
