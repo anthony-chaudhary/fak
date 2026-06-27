@@ -60,6 +60,9 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **Claude Code** / the Anthropic API or SDK | [`claude.md`](claude.md) |
 | **Cursor** (IDE — MCP *or* OpenAI proxy) | [`cursor.md`](cursor.md) |
 | **OpenAI Codex** / the OpenAI API or SDK | [`openai-codex.md`](openai-codex.md) |
+| **VS Code + GitHub Copilot** (IDE — OpenAI/Anthropic proxy) | [`vscode.md`](vscode.md) |
+| **Zed** (AI-native editor — OpenAI/Anthropic/MCP) | [`zed.md`](zed.md) |
+| **JetBrains IDEs** (IntelliJ/PyCharm/WebStorm/… — OpenAI/Anthropic) | [`jetbrains.md`](jetbrains.md) |
 | **Aider** (CLI pair-programmer, OpenAI wire) | [`aider.md`](aider.md) |
 | **Cline** (VS Code — OpenAI-Compatible provider) | [`cline.md`](cline.md) |
 | **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](continue.md) |

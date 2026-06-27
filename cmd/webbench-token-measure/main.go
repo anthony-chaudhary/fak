@@ -1,11 +1,18 @@
 // webbench-token-measure measures actual token usage from model API runs.
 // This is the real measurement counterpart to the theoretical cost arm calculations.
+//
+// Usage:
+//   webbench-token-measure --responses responses.jsonl
+//   webbench-token-measure --demo
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -48,11 +55,35 @@ type Run struct {
 
 // Config holds the measurement configuration.
 type Config struct {
-	ModelProvider string // "openai", "anthropic", "ollama", etc.
-	ModelName     string // "gpt-4", "claude-3-opus-20240229", etc.
-	APIKey        string // API key (or empty for local/no-auth)
-	MaxTurns      int    // Maximum turns to record per task
-	OutputDir     string // Where to write measurement JSON
+	ResponseFile string // Path to JSONL file containing API responses
+	Demo         bool   // Run demo mode with simulated data
+}
+
+var config Config
+
+func init() {
+	flag.StringVar(&config.ResponseFile, "responses", "", "Path to JSONL file with API responses (one per line)")
+	flag.BoolVar(&config.Demo, "demo", false, "Run demo mode with simulated measurements")
+}
+
+func main() {
+	flag.Parse()
+
+	if config.ResponseFile == "" && !config.Demo {
+		fmt.Fprintln(os.Stderr, "Error: --responses is required (or use --demo)")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if config.Demo {
+		runDemo()
+		return
+	}
+
+	if err := processResponses(config.ResponseFile); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // OpenAIUsage is the usage structure from OpenAI API responses.
@@ -130,45 +161,124 @@ func parseAnthropicResponse(body []byte) (TokenUsage, error) {
 // measureTurn makes a (mock) API call and records token usage.
 // In production, this would call the actual model API and parse the response.
 func measureTurn(cfg Config, turnNum int, taskID string, context string) (Measurement, error) {
-	// Placeholder: In production, make actual API call here.
-	// For now, simulate with estimated values based on context length.
-	estimatedTokens := len(context) / 4 // Rough estimate: 4 chars per token.
+	estimatedTokens := len(context) / 4
 
 	meas := Measurement{
 		TurnNumber:    turnNum,
 		PrefillTokens: estimatedTokens,
-		DecodeTokens:  150 + (estimatedTokens / 10), // Rough decode estimate
+		DecodeTokens:  150 + (estimatedTokens / 10),
 		Timestamp:     time.Now(),
-		Model:         cfg.ModelName,
-		APIProvider:   cfg.ModelProvider,
+		Model:         "demo-model",
+		APIProvider:   "demo",
 	}
 	meas.TotalTokens = meas.PrefillTokens + meas.DecodeTokens
 
 	return meas, nil
 }
 
-// main demonstrates the token measurement tool.
-func main() {
-	cfg := Config{
-		ModelProvider: "demo",
-		ModelName:     "gpt-4-demo",
-		MaxTurns:      10,
-		OutputDir:     "measurements",
-	}
+// APIResponseRaw is a raw API response that may be from OpenAI or Anthropic.
+type APIResponseRaw struct {
+	ID     string          `json:"id"`
+	Object string          `json:"object,omitempty"`
+	Type   string          `json:"type,omitempty"`
+	Model  string          `json:"model"`
+	Usage  json.RawMessage `json:"usage"`
+}
 
-	// Demo: simulate measuring a 5-turn task.
-	taskID := "demo-task-001"
+// processResponses reads a JSONL file of API responses and measures token usage.
+func processResponses(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open responses file: %w", err)
+	}
+	defer file.Close()
+
 	var run Run
-	run.TaskID = taskID
+	run.TaskID = "real-measurements-" + time.Now().Format("20060102-150405")
 	run.StartTime = time.Now()
 
-	// Simulate a growing context (like a web agent).
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var raw APIResponseRaw
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			return fmt.Errorf("parse response at line %d: %w", lineNum, err)
+		}
+
+		var usage TokenUsage
+		var err error
+
+		switch {
+		case raw.Object == "chat.completion":
+			usage, err = parseOpenAIResponse([]byte(line))
+		case raw.Type == "message":
+			usage, err = parseAnthropicResponse([]byte(line))
+		default:
+			return fmt.Errorf("line %d: unknown response format (object=%q, type=%q)", lineNum, raw.Object, raw.Type)
+		}
+
+		if err != nil {
+			return fmt.Errorf("parse usage at line %d: %w", lineNum, err)
+		}
+
+		meas := Measurement{
+			TurnNumber:    lineNum,
+			PrefillTokens: usage.PrefillTokens,
+			DecodeTokens:  usage.DecodeTokens,
+			TotalTokens:   usage.TotalTokens,
+			Timestamp:     time.Now(),
+			Model:         raw.Model,
+			APIProvider:   inferProvider(raw.Object, raw.Type),
+		}
+
+		run.Measurements = append(run.Measurements, meas)
+		run.TotalPrefill += meas.PrefillTokens
+		run.TotalDecode += meas.DecodeTokens
+		run.TotalTokens += meas.TotalTokens
+		run.TurnCount++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read responses file: %w", err)
+	}
+
+	run.EndTime = time.Now()
+	if run.TurnCount > 0 {
+		run.AvgPrefill = float64(run.TotalPrefill) / float64(run.TurnCount)
+	}
+
+	return printReport(&run)
+}
+
+// inferProvider guesses the provider from response fields.
+func inferProvider(obj, typ string) string {
+	switch {
+	case obj == "chat.completion":
+		return "openai"
+	case typ == "message":
+		return "anthropic"
+	default:
+		return "unknown"
+	}
+}
+
+// runDemo runs the demo mode with simulated measurements.
+func runDemo() {
+	var run Run
+	run.TaskID = "demo-task-001"
+	run.StartTime = time.Now()
+
 	context := ""
 	for i := 1; i <= 5; i++ {
-		// Each turn adds more context (DOM state, actions, etc.).
 		context += fmt.Sprintf("\n[Turn %d action and DOM state...]", i)
 
-		meas, err := measureTurn(cfg, i, taskID, context)
+		meas, err := measureTurn(config, i, run.TaskID, context)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error measuring turn %d: %v\n", i, err)
 			continue
@@ -186,7 +296,11 @@ func main() {
 		run.AvgPrefill = float64(run.TotalPrefill) / float64(run.TurnCount)
 	}
 
-	// Output the measurement.
+	printReport(&run)
+}
+
+// printReport prints the measurement report.
+func printReport(run *Run) error {
 	fmt.Printf("Token Measurement Summary:\n")
 	fmt.Printf("  Task ID: %s\n", run.TaskID)
 	fmt.Printf("  Turns: %d\n", run.TurnCount)
@@ -195,30 +309,29 @@ func main() {
 	fmt.Printf("  Total Tokens: %d\n", run.TotalTokens)
 	fmt.Printf("  Avg Prefill/Turn: %.0f tokens\n", run.AvgPrefill)
 
-	// Show the turn-by-turn breakdown (like A/B/C comparison).
 	fmt.Printf("\nTurn-by-turn breakdown:\n")
-	fmt.Printf("  Turn | Prefill | Decode | Total\n")
-	fmt.Printf("  ----|---------|--------|------\n")
+	fmt.Printf("  Turn | Prefill | Decode | Total | Model\n")
+	fmt.Printf("  ----|---------|--------|------|-------\n")
 	for _, m := range run.Measurements {
-		fmt.Printf("  %3d | %7d | %6d | %5d\n", m.TurnNumber, m.PrefillTokens, m.DecodeTokens, m.TotalTokens)
+		fmt.Printf("  %3d | %7d | %6d | %5d | %s\n", m.TurnNumber, m.PrefillTokens, m.DecodeTokens, m.TotalTokens, m.Model)
 	}
 
-	// Compare naive (cumulative re-prefill) vs fak (shared prefix).
-	fmt.Printf("\nCost comparison (naive vs fak):\n")
-	naiveTotal := 0
-	for _, m := range run.Measurements {
-		// Naive: re-prefill entire context each turn
-		naiveTotal += m.TotalTokens
-	}
-	// With fak: shared prefix means only first turn pays full prefill cost
-	fakTotal := run.Measurements[0].PrefillTokens // First turn prefill
-	for i := 1; i < len(run.Measurements); i++ {
-		// Subsequent turns: only pay for new tokens (simplified)
-		fakTotal += run.Measurements[i].DecodeTokens
+	if run.TurnCount > 0 {
+		fmt.Printf("\nCost comparison (naive vs fak):\n")
+		naiveTotal := 0
+		for _, m := range run.Measurements {
+			naiveTotal += m.TotalTokens
+		}
+		fakTotal := run.Measurements[0].PrefillTokens
+		for i := 1; i < len(run.Measurements); i++ {
+			fakTotal += run.Measurements[i].DecodeTokens
+		}
+
+		elimination := float64(naiveTotal) / float64(fakTotal)
+		fmt.Printf("  Naive total: %d tokens\n", naiveTotal)
+		fmt.Printf("  fak total: %d tokens\n", fakTotal)
+		fmt.Printf("  Elimination: %.1fx\n", elimination)
 	}
 
-	elimination := float64(naiveTotal) / float64(fakTotal)
-	fmt.Printf("  Naive total: %d tokens\n", naiveTotal)
-	fmt.Printf("  fak total: %d tokens\n", fakTotal)
-	fmt.Printf("  Elimination: %.1fx\n", elimination)
+	return nil
 }

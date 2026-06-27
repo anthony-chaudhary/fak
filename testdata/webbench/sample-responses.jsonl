@@ -1,0 +1,3 @@
+{"id":"cmpl-001","object":"chat.completion","created":1718899200,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"Navigate to example.com"}}],"usage":{"prompt_tokens":1500,"completion_tokens":45,"total_tokens":1545}}
+{"id":"cmpl-002","object":"chat.completion","created":1718899265,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"Click the contact link"}}],"usage":{"prompt_tokens":5200,"completion_tokens":38,"total_tokens":5238}}
+{"id":"cmpl-003","object":"chat.completion","created":1718899330,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"Extract email: contact@example.com"}}],"usage":{"prompt_tokens":8500,"completion_tokens":52,"total_tokens":8552}}
