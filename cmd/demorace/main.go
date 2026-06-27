@@ -44,6 +44,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -127,25 +128,10 @@ func (r *registry) get(s spec) (*loaded, error) {
 	return l, nil
 }
 
-func readHFConfig(dir string) (model.Config, error) {
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return cfg, fmt.Errorf("config.json: %w", err)
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, fmt.Errorf("config.json parse: %w", err)
-	}
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
-}
-
 func loadSpec(s spec) (*model.Model, error) {
 	switch s.Kind {
 	case "hf":
-		cfg, err := readHFConfig(s.Dir)
+		cfg, err := benchcli.ReadHFConfig(s.Dir)
 		if err != nil {
 			return nil, err
 		}

@@ -59,6 +59,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -89,21 +90,6 @@ func bestLiveC(m *model.Model, quant, vocab, P, T, C, D, R, reps int) (pf, cl, d
 }
 
 // ---- model loading (mirrors cmd/modelbench) ----
-
-func readHFConfig(dir string) (model.Config, error) {
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return cfg, fmt.Errorf("config.json: %w", err)
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, fmt.Errorf("config.json parse: %w", err)
-	}
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
-}
 
 // syntheticShape maps a named model size to its HF Config, so sessionbench can run the
 // 3-arm value-stack on a box with NO HuggingFace export (no -hf/-dir/-lean). model.NewSynthetic
@@ -159,7 +145,7 @@ func loadModel(dir, hf, synthetic string, lean bool) (*model.Model, string, erro
 		if hf == "" {
 			return nil, "", fmt.Errorf("-lean requires -hf")
 		}
-		cfg, err := readHFConfig(hf)
+		cfg, err := benchcli.ReadHFConfig(hf)
 		if err != nil {
 			return nil, "", err
 		}
@@ -169,7 +155,7 @@ func loadModel(dir, hf, synthetic string, lean bool) (*model.Model, string, erro
 		}
 		return m, filepath.Base(hf) + " [lean]", nil
 	case hf != "":
-		cfg, err := readHFConfig(hf)
+		cfg, err := benchcli.ReadHFConfig(hf)
 		if err != nil {
 			return nil, "", err
 		}

@@ -7,10 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agenticbench"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 func main() {
@@ -36,11 +36,11 @@ func main() {
 		if _, err := os.Stdout.Write(b); err != nil {
 			fatal(err)
 		}
-	} else if err := writeFile(*out, b); err != nil {
+	} else if err := benchcli.WriteFile(*out, b); err != nil {
 		fatal(err)
 	}
 	if *md != "" {
-		if err := writeFile(*md, []byte(agenticbench.RenderMarkdown(report))); err != nil {
+		if err := benchcli.WriteFile(*md, []byte(agenticbench.RenderMarkdown(report))); err != nil {
 			fatal(err)
 		}
 	}
@@ -74,15 +74,6 @@ func main() {
 	if *strict && !report.ResultClaimAllowed {
 		os.Exit(2)
 	}
-}
-
-func writeFile(path string, b []byte) error {
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	return os.WriteFile(path, b, 0o644)
 }
 
 func fatal(err error) {

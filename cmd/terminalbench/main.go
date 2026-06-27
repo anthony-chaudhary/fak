@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/terminalbench"
 )
 
@@ -87,11 +88,11 @@ func main() {
 			if _, err := os.Stdout.Write(b); err != nil {
 				fatal(err)
 			}
-		} else if err := writeFile(*outPath, b); err != nil {
+		} else if err := benchcli.WriteFile(*outPath, b); err != nil {
 			fatal(err)
 		}
 		if *mdPath != "" {
-			if err := writeFile(*mdPath, []byte(terminalbench.RenderOfficialRunContractMarkdown(contract))); err != nil {
+			if err := benchcli.WriteFile(*mdPath, []byte(terminalbench.RenderOfficialRunContractMarkdown(contract))); err != nil {
 				fatal(err)
 			}
 		}
@@ -150,11 +151,11 @@ func main() {
 			if _, err := os.Stdout.Write(b); err != nil {
 				fatal(err)
 			}
-		} else if err := writeFile(*outPath, b); err != nil {
+		} else if err := benchcli.WriteFile(*outPath, b); err != nil {
 			fatal(err)
 		}
 		if *mdPath != "" {
-			if err := writeFile(*mdPath, []byte(terminalbench.RenderRehearsalPreflightMarkdown(preflight))); err != nil {
+			if err := benchcli.WriteFile(*mdPath, []byte(terminalbench.RenderRehearsalPreflightMarkdown(preflight))); err != nil {
 				fatal(err)
 			}
 		}
@@ -190,11 +191,11 @@ func main() {
 		if _, err := os.Stdout.Write(b); err != nil {
 			fatal(err)
 		}
-	} else if err := writeFile(*outPath, b); err != nil {
+	} else if err := benchcli.WriteFile(*outPath, b); err != nil {
 		fatal(err)
 	}
 	if *mdPath != "" {
-		if err := writeFile(*mdPath, []byte(terminalbench.RenderMarkdown(report))); err != nil {
+		if err := benchcli.WriteFile(*mdPath, []byte(terminalbench.RenderMarkdown(report))); err != nil {
 			fatal(err)
 		}
 	}
@@ -210,13 +211,6 @@ func main() {
 	if *mdPath != "" {
 		fmt.Fprintf(os.Stderr, "markdown     : %s\n", *mdPath)
 	}
-}
-
-func writeFile(path string, b []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o644)
 }
 
 func fatal(err error) {

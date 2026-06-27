@@ -24,7 +24,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -33,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -154,7 +154,7 @@ func runSelfcheck(prompt []int, n, nStages int, incremental bool) {
 // keeps its band KV resident and advances one position per token (PipelineGenerateIncremental);
 // otherwise it uses the O(n^2) re-forward (PipelineGenerate). Both cross the stage handoff.
 func runDir(dir string, prompt []int, n, nStages int, incremental bool) {
-	cfg, err := readConfig(dir)
+	cfg, err := benchcli.ReadHFConfig(dir)
 	if err != nil {
 		fail("read config: %v", err)
 	}
@@ -332,23 +332,6 @@ func parseIDs(csv string) ([]int, error) {
 		ids = append(ids, v)
 	}
 	return ids, nil
-}
-
-// readConfig parses config.json from a checkpoint dir into a model.Config (the
-// same mapping the existing loaders use), filling head_dim if HF omitted it.
-func readConfig(dir string) (model.Config, error) {
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return cfg, fmt.Errorf("config.json: %w", err)
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, fmt.Errorf("config.json parse: %w", err)
-	}
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
 }
 
 func tokPerSec(tokens int, d time.Duration) float64 {

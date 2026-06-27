@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
@@ -49,24 +50,8 @@ import (
 // checkpoint on this box without the export_oracle.py (torch) step: the generic config-driven
 // forward pass already handles GQA, RoPE theta, SwiGLU, tied embeddings, and Qwen2 qkv-bias.
 // Returns the model and a display name derived from model_type + parameter scale.
-func readHFConfig(dir string) (model.Config, error) {
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return cfg, fmt.Errorf("config.json: %w", err)
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, fmt.Errorf("config.json parse: %w", err)
-	}
-	// HF Llama/Qwen2 configs omit head_dim (it is hidden_size/num_attention_heads).
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
-}
-
 func loadHF(dir string) (*model.Model, string, error) {
-	cfg, err := readHFConfig(dir)
+	cfg, err := benchcli.ReadHFConfig(dir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -80,7 +65,7 @@ func loadHF(dir string) (*model.Model, string, error) {
 // loadHFLean loads via the memory-lean quantize-at-load path (f32 of the big weights dropped),
 // the loader that lets a 7B-class model fit on this box. Quant-only: the bench forces -quant.
 func loadHFLean(dir string) (*model.Model, string, error) {
-	cfg, err := readHFConfig(dir)
+	cfg, err := benchcli.ReadHFConfig(dir)
 	if err != nil {
 		return nil, "", err
 	}

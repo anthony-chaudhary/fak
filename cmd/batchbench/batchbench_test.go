@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 func TestCapPositive(t *testing.T) {
@@ -80,9 +82,9 @@ func TestReadHFConfigFillsHeadDim(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	cfg, err := readHFConfig(dir)
+	cfg, err := benchcli.ReadHFConfig(dir)
 	if err != nil {
-		t.Fatalf("readHFConfig: %v", err)
+		t.Fatalf("ReadHFConfig: %v", err)
 	}
 	if cfg.ModelType != "qwen2" {
 		t.Fatalf("ModelType = %q, want qwen2", cfg.ModelType)
@@ -94,9 +96,9 @@ func TestReadHFConfigFillsHeadDim(t *testing.T) {
 
 func TestHFNameIncludesModelTypeWhenPresent(t *testing.T) {
 	dir := filepath.Join("models", "snapshots", "abc123") + string(os.PathSeparator)
-	cfg, err := readHFConfig(writeHFConfig(t, `{"model_type":"llama","hidden_size":64,"num_attention_heads":4}`))
+	cfg, err := benchcli.ReadHFConfig(writeHFConfig(t, `{"model_type":"llama","hidden_size":64,"num_attention_heads":4}`))
 	if err != nil {
-		t.Fatalf("readHFConfig: %v", err)
+		t.Fatalf("ReadHFConfig: %v", err)
 	}
 	if got := hfName(cfg, dir); got != "abc123 (llama)" {
 		t.Fatalf("hfName with type = %q, want abc123 (llama)", got)

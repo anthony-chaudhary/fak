@@ -22,7 +22,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"html"
@@ -31,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -257,18 +257,7 @@ func readModelConfig(hf, gguf string) (model.Config, error) {
 		}
 		return f.Config()
 	}
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(hf, "config.json"))
-	if err != nil {
-		return cfg, fmt.Errorf("config.json: %w", err)
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, fmt.Errorf("config.json parse: %w", err)
-	}
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
+	return benchcli.ReadHFConfig(hf)
 }
 
 // loadModel loads weights for a cacheless Forward pass. Llama family: quantize-at-load

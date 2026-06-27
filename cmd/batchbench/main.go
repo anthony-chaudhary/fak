@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -71,21 +72,6 @@ func bestMS(ds []time.Duration) float64 {
 // parallel + multi-user batching) can be reported against the honest origin.
 const naiveSerialMsPerTok = 52.1
 
-func readHFConfig(dir string) (model.Config, error) {
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return cfg, fmt.Errorf("config.json: %w", err)
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, fmt.Errorf("config.json parse: %w", err)
-	}
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
-}
-
 func hfName(cfg model.Config, dir string) string {
 	base := filepath.Base(strings.TrimRight(dir, `/\`))
 	if cfg.ModelType == "" {
@@ -119,7 +105,7 @@ type batchPoint struct {
 // load failure (the only sensible action for a benchmark CLI with no model).
 func loadBenchModel(hf, dir string) (*model.Model, string, string) {
 	if hf != "" {
-		cfg, err := readHFConfig(hf)
+		cfg, err := benchcli.ReadHFConfig(hf)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "load:", err)
 			os.Exit(1)

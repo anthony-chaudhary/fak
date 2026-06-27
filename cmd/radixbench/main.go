@@ -59,6 +59,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
@@ -432,21 +433,6 @@ func safeDiv(a, b float64) float64 {
 
 // ---- model loading (synthetic by default; -hf for a real checkpoint) ----
 
-func readHFConfig(dir string) (model.Config, error) {
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return cfg, err
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, err
-	}
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
-}
-
 func syntheticModel() (*model.Model, string, int) {
 	cfg := model.Config{
 		HiddenSize: 64, NumLayers: 4, NumHeads: 8, NumKVHeads: 2, HeadDim: 8,
@@ -486,7 +472,7 @@ func main() {
 		name = filepath.Base(*dir)
 		vocab = m.Cfg.VocabSize
 	} else if *hf != "" {
-		cfg, err := readHFConfig(*hf)
+		cfg, err := benchcli.ReadHFConfig(*hf)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "hf config: %v\n", err)
 			os.Exit(1)

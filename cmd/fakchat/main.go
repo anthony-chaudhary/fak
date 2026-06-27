@@ -18,7 +18,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
@@ -27,6 +26,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
@@ -403,24 +403,7 @@ func readModelConfig(hf, gguf string) (model.Config, error) {
 		}
 		return f.Config()
 	}
-	return readHFConfig(hf)
-}
-
-// readHFConfig mirrors cmd/modelbench: read config.json into model.Config and fill
-// head_dim if implicit. Family-specific defaults live in model.Config derivation.
-func readHFConfig(dir string) (model.Config, error) {
-	var cfg model.Config
-	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return cfg, fmt.Errorf("config.json: %w", err)
-	}
-	if err := json.Unmarshal(cb, &cfg); err != nil {
-		return cfg, fmt.Errorf("config.json parse: %w", err)
-	}
-	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
-		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
-	}
-	return cfg, nil
+	return benchcli.ReadHFConfig(hf)
 }
 
 // loadLean quantize-at-load: sharded dirs via the index, else the single file.
