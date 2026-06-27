@@ -150,6 +150,13 @@ experiments/dgx/
 # superrepo nests the module under fak/, while this public checkout is root-hoisted.
 fak/experiments/benchmark/runs/by-machine/dgx*/
 experiments/benchmark/runs/by-machine/dgx*/
+# `fak nightrun --apply` captures each task's raw stdout under experiments/nightrun/<box>/.
+# Those per-box dirs are LOCAL evidence only: regenerable, low-signal (mostly failure logs),
+# and one carries a raw os.Hostname() box dir (pre-#970) that must never reach the public tree.
+# The durable record is docs/nightrun/collected.jsonl; the operator overlay
+# experiments/nightrun/backlog.json stays tracked (a shareable input, not an artifact).
+fak/experiments/nightrun/*/
+experiments/nightrun/*/
 # DGX Slack control-bridge source is PRIVATE-ONLY. Its home is the private repo
 # fak-private (tools/dgxbridge/); fleet is the sunset archive. tools/check_committed_files.py
 # already REFUSES any cmd|internal/*dgx*/ path at commit (this is exactly how cmd/dgxbridge +
