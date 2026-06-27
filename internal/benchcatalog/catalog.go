@@ -47,12 +47,35 @@ const (
 	KindVerb Kind = "verb" // a `fak <verb>` subcommand of this binary
 )
 
+// Level classifies what KIND of number a benchmark produces, on the axis that
+// matters for "is this worth collecting on a capable box": a serving/e2e bench
+// emits a real hardware or graded-task number (coverage-class, worth filling per
+// box); a micro/component bench is a smoke check (the floor). This is orthogonal
+// to Kind (cmd vs verb, an invocation detail) and to Need (cold-start cost) - it
+// is the importance axis `fak nightrun` ranks by. The zero value ("" ==
+// LevelSmoke) is the safe default: an unannotated bench is treated as a smoke
+// check, never silently promoted to coverage-class.
+type Level string
+
+const (
+	// LevelSmoke is the zero value: an offline micro/component check, a rollup, or
+	// a converter - it guards a boundary but does not produce a headline number.
+	LevelSmoke Level = ""
+	// LevelServing produces a real serving-throughput / latency hardware number
+	// (tok/s, p50, batched decode) and needs weights and/or a GPU.
+	LevelServing Level = "serving"
+	// LevelE2E produces an end-to-end graded-task outcome number (solve rate,
+	// safe-pass) over a real agent/task harness.
+	LevelE2E Level = "e2e"
+)
+
 // Bench is one benchmark surface: what it measures, how much it costs to start,
 // and the exact command that runs it.
 type Bench struct {
 	Name    string // the registry key, also the cmd dir / fak verb (e.g. "modelbench", "webbench")
 	Kind    Kind
 	Need    Need
+	Level   Level  // the importance axis (serving/e2e vs smoke); zero value == LevelSmoke
 	Summary string // one line: what NUMBER this benchmark produces and what it means
 	// Run is the copy-pasteable command that runs the offline/default arm. For a
 	// weights/dataset bench it is the smallest meaningful invocation; the flags
@@ -109,7 +132,7 @@ var registry = []Bench{
 		Doc:     "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
 	},
 	{
-		Name: "batchbench", Kind: KindCmd, Need: NeedWeights,
+		Name: "batchbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "Aggregate multi-user batched-decode throughput as a function of batch size B (the continuous-batching regime).",
 		Run:     "go run ./cmd/batchbench -dir internal/model/.cache/smollm2-135m",
 		Flags:   []string{"-dir  -  model export dir", "-quant  -  Q8_0 lane", "-reps  -  reps per batch size", "-out  -  JSON out"},
@@ -153,7 +176,7 @@ var registry = []Bench{
 		Doc:     "",
 	},
 	{
-		Name: "modelbench", Kind: KindCmd, Need: NeedWeights,
+		Name: "modelbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "In-kernel pure-Go forward-pass latency / tok-per-sec, so the kernel's model numbers are self-measured not borrowed.",
 		Run:     "go run ./cmd/modelbench -dir internal/model/.cache/smollm2-135m",
 		Flags:   []string{"-dir  -  fak export dir", "-hf  -  HuggingFace snapshot", "-gguf  -  GGUF checkpoint", "-quant/-lean  -  Q8_0", "-out  -  JSON out"},
@@ -172,14 +195,14 @@ var registry = []Bench{
 		Doc:     "",
 	},
 	{
-		Name: "q8bench", Kind: KindCmd, Need: NeedWeights,
+		Name: "q8bench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "Independent verifier for the int8-quantized in-kernel forward path (numerical parity vs f32).",
 		Run:     "go run ./cmd/q8bench -dir internal/model/.cache/smollm2-135m",
 		Flags:   []string{"-dir  -  model export dir"},
 		Doc:     "",
 	},
 	{
-		Name: "radixbench", Kind: KindCmd, Need: NeedWeights,
+		Name: "radixbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "fak's KV-cache prefix reuse vs SGLang's RadixAttention regime  -  prefix-cache hit value.",
 		Run:     "go run ./cmd/radixbench -synthetic smollm2-135m",
 		Flags:   []string{"-synthetic  -  weightless synthetic shape (ratios faithful)", "-hf/-dir  -  live arm", "-quant/-lean  -  Q8_0"},
@@ -193,14 +216,14 @@ var registry = []Bench{
 		Doc:     "",
 	},
 	{
-		Name: "sessionbench", Kind: KindCmd, Need: NeedWeights,
+		Name: "sessionbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "Net value-add of the fused agent kernel on a multi-turn session vs a tuned warm-cache baseline.",
 		Run:     "go run ./cmd/sessionbench -synthetic smollm2-135m",
 		Flags:   []string{"-synthetic  -  weightless shape (ratios faithful, wall-clock this-box)", "-hf/-dir  -  live arm", "-quant"},
 		Doc:     "docs/production-benchmark-methodology.md",
 	},
 	{
-		Name: "swebench", Kind: KindVerb, Need: NeedNone,
+		Name: "swebench", Kind: KindVerb, Need: NeedNone, Level: LevelE2E,
 		Summary: "SWE-bench Verified benchmarking surface (describe | eval | compare). describe is offline; eval is gated on the harness.",
 		Run:     "fak swebench describe",
 		Flags:   []string{"describe  -  offline geometry", "eval  -  graded (gated)", "compare  -  side-by-side"},
@@ -247,7 +270,7 @@ var registry = []Bench{
 		Doc: "docs/cli-reference.md",
 	},
 	{
-		Name: "webbench", Kind: KindVerb, Need: NeedNone,
+		Name: "webbench", Kind: KindVerb, Need: NeedNone, Level: LevelE2E,
 		Summary: "Frontier web/browser agent benchmarking (describe | eval | compare). describe prints the offline prefill-work geometry.",
 		Run:     "fak webbench describe --dataset testdata/webvoyager/sample.json",
 		Flags:   []string{"describe  -  offline geometry (needs --dataset)", "eval  -  graded (gated)", "compare  -  vs a results file"},
@@ -260,7 +283,7 @@ var registry = []Bench{
 		Doc:     "docs/webbench-baselines.md",
 	},
 	{
-		Name: "webbench-run", Kind: KindCmd, Need: NeedDataset,
+		Name: "webbench-run", Kind: KindCmd, Need: NeedDataset, Level: LevelE2E,
 		Summary: "Reproducible end-to-end webbench runner over a converted task set.",
 		Run:     "go run ./cmd/webbench-run",
 		Doc:     "docs/webbench-baselines.md",
