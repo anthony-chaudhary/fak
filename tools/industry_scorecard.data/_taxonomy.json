@@ -35,7 +35,8 @@
       "source_url": "https://arxiv.org/abs/2401.09670",
       "source_date": "2024-01",
       "notes": "No newer source sets a higher headline goodput-under-SLO multiplier; old bar stands. The 2025-26 systems I found (PD-Multiplexing 1.62x over PD-disagg per LMSYS 2025-09-28; DOPD up to 1.5x over vLLM/DistServe per arXiv 2511.20982 v3 2026-03; TaiChi 29-77% over PD-disagg per arXiv 2508.01989 2025-08) all report gains RELATIVE TO disaggregation, which compound on top of DistServe's 7.4x rather than replace it. NVIDIA Dynamo's 2026 figure is 38% over the best aggregated config, not a DistServe-style baseline-relative record.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "chunked-prefill-pd-interference",
@@ -87,7 +88,8 @@
       "source_url": "https://www.lmsys.org/blog/2024-12-04-sglang-v0-4/",
       "source_date": "2024-12",
       "notes": "No newer SGLang router multiplier found; the v0.4 (2024-12) 1.9x throughput / 3.8x hit-rate is still the number quoted in 2026 SGLang reviews (e.g. ChatForest 2026 review, dstack 2026 router roadmap) even though SGLang is now at v0.5.11 (2026-05). The router itself has matured (PD-disaggregation, gRPC, multi-region roadmap) but LMSYS has not re-published a higher headline cache-aware multiplier. Old bar stands; only the freshness check date refreshes.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "kv-cache-memory-efficiency-concurrency",
@@ -104,7 +106,8 @@
       "source_url": "https://arxiv.org/abs/2309.06180",
       "source_date": "2023-09",
       "notes": "No newer source supersedes the canonical <4% waste / near-zero-fragmentation figure; the original PagedAttention SOSP'23 paper is still the cited bar and the abstract phrases it as 'near-zero waste in KV cache memory.' Old bar stands. What HAS moved in 2026 is that paging is now table stakes: the competitive frontier shifted to cross-request and non-prefix KV REUSE (RadixAttention, LMCache CacheBlend, Mooncake KV pools) rather than squeezing intra-request fragmentation further. Secondary 2025 sources still quote the same 'under 4% waste, 60-80% in legacy systems' framing.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "absolute-tokens-per-second-mlperf",
@@ -116,12 +119,12 @@
         "NVIDIA GB300 NVL72 single rack",
         "CoreWeave / Nebius GB300 NVL72"
       ],
-      "sota_bar": "MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01) supersedes v5.0 and v5.1, and the headline model is now DeepSeek-R1 (671B MoE reasoning), not Llama 3.1 405B: NVIDIA's largest-ever submission of 288 Blackwell Ultra GPUs (4x GB300 NVL72 over Quantum-X800 InfiniBand) hit ~2.494 million tokens/second aggregate in the offline scenario, at 9,821 tok/s/GPU offline (8,064 tok/s/GPU server) — up to 2.7x higher than the GB300 debut six months prior via TensorRT-LLM/Dynamo software.",
+      "sota_bar": "MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01) supersedes v5.0 and v5.1, and the headline model is now DeepSeek-R1 (671B MoE reasoning), not Llama 3.1 405B: NVIDIA's largest-ever submission of 288 Blackwell Ultra GPUs (4x GB300 NVL72 over Quantum-X800 InfiniBand) hit ~2.494 million tokens/second aggregate in the offline scenario, at 9,821 tok/s/GPU offline (8,064 tok/s/GPU server) \u00e2\u20ac\u201d up to 2.7x higher than the GB300 debut six months prior via TensorRT-LLM/Dynamo software.",
       "best_value": 2494000,
       "metric_unit": "tokens/second aggregate, DeepSeek-R1 671B, offline scenario, 288-GPU (4x GB300 NVL72) submission, MLPerf Inference v6.0",
       "source_url": "https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform",
       "source_date": "2026-04-01",
-      "notes": "Materially changed: a full MLPerf round (v6.0) landed since the old v5.0 bar, and the benchmark headline shifted off Llama 3.1 405B onto DeepSeek-R1 671B MoE. The old 'GB200 NVL72 13,886 tok/s Llama 3.1 405B offline' is superseded. Per-GPU on DeepSeek-R1 v6.0: 9,821 offline / 8,064 server; full 288-GPU offline aggregate 2.494M tok/s. NVIDIA's own blog (developer.nvidia.com 'Blackwell Ultra Sets New Inference Records', and the lowest-token-cost co-design post) is the primary source; storagereview gives the clean numeric breakdown cited here. Note a small date discrepancy across secondaries (results 2026-03-30, blogs/articles 2026-04-01). If the scorecard wants a Llama-405B continuity number, v5.1 (2025-09-09) put GB200 NVL72 at ~16,128 tok/s offline aggregate / 224 tok/s/GPU — but v6.0 is the current round.",
+      "notes": "Materially changed: a full MLPerf round (v6.0) landed since the old v5.0 bar, and the benchmark headline shifted off Llama 3.1 405B onto DeepSeek-R1 671B MoE. The old 'GB200 NVL72 13,886 tok/s Llama 3.1 405B offline' is superseded. Per-GPU on DeepSeek-R1 v6.0: 9,821 offline / 8,064 server; full 288-GPU offline aggregate 2.494M tok/s. NVIDIA's own blog (developer.nvidia.com 'Blackwell Ultra Sets New Inference Records', and the lowest-token-cost co-design post) is the primary source; storagereview gives the clean numeric breakdown cited here. Note a small date discrepancy across secondaries (results 2026-03-30, blogs/articles 2026-04-01). If the scorecard wants a Llama-405B continuity number, v5.1 (2025-09-09) put GB200 NVL72 at ~16,128 tok/s offline aggregate / 224 tok/s/GPU \u00e2\u20ac\u201d but v6.0 is the current round.",
       "in_scope": true
     },
     {
@@ -174,7 +177,8 @@
       "source_url": "https://arxiv.org/abs/2503.01840",
       "source_date": "2025-03",
       "notes": "Old bar (EAGLE-3 1.38x@batch64, 2025) still stands as the named throughput-at-batch figure; multiple 2025/2026 sources reconfirm 1.38x@batch64 and 1.81x@batch2 on H100/SGLang. EAGLE-3 is still the leading trained-head method; no successor has displaced it on the throughput-vs-batch axis as of mid-2026. Date can be tightened to the arXiv 2503.01840 (NeurIPS 2025) primary source.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "fairness-isolation-multitenant",
@@ -280,7 +284,8 @@
       "source_url": "https://arxiv.org/abs/2401.09670",
       "source_date": "2024-01",
       "notes": "No newer source found that beats the SLO-constrained 4.48x figure on a comparable baseline; old bar stands. 2025-26 work has shifted from a single goodput multiplier toward SLO-attainment percentages: DOPD reports >99% SLO attainment with up to 1.5x goodput over vLLM/DistServe (arXiv 2511.20982 v3, 2026-03); TaiChi reports 90% SLO attainment with 29-77% goodput over PD-disaggregation (arXiv 2508.01989, 2025-08). These are incremental gains layered on disaggregation, not a replacement of the 4.48x bar.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "latency-throughput-pareto",
@@ -352,7 +357,8 @@
       "source_url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/",
       "source_date": "2025-01",
       "notes": "Must be measured at a realistic prefix-sharing ratio; reporting only cold (no-hit) TTFT understates production performance, while reporting only warm overstates it. Hit rate is the hidden variable.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "speculative-decoding-itl",
@@ -423,7 +429,8 @@
       "source_url": "https://arxiv.org/abs/2309.06180",
       "source_date": "2023-09",
       "notes": "No newer source found that publishes a higher single-number paged-KV utilization bar; old bar stands at ~96.3% (the arithmetic complement of the <4% waste claim from the PagedAttention paper). The number is a derived/complement figure rather than a directly headlined metric, hence medium confidence. The 2026 direction of travel is tiered/disaggregated KV (Mooncake offloads to CPU/DRAM/SSD; LMCache adds a multi-tier KV layer) which raises EFFECTIVE capacity and reuse rather than per-block utilization, so the per-block utilization ceiling itself has not moved.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "automatic-prefix-caching-hit-rate",
@@ -440,7 +447,8 @@
       "source_url": "https://www.lmsys.org/blog/2024-01-17-sglang/",
       "source_date": "2024-01",
       "notes": "Changed: the dimension has matured from a single throughput multiplier into documented HIT-RATE figures. 2026 sources now state concrete cross-request hit rates: SGLang few-shot 85-95% / multi-turn 75-90% / agentic ~88%, and vLLM APC ~87% warm-cache hit rate with ~88% faster TTFT on prefix-heavy workloads. The original 6.4x RadixAttention throughput claim (LMSYS Jan 2024) is still the canonical headline and is reused as best_value because it is the directly-comparable single number; the new development is the measured hit-rate band. SGLang vs vLLM on an agentic-workflow study: vLLM 42.9% vs a newer 'Helium' system 59.2% prefix-cache hit rate, showing the metric is now actively benchmarked across systems.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "non-prefix-kv-reuse-cacheblend",
@@ -511,7 +519,8 @@
       "source_url": "https://arxiv.org/pdf/2505.24133",
       "source_date": "2025-05",
       "notes": "Old bar (H2O/Quest budget cliff, 2024-06) refreshed: H2O/SnapKV/Quest are now the BASELINES that newer redundancy/reasoning-aware methods beat. R-KV (arXiv 2505.24133) reports lossless at 10% budget on AIME-2024 and 105% of FullKV at 16% -- a genuine break past the old budget cliff for CoT reasoning. EpiCache (Apple 2026) adds episodic clustering for near-full-cache accuracy at 4-6x compression, +40% over eviction baselines, 3.5x lower peak memory, ~2.4x lower latency. The field reframed eviction around reasoning/redundancy rather than raw attention-score thresholds.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "kv-transfer-disaggregation",
@@ -565,7 +574,8 @@
       "source_url": "https://arxiv.org/pdf/2502.14837",
       "source_date": "2025-02",
       "notes": "Old bar (MLA 70KB vs GQA 192-328KB, 2025-02) STILL STANDS as the per-token arithmetic baseline; the 70KB MLA vs 192-328KB GQA figures are unchanged and remain the canonical comparison (re-confirmed by 2025/2026 surveys, e.g. arXiv 2502.14837 and pyimagesearch DeepSeek-V3 MLA build Mar 2026). What MOVED since: MLA is now a standard architecture option (adopted by Qwen-Latent, MiniMax-Text-01), and the new frontier is layering learned sparsity on MLA -- DeepSeek NSA (2025) targets sub-100 floats/token for very long contexts. Date refreshed via adoption; the headline footprint number did not change.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "effective-capacity-slo-gain",
@@ -582,7 +592,8 @@
       "source_url": "https://arxiv.org/abs/2407.00079",
       "source_date": "2024-07",
       "notes": "No newer source beats Mooncake's 59-498% (real traces) / 525% (simulated) effective-capacity-under-SLO range; old bar stands. The figure is now corroborated and republished in ACM Transactions on Storage (10.1145/3773772, 2026) and in production reports (Kimi handles 75% more requests; 115%/107% more on A800/H800 clusters; >100B tokens/day). KV-centric disaggregation (the Mooncake idea) is now standard infrastructure (NIXL KV transfer in vLLM and NVIDIA Dynamo), but no system has published a higher effective-capacity-under-SLO percentage on real traces.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "persistent-cross-instance-cache-coherence",
@@ -617,7 +628,8 @@
       "source_url": "https://developers.redhat.com/articles/2024/10/17/we-ran-over-half-million-evaluations-quantized-llms",
       "source_date": "2024-10",
       "notes": "Old bar was 99% recovery (2025-08). The large-scale Red Hat eval (>500k evaluations) reports 99.9% recovery on HumanEval and labels W8A8-FP lossless across all scales; the 2026 vLLM/Spheron framing calls FP8 'nearly indistinguishable from BF16' and the practical 2026 sweet spot. Number ticks slightly up (99 -> ~99.9 on HumanEval) but the qualitative bar (near-lossless, <=1% vs BF16) is the same, so this is essentially a date/confidence refresh rather than a new bar. The strongest cited primary value (99.9%) predates the old bar's stamp date; no 2026 source materially exceeds it, so changed_vs_old=false.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "int8-w8a8-smoothquant-accuracy",
@@ -634,7 +646,8 @@
       "source_url": "https://developers.redhat.com/articles/2025/03/03/deployment-ready-reasoning-quantized-deepseek-r1-models",
       "source_date": "2025-03",
       "notes": "Old bar was 1-3% loss (2025-08). Red Hat (Mar 2025) puts INT8 W8A8 at ~99% recovery (i.e. ~1% loss, the favorable end of the old 1-3% band); vLLM INT8 docs describe a tolerable 1-3% per-task average with dynamic-activation or SmoothQuant. Bar is unchanged in substance. NOTE vLLM-relevant caveat: INT8 W8A8 is NOT supported on Blackwell (compute capability >=10.0), so on Blackwell FP8/NVFP4 displace INT8. Returning the old ~1-3% band; only the source/date refresh.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "int4-weight-only-awq-gptq",
@@ -689,7 +702,8 @@
       "source_url": "https://arxiv.org/abs/2405.16406",
       "source_date": "2025-04",
       "notes": "Old bar was QuaRot-only at 2024-04. The rotation line clearly advanced: SpinQuant (published/accepted ICLR 2025) supersedes QuaRot with up to 45.1% gap reduction on Llama-3 8B, and is now the reference learned-rotation method. Further successors landed in 2025-2026 (Qronos arXiv 2505.11695 'best overall with SpinQuant', ResQ PCA mixed-precision, TurboQuant 2026 random-orthogonal KV-cache rotations, WUSH 2512.00956 near-optimal adaptive transforms, HadaCore Tensor-Core Hadamard kernel). best_value 45.1 is SpinQuant's headline relative gap-reduction over QuaRot. vLLM does not implement learned rotation itself; rotated checkpoints are produced offline (LLM Compressor / model-opt) then served as W4A4/NVFP4 in vLLM. changed_vs_old=true. [second-source verified]",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "kv-cache-quantization-accuracy",
@@ -836,7 +850,8 @@
       "source_url": "https://arxiv.org/abs/2503.01840",
       "source_date": "2025-03",
       "notes": "SOTA moved: old bar was DeepSeek-V3 MTP 0.85 (2024-12). EAGLE-3 (2025-03) reports ~0.80-0.88 acceptance and ~4.5-5.0 mean accepted tokens per verify step on coding/instruction tasks, a newer and higher published bar; EAGLE-3's training-time-test fused-layer draft head is the mechanism. best_value 0.88 is the upper end of the reported coding/instruction-following band; the mean-accepted-length is the complementary metric (~4.5-5.0). Confidence medium because the 0.80-0.88 figure is reported via secondary summaries of the EAGLE-3 paper; the primary arXiv is the citable source. [second-source verified]",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "draft-method-coverage",
@@ -872,7 +887,8 @@
       "source_url": "https://www.snowflake.com/en/engineering-blog/suffixdecoding-arctic-inference-vllm/",
       "source_date": "2025-05",
       "notes": "SOTA moved: old bar was classic prompt-lookup (PLD/n-gram) 2.8x on summarization (vLLM blog, 2024-10). SuffixDecoding (NeurIPS 2025 Spotlight, arXiv 2411.04975) generalizes prompt-lookup to suffix trees over prompt + prior outputs and beats PLD by 1.3-3x, reaching up to 5.3x speculative speedup and ~4x end-to-end on SWE-Bench agentic workloads, shipped in vLLM via Snowflake Arctic Inference. This is directly adjacent to fak's cross-agent prefix-reuse thesis (input-grounded, draft-model-free).",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "spec-decode-lossless-correctness",
@@ -908,7 +924,8 @@
       "source_url": "https://arxiv.org/abs/2503.01840",
       "source_date": "2025-03",
       "notes": "SOTA refreshed: old bar was MagicDec break-even framing at batch 16 (arXiv 2408.11049, 2024-08). The current, more concrete measured number is EAGLE-3 in SGLang sustaining 1.38x to batch 64 (vs EAGLE-2's 0.93x regression at batch 24), with the break-even/diminishing point now around batch 64+. The dimension's measurable bar moved from 16 to 64. This presupposes continuous batching, which fak does not have on its live path (decode lane serial by construction).",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "constrained-decode-per-token-overhead",
@@ -1016,7 +1033,8 @@
       "source_url": "https://arxiv.org/abs/2506.12708",
       "source_date": "2025-06",
       "notes": "SOTA moved up: old bar was 72 (LMSYS/SGLang large-scale EP on 96 H100s, 2025-05-05). CloudMatrix-Infer (arXiv 2506.12708, June 2025) demonstrates EP320 for DeepSeek-R1 on Huawei CloudMatrix384 -- each NPU die hosts exactly one expert, with PD+caching disaggregation over the UB network. This is the current largest published expert-parallel degree for a giant MoE. (SGLang's 96-GPU run remains the leading NVIDIA-GPU EP demonstration.) Out of scope for fak's single-box engine, which runs GLM-5.2 MoE experts on one device.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "data-parallel-attention",
@@ -1213,7 +1231,8 @@
       "source_date": "2024-01",
       "why_it_matters": "Agent and fleet workloads repeat large identical prefixes (system prompts, tool schemas, few-shot exemplars). Reusing their KV across requests is the single largest lever on prefill cost and TTFT, and is now table-stakes; buyers compare hit-rate and the throughput gain it delivers.",
       "notes": "No newer source supersedes the 6.4x cross-request prefix-reuse headline; the LMSYS RadixAttention announcement (2024-01-17) remains the cited bar and 2026 sources still quote 'up to 6.4x on prefix-heavy workloads' verbatim. Old bar stands. The 2026 refinement is breadth of measured hit rates (50%->near-99% across benchmarks) and the move to multi-tier/disaggregated cross-request pools (Mooncake serving Kimi across thousands of nodes, integrated as a vLLM v1 KV connector and into TensorRT-LLM), which extend cross-request reuse across nodes rather than raising the single-node multiplier.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "kv-aware-routing-locality",
@@ -1256,7 +1275,7 @@
       "dimension": "Inference unit economics ($ per 1M tokens) at realistic utilization",
       "metric_unit": "USD per 1M tokens; GPU utilization %",
       "best_value": 0.4,
-      "sota_bar": "GPT-4-equivalent quality now serves at ~$0.40 / 1M tokens vs ~$20 in late 2022 (≈10x/yr decline). Real production GPU utilization is only 30-60%, so realistic cost-per-token runs 2-3x above spreadsheet estimates; FP8/FP4 quantization roughly halves cost-per-token on H100/H200. Self-hosting a 7B breaks even only above ~50% utilization.",
+      "sota_bar": "GPT-4-equivalent quality now serves at ~$0.40 / 1M tokens vs ~$20 in late 2022 (\u00e2\u2030\u02c610x/yr decline). Real production GPU utilization is only 30-60%, so realistic cost-per-token runs 2-3x above spreadsheet estimates; FP8/FP4 quantization roughly halves cost-per-token on H100/H200. Self-hosting a 7B breaks even only above ~50% utilization.",
       "sota_systems": [
         "Hosted frontier APIs",
         "vLLM/SGLang self-host on H100/H200",
@@ -1378,7 +1397,8 @@
       "source_date": "2025-03",
       "why_it_matters": "An agent that calls tools and reads untrusted content is an exfiltration surface; indirect prompt injection is the top agent-security risk. Buyers now require an ASR-vs-utility number, not a vibe, and adaptive attacks routinely break naive defenses, so the bar is benchmark-grounded.",
       "notes": "SOTA moved: old bar was 2024-09-25 vintage. The 2025 frontier is provable, design-by-construction defense -- CaMeL (arXiv 2503.18813) reduces successful AgentDojo attacks to 0 with 77% utility (provable), and MELON (arXiv 2502.05174, ICML'25) outperforms five prior SOTA defenses across GPT-4o/o3-mini/Llama-3.3-70B. best_value 0.0 = CaMeL's zero successful attacks (security guarantee), the strongest published result. This aligns with fak's own structural-containment thesis (capability/IFC floor rather than a detection rate). fak's detector is conceded ~100% evadable; its real claim is the structural floor.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "tool-sandboxing-structural-containment",
@@ -1397,7 +1417,8 @@
       "source_date": "2025-03",
       "why_it_matters": "Detectors are evadable, so the durable control is architectural: bound the blast radius so a successful injection still cannot read secrets, write outside scope, or exfiltrate PII. Structural containment is the property that survives an adaptive attacker and that security-conscious buyers actually demand.",
       "notes": "Refreshed: old source was MELON (arXiv 2502.05174, 2025-02-07). The current strongest structural-containment result is CaMeL (arXiv 2503.18813, 2025-03) -- explicit control/data-flow extraction + capability-gated tool calls giving provable security (0 attacks, 77% utility), the clearest capability/IFC exemplar. MELON remains a co-SOTA (masked re-execution). Qualitative dim (containment-capability presence, no audited ASR-under-containment leaderboard), so best_value null. fak is at parity here -- default-deny capability allow-list, IFC taint sink-gating (FIDES/CaMeL-class), kernel-authored provenance, plan-CFI, context-MMU quarantine -- the same family.",
-      "in_scope": true
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
     },
     {
       "id": "served-model-capability-quality",
@@ -1420,7 +1441,7 @@
     {
       "id": "cross-agent-fleet-serving",
       "category": "agent-fleet",
-      "dimension": "Cross-agent fleet serving time (N agents × T turns): work eliminated by shared-prefix fusion",
+      "dimension": "Cross-agent fleet serving time (N agents \u00c3\u2014 T turns): work eliminated by shared-prefix fusion",
       "why_it_matters": "fak's product category. When a fleet of agents shares a large system/context prefix, fusing that prefix once across all agents eliminates re-prefill work that even a tuned per-agent cache repeats. This is the axis fak is built to win.",
       "sota_systems": [
         "vLLM Automatic Prefix Caching",
@@ -1455,7 +1476,7 @@
       "id": "marginal-reuse-vs-live-engine",
       "category": "agent-fleet",
       "dimension": "Cross-agent reuse marginal value vs a LIVE tuned shared-prefix engine (head-to-head)",
-      "why_it_matters": "A live SGLang/vLLM ALSO fuses a shared prefix once. The marginal win vs a real competing process — not vs fak's own warm-KV arm — is the number a buyer comparing engines actually wants, and fak has not measured it.",
+      "why_it_matters": "A live SGLang/vLLM ALSO fuses a shared prefix once. The marginal win vs a real competing process \u00e2\u20ac\u201d not vs fak's own warm-KV arm \u00e2\u20ac\u201d is the number a buyer comparing engines actually wants, and fak has not measured it.",
       "sota_systems": [
         "SGLang RadixAttention (live process)",
         "vLLM Automatic Prefix Caching (live process)"
@@ -1472,7 +1493,7 @@
       "id": "single-stream-decode-cpu",
       "category": "single-stream",
       "dimension": "Single-stream (one chat) decode throughput on CPU",
-      "why_it_matters": "The regime local/edge stacks (llama.cpp, Ollama, MLC) compete hardest on: one user, one chat, raw tokens/s on commodity hardware. fak explicitly does NOT target this — showing the loss keeps the scorecard honest.",
+      "why_it_matters": "The regime local/edge stacks (llama.cpp, Ollama, MLC) compete hardest on: one user, one chat, raw tokens/s on commodity hardware. fak explicitly does NOT target this \u00e2\u20ac\u201d showing the loss keeps the scorecard honest.",
       "sota_systems": [
         "llama.cpp",
         "Ollama",
@@ -1490,12 +1511,12 @@
       "id": "single-stream-prefill-cpu",
       "category": "single-stream",
       "dimension": "Single-stream prefill throughput, apples-to-apples CPU-vs-CPU",
-      "why_it_matters": "Prefill (prompt ingestion) speed on CPU is a core local-inference axis. fak's arm64 build lacks the register-blocked int8 GEMM tile that x86 already has — a disclosed, narrowing loss.",
+      "why_it_matters": "Prefill (prompt ingestion) speed on CPU is a core local-inference axis. fak's arm64 build lacks the register-blocked int8 GEMM tile that x86 already has \u00e2\u20ac\u201d a disclosed, narrowing loss.",
       "sota_systems": [
         "llama.cpp"
       ],
-      "sota_bar": "llama.cpp CPU sets the prefill bar on the same box + Q8 weights (1× reference); fak arm64 is ~0.12× until the int8 tile lands.",
-      "metric_unit": "× of llama.cpp CPU",
+      "sota_bar": "llama.cpp CPU sets the prefill bar on the same box + Q8 weights (1\u00c3\u2014 reference); fak arm64 is ~0.12\u00c3\u2014 until the int8 tile lands.",
+      "metric_unit": "\u00c3\u2014 of llama.cpp CPU",
       "best_value": 1,
       "source_url": "https://github.com/ggml-org/llama.cpp",
       "source_date": "2026-06",
@@ -1510,7 +1531,7 @@
       "sota_systems": [
         "llama.cpp (CUDA)"
       ],
-      "sota_bar": "llama.cpp Q8_0 ~120 ± 15 tok/s on an RTX 4070 (-ngl 99).",
+      "sota_bar": "llama.cpp Q8_0 ~120 \u00c2\u00b1 15 tok/s on an RTX 4070 (-ngl 99).",
       "metric_unit": "tok/s",
       "best_value": 120,
       "source_url": "https://github.com/ggml-org/llama.cpp",
@@ -1527,8 +1548,8 @@
         "HuggingFace dynamic-int8",
         "llama.cpp Q8_0"
       ],
-      "sota_bar": "HuggingFace dynamic-int8 is the standard same-rung CPU int8 reference (1×); llama.cpp Q8_0 CPU is the harder peer (~parity).",
-      "metric_unit": "× vs HF int8",
+      "sota_bar": "HuggingFace dynamic-int8 is the standard same-rung CPU int8 reference (1\u00c3\u2014); llama.cpp Q8_0 CPU is the harder peer (~parity).",
+      "metric_unit": "\u00c3\u2014 vs HF int8",
       "best_value": 1,
       "source_url": "https://huggingface.co/docs/transformers/main/quantization/overview",
       "source_date": "2026-06",
@@ -1539,7 +1560,7 @@
       "id": "vendor-gemm-free-correctness",
       "category": "numerical-correctness",
       "dimension": "Dense GPU compute correctness with ZERO vendor GEMM (cuBLAS-free)",
-      "why_it_matters": "Every mainstream stack depends on NVIDIA cuBLAS for its GEMMs. Running a real model's dense path on an owned, dependency-free kernel — and proving it bit-matches the vendor oracle — is a portability/auditability differentiator.",
+      "why_it_matters": "Every mainstream stack depends on NVIDIA cuBLAS for its GEMMs. Running a real model's dense path on an owned, dependency-free kernel \u00e2\u20ac\u201d and proving it bit-matches the vendor oracle \u00e2\u20ac\u201d is a portability/auditability differentiator.",
       "sota_systems": [
         "cuBLAS (NVIDIA tuned vendor GEMM)"
       ],
@@ -1555,7 +1576,7 @@
       "id": "model-routing-granularity",
       "category": "model-routing",
       "dimension": "Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection",
-      "why_it_matters": "Every mainstream 'LLM router' (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) answers one question — which SINGLE model should serve this WHOLE request — and the only shipped model ensemble is a single fixed recipe (OpenRouter Fusion). Routing a sub-request aspect (one tool call, one reasoning step) to its own model, or declaring a configurable per-aspect ensemble with a reduction, is a granularity layer no surveyed product exposes; it is the axis that decides whether routing is a per-request pick or a first-class, in-loop decision.",
+      "why_it_matters": "Every mainstream 'LLM router' (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) answers one question \u00e2\u20ac\u201d which SINGLE model should serve this WHOLE request \u00e2\u20ac\u201d and the only shipped model ensemble is a single fixed recipe (OpenRouter Fusion). Routing a sub-request aspect (one tool call, one reasoning step) to its own model, or declaring a configurable per-aspect ensemble with a reduction, is a granularity layer no surveyed product exposes; it is the axis that decides whether routing is a per-request pick or a first-class, in-loop decision.",
       "sota_systems": [
         "RouteLLM (LMSYS)",
         "Martian",
@@ -1565,19 +1586,19 @@
         "Portkey",
         "LiteLLM Router"
       ],
-      "sota_bar": "Surveyed 2025-2026 routers/gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) all route the WHOLE request to ONE model; OpenRouter Fusion is the only shipped model ensemble and it is a fixed parallel-synthesize recipe, not a configurable per-aspect reduction. None routes a sub-request aspect to its own model. (Aurelio Semantic-Router routes to an intent, not a model; vLLM/SGLang routers balance replicas of ONE model for KV locality — a different layer.)",
+      "sota_bar": "Surveyed 2025-2026 routers/gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) all route the WHOLE request to ONE model; OpenRouter Fusion is the only shipped model ensemble and it is a fixed parallel-synthesize recipe, not a configurable per-aspect reduction. None routes a sub-request aspect to its own model. (Aurelio Semantic-Router routes to an intent, not a model; vLLM/SGLang routers balance replicas of ONE model for KV locality \u00e2\u20ac\u201d a different layer.)",
       "best_value": null,
       "metric_unit": "qualitative (routing granularity: whole-request vs per-aspect; fixed vs configurable ensemble reduction)",
       "source_url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md",
       "source_date": "2026-06",
-      "notes": "Survey of 2025-2026 routers/gateways in docs/model-routing.md. The gap is categorical (a routing GRANULARITY no surveyed product exposes), not a benchmarked speed/quality win — any '10x' is a target to be measured, never an inferred or borrowed number.",
+      "notes": "Survey of 2025-2026 routers/gateways in docs/model-routing.md. The gap is categorical (a routing GRANULARITY no surveyed product exposes), not a benchmarked speed/quality win \u00e2\u20ac\u201d any '10x' is a target to be measured, never an inferred or borrowed number.",
       "in_scope": true
     },
     {
       "id": "compaction-cache-preservation",
       "category": "client-compaction",
       "dimension": "Long-session history compaction that preserves the provider prompt-cache prefix (drop-and-splice vs summarize-and-resend)",
-      "why_it_matters": "An agent re-sends its whole transcript every turn; the provider prompt cache discounts the unchanged prefix ONLY while it stays byte-for-byte identical. Almost every built-in compaction (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI, Anthropic API context-editing) summarizes or clears old turns and re-sends a REWRITTEN prompt — which by the providers' own docs breaks that exact-match prefix and re-bills it at full price on the compacting turn. Whether a tool can shrink a long conversation WITHOUT busting the cache is the axis that decides if compaction saves money on the turn it fires or costs it.",
+      "why_it_matters": "An agent re-sends its whole transcript every turn; the provider prompt cache discounts the unchanged prefix ONLY while it stays byte-for-byte identical. Almost every built-in compaction (Aider, LangChain ConversationSummaryMemory, Codex CLI, Copilot CLI, Anthropic API context-editing) summarizes or clears old turns and re-sends a REWRITTEN prompt \u00e2\u20ac\u201d which by the providers' own docs breaks that exact-match prefix and re-bills it at full price on the compacting turn. Whether a tool can shrink a long conversation WITHOUT busting the cache is the axis that decides if compaction saves money on the turn it fires or costs it.",
       "sota_systems": [
         "Anthropic API context-editing (clear_tool_uses_20250919)",
         "OpenAI Codex CLI (summary compaction)",
@@ -1590,7 +1611,7 @@
       "metric_unit": "qualitative (preserves byte-identical cache prefix while compacting: yes/no; lossy vs drop; on-by-default vs library/beta)",
       "source_url": "https://platform.claude.com/docs/en/docs/build-with-claude/context-editing",
       "source_date": "2026-01",
-      "notes": "Industry mechanisms web-sourced 2026-06 (OpenAI prompt-caching cookbook, Anthropic context-editing docs, GitHub Copilot context blog, Aider/LangChain source). fak's drop-and-splice is verified in internal/agent/anthropic_compact.go (bytes.Equal prefix proof, 13 fail-safe identity exits). FENCE: fak proves byte-identity of the shipped prefix; whether the provider's cache CASCADE realizes the hit on the compacting turn is unmeasured (epic #745) — so this is a cache-PRESERVATION-mechanism position, not a measured cost-saving number.",
+      "notes": "Industry mechanisms web-sourced 2026-06 (OpenAI prompt-caching cookbook, Anthropic context-editing docs, GitHub Copilot context blog, Aider/LangChain source). fak's drop-and-splice is verified in internal/agent/anthropic_compact.go (bytes.Equal prefix proof, 13 fail-safe identity exits). FENCE: fak proves byte-identity of the shipped prefix; whether the provider's cache CASCADE realizes the hit on the compacting turn is unmeasured (epic #745) \u00e2\u20ac\u201d so this is a cache-PRESERVATION-mechanism position, not a measured cost-saving number.",
       "in_scope": true
     }
   ]
