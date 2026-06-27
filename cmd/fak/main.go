@@ -80,6 +80,8 @@ func main() {
 		cmdRecall(os.Args[2:])
 	case "session":
 		cmdSession(os.Args[2:])
+	case "resume":
+		cmdResume(os.Args[2:])
 	case "ps":
 		cmdPS(os.Args[2:])
 	case "top":
@@ -354,6 +356,15 @@ func usage() {
                 priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
                 (the OPERATOR control surface: read a served session's live DRIVE state
                  and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)
+  fak resume    plan [--resident-tokens N] [--idle-seconds S] [--ttl 5m|1h] [--horizon N]
+                [--shed-budget N] [--seed-tokens N] [--input-price F] [--output-price F]
+                [--image DIR] [--json]
+                (the DETERMINISTIC RESUME-CACHE decision: "I am resuming a 250k-token
+                 session  -  what happens to the prompt cache, and what should I do?"
+                 Projects the cache POSTURE (cold if the session was idle past the cache
+                 TTL, warm if not), prices RESUME_FULL / CUT / RESET, and recommends a
+                 cut-by-default re-entry. Pure: same facts in, same priced verdict out.
+                 --image grounds it on a real portable session image)
   fak ps        [--json] [--watch] [--interval D] [--frames N] [--addr URL] [--key K]
   fak top       (= fak ps --watch)
                 (the READ-ONLY PROCESS TABLE: one aligned row per live session folded
