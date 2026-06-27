@@ -5,6 +5,7 @@
     "source": "overlay",
     "value": "frontier",
     "requires": ["weights"],
+    "manual": true,
     "run": "BASELINE (memory-safe, mmap): /path/to/llama-bench -m $FAK_GGUF -ngl 0 -t 128 -p 256 -n 64 -r 2   ||   FAK-NATIVE (only if free RAM > ~1.1x GGUF size + KV; else it OOM-wedges the host, #974): FAK_Q4K=1 FAK_GGUF_LOAD_WORKERS=64 fak serve --gguf $FAK_GGUF --context-budget-tokens 8192 --addr 127.0.0.1:8080  then POST /v1/chat/completions",
     "acceptance": "a recorded single-stream prefill+decode tok/s for GLM-5.2 UD-Q4_K_M on a CPU-only host for llama.cpp (mmap baseline) and, where RAM allows, fak-native, in an experiments/benchmark/runs artifact; the fak-native resident-Q4_K load wall-clock + GB/s where it fits",
     "recheck_days": 30,
