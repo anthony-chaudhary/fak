@@ -24,15 +24,20 @@
 log()  { printf '\033[36m[connect-fak-node]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[33m[connect-fak-node] WARNING: %s\033[0m\n' "$*" >&2; }
 
-# Guard: refuse to run in exec mode (env vars would be lost on exit)
+# Guard: refuse to run in exec mode (env vars would be lost on exit).
+# bash: BASH_SOURCE[0] differs from $0 when sourced.
+# zsh:  ZSH_EVAL_CONTEXT contains ":file" when sourced (may be "toplevel:file",
+#       "toplevel:file:file" when sourced from within a script, etc.) — use a
+#       substring match, not equality, so it works from .zshrc too.
+# Both: fall back to permissive if neither variable is set (e.g. dash).
 _sourced=0
 # shellcheck disable=SC2128
-[ "${BASH_SOURCE[0]}" != "$0" ] 2>/dev/null && _sourced=1
-[ "${ZSH_EVAL_CONTEXT:-}" = "toplevel:file" ] && _sourced=1
-if [ "$_sourced" = "0" ]; then
+[ "${BASH_SOURCE[0]:-$0}" != "$0" ] 2>/dev/null && _sourced=1
+case "${ZSH_EVAL_CONTEXT:-}" in *:file*) _sourced=1 ;; esac
+if [ "$_sourced" = "0" ] && [ -n "${BASH_VERSION:-}${ZSH_VERSION:-}" ]; then
   echo "[connect-fak-node] ERROR: this script must be sourced, not executed." >&2
   echo "  source $0 <host> <key>  OR  . $0 <host> <key>" >&2
-  exit 1
+  return 1 2>/dev/null || exit 1
 fi
 
 # --- --disconnect ---

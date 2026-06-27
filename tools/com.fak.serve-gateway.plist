@@ -48,12 +48,12 @@
 
     <key>ProgramArguments</key>
     <array>
-      <!-- caffeinate -is wraps fak serve so macOS cannot idle-sleep or system-sleep
-           while the gateway is running. launchd KeepAlive=true restarts the caffeinate
-           process if it exits, which restarts fak serve underneath it. Together: launchd
-           keeps the daemon alive, caffeinate keeps the machine alive. -->
-      <string>/usr/bin/caffeinate</string>
-      <string>-is</string>
+      <!-- fak-serve-caffeinate.sh asserts -is (idle+system) sleep prevention via
+           `caffeinate -is -w $$`, then execs fak serve. exec keeps launchd's direct
+           child as fak serve (KeepAlive tracks the right process) and preserves stdio
+           so StandardOutPath / StandardErrorPath actually receive fak serve's output.
+           Using caffeinate as the top-level command directly loses all stdio. -->
+      <string>__REPO__/tools/fak-serve-caffeinate.sh</string>
       <string>__FAK__</string>
       <string>serve</string>
       <string>--provider</string>
@@ -62,6 +62,8 @@
       <string>https://api.anthropic.com</string>
       <string>--addr</string>
       <string>__ADDR__</string>
+      <string>--policy</string>
+      <string>__REPO__/examples/dogfood-claude-policy.json</string>
     </array>
 
     <key>EnvironmentVariables</key>

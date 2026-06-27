@@ -68,8 +68,7 @@ if (-not $GatewayKey) {
     return
 }
 
-$baseUrl = "http://${GatewayHost}:${GatewayPort}"
-$healthzUrl = "${baseUrl}/v1/messages"   # fak serve exposes /healthz at the gateway root
+$baseUrl     = "http://${GatewayHost}:${GatewayPort}"
 $healthzCheck = "${baseUrl}/healthz"
 
 # --- Probe: curl /healthz to verify reachability ---
