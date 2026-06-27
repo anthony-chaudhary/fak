@@ -21,6 +21,7 @@ Design background: [`docs/notes/SESSION-CONTROL-STATE-AS-FIRST-CLASS-2026-06-24.
 |---|---|
 | `GET /v1/fak/session/{id}` | observe one session's drive state |
 | `GET /v1/fak/sessions` | snapshot **every** live session (priority order) |
+| `GET·POST /v1/fak/session/changes` | tail **every** drive-state revision since a cursor (`?since=<seq>`) |
 | `POST /v1/fak/session/{id}/run` | set the run-state (`{"run":"paused"}`, `"stopped"`, …) |
 | `POST /v1/fak/session/{id}/budget` | re-set the allotment (`{"budget":{"turns_left":3,"tokens_left":-1}}`) |
 | `POST /v1/fak/session/{id}/pace` | re-set the per-turn throttle (`{"pace":{"max_tokens_per_turn":256}}`) |
@@ -32,6 +33,31 @@ newer change; a lost race returns **409** (re-read and retry). A stopped session
 terminal: every control verb on it returns 409 (you start a new session, you do not
 un-stop one). The routes are **fail-closed**: a gateway with no session table returns
 **404**, never a silent clean reading.
+
+## The live tail
+
+`GET /v1/fak/sessions` is a point-in-time snapshot — to see it *change* you would have
+to poll. `/v1/fak/session/changes` turns that read into a live tail: it streams every
+drive-state revision as it lands, so "what is every session doing right now" is a feed,
+not a poll, and every scheduling preemption is a first-class, auditable wire event rather
+than hidden policy.
+
+```sh
+GET  /v1/fak/session/changes?since=<seq>     # every revision after your cursor
+POST /v1/fak/session/changes  {"since": N}   # same, body form
+```
+
+It is the `/v1/fak/changes` cursor-feed protocol (the cross-agent coherence bus that
+streams cache mutations and revocations) applied to the per-session DRIVE table instead:
+every `rev` bump — a run-state flip, a budget cut, a priority/pace change, a preemption —
+appends one event. Each event is the full session snapshot at that revision, tagged with
+a feed-global `seq` (the drain cursor: monotone across all sessions, since `rev` is
+per-session and not globally ordered) and carrying the per-session `rev` (the dedupe and
+optimistic-concurrency key). `since=0` (or omitted) returns the whole retained tail; a
+lapsed client sees a `seq` gap and re-syncs to head, so a never-draining client cannot
+grow the ring without bound. The feed exposes exactly what the `/v1/fak/sessions` snapshot
+already does (every retained session's drive state), so it opens no new cross-tenant
+surface — it just makes that read a live tail.
 
 ## The CLI
 
