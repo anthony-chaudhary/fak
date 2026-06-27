@@ -115,6 +115,7 @@ func HygieneGates() []HygieneGate {
 		{"PROVENANCE_LABEL", gateProvenanceLabelTree},
 		{"INDEX_SYNC", gateIndexSyncTree},
 		{"BRAND_CONSISTENCY", gateBrandConsistencyTree},
+		{"TIER_DECLARED", gateTierDeclaredTree},
 	}
 }
 
