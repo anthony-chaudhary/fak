@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
@@ -56,6 +57,10 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		return 1
 	}
 
+	// Canonicalize the roster name to carry the suffix (the host convention, e.g. day26 ->
+	// day26-netra), so the registry name matches the dir basename and `remove --name <name>`
+	// uses the same handle the rosters show.
+	rosterName := rosterAccountName(p.name, p.suffix)
 	dir := accountDir(p.homeDir, p.name, p.suffix)
 	// Refuse to ever target the live default seat or an existing dir — a new account gets a
 	// fresh, isolated home so no login can clobber ~/.claude.
@@ -79,8 +84,8 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		reg = loaded
 	}
 	for _, h := range reg.Homes {
-		if h.Name == p.name {
-			fmt.Fprintf(stderr, "fak accounts: %q is already in the registry\n", p.name)
+		if h.Name == rosterName {
+			fmt.Fprintf(stderr, "fak accounts: %q is already in the registry\n", rosterName)
 			return 1
 		}
 	}
@@ -134,7 +139,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 
 	// Step 6: upsert the canonical registry record.
 	home := accounts.Home{
-		Name:          p.name,
+		Name:          rosterName,
 		Dir:           dir,
 		Reserved:      p.reserved,
 		ChromeProfile: p.chrome,
@@ -145,7 +150,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "registry: added %s -> %s\n", p.name, dir)
+	fmt.Fprintf(stdout, "registry: added %s -> %s\n", rosterName, dir)
 
 	// Step 7: regenerate the roster views.
 	if !p.noSync {
@@ -156,7 +161,98 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		fmt.Fprintf(stdout, "synced %d roster view(s)\n", synced)
 	}
 
-	fmt.Fprintf(stdout, "added account %q (dir=%s, reserved=%v) — ~/.claude untouched\n", p.name, dir, p.reserved)
+	fmt.Fprintf(stdout, "added account %q (dir=%s, reserved=%v) — ~/.claude untouched\n", rosterName, dir, p.reserved)
+	return 0
+}
+
+// rosterAccountName canonicalizes a --name to the suffixed roster handle (e.g. day26 ->
+// day26-netra), matching the dir basename so the registry name, the dir, and the rosters all
+// use one handle and `remove --name <name>` works with the name the rosters show.
+func rosterAccountName(name, suffix string) string {
+	if suffix != "" && !strings.HasSuffix(name, suffix) {
+		return name + suffix
+	}
+	return name
+}
+
+// removeParams carries the resolved flags for `fak accounts remove`.
+type removeParams struct {
+	name         string
+	rehomeTo     string
+	reason       string
+	registryPath string
+	dosView      string
+	jobView      string
+	noSync       bool
+}
+
+// runAccountsRemove tombstones an account in the canonical registry and regenerates the
+// views — the single-source inverse of add. It sets the home to status=tombstoned with a
+// rehome target (so anything pinned to it falls forward) and records the audit fields
+// (tombstoned_at, tombstone_reason), then re-syncs so the account drops from the dos view's
+// active rows and appears under the job view's tombstoned_accounts block. It does NOT delete
+// the config dir — that is a separate, destructive operator step.
+func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
+	if p.name == "" {
+		fmt.Fprintln(stderr, "usage: fak accounts remove --name <name> [--rehome-to <seat>] [--reason <text>]")
+		return 2
+	}
+	reg, err := accounts.LoadRegistry(p.registryPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	idx := -1
+	for i := range reg.Homes {
+		if reg.Homes[i].Name == p.name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		fmt.Fprintf(stderr, "fak accounts: %q not in registry\n", p.name)
+		return 1
+	}
+	if !reg.Homes[idx].Active() {
+		fmt.Fprintf(stderr, "fak accounts: %q is already tombstoned\n", p.name)
+		return 1
+	}
+	// Resolve the rehome target: the flag, else the registry's default seat.
+	rehome := p.rehomeTo
+	if rehome == "" {
+		if def, ok := reg.Default(); ok && def.Name != p.name {
+			rehome = def.Name
+		}
+	}
+	if rehome == "" {
+		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
+		return 1
+	}
+	if rehome == p.name {
+		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q to itself\n", p.name)
+		return 1
+	}
+	reason := p.reason
+	if reason == "" {
+		reason = "removed via `fak accounts remove`"
+	}
+	reg.Homes[idx].Status = accounts.StatusTombstoned
+	reg.Homes[idx].RehomeTo = rehome
+	reg.Homes[idx].TombstonedAt = time.Now().UTC().Format(time.RFC3339)
+	reg.Homes[idx].TombstoneReason = reason
+	disabled := false
+	reg.Homes[idx].Enabled = &disabled
+	if err := accounts.SaveRegistry(p.registryPath, reg); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "registry: tombstoned %s -> rehome %s\n", p.name, rehome)
+	if !p.noSync {
+		if _, code := syncViews(stdout, stderr, p.registryPath, p.dosView, p.jobView); code != 0 {
+			return code
+		}
+	}
+	fmt.Fprintf(stdout, "removed account %q (config dir left in place; tombstoned in registry + views)\n", p.name)
 	return 0
 }
 

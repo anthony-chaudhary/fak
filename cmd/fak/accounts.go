@@ -32,7 +32,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -61,6 +61,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addToken := fs.String("token", "", "(add) the setup-token (sk-ant-oat…); '-' or empty with --no-login reads stdin")
 	addSuffix := fs.String("suffix", firstNonEmpty(os.Getenv("FAK_ACCOUNT_SUFFIX"), "-netra"), "(add) config-dir suffix: dir is ~/.claude-<name> when <name> already ends with it, else ~/.claude-<name><suffix>")
 	addNoSync := fs.Bool("no-sync", false, "(add) skip regenerating the roster views after adding (just write the registry)")
+	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's default seat)")
+	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -288,6 +290,21 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			jobView:      *jobView,
 		})
 
+	case "remove":
+		// Tombstone an account in the canonical registry and regenerate the views — the
+		// single-source inverse of `add`. The account becomes status=tombstoned with a rehome
+		// target + audit fields, drops out of the dos view's active rows, and moves to the job
+		// view's tombstoned_accounts block, all from one registry edit.
+		return runAccountsRemove(stdout, stderr, removeParams{
+			name:         *addName,
+			rehomeTo:     *rmRehome,
+			reason:       *rmReason,
+			registryPath: *registryPath,
+			dosView:      *dosView,
+			jobView:      *jobView,
+			noSync:       *addNoSync,
+		})
+
 	case "sync":
 		// Project the canonical registry into the generated roster views and write them. The
 		// registry is the single source of truth; these files are caches of it, never
@@ -338,7 +355,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
