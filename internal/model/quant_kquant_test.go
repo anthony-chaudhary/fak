@@ -48,6 +48,12 @@ func refKQuantMatRows(qt *kQuantTensor, x []float32) []float32 {
 }
 
 func TestKQuantMatRowsMatchesDequantRef(t *testing.T) {
+	// This asserts kQuantMatRows is BIT-IDENTICAL to dequant-then-dot, which only the f32 GEMV is —
+	// the int8 Q5_K path is approximate (activation quantization). Pin the f32 path so a production
+	// FAK_KQ_INT8=1 in the env does not flip kQuantMatRows to int8 and muddy this bit-identity check
+	// (TestQ5KInt8MatchesF32 covers the int8 path under its own cosine gate).
+	setKQuantSDOTForTest(false)
+	t.Cleanup(func() { kQuantSDOTForce = 0 })
 	const (
 		out = 9   // odd, to exercise the parallel row split's tail
 		in  = 512 // 2 super-blocks per row
