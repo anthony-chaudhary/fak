@@ -141,6 +141,7 @@ autopick = [
   "fakrpc",
   "vcacheobserve",
   "leaseref", # #825: internal/leaseref leaf, see [lanes].concurrent note
+  "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -263,6 +264,7 @@ loopmgr = ["internal/loopmgr/**"] # #763 (#749 `fak cron` / #748): loop ledger +
 fakrpc = ["internal/fakrpc/**"]
 vcacheobserve = ["internal/vcacheobserve/**"]
 leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY substrate (refs/fak/locks/*)
+dojo = ["internal/dojo/**"] # #951: prediction-vs-reality gym (predict -> run -> measure -> eval -> calibrate)
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
