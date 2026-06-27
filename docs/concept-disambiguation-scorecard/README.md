@@ -5,6 +5,8 @@ description: "Inward naming scorecard: each confusable fak concept positioned on
 
 # Concept-disambiguation scorecard - crystal clarity across similar-sounding names
 
+<!-- concept-disambiguation-scorecard: 2026-06-27 coverage push #942/#948 - process: tools/concept_disambiguation_scorecard.py - data: tools/concept_disambiguation_scorecard.data/ -->
+
 The sibling scorecards grade fak's code, docs, and competitive standing. This one asks the question that bites a reader as the system grows: **of the massive, growing set of similar-sounding names (cache, vCache, KV cache, cachemeta, the provider prompt-cache), is each distinct concept crystal-clear - one canonical name, a written definition, and an explicit line drawn against the siblings it is confused with?** Every number below is re-derived by `tools/concept_disambiguation_scorecard.py` and cross-checked against the real tree (the grounding token must appear in the production corpus; the glossary anchor must exist; a `distinct_from` reference must resolve). No verdict is hand-typed.
 
 > Regenerate: `python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard`.
@@ -13,10 +15,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **45.2/100** (grade F) = 4.5/10 |
-| **Coverage** | **15.7%** (102/649 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **547** (clarity 0 + coverage 547) |
-| Crystal-clear concepts | 104 of 143 positioned |
+| **Score** | **66.7/100** (grade D) = 6.7/10 |
+| **Coverage** | **48.7%** (318/653 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **335** (clarity 0 + coverage 335) |
+| Crystal-clear concepts | 104 of 332 positioned |
 | As of | 2026-06-26 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,19 +26,19 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 143 concepts - score 45.2/100 (grade F) - disambiguation-debt 547
+concept-disambiguation chart - 332 concepts - score 66.7/100 (grade D) - disambiguation-debt 335
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ############################ 104
-  o defined       ##########.................. 39
+  * crystal       #############............... 104
+  o defined       ############################ 228
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        oooooooooo         (10 concept(s); 0 crystal)
-  cache            **************ooo  (17 concept(s); 14 crystal)
-  context-ctx      ********ooooooo    (15 concept(s); 8 crystal)
+  attention        ooooooooooooooooooooooooooooooooooooooooooooooo (47 concept(s); 0 crystal)
+  cache            **************oooooooooooooooooooooooooooooooooooooo (52 concept(s); 14 crystal)
+  context-ctx      ********oooooooooooooooooooooooooooooooooo (42 concept(s); 8 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****               (4 concept(s); 4 crystal)
   evict            ***                (3 concept(s); 3 crystal)
@@ -44,32 +46,32 @@ clarity mix by family (each cell = one concept):
   guard-gate       ***********************oo (25 concept(s); 23 crystal)
   layout           ***                (3 concept(s); 3 crystal)
   plan             ***                (3 concept(s); 3 crystal)
-  policy-capability ******oo           (8 concept(s); 6 crystal)
+  policy-capability ******oooooooooooooooooooooooooooooooooooo (42 concept(s); 6 crystal)
   pool             **                 (2 concept(s); 2 crystal)
   render-materialize ***                (3 concept(s); 3 crystal)
   score-debt       ***                (3 concept(s); 3 crystal)
-  session-runtime  *******oooooooooo  (17 concept(s); 7 crystal)
-  witness-proof    *****oo            (7 concept(s); 5 crystal)
+  session-runtime  *******ooooooooooooooooooooooooooooooooooooooooooooo (52 concept(s); 7 crystal)
+  witness-proof    *****ooooooooooooooooooooooo (28 concept(s); 5 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ##.......................... 7/107
-  gateway-engine   ###......................... 10/105
-  attention        ###......................... 5/55
-  session-runtime  #######..................... 14/60
+  plan             ###......................... 10/108
+  gateway-engine   #####....................... 20/106
   render-materialize #........................... 2/47
-  context-ctx      #######..................... 14/58
-  cache            #######..................... 15/57
-  guard-gate       ##########.................. 22/63
-  policy-capability ###......................... 5/46
-  witness-proof    ######...................... 6/30
+  guard-gate       ##########.................. 22/64
+  context-ctx      ####################........ 42/58
   pool             ####........................ 2/14
-  evict            ##.......................... 1/12
+  evict            #####....................... 2/12
   layout           ######...................... 2/10
   decision         ####........................ 1/8
+  session-runtime  #########################... 54/61
+  policy-capability ##########################.. 43/46
+  cache            ###########################. 55/57
   score-debt       #################........... 3/5
+  attention        ###########################. 54/55
+  witness-proof    ###########################. 29/30
   cross-cluster    ............................ 0/0
 
-namespace coverage  [#####...........................] 15.7%  (102/649 confusable tokens positioned)
+namespace coverage  [################................] 48.7%  (318/653 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -192,6 +194,43 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | witness-proof | **WitnessResolver** - The component that corroborates claims against independent evidence sources (git history, filesystem, HTTP APIs) and returns Confirmed, Refuted, or Abstain. |
 | * | crystal | symbol | witness-proof | **Refutation** - The local decision that a witness is invalid (its cached state is stale or poisoned), triggering eviction of all entries admitted under it. |
 | * | crystal | symbol | witness-proof | **Revocation** - The broadcast event published to the coherence bus when a witness is refuted, enabling cross-agent causal invalidation of cache entries. |
+| o | defined | concept | attention | **Attention (softmax token-mixer)** - The default softmax scaled-dot-product self-attention token mixer (the be.Attention HAL op and m.attnSeq body) that mixes tokens via Q·K softmax over V. |
+| o | defined | concept | attention | **self_attn (projection namespace)** - The self-attention sublayer's canonical tensor namespace (self_attn.{q,k,v,o}_proj plus q_norm/k_norm) that holds the projection weights of a softmax-attention block. |
+| o | defined | symbol | attention | **attnOut (attention output buffer)** - The per-head context-vector buffer (nH*hd wide) that attention accumulates per position and then feeds into the o_proj output matmul. |
+| o | defined | symbol | attention | **attnConcat (GLM-DSA output concat)** - GLM-DSA's per-head sparse-attention output, concatenated across heads (nH*vHead) and fed into o_proj in the DeepSeek-style sparse-attend path. |
+| o | defined | symbol | attention | **attn_q (query projection)** - The GGUF `attn_q` query-projection weight (maps hidden state to the per-head query vectors of a self-attention layer). |
+| o | defined | symbol | attention | **attn_k (key projection)** - The GGUF `attn_k` key-projection weight (maps hidden state to the per-KV-head key vectors of a self-attention layer). |
+| o | defined | symbol | attention | **attn_k_b (MLA absorbed key up-proj)** - The GLM-DSA/MLA absorbed key up-projection weight `attn_k_b.weight` ([n_head, kv_lora, qk_nope], transposed at convert time) that lifts the compressed KV latent to per-head keys. |
+| o | defined | symbol | attention | **attn_v_b (MLA value up-proj)** - The GLM-DSA/MLA value up-projection weight `attn_v_b.weight` ([n_head, v_head, kv_lora]) that lifts the compressed KV latent to per-head value vectors. |
+| o | defined | symbol | attention | **attn_qkv (fused QKV projection)** - The single fused query+key+value projection tensor (self_attn.qkv_proj / GGUF attn_qkv) that some families (Phi, Qwen3.5 linear) ship and fak splits into q/k/v at load. |
+| o | defined | symbol | attention | **attnScale (SDPA denominator)** - cfg.attnScale() — the per-head scaled-dot-product denominator (1/sqrt(HeadDim), or 1/sqrt(QueryPreAttnScalar) for Gemma) multiplied into the raw QK scores before softmax. |
+| o | defined | config | attention | **AttnSoftcap (Gemma2 logit soft-cap)** - cfg.AttnSoftcap — the Gemma2 tanh soft-cap value applied in-place to attention logits (softcapInPlace) to bound them; 0 means off. |
+| o | defined | config | attention | **AttentionBias (QKV bias flag)** - cfg.AttentionBias — the all-or-nothing flag (inferred from attn_{q,k,v}.bias tensors) that the q/k/v projections carry an additive learned bias (e.g. Qwen2). |
+| o | defined | symbol | attention | **attentionNorms (attention norm bundle)** - m.attentionNorms(l) — the bundle of pre/post normalization weights (and biases) that wrap the attention sublayer for a layer's topology. |
+| o | defined | symbol | attention | **post_attention_layernorm (MLP input norm)** - The HF-named `post_attention_layernorm.weight` — the RMSNorm applied to the residual BEFORE the MLP/SwiGLU sublayer (its name notwithstanding). |
+| o | defined | symbol | attention | **attnSeq (dense attention body)** - m.attnSeq — the cacheless whole-sequence dense attention body (Q/K/V projection, RoPE, SDPA, o_proj) run over a panel of normalized inputs. |
+| o | defined | symbol | attention | **attnBody (cached attention sublayer)** - The attnBody closure — the per-step attention sublayer over an already-normalized input that reads/writes the KV cache (kv.go, glm_dsa_session, minimax_m3_session) and returns the raw attention output. |
+| o | defined | symbol | attention | **attnPrefillInto (prefill attention kernel)** - attnPrefillInto — the batched causal GQA attention kernel that computes a P-token prefill panel's attention and writes it into attnOut with optional sliding-window and soft-cap. |
+| o | defined | symbol | attention | **attnDecodeBatch (batched decode attention)** - attnDecodeBatch — computes per-user causal attention for ONE batched decode step across B users, bit-identical to serial Step. |
+| o | defined | config | attention | **attnGQAFuse (GQA fast-path flag)** - attnGQAFuse — the env-tunable flag that fuses a GQA group of 3 query heads sharing a KV head into one combined score-dot fast path. |
+| o | defined | config | attention | **attnFdot3SIMD (3-wide score-dot SIMD)** - attnFdot3SIMD (with its attnFdot3SIMDMinBatch threshold) — the toggle enabling a 3-wide SIMD fused score dot-product (scoreDot3) for a GQA-3 group. |
+| o | defined | config | attention | **attnSaxpy3SIMD thresholds** - attnSaxpy3SIMDMinBatch / attnSaxpy3SIMDMinPos — the batch- and position-count thresholds gating the 3-wide SIMD saxpy fast path that accumulates weighted value vectors. |
+| o | defined | concept | attention | **linear attention (Gated-DeltaNet)** - The Gated-DeltaNet linear-attention token mixer that replaces softmax attention on hybrid layers (selected by c.isLinearAttnLayer); a recurrent linear scan instead of an O(n^2) softmax. |
+| o | defined | symbol | attention | **linearAttnSeq (DeltaNet scan)** - m.linearAttnSeq — the concrete Gated-DeltaNet recurrent-scan implementation over a sequence (with linearAttnSeqBatched as the issue-#443 batched variant) that produces the linear-attention outputs. |
+| o | defined | config | attention | **FullAttentionInterval (hybrid full layers)** - cfg.FullAttentionInterval — the hybrid Qwen3.5 schedule where every Nth decoder layer uses full (global) attention (LayerTypes 'full_attention') while the rest slide. |
+| o | defined | config | attention | **sliding_attention (SWA layer type)** - The 'sliding_attention' LayerTypes value (derived in deriveLayerAttentionAxes) marking a layer that attends only within a bounded sliding window (SWA). |
+| o | defined | symbol | attention | **isMiniMaxSparseAttn (MiniMax sparse path)** - c.isMiniMaxSparseAttn — the predicate selecting the MiniMax-M3 sparse-attention decoder path (m.layerMiniMax) for a layer. |
+| o | defined | concept | attention | **RadixAttention (prefix cache)** - The SGLang-style RadixAttention prefix KV-cache (internal/radixkv) that walks a radix tree of past requests and reuses the longest cached prompt prefix. |
+| o | defined | concept | attention | **PagedAttention (paged KV kernel)** - The vLLM-style PagedAttention / flash fused attention kernel concept that fak's Caps.FusedAttn can lower the whole Attention op to (paged KV blocks, online softmax). |
+| o | defined | symbol | attention | **FusedAttn (capability flag)** - Caps.FusedAttn — the backend capability bit advertising it can lower the Attention op to ONE fused flash/online-softmax (paged) kernel (e.g. the CUDA backend, issue #486). |
+| o | defined | symbol | attention | **ropeAttentionFactor (RoPE scaling)** - c.ropeAttentionFactor() — the RoPE long-context attention-scaling multiplier (YaRN/longrope), read from RopeParams.AttentionFactor, applied to the attention computation. |
+| o | defined | symbol | attention | **softmaxAttentionScores (score softmax + sinks)** - m.softmaxAttentionScores — applies softmax to a head's attention scores, honoring per-head attention-sink logits (self_attn.sinks) when present. |
+| o | defined | symbol | attention | **AttentionIndexReferences (index→KV dep)** - cachemeta.AttentionIndexReferences — the predicate reporting whether an attention_index cache entry depends on a given KV span (used by eviction/external-invalidation). |
+| o | defined | symbol | attention | **SignalNoiseFromAttention (S/N split)** - ctxplan.SignalNoiseFromAttention — folds a Plan plus a WITNESSED per-span attention attribution into a signal-vs-noise mass split for a turn. |
+| o | defined | symbol | attention | **OutcomeFromAttention (turn outcome)** - ctxplan.OutcomeFromAttention — produces a WITNESSED per-turn Outcome (classifies each resident span by its witnessed attention mass vs a hit threshold). |
+| o | defined | subsystem | attention | **attnsnrsi (attention-S/N RSI command)** - The cmd/attnsnrsi command that closes the attention signal/noise RSI loop in SHADOW (#867), replaying a session's Forecast scored on attention attribution through rsiloop. |
+| o | defined | symbol | attention | **SetAttnObserver (install observer)** - m.SetAttnObserver — installs (or clears with nil) the default-off attention-mass witness observer on the model, used to capture post-softmax weights without perturbing the forward pass. |
+| o | defined | symbol | attention | **emitAttnRow (emit attention row)** - emitAttnRow — the hot-path helper that copies the post-softmax weights for one (layer, query position, head) window and hands the fresh slices to the installed observer. |
 | o | defined | symbol | attention | **AttnObserver** - A callback that receives post-softmax attention distributions one (layer, query, head) row at a time for span attribution. |
 | o | defined | symbol | attention | **Attended (span field)** - The per-turn witnessed post-softmax attention mass a span accumulated during one forward pass, reset at the turn boundary. |
 | o | defined | symbol | attention | **AttendedMass (method)** - The total witnessed attention mass currently attributed across all live segments - the denominator that normalizes each span's attention into [0,1]. |
@@ -202,9 +241,71 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | attention | **AttentionIndexRequest** - The set of axes a DSA index lookup must match for reuse, with strict causal and exactness requirements for prefix matching. |
 | o | defined | symbol | attention | **linearAttnCache** - The cache for Gated-DeltaNet linear-attention layers: accumulated recurrent state and a short-conv window per layer, not per-token K/V. |
 | o | defined | symbol | attention | **AttributeRow (method)** - Routes one post-softmax attention row onto the segment ledger, attributing each key position's weight to the live span whose cache range owns that position. |
+| o | defined | subsystem | cache | **vcachecal (M1 calibrate)** - internal/vcachecal is the vCache M1 observe-and-calibrate decision layer (#716): the warmth-belief estimator plus the offline probe harness that fits the T/M_min/r warmth law and reports false-warm/false-cold prediction error, off the hot path. |
+| o | defined | subsystem | cache | **vcachescore (operator scorecard)** - internal/vcachescore is the vCache operator scorecard that composes the vcachecal/vcachestar/vcachegov proof leaves into the offline 2x-readiness gate and the hot-anchor index artifact. |
+| o | defined | subsystem | cache | **vcachewarm (M3 warming)** - internal/vcachewarm is the vCache M3 dedicated-warming decision layer (#718): the Anthropic max_tokens:0-vs-decode-1 gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. |
+| o | defined | subsystem | cache | **vcachestar (M2 star anchors)** - internal/vcachestar is the vCache M2 star-anchor decision layer (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking. |
+| o | defined | subsystem | cache | **vcacheobserve (fak vcache observe)** - internal/vcacheobserve backs `fak vcache observe`, ingesting REAL provider-cache transcripts/telemetry into a per-session and cross-session hit-rate report. |
+| o | defined | subsystem | cache | **cacheobs (observability tap)** - internal/cacheobs is the process-global observability tap that the in-kernel KV-prefix cache writes lifecycle events into for scraping. |
+| o | defined | symbol | cache | **CacheHit (vdso event)** - CacheHit is a vDSO CacheEventKind value naming a tier-2 cache lifecycle HIT event (a cacheable lookup that an entry served), emitted to the cache-event sink. |
+| o | defined | symbol | cache | **NOT_CACHED (miss reason)** - MissNotCached ("NOT_CACHED") is the vDSO miss-reason recorded when a lookup was cacheable but no tier-1/tier-3/tier-2 entry answered it. |
+| o | defined | symbol | cache | **CachedTokens (provider field)** - CachedTokens is the raw provider-reported cache-read token count carried on cachemeta.ProviderCache and on the agent Usage prompt/input token details. |
+| o | defined | symbol | cache | **CachedPromptTokens (normalized hit count)** - CachedPromptTokens is the agent Usage method (and AdjudicationSummary field) that normalizes Anthropic/OpenAI/Gemini prompt-cache hit counts into one cache-read prompt-token number. |
+| o | defined | symbol | cache | **healthy_cache (reset reason)** - healthy_cache is the ResetReasonHealthy value of the resetScore SHADOW policy, the verdict that a turn's OBSERVED provider cache ratios look healthy enough to keep cutting rather than reset. |
+| o | defined | symbol | cache | **MemoryKVCache (capacity class)** - compute.MemoryKVCache is the MemoryClass label "kv_cache" used by the capacity planner to bucket KV-cache allocations in the device memory plan. |
+| o | defined | symbol | cache | **cachedInvFreq (RoPE memo)** - model.cachedInvFreq returns the memoized RoPE inverse-frequency table for a config/layer so the rotation base is computed once and reused. |
+| o | defined | symbol | cache | **glmDsaKVCache (DSA session cache)** - model.glmDsaKVCache is the per-session KV cache struct for GLM-MoE-DSA sparse attention, holding pre-RoPE K, V, and the index span with reserve/evict/rerotate operations. |
+| o | defined | symbol | cache | **glmDsaAttendCached (DSA attend)** - model.glmDsaAttendCached is the method that computes GLM-MoE-DSA sparse attention over the already-selected keys/values resident in a glmDsaKVCache (softmax(scale·q·k) then ΣwV). |
+| o | defined | symbol | cache | **NewKVCache (dense allocator)** - model.NewKVCache allocates an empty dense full-attention KVCache (keeping pre-RoPE Kraw) for a model session. |
+| o | defined | symbol | cache | **linearAttnCache (Qwen3.5 recurrent)** - model.linearAttnCache (constructed by newLinearAttnCache) is the per-session recurrent/conv state cache for Qwen3.5 hybrid linear-attention layers, held in the KVCache.linear field. |
+| o | defined | symbol | cache | **growCaches (batch grow)** - model.growCaches grows a slice of *KVCache up to batch size B, allocating fresh per-row caches as needed for batched decode/prefill. |
+| o | defined | symbol | cache | **uploadCache (device upload memo)** - compute.uploadCache (and its Metal twin metalUploadCache) shares one device/VRAM copy per distinct host buffer across all sessions so a weight tensor stages to the GPU once. |
+| o | defined | symbol | cache | **FromProviderCache (constructor)** - cachemeta.FromProviderCache lowers a provider-reported ProviderCache observation into a cachemeta.Entry with provider residency and prompt-prefix media type. |
+| o | defined | symbol | cache | **ProviderCacheVerdict** - cachemeta.ProviderCacheVerdict is the typed LookupVerdict answering "may this provider cache entry be served", returning cost_latency_only / non-serveable for provider residency. |
+| o | defined | symbol | cache | **rawHasCacheControl (detector)** - agent.rawHasCacheControl is the predicate that tests whether a raw Anthropic JSON block (system, tool_result, or content) carries a cache_control breakpoint. |
+| o | defined | symbol | cache | **CacheReadMultiplier (price coeff)** - gateway.CacheReadMultiplier (=0.1, mirrored in internal/resume) is the price of a cached-prefix READ relative to base input, used to value cache-read tokens in cost math. |
+| o | defined | symbol | cache | **cache_rebate_tokens (debug field)** - cache_rebate_tokens is the OBSERVED per-turn field in the `fak serve --debug-stats` stderr line, the token-equivalent rebate computed as cacheRead·(1−CacheReadMultiplier). |
+| o | defined | symbol | cache | **recordCompactionCacheRead** - gateway.recordCompactionCacheRead records the provider's cache_read_input_tokens on a compacted (streamed or buffered) turn so post-compaction billing truth is captured. |
+| o | defined | symbol | cache | **PageCacheEntries (image enum)** - PageCacheEntries returns the cachemeta.Entry metadata for every page-table row of a context image (cdb.Image / contextq), without materializing the pages. |
+| o | defined | symbol | cache | **emitCache (vdso emitter)** - vdso.emitCache builds a cachemeta entry from a tier-2 identity and dispatches it (outside the lock) to the installed cache-event sink. |
+| o | defined | symbol | cache | **SetCacheEventSink** - vdso.SetCacheEventSink installs (or clears) the observer function that receives tier-2 cache lifecycle CacheEvents, wired by the gateway to fold them into fak_cache_*. |
+| o | defined | symbol | cache | **vcacheProofFromCounters** - gateway.vcacheProofFromCounters prices the NET realized provider-cache economics over cumulative input/cached/creation counters into a vcachegov.TelemetrySavingsProof. |
+| o | defined | symbol | cache | **VCacheTokenEquiv** - vcachegov.VCacheTokenEquiv is the token-equivalent cost of a vCache-anchored plan (write-multiplier·anchor + reuse reads + suffix), compared against the baseline to compute savings. |
+| o | defined | config | cache | **EngineCache* serve knobs** - The EngineCache* serve flags (engine sglang|vllm, base-url, admin-key env, idle-timeout, require-exact-span) configure fak's reset of a self-hosted upstream serving-engine cache after a quarantined provider-bound tool turn. |
+| o | defined | metric | cache | **fak_cache_* (stream metrics)** - fak_cache_* is the Prometheus metric family folding cachemeta.Entry events across ALL cache planes (the unified cross-plane events/bytes/breakdown counters rendered by the gateway's StreamMetrics). |
+| o | defined | metric | cache | **fak_engine_cache_* (engine metrics)** - fak_engine_cache_* is the Prometheus metric family for live serving-engine KV cache events (events/hits/misses/faults/bytes/tokens moved across residency tiers), namespaced alongside fak_gateway_*/fak_kernel_*. |
+| o | defined | subsystem | cache | **hwcachedemo (HW-aware proof cmd)** - cmd/hwcachedemo is a no-model, no-GPU command that proves fak's cache is hardware-aware by replaying an expensive hot-prefix span under hand-injected capacity pressure (demote-not-evict). |
+| o | defined | doc-term | cache | **L3 disaggregated cache (study)** - l3cache is the docs/notes positioning study (epic #79) that fixes fak's relationship to an external, content-addressed remote-DRAM L3 KV-cache tier and maps fak's shipped semantic primitives onto the gaps that tier leaves open. |
 | o | defined | symbol | cache | **vBlock** - The unit of cacheable work in vCache: a cachemeta entry whose identity carries every axis that must match for provider reuse (content digest, model, tokenizer, endpoints, position in prefix DAG). |
 | o | defined | symbol | cache | **KVLayout** - The interface abstracting the per-position bytes a given attention variant caches and how to reconstruct per-head K/V from those bytes (standard vs MLA). |
 | o | defined | symbol | cache | **MLAConfig** - The low-rank MLA projection geometry (DeepSeek V2/V3): latent width, RoPE dim, and down/up projection matrices for compressing the K/V cache. |
+| o | defined | symbol | context-ctx | **ContextTokensLeft (session budget)** - ContextTokensLeft is the session.Budget field holding the remaining prompt/context-token budget a served session has before context-budget exhaustion triggers a reset directive. |
+| o | defined | symbol | context-ctx | **ContextTokens (session usage)** - ContextTokens is the per-turn usage field on gateway.SessionUsage / session.Usage carrying the prompt/context-window token count to debit from the session budget. |
+| o | defined | symbol | context-ctx | **RequestContextChange (recall)** - RequestContextChange is the recall.Session method that applies a safe, negative-only context mutation — recording a tombstone that suppresses one page from future model-visible recall without deleting bytes. |
+| o | defined | symbol | context-ctx | **ContextActionTombstone** - ContextActionTombstone is the recall.ContextAction constant ("tombstone_page") naming the one shipped, deliberately negative-only context mutation that narrows what may enter future context. |
+| o | defined | subsystem | context-ctx | **ctxplanbench (planner bench cmd)** - ctxplanbench is the cmd/ctxplanbench benchmark that measures the ctxplan planned VIEW (compaction count, recovered tokens) over real Claude Code session transcripts. |
+| o | defined | symbol | context-ctx | **ContextChanges (recall ledger)** - ContextChanges is the recall.Session accessor (and Manifest field) returning the applied, durable context-control ledger — the list of tombstone rows recorded against the core image. |
+| o | defined | metric | context-ctx | **ContextPollutionRate (bench KPI)** - ContextPollutionRate is the bench KPI computed as the rate of ctxmmu quarantines per tool call in the gates-on run. |
+| o | defined | subsystem | context-ctx | **ctxdemo (multi-agent demo cmd)** - ctxdemo is the cmd/ctxdemo live on-box demonstrator that runs a catalog of multi-agent shapes to show fak's prefill/KV-reuse value, reporting per-scenario max context and fak-vs-tuned token work. |
+| o | defined | config | context-ctx | **CtxViewBudget (gateway knob)** - CtxViewBudget is the gateway.Config field that, when > 0, wires the ctxplan context planner into the live serve/guard loop and materializes each turn's history as an O(1) planned view under this resident-token budget. |
+| o | defined | symbol | context-ctx | **ProveRecallInput (vcachechain)** - ProveRecallInput is the vcachechain struct holding the caller-supplied calibration (prefix tokens, unit tokens, read-multiplier, siblings) that the recall economics proof is run over. |
+| o | defined | cli-verb | context-ctx | **cmdRecall (fak recall verb)** - cmdRecall is the cmd/fak handler for `fak recall` — the offline session-recall demo that writes a session through the gate, reloads it in a fresh Session, and demonstrates the rung-0/rung-4 poison-refusal guarantees. |
+| o | defined | metric | context-ctx | **CompactionFired (gateway metric)** - CompactionFired is the gateway metrics counter of compaction attempts that fired — the turn body was rewritten with the protected prefix shipped byte-identical. |
+| o | defined | symbol | context-ctx | **contextBudgetAxis (TUI formatter)** - contextBudgetAxis is the cmd/fak formatter that renders a context-token budget value as a short axis cell ("inf" for <0, "off" for 0, else the number) for ps/overview/session rows. |
+| o | defined | config | context-ctx | **context-budget-tokens (guard flag)** - contextBudgetTokens is the `fak guard --context-budget-tokens` flag that seeds the guard session with a prompt/context-token budget so exhaustion returns a reset directive with a continuation id. |
+| o | defined | symbol | context-ctx | **ContextTokensCap (budget denominator)** - ContextTokensCap is the session.Budget field recording the configured context-budget size — the denominator the pre-exhaustion warning measures consumed-share against (0 means no context budget). |
+| o | defined | symbol | context-ctx | **ContextWindowTokens (usage method)** - ContextWindowTokens is the agent.Usage method that computes the prompt/context size to count against a long-session budget, adding Anthropic cache_read/cache_creation tokens back onto input_tokens. |
+| o | defined | subsystem | context-ctx | **ctxbench (security-gate corpus cmd)** - ctxbench is the cmd/ctxbench tool that runs fak's security gates over a corpus of tool calls and reports the injection/quarantine outcomes. |
+| o | defined | symbol | context-ctx | **handleFakContextChange (gateway route)** - handleFakContextChange is the gateway HTTP handler for POST /v1/fak/context/change that records a requester-initiated tombstone against a persisted recall core image. |
+| o | defined | symbol | context-ctx | **freshContextTokens (guard reseed)** - freshContextTokens is the cmd/fak guard budget-restarter field holding the fresh context-token budget to reseed onto a continuation trace after a budget-triggered managed reset. |
+| o | defined | symbol | context-ctx | **InjectionInContext (agent harness)** - InjectionInContext is the agent loop-result boolean recording that a tool result carrying a prompt injection actually reached the model in the context. |
+| o | defined | subsystem | context-ctx | **longctxbench (long-context floor cmd)** - longctxbench is the cmd/longctxbench tool that renders the exact, contention-free token-work floor for ultra-long-context / agent-city regimes across a prefix/turns/agents ladder. |
+| o | defined | symbol | context-ctx | **MaxContext (swebench geometry)** - MaxContext is the swebench.Geometry method giving the largest context length a workload geometry reaches, computed as Prefix + Turns*(Decode+Result). |
+| o | defined | symbol | context-ctx | **NewRecallBackend (memq)** - NewRecallBackend is the memq constructor that builds the negative-only recall backend — a tombstone store that drives suppression through recall.RequestContextChange persisted to a directory. |
+| o | defined | symbol | context-ctx | **PlanRecall (vcachechain)** - PlanRecall is the vcachechain M4 entry point that, given a prefix DAG, a recall request, and an enable flag, returns the recall verdict plus the economics and cold-tail replay schedule. |
+| o | defined | config | context-ctx | **RopeOrigContext (model config)** - RopeOrigContext is the model.Config field (rope_scaling_original_max_position_embeddings) holding the original pre-scaling max position / context length used as the reference when applying RoPE scaling. |
+| o | defined | subsystem | context-ctx | **ctxresidency (residency query package)** - ctxresidency is the internal package providing the context-residency query: a pure, witnessable READ that composes kvmmu, ctxmmu, and cachemeta to classify each span resident/evictable/held with its evict blast radius. |
+| o | defined | subsystem | context-ctx | **ctxplandemo (planner demo cmd)** - ctxplandemo is the cmd/ctxplandemo runnable demonstrator for the context PLANNER, treating a transcript as a plannable store and showing the planned view it materializes. |
 | o | defined | symbol | context-ctx | **SpeculationContext** - Transient state for brainstorm epochs: (Speculative, Epoch, ParentEpoch) marking provisional effects produced under speculation. |
 | o | defined | symbol | context-ctx | **ContextChangeRequest** - Negative-only context mutation request: one persisted recall-page tombstone with reason, requestor, and witness. |
 | o | defined | symbol | context-ctx | **RecallProof** - Self-describing proof of a recall cost calculation: shows the gate's work (PrefixTokens, UnitTokens, ReadMult, siblings, cost breakdown). |
@@ -217,8 +318,77 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | subsystem | gateway-engine | **xenginekv** - The cross-engine zero-copy KV co-residence seam: a RegionBackend that maps an external engine's KV cache and fak's args/results into one shared addressable arena. |
 | o | defined | subsystem | guard-gate | **normgate (result admitter)** - A ResultAdmitter that canonicalizes obfuscated payloads (base64, homoglyph, zero-width) before re-scanning for secrets. |
 | o | defined | subsystem | guard-gate | **secretgate (result admitter)** - A ResultAdmitter that classifies discovered credentials as RESULT_SECRET_DISCOVERED events, distinct from injection poisoning. |
+| o | defined | symbol | policy-capability | **RegisterCapability (abi)** - abi.RegisterCapability is the registry writer that adds a negotiable feature token to the kernel's process-global Supported() capability set, called from a driver's init(). |
+| o | defined | symbol | policy-capability | **RegisterAdjudicator (abi)** - abi.RegisterAdjudicator inserts a PDP/PEP adjudicator link into the kernel's pre-call decision chain at a numeric rank (lower rank runs first) and rebuilds the registry snapshot. |
+| o | defined | symbol | policy-capability | **WithAdjudicators (kernel)** - kernel.WithAdjudicators constructs a kernel that folds an EXPLICIT caller-supplied adjudicator chain instead of the process-global registry, so K replay arms each carry their own monitor without colliding. |
+| o | defined | symbol | policy-capability | **AdjudicatorsFor (abi)** - abi.AdjudicatorsFor returns the rung chain a given ToolCall must fold in rank order — the unconditional rungs plus any rung tool-scoped to that call — as the registry's immutable slice. |
+| o | defined | symbol | policy-capability | **adjudicateProposed (gateway)** - Server.adjudicateProposed gates every proposed tool call in a buffered upstream turn through the kernel, returning the kept calls, per-call ToolAdjudication records, and a dropped count. |
+| o | defined | symbol | policy-capability | **handleFakAdjudicate (gateway)** - Server.handleFakAdjudicate is the /v1/fak/adjudicate HTTP handler that returns the pre-execution verdict only — no dispatch, no engine, no pending state — for a client that runs its own tools. |
+| o | defined | symbol | policy-capability | **ToolAdjudication (gateway)** - gateway.ToolAdjudication is the per-tool-call record of the kernel's decision on one proposed call — its id, tool, admitted bit, WireVerdict, and any repaired arguments. |
+| o | defined | symbol | policy-capability | **AdjudicationSummary (gateway)** - gateway.AdjudicationSummary is the aggregate per-run counter struct (provider token axes, cache reads, decision counts) folded into the guard exit summary. |
+| o | defined | symbol | policy-capability | **adjudicationNote (gateway)** - gateway.adjudicationNote renders a short agent-readable in-band summary of a turn's non-trivial decisions (drops + arg repairs) for clients that read only the content channel and never the fak extension. |
+| o | defined | symbol | policy-capability | **FakExt.Adjudications (gateway)** - gateway FakExt.Adjudications is the JSON field in the gateway's non-standard response extension carrying the ToolAdjudication record for every tool_call the model proposed, including the dropped ones. |
+| o | defined | symbol | policy-capability | **SetPolicy (adjudicator)** - Adjudicator.SetPolicy swaps the live decision table, re-indexing arg predicates and clamping (sanitizeProfile) any profile that tries to drop a mandatory write-class refusal rung. |
+| o | defined | symbol | policy-capability | **DefaultPolicy (adjudicator)** - adjudicator.DefaultPolicy is the v0.1 baseline decision table — allow the read-only tool family, fail-closed otherwise — used when no manifest is loaded. |
+| o | defined | symbol | policy-capability | **Manifest.ToPolicy (policy)** - policy.Manifest.ToPolicy validates a manifest (version + closed-vocabulary deny reasons) and compiles it into the runtime adjudicator.Policy. |
+| o | defined | symbol | policy-capability | **applyPolicy (cmd)** - cmd/fak applyPolicy loads a capability-floor manifest from the --policy path and installs it onto the process-global adjudicator.Default (plus its runtime side-effects) at startup. |
+| o | defined | symbol | policy-capability | **policyReloader (cmd)** - cmd/fak policyReloader returns the gateway PolicyReloadFunc that re-loads the capability-floor manifest in-place on a running gateway (re-SetPolicy + runtime apply) and reports a reload summary. |
+| o | defined | symbol | policy-capability | **RunPolicyReplay (turnbench)** - turnbench.RunPolicyReplay scores K policy variants against ONE recorded trajectory as model-free kernel replays, emitting per-arm divergence witnesses and the cube-collapse cost accounting. |
+| o | defined | symbol | policy-capability | **PolicyArm (turnbench)** - turnbench.PolicyArm is one named policy variant in a same-trace comparison — a label plus the adjudicator.Policy swapped onto the monitor for that arm's replay. |
+| o | defined | symbol | policy-capability | **ReasonPolicyBlock (abi)** - abi.ReasonPolicyBlock is the closed-vocabulary reason code (POLICY_BLOCK) the kernel cites when an EXPLICIT policy rule denied a call. |
+| o | defined | symbol | policy-capability | **ReasonPolicyMismatch (cachemeta)** - cachemeta.ReasonPolicyMismatch is the cache-lookup MISS reason ("policy_mismatch") returned when a candidate entry's bound policy version no longer matches the live policy. |
+| o | defined | symbol | policy-capability | **PolicyVersion (cachemeta)** - cachemeta Validity.PolicyVersion is the policy-version string stamped on a cache entry that bounds its validity, so a policy change invalidates entries minted under the old version. |
+| o | defined | symbol | policy-capability | **InvalidationPolicy (cachemeta)** - cachemeta.InvalidationPolicy is the InvalidationMode constant "policy" — the coherence mode that drops a cache entry when policy changes, distinct from the lru/ttl/write_epoch modes. |
+| o | defined | config | policy-capability | **LifecyclePolicy (cachemeta)** - cachemeta.LifecyclePolicy parameterizes the time-driven cache-tier transitions — per-tier TTLs, a default TTL, the expiring->expired grace window, and demote-vs-evict on expiry. |
+| o | defined | metric | policy-capability | **PolicyEvictions (radixkv)** - PolicyEvictions counts explicit EvictNode calls in the radix KV cache — entries dropped by a deliberate policy action — surfaced as fak_gateway_kv_memory_evictions_total{kind="policy"}. |
+| o | defined | config | policy-capability | **DynamicPrecisionPolicy (model)** - model.DynamicPrecisionPolicy is an online quantization controller that accepts a Q8_0 decode result only when the logit top1-top2 margin / top1 probability clears a threshold, else recomputes the span in f32. |
+| o | defined | config | policy-capability | **ResetPolicy (gateway)** - gateway.ResetPolicy holds the context-reset decision thresholds (min turns, healthy/stale read ratios, cooldown) that ResetScore folds to recommend a fresh-context reset over another compaction cut; DefaultResetPolicy supplies the conservative defaults. |
+| o | defined | config | policy-capability | **BatchPolicy (gateway)** - gateway.BatchPolicy holds the dynamic-batching knobs (max batch, max pad overhead, max prompt length) that bound rectangular-prefill batch selection; DefaultBatchPolicy gives the shipping defaults. |
+| o | defined | config | policy-capability | **SecretPosture (adjudicator)** - adjudicator.SecretPosture is the policy-author knob selecting what the on-discovery secret rung does when a tool RESULT bears a credential — quarantine (default), fail_closed, or admit_and_log. |
+| o | defined | symbol | policy-capability | **HasPreflightSchema (toollint)** - toollint ToolFacts.HasPreflightSchema is the fact-bit true iff the pre-flight ladder (rung-1) enforces a parameter schema for a tool. |
+| o | defined | symbol | policy-capability | **PolicyDenied (toollint)** - toollint ToolFacts.PolicyDenied is the fact-bit true iff the adjudicator policy provably refuses a tool by name via its Deny map. |
+| o | defined | symbol | policy-capability | **EvalCapability (swebench)** - swebench.EvalCapability is the probe result describing whether the official grader harness is runnable here — Docker present, swebench importable, the resolved python, and a Runnable bit with a reason. |
+| o | defined | symbol | policy-capability | **DetectEvalCapability (swebench)** - swebench.DetectEvalCapability probes the box for Docker and an importable swebench harness and returns the populated EvalCapability with a Runnable verdict and reason. |
+| o | defined | metric | policy-capability | **PolicyBreaches (browseraction)** - PolicyBreaches counts the policy-violating actions an arm took during a benchmark task (browser-action / terminal-bench), feeding the SafeSuccess gate. |
+| o | defined | metric | policy-capability | **PolicyBreachRate (bench)** - PolicyBreachRate is the arm-level ratio of policy breaches to total actions/commands in a benchmark summary. |
+| o | defined | metric | policy-capability | **PolicyBreachDelta (bench)** - PolicyBreachDelta is the raw-arm-minus-fak-arm difference in policy breaches, the head-to-head measure of how many violations the fak floor prevented. |
 | o | defined | symbol | policy-capability | **Policy (loaded)** - The in-memory decision table compiled from a manifest, holding allow-lists, deny maps, arg predicates, posture, and secret patterns the adjudicator consults. |
 | o | defined | subsystem | policy-capability | **preflight ladder** - The cheapest-first well-formedness rung ladder that catches malformed / unsafe calls before they fire, registered ahead of the authoritative monitor. |
+| o | defined | subsystem | session-runtime | **sessionbench (value-stack bench)** - cmd/sessionbench is the Go benchmark command that measures the net value-add of fak's fused agent kernel over a synthetic multi-agent, multi-turn session workload (its prefillTokens A/B/C formula). |
+| o | defined | symbol | session-runtime | **DurabilitySession (durability tier)** - DurabilitySession is the ctxplan/ctxmmu durability-tier constant ("session") that marks a stored context span as true only for the current session's lifetime. |
+| o | defined | symbol | session-runtime | **BatchSession (batched decode)** - model.BatchSession decodes B independent user sequences in lockstep over one shared weight stream (continuous-batching decode), built via NewBatchSession. |
+| o | defined | symbol | session-runtime | **decideSession (admit hook)** - decideSession is the host-injected request-boundary hook that applies session.Table.Decide so each served model request honors run-state, turn/token/context budget, and pace before the upstream call runs. |
+| o | defined | symbol | session-runtime | **observeSession (read hook)** - observeSession is the read side of the /v1/fak/session control surface, returning one served session's current DRIVE state (run-state, budget, pace) without mutating the table. |
+| o | defined | symbol | session-runtime | **debitSession (usage hook)** - debitSession is the host hook that records a served request's post-response token usage (output + context) into the drive table so the next Decide sees budget exhaustion. |
+| o | defined | symbol | session-runtime | **NewBackendSession (HAL session)** - model.NewBackendSession starts a single-user model.Session whose per-token forward path runs through an injected compute HAL backend (CUDA/Vulkan/Metal device). |
+| o | defined | symbol | session-runtime | **servedSessionTurn (gateway turn record)** - servedSessionTurn is the gateway's internal per-request record (traceID, resolved SessionState, maxTokens, minGapMs) produced when the session gate admits one proxied model request. |
+| o | defined | symbol | session-runtime | **beginServedSessionTurn (gateway admit)** - Server.beginServedSessionTurn applies the live session gate to one proxied model request, calling the wired DecideSession (or the ObserveSession fallback) and enforcing the pace min-gap before the turn runs. |
+| o | defined | symbol | session-runtime | **debitServedSessionTurn (gateway debit)** - Server.debitServedSessionTurn reports a just-served model request's provider usage back through the injected DebitSession hook so output/context budgets are debited. |
+| o | defined | symbol | session-runtime | **resetServedSessionOnBudget (reset hook)** - resetServedSessionOnBudget is the host-owned ResetOnBudgetFunc the gateway calls after a context-budget drain to distill a carryover seed, re-arm the continuation trace with a fresh context budget, and let the live request continue transparently. |
+| o | defined | symbol | session-runtime | **steerSession (steer hook)** - steerSession enqueues an operator steer onto the process-global a2achan bus (keyed by the session trace) so a running detached session can splice the input at its next turn boundary. |
+| o | defined | symbol | session-runtime | **controlSession (write hook)** - controlSession is the write side of /v1/fak/session, applying one DRIVE control verb (run|budget|pace|priority) to a live session's state with optional if_rev optimistic-concurrency. |
+| o | defined | symbol | session-runtime | **IngestSession (cdb)** - cdb.IngestSession parses a Claude Code session JSONL transcript at a path into a recall.Recorder, applying the ctxmmu write-time seal/quarantine decision per tool result. |
+| o | defined | symbol | session-runtime | **SessionFromPrefix (prefix clone)** - model.SessionFromPrefix starts a model.Session whose KV cache is an independent clone of an already-computed prefix cache, so a known prefix can be spliced into a new session before prefilling a suffix. |
+| o | defined | symbol | session-runtime | **SessionListResponse (wire)** - gateway.SessionListResponse is the wire result of GET /v1/fak/sessions — a snapshot array of every live session's DRIVE state plus a Count. |
+| o | defined | symbol | session-runtime | **sessionQ4KKernel (decode matvec)** - sessionQ4KKernel (with siblings sessionQ8Kernel and sessionQ4Kernel) is an allocation-light per-token decode matvec kernel that wraps a *model.Session and dispatches projections by resident quant format (Q4_K / Q8 / Q4_0), reusing the session's activation buffer. |
+| o | defined | cli-verb | session-runtime | **cmdSession (CLI verb)** - cmdSession is the `fak session` CLI entry point, delegating to its testable core runSession to read and POST DRIVE-state controls to a gateway's session REST surface. |
+| o | defined | symbol | session-runtime | **sessionClient (CLI HTTP client)** - sessionClient is the cmd/fak HTTP client struct (base URL, key, http.Client) that the session/ps/signal/tui commands use to call the gateway's session observe/list/control endpoints. |
+| o | defined | symbol | session-runtime | **SessionResetDirective (handoff)** - gateway.SessionResetDirective is the machine-readable handoff a supervisor receives when a served session's budget is exhausted, carrying the continuation id and carryover so a fresh window can resume. |
+| o | defined | config | session-runtime | **defaultSessionAddr (CLI target)** - defaultSessionAddr returns the gateway base URL the cmd/fak session/ps/signal/tui commands target — $FAK_ADDR when set, otherwise the built-in localhost default. |
+| o | defined | symbol | session-runtime | **SessionBudget (wire)** - gateway.SessionBudget is the wire form of internal/session.Budget, carrying TurnsLeft, TokensLeft, and ContextTokensLeft for one session. |
+| o | defined | symbol | session-runtime | **SessionPace (wire)** - gateway.SessionPace is the wire form of internal/session.Pace, carrying MaxTokensPerTurn and MinTurnGapMs (zero on either axis means unset). |
+| o | defined | symbol | session-runtime | **writeSessionRefusal (409 emitter)** - writeSessionRefusal emits the HTTP 409 a proxied request receives when an operator has held, paused, or stopped a session, embedding the SessionState reason and any reset directive. |
+| o | defined | symbol | session-runtime | **emitSessionJSON (CLI printer)** - emitSessionJSON is the cmd/fak helper that marshals a session value (state, list, or ack) to JSON on stdout and returns the process exit code for the --json output mode. |
+| o | defined | subsystem | session-runtime | **NativeScheduler (modelengine)** - modelengine.NativeScheduler is the continuous-batching-shaped LifecycleEngine stub whose single scheduler loop owns one model.BatchSession and advances all admitted lanes in lockstep. |
+| o | defined | symbol | session-runtime | **OnSlotFreed (scheduler callback)** - session.Scheduler.OnSlotFreed registers the single host callback the scheduler invokes once per slot-freed SlotEvent when a session transitions to a slot-releasing run-state. |
+| o | defined | symbol | session-runtime | **ReclaimKVOnSlotFreed (gateway KV reclaim)** - Server.ReclaimKVOnSlotFreed is the gateway's consumer of a scheduler SlotFreed event that, on a terminal cause (draining/stopped), drives the injected KV reclaimer to free that session's real KV-cache pages. |
+| o | defined | symbol | session-runtime | **PublishSessionRevision (change feed)** - Server.PublishSessionRevision records one drive-state revision onto the gateway's session change feed (#630) so /v1/fak/session/changes subscribers can drain DRIVE-state updates. |
+| o | defined | symbol | session-runtime | **serveSessions (drive table)** - serveSessions is the process-local, TraceID-keyed, bounded-LRU session.Table holding every served session's DRIVE state (run-state/budget/priority/pace), shared by the gateway session routes and any in-process agent loop. |
+| o | defined | symbol | session-runtime | **sessionAdmits (proxy admission gate)** - Server.sessionAdmits is the gateway's fallback proxy admission gate that reports whether a proxied request may proceed under the operator-controlled DRIVE run-state, failing OPEN when no ObserveSession hook is wired. |
+| o | defined | symbol | session-runtime | **SlotCause (scheduler reason)** - session.SlotCause is the closed enum naming WHY a scheduling slot freed (budget-exhausted | paused | draining | stopped), carried on a SlotEvent and rendered as a lowercase token. |
+| o | defined | symbol | session-runtime | **toGatewaySessionState (projection)** - toGatewaySessionState projects an internal/session.State value into the gateway's wire SessionState DTO so cmd/fak can publish DRIVE state without the gateway importing internal/session. |
+| o | defined | symbol | session-runtime | **WithSessionTable (run option)** - agent.WithSessionTable is the RunOption that threads a per-session DRIVE-state session.Table plus the run's trace id into the agent loop so each turn honors the same budget/pace/run-state as a served request. |
+| o | defined | symbol | session-runtime | **handleFakSession (HTTP route)** - Server.handleFakSession is the gateway HTTP handler for /v1/fak/session/{id} — the read-write DRIVE-state control route that fans GET to observeSession and POST verbs to controlSession/steerSession. |
 | o | defined | symbol | session-runtime | **Budget** - A session's remaining work allotment across three independent axes: turns (round-trips), output tokens, and context tokens. |
 | o | defined | symbol | session-runtime | **Pace** - The per-turn throttle: max output tokens and minimum gap between turns, applied cooperatively without pausing the session. |
 | o | defined | symbol | session-runtime | **RunState** - A served session's lifecycle position in a small total state machine: Running, Throttled, Paused, Draining, or Stopped. |
@@ -229,6 +399,27 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | session-runtime | **SessionControlRequest** - An external steer directive against a live session: pause / resume / priority / pace change. |
 | o | defined | symbol | session-runtime | **SessionReset** - A directive to clear a session's drive state back to a clean baseline without removing it from the pool. |
 | o | defined | symbol | session-runtime | **ListSessions** - The read query that returns a snapshot of all live sessions in the table. |
+| o | defined | symbol | witness-proof | **VerdictRequireWitness (abi verdict)** - abi.VerdictRequireWitness is the kernel verdict kind that leaves a gated call PENDING an independent read-back, so the kernel must corroborate the caller's claimed effect (carried in the WitnessPayload) before the call may dispatch. |
+| o | defined | symbol | witness-proof | **ReasonUnwitnessed (deny reason)** - abi.ReasonUnwitnessed is the deny reason-code the kernel attaches when a require-witness gate found no corroboration, so the fail-closed default turns the pending verdict into a DENY (also surfaced as looprecover's unwitnessed disposition). |
+| o | defined | symbol | witness-proof | **WitnessPayload (verdict claim carrier)** - abi.WitnessPayload is the typed bounded-disclosure verdict payload struct{Claim string} that an adjudicator attaches to a RequireWitness or Deny verdict to carry the single claim string the kernel must corroborate. |
+| o | defined | concept | witness-proof | **refute (revocation trigger)** - refute is the action of calling vdso.Revoke(witness) on the integrity/coherence bus to mark a previously-trusted world-state witness as contradicted, stranding every cache entry admitted under it. |
+| o | defined | symbol | witness-proof | **ProofRefuted (callavoid status)** - callavoid.ProofRefuted is the two-valued proof-status value 'REFUTED' meaning a cost-benefit proof concluded that avoidance/memoization does not pay (single-use, too-volatile, or validation as costly as the call). |
+| o | defined | symbol | witness-proof | **WitnessRecord (taskmgr evidence)** - taskmgr.WitnessRecord is the evidence-backed verdict struct a Witness attaches BESIDE a task/step's claimed State (VerifiedState plus source and evidence refs), so a snapshot holds both 'process says done' and 'a witness has/has not confirmed it'. |
+| o | defined | symbol | witness-proof | **WitnessConfirmed (witness outcome)** - abi.WitnessConfirmed is the WitnessOutcome value meaning a resolver INDEPENDENTLY CORROBORATED the claimed effect from evidence the agent did not author, which opens the require-witness gate. |
+| o | defined | symbol | witness-proof | **WitnessRefuted (witness outcome)** - abi.WitnessRefuted is the WitnessOutcome value meaning a resolver found evidence that CONTRADICTS the claimed effect (the agent's claim was false), keeping the require-witness gate closed. |
+| o | defined | symbol | witness-proof | **WitnessAbstain (witness outcome)** - abi.WitnessAbstain is the zero-value WitnessOutcome meaning the resolver had NO evidence either way (fail-to-abstain), e.g. an unrecognized claim or git unavailable, which the kernel's fail-closed default then turns into a deny. |
+| o | defined | symbol | witness-proof | **defaultWitnessOf (vdso extractor)** - vdso.defaultWitnessOf is the default extractor that derives the external world-state witness string a call/result was admitted under (from the call/result meta), used by the coherence bus when no per-tool adapter is registered. |
+| o | defined | symbol | witness-proof | **resolveWitness (kernel gate driver)** - kernel.resolveWitness drives the require-witness gate: on a RequireWitness verdict it asks every registered abi.WitnessResolver to corroborate the claim and folds their WitnessOutcomes into a final allow/deny. |
+| o | defined | symbol | witness-proof | **ShapeGLMTurnSegmentWitnessed (coherence shaper)** - cachemeta.ShapeGLMTurnSegmentWitnessed is the simplest live-path coherence shaper: given a turn's prompt segments and a revoked(witness) predicate, it emits the prefix-break directive that severs the provider prefix at the first refuted span. |
+| o | defined | symbol | witness-proof | **StatusWitnessedDone (loop run status)** - loopmgr.StatusWitnessedDone is the loop run-status 'witnessed_done' meaning an independent witness event confirmed the run's claimed completion (carrying evidence refs), promoting it above claimed_done. |
+| o | defined | symbol | witness-proof | **SubscribeRevocations (vdso observer seam)** - vdso.SubscribeRevocations registers an observer callback that fires on every refutation (Revocation) published to the integrity bus and returns a cancel func, never firing on the read hot path. |
+| o | defined | symbol | witness-proof | **WitnessEntry (session-image keep-bit)** - sessionimage.WitnessEntry binds one effect's keep-bit (a taskmgr.WitnessRecord) to a stable EffectID inside a persisted/restored session image, so a rehydrated session knows which effects were witnessed. |
+| o | defined | symbol | witness-proof | **WitnessFunc (vdso witness adapter)** - vdso.WitnessFunc is a per-tool adapter func(c *ToolCall, r *Result) string registered via RegisterWitness that extracts the external world-state witness a specific tool's result was admitted under, overriding the default extraction. |
+| o | defined | metric | witness-proof | **WitnessGaps (TUI counter)** - WitnessGaps is the TUI loop-overview counter tallying runs that ended or claimed done but were never witnessed — the per-report aggregate of the unwitnessed gap, weighted into the attention score. |
+| o | defined | symbol | witness-proof | **StatusWitnessRefused (loop run status)** - loopmgr.StatusWitnessRefused is the loop run-status 'witness_refused' (and its WitnessRefused counter) meaning a witness RAN and the evidence contradicted the run's claimed completion. |
+| o | defined | metric | witness-proof | **MissWitnessRevoked (vdso cache-miss)** - vdso.MissWitnessRevoked is the cache-miss reason 'WITNESS_REVOKED' counted when a cached entry was admitted under a now-refuted external witness and therefore fails closed instead of serving stale bytes. |
+| o | defined | symbol | witness-proof | **VerifiedUnavailable (witness unavailable)** - taskmgr.VerifiedUnavailable (and loopmgr.StatusWitnessUnavailable) is the state where a witness was ASKED but could not read the effect back — no network, a missing ref — so the claim is neither confirmed nor refused and must not downgrade to claimed-done. |
+| o | defined | doc-term | witness-proof | **dgxGlmGpuWitness (CUDA GPU proof)** - dgxGlmGpuWitness is the on-DGX CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via tools/dgx_glm_gpu_witness.sh), invoked because the win32 build host cannot execute the CUDA path. |
 | o | defined | symbol | witness-proof | **WitnessOutcome** - The result of claim corroboration: Confirmed (evidence supports it), Refuted (evidence contradicts it), or Abstain (no definitive evidence). |
 | o | defined | symbol | witness-proof | **TrustEpoch** - A monotonically-increasing integrity clock that increments with each witness refutation, dual to WorldVersion (the consistency clock). |
 
@@ -236,8 +427,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 76 | 0 | 4 kind/grounding mismatch |
-| well-formed | `well_formed` | 100 | 0 | all 143 rows well-formed |
+| honesty | `kind_grounding_soft` | 60 | 0 | 8 kind/grounding mismatch |
+| well-formed | `well_formed` | 100 | 0 | all 332 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -250,20 +441,20 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 7 | 107 | 100 |
-| gateway-engine | 10 | 105 | 95 |
-| attention | 5 | 55 | 50 |
-| session-runtime | 14 | 60 | 46 |
+| plan | 10 | 108 | 98 |
+| gateway-engine | 20 | 106 | 86 |
 | render-materialize | 2 | 47 | 45 |
-| context-ctx | 14 | 58 | 44 |
-| cache | 15 | 57 | 42 |
-| guard-gate | 22 | 63 | 41 |
-| policy-capability | 5 | 46 | 41 |
-| witness-proof | 6 | 30 | 24 |
+| guard-gate | 22 | 64 | 42 |
+| context-ctx | 42 | 58 | 16 |
 | pool | 2 | 14 | 12 |
-| evict | 1 | 12 | 11 |
+| evict | 2 | 12 | 10 |
 | layout | 2 | 10 | 8 |
 | decision | 1 | 8 | 7 |
+| session-runtime | 54 | 61 | 7 |
+| policy-capability | 43 | 46 | 3 |
+| cache | 55 | 57 | 2 |
 | score-debt | 3 | 5 | 2 |
+| attention | 54 | 55 | 1 |
+| witness-proof | 29 | 30 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 
