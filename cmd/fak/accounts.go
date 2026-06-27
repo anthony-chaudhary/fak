@@ -32,7 +32,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <list|resolve|pull|discover|validate|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -52,6 +52,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying")
 	gateDir := fs.String("dir", "", "(gate-write) target config dir to gate a stdin setup-token write against")
 	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout")
+	dosView := fs.String("dos-view", firstNonEmpty(os.Getenv("FAK_DOS_ROSTER"), defaultDosView(defHome)), "(sync/check) path to the generated dos roster view (~/.claude/accounts.yaml)")
+	jobView := fs.String("job-view", os.Getenv("FAK_JOB_ROSTER"), "(sync/check) path to the generated job roster view; empty skips the job view")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -65,6 +67,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	*registryPath = pathutil.ExpandTilde(*registryPath)
 	*homeDir = pathutil.ExpandTilde(*homeDir)
 	*gateDir = pathutil.ExpandTilde(*gateDir)
+	*dosView = pathutil.ExpandTilde(*dosView)
+	*jobView = pathutil.ExpandTilde(*jobView)
 	positional := append(append([]string{}, rest[:lead]...), fs.Args()...)
 
 	switch sub {
@@ -258,10 +262,125 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 1
 
+	case "sync":
+		// Project the canonical registry into the generated roster views and write them. The
+		// registry is the single source of truth; these files are caches of it, never
+		// hand-edited. Refresh identities from disk first so emitted emails are current.
+		reg, err := accounts.LoadRegistry(*registryPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		reg = reg.Refresh()
+		wrote := 0
+		for _, t := range viewTargets(*dosView, *jobView) {
+			text, err := reg.RenderView(t.view)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+				return 1
+			}
+			if err := writeViewFile(t.path, text); err != nil {
+				fmt.Fprintf(stderr, "fak accounts: write %s: %v\n", t.path, err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "synced %s view -> %s\n", t.view, t.path)
+			wrote++
+		}
+		if wrote == 0 {
+			fmt.Fprintln(stderr, "fak accounts: no view targets (set --dos-view/--job-view or FAK_DOS_ROSTER/FAK_JOB_ROSTER)")
+			return 2
+		}
+		return 0
+
+	case "check":
+		// Drift detector: RED (exit 1) if any on-disk view differs from a freshly-rendered
+		// projection of the registry. This is the ratchet that keeps the generated views from
+		// silently diverging from the canonical source again.
+		reg, err := accounts.LoadRegistry(*registryPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+			return 1
+		}
+		reg = reg.Refresh()
+		drift := 0
+		for _, t := range viewTargets(*dosView, *jobView) {
+			want, err := reg.RenderView(t.view)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+				return 1
+			}
+			got, err := os.ReadFile(t.path)
+			if err != nil {
+				fmt.Fprintf(stdout, "DRIFT %s: cannot read %s (%v)\n", t.view, t.path, err)
+				drift++
+				continue
+			}
+			if string(got) != want {
+				fmt.Fprintf(stdout, "DRIFT %s: %s differs from registry projection — run `fak accounts sync`\n", t.view, t.path)
+				drift++
+				continue
+			}
+			fmt.Fprintf(stdout, "ok %s: %s matches registry\n", t.view, t.path)
+		}
+		if drift > 0 {
+			return 1
+		}
+		return 0
+
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want list|resolve|pull|discover|validate|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
 		return 2
 	}
+}
+
+// viewTarget pairs a view name with its on-disk path.
+type viewTarget struct {
+	view accounts.ViewName
+	path string
+}
+
+// viewTargets returns the view destinations to sync/check: the dos roster always (it has a
+// default path), and the job roster only when a path was given (it lives in a separate repo,
+// so it is opt-in via --job-view / FAK_JOB_ROSTER).
+func viewTargets(dosPath, jobPath string) []viewTarget {
+	var out []viewTarget
+	if dosPath != "" {
+		out = append(out, viewTarget{accounts.ViewDos, dosPath})
+	}
+	if jobPath != "" {
+		out = append(out, viewTarget{accounts.ViewJob, jobPath})
+	}
+	return out
+}
+
+// writeViewFile writes a generated view atomically (temp + rename) so a reader never sees a
+// half-written roster.
+func writeViewFile(path, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".view-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.WriteString(text); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+// defaultDosView is the dos roster's conventional path (~/.claude/accounts.yaml).
+func defaultDosView(home string) string {
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "accounts.yaml")
 }
 
 // mustJSON marshals v to indented JSON for the --json output paths; on the (unreachable

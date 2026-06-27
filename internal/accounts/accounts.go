@@ -129,6 +129,11 @@ type Home struct {
 	Enabled       *bool  `json:"enabled,omitempty"`
 	Reserved      bool   `json:"reserved,omitempty"`
 	ChromeProfile string `json:"chrome_profile,omitempty"`
+	// Tombstone audit trail, canonical here so the generated views need not strand it: when
+	// this seat was retired and why. RehomeTo (above) is the third audit field. Empty for a
+	// live seat. These move the job roster's tombstoned_accounts prose into the registry.
+	TombstonedAt    string `json:"tombstoned_at,omitempty"`
+	TombstoneReason string `json:"tombstone_reason,omitempty"`
 	// HistoryAt names this seat's history BUNDLE in the registry's shared-history store
 	// (a path relative to Registry.SharedHistory, defaulting to Name). A tombstoned seat
 	// keeps its sessions/projects in the SHARED store — not trapped in a home that may be
@@ -165,6 +170,24 @@ type Registry struct {
 	Version       string `json:"version,omitempty"`
 	SharedHistory string `json:"shared_history,omitempty"`
 	Homes         []Home `json:"homes"`
+	// Views holds the per-consumer config blocks (the dos roster's defaults; the job
+	// roster's defaults/rotation/launch) that used to live ONLY in the generated files. It
+	// is keyed by view name ("dos", "job"), and each value is an opaque config tree carried
+	// verbatim so a consumer can add a config key without a schema change here. SyncViews
+	// projects each view's blocks back out. Empty when no view config has been adopted yet.
+	Views map[string]ViewConfig `json:"views,omitempty"`
+}
+
+// ViewConfig is one generated view's non-account config: the named top-level YAML blocks it
+// carries below `accounts:`/`tombstoned_accounts:` (e.g. "defaults", "rotation", "launch"),
+// each an arbitrary nested map emitted as YAML by the projector. Order is fixed by BlockOrder
+// so the generated file is byte-stable across runs.
+type ViewConfig struct {
+	// Blocks maps a top-level YAML key to its (arbitrary, nested) value.
+	Blocks map[string]any `json:"blocks,omitempty"`
+	// BlockOrder fixes the emission order of Blocks' keys (a JSON object is unordered).
+	// Keys present in Blocks but absent here are emitted after, sorted, for determinism.
+	BlockOrder []string `json:"block_order,omitempty"`
 }
 
 // PullPlan is the recipe for serving a (possibly tombstoned) name: the live config dir
