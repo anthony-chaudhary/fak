@@ -48,11 +48,13 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumePlan(stdout, stderr, argv[1:])
 	case "validate":
 		return runResumeValidate(stdout, stderr, argv[1:])
+	case "scan":
+		return runResumeScan(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan or validate)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, or scan)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -555,6 +557,9 @@ func resumeUsage(w io.Writer) {
 
   fak resume validate --corpus DIR [--ttl 5m|1h] [--max-files N] [--json]
 
+  fak resume scan --store DIR [--ttl 5m|1h] [--horizon N] [--shed-budget N]
+                  [--input-price F] [--output-price F] [--all] [--json]
+
 plan answers "I am resuming a long session — what happens to the prompt cache, and what
 should I do?" It projects the cache posture (cold if idle exceeds the TTL, warm if not),
 prices RESUME_FULL / CUT / RESET, and recommends a cut-by-default re-entry. Pure and
@@ -565,6 +570,12 @@ Claude Code transcripts, scores how often the cold/warm posture call agreed with
 provider's own cache_read / cache_creation records, and measures how exactly the cold-cost
 premise held. The deterministic, observable answer to "is the cache-value call effective?".
 
+scan walks a whole transcript store and finds the sessions that crashed on a rate limit
+and never resumed — the ones that need a managed restart — then prints each one's cache
+plan (cut/reset vs a cold full re-prefill). The detect-and-plan step before a restart: it
+sizes each session from its last REAL model turn, so the synthetic rate-limit refusal that
+ends a crashed session never mis-sizes it to zero.
+
 example (resume a 250k session idle 2h on a 5-minute cache):
   fak resume plan --resident-tokens 250000 --idle-seconds 7200
 
@@ -573,5 +584,8 @@ example (plan the resume of a REAL Claude Code session you are about to --resume
 
 example (back-test the projection against your real session history):
   fak resume validate --corpus ~/.claude/projects
+
+example (find the rate-limited crashes in a project and plan each managed restart):
+  fak resume scan --store ~/.claude/projects/<project>
 `)
 }
