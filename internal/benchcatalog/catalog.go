@@ -95,6 +95,13 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "benchscore", Kind: KindCmd, Need: NeedNone,
+		Summary: "Aggregates the committed benchmark score.json results into a cross-model score matrix and re-derives every ratio, so a drifted or overclaimed number fails the scan  -  the record-and-verify half of the benchmark loop.",
+		Run:     "go run ./cmd/benchscore -root experiments/benchmark/runs",
+		Flags:   []string{"-root  -  directory tree scanned for score.json files", "-json  -  emit JSON instead of the markdown matrix"},
+		Doc:     "docs/benchmark/ARM64-QKERNEL-SCORE.md",
+	},
+	{
 		Name: "browseractionbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Browser/computer-use action-mediation smoke: replays local browser traces through raw and fak arms and reports safe pass^1, policy breaches, minefield hits, denied actions, and evidence checkpoints.",
 		Run:     "go run ./cmd/browseractionbench",
