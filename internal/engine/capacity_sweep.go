@@ -133,8 +133,8 @@ func PlanPlacementForDeviceAtHighWater(b compute.Backend, residentBytes int64, t
 
 func planPlacementForDeviceAtHighWater(b compute.Backend, residentBytes int64, targetPressure float64, req cachemeta.PlacementRequest) cachemeta.PlacementDecision {
 	if pressure, capacity, known := DeviceHBMPressure(b, residentBytes); known {
-		req.Pressure = withHBMPressure(req.Pressure, scalePressureToTarget(pressure, targetPressure))
-		req.Profiles = withHBMCapacity(req.Profiles, capacity)
+		req.Pressure = withTierPressure(req.Pressure, cachemeta.TierHBM, scalePressureToTarget(pressure, targetPressure))
+		req.Profiles = withTierCapacity(req.Profiles, cachemeta.TierHBM, capacity)
 	}
 	return cachemeta.PlanPlacement(req)
 }

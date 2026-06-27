@@ -45,20 +45,7 @@ import (
 // pressure outside [0,1] and trip the placement math into a nonsense decision.
 func DeviceHBMPressure(b compute.Backend, residentBytes int64) (pressure float64, capacityBytes int64, known bool) {
 	total, free, ok := compute.DeviceMemoryInfo(b)
-	if !ok || total <= 0 {
-		return 0, 0, false
-	}
-	used := residentBytes
-	if free >= 0 { // free is known (not the FreeUnknown sentinel)
-		used = total - free
-	}
-	if used < 0 {
-		used = 0
-	}
-	if used > total {
-		used = total
-	}
-	return float64(used) / float64(total), total, true
+	return pressureFromProbe(total, free, residentBytes, ok)
 }
 
 // PlanPlacementForDevice plans a cachemeta placement against the device that ACTUALLY exists:
@@ -73,42 +60,5 @@ func DeviceHBMPressure(b compute.Backend, residentBytes int64) (pressure float64
 // (#363). req is not mutated: its Pressure and Profiles maps are copied before the HBM
 // override is applied, so a shared request value handed to several backends stays clean.
 func PlanPlacementForDevice(b compute.Backend, residentBytes int64, req cachemeta.PlacementRequest) cachemeta.PlacementDecision {
-	if pressure, capacity, known := DeviceHBMPressure(b, residentBytes); known {
-		req.Pressure = withHBMPressure(req.Pressure, pressure)
-		req.Profiles = withHBMCapacity(req.Profiles, capacity)
-	}
-	return cachemeta.PlanPlacement(req)
-}
-
-// withHBMPressure returns a COPY of in with the HBM tier's pressure set to p. A nil in yields
-// a one-entry map; every non-HBM tier is carried over unchanged. Copying keeps a caller's
-// request value reusable across backends.
-func withHBMPressure(in cachemeta.TierPressure, p float64) cachemeta.TierPressure {
-	out := cachemeta.TierPressure{cachemeta.TierHBM: p}
-	for t, v := range in {
-		if t == cachemeta.TierHBM {
-			continue
-		}
-		out[t] = v
-	}
-	return out
-}
-
-// withHBMCapacity returns a COPY of in with the HBM tier's CapacityBytes overridden by the
-// device's real total. A nil in stays nil (nothing to override); a tier table without an HBM
-// entry is copied unchanged (only an existing HBM profile is updated — this wire reports the
-// device ceiling, it does not invent a tier the box did not declare).
-func withHBMCapacity(in map[cachemeta.ResidencyTier]cachemeta.TierProfile, capacity int64) map[cachemeta.ResidencyTier]cachemeta.TierProfile {
-	if in == nil {
-		return nil
-	}
-	out := make(map[cachemeta.ResidencyTier]cachemeta.TierProfile, len(in))
-	for t, prof := range in {
-		out[t] = prof
-	}
-	if hbm, ok := out[cachemeta.TierHBM]; ok {
-		hbm.CapacityBytes = capacity
-		out[cachemeta.TierHBM] = hbm
-	}
-	return out
+	return cachemeta.PlanPlacement(withDeviceHBM(b, residentBytes, req))
 }

@@ -53,7 +53,7 @@ func TestDiskPressureFlipsSpillToEvict(t *testing.T) {
 	// WITH the wire: fold a full-disk pressure into the request the way withDiskPressure does on
 	// a real probe. The action must flip to evict with reason "no_colder_tier_with_room".
 	req := base()
-	req.Pressure = withTierDiskPressure(req.Pressure, 1.0)
+	req.Pressure = withTierPressure(req.Pressure, cachemeta.TierDisk, 1.0)
 	d := cachemeta.PlanPlacement(req)
 	if d.Action != cachemeta.ActionEvict {
 		t.Fatalf("with disk full the span should evict (no colder tier has room), got %s", d.Action)
@@ -149,18 +149,18 @@ func TestDiskPressureContract(t *testing.T) {
 func TestWithTierDiskCapacityOverridesOnlyExistingDisk(t *testing.T) {
 	in := cachemeta.DefaultTierProfiles()
 	srcDisk := in[cachemeta.TierDisk].CapacityBytes
-	out := withTierDiskCapacity(in, 1<<40)
+	out := withTierCapacity(in, cachemeta.TierDisk, 1<<40)
 	if out[cachemeta.TierDisk].CapacityBytes != (1 << 40) {
 		t.Fatalf("Disk CapacityBytes not overridden, got %d", out[cachemeta.TierDisk].CapacityBytes)
 	}
 	if in[cachemeta.TierDisk].CapacityBytes != srcDisk {
 		t.Fatalf("source table mutated, got %d want %d", in[cachemeta.TierDisk].CapacityBytes, srcDisk)
 	}
-	if withTierDiskCapacity(nil, 1) != nil {
+	if withTierCapacity(nil, cachemeta.TierDisk, 1) != nil {
 		t.Fatal("nil table must stay nil")
 	}
 	noDisk := map[cachemeta.ResidencyTier]cachemeta.TierProfile{cachemeta.TierHBM: {Tier: cachemeta.TierHBM}}
-	if _, has := withTierDiskCapacity(noDisk, 1)[cachemeta.TierDisk]; has {
+	if _, has := withTierCapacity(noDisk, cachemeta.TierDisk, 1)[cachemeta.TierDisk]; has {
 		t.Fatal("must not invent a disk tier the table did not declare")
 	}
 }
@@ -169,7 +169,7 @@ func TestWithTierDiskCapacityOverridesOnlyExistingDisk(t *testing.T) {
 // copy-on-write and leaves sibling tiers untouched.
 func TestWithTierDiskPressureCopiesAndPreservesOtherTiers(t *testing.T) {
 	in := cachemeta.TierPressure{cachemeta.TierHBM: 0.4, cachemeta.TierDisk: 0.1}
-	out := withTierDiskPressure(in, 0.9)
+	out := withTierPressure(in, cachemeta.TierDisk, 0.9)
 	if out[cachemeta.TierDisk] != 0.9 {
 		t.Fatalf("Disk pressure not set, got %v", out[cachemeta.TierDisk])
 	}
@@ -180,7 +180,7 @@ func TestWithTierDiskPressureCopiesAndPreservesOtherTiers(t *testing.T) {
 		t.Fatalf("source map mutated, got %v", in[cachemeta.TierDisk])
 	}
 	// nil in -> a one-entry map.
-	if got := withTierDiskPressure(nil, 0.5); got[cachemeta.TierDisk] != 0.5 || len(got) != 1 {
+	if got := withTierPressure(nil, cachemeta.TierDisk, 0.5); got[cachemeta.TierDisk] != 0.5 || len(got) != 1 {
 		t.Fatalf("nil in should yield a one-entry disk map, got %v", got)
 	}
 }

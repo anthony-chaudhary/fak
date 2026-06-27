@@ -36,7 +36,7 @@ func TestDRAMPressureFlipsDemoteTarget(t *testing.T) {
 	// WITH the wire: fold a full-host DRAM pressure into the request the way withHostDRAM does on
 	// a real probe. The target must move off DRAM to the next colder attendable tier.
 	req := base()
-	req.Pressure = withDRAMPressure(req.Pressure, 1.0)
+	req.Pressure = withTierPressure(req.Pressure, cachemeta.TierDRAM, 1.0)
 	d := cachemeta.PlanPlacement(req)
 	if d.Action != cachemeta.ActionDemote {
 		t.Fatalf("with DRAM full the span should still demote (a colder tier has room), got %s", d.Action)
@@ -135,18 +135,18 @@ func TestHostDRAMPressureContract(t *testing.T) {
 func TestWithDRAMCapacityOverridesOnlyExistingDRAM(t *testing.T) {
 	in := cachemeta.DefaultTierProfiles()
 	srcDRAM := in[cachemeta.TierDRAM].CapacityBytes
-	out := withDRAMCapacity(in, 1<<40)
+	out := withTierCapacity(in, cachemeta.TierDRAM, 1<<40)
 	if out[cachemeta.TierDRAM].CapacityBytes != (1 << 40) {
 		t.Fatalf("DRAM CapacityBytes not overridden, got %d", out[cachemeta.TierDRAM].CapacityBytes)
 	}
 	if in[cachemeta.TierDRAM].CapacityBytes != srcDRAM {
 		t.Fatalf("source table mutated, got %d want %d", in[cachemeta.TierDRAM].CapacityBytes, srcDRAM)
 	}
-	if withDRAMCapacity(nil, 1) != nil {
+	if withTierCapacity(nil, cachemeta.TierDRAM, 1) != nil {
 		t.Fatal("nil table must stay nil")
 	}
 	noDRAM := map[cachemeta.ResidencyTier]cachemeta.TierProfile{cachemeta.TierHBM: {Tier: cachemeta.TierHBM}}
-	if _, has := withDRAMCapacity(noDRAM, 1)[cachemeta.TierDRAM]; has {
+	if _, has := withTierCapacity(noDRAM, cachemeta.TierDRAM, 1)[cachemeta.TierDRAM]; has {
 		t.Fatal("must not invent a DRAM tier the table did not declare")
 	}
 }
@@ -155,7 +155,7 @@ func TestWithDRAMCapacityOverridesOnlyExistingDRAM(t *testing.T) {
 // leaves sibling tiers untouched (so a request reused across planners does not accrete state).
 func TestWithDRAMPressureCopiesAndPreservesOtherTiers(t *testing.T) {
 	in := cachemeta.TierPressure{cachemeta.TierHBM: 0.4, cachemeta.TierDRAM: 0.1}
-	out := withDRAMPressure(in, 0.9)
+	out := withTierPressure(in, cachemeta.TierDRAM, 0.9)
 	if out[cachemeta.TierDRAM] != 0.9 {
 		t.Fatalf("DRAM pressure not set, got %v", out[cachemeta.TierDRAM])
 	}
@@ -166,7 +166,7 @@ func TestWithDRAMPressureCopiesAndPreservesOtherTiers(t *testing.T) {
 		t.Fatalf("source map mutated, got %v", in[cachemeta.TierDRAM])
 	}
 	// nil in -> a one-entry map.
-	if got := withDRAMPressure(nil, 0.5); got[cachemeta.TierDRAM] != 0.5 || len(got) != 1 {
+	if got := withTierPressure(nil, cachemeta.TierDRAM, 0.5); got[cachemeta.TierDRAM] != 0.5 || len(got) != 1 {
 		t.Fatalf("nil in should yield a one-entry DRAM map, got %v", got)
 	}
 }

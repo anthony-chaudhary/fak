@@ -41,13 +41,7 @@ func DiskPressure(path string) (pressure float64, capacityBytes int64, known boo
 		return 0, 0, false
 	}
 	used := total - free
-	if used < 0 {
-		used = 0
-	}
-	if used > total {
-		used = total
-	}
-	return float64(used) / float64(total), total, true
+	return pressureFromUsedTotal(used, total), total, true
 }
 
 // PlanPlacementForDisk plans a cachemeta placement against the filesystem at path that
@@ -73,43 +67,9 @@ func withDiskPressure(path string, req cachemeta.PlacementRequest) cachemeta.Pla
 	if !known {
 		return req
 	}
-	req.Pressure = withTierDiskPressure(req.Pressure, pressure)
-	req.Profiles = withTierDiskCapacity(req.Profiles, capacity)
+	req.Pressure = withTierPressure(req.Pressure, cachemeta.TierDisk, pressure)
+	req.Profiles = withTierCapacity(req.Profiles, cachemeta.TierDisk, capacity)
 	return req
-}
-
-// withTierDiskPressure returns a COPY of in with the disk tier's pressure set to p.
-// A nil in yields a one-entry map; every non-disk tier is carried over unchanged.
-// Copying keeps a caller's request value reusable across planners.
-func withTierDiskPressure(in cachemeta.TierPressure, p float64) cachemeta.TierPressure {
-	out := cachemeta.TierPressure{cachemeta.TierDisk: p}
-	for t, v := range in {
-		if t == cachemeta.TierDisk {
-			continue
-		}
-		out[t] = v
-	}
-	return out
-}
-
-// withTierDiskCapacity returns a COPY of in with the disk tier's CapacityBytes
-// overridden by the filesystem's real total. A nil in stays nil (nothing to override);
-// a tier table without a disk entry is copied unchanged (only an existing disk profile
-// is updated — this wire reports the filesystem ceiling, it does not invent a tier the
-// box did not declare). Mirrors withHBMCapacity and withDRAMCapacity.
-func withTierDiskCapacity(in map[cachemeta.ResidencyTier]cachemeta.TierProfile, capacity int64) map[cachemeta.ResidencyTier]cachemeta.TierProfile {
-	if in == nil {
-		return nil
-	}
-	out := make(map[cachemeta.ResidencyTier]cachemeta.TierProfile, len(in))
-	for t, prof := range in {
-		out[t] = prof
-	}
-	if disk, ok := out[cachemeta.TierDisk]; ok {
-		disk.CapacityBytes = capacity
-		out[cachemeta.TierDisk] = disk
-	}
-	return out
 }
 
 // PlanPlacementForHostAndDisk plans against BOTH live local tiers at once: DRAM pressure
@@ -130,10 +90,7 @@ func PlanPlacementForHostAndDisk(dramResidentBytes int64, diskPath string, req c
 // a span under HBM pressure may demote to DRAM, then to disk, and each target must itself be
 // planned against real fullness. Each override is independently fail-open.
 func PlanPlacementForDeviceHostAndDisk(b compute.Backend, hbmResidentBytes, dramResidentBytes int64, diskPath string, req cachemeta.PlacementRequest) cachemeta.PlacementDecision {
-	if pressure, capacity, known := DeviceHBMPressure(b, hbmResidentBytes); known {
-		req.Pressure = withHBMPressure(req.Pressure, pressure)
-		req.Profiles = withHBMCapacity(req.Profiles, capacity)
-	}
+	req = withDeviceHBM(b, hbmResidentBytes, req)
 	req = withHostDRAM(dramResidentBytes, req)
 	req = withDiskPressure(diskPath, req)
 	return cachemeta.PlanPlacement(req)

@@ -280,27 +280,25 @@ func (s CacheEventSnapshot) Prometheus() string {
 	help("fak_engine_cache_tokens_moved_total", "KV span positions moved across residency tiers by cache events.", "counter")
 	b.WriteString("fak_engine_cache_tokens_moved_total " + itoa64(s.TokensMoved) + "\n")
 	help("fak_engine_cache_event_breakdown_total", "Cache events by direction, outcome, destination residency tier, and memory class.", "counter")
-	for _, r := range s.Rows {
-		b.WriteString("fak_engine_cache_event_breakdown_total{direction=\"" + promLabel(r.Direction) +
-			"\",outcome=\"" + promLabel(r.Outcome) + "\",to_tier=\"" + promLabel(r.ToTier) +
-			"\",memory_class=\"" + promLabel(r.MemoryClass) + "\"} " +
-			utoa(r.Count) + "\n")
-	}
+	writeCacheBreakdown(&b, "fak_engine_cache_event_breakdown_total", s.Rows, func(r CacheEventRow) string { return utoa(r.Count) })
 	help("fak_engine_cache_bytes_moved_breakdown_total", "Bytes moved by cache events, bucketed by direction, outcome, destination residency tier, and memory class.", "counter")
-	for _, r := range s.Rows {
-		b.WriteString("fak_engine_cache_bytes_moved_breakdown_total{direction=\"" + promLabel(r.Direction) +
-			"\",outcome=\"" + promLabel(r.Outcome) + "\",to_tier=\"" + promLabel(r.ToTier) +
-			"\",memory_class=\"" + promLabel(r.MemoryClass) + "\"} " +
-			itoa64(r.BytesMoved) + "\n")
-	}
+	writeCacheBreakdown(&b, "fak_engine_cache_bytes_moved_breakdown_total", s.Rows, func(r CacheEventRow) string { return itoa64(r.BytesMoved) })
 	help("fak_engine_cache_tokens_moved_breakdown_total", "KV span positions moved by cache events, bucketed by direction, outcome, destination residency tier, and memory class.", "counter")
-	for _, r := range s.Rows {
-		b.WriteString("fak_engine_cache_tokens_moved_breakdown_total{direction=\"" + promLabel(r.Direction) +
+	writeCacheBreakdown(&b, "fak_engine_cache_tokens_moved_breakdown_total", s.Rows, func(r CacheEventRow) string { return itoa64(r.TokensMoved) })
+	return b.String()
+}
+
+// writeCacheBreakdown writes one Prometheus breakdown series — one labeled line per row,
+// keyed by (direction, outcome, to_tier, memory_class) — for the metric named name, using
+// value to render each row's count. Factored from the three identical breakdown loops in
+// Prometheus so the label set and escaping live in exactly one place.
+func writeCacheBreakdown(b *strings.Builder, name string, rows []CacheEventRow, value func(CacheEventRow) string) {
+	for _, r := range rows {
+		b.WriteString(name + "{direction=\"" + promLabel(r.Direction) +
 			"\",outcome=\"" + promLabel(r.Outcome) + "\",to_tier=\"" + promLabel(r.ToTier) +
 			"\",memory_class=\"" + promLabel(r.MemoryClass) + "\"} " +
-			itoa64(r.TokensMoved) + "\n")
+			value(r) + "\n")
 	}
-	return b.String()
 }
 
 // CacheEventRecorder is the live-engine cache-event seam. The routing/offload path

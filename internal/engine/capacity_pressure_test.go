@@ -130,18 +130,18 @@ func TestPlanPlacementForDeviceDoesNotMutateRequest(t *testing.T) {
 // touches only an existing HBM profile (it never invents a tier the box did not declare).
 func TestWithHBMCapacityOverridesOnlyExistingHBM(t *testing.T) {
 	in := cachemeta.DefaultTierProfiles()
-	out := withHBMCapacity(in, 24<<30)
+	out := withTierCapacity(in, cachemeta.TierHBM, 24<<30)
 	if out[cachemeta.TierHBM].CapacityBytes != (24 << 30) {
 		t.Fatalf("HBM CapacityBytes not overridden, got %d", out[cachemeta.TierHBM].CapacityBytes)
 	}
 	if in[cachemeta.TierHBM].CapacityBytes != (80 << 30) {
 		t.Fatalf("source table mutated, got %d", in[cachemeta.TierHBM].CapacityBytes)
 	}
-	if withHBMCapacity(nil, 1) != nil {
+	if withTierCapacity(nil, cachemeta.TierHBM, 1) != nil {
 		t.Fatal("nil table must stay nil")
 	}
 	noHBM := map[cachemeta.ResidencyTier]cachemeta.TierProfile{cachemeta.TierDRAM: {Tier: cachemeta.TierDRAM}}
-	if _, has := withHBMCapacity(noHBM, 1)[cachemeta.TierHBM]; has {
+	if _, has := withTierCapacity(noHBM, cachemeta.TierHBM, 1)[cachemeta.TierHBM]; has {
 		t.Fatal("must not invent an HBM tier the table did not declare")
 	}
 }
