@@ -31,7 +31,7 @@ func TestClaudeGLMGCPPowerShellLauncherPreset(t *testing.T) {
 	for _, want := range []string{
 		"'glm-gcp'",
 		"FAK_GLM_GCP_BASE_URL",
-		"$OpenaiBackend = ($Backend -eq 'openai')",
+		"$OpenaiBackend    = ($Backend -eq 'openai')",
 		"Resolve-OpenAiBaseUrl",
 		"Get-FirstOpenAiModel",
 		"claude-glm-gcp.cmd",

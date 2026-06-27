@@ -305,7 +305,7 @@ func probeGatewayReachable(ctx context.Context, base string) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		return false, err.Error()
 	}
