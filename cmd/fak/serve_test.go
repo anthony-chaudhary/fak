@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 // TestCompactHistoryBudgetDefaultsToDefaultConst pins the default-on sprawl trigger: the
