@@ -52,7 +52,7 @@ type RunOptions struct {
 	Max         int          // cap on attempts (0 = unbounded within a loop; 1 implied when !Loop)
 	ArtifactDir string       // base dir for captured output (default experiments/nightrun)
 	LedgerPath  string       // ledger file (default <root>/DefaultLedgerRel)
-	Executor    Executor     // nil => DefaultExecutor (shell)
+	Executor    Executor     // nil => execTask via the live shell (go-run benches pre-built once)
 	ReadLedger  func() []CollectRow
 	AppendRow   func(CollectRow) error
 }
@@ -93,7 +93,7 @@ func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 		ranked := Rank(opts.Tasks, opts.Caps, opts.ReadLedger(), opts.Now)
 		next, ok := pickFresh(ranked, attempted)
 		if !ok {
-			summary.StopReason = stopReason(ranked, len(summary.Runs))
+			summary.StopReason = stopReason(ranked, len(summary.Runs), opts.Apply)
 			break
 		}
 		attempted[next.Task.ID] = true
@@ -142,7 +142,7 @@ func pickFresh(ranked []Scored, attempted map[string]bool) (Scored, bool) {
 	return Scored{}, false
 }
 
-func stopReason(ranked []Scored, ran int) string {
+func stopReason(ranked []Scored, ran int, applied bool) string {
 	anyFeasible := false
 	for _, s := range ranked {
 		if s.Feasible {
@@ -156,7 +156,14 @@ func stopReason(ranked []Scored, ran int) string {
 	if ran == 0 {
 		return "nothing to collect"
 	}
-	return fmt.Sprintf("collected the whole feasible queue (%d task(s)) — nothing left", ran)
+	// Outcome-neutral: the feasible queue was exhausted, but the attempts may have
+	// failed/timed out (and in a dry run nothing executed) — so never claim "collected"
+	// here. Each attempt's true outcome is in its ledger row.
+	verb := "planned"
+	if applied {
+		verb = "attempted"
+	}
+	return fmt.Sprintf("%s the whole feasible queue (%d task(s)) — nothing left", verb, ran)
 }
 
 // numberRE best-effort-extracts a headline number with a known unit from a run's
@@ -183,7 +190,11 @@ func DefaultExecutor(ctx context.Context, t Task, artifactPath string) (Outcome,
 // pass is not dominated by per-task `go run` compile time (#965).
 func execTask(ctx context.Context, root string, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
 	start := time.Now()
-	run := t.Run
+	// Peel a leading POSIX `VAR=val ...` env prefix off the command and apply it via
+	// cmd.Env below: that prefix syntax is invalid under Windows `cmd /c`, and cmd.Env
+	// is shell-agnostic (valid under both `sh -c` and `cmd /c`). Stripping it first also
+	// lets a `FAK_X=1 go run ./cmd/<x>` task become prebuild-eligible.
+	envPrefix, run := splitEnvPrefix(t.Run)
 	if root != "" {
 		run = maybePrebuildRun(ctx, root, run)
 	}
@@ -201,6 +212,9 @@ func execTask(ctx context.Context, root string, t Task, artifactPath string) (Ou
 	runCtx, cancel := context.WithTimeout(ctx, t.timeout())
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, shell, flag, run)
+	if len(envPrefix) > 0 {
+		cmd.Env = append(os.Environ(), envPrefix...)
+	}
 	configureProcGroup(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	out, err := cmd.CombinedOutput()
@@ -233,6 +247,28 @@ func parseNumber(out string) string {
 		return m[1] + " " + m[2]
 	}
 	return ""
+}
+
+// envAssignRE matches a leading `NAME=` token — the POSIX env-assignment shape.
+var envAssignRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// splitEnvPrefix peels a leading `VAR=val ...` env-assignment prefix off a command,
+// returning the assignments (NAME=VALUE, applied via cmd.Env) and the residual
+// command. No prefix returns (nil, run) unchanged. Tokenisation is whitespace-split,
+// matching the package's other simple command parsers (parseGoRun); it does not
+// handle a quoted value with spaces, which none of the built-in tasks use.
+func splitEnvPrefix(run string) ([]string, string) {
+	fields := strings.Fields(run)
+	var env []string
+	i := 0
+	for i < len(fields) && envAssignRE.MatchString(fields[i]) {
+		env = append(env, fields[i])
+		i++
+	}
+	if len(env) == 0 {
+		return nil, run
+	}
+	return env, strings.Join(fields[i:], " ")
 }
 
 // ReadLedgerFile reads + parses the ledger file, tolerating a missing file (no
