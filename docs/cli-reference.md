@@ -374,11 +374,15 @@ Every claim in `CLAIMS.md` carries exactly one of `[SHIPPED]` / `[SIMULATED]` /
 `[STUB]` (lint-enforced). See `../BUILD-72h-fused-agent-kernel.md` for the original
 scope and `../PLAN-fak-mvp-100-units-2026-06-16.md` for the 100-unit plan.
 
-## Launching the build
+## Build history (how wave 0 was landed)
+
+The following work was completed as the initial wave-0 build:
 
 1. Land + freeze wave 0 (this artifact): `go build ./... && go vet ./...`, commit the
-   golden conformance test, author the operator fixtures, run the vDSO purity gate.
+    golden conformance test, author the operator fixtures, run the vDSO purity gate.
 2. `dos-plan-price PARTITION.md` → confirm collision-free; `dos-arbitrate` the leases.
 3. `dos-goal-fleet` the wave-1 packets; gate wave 2 on `dos-witness-claim`; fold; tag.
+
+See [PARTITION.md](../PARTITION.md) for the current partition manifest and wave plan.
 
 License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
