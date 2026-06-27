@@ -104,10 +104,15 @@ go run ./cmd/fak serve \
   LAN without it.
 - For the **gateway-in-front-of-Ollama** path instead, drop `--gguf` and add
   `--base-url http://localhost:11434/v1 --model qwen2.5:7b`.
-- There is **no `metal` backend wired into `serve`** today — `--backend` accepts
-  `cuda` (needs a `-tags cuda` build + a GPU). On a Mac, `serve` = pure-Go CPU
-  forward. The Metal lane lives in `cmd/fakchat`/`cmd/modelbench` under `-tags
-  fakmetal`.
+- **Metal GPU serving is now wired into `serve`** via `--metal` (or `FAK_METAL=1`):
+  on a `-tags fakmetal` Apple-Silicon build, `fak serve --gguf <dense-qwen-q8> --metal`
+  runs the in-kernel chat through the metalgemm GPU forward — GPU prefill + GPU-resident
+  Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). It is the CPU-session
+  seam, so it is **mutually exclusive with `--backend`** (which is the compute-HAL device
+  path, e.g. `cuda`), and it **fails loud** if requested without the build tag or a Metal
+  device rather than silently serving on CPU. Scope is honest: **dense Qwen-class Q8 GGUFs
+  only** — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode. Without `--metal`
+  (or on a default non-fakmetal build), `serve` on a Mac is still the pure-Go CPU forward.
 
 ## Benchmarking agentic performance from the second laptop
 

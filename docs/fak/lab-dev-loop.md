@@ -47,10 +47,18 @@ that reads `OPENAI_BASE_URL` (Codex, OpenCode, Aider) — not Claude Code, which
 Anthropic wire (guard rejects `--remote-serve` with `--provider anthropic`).
 
 ```bash
-# on the lab box: serve a model in fak's own kernel on the GPU
+# on the lab box: serve a model in fak's own kernel on the GPU.
+# Linux/NVIDIA box (a -tags cuda build):
 FAK_Q4K=1 fak serve \
   --gguf /srv/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf \
   --engine inkernel --backend cuda \
+  --addr 0.0.0.0:8080
+
+# Apple-Silicon box (a -tags fakmetal build) — GPU prefill + resident Q8 decode on a
+# dense Qwen-class Q8 GGUF. --metal is the Metal seam, mutually exclusive with --backend:
+fak serve \
+  --gguf /srv/models/qwen2.5-coder-7b-instruct-q8_0.gguf \
+  --engine inkernel --metal \
   --addr 0.0.0.0:8080
 
 # from the box (or the bridge session on it): run a kernel-adjudicated dev turn,
