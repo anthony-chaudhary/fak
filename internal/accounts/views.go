@@ -73,8 +73,8 @@ func (r Registry) tombstonedHomes() []Home {
 }
 
 // renderDos emits the dos roster: `accounts:` rows of name+config_dir for every active home,
-// the active-default seat (so a launcher/watchdog can pick the default account without
-// re-reading the registry), then the view's config blocks (rotation/defaults).
+// the active-default seat + the full role map (so a launcher/watchdog can pick the right seat
+// without re-reading the registry), then the view's config blocks (rotation/defaults).
 func (r Registry) renderDos() string {
 	var b strings.Builder
 	b.WriteString(generatedHeader)
@@ -83,13 +83,26 @@ func (r Registry) renderDos() string {
 		b.WriteString("  - name: " + yamlScalar(h.Name) + "\n")
 		b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
 	}
-	// active_default: the name+config_dir of the seat marked default in the registry. It is the
-	// account a bare launch / watchdog should use. Emitted as a top-level scalar so the existing
-	// flat `accounts:` parsers ignore it; a new consumer reads it directly. Omitted when no seat
-	// is marked default (Validate guarantees at most one, never tombstoned).
-	if def, ok := r.Default(); ok && def.Active() {
-		b.WriteString("\nactive_default: " + yamlScalar(def.Name) + "\n")
-		b.WriteString("active_default_dir: " + yamlScalar(def.Dir) + "\n")
+	// active_default: the name+config_dir of the ACTIVE-role seat — the account a bare launch /
+	// watchdog should use. Emitted as a top-level scalar so the existing flat `accounts:`
+	// parsers ignore it; a new consumer reads it directly. Omitted when no active role is set.
+	if act, ok := r.Role(RoleActive); ok && act.Active() {
+		b.WriteString("\nactive_default: " + yamlScalar(act.Name) + "\n")
+		b.WriteString("active_default_dir: " + yamlScalar(act.Dir) + "\n")
+	}
+	// roles: the full role -> {name, config_dir} map, so a consumer can resolve any role (e.g.
+	// the rehome anchor) from the view alone. Emitted in sorted role order for byte-stability.
+	if len(r.Roles) > 0 {
+		b.WriteString("\nroles:\n")
+		for _, role := range sortedKeys(r.Roles) {
+			h, ok := r.home(r.Roles[role])
+			if !ok {
+				continue // Validate rejects a dangling role, so a loaded registry never hits this.
+			}
+			b.WriteString("  " + role + ":\n")
+			b.WriteString("    name: " + yamlScalar(h.Name) + "\n")
+			b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
+		}
 	}
 	b.WriteString(r.renderBlocks(ViewDos))
 	return b.String()

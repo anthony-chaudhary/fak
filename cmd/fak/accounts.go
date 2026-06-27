@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -32,18 +33,20 @@ import (
 //	                                   enroll a NEW account end-to-end: isolated-dir login (never
 //	                                   ~/.claude), identity probe, twin-check, registry + views
 //	fak accounts remove --name <n>     tombstone an account in the registry + regenerate views
-//	fak accounts set-default --name <n> make <n> the single default (active) seat + regenerate views
+//	fak accounts set-role <role> --name <n> point a role (active|anchor) at <n> + regenerate views
+//	fak accounts set-default --name <n> alias for `set-role active` (the launch/active seat)
 //	fak accounts list                  table of every seat: name, status, TRUE identity, creds, rehome, flags
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
 //	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
 //	fak accounts sync                  project the registry into the dos + job roster views
 //	fak accounts check                 RED (exit 1) if a generated view drifts from the registry
 //	fak accounts validate              load the registry and check every invariant (incl. tombstones resolve)
+//	fak accounts version               this binary's build + the registry schema/family it supports + verb set
 func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv)) }
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-default|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -72,8 +75,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addToken := fs.String("token", "", "(add) the setup-token (sk-ant-oat…); '-' or empty with --no-login reads stdin")
 	addSuffix := fs.String("suffix", firstNonEmpty(os.Getenv("FAK_ACCOUNT_SUFFIX"), "-netra"), "(add) config-dir suffix: dir is ~/.claude-<name> when <name> already ends with it, else ~/.claude-<name><suffix>")
 	addNoSync := fs.Bool("no-sync", false, "(add) skip regenerating the roster views after adding (just write the registry)")
-	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's default seat)")
+	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry")
+	roleFlag := fs.String("role", "", "(set-role) the role to point at --name (active|anchor); may also be given as the first positional")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -316,11 +320,30 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			noSync:       *addNoSync,
 		})
 
+	case "set-role":
+		// Point a well-known role (active|anchor) at --name — the deterministic one-command way
+		// to move the launch seat OR the rehome anchor INDEPENDENTLY. The role is the first
+		// positional (`set-role active --name x`) or --role. RoleActive is surfaced as
+		// active_default in the dos view; RoleAnchor is the Serve fall-forward target.
+		role := *roleFlag
+		if role == "" && len(positional) > 0 {
+			role = positional[0]
+		}
+		return runAccountsSetRole(stdout, stderr, setRoleParams{
+			role:         role,
+			name:         *addName,
+			registryPath: *registryPath,
+			dosView:      *dosView,
+			jobView:      *jobView,
+			noSync:       *addNoSync,
+		})
+
 	case "set-default":
-		// Make <name> the single default (active) seat — the deterministic one-command inverse
-		// of hand-editing `default: true`. The default is what a bare launch / the watchdog
-		// picks; it is surfaced as `active_default` in the dos view.
-		return runAccountsSetDefault(stdout, stderr, setDefaultParams{
+		// Back-compat alias for `set-role active`: the "default active account" a bare launch /
+		// the watchdog uses. Kept because that is the word an operator reaches for; it points
+		// the active role ONLY, never the rehome anchor — the separation roles exist to provide.
+		return runAccountsSetRole(stdout, stderr, setRoleParams{
+			role:         accounts.RoleActive,
 			name:         *addName,
 			registryPath: *registryPath,
 			dosView:      *dosView,
@@ -377,8 +400,32 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 
+	case "version":
+		// The tool-version surface. A stale binary is the trap this closes: it silently lacks a
+		// newer verb and fails with a raw "flag provided but not defined" instead of saying it is
+		// behind. Printing the build + the registry schema/family it supports + the verb set makes
+		// the staleness VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
+		verbs := []string{
+			"add", "remove", "set-role", "set-default", "list", "resolve", "pull",
+			"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
+		}
+		if *asJSON {
+			stdout.Write(mustJSON(map[string]any{
+				"fak":              appversion.Current(),
+				"registry_version": accounts.RegistryVersion,
+				"registry_family":  accounts.RegistryFamily + "*",
+				"verbs":            verbs,
+			}))
+			fmt.Fprintln(stdout)
+			return 0
+		}
+		fmt.Fprintf(stdout, "fak %s\n", appversion.Current())
+		fmt.Fprintf(stdout, "registry schema: %s (family %s*)\n", accounts.RegistryVersion, accounts.RegistryFamily)
+		fmt.Fprintf(stdout, "verbs: %s\n", strings.Join(verbs, " "))
+		return 0
+
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-default|list|resolve|pull|discover|sync|check|validate|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
@@ -530,6 +577,10 @@ func copyTree(src, dst string) (int, error) {
 }
 
 func printAccountsTable(w io.Writer, reg accounts.Registry) {
+	// One provenance line above the table: WHICH fak build rendered this and the registry
+	// schema it speaks. It is the cheap visibility half of `fak accounts version` — an operator
+	// reading a roster sees the tool version inline, so a stale binary is obvious at a glance.
+	fmt.Fprintf(w, "# fak %s · registry %s\n", appversion.Current(), accounts.RegistryVersion)
 	// Reconcile groups the seats by the account each truly resolves to, so the table can
 	// flag a seat that is really a duplicate of another (one rate-limit bucket presented
 	// as several) and a seat whose setup token belongs to a different login than its own.

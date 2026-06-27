@@ -44,15 +44,17 @@ import (
 	"strings"
 )
 
-// RegistryVersion is this registry's on-disk schema tag, and registryFamily is the
+// RegistryVersion is this registry's on-disk schema tag, and RegistryFamily is the
 // prefix every version of THIS file shares. It is DISTINCT from modelroute.RosterVersion
 // (a separate file, a different concern): a config-home registry vs a provider-credential
 // roster. A registry MAY omit the version (treated as current); one in the same family
 // (fak-config-homes/*) is accepted so additive, omitempty schema growth (e.g. the policy
 // attributes on Home) never strands an existing file; one from a FOREIGN family is refused.
+// RegistryFamily is exported so the `fak accounts version` surface can report the family a
+// binary supports — the line that makes a stale binary visible instead of silently lacking a verb.
 const (
 	RegistryVersion = "fak-config-homes/v1"
-	registryFamily  = "fak-config-homes/"
+	RegistryFamily  = "fak-config-homes/"
 )
 
 // Status is the lifecycle of a config-home seat. A CLOSED set: an empty status reads
@@ -105,13 +107,20 @@ func (id Identity) AccountKey() string {
 
 // Home is one Claude config home (a CLAUDE_CONFIG_DIR seat). Name is the roster handle
 // the launcher references ("gem8-seat"); Dir is the config-home path. Status empty or
-// "active" is a live seat; "tombstoned" REQUIRES RehomeTo. Default marks the preferred
-// single-session seat. Identity is disk-derived (filled by Discover/refresh), advisory
-// for display + the NameLie check — never the secret.
+// "active" is a live seat; "tombstoned" REQUIRES RehomeTo. Identity is disk-derived (filled
+// by Discover/refresh), advisory for display + the NameLie check — never the secret.
+//
+// Which seat is the launch default vs the rehome anchor now lives in Registry.Roles, not on
+// the Home — see the Default field note below.
 type Home struct {
-	Name     string   `json:"name"`
-	Dir      string   `json:"dir,omitempty"`
-	Status   Status   `json:"status,omitempty"`
+	Name   string `json:"name"`
+	Dir    string `json:"dir,omitempty"`
+	Status Status `json:"status,omitempty"`
+	// Default is the LEGACY per-home anchor flag, retained only so a pre-roles registry still
+	// decodes (DisallowUnknownFields would otherwise reject the field). On load, migrate folds
+	// a true value into Roles[RoleAnchor] and clears it, so a freshly-saved registry never
+	// carries it. Do NOT read it — use Registry.Role / Registry.Default. It will be dropped in
+	// a future schema version.
 	Default  bool     `json:"default,omitempty"`
 	RehomeTo string   `json:"rehome_to,omitempty"`
 	Role     string   `json:"role,omitempty"`
@@ -170,12 +179,50 @@ type Registry struct {
 	Version       string `json:"version,omitempty"`
 	SharedHistory string `json:"shared_history,omitempty"`
 	Homes         []Home `json:"homes"`
+	// Roles maps a well-known ROLE to the home name that currently fills it. It replaces the
+	// per-Home `default: true` boolean, which conflated two genuinely different jobs onto one
+	// flag: the seat a bare/interactive launch should run as (RoleActive — rotates as you
+	// switch working accounts) and the seat everything falls FORWARD onto when its own seat
+	// can't serve (RoleAnchor — a stable, always-available anchor you rarely change). One
+	// boolean could not hold both, so setting the active account silently moved the rehome
+	// anchor. As a map it also extends to a new role (a reserved fallback, a billing owner)
+	// without a schema change, and the "which seat is X?" answer lives in ONE place instead of
+	// scattered across every Home. A role value MUST name an active, serveable home (Validate
+	// enforces it). Empty/absent is legal — a registry need not fill every role. A legacy
+	// `default: true` migrates to RoleAnchor on load (see migrate), preserving the old
+	// Serve() fall-forward behavior, where Default WAS the anchor.
+	Roles map[string]string `json:"roles,omitempty"`
 	// Views holds the per-consumer config blocks (the dos roster's defaults; the job
 	// roster's defaults/rotation/launch) that used to live ONLY in the generated files. It
 	// is keyed by view name ("dos", "job"), and each value is an opaque config tree carried
 	// verbatim so a consumer can add a config key without a schema change here. SyncViews
 	// projects each view's blocks back out. Empty when no view config has been adopted yet.
 	Views map[string]ViewConfig `json:"views,omitempty"`
+}
+
+// Well-known roles a home can fill (see Registry.Roles). The set is open — a consumer may
+// define its own role key — but these two are load-bearing in this package:
+const (
+	// RoleActive is the seat a bare / interactive `claude` launch and the watchdog run as.
+	// It is the "default active account" an operator picks; it ROTATES as you switch the
+	// account you are working as. Surfaced as active_default in the dos view.
+	RoleActive = "active"
+	// RoleAnchor is the rehome fall-forward target: when a seat can't serve and has no
+	// rehome_to of its own, Serve collapses onto the anchor. It should be a stable,
+	// always-available account; you rarely change it. (This is what `default: true` meant
+	// inside Serve before roles existed.)
+	RoleAnchor = "anchor"
+)
+
+// Role returns the home filling the named role, following the same lookup as home(): the role
+// must be set AND name a present home. ok is false when the role is unset or dangles (Validate
+// rejects a dangling role, so a loaded registry never dangles).
+func (r Registry) Role(role string) (Home, bool) {
+	name, ok := r.Roles[role]
+	if !ok || name == "" {
+		return Home{}, false
+	}
+	return r.home(name)
 }
 
 // ViewConfig is one generated view's non-account config: the named top-level YAML blocks it
@@ -231,14 +278,40 @@ func (r Registry) home(name string) (Home, bool) {
 	return Home{}, false
 }
 
-// Default returns the seat marked default (the preferred single-session identity).
-func (r Registry) Default() (Home, bool) {
-	for _, h := range r.Homes {
-		if h.Default {
-			return h, true
+// Default returns the seat that fills the rehome ANCHOR role — the seat everything falls
+// forward onto. It is a compatibility shim over Role(RoleAnchor): before roles, the
+// per-Home `default: true` boolean named exactly this seat (Serve's fall-forward target), so
+// callers that asked for the "default" wanted the anchor. New code should call Role directly
+// (RoleActive for the launch seat, RoleAnchor for the fall-forward seat) — the two the old
+// single Default conflated.
+func (r Registry) Default() (Home, bool) { return r.Role(RoleAnchor) }
+
+// migrate folds a legacy registry forward in place: a pre-roles registry carried the rehome
+// anchor as a per-Home `default: true`. If no anchor role is set but some home carries the
+// legacy flag, adopt it as RoleAnchor (preserving Serve's old fall-forward target), then clear
+// the boolean so the registry has ONE representation of the anchor. It is idempotent and runs
+// before Validate, so both LoadRegistry and the SaveRegistry round-trip self-check see the
+// same migrated shape.
+func (r *Registry) migrate() {
+	legacyIdx := -1
+	for i := range r.Homes {
+		if r.Homes[i].Default {
+			legacyIdx = i
+			break
 		}
 	}
-	return Home{}, false
+	if legacyIdx >= 0 {
+		if r.Roles == nil {
+			r.Roles = map[string]string{}
+		}
+		if _, ok := r.Roles[RoleAnchor]; !ok {
+			r.Roles[RoleAnchor] = r.Homes[legacyIdx].Name
+		}
+		// Clear every legacy flag — the anchor now lives in Roles, the single source.
+		for i := range r.Homes {
+			r.Homes[i].Default = false
+		}
+	}
 }
 
 // Resolve returns the LIVE seat that serves name, following a tombstone's RehomeTo
@@ -313,14 +386,31 @@ func (r Registry) Serve(name string) (Home, []string, error) {
 		chain = append(chain, cur)
 		next := h.RehomeTo
 		if next == "" {
-			d, ok := r.Default()
-			if !ok || d.Name == cur {
-				return Home{}, chain, fmt.Errorf("accounts: %q cannot serve and has no rehome_to or default to fall forward to", cur)
+			// No explicit rehome target: fall forward to a ROLE seat. Prefer the anchor (its
+			// whole job is to be the always-available fall-forward); if no anchor is set, the
+			// active seat is the next-best stable target. A role pointing back at the seat we
+			// just failed on can't help, so skip it.
+			fb, ok := r.fallbackSeat(cur)
+			if !ok {
+				return Home{}, chain, fmt.Errorf("accounts: %q cannot serve and has no rehome_to, anchor, or active seat to fall forward to", cur)
 			}
-			next = d.Name
+			next = fb
 		}
 		cur = next
 	}
+}
+
+// fallbackSeat returns the role seat to fall forward onto when the seat named avoid can't
+// serve and carries no rehome_to: the anchor first (its purpose), then the active seat. It
+// never returns avoid itself (that would loop). ok is false when neither role offers a
+// different seat.
+func (r Registry) fallbackSeat(avoid string) (string, bool) {
+	for _, role := range []string{RoleAnchor, RoleActive} {
+		if h, ok := r.Role(role); ok && h.Name != avoid {
+			return h.Name, true
+		}
+	}
+	return "", false
 }
 
 // Validate checks the registry is well-formed and that every tombstone resolves. The
@@ -328,19 +418,23 @@ func (r Registry) Serve(name string) (Home, []string, error) {
 //   - a known major version; at least one home;
 //   - each home: a non-empty, unique name; a status in the closed set; an active home
 //     carries a dir; a tombstoned home carries a rehome_to that is not itself;
-//   - at most one default, and the default is not tombstoned;
+//   - every role (active, anchor, …) names a present, ACTIVE home — never a typo or a
+//     tombstone (a tombstone can't serve, so it can't fill a role);
 //   - every tombstone Resolves to a live seat (no dangling rehome, no cycle).
+//
+// The legacy per-Home `default: true` is NOT validated here: migrate (run before Validate
+// in ParseRegistry) has already folded it into RoleAnchor and cleared the flag, so by the
+// time Validate runs the anchor lives only in Roles.
 //
 // A misconfigured registry must fail here, never fall through to an arbitrary seat.
 func (r Registry) Validate() error {
-	if r.Version != "" && !strings.HasPrefix(r.Version, registryFamily) {
-		return fmt.Errorf("accounts: registry version %q is not in the %s* family", r.Version, registryFamily)
+	if r.Version != "" && !strings.HasPrefix(r.Version, RegistryFamily) {
+		return fmt.Errorf("accounts: registry version %q is not in the %s* family", r.Version, RegistryFamily)
 	}
 	if len(r.Homes) == 0 {
 		return fmt.Errorf("accounts: registry has no homes")
 	}
 	seen := make(map[string]bool, len(r.Homes))
-	defaults := 0
 	for i, h := range r.Homes {
 		if h.Name == "" {
 			return fmt.Errorf("accounts: home %d has an empty name", i)
@@ -353,12 +447,6 @@ func (r Registry) Validate() error {
 		case "", StatusActive, StatusTombstoned:
 		default:
 			return fmt.Errorf("accounts: home %q has unknown status %q", h.Name, h.Status)
-		}
-		if h.Default {
-			defaults++
-			if !h.Active() {
-				return fmt.Errorf("accounts: default home %q is tombstoned", h.Name)
-			}
 		}
 		if h.Active() {
 			if h.Dir == "" {
@@ -373,8 +461,16 @@ func (r Registry) Validate() error {
 			}
 		}
 	}
-	if defaults > 1 {
-		return fmt.Errorf("accounts: %d homes marked default (at most one allowed)", defaults)
+	// Every role must name a present, active home (in role-name order for a stable error).
+	for _, role := range sortedKeys(r.Roles) {
+		name := r.Roles[role]
+		h, ok := r.home(name)
+		if !ok {
+			return fmt.Errorf("accounts: role %q names %q, which is not in the registry", role, name)
+		}
+		if !h.Active() {
+			return fmt.Errorf("accounts: role %q names tombstoned seat %q (a role must be an active seat)", role, name)
+		}
 	}
 	// Referential: every tombstone must reach a live seat (catches dangling rehome
 	// targets and cycles, transitively).
@@ -386,6 +482,18 @@ func (r Registry) Validate() error {
 		}
 	}
 	return nil
+}
+
+// sortedKeys returns m's keys sorted, for deterministic iteration (stable Validate errors and
+// stable view emission). Defined here (no generics dependency beyond the stdlib) for the small
+// string-keyed maps this package iterates.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -807,6 +915,7 @@ func ParseRegistry(b []byte) (Registry, error) {
 	if err := dec.Decode(&r); err != nil {
 		return Registry{}, fmt.Errorf("accounts: parse registry: %w", err)
 	}
+	r.migrate() // fold a legacy `default: true` into RoleAnchor before validating
 	if err := r.Validate(); err != nil {
 		return Registry{}, err
 	}

@@ -11,8 +11,9 @@ import (
 func fixture() Registry {
 	return Registry{
 		Version: RegistryVersion,
+		Roles:   map[string]string{RoleAnchor: "gem8-seat"},
 		Homes: []Home{
-			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat", Default: true},
+			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat"},
 			{Name: "day24-seat", Dir: "/h/.claude-day24-seat", Status: StatusActive},
 			{Name: "q", Status: StatusTombstoned, RehomeTo: "gem8-seat"},
 			{Name: "old", Status: StatusTombstoned, RehomeTo: "mid"},
@@ -89,8 +90,8 @@ func TestValidateRejections(t *testing.T) {
 		"tombstone no rehome":   {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned}}},
 		"tombstone self rehome": {Homes: []Home{{Name: "a", Status: StatusTombstoned, RehomeTo: "a"}}},
 		"dangling rehome":       {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned, RehomeTo: "ghost"}}},
-		"two defaults":          {Homes: []Home{{Name: "a", Dir: "/d", Default: true}, {Name: "b", Dir: "/e", Default: true}}},
-		"default tombstoned":    {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned, Default: true, RehomeTo: "a"}}},
+		"role names ghost":      {Homes: []Home{{Name: "a", Dir: "/d"}}, Roles: map[string]string{RoleActive: "ghost"}},
+		"role on tombstone":     {Homes: []Home{{Name: "a", Dir: "/d"}, {Name: "b", Status: StatusTombstoned, RehomeTo: "a"}}, Roles: map[string]string{RoleAnchor: "b"}},
 		"foreign version":       {Version: "some-other-roster/v1", Homes: []Home{{Name: "a", Dir: "/d"}}},
 		"rehome cycle":          {Homes: []Home{{Name: "a", Status: StatusTombstoned, RehomeTo: "b"}, {Name: "b", Status: StatusTombstoned, RehomeTo: "a"}}},
 	}
@@ -102,12 +103,68 @@ func TestValidateRejections(t *testing.T) {
 }
 
 func TestDefault(t *testing.T) {
+	// Default() is the compatibility shim for the rehome ANCHOR role.
 	h, ok := fixture().Default()
 	if !ok || h.Name != "gem8-seat" {
 		t.Fatalf("Default = %q,%v, want gem8-seat,true", h.Name, ok)
 	}
 	if _, ok := (Registry{Homes: []Home{{Name: "a", Dir: "/d"}}}).Default(); ok {
-		t.Fatalf("no default marked should report ok=false")
+		t.Fatalf("no anchor role set should report ok=false")
+	}
+}
+
+// TestRolesAreIndependent is the regression this whole change exists for: the launch ACTIVE
+// seat and the rehome ANCHOR are separate roles, so pointing one never disturbs the other.
+// Under the old single `default: true` boolean, setting the active account silently moved the
+// rehome anchor; that conflation is what is fixed here.
+func TestRolesAreIndependent(t *testing.T) {
+	r := Registry{
+		Roles: map[string]string{RoleAnchor: "gem8-seat", RoleActive: "day24-seat"},
+		Homes: []Home{
+			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat"},
+			{Name: "day24-seat", Dir: "/h/.claude-day24-seat"},
+			{Name: "day27-seat", Dir: "/h/.claude-day27-seat"},
+		},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("two-role registry should validate: %v", err)
+	}
+	// Rotate the ACTIVE seat to day27 — the way `set-role active` does.
+	r.Roles[RoleActive] = "day27-seat"
+	if err := r.Validate(); err != nil {
+		t.Fatalf("after rotating active: %v", err)
+	}
+	act, _ := r.Role(RoleActive)
+	if act.Name != "day27-seat" {
+		t.Fatalf("active = %q, want day27-seat", act.Name)
+	}
+	// The anchor MUST be untouched — the entire point of separating the roles.
+	anchor, ok := r.Role(RoleAnchor)
+	if !ok || anchor.Name != "gem8-seat" {
+		t.Fatalf("anchor moved when only active was set: anchor=%q,%v want gem8-seat", anchor.Name, ok)
+	}
+}
+
+// TestMigrateLegacyDefaultIsIdempotent proves a pre-roles `default: true` folds into RoleAnchor
+// exactly once and re-running migrate (or re-parsing) is a no-op.
+func TestMigrateLegacyDefaultIsIdempotent(t *testing.T) {
+	r := Registry{Homes: []Home{
+		{Name: "anchor-seat", Dir: "/h/.claude-anchor", Default: true},
+		{Name: "other", Dir: "/h/.claude-other"},
+	}}
+	r.migrate()
+	if got := r.Roles[RoleAnchor]; got != "anchor-seat" {
+		t.Fatalf("migrate: RoleAnchor = %q, want anchor-seat", got)
+	}
+	if r.Homes[0].Default {
+		t.Fatalf("migrate should clear the legacy default bool")
+	}
+	// An explicit anchor role wins over a stray legacy bool (no clobber on re-migrate).
+	r.Roles[RoleAnchor] = "other"
+	r.Homes[0].Default = true // simulate a stray legacy flag reappearing
+	r.migrate()
+	if got := r.Roles[RoleAnchor]; got != "other" {
+		t.Fatalf("migrate must not clobber an explicit anchor: got %q, want other", got)
 	}
 }
 
@@ -198,6 +255,14 @@ func TestPolicyFieldsRoundTrip(t *testing.T) {
 	if got.Homes[1].EnabledOrDefault() != false {
 		t.Fatalf("home with enabled:false should read disabled after round-trip")
 	}
+	// The legacy `default: true` on "live" migrated to RoleAnchor and the bool cleared, so the
+	// registry has ONE representation of the anchor after a round-trip.
+	if anchor, ok := got.Role(RoleAnchor); !ok || anchor.Name != "live" {
+		t.Fatalf("legacy default:true should migrate to RoleAnchor=live, got %q,%v", anchor.Name, ok)
+	}
+	if got.Homes[0].Default {
+		t.Fatalf("legacy default:true should be cleared after migration, still set on %+v", got.Homes[0])
+	}
 
 	// A literal v1-shaped registry (no new keys at all) must still parse.
 	v1 := []byte(`{"version":"fak-config-homes/v1","homes":[{"name":"a","dir":"/d"}]}`)
@@ -233,13 +298,15 @@ func TestSaveRegistryRoundTrips(t *testing.T) {
 }
 
 // serveFixture has disk-derived Identity populated so Serve's creds checks have meaning:
-// gem8 is the serveable default, throttled is active-but-logged-out, q is tombstoned.
+// gem8 is the serveable anchor (Serve's fall-forward target), throttled is
+// active-but-logged-out, q is tombstoned.
 func serveFixture() Registry {
 	live := Identity{Email: "x@y", Exists: true, HasCreds: true}
 	noCreds := Identity{Email: "x@y", Exists: true, HasCreds: false}
 	return Registry{
+		Roles: map[string]string{RoleAnchor: "gem8-seat"},
 		Homes: []Home{
-			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat", Default: true, Identity: live},
+			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat", Identity: live},
 			{Name: "throttled", Dir: "/h/.claude-throttled", Identity: noCreds},                // active but can't serve
 			{Name: "q", Status: StatusTombstoned, RehomeTo: "gem8-seat"},                       // tombstoned -> gem8
 			{Name: "stale", Dir: "/h/.claude-stale", Identity: noCreds, RehomeTo: "gem8-seat"}, // no creds, explicit rehome
@@ -332,7 +399,7 @@ func TestPlanHistoryAtOverride(t *testing.T) {
 	r := Registry{
 		SharedHistory: "/store",
 		Homes: []Home{
-			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat", Default: true},
+			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat"},
 			{Name: "q", Status: StatusTombstoned, RehomeTo: "gem8-seat", HistoryAt: "q-archive-2026-06-25"},
 		},
 	}

@@ -256,8 +256,9 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	return 0
 }
 
-// setDefaultParams carries the resolved flags for `fak accounts set-default`.
-type setDefaultParams struct {
+// setRoleParams carries the resolved flags for `fak accounts set-role`.
+type setRoleParams struct {
+	role         string // "active", "anchor", … (RoleActive is the set-default alias's role)
 	name         string
 	registryPath string
 	dosView      string
@@ -265,15 +266,16 @@ type setDefaultParams struct {
 	noSync       bool
 }
 
-// runAccountsSetDefault makes <name> the single default (active) seat: it clears any existing
-// default and marks the named active home default, then validates and regenerates the views.
-// This is the deterministic one-command inverse of hand-editing `default: true` in the
-// registry — the default is what a bare launch / the watchdog picks, surfaced as
-// `active_default` in the dos view. Refuses a missing or tombstoned target (a tombstone can
-// never serve, so it can never be the default).
-func runAccountsSetDefault(stdout, stderr io.Writer, p setDefaultParams) int {
-	if p.name == "" {
-		fmt.Fprintln(stderr, "usage: fak accounts set-default --name <name>")
+// runAccountsSetRole points a well-known ROLE at <name>: it sets reg.Roles[role]=name,
+// validates (the target must be an active, serveable home), and regenerates the views. This is
+// the deterministic one-command inverse of hand-editing the registry's roles — and the reason
+// roles exist: the launch seat (RoleActive) and the rehome anchor (RoleAnchor) are SEPARATE,
+// so pointing one never disturbs the other. RoleActive is surfaced as active_default in the
+// dos view. Refuses a missing or tombstoned target (a tombstone can never serve, so it can
+// never fill a role).
+func runAccountsSetRole(stdout, stderr io.Writer, p setRoleParams) int {
+	if p.role == "" || p.name == "" {
+		fmt.Fprintln(stderr, "usage: fak accounts set-role <role> --name <name>   (role: active|anchor)")
 		return 2
 	}
 	reg, err := accounts.LoadRegistry(p.registryPath)
@@ -281,30 +283,23 @@ func runAccountsSetDefault(stdout, stderr io.Writer, p setDefaultParams) int {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
-	idx := -1
-	for i := range reg.Homes {
-		if reg.Homes[i].Name == p.name {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	h, ok := homeByName(reg, p.name)
+	if !ok {
 		fmt.Fprintf(stderr, "fak accounts: %q not in registry\n", p.name)
 		return 1
 	}
-	if !reg.Homes[idx].Active() {
-		fmt.Fprintf(stderr, "fak accounts: %q is tombstoned and cannot be the default\n", p.name)
+	if !h.Active() {
+		fmt.Fprintf(stderr, "fak accounts: %q is tombstoned and cannot fill role %q\n", p.name, p.role)
 		return 1
 	}
-	if reg.Homes[idx].Default {
-		fmt.Fprintf(stdout, "%q is already the default seat\n", p.name)
+	if cur, ok := reg.Roles[p.role]; ok && cur == p.name {
+		fmt.Fprintf(stdout, "%q already fills role %q\n", p.name, p.role)
 		return 0
 	}
-	// Clear any prior default (Validate allows at most one), then set the new one.
-	for i := range reg.Homes {
-		reg.Homes[i].Default = false
+	if reg.Roles == nil {
+		reg.Roles = map[string]string{}
 	}
-	reg.Homes[idx].Default = true
+	reg.Roles[p.role] = p.name
 	if err := reg.Validate(); err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
@@ -313,14 +308,24 @@ func runAccountsSetDefault(stdout, stderr io.Writer, p setDefaultParams) int {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "registry: default seat -> %s\n", p.name)
+	fmt.Fprintf(stdout, "registry: role %s -> %s\n", p.role, p.name)
 	if !p.noSync {
 		if _, code := syncViews(stdout, stderr, p.registryPath, p.dosView, p.jobView); code != 0 {
 			return code
 		}
 	}
-	fmt.Fprintf(stdout, "set default account %q (active_default in the dos view)\n", p.name)
+	fmt.Fprintf(stdout, "set role %q -> account %q\n", p.role, p.name)
 	return 0
+}
+
+// homeByName returns the registry home with the given name.
+func homeByName(reg accounts.Registry, name string) (accounts.Home, bool) {
+	for _, h := range reg.Homes {
+		if h.Name == name {
+			return h, true
+		}
+	}
+	return accounts.Home{}, false
 }
 
 // accountDir resolves the isolated config dir for a new account: ~/.claude-<name> when <name>

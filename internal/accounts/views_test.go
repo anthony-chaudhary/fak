@@ -5,13 +5,15 @@ import (
 	"testing"
 )
 
-// viewFixture is a registry exercising both views: an active default, an active reserved
-// seat, an active worker, and a tombstone with full audit fields, plus per-view config.
+// viewFixture is a registry exercising both views: an anchor seat, a separate active seat (so
+// the two roles are distinct — the whole point of roles), a reserved seat, and a tombstone
+// with full audit fields, plus per-view config.
 func viewFixture() Registry {
 	tru := true
 	return Registry{
+		Roles: map[string]string{RoleAnchor: "gem8-netra", RoleActive: "day24-netra"},
 		Homes: []Home{
-			{Name: "gem8-netra", Dir: `C:\Users\U\.claude-gem8-netra`, Default: true,
+			{Name: "gem8-netra", Dir: `C:\Users\U\.claude-gem8-netra`,
 				Identity: Identity{Email: "gem8@netra.test"}, Enabled: &tru},
 			{Name: "day24-netra", Dir: `C:\Users\U\.claude-day24-netra`, Reserved: true,
 				Identity: Identity{Email: "day24@netra.test"}, ChromeProfile: "Profile 3"},
@@ -73,14 +75,28 @@ func TestRenderDosView(t *testing.T) {
 	if strings.Contains(got, "name: q-netra") {
 		t.Errorf("tombstoned q-netra leaked into dos active rows:\n%s", got)
 	}
-	// The active-default seat is surfaced so a launcher/watchdog can pick it without re-reading
-	// the registry.
+	// The ACTIVE-role seat is surfaced as active_default so a launcher/watchdog can pick it
+	// without re-reading the registry — and it is the active seat (day24), NOT the anchor
+	// (gem8), proving the two roles are kept distinct.
 	for _, want := range []string{
-		"\nactive_default: gem8-netra\n",
-		`active_default_dir: "C:\\Users\\U\\.claude-gem8-netra"` + "\n",
+		"\nactive_default: day24-netra\n",
+		`active_default_dir: "C:\\Users\\U\\.claude-day24-netra"` + "\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dos view missing active-default line %q in:\n%s", want, got)
+		}
+	}
+	// The full role map is emitted so a consumer can resolve any role (anchor included) from
+	// the view alone.
+	for _, want := range []string{
+		"\nroles:\n",
+		"  active:\n",
+		"    name: day24-netra\n",
+		"  anchor:\n",
+		"    name: gem8-netra\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dos view missing roles line %q in:\n%s", want, got)
 		}
 	}
 	// Config blocks emitted in order, nested correctly.
