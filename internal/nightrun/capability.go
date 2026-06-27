@@ -31,6 +31,10 @@ type Capabilities struct {
 	Net bool `json:"net"`
 	// Creds maps a credential env-var NAME to whether it is set (never the value).
 	Creds map[string]bool `json:"creds"`
+	// Root is the repo root the box was probed at, so Satisfies can verify a
+	// task that names a specific local checkpoint (-dir/-gguf) actually has it -
+	// box-level weights=true is too coarse for a benchmark that hardcodes one export.
+	Root string `json:"root,omitempty"`
 }
 
 // knownCredEnv is the closed set of credential env-var NAMES nightrun probes for.
@@ -82,6 +86,7 @@ func probe(root string, e probeEnv) Capabilities {
 	c.Weights = detectWeights(root, e)
 	c.Datasets = detectDatasets(root, e)
 	c.Net = !truthy(e.getenv("FAK_OFFLINE"))
+	c.Root = root
 
 	for _, name := range knownCredEnv {
 		c.Creds[name] = strings.TrimSpace(e.getenv(name)) != ""
@@ -147,6 +152,17 @@ func (c Capabilities) Satisfies(t Task) (bool, string) {
 	for _, name := range t.CredEnv {
 		if !c.hasCred(name) {
 			return false, fmt.Sprintf("needs credential %s (not set)", name)
+		}
+	}
+	// A task that names a specific local checkpoint (a -dir/-gguf export) is only
+	// feasible if THAT path exists - box-level weights=true means "some weights
+	// somewhere", not "this export". Closes the false-feasible gap for the
+	// NeedWeights benchmarks that hardcode one export dir (see #964).
+	if c.Root != "" {
+		if p := localCheckpointPath(t.Run); p != "" {
+			if !pathExists(filepath.Join(c.Root, filepath.FromSlash(p))) {
+				return false, "needs the local checkpoint " + p + " (absent; run `make model` or export it)"
+			}
 		}
 	}
 	return true, ""
@@ -225,4 +241,28 @@ func truthy(s string) bool {
 	default:
 		return false
 	}
+}
+
+// localCheckpointPath extracts the repo-relative checkpoint path a benchmark Run
+// hardcodes via `-dir <path>` or `-gguf <path>`, or "" if the Run names none, uses
+// a placeholder (<...>), or points outside the repo (absolute / ~). Only a concrete
+// in-repo export under internal/model/.cache (the convention the bench mains use) is
+// returned, so Satisfies can verify THAT export exists rather than trusting the
+// coarse box-level weights flag. Deliberately conservative: an unrecognized shape
+// returns "" (no extra gate), so this can only ADD honesty, never spuriously block.
+func localCheckpointPath(run string) string {
+	fields := strings.Fields(run)
+	for i, f := range fields {
+		if (f == "-dir" || f == "-gguf" || f == "--dir" || f == "--gguf") && i+1 < len(fields) {
+			arg := fields[i+1]
+			if arg == "" || strings.HasPrefix(arg, "<") || strings.HasPrefix(arg, "~") ||
+				strings.HasPrefix(arg, "/") || filepath.IsAbs(arg) {
+				return "" // placeholder / outside-repo — not a concrete local export to verify
+			}
+			if strings.HasPrefix(arg, "internal/model/.cache/") {
+				return arg
+			}
+		}
+	}
+	return ""
 }

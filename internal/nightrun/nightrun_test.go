@@ -2,6 +2,8 @@ package nightrun
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -405,6 +407,59 @@ func TestBacklogRunRequiresConsistency(t *testing.T) {
 		}
 		if strings.Contains(task.Run, "-tags=metal") && !has(task.Requires, ReqMetal) {
 			t.Errorf("task %q Run uses -tags=metal but does not declare ReqMetal (Requires=%v)", task.ID, task.Requires)
+		}
+	}
+}
+
+// TestSatisfiesLocalCheckpoint pins the #964 fix: a NeedWeights task that hardcodes a
+// specific local export (-dir internal/model/.cache/<name>) is feasible ONLY if that
+// export exists under the probed Root, so box-level Weights=true can no longer mark a
+// missing-checkpoint benchmark feasible (which then fails at runtime). A -synthetic /
+// placeholder Run names no concrete local export and is unaffected.
+func TestSatisfiesLocalCheckpoint(t *testing.T) {
+	root := t.TempDir()
+	present := filepath.Join(root, "internal", "model", ".cache", "smollm2-135m")
+	if err := os.MkdirAll(present, 0o755); err != nil {
+		t.Fatalf("mkdir export: %v", err)
+	}
+	box := Capabilities{Box: "dev", GPU: "none", Weights: true, Net: true, Root: root, Creds: map[string]bool{}}
+
+	presentTask := Task{ID: "model", Requires: []Requirement{ReqWeights}, Run: "go run ./cmd/modelbench -dir internal/model/.cache/smollm2-135m"}
+	if ok, why := box.Satisfies(presentTask); !ok {
+		t.Errorf("a task whose -dir export EXISTS must be feasible; why=%q", why)
+	}
+
+	absentTask := Task{ID: "batch", Requires: []Requirement{ReqWeights}, Run: "go run ./cmd/batchbench -dir internal/model/.cache/absent-model"}
+	if ok, why := box.Satisfies(absentTask); ok {
+		t.Errorf("a task whose -dir export is ABSENT must be infeasible; got feasible (why=%q)", why)
+	} else if !strings.Contains(why, "absent-model") {
+		t.Errorf("the block reason should name the missing checkpoint; got %q", why)
+	}
+
+	// -synthetic names no concrete local export — the path gate must not touch it.
+	synthTask := Task{ID: "radix", Requires: []Requirement{ReqWeights}, Run: "go run ./cmd/radixbench -synthetic smollm2-135m"}
+	if ok, why := box.Satisfies(synthTask); !ok {
+		t.Errorf("a -synthetic task must stay feasible (no hardcoded export); why=%q", why)
+	}
+
+	// No Root probed (e.g. a unit test constructing caps by hand) → the gate is skipped.
+	noRoot := Capabilities{Box: "x", Weights: true, Net: true, Creds: map[string]bool{}}
+	if ok, _ := noRoot.Satisfies(absentTask); !ok {
+		t.Error("with no Root set the checkpoint gate must be skipped (conservative)")
+	}
+}
+
+func TestLocalCheckpointPath(t *testing.T) {
+	cases := map[string]string{
+		"go run ./cmd/modelbench -dir internal/model/.cache/smollm2-135m": "internal/model/.cache/smollm2-135m",
+		"fak serve --gguf <glm-5.2.gguf> --backend cuda":                  "", // placeholder
+		"go run ./cmd/radixbench -synthetic smollm2-135m":                 "", // no -dir/-gguf
+		"go run ./cmd/q8bench -dir /abs/path/model":                       "", // absolute, outside repo
+		"go run ./cmd/x -dir ~/models/m":                                  "", // home, outside repo
+	}
+	for run, want := range cases {
+		if got := localCheckpointPath(run); got != want {
+			t.Errorf("localCheckpointPath(%q) = %q, want %q", run, got, want)
 		}
 	}
 }
