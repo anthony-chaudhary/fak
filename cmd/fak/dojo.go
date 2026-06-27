@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -227,11 +228,11 @@ func dojoLeverCatalog() []dojoLeverInfo {
 		{
 			Name:    "resume-posture",
 			Summary: "the resume cache-posture projection, scored against the provider's billed cache_read/cache_creation",
-		Metrics: []dojoMetricInfo{
-			{Name: "posture_accuracy", Theory: "the projection's per-boundary cold/warm call is correct (claim 1.0)"},
-			{Name: "cold_write_share", Theory: "a cold resume re-prefill rewrites ~85% of the resident at the write premium (claim 0.85)"},
-			{Name: "cross_session_warm_hit_rate", Theory: "~0% by default; workload-dependent and bimodal across corpora (observed 0.00→0.65) (claim 0.0)"},
-		},
+			Metrics: []dojoMetricInfo{
+				{Name: "posture_accuracy", Theory: "the projection's per-boundary cold/warm call is correct (claim 1.0)"},
+				{Name: "cold_write_share", Theory: "a cold resume re-prefill rewrites ~85% of the resident at the write premium (claim 0.85)"},
+				{Name: "cross_session_warm_hit_rate", Theory: "~0% by default; workload-dependent and bimodal across corpora (observed 0.00→0.65) (claim 0.0)"},
+			},
 		},
 		{
 			Name:    "compaction",
@@ -285,6 +286,15 @@ func (l resumePostureLever) Episodes(s dojo.Scenario) ([]dojo.ScoredInput, error
 		return nil, err
 	}
 	if l.maxFiles > 0 && len(files) > l.maxFiles {
+		// findTranscripts returns paths sorted lexicographically, so a naive
+		// prefix slice front-loads whichever project cluster sorts first. That
+		// matters for workload-dependent metrics: dogfooding showed the capped
+		// warm-hit rate skewed high (0.47–0.58 at small caps vs 0.16 over the
+		// full corpus) purely from the path-ordered prefix. Shuffle with a fixed
+		// seed before slicing so a cap is a representative-but-reproducible
+		// sample of the whole corpus, not a path-biased one.
+		r := rand.New(rand.NewSource(1))
+		r.Shuffle(len(files), func(i, j int) { files[i], files[j] = files[j], files[i] })
 		files = files[:l.maxFiles]
 	}
 	sessions := make([][]resume.ObservedTurn, 0, len(files))
@@ -415,15 +425,15 @@ func appendDojoLedgerRow(path string, row dojo.LedgerRow) error {
 // metrics scored against the projection.
 type CompactionBacktestReport struct {
 	// Cache prefix preservation metrics
-	FiredAttempts         int     `json:"fired_attempts"`         // WITNESSED: compactions that fired (body rewritten, protected prefix shipped byte-identical)
-	PrefixMismatchBails   int     `json:"prefix_mismatch_bails"`   // WITNESSED: compactions that bailed with prefix_mismatch (fak-fault signal)
-	PostFireCacheReadSum  uint64  `json:"post_fire_cache_read_sum"` // OBSERVED: cumulative provider cache_read on compacted turns
-	PostFireCacheReadN    int     `json:"post_fire_cache_read_n"`   // N for the sum (turns with post-fire cache_read)
+	FiredAttempts        int    `json:"fired_attempts"`           // WITNESSED: compactions that fired (body rewritten, protected prefix shipped byte-identical)
+	PrefixMismatchBails  int    `json:"prefix_mismatch_bails"`    // WITNESSED: compactions that bailed with prefix_mismatch (fak-fault signal)
+	PostFireCacheReadSum uint64 `json:"post_fire_cache_read_sum"` // OBSERVED: cumulative provider cache_read on compacted turns
+	PostFireCacheReadN   int    `json:"post_fire_cache_read_n"`   // N for the sum (turns with post-fire cache_read)
 
 	// Token shed metrics
-	ShedTokensSum         uint64  `json:"shed_tokens_sum"`         // WITNESSED: cumulative tokens fak claims to have shed
-	InputTokensOffSum     uint64  `json:"input_tokens_off_sum"`     // OBSERVED: cumulative provider input_tokens on compacted turns with compaction OFF
-	InputTokensOnSum      uint64  `json:"input_tokens_on_sum"`      // OBSERVED: cumulative provider input_tokens on compacted turns with compaction ON
+	ShedTokensSum     uint64 `json:"shed_tokens_sum"`      // WITNESSED: cumulative tokens fak claims to have shed
+	InputTokensOffSum uint64 `json:"input_tokens_off_sum"` // OBSERVED: cumulative provider input_tokens on compacted turns with compaction OFF
+	InputTokensOnSum  uint64 `json:"input_tokens_on_sum"`  // OBSERVED: cumulative provider input_tokens on compacted turns with compaction ON
 }
 
 // compactionLever scores history compaction's theory against billed reality.
