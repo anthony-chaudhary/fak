@@ -161,8 +161,11 @@ var registry = []Bench{
 	{
 		Name: "ctxplanbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Measures the ctxplan planned VIEW over real Claude Code session transcripts  -  context kept vs dropped.",
-		Run:     "go run ./cmd/ctxplanbench",
-		Doc:     "",
+		// Default to the self-contained known-answer pipeline (-selfcheck): a bare
+		// invocation needs -transcripts/-heaviest input the sweep has no way to supply,
+		// so it failed every unattended run. -selfcheck is the offline smoke that exits 0.
+		Run: "go run ./cmd/ctxplanbench -selfcheck",
+		Doc: "",
 	},
 	{
 		Name: "fanbench", Kind: KindCmd, Need: NeedNone,
