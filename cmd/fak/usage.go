@@ -334,6 +334,15 @@ func usageScorecardVerbs() {
                  posts free-form product prose (persona items, direction calls). Same
                  workspace as #scoreboard but resolves FAK_PRODUCT_CHANNEL -- never falls
                  back to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN, not the lab token)
+  fak nodeusage post [--fleet snap.json | --kpi NAME --value V --grade G --verdict OK|ACTION |
+                --from FILE] [--detail D] [--title T] [--channel ID] [--source WHO] [--dry-run]
+                (the COMPUTE-NODE-USAGE Slack surface for #node-usage: --fleet folds a
+                 'fak lab status --json' snapshot (the headline node-usage signal:
+                 per-state/per-class node counts + readiness) into a card; --kpi posts
+                 an ad-hoc node-usage number (active workers, open-issue inbound load).
+                 Same workspace as #scoreboard but resolves FAK_NODE_USAGE_CHANNEL --
+                 never falls back to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN
+                 (node-usage token fallback), not the lab token)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
                 (the CONSOLIDATED regular-cadence report: folds the three dimensions
                  an operator tracks  -  SCORES (scorecard control pane), WORK-DONE

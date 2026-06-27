@@ -187,6 +187,8 @@ func main() {
 		cmdSteering(os.Args[2:])
 	case "product":
 		cmdProduct(os.Args[2:])
+	case "nodeusage":
+		cmdNodeUsage(os.Args[2:])
 	case "callavoid":
 		cmdCallavoid(os.Args[2:])
 	case "savings-vector":

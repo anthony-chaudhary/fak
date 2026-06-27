@@ -1,0 +1,113 @@
+name: node-usage-feed
+
+# Publish fak's COMPUTE-NODE-USAGE surface to Slack #node-usage (C0BEFFPCSAU, the
+# scoreboard workspace T0BDEJF1HGB). The node-usage memo names three signals —
+# (a) fleet/node readiness (`fak lab status`), (b) active worker accounts
+# (`fak accounts list`), and (c) the open-issue inbound-load backlog. (b) and (c)
+# need lab/account/issue context; the headline signal that is reliable on a bare CI
+# node WITHOUT any lab secret is the FLEET READINESS SNAPSHOT: `fak lab status --json`
+# folds the embedded GENERIC roster against whatever live reports exist (none, on CI),
+# so it always renders a valid node-usage card (every box reads `unknown`, honestly,
+# until a bridge populates liveness). So this daily job folds that snapshot into the
+# node-usage card via `fak nodeusage post --fleet`.
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), the dual of
+# capacity-feed.yml / steering-guard.yml — NOT an issue feeder like
+# score-/bench-/gate-signal.yml (those turn a regression into a GitHub issue for the
+# dispatch loop and post nothing to Slack). Do not conflate the two.
+#
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret being present (the node-usage
+# token falls back to it). Without it the job runs in --dry-run and writes the card to
+# the step summary, so a fork or a secret-less run never hard-fails — it just shows
+# what WOULD post.
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
+# scoreboard-workspace bot token — the same value in the gitignored .env.slack.local)
+# under Settings -> Secrets and variables -> Actions. The channel #node-usage
+# (C0BEFFPCSAU) is the built-in default; override with the FAK_NODE_USAGE_CHANNEL repo
+# variable if you point the surface elsewhere.
+on:
+  schedule:
+    # Daily 08:57 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (scoreboard-feed 08:17, bench-feed 08:27, capacity-feed 08:47; garden 06:23,
+    # steering-guard 07:33, score-signal 07:41, gate-signal 07:53, bench-signal 08:03).
+    - cron: "57 8 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-usage-feed
+  cancel-in-progress: false
+
+jobs:
+  node-usage-feed:
+    name: node usage -> #node-usage
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_NODE_USAGE_CHANNEL: ${{ vars.FAK_NODE_USAGE_CHANNEL || 'C0BEFFPCSAU' }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Fold the fleet readiness snapshot — the node-usage signal. The embedded generic
+      # roster needs no flag and no lab secret; with no live reports every box reads
+      # `unknown` (honest), so the card always renders.
+      - name: fold fleet snapshot
+        run: |
+          go run ./cmd/fak lab status --json > snap.json
+          test -s snap.json || { echo "lab status produced no snapshot"; exit 1; }
+
+      # Always render the card to the step summary (and as the artifact) so the run is
+      # auditable even when nothing posts (missing secret / manual dry-run / fork).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak nodeusage post \
+            --fleet snap.json \
+            --channel "$FAK_NODE_USAGE_CHANNEL" \
+            --source ci \
+            --dry-run | tee node-usage-card.txt
+          {
+            echo "## node-usage-feed — fleet readiness"
+            echo '```'
+            cat node-usage-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when the token secret is present. A manual dry_run also skips.
+      - name: post to #node-usage
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak nodeusage post \
+            --fleet snap.json \
+            --channel "$FAK_NODE_USAGE_CHANNEL" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-usage-card
+          path: |
+            node-usage-card.txt
+            snap.json
+          if-no-files-found: ignore
