@@ -312,10 +312,7 @@ func ablateEpisodesFromArms(on, off metrics.Arm) []dojo.ScoredInput {
 			elided = 0
 		}
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "vdso-ablation", Metric: "engine_call_elision", Claimed: 1.0, Unit: "fraction",
-				Basis: "vDSO ON serves every fast-path call locally, eliding it from the engine",
-			},
+			Prediction: dojo.Registry.MustPredict("vdso-ablation", "engine_call_elision", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: elided, Provenance: dojo.Witnessed, Measured: true, Sample: int(off.EngineCalls),
 				Source: "(off.engine_calls - on.engine_calls) / off.engine_calls over the replayed trace (WITNESSED)",
@@ -638,10 +635,7 @@ func resumeEpisodesFromBacktest(rep resume.BacktestReport) []dojo.ScoredInput {
 	// reality: the share that agreed with the provider's billed cache_read.
 	if rep.Scored > 0 {
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "resume-posture", Metric: "posture_accuracy", Claimed: 1.0, Unit: "fraction",
-				Basis: "the resume projection's per-boundary cold/warm posture call assumed correct",
-			},
+			Prediction: dojo.Registry.MustPredict("resume-posture", "posture_accuracy", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: rep.Accuracy, Provenance: dojo.Observed, Measured: true, Sample: rep.Scored,
 				Source: "provider cache_read recovery vs projected posture",
@@ -653,10 +647,7 @@ func resumeEpisodesFromBacktest(rep resume.BacktestReport) []dojo.ScoredInput {
 	// the resident at the write premium (0.85); reality: the measured write share.
 	if rep.FirstTurnCold > 0 {
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "resume-posture", Metric: "cold_write_share", Claimed: 0.85, Unit: "fraction",
-				Basis: "the projection prices ~85% of the resident at the cold-write premium (share = 0.85)",
-			},
+			Prediction: dojo.Registry.MustPredict("resume-posture", "cold_write_share", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: rep.FirstTurnColdWriteShareMean, Provenance: dojo.Observed, Measured: true, Sample: rep.FirstTurnCold,
 				Source: "provider cache_creation/prompt on cold cross-file resume re-prefills",
@@ -671,10 +662,7 @@ func resumeEpisodesFromBacktest(rep resume.BacktestReport) []dojo.ScoredInput {
 	if rep.FirstTurnResumes > 0 {
 		warm := float64(rep.FirstTurnWarmHit) / float64(rep.FirstTurnResumes)
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "resume-posture", Metric: "cross_session_warm_hit_rate", Claimed: 0.0, Unit: "fraction",
-				Basis: "~0% of large first-turn resumes hit a still-warm cross-session prefix by default; the rate is workload-dependent and bimodal across corpora (0.00→0.65 observed)",
-			},
+			Prediction: dojo.Registry.MustPredict("resume-posture", "cross_session_warm_hit_rate", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: warm, Provenance: dojo.Observed, Measured: true, Sample: rep.FirstTurnResumes,
 				Source: "provider cache_read>~0 on the first turn of resumed transcripts",
@@ -732,10 +720,7 @@ func vcacheEpisodesFromObserve(pe vcachecal.PredictionError) []dojo.ScoredInput 
 	// FalseWarm / (TrueWarm + FalseWarm).
 	if predictedWarm := pe.TrueWarm + pe.FalseWarm; predictedWarm > 0 {
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "vcache-warmth", Metric: "false_warm_rate", Claimed: 0.0, Unit: "fraction",
-				Basis: "the warmth belief never predicts warm on a call the provider bills cache_read=0",
-			},
+			Prediction: dojo.Registry.MustPredict("vcache-warmth", "false_warm_rate", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: pe.FalseWarmRate(), Provenance: dojo.Observed, Measured: true, Sample: predictedWarm,
 				Source: "provider cache_read=0 on believed-warm calls / all believed-warm calls",
@@ -749,10 +734,7 @@ func vcacheEpisodesFromObserve(pe vcachecal.PredictionError) []dojo.ScoredInput 
 	if warmReads := pe.TrueWarm + pe.FalseCold; warmReads > 0 {
 		recall := float64(pe.TrueWarm) / float64(warmReads)
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "vcache-warmth", Metric: "warm_recall", Claimed: 1.0, Unit: "fraction",
-				Basis: "the warmth belief calls warm every read the provider bills cache_read>0",
-			},
+			Prediction: dojo.Registry.MustPredict("vcache-warmth", "warm_recall", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: recall, Provenance: dojo.Observed, Measured: true, Sample: warmReads,
 				Source: "believed-warm provider-warm reads / all provider-warm reads (TrueWarm/(TrueWarm+FalseCold))",
@@ -859,10 +841,7 @@ func (compactionLever) Episodes(s dojo.Scenario) ([]dojo.ScoredInput, error) {
 	// The pure compactionEpisodesFromBacktest scores the real metric once a paired
 	// ON/OFF corpus exists; until then this is the honest empty state.
 	return []dojo.ScoredInput{{
-		Prediction: dojo.Prediction{
-			Lever: "compaction", Metric: "token_shed_ratio", Claimed: 1.0, Unit: "fraction",
-			Basis: "the projected shed (WITNESSED shed_tokens) matches the billed input_tokens delta (OFF - ON)",
-		},
+		Prediction: dojo.Registry.MustPredict("compaction", "token_shed_ratio", "fraction"),
 		Outcome: dojo.Outcome{
 			Measured: false,
 			Source:   "no paired ON/OFF compaction corpus from standard transcripts (see #953); fak_gateway_compaction_* expose the ON-side counters but not the OFF counterfactual",
@@ -885,10 +864,7 @@ func compactionEpisodesFromBacktest(rep CompactionBacktestReport) []dojo.ScoredI
 		prefixMismatchRate := float64(rep.PrefixMismatchBails) / float64(rep.FiredAttempts)
 		preserved := 1.0 - prefixMismatchRate
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "compaction", Metric: "cache_prefix_preserved", Claimed: 1.0, Unit: "fraction",
-				Basis: "a fired compaction ships the protected prefix byte-identical",
-			},
+			Prediction: dojo.Registry.MustPredict("compaction", "cache_prefix_preserved", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: preserved, Provenance: dojo.Witnessed, Measured: true, Sample: rep.FiredAttempts,
 				Source: "inverse of prefix_mismatch bail rate over fired attempts (WITNESSED)",
@@ -920,10 +896,7 @@ func compactionEpisodesFromBacktest(rep CompactionBacktestReport) []dojo.ScoredI
 			sample = 1
 		}
 		out = append(out, dojo.ScoredInput{
-			Prediction: dojo.Prediction{
-				Lever: "compaction", Metric: "token_shed_ratio", Claimed: 1.0, Unit: "fraction",
-				Basis: "the projected shed (WITNESSED shed_tokens) matches the billed delta",
-			},
+			Prediction: dojo.Registry.MustPredict("compaction", "token_shed_ratio", "fraction"),
 			Outcome: dojo.Outcome{
 				Realized: ratio, Provenance: dojo.Witnessed, Measured: true, Sample: sample,
 				Source: "billed input_tokens delta (OFF - ON) divided by projected shed (WITNESSED)",

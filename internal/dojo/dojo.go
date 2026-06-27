@@ -75,6 +75,17 @@ type Prediction struct {
 	Unit          string  `json:"unit"`
 	Basis         string  `json:"basis"`
 	LowerIsBetter bool    `json:"lower_is_better,omitempty"`
+
+	// IntentionalFloor marks a claim that is a GUARD the dojo defends, not an
+	// ESTIMATE it expects reality to match: a value reality must not breach
+	// (false_warm_rate must stay 0.0; the bimodal cross-session warm-hit default
+	// is 0.0 by design) rather than a best-guess central tendency. FoldCalibrable
+	// folds an estimate by its calib_err but a floor only by its breach, so a loop
+	// optimising the fold can never "gain" by recalibrating a floor up to its
+	// empirical rate — closing a floor's gap RAISES the fold. The field is
+	// additive and zero-value-safe, exactly like LowerIsBetter: a Prediction built
+	// without it scores and folds exactly as before.
+	IntentionalFloor bool `json:"intentional_floor,omitempty"`
 }
 
 // Outcome is the measured reality for the same metric, lifted from the provider's
@@ -107,6 +118,19 @@ type Episode struct {
 	Source     string     `json:"source"`
 	Sample     int        `json:"sample"`
 	Basis      string     `json:"basis"`
+
+	// IntentionalFloor is carried from the Prediction so the fold can tell a guard
+	// from an estimate without re-consulting the registry. FoldCalibrable reads it
+	// to route a floor through FloorRespectErr instead of calib_err. Additive and
+	// zero-value-safe: an episode scored from a Prediction without the bit folds
+	// exactly as before.
+	IntentionalFloor bool `json:"intentional_floor,omitempty"`
+	// LowerIsBetter is carried from the Prediction so FloorRespectErr can measure a
+	// floor's breach on the metric's OWN worse side directly, independent of the
+	// (estimate-tuned) calibration band — a 0.05 false-warm is a breach of a 0.0
+	// floor even though 0.05 is "calibrated" for an estimate. Additive and
+	// zero-value-safe.
+	LowerIsBetter bool `json:"lower_is_better,omitempty"`
 }
 
 // CalibBand maps a normalized residual to a verdict and a letter grade. A
@@ -146,16 +170,18 @@ func (b CalibBand) grade(ce float64) string {
 // perfectly calibrated rather than as an unbounded relative error.
 func Score(scenario string, p Prediction, o Outcome, band CalibBand) Episode {
 	e := Episode{
-		Scenario:   scenario,
-		Lever:      p.Lever,
-		Metric:     p.Metric,
-		Unit:       p.Unit,
-		Claimed:    p.Claimed,
-		Realized:   o.Realized,
-		Provenance: o.Provenance,
-		Source:     o.Source,
-		Sample:     o.Sample,
-		Basis:      p.Basis,
+		Scenario:         scenario,
+		Lever:            p.Lever,
+		Metric:           p.Metric,
+		Unit:             p.Unit,
+		Claimed:          p.Claimed,
+		Realized:         o.Realized,
+		Provenance:       o.Provenance,
+		Source:           o.Source,
+		Sample:           o.Sample,
+		Basis:            p.Basis,
+		IntentionalFloor: p.IntentionalFloor,
+		LowerIsBetter:    p.LowerIsBetter,
 	}
 	if !o.Measured {
 		e.Verdict = VerdictUnmeasured
@@ -337,6 +363,101 @@ func Fold(episodes []Episode, opts FoldOpts) Report {
 		r.NextAction = nextAction(overs, unders)
 	}
 	return r
+}
+
+// FloorRespectErr is the fold contribution of one INTENTIONAL-FLOOR episode: 0
+// while the floor holds, rising as it is breached. A floor is a guard the dojo
+// asserts reality must not cross (false_warm_rate must stay at the 0.0 claim), so
+// the only error worth folding is the BREACH — how far realized landed on the
+// worse side of the claim — never the (incentive-inverting) calibration gap a
+// recalibrate-toward-the-mean rewrite would close.
+//
+// The breach is measured on the metric's OWN worse side (worseThanClaim, the same
+// direction rule Score uses), DIRECTLY rather than through the verdict: a floor's
+// tolerance is zero, so even a 0.05 false-warm against a 0.0 floor is a breach
+// even though 0.05 is "CALIBRATED" for an estimate. Reading the verdict would
+// inherit the estimate-tuned calibration band and silently forgive a small floor
+// breach; reading the residual's sign honors the floor's zero tolerance. Reality
+// on the safe side (the floor held, or reality beat it) contributes 0. The
+// magnitude is the absolute residual, capped at MaxCalibErr so one wild floor
+// cannot dominate the fold — the same cap calibErr applies. This is what makes
+// "recalibrating a floor to its empirical rate" leave the breach folded instead of
+// zeroed, so the loop can never erase the guard it is meant to defend.
+func FloorRespectErr(e Episode) float64 {
+	if !worseThanClaim(e.Residual, e.LowerIsBetter) {
+		return 0
+	}
+	breach := math.Abs(e.Residual)
+	if breach > MaxCalibErr {
+		return MaxCalibErr
+	}
+	return breach
+}
+
+// FoldResult is the breakdown FoldCalibrable returns: the folded metric the RSI
+// loop optimises (Value), and the two disjoint populations behind it so a reader
+// (and the keep-bit) can see WHY the number moved — an estimate recalibration that
+// lowered EstimateMeanCalibErr versus a floor breach that raised FloorBreachErr.
+type FoldResult struct {
+	// Value is the optimisation target: the mean calib_err over genuine estimates
+	// PLUS the mean floor-breach over intentional floors. Smaller is better. A
+	// constant-rewrite "gain" is admissible only where the claim is an estimate;
+	// closing a floor's gap raises FloorBreachErr and so raises Value.
+	Value float64 `json:"value"`
+	// EstimateMeanCalibErr is the mean calib_err over measured, non-floor episodes
+	// (the recalibratable estimates). EstimateCount stands behind it.
+	EstimateMeanCalibErr float64 `json:"estimate_mean_calib_err"`
+	EstimateCount        int     `json:"estimate_count"`
+	// FloorBreachErr is the mean FloorRespectErr over measured floor episodes (0
+	// while every floor holds). FloorCount stands behind it.
+	FloorBreachErr float64 `json:"floor_breach_err"`
+	FloorCount     int     `json:"floor_count"`
+	// Measured is the total measured episodes folded (estimates + floors).
+	Measured int `json:"measured"`
+}
+
+// FoldCalibrable folds a run's episodes into the CALIBRABLE metric the dojo-RSI
+// loop optimises — the one number a recalibration is kept or reverted on. It is
+// NOT the report's mean_calib_err. The split is the whole point (see
+// docs/fak/dojo-rsi-loop.md "What it optimises"):
+//
+//   - a genuine ESTIMATE (IntentionalFloor=false) contributes its calib_err, so
+//     re-pointing the claim at its corpus central tendency lowers the fold and is
+//     eligible to KEEP — the mechanical RECALIBRATE win;
+//   - an intentional FLOOR (IntentionalFloor=true) contributes FloorRespectErr —
+//     0 while the floor holds, rising on a breach — so "recalibrating" a floor up
+//     to its empirical rate RAISES the fold and is reverted, and a real belief-code
+//     bug that breaches the floor surfaces as a rising fold rather than being
+//     silently calibrated away.
+//
+// UNMEASURED episodes never fold (the same honesty constraint Fold keeps). Value
+// is the sum of the two population means so neither side can mask the other: a big
+// estimate win cannot hide a floor breach, and a floor that holds adds exactly 0.
+// Pure and total: no episodes yields a zero FoldResult.
+func FoldCalibrable(episodes []Episode) FoldResult {
+	var fr FoldResult
+	var sumEstimate, sumFloor float64
+	for _, e := range episodes {
+		if e.Verdict == VerdictUnmeasured {
+			continue
+		}
+		fr.Measured++
+		if e.IntentionalFloor {
+			fr.FloorCount++
+			sumFloor += FloorRespectErr(e)
+			continue
+		}
+		fr.EstimateCount++
+		sumEstimate += e.CalibErr
+	}
+	if fr.EstimateCount > 0 {
+		fr.EstimateMeanCalibErr = sumEstimate / float64(fr.EstimateCount)
+	}
+	if fr.FloorCount > 0 {
+		fr.FloorBreachErr = sumFloor / float64(fr.FloorCount)
+	}
+	fr.Value = fr.EstimateMeanCalibErr + fr.FloorBreachErr
+	return fr
 }
 
 func nextAction(overs, unders []string) string {
