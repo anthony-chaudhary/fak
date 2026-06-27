@@ -644,6 +644,47 @@ func refuseMemoryPlanForHostMem(plan MemoryPlan, total, free int64, known bool, 
 	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: cloneMemoryPlan(plan), Scope: MemoryScopeHost}
 }
 
+// RefuseHostScopedPlanIfTooBigForHost is the --cpu-offload-experts counterpart of
+// RefuseMemoryPlanIfTooBigForHost (#974, #971). On a BACKED (device) serve with cpu-offloaded MoE
+// experts the dense weights live in device VRAM — RefuseMemoryPlanIfTooBig already checks those
+// against the device probe — but the routed experts are pinned in ANONYMOUS host RAM, and a device
+// backend does NOT advertise HostCapacity, so FitsOnHost(be, …) fails OPEN and the host expert pool
+// (~424 GiB for GLM-5.2 Q4_K) is never checked against the box's real free RAM. That gap OOM-kills
+// the host (#971 blocker 3): a second concurrent large load, or one load on a contended box,
+// exhausts host RAM with no refusal. This checks ONLY the plan's host-scoped subset against the
+// PROCESS host's allocatable memory (HostSystemMemoryInfo → Linux MemAvailable), turning a would-be
+// OOM into a typed FitTooBig(host) BEFORE the experts are pinned. Because the budget is MemAvailable
+// (live free, not the static total), an already-running serve's resident experts shrink it — so this
+// also refuses the "second concurrent large load" the issue names. Fail-open: a platform that cannot
+// report host memory yields nil and loads exactly as before. headroom in [0,1) reserves a fraction
+// for the bytes NOT in the header estimate (the resident-struct overshoot, dense weights transiting
+// host buffers during upload, MemAvailable jitter as clean cache is evicted mid-load).
+func RefuseHostScopedPlanIfTooBigForHost(plan MemoryPlan, headroom float64) error {
+	total, free, known := HostSystemMemoryInfo()
+	return refuseHostScopedPlanForHostMem(plan, total, free, known, headroom)
+}
+
+// refuseHostScopedPlanForHostMem is the injectable core of RefuseHostScopedPlanIfTooBigForHost: it
+// takes the host (total, free, known) explicitly so the refusal is testable without a live
+// /proc/meminfo. Unlike refuseMemoryPlanForHostMem (which sums the GRAND total for the pure-CPU
+// serve, where every demand is anonymous host RAM), it checks ONLY the host-scoped demands — the
+// device-scoped weights of a backed serve live in VRAM, not host RAM — and the FitError carries
+// just that host-scoped subset so the refusal names the expert pool, not the VRAM-resident dense.
+func refuseHostScopedPlanForHostMem(plan MemoryPlan, total, free int64, known bool, headroom float64) error {
+	want := plan.HostTotal()
+	verdict, avail := fitsWithinReportedMemory(total, free, known, want, headroom)
+	if verdict != FitTooBig {
+		return nil
+	}
+	hostPlan := make(MemoryPlan, 0, len(plan))
+	for _, d := range plan {
+		if d.Bytes > 0 && d.ScopeOrDefault() == MemoryScopeHost {
+			hostPlan = append(hostPlan, d)
+		}
+	}
+	return &FitError{Verdict: verdict, Want: want, Avail: avail, Demands: hostPlan, Scope: MemoryScopeHost}
+}
+
 // DeviceAllocError is the typed form of a RUNTIME in-kernel device allocation failure — the
 // allocation that actually returned nil, as opposed to FitError's pre-flight refusal. It is
 // raised (as a panic, since the failing alloc sits deep below a CGO boundary with no error

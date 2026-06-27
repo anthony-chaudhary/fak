@@ -790,6 +790,12 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// expert split so experts dwarfing VRAM stay host-scoped while the dense side must fit.
 		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, contextBudgetTokens)
 		must(err)
+		// #971 blocker 3: the dense weights fit-checked above land in VRAM, but the routed MoE
+		// experts (~424 GiB for GLM-5.2 Q4_K) are pinned in HOST RAM — and a device backend does not
+		// advertise HostCapacity, so the device fit check fails OPEN on them. Guard the host expert
+		// pool against the box's real MemAvailable so a load that would OOM-kill the host (or a second
+		// concurrent large load on a contended box) refuses cleanly here instead of wedging the box.
+		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
 		prof := ggufload.NewLoadProfiler()
 		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
 		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)

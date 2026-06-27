@@ -62,3 +62,74 @@ func TestRefuseMemoryPlanForHostMem(t *testing.T) {
 		t.Errorf("empty plan: want nil, got %v", err)
 	}
 }
+
+// TestRefuseHostScopedPlanForHostMem covers the --cpu-offload-experts host-RAM guard
+// (refuseHostScopedPlanForHostMem, the injectable core of RefuseHostScopedPlanIfTooBigForHost,
+// #971 blocker 3). Unlike the pure-CPU path it must check ONLY the host-scoped subset — the
+// device-scoped dense weights of a backed serve live in VRAM — refuse when the host expert pool
+// exceeds MemAvailable-less-headroom, refuse a SECOND concurrent load (MemAvailable already shrunk
+// by a running serve), pass when the box has room, ignore the device weights entirely, and FAIL
+// OPEN when the host cannot report.
+func TestRefuseHostScopedPlanForHostMem(t *testing.T) {
+	const gib = int64(1) << 30
+	const headroom = 0.15
+	// The cpu-offload serve plan the way serveGGUFCPUOffloadMemoryPlan builds it: dense weights +
+	// KV/scratch are DEVICE-scoped (they go to VRAM), the routed experts are HOST-scoped.
+	plan := MemoryPlan{
+		{Class: MemoryWeights, Bytes: 12 * gib, Detail: "gguf-device-dense-load", Scope: MemoryScopeDevice},
+		{Class: MemoryKVCache, Bytes: 4 * gib, Detail: "kv", Scope: MemoryScopeDevice},
+		{Class: MemoryOffload, Bytes: 424 * gib, Detail: "gguf-host-expert-offload", Scope: MemoryScopeHost},
+	}
+
+	// Single load on a contended 512 GiB box: 480 GiB MemAvailable, budget = 480*0.85 = 408 GiB <
+	// 424 GiB host experts -> refuse before pinning them and wedging the box.
+	err := refuseHostScopedPlanForHostMem(plan, 512*gib, 480*gib, true, headroom)
+	if err == nil {
+		t.Fatal("424 GiB host experts into 480 GiB MemAvailable (15% headroom): want FitTooBig, got nil")
+	}
+	var fe *FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want *FitError, got %T: %v", err, err)
+	}
+	if fe.Verdict != FitTooBig {
+		t.Errorf("verdict = %s, want too_big", fe.Verdict)
+	}
+	if fe.Scope != MemoryScopeHost {
+		t.Errorf("scope = %q, want host (the offloaded experts are anonymous host RAM)", fe.Scope)
+	}
+	// CRUCIAL: Want is the HOST-scoped total only — the 16 GiB of device weights+KV must not count.
+	if fe.Want != 424*gib {
+		t.Errorf("want bytes = %d, want host-scoped-only %d (device weights must not count)", fe.Want, 424*gib)
+	}
+	if fe.Avail != int64(float64(480*gib)*(1-headroom)) {
+		t.Errorf("avail = %d, want headroom-adjusted budget %d", fe.Avail, int64(float64(480*gib)*(1-headroom)))
+	}
+	for _, d := range fe.Demands {
+		if d.ScopeOrDefault() != MemoryScopeHost {
+			t.Errorf("FitError carried a non-host demand %+v; the refusal must name only the host expert pool", d)
+		}
+	}
+
+	// Second concurrent large load: a first serve already pinned its experts, so MemAvailable has
+	// collapsed to ~100 GiB. The same plan must refuse -> the "refuse a second concurrent load" ask.
+	if err := refuseHostScopedPlanForHostMem(plan, 2048*gib, 100*gib, true, headroom); err == nil {
+		t.Error("second concurrent load (100 GiB MemAvailable left): want FitTooBig refusal, got nil")
+	}
+
+	// A 2 TiB box with 1.8 TiB MemAvailable: 424 GiB host experts fit -> must NOT refuse.
+	if err := refuseHostScopedPlanForHostMem(plan, 2048*gib, 1800*gib, true, headroom); err != nil {
+		t.Errorf("424 GiB host experts into 1800 GiB MemAvailable: want nil (fits), got %v", err)
+	}
+
+	// A device-only plan (no host-scoped demand) asks nothing of host RAM -> never refuse, even on
+	// a tiny box. This pins that the guard cannot trip on the VRAM-resident dense weights.
+	deviceOnly := MemoryPlan{{Class: MemoryWeights, Bytes: 400 * gib, Scope: MemoryScopeDevice}}
+	if err := refuseHostScopedPlanForHostMem(deviceOnly, 8*gib, 1*gib, true, headroom); err != nil {
+		t.Errorf("device-only plan: want nil (host guard ignores VRAM weights), got %v", err)
+	}
+
+	// Fail-open: a platform that cannot report host memory must never refuse.
+	if err := refuseHostScopedPlanForHostMem(plan, 0, FreeUnknown, false, headroom); err != nil {
+		t.Errorf("unreported host memory: want fail-open nil, got %v", err)
+	}
+}
