@@ -182,7 +182,7 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, fmt.Errorf("gguf: tensor %s f16 payload has %d bytes, want %d", t.Name, len(raw), len(out)*2)
 		}
 		for i := range out {
-			out[i] = math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[i*2:])))
+			out[i] = f16At(raw, i*2)
 		}
 	case TensorBF16:
 		if len(raw) != len(out)*2 {
@@ -192,132 +192,95 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			out[i] = math.Float32frombits(uint32(binary.LittleEndian.Uint16(raw[i*2:])) << 16)
 		}
 	case TensorQ4_0:
-		if elems%qk4 != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q4_0 element count %d is not a multiple of %d", t.Name, elems, qk4)
-		}
-		want := int(elems / qk4 * blockQ4_0Bytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q4_0 payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_0Bytes, "Q4_0"); err != nil {
+			return nil, err
 		}
 		dequantQ4_0(out, raw)
 	case TensorQ4_1:
-		if elems%qk4 != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q4_1 element count %d is not a multiple of %d", t.Name, elems, qk4)
-		}
-		want := int(elems / qk4 * blockQ4_1Bytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q4_1 payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_1Bytes, "Q4_1"); err != nil {
+			return nil, err
 		}
 		dequantQ4_1(out, raw)
 	case TensorQ5_0:
-		if elems%qk5 != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q5_0 element count %d is not a multiple of %d", t.Name, elems, qk5)
-		}
-		want := int(elems / qk5 * blockQ5_0Bytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q5_0 payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qk5, blockQ5_0Bytes, "Q5_0"); err != nil {
+			return nil, err
 		}
 		dequantQ5_0(out, raw)
 	case TensorQ5_1:
-		if elems%qk5 != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q5_1 element count %d is not a multiple of %d", t.Name, elems, qk5)
-		}
-		want := int(elems / qk5 * blockQ5_1Bytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q5_1 payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qk5, blockQ5_1Bytes, "Q5_1"); err != nil {
+			return nil, err
 		}
 		dequantQ5_1(out, raw)
 	case TensorQ8_0:
-		if elems%qk8_0 != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q8_0 element count %d is not a multiple of %d", t.Name, elems, qk8_0)
-		}
-		want := int(elems / qk8_0 * blockQ8_0Bytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q8_0 payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qk8_0, blockQ8_0Bytes, "Q8_0"); err != nil {
+			return nil, err
 		}
 		for block := 0; block < int(elems)/qk8_0; block++ {
 			base := block * blockQ8_0Bytes
-			d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+			d := f16At(raw, base)
 			for j := 0; j < qk8_0; j++ {
 				out[block*qk8_0+j] = float32(int8(raw[base+2+j])) * d
 			}
 		}
 	case TensorQ2_K:
-		if elems%qkK != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q2_K element count %d is not a multiple of %d", t.Name, elems, qkK)
-		}
-		want := int(elems / qkK * blockQ2KBytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q2_K payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ2KBytes, "Q2_K"); err != nil {
+			return nil, err
 		}
 		dequantQ2K(out, raw)
 	case TensorQ3_K:
-		if elems%qkK != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q3_K element count %d is not a multiple of %d", t.Name, elems, qkK)
-		}
-		want := int(elems / qkK * blockQ3KBytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q3_K payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ3KBytes, "Q3_K"); err != nil {
+			return nil, err
 		}
 		dequantQ3K(out, raw)
 	case TensorQ4_K:
-		if elems%qkK != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q4_K element count %d is not a multiple of %d", t.Name, elems, qkK)
-		}
-		want := int(elems / qkK * blockQ4KBytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q4_K payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ4KBytes, "Q4_K"); err != nil {
+			return nil, err
 		}
 		dequantQ4K(out, raw)
 	case TensorQ5_K:
-		if elems%qkK != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q5_K element count %d is not a multiple of %d", t.Name, elems, qkK)
-		}
-		want := int(elems / qkK * blockQ5KBytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q5_K payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ5KBytes, "Q5_K"); err != nil {
+			return nil, err
 		}
 		dequantQ5K(out, raw)
 	case TensorQ6_K:
-		if elems%qkK != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s Q6_K element count %d is not a multiple of %d", t.Name, elems, qkK)
-		}
-		want := int(elems / qkK * blockQ6KBytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s Q6_K payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ6KBytes, "Q6_K"); err != nil {
+			return nil, err
 		}
 		dequantQ6K(out, raw)
 	case TensorMXFP4:
-		if elems%qkMXFP4 != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s MXFP4 element count %d is not a multiple of %d", t.Name, elems, qkMXFP4)
-		}
-		want := int(elems / qkMXFP4 * blockMXFP4Bytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s MXFP4 payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkMXFP4, blockMXFP4Bytes, "MXFP4"); err != nil {
+			return nil, err
 		}
 		dequantMXFP4(out, raw)
 	case TensorIQ4_NL:
-		if elems%qkIQ4NL != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s IQ4_NL element count %d is not a multiple of %d", t.Name, elems, qkIQ4NL)
-		}
-		want := int(elems / qkIQ4NL * blockIQ4NLBytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s IQ4_NL payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkIQ4NL, blockIQ4NLBytes, "IQ4_NL"); err != nil {
+			return nil, err
 		}
 		dequantIQ4NL(out, raw)
 	case TensorIQ4_XS:
-		if elems%qkK != 0 {
-			return nil, fmt.Errorf("gguf: tensor %s IQ4_XS element count %d is not a multiple of %d", t.Name, elems, qkK)
-		}
-		want := int(elems / qkK * blockIQ4XSBytes)
-		if len(raw) != want {
-			return nil, fmt.Errorf("gguf: tensor %s IQ4_XS payload has %d bytes, want %d", t.Name, len(raw), want)
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ4XSBytes, "IQ4_XS"); err != nil {
+			return nil, err
 		}
 		dequantIQ4XS(out, raw)
 	default:
 		return nil, fmt.Errorf("gguf: tensor %s type %d cannot dequantize to f32 yet", t.Name, t.Type)
 	}
 	return out, nil
+}
+
+// checkQuantPayload validates that a quantized tensor's raw payload is a whole number of
+// blocks (elems divisible by qk) and exactly the size those blocks pack to, returning that
+// expected byte count. It is the shared block-shape guard the per-type dequant cases all ran
+// inline; label is the quant name in the error text (byte-identical to the inlined checks).
+func checkQuantPayload(t TensorInfo, elems uint64, raw []byte, qk, blockBytes uint64, label string) (int, error) {
+	if elems%qk != 0 {
+		return 0, fmt.Errorf("gguf: tensor %s %s element count %d is not a multiple of %d", t.Name, label, elems, qk)
+	}
+	want := int(elems / qk * blockBytes)
+	if len(raw) != want {
+		return 0, fmt.Errorf("gguf: tensor %s %s payload has %d bytes, want %d", t.Name, label, len(raw), want)
+	}
+	return want, nil
 }
 
 // dequantQ4_0 expands the legacy GGML Q4_0 32-element block. Each block is a
@@ -329,7 +292,7 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 func dequantQ4_0(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qk4; block++ {
 		base := block * blockQ4_0Bytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		d := f16At(raw, base)
 		qs := raw[base+2 : base+blockQ4_0Bytes]
 		yi := block * qk4
 		for j := 0; j < qk4/2; j++ {
@@ -387,7 +350,7 @@ var kvaluesIQ4NL = [16]float32{-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 
 func dequantIQ4NL(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkIQ4NL; block++ {
 		base := block * blockIQ4NLBytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		d := f16At(raw, base)
 		qs := raw[base+2 : base+blockIQ4NLBytes]
 		yi := block * qkIQ4NL
 		for j := 0; j < qkIQ4NL/2; j++ {
@@ -407,7 +370,7 @@ func dequantIQ4NL(out []float32, raw []byte) {
 func dequantIQ4XS(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockIQ4XSBytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		d := f16At(raw, base)
 		scalesH := binary.LittleEndian.Uint16(raw[base+2:])
 		scalesL := raw[base+4 : base+4+qkK/64]
 		qs := raw[base+4+qkK/64 : base+blockIQ4XSBytes]
@@ -434,8 +397,8 @@ func dequantIQ4XS(out []float32, raw []byte) {
 func dequantQ4_1(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qk4; block++ {
 		base := block * blockQ4_1Bytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
-		m := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+2:])))
+		d := f16At(raw, base)
+		m := f16At(raw, base+2)
 		qs := raw[base+4 : base+blockQ4_1Bytes]
 		yi := block * qk4
 		for j := 0; j < qk4/2; j++ {
@@ -450,7 +413,7 @@ func dequantQ4_1(out []float32, raw []byte) {
 func dequantQ5_0(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qk5; block++ {
 		base := block * blockQ5_0Bytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		d := f16At(raw, base)
 		qh := binary.LittleEndian.Uint32(raw[base+2:])
 		qs := raw[base+6 : base+blockQ5_0Bytes]
 		yi := block * qk5
@@ -468,8 +431,8 @@ func dequantQ5_0(out []float32, raw []byte) {
 func dequantQ5_1(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qk5; block++ {
 		base := block * blockQ5_1Bytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
-		m := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+2:])))
+		d := f16At(raw, base)
+		m := f16At(raw, base+2)
 		qh := binary.LittleEndian.Uint32(raw[base+4:])
 		qs := raw[base+8 : base+blockQ5_1Bytes]
 		yi := block * qk5
@@ -490,8 +453,8 @@ func dequantQ2K(out []float32, raw []byte) {
 		scales := raw[base : base+qkK/16]
 		q := raw[base+qkK/16 : base+qkK/16+qkK/4]
 		dm := base + qkK/16 + qkK/4
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[dm:])))
-		min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[dm+2:])))
+		d := f16At(raw, dm)
+		min := f16At(raw, dm+2)
 		yi := block * qkK
 		qi := 0
 		is := 0
@@ -524,7 +487,7 @@ func dequantQ3K(out []float32, raw []byte) {
 		hmask := raw[base : base+qkK/8]
 		q := raw[base+qkK/8 : base+qkK/8+qkK/4]
 		scales := unpackQ3KScales(raw[base+qkK/8+qkK/4 : base+qkK/8+qkK/4+kScaleSize])
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+blockQ3KBytes-2:])))
+		d := f16At(raw, base+blockQ3KBytes-2)
 		yi := block * qkK
 		qi := 0
 		is := 0
@@ -586,18 +549,15 @@ func unpackQ3KScales(raw []byte) [16]int8 {
 func dequantQ4K(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockQ4KBytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
-		min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+2:])))
+		d := f16At(raw, base)
+		min := f16At(raw, base+2)
 		scales := raw[base+4 : base+4+kScaleSize]
 		q := raw[base+4+kScaleSize : base+blockQ4KBytes]
 		qi := 0
 		is := 0
 		yi := block * qkK
 		for j := 0; j < qkK; j += 64 {
-			sc, m := getScaleMinK4(is, scales)
-			d1, m1 := d*float32(sc), min*float32(m)
-			sc, m = getScaleMinK4(is+1, scales)
-			d2, m2 := d*float32(sc), min*float32(m)
+			d1, m1, d2, m2 := scaleMinPairK4(d, min, is, scales)
 			for l := 0; l < 32; l++ {
 				out[yi+j+l] = d1*float32(q[qi+l]&0x0f) - m1
 			}
@@ -610,6 +570,18 @@ func dequantQ4K(out []float32, raw []byte) {
 	}
 }
 
+// scaleMinPairK4 decodes the two 6-bit (scale,min) sub-block fields at indices is and is+1
+// and folds them with the super-block d/min into the (d1,m1,d2,m2) the Q4_K and Q5_K kernels
+// both consume per 64-element stride. It is pure code motion of the identical 4-line preamble
+// shared by dequantQ4K and dequantQ5K.
+func scaleMinPairK4(d, min float32, is int, scales []byte) (d1, m1, d2, m2 float32) {
+	sc, m := getScaleMinK4(is, scales)
+	d1, m1 = d*float32(sc), min*float32(m)
+	sc, m = getScaleMinK4(is+1, scales)
+	d2, m2 = d*float32(sc), min*float32(m)
+	return d1, m1, d2, m2
+}
+
 func getScaleMinK4(j int, q []byte) (scale, min uint8) {
 	if j < 4 {
 		return q[j] & 63, q[j+4] & 63
@@ -620,8 +592,8 @@ func getScaleMinK4(j int, q []byte) (scale, min uint8) {
 func dequantQ5K(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockQ5KBytes
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
-		min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+2:])))
+		d := f16At(raw, base)
+		min := f16At(raw, base+2)
 		scales := raw[base+4 : base+4+kScaleSize]
 		qh := raw[base+4+kScaleSize : base+4+kScaleSize+qkK/8]
 		ql := raw[base+4+kScaleSize+qkK/8 : base+blockQ5KBytes]
@@ -630,10 +602,7 @@ func dequantQ5K(out []float32, raw []byte) {
 		u1, u2 := byte(1), byte(2)
 		yi := block * qkK
 		for j := 0; j < qkK; j += 64 {
-			sc, m := getScaleMinK4(is, scales)
-			d1, m1 := d*float32(sc), min*float32(m)
-			sc, m = getScaleMinK4(is+1, scales)
-			d2, m2 := d*float32(sc), min*float32(m)
+			d1, m1, d2, m2 := scaleMinPairK4(d, min, is, scales)
 			for l := 0; l < 32; l++ {
 				hi := byte(0)
 				if qh[l]&u1 != 0 {
@@ -662,7 +631,7 @@ func dequantQ6K(out []float32, raw []byte) {
 		ql := raw[base : base+qkK/2]
 		qh := raw[base+qkK/2 : base+qkK/2+qkK/4]
 		scales := raw[base+qkK/2+qkK/4 : base+qkK/2+qkK/4+qkK/16]
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+blockQ6KBytes-2:])))
+		d := f16At(raw, base+blockQ6KBytes-2)
 		yi := block * qkK
 		qlOff, qhOff, scOff := 0, 0, 0
 		for n := 0; n < qkK; n += 128 {
@@ -682,6 +651,15 @@ func dequantQ6K(out []float32, raw []byte) {
 			scOff += 8
 		}
 	}
+}
+
+// f16At decodes the little-endian IEEE-754 half stored at raw[off:off+2] into a float32.
+// It is the single reader for every per-block GGUF scale/min field — the dozen-plus
+// dequant kernels all read their f16 scales through here so the conversion lives in one
+// place. Behavior is identical to the inlined
+// f16At(raw, off) it replaces.
+func f16At(raw []byte, off int) float32 {
+	return math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[off:])))
 }
 
 func f16bitsToF32bits(h uint16) uint32 {

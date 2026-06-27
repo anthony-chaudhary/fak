@@ -182,13 +182,25 @@ func glmMoeDsaBatchedExpert(name string) (layer int, proj string, ok bool) {
 // [out, in]. Expert e is the contiguous block data[e*out*in : (e+1)*out*in], so the split is a pure
 // row-major reslice along the leading expert axis (bit-equal to manual slicing). Each expert's slice
 // is copied into its own backing array so a later quantize/normalize cannot alias across experts.
-func splitGLMMoeDsaExperts(layer int, proj string, shape []int, data []float32) ([]model.NamedTensorF32, error) {
+// parseGLMMoeDsaExpertShape validates a batched glm_moe_dsa routed-expert shape and returns
+// its [E,out,in] dims. It is the shared prologue of the f32 split (splitGLMMoeDsaExperts) and
+// the raw k-quant split (splitGLMMoeDsaExpertsKQuantRaw); each caller maps the error onto its
+// own return arity. The dim/error messages are byte-identical to the inlined checks it replaces.
+func parseGLMMoeDsaExpertShape(shape []int) (e, out, in int, err error) {
 	if len(shape) != 3 {
-		return nil, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor must be 3-D [E,out,in], got shape %v", shape)
+		return 0, 0, 0, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor must be 3-D [E,out,in], got shape %v", shape)
 	}
-	e, out, in := shape[0], shape[1], shape[2]
+	e, out, in = shape[0], shape[1], shape[2]
 	if e <= 0 || out <= 0 || in <= 0 {
-		return nil, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor has non-positive dim in [%d,%d,%d]", e, out, in)
+		return 0, 0, 0, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor has non-positive dim in [%d,%d,%d]", e, out, in)
+	}
+	return e, out, in, nil
+}
+
+func splitGLMMoeDsaExperts(layer int, proj string, shape []int, data []float32) ([]model.NamedTensorF32, error) {
+	e, out, in, err := parseGLMMoeDsaExpertShape(shape)
+	if err != nil {
+		return nil, err
 	}
 	per := out * in
 	if len(data) != e*per {
@@ -243,12 +255,9 @@ func splitGLMMoeDsaExpertsQ4KRaw(layer int, proj string, shape []int, raw []byte
 // 417 GB expert bulk from f32-dequant-bound into a raw byte copy. ok=false (no error) means the
 // dims are not block-aligned for a clean raw split, so the caller dequant-splits to f32.
 func splitGLMMoeDsaExpertsKQuantRaw(layer int, proj string, shape []int, raw []byte, blockBytes int) ([]NamedResidentQ4K, bool, error) {
-	if len(shape) != 3 {
-		return nil, false, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor must be 3-D [E,out,in], got shape %v", shape)
-	}
-	e, out, in := shape[0], shape[1], shape[2]
-	if e <= 0 || out <= 0 || in <= 0 {
-		return nil, false, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor has non-positive dim in [%d,%d,%d]", e, out, in)
+	e, out, in, err := parseGLMMoeDsaExpertShape(shape)
+	if err != nil {
+		return nil, false, err
 	}
 	// Gate on the REDUCTION dim (in), not out*in: a resident k-quant row must be a whole
 	// number of 256-weight super-blocks, since the GEMV dequantizes super-blocks ALONG each
