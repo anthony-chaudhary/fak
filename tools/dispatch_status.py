@@ -233,6 +233,18 @@ def read_backend_health(runs_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _total_commits(root: Path) -> int | None:
+    """Commits reachable from HEAD, or None if git can't answer. Used to size the
+    closure-audit window to the repo so it never silently scans a stale slice."""
+    try:
+        proc = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=str(root),
+                              capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    out = (proc.stdout or "").strip()
+    return int(out) if proc.returncode == 0 and out.isdigit() else None
+
+
 def collect(root: Path, *, max_workers: int, fast: bool,
             closure_commits: int) -> dict[str, Any]:
     pre = run_json([_py(), str(root / "tools" / "dispatch_preflight.py"),
@@ -244,9 +256,21 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     backlog: dict[str, Any] = {"_skipped": "fast"} if fast else run_json(
         [_py(), str(root / "tools" / "issue_lane_router.py"), "--json"], root,
         timeout=130)
+    # Cover the WHOLE repo, not a slice. A closure audit whose --max-commits is
+    # narrower than the repo's history can't bind a resolving commit older than the
+    # window, so a long-since-shipped issue mis-buckets CLAIMED_CLOSED and the
+    # closure_rate reads catastrophically low (the 0.20-vs-0.79 artifact). The
+    # auditor caches every SHA verdict permanently, so a full-history window is
+    # cheap on warm runs; we size it to the repo + headroom (never below the
+    # operator's floor) and lift the issue limit above the real backlog so the
+    # oldest -- disproportionately closed -- issues all load.
+    total_commits = _total_commits(root)
+    commit_window = max(closure_commits,
+                        (total_commits + 200) if total_commits else closure_commits)
     closure: dict[str, Any] = {"_skipped": "fast"} if fast else run_json(
         [_py(), str(root / "tools" / "issue_closure_audit.py"), "--json",
-         "--max-commits", str(closure_commits)], root, timeout=180)
+         "--max-commits", str(commit_window), "--issue-limit", "4000"],
+        root, timeout=300)
     # The RATE fold (closed/hour vs target) — the observable the loop's goal is
     # actually stated in. gh-backed, so it degrades to n/a under --fast/timeout
     # exactly like backlog/closure; it never flips the dispatcher-health verdict
@@ -296,6 +320,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     # --- closure honesty ---
     counts = closure.get("counts") or {}
     closure_rate = closure.get("closure_rate")
+    honest_close_rate = closure.get("honest_close_rate")
     closure_na = "_skipped" in closure or ("_error" in closure and closure_rate is None)
     open_witnessed = _int(counts.get("OPEN_WITNESSED"), 0)
 
@@ -399,6 +424,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "closure": {
             "na": closure_na,
             "closure_rate": closure_rate,
+            "honest_close_rate": honest_close_rate,
             "counts": counts or None,
             "open_witnessed_closable": None if closure_na else open_witnessed,
         },
@@ -457,8 +483,9 @@ def render(p: dict[str, Any]) -> str:
     else:
         cnt = c.get("counts") or {}
         lines.append(
-            f"║ closure   : rate={c.get('closure_rate')}  "
-            f"resolved={cnt.get('TRUE_RESOLVED')} claimed={cnt.get('CLAIMED_CLOSED')} "
+            f"║ closure   : rate={c.get('closure_rate')} honest={c.get('honest_close_rate')}  "
+            f"resolved={cnt.get('TRUE_RESOLVED')} data={cnt.get('DATA_RESOLVED')} "
+            f"claimed={cnt.get('CLAIMED_CLOSED')} "
             f"closable-now={c.get('open_witnessed_closable')} (OPEN_WITNESSED)")
     tp = p.get("throughput") or {}
     if tp.get("na"):
@@ -545,13 +572,17 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         out.append("_Closure audit n/a this run (gh/dos fold skipped or timed out)._")
     else:
         cnt = c.get("counts") or {}
+        honest = c.get("honest_close_rate")
         out += [
             f"`closure_rate` = **{c.get('closure_rate')}** "
-            f"(TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)).",
+            f"(TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED) — strict diff-witness)"
+            + (f"; `honest_close_rate` = **{honest}** (also credits the DATA rung)."
+               if honest is not None else "."),
             "",
             "| bucket | count |",
             "|---|---|",
             f"| TRUE_RESOLVED | {cnt.get('TRUE_RESOLVED', 0)} |",
+            f"| DATA_RESOLVED | {cnt.get('DATA_RESOLVED', 0)} |",
             f"| CLAIMED_CLOSED | {cnt.get('CLAIMED_CLOSED', 0)} |",
             f"| OPEN_WITNESSED (closable now) | {c.get('open_witnessed_closable')} |",
         ]
@@ -648,8 +679,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="cap used by the spawn-gate preflight (default: 2)")
     ap.add_argument("--fast", action="store_true",
                     help="skip the two gh-backed folds (backlog + closure); pure-local")
-    ap.add_argument("--closure-commits", type=int, default=400,
-                    help="git history budget for the closure audit (default: 400)")
+    ap.add_argument("--closure-commits", type=int, default=2500,
+                    help="MINIMUM git-history budget for the closure audit; the actual "
+                         "window auto-grows to the repo size + headroom so the audit "
+                         "never scans a stale slice (default floor: 2500)")
     ap.add_argument("--md", default="",
                     help="write the committed markdown status doc to this path "
                          "(forces the full fold; --fast is ignored when --md is set)")

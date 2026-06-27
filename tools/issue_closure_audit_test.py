@@ -141,6 +141,31 @@ class GraderTest(unittest.TestCase):
         self.assertEqual(g["bucket"], m.TRUE_RESOLVED)
         self.assertEqual(g["witnessed_commits"], ["good123"])
 
+    def test_data_witnessed_close_is_data_resolved_not_claimed(self):
+        # Closed + a resolving commit DOS graded OK on the DATA rung (a data-driven
+        # feature: a rows.json / dos.toml change). Honest, but not the diff-witnessed
+        # gold standard -> its own bucket, NOT CLAIMED_CLOSED (which would slander it)
+        # and NOT TRUE_RESOLVED (which would blur the rung).
+        g = m.grade_issue(
+            _issue(945, state="CLOSED", reason="COMPLETED"),
+            [{"sha": "data123", "subject": "feat", "kind": m.RESOLVING}],
+            {"data123": _audit(witness="data-witnessed")},
+        )
+        self.assertEqual(g["bucket"], m.DATA_RESOLVED)
+        self.assertEqual(g["data_witnessed_commits"], ["data123"])
+        self.assertEqual(g["witnessed_commits"], [])  # not the diff rung
+
+    def test_diff_witness_beats_data_witness_for_true_resolved(self):
+        # An issue with BOTH a diff-witnessed and a data-witnessed resolving commit
+        # is TRUE_RESOLVED -- the stronger rung wins.
+        g = m.grade_issue(
+            _issue(99, state="CLOSED", reason="COMPLETED"),
+            [{"sha": "diff1", "subject": "fix", "kind": m.RESOLVING},
+             {"sha": "data1", "subject": "feat", "kind": m.RESOLVING}],
+            {"diff1": _audit(), "data1": _audit(witness="data-witnessed")},
+        )
+        self.assertEqual(g["bucket"], m.TRUE_RESOLVED)
+
     def test_closed_with_no_commit_is_claimed(self):
         g = m.grade_issue(_issue(5, state="CLOSED", reason="COMPLETED"), [], {})
         self.assertEqual(g["bucket"], m.CLAIMED_CLOSED)
@@ -191,6 +216,27 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(p["counts"][m.TRUE_RESOLVED], 1)
         self.assertEqual(p["counts"][m.CLAIMED_CLOSED], 2)
         self.assertAlmostEqual(p["closure_rate"], 1 / 3, places=3)
+
+    def test_data_resolved_leaves_closure_denom_enters_honest_rate(self):
+        # strict closure_rate counts only the diff rung and a DATA_RESOLVED close is
+        # NOT a claimed gap, so it leaves the strict denominator; honest_close_rate
+        # credits it. 1 true + 1 data + 1 claimed -> strict 1/2, honest 2/3.
+        issues = [
+            _issue(1, state="CLOSED", reason="COMPLETED"),  # true
+            _issue(2, state="CLOSED", reason="COMPLETED"),  # data
+            _issue(3, state="CLOSED", reason="COMPLETED"),  # claimed
+        ]
+        refs = {
+            1: [{"sha": "w1", "subject": "fix", "kind": m.RESOLVING}],
+            2: [{"sha": "d1", "subject": "feat", "kind": m.RESOLVING}],
+        }
+        audits = {"w1": _audit(), "d1": _audit(witness="data-witnessed")}
+        p = self._payload(issues, refs, audits)
+        self.assertEqual(p["counts"][m.TRUE_RESOLVED], 1)
+        self.assertEqual(p["counts"][m.DATA_RESOLVED], 1)
+        self.assertEqual(p["counts"][m.CLAIMED_CLOSED], 1)
+        self.assertAlmostEqual(p["closure_rate"], 1 / 2, places=3)
+        self.assertAlmostEqual(p["honest_close_rate"], 2 / 3, places=3)
 
     def test_verdict_action_and_not_ok_when_claimed_present(self):
         issues = [_issue(2, state="CLOSED", reason="COMPLETED")]

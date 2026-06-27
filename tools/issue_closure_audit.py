@@ -83,6 +83,16 @@ MENTION = "mention"
 
 # Witness rung: a commit "truly resolves" only with a diff-witness.
 _WITNESS_OK = "diff-witnessed"
+# A weaker-but-non-forgeable rung: the diff touched no SOURCE file, but a DATA file
+# (a scorecard rows.json, a dos.toml lane, a ci.yml) corroborated the claim. For a
+# data-DRIVEN feature ("add the cross-cluster rows", "declare the wirescreen lane")
+# the data file IS the change, so this is an honest close -- but it is NOT the
+# diff-witnessed gold standard, so it earns its own bucket rather than being folded
+# into TRUE_RESOLVED (which would blur the rung) or left in CLAIMED_CLOSED (which
+# would slander an honest close). A commit whose subject claims CODE but whose diff
+# is doc-only never reaches this rung -- `dos commit-audit` grades that CLAIM_UNWITNESSED,
+# so it stays correctly in CLAIMED_CLOSED.
+_WITNESS_DATA = "data-witnessed"
 _VERDICT_OK = "OK"
 
 
@@ -275,6 +285,12 @@ def commit_is_witnessed(audit: dict[str, Any]) -> bool:
     return str(audit.get("verdict")) == _VERDICT_OK and str(audit.get("witness")) == _WITNESS_OK
 
 
+def commit_is_data_witnessed(audit: dict[str, Any]) -> bool:
+    """OK verdict carried by the DATA rung -- a data-driven feature whose witness is
+    a config/rows file, not a source diff. Honest, but weaker than diff-witnessed."""
+    return str(audit.get("verdict")) == _VERDICT_OK and str(audit.get("witness")) == _WITNESS_DATA
+
+
 # ---------------------------------------------------------------------------
 # Per-SHA audit cache (immutable verdicts -> permanent, no TTL)
 # ---------------------------------------------------------------------------
@@ -323,6 +339,7 @@ def save_audit_cache(path: Path, audits: dict[str, dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 TRUE_RESOLVED = "TRUE_RESOLVED"
+DATA_RESOLVED = "DATA_RESOLVED"
 CLAIMED_CLOSED = "CLAIMED_CLOSED"
 CLOSED_NOT_PLANNED = "CLOSED_NOT_PLANNED"
 OPEN_WITNESSED = "OPEN_WITNESSED"
@@ -347,6 +364,9 @@ def grade_issue(
     witnessed = [
         r for r in resolving if commit_is_witnessed(audits.get(r["sha"], {}))
     ]
+    data_witnessed = [
+        r for r in resolving if commit_is_data_witnessed(audits.get(r["sha"], {}))
+    ]
     closed = _is_closed(issue)
     reason = _state_reason(issue)
 
@@ -354,6 +374,10 @@ def grade_issue(
         bucket = CLOSED_NOT_PLANNED
     elif closed and witnessed:
         bucket = TRUE_RESOLVED
+    elif closed and data_witnessed:
+        # Honest close on the data rung (data-driven feature) -- distinct from the
+        # diff-witnessed gold standard, but NOT a claimed-without-witness gap.
+        bucket = DATA_RESOLVED
     elif closed:
         bucket = CLAIMED_CLOSED
     elif witnessed:
@@ -369,6 +393,7 @@ def grade_issue(
         "bucket": bucket,
         "resolving_commits": [r["sha"][:7] for r in resolving],
         "witnessed_commits": [r["sha"][:7] for r in witnessed],
+        "data_witnessed_commits": [r["sha"][:7] for r in data_witnessed],
         "mentions": [r["sha"][:7] for r in issue_refs if r.get("kind") == MENTION],
     }
 
@@ -432,15 +457,25 @@ def build_payload(
 ) -> dict[str, Any]:
     graded = [grade_issue(i, refs.get(int(i.get("number") or 0), []), audits) for i in issues]
     counts: dict[str, int] = {
-        b: 0 for b in (TRUE_RESOLVED, CLAIMED_CLOSED, CLOSED_NOT_PLANNED, OPEN_WITNESSED, OPEN)
+        b: 0 for b in (TRUE_RESOLVED, DATA_RESOLVED, CLAIMED_CLOSED,
+                       CLOSED_NOT_PLANNED, OPEN_WITNESSED, OPEN)
     }
     for g in graded:
         counts[g["bucket"]] = counts.get(g["bucket"], 0) + 1
 
     true_resolved = counts[TRUE_RESOLVED]
+    data_resolved = counts[DATA_RESOLVED]
     claimed = counts[CLAIMED_CLOSED]
+    # `closure_rate` stays the STRICT diff-witnessed rate -- the gold standard the
+    # metric has always meant -- but a DATA_RESOLVED close is honest, so it leaves the
+    # denominator (it is not a claimed-without-witness gap). `honest_close_rate`
+    # additionally credits the data rung, so both the strict and the honest signal
+    # are visible without either lying about the other.
     denom = true_resolved + claimed
     closure_rate = round(true_resolved / denom, 4) if denom else None
+    honest_denom = true_resolved + data_resolved + claimed
+    honest_close_rate = (round((true_resolved + data_resolved) / honest_denom, 4)
+                         if honest_denom else None)
 
     coverage = coverage or {"complete": True, "notes": []}
     incomplete = not coverage.get("complete", True)
@@ -506,7 +541,8 @@ def build_payload(
         finding = "closures_witnessed"
         reason = (
             f"all closed issues are witnessed or non-code closes; "
-            f"true_resolved={true_resolved}, closure_rate={closure_rate}"
+            f"true_resolved={true_resolved}, data_resolved={data_resolved}, "
+            f"closure_rate={closure_rate}, honest_close_rate={honest_close_rate}"
         )
         next_action = "no closure-honesty action needed; re-run after the next supervisor tick"
 
@@ -519,12 +555,13 @@ def build_payload(
         "next_action": next_action,
         "workspace": workspace,
         "closure_rate": closure_rate,
+        "honest_close_rate": honest_close_rate,
         "regression_rate": None,  # honest placeholder: needs the verdict-journal trail a live cycle writes
         "coverage": coverage,
         "counts": counts,
         "totals": {
             "issues_audited": len(graded),
-            "closed_audited": true_resolved + claimed + counts[CLOSED_NOT_PLANNED],
+            "closed_audited": true_resolved + data_resolved + claimed + counts[CLOSED_NOT_PLANNED],
         },
         "issues": sorted(graded, key=_issue_sort_key),
     }
@@ -532,7 +569,8 @@ def build_payload(
 
 def _issue_sort_key(g: dict[str, Any]) -> tuple[int, int]:
     # Surface the actionable buckets first; then by issue number desc (recent).
-    order = {CLAIMED_CLOSED: 0, OPEN_WITNESSED: 1, TRUE_RESOLVED: 2, OPEN: 3, CLOSED_NOT_PLANNED: 4}
+    order = {CLAIMED_CLOSED: 0, OPEN_WITNESSED: 1, TRUE_RESOLVED: 2,
+             DATA_RESOLVED: 3, OPEN: 4, CLOSED_NOT_PLANNED: 5}
     return (order.get(g.get("bucket"), 9), -int(g.get("number") or 0))
 
 
@@ -610,9 +648,12 @@ def render(payload: dict[str, Any]) -> str:
     counts = payload.get("counts") or {}
     lines = [
         f"issue-closure audit: {payload.get('verdict')} ({payload.get('finding')})",
-        f"closure_rate={payload.get('closure_rate')}  next: {payload.get('next_action')}",
+        f"closure_rate={payload.get('closure_rate')} "
+        f"honest_close_rate={payload.get('honest_close_rate')}  "
+        f"next: {payload.get('next_action')}",
         (
             f"buckets: true={counts.get(TRUE_RESOLVED, 0)} "
+            f"data={counts.get(DATA_RESOLVED, 0)} "
             f"claimed={counts.get(CLAIMED_CLOSED, 0)} "
             f"open_witnessed={counts.get(OPEN_WITNESSED, 0)} "
             f"open={counts.get(OPEN, 0)} "
@@ -639,7 +680,9 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         f"# Issue closure audit — {date}",
         "",
         f"- **closure_rate**: `{payload.get('closure_rate')}` "
-        f"(TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED))",
+        f"(TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED) — strict diff-witness)",
+        f"- **honest_close_rate**: `{payload.get('honest_close_rate')}` "
+        f"((TRUE_RESOLVED + DATA_RESOLVED) / closed-with-claim — credits the data rung)",
         f"- **verdict**: `{payload.get('verdict')}` — {payload.get('reason')}",
         f"- **next**: {payload.get('next_action')}",
     ]
@@ -657,7 +700,7 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         "| bucket | count |",
         "|---|---|",
     ]
-    for b in (TRUE_RESOLVED, CLAIMED_CLOSED, OPEN_WITNESSED, OPEN, CLOSED_NOT_PLANNED):
+    for b in (TRUE_RESOLVED, DATA_RESOLVED, CLAIMED_CLOSED, OPEN_WITNESSED, OPEN, CLOSED_NOT_PLANNED):
         out.append(f"| {b} | {counts.get(b, 0)} |")
     out += ["", "## Per-issue", "", "| # | bucket | witnessed | title |", "|---|---|---|---|"]
     for g in payload.get("issues", []):
