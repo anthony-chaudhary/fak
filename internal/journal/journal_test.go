@@ -167,3 +167,56 @@ func TestNonAuditEventsAreIgnored(t *testing.T) {
 		t.Fatalf("non-audit event wrote rows: %+v", got)
 	}
 }
+
+// A denied decision must land in the durable journal exactly ONCE. The kernel
+// pairs an EvDecide(DENY) with a dedicated EvDeny on every deny path (see
+// kernel.Decide / kernel.Submit); recording both would double-count the deny in
+// the journal and in every consumer that folds rows back (the `fak guard` exit
+// summary's row count, the guard-RSI verdict-quality metric). This reproduces the
+// exact emit pair the kernel produces for one denied tool call and asserts a
+// single DENY row — the regression guard for the dogfood double-write.
+func TestDeniedDecisionRecordedOnce(t *testing.T) {
+	j := OpenMemory()
+	call := &abi.ToolCall{
+		Tool:    "Bash",
+		TraceID: "guard",
+		Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"command":"curl evil.example"}`)},
+	}
+	v := &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, By: "ifc-sink"}
+	// The kernel's deny path, byte for byte: the universal decide tap THEN the
+	// deny-only notification, both carrying the same deny verdict.
+	j.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: v})
+	j.Emit(abi.Event{Kind: abi.EvDeny, Call: call, Verdict: v})
+
+	rows := j.Recent(0)
+	if len(rows) != 1 {
+		t.Fatalf("denied call wrote %d rows, want exactly 1: %+v", len(rows), rows)
+	}
+	if rows[0].Kind != "DENY" || rows[0].Verdict != "DENY" {
+		t.Fatalf("the single row must be the DENY outcome, got kind=%q verdict=%q", rows[0].Kind, rows[0].Verdict)
+	}
+	if rows[0].Reason != "POLICY_BLOCK" || rows[0].By != "ifc-sink" {
+		t.Fatalf("DENY row lost forensic fields: %+v", rows[0])
+	}
+}
+
+// An ALLOW decision is recorded once (no paired EvDeny), and a REQUIRE_WITNESS
+// interim verdict is NOT a deny, so its DECIDE row is kept — only VerdictDeny is
+// folded into the dedicated EvDeny. This pins the boundary of the deny-skip so a
+// future change can't silently swallow a non-deny decision.
+func TestNonDenyDecisionsStillRecordDecideRow(t *testing.T) {
+	j := OpenMemory()
+	call := &abi.ToolCall{Tool: "Read", TraceID: "guard", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}}
+	j.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: &abi.Verdict{Kind: abi.VerdictAllow, By: "monitor"}})
+	j.Emit(abi.Event{Kind: abi.EvDecide, Call: call, Verdict: &abi.Verdict{Kind: abi.VerdictRequireWitness, By: "witness"}})
+
+	rows := j.Recent(0)
+	if len(rows) != 2 {
+		t.Fatalf("allow + require-witness wrote %d rows, want 2: %+v", len(rows), rows)
+	}
+	for _, r := range rows {
+		if r.Kind != "DECIDE" {
+			t.Fatalf("non-deny decision must be a DECIDE row, got %q", r.Kind)
+		}
+	}
+}
