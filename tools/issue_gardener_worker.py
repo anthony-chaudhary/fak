@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tier-2 launcher for the GitHub-issue *gardener* — the model-driven pass.
+"""Quality-tier-2 launcher for the GitHub-issue *gardener* — the model-driven pass.
 
 The backlog gardener is two layers, mirroring the supervisor/dispatch split:
 
@@ -12,19 +12,19 @@ The backlog gardener is two layers, mirroring the supervisor/dispatch split:
   (split an oversized ``needs-split`` issue into focused sub-issues) and
   **contraction** (confirm duplicate/stale/dormant clusters for merge/close).
 
-Per the operator policy, the gardener runs on a **tier-2 model by default**
-(Sonnet — the mid-tier Claude), not the tier-1 model the interactive fleet
+Per the operator policy, the gardener runs on a **quality-tier-2 model by default**
+(Sonnet — the mid-quality Claude), not the quality-tier-1 model the interactive fleet
 uses: gardening is a high-volume, low-stakes cadence task where a cheaper model
 is the right default. Model selection precedence (highest first):
 
 1. ``--model`` CLI flag (an explicit model id/alias, e.g. ``opus``/``sonnet``).
-2. ``--tier {1,2,3}`` → ``opus`` / ``sonnet`` / ``haiku``.
+2. ``--quality-tier {1,2,3}`` → ``opus`` / ``sonnet`` / ``haiku``.
 3. ``FLEET_GARDENER_MODEL`` env var.
 4. ``fak route`` over the gardening routing preset (opt-in via
    ``FLEET_GARDENER_ROUTE``; fail-safe — a routing failure falls through to 5).
    This rung makes the gardener the first DEPLOYED consumer of fak's
    model-routing spine, dogfooding routing on the lowest-risk workload.
-5. ``sonnet`` (tier 2, the default).
+5. ``sonnet`` (quality-tier 2, the default).
 
 Like the supervisor/watchdog/canary layer (and UNLIKE the leaf
 ``dispatch_worker.py``), this launcher is **dry-run by default** — it prints the
@@ -54,11 +54,11 @@ except (AttributeError, ValueError):
 
 SCHEMA = "fleet-issue-gardener-worker/1"
 
-# Tier -> Claude model alias. Tier 2 (Sonnet) is the gardener default.
-TIER_MODELS = {"1": "opus", "2": "sonnet", "3": "haiku"}
-MODEL_TIERS = {v: k for k, v in TIER_MODELS.items()}
-DEFAULT_TIER = "2"
-DEFAULT_MODEL = TIER_MODELS[DEFAULT_TIER]  # "sonnet"
+# Quality-tier -> Claude model alias. Quality-tier 2 (Sonnet) is the gardener default.
+QUALITY_TIER_MODELS = {"1": "opus", "2": "sonnet", "3": "haiku"}
+MODEL_QUALITY_TIERS = {v: k for k, v in QUALITY_TIER_MODELS.items()}
+DEFAULT_QUALITY_TIER = "2"
+DEFAULT_MODEL = QUALITY_TIER_MODELS[DEFAULT_QUALITY_TIER]  # "sonnet"
 
 # The model-routing bridge (opt-in via FLEET_GARDENER_ROUTE). The gardening pass
 # is the lowest-risk first workload to dogfood fak's routing spine: high-volume,
@@ -67,13 +67,13 @@ DEFAULT_MODEL = TIER_MODELS[DEFAULT_TIER]  # "sonnet"
 # routing preset and maps the chosen ABSTRACT id (small/medium/large) onto the
 # Claude alias ladder below. The whole bridge is FAIL-SAFE: any failure (no fak
 # binary, a nonzero exit, unparseable JSON, an unknown id) falls straight through
-# to the existing tier ladder, so a routing hiccup never blocks a gardening tick.
+# to the existing quality-tier ladder, so a routing hiccup never blocks a gardening tick.
 ROUTE_ENABLE_ENV = "FLEET_GARDENER_ROUTE"
 # The routing manifest the gardening subject is classified against (overridable).
 ROUTE_MANIFEST_ENV = "FLEET_GARDENER_ROUTE_MANIFEST"
 DEFAULT_ROUTE_MANIFEST = "examples/routing-presets/gardening.json"
 # Abstract routed id -> Claude alias. The gardener launches a `claude -p` backend,
-# so a routed id is mapped onto the same alias ladder the tier path uses.
+# so a routed id is mapped onto the same alias ladder the quality-tier path uses.
 ROUTED_ID_MODELS = {"small": "haiku", "medium": "sonnet", "large": "opus"}
 
 BACKENDS = ("claude",)
@@ -171,19 +171,19 @@ def resolve_model(
     workspace: Path | None = None,
     route_runner: RouteRunner | None = None,
 ) -> str:
-    """Pick the gardener model. Precedence: --model > --tier > env > route > sonnet.
+    """Pick the gardener model. Precedence: --model > --quality-tier > env > route > sonnet.
 
     The route rung (opt-in via FLEET_GARDENER_ROUTE) makes the gardener the first
     deployed consumer of fak's model-routing spine; it is fail-safe, so a routing
-    failure leaves the historical --model > --tier > env > sonnet behavior intact.
+    failure leaves the historical --model > --quality-tier > env > sonnet behavior intact.
     """
     if explicit:
         return explicit.strip()
     if tier:
         t = str(tier).strip()
-        if t not in TIER_MODELS:
-            raise ValueError(f"unknown tier {tier!r}; expected one of {sorted(TIER_MODELS)}")
-        return TIER_MODELS[t]
+        if t not in QUALITY_TIER_MODELS:
+            raise ValueError(f"unknown quality-tier {tier!r}; expected one of {sorted(QUALITY_TIER_MODELS)}")
+        return QUALITY_TIER_MODELS[t]
     env_model = (env if env is not None else os.environ).get("FLEET_GARDENER_MODEL")
     if env_model and env_model.strip():
         return env_model.strip()
@@ -195,7 +195,7 @@ def resolve_model(
 
 def model_tier(model: str) -> str:
     """Best-effort reverse lookup (a bare model id maps to '?')."""
-    return MODEL_TIERS.get(model, "?")
+    return MODEL_QUALITY_TIERS.get(model, "?")
 
 
 def build_prompt(*, as_of: str, scope: str | None, apply_mechanical: bool) -> str:
@@ -215,7 +215,7 @@ def build_prompt(*, as_of: str, scope: str | None, apply_mechanical: bool) -> st
         else " Do NOT edit, label, comment on, or close any issue - propose only."
     )
     return (
-        "Garden the open GitHub issue backlog (tier-2 pass).{scope}\n"
+        "Garden the open GitHub issue backlog (quality-tier-2 pass).{scope}\n"
         "1. Run `python tools/issue_triage.py --detect-split --markdown "
         "--out docs/_audits/issue-triage-{date}.md` and "
         "`python tools/issue_triage.py --detect-split --actions "
@@ -377,12 +377,13 @@ def render(payload: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Launch the tier-2 GitHub-issue gardener (dry-run by default)."
+        description="Launch the quality-tier-2 GitHub-issue gardener (dry-run by default)."
     )
     ap.add_argument("--model", default=None,
-                    help="explicit model id/alias (overrides --tier/env/default)")
-    ap.add_argument("--tier", default=None, choices=sorted(TIER_MODELS),
-                    help="model tier: 1=opus, 2=sonnet (default), 3=haiku")
+                    help="explicit model id/alias (overrides --quality-tier/env/default)")
+    ap.add_argument("--quality-tier", default=None, dest="quality_tier",
+                    choices=sorted(QUALITY_TIER_MODELS),
+                    help="model quality-tier: 1=opus, 2=sonnet (default), 3=haiku")
     ap.add_argument("--backend", choices=BACKENDS, default=DEFAULT_BACKEND,
                     help="worker backend (default: claude)")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
@@ -408,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     error: str | None = None
     model = DEFAULT_MODEL
     try:
-        model = resolve_model(args.model, args.tier, None, workspace=workspace)
+        model = resolve_model(args.model, args.quality_tier, None, workspace=workspace)
     except ValueError as exc:
         error = str(exc)
 
