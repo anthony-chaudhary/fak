@@ -110,7 +110,7 @@ long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
 > 1-shot kernel deletes. The `fak agent` verb still drives the **live** turn-count A/B
 > (real Gemini + local Qwen2.5, transcript-hashed) — see `LIVE-RESULTS.md`.
 
-## The one honest KPI (cannot go red — call-mix-independent)
+## Syscall subsystem check — useful, not the headline KPI (call-mix-independent)
 
 `fak bench --suite tau2-smoke` replays a frozen tool-call trace through the one
 binary and times the **in-process tool-call adjudication boundary** against a
@@ -120,13 +120,15 @@ transports — apples-to-apples):
 ```
 in-process adjudication p50 : 2,427 ns
 spawned-hook        p50     : 6.913 ms  (process-per-decide, this machine, n=100)
-PRIMARY GATE                : pass   (~2,849x fusion speedup)
+SUBSYSTEM CHECK (gate_primary): pass   (~2,849x fusion speedup)
 ```
 
-This is the headline because it is **independent of the tool mix**: it times the
-adjudication fold, not the workload, so a low vDSO hit-rate can never turn it red.
-The vDSO hit-rate and token savings are reported as **soft UPSIDE secondaries**,
-never the gate.
+This is a **subsystem regression sentinel**, deliberately **not** the headline
+product KPI: it is independent of the tool mix — it times the adjudication fold,
+not the workload, so a low vDSO hit-rate can never turn it red — but it does not
+prove production readiness, model quality, serving throughput, or the 45x fleet
+claim. The vDSO hit-rate and token savings are reported as **soft UPSIDE
+secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.md` (unit 82).
 
 ## Verbs
 
