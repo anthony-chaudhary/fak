@@ -1,0 +1,141 @@
+name: capacity-feed
+
+# Publish fak's CAPACITY surface to Slack #capacity (C0BDNU04JDP, the scoreboard
+# workspace T0BDEJF1HGB). The capacity memo names three inbound-load signals —
+# (a) active worker accounts (`fak accounts list`), (b) lab node readiness
+# (`fak lab status`), and (c) the open-issue backlog. (a) and (b) need lab/account
+# secrets this CI node does not have; the one signal that is reliable WITHOUT them
+# is the OPEN-ISSUE COUNT, since `gh` is available with the built-in GITHUB_TOKEN.
+# So this daily job posts the open GitHub issue backlog as the capacity KPI
+# (open-issues) — the inbound-load proxy — to #capacity.
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), the dual of
+# steering-guard.yml — NOT an issue feeder like score-/bench-/gate-signal.yml
+# (those turn a regression into a GitHub issue for the dispatch loop and post
+# nothing to Slack). Do not conflate the two.
+#
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret being present. Without it the
+# job runs in --dry-run and writes the card to the step summary, so a fork or a
+# secret-less run never hard-fails — it just shows what WOULD post.
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
+# scoreboard-workspace bot token — the same value in the gitignored
+# .env.slack.local) under Settings -> Secrets and variables -> Actions. The channel
+# #capacity (C0BDNU04JDP) is the built-in default; override with the
+# FAK_CAPACITY_CHANNEL repo variable if you point the surface elsewhere.
+on:
+  schedule:
+    # Daily 08:47 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (bench-signal 08:03, scoreboard-feed 08:17, bench-feed 08:27; garden 06:23,
+    # steering-guard 07:33, score-signal 07:41, gate-signal 07:53).
+    - cron: "47 8 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: capacity-feed
+  cancel-in-progress: false
+
+jobs:
+  capacity-feed:
+    name: capacity -> #capacity
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_CAPACITY_CHANNEL: ${{ vars.FAK_CAPACITY_CHANNEL || 'C0BDNU04JDP' }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Count the open GitHub issues — the inbound-load signal. `gh` ships on the
+      # runner and authenticates with the built-in GITHUB_TOKEN. NO --search date
+      # filter (documented unreliable / cap-limited); a plain --state open with a
+      # high --limit and a `length` jq is the honest count.
+      - name: count open issues
+        id: count
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          count=$(gh issue list --state open --limit 2000 --json number --jq 'length')
+          # Guard against an empty/failed read so the grade step's integer test is safe.
+          case "$count" in
+            ''|*[!0-9]*) count=0 ;;
+          esac
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "open issues: $count"
+
+      # Map the backlog size onto a grade/verdict with a small fixed-threshold case.
+      # A growing backlog is rising inbound load: ACTION once it crosses ~200.
+      - name: grade backlog
+        id: grade
+        run: |
+          n="${{ steps.count.outputs.count }}"
+          if   [ "$n" -lt 50 ];  then g=A; v=OK;
+          elif [ "$n" -lt 120 ]; then g=B; v=OK;
+          elif [ "$n" -lt 200 ]; then g=C; v=ACTION;
+          else                        g=D; v=ACTION;
+          fi
+          echo "grade=$g" >> "$GITHUB_OUTPUT"
+          echo "verdict=$v" >> "$GITHUB_OUTPUT"
+          echo "grade=$g verdict=$v"
+
+      # Always render the card to the step summary (and as the artifact) so the run
+      # is auditable even when nothing posts (missing secret / manual dry-run / fork).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_CAPACITY_CHANNEL" \
+            --kpi open-issues \
+            --value "${{ steps.count.outputs.count }}" \
+            --grade "${{ steps.grade.outputs.grade }}" \
+            --verdict "${{ steps.grade.outputs.verdict }}" \
+            --detail "open GitHub issues (backlog inbound load)" \
+            --source ci \
+            --dry-run | tee capacity-card.txt
+          {
+            echo "## capacity-feed — open-issues"
+            echo '```'
+            cat capacity-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when the token secret is present. A manual dry_run also skips.
+      - name: post to #capacity
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_CAPACITY_CHANNEL" \
+            --kpi open-issues \
+            --value "${{ steps.count.outputs.count }}" \
+            --grade "${{ steps.grade.outputs.grade }}" \
+            --verdict "${{ steps.grade.outputs.verdict }}" \
+            --detail "open GitHub issues (backlog inbound load)" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-card
+          path: capacity-card.txt
+          if-no-files-found: ignore

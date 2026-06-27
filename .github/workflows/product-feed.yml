@@ -1,0 +1,140 @@
+name: product-feed
+
+# Publish fak's PRODUCT-DIRECTION snapshot to Slack #product (the scoreboard
+# workspace, T0BDEJF1HGB). Product direction changes slowly, so this is a WEEKLY
+# heartbeat, the dual of the daily steering-guard.yml feeder:
+#
+#   * Monday 09:23 UTC -> `fak product post --status` — folds the product
+#     scorecard (tools/product_scorecard.py) into a card and posts the
+#     product-status snapshot to #product. The scorecard EXITS NON-ZERO when
+#     there is debt (verdict ACTION) but still prints valid JSON; `fak product`
+#     handles that internally (runScorecardJSON treats JSON-on-stdout as
+#     success), so no set +e wrapper is needed.
+#   * workflow_dispatch -> a manual off-cadence run (status or persona), dry-run
+#     by default so an operator can preview the card without posting.
+#
+# `fak product post` runs the python scorecard ITSELF (--status ->
+# product_scorecard.py, --persona -> persona_readiness_scorecard.py), so
+# actions/setup-python IS needed even though there is no separate generate step.
+#
+# Posting is GATED on BOTH (a) the FAK_SCOREBOARD_TOKEN secret (the shared
+# scoreboard-workspace bot token) being present AND (b) the FAK_PRODUCT_CHANNEL
+# repo variable being set — #product has no built-in default, so a product post
+# never falls back to #scoreboard. Without either, the job runs in --dry-run and
+# writes the card to the step summary, so a fork or a secret-less / variable-less
+# run never hard-fails — it just shows what WOULD post.
+#
+# OPERATOR STEPS (one-time):
+#   1. Add the repo SECRET FAK_SCOREBOARD_TOKEN (the scoreboard-workspace bot
+#      token — the same value in the gitignored .env.slack.local) under
+#      Settings -> Secrets and variables -> Actions -> Secrets.
+#   2. Add the repo VARIABLE FAK_PRODUCT_CHANNEL (the #product channel id) under
+#      Settings -> Secrets and variables -> Actions -> Variables. There is no
+#      default channel for #product; without this variable the job stays in
+#      dry-run.
+on:
+  schedule:
+    # Weekly, Monday 09:23 UTC — an off-the-hour minute clear of every other
+    # scheduled job (garden 06:23, dogfood 06:41, dogfood-coverage 07:13,
+    # steering-guard 07:33, score-signal 07:41, gate-signal 07:53, bench-signal
+    # 08:03, cadence Mon 08:17).
+    - cron: "23 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "status | persona"
+        type: choice
+        options: [status, persona]
+        default: status
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-feed
+  cancel-in-progress: false
+
+jobs:
+  product-feed:
+    name: product -> #product
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_PRODUCT_CHANNEL: ${{ vars.FAK_PRODUCT_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # `fak product post --status` runs tools/product_scorecard.py (or
+      # --persona runs persona_readiness_scorecard.py) itself, so python must
+      # be on PATH.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The schedule posts the weekly product-status snapshot; a manual run uses
+      # the chosen input (status or persona).
+      - name: select mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "mode=status" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Always render the card to the step summary (and as the artifact) so the
+      # run is auditable even when nothing posts (missing secret/variable, fork,
+      # or a manual dry-run). The scorecard's non-zero "ACTION" exit is handled
+      # inside `fak product`, so no set +e is needed here.
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak product post --${{ steps.mode.outputs.mode }} \
+            --source ci --dry-run | tee product-card.txt
+          {
+            echo "## product-feed — ${{ steps.mode.outputs.mode }}"
+            echo '```'
+            cat product-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when BOTH the token secret AND the channel variable are set.
+      # A manual dry_run also skips. #product has no default channel, so the
+      # FAK_PRODUCT_CHANNEL gate is load-bearing, not just the token.
+      - name: post to #product
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_PRODUCT_CHANNEL != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak product post --${{ steps.mode.outputs.mode }} --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_PRODUCT_CHANNEL == '' }}
+        run: |
+          {
+            echo "Product post SKIPPED — ran in dry-run, nothing posted."
+            if [ -z "${{ env.FAK_SCOREBOARD_TOKEN }}" ]; then
+              echo "- FAK_SCOREBOARD_TOKEN secret not set (add it under Settings -> Secrets and variables -> Actions -> Secrets)."
+            fi
+            if [ -z "${{ env.FAK_PRODUCT_CHANNEL }}" ]; then
+              echo "- FAK_PRODUCT_CHANNEL repo variable not set (#product has no default channel; add it under Variables)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-card
+          path: product-card.txt
+          if-no-files-found: ignore

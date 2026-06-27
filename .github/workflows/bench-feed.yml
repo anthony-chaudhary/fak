@@ -1,0 +1,128 @@
+name: bench-feed
+
+# Publish fak's BENCHMARK THROUGHPUT surface to the Slack bench channel (the
+# scoreboard workspace, T0BDEJF1HGB). One cadence, one command (`fak bench post`):
+#
+#   * daily 08:27 UTC -> `fak bench post --rollup regression` — the tok/s
+#     regression rollup, comparing experiments/benchmark/catalog.json against the
+#     pinned floor tools/bench_baseline.json and flagging the runs that dropped.
+#   * workflow_dispatch -> a manual off-cadence run; pick the rollup (regression |
+#     latest) and dry-run by default so an operator can preview the card without
+#     posting.
+#
+# `fak bench post` reads experiments/benchmark/catalog.json + tools/bench_baseline.json
+# directly, so there is NO python payload-gen step — just Go.
+#
+# Posting is GATED on TWO things being present (the real post step skips unless BOTH
+# hold), so a fork, a secret-less run, or an unconfigured channel never hard-fails —
+# it runs --dry-run and writes the card to the step summary, showing what WOULD post:
+#   1. the FAK_SCOREBOARD_TOKEN secret (the bench token falls back to it); and
+#   2. the FAK_BENCH_CHANNEL repo variable — the bench channel id has NO built-in
+#      default, so without it the post has nowhere to go.
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), the dual of
+# steering-guard.yml — NOT an issue feeder. It does not write issues or push; it only
+# posts to Slack (permissions: contents: read).
+#
+# OPERATOR STEPS (one-time, under Settings -> Secrets and variables -> Actions):
+#   1. add the repo SECRET   FAK_SCOREBOARD_TOKEN  — the scoreboard-workspace bot
+#      token (the same value in the gitignored .env.slack.local).
+#   2. add the repo VARIABLE FAK_BENCH_CHANNEL     — the bench channel id (there is
+#      no built-in default; without it the real post is skipped).
+on:
+  schedule:
+    # Daily 08:27 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (steering-guard 07:33, score-signal 07:41, gate-signal 07:53, bench-signal
+    # 08:03, cadence Mon 08:17, garden 06:23, dogfood 06:41, dogfood-coverage 07:13).
+    - cron: "27 8 * * *"
+  workflow_dispatch:
+    inputs:
+      rollup:
+        description: "which rollup to render/post"
+        type: choice
+        options: [regression, latest]
+        default: regression
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-feed
+  cancel-in-progress: false
+
+jobs:
+  bench-feed:
+    name: bench rollup -> bench channel
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_BENCH_CHANNEL: ${{ vars.FAK_BENCH_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The daily schedule posts the regression rollup; a manual run uses the chosen
+      # input. `fak bench post` reads the catalog + baseline itself — no payload-gen.
+      - name: select rollup
+        id: rollup
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "rollup=${{ github.event.inputs.rollup }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "rollup=regression" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Always render the card to the step summary (and as the artifact) so the run
+      # is auditable even when nothing posts (missing secret / unset channel / fork).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak bench post --rollup ${{ steps.rollup.outputs.rollup }} \
+            --source ci --dry-run | tee bench-card.txt
+          {
+            echo "## bench-feed — ${{ steps.rollup.outputs.rollup }} rollup"
+            echo '```'
+            cat bench-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when BOTH gates hold: the token secret is present AND the bench
+      # channel variable is set (the channel has no built-in default). A manual
+      # dry_run also skips.
+      - name: post bench rollup
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BENCH_CHANNEL != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak bench post --rollup ${{ steps.rollup.outputs.rollup }} \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_BENCH_CHANNEL == '' }}
+        run: |
+          {
+            echo "Posting skipped — ran in dry-run, nothing posted."
+            if [ -z "${{ env.FAK_SCOREBOARD_TOKEN }}" ]; then
+              echo "- FAK_SCOREBOARD_TOKEN secret is not set (add it to enable posting)."
+            fi
+            if [ -z "${{ env.FAK_BENCH_CHANNEL }}" ]; then
+              echo "- FAK_BENCH_CHANNEL repo variable is not set (the bench channel has no built-in default)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-card
+          path: bench-card.txt
+          if-no-files-found: ignore

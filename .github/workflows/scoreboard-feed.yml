@@ -1,0 +1,152 @@
+name: scoreboard-feed
+
+# Publish fak's PORTFOLIO status to Slack #scoreboard (the scoreboard workspace,
+# T0BDEJF1HGB). This is the daily heartbeat for the whole code/debt control pane:
+# the scorecard control-pane tool rolls every surface's debt into one card and this
+# job posts that card on a cadence.
+#
+#   * daily 08:17 UTC -> posts the portfolio total_debt / grade / verdict as an
+#     ad-hoc KPI card. The control-pane payload (schema fak-scorecard-control-pane/1)
+#     is a PORTFOLIO summary with total_debt at the TOP LEVEL and no per-scorecard
+#     `corpus` block, so `fak scoreboard post --from` (which reads grade/score/debt
+#     out of corpus[...]) would render a hollow card. We therefore jq the headline
+#     numbers out of the payload and post them via the --kpi path, the same ad-hoc
+#     route capacity-feed uses. A heartbeat regardless of change, so #scoreboard
+#     always shows the current portfolio total_debt / verdict.
+#   * workflow_dispatch -> a manual off-cadence run, dry-run by default so an
+#     operator can preview the card without posting.
+#
+# This is a Slack STATUS feeder (cadence -> channel post), the dual of
+# steering-guard.yml — NOT an issue feeder. It does not open issues or push; the
+# score-signal / bench-signal / gate-signal workflows own the regression->issue
+# dispatch loop and are a separate concern.
+#
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret being present. Without it the
+# job runs in --dry-run and writes the card to the step summary, so a fork or a
+# secret-less run never hard-fails — it just shows what WOULD post.
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
+# scoreboard-workspace bot token — the same value in the gitignored
+# .env.slack.local) under Settings -> Secrets and variables -> Actions. The
+# #scoreboard channel is the built-in default; override with the
+# FAK_SCOREBOARD_CHANNEL repo variable if you point the surface elsewhere.
+on:
+  schedule:
+    # Daily 08:17 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, steering-guard 07:33,
+    # score-signal 07:41, gate-signal 07:53, bench-signal 08:03; cadence Mon 08:17
+    # is weekly-only so a daily 08:17 does not collide on a weekday count).
+    # No push trigger: total_debt changes on most commits to a high-churn shared
+    # trunk, so a per-push post would be heartbeat noise. The daily cadence is the
+    # right grain for a portfolio snapshot.
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scoreboard-feed
+  cancel-in-progress: false
+
+jobs:
+  scoreboard-feed:
+    name: control-pane -> #scoreboard
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_SCOREBOARD_CHANNEL: ${{ vars.FAK_SCOREBOARD_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The control-pane tool is the single source of the numbers; generate the
+      # payload once. The tool EXITS NON-ZERO when there is debt (verdict ACTION) but
+      # still prints valid JSON, so tolerate the non-zero exit and assert the file
+      # is non-empty instead — exactly like the signal workflows do.
+      - name: generate control-pane payload
+        run: |
+          set +e
+          python tools/scorecard_control_pane.py --json > pane.json
+          set -e
+          test -s pane.json || { echo "control pane produced no JSON"; exit 1; }
+
+      # Extract the headline numbers from the PORTFOLIO payload. The control-pane
+      # schema (fak-scorecard-control-pane/1) keeps total_debt / verdict at the TOP
+      # LEVEL with no per-scorecard `corpus` block, so we post via the --kpi ad-hoc
+      # path (capacity-feed's route) rather than --from. A clean portfolio (debt 0)
+      # is grade A / OK; any residual debt is grade C / ACTION — the same coarse
+      # mapping the capacity feed uses, so the channel reads consistently.
+      - name: fold portfolio headline
+        id: pane
+        run: |
+          debt=$(jq -r '.total_debt // 0' pane.json)
+          case "$debt" in ''|*[!0-9]*) debt=0 ;; esac
+          if [ "$debt" -eq 0 ]; then grade=A; verdict=OK; else grade=C; verdict=ACTION; fi
+          reason=$(jq -r '.reason // "scorecard portfolio total_debt"' pane.json | head -c 280)
+          echo "debt=$debt" >> "$GITHUB_OUTPUT"
+          echo "grade=$grade" >> "$GITHUB_OUTPUT"
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "portfolio total_debt=$debt grade=$grade verdict=$verdict"
+
+      # Always render the card to the step summary (and as the artifact) so the run
+      # is auditable even when nothing posts (missing secret / fork / manual dry-run).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak scoreboard post \
+            --kpi scorecard-portfolio \
+            --value "${{ steps.pane.outputs.debt }}" \
+            --grade "${{ steps.pane.outputs.grade }}" \
+            --verdict "${{ steps.pane.outputs.verdict }}" \
+            --detail "${{ steps.pane.outputs.reason }}" \
+            --source ci --dry-run | tee scoreboard-card.txt
+          {
+            echo "## scoreboard-feed — control pane"
+            echo '```'
+            cat scoreboard-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when the token secret is present. A manual dry_run also skips.
+      - name: post to #scoreboard
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak scoreboard post \
+            --kpi scorecard-portfolio \
+            --value "${{ steps.pane.outputs.debt }}" \
+            --grade "${{ steps.pane.outputs.grade }}" \
+            --verdict "${{ steps.pane.outputs.verdict }}" \
+            --detail "${{ steps.pane.outputs.reason }}" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoreboard-card
+          path: |
+            scoreboard-card.txt
+            pane.json
+          if-no-files-found: ignore
