@@ -1,6 +1,9 @@
 package nightrun
 
-import "sort"
+import (
+	"sort"
+	"time"
+)
 
 // Source records where a collection Task came from, so a reader can tell a
 // benchmark-grid cell from a curated open-measurement and from an operator's
@@ -135,6 +138,12 @@ type Task struct {
 	// RecheckDays is how long a collected datum stays "fresh" before a re-collect
 	// is overdue. Zero falls back to DefaultRecheckDays.
 	RecheckDays int `json:"recheck_days,omitempty"`
+	// TimeoutSec is the per-task wall-clock budget for ONE --apply attempt. A task
+	// that exceeds it is killed and recorded OBSERVED as a timeout (never as a
+	// success), so one slow/hung task can never stall an unattended --loop. Zero
+	// falls back to DefaultTaskTimeoutSec. A live serving/throughput collection can
+	// raise it via the overlay (`"timeout_sec": 3600`) without recompiling.
+	TimeoutSec int `json:"timeout_sec,omitempty"`
 	// Doc is the in-repo methodology / issue / authority pointer, or "".
 	Doc string `json:"doc,omitempty"`
 }
@@ -145,6 +154,14 @@ func (t Task) recheckDays() int {
 		return t.RecheckDays
 	}
 	return DefaultRecheckDays
+}
+
+// timeout returns the Task's per-attempt wall-clock budget, defaulting when unset.
+func (t Task) timeout() time.Duration {
+	if t.TimeoutSec > 0 {
+		return time.Duration(t.TimeoutSec) * time.Second
+	}
+	return time.Duration(DefaultTaskTimeoutSec) * time.Second
 }
 
 // offline reports whether the Task needs nothing — no requirement and no cred.
@@ -164,6 +181,14 @@ func (t Task) offline() bool {
 // declare its own — the same 14-day default tools/bench_plan.py uses, so the two
 // planners agree on what "stale" means.
 const DefaultRecheckDays = 14
+
+// DefaultTaskTimeoutSec is the fall-back per-attempt wall-clock budget for a Task
+// that does not declare its own. It bounds ONE --apply attempt so an unattended
+// --loop cannot be stalled by a single slow or hung command (a full benchmark
+// grid, a wedged process); the task is killed and recorded as a timeout, and the
+// loop moves on. 15 minutes is generous for the offline/smoke lane while still
+// catching a genuinely stuck run. A heavier collection raises it per-task.
+const DefaultTaskTimeoutSec = 900
 
 // sortTasks orders a slice of Tasks deterministically by id, in place, and
 // returns it — the canonical order the backlog is presented in before scoring.

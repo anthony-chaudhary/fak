@@ -25,6 +25,7 @@ type Outcome string
 const (
 	OutcomeCollected Outcome = "collected" // ran clean, artifact captured
 	OutcomeFailed    Outcome = "failed"    // ran, non-zero exit / no artifact
+	OutcomeTimeout   Outcome = "timeout"   // exceeded the per-task wall-clock budget; killed (partial artifact kept)
 	OutcomeDryRun    Outcome = "dry-run"   // printed only; nothing executed
 	OutcomeSkipped   Outcome = "skipped"   // not feasible / deliberately passed
 )

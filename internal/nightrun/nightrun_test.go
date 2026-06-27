@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -378,6 +379,48 @@ func TestParseNumberObservedOnly(t *testing.T) {
 	}
 	if got := parseNumber("no headline here"); got != "" {
 		t.Errorf("parseNumber must NOT fabricate a number, got %q", got)
+	}
+}
+
+// TestTaskTimeoutDefaultAndOverride pins the per-attempt budget: an unset
+// TimeoutSec falls back to DefaultTaskTimeoutSec; a declared one wins. This bound
+// is what keeps a single slow task from stalling an unattended --loop.
+func TestTaskTimeoutDefaultAndOverride(t *testing.T) {
+	if got := (Task{}).timeout(); got != time.Duration(DefaultTaskTimeoutSec)*time.Second {
+		t.Errorf("default timeout = %s, want %ds", got, DefaultTaskTimeoutSec)
+	}
+	if got := (Task{TimeoutSec: 5}).timeout(); got != 5*time.Second {
+		t.Errorf("override timeout = %s, want 5s", got)
+	}
+}
+
+// TestDefaultExecutorTimeout pins the OBSERVED-timeout path: a task that exceeds
+// its budget is killed and recorded as OutcomeTimeout (never a success, never a
+// generic failure), with no fabricated number and the partial output still
+// captured as evidence. Regression guard for the unattended-loop stall a slow
+// full-grid benchmark caused in live collection.
+func TestDefaultExecutorTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh/sleep; runs on the Linux test path (native windows go test is blocked anyway)")
+	}
+	art := filepath.Join(t.TempDir(), "out.log")
+	task := Task{ID: "slow", Run: "echo started; sleep 30", TimeoutSec: 1}
+	start := time.Now()
+	outcome, number, dur, err := DefaultExecutor(context.Background(), task, art)
+	if outcome != OutcomeTimeout {
+		t.Errorf("outcome = %q, want %q (err=%v)", outcome, OutcomeTimeout, err)
+	}
+	if err == nil {
+		t.Error("a timed-out run must report an error naming the budget")
+	}
+	if number != "" {
+		t.Errorf("a timed-out run must not report a headline number, got %q", number)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second || dur > 10*time.Second {
+		t.Errorf("timeout did not fire promptly (elapsed=%s dur=%s); the 1s budget should kill the 30s sleep", elapsed, dur)
+	}
+	if b, rerr := os.ReadFile(art); rerr != nil || !strings.Contains(string(b), "started") {
+		t.Errorf("partial output not captured before kill: err=%v content=%q", rerr, string(b))
 	}
 }
 

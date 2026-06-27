@@ -163,15 +163,29 @@ var numberRE = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*(tok/s|tokens/s|GB/s|
 
 // DefaultExecutor runs t.Run through the platform shell, tees the combined output
 // to artifactPath, and reports the OBSERVED outcome: a zero exit with captured
-// output is collected; a non-zero exit is failed. It parses a headline number
-// only if the output clearly contains one — otherwise the Number is left empty.
+// output is collected; a non-zero exit is failed; exceeding the task's wall-clock
+// budget (t.timeout()) is a timeout — the process is killed, the partial output is
+// still captured, and the loop moves on (so one slow/hung task cannot stall an
+// unattended --loop). It parses a headline number only if the output clearly
+// contains one — otherwise the Number is left empty.
 func DefaultExecutor(ctx context.Context, t Task, artifactPath string) (Outcome, string, time.Duration, error) {
 	start := time.Now()
 	shell, flag := "sh", "-c"
 	if runtime.GOOS == "windows" {
 		shell, flag = "cmd", "/c"
 	}
-	cmd := exec.CommandContext(ctx, shell, flag, t.Run)
+	// Bound the attempt: a per-task deadline on top of any caller deadline. The
+	// whole process GROUP is killed on expiry (configureProcGroup) — exec.Command
+	// only kills the direct child, so a `go run ./cmd/<bench>` whose compiled binary
+	// is the real worker (or any grandchild) would otherwise outlive the kill AND
+	// keep the output pipe open, blocking CombinedOutput past the deadline. WaitDelay
+	// is the portable backstop: it force-closes the pipes if a straggler lingers, so
+	// the loop is guaranteed to move on.
+	runCtx, cancel := context.WithTimeout(ctx, t.timeout())
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, shell, flag, t.Run)
+	configureProcGroup(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	out, err := cmd.CombinedOutput()
 	dur := time.Since(start)
 
@@ -180,8 +194,15 @@ func DefaultExecutor(ctx context.Context, t Task, artifactPath string) (Outcome,
 	if derr := os.MkdirAll(filepath.Dir(artifactPath), 0o755); derr != nil {
 		return OutcomeFailed, "", dur, fmt.Errorf("create artifact dir: %w", derr)
 	}
+	// Capture whatever output the command produced before it ended — a timed-out
+	// run's partial log is still evidence of how far it got.
 	if werr := os.WriteFile(artifactPath, out, 0o644); werr != nil {
 		return OutcomeFailed, "", dur, fmt.Errorf("capture output: %w", werr)
+	}
+	// A deadline hit is reported as a timeout, not a generic failure: it is the
+	// budget firing, not the command itself exiting non-zero.
+	if runCtx.Err() == context.DeadlineExceeded {
+		return OutcomeTimeout, "", dur, fmt.Errorf("task %q exceeded its %s budget", t.ID, t.timeout())
 	}
 	if err != nil {
 		return OutcomeFailed, "", dur, err
