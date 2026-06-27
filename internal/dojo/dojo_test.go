@@ -226,6 +226,33 @@ func TestLedgerRoundTripAndTrend(t *testing.T) {
 	}
 }
 
+func TestTrendSubDisplayDeltaIsFlat(t *testing.T) {
+	// Dogfood regression: a corpus drift of +0.00045 mean-calib-err once printed
+	// "calibration regressed +0.000 (0.341->0.341)" — a direction the operator
+	// cannot see in the rendered numbers. A delta finer than the %.3f display
+	// precision must read "flat", and the summary must not contradict itself.
+	prev := LedgerRow{Date: "2026-06-27", Commit: "6a2a325e", GeneratedAt: "2026-06-27T05:57:56Z", MeanCalibErr: 0.3409325648392343, Calibrated: 2, Measured: 3}
+	cur := LedgerRow{Date: "2026-06-27", Commit: "d6188182", GeneratedAt: "2026-06-27T06:10:00Z", MeanCalibErr: 0.3413873609606471, Calibrated: 2, Measured: 3}
+	tr := TrendVsLast(cur, []LedgerRow{prev})
+	if tr.Direction != "flat" {
+		t.Fatalf("delta %.5f rounds to +0.000 at display precision — want flat, got %q (%s)", tr.CalibErrDelta, tr.Direction, tr.Summary)
+	}
+	if strings.Contains(tr.Summary, "regressed") || strings.Contains(tr.Summary, "improved") {
+		t.Fatalf("a sub-display delta summary must not claim a direction it cannot show: %q", tr.Summary)
+	}
+}
+
+func TestTrendDisplayableRegressionStillReported(t *testing.T) {
+	// The fix must not blunt a real, visible regression: a +0.05 rise still reads
+	// "regressed" (it renders as +0.050, not +0.000).
+	prev := LedgerRow{Date: "2026-06-26", MeanCalibErr: 0.300, Calibrated: 2, Measured: 3}
+	cur := LedgerRow{Date: "2026-06-27", MeanCalibErr: 0.350, Calibrated: 2, Measured: 3}
+	tr := TrendVsLast(cur, []LedgerRow{prev})
+	if tr.Direction != "regressed" {
+		t.Fatalf("a visible +0.050 rise must stay regressed, got %q (%s)", tr.Direction, tr.Summary)
+	}
+}
+
 func TestTrendNewWhenNoPrior(t *testing.T) {
 	row := RowFromReport(Fold([]Episode{Score("s", pred("a", 1.0), obs(0.9, true), DefaultCalibBand())}, FoldOpts{Date: "2026-06-26"}))
 	tr := TrendVsLast(row, nil)

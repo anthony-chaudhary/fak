@@ -45,6 +45,12 @@ type Trend struct {
 	Summary        string  `json:"summary"`
 }
 
+// trendDisplayEpsilon is the smallest mean-calib-err delta the trend summary can
+// render as nonzero at its %.3f precision (the rounding boundary, 0.0005). A
+// change below it prints "+0.000", so the direction is reported "flat" rather
+// than a regressed/improved label the operator cannot see in the numbers.
+const trendDisplayEpsilon = 5e-4
+
 // RowFromReport projects a folded report into one durable ledger row.
 func RowFromReport(r Report) LedgerRow {
 	return LedgerRow{
@@ -102,10 +108,16 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		}
 	}
 	delta := row.MeanCalibErr - last.MeanCalibErr
+	// The direction must agree with the magnitude the summary renders at %.3f: a
+	// delta that rounds to +0.000 reads as a contradiction if we still call it
+	// "regressed"/"improved" (a real dogfood finding — a +0.00045 corpus drift
+	// printed "calibration regressed +0.000 (0.341->0.341)"). So a change finer
+	// than the displayed precision is "flat", not a direction the operator can't
+	// see. trendDisplayEpsilon is the %.3f rounding boundary.
 	dir := "flat"
-	if delta < -1e-9 {
+	if delta <= -trendDisplayEpsilon {
 		dir = "improved"
-	} else if delta > 1e-9 {
+	} else if delta >= trendDisplayEpsilon {
 		dir = "regressed"
 	}
 	return Trend{
