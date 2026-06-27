@@ -86,18 +86,28 @@ kernel void q8dq_gemv(device const char*  W    [[buffer(0)]],  // out*in int8 co
     if (lane == 0) Y[o] = half(acc);
 }
 
+// d_rmsnorm: ONE threadgroup over the single token's H-vector. The TG threads cooperatively sum
+// x^2 (strided), reduce in threadgroup memory, then write the normed row strided. The old version
+// ran the whole H-wide norm on ONE thread (a 56-dispatch serial bottleneck in the decode forward);
+// this parallelizes it across the threadgroup.
 kernel void d_rmsnorm(device const half* X [[buffer(0)]],
                       device const half* W [[buffer(1)]],
                       device half* Out [[buffer(2)]],
                       constant uint& H [[buffer(3)]],
                       constant float& eps [[buffer(4)]],
-                      uint t [[thread_position_in_grid]]) {
-    device const half* x = X + t*H;
-    float ss = 0.0f;
-    for (uint i=0;i<H;i++){ float v=float(x[i]); ss += v*v; }
-    float inv = rsqrt(ss/float(H) + eps);
-    device half* o = Out + t*H;
-    for (uint i=0;i<H;i++){ o[i] = half(float(x[i])*inv*float(W[i])); }
+                      uint tid [[thread_position_in_threadgroup]],
+                      uint tgsize [[threads_per_threadgroup]],
+                      threadgroup float* shared [[threadgroup(0)]]) {
+    float ps = 0.0f;
+    for (uint i=tid;i<H;i+=tgsize){ float v=float(X[i]); ps += v*v; }
+    shared[tid] = ps;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint s=tgsize/2; s>0; s>>=1) {
+        if (tid < s) shared[tid] += shared[tid+s];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    float inv = rsqrt(shared[0]/float(H) + eps);
+    for (uint i=tid;i<H;i+=tgsize){ Out[i] = half(float(X[i])*inv*float(W[i])); }
 }
 
 kernel void d_addbias(device half* Buf [[buffer(0)]],
@@ -292,7 +302,12 @@ static void d_norm(id<MTLBuffer> X, int normID, id<MTLBuffer> Out) {
     [e setBuffer:Out offset:0 atIndex:2];
     uint H = gDecH; [e setBytes:&H length:4 atIndex:3];
     [e setBytes:&gDecEps length:4 atIndex:4];
-    [e dispatchThreads:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(1,1,1)];
+    // ONE threadgroup of TG threads (power of two) over the H-vector; threadgroup memory holds the
+    // reduction. TG = min(256, maxThreads), rounded down to a power of two for the tree reduction.
+    NSUInteger TG = psoDNorm.maxTotalThreadsPerThreadgroup; if (TG > 256) TG = 256;
+    NSUInteger p = 1; while (p*2 <= TG) p *= 2; TG = p;
+    [e setThreadgroupMemoryLength:(NSUInteger)(TG*4) atIndex:0];
+    [e dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(TG,1,1)];
 }
 
 static void d_bias(id<MTLBuffer> Buf, int biasID, int n, long off) {
@@ -388,29 +403,36 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
 
         gDCB = [gQueue commandBuffer];
         gDEnc = nil;
+        // Diagnostic: skip the elementwise kernels (norm/bias/RoPE/attn/SwiGLU/add) so only the seven
+        // projection GEMVs run. Output is garbage; this isolates the matmul (weight-stream) GPU time
+        // from the small-kernel overhead, to decide whether the parity lever is the GEMV bandwidth or
+        // fusing the small kernels.
+        int matOnly = getenv("FAK_DECODE_MATMUL_ONLY") != NULL;
 
         for (int l = 0; l < gDecNL; l++) {
             DecLayer L_ = gDecL[l];
-            d_norm(Xb, L_.inNorm, Xn);                     // Xn = rmsnorm(X)
+            if (!matOnly) d_norm(Xb, L_.inNorm, Xn);        // Xn = rmsnorm(X)
             d_gemv(L_.q, Xn, Qb, 0);                       // Q
             d_gemv(L_.k, Xn, Kbuf[l], rowOff);             // K written straight to resident row L
             d_gemv(L_.v, Xn, Vbuf[l], rowOff);             // V written straight to resident row L
-            if (gDecAttnBias) {
+            if (!matOnly && gDecAttnBias) {
                 d_bias(Qb, L_.qb, qrow, 0);
                 d_bias(Kbuf[l], L_.kb, w, rowOff);
                 d_bias(Vbuf[l], L_.vb, w, rowOff);
             }
-            d_rope_at(Qb, nH, L, 0);                        // RoPE Q
-            d_rope_at(Kbuf[l], nKV, L, rowOff);            // RoPE the new K row in place
-            d_attn(Qb, Kbuf[l], Vbuf[l], attn, ctx);       // single-query attention over ctx keys
+            if (!matOnly) {
+                d_rope_at(Qb, nH, L, 0);                    // RoPE Q
+                d_rope_at(Kbuf[l], nKV, L, rowOff);        // RoPE the new K row in place
+                d_attn(Qb, Kbuf[l], Vbuf[l], attn, ctx);   // single-query attention over ctx keys
+            }
             d_gemv(L_.o, attn, tmpH, 0);                   // O
-            d_add_buf(Xb, tmpH, H);                         // X += O
-            d_norm(Xb, L_.postNorm, Xn2);                  // Xn2 = rmsnorm(X)
+            if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += O
+            if (!matOnly) d_norm(Xb, L_.postNorm, Xn2);    // Xn2 = rmsnorm(X)
             d_gemv(L_.gate, Xn2, Gb, 0);                   // gate
             d_gemv(L_.up, Xn2, Ub, 0);                     // up
-            d_silu(Gb, Ub, Im);                             // G = silu(G)*U
+            if (!matOnly) d_silu(Gb, Ub, Im);               // G = silu(G)*U
             d_gemv(L_.down, Gb, tmpH, 0);                  // down
-            d_add_buf(Xb, tmpH, H);                         // X += down
+            if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += down
         }
         dendEnc();
         CFTimeInterval tEnc = prof ? CFAbsoluteTimeGetCurrent() : 0;
