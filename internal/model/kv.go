@@ -450,6 +450,14 @@ func (s *Session) Prefill(ids []int) []float32 {
 		}
 		return s.headQ4(last)
 	}
+	if s.Backend != nil {
+		// A device session executes the WHOLE forward through the HAL (matWeightHAL now
+		// dispatches q8w/q4kw/f32), so the device path must take precedence over the CPU
+		// resident-quant lanes below — else a Q4_K device session prefilled on the CPU cache
+		// (s.Cache) while decoding from the empty device cache (s.halKV) → garbage (#949).
+		s.requirePreNorm("HAL prefill")
+		return s.prefillHAL(ids, true)
+	}
 	if s.Q4K {
 		// Resident Q4_K prefill (plan P1/P3). For a PreNorm standard-attention model (the
 		// q4_k_m regime the plan targets), run the BATCHED q4 GEMM: q4_k_m majority via
@@ -481,10 +489,6 @@ func (s *Session) Prefill(ids []int) []float32 {
 			last = s.tokenHiddenGPTQ(id, s.Cache.Len())
 		}
 		return s.headResident(last)
-	}
-	if s.Backend != nil {
-		s.requirePreNorm("HAL prefill")
-		return s.prefillHAL(ids, true)
 	}
 	if s.Metal {
 		s.requirePreNorm("Metal prefill")
@@ -554,6 +558,11 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		}
 		return
 	}
+	if s.Backend != nil {
+		s.requirePreNorm("HAL prefill")
+		s.prefillHAL(ids, false)
+		return
+	}
 	if s.Q4K {
 		if !q8PrefillNeedsTokenLoop(s.M.Cfg) {
 			s.prefillBatchedQ4K(ids)
@@ -572,11 +581,6 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		for _, id := range ids {
 			s.tokenHiddenGPTQ(id, s.Cache.Len())
 		}
-		return
-	}
-	if s.Backend != nil {
-		s.requirePreNorm("HAL prefill")
-		s.prefillHAL(ids, false)
 		return
 	}
 	if s.PrecisionPolicy != nil {
