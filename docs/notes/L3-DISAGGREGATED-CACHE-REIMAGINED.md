@@ -121,6 +121,44 @@ path only.
   tested; **every tier-projection here is unbuilt.** No row above should be read as "fak
   already does this across an L3 tier."
 
+## CLAIMS tie-in
+
+This positioning study maps fak's shipped primitives onto L3-cache gaps. The **single-box
+primitives** themselves are already captured in the claims ledger at `CLAIMS.md` under their
+respective sections:
+
+- **G1 (`Ref.Digest`)** — content-hash identity and verification is covered by the
+  IFC/taint and result-quarantine claims (CLAIMS.md units 48–70, the result-admit
+  guard), which establish that every `Ref` carries a verifiable digest at the syscall
+  boundary.
+- **G2 (`KVCache.Evict` / `CanEvict` / `TryEvict`)** — the middle-evict primitive is a
+  tier-agnostic KV surface; its claims appear under the memory-classed OOM / cache
+  visibility surface (CLAIMS.md, the `kv_cache` and `cache_event` metric rows).
+- **G3 (`DeletionCertificate`)** — the shipped mint/verify primitive carries a fenced
+  `[SHIPPED]` entry in CLAIMS.md (the deletioncert row with the three honest fences:
+  self-signed v1, `EvictedCount` self-report, `max|Δ|=0` as a signed string).
+- **G4 (`ShareScope`)** — the closed scope vocabulary (`Agent` / `Fleet` / `Tenant`) is
+  part of the IFC/taint and ShareScope claims (CLAIMS.md IFC line), which enforce
+  isolation beyond flat tags.
+- **G5 (IFC taint + sink-gate)** — the provenance backstop is fully claimed under the
+  IFC section of CLAIMS.md, including the `Ref.Taint` source-stamping and rank-30
+  pre-call sink gate.
+- **G6 (S7 durability axis)** — epic #496 and its durability-tiering work carry their
+  own claim rows in CLAIMS.md under the S7 durability section.
+- **G7 (DOS lease-lane / `arbitrate`)** — the lane-arbitration primitive is covered by
+  the DOS kernel claims (the `dos_arbitrate` / lane-family rows).
+- **G8 (closed `ReasonCode` vocabulary)** — the refusal vocabulary is part of the
+  default-deny capability floor claims (CLAIMS.md units 15, 29, and the
+  `dos_refuse_reasons` surface).
+
+**The tier-projections (children A–E) are not yet claimed** — they are unbuilt, so no
+`[SHIPPED]` entries exist for them. When a child ships, it must add its own fenced
+claim to CLAIMS.md with the same discipline: a `[SHIPPED]` tag, the shipped primitive
+location, and honest fences (single-box vs L3-tier scope, control-path-only guarantees,
+external-store dependence for child A, network transport dependence for child B, etc.).
+The claims-lint gate enforces exactly-one-tag per claim and will catch any attempt to
+claim an unbuilt tier-projection.
+
 ## Open forks for the operator
 
 1. Real external-L3-cache integration, or L3-cache-as-exemplar (positioning only)?
