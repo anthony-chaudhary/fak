@@ -11,7 +11,7 @@ The `add()` function in `calculator.py` is buggy: it subtracts instead of adds.
 Before the fix, one test should fail:
 ```bash
 python -m unittest test_calculator.py
-# Expected output: .F. (1 pass, 1 fail)
+# Expected output: F. (1 fail, 1 pass)
 ```
 
 After fixing the `add()` function, both tests should pass:

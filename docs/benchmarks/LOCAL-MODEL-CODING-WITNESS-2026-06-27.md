@@ -58,7 +58,7 @@ A minimal, deterministic coding task:
 ```bash
 cd testdata/coding_smoke
 python -m unittest test_calculator.py
-# Expected: .F. (1 pass, 1 fail)
+# Expected: F. (1 fail, 1 pass)
 ```
 
 **After the fix:**
