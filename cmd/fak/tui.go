@@ -989,6 +989,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the launch model as JSON and do not start the backend agent")
 	listTargets := fs.Bool("list-targets", false, "list the named compute targets (mac/gcp/local/anthropic + ~/.fak/targets.json) with a live /healthz column, then exit")
 	targetFlag := fs.String("target", "", "named compute target to chat against (mac/gcp/local/anthropic + ~/.fak/targets.json); the explicit form of the leading `fak c <target>` token")
+	auto := fs.Bool("auto", false, "health/cost/quota-aware automatic compute-target selection with failover (#939): probe every registered target, rank by the documented policy (healthy first, then cheapest/most-local), and launch the best one; --json emits the ranked decision instead of launching")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -1008,6 +1009,47 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	}
 	if selectedTarget == "" {
 		selectedTarget = leadingTarget
+	}
+	// #939: --auto ranks the registered targets (healthy first, then cheapest/most-local)
+	// and selects the winner, which then flows through the same resolution path as an
+	// explicit target below. It is mutually exclusive with a named target or --gateway-url.
+	autoSelected := false
+	if *auto {
+		if selectedTarget != "" {
+			fmt.Fprintf(stderr, "fak console agent: --auto selects a target automatically; do not also pass a target (%q)\n", selectedTarget)
+			return 2
+		}
+		if setFlags["gateway-url"] {
+			fmt.Fprintln(stderr, "fak console agent: --auto ranks the registered targets; it cannot combine with an explicit --gateway-url")
+			return 2
+		}
+		if regErr != nil {
+			fmt.Fprintf(stderr, "fak console agent: --auto: load compute targets: %v\n", regErr)
+			return 1
+		}
+		hc := &http.Client{Timeout: 3 * time.Second}
+		decision, winner, autoErr := autoSelectComputeTarget(context.Background(), reg, hc, 3*time.Second)
+		if *asJSON {
+			// --auto --json emits the ranked decision (not a launch plan) and does not launch.
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			if encErr := enc.Encode(decision); encErr != nil {
+				fmt.Fprintf(stderr, "fak console agent: encode json: %v\n", encErr)
+				return 1
+			}
+			if autoErr != nil {
+				return 1
+			}
+			return 0
+		}
+		// Log the ranked decision so the operator sees WHY the winner won (or why nothing did).
+		renderAutoDecision(stderr, decision)
+		if autoErr != nil {
+			fmt.Fprintf(stderr, "fak console agent: --auto: %v\n", autoErr)
+			return 1
+		}
+		selectedTarget = winner.Name
+		autoSelected = true
 	}
 	if *width < 72 {
 		*width = 72
@@ -1097,8 +1139,9 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	// #938: gate an interactive launch against a resolved remote target on a reachable
 	// gateway — mirror the claude-mac-fak preflight so `fak c mac/gcp/local` never hands
 	// the terminal to Claude against a dead/mock backend. A target with no /healthz (the
-	// real Anthropic API) is n/a and never blocks.
-	if resolvedTarget != nil {
+	// real Anthropic API) is n/a and never blocks. --auto already probed every target and
+	// picked a healthy winner, so it skips this redundant second probe.
+	if resolvedTarget != nil && !autoSelected {
 		if code, gated := preflightComputeTarget(stdout, stderr, *resolvedTarget); gated {
 			return code
 		}

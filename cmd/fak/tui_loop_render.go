@@ -432,7 +432,7 @@ Alias: fak tui
                  [--workspace DIR] [--deep] [--timeout N] [--width N]
   fak console guard  --guard-json FILE [--guard-json FILE ...] [--json]
                  [--width N] [--at RFC3339|YYYY-MM-DD]
-  fak console agent [<target> | --target NAME] [--list-targets]
+  fak console agent [<target> | --target NAME | --auto] [--list-targets]
                 [--account NAME | --claude-config-dir DIR] [--dry-run]
                 [--prompt STR] [--session-id ID] [--passthrough]
                 [--permission-mode MODE] [--gateway-url URL]
@@ -469,6 +469,12 @@ A leading `+"`fak c <target>`"+` (or --target NAME) selects a named compute back
 from the registry (mac/gcp/local/anthropic + ~/.fak/targets.json; see --list-targets):
 it resolves the target's gateway URL + model and gates an interactive launch on a live
 /healthz probe. An unknown leading token still forwards to claude unchanged.
+
+--auto picks the backend for you: it probes every registered target's /healthz and ranks
+them by a documented policy — healthy first, then cheapest/most-local (cost_class asc:
+local < mac < gcp < anthropic), failing over past a dead/over-quota choice. It never
+lands on a dead gateway. The quota signal is an honest [stub] (not yet a live
+`+"`fak accounts`"+` read). `+"`--auto --json`"+` emits the ranked decision instead of launching.
 
 The overview pane composes selected pane models into one ranked spine so
 operators can see issue, loop, session, garden, and guard pressure together.
