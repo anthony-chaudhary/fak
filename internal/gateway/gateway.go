@@ -922,6 +922,73 @@ func (s *Server) maybePlanMessages(ctx context.Context, trace string, messages [
 	return planned
 }
 
+// maybeElideKVResidency drives the model-side PLANNED-ELISION residency bridge (issue #579, the
+// kvmmu-planned-eviction half) when the context planner shrank the turn history. It is the
+// capacity-plan twin of evictInKernelPoison's KVSpanEvictor (which enforces a trust quarantine):
+// the planner's O(1) text view becomes a real O(1) KV RESIDENCY, with the elided spans' K/V
+// actually evicted from the kernel-owned cache instead of physically held behind an O(1) view.
+//
+// Honest posture (issue #579, "bit-exact provable direction only"): the bridge engages on the
+// plan the context planner produced, and ElideKVSpans evicts every elided span — but it asserts
+// the bit-exact O(1)-residency invariant ONLY when the elided spans are the positional SUFFIX (the
+// over-budget direction the kvmmu witness proves: a re-RoPE renumbers survivors with no surviving
+// earlier token having attended to an evicted later one). Eliding an old prefix the recent
+// resident tail already attended to still shrinks residency but is NOT reported bit-exact, rather
+// than overclaiming an invariant a re-RoPE cannot satisfy.
+//
+// It is a no-op (returns silently) unless the planner implements KVSpanElider (the in-kernel
+// engine with FAK_INKERNEL_KVMMU on) AND the planned view is a clean sub-sequence of the history
+// (a reorder/rewrite is left untouched — the bridge fails OPEN rather than evict the wrong span).
+// Default posture is therefore unchanged unless an operator opts the in-kernel bridge in.
+func (s *Server) maybeElideKVResidency(fullHistory, planned []agent.Message) {
+	elider, ok := s.planner.(agent.KVSpanElider)
+	if !ok {
+		return
+	}
+	// Recover which fullHistory messages the planner elided. The planned view must be a clean
+	// trailing SUFFIX of fullHistory (planning dropped a leading prefix); a reorder/rewrite is
+	// not a shape the residency bridge can map safely, so it is skipped (fail-open).
+	elided, ok := elidedPrefixMask(fullHistory, planned)
+	if !ok {
+		return
+	}
+	plan := agent.SegElisionPlan(fullHistory, elided)
+	if len(plan.Elided) == 0 {
+		return // planning kept everything resident — nothing to evict
+	}
+	if freed, exact := elider.ElideKVSpans(fullHistory, plan); freed > 0 {
+		s.logf("gateway: in-kernel KV residency shrank to planned view elided=%d freed=%dpos reposition_exact=%v", len(plan.Elided), freed, exact)
+	}
+}
+
+// elidedPrefixMask recovers which fullHistory messages the planner elided, for the case the
+// planned view is a trailing SUFFIX of fullHistory (planning dropped a leading prefix). It returns
+// a mask where the leading prefix is elided (true) and the resident suffix is kept (false), and
+// ok=false when the planned view is not a clean trailing suffix (a reorder or rewrite). Compares
+// role+content, the fields renderTranscript lowers into the spans the bridge evicts.
+//
+// NOTE the bit-exactness direction is decided downstream: a trailing-suffix RESIDENT view means
+// the ELIDED spans are the leading prefix — the non-bit-exact direction — so ElideKVSpans will
+// shrink residency but report reposition_exact=false here. The provable (suffix-elided) direction
+// is exercised by the unit witness driving SegElisionPlan directly. This gate is the conservative
+// pre-filter; ElideKVSpans re-checks positional order and is the load-bearing proof.
+func elidedPrefixMask(fullHistory, planned []agent.Message) (mask []bool, ok bool) {
+	if len(planned) == 0 || len(planned) >= len(fullHistory) {
+		return nil, false
+	}
+	off := len(fullHistory) - len(planned)
+	for i := range planned {
+		if planned[i].Role != fullHistory[off+i].Role || planned[i].Content != fullHistory[off+i].Content {
+			return nil, false
+		}
+	}
+	mask = make([]bool, len(fullHistory))
+	for i := 0; i < off; i++ {
+		mask[i] = true
+	}
+	return mask, true
+}
+
 // maybeElideMessages shrinks oversized OLD tool-role message Content to a bounded head+tail on
 // the DECODED []Message path — the OpenAI / in-kernel wire a LOCAL model served by fak takes
 // (GLM-5.2 / Qwen-3.6-27B via an OpenAI backend or the in-kernel engine), where the byte-splice
@@ -983,7 +1050,15 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// the "replace append+compact with a planned view" rung (issue #555). Inert (an
 	// identity) unless CtxViewBudget > 0, so the default path is unchanged. The trace keys
 	// the persistent per-session planner so the rewrite is O(c·N), not O(N²), across turns.
+	fullHistory := messages
 	messages = s.maybePlanMessages(ctx, trace, messages)
+	// Shrink the kernel-owned KV residency to match the planned O(1) view (issue #579, the
+	// kvmmu-planned-eviction half): when planning ELIDED older history (the view is a strict
+	// trailing window of the full transcript), drive the model-side residency bridge so the
+	// elided spans' K/V is actually evicted via model.KVCache.Evict — making the "O(1) view" a
+	// real O(1) KV RESIDENCY instead of an O(1) text view over an O(N) cache. Default OFF /
+	// fail-open: a no-op unless FAK_INKERNEL_KVMMU opted the in-kernel bridge in.
+	s.maybeElideKVResidency(fullHistory, messages)
 	// Oversized tool_result elision on the DECODED path — the OpenAI / in-kernel wire a LOCAL
 	// model served by fak takes (GLM-5.2 / Qwen-3.6-27B), where the byte-splice passthrough
 	// elision never fires. Shrinks old oversized tool-role content to head+tail; default-on,

@@ -30,6 +30,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
@@ -1192,6 +1193,167 @@ func (p *InKernelPlanner) EvictKVSpan(messages []Message, throughIdx int) (freed
 	log.Printf("inkernel_chat kvmmu-evict model=%s through_msg=%d freed=%dpos reposition_exact=%v",
 		p.modelID, throughIdx, freed, repositionExact)
 	return freed, repositionExact
+}
+
+// KVSpanElider is the model-side PLANNED-ELISION residency BRIDGE seam the gateway drives on
+// a context-planner elision (issue #579, the kvmmu-planned-eviction half). Where KVSpanEvictor
+// enforces a trust QUARANTINE (a poisoned span), this enforces a CAPACITY plan: when the live
+// ctxplan view-planner decides the resident view is the last residentTail messages, this evicts
+// every OLDER message's K/V span via kvmmu.ApplyPlan (the proven model.KVCache.Evict re-RoPE +
+// renumber), so the kernel-owned KV residency SHRINKS to the planner's O(1) resident view
+// byte-for-byte — the model's attention state stops physically holding the elided history. The
+// elided spans keep a content-address page-back-in handle, so the demand-fault path is intact:
+// an elision is a page fault, not a lost fact. Implemented by InKernelPlanner and engaged ONLY
+// when FAK_INKERNEL_KVMMU opts in; a proxy/mock planner — or the bridge left off — does not
+// implement it, so the gateway's type-assert simply skips it (fail-open default).
+type KVSpanElider interface {
+	// ElideKVSpans rebuilds messages as labeled per-message K/V segments on a fresh session over
+	// the loaded model, then applies the context PLANNER's own ctxplan.Plan — evicting every span
+	// the plan Elided via the proven model.KVCache.Evict — so the kernel-owned KV residency shrinks
+	// to the plan's O(1) resident view. The plan's span ids MUST be the per-message ids segIDFor
+	// mints (the adapter contract kvmmu.ApplyPlan keys on); a plan keyed on foreign ids elides
+	// nothing.
+	//
+	// It returns the number of K/V positions freed (0 when the bridge is off, the plan elided
+	// nothing, or the model cannot evict) and whether the post-elision cache is bit-exact to a
+	// session that only ever prefilled the resident spans (the O(1)-residency invariant). The
+	// bit-exact guarantee holds ONLY in the provable direction — every elided span positionally
+	// AFTER every resident span (the over-budget-tail case the kvmmu witness proves), because a
+	// re-RoPE cannot un-see attention a surviving earlier token already absorbed from a later one.
+	// In any other direction the residency still shrinks and stays recoverable, but repositionExact
+	// is reported false rather than asserting an invariant that does not hold.
+	ElideKVSpans(messages []Message, plan ctxplan.Plan) (freed int, repositionExact bool)
+}
+
+// ElideKVSpans is the live-path planned-elision residency bridge (#579, the kvmmu-planned-eviction
+// half): it lowers the full transcript into per-message token spans, prefills them as labeled kvmmu
+// segments over a FRESH model.Session built from the loaded model, then applies the context
+// planner's own plan via kvmmu.ApplyPlan — which drives the proven model.KVCache.Evict over the
+// elided spans (re-RoPE + renumber). The planner's plan already guarantees every elided span
+// carries a page-back-in handle (ctxplan.Audit faithfulness), so the demand-fault path stays
+// intact — an elision is a page fault, not a lost fact.
+//
+// When the elided spans are all positionally AFTER the resident spans (the over-budget-tail plan
+// the optimizer produces, keeping the early pins and shedding later low-density candidates), the
+// post-elision cache is BIT-EXACT to a reference session that only ever prefilled the resident
+// spans — proven here by comparing next-token logits, the same structural, model-independent
+// guarantee EvictKVSpan asserts for a quarantine. In the other direction (eliding an old prefix a
+// resident later span already attended to) a re-RoPE cannot reproduce never-having-seen it, so the
+// residency still shrinks but repositionExact is reported false rather than overclaimed. It is
+// inert (returns 0,false) unless FAK_INKERNEL_KVMMU opted the bridge in, so the served path is
+// unchanged by default and FAILS OPEN on any encode/cache anomaly.
+func (p *InKernelPlanner) ElideKVSpans(messages []Message, plan ctxplan.Plan) (freed int, repositionExact bool) {
+	if !p.kvSpanEvict || p.m == nil || p.tok == nil || len(messages) == 0 {
+		return 0, false
+	}
+	if len(plan.Elided) == 0 {
+		return 0, false // the plan elided nothing — residency already matches the view
+	}
+	// Lower every message into its incremental token span (the same lowering EvictKVSpan uses,
+	// through the LAST message so the spans concatenate to exactly the full transcript path). The
+	// segment ids are segIDFor(message, i) — the same ids the plan must carry.
+	segIDs, _, ok := p.lowerSegments(messages, len(messages)-1)
+	if !ok {
+		return 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sess := p.m.NewSession()
+	sess.Quant, sess.Q4K = p.quant, p.q4k
+	// Fail OPEN on a cache whose eviction is formally unsupported (a recurrent / GDN cache):
+	// the residency plan simply does not engage rather than panic the served turn.
+	if sess.Cache.CanEvict() != nil {
+		return 0, false
+	}
+	bridge := kvmmu.NewWithGate(sess, kvmmu.FoldedGate{})
+	for _, sg := range segIDs {
+		bridge.Append(sg.id, sg.tool, sg.ids)
+	}
+	freed = bridge.ApplyPlan(plan)
+	if freed == 0 {
+		return 0, false // no segment id matched the plan's elided set (or all were held/selected)
+	}
+	// Bit-exact ONLY in the provable direction: every elided span positionally after every
+	// resident one. There, the reference is a prefill of just the resident-prefix spans, and equal
+	// next-token logits prove the elided cache is the only-ever-saw-the-view cache (the
+	// O(1)-residency invariant). Otherwise residency shrank but the never-saw invariant does not
+	// hold, so report false instead of asserting it.
+	repositionExact = p.residencyIsExact(sess, segIDs, plan)
+	log.Printf("inkernel_chat kvmmu-elide model=%s elided=%d freed=%dpos reposition_exact=%v",
+		p.modelID, len(plan.Elided), freed, repositionExact)
+	return freed, repositionExact
+}
+
+// SegElisionPlan builds the ctxplan.Plan ElideKVSpans consumes from a positional resident/elided
+// split of a transcript: message i is Elided iff elided[i], else Selected. Every span id is the
+// SAME id lowerSegments mints (segIDFor), so kvmmu.ApplyPlan's id-correspondence contract holds —
+// a segment is evicted iff its id is elided and not selected. Every elision carries a sha256
+// content-address (ctxplan.Digest) of its rendered message as the page-back-in handle, so the
+// plan is ctxplan.Audit-Faithful (every elided span recoverable) and the demand-fault path stays
+// intact. It is the adapter the gateway uses to turn the context planner's positional view into a
+// segIDFor-keyed plan the residency bridge can apply.
+func SegElisionPlan(messages []Message, elided []bool) ctxplan.Plan {
+	plan := ctxplan.Plan{Objective: ctxplan.ObjGreedy, Candidates: len(messages)}
+	for i := range messages {
+		id := segIDFor(messages[i], i)
+		if i < len(elided) && elided[i] {
+			plan.Elided = append(plan.Elided, ctxplan.Elision{
+				ID:     id,
+				Step:   i,
+				Role:   segTool(messages[i]),
+				Digest: ctxplan.Digest([]byte(renderTranscript(messages[i : i+1]))),
+				Reason: ctxplan.ElideOverBudget,
+			})
+			continue
+		}
+		plan.Selected = append(plan.Selected, ctxplan.Selection{
+			ID:   id,
+			Step: i,
+			Role: segTool(messages[i]),
+		})
+	}
+	return plan
+}
+
+// residencyIsExact proves the post-elision cache is bit-identical to a run that only ever saw the
+// resident spans — but ONLY in the direction where that is true: every elided span positionally
+// AFTER every resident span (so no surviving resident token ever attended to an evicted one). It
+// partitions segs by the plan's elided/selected sets, returns false unless the resident set is a
+// contiguous positional PREFIX (elided set the suffix), then prefills just the resident-prefix ids
+// on a reference session and compares the post-elision next-token distribution to it. Equal
+// (within the cross-path FMA tolerance) iff the re-RoPE + renumber left the cache identical to
+// never having prefilled the elided suffix. It is the planned-elision twin of repositionIsExact.
+func (p *InKernelPlanner) residencyIsExact(elided *model.Session, segs []kvSegment, plan ctxplan.Plan) bool {
+	elide := make(map[string]bool, len(plan.Elided))
+	for _, e := range plan.Elided {
+		elide[e.ID] = true
+	}
+	for _, s := range plan.Selected {
+		delete(elide, s.ID)
+	}
+	// Walk the segments in cache (positional) order. The resident set is bit-exact-reconstructible
+	// only if it is a contiguous PREFIX: once we have seen an elided span, every later span must
+	// also be elided (the elided set is the positional suffix). Collect the resident-prefix ids.
+	var refIDs []int
+	seenElided := false
+	for _, sg := range segs {
+		if elide[sg.id] {
+			seenElided = true
+			continue
+		}
+		if seenElided {
+			return false // a resident span sits AFTER an elided one — not the provable direction
+		}
+		refIDs = append(refIDs, sg.ids...)
+	}
+	if len(refIDs) == 0 || elided.Cache.Len() != len(refIDs) {
+		return false
+	}
+	ref := p.m.NewSession()
+	ref.Quant, ref.Q4K = p.quant, p.q4k
+	ref.Prefill(refIDs)
+	last := refIDs[len(refIDs)-1]
+	return logitsClose(elided.Step(last), ref.Step(last))
 }
 
 // kvSegment is one lowered per-message K/V span: its kvmmu segment id (the message index +

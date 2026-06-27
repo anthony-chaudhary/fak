@@ -336,8 +336,14 @@ func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool str
 //
 // Honest fence: ApplyPlan only SHRINKS residency to match the view; it does not
 // page resident spans IN (that is the demand-fault path, ctxplan.Materialize).
-// Like the KV-quarantine bridge it is bit-exact on a synthetic model (the witness
-// test) and is not yet wired into the live agent HTTP loop.
+// Like the KV-quarantine bridge, it is now wired into the live agent HTTP loop
+// (issue #579, via agent.KVSpanElider, driven by the gateway's complete() loop): a
+// context-planner elision evicts the elided spans' K/V on the served path. The
+// bit-exact O(1)-residency invariant holds in the provable direction — every elided
+// span positionally AFTER every resident one (the over-budget-tail plan), the only
+// direction a re-RoPE can make identical to never-having-prefilled the elided spans;
+// eliding an earlier span a survivor already attended to shrinks residency but is not
+// reported bit-exact (the live elider asserts the invariant only where it holds).
 func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
 	elide := make(map[string]bool, len(plan.Elided))
 	for _, e := range plan.Elided {
