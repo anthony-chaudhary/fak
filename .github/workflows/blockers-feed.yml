@@ -1,0 +1,135 @@
+name: blockers-feed
+
+# Publish fak's standing-BLOCKER backlog to the Slack #blockers channel (C0BDHRJJPTP,
+# the scoreboard workspace T0BDEJF1HGB) on a daily cadence. #blockers is the central
+# place the fleet records ongoing impediments and surfaces human-needed ones; this is
+# its heartbeat.
+#
+# The CI-derivable blocker source is the open GitHub backlog filtered to the blocker
+# label (FAK_BLOCKERS_LABEL, default `blocked`). `fak blockers feed` folds that list,
+# and the surfacing follows ownership — the honest dual of "lightweight status ones in
+# background, human-operator ones surfaced":
+#
+#   * 0 blocked issues            -> a quiet green all-clear card (no page).
+#   * >=1 with an UNOWNED issue    -> an OPERATOR card: <!here> + a triage link (paged) —
+#                                     a blocker with no assignee needs a human to pick up.
+#   * >=1 but all assigned         -> a muted background-status card (tracked, no page).
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), the dual of steering-guard.yml
+# — NOT an issue feeder like score-/bench-/gate-signal.yml (those turn a regression into
+# a GitHub issue and post nothing to Slack). Do not conflate the two.
+#
+# Posting is GATED on the FAK_SCOREBOARD_TOKEN secret (the bot token blockerpost falls
+# back to) being present. Without it the job runs in --dry-run and writes the card to the
+# step summary, so a fork or a secret-less run never hard-fails — it just shows what WOULD
+# post.
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the
+# scoreboard-workspace bot token — the same value in the gitignored .env.slack.local)
+# under Settings -> Secrets and variables -> Actions. The channel #blockers (C0BDHRJJPTP)
+# is the built-in default; override with the FAK_BLOCKERS_CHANNEL repo variable, and the
+# label with the FAK_BLOCKERS_LABEL repo variable, if you point the surface elsewhere.
+on:
+  schedule:
+    # Daily 09:07 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, steering-guard 07:33,
+    # score-signal 07:41, gate-signal 07:53, bench-signal 08:03, scoreboard-feed 08:17,
+    # bench-feed 08:27, capacity-feed 08:47).
+    - cron: "7 9 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: blockers-feed
+  cancel-in-progress: false
+
+jobs:
+  blockers-feed:
+    name: blockers -> #blockers
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL || 'C0BDHRJJPTP' }}
+      FAK_BLOCKERS_LABEL: ${{ vars.FAK_BLOCKERS_LABEL || 'blocked' }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # List the open blocker-labelled issues — the standing-blocker signal. `gh` ships
+      # on the runner and authenticates with the built-in GITHUB_TOKEN. A label that does
+      # not exist (or any gh hiccup) must NOT fail the heartbeat: fall back to an empty
+      # array, which folds to the honest "no standing blockers" all-clear card.
+      - name: list blocked issues
+        id: issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          gh issue list --state open --label "$FAK_BLOCKERS_LABEL" --limit 200 \
+            --json number,title,url,assignees,labels > issues.json
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ] || [ ! -s issues.json ]; then
+            echo "gh issue list returned no usable payload (rc=$rc); treating as no standing blockers"
+            echo "[]" > issues.json
+          fi
+          echo "count=$(jq 'length' issues.json 2>/dev/null || echo 0)" >> "$GITHUB_OUTPUT"
+
+      # Always render the card to the step summary (and as the artifact) so the run is
+      # auditable even when nothing posts (missing secret / manual dry-run / fork).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak blockers feed \
+            --issues issues.json \
+            --label "$FAK_BLOCKERS_LABEL" \
+            --repo-url "${{ github.server_url }}/${{ github.repository }}" \
+            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --source ci \
+            --dry-run | tee blockers-card.txt
+          {
+            echo "## blockers-feed — ${{ steps.issues.outputs.count }} open \`$FAK_BLOCKERS_LABEL\` issue(s)"
+            echo '```'
+            cat blockers-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when the token secret is present. A manual dry_run also skips.
+      - name: post to #blockers
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak blockers feed \
+            --issues issues.json \
+            --label "$FAK_BLOCKERS_LABEL" \
+            --repo-url "${{ github.server_url }}/${{ github.repository }}" \
+            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blockers-card
+          path: |
+            blockers-card.txt
+            issues.json
+          if-no-files-found: ignore

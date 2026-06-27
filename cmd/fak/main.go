@@ -185,6 +185,8 @@ func main() {
 		cmdScoreboard(os.Args[2:])
 	case "steering":
 		cmdSteering(os.Args[2:])
+	case "blockers":
+		cmdBlockers(os.Args[2:])
 	case "product":
 		cmdProduct(os.Args[2:])
 	case "nodeusage":
@@ -473,6 +475,44 @@ func cmdAgent(argv []string) {
 func jsonIndent(v any) []byte {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	return b
+}
+
+// envOrHomePath returns the trimmed value of env var name when set, else
+// $HOME joined with homeParts. It returns "" when the env var is empty and the
+// home directory cannot be resolved. Shared by the default-path helpers.
+func envOrHomePath(name string, homeParts ...string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(append([]string{home}, homeParts...)...)
+}
+
+// emitIndentedJSON encodes v as 2-space-indented JSON to stdout, returning 0 on
+// success or 1 after printing "<label>: encode json: <err>" to stderr. It is the
+// shared body behind the per-command emit*JSON wrappers.
+func emitIndentedJSON(stdout, stderr io.Writer, label string, v any) int {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintf(stderr, "%s: encode json: %v\n", label, err)
+		return 1
+	}
+	return 0
+}
+
+// writeJSONOrStdout writes v as indented JSON to the file at path, or prints it to
+// stdout when path is empty. It is the shared form of the repeated
+// `if *out != "" { WriteFile } else { Println }` blocks across the bench commands.
+func writeJSONOrStdout(path string, v any) {
+	if path != "" {
+		must(os.WriteFile(path, jsonIndent(v), 0o644))
+	} else {
+		fmt.Println(string(jsonIndent(v)))
+	}
 }
 
 // applyPolicy loads a capability-floor manifest and swaps it into the registered
@@ -1083,32 +1123,24 @@ func printReport(rep *metrics.Report, path string) {
 	fmt.Printf("report written              : %s\n", path)
 }
 
-func traceDir() string {
-	// testdata sits next to the module root; resolve relative to cwd first then
-	// the executable dir.
-	if _, err := os.Stat(filepath.Join("testdata", "tau2")); err == nil {
-		return filepath.Join("testdata", "tau2")
-	}
-	if exe, err := os.Executable(); err == nil {
-		d := filepath.Join(filepath.Dir(exe), "testdata", "tau2")
-		if _, err := os.Stat(d); err == nil {
-			return d
-		}
-	}
-	return filepath.Join("testdata", "tau2")
-}
+func traceDir() string { return testdataDir("tau2") }
 
-func turnTaxDir() string {
-	if _, err := os.Stat(filepath.Join("testdata", "turntax")); err == nil {
-		return filepath.Join("testdata", "turntax")
+func turnTaxDir() string { return testdataDir("turntax") }
+
+// testdataDir resolves the testdata/<name> directory relative to cwd first, then
+// the executable dir; it falls back to the cwd-relative path when neither exists.
+// testdata sits next to the module root.
+func testdataDir(name string) string {
+	if _, err := os.Stat(filepath.Join("testdata", name)); err == nil {
+		return filepath.Join("testdata", name)
 	}
 	if exe, err := os.Executable(); err == nil {
-		d := filepath.Join(filepath.Dir(exe), "testdata", "turntax")
+		d := filepath.Join(filepath.Dir(exe), "testdata", name)
 		if _, err := os.Stat(d); err == nil {
 			return d
 		}
 	}
-	return filepath.Join("testdata", "turntax")
+	return filepath.Join("testdata", name)
 }
 
 // resolveSuite turns a --suite NAME into its trace path under dir, but FAILS LOUD
