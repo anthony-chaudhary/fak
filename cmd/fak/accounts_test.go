@@ -203,6 +203,16 @@ func TestRunAccountsRemoveArchive(t *testing.T) {
 	// `remove --archive` must do the WHOLE retirement in one command: tombstone the registry,
 	// rename the config dir to the .DELETED-<date> form, and repoint the registry entry — the
 	// manual dance this used to take. (This is the "super easy to remove" guarantee.)
+	//
+	// HERMETIC ROSTER ISOLATION: `remove` regenerates the dos + job roster VIEWS as its final
+	// step, and their default paths come from process-global state (os.UserHomeDir for the dos
+	// view, FAK_JOB_ROSTER for the job view). Left unpinned, this test once overwrote a live
+	// operator's real ~/.claude/accounts.yaml and job roster with its temp-dir `anchor-seat`,
+	// breaking the `(u)` account switcher until the views were re-synced from the registry.
+	// Clear the env redirect and rely on the --home redirect (re-derives the dos view under the
+	// temp home) so this test can only ever touch files inside t.TempDir().
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
 	home := t.TempDir()
 	seat := mkHome(t, home, ".claude-old-seat", "old@example.test", true)
 	anchor := mkHome(t, home, ".claude-anchor-seat", "anchor@example.test", true)
@@ -253,6 +263,25 @@ func TestRunAccountsRemoveArchive(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no archived registry entry found:\n%s", reg2.JSON())
+	}
+
+	// Hermeticity witness: the regenerated dos roster must live UNDER the temp home, never the
+	// real ~/.claude/accounts.yaml. If --home failed to redirect the view, this test would have
+	// clobbered the operator's live switcher roster — assert it landed in the sandbox instead.
+	dosView := filepath.Join(home, ".claude", "accounts.yaml")
+	if _, err := os.Stat(dosView); err != nil {
+		t.Fatalf("dos roster view should have been regenerated under the temp home at %s: %v", dosView, err)
+	}
+	realHome, _ := os.UserHomeDir()
+	if realHome != "" {
+		realDosView := filepath.Join(realHome, ".claude", "accounts.yaml")
+		if rel, err := filepath.Rel(home, realDosView); err == nil && !strings.HasPrefix(rel, "..") {
+			t.Skipf("real home is inside the temp dir (unexpected); skipping leak assertion")
+		}
+		// The regenerated view names this test's `anchor-seat`; a real roster must NOT.
+		if data, err := os.ReadFile(realDosView); err == nil && strings.Contains(string(data), "anchor-seat") {
+			t.Fatalf("test leaked its temp-dir roster into the REAL dos view %s (contains 'anchor-seat')", realDosView)
+		}
 	}
 }
 
