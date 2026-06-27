@@ -129,3 +129,31 @@ func TestSampleLensSpansRange(t *testing.T) {
 		t.Errorf("sampleLens should include the prefix length 2048: %v", ls)
 	}
 }
+
+// TestSyntheticShapeTiny pins the #967 CPU-tractable wiring shape: the live B/C
+// arms run end-to-end in f32, so a 135M+ shape times out unattended nightrun;
+// "tiny" returns a 64h/4L/vocab-256 config the kernel runs in seconds. Pure
+// arithmetic over the shape map (no NewSynthetic / kernel / GPU), so CI runs it.
+func TestSyntheticShapeTiny(t *testing.T) {
+	cfg, ok := syntheticShape("tiny")
+	if !ok {
+		t.Fatal(`syntheticShape("tiny") returned ok=false; the tiny shape must resolve`)
+	}
+	if cfg.HiddenSize != 64 || cfg.NumLayers != 4 || cfg.VocabSize != 256 {
+		t.Fatalf("tiny shape = %dh/%dL/vocab%d, want 64h/4L/vocab256", cfg.HiddenSize, cfg.NumLayers, cfg.VocabSize)
+	}
+	if cfg.NumHeads != 8 || cfg.NumKVHeads != 2 || cfg.HeadDim != 8 {
+		t.Fatalf("tiny attn = %dq/%dkv/headdim%d, want 8q/2kv/headdim8", cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim)
+	}
+
+	// The pre-existing shapes must still resolve (no regression from inserting tiny first).
+	for _, name := range []string{"smollm2-135m", "135m", "qwen25-1.5b", "qwen25-7b"} {
+		if _, ok := syntheticShape(name); !ok {
+			t.Errorf("syntheticShape(%q) regressed to ok=false", name)
+		}
+	}
+	// An unknown shape still returns ok=false.
+	if _, ok := syntheticShape("bogus"); ok {
+		t.Error(`syntheticShape("bogus") returned ok=true, want false`)
+	}
+}

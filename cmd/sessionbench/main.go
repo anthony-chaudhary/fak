@@ -114,6 +114,17 @@ func readHFConfig(dir string) (model.Config, error) {
 // kernel at the real model shape; only the absolute wall-clock is this-box, not the target host.
 func syntheticShape(name string) (model.Config, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "tiny":
+		// A WIRING shape (the radixbench synthetic-llama: 64h/4L/8q-2kv, HeadDim 8,
+		// vocab 256). The 135M+ shapes run the live B/C arms end-to-end in f32, which
+		// dominates CPU wall-clock and times out unattended nightrun (#967). At this
+		// shape the full live arm finishes in seconds, so the work-elimination ratios
+		// are measurable on a no-GPU box; only the absolute numbers are this-box.
+		return model.Config{
+			HiddenSize: 64, NumLayers: 4, NumHeads: 8, NumKVHeads: 2, HeadDim: 8,
+			IntermediateSize: 128, VocabSize: 256, RMSNormEps: 1e-5, RopeTheta: 10000, EOSTokenID: 255,
+			TieWordEmbeddings: true, HiddenAct: "silu", ModelType: "llama",
+		}, true
 	case "smollm2-135m", "135m", "smollm2":
 		return model.Config{
 			HiddenSize: 576, NumLayers: 30, NumHeads: 9, NumKVHeads: 3, HeadDim: 64,
@@ -141,7 +152,7 @@ func loadModel(dir, hf, synthetic string, lean bool) (*model.Model, string, erro
 	case synthetic != "":
 		cfg, ok := syntheticShape(synthetic)
 		if !ok {
-			return nil, "", fmt.Errorf("unknown -synthetic shape %q (smollm2-135m|qwen25-1.5b|qwen25-7b)", synthetic)
+			return nil, "", fmt.Errorf("unknown -synthetic shape %q (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b)", synthetic)
 		}
 		return model.NewSynthetic(cfg), synthetic + " [synthetic]", nil
 	case lean:
@@ -424,7 +435,7 @@ type cell struct {
 func main() {
 	dir := flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir (-dir mode)")
 	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors)")
-	synthetic := flag.String("synthetic", "", "run weightless on a synthetic model at a named shape (smollm2-135m|qwen25-1.5b|qwen25-7b) — no -hf/-dir needed; ratios faithful, absolute wall-clock is this-box")
+	synthetic := flag.String("synthetic", "", "run weightless on a synthetic model at a named shape (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b) — no -hf/-dir needed; ratios faithful, absolute wall-clock is this-box; tiny is the CPU-tractable wiring shape for unattended nightrun")
 	lean := flag.Bool("lean", false, "memory-lean quantize-at-load (requires -hf; implies -quant)")
 	quantF := flag.Bool("quant", false, "use the Q8_0 quantized lane (else f32) — opt-in, matching batch/model/radixbench")
 	prefix := flag.Int("prefix", 2048, "shared prefix tokens (system prompt + tool schemas)")
@@ -454,7 +465,7 @@ func main() {
 			os.Exit(2)
 		}
 		if _, ok := syntheticShape(*synthetic); !ok {
-			fmt.Fprintf(os.Stderr, "unknown -synthetic shape %q (smollm2-135m|qwen25-1.5b|qwen25-7b)\n", *synthetic)
+			fmt.Fprintf(os.Stderr, "unknown -synthetic shape %q (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b)\n", *synthetic)
 			os.Exit(2)
 		}
 		writeSessionReport(deterministicReport(*synthetic+" [synthetic]", quant != 0, turns, agents, *prefix, *decode, *result), *out)
