@@ -434,12 +434,15 @@ type compactionLever struct{}
 func (compactionLever) Name() string { return "compaction" }
 
 func (compactionLever) Episodes(s dojo.Scenario) ([]dojo.ScoredInput, error) {
-	// TODO: Read access logs/audit journal entries from s.Corpus and build a
-	// CompactionBacktestReport. The corpus format is TBD (see #953 for the
-	// intended shape: access logs containing compaction outcomes and billing data).
-	// For now, return empty slices so the lever is registered and discoverable
-	// but produces no episodes until the corpus format is defined.
-	return nil, nil
+	// Compaction requires paired ON/OFF runs with specific metrics that don't exist in
+	// standard transcript files. The corpus format is a paired set of access logs or
+	// audit journal entries containing:
+	//   - WITNESSED compaction outcomes: fired attempts, prefix_mismatch bails, shed_tokens
+	//   - OBSERVED provider billing: input_tokens on compacted turns (compaction ON vs OFF),
+	//     cache_read on compacted turns after fire
+	// This format is not yet standardized — the lever is registered and discoverable
+	// but requires a dedicated compaction corpus to run. See #953 for the intended shape.
+	return nil, fmt.Errorf("compaction lever requires a paired ON/OFF compaction corpus with shed_tokens and provider billing metrics; not available from standard transcripts (see #953)")
 }
 
 // compactionEpisodesFromBacktest adapts a CompactionBacktestReport into the dojo's
