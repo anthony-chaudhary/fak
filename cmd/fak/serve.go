@@ -86,6 +86,7 @@ func cmdServe(argv []string) {
 	engineCacheRequireExactSpan := fs.Bool("engine-cache-require-exact-span", false, "require exact remote K/V/index span eviction; fail closed if the selected engine only supports whole-cache reset")
 	engineID := fs.String("engine", "inkernel", "registered engine id that fak_syscall dispatches an allowed call to (default: the fused in-kernel model)")
 	backendName := fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
+	cudaGraph := fs.Bool("cuda-graph", false, "with --backend cuda: capture each decode token's whole op stream into a CUDA graph and replay it as ONE launch instead of N kernel launches (#483), the per-token launch-overhead lever for large single-stream decode (e.g. Qwen3.6-27B on an A100). OFF by default (a measured no-win on a tiny 0.5B/L4 where launch overhead is already small); witness tok/s before/after on YOUR node before relying on it. Equivalent to FAK_CUDA_GRAPH=1; inert on a non-cuda build or CPU backend.")
 	policyPath := fs.String("policy", "", "capability-floor manifest to load (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	policyCheck := fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
 	vdso := fs.Bool("vdso", true, "enable the vDSO dedup fast path")
@@ -166,6 +167,13 @@ func cmdServe(argv []string) {
 	}
 	if chatBackend != nil {
 		fmt.Printf("fak: in-kernel chat decode → device backend %q\n", chatBackend.Name())
+	}
+	// --cuda-graph flips the (init-time, FAK_CUDA_GRAPH-gated) graph-replay decode path on
+	// from a parsed flag. graphEnabled is consulted per token at GraphBegin, so this post-init
+	// flip cleanly activates the fully-wired HAL capture/replay path. No-op on a non-cuda build.
+	if *cudaGraph {
+		compute.EnableCUDAGraph()
+		fmt.Println("fak: CUDA-graph decode replay enabled (#483) — witness tok/s before relying on it")
 	}
 
 	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
