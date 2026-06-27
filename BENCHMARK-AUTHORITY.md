@@ -395,6 +395,11 @@ shrank. The fak arm C still matches (12.0s/28.2s old vs 11.2s/24.4s re-measured)
 shrank **because fak got faster at the prefill arm A depends on**, not from any regression. Full
 diagnosis: `benchmark-run-opencode-20260619/BENCHMARK-RUN-OPENCODE-20260619.md` finding F1.
 
+**Cross-ref (process doc):** the [BENCHMARK-GOVERNANCE.md Regime Boundaries](BENCHMARK-GOVERNANCE.md#regime-boundaries--what-each-number-means)
+example formerly cited the retired figure as its live *Session value-add*; it now cites the
+re-measured row above and links back to this tombstone (#143), keeping the governance discipline
+and this authority in sync.
+
 ---
 
 ## RadixAttention Results (SmolLM2-135M Q8)
