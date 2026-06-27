@@ -10,8 +10,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
+// usage prints the full `fak` help banner. The verb list is long enough to be a
+// god-function on its own, so the body is split into three contiguous raw-string
+// sections (core verbs / ops verbs / scorecards + aliases) printed back-to-back —
+// the output is byte-identical to the single block it replaced.
 func usage() {
 	fmt.Fprintf(os.Stderr, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
+	usageCoreVerbs()
+	usageOpsVerbs()
+	usageScorecardVerbs()
+}
+
+func usageCoreVerbs() {
 	fmt.Fprint(os.Stderr, `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--json]
@@ -129,7 +139,11 @@ func usage() {
                  cross-check the real kernel admit verdict (would the context-MMU
                  quarantine it?), then RECOMMEND what to do about each finding. Exit 1
                  on any finding. The fak analogue of 'dos doctor')
-  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
+`)
+}
+
+func usageOpsVerbs() {
+	fmt.Fprint(os.Stderr, `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
   fak snapshot  kinds | demo | info | dump-fleet | restore-fleet
@@ -253,7 +267,11 @@ func usage() {
                  fak_session_reset / fak_context_change) over stdin/stdout)
   fak serve-wiring [--md|--check]
                 (audit fak serve flag -> gateway.Config -> runtime-read wiring)
-  fak cluster   selftest | coordinator --listen ADDR --size N --vec a,b,c |
+`)
+}
+
+func usageScorecardVerbs() {
+	fmt.Fprint(os.Stderr, `  fak cluster   selftest | coordinator --listen ADDR --size N --vec a,b,c |
                 worker --coord ADDR --rank R --size N --vec a,b,c   [--op allreduce|allgather]
                 (MULTI-NODE COMPUTE: run a real cross-node collective over fak's DistComm
                  process group (host float32). Launch 'coordinator' on one box and 'worker'
