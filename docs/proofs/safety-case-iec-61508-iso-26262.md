@@ -174,7 +174,7 @@ To independently verify the determinism and provenance claims:
 # Clone the repository and verify the commit
 git clone https://github.com/anthony-chaudhary/fak.git
 cd fak
-git log --oneline -1  # Should show commit <tbd>
+git log --oneline -1  # Should show commit 8041dc7c
 
 # Run the determinism witnesses (N7, D1, I1)
 go test -run 'Oracle|Parity|Greedy|Argmax|Forward' ./internal/model/ -count=1 -timeout 240s -v
