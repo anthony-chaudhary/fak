@@ -388,6 +388,7 @@ can be blocked by OS Application Control on freshly compiled test binaries. Use
 | If you want... | Read |
 |---|---|
 | First real run | [GETTING-STARTED.md](GETTING-STARTED.md) |
+| Always-on gateway (`fak node`) | [docs/fak/node-setup.md](docs/fak/node-setup.md) |
 | Claude Code / guard path | [docs/integrations/claude.md](docs/integrations/claude.md) |
 | Codex | [docs/integrations/openai-codex.md](docs/integrations/openai-codex.md) |
 | MCP examples | [examples/mcp](examples/mcp) |
