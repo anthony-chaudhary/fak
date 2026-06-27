@@ -97,7 +97,15 @@ Two fixes were implemented and measured:
    re-reading it per output. Shipped (`76fd1dc`), correct. **Also no meaningful change.**
 
 That both levers failed to move decode is itself the finding: at **~2 ms/op** the floor is
-**fixed per-op CPU↔GPU overhead**, not submit count or compute efficiency. A follow-on cgo
+**fixed per-op CPU↔GPU overhead**, not submit count or compute efficiency.
+
+> **This ~2 ms/op is the Vulkan/native-Windows per-op tax — it is backend- and OS-dependent.**
+> The CUDA-on-WSL path measures a far lower **~0.07 ms/op** host-launch tax
+> (`GPU-QWEN-RESULTS.md` §4), so this Vulkan floor is **~28× higher** than CUDA-on-WSL's. A
+> reader projecting GPU decode on another box must apply the per-op tax for *that* backend —
+> ~2 ms/op is Vulkan/native, 0.07 ms/op is CUDA-on-WSL — not assume one number crosses backends.
+
+A follow-on cgo
 cleanup now removes the fresh host-staging allocation/map/free cycle by reusing one mapped
 HOST_VISIBLE transfer buffer; correctness is witnessed on the RX 7600, and the restored
 SmolLM2 export measures decode at **570.8 ms/tok**. A follow-on descriptor-set pool removes

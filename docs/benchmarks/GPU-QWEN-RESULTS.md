@@ -94,6 +94,12 @@ A batch-1 decode issues ~600 device ops/token. On WSL each op carries a ~0.07 ms
 launch tax (microbench, `GPU.md` §3b) → a **~42 ms/token floor independent of compute**. Three
 measurements pin the cause to *launches*, not the GEMV inner loop:
 
+> **The per-op tax is backend- and OS-dependent — don't carry this number across backends.**
+> The **~0.07 ms/op** here is **CUDA-on-WSL**. The Vulkan/native-Windows path measures a
+> **~2 ms/op** floor (~28× higher; `VULKAN-AMD-RESULTS.md` §"Why it is slow"). So a reader
+> projecting GPU decode on another box must apply the per-op tax for *that* backend — 0.07 ms/op
+> is CUDA-on-WSL, ~2 ms/op is Vulkan/native — not assume one floor everywhere.
+
 - **char4/float4 vectorizing the Q8 GEMV changed nothing** (3B 90.3 vs 90.1 ms) — the inner
   loop is not the bottleneck.
 - **A W8A8 `__dp4a` GEMV (llama.cpp's technique) made it SLOWER** (1.5B 15.8 → 11.0 tok/s) —
