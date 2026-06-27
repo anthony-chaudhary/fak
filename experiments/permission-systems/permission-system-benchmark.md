@@ -1,6 +1,6 @@
 # Permission-System Benchmark
 
-| system | deterministic risk coverage | soft/review | unguarded risk allows | known max FNR | result admission | API-host bridge | bridge controls | bridge result quarantine |
+| system | deterministic risk coverage | soft/review | unguarded risk allows<sup>†</sup> | known max FNR<sup>‡</sup> | result admission | API-host bridge | bridge controls | bridge result quarantine |
 |---|---:|---:|---:|---:|---|---|---:|---|
 | FAK/DOS gateway | 6/6 (100.0%) | 0 | 0 |  | QUARANTINE | yes | 6/6 (100.0%) | QUARANTINE |
 | Claude Code auto mode | 0/6 (0.0%) | 6 | 0 | 17.0% | WARNING | no | 0/6 (0.0%) | WARNING |
@@ -8,6 +8,10 @@
 | GitHub Copilot cloud agent | 2/6 (33.3%) | 4 | 0 |  | REVIEW_AFTER | no | 0/6 (0.0%) | REVIEW_AFTER |
 | Manual permission prompts | 0/6 (0.0%) | 6 | 0 |  | PROMPT | no | 0/6 (0.0%) | PROMPT |
 | Bypass / dangerous skip | 0/6 (0.0%) | 0 | 6 |  | UNBOUNDED_ALLOW | no | 0/6 (0.0%) | UNBOUNDED_ALLOW |
+
+<sup>†</sup> "unguarded risk allows": The count of risky tool-call scenarios (from the six benchmark rows) that are permitted without any guard, review, or control mechanism.
+
+<sup>‡</sup> "known max FNR": The worst-case False Negative Rate of the auto-classifier—the probability it incorrectly permits a dangerous tool call—measured against the benchmark dataset.
 
 ## API-Host Bridge Dimensions
 

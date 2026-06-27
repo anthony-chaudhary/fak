@@ -77,6 +77,10 @@ flowchart LR
   class bad note;
 ```
 
+**Terms used:**
+- "unguarded risk allows": The count of risky tool-call scenarios (from the six benchmark rows) that are permitted without any guard, review, or control mechanism.
+- "known max FNR": The worst-case False Negative Rate of the auto-classifier—the probability it incorrectly permits a dangerous tool call—measured against the benchmark dataset.
+
 ---
 
 ## 36 - Deterministic risk coverage
