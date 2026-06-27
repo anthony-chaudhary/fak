@@ -27,6 +27,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
+	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
 const dojoUsage = `fak dojo — the prediction-vs-reality gym
@@ -242,6 +244,14 @@ func dojoLeverCatalog() []dojoLeverInfo {
 				{Name: "token_shed_ratio", Theory: "the projected shed for the budget matches the billed delta (claim 1.0)"},
 			},
 		},
+		{
+			Name:    "vcache-warmth",
+			Summary: "the vCache warmth belief's warm/cold prediction scored against the provider's billed cache_read",
+			Metrics: []dojoMetricInfo{
+				{Name: "false_warm_rate", Theory: "the warmth belief NEVER predicts warm on a call that bills cache_read=0 (claim 0.0 — the lethal class)"},
+				{Name: "warm_recall", Theory: "the belief recalls every genuinely-warm read it could have predicted (claim 1.0)"},
+			},
+		},
 	}
 }
 
@@ -249,6 +259,7 @@ func registerDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
 	return []dojo.Lever{
 		resumePostureLever{ttl: ttl, maxFiles: maxFiles},
 		compactionLever{},
+		vcacheLever{maxFiles: maxFiles},
 	}
 }
 
@@ -359,6 +370,84 @@ func resumeEpisodesFromBacktest(rep resume.BacktestReport) []dojo.ScoredInput {
 			Outcome: dojo.Outcome{
 				Realized: warm, Provenance: dojo.Observed, Measured: true, Sample: rep.FirstTurnResumes,
 				Source: "provider cache_read>~0 on the first turn of resumed transcripts",
+			},
+		})
+	}
+	return out
+}
+
+// --- the vcache-warmth lever ----------------------------------------------
+
+// vcacheLever scores the vCache warmth belief's warm/cold prediction against the
+// provider's billed cache_read, by replaying the corpus transcripts through the
+// already-shipped vcacheobserve.Observe (the same fold `fak vcache observe` and
+// /metrics use). The two episodes pair the belief's THEORY (it never false-warms;
+// it recalls every genuinely-warm read) with the OBSERVED PredictionError.
+type vcacheLever struct {
+	maxFiles int
+}
+
+func (vcacheLever) Name() string { return "vcache-warmth" }
+
+func (l vcacheLever) Episodes(s dojo.Scenario) ([]dojo.ScoredInput, error) {
+	files, err := findTranscripts(s.Corpus)
+	if err != nil {
+		return nil, err
+	}
+	if l.maxFiles > 0 && len(files) > l.maxFiles {
+		files = files[:l.maxFiles]
+	}
+	var turns []vcacheobserve.Turn
+	for _, p := range files {
+		ts, err := readObserveTranscript(p)
+		if err != nil {
+			continue // a malformed transcript is skipped, not fatal (parity with vcache observe)
+		}
+		turns = append(turns, ts...)
+	}
+	if len(turns) == 0 {
+		return nil, nil
+	}
+	rep := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers())
+	return vcacheEpisodesFromObserve(rep.Prediction), nil
+}
+
+// vcacheEpisodesFromObserve adapts a vcachecal.PredictionError into the dojo's
+// (prediction, outcome) pairs. It is pure so the mapping is unit-testable without
+// scanning a corpus. Each metric pairs the warmth belief's THEORY (a Claimed
+// number) with the provider's OBSERVED reality.
+func vcacheEpisodesFromObserve(pe vcachecal.PredictionError) []dojo.ScoredInput {
+	var out []dojo.ScoredInput
+
+	// false_warm_rate — theory: the warmth belief never predicts warm on a call
+	// that bills cache_read=0 (claim 0.0, the lethal class); reality: the measured
+	// FalseWarm / (TrueWarm + FalseWarm).
+	if predictedWarm := pe.TrueWarm + pe.FalseWarm; predictedWarm > 0 {
+		out = append(out, dojo.ScoredInput{
+			Prediction: dojo.Prediction{
+				Lever: "vcache-warmth", Metric: "false_warm_rate", Claimed: 0.0, Unit: "fraction",
+				Basis: "the warmth belief never predicts warm on a call the provider bills cache_read=0",
+			},
+			Outcome: dojo.Outcome{
+				Realized: pe.FalseWarmRate(), Provenance: dojo.Observed, Measured: true, Sample: predictedWarm,
+				Source: "provider cache_read=0 on believed-warm calls / all believed-warm calls",
+			},
+		})
+	}
+
+	// warm_recall — theory: the belief recalls every genuinely-warm read it could
+	// have predicted (claim 1.0); reality: TrueWarm / (TrueWarm + FalseCold) — the
+	// share of provider-warm reads the belief actually called warm.
+	if warmReads := pe.TrueWarm + pe.FalseCold; warmReads > 0 {
+		recall := float64(pe.TrueWarm) / float64(warmReads)
+		out = append(out, dojo.ScoredInput{
+			Prediction: dojo.Prediction{
+				Lever: "vcache-warmth", Metric: "warm_recall", Claimed: 1.0, Unit: "fraction",
+				Basis: "the warmth belief calls warm every read the provider bills cache_read>0",
+			},
+			Outcome: dojo.Outcome{
+				Realized: recall, Provenance: dojo.Observed, Measured: true, Sample: warmReads,
+				Source: "believed-warm provider-warm reads / all provider-warm reads (TrueWarm/(TrueWarm+FalseCold))",
 			},
 		})
 	}

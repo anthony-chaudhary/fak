@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 )
 
 func TestResumeEpisodesFromBacktest(t *testing.T) {
@@ -271,6 +272,63 @@ func TestDojoCatalogMatchesCompactionEmittedMetrics(t *testing.T) {
 	}
 	for _, lv := range dojoLeverCatalog() {
 		if lv.Name != "compaction" {
+			continue
+		}
+		for _, m := range lv.Metrics {
+			if !emitted[m.Name] {
+				t.Fatalf("catalog advertises metric %q the lever never emits", m.Name)
+			}
+		}
+		if len(lv.Metrics) != len(emitted) {
+			t.Fatalf("catalog lists %d metrics but the lever emits %d", len(lv.Metrics), len(emitted))
+		}
+	}
+}
+
+func TestVcacheEpisodesFromObserve(t *testing.T) {
+	// 10 believed-warm calls, 1 of which billed cache_read=0 (false-warm); 8
+	// provider-warm reads, 6 of which the belief called warm (recall 6/8=0.75).
+	pe := vcachecal.PredictionError{TrueWarm: 6, FalseWarm: 1, TrueCold: 3, FalseCold: 2}
+	ins := vcacheEpisodesFromObserve(pe)
+	if len(ins) != 2 {
+		t.Fatalf("a full prediction-error should yield 2 metrics, got %d", len(ins))
+	}
+	got := map[string]dojo.ScoredInput{}
+	for _, in := range ins {
+		got[in.Prediction.Metric] = in
+	}
+
+	fw := got["false_warm_rate"]
+	// false-warm rate = FalseWarm/(TrueWarm+FalseWarm) = 1/7.
+	if fw.Prediction.Claimed != 0.0 || fw.Outcome.Realized != 1.0/7.0 || fw.Outcome.Sample != 7 {
+		t.Fatalf("false_warm_rate mapping wrong: %+v", fw)
+	}
+	if fw.Outcome.Provenance != dojo.Observed || !fw.Outcome.Measured {
+		t.Fatalf("vcache metrics must be OBSERVED + measured: %+v", fw.Outcome)
+	}
+
+	wr := got["warm_recall"]
+	// recall = TrueWarm/(TrueWarm+FalseCold) = 6/8 = 0.75.
+	if wr.Prediction.Claimed != 1.0 || wr.Outcome.Realized != 0.75 || wr.Outcome.Sample != 8 {
+		t.Fatalf("warm_recall mapping wrong: %+v", wr)
+	}
+}
+
+func TestVcacheEpisodesSkipsEmptyMetrics(t *testing.T) {
+	if ins := vcacheEpisodesFromObserve(vcachecal.PredictionError{}); len(ins) != 0 {
+		t.Fatalf("an empty prediction-error should yield no episodes, got %d", len(ins))
+	}
+}
+
+func TestDojoCatalogMatchesVcacheEmittedMetrics(t *testing.T) {
+	// the static catalog must match the metrics the vcache-warmth lever emits.
+	pe := vcachecal.PredictionError{TrueWarm: 1, FalseWarm: 1, TrueCold: 1, FalseCold: 1}
+	emitted := map[string]bool{}
+	for _, in := range vcacheEpisodesFromObserve(pe) {
+		emitted[in.Prediction.Metric] = true
+	}
+	for _, lv := range dojoLeverCatalog() {
+		if lv.Name != "vcache-warmth" {
 			continue
 		}
 		for _, m := range lv.Metrics {
