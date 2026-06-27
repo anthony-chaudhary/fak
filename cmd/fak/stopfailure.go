@@ -45,38 +45,63 @@ func stopFailureUsage(w io.Writer) {
 	fmt.Fprintln(w, "       fak stopfailure clear-reviewed --session ID [--session ID ...] [--root DIR] [--recent-hours N] [--apply] [--json]")
 }
 
+// stopFailureCommonFlags holds the flag pointers shared by every stopfailure
+// subcommand. registerStopFailureCommonFlags wires them onto fs so each
+// subcommand declares only its own extra flags.
+type stopFailureCommonFlags struct {
+	root        *string
+	sinceHours  *int
+	recentHours *int
+	claudeHome  *string
+	namespace   *string
+	asJSON      *bool
+	nowFlag     *string
+}
+
+func registerStopFailureCommonFlags(fs *flag.FlagSet) stopFailureCommonFlags {
+	return stopFailureCommonFlags{
+		root:        fs.String("root", ".", "repository root containing .dos/stop-failures"),
+		sinceHours:  fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history"),
+		recentHours: fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours"),
+		claudeHome:  fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home"),
+		namespace:   fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup"),
+		asJSON:      fs.Bool("json", false, "emit JSON"),
+		nowFlag:     fs.String("now", "", "override current time as RFC3339 for deterministic tests"),
+	}
+}
+
+// options builds the stopfailure.Options shared by every subcommand from the
+// common flags and the parsed now/limit values.
+func (c stopFailureCommonFlags) options(now time.Time, limit int) stopfailure.Options {
+	return stopfailure.Options{
+		Root:                *c.root,
+		Now:                 now,
+		RecentWindow:        time.Duration(*c.recentHours) * time.Hour,
+		SinceWindow:         time.Duration(*c.sinceHours) * time.Hour,
+		Limit:               limit,
+		ClaudeHome:          *c.claudeHome,
+		TranscriptNamespace: *c.namespace,
+	}
+}
+
 func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak stopfailure plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
-	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
-	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
-	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
-	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
+	common := registerStopFailureCommonFlags(fs)
 	limit := fs.Int("limit", 20, "maximum rows per settlement action in output; 0 means all")
-	asJSON := fs.Bool("json", false, "emit JSON")
-	nowFlag := fs.String("now", "", "override current time as RFC3339 for deterministic tests")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	now, ok := parseStopFailureNow(*nowFlag, stderr)
+	now, ok := parseStopFailureNow(*common.nowFlag, stderr)
 	if !ok {
 		return 2
 	}
-	plan, err := stopfailure.BuildPlan(stopfailure.Options{
-		Root:                *root,
-		Now:                 now,
-		RecentWindow:        time.Duration(*recentHours) * time.Hour,
-		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
-		Limit:               *limit,
-		ClaudeHome:          *claudeHome,
-		TranscriptNamespace: *namespace,
-	})
+	plan, err := stopfailure.BuildPlan(common.options(now, *limit))
 	if err != nil {
 		fmt.Fprintf(stderr, "fak stopfailure plan: %v\n", err)
 		return 1
 	}
-	if *asJSON {
+	if *common.asJSON {
 		return writeStopFailureJSON(stdout, stderr, plan)
 	}
 	printStopFailurePlan(stdout, plan)
@@ -86,36 +111,22 @@ func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
 func runStopFailureResetStale(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak stopfailure reset-stale", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
-	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
-	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
-	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
-	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
+	common := registerStopFailureCommonFlags(fs)
 	limit := fs.Int("limit", 0, "maximum stale markers to reset; 0 means all candidates")
 	apply := fs.Bool("apply", false, "write consecutive=0 to stale markers; omitted means dry-run")
-	asJSON := fs.Bool("json", false, "emit JSON")
-	nowFlag := fs.String("now", "", "override current time as RFC3339 for deterministic tests")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	now, ok := parseStopFailureNow(*nowFlag, stderr)
+	now, ok := parseStopFailureNow(*common.nowFlag, stderr)
 	if !ok {
 		return 2
 	}
-	result, err := stopfailure.ResetStale(stopfailure.Options{
-		Root:                *root,
-		Now:                 now,
-		RecentWindow:        time.Duration(*recentHours) * time.Hour,
-		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
-		Limit:               *limit,
-		ClaudeHome:          *claudeHome,
-		TranscriptNamespace: *namespace,
-	}, *apply)
+	result, err := stopfailure.ResetStale(common.options(now, *limit), *apply)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak stopfailure reset-stale: %v\n", err)
 		return 1
 	}
-	if *asJSON {
+	if *common.asJSON {
 		return writeStopFailureJSON(stdout, stderr, result)
 	}
 	printStopFailureReset(stdout, result)
@@ -128,36 +139,22 @@ func runStopFailureResetStale(stdout, stderr io.Writer, argv []string) int {
 func runStopFailureArchiveMarkerOnly(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak stopfailure archive-marker-only", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
-	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
-	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
-	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
-	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
+	common := registerStopFailureCommonFlags(fs)
 	limit := fs.Int("limit", 0, "maximum marker-only files to archive; 0 means all candidates")
 	apply := fs.Bool("apply", false, "move stale marker-only files under .dos/stop-failures/archive; omitted means dry-run")
-	asJSON := fs.Bool("json", false, "emit JSON")
-	nowFlag := fs.String("now", "", "override current time as RFC3339 for deterministic tests")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	now, ok := parseStopFailureNow(*nowFlag, stderr)
+	now, ok := parseStopFailureNow(*common.nowFlag, stderr)
 	if !ok {
 		return 2
 	}
-	result, err := stopfailure.ArchiveMarkerOnly(stopfailure.Options{
-		Root:                *root,
-		Now:                 now,
-		RecentWindow:        time.Duration(*recentHours) * time.Hour,
-		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
-		Limit:               *limit,
-		ClaudeHome:          *claudeHome,
-		TranscriptNamespace: *namespace,
-	}, *apply)
+	result, err := stopfailure.ArchiveMarkerOnly(common.options(now, *limit), *apply)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak stopfailure archive-marker-only: %v\n", err)
 		return 1
 	}
-	if *asJSON {
+	if *common.asJSON {
 		return writeStopFailureJSON(stdout, stderr, result)
 	}
 	printStopFailureArchive(stdout, result)
@@ -170,36 +167,23 @@ func runStopFailureArchiveMarkerOnly(stdout, stderr io.Writer, argv []string) in
 func runStopFailureClearReviewed(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak stopfailure clear-reviewed", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
-	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
-	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
-	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
-	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
+	common := registerStopFailureCommonFlags(fs)
 	apply := fs.Bool("apply", false, "write consecutive=0 to named recent reviewed markers; omitted means dry-run")
-	asJSON := fs.Bool("json", false, "emit JSON")
-	nowFlag := fs.String("now", "", "override current time as RFC3339 for deterministic tests")
 	var sessions stopFailureSessionList
 	fs.Var(&sessions, "session", "recent reviewed StopFailure session id to clear; repeatable")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	now, ok := parseStopFailureNow(*nowFlag, stderr)
+	now, ok := parseStopFailureNow(*common.nowFlag, stderr)
 	if !ok {
 		return 2
 	}
-	result, err := stopfailure.ClearReviewed(stopfailure.Options{
-		Root:                *root,
-		Now:                 now,
-		RecentWindow:        time.Duration(*recentHours) * time.Hour,
-		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
-		ClaudeHome:          *claudeHome,
-		TranscriptNamespace: *namespace,
-	}, sessions, *apply)
+	result, err := stopfailure.ClearReviewed(common.options(now, 0), sessions, *apply)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak stopfailure clear-reviewed: %v\n", err)
 		return 1
 	}
-	if *asJSON {
+	if *common.asJSON {
 		return writeStopFailureJSON(stdout, stderr, result)
 	}
 	printStopFailureClearReviewed(stdout, result)
@@ -258,50 +242,52 @@ func printStopFailurePlan(w io.Writer, plan stopfailure.Plan) {
 	}
 }
 
-func printStopFailureReset(w io.Writer, result stopfailure.ResetResult) {
-	mode := "DRY-RUN"
-	if result.Applied {
-		mode = "APPLIED"
+// stopFailureMode renders the dry-run/applied banner word shared by every
+// mutating settlement printer.
+func stopFailureMode(applied bool) string {
+	if applied {
+		return "APPLIED"
 	}
-	fmt.Fprintf(w, "fak stopfailure reset-stale: %s candidates=%d updated=%d errors=%d\n", mode, len(result.Candidates), len(result.Updated), len(result.Errors))
+	return "DRY-RUN"
+}
+
+// printStopFailureSettlement renders the rows + the conditional "next: rerun
+// with --apply" hint + the trailing error lines common to every mutating
+// settlement action. nextHint is the action-specific re-run instruction.
+func printStopFailureSettlement(w io.Writer, label, nextHint string, rows []stopfailure.Marker, applied bool, hasCandidates bool, errs []string) {
+	printStopFailureRows(w, label, rows)
+	if !applied && hasCandidates {
+		fmt.Fprintln(w, nextHint)
+	}
+	for _, err := range errs {
+		fmt.Fprintf(w, "error: %s\n", err)
+	}
+}
+
+func printStopFailureReset(w io.Writer, result stopfailure.ResetResult) {
+	fmt.Fprintf(w, "fak stopfailure reset-stale: %s candidates=%d updated=%d errors=%d\n", stopFailureMode(result.Applied), len(result.Candidates), len(result.Updated), len(result.Errors))
 	rows := result.Candidates
 	if result.Applied {
 		rows = result.Updated
 	}
-	printStopFailureRows(w, "stale reset", rows)
-	if !result.Applied && len(result.Candidates) > 0 {
-		fmt.Fprintln(w, "next: rerun with --apply to set consecutive=0 on stale markers only")
-	}
-	for _, err := range result.Errors {
-		fmt.Fprintf(w, "error: %s\n", err)
-	}
+	printStopFailureSettlement(w, "stale reset",
+		"next: rerun with --apply to set consecutive=0 on stale markers only",
+		rows, result.Applied, len(result.Candidates) > 0, result.Errors)
 }
 
 func printStopFailureArchive(w io.Writer, result stopfailure.ArchiveResult) {
-	mode := "DRY-RUN"
-	if result.Applied {
-		mode = "APPLIED"
-	}
-	fmt.Fprintf(w, "fak stopfailure archive-marker-only: %s candidates=%d archived=%d errors=%d\n", mode, len(result.Candidates), len(result.Archived), len(result.Errors))
+	fmt.Fprintf(w, "fak stopfailure archive-marker-only: %s candidates=%d archived=%d errors=%d\n", stopFailureMode(result.Applied), len(result.Candidates), len(result.Archived), len(result.Errors))
 	rows := result.Candidates
 	if result.Applied {
 		rows = result.Archived
 	}
-	printStopFailureRows(w, "marker-only archive", rows)
-	if !result.Applied && len(result.Candidates) > 0 {
-		fmt.Fprintln(w, "next: rerun with --apply to move stale marker-only files under .dos/stop-failures/archive")
-	}
-	for _, err := range result.Errors {
-		fmt.Fprintf(w, "error: %s\n", err)
-	}
+	printStopFailureSettlement(w, "marker-only archive",
+		"next: rerun with --apply to move stale marker-only files under .dos/stop-failures/archive",
+		rows, result.Applied, len(result.Candidates) > 0, result.Errors)
 }
 
 func printStopFailureClearReviewed(w io.Writer, result stopfailure.ClearReviewedResult) {
-	mode := "DRY-RUN"
-	if result.Applied {
-		mode = "APPLIED"
-	}
-	fmt.Fprintf(w, "fak stopfailure clear-reviewed: %s requested=%d candidates=%d updated=%d missing=%d errors=%d\n", mode, len(result.Requested), len(result.Candidates), len(result.Updated), len(result.Missing), len(result.Errors))
+	fmt.Fprintf(w, "fak stopfailure clear-reviewed: %s requested=%d candidates=%d updated=%d missing=%d errors=%d\n", stopFailureMode(result.Applied), len(result.Requested), len(result.Candidates), len(result.Updated), len(result.Missing), len(result.Errors))
 	rows := result.Candidates
 	if result.Applied {
 		rows = result.Updated

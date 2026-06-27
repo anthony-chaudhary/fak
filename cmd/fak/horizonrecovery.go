@@ -38,20 +38,11 @@ func runHorizonRecovery(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	path := *reportPath
-	if path == "" {
-		if fs.NArg() == 0 {
-			fmt.Fprintln(stderr, "fak horizon-recovery: give a ctxplanbench report JSON path "+
-				"(positional or --report), or run 'fak horizon-recovery selfcheck'")
-			return 2
-		}
-		path = fs.Arg(0)
-		if fs.NArg() > 1 {
-			fmt.Fprintf(stderr, "fak horizon-recovery: unexpected argument %q\n", fs.Arg(1))
-			return 2
-		}
-	} else if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak horizon-recovery: unexpected argument %q\n", fs.Arg(0))
+	path, ok := resolveReportPath(fs, stderr, "horizon-recovery",
+		"fak horizon-recovery: give a ctxplanbench report JSON path "+
+			"(positional or --report), or run 'fak horizon-recovery selfcheck'",
+		*reportPath)
+	if !ok {
 		return 2
 	}
 

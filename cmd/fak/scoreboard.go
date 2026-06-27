@@ -99,29 +99,49 @@ func buildUpdate(stderr io.Writer, from, debtKey, title, kpi, value, grade, verd
 	}
 
 	if from != "" {
-		raw, err := readFromFile(from)
-		if err != nil {
-			return scoreboard.Update{}, err
-		}
-		var p scorecard.Payload
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return scoreboard.Update{}, fmt.Errorf("parse --from payload: %w", err)
-		}
-		t := title
-		if t == "" {
-			t = p.Schema
-		}
-		if t == "" {
-			t = "scorecard"
-		}
-		up := scoreboard.FromPayload(t, p, debtKey)
-		up.Source = src
-		return up, nil
+		return scoreboardPayloadUpdate(from, debtKey, title, src, "scorecard")
 	}
 
 	if kpi == "" {
 		return scoreboard.Update{}, fmt.Errorf("nothing to post: pass --from <payload.json> or --kpi <name>")
 	}
+	return scoreboardKPIUpdate(title, kpi, value, grade, verdict, detail, src), nil
+}
+
+// scoreboardPayloadUpdate reads a pkg/scorecard control-pane JSON payload from
+// `from`, folds it into a scoreboard.Update via FromPayload (tagged with src),
+// and titles it from --title, else the payload schema, else fallbackTitle. It
+// is the shared --from branch used by the scoreboard/nodeusage/product feeds.
+func scoreboardPayloadUpdate(from, debtKey, title, src, fallbackTitle string) (scoreboard.Update, error) {
+	raw, err := readFromFile(from)
+	if err != nil {
+		return scoreboard.Update{}, err
+	}
+	var p scorecard.Payload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return scoreboard.Update{}, fmt.Errorf("parse --from payload: %w", err)
+	}
+	return scoreboardPayloadUpdateFrom(p, debtKey, title, src, fallbackTitle), nil
+}
+
+// scoreboardPayloadUpdateFrom folds an already-parsed scorecard payload into an
+// Update, applying the shared title-resolution (--title > schema > fallback).
+func scoreboardPayloadUpdateFrom(p scorecard.Payload, debtKey, title, src, fallbackTitle string) scoreboard.Update {
+	t := title
+	if t == "" {
+		t = p.Schema
+	}
+	if t == "" {
+		t = fallbackTitle
+	}
+	up := scoreboard.FromPayload(t, p, debtKey)
+	up.Source = src
+	return up
+}
+
+// scoreboardKPIUpdate builds the ad-hoc --kpi Update shared by the scoreboard
+// and nodeusage feeds: title defaults to the kpi name.
+func scoreboardKPIUpdate(title, kpi, value, grade, verdict, detail, src string) scoreboard.Update {
 	t := title
 	if t == "" {
 		t = kpi
@@ -133,7 +153,7 @@ func buildUpdate(stderr io.Writer, from, debtKey, title, kpi, value, grade, verd
 		Verdict: verdict,
 		Detail:  detail,
 		Source:  src,
-	}, nil
+	}
 }
 
 func readFromFile(path string) ([]byte, error) {

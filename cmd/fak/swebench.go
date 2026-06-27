@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -233,18 +234,30 @@ func printSwebenchSummary(w *os.File, s swebench.Summary, src, out string) {
 	fmt.Fprintf(w, "geometry src  : %s\n", sortedCountsSWE(s.GeometrySources))
 	fmt.Fprintf(w, "turns         : min %d  median %d  max %d  (total %d round-trips)\n",
 		s.TurnsMin, s.TurnsMedian, s.TurnsMax, s.TotalTurns)
-	fmt.Fprintf(w, "\nprefill-token work-elimination (deterministic floor, no model):\n")
-	fmt.Fprintf(w, "  %-8s %16s %16s %16s   %8s %8s %8s\n", "workers", "A naive", "B per-agent", "C fak", "A/C", "B/C", "A/B")
+	printPrefillTableHeader(w)
 	for _, p := range s.Prefill {
 		fmt.Fprintf(w, "  %-8d %16d %16d %16d   %7.1fx %7.2fx %7.1fx\n",
 			p.Workers, p.A, p.B, p.C, p.AOverC, p.BOverC, p.AOverB)
 	}
-	fmt.Fprintf(w, "\n  A/C = net prefill work-elimination vs the naive re-prefill-every-turn harness\n")
-	fmt.Fprintf(w, "  B/C = cross-worker prefix reuse (the value stack; bites at workers>1)\n")
-	fmt.Fprintf(w, "  A/B = the turn-tax (re-prefill vs KV persistence), worker-independent\n")
+	printPrefillTableLegend(w)
 	if out != "" {
 		fmt.Fprintf(w, "\nSummary JSON written: %s\n", out)
 	}
+}
+
+// printPrefillTableHeader writes the shared header line of the prefill-token
+// work-elimination table (used by both the swebench and webbench summaries).
+func printPrefillTableHeader(w io.Writer) {
+	fmt.Fprintf(w, "\nprefill-token work-elimination (deterministic floor, no model):\n")
+	fmt.Fprintf(w, "  %-8s %16s %16s %16s   %8s %8s %8s\n", "workers", "A naive", "B per-agent", "C fak", "A/C", "B/C", "A/B")
+}
+
+// printPrefillTableLegend writes the shared A/C, B/C, A/B legend lines that
+// follow the prefill-token table in both the swebench and webbench summaries.
+func printPrefillTableLegend(w io.Writer) {
+	fmt.Fprintf(w, "\n  A/C = net prefill work-elimination vs the naive re-prefill-every-turn harness\n")
+	fmt.Fprintf(w, "  B/C = cross-worker prefix reuse (the value stack; bites at workers>1)\n")
+	fmt.Fprintf(w, "  A/B = the turn-tax (re-prefill vs KV persistence), worker-independent\n")
 }
 
 func sortedCountsSWE(m map[string]int) string {
@@ -281,18 +294,7 @@ func cmdSwebenchSmokeContract(argv []string) {
 	md := fs.String("md", "", "write the contract markdown here")
 	_ = fs.Parse(argv)
 
-	diff, ds := *difficulty, *dataset
-	if diff == "" && ds == "" {
-		if env := os.Getenv("FAK_SWEBENCH_DIFFICULTY"); env != "" {
-			diff = env
-		} else if env := os.Getenv("FAK_SWEBENCH_DATASET"); env != "" {
-			ds = env
-		} else {
-			diff = swebenchSampleDifficulty
-			fmt.Fprintf(os.Stderr, "fak swebench smoke-contract: no --difficulty/--dataset; using committed sample %s.\n", diff)
-		}
-	}
-	d, srcDesc, err := loadSwebenchSource(diff, ds)
+	d, diff, ds, srcDesc, err := resolveSwebenchContractSource("smoke-contract", *difficulty, *dataset)
 	must(err)
 	selected := selectSwebenchSmokeTasks(d, *filter, *limit)
 	rawCmd := strings.TrimSpace(*rawCommand)
@@ -326,16 +328,23 @@ func cmdSwebenchSmokeContract(argv []string) {
 	fmt.Fprintf(os.Stderr, "status       : %s\n", contract.Status)
 	fmt.Fprintf(os.Stderr, "tasks        : %d\n", len(contract.TaskSelection.TaskIDs))
 	fmt.Fprintf(os.Stderr, "model        : %s\n", *model)
-	fmt.Fprintf(os.Stderr, "grader       : runnable=%t", contract.OfficialGrader.Runnable)
-	if contract.OfficialGrader.Reason != "" {
-		fmt.Fprintf(os.Stderr, " (%s)", contract.OfficialGrader.Reason)
+	printSwebenchContractGraderTail(contract.OfficialGrader.Runnable, contract.OfficialGrader.Reason, *out, *md)
+}
+
+// printSwebenchContractGraderTail renders the grader/json/markdown stderr tail
+// shared by every swebench contract command. graderReason is empty when there
+// is none; out/md are empty when the artifact was not written.
+func printSwebenchContractGraderTail(graderRunnable bool, graderReason, out, md string) {
+	fmt.Fprintf(os.Stderr, "grader       : runnable=%t", graderRunnable)
+	if graderReason != "" {
+		fmt.Fprintf(os.Stderr, " (%s)", graderReason)
 	}
 	fmt.Fprintln(os.Stderr)
-	if *out != "" {
-		fmt.Fprintf(os.Stderr, "json         : %s\n", *out)
+	if out != "" {
+		fmt.Fprintf(os.Stderr, "json         : %s\n", out)
 	}
-	if *md != "" {
-		fmt.Fprintf(os.Stderr, "markdown     : %s\n", *md)
+	if md != "" {
+		fmt.Fprintf(os.Stderr, "markdown     : %s\n", md)
 	}
 }
 
@@ -364,18 +373,7 @@ func cmdSwebenchDeepSWEContract(argv []string) {
 	md := fs.String("md", "", "write the contract markdown here")
 	_ = fs.Parse(argv)
 
-	diff, ds := *difficulty, *dataset
-	if diff == "" && ds == "" {
-		if env := os.Getenv("FAK_SWEBENCH_DIFFICULTY"); env != "" {
-			diff = env
-		} else if env := os.Getenv("FAK_SWEBENCH_DATASET"); env != "" {
-			ds = env
-		} else {
-			diff = swebenchSampleDifficulty
-			fmt.Fprintf(os.Stderr, "fak swebench deepswe-contract: no --difficulty/--dataset; using committed sample %s.\n", diff)
-		}
-	}
-	d, srcDesc, err := loadSwebenchSource(diff, ds)
+	d, diff, ds, srcDesc, err := resolveSwebenchContractSource("deepswe-contract", *difficulty, *dataset)
 	must(err)
 	selected := selectSwebenchSmokeTasks(d, *filter, *limit)
 	rawCommand := buildDeepSWERawFakRunCommand(diff, ds, *filter, *limit, *model, *rawBaseURL, *adapter, *adapterArgs, *rawOutput, *timeout, *maxSteps)
@@ -415,17 +413,27 @@ func cmdSwebenchDeepSWEContract(argv []string) {
 	fmt.Fprintf(os.Stderr, "adapter      : %s\n", *adapter)
 	fmt.Fprintf(os.Stderr, "raw base     : %s\n", *rawBaseURL)
 	fmt.Fprintf(os.Stderr, "fak base     : %s\n", *fakBaseURL)
-	fmt.Fprintf(os.Stderr, "grader       : runnable=%t", contract.OfficialGrader.Runnable)
-	if contract.OfficialGrader.Reason != "" {
-		fmt.Fprintf(os.Stderr, " (%s)", contract.OfficialGrader.Reason)
+	printSwebenchContractGraderTail(contract.OfficialGrader.Runnable, contract.OfficialGrader.Reason, *out, *md)
+}
+
+// resolveSwebenchContractSource applies the contract commands' shared source
+// resolution: honor an explicit --difficulty/--dataset, else FAK_SWEBENCH_*,
+// else fall back to the committed sample (announcing it on stderr under cmdName)
+// and load the dataset. cmdName is the subcommand label for the notice.
+func resolveSwebenchContractSource(cmdName, difficulty, dataset string) (d *swebench.Dataset, diff, ds, srcDesc string, err error) {
+	diff, ds = difficulty, dataset
+	if diff == "" && ds == "" {
+		if env := os.Getenv("FAK_SWEBENCH_DIFFICULTY"); env != "" {
+			diff = env
+		} else if env := os.Getenv("FAK_SWEBENCH_DATASET"); env != "" {
+			ds = env
+		} else {
+			diff = swebenchSampleDifficulty
+			fmt.Fprintf(os.Stderr, "fak swebench %s: no --difficulty/--dataset; using committed sample %s.\n", cmdName, diff)
+		}
 	}
-	fmt.Fprintln(os.Stderr)
-	if *out != "" {
-		fmt.Fprintf(os.Stderr, "json         : %s\n", *out)
-	}
-	if *md != "" {
-		fmt.Fprintf(os.Stderr, "markdown     : %s\n", *md)
-	}
+	d, srcDesc, err = loadSwebenchSource(diff, ds)
+	return d, diff, ds, srcDesc, err
 }
 
 func selectSwebenchSmokeTasks(d *swebench.Dataset, filter string, limit int) *swebench.Dataset {

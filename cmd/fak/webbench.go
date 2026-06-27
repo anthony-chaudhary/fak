@@ -149,8 +149,7 @@ func printWebbenchSummary(w *os.File, s webbench.Summary, src, out string) {
 	fmt.Fprintf(w, "geometry src  : %s\n", sortedCounts(s.GeometrySources))
 	fmt.Fprintf(w, "turns         : min %d  median %d  max %d  (total %d navigation turns)\n",
 		s.TurnsMin, s.TurnsMedian, s.TurnsMax, s.TotalTurns)
-	fmt.Fprintf(w, "\nprefill-token work-elimination (deterministic floor, no model):\n")
-	fmt.Fprintf(w, "  %-8s %16s %16s %16s   %8s %8s %8s\n", "workers", "A naive", "B per-agent", "C fak", "A/C", "B/C", "A/B")
+	printPrefillTableHeader(w)
 	for _, p := range s.Prefill {
 		fmt.Fprintf(w, "  %-8d %16s %16s %16s   %7.1fx %7.2fx %7.1fx\n",
 			p.Workers,
@@ -162,9 +161,7 @@ func printWebbenchSummary(w *os.File, s webbench.Summary, src, out string) {
 			p.AOverB,
 		)
 	}
-	fmt.Fprintf(w, "\n  A/C = net prefill work-elimination vs the naive re-prefill-every-turn harness\n")
-	fmt.Fprintf(w, "  B/C = cross-worker prefix reuse (the value stack; bites at workers>1)\n")
-	fmt.Fprintf(w, "  A/B = the turn-tax (re-prefill vs KV persistence), worker-independent\n")
+	printPrefillTableLegend(w)
 	if out != "" {
 		fmt.Fprintf(w, "\nSummary JSON written: %s\n", out)
 	}

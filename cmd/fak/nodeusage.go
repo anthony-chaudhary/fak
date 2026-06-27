@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/nodeusagepost"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
-	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // cmdNodeUsage posts compute-node-usage status to the #node-usage Slack channel.
@@ -126,38 +124,10 @@ func buildNodeUsageUpdate(fleetSrc, from, debtKey, title, kpi, value, grade, ver
 		return up, nil
 
 	case from != "":
-		raw, err := readFromFile(from)
-		if err != nil {
-			return scoreboard.Update{}, err
-		}
-		var p scorecard.Payload
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return scoreboard.Update{}, fmt.Errorf("parse --from payload: %w", err)
-		}
-		t := title
-		if t == "" {
-			t = p.Schema
-		}
-		if t == "" {
-			t = "node usage"
-		}
-		up := scoreboard.FromPayload(t, p, debtKey)
-		up.Source = src
-		return up, nil
+		return scoreboardPayloadUpdate(from, debtKey, title, src, "node usage")
 
 	default: // kpi != ""
-		t := title
-		if t == "" {
-			t = kpi
-		}
-		return scoreboard.Update{
-			Title:   t,
-			Score:   value,
-			Grade:   grade,
-			Verdict: verdict,
-			Detail:  detail,
-			Source:  src,
-		}, nil
+		return scoreboardKPIUpdate(title, kpi, value, grade, verdict, detail, src), nil
 	}
 }
 

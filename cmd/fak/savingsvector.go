@@ -46,20 +46,11 @@ func runSavingsVector(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	path := *reportPath
-	if path == "" {
-		if fs.NArg() == 0 {
-			fmt.Fprintln(stderr, "fak savings-vector: give a turnbench Report JSON path "+
-				"(positional or --report), or run 'fak savings-vector selfcheck'")
-			return 2
-		}
-		path = fs.Arg(0)
-		if fs.NArg() > 1 {
-			fmt.Fprintf(stderr, "fak savings-vector: unexpected argument %q\n", fs.Arg(1))
-			return 2
-		}
-	} else if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak savings-vector: unexpected argument %q\n", fs.Arg(0))
+	path, ok := resolveReportPath(fs, stderr, "savings-vector",
+		"fak savings-vector: give a turnbench Report JSON path "+
+			"(positional or --report), or run 'fak savings-vector selfcheck'",
+		*reportPath)
+	if !ok {
 		return 2
 	}
 
@@ -152,6 +143,31 @@ func writeSavingsVectorHuman(w io.Writer, v savingsvector.Vector) {
 		verdict = "YES (decomposes, does not inflate)"
 	}
 	fmt.Fprintf(w, "    equal: %s\n", verdict)
+}
+
+// resolveReportPath resolves the report-JSON path shared by the report-replay
+// commands (horizon-recovery, savings-vector): prefer an explicit --report
+// (reportFlag), else a single positional argument. cmdName labels the
+// command-specific error messages and missingHint is the command-specific
+// "give a ... path" sentence shown when no path is supplied. ok is false when
+// the path is missing or an extra argument was given (caller should return 2).
+func resolveReportPath(fs *flag.FlagSet, stderr io.Writer, cmdName, missingHint, reportFlag string) (path string, ok bool) {
+	path = reportFlag
+	if path == "" {
+		if fs.NArg() == 0 {
+			fmt.Fprintln(stderr, missingHint)
+			return "", false
+		}
+		path = fs.Arg(0)
+		if fs.NArg() > 1 {
+			fmt.Fprintf(stderr, "fak %s: unexpected argument %q\n", cmdName, fs.Arg(1))
+			return "", false
+		}
+	} else if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak %s: unexpected argument %q\n", cmdName, fs.Arg(0))
+		return "", false
+	}
+	return path, true
 }
 
 // reorderLeadingPositional moves a single leading non-flag token (the Report path)

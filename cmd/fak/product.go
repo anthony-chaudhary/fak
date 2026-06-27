@@ -163,16 +163,7 @@ func buildProductUpdate(status, persona bool, from, debtKey, title, notes, notes
 	if key == "" {
 		key = defKey
 	}
-	t := title
-	if t == "" {
-		t = p.Schema
-	}
-	if t == "" {
-		t = "product"
-	}
-	up := scoreboard.FromPayload(t, p, key)
-	up.Source = src
-	return up, nil
+	return scoreboardPayloadUpdateFrom(p, key, title, src, "product"), nil
 }
 
 // runScorecardJSON runs a project python scorecard with --json and returns its stdout.
