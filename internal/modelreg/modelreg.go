@@ -35,15 +35,21 @@ import (
 // "names that just work" set, not an exhaustive index. Users extend it via
 // registry.json. The keys follow the Ollama-style `family:size` spelling where it
 // reads naturally, plus a couple of bare names.
+// Every target below was verified fetchable (a public repo, an exact single-file
+// GGUF that resolves with no HF token) before being seeded, so a clean install can
+// `fak pull <name>` without auth. Re-verify with a HEAD on the resolve URL if you add
+// one; HF returns 401 (not 404) for a nonexistent repo, so a typo'd repo path silently
+// looks like an auth wall.
 var Catalog = map[string]string{
-	// SmolLM2-135M-Instruct — the tiny model the repo's own dogfood + tests use;
-	// the smallest "it actually chats" GGUF, ideal for `fak run smollm2 "hi"` on a
-	// laptop with no GPU.
-	"smollm2":      "hf://HuggingFaceTB/SmolLM2-135M-Instruct-GGUF/smollm2-135m-instruct-q8_0.gguf",
-	"smollm2:135m": "hf://HuggingFaceTB/SmolLM2-135M-Instruct-GGUF/smollm2-135m-instruct-q8_0.gguf",
-	// Qwen2.5 GGUFs already referenced across the repo (hfhub tests, fetch scripts).
-	"qwen2.5:1.5b": "hf://mradermacher/Qwen2.5-1.5B-GGUF/model.Q8_0.gguf",
-	"qwen2.5:7b":   "hf://Qwen/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q8_0.gguf",
+	// SmolLM2-135M-Instruct — the smallest "it actually chats" GGUF, ideal for
+	// `fak run smollm2 "hi"` on a laptop with no GPU. bartowski is the canonical
+	// public GGUF re-publisher (the base HuggingFaceTB repo ships no GGUF).
+	"smollm2":      "hf://bartowski/SmolLM2-135M-Instruct-GGUF/SmolLM2-135M-Instruct-Q8_0.gguf",
+	"smollm2:135m": "hf://bartowski/SmolLM2-135M-Instruct-GGUF/SmolLM2-135M-Instruct-Q8_0.gguf",
+	// Qwen2.5 instruct GGUFs: a 1.5B Q8 for a quick CPU run and a 7B Q4_K_M
+	// (single file, ~4.7 GB) for a more capable laptop/GPU run.
+	"qwen2.5:1.5b": "hf://mradermacher/Qwen2.5-1.5B-GGUF/Qwen2.5-1.5B.Q8_0.gguf",
+	"qwen2.5:7b":   "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
 }
 
 // Entry is one resolved alias: the name a user types and the target it expands to.
