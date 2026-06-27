@@ -5,7 +5,9 @@ flowchart LR
   prompts["Manual prompts<br/>control: PROMPT<br/>hard risk coverage: 0/6<br/>failure: click-through tax"]
   classes["Broad sandbox / class grants<br/>control: boundary + review<br/>hard risk coverage: partial<br/>failure: allowed class is too wide"]
   auto["Auto-classified permissioning<br/>control: learned classifier<br/>hard risk coverage: 0/6<br/>known max FNR: 17%"]
+  %% known max FNR: The worst-case False Negative Rate of the auto-classifier—the probability it incorrectly permits a dangerous tool call—measured against the benchmark dataset.
   skip["Dangerous skip<br/>control: none<br/>hard risk coverage: 0/6<br/>unguarded risk allows: 6"]
+  %% unguarded risk allows: The count of risky tool-call scenarios (from the six benchmark rows) that are permitted without any guard, review, or control mechanism.
 
   fak["FAK/DOS gateway<br/>control: manifest + arg rules + IFC + witness<br/>hard risk coverage: 6/6<br/>result admission: QUARANTINE<br/>bridge controls: 6/6"]
 
