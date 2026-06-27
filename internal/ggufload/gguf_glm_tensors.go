@@ -139,7 +139,12 @@ func glmMoeDsaSkipGGUFTensor(name string) bool {
 // tensors (mlp.experts.<e>.<proj>.weight) — the form internal/model's MoE forward consumes
 // (moe.go expertName). Detected from the GGUF name (not the canonical map) so the split happens
 // BEFORE CanonicalTensorNameArch, which deliberately returns no mapping for these.
-func glmMoeDsaBatchedExpert(name string) (layer int, proj string, ok bool) {
+// parseGLMBlkLayerSuffix splits a "blk.<layer>.<suffix>" GGUF tensor name into its
+// decoder layer index and the remaining suffix (everything after the layer's dot).
+// It is the shared front half of the glm_moe_dsa name classifiers — each then matches
+// the returned suffix against its own constant set. ok=false when the name is not a
+// blk.<int>.* tensor, so a caller's classification falls through unchanged.
+func parseGLMBlkLayerSuffix(name string) (layer int, suffix string, ok bool) {
 	if !strings.HasPrefix(name, "blk.") {
 		return 0, "", false
 	}
@@ -152,7 +157,15 @@ func glmMoeDsaBatchedExpert(name string) (layer int, proj string, ok bool) {
 	if err != nil {
 		return 0, "", false
 	}
-	switch rest[dot+1:] {
+	return l, rest[dot+1:], true
+}
+
+func glmMoeDsaBatchedExpert(name string) (layer int, proj string, ok bool) {
+	l, suffix, ok := parseGLMBlkLayerSuffix(name)
+	if !ok {
+		return 0, "", false
+	}
+	switch suffix {
 	case glmGGUFExpertsGate:
 		return l, "gate_proj", true
 	case glmGGUFExpertsUp:
@@ -279,19 +292,11 @@ const (
 // (mergeGLMMoeDsaKVB) handles them BEFORE CanonicalTensorNameArch — the same shape the batched
 // expert splitter (glmMoeDsaBatchedExpert) uses, but combining two tensors instead of splitting one.
 func glmMoeDsaSplitKVB(name string) (layer int, half string, ok bool) {
-	if !strings.HasPrefix(name, "blk.") {
+	l, suffix, ok := parseGLMBlkLayerSuffix(name)
+	if !ok {
 		return 0, "", false
 	}
-	rest := strings.TrimPrefix(name, "blk.")
-	dot := strings.IndexByte(rest, '.')
-	if dot <= 0 {
-		return 0, "", false
-	}
-	l, err := strconv.Atoi(rest[:dot])
-	if err != nil {
-		return 0, "", false
-	}
-	switch rest[dot+1:] {
+	switch suffix {
 	case glmGGUFAttnKB:
 		return l, "k", true
 	case glmGGUFAttnVB:

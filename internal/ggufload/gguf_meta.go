@@ -53,8 +53,14 @@ func (f *File) Bool(key string) (bool, bool) {
 	return b, ok
 }
 
-// StringArray reads a GGUF metadata array of strings into []string, returning (nil,false) on a non-array or any non-string item.
-func (f *File) StringArray(key string) ([]string, bool) {
+// metadataArray reads a GGUF metadata array under key into a []T, converting each
+// item with conv. It centralizes the shared array scaffolding — key lookup, the
+// TypeArray check, the []Value assertion, allocation, and the per-item iteration —
+// so each typed reader (StringArray/IntArray/BoolArray/Int32Array) supplies only its
+// element conversion. conv returns (value,false) to reject an item, which fails the
+// whole read with (nil,false), preserving each reader's original all-or-nothing
+// behavior.
+func metadataArray[T any](f *File, key string, conv func(Value) (T, bool)) ([]T, bool) {
 	v, ok := f.Metadata[key]
 	if !ok || v.Type != TypeArray {
 		return nil, false
@@ -63,63 +69,52 @@ func (f *File) StringArray(key string) ([]string, bool) {
 	if !ok {
 		return nil, false
 	}
-	out := make([]string, len(items))
+	out := make([]T, len(items))
 	for i, item := range items {
-		if item.Type != TypeString {
+		c, ok := conv(item)
+		if !ok {
 			return nil, false
 		}
-		out[i] = item.Value.(string)
+		out[i] = c
 	}
 	return out, true
+}
+
+// StringArray reads a GGUF metadata array of strings into []string, returning (nil,false) on a non-array or any non-string item.
+func (f *File) StringArray(key string) ([]string, bool) {
+	return metadataArray(f, key, func(item Value) (string, bool) {
+		if item.Type != TypeString {
+			return "", false
+		}
+		s, ok := item.Value.(string)
+		return s, ok
+	})
 }
 
 // IntArray reads a GGUF metadata array of integers into []int. Gemma4 encodes a
 // per-layer head_count_kv as such an array (one entry per decoder layer). Returns
 // (nil,false) when the key is absent, not an array, or carries a non-integer item.
 func (f *File) IntArray(key string) ([]int, bool) {
-	v, ok := f.Metadata[key]
-	if !ok || v.Type != TypeArray {
-		return nil, false
-	}
-	items, ok := v.Value.([]Value)
-	if !ok {
-		return nil, false
-	}
-	out := make([]int, len(items))
-	for i, item := range items {
+	return metadataArray(f, key, func(item Value) (int, bool) {
 		u, ok := valueUint64(item)
 		if !ok || u > uint64(math.MaxInt) {
-			return nil, false
+			return 0, false
 		}
-		out[i] = int(u)
-	}
-	return out, true
+		return int(u), true
+	})
 }
 
 // BoolArray reads a GGUF metadata array of bools into []bool. Gemma4 encodes its
 // per-layer local/global cadence as sliding_window_pattern (true = sliding/local,
 // false = full/global). Returns (nil,false) on any non-bool item.
 func (f *File) BoolArray(key string) ([]bool, bool) {
-	v, ok := f.Metadata[key]
-	if !ok || v.Type != TypeArray {
-		return nil, false
-	}
-	items, ok := v.Value.([]Value)
-	if !ok {
-		return nil, false
-	}
-	out := make([]bool, len(items))
-	for i, item := range items {
+	return metadataArray(f, key, func(item Value) (bool, bool) {
 		if item.Type != TypeBool {
-			return nil, false
+			return false, false
 		}
 		b, ok := item.Value.(bool)
-		if !ok {
-			return nil, false
-		}
-		out[i] = b
-	}
-	return out, true
+		return b, ok
+	})
 }
 
 func (f *File) requiredInt(key string) (int, error) {
