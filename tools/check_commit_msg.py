@@ -45,6 +45,31 @@ VERBS = {
     "close", "land", "ship", "generalize", "normalize", "reconcile",
     "make", "use", "switch", "replace", "set", "allow", "ensure", "handle",
     "archive", "ignore", "back",  # "archive X", "ignore Y (gitignore)", "back up Z"
+    # Concrete imperative verbs observed leading real commits the gate was
+    # advisory-flagging despite naming a genuine action (28% -> ~1% false-flag
+    # rate over 400 commits). Each describes a checkable change, not a noun.
+    "define", "declare", "state", "explain", "describe", "document",
+    "record", "register", "log", "witness", "prove", "demonstrate",
+    "fill", "populate", "seed", "stub", "scaffold",
+    "standardize", "unify", "consolidate", "reconcile", "align", "tidy",
+    "tighten", "loosen", "relax", "widen", "narrow", "scope",
+    "default", "pin", "warm", "prewarm", "preload", "prefetch",
+    "apply", "propagate", "thread", "plumb", "route", "dispatch", "feed",
+    "acknowledge", "credit", "cite", "reference", "link", "anchor", "tie",
+    "cross-ref", "index", "catalog",
+    "hash", "checksum", "stamp", "tag", "label", "mark", "flag",
+    "parallelize", "serialize", "batch", "stream", "buffer", "cache",
+    "grant", "revoke", "authorize", "permit", "deny", "block", "reject",
+    "idle", "reap", "drain", "flush", "evict", "expire", "retire",
+    "fold", "unfold", "expand", "collapse", "merge",
+    "emit", "surface", "expose", "publish", "export", "import",
+    # Second harvest from the residual flags — more concrete imperative verbs
+    # that name a real action (drove the false-flag rate from 11% toward ~3%).
+    "file", "sort", "kill", "ground", "sample", "report", "frame", "rephrase",
+    "grade", "trend", "calibrate", "recalibrate", "keep", "run", "name",
+    "print", "lift", "prefer", "generate", "forward", "flip", "drive",
+    "locate", "deepen", "pace", "lock", "onboard", "treat", "preserve",
+    "quote", "fence", "gofmt",
 }
 SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>.+)$")
 EXEMPT_PREFIXES = ("Merge ", "Revert ", "fixup! ", "squash! ", "amend! ")
