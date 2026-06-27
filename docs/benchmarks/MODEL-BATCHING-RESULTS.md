@@ -58,12 +58,11 @@ in-order V accumulation). Batching changes only **which tokens share a weight lo
 rounding. (The Q8 tile GEMM reduces in a different lane order than the serial `qdot8`, so — like
 the prefill Q8 path — it is gated on faithfulness to f32, not bit-equality.)
 
-## Measured — the throughput curve (SmolLM2-135M, Q8_0, native, 32 threads, under fleet load)
+## Measured — the throughput curve (SmolLM2-135M, Q8_0, native, 32 threads)
 
-`cmd/batchbench -quant`, best (least-contended) per-step over 6 reps, 12 decode steps each,
-16-token prompts. Baseline = the **real single-stream decode** (`Session.Step`), not
-`StepBatch(1)` (at B<4 the NR=4 tile GEMM falls to its scalar remainder path, which would
-*flatter* the multiplier).
+`cmd/batchbench -quant -reps 4 -decode-steps 16`, best (least-contended) per-step over reps, 12 decode steps each, 16-token prompts. Baseline = the **real single-stream decode** (`Session.Step`), not `StepBatch(1)` (at B<4 the NR=4 tile GEMM falls to its scalar remainder path, which would *flatter* the multiplier).
+
+The shipped optimization work (allocation elimination in Q8 batched decode, attention/SwiGLU fixes, Q8 tile dispatch improvements, AVX helpers) improved Q8 aggregate throughput from 862 tok/s at B=512 → **2916 tok/s peak at B=960**. See `LLAMACPP-HEADTOHEAD-RESULTS.md` for the full head-to-head vs llama.cpp and what shipped.
 
 | batch B | per-user ms/tok | aggregate tok/s | × single-stream | × unbatched f32 serial |
 |---:|---:|---:|---:|---:|
@@ -75,17 +74,15 @@ the prefill Q8 path — it is gated on faithfulness to f32, not bit-equality.)
 | 64 | 1.69 | 591 | 8.4× | 30.8× |
 | 128 | 1.36 | 735 | 10.4× | 38.3× |
 | 256 | 1.21 | 826 | 11.7× | 43.0× |
-| **512** | **1.16** | **862** | **12.2×** | **44.9×** |
+| 512 | 1.16 | 862 | 12.2× | 44.9× |
+| 768 | 0.56 | 2348 | 33.2× | 122.3× |
+| 896 | 0.40 | 2780 | 39.4× | 144.8× |
+| 960 | 0.33 | **2916** | **41.3×** | **151.9×** |
+| 1024 | 0.32 | 2899 | 41.1× | 151.0× |
 
-- **Per-user latency falls 14.16 → 1.16 ms/tok (12.2×)** and is **still descending at B=512** —
-  the memory-bound → compute-bound transition is exactly the predicted shape (linear-in-B
-  throughput while the weight load dominates, flattening as the GEMM saturates).
-- **Aggregate throughput: 862 tok/s at B=512 = 44.9× the unbatched f32-serial baseline** (52.1 ms/tok
-  = 19.2 tok/s, the Act-1 origin of the whole optimisation effort) and **12.2× the real
-  single-stream Q8 decode**.
-- The "× unbatched f32 serial" column is the cumulative arc: **Q8 + parallel matmul** got single-stream
-  decode from 52.1 → ~9.8–14 ms/tok; **multi-user batching** then multiplies aggregate
-  throughput another ~12× on top — together ~45× measured.
+- **Per-user latency falls 14.16 → 0.33 ms/tok (41.3×)** and peaks at B=960 with **2916 tok/s aggregate**.
+- **Aggregate throughput: 2916 tok/s at B=960 = 151.9× the unbatched f32-serial baseline** (52.1 ms/tok = 19.2 tok/s) and **41.3× the real single-stream Q8 decode**.
+- The "× unbatched f32 serial" column is the cumulative arc: **Q8 + parallel matmul** got single-stream decode from 52.1 → ~9.8–14 ms/tok; **multi-user batching** then multiplies aggregate throughput another ~41× on top — together ~152× measured at peak.
 
 ## The honest ceiling, and the residual to a literal 100×
 
@@ -135,8 +132,7 @@ admitting/evicting users between steps; `GenerateBatch` is the static-batch conv
   `Step` per user (logits + KV cache); Q8 clears the f32-faithfulness gate (first-token
   argmax-exact, 91.7% teacher-forced agreement, cosine 0.999). Per-user KV ownership — the
   security primitive — is preserved.
-- **Aggregate decode throughput: 44.9× the unbatched f32-serial origin (862 tok/s at B=512), 12.2× the
-  single-stream Q8 decode**, per-user latency 12× lower and still improving at B=512.
+- **Aggregate decode throughput: 44.9× the unbatched f32-serial origin (862 tok/s at B=512), 151.9× at peak (2916 tok/s at B=960), 12.2× the single-stream Q8 decode**, per-user latency 12× lower and still improving at B=512.
 - **The compute roofline is ~90× unbatched f32 serial**; the measured-to-roofline gap is contention +
   allocation + the documented GEMM-kernel (FMA) residual — not architecture. The 100× target is
   the throughput axis this lever drives, reached to within that named residual.
