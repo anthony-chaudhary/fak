@@ -22,6 +22,12 @@ import (
 var (
 	metalDecMu    sync.Mutex
 	metalDecReady = map[*Model]bool{} // models whose decode topology is registered + uploaded
+	// The GPU holds ONE sequence's KV resident at a time (decode.m's gKVk). metalKVSession/metalKVLen
+	// track whose it is and how long: a step APPENDS (no context re-upload, no Go concat) only when
+	// it matches this session at exactly L rows, else it SEEDS (uploads the cache context). A
+	// different session simply re-seeds — correct, just not append-fast while two interleave.
+	metalKVSession *Session
+	metalKVLen     int
 
 	// metalDecodeEnvOnce reads FAK_METAL_DECODE once: when set, the resident decode forward runs
 	// even without s.Metal, so a run can use CPU prefill (no f16 upload) + GPU-resident Q8 decode —
@@ -109,8 +115,14 @@ func (s *Session) metalDecodeLogitsQ8(id, pos int) []float32 {
 	w := cfg.NumKVHeads * hd
 	L := pos // cache length == the new token's absolute position
 
+	// Seed (upload the cache context) only when the resident KV is not exactly L rows for THIS
+	// session; otherwise append — skipping the per-step context concat + upload entirely.
+	metalDecMu.Lock()
+	seed := metalKVSession != s || metalKVLen != L
+	metalDecMu.Unlock()
+
 	var Kctx, Vctx []float32
-	if L > 0 {
+	if seed && L > 0 {
 		Kctx = make([]float32, cfg.NumLayers*L*w)
 		Vctx = make([]float32, cfg.NumLayers*L*w)
 		for l := 0; l < cfg.NumLayers; l++ {
@@ -127,10 +139,13 @@ func (s *Session) metalDecodeLogitsQ8(id, pos int) []float32 {
 	copy(x, embed[id*H:(id+1)*H])
 	scaleEmbedInPlace(x, cfg) // Gemma; no-op for Llama/Qwen
 
-	_, newKpost, newV, logits, ok := metalgemm.DecodeStep(x, Kctx, Vctx, L, cfg.NumLayers, w, H, cfg.VocabSize)
+	_, newKpost, newV, logits, ok := metalgemm.DecodeStep(x, Kctx, Vctx, L, cfg.NumLayers, w, H, cfg.VocabSize, seed)
 	if !ok || logits == nil {
-		return nil
+		return nil // append out of sync (cross-session) or backend declined — caller uses CPU
 	}
+	metalDecMu.Lock()
+	metalKVSession, metalKVLen = s, L+1
+	metalDecMu.Unlock()
 	// Append the new token's post-RoPE K and V to the cache (matches the fast Q8 path, which keeps
 	// K/V but not Kraw during decode). pos advances by one.
 	for l := 0; l < cfg.NumLayers; l++ {

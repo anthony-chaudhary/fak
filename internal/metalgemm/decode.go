@@ -13,7 +13,7 @@ void mg_decode_layer(int layer, int q, int k, int v, int o, int gate, int up, in
 void mg_decode_head(int finalNormID, int headWid, int vocab);
 void mg_decode_reset(void);
 int  mg_decode_step(const float* xEmbed, const float* Kctx, const float* Vctx, int L,
-                    float* lastPre, float* newKraw, float* newKpost, float* newV, float* logits);
+                    float* lastPre, float* newKraw, float* newKpost, float* newV, float* logits, int seedFlag);
 */
 import "C"
 
@@ -57,7 +57,10 @@ func DecodeReset() { C.mg_decode_reset() }
 // K and V [nLayers*w] (caller appends to its cache). ok is false if the backend declined.
 // vocab > 0 (with DecodeHead registered) makes the forward also run the final norm + LM head on the
 // GPU and return logits [vocab]; vocab == 0 returns logits == nil and the caller applies the head.
-func DecodeStep(xEmbed, Kctx, Vctx []float32, L, nLayers, w, H, vocab int) (lastPre, newKpost, newV, logits []float32, ok bool) {
+// seed==true uploads the L-row Kctx/Vctx context into the resident KV (a new/desynced sequence);
+// seed==false appends onto the resident KV with no re-upload (the steady decode path) and ignores
+// Kctx/Vctx — returns ok==false if the resident length disagrees, so the caller re-seeds.
+func DecodeStep(xEmbed, Kctx, Vctx []float32, L, nLayers, w, H, vocab int, seed bool) (lastPre, newKpost, newV, logits []float32, ok bool) {
 	if !Available() || len(xEmbed) < H {
 		return nil, nil, nil, nil, false
 	}
@@ -71,16 +74,20 @@ func DecodeStep(xEmbed, Kctx, Vctx []float32, L, nLayers, w, H, vocab int) (last
 		lp = (*C.float)(unsafe.Pointer(&logits[0]))
 	}
 	var kp, vp *C.float
-	if L > 0 {
+	if seed && L > 0 {
 		if len(Kctx) < nLayers*L*w || len(Vctx) < nLayers*L*w {
 			return nil, nil, nil, nil, false
 		}
 		kp = (*C.float)(unsafe.Pointer(&Kctx[0]))
 		vp = (*C.float)(unsafe.Pointer(&Vctx[0]))
 	}
+	seedF := C.int(0)
+	if seed {
+		seedF = 1
+	}
 	r := C.mg_decode_step((*C.float)(unsafe.Pointer(&xEmbed[0])), kp, vp, C.int(L),
 		(*C.float)(unsafe.Pointer(&lastPre[0])), (*C.float)(unsafe.Pointer(&newKraw[0])),
-		(*C.float)(unsafe.Pointer(&newKpost[0])), (*C.float)(unsafe.Pointer(&newV[0])), lp)
+		(*C.float)(unsafe.Pointer(&newKpost[0])), (*C.float)(unsafe.Pointer(&newV[0])), lp, seedF)
 	if r != 1 {
 		return nil, nil, nil, nil, false
 	}

@@ -223,6 +223,11 @@ static int gDecFinalNorm = -1, gDecHead = -1, gDecVocab = 0;
 // f32-scale read, the last bandwidth lever toward the llama.cpp-Metal bar. Built once per weight.
 #define DEC_MAX_W 8192
 static id<MTLBuffer> gDecSF16[DEC_MAX_W];
+// Persistent per-layer GPU KV: kept resident ACROSS decode steps so the common (append) path neither
+// re-uploads the context nor re-allocates — the new K/V row is written in place each step. gKVLen is
+// the resident row count; the host seeds (passes context) when its tracker disagrees, else appends.
+static id<MTLBuffer> gKVk[DEC_MAXL], gKVv[DEC_MAXL];
+static int gKVCap = 0, gKVLen = 0; // rows
 static void ensureScaleF16(int wid) {
     if (wid < 0 || wid >= DEC_MAX_W || gDecSF16[wid] != nil) return;
     int out, in, nblk; mg_q8_dims(wid, &out, &in, &nblk);
@@ -287,8 +292,9 @@ void mg_decode_head(int finalNormID, int headWid, int vocab) {
 void mg_decode_reset(void) {
     gDecNL = gDecH = gDecHd = gDecNH = gDecNKV = gDecI = gDecAttnBias = 0;
     gDecEps = gDecTheta = gDecScale = 0.0f;
-    for (int i = 0; i < DEC_MAXL; i++) gDecL[i] = (DecLayer){0};
+    for (int i = 0; i < DEC_MAXL; i++) { gDecL[i] = (DecLayer){0}; gKVk[i] = nil; gKVv[i] = nil; }
     gDecFinalNorm = -1; gDecHead = -1; gDecVocab = 0;
+    gKVCap = 0; gKVLen = 0;
     for (int i = 0; i < DEC_MAX_W; i++) gDecSF16[i] = nil; // ARC frees the f16-scale buffers
 }
 
@@ -399,6 +405,23 @@ static void d_add_buf(id<MTLBuffer> X, id<MTLBuffer> Y, int n) {
     d1d(e, psoDAdd, (NSUInteger)n);
 }
 
+// kv_ensure grows the resident KV to hold at least `rows`, preserving the gKVLen rows already there.
+static void kv_ensure(int rows) {
+    if (gKVCap >= rows) return;
+    int w = gDecNKV * gDecHd;
+    int newCap = rows + 512; // headroom so a decode run grows O(log) not per-token
+    for (int l = 0; l < gDecNL; l++) {
+        id<MTLBuffer> nk = [gDev newBufferWithLength:(NSUInteger)((long)newCap*w*2) options:MTLResourceStorageModeShared];
+        id<MTLBuffer> nv = [gDev newBufferWithLength:(NSUInteger)((long)newCap*w*2) options:MTLResourceStorageModeShared];
+        if (gKVLen > 0 && gKVk[l] != nil) {
+            memcpy(nk.contents, gKVk[l].contents, (size_t)((long)gKVLen*w*2));
+            memcpy(nv.contents, gKVv[l].contents, (size_t)((long)gKVLen*w*2));
+        }
+        gKVk[l] = nk; gKVv[l] = nv; // ARC frees the old buffers
+    }
+    gKVCap = newCap;
+}
+
 // mg_decode_step runs one decode token through the whole model on the GPU in ONE command buffer.
 // xEmbed: f32[H] (the new token's embedding). Kctx/Vctx: f32[nL*L*w] (the per-layer post-RoPE K and
 // V already in the CPU cache, w = nKV*hd). L: number of cached positions (the new token's absolute
@@ -406,7 +429,7 @@ static void d_add_buf(id<MTLBuffer> X, id<MTLBuffer> Y, int n) {
 // newKraw/newKpost/newV f32[nL*w] (the new token's per-layer pre-RoPE K, post-RoPE K, V — caller
 // appends to its f32 cache). Returns 1 on success, 0 if the backend declined.
 int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, int L,
-                   float *lastPre, float *newKraw, float *newKpost, float *newV, float *logits) {
+                   float *lastPre, float *newKraw, float *newKpost, float *newV, float *logits, int seedFlag) {
     if (!dec_init()) return 0;
     int prof = getenv("FAK_DECODE_PROF") != NULL;
     CFTimeInterval t0 = prof ? CFAbsoluteTimeGetCurrent() : 0;
@@ -426,13 +449,21 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
         // ONE compute encoder — Metal's default serial dispatch + automatic hazard tracking order
         // the dependent kernels without an encoder switch.
         long rowOff = (long)L * w;
-        id<MTLBuffer> Kbuf[DEC_MAXL] = {0}, Vbuf[DEC_MAXL] = {0};
-        for (int l = 0; l < gDecNL; l++) {
-            Kbuf[l] = dbuf((long)ctx*w); Vbuf[l] = dbuf((long)ctx*w);
-            if (L > 0) {
-                mg_f32_to_f16(Kctx + (long)l*L*w, (__fp16 *)Kbuf[l].contents, (long)L*w);
-                mg_f32_to_f16(Vctx + (long)l*L*w, (__fp16 *)Vbuf[l].contents, (long)L*w);
+        // Persistent KV: seed (upload the L context rows) when the caller passes Kctx, else append
+        // (the resident KV already holds L rows from prior steps). Decline an append whose length
+        // disagrees with the resident state, so the caller falls back to the CPU path for that token.
+        int seed = seedFlag;
+        kv_ensure(ctx);
+        if (seed) {
+            if (L > 0 && Kctx != NULL) {
+                for (int l = 0; l < gDecNL; l++) {
+                    mg_f32_to_f16(Kctx + (long)l*L*w, (__fp16 *)gKVk[l].contents, (long)L*w);
+                    mg_f32_to_f16(Vctx + (long)l*L*w, (__fp16 *)gKVv[l].contents, (long)L*w);
+                }
             }
+            gKVLen = L;
+        } else if (gKVLen != L) {
+            return 0; // append out of sync with the resident KV — let the caller re-seed via CPU
         }
 
         CFTimeInterval tHost = prof ? CFAbsoluteTimeGetCurrent() : 0;
@@ -450,12 +481,12 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
             int qb = gDecAttnBias ? L_.qb : -1, kb = gDecAttnBias ? L_.kb : -1, vb = gDecAttnBias ? L_.vb : -1;
             if (!matOnly) d_norm(Xb, L_.inNorm, Xn);        // Xn = rmsnorm(X)
             d_gemv(L_.q, Xn, Qb, 0, qb);                   // Q (+bias fused)
-            d_gemv(L_.k, Xn, Kbuf[l], rowOff, kb);         // K written straight to resident row L (+bias)
-            d_gemv(L_.v, Xn, Vbuf[l], rowOff, vb);         // V written straight to resident row L (+bias)
+            d_gemv(L_.k, Xn, gKVk[l], rowOff, kb);         // K written straight to resident row L (+bias)
+            d_gemv(L_.v, Xn, gKVv[l], rowOff, vb);         // V written straight to resident row L (+bias)
             if (!matOnly) {
                 d_rope_at(Qb, nH, L, 0);                    // RoPE Q
-                d_rope_at(Kbuf[l], nKV, L, rowOff);        // RoPE the new K row in place
-                d_attn(Qb, Kbuf[l], Vbuf[l], attn, ctx);   // single-query attention over ctx keys
+                d_rope_at(gKVk[l], nKV, L, rowOff);        // RoPE the new K row in place
+                d_attn(Qb, gKVk[l], gKVv[l], attn, ctx);   // single-query attention over ctx keys
             }
             d_gemv(L_.o, attn, tmpH, 0, -1);               // O
             if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += O
@@ -484,9 +515,10 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
         if (wantLogits) mg_f16_to_f32((const __fp16 *)logitBuf.contents, logits, (long)gDecVocab);
         (void)newKraw; // the fast Q8 decode path keeps post-RoPE K/V but not pre-RoPE Kraw
         for (int l = 0; l < gDecNL; l++) {
-            mg_f16_to_f32((const __fp16 *)Kbuf[l].contents + (long)L*w, newKpost + (long)l*w, (long)w);
-            mg_f16_to_f32((const __fp16 *)Vbuf[l].contents + (long)L*w, newV + (long)l*w, (long)w);
+            mg_f16_to_f32((const __fp16 *)gKVk[l].contents + (long)L*w, newKpost + (long)l*w, (long)w);
+            mg_f16_to_f32((const __fp16 *)gKVv[l].contents + (long)L*w, newV + (long)l*w, (long)w);
         }
+        gKVLen = L + 1; // the new row is now resident; the next step appends at row L+1
         gDCB = nil;
         return 1;
     }
