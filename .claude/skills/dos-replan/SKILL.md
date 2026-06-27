@@ -22,6 +22,16 @@ operator inbox is the kernel's decisions projection.
 - `--force` (optional) — run even if the no-op skip gate would fire (no new
   evidence since the last sweep).
 
+## Definitions
+
+- **PRODUCTIVE** — the replan closed at least one queue item (verified via
+  `dos verify`), refilled the queue with new work, or performed a gardening
+  operation (e.g., surfacing a decision-needed item). This arms the loop's
+  drained-twice trigger when followed by a DRAIN.
+- **UNPRODUCTIVE** — the replan was a no-op skip (no new evidence) or a
+  0/0/0 sweep (zero items closed, zero refilled, zero gardened). An
+  unproductive replan must NOT arm the drained-twice trigger.
+
 ## Step 0 — Discover the layout
 
 ```bash
