@@ -35,8 +35,8 @@ func TestSampleConstrainedBitExactOff(t *testing.T) {
 		{1, 2, 3, 4, 5},
 		{5, 4, 3, 2, 1},
 		{-1, -2, -3},
-		{2, 2, 2, 2},                                  // all tied -> first wins
-		{1, 9, 9, 3},                                  // tie at the max -> first max wins
+		{2, 2, 2, 2}, // all tied -> first wins
+		{1, 9, 9, 3}, // tie at the max -> first max wins
 		{float32(math.Inf(-1)), 0.5, float32(math.Inf(-1))},
 		{-0.0, 0.0, -0.0},
 		{1e-7, 2e-7, 1.5e-7},
@@ -76,9 +76,9 @@ func TestGenerateConstrainedBitExactOff(t *testing.T) {
 		t.Fatal("greedy oracle produced no tokens")
 	}
 	cases := map[string]*DecodeConstraint{
-		"nil":         nil,
-		"empty":       {},
-		"empty-bias":  {Bias: LogitBias{}},
+		"nil":          nil,
+		"empty":        {},
+		"empty-bias":   {Bias: LogitBias{}},
 		"dormant-mask": {Mask: AllowedSetMask{1: true, 2: true}}, // flag off => no-op
 	}
 	for name, c := range cases {

@@ -64,20 +64,20 @@ type Releases struct {
 // Trend is the per-tick delta vs the previous ledger row (the durable history's
 // reason for existing: a trend across ticks, not against one pinned baseline).
 type Trend struct {
-	PrevDate   string `json:"prev_date"`
-	PrevCommit string `json:"prev_commit"`
-	Direction  string `json:"direction"` // improved | regressed | flat | new
-	DebtFrom   int    `json:"debt_from"`
-	DebtTo     int    `json:"debt_to"`
-	DebtDelta  int    `json:"debt_delta"`
-	WorkCommitsFrom int    `json:"work_commits_from"`
-	WorkCommitsTo   int    `json:"work_commits_to"`
+	PrevDate         string `json:"prev_date"`
+	PrevCommit       string `json:"prev_commit"`
+	Direction        string `json:"direction"` // improved | regressed | flat | new
+	DebtFrom         int    `json:"debt_from"`
+	DebtTo           int    `json:"debt_to"`
+	DebtDelta        int    `json:"debt_delta"`
+	WorkCommitsFrom  int    `json:"work_commits_from"`
+	WorkCommitsTo    int    `json:"work_commits_to"`
 	WorkCommitsDelta int    `json:"work_commits_delta"`
-	WorkShipsFrom  int    `json:"work_ships_from"`
-	WorkShipsTo    int    `json:"work_ships_to"`
-	WorkShipsDelta int    `json:"work_ships_delta"`
-	ShipsSince int    `json:"ships_since"`
-	Summary    string `json:"summary"`
+	WorkShipsFrom    int    `json:"work_ships_from"`
+	WorkShipsTo      int    `json:"work_ships_to"`
+	WorkShipsDelta   int    `json:"work_ships_delta"`
+	ShipsSince       int    `json:"ships_since"`
+	Summary          string `json:"summary"`
 }
 
 // Report is one folded cadence-report control-pane envelope.
@@ -294,12 +294,12 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 	last, ok := latestBefore(row, prior)
 	if !ok {
 		return Trend{
-			Direction: "new",
-			DebtTo:    row.ScoresDebt,
+			Direction:     "new",
+			DebtTo:        row.ScoresDebt,
 			WorkCommitsTo: row.WorkCommits,
-			WorkShipsTo: row.WorkShips,
-			ShipsSince: row.WorkShips,
-			Summary:   fmt.Sprintf("first cadence tick (debt %d, %d ship(s) in %dd)", row.ScoresDebt, row.WorkShips, row.WorkWindowDays),
+			WorkShipsTo:   row.WorkShips,
+			ShipsSince:    row.WorkShips,
+			Summary:       fmt.Sprintf("first cadence tick (debt %d, %d ship(s) in %dd)", row.ScoresDebt, row.WorkShips, row.WorkWindowDays),
 		}
 	}
 	debtDelta := row.ScoresDebt - last.ScoresDebt
@@ -312,19 +312,19 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		dir = "regressed"
 	}
 	return Trend{
-		PrevDate:   last.Date,
-		PrevCommit: last.Commit,
-		Direction:  dir,
-		DebtFrom:   last.ScoresDebt,
-		DebtTo:     row.ScoresDebt,
-		DebtDelta:  debtDelta,
-		WorkCommitsFrom: last.WorkCommits,
-		WorkCommitsTo:   row.WorkCommits,
+		PrevDate:         last.Date,
+		PrevCommit:       last.Commit,
+		Direction:        dir,
+		DebtFrom:         last.ScoresDebt,
+		DebtTo:           row.ScoresDebt,
+		DebtDelta:        debtDelta,
+		WorkCommitsFrom:  last.WorkCommits,
+		WorkCommitsTo:    row.WorkCommits,
 		WorkCommitsDelta: workCommitsDelta,
-		WorkShipsFrom:  last.WorkShips,
-		WorkShipsTo:    row.WorkShips,
-		WorkShipsDelta: workShipsDelta,
-		ShipsSince: row.WorkShips,
+		WorkShipsFrom:    last.WorkShips,
+		WorkShipsTo:      row.WorkShips,
+		WorkShipsDelta:   workShipsDelta,
+		ShipsSince:       row.WorkShips,
 		Summary: fmt.Sprintf("debt %s %+d (%d->%d); work %s %+d commit(s) (%d->%d), %s %+d ship(s) (%d->%d) vs %s; %d ship(s) in the last %dd",
 			dir, debtDelta, last.ScoresDebt, row.ScoresDebt,
 			commitsDirection(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,

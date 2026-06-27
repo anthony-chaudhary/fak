@@ -392,9 +392,9 @@ func TestAutoRunnable(t *testing.T) {
 		{"go run ./cmd/modelbench -quant", true},
 		{"echo hi", true},
 		{"false", true},
-		{"cmd > out.txt", true},                  // a redirect is not a placeholder
-		{"sh -c 'cat < in'", true},               // input redirect (space after <) is not a placeholder
-		{"", false},                              // empty is not runnable
+		{"cmd > out.txt", true},    // a redirect is not a placeholder
+		{"sh -c 'cat < in'", true}, // input redirect (space after <) is not a placeholder
+		{"", false},                // empty is not runnable
 		{"serve --gguf <glm-5.2.gguf> --load", false},
 		{"go run ./cmd/terminalbench -suite <official-suite>", false},
 		{"experiments/benchmark gcp-qwen-serve.sh → fak serve + fak agent", false},

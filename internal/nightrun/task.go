@@ -191,7 +191,6 @@ func (t Task) autoRunnable() bool {
 	return !placeholderRE.MatchString(run)
 }
 
-
 // DefaultRecheckDays is the fall-back staleness horizon for a Task that does not
 // declare its own — the same 14-day default tools/bench_plan.py uses, so the two
 // planners agree on what "stale" means.
