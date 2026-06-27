@@ -384,6 +384,73 @@ func TestRunLoopEachTaskAttemptedOnce(t *testing.T) {
 	}
 }
 
+func TestAutoRunnable(t *testing.T) {
+	cases := []struct {
+		run  string
+		want bool
+	}{
+		{"go run ./cmd/modelbench -quant", true},
+		{"echo hi", true},
+		{"false", true},
+		{"cmd > out.txt", true},                  // a redirect is not a placeholder
+		{"sh -c 'cat < in'", true},               // input redirect (space after <) is not a placeholder
+		{"", false},                              // empty is not runnable
+		{"serve --gguf <glm-5.2.gguf> --load", false},
+		{"go run ./cmd/terminalbench -suite <official-suite>", false},
+		{"experiments/benchmark gcp-qwen-serve.sh → fak serve + fak agent", false},
+		{"script.sh -> next", false},
+	}
+	for _, c := range cases {
+		if got := (Task{Run: c.run}).autoRunnable(); got != c.want {
+			t.Errorf("autoRunnable(%q) = %v, want %v", c.run, got, c.want)
+		}
+	}
+}
+
+func TestRunLoopSkipsManualTask(t *testing.T) {
+	// A manual witness (placeholder Run) outranks a real bench by Value; the loop
+	// must SKIP it (never exec, never ledger) and still collect the real one.
+	caps := Capabilities{Box: "ci", GPU: "cuda", Net: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-27T00:00:00Z")
+	tasks := []Task{
+		{ID: "witness-manual", Value: ValueFrontier, Requires: []Requirement{ReqCUDA}, Run: "serve --gguf <model.gguf>"},
+		{ID: "bench-real", Value: ValueCoverage, Run: "echo ok"},
+	}
+	var ledger []CollectRow
+	executed := map[string]int{}
+	summary, err := RunLoop(context.Background(), RunOptions{
+		Root: "/repo", Caps: caps, Tasks: tasks, Now: now,
+		Apply: true, Loop: true,
+		ReadLedger: func() []CollectRow { return ledger },
+		AppendRow:  func(r CollectRow) error { ledger = append(ledger, r); return nil },
+		Executor: func(_ context.Context, tk Task, _ string) (Outcome, string, time.Duration, error) {
+			executed[tk.ID]++
+			return OutcomeCollected, "", time.Second, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed["witness-manual"] != 0 {
+		t.Errorf("manual task must never be executed, ran %d time(s)", executed["witness-manual"])
+	}
+	if executed["bench-real"] != 1 {
+		t.Errorf("real task should run exactly once, ran %d", executed["bench-real"])
+	}
+	if len(ledger) != 1 || ledger[0].TaskID != "bench-real" {
+		t.Errorf("ledger should hold only the real collection, got %+v", ledger)
+	}
+	sawSkip := false
+	for _, r := range summary.Runs {
+		if r.Task.ID == "witness-manual" && r.Outcome == OutcomeSkipped {
+			sawSkip = true
+		}
+	}
+	if !sawSkip {
+		t.Errorf("summary should record the manual task as skipped, got %+v", summary.Runs)
+	}
+}
+
 func TestParseNumberObservedOnly(t *testing.T) {
 	if got := parseNumber("decode: 17.73 tok/s steady"); got != "17.73 tok/s" {
 		t.Errorf("parseNumber = %q, want 17.73 tok/s", got)

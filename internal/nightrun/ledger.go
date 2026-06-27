@@ -27,6 +27,7 @@ const (
 	OutcomeFailed    Outcome = "failed"    // ran, non-zero exit / no artifact
 	OutcomeTimeout   Outcome = "timeout"   // exceeded the per-task wall-clock budget; killed (partial artifact kept)
 	OutcomeDryRun    Outcome = "dry-run"   // printed only; nothing executed (a summary state — never written to the ledger)
+	OutcomeSkipped   Outcome = "skipped"   // a manual/placeholder Run (operator-setup witness); surfaced but never executed — also never written to the ledger
 )
 
 // CollectRow is one durable, append-only collection record. It is a flat

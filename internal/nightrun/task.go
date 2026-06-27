@@ -1,7 +1,9 @@
 package nightrun
 
 import (
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -162,6 +164,31 @@ func (t Task) timeout() time.Duration {
 		return time.Duration(t.TimeoutSec) * time.Second
 	}
 	return time.Duration(DefaultTaskTimeoutSec) * time.Second
+}
+
+// placeholderRE matches a `<token>` placeholder in a Run command (e.g.
+// `<glm-5.2.gguf>`, `<official-suite>`). The token must start with a non-space so a
+// shell input-redirect (`< file`) and a heredoc (`<<EOF`) are NOT matched — only a
+// genuine fill-me-in placeholder is.
+var placeholderRE = regexp.MustCompile(`<[^>\s][^>]*>`)
+
+// autoRunnable reports whether a Task's Run is a real, executable command the loop
+// may auto-run, vs a MANUAL recipe that only describes how to collect the datum. A
+// curated witness often carries a prose hint — a `<placeholder>` to fill in, or a
+// `→`/` -> ` prose arrow ("script.sh → fak serve + fak agent") — which is not a
+// command: exec-ing it just records a spurious failure every sweep. Such a Task is
+// surfaced (plan/next still show it as the manual recipe to run by hand) but skipped
+// by `run --apply`. Conservative by construction: a concrete command (no placeholder,
+// no arrow, non-empty) is auto-runnable, so a real benchmark is never wrongly skipped.
+func (t Task) autoRunnable() bool {
+	run := strings.TrimSpace(t.Run)
+	if run == "" {
+		return false
+	}
+	if strings.Contains(run, "→") || strings.Contains(run, " -> ") {
+		return false
+	}
+	return !placeholderRE.MatchString(run)
 }
 
 

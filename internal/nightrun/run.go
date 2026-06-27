@@ -86,19 +86,29 @@ func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 
 	summary := RunSummary{Box: opts.Caps.Box, Applied: opts.Apply}
 	attempted := map[string]bool{}
+	realAttempts := 0 // executed/shown tasks; a skip is free (does not count toward --max)
 
 	for {
-		if opts.Max > 0 && len(summary.Runs) >= opts.Max {
+		if opts.Max > 0 && realAttempts >= opts.Max {
 			summary.StopReason = fmt.Sprintf("reached --max %d", opts.Max)
 			break
 		}
 		ranked := Rank(opts.Tasks, opts.Caps, opts.ReadLedger(), opts.Now)
 		next, ok := pickFresh(ranked, attempted)
 		if !ok {
-			summary.StopReason = stopReason(ranked, len(summary.Runs), opts.Apply)
+			summary.StopReason = stopReason(ranked, realAttempts, opts.Apply)
 			break
 		}
 		attempted[next.Task.ID] = true
+
+		// A feasible-but-MANUAL task (its Run is a placeholder/prose recipe — a
+		// curated witness that needs operator setup) is surfaced but never auto-run:
+		// exec-ing the prose would just record a spurious failure every sweep. Record
+		// it skipped (not a ledger datum, not a --max attempt) and pick the next.
+		if !next.Task.autoRunnable() {
+			summary.Runs = append(summary.Runs, Run{Task: next.Task, Outcome: OutcomeSkipped})
+			continue
+		}
 
 		if !opts.Apply {
 			summary.Runs = append(summary.Runs, Run{
@@ -106,6 +116,7 @@ func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 				Outcome:  OutcomeDryRun,
 				Artifact: relArtifact(opts, next.Task),
 			})
+			realAttempts++
 			if !opts.Loop {
 				summary.StopReason = "dry-run (pass --apply to execute)"
 				break
@@ -124,6 +135,7 @@ func RunLoop(ctx context.Context, opts RunOptions) (RunSummary, error) {
 			r.Err = runErr.Error()
 		}
 		summary.Runs = append(summary.Runs, r)
+		realAttempts++
 
 		if !opts.Loop {
 			summary.StopReason = "ran one task (pass --loop to continue)"
