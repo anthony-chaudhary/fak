@@ -61,11 +61,12 @@ func StripReasoning(s string) string {
 }
 
 // tidyAfterStrip removes the whitespace artifacts a strip leaves behind: a leading blank line
-// from a removed top-of-string block, and any run of three-or-more newlines (an empty line that
-// used to hold a block) collapsed back to a single blank line.
+// from a removed top-of-string block, a trailing space/newline left when a block (or an unclosed
+// truncated block) was the tail of the string, and any run of three-or-more newlines (an empty
+// line that used to hold a block) collapsed back to a single blank line.
 func tidyAfterStrip(s string) string {
 	for strings.Contains(s, "\n\n\n") {
 		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
 	}
-	return strings.TrimLeft(s, " \t\r\n")
+	return strings.TrimSpace(s)
 }

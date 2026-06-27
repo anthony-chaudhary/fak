@@ -103,6 +103,13 @@ type Message struct {
 	Thinking          string   `json:"thinking,omitempty"`
 	ThinkingSignature string   `json:"thinking_signature,omitempty"`
 	RedactedThinking  []string `json:"redacted_thinking,omitempty"`
+
+	// ReasoningContent carries the reasoning block a Qwen3.5-style reasoning model
+	// (e.g. Ornith) emits inside <think>…</think>, split off the in-kernel decode path
+	// so it does not leak into Content (and thus into downstream Claude Code context).
+	// It mirrors the `reasoning_content` field vLLM produces with --reasoning-parser
+	// qwen3. Additive over the OpenAI shape; an OpenAI client simply ignores it.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // UnmarshalJSON decodes a chat message, flattening a `content` field that may be a

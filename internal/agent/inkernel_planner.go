@@ -655,8 +655,18 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 	// the frozen-trajectory cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md).
 	cacheobs.Default.Observe(promptTok, matched)
 
+	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
+	// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
+	// the turn with <think>…</think> then the final answer; renderChatMLTools does NOT
+	// pre-seed the open tag, so the model emits both. splitReasoning is the in-kernel
+	// equivalent of vLLM's --reasoning-parser qwen3: the reasoning lands in
+	// ReasoningContent and only the post-</think> answer flows into Content (and thus
+	// into Claude Code's context). It is gated — a non-reasoning turn (no think tags)
+	// returns the decoded text untouched, so this is byte-identical to today for any
+	// model that does not emit <think>.
+	reasoning, content := splitReasoning(sb.String())
 	comp = &Completion{
-		Message:      Message{Role: "assistant", Content: sb.String()},
+		Message:      Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
 		FinishReason: finishReason,
 		Usage:        Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen},
 	}
