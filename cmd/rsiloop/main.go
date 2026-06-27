@@ -14,8 +14,9 @@
 //	               ongoing benchmark-against-latest-main series, with regression
 //	               detection vs the last recorded point.
 //
-// Exit codes mirror the dos improve verdict: 0 = normal, 3 = ESCALATE (improve) or
-// a detected regression (track) — the "hand this to a human / alert" signal.
+// Exit codes: 0 = normal (completed without escalation), 1 = error, 3 = ESCALATE (the
+// breaker tripped after K consecutive non-keeps — hand to a human) or, in track mode, a
+// detected regression on `main` (alert).
 package main
 
 import (

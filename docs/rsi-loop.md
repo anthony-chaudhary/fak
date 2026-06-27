@@ -80,7 +80,7 @@ go run ./cmd/rsiloop -mode improve -repo . -baseline-ref main \
 go run ./cmd/rsiloop -mode track -repo . -baseline-ref main -journal /tmp/rsi.jsonl
 ```
 
-Exit codes mirror the `dos improve` verdict: `0` normal, `3` = ESCALATE (the breaker
+Exit codes: `0` = normal (run completed without escalation), `1` = error, `3` = ESCALATE (the breaker
 tripped after K consecutive non-keeps — hand to a human) or, in `track` mode, a
 detected regression on `main` (alert).
 
