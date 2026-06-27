@@ -93,3 +93,7 @@ auto-handle the collapse rather than maintain the dirs as separate. Landed
 - **Full cutover.** The reconcile LOGIC now lives in two places (fak Go `internal/accounts`
   and the `job` Python `observe`), mirrored. Collapsing to one source — `observe` (and the
   `dos`/`fak` rosters) resolving through fak's Go — is the remaining consolidation step.
+
+**See also:** the [Account-lifecycle runbook](ACCOUNT-LIFECYCLE-RUNBOOK-2026-06-26.md) — the
+one-command add / `remove --archive` procedure, the `fak accounts version` stale-binary surface,
+and the keep-updating lessons log built on this single-source model.

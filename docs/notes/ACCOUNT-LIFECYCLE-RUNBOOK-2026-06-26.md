@@ -30,6 +30,24 @@ The shell entry points (the shared `shortcuts.ps1` profile):
 - `u` — `job-search claude-accounts observe`: the operator roster card (serving / walled /
   needs-enroll, 24h usage spark, rate-limit-bucket reconcile).
 
+## Quickref — add / remove a seat (super easy)
+
+```
+# add: one command — isolated-dir login, identity probe, twin-check, registry + views
+fak accounts add <name>
+
+# remove: one command — tombstone + archive the dir + repoint the registry + resync views
+fak accounts remove --name <seat> --archive
+
+# inspect: the roster (tool/registry version stamped on top) and "is my binary current?"
+fak accounts list
+fak accounts version
+```
+
+`remove --archive` refuses the live `CLAUDE_CONFIG_DIR` seat — retire that one from another
+session. Export `FAK_JOB_ROSTER=<job>/config/claude_accounts.yaml` once from your shell profile so
+add/remove/sync regenerate the `u` view too, no flag needed.
+
 ## Lifecycle
 
 ```
@@ -37,36 +55,30 @@ add ──► serve/rotate ──► tombstone (remove) ──► dir-rename .DE
         (live seat)       registry only           reversible                  rm (frees disk)
 ```
 
-Tombstone and dir-rename are **two separate steps** by design (the `remove` code says so):
-`fak accounts remove` only flips the registry; moving or deleting the config dir is a deliberate
-destructive follow-on.
+`remove` flips the registry only; `remove --archive` ALSO does the dir-rename + registry repoint
+in the same command. A final `rm` of the `.DELETED-*` dirs (to reclaim disk) stays a separate,
+deliberate step.
 
 ## Runbook: retire one or more seats
 
 1. **Look before you cut.** `fak accounts list` — note `dup -> <canonical>` (a seat that is
    really another account), `CREDS` (does it hold a unique login?), and whether a backup exists
-   under `~/.claude-account-backups/<email>`.
-2. **Refuse to retire the seat you are sitting on.** `echo $CLAUDE_CONFIG_DIR` — you cannot
-   rename or delete the dir this session runs from. Retire it from another session.
-3. **Tombstone in the registry (reversible):**
+   under `~/.claude-account-backups/<email>`. A seat with a unique login and no backup loses that
+   login on the eventual purge — keep its `.DELETED-*` dir until you are sure.
+2. **Don't retire the seat you are sitting on.** `echo $CLAUDE_CONFIG_DIR` — `--archive` refuses
+   it anyway (you cannot move the dir this session runs from); retire that one from another session.
+3. **Retire it in one command (reversible):**
    ```
-   fak accounts remove --name <seat> --rehome-to <live-seat> --reason "<why>"
+   fak accounts remove --name <seat> --archive --rehome-to <live-seat> --reason "<why>"
    ```
-   Rehome a duplicate to its identity twin; rehome the rest to the default seat. This
-   regenerates the dos view automatically.
-4. **Rename the dir to the house tombstone form (reversible):**
-   `~/.claude-<seat>` → `~/.claude-<seat>.DELETED-<YYYY-MM-DD>`, then repoint the registry
-   entry's `name` + `dir` to match (this is how prior retired seats are represented). Skip any
-   seat that has no backup unless you accept losing its login.
-5. **Regenerate every view and prove no drift:**
-   ```
-   fak accounts sync --job-view <job>/config/claude_accounts.yaml
-   fak accounts check --job-view <job>/config/claude_accounts.yaml   # ok dos / ok job
-   fak accounts validate                                             # registry valid
-   ```
-6. **Confirm the operator surface (`u`) updated:** retired seats should appear under
-   `tombstoned_accounts`, not the active table.
-7. **Purge later (irreversible):** a sweep can `rm` the `.DELETED-*` dirs to reclaim disk once
+   This tombstones the registry, renames the dir to `~/.claude-<seat>.DELETED-<date>`, repoints
+   the registry entry (name + dir + any rehome refs), and regenerates the views. Omit `--archive`
+   to tombstone the registry only and leave the dir in place. Rehome a duplicate to its identity
+   twin; rehome the rest to the anchor seat (the default `--rehome-to`).
+4. **Prove it landed:** `fak accounts check` (ok dos / ok job) and `fak accounts validate`
+   (registry valid). The retired seat should appear under `u`'s `tombstoned_accounts`, not the
+   active table.
+5. **Purge later (irreversible):** a sweep can `rm` the `.DELETED-*` dirs to reclaim disk once
    you are sure nothing is pinned to them.
 
 ## Lessons log
@@ -86,32 +98,36 @@ destructive follow-on.
   (`has_creds: true`, no `~/.claude-account-backups` entry); the others had no creds and did have
   backups. We chose the reversible `.DELETED-<date>` rename over `rm` so the unique login
   survives.
-- **`remove` syncs the dos view, not the job view.** `fak accounts remove` only regenerates the
-  default dos view; the job roster (`u`'s source) stayed stale until an explicit
-  `fak accounts sync --job-view …`. Always re-sync the job view, then `check`.
+- **`remove` synced the dos view, not the job view.** Back then `fak accounts remove` only
+  regenerated the dos view; the job roster (`u`'s source) stayed stale until an explicit
+  `fak accounts sync --job-view …`. *Fix:* export `FAK_JOB_ROSTER=<job>/config/claude_accounts.yaml`
+  from your shell profile so the job view joins the default sync set — then add/remove/sync refresh
+  `u` with no flag.
 - **Re-sync after any external registry edit.** The registry was hand-edited mid-task (a new
   default seat, a dropped entry). Views must be re-synced or `check` goes RED.
 
-## Versioning & visibility — proposal (think-about-starting)
+## Versioning & visibility
 
-The registry **data** is versioned (`fak-config-homes/v1`, with a family-prefix accept check in
-`internal/accounts`). What is **not** visible is the **tooling** version and the live seat's
-retirement state — the two gaps that cost time on 2026-06-26.
+The registry **data** is versioned (`fak-config-homes/v1`, family-prefix accept check in
+`internal/accounts`). The gaps that cost time on 2026-06-26 were the invisible **tooling** version
+and the multi-step retire — both now closed.
 
-Proposed, smallest-first:
+**Shipped (2026-06-26):**
 
-1. **Stamp the generated views with the producing `fak` build.** Add `fak <version>` +
-   `registry <schema>` to the view header comment so `u` / `dos accounts` can show *who* rendered
-   the roster and *when*. (Touch: `internal/accounts` view render.)
-2. **`fak accounts version`** (or a header line on `fak accounts list`): print the binary
-   build/version, the supported registry family, and the verb set — so an operator can compare
-   against source and see "your binary is behind." Directly closes the stale-binary trap.
-3. **Stale-binary guard in `claude-as` / `u`.** When the installed `fak.exe` lacks a verb the
-   registry needs, warn with the fix (`go install …/cmd/fak@latest` or `make install`) instead of
-   failing with a raw flag error.
-4. **Session-start seat banner.** Show the active seat plus a warning when it is tombstoned or
-   slated for removal (this session ran on a seat being retired with no banner). `c` already
-   prints `[c] account: <name>`; extend it to flag a tombstoned seat.
+- **`fak accounts version`** (text + `--json`) — prints the build, the registry schema/family it
+  supports, and the verb set. Closes the stale-binary trap: a binary behind source prints an old
+  version / short verb list instead of failing a newer verb with a raw flag error.
+- **`fak accounts list` provenance header** — `# fak <ver> · registry <schema>` above the table,
+  so any roster read shows the tool version inline.
+- **`fak accounts remove --archive`** — the one-command retire (tombstone + dir-rename + registry
+  repoint + resync) that replaces the manual dance this note was written about.
 
-First step to implement: (1) + (2) together — a version surface on the tool and its output. Low
-risk, fully testable, and it is the line that would have explained the failure we hit.
+**Still open:**
+
+- **Stamp the GENERATED views** (dos/job) with the producing build. Deferred on purpose: putting
+  the binary version *inside* the rendered view makes `fak accounts check` version-sensitive (drift
+  on every binary bump). Decide the determinism rule before shipping it.
+- **Stale-binary guard in `claude-as` / `u`.** When the installed `fak.exe` lacks a verb the
+  registry needs, warn with the fix (`go install …/cmd/fak@latest`) instead of a raw flag error.
+- **Session-start seat banner.** `c` already prints `[c] account: <name>`; extend it to flag a
+  tombstoned / slated-for-removal seat (this session ran on a retiring seat with no banner).
