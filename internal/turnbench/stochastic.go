@@ -131,8 +131,6 @@ func readAnchors(base *Trace) []Call {
 // aliasPair is one alias spelling the grammar rung repairs (from/to & source/target).
 type aliasPair struct{ a, b string }
 
-var aliasPairs = []aliasPair{{"from", "to"}, {"source", "target"}}
-
 // Perturb produces a NEW trace from base by injecting the four happy-path error
 // classes per the given rates, deterministically driven by rng. The base is never
 // mutated. For every eligible base call we make four independent Bernoulli draws:
@@ -157,11 +155,9 @@ func Perturb(base *Trace, rates RateProfile, rng *rand.Rand) *Trace {
 
 		// An aliased convert_currency: pick an alias spelling deterministically.
 		if rng.Float64() < rates.AliasRate {
-			ap := aliasPairs[rng.Intn(len(aliasPairs))]
-			amt := 50 + rng.Intn(900)
-			args, _ := json.Marshal(map[string]any{ap.a: "USD", ap.b: "EUR", "amount": amt})
+			ap, args := aliasConvertArgs(rng)
 			out = append(out, Call{
-				Tool: "convert_currency", Args: json.RawMessage(args),
+				Tool: "convert_currency", Args: args,
 				Meta:  map[string]string{"readOnlyHint": "true", "idempotentHint": "true"},
 				Class: "grammar", Note: fmt.Sprintf("injected alias %s/%s", ap.a, ap.b),
 			})

@@ -156,9 +156,8 @@ func sharedRoute(i int) json.RawMessage {
 }
 
 var (
-	roMeta   = map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
-	wrMeta   = map[string]string{"readOnlyHint": "false", "idempotentHint": "false", "destructive": "true"}
-	aliasKey = []struct{ a, b string }{{"from", "to"}, {"source", "target"}}
+	roMeta = map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
+	wrMeta = map[string]string{"readOnlyHint": "false", "idempotentHint": "false", "destructive": "true"}
 )
 
 // agentSession builds ONE agent's T-turn session deterministically from rng. The
@@ -195,10 +194,8 @@ func agentSession(p FleetProfile, T, agentIdx int, rng *rand.Rand) []Call {
 				calls = append(calls, privateRead())
 			}
 		case x < p.PShared+p.PPrivate+p.PAlias:
-			ap := aliasKey[rng.Intn(len(aliasKey))]
-			amt := 50 + rng.Intn(900)
-			args, _ := json.Marshal(map[string]any{ap.a: "USD", ap.b: "EUR", "amount": amt})
-			calls = append(calls, Call{Tool: "convert_currency", Args: json.RawMessage(args), Meta: roMeta, Class: "grammar"})
+			_, aliasArgs := aliasConvertArgs(rng)
+			calls = append(calls, Call{Tool: "convert_currency", Args: aliasArgs, Meta: roMeta, Class: "grammar"})
 		case x < p.PShared+p.PPrivate+p.PAlias+p.PPure:
 			args, _ := json.Marshal(map[string]any{"a": rng.Intn(1000), "b": rng.Intn(1000)})
 			calls = append(calls, Call{Tool: "calculate", Args: json.RawMessage(args), Meta: roMeta, Class: "pure"})

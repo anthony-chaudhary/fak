@@ -455,44 +455,27 @@ func RunPolicySearch(ctx context.Context, cfg PolicySearchConfig, cm CostModel) 
 	// no other candidate dominates it (<= on both axes, < on at least one). Stamp the
 	// OnFrontier flag onto the candidates slice BEFORE deriving the baseline/best copies so
 	// those copies carry the correct flag (they are read out of the flagged slice).
-	frontierNames := map[string]bool{}
-	for _, fc := range paretoFrontier(candidates) {
-		frontierNames[fc.Name] = true
-	}
-	for i := range candidates {
-		candidates[i].OnFrontier = frontierNames[candidates[i].Name]
-	}
+	candName := func(c SearchCandidate) string { return c.Name }
+	stampFrontier(candidates, paretoFrontier(candidates), candName,
+		func(c *SearchCandidate, on bool) { c.OnFrontier = on })
 	frontier := paretoFrontier(candidates) // re-derive so the frontier copies carry OnFrontier too
 
 	// Best: lowest InjectionsAdmitted, ties -> fewer DestructiveExecuted -> fewer Denies
 	// -> name. The headline improvement vs the baseline. Read from the flagged slice so
 	// Best.OnFrontier is set.
-	best := candidates[0]
-	for _, c := range candidates[1:] {
-		if betterFitness(c.Fitness, best.Fitness) || (equalFitness(c.Fitness, best.Fitness) && c.Name < best.Name) {
-			best = c
-		}
-	}
+	best := bestCandidate(candidates, func(c, incumbent SearchCandidate) bool {
+		return betterFitness(c.Fitness, incumbent.Fitness) ||
+			(equalFitness(c.Fitness, incumbent.Fitness) && c.Name < incumbent.Name)
+	})
 	// Refresh the baseline copy from the flagged slice so its OnFrontier flag is set too.
-	for i := range candidates {
-		if candidates[i].Name == "baseline" {
-			baseline = candidates[i]
-			break
-		}
+	if b, ok := candidateByName(candidates, candName, "baseline"); ok {
+		baseline = b
 	}
 
 	// Flag the top-k frontier candidates that need live re-validation (any bounded cell).
 	// A FLAG, never an executed model run.
-	topK := cfg.TopK
-	if topK <= 0 || topK > len(frontier) {
-		topK = len(frontier)
-	}
-	var flagged []string
-	for i := 0; i < topK; i++ {
-		if frontier[i].NeedsLiveRevalidation {
-			flagged = append(flagged, frontier[i].Name)
-		}
-	}
+	flagged := topKNeedsRevalidation(frontier, cfg.TopK, candName,
+		func(c SearchCandidate) bool { return c.NeedsLiveRevalidation })
 
 	return &PolicySearchReport{
 		Provenance: Provenance{
@@ -761,34 +744,20 @@ func equalFitness(a, b SearchFitness) bool {
 // both axes and < on at least one. The frontier is sorted by InjectionsAdmitted ascending
 // (ties by Denies, then name) for a stable artifact.
 func paretoFrontier(cands []SearchCandidate) []SearchCandidate {
-	var front []SearchCandidate
-	for i := range cands {
-		ci := cands[i].Fitness
-		dominated := false
-		for j := range cands {
-			if i == j {
-				continue
+	return paretoFrontierBy(cands,
+		func(a, b SearchCandidate) bool {
+			af, bf := a.Fitness, b.Fitness
+			leq := af.InjectionsAdmitted <= bf.InjectionsAdmitted && af.Denies <= bf.Denies
+			lt := af.InjectionsAdmitted < bf.InjectionsAdmitted || af.Denies < bf.Denies
+			return leq && lt
+		},
+		func(a, b SearchCandidate) bool {
+			if a.Fitness.InjectionsAdmitted != b.Fitness.InjectionsAdmitted {
+				return a.Fitness.InjectionsAdmitted < b.Fitness.InjectionsAdmitted
 			}
-			cj := cands[j].Fitness
-			leq := cj.InjectionsAdmitted <= ci.InjectionsAdmitted && cj.Denies <= ci.Denies
-			lt := cj.InjectionsAdmitted < ci.InjectionsAdmitted || cj.Denies < ci.Denies
-			if leq && lt {
-				dominated = true
-				break
+			if a.Fitness.Denies != b.Fitness.Denies {
+				return a.Fitness.Denies < b.Fitness.Denies
 			}
-		}
-		if !dominated {
-			front = append(front, cands[i])
-		}
-	}
-	sort.Slice(front, func(i, j int) bool {
-		if front[i].Fitness.InjectionsAdmitted != front[j].Fitness.InjectionsAdmitted {
-			return front[i].Fitness.InjectionsAdmitted < front[j].Fitness.InjectionsAdmitted
-		}
-		if front[i].Fitness.Denies != front[j].Fitness.Denies {
-			return front[i].Fitness.Denies < front[j].Fitness.Denies
-		}
-		return front[i].Name < front[j].Name
-	})
-	return front
+			return a.Name < b.Name
+		})
 }

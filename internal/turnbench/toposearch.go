@@ -441,44 +441,26 @@ func RunTopologySearch(ctx context.Context, cfg TopologySearchConfig, cm FanoutC
 
 	// Pareto frontier on (CreditedSavings up, ArbiterCollision down). Stamp OnFrontier onto the
 	// candidates BEFORE deriving the baseline/best copies so those carry the correct flag.
-	frontierNames := map[string]bool{}
-	for _, fc := range topoParetoFrontier(candidates) {
-		frontierNames[fc.Name] = true
-	}
-	for i := range candidates {
-		candidates[i].OnFrontier = frontierNames[candidates[i].Name]
-	}
+	candName := func(c TopologyCandidate) string { return c.Name }
+	stampFrontier(candidates, topoParetoFrontier(candidates), candName,
+		func(c *TopologyCandidate, on bool) { c.OnFrontier = on })
 	frontier := topoParetoFrontier(candidates)
 
 	// Best: highest CreditedSavings, ties -> lower collision -> lower width -> name. Read from
 	// the flagged slice so Best.OnFrontier is set. The frontier credit cap means an
 	// extrapolated genome can never out-credit a witnessed one.
-	best := candidates[0]
-	for _, c := range candidates[1:] {
-		if betterTopology(c.Fitness, c.Genome, best.Fitness, best.Genome) ||
-			(equalTopology(c.Fitness, best.Fitness) && c.Name < best.Name) {
-			best = c
-		}
-	}
+	best := bestCandidate(candidates, func(c, incumbent TopologyCandidate) bool {
+		return betterTopology(c.Fitness, c.Genome, incumbent.Fitness, incumbent.Genome) ||
+			(equalTopology(c.Fitness, incumbent.Fitness) && c.Name < incumbent.Name)
+	})
 	// Refresh the baseline copy from the flagged slice so its OnFrontier flag is set too.
-	for i := range candidates {
-		if candidates[i].Name == "baseline" {
-			baseline = candidates[i]
-			break
-		}
+	if b, ok := candidateByName(candidates, candName, "baseline"); ok {
+		baseline = b
 	}
 
 	// Flag the top-k frontier genomes that need live re-validation (width past the frontier).
-	topK := cfg.TopK
-	if topK <= 0 || topK > len(frontier) {
-		topK = len(frontier)
-	}
-	var flagged []string
-	for i := 0; i < topK; i++ {
-		if frontier[i].NeedsLiveRevalidation {
-			flagged = append(flagged, frontier[i].Name)
-		}
-	}
+	flagged := topKNeedsRevalidation(frontier, cfg.TopK, candName,
+		func(c TopologyCandidate) bool { return c.NeedsLiveRevalidation })
 
 	return &TopologySearchReport{
 		Provenance: Provenance{
@@ -529,34 +511,20 @@ func equalTopology(a, b TopologyFitness) bool {
 // collision, with strict inequality on at least one. Sorted by CreditedSavings descending
 // (ties by collision ascending, then name) for a stable artifact.
 func topoParetoFrontier(cands []TopologyCandidate) []TopologyCandidate {
-	var front []TopologyCandidate
-	for i := range cands {
-		ci := cands[i].Fitness
-		dominated := false
-		for j := range cands {
-			if i == j {
-				continue
+	return paretoFrontierBy(cands,
+		func(a, b TopologyCandidate) bool {
+			af, bf := a.Fitness, b.Fitness
+			geq := af.CreditedSavingsTokens >= bf.CreditedSavingsTokens && af.ArbiterCollisionCost <= bf.ArbiterCollisionCost
+			gt := af.CreditedSavingsTokens > bf.CreditedSavingsTokens || af.ArbiterCollisionCost < bf.ArbiterCollisionCost
+			return geq && gt
+		},
+		func(a, b TopologyCandidate) bool {
+			if a.Fitness.CreditedSavingsTokens != b.Fitness.CreditedSavingsTokens {
+				return a.Fitness.CreditedSavingsTokens > b.Fitness.CreditedSavingsTokens
 			}
-			cj := cands[j].Fitness
-			geq := cj.CreditedSavingsTokens >= ci.CreditedSavingsTokens && cj.ArbiterCollisionCost <= ci.ArbiterCollisionCost
-			gt := cj.CreditedSavingsTokens > ci.CreditedSavingsTokens || cj.ArbiterCollisionCost < ci.ArbiterCollisionCost
-			if geq && gt {
-				dominated = true
-				break
+			if a.Fitness.ArbiterCollisionCost != b.Fitness.ArbiterCollisionCost {
+				return a.Fitness.ArbiterCollisionCost < b.Fitness.ArbiterCollisionCost
 			}
-		}
-		if !dominated {
-			front = append(front, cands[i])
-		}
-	}
-	sort.Slice(front, func(i, j int) bool {
-		if front[i].Fitness.CreditedSavingsTokens != front[j].Fitness.CreditedSavingsTokens {
-			return front[i].Fitness.CreditedSavingsTokens > front[j].Fitness.CreditedSavingsTokens
-		}
-		if front[i].Fitness.ArbiterCollisionCost != front[j].Fitness.ArbiterCollisionCost {
-			return front[i].Fitness.ArbiterCollisionCost < front[j].Fitness.ArbiterCollisionCost
-		}
-		return front[i].Name < front[j].Name
-	})
-	return front
+			return a.Name < b.Name
+		})
 }
