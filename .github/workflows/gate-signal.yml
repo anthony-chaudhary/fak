@@ -1,0 +1,125 @@
+name: gate-signal
+
+# Turn a NON-scorecard CI finding (a security-audit FAIL, a garden dimension gone
+# red) into a specific, deduped, lane-routed GitHub issue the dispatch loop can
+# resolve — the sibling of score-signal (which does the same for a SCORECARD
+# regression). On a daily cadence it folds the security-posture audit
+# (tools/security_audit.py --json) into the gate-signal feeder; for every red
+# finding it files ONE scoped issue naming the owning tool path (so the dispatch
+# router path-confirms a lane) + the `#N`-stamp worker contract.
+#
+# SAFE BY DEFAULT: the scheduled run is DRY-RUN — it plans the issues, surfaces them
+# to the step summary + an artifact, and files NOTHING. Filing is an explicit
+# operator arm: `workflow_dispatch` with `live=true`. This matches the repo
+# convention that scheduled jobs REPORT and only an explicit manual arm mutates
+# (cf. score-signal.yml — but NOTE score-signal itself is now autonomous-live on its
+# schedule per #980; gate-signal stays manual-arm until it has soaked the same way).
+# The pure normalize/dedup logic is proven by tools/gate_signal_test.py (run FIRST
+# below), so a green plan is a real signal, not a tool that always passes.
+on:
+  schedule:
+    # Daily 07:53 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, score-signal 07:41,
+    # bench-signal 08:03).
+    - cron: "53 7 * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Actually CREATE the issues (default: dry-run plan only)"
+        type: boolean
+        default: false
+      max_issues:
+        description: "Hard cap on issues filed per run (worst-finding-first)"
+        type: string
+        default: "5"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gate-signal
+  cancel-in-progress: false
+
+jobs:
+  gate-signal:
+    name: CI finding -> issue
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The normalize/dedup logic FIRST: a planned issue below is only meaningful if
+      # the pure core that produced it is itself proven correct.
+      - name: gate-signal self-test
+        run: python tools/gate_signal_test.py
+
+      # Fold the security-posture audit into the gate-signal envelope. The auditor
+      # exits 1 on any FAIL — tolerate it; gate-signal reads the findings, not the
+      # exit code, and acts only on a real red finding.
+      - name: fold security-posture audit
+        run: |
+          set +e
+          python tools/security_audit.py --json > gate-envelope.json
+          echo "audit-exit=$?"
+          set -e
+          test -s gate-envelope.json || { echo "security audit produced no JSON"; exit 1; }
+
+      # Plan the issues (dry-run) — always, so the step summary shows what WOULD be
+      # filed even on an armed run. Operator inputs are bound to env (not spliced
+      # into the script body) so an input value can't break out into shell.
+      - name: plan gate-signal issues
+        env:
+          MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
+        run: |
+          python tools/gate_signal.py --from gate-envelope.json \
+            --max-issues "$MAX_ISSUES" --json > gate-signal-plan.json
+          python tools/gate_signal.py --from gate-envelope.json \
+            --max-issues "$MAX_ISSUES" > gate-signal-plan.txt
+          cat gate-signal-plan.txt
+
+      # File the issues — ONLY on an explicit `workflow_dispatch` arm with live=true.
+      - name: file gate-signal issues (armed)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' }}
+        env:
+          MAX_ISSUES: ${{ github.event.inputs.max_issues || '5' }}
+        run: |
+          python tools/gate_signal.py --from gate-envelope.json \
+            --max-issues "$MAX_ISSUES" --live
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## gate-signal plan"
+            armed="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' && 'LIVE (issues filed)' || 'dry-run (nothing filed)' }}"
+            echo "_Mode: ${armed}. Scheduled runs are dry-run; arm via workflow_dispatch with live=true._"
+            echo '```'
+            cat gate-signal-plan.txt 2>/dev/null || echo "(no plan)"
+            echo '```'
+            echo '<details><summary>machine plan</summary>'
+            echo
+            echo '```json'
+            cat gate-signal-plan.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-signal-plan
+          path: |
+            gate-signal-plan.json
+            gate-signal-plan.txt
+            gate-envelope.json
+          if-no-files-found: ignore
