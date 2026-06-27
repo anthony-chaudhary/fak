@@ -361,10 +361,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         tp_target = throughput.get("target_per_hour")
         win = throughput.get("primary_window_hours")
         if tp_verdict in ("BELOW_TARGET", "AUDIT_ERROR"):
-            reasons.append(f"throughput {tp_rate}/h completed over {win}h — below the "
+            reasons.append(f"throughput {tp_rate}/h completed over the {win}h analysis window — below the "
                            f"{tp_target}/h target")
         else:
-            reasons.append(f"throughput {tp_verdict} ({tp_rate}/h completed over {win}h, "
+            reasons.append(f"throughput {tp_verdict} ({tp_rate}/h completed over the {win}h analysis window, "
                            f"target {tp_target}/h)")
 
     return {
@@ -466,7 +466,7 @@ def render(p: dict[str, Any]) -> str:
     else:
         lines.append(
             f"║ rate      : {tp.get('verdict')}  {tp.get('completed_rate_per_hour')}/h completed "
-            f"over {tp.get('primary_window_hours')}h (target {tp.get('target_per_hour')}/h)")
+            f"over the {tp.get('primary_window_hours')}h analysis window (target {tp.get('target_per_hour')}/h)")
     w = p.get("workers") or {}
     sc = w.get("silent_count") or 0
     if sc:
