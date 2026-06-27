@@ -49,6 +49,15 @@ func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
 }
 
 // QuantModelQ4KProfile is QuantModelQ4K with optional progress reporting (p.SetTotal/Tick).
+//
+// The per-tensor work (read + dequant + normalize + expert split) runs on a bounded worker
+// pool (gguf_parload.go); the builder mutations + the MLA KV-b merge + the profiler are
+// applied SERIALLY in original tensor order by a single collector, so the built model is
+// byte-identical to a serial load — only the CPU-bound dequant is parallelized. This is the
+// S1 lever against the ~100-min single-core GLM-5.2 load
+// (docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md): zero arithmetic change,
+// every core busy. The collector also records the per-quant-type resident-vs-dequant
+// breakdown (the S4 visibility) so the mixed-quant cost is legible without an external dump.
 func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, error) {
 	cfg, err := s.File.Config()
 	if err != nil {
@@ -57,130 +66,169 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
 	p.SetTotal(len(s.File.Tensors))
-	for _, info := range s.File.Tensors {
-		p.Tick(tensorOnDiskBytes(info))
-		// glm_moe_dsa MLA KV-b: buffer the split attn_k_b/attn_v_b and emit the combined
-		// kv_b_proj when both arrive, before CanonicalTensorNameArch (which leaves them unmapped).
-		// The merged tensor follows the standard dequant->Q8 path (it is not resident-Q4_K eligible).
+
+	// computeFn is the pure, concurrency-safe per-tensor work: it reads + dequantizes +
+	// normalizes + splits, returning the builder mutations to apply. It touches no shared
+	// state (TensorBytes copies; dequantF32 allocates fresh; the helpers are pure over the
+	// read-only Config), so it is safe to run from many workers at once.
+	computeFn := func(info TensorInfo) tensorWork {
+		tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
 		if cfg.ModelType == "glm_moe_dsa" {
 			// Drop the MTP ("nextn") head + any vision tower the text forward never reads.
 			if glmMoeDsaSkipGGUFTensor(info.Name) {
-				continue
+				return tw
 			}
+			// MLA KV-b half: dequant it; the collector buffers + merges the pair in order.
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {
-					return nil, err
+					tw.err = err
+					return tw
 				}
 				raw, _, err := s.TensorBytes(info.Name)
 				if err != nil {
-					return nil, err
+					tw.err = err
+					return tw
 				}
 				data, err := dequantF32(info, raw)
 				if err != nil {
-					return nil, err
+					tw.err = err
+					return tw
 				}
-				merged, ready, err := bufferGLMKVBHalf(kvbHalf, layer, half, shape, append([]float32(nil), data...))
-				if err != nil {
-					return nil, err
-				}
-				if ready {
-					md, err := normalizeCanonicalTensorData(merged.Name, merged.Data, cfg)
-					if err != nil {
-						return nil, err
-					}
-					if err := builder.AddF32Tensor(merged.Name, merged.Shape, md); err != nil {
-						return nil, err
-					}
-				}
-				continue
+				tw.pending = []pendingTensor{{isKVBHalf: true, layer: layer, half: half, shape: shape, f32: append([]float32(nil), data...)}}
+				return tw
 			}
-			// glm_moe_dsa batched routed experts: split the [E,out,in] blob 1->E. When the blob is
-			// Q4_K and block-aligned, split it as RAW Q4_K bytes and store each expert RESIDENT (no
-			// dequant) — the experts are GLM-5.2's 417 GB bulk, so this is the load-time lever that
-			// avoids the f32 round-trip. Falls back to the f32 dequant-split for a non-Q4_K blob or
-			// a name the resident gate excludes.
+			// Batched routed experts: split the [E,out,in] blob 1->E. A Q4_K block-aligned
+			// blob splits as RAW bytes -> resident (no dequant): the experts are GLM-5.2's
+			// 417 GB bulk, so this is the load-time lever. A non-Q4_K (Q6_K/Q5_K mixed-quant)
+			// blob falls to the f32 dequant-split — the slow path the load-path breakdown names.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {
-					return nil, err
+					tw.err = err
+					return tw
 				}
 				raw, _, err := s.TensorBytes(info.Name)
 				if err != nil {
-					return nil, err
+					tw.err = err
+					return tw
 				}
+				tw.acctType, tw.acctExpert, tw.acctBytes = info.Type.String(), true, tensorOnDiskBytes(info)
 				if info.Type == TensorQ4_K {
 					q4kExperts, aligned, err := splitGLMMoeDsaExpertsQ4KRaw(layer, proj, shape, raw)
 					if err != nil {
-						return nil, err
+						tw.err = err
+						return tw
 					}
 					if aligned && model.ResidentQ4KEligible(cfg, q4kExperts[0].Name) {
-						for _, ex := range q4kExperts {
-							if err := builder.AddResidentQ4K(ex.Name, ex.Shape, ex.Raw); err != nil {
-								return nil, err
-							}
+						tw.pending = make([]pendingTensor, len(q4kExperts))
+						for i, ex := range q4kExperts {
+							tw.pending[i] = pendingTensor{resident: true, name: ex.Name, shape: ex.Shape, raw: ex.Raw}
 						}
-						continue
+						tw.acctResident, tw.acctTensors = true, len(q4kExperts)
+						return tw
 					}
 				}
 				data, err := dequantF32(info, raw)
 				if err != nil {
-					return nil, err
+					tw.err = err
+					return tw
 				}
 				experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
 				if err != nil {
-					return nil, err
+					tw.err = err
+					return tw
 				}
-				for _, ex := range experts {
-					if err := builder.AddF32Tensor(ex.Name, ex.Shape, ex.Data); err != nil {
-						return nil, err
-					}
+				tw.pending = make([]pendingTensor, len(experts))
+				for i, ex := range experts {
+					tw.pending[i] = pendingTensor{resident: false, name: ex.Name, shape: ex.Shape, f32: ex.Data}
 				}
-				continue
+				tw.acctResident, tw.acctTensors = false, len(experts)
+				return tw
 			}
 		}
 		canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
 		if !ok {
-			return nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+			tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+			return tw
 		}
 		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 		if err != nil {
-			return nil, err
+			tw.err = err
+			return tw
 		}
 		raw, _, err := s.TensorBytes(info.Name)
 		if err != nil {
-			return nil, err
+			tw.err = err
+			return tw
 		}
-
+		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors = info.Type.String(), false, tensorOnDiskBytes(info), 1
 		// Direct-resident-Q4_K fast path: an eligible Q4_K matmul weight is wrapped raw,
-		// skipping dequantF32 (Q4→f32) and the f32→Q8 re-quant entirely. ResidentQ4KEligible
-		// is the authoritative gate (it already excludes the normalize-sensitive + non-matmul
-		// names), so AddResidentQ4K stores and we continue.
+		// skipping dequantF32 (Q4→f32) and the f32→Q8 re-quant entirely. raw is a fresh
+		// TensorBytes copy, so handing it straight to the builder is safe.
 		if info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
-			if err := builder.AddResidentQ4K(canon, shape, raw); err != nil {
-				return nil, err
-			}
-			continue
+			tw.pending = []pendingTensor{{resident: true, name: canon, shape: shape, raw: raw}}
+			tw.acctResident = true
+			return tw
 		}
-
-		// Everything else (the normalize-sensitive projections, Q6_K matmul weights, the
-		// embedding, norms, biases, fused qkv) follows the standard path: dequant →
-		// normalize → builder, which quantizes the remaining matmul weights to Q8_0 and
-		// keeps the small tensors as f32.
+		// Everything else (normalize-sensitive projections, Q6_K matmul weights, embedding,
+		// norms, biases, fused qkv) follows the standard dequant → normalize → builder path.
 		data, err := dequantF32(info, raw)
 		if err != nil {
-			return nil, err
+			tw.err = err
+			return tw
 		}
 		data, err = normalizeCanonicalTensorData(canon, data, cfg)
 		if err != nil {
-			return nil, err
+			tw.err = err
+			return tw
 		}
-		if err := builder.AddF32Tensor(canon, shape, data); err != nil {
-			return nil, err
+		tw.pending = []pendingTensor{{resident: false, name: canon, shape: shape, f32: data}}
+		return tw
+	}
+
+	// applyFn owns all shared mutable state (builder, KV-b merge buffer, profiler) and runs
+	// on the single collector goroutine in original tensor order.
+	applyFn := func(tw tensorWork) error {
+		p.Tick(tw.tickBytes)
+		p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
+		for _, pt := range tw.pending {
+			switch {
+			case pt.isKVBHalf:
+				merged, ready, err := bufferGLMKVBHalf(kvbHalf, pt.layer, pt.half, pt.shape, pt.f32)
+				if err != nil {
+					return err
+				}
+				if ready {
+					md, err := normalizeCanonicalTensorData(merged.Name, merged.Data, cfg)
+					if err != nil {
+						return err
+					}
+					if err := builder.AddF32Tensor(merged.Name, merged.Shape, md); err != nil {
+						return err
+					}
+				}
+			case pt.resident:
+				if err := builder.AddResidentQ4K(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			default:
+				if err := builder.AddF32Tensor(pt.name, pt.shape, pt.f32); err != nil {
+					return err
+				}
+			}
 		}
+		return nil
+	}
+
+	if err := s.parallelQuantLoad(computeFn, applyFn); err != nil {
+		return nil, err
 	}
 	if err := glmKVBUnpaired(kvbHalf); err != nil {
 		return nil, err
+	}
+	if p != nil {
+		p.EmitLoadPathSummary(p.Progress)
 	}
 	return builder.Build()
 }

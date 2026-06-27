@@ -35,6 +35,21 @@ type LoadTensorStat struct {
 	TotalMS        float64 `json:"total_ms"`
 }
 
+// LoadPathStat is one row of the per-quant-type load-path breakdown: for a GGUF quant type
+// (and expert-vs-dense class) how many model tensors + on-disk bytes took the raw-RESIDENT
+// fast path vs paid the f32 DEQUANT round-trip. It is the visibility that makes the
+// mixed-quant load cost legible WITHOUT an external gguf-dump: a row like
+// {Q6_K, expert, dequant_tensors>0} names exactly the bulk the resident path does not yet
+// cover (the S2 lever in docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md).
+type LoadPathStat struct {
+	QuantType       string `json:"quant_type"`
+	Expert          bool   `json:"expert"`
+	ResidentTensors int    `json:"resident_tensors,omitempty"`
+	ResidentBytes   int64  `json:"resident_bytes,omitempty"`
+	DequantTensors  int    `json:"dequant_tensors,omitempty"`
+	DequantBytes    int64  `json:"dequant_bytes,omitempty"`
+}
+
 // LoadProfile is a machine-readable load-phase report for modelbench. It is scoped
 // to the pure GGUF->resident-model path, not tokenizer or inference.
 type LoadProfile struct {
@@ -46,6 +61,15 @@ type LoadProfile struct {
 	Phases      []LoadPhaseStat  `json:"phases"`
 	TopTensors  []LoadTensorStat `json:"top_tensors,omitempty"`
 	Bottleneck  string           `json:"bottleneck"`
+	// LoadPaths is the per-quant-type resident-vs-dequant breakdown (deterministically
+	// ordered). Empty unless the loader recorded it (the resident-Q4_K GLM path does).
+	LoadPaths []LoadPathStat `json:"load_paths,omitempty"`
+}
+
+// loadPathKey keys the per-quant-type load-path tally by (GGUF quant type, expert class).
+type loadPathKey struct {
+	quantType string
+	expert    bool
 }
 
 // LoadProfiler records opt-in GGUF load timings. Nil keeps the loader on its
@@ -70,12 +94,44 @@ type LoadProfiler struct {
 	cumBytes      int64
 	ggufSeen      int // GGUF tensors consumed (advances even for split/merged tensors)
 	lastPct       float64
+
+	// loadPaths tallies the per-quant-type resident-vs-dequant breakdown. Written only by
+	// the serial load collector (one goroutine), so it needs no lock even under the parallel
+	// load pipeline.
+	loadPaths map[loadPathKey]*LoadPathStat
 }
 
 // NewLoadProfiler returns an enabled load profiler that records per-phase timings and
 // keeps the top 16 slowest tensors by default.
 func NewLoadProfiler() *LoadProfiler {
-	return &LoadProfiler{stat: map[string]*LoadPhaseStat{}, TopN: 16}
+	return &LoadProfiler{stat: map[string]*LoadPhaseStat{}, loadPaths: map[loadPathKey]*LoadPathStat{}, TopN: 16}
+}
+
+// recordLoadPath tallies one GGUF tensor against the per-quant-type load-path breakdown:
+// which raw quant type, expert-vs-dense, and whether it took the raw-resident fast path
+// (resident=true) or the f32 dequant round-trip (resident=false). tensors is the number of
+// model tensors the GGUF tensor produced (E for a batched expert blob); bytes is its on-disk
+// payload. Called ONLY from the serial load collector, so it is lock-free. Safe on nil.
+func (p *LoadProfiler) recordLoadPath(quantType string, expert, resident bool, bytes int64, tensors int) {
+	if p == nil || quantType == "" {
+		return
+	}
+	if p.loadPaths == nil {
+		p.loadPaths = map[loadPathKey]*LoadPathStat{}
+	}
+	k := loadPathKey{quantType: quantType, expert: expert}
+	st := p.loadPaths[k]
+	if st == nil {
+		st = &LoadPathStat{QuantType: quantType, Expert: expert}
+		p.loadPaths[k] = st
+	}
+	if resident {
+		st.ResidentTensors += tensors
+		st.ResidentBytes += bytes
+	} else {
+		st.DequantTensors += tensors
+		st.DequantBytes += bytes
+	}
 }
 
 // SetTotal records the expected tensor count and starts the load clock so the
@@ -226,5 +282,50 @@ func (p *LoadProfiler) Snapshot(mode, source string, totalNanos int64) *LoadProf
 		n = len(top)
 	}
 	out.TopTensors = top[:n]
+	out.LoadPaths = p.loadPathRows()
 	return out
+}
+
+// loadPathRows renders the per-quant-type load-path tally in a deterministic order:
+// experts before dense, then by quant type, so a fixed load yields identical output.
+func (p *LoadProfiler) loadPathRows() []LoadPathStat {
+	if p == nil || len(p.loadPaths) == 0 {
+		return nil
+	}
+	rows := make([]LoadPathStat, 0, len(p.loadPaths))
+	for _, st := range p.loadPaths {
+		rows = append(rows, *st)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Expert != rows[j].Expert {
+			return rows[i].Expert // experts first (the bulk that dominates the load)
+		}
+		return rows[i].QuantType < rows[j].QuantType
+	})
+	return rows
+}
+
+// EmitLoadPathSummary writes the per-quant-type resident-vs-dequant breakdown to w (one line
+// per row), so an operator watching a multi-minute load sees, in-band, exactly which quant
+// types took the fast raw-resident path and which paid the slow f32 round-trip — the
+// mixed-quant diagnosis without an external gguf-dump. No-op on nil / no recorded rows.
+func (p *LoadProfiler) EmitLoadPathSummary(w io.Writer) {
+	if p == nil || w == nil {
+		return
+	}
+	rows := p.loadPathRows()
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "fak: load-path breakdown (resident = raw bytes, no dequant; dequant = f32 round-trip):\n")
+	for _, r := range rows {
+		class := "dense"
+		if r.Expert {
+			class = "expert"
+		}
+		fmt.Fprintf(w, "fak:   %-5s %-6s  resident=%d (%.1f GB)  dequant=%d (%.1f GB)\n",
+			r.QuantType, class,
+			r.ResidentTensors, float64(r.ResidentBytes)/(1<<30),
+			r.DequantTensors, float64(r.DequantBytes)/(1<<30))
+	}
 }

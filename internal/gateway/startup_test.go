@@ -107,6 +107,10 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 			{Phase: "header", Seconds: 0.1, Bytes: 1_000, Tensors: 0},
 			{Phase: "dequant", Seconds: 1.2, Bytes: 1_900_000, Tensors: 290},
 		},
+		LoadPaths: []ModelLoadPath{
+			{QuantType: "Q4_K", Expert: true, ResidentTensors: 256, ResidentBytes: 1_000_000},
+			{QuantType: "Q6_K", Expert: true, DequantTensors: 128, DequantBytes: 900_000},
+		},
 		MemoryPlan: []ModelLoadMemoryDemand{
 			{Class: "weights", Scope: "device", Bytes: 1_750_000, Detail: "gguf-q8-load", DType: "q8_0"},
 			{Class: "kv_cache", Scope: "device", Bytes: 240_000, Detail: "hal-kv-store", DType: "f32"},
@@ -129,6 +133,10 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 		`fak_model_load_phase_duration_seconds{phase="dequant"} 1.2`,
 		`fak_model_load_phase_bytes{phase="dequant"} 1900000`,
 		`fak_model_load_phase_tensors{phase="dequant"} 290`,
+		`fak_model_load_path_tensors{quant_type="Q4_K",class="expert",path="resident"} 256`,
+		`fak_model_load_path_tensors{quant_type="Q6_K",class="expert",path="dequant"} 128`,
+		`fak_model_load_path_bytes{quant_type="Q4_K",class="expert",path="resident"} 1000000`,
+		`fak_model_load_path_bytes{quant_type="Q6_K",class="expert",path="dequant"} 900000`,
 		`fak_model_load_memory_plan_bytes{class="weights",scope="device"} 2000000`,
 		`fak_model_load_memory_plan_bytes{class="kv_cache",scope="device"} 240000`,
 		`fak_model_load_memory_plan_bytes{class="offload",scope="host"} 10000`,

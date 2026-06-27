@@ -109,6 +109,20 @@ type ModelLoadPhase struct {
 	Tensors int
 }
 
+// ModelLoadPath is one per-quant-type row of the boot-time load-path breakdown: how many
+// tensors + on-disk bytes of a GGUF quant type took the raw-RESIDENT fast path vs paid the
+// f32 DEQUANT round-trip, split by expert-vs-dense. It surfaces (on /metrics) which
+// mixed-quant weights still pay the slow load — the GLM-5.2 load-time diagnosis made legible
+// without an external gguf-dump.
+type ModelLoadPath struct {
+	QuantType       string
+	Expert          bool
+	ResidentTensors int
+	ResidentBytes   int64
+	DequantTensors  int
+	DequantBytes    int64
+}
+
 // ModelLoadMemoryDemand is one classed row from the memory plan used to admit a
 // boot-time model load. Detail is safe for /debug/vars, but Prometheus aggregates
 // by class+scope to avoid high-cardinality tensor/path labels.
@@ -143,6 +157,7 @@ type ModelLoadProfile struct {
 	Tensors             int
 	Bottleneck          string
 	Phases              []ModelLoadPhase
+	LoadPaths           []ModelLoadPath
 	MemoryPlan          []ModelLoadMemoryDemand
 	MemoryCapacities    []ModelLoadMemoryCapacity
 	MemoryHeadroomRatio float64
@@ -154,6 +169,7 @@ func (p *ModelLoadProfile) clone() *ModelLoadProfile {
 	}
 	out := *p
 	out.Phases = append([]ModelLoadPhase(nil), p.Phases...)
+	out.LoadPaths = append([]ModelLoadPath(nil), p.LoadPaths...)
 	out.MemoryPlan = append([]ModelLoadMemoryDemand(nil), p.MemoryPlan...)
 	out.MemoryCapacities = append([]ModelLoadMemoryCapacity(nil), p.MemoryCapacities...)
 	return &out
@@ -268,6 +284,13 @@ func modelLoadDType(dtype string) string {
 	return dtype
 }
 
+func modelLoadPathClass(expert bool) string {
+	if expert {
+		return "expert"
+	}
+	return "dense"
+}
+
 // writeStartupMetrics renders the boot-timeline gauges. They are emitted on every
 // scrape with their once-at-boot values so a Grafana panel can show this process's
 // startup cost at any later moment, not only in the scrape window right after boot.
@@ -350,6 +373,21 @@ func (s *Server) writeModelLoadMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_model_load_phase_tensors", "Tensors processed by each model-weight load phase at boot.", "gauge")
 	for _, ph := range phases {
 		fmt.Fprintf(b, "fak_model_load_phase_tensors{phase=\"%s\"} %d\n", promQuote(ph.Phase), ph.Tensors)
+	}
+
+	if len(p.LoadPaths) > 0 {
+		writeHelpType(b, "fak_model_load_path_tensors", "Tensors materialized at boot by GGUF quant type and expert/dense class, split by load path: resident (raw quant bytes, no dequant) vs dequant (f32 round-trip). A nonzero dequant row for a large expert quant type is the slow-load signal.", "gauge")
+		for _, r := range p.LoadPaths {
+			class := modelLoadPathClass(r.Expert)
+			fmt.Fprintf(b, "fak_model_load_path_tensors{quant_type=\"%s\",class=\"%s\",path=\"resident\"} %d\n", promQuote(r.QuantType), class, r.ResidentTensors)
+			fmt.Fprintf(b, "fak_model_load_path_tensors{quant_type=\"%s\",class=\"%s\",path=\"dequant\"} %d\n", promQuote(r.QuantType), class, r.DequantTensors)
+		}
+		writeHelpType(b, "fak_model_load_path_bytes", "On-disk bytes materialized at boot by GGUF quant type and expert/dense class, split by load path (resident raw bytes vs f32 dequant round-trip).", "gauge")
+		for _, r := range p.LoadPaths {
+			class := modelLoadPathClass(r.Expert)
+			fmt.Fprintf(b, "fak_model_load_path_bytes{quant_type=\"%s\",class=\"%s\",path=\"resident\"} %d\n", promQuote(r.QuantType), class, r.ResidentBytes)
+			fmt.Fprintf(b, "fak_model_load_path_bytes{quant_type=\"%s\",class=\"%s\",path=\"dequant\"} %d\n", promQuote(r.QuantType), class, r.DequantBytes)
+		}
 	}
 
 	if rows := p.memoryPlanByClassScope(); len(rows) > 0 {

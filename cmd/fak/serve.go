@@ -392,6 +392,16 @@ func toGatewayLoadProfile(p *ggufload.LoadProfile) *gateway.ModelLoadProfile {
 			Tensors: ph.Tensors,
 		})
 	}
+	for _, lp := range p.LoadPaths {
+		out.LoadPaths = append(out.LoadPaths, gateway.ModelLoadPath{
+			QuantType:       lp.QuantType,
+			Expert:          lp.Expert,
+			ResidentTensors: lp.ResidentTensors,
+			ResidentBytes:   lp.ResidentBytes,
+			DequantTensors:  lp.DequantTensors,
+			DequantBytes:    lp.DequantBytes,
+		})
+	}
 	return out
 }
 
