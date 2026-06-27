@@ -238,7 +238,7 @@ M3 arm64). See `CROSS-PLATFORM-REPRO-20260619.md` (private companion).
 
 ### DOS Verification Commands
 - `dos_commit_audit` — Verify commit diff matches claim
-- `dos_verify` — Confirm a phase actually shipped
+- `dos verify` — Confirm a phase actually shipped
 - See DOS plugin documentation for details
 
 ---

@@ -61,7 +61,7 @@ grammar — but the diff witness proves they are real code commits, not empty/RE
 stamps. The honest distinction the truth syscall is built to make.)
 
 **The v0.2.x line (tags `v0.2.0`, `v0.2.1`) extends this — with a caveat the truth
-syscall itself surfaces, recorded here rather than hidden.** Running `dos_verify fak
+syscall itself surfaces, recorded here rather than hidden.** Running `dos verify fak
 v0.2.0` / `v0.2.1` against this repo today returns **`shipped:false, source:none`**:
 the ship oracle finds the tagged commits (`a8b10c3`, `3c2a1eb`) but **demotes** them as
 *release-bump* commits — the `/release` skill stamps the version on its own commit,
