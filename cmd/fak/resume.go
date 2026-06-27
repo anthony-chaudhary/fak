@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessionimage"
 )
@@ -161,7 +162,10 @@ func runResumeValidate(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	files, err := findTranscripts(*corpus)
+	// Expand a leading ~ so `-corpus ~/.claude/projects` works under cmd.exe /
+	// PowerShell (which pass ~ through literally) - the same way the GGUF flag does.
+	corpusDir := pathutil.ExpandTilde(*corpus)
+	files, err := findTranscripts(corpusDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak resume validate: scan corpus %q: %v\n", *corpus, err)
 		return 1

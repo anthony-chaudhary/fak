@@ -176,7 +176,7 @@ func witnessTasks() []Task {
 			Source:      SourceWitness,
 			Value:       ValueRegression,
 			Requires:    nil, // offline back-test over recorded billing
-			Run:         "fak resume validate --calibrate",
+			Run:         "fak resume validate -corpus ~/.claude/projects -json",
 			Acceptance:  "a recorded calibration accuracy over the billing boundaries (current 97.7%) refreshed against new sessions",
 			RecheckDays: 14,
 			Doc:         "docs/proofs/async-addressing.md",
