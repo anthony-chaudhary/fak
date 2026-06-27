@@ -1,0 +1,132 @@
+name: score-signal
+
+# Turn a CI scorecard REGRESSION into a specific, deduped GitHub issue the
+# dispatch loop can resolve — the INTERNAL feeder of the fleet loop (the dual of
+# the EXTERNAL idea-scout feeder). The scorecard ratchet (ci.yml) BLOCKS a
+# regression at merge time; this job is the follow-through: on a daily cadence it
+# folds the scorecard control pane, and for every metric whose debt rose above its
+# pinned baseline (tools/scorecard_baseline.json) it files ONE scoped, lane-routed
+# issue naming the owning RSI skill + the re-measure command + the `#N`-stamp
+# contract. The dispatch loop then routes it to a lane and spawns a worker.
+#
+# SAFE BY DEFAULT: the scheduled run is DRY-RUN — it plans the issues, surfaces
+# them to the step summary + an artifact, and files NOTHING. Filing is an explicit
+# operator arm: `workflow_dispatch` with `live=true`. This matches the repo
+# convention that scheduled jobs REPORT and only an explicit manual arm mutates
+# (cf. cadence.yml / release-cadence.yml). The pure plan/dedup logic is proven by
+# tools/score_signal_test.py (run FIRST below), so a green plan is a real signal,
+# not a tool that always passes.
+on:
+  schedule:
+    # Daily 07:41 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, cadence Mon 08:17).
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Actually CREATE the issues (default: dry-run plan only)"
+        type: boolean
+        default: false
+      min_delta:
+        description: "A metric must rise by at least this debt to file"
+        type: string
+        default: "1"
+      max_issues:
+        description: "Hard cap on issues filed per run (worst-regression-first)"
+        type: string
+        default: "5"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: score-signal
+  cancel-in-progress: false
+
+jobs:
+  score-signal:
+    name: scorecard regression -> issue
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: auto
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The plan/dedup logic FIRST: a planned issue below is only meaningful if the
+      # pure core that produced it is itself proven correct.
+      - name: score-signal self-test
+        run: python tools/score_signal_test.py
+
+      # Fold the scorecard control pane. Tolerate a non-zero exit (the pane reds on
+      # any residual debt) — score-signal reads the trend, not the exit code, and
+      # acts only on a real measured rise.
+      - name: fold scorecard control pane
+        run: |
+          set +e
+          python tools/scorecard_control_pane.py --json > pane.json
+          echo "pane-exit=$?"
+          set -e
+          test -s pane.json || { echo "control pane produced no JSON"; exit 1; }
+
+      # Plan the issues (dry-run) — always, so the step summary shows what WOULD be
+      # filed even on an armed run.
+      - name: plan score-signal issues
+        run: |
+          MIN="${{ github.event.inputs.min_delta || '1' }}"
+          MAX="${{ github.event.inputs.max_issues || '5' }}"
+          python tools/score_signal.py --from pane.json --min-delta "$MIN" \
+            --max-issues "$MAX" --json > score-signal-plan.json
+          python tools/score_signal.py --from pane.json --min-delta "$MIN" \
+            --max-issues "$MAX" > score-signal-plan.txt
+          cat score-signal-plan.txt
+
+      # File the issues — ONLY on an explicit `workflow_dispatch` arm with live=true.
+      - name: file score-signal issues (armed)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' }}
+        run: |
+          MIN="${{ github.event.inputs.min_delta || '1' }}"
+          MAX="${{ github.event.inputs.max_issues || '5' }}"
+          python tools/score_signal.py --from pane.json --min-delta "$MIN" \
+            --max-issues "$MAX" --live
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## score-signal plan"
+            armed="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.live == 'true' && 'LIVE (issues filed)' || 'dry-run (nothing filed)' }}"
+            echo "_Mode: ${armed}. Scheduled runs are always dry-run; arm via workflow_dispatch with live=true._"
+            echo '```'
+            cat score-signal-plan.txt 2>/dev/null || echo "(no plan)"
+            echo '```'
+            echo '<details><summary>machine plan</summary>'
+            echo
+            echo '```json'
+            cat score-signal-plan.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: score-signal-plan
+          path: |
+            score-signal-plan.json
+            score-signal-plan.txt
+            pane.json
+          if-no-files-found: ignore
