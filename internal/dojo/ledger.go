@@ -84,6 +84,15 @@ func ParseLedger(content string) []LedgerRow {
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			continue
 		}
+		// Reject rows that are not our schema. A foreign JSONL (e.g. another
+		// tool's history with its own "date" field) unmarshals cleanly into
+		// LedgerRow — extra fields are dropped, Date survives — so it would
+		// otherwise pollute the trend. Committed rows are written via
+		// RowFromReport, which stamps Schema=LedgerSchema, so this only drops
+		// lines that were never ours.
+		if row.Schema != LedgerSchema {
+			continue
+		}
 		if row.Date == "" {
 			continue
 		}
@@ -134,13 +143,26 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 	}
 }
 
-// latestBefore returns the most recent prior row, comparing by (date, then
-// generated_at). A row with the exact same generated_at as `row` is excluded
-// (idempotent re-append), mirroring the cadence ledger's rule.
+// latestBefore returns the most recent prior row that STRICTLY PRECEDES `row`,
+// comparing by (date, then generated_at). Two rows are excluded: one with the
+// exact same generated_at as `row` (idempotent re-append, mirroring the cadence
+// ledger's rule), and any row that is not strictly before `row` in (date,
+// generated_at) order — so a `--date` backfill (a 2026-06-20 row appended when a
+// 2026-06-27 row already exists) trends against the prior 06-20 data, never the
+// 06-27 FUTURE row. Without the strict-before filter, a backfill would print
+// "improved ... vs 2026-06-27" while stamping a 06-20 tick — a direction computed
+// against data from the future, contradicting this function's name and doc.
 func latestBefore(row LedgerRow, prior []LedgerRow) (LedgerRow, bool) {
 	cands := make([]LedgerRow, 0, len(prior))
 	for _, p := range prior {
 		if p.GeneratedAt != "" && p.GeneratedAt == row.GeneratedAt {
+			continue
+		}
+		// Keep only rows strictly before `row`: an earlier date, or the same date
+		// with an earlier generated_at. A same-date row whose generated_at does not
+		// sort before `row`'s (including the empty-string case) cannot be proven to
+		// precede it, so it is not a valid prior.
+		if !(p.Date < row.Date || (p.Date == row.Date && p.GeneratedAt < row.GeneratedAt)) {
 			continue
 		}
 		cands = append(cands, p)

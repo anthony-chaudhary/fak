@@ -60,12 +60,21 @@ const (
 
 // Prediction is the THEORY a lever declares for one metric BEFORE billed reality
 // is consulted: the Claimed number and the Basis that produced it.
+//
+// LowerIsBetter names the metric's direction so the verdict can tell the WORSE
+// side of the claim from the better side. For most metrics (hit rates, accuracy,
+// savings) higher is better, so the zero value (false) keeps the original
+// higher-is-better scoring. Set it true for a metric where a lower realized value
+// is the good outcome (false_warm_rate, cold_write_share) — then realized ABOVE
+// the claim is the over-claim side, not the under-claim side. The field is
+// additive: a Prediction built without it scores exactly as before.
 type Prediction struct {
-	Lever   string  `json:"lever"`
-	Metric  string  `json:"metric"`
-	Claimed float64 `json:"claimed"`
-	Unit    string  `json:"unit"`
-	Basis   string  `json:"basis"`
+	Lever         string  `json:"lever"`
+	Metric        string  `json:"metric"`
+	Claimed       float64 `json:"claimed"`
+	Unit          string  `json:"unit"`
+	Basis         string  `json:"basis"`
+	LowerIsBetter bool    `json:"lower_is_better,omitempty"`
 }
 
 // Outcome is the measured reality for the same metric, lifted from the provider's
@@ -158,7 +167,7 @@ func Score(scenario string, p Prediction, o Outcome, band CalibBand) Episode {
 	switch {
 	case e.CalibErr <= band.CalibratedMax:
 		e.Verdict = VerdictCalibrated
-	case e.Residual < 0:
+	case worseThanClaim(e.Residual, p.LowerIsBetter):
 		e.Verdict = VerdictOverClaim
 	default:
 		e.Verdict = VerdictUnderClaim
@@ -167,24 +176,56 @@ func Score(scenario string, p Prediction, o Outcome, band CalibBand) Episode {
 	return e
 }
 
+// worseThanClaim reports whether the realized value landed on the OVER_CLAIM
+// (worse-than-promised) side of the claim, given the metric's direction. For a
+// higher-is-better metric (the default), realized below the claim (residual < 0)
+// is the worse side — billed reality delivered less than the theory promised. For
+// a lower-is-better metric, the polarity flips: realized above the claim
+// (residual > 0) is the worse side. A residual of exactly 0 is not "worse" either
+// way (it scores UNDER_CLAIM only because CALIBRATED already caught the small-gap
+// case ahead of this test).
+func worseThanClaim(residual float64, lowerIsBetter bool) bool {
+	if lowerIsBetter {
+		return residual > 0
+	}
+	return residual < 0
+}
+
 // calibErr is the normalized magnitude of the residual, capped at MaxCalibErr.
-// It divides by the claim, falling back to the realized magnitude when the claim
-// is ~0, and returns 0 when both are ~0 (the claim of "nothing" held).
+//
+// For a claim with real magnitude it is the RELATIVE residual |realized-claimed|
+// / |claimed| (a 10% miss on a 0.85 claim scores 0.20, the same yardstick across
+// metrics of different scale). For a claim of "nothing" (|claimed| at or below
+// zeroClaimEps) the relative form is undefined — dividing by the realized
+// magnitude makes EVERY zero-claim metric score exactly 1.0 regardless of how far
+// reality drifted, and (since exact-zero then scored 1.0 while a near-zero claim
+// took the ratio path and capped at 2.0) it scored a refuted exact-zero BETTER
+// than a refuted near-zero. So a near-zero claim instead scores the ABSOLUTE
+// residual |realized-claimed| (fraction-unit metrics are already in [0,1], so the
+// absolute residual is the natural, magnitude-aware error there), capped at
+// MaxCalibErr. This makes the zero claim magnitude-aware (claim 0 vs realized 0.30
+// scores 0.30, vs realized 0.99 scores 0.99) and restores the ordering: across the
+// whole zero-neighborhood [0, zeroClaimEps] the error is the absolute residual,
+// flat in claimed and continuous across claimed==0, and exact-zero is now the
+// smallest (best) score in its neighborhood, never the largest. 0/0 still scores 0
+// (the claim of "nothing" held).
 func calibErr(claimed, realized float64) float64 {
 	resid := math.Abs(realized - claimed)
-	denom := math.Abs(claimed)
-	if denom < 1e-9 {
-		denom = math.Abs(realized)
+	var ce float64
+	if math.Abs(claimed) <= zeroClaimEps {
+		ce = resid
+	} else {
+		ce = resid / math.Abs(claimed)
 	}
-	if denom < 1e-9 {
-		return 0
-	}
-	ce := resid / denom
 	if ce > MaxCalibErr {
 		return MaxCalibErr
 	}
 	return ce
 }
+
+// zeroClaimEps is the magnitude at or below which a claim is treated as "nothing"
+// and scored by the absolute residual rather than the (undefined) relative one.
+const zeroClaimEps = 1e-9
 
 // FoldOpts carries the ambient context the fold stamps onto the envelope.
 type FoldOpts struct {

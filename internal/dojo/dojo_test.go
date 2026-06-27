@@ -1,6 +1,7 @@
 package dojo
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -226,6 +227,33 @@ func TestLedgerRoundTripAndTrend(t *testing.T) {
 	}
 }
 
+func TestParseLedgerRejectsForeignSchema(t *testing.T) {
+	// A foreign JSONL line with a "date" field unmarshals cleanly into LedgerRow
+	// (extra keys dropped, Date survives) and would pollute the trend. ParseLedger
+	// must keep only rows stamped with our LedgerSchema. A line with no schema at
+	// all (a hand-edit, or a pre-schema row) is likewise rejected.
+	good, err := AppendLedgerLine(RowFromReport(Fold(
+		[]Episode{Score("s", pred("a", 1.0), obs(0.6, true), DefaultCalibBand())},
+		FoldOpts{Date: "2026-06-27", Commit: "c0", GeneratedAt: "2026-06-27T00:00:00Z"},
+	)))
+	if err != nil {
+		t.Fatalf("append line: %v", err)
+	}
+	foreign := `{"schema":"some-other-tool/3","date":"2026-06-27","mean_calib_err":99.0}`
+	noSchema := `{"date":"2026-06-27","mean_calib_err":42.0}`
+
+	rows := ParseLedger(strings.Join([]string{foreign, good, noSchema}, "\n") + "\n")
+	if len(rows) != 1 {
+		t.Fatalf("foreign-schema and no-schema lines must be rejected; want 1 row, got %d (%+v)", len(rows), rows)
+	}
+	if rows[0].Schema != LedgerSchema {
+		t.Fatalf("the surviving row must be our schema, got %q", rows[0].Schema)
+	}
+	if rows[0].Commit != "c0" {
+		t.Fatalf("the surviving row must be the committed one, got commit %q", rows[0].Commit)
+	}
+}
+
 func TestTrendSubDisplayDeltaIsFlat(t *testing.T) {
 	// Dogfood regression: a corpus drift of +0.00045 mean-calib-err once printed
 	// "calibration regressed +0.000 (0.341->0.341)" — a direction the operator
@@ -270,11 +298,186 @@ func TestTrendIdempotentReappend(t *testing.T) {
 	}
 }
 
+func TestTrendBackfillIgnoresFutureRow(t *testing.T) {
+	// Bug #4: a --date backfill must trend against the prior row, never a
+	// chronologically-later (future) row already on the ledger. A ledger holding a
+	// 2026-06-27 row plus a 2026-06-20 row: a freshly-built 2026-06-25 backfill tick
+	// must trend against 06-20, not the 06-27 future row.
+	future := LedgerRow{Date: "2026-06-27", Commit: "cFut", GeneratedAt: "2026-06-27T00:00:00Z", MeanCalibErr: 0.10, Calibrated: 3, Measured: 3}
+	past := LedgerRow{Date: "2026-06-20", Commit: "cPast", GeneratedAt: "2026-06-20T00:00:00Z", MeanCalibErr: 0.50, Calibrated: 1, Measured: 3}
+	cur := LedgerRow{Date: "2026-06-25", Commit: "cCur", GeneratedAt: "2026-06-25T00:00:00Z", MeanCalibErr: 0.40, Calibrated: 2, Measured: 3}
+	tr := TrendVsLast(cur, []LedgerRow{future, past})
+	if tr.PrevDate != "2026-06-20" {
+		t.Fatalf("backfill must trend against the prior 06-20 row, not a future row; got prev=%s (%s)", tr.PrevDate, tr.Summary)
+	}
+	if tr.CalibErrFrom != 0.50 {
+		t.Fatalf("from-value should be the 06-20 row's 0.50, got %.3f (trended against the wrong row)", tr.CalibErrFrom)
+	}
+	// 0.50 -> 0.40 is a fall, so the direction is improved (against the PAST row).
+	if tr.Direction != "improved" {
+		t.Fatalf("0.50->0.40 vs the prior row is improved, got %q (%s)", tr.Direction, tr.Summary)
+	}
+}
+
+func TestTrendNewWhenOnlyFutureRows(t *testing.T) {
+	// Bug #4: if every other row is dated AFTER `row`, there is no valid prior, so
+	// the tick is "new" rather than trended against the future. Previously the max
+	// row (a future row) leaked in and produced a from-the-future direction.
+	future := LedgerRow{Date: "2026-06-30", Commit: "cF", GeneratedAt: "2026-06-30T00:00:00Z", MeanCalibErr: 0.10, Calibrated: 3, Measured: 3}
+	cur := LedgerRow{Date: "2026-06-25", Commit: "cC", GeneratedAt: "2026-06-25T00:00:00Z", MeanCalibErr: 0.40, Calibrated: 2, Measured: 3}
+	tr := TrendVsLast(cur, []LedgerRow{future})
+	if tr.Direction != "new" {
+		t.Fatalf("no row precedes the backfill tick, so it must be 'new', got %q (prev=%s)", tr.Direction, tr.PrevDate)
+	}
+}
+
+func TestTrendSameDateEarlierGeneratedAtStillPrior(t *testing.T) {
+	// Bug #4 must not blunt the same-date case: a same-date row with an EARLIER
+	// generated_at is still a valid prior (the within-day re-run case).
+	earlier := LedgerRow{Date: "2026-06-27", Commit: "cE", GeneratedAt: "2026-06-27T05:00:00Z", MeanCalibErr: 0.30, Calibrated: 2, Measured: 3}
+	cur := LedgerRow{Date: "2026-06-27", Commit: "cC", GeneratedAt: "2026-06-27T06:00:00Z", MeanCalibErr: 0.20, Calibrated: 3, Measured: 3}
+	tr := TrendVsLast(cur, []LedgerRow{earlier})
+	if tr.PrevCommit != "cE" {
+		t.Fatalf("a same-date, earlier generated_at row is a valid prior; got prev=%q (%s)", tr.PrevCommit, tr.Summary)
+	}
+	if tr.Direction != "improved" {
+		t.Fatalf("0.30->0.20 within the same day is improved, got %q", tr.Direction)
+	}
+}
+
 func TestWithGate(t *testing.T) {
 	r := Fold(nil, FoldOpts{})
 	code, msg := CheckGate(r)
 	g := r.WithGate(code, msg)
 	if g.GateExit == nil || *g.GateExit != 1 || g.OK {
 		t.Fatalf("WithGate should reconcile to the failing gate, got exit=%v ok=%v", g.GateExit, g.OK)
+	}
+}
+
+// predDir builds a Prediction with an explicit metric direction (bug #1).
+func predDir(metric string, claimed float64, lowerIsBetter bool) Prediction {
+	return Prediction{Lever: "lvr", Metric: metric, Claimed: claimed, Unit: "fraction", Basis: "test", LowerIsBetter: lowerIsBetter}
+}
+
+func TestScoreLowerIsBetterRealizedWorseIsOverClaim(t *testing.T) {
+	// Bug #1: false_warm_rate is LOWER-is-better. The theory claims a 10% false-warm
+	// rate (0.10); billed reality came in at 18% (0.18) — WORSE than promised.
+	// Realized ABOVE the claim is the over-claim side for this direction, even
+	// though the raw residual is positive (the old sign-only rule mislabeled it
+	// UNDER_CLAIM and steered the operator to "harvest" a regression).
+	e := Score("s", predDir("false_warm_rate", 0.10, true), obs(0.18, true), DefaultCalibBand())
+	if e.Verdict != VerdictOverClaim {
+		t.Fatalf("lower-is-better realized above claim should be OVER_CLAIM, got %s (resid %.4f)", e.Verdict, e.Residual)
+	}
+	if e.Residual <= 0 {
+		t.Fatalf("realized 0.18 vs claim 0.10 should give a positive residual, got %.4f", e.Residual)
+	}
+	// calib_err = |0.18-0.10|/0.10 = 0.80 -> grade F (direction does not change magnitude)
+	if e.CalibErr < 0.79 || e.CalibErr > 0.81 {
+		t.Fatalf("calib_err should be ~0.80, got %.4f", e.CalibErr)
+	}
+	if e.Grade != "F" {
+		t.Fatalf("0.80 calib-err should grade F, got %s", e.Grade)
+	}
+}
+
+func TestScoreLowerIsBetterRealizedBetterIsUnderClaim(t *testing.T) {
+	// Bug #1: cold_write_share scored as LOWER-is-better. The theory claims 50%
+	// (0.50); reality came in at 20% (0.20) — BETTER than promised. Realized below
+	// the claim is the under-claim (free saving) side for this direction.
+	e := Score("s", predDir("cold_write_share", 0.50, true), obs(0.20, true), DefaultCalibBand())
+	if e.Verdict != VerdictUnderClaim {
+		t.Fatalf("lower-is-better realized below claim should be UNDER_CLAIM, got %s (resid %.4f)", e.Verdict, e.Residual)
+	}
+	if e.Residual >= 0 {
+		t.Fatalf("realized 0.20 vs claim 0.50 should give a negative residual, got %.4f", e.Residual)
+	}
+	// calib_err = |0.20-0.50|/0.50 = 0.60 -> grade D
+	if e.CalibErr < 0.59 || e.CalibErr > 0.61 {
+		t.Fatalf("calib_err should be ~0.60, got %.4f", e.CalibErr)
+	}
+	if e.Grade != "D" {
+		t.Fatalf("0.60 calib-err should grade D, got %s", e.Grade)
+	}
+}
+
+func TestScoreDirectionFlipsVerdictNotMagnitude(t *testing.T) {
+	// Bug #1: the same claim and realized value, scored once higher-is-better and
+	// once lower-is-better, must produce OPPOSITE verdicts but the SAME calibration
+	// error — LowerIsBetter is the only lever that moves the verdict and it does
+	// not touch the magnitude. claim 0.20, realized 0.50: residual +0.30.
+	hi := Score("s", predDir("m", 0.20, false), obs(0.50, true), DefaultCalibBand())
+	lo := Score("s", predDir("m", 0.20, true), obs(0.50, true), DefaultCalibBand())
+	if hi.Verdict != VerdictUnderClaim {
+		t.Fatalf("higher-is-better realized above claim should be UNDER_CLAIM, got %s", hi.Verdict)
+	}
+	if lo.Verdict != VerdictOverClaim {
+		t.Fatalf("lower-is-better realized above claim should be OVER_CLAIM, got %s", lo.Verdict)
+	}
+	if math.Abs(hi.CalibErr-lo.CalibErr) > 1e-9 {
+		t.Fatalf("direction must not change the magnitude: hi %.6f vs lo %.6f", hi.CalibErr, lo.CalibErr)
+	}
+}
+
+func TestCalibErrZeroClaimUsesAbsoluteResidual(t *testing.T) {
+	// Bug #2: a claim of "nothing" must score the ABSOLUTE residual, not a
+	// magnitude-blind 1.0. Two zero-claim metrics whose realities differ must score
+	// DIFFERENTLY (the old divide-by-realized form gave 1.0 for both). realized > 0
+	// above the calibration band so reality clearly exceeds a zero claim ->
+	// UNDER_CLAIM; calib_err is the absolute residual (== realized here).
+	for _, realized := range []float64{0.30, 0.68, 0.99} {
+		e := Score("s", pred("zero_claim", 0.0), obs(realized, true), DefaultCalibBand())
+		if e.CalibErr < realized-1e-9 || e.CalibErr > realized+1e-9 {
+			t.Fatalf("claim 0.0 realized %.2f: calib_err should be the absolute residual %.4f, got %.4f",
+				realized, realized, e.CalibErr)
+		}
+		if e.Verdict != VerdictUnderClaim {
+			t.Fatalf("claim 0.0 realized %.2f exceeds the claim, want UNDER_CLAIM, got %s", realized, e.Verdict)
+		}
+	}
+}
+
+func TestCalibErrZeroClaimNotConstantOne(t *testing.T) {
+	// Bug #2 core defect: the old form scored EVERY zero-claim metric exactly 1.0.
+	lo := Score("s", pred("z", 0.0), obs(0.10, true), DefaultCalibBand())
+	hi := Score("s", pred("z", 0.0), obs(0.90, true), DefaultCalibBand())
+	if lo.CalibErr == hi.CalibErr {
+		t.Fatalf("zero-claim calib_err must track realized magnitude, got identical %.4f for 0.10 and 0.90", lo.CalibErr)
+	}
+	if lo.CalibErr >= hi.CalibErr {
+		t.Fatalf("a larger zero-claim miss must score worse: 0.10->%.4f should be < 0.90->%.4f", lo.CalibErr, hi.CalibErr)
+	}
+}
+
+func TestCalibErrExactZeroNotBetterThanNearZero(t *testing.T) {
+	// Bug #2: the backwards discontinuity the fix removes — previously claim==0
+	// scored 1.0 while a refuted near-zero claim took the ratio path and capped at
+	// 2.0, so the EXACT-zero claim scored BETTER than the near-zero one. Exact-zero
+	// must now be the smallest (best) score in its neighborhood, never the largest.
+	exact := calibErr(0.0, 0.30)
+	near := calibErr(1e-8, 0.30) // just above zeroClaimEps -> ratio path, refuted, caps
+	if exact > near {
+		t.Fatalf("exact-zero (%.4f) must not score worse than a refuted near-zero claim (%.4f)", exact, near)
+	}
+}
+
+func TestCalibErrZeroNeighborhoodContinuous(t *testing.T) {
+	// Bug #2: across claimed==0 and the sub-zeroClaimEps neighborhood the error is
+	// the absolute residual, flat in claimed and continuous across zero (no jump
+	// from the old divide-by-realized step at exactly claimed==0).
+	base := calibErr(0.0, 0.30)
+	for _, c := range []float64{1e-12, 1e-10, zeroClaimEps} {
+		got := calibErr(c, 0.30)
+		if math.Abs(got-base) > 1e-6 {
+			t.Fatalf("zero-neighborhood not continuous: claim %.0e gave %.6f, claim 0 gave %.6f", c, got, base)
+		}
+	}
+}
+
+func TestCalibErrZeroClaimStillCaps(t *testing.T) {
+	// Bug #2: a zero claim refuted by an out-of-[0,1] reality still caps at
+	// MaxCalibErr (the absolute residual is bounded by the same cap as the ratio).
+	if e := calibErr(0.0, 100.0); e != MaxCalibErr {
+		t.Fatalf("zero claim vs realized 100.0 should cap at %.1f, got %.4f", MaxCalibErr, e)
 	}
 }
