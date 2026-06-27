@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -99,6 +100,7 @@ func cmdServe(argv []string) {
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). DEFAULT-ON: once a conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). No effect on non-passthrough wires.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "OFF by default: shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables. The documented candidate is gateway.DocumentedElideResultBytes; flip only after reading the tradeoff witness.")
 	sessionID := fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
+	sessionStatePath := fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
@@ -225,6 +227,18 @@ func cmdServe(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak serve: --reset-on-budget requires --context-budget-tokens N")
 		os.Exit(2)
 	}
+	// COLD resume (#629): re-attach the persisted drive state of every session BEFORE the
+	// per-boot default-budget seed, so a restart resumes each session at the budget/
+	// priority/run-state/pace it held — not its defaults — while an explicit
+	// --context-budget-tokens on THIS boot still re-seeds the default trace. A STOPPED
+	// session reloads STOPPED with its reason (session.Table.Restore), never silently
+	// resurrected as RUNNING. A missing file is a clean first boot; a present-but-corrupt
+	// file fails loud (a tampered drive record is worse than none).
+	if err := restoreServeSessions(serveSessions, *sessionStatePath); err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(1)
+	}
+
 	defaultTraceID := strings.TrimSpace(*sessionID)
 	if *contextBudgetTokens > 0 {
 		if defaultTraceID == "" {
@@ -358,6 +372,7 @@ func cmdServe(argv []string) {
 		if err := srv.ServeStdio(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 			must(err)
 		}
+		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 		return
 	}
 	if *addr == "" {
@@ -367,6 +382,65 @@ func cmdServe(argv []string) {
 	if err := srv.ListenAndServe(ctx, *addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		must(err)
 	}
+	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
+}
+
+// restoreServeSessions re-attaches the persisted DRIVE state of every session (the COLD
+// resume of #629) from a fleet-snapshot file a prior `fak serve` wrote on shutdown. It is
+// the load-time inverse of dumpServeSessions: each session re-attaches at the budget /
+// priority / run-state / pace it held — a STOPPED session reloads STOPPED with its reason
+// (session.Table.Restore is the one write that re-establishes a terminal record), never
+// silently resurrected as RUNNING. An empty path is off (no-op). A missing file is a clean
+// first boot (not an error). A PRESENT-but-corrupt file fails loud — a tampered/truncated
+// drive record is worse than none, the same fail-closed posture the policy/route loaders
+// take, and the snapshot envelope's own sha256 body digest is what catches the tamper. This
+// is the process-restart half the design note SESSION-CONTROL-STATE-AS-FIRST-CLASS §5
+// named; it is DISTINCT from the live Paused→Running resume the control verbs already do.
+func restoreServeSessions(tbl *session.Table, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	snap, err := snapshot.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // first boot — nothing persisted yet
+		}
+		return fmt.Errorf("--session-state %s: %w", path, err)
+	}
+	n, err := snap.RestoreFleet(tbl)
+	if err != nil {
+		return fmt.Errorf("--session-state %s: %w", path, err)
+	}
+	if n > 0 {
+		fmt.Printf("fak: cold resume (#629) — re-attached %d session(s) drive state from %s\n", n, path)
+	}
+	return nil
+}
+
+// dumpServeSessions writes the live DRIVE table to path as an integrity-checked fleet
+// snapshot so the NEXT `fak serve` cold-resumes it (#629). An empty path is off (no-op).
+// Best-effort on a clean shutdown: a write failure is logged, never fatal — a failed dump
+// must not turn a graceful stop into a crash (worst case the next boot starts at defaults,
+// exactly today's behavior). A hard kill skips the dump; the last clean shutdown's file
+// stands. An empty table writes an empty (still valid) snapshot.
+func dumpServeSessions(tbl *session.Table, path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	snap, err := snapshot.DumpFleet("serve", tbl, 0)
+	if err == nil {
+		var b []byte
+		if b, err = snap.Encode(); err == nil {
+			err = os.WriteFile(path, b, 0o644)
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak: persist session state to %s failed: %v\n", path, err)
+		return
+	}
+	fmt.Printf("fak: persisted live session drive state → %s (#629)\n", path)
 }
 
 // toGatewayLoadProfile mirrors a ggufload.LoadProfile into the gateway's import-
