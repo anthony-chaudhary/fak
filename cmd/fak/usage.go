@@ -327,6 +327,13 @@ func usageScorecardVerbs() {
                  -- hard debt > 0, index drop, or a NEW drift signal -- with action buttons
                  pointing each drift at the skill that retires it; pin re-baselines the floor.
                  Posts via FAK_SCOREBOARD_TOKEN, never the lab SLACK_BOT_TOKEN)
+  fak product   post [--status | --persona | --from FILE | --title T --notes BODY]
+                [--notes-file FILE] [--channel ID] [--source WHO] [--dry-run]
+                (the PRODUCT-direction Slack surface for #product: --status folds the
+                 product scorecard, --persona folds persona-readiness, --title/--notes
+                 posts free-form product prose (persona items, direction calls). Same
+                 workspace as #scoreboard but resolves FAK_PRODUCT_CHANNEL -- never falls
+                 back to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN, not the lab token)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
                 (the CONSOLIDATED regular-cadence report: folds the three dimensions
                  an operator tracks  -  SCORES (scorecard control pane), WORK-DONE
