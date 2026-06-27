@@ -202,10 +202,10 @@ var registry = []Bench{
 		Doc:     "",
 	},
 	{
-		Name: "radixbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
+		Name: "radixbench", Kind: KindCmd, Need: NeedNone, Level: LevelSmoke,
 		Summary: "fak's KV-cache prefix reuse vs SGLang's RadixAttention regime  -  prefix-cache hit value.",
-		Run:     "go run ./cmd/radixbench -synthetic smollm2-135m",
-		Flags:   []string{"-synthetic  -  weightless synthetic shape (ratios faithful)", "-hf/-dir  -  live arm", "-quant/-lean  -  Q8_0"},
+		Run:     "go run ./cmd/radixbench",
+		Flags:   []string{"(default)  -  weightless synthetic shape (ratios faithful, runs anywhere)", "-hf/-dir  -  live weight-backed arm", "-quant/-lean  -  Q8_0"},
 		Doc:     "docs/explainers/fleet-benchmarks.md",
 	},
 	{
