@@ -167,13 +167,21 @@ Example request:
 {"jsonrpc":"2.0","id":"info","method":"agent.info","params":{}}
 ```
 
-Example remote transport:
+Example remote transport (Windows):
 
 ```powershell
 @'
 {"jsonrpc":"2.0","id":"status","method":"laptop.status","params":{"cpu_only":true}}
 '@ | tailscale ssh anthony@<laptop-tailnet-name> `
   "cd C:\path\to\fleet-laptop-proof; py -3 tools\fleet_agent_link.py serve-once"
+```
+
+Linux/macOS equivalent:
+
+```bash
+echo '{"jsonrpc":"2.0","id":"status","method":"laptop.status","params":{"cpu_only":true}}' | \
+  tailscale ssh anthony@<laptop-tailnet-name> \
+  "cd /path/to/fleet-laptop-proof && python3 tools/fleet_agent_link.py serve-once"
 ```
 
 Tradeoff: stdio JSON-RPC does not provide discovery, streaming, auth policy, or
@@ -185,7 +193,7 @@ the endpoint, the endpoint handles one request, and the process exits. That is
 slower than a daemon but easier to trust, easier to update with `git fetch`, and
 less likely to leave stale privileged code running on a personal machine.
 
-Implemented helper commands:
+Implemented helper commands (Windows):
 
 ```powershell
 py -3 tools\fleet_agent_link.py request agent.info
@@ -198,11 +206,31 @@ py -3 tools\fleet_agent_link.py a2a-card `
   --scope read
 ```
 
-Local laptop status call:
+Linux/macOS equivalent:
+
+```bash
+python3 tools/fleet_agent_link.py request agent.info
+python3 tools/fleet_agent_link.py call-local agent.ping
+python3 tools/fleet_agent_link.py remote-command \
+  --cwd /path/to/fleet-laptop-proof \
+  --shell bash
+python3 tools/fleet_agent_link.py a2a-card \
+  --url https://fleet.example.com/a2a \
+  --scope read
+```
+
+Local laptop status call (Windows):
 
 ```powershell
 py -3 tools\fleet_agent_link.py request laptop.status --params '{"cpu_only":true}' |
   py -3 tools\fleet_agent_link.py serve-once
+```
+
+Linux/macOS equivalent:
+
+```bash
+python3 tools/fleet_agent_link.py request laptop.status --params '{"cpu_only":true}' | \
+  python3 tools/fleet_agent_link.py serve-once
 ```
 
 ## Layer 3: A2A Edge Adapter
