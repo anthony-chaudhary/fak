@@ -129,11 +129,11 @@ func TestFoldUnmeasuredGates(t *testing.T) {
 
 func TestParseLedgerTolerant(t *testing.T) {
 	content := strings.Join([]string{
-		`{"schema":"fak-cadence-ledger/1","date":"2026-06-20","commit":"a","scores_debt":44,"work_ships":10}`,
+		`{"schema":"fak-cadence-ledger/1","date":"2026-06-20","commit":"a","scores_debt":44,"work_commits":20,"work_ships":10}`,
 		``,
 		`not json at all`,
 		`{"date":"","commit":"skipme"}`,
-		`{"schema":"fak-cadence-ledger/1","date":"2026-06-26","commit":"b","scores_debt":40,"work_ships":18}`,
+		`{"schema":"fak-cadence-ledger/1","date":"2026-06-26","commit":"b","scores_debt":40,"work_commits":25,"work_ships":18}`,
 	}, "\n")
 	rows := ParseLedger(content)
 	if len(rows) != 2 {
@@ -146,10 +146,10 @@ func TestParseLedgerTolerant(t *testing.T) {
 
 func TestTrendVsLast(t *testing.T) {
 	prior := []LedgerRow{
-		{Date: "2026-06-20", Commit: "a", ScoresDebt: 44, GeneratedAt: "2026-06-20T00:00:00Z"},
-		{Date: "2026-06-23", Commit: "b", ScoresDebt: 42, GeneratedAt: "2026-06-23T00:00:00Z"},
+		{Date: "2026-06-20", Commit: "a", ScoresDebt: 44, WorkCommits: 20, WorkShips: 15, GeneratedAt: "2026-06-20T00:00:00Z"},
+		{Date: "2026-06-23", Commit: "b", ScoresDebt: 42, WorkCommits: 22, WorkShips: 16, GeneratedAt: "2026-06-23T00:00:00Z"},
 	}
-	row := LedgerRow{Date: "2026-06-26", Commit: "c", ScoresDebt: 40, WorkShips: 18, WorkWindowDays: 7, GeneratedAt: "2026-06-26T00:00:00Z"}
+	row := LedgerRow{Date: "2026-06-26", Commit: "c", ScoresDebt: 40, WorkCommits: 25, WorkShips: 18, WorkWindowDays: 7, GeneratedAt: "2026-06-26T00:00:00Z"}
 	tr := TrendVsLast(row, prior)
 	if tr.Direction != "improved" || tr.DebtDelta != -2 || tr.DebtFrom != 42 || tr.DebtTo != 40 {
 		t.Fatalf("improved trend = %+v", tr)
@@ -157,18 +157,21 @@ func TestTrendVsLast(t *testing.T) {
 	if tr.PrevDate != "2026-06-23" {
 		t.Fatalf("trend should compare vs the latest prior row, got prev %q", tr.PrevDate)
 	}
+	if tr.WorkCommitsDelta != 3 || tr.WorkShipsDelta != 2 {
+		t.Fatalf("work deltas wrong: commits %+d, ships %+d", tr.WorkCommitsDelta, tr.WorkShipsDelta)
+	}
 
 	first := TrendVsLast(row, nil)
 	if first.Direction != "new" || !strings.Contains(first.Summary, "first cadence tick") {
 		t.Fatalf("first tick = %+v", first)
 	}
 
-	worse := TrendVsLast(LedgerRow{Date: "2026-06-27", ScoresDebt: 50, GeneratedAt: "2026-06-27T00:00:00Z"}, prior)
+	worse := TrendVsLast(LedgerRow{Date: "2026-06-27", ScoresDebt: 50, WorkCommits: 18, WorkShips: 12, GeneratedAt: "2026-06-27T00:00:00Z"}, prior)
 	if worse.Direction != "regressed" || worse.DebtDelta != 8 {
 		t.Fatalf("regressed trend = %+v", worse)
 	}
 
-	flat := TrendVsLast(LedgerRow{Date: "2026-06-27", ScoresDebt: 42, GeneratedAt: "2026-06-27T00:00:00Z"}, prior)
+	flat := TrendVsLast(LedgerRow{Date: "2026-06-27", ScoresDebt: 42, WorkCommits: 22, WorkShips: 16, GeneratedAt: "2026-06-27T00:00:00Z"}, prior)
 	if flat.Direction != "flat" {
 		t.Fatalf("flat trend = %+v", flat)
 	}
@@ -177,10 +180,10 @@ func TestTrendVsLast(t *testing.T) {
 func TestTrendExcludesSameGeneratedAt(t *testing.T) {
 	// An idempotent re-append (same generated_at) must not trend against itself.
 	prior := []LedgerRow{
-		{Date: "2026-06-20", ScoresDebt: 44, GeneratedAt: "2026-06-20T00:00:00Z"},
-		{Date: "2026-06-26", ScoresDebt: 40, GeneratedAt: "2026-06-26T12:00:00Z"},
+		{Date: "2026-06-20", ScoresDebt: 44, WorkCommits: 20, WorkShips: 15, GeneratedAt: "2026-06-20T00:00:00Z"},
+		{Date: "2026-06-26", ScoresDebt: 40, WorkCommits: 25, WorkShips: 18, GeneratedAt: "2026-06-26T12:00:00Z"},
 	}
-	row := LedgerRow{Date: "2026-06-26", ScoresDebt: 40, GeneratedAt: "2026-06-26T12:00:00Z"}
+	row := LedgerRow{Date: "2026-06-26", ScoresDebt: 40, WorkCommits: 25, WorkShips: 18, GeneratedAt: "2026-06-26T12:00:00Z"}
 	tr := TrendVsLast(row, prior)
 	if tr.PrevDate != "2026-06-20" {
 		t.Fatalf("same generated_at row should be excluded, got prev %q", tr.PrevDate)

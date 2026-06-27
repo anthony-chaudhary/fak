@@ -65,6 +65,12 @@ type Trend struct {
 	DebtFrom   int    `json:"debt_from"`
 	DebtTo     int    `json:"debt_to"`
 	DebtDelta  int    `json:"debt_delta"`
+	WorkCommitsFrom int    `json:"work_commits_from"`
+	WorkCommitsTo   int    `json:"work_commits_to"`
+	WorkCommitsDelta int    `json:"work_commits_delta"`
+	WorkShipsFrom  int    `json:"work_ships_from"`
+	WorkShipsTo    int    `json:"work_ships_to"`
+	WorkShipsDelta int    `json:"work_ships_delta"`
 	ShipsSince int    `json:"ships_since"`
 	Summary    string `json:"summary"`
 }
@@ -285,14 +291,19 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		return Trend{
 			Direction: "new",
 			DebtTo:    row.ScoresDebt,
+			WorkCommitsTo: row.WorkCommits,
+			WorkShipsTo: row.WorkShips,
+			ShipsSince: row.WorkShips,
 			Summary:   fmt.Sprintf("first cadence tick (debt %d, %d ship(s) in %dd)", row.ScoresDebt, row.WorkShips, row.WorkWindowDays),
 		}
 	}
-	delta := row.ScoresDebt - last.ScoresDebt
+	debtDelta := row.ScoresDebt - last.ScoresDebt
+	workCommitsDelta := row.WorkCommits - last.WorkCommits
+	workShipsDelta := row.WorkShips - last.WorkShips
 	dir := "flat"
-	if delta < 0 {
+	if debtDelta < 0 {
 		dir = "improved"
-	} else if delta > 0 {
+	} else if debtDelta > 0 {
 		dir = "regressed"
 	}
 	return Trend{
@@ -301,11 +312,40 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		Direction:  dir,
 		DebtFrom:   last.ScoresDebt,
 		DebtTo:     row.ScoresDebt,
-		DebtDelta:  delta,
+		DebtDelta:  debtDelta,
+		WorkCommitsFrom: last.WorkCommits,
+		WorkCommitsTo:   row.WorkCommits,
+		WorkCommitsDelta: workCommitsDelta,
+		WorkShipsFrom:  last.WorkShips,
+		WorkShipsTo:    row.WorkShips,
+		WorkShipsDelta: workShipsDelta,
 		ShipsSince: row.WorkShips,
-		Summary: fmt.Sprintf("debt %s %+d (%d->%d) vs %s; %d ship(s) in the last %dd",
-			dir, delta, last.ScoresDebt, row.ScoresDebt, last.Date, row.WorkShips, row.WorkWindowDays),
+		Summary: fmt.Sprintf("debt %s %+d (%d->%d); work %s %+d commit(s) (%d->%d), %s %+d ship(s) (%d->%d) vs %s; %d ship(s) in the last %dd",
+			dir, debtDelta, last.ScoresDebt, row.ScoresDebt,
+			commitsDirection(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,
+			shipsDirection(workShipsDelta), workShipsDelta, last.WorkShips, row.WorkShips,
+			last.Date, row.WorkShips, row.WorkWindowDays),
 	}
+}
+
+func commitsDirection(delta int) string {
+	if delta > 0 {
+		return "up"
+	}
+	if delta < 0 {
+		return "down"
+	}
+	return "flat"
+}
+
+func shipsDirection(delta int) string {
+	if delta > 0 {
+		return "up"
+	}
+	if delta < 0 {
+		return "down"
+	}
+	return "flat"
 }
 
 // latestBefore returns the most recent prior row, comparing by (date, then
