@@ -37,6 +37,7 @@ honest survey (full table and sourcing in [model routing](../model-routing.md#wh
 | LiteLLM Router | deployment | load-balance/failover of one model | complement: connectivity/HA; fak routes *which model*, per aspect — see [litellm.md](litellm.md) |
 | Unify / Martian / NotDiamond | request | none | complement: learned per-request pick; fak routes sub-request aspects + runs ensembles |
 | Vercel AI Gateway | request | none | complement: one key, many providers; fak governs + routes above it |
+| **AgentGateway** (Linux Foundation) | **connectivity** (LLM, MCP, A2A) | **guardrails** (regex, moderation, webhooks) | **connectivity peer**: AgentGateway is the head-on connectivity competitor (MCP+A2A+LLM data plane). fak does not out-connect it; it adds the in-kernel capability floor + bit-exact KV cache they leave open. They focus on multi-protocol transport and rich observability; fak focuses on adjudication at the tool-call boundary and per-aspect ensemble routing. Compose fak behind AgentGateway for governed LLM/MCP/A2A connectivity, or front AgentGateway for multi-backend HA behind fak's floor. |
 
 The claim fak makes is **categorical, not a benchmark**: to our knowledge it is the only
 design that routes at *any aspect of a single request*, each to a different model, with

@@ -24,8 +24,8 @@ var, constructor arg, or config field. A **Partial** or **No** means the repoint
 templated, indirect, or undocumented — the [caveats](#caveats-worth-knowing) below say
 exactly how.
 
-> Surveyed 2026-06-23 across 44 targets (11 harnesses, 14 frameworks, 12 backends, 7
-> protocols). Each row carries a source link; 37 of 44 are high-confidence, the rest
+> Surveyed 2026-06-27 across 45 targets (11 harnesses, 14 frameworks, 13 backends, 7
+> protocols). Each row carries a source link; 38 of 45 are high-confidence, the rest
 > flagged in the caveats. Wires and config keys drift — when a row looks stale, the source
 > link is the ground truth, not this table.
 
@@ -45,7 +45,7 @@ Interactive coding agents and CLIs. Almost all let you set a base URL, so the ga
 | [Goose (Block)](https://github.com/block/goose/blob/main/documentation/docs/getting-started/providers.md) | OpenAI Chat Completions and Anthropic Messages (plus Bedrock/Vertex/OpenRouter/Databricks/Ollama/LiteLLM); pluggable provider layer | Yes | OPENAI_HOST (OpenAI-compatible host; default https://api.openai.com), OPENAI_BASE_PATH (default v1/chat/completions), ANTHROPIC_HOST for Anthropic-compatible; or a custom provider in ~/.config/goose/config.yaml / custom_providers with base_url |
 | [Zed editor (AI/agentic)](https://zed.dev/docs/ai/use-api-access) | OpenAI Chat Completions (native + openai_compatible) and Anthropic Messages (native providers) | Yes | settings.json: language_models.openai_compatible.<ProviderName>.api_url (with available_models[]); API key via <PROVIDER_ID>_API_KEY env (upper snake case) |
 | [Windsurf (Codeium / Devin Desktop)](https://docs.devin.ai/desktop/chat/models) | native/proprietary (requests routed through Codeium/Cognition backend to OpenAI and Anthropic flagship models) | No | — |
-| [Gemini CLI (Google)](https://github.com/google-gemini/gemini-cli/pull/2899) | Gemini (native Generative Language API via google/genai SDK) | Partial | GOOGLE_GEMINI_BASE_URL env var (consumed by the underlying google/genai SDK) |
+| [Gemini CLI (Google)](https://github.com/google-gemini/gemini-cli) | Gemini (native Generative Language API via google/genai SDK) | Partial | GOOGLE_GEMINI_BASE_URL env var (consumed by the underlying google/genai SDK); official docs do not document this var, and it has known sandbox-propagation bugs (issue #2168) |
 | [OpenHands (formerly OpenDevin)](https://docs.openhands.dev/openhands/usage/llms/llms) | Whatever LiteLLM normalizes to (OpenAI Chat Completions, Anthropic Messages, etc.); LiteLLM is the abstraction layer | Yes | config.toml [llm] base_url (with optional custom_llm_provider, model, api_key); env-var overrides LLM_BASE_URL / LLM_MODEL / LLM_API_KEY (via openhands --override-with-envs), or the Advanced > Base URL field in the UI |
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/) | OpenAI Chat Completions (official OpenAI Node.js SDK; endpoint must accept OpenAI-format requests) | Yes | OPENAI_BASE_URL env var (with OPENAI_API_KEY, OPENAI_MODEL); or ~/.qwen/settings.json modelProviders.openai[].baseUrl; or CLI --openai-base-url / --openaiBaseUrl |
 
@@ -88,6 +88,7 @@ What actually serves the tokens. `fak serve --base-url <here>` puts the gate in 
 | [Together AI](https://docs.together.ai/docs/openai-api-compatibility) | OpenAI Chat Completions / Completions / Embeddings / Images | Yes | OpenAI SDK base_url='https://api.together.xyz/v1' (also documented as https://api.together.ai/v1) + Together API key. From fak: --base-url https://api.together.xyz/v1 |
 | [Groq](https://console.groq.com/docs/openai) | OpenAI Chat Completions (plus a Responses API) | Yes | OpenAI SDK base_url='https://api.groq.com/openai/v1' + GROQ_API_KEY. From fak: --base-url https://api.groq.com/openai/v1 |
 | [Fireworks AI](https://docs.fireworks.ai/tools-sdks/openai-compatibility) | OpenAI Chat Completions / Completions (plus an OpenAI Responses API beta) | Yes | OpenAI SDK base_url='https://api.fireworks.ai/inference/v1' + Fireworks API key. From fak: --base-url https://api.fireworks.ai/inference/v1 |
+| [AgentGateway](https://github.com/agentgateway/agentgateway) | OpenAI Chat Completions (unified LLM gateway), MCP, A2A (Linux Foundation project) | Yes | OpenAI SDK base_url='https://<agentgateway-host>:<port>/v1' or via AgentGateway's OpenAI-compatible endpoint; also serves MCP and A2A protocols. A Linux Foundation project (donated 2026) providing connectivity for agent-to-LLM, agent-to-tool, and agent-to-agent communication. |
 
 ### Wire & interop protocols
 
@@ -96,12 +97,12 @@ The wires themselves. Three are runtime boundaries a gateway can sit on (MCP-ove
 | Target | Speaks | Custom base URL | How you repoint it |
 |---|---|---|---|
 | [MCP (Model Context Protocol)](https://modelcontextprotocol.io/specification/2025-11-25) | JSON-RPC 2.0 over stdio or Streamable HTTP (HTTP POST + SSE) | Yes | Client config points at a server URL/command (e.g. mcpServers entry with a "url" for HTTP transport, or "command"/"args" for stdio, in the host's config such as claude_desktop_config.json / .mcp.json) |
-| [A2A (Agent2Agent)](https://a2a-protocol.org/latest/specification/) | JSON-RPC 2.0, gRPC, or HTTP+JSON/REST; SSE for streaming | Yes | AgentCard JSON exposes the agent's service endpoint in its "url" field; clients discover/address an agent by that URL (typically published at /.well-known/agent-card.json) |
+| [A2A (Agent2Agent)](https://a2a-protocol.org/latest/) | JSON-RPC 2.0, gRPC, or HTTP+JSON/REST; SSE for streaming | Yes | AgentCard JSON exposes the agent's service endpoint in its "url" field; clients discover/address an agent by that URL (typically published at /.well-known/agent-card.json). v1.0 production standard under Linux Foundation (April 2026) |
 | [AG-UI (Agent-User Interaction Protocol)](https://docs.ag-ui.com/concepts/architecture) | Transport-agnostic; default is HTTP POST + Server-Sent Events (also WebSocket, webhook, binary variant) | Yes | Frontend client (e.g. HttpAgent) is constructed with a target agent endpoint URL; it POSTs RunAgentInput and consumes a stream of typed BaseEvents |
 | [ACP (Agent Communication Protocol / BeeAI)](https://agentcommunicationprotocol.dev/introduction/welcome) | REST over HTTP (explicitly not JSON-RPC); streaming + await/resume sessions | Yes | REST endpoints; an ACP server hosts one or more agents behind a single HTTP base URL and routes by agent name (OpenAPI-described, e.g. /agents, /runs) |
 | [ANP (Agent Network Protocol)](https://agentnetworkprotocol.com/en/specs/07-anp-agent-description-protocol-specification/) | JSON-LD messages over HTTP(S); W3C DID (did:wba) for identity | Yes | Each agent is identified by a DID whose document is hosted at an HTTPS URL; the JSON-LD Agent Description document lists service endpoints |
 | [llms.txt](https://llmstxt.org/) | none (static Markdown file served over HTTP at a fixed path) | No | — |
-| [OpenAI Responses API](https://github.com/openai/openai-python) | HTTP+JSON at POST /v1/responses; SSE for streaming (typed response.* events) | Yes | OpenAI SDK base_url client parameter, or the OPENAI_BASE_URL environment variable (default https://api.openai.com/v1); a gateway exposes an OpenAI-compatible /v1/responses and clients repoint here |
+| [OpenAI Responses API](https://github.com/openai/openai-python) | HTTP+JSON at POST /v1/responses; SSE for streaming (typed response.* events) | Yes | OpenAI SDK base_url client parameter, or the OPENAI_BASE_URL environment variable (default https://api.openai.com/v1); Responses API is now the primary OpenAI Python API (June 2026). A gateway exposes an OpenAI-compatible /v1/responses and clients repoint here. |
 
 ### Caveats worth knowing
 
@@ -121,7 +122,7 @@ Where a row says **Partial** or **No**, or the repoint has a sharp edge, here's 
 
 ## Summary
 
-Of the 44 targets, **38 expose a custom base URL outright** and 4 more do so partially —
+Of the 45 targets, **39 expose a custom base URL outright** and 4 more do so partially —
 because the OpenAI-compatible wire has become the field's lingua franca, and `fak serve`
 speaks it. The handful that don't (`llms.txt` is a static file; Windsurf routes through a
 closed backend) aren't runtime boundaries a gateway can sit on in the first place.
