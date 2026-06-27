@@ -685,7 +685,7 @@ func denied(patch Patch, rev, reason string, policy Policy) PatchResult {
 	}
 }
 
-func quarantinedArtifact(patch Patch, artifact ArtifactRef, reason string, policy Policy) PatchResult {
+func quarantinedResult(patch Patch, reason string, q *Quarantine) PatchResult {
 	return PatchResult{
 		Schema:     SchemaPatchResult,
 		TaskID:     patch.TaskID,
@@ -693,48 +693,36 @@ func quarantinedArtifact(patch Patch, artifact ArtifactRef, reason string, polic
 		CurrentRev: patch.BaseRev,
 		Verdict:    VerdictQuarantined,
 		Reason:     reason,
-		Quarantine: &Quarantine{
-			QuarantineID: "q_" + artifact.ArtifactID,
-			ArtifactID:   artifact.ArtifactID,
-			SubjectKind:  "artifact",
-			SubjectID:    artifact.ArtifactID,
-			SafeSummary:  policy.QuarantineSummary,
-		},
+		Quarantine: q,
 	}
+}
+
+func quarantinedArtifact(patch Patch, artifact ArtifactRef, reason string, policy Policy) PatchResult {
+	return quarantinedResult(patch, reason, &Quarantine{
+		QuarantineID: "q_" + artifact.ArtifactID,
+		ArtifactID:   artifact.ArtifactID,
+		SubjectKind:  "artifact",
+		SubjectID:    artifact.ArtifactID,
+		SafeSummary:  policy.QuarantineSummary,
+	})
 }
 
 func quarantinedNote(patch Patch, note Note, reason string, policy Policy) PatchResult {
-	return PatchResult{
-		Schema:     SchemaPatchResult,
-		TaskID:     patch.TaskID,
-		BaseRev:    patch.BaseRev,
-		CurrentRev: patch.BaseRev,
-		Verdict:    VerdictQuarantined,
-		Reason:     reason,
-		Quarantine: &Quarantine{
-			QuarantineID: "q_" + note.NoteID,
-			SubjectKind:  "note",
-			SubjectID:    note.NoteID,
-			SafeSummary:  policy.QuarantineSummary,
-		},
-	}
+	return quarantinedResult(patch, reason, &Quarantine{
+		QuarantineID: "q_" + note.NoteID,
+		SubjectKind:  "note",
+		SubjectID:    note.NoteID,
+		SafeSummary:  policy.QuarantineSummary,
+	})
 }
 
 func quarantinedBody(patch Patch, reason string, policy Policy) PatchResult {
-	return PatchResult{
-		Schema:     SchemaPatchResult,
-		TaskID:     patch.TaskID,
-		BaseRev:    patch.BaseRev,
-		CurrentRev: patch.BaseRev,
-		Verdict:    VerdictQuarantined,
-		Reason:     reason,
-		Quarantine: &Quarantine{
-			QuarantineID: "q_body_ref",
-			SubjectKind:  "body",
-			SubjectID:    "body_ref",
-			SafeSummary:  policy.QuarantineSummary,
-		},
-	}
+	return quarantinedResult(patch, reason, &Quarantine{
+		QuarantineID: "q_body_ref",
+		SubjectKind:  "body",
+		SubjectID:    "body_ref",
+		SafeSummary:  policy.QuarantineSummary,
+	})
 }
 
 func resultForUnsupported(patch Patch, currentRev string) PatchResult {

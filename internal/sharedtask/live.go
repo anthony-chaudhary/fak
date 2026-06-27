@@ -37,31 +37,36 @@ func EventRef(event Event) (abi.Ref, error) {
 	return a2achan.Inline(body, abiScope(event.Scope), abiTaint(event.Taint)), nil
 }
 
-func PublishEvent(ctx context.Context, bus *a2achan.Bus, from string, event Event, caps ...abi.Capability) (abi.Verdict, int, error) {
+// preparePublish resolves the default bus and builds the event ref shared by
+// the publish entrypoints. ok is false when the caller should return early with
+// the supplied verdict/err (event not accepted, or marshal failure).
+func preparePublish(bus *a2achan.Bus, event Event) (resolved *a2achan.Bus, ref abi.Ref, verdict abi.Verdict, err error, ok bool) {
 	if bus == nil {
 		bus = a2achan.Default
 	}
 	if event.Verdict != VerdictAccepted {
-		return abi.Verdict{Kind: abi.VerdictDefer, By: "sharedtask/live"}, 0, nil
+		return bus, abi.Ref{}, abi.Verdict{Kind: abi.VerdictDefer, By: "sharedtask/live"}, nil, false
 	}
-	ref, err := EventRef(event)
+	ref, err = EventRef(event)
 	if err != nil {
-		return abi.Verdict{}, 0, err
+		return bus, abi.Ref{}, abi.Verdict{}, err, false
+	}
+	return bus, ref, abi.Verdict{}, nil, true
+}
+
+func PublishEvent(ctx context.Context, bus *a2achan.Bus, from string, event Event, caps ...abi.Capability) (abi.Verdict, int, error) {
+	bus, ref, verdict, err, ok := preparePublish(bus, event)
+	if !ok {
+		return verdict, 0, err
 	}
 	verdict, n := bus.Publish(ctx, from, EventTopic(event.TaskID), ref, caps...)
 	return verdict, n, nil
 }
 
 func PublishEventScoped(ctx context.Context, bus *a2achan.Bus, from string, event Event, caps ...abi.Capability) (abi.Verdict, int, error) {
-	if bus == nil {
-		bus = a2achan.Default
-	}
-	if event.Verdict != VerdictAccepted {
-		return abi.Verdict{Kind: abi.VerdictDefer, By: "sharedtask/live"}, 0, nil
-	}
-	ref, err := EventRef(event)
-	if err != nil {
-		return abi.Verdict{}, 0, err
+	bus, ref, earlyVerdict, err, ok := preparePublish(bus, event)
+	if !ok {
+		return earlyVerdict, 0, err
 	}
 	topics := scopedEventTopics(event.TaskID, event.Scope)
 	if len(topics) == 0 {
@@ -81,7 +86,9 @@ func PublishEventScoped(ctx context.Context, bus *a2achan.Bus, from string, even
 	return last, total, nil
 }
 
-func (s *Store) ApplyAndPublish(ctx context.Context, bus *a2achan.Bus, from string, patch Patch, caps ...abi.Capability) (PatchResult, abi.Verdict, int, error) {
+type eventPublisher func(ctx context.Context, bus *a2achan.Bus, from string, event Event, caps ...abi.Capability) (abi.Verdict, int, error)
+
+func (s *Store) applyAndPublish(ctx context.Context, bus *a2achan.Bus, from string, patch Patch, publish eventPublisher, caps ...abi.Capability) (PatchResult, abi.Verdict, int, error) {
 	result := s.Apply(patch)
 	if result.Verdict != VerdictAccepted {
 		return result, abi.Verdict{Kind: abi.VerdictDefer, By: "sharedtask/live"}, 0, nil
@@ -90,50 +97,38 @@ func (s *Store) ApplyAndPublish(ctx context.Context, bus *a2achan.Bus, from stri
 	if !ok {
 		return result, abi.Verdict{}, 0, fmt.Errorf("sharedtask: accepted event %q missing", result.EventID)
 	}
-	verdict, n, err := PublishEvent(ctx, bus, from, event, caps...)
+	verdict, n, err := publish(ctx, bus, from, event, caps...)
 	return result, verdict, n, err
+}
+
+func (s *Store) ApplyAndPublish(ctx context.Context, bus *a2achan.Bus, from string, patch Patch, caps ...abi.Capability) (PatchResult, abi.Verdict, int, error) {
+	return s.applyAndPublish(ctx, bus, from, patch, PublishEvent, caps...)
 }
 
 func (s *Store) ApplyAndPublishScoped(ctx context.Context, bus *a2achan.Bus, from string, patch Patch, caps ...abi.Capability) (PatchResult, abi.Verdict, int, error) {
-	result := s.Apply(patch)
-	if result.Verdict != VerdictAccepted {
-		return result, abi.Verdict{Kind: abi.VerdictDefer, By: "sharedtask/live"}, 0, nil
+	return s.applyAndPublish(ctx, bus, from, patch, PublishEventScoped, caps...)
+}
+
+func (s *Store) subscribeTopic(bus *a2achan.Bus, taskID string, topic a2achan.ChannelKey, policy ViewPolicy) (TaskSubscription, bool) {
+	if bus == nil {
+		bus = a2achan.Default
 	}
-	event, ok := s.Event(result.TaskID, result.EventID)
+	inbox, cancel := bus.Subscribe(topic)
+	view, ok := s.View(taskID, policy)
 	if !ok {
-		return result, abi.Verdict{}, 0, fmt.Errorf("sharedtask: accepted event %q missing", result.EventID)
+		cancel()
+		return TaskSubscription{}, false
 	}
-	verdict, n, err := PublishEventScoped(ctx, bus, from, event, caps...)
-	return result, verdict, n, err
+	return TaskSubscription{Topic: topic, Inbox: inbox, View: view, Cancel: cancel}, true
 }
 
 func (s *Store) SubscribeView(bus *a2achan.Bus, taskID string, policy ViewPolicy) (TaskSubscription, bool) {
-	if bus == nil {
-		bus = a2achan.Default
-	}
-	topic := EventTopic(taskID)
-	inbox, cancel := bus.Subscribe(topic)
-	view, ok := s.View(taskID, policy)
-	if !ok {
-		cancel()
-		return TaskSubscription{}, false
-	}
-	return TaskSubscription{Topic: topic, Inbox: inbox, View: view, Cancel: cancel}, true
+	return s.subscribeTopic(bus, taskID, EventTopic(taskID), policy)
 }
 
 func (s *Store) SubscribeScopedView(bus *a2achan.Bus, taskID string, policy ViewPolicy) (TaskSubscription, bool) {
-	if bus == nil {
-		bus = a2achan.Default
-	}
 	policy = normalizeViewPolicy(policy)
-	topic := ScopedEventTopic(taskID, policy.MaxScope)
-	inbox, cancel := bus.Subscribe(topic)
-	view, ok := s.View(taskID, policy)
-	if !ok {
-		cancel()
-		return TaskSubscription{}, false
-	}
-	return TaskSubscription{Topic: topic, Inbox: inbox, View: view, Cancel: cancel}, true
+	return s.subscribeTopic(bus, taskID, ScopedEventTopic(taskID, policy.MaxScope), policy)
 }
 
 func scopedEventTopics(taskID string, eventScope Scope) []a2achan.ChannelKey {
