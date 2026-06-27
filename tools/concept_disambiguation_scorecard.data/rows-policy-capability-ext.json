@@ -1,0 +1,647 @@
+{
+  "rows": [
+    {
+      "id": "x-policy-capability-registercapability",
+      "canonical": "RegisterCapability (abi)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "abi.RegisterCapability is the registry writer that adds a negotiable feature token to the kernel's process-global Supported() capability set, called from a driver's init().",
+      "distinction": "It registers a negotiable FEATURE FLAG, not a tool-admission rung \u2014 unlike RegisterAdjudicator, which inserts a PDP/PEP decision link into the call-folding chain.",
+      "distinct_from": [
+        "adjudicator",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "registercapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-registeradjudicator",
+      "canonical": "RegisterAdjudicator (abi)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "abi.RegisterAdjudicator inserts a PDP/PEP adjudicator link into the kernel's pre-call decision chain at a numeric rank (lower rank runs first) and rebuilds the registry snapshot.",
+      "distinction": "It registers a PRE-CALL reference-monitor rung, not a feature token \u2014 unlike RegisterCapability, which only flips a negotiable capability bit.",
+      "distinct_from": [
+        "adjudicator",
+        "RegisterCapability (abi)"
+      ],
+      "aliases": [],
+      "grounding": "registeradjudicator",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-withadjudicators",
+      "canonical": "WithAdjudicators (kernel)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "kernel.WithAdjudicators constructs a kernel that folds an EXPLICIT caller-supplied adjudicator chain instead of the process-global registry, so K replay arms each carry their own monitor without colliding.",
+      "distinction": "It injects a per-kernel chain for isolated replay, not a global registration \u2014 unlike RegisterAdjudicator, which mutates the one process-global registry.",
+      "distinct_from": [
+        "RegisterAdjudicator (abi)",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "withadjudicators",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-adjudicatorsfor",
+      "canonical": "AdjudicatorsFor (abi)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "abi.AdjudicatorsFor returns the rung chain a given ToolCall must fold in rank order \u2014 the unconditional rungs plus any rung tool-scoped to that call \u2014 as the registry's immutable slice.",
+      "distinction": "It SELECTS the chain to fold for one call, it does not register a rung \u2014 unlike RegisterAdjudicator, which adds a rung to the registry.",
+      "distinct_from": [
+        "RegisterAdjudicator (abi)"
+      ],
+      "aliases": [],
+      "grounding": "adjudicatorsfor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-adjudicateproposed",
+      "canonical": "adjudicateProposed (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Server.adjudicateProposed gates every proposed tool call in a buffered upstream turn through the kernel, returning the kept calls, per-call ToolAdjudication records, and a dropped count.",
+      "distinction": "It is the gateway's BATCH pre-execution gate over a model's proposed calls, not the single-call reference monitor \u2014 unlike adjudicator.Adjudicate, the per-call decision function it delegates to.",
+      "distinct_from": [
+        "adjudicator",
+        "verdict"
+      ],
+      "aliases": [],
+      "grounding": "adjudicateproposed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-fakadjudicate",
+      "canonical": "handleFakAdjudicate (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Server.handleFakAdjudicate is the /v1/fak/adjudicate HTTP handler that returns the pre-execution verdict only \u2014 no dispatch, no engine, no pending state \u2014 for a client that runs its own tools.",
+      "distinction": "It returns a CALL verdict before execution, not result containment \u2014 unlike handleFakAdmit, the served-path complement that quarantines a tool RESULT after.",
+      "distinct_from": [
+        "adjudicateProposed (gateway)",
+        "verdict"
+      ],
+      "aliases": [],
+      "grounding": "fakadjudicate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-tooladjudication",
+      "canonical": "ToolAdjudication (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway.ToolAdjudication is the per-tool-call record of the kernel's decision on one proposed call \u2014 its id, tool, admitted bit, WireVerdict, and any repaired arguments.",
+      "distinction": "It is the per-CALL decision record, not the aggregate \u2014 unlike AdjudicationSummary, the run-level counter roll-up folded into the exit summary.",
+      "distinct_from": [
+        "verdict",
+        "adjudicateProposed (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "tooladjudication",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-adjudicationsummary",
+      "canonical": "AdjudicationSummary (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway.AdjudicationSummary is the aggregate per-run counter struct (provider token axes, cache reads, decision counts) folded into the guard exit summary.",
+      "distinction": "It aggregates a whole run's decisions and observed token axes, not one call \u2014 unlike ToolAdjudication, the single-call verdict record.",
+      "distinct_from": [
+        "ToolAdjudication (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "adjudicationsummary",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-adjudicationnote",
+      "canonical": "adjudicationNote (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway.adjudicationNote renders a short agent-readable in-band summary of a turn's non-trivial decisions (drops + arg repairs) for clients that read only the content channel and never the fak extension.",
+      "distinction": "It is the human/agent-facing PROSE of the decisions, not the machine counter roll-up \u2014 unlike AdjudicationSummary, the numeric aggregate.",
+      "distinct_from": [
+        "AdjudicationSummary (gateway)",
+        "ToolAdjudication (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "adjudicationnote",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-adjudications",
+      "canonical": "FakExt.Adjudications (gateway)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway FakExt.Adjudications is the JSON field in the gateway's non-standard response extension carrying the ToolAdjudication record for every tool_call the model proposed, including the dropped ones.",
+      "distinction": "It is the WIRE list of per-call decisions returned to the client, not the run-level counters \u2014 unlike AdjudicationSummary, the exit-summary aggregate.",
+      "distinct_from": [
+        "ToolAdjudication (gateway)",
+        "AdjudicationSummary (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "adjudications",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-setpolicy",
+      "canonical": "SetPolicy (adjudicator)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Adjudicator.SetPolicy swaps the live decision table, re-indexing arg predicates and clamping (sanitizeProfile) any profile that tries to drop a mandatory write-class refusal rung.",
+      "distinction": "It mutates the running monitor's policy in memory, not a manifest on disk \u2014 unlike Manifest.ToPolicy, which compiles a manifest into a Policy value.",
+      "distinct_from": [
+        "policy-manifest",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "setpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-defaultpolicy",
+      "canonical": "DefaultPolicy (adjudicator)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "adjudicator.DefaultPolicy is the v0.1 baseline decision table \u2014 allow the read-only tool family, fail-closed otherwise \u2014 used when no manifest is loaded.",
+      "distinction": "It is the built-in fallback table, not an operator's loaded rules \u2014 unlike a Manifest compiled via ToPolicy, which an operator authors.",
+      "distinct_from": [
+        "SetPolicy (adjudicator)",
+        "policy-manifest"
+      ],
+      "aliases": [],
+      "grounding": "defaultpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-topolicy",
+      "canonical": "Manifest.ToPolicy (policy)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "policy.Manifest.ToPolicy validates a manifest (version + closed-vocabulary deny reasons) and compiles it into the runtime adjudicator.Policy.",
+      "distinction": "It COMPILES a parsed manifest into a runtime Policy, it does not install it \u2014 unlike SetPolicy, which swaps a compiled Policy onto the live monitor.",
+      "distinct_from": [
+        "policy-manifest",
+        "DefaultPolicy (adjudicator)"
+      ],
+      "aliases": [],
+      "grounding": "topolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-applypolicy",
+      "canonical": "applyPolicy (cmd)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cmd/fak applyPolicy loads a capability-floor manifest from the --policy path and installs it onto the process-global adjudicator.Default (plus its runtime side-effects) at startup.",
+      "distinction": "It is the one-shot CLI install of a manifest at boot, not the live in-place reload \u2014 unlike policyReloader, which rebuilds the floor on a running gateway.",
+      "distinct_from": [
+        "policy-loaded",
+        "Manifest.ToPolicy (policy)"
+      ],
+      "aliases": [
+        "policypath"
+      ],
+      "grounding": "applypolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-reloadpolicy",
+      "canonical": "policyReloader (cmd)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cmd/fak policyReloader returns the gateway PolicyReloadFunc that re-loads the capability-floor manifest in-place on a running gateway (re-SetPolicy + runtime apply) and reports a reload summary.",
+      "distinction": "It hot-reloads the floor on a live process, not the startup install \u2014 unlike applyPolicy, the one-shot load at boot.",
+      "distinct_from": [
+        "applyPolicy (cmd)",
+        "SetPolicy (adjudicator)"
+      ],
+      "aliases": [
+        "policyreloader"
+      ],
+      "grounding": "reloadpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policyreplay",
+      "canonical": "RunPolicyReplay (turnbench)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "turnbench.RunPolicyReplay scores K policy variants against ONE recorded trajectory as model-free kernel replays, emitting per-arm divergence witnesses and the cube-collapse cost accounting.",
+      "distinction": "It is the same-trace K-policy replay SPINE, not a single variant \u2014 unlike PolicyArm, the one policy entry it replays.",
+      "distinct_from": [
+        "adjudicator",
+        "policy-manifest"
+      ],
+      "aliases": [
+        "runpolicyreplay"
+      ],
+      "grounding": "policyreplay",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policyarm",
+      "canonical": "PolicyArm (turnbench)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "turnbench.PolicyArm is one named policy variant in a same-trace comparison \u2014 a label plus the adjudicator.Policy swapped onto the monitor for that arm's replay.",
+      "distinction": "It is a single variant input, not the replay engine \u2014 unlike RunPolicyReplay, the spine that folds all arms over the trace.",
+      "distinct_from": [
+        "RunPolicyReplay (turnbench)",
+        "DefaultPolicy (adjudicator)"
+      ],
+      "aliases": [],
+      "grounding": "policyarm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policyblock",
+      "canonical": "ReasonPolicyBlock (abi)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "abi.ReasonPolicyBlock is the closed-vocabulary reason code (POLICY_BLOCK) the kernel cites when an EXPLICIT policy rule denied a call.",
+      "distinction": "It marks an explicit-rule denial, not the catch-all fail-closed \u2014 unlike ReasonDefaultDeny, cited when no rule affirmatively allowed the call.",
+      "distinct_from": [
+        "reason-code",
+        "verdict"
+      ],
+      "aliases": [
+        "reasonpolicyblock"
+      ],
+      "grounding": "policyblock",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-reasonpolicymismatch",
+      "canonical": "ReasonPolicyMismatch (cachemeta)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cachemeta.ReasonPolicyMismatch is the cache-lookup MISS reason (\"policy_mismatch\") returned when a candidate entry's bound policy version no longer matches the live policy.",
+      "distinction": "It is a cache-coherence miss reason, not a tool-admission refusal \u2014 unlike ReasonPolicyBlock, the adjudicator's POLICY_BLOCK denial code.",
+      "distinct_from": [
+        "ReasonPolicyBlock (abi)",
+        "reason-code"
+      ],
+      "aliases": [],
+      "grounding": "reasonpolicymismatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policyversion",
+      "canonical": "PolicyVersion (cachemeta)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cachemeta Validity.PolicyVersion is the policy-version string stamped on a cache entry that bounds its validity, so a policy change invalidates entries minted under the old version.",
+      "distinction": "It is a cache-entry validity STAMP, not a refusal code \u2014 unlike ReasonPolicyMismatch, the miss reason raised when that stamp no longer matches.",
+      "distinct_from": [
+        "ReasonPolicyMismatch (cachemeta)",
+        "policy-loaded"
+      ],
+      "aliases": [],
+      "grounding": "policyversion",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-invalidationpolicy",
+      "canonical": "InvalidationPolicy (cachemeta)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "cachemeta.InvalidationPolicy is the InvalidationMode constant \"policy\" \u2014 the coherence mode that drops a cache entry when policy changes, distinct from the lru/ttl/write_epoch modes.",
+      "distinction": "It is a cache INVALIDATION trigger, not the validity stamp it acts on \u2014 unlike PolicyVersion, the per-entry string the policy-mode invalidation compares.",
+      "distinct_from": [
+        "PolicyVersion (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "invalidationpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-lifecyclepolicy",
+      "canonical": "LifecyclePolicy (cachemeta)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "cachemeta.LifecyclePolicy parameterizes the time-driven cache-tier transitions \u2014 per-tier TTLs, a default TTL, the expiring->expired grace window, and demote-vs-evict on expiry.",
+      "distinction": "It governs TIME-driven tier aging, not policy-change invalidation \u2014 unlike InvalidationPolicy, the coherence mode keyed on policy version.",
+      "distinct_from": [
+        "InvalidationPolicy (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "lifecyclepolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policyevictions",
+      "canonical": "PolicyEvictions (radixkv)",
+      "family": "policy-capability",
+      "kind": "metric",
+      "definition": "PolicyEvictions counts explicit EvictNode calls in the radix KV cache \u2014 entries dropped by a deliberate policy action \u2014 surfaced as fak_gateway_kv_memory_evictions_total{kind=\"policy\"}.",
+      "distinction": "It counts policy-driven KV-node drops, not budget pressure drops \u2014 unlike the plain Evictions counter, the LRU budget evictions.",
+      "distinct_from": [
+        "LifecyclePolicy (cachemeta)"
+      ],
+      "aliases": [],
+      "grounding": "policyevictions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-precisionpolicy",
+      "canonical": "DynamicPrecisionPolicy (model)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "model.DynamicPrecisionPolicy is an online quantization controller that accepts a Q8_0 decode result only when the logit top1-top2 margin / top1 probability clears a threshold, else recomputes the span in f32.",
+      "distinction": "It is a numeric-PRECISION acceptance policy for decode, not a tool-admission policy \u2014 unlike DefaultPolicy, the adjudicator's tool decision table.",
+      "distinct_from": [
+        "DefaultPolicy (adjudicator)"
+      ],
+      "aliases": [],
+      "grounding": "precisionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-defaultresetpolicy",
+      "canonical": "ResetPolicy (gateway)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "gateway.ResetPolicy holds the context-reset decision thresholds (min turns, healthy/stale read ratios, cooldown) that ResetScore folds to recommend a fresh-context reset over another compaction cut; DefaultResetPolicy supplies the conservative defaults.",
+      "distinction": "It decides session CONTEXT reset-vs-cut from cache health, not tool admission \u2014 unlike DefaultPolicy, the adjudicator floor.",
+      "distinct_from": [
+        "DefaultPolicy (adjudicator)"
+      ],
+      "aliases": [],
+      "grounding": "defaultresetpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-batchpolicy",
+      "canonical": "BatchPolicy (gateway)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "gateway.BatchPolicy holds the dynamic-batching knobs (max batch, max pad overhead, max prompt length) that bound rectangular-prefill batch selection; DefaultBatchPolicy gives the shipping defaults.",
+      "distinction": "It is a throughput/batching control policy, not a security decision policy \u2014 unlike DefaultPolicy, the adjudicator tool floor.",
+      "distinct_from": [
+        "DefaultPolicy (adjudicator)",
+        "ResetPolicy (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "batchpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-secretposture",
+      "canonical": "SecretPosture (adjudicator)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "adjudicator.SecretPosture is the policy-author knob selecting what the on-discovery secret rung does when a tool RESULT bears a credential \u2014 quarantine (default), fail_closed, or admit_and_log.",
+      "distinction": "It governs the secret-discovery verdict specifically, not the general default-deny stance \u2014 unlike Posture, the tool-admission fail-closed/admit-and-log selector it reuses.",
+      "distinct_from": [
+        "posture",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "secretposture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-haspreflightschema",
+      "canonical": "HasPreflightSchema (toollint)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "toollint ToolFacts.HasPreflightSchema is the fact-bit true iff the pre-flight ladder (rung-1) enforces a parameter schema for a tool.",
+      "distinction": "It records whether rung-1 schema validation exists, not whether the policy denies the tool \u2014 unlike PolicyDenied, the fact that the adjudicator refuses it by name.",
+      "distinct_from": [
+        "preflight-ladder"
+      ],
+      "aliases": [],
+      "grounding": "haspreflightschema",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policydenied",
+      "canonical": "PolicyDenied (toollint)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "toollint ToolFacts.PolicyDenied is the fact-bit true iff the adjudicator policy provably refuses a tool by name via its Deny map.",
+      "distinction": "It is a lint FACT about a tool's policy status, not the runtime refusal code \u2014 unlike ReasonPolicyBlock, the verdict reason cited at decision time.",
+      "distinct_from": [
+        "ReasonPolicyBlock (abi)",
+        "preflight-ladder"
+      ],
+      "aliases": [],
+      "grounding": "policydenied",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-evalcapability",
+      "canonical": "EvalCapability (swebench)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "swebench.EvalCapability is the probe result describing whether the official grader harness is runnable here \u2014 Docker present, swebench importable, the resolved python, and a Runnable bit with a reason.",
+      "distinction": "It is a BENCH-harness readiness capability, not a negotiated kernel feature token \u2014 unlike RegisterCapability's Capability, the ABI feature-flag set.",
+      "distinct_from": [
+        "RegisterCapability (abi)",
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "evalcapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-detectevalcapability",
+      "canonical": "DetectEvalCapability (swebench)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "swebench.DetectEvalCapability probes the box for Docker and an importable swebench harness and returns the populated EvalCapability with a Runnable verdict and reason.",
+      "distinction": "It is the PROBE that produces an EvalCapability, not the struct itself \u2014 unlike EvalCapability, the value it returns.",
+      "distinct_from": [
+        "EvalCapability (swebench)"
+      ],
+      "aliases": [],
+      "grounding": "detectevalcapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policybreaches",
+      "canonical": "PolicyBreaches (browseraction)",
+      "family": "policy-capability",
+      "kind": "metric",
+      "definition": "PolicyBreaches counts the policy-violating actions an arm took during a benchmark task (browser-action / terminal-bench), feeding the SafeSuccess gate.",
+      "distinction": "It tallies how many violations slipped through in a measured run, not the kernel's per-call denial \u2014 unlike ReasonPolicyBlock, the verdict code an individual refusal cites.",
+      "distinct_from": [
+        "ReasonPolicyBlock (abi)"
+      ],
+      "aliases": [],
+      "grounding": "policybreaches",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policybreachrate",
+      "canonical": "PolicyBreachRate (bench)",
+      "family": "policy-capability",
+      "kind": "metric",
+      "definition": "PolicyBreachRate is the arm-level ratio of policy breaches to total actions/commands in a benchmark summary.",
+      "distinction": "It is the normalized RATE, not the raw tally \u2014 unlike PolicyBreaches, the integer count it divides.",
+      "distinct_from": [
+        "PolicyBreaches (browseraction)"
+      ],
+      "aliases": [],
+      "grounding": "policybreachrate",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-policy-capability-policybreachdelta",
+      "canonical": "PolicyBreachDelta (bench)",
+      "family": "policy-capability",
+      "kind": "metric",
+      "definition": "PolicyBreachDelta is the raw-arm-minus-fak-arm difference in policy breaches, the head-to-head measure of how many violations the fak floor prevented.",
+      "distinction": "It is the between-arm difference (raw vs fak), not one arm's count or rate \u2014 unlike PolicyBreaches and PolicyBreachRate, the per-arm tally and ratio.",
+      "distinct_from": [
+        "PolicyBreaches (browseraction)",
+        "PolicyBreachRate (bench)"
+      ],
+      "aliases": [],
+      "grounding": "policybreachdelta",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

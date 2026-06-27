@@ -1,0 +1,506 @@
+{
+  "rows": [
+    {
+      "id": "x-context-ctx-contexttokensleft",
+      "canonical": "ContextTokensLeft (session budget)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextTokensLeft is the session.Budget field holding the remaining prompt/context-token budget a served session has before context-budget exhaustion triggers a reset directive.",
+      "distinction": "Not the model's fixed context-window limit (context-window); it is the live remaining count that the scheduler debits down each turn.",
+      "distinct_from": [
+        "context-window"
+      ],
+      "aliases": [],
+      "grounding": "contexttokensleft",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contexttokens",
+      "canonical": "ContextTokens (session usage)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextTokens is the per-turn usage field on gateway.SessionUsage / session.Usage carrying the prompt/context-window token count to debit from the session budget.",
+      "distinction": "Not the remaining budget (ContextTokensLeft (session budget)); it is the consumed amount reported for one turn that is subtracted from that remainder.",
+      "distinct_from": [
+        "context-window",
+        "ContextTokensLeft (session budget)"
+      ],
+      "aliases": [],
+      "grounding": "contexttokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-requestcontextchange",
+      "canonical": "RequestContextChange (recall)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "RequestContextChange is the recall.Session method that applies a safe, negative-only context mutation \u2014 recording a tombstone that suppresses one page from future model-visible recall without deleting bytes.",
+      "distinction": "Not the request envelope itself (contextchangerequest) nor the gateway wire route; it is the recall-kernel apply operation that consumes that request.",
+      "distinct_from": [
+        "contextchangerequest",
+        "contextchange-apply"
+      ],
+      "aliases": [],
+      "grounding": "requestcontextchange",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contextactiontombstone",
+      "canonical": "ContextActionTombstone",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextActionTombstone is the recall.ContextAction constant (\"tombstone_page\") naming the one shipped, deliberately negative-only context mutation that narrows what may enter future context.",
+      "distinction": "Not the ContextChangeRequest envelope that carries it (contextchangerequest); it is the action-type enum value inside that envelope.",
+      "distinct_from": [
+        "contextchangerequest"
+      ],
+      "aliases": [],
+      "grounding": "contextactiontombstone",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-ctxplanbench",
+      "canonical": "ctxplanbench (planner bench cmd)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "ctxplanbench is the cmd/ctxplanbench benchmark that measures the ctxplan planned VIEW (compaction count, recovered tokens) over real Claude Code session transcripts.",
+      "distinction": "Not the ctxplan planner engine itself (ctxplan); it is the measurement harness that replays real transcripts through that engine.",
+      "distinct_from": [
+        "ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "ctxplanbench",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contextchanges",
+      "canonical": "ContextChanges (recall ledger)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextChanges is the recall.Session accessor (and Manifest field) returning the applied, durable context-control ledger \u2014 the list of tombstone rows recorded against the core image.",
+      "distinction": "Not a pending ContextChangeRequest (contextchangerequest); it is the append-only ledger of changes that were already applied.",
+      "distinct_from": [
+        "contextchangerequest",
+        "contextchange-apply"
+      ],
+      "aliases": [],
+      "grounding": "contextchanges",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contextpollutionrate",
+      "canonical": "ContextPollutionRate (bench KPI)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "ContextPollutionRate is the bench KPI computed as the rate of ctxmmu quarantines per tool call in the gates-on run.",
+      "distinction": "Not the context-mmu quarantine mechanism itself (context-mmu); it is a measured ratio reported over that mechanism's events.",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "contextpollutionrate",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-ctxdemo",
+      "canonical": "ctxdemo (multi-agent demo cmd)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "ctxdemo is the cmd/ctxdemo live on-box demonstrator that runs a catalog of multi-agent shapes to show fak's prefill/KV-reuse value, reporting per-scenario max context and fak-vs-tuned token work.",
+      "distinction": "Not the context PLANNER demonstrator (ctxplandemo); ctxdemo exercises the multi-agent KV-reuse axis, not the planned-view lowering.",
+      "distinct_from": [
+        "ctxplan",
+        "ctxplandemo (planner demo cmd)"
+      ],
+      "aliases": [],
+      "grounding": "ctxdemo",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-ctxviewbudget",
+      "canonical": "CtxViewBudget (gateway knob)",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "CtxViewBudget is the gateway.Config field that, when > 0, wires the ctxplan context planner into the live serve/guard loop and materializes each turn's history as an O(1) planned view under this resident-token budget.",
+      "distinction": "Not the planner that consumes it (ctxviewplanner) nor the view it emits (ctxview); it is the single resident-token budget knob that turns that planner on.",
+      "distinct_from": [
+        "ctxview",
+        "ctxviewplanner"
+      ],
+      "aliases": [],
+      "grounding": "ctxviewbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-proverecallinput",
+      "canonical": "ProveRecallInput (vcachechain)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ProveRecallInput is the vcachechain struct holding the caller-supplied calibration (prefix tokens, unit tokens, read-multiplier, siblings) that the recall economics proof is run over.",
+      "distinction": "Not the proof's output (prove-recall / recallproof); it is the input parameter bundle fed into that proof.",
+      "distinct_from": [
+        "prove-recall",
+        "recallproof"
+      ],
+      "aliases": [],
+      "grounding": "proverecallinput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-cmdrecall",
+      "canonical": "cmdRecall (fak recall verb)",
+      "family": "context-ctx",
+      "kind": "cli-verb",
+      "definition": "cmdRecall is the cmd/fak handler for `fak recall` \u2014 the offline session-recall demo that writes a session through the gate, reloads it in a fresh Session, and demonstrates the rung-0/rung-4 poison-refusal guarantees.",
+      "distinction": "Not the recall subsystem/concept (recall); it is the one CLI verb that drives a demo over it.",
+      "distinct_from": [
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "cmdrecall",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-compactionfired",
+      "canonical": "CompactionFired (gateway metric)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "CompactionFired is the gateway metrics counter of compaction attempts that fired \u2014 the turn body was rewritten with the protected prefix shipped byte-identical.",
+      "distinction": "Not the compaction mechanism itself (compaction) and not the cache_read recorder (recordCompactionCacheRead); it counts only successful fires.",
+      "distinct_from": [
+        "compaction"
+      ],
+      "aliases": [],
+      "grounding": "compactionfired",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contextbudgetaxis",
+      "canonical": "contextBudgetAxis (TUI formatter)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "contextBudgetAxis is the cmd/fak formatter that renders a context-token budget value as a short axis cell (\"inf\" for <0, \"off\" for 0, else the number) for ps/overview/session rows.",
+      "distinction": "Not the underlying budget field (ContextTokensLeft (session budget)); it is the display-string formatter over that field.",
+      "distinct_from": [
+        "context-window",
+        "ContextTokensLeft (session budget)"
+      ],
+      "aliases": [],
+      "grounding": "contextbudgetaxis",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contextbudgettokens",
+      "canonical": "context-budget-tokens (guard flag)",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "contextBudgetTokens is the `fak guard --context-budget-tokens` flag that seeds the guard session with a prompt/context-token budget so exhaustion returns a reset directive with a continuation id.",
+      "distinction": "Not the runtime remaining field it seeds (ContextTokensLeft (session budget)); it is the operator-set CLI knob supplying the initial value.",
+      "distinct_from": [
+        "context-window",
+        "ContextTokensLeft (session budget)"
+      ],
+      "aliases": [],
+      "grounding": "contextbudgettokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contexttokenscap",
+      "canonical": "ContextTokensCap (budget denominator)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextTokensCap is the session.Budget field recording the configured context-budget size \u2014 the denominator the pre-exhaustion warning measures consumed-share against (0 means no context budget).",
+      "distinction": "Not the remaining count (ContextTokensLeft (session budget)); it is the fixed cap the remaining is measured as a fraction of.",
+      "distinct_from": [
+        "context-window",
+        "ContextTokensLeft (session budget)"
+      ],
+      "aliases": [],
+      "grounding": "contexttokenscap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-contextwindowtokens",
+      "canonical": "ContextWindowTokens (usage method)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextWindowTokens is the agent.Usage method that computes the prompt/context size to count against a long-session budget, adding Anthropic cache_read/cache_creation tokens back onto input_tokens.",
+      "distinction": "Not the context-window concept or any fixed limit (context-window); it is the per-turn accounting function that derives the chargeable context size.",
+      "distinct_from": [
+        "context-window"
+      ],
+      "aliases": [],
+      "grounding": "contextwindowtokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-ctxbench",
+      "canonical": "ctxbench (security-gate corpus cmd)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "ctxbench is the cmd/ctxbench tool that runs fak's security gates over a corpus of tool calls and reports the injection/quarantine outcomes.",
+      "distinction": "Not a context-planning benchmark (ctxplanbench (planner bench cmd)); ctxbench exercises the safety gates over a tool-call corpus, not the planned view.",
+      "distinct_from": [
+        "ctxplan",
+        "ctxplanbench (planner bench cmd)"
+      ],
+      "aliases": [],
+      "grounding": "ctxbench",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-fakcontextchange",
+      "canonical": "handleFakContextChange (gateway route)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "handleFakContextChange is the gateway HTTP handler for POST /v1/fak/context/change that records a requester-initiated tombstone against a persisted recall core image.",
+      "distinction": "Not the recall-kernel apply method (RequestContextChange (recall)); it is the wire route that decodes the request and delegates to that method.",
+      "distinct_from": [
+        "contextchange-apply",
+        "RequestContextChange (recall)"
+      ],
+      "aliases": [],
+      "grounding": "fakcontextchange",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-freshcontexttokens",
+      "canonical": "freshContextTokens (guard reseed)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "freshContextTokens is the cmd/fak guard budget-restarter field holding the fresh context-token budget to reseed onto a continuation trace after a budget-triggered managed reset.",
+      "distinction": "Not the live remaining budget (ContextTokensLeft (session budget)); it is the fixed reseed value applied when a session is restarted.",
+      "distinct_from": [
+        "context-window",
+        "ContextTokensLeft (session budget)"
+      ],
+      "aliases": [],
+      "grounding": "freshcontexttokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-injectionincontext",
+      "canonical": "InjectionInContext (agent harness)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "InjectionInContext is the agent loop-result boolean recording that a tool result carrying a prompt injection actually reached the model in the context.",
+      "distinction": "Not the ctxmmu quarantine ledger that prevents it (context-mmu); it is a per-run outcome flag in the agent A/B harness.",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "injectionincontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-longctxbench",
+      "canonical": "longctxbench (long-context floor cmd)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "longctxbench is the cmd/longctxbench tool that renders the exact, contention-free token-work floor for ultra-long-context / agent-city regimes across a prefix/turns/agents ladder.",
+      "distinction": "Not the planned-view bench (ctxplanbench (planner bench cmd)); longctxbench computes a deterministic work floor, not a measured plan over transcripts.",
+      "distinct_from": [
+        "ctxplan",
+        "ctxplanbench (planner bench cmd)"
+      ],
+      "aliases": [],
+      "grounding": "longctxbench",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-maxcontext",
+      "canonical": "MaxContext (swebench geometry)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "MaxContext is the swebench.Geometry method giving the largest context length a workload geometry reaches, computed as Prefix + Turns*(Decode+Result).",
+      "distinction": "Not the model's fixed context-window limit (context-window); it is a measured per-workload peak context length.",
+      "distinct_from": [
+        "context-window"
+      ],
+      "aliases": [],
+      "grounding": "maxcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-newrecallbackend",
+      "canonical": "NewRecallBackend (memq)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "NewRecallBackend is the memq constructor that builds the negative-only recall backend \u2014 a tombstone store that drives suppression through recall.RequestContextChange persisted to a directory.",
+      "distinction": "Not the recall subsystem broadly (recall); it is the memq-layer adapter that exposes a backend over it.",
+      "distinct_from": [
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "newrecallbackend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-planrecall",
+      "canonical": "PlanRecall (vcachechain)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "PlanRecall is the vcachechain M4 entry point that, given a prefix DAG, a recall request, and an enable flag, returns the recall verdict plus the economics and cold-tail replay schedule.",
+      "distinction": "Not the economic proof of net-positivity (prove-recall / recallproof); PlanRecall decides and schedules a recall, whereas the proof only certifies the math.",
+      "distinct_from": [
+        "recallproof",
+        "prove-recall"
+      ],
+      "aliases": [],
+      "grounding": "planrecall",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-ropeorigcontext",
+      "canonical": "RopeOrigContext (model config)",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "RopeOrigContext is the model.Config field (rope_scaling_original_max_position_embeddings) holding the original pre-scaling max position / context length used as the reference when applying RoPE scaling.",
+      "distinction": "Not a runtime context budget or the served context-window limit (context-window); it is a RoPE-scaling reference length read from the model config.",
+      "distinct_from": [
+        "context-window"
+      ],
+      "aliases": [],
+      "grounding": "ropeorigcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-ctxresidency",
+      "canonical": "ctxresidency (residency query package)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "ctxresidency is the internal package providing the context-residency query: a pure, witnessable READ that composes kvmmu, ctxmmu, and cachemeta to classify each span resident/evictable/held with its evict blast radius.",
+      "distinction": "Not the write-side kernels it reads (context-mmu, kv-mmu); it is the off-write-path read projection that reconciles with their counters.",
+      "distinct_from": [
+        "context-mmu",
+        "kv-mmu"
+      ],
+      "aliases": [],
+      "grounding": "ctxresidency",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-context-ctx-ctxplandemo",
+      "canonical": "ctxplandemo (planner demo cmd)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "ctxplandemo is the cmd/ctxplandemo runnable demonstrator for the context PLANNER, treating a transcript as a plannable store and showing the planned view it materializes.",
+      "distinction": "Not the multi-agent KV-reuse demo (ctxdemo (multi-agent demo cmd)); ctxplandemo demonstrates the ctxplan planner's view, not cross-agent prefill reuse.",
+      "distinct_from": [
+        "ctxplan",
+        "ctxdemo (multi-agent demo cmd)"
+      ],
+      "aliases": [],
+      "grounding": "ctxplandemo",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

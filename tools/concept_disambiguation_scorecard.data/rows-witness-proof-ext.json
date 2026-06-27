@@ -1,0 +1,402 @@
+{
+  "rows": [
+    {
+      "id": "x-witness-proof-verdictrequirewitness",
+      "canonical": "VerdictRequireWitness (abi verdict)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "abi.VerdictRequireWitness is the kernel verdict kind that leaves a gated call PENDING an independent read-back, so the kernel must corroborate the caller's claimed effect (carried in the WitnessPayload) before the call may dispatch.",
+      "distinction": "It is the request-for-proof signal, not the proof's answer: unlike a WitnessOutcome it carries no confirmed/refuted/abstain result, it is the intermediate verdict that triggers asking a resolver.",
+      "distinct_from": [
+        "witness-outcome"
+      ],
+      "aliases": [
+        "requirewitness"
+      ],
+      "grounding": "verdictrequirewitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-unwitnessed",
+      "canonical": "ReasonUnwitnessed (deny reason)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "abi.ReasonUnwitnessed is the deny reason-code the kernel attaches when a require-witness gate found no corroboration, so the fail-closed default turns the pending verdict into a DENY (also surfaced as looprecover's unwitnessed disposition).",
+      "distinction": "It is the terminal DENY label for 'no proof arrived', not the resolver's neutral WitnessAbstain which merely reports 'no evidence either way' before the gate decides.",
+      "distinct_from": [
+        "witness-outcome",
+        "WitnessAbstain (witness outcome)"
+      ],
+      "aliases": [
+        "reasonunwitnessed"
+      ],
+      "grounding": "unwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnesspayload",
+      "canonical": "WitnessPayload (verdict claim carrier)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "abi.WitnessPayload is the typed bounded-disclosure verdict payload struct{Claim string} that an adjudicator attaches to a RequireWitness or Deny verdict to carry the single claim string the kernel must corroborate.",
+      "distinction": "It is the wire carrier wrapping ONE claim-grammar string on a verdict, not the Claim concept itself nor the multi-field taskmgr WitnessRecord.",
+      "distinct_from": [
+        "claim",
+        "WitnessRecord (taskmgr evidence)"
+      ],
+      "aliases": [],
+      "grounding": "witnesspayload",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-refute",
+      "canonical": "refute (revocation trigger)",
+      "family": "witness-proof",
+      "kind": "concept",
+      "definition": "refute is the action of calling vdso.Revoke(witness) on the integrity/coherence bus to mark a previously-trusted world-state witness as contradicted, stranding every cache entry admitted under it.",
+      "distinction": "It is the verb/trigger that PRODUCES a refutation, not the recorded Revocation event nor the TrustEpoch counter that tallies how many have fired.",
+      "distinct_from": [
+        "revocation",
+        "trust-epoch"
+      ],
+      "aliases": [],
+      "grounding": "refute",
+      "grounding_kind": "verb",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-proofrefuted",
+      "canonical": "ProofRefuted (callavoid status)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "callavoid.ProofRefuted is the two-valued proof-status value 'REFUTED' meaning a cost-benefit proof concluded that avoidance/memoization does not pay (single-use, too-volatile, or validation as costly as the call).",
+      "distinction": "It is an economic break-even verdict about whether caching is worth it, NOT a world-state WitnessRefuted where external evidence contradicted a claim.",
+      "distinct_from": [
+        "WitnessRefuted (witness outcome)",
+        "refutation"
+      ],
+      "aliases": [],
+      "grounding": "proofrefuted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessrecord",
+      "canonical": "WitnessRecord (taskmgr evidence)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "taskmgr.WitnessRecord is the evidence-backed verdict struct a Witness attaches BESIDE a task/step's claimed State (VerifiedState plus source and evidence refs), so a snapshot holds both 'process says done' and 'a witness has/has not confirmed it'.",
+      "distinction": "It is the full multi-field evidence record kept as a separate rung from the claimed State, not the tiny three-valued abi WitnessOutcome enum the in-process gate folds.",
+      "distinct_from": [
+        "witness-outcome",
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "witnessrecord",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessconfirmed",
+      "canonical": "WitnessConfirmed (witness outcome)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "abi.WitnessConfirmed is the WitnessOutcome value meaning a resolver INDEPENDENTLY CORROBORATED the claimed effect from evidence the agent did not author, which opens the require-witness gate.",
+      "distinction": "It is the gate-opening positive of the outcome triple, distinct from WitnessRefuted (evidence contradicts) and WitnessAbstain (no evidence either way).",
+      "distinct_from": [
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "witnessconfirmed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessrefuted",
+      "canonical": "WitnessRefuted (witness outcome)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "abi.WitnessRefuted is the WitnessOutcome value meaning a resolver found evidence that CONTRADICTS the claimed effect (the agent's claim was false), keeping the require-witness gate closed.",
+      "distinction": "It is the evidence-contradicts verdict in the world-state witness triple, NOT callavoid's economic ProofRefuted nor the recorded refutation event on the vDSO bus.",
+      "distinct_from": [
+        "WitnessConfirmed (witness outcome)",
+        "ProofRefuted (callavoid status)",
+        "refutation"
+      ],
+      "aliases": [],
+      "grounding": "witnessrefuted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessabstain",
+      "canonical": "WitnessAbstain (witness outcome)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "abi.WitnessAbstain is the zero-value WitnessOutcome meaning the resolver had NO evidence either way (fail-to-abstain), e.g. an unrecognized claim or git unavailable, which the kernel's fail-closed default then turns into a deny.",
+      "distinction": "Abstain means the resolver ran but found nothing decisive, distinct from VerifiedUnavailable where the witness could not be consulted at all (no network/missing ref).",
+      "distinct_from": [
+        "WitnessConfirmed (witness outcome)",
+        "VerifiedUnavailable (witness unavailable)"
+      ],
+      "aliases": [],
+      "grounding": "witnessabstain",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-defaultwitnessof",
+      "canonical": "defaultWitnessOf (vdso extractor)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "vdso.defaultWitnessOf is the default extractor that derives the external world-state witness string a call/result was admitted under (from the call/result meta), used by the coherence bus when no per-tool adapter is registered.",
+      "distinction": "It is the extraction FUNCTION that reads out a witness identifier, not the world-state-witness value itself nor the per-tool WitnessFunc override that can replace it.",
+      "distinct_from": [
+        "world-state-witness",
+        "WitnessFunc (vdso witness adapter)"
+      ],
+      "aliases": [],
+      "grounding": "defaultwitnessof",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-resolvewitness",
+      "canonical": "resolveWitness (kernel gate driver)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "kernel.resolveWitness drives the require-witness gate: on a RequireWitness verdict it asks every registered abi.WitnessResolver to corroborate the claim and folds their WitnessOutcomes into a final allow/deny.",
+      "distinction": "It is the kernel-side DRIVER that consults resolvers, not the abi.WitnessResolver interface it calls, and not the same-named vdso.resolveWitness that merely extracts a witness string for the cache bus.",
+      "distinct_from": [
+        "witness-resolver"
+      ],
+      "aliases": [],
+      "grounding": "resolvewitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-shapeglmturnsegmentwitnessed",
+      "canonical": "ShapeGLMTurnSegmentWitnessed (coherence shaper)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "cachemeta.ShapeGLMTurnSegmentWitnessed is the simplest live-path coherence shaper: given a turn's prompt segments and a revoked(witness) predicate, it emits the prefix-break directive that severs the provider prefix at the first refuted span.",
+      "distinction": "It is the prefix-breaking SHAPER that consumes refutation state to keep a GLM prompt coherent, not the witness value nor the Revocation event that refuted a span.",
+      "distinct_from": [
+        "revocation",
+        "world-state-witness"
+      ],
+      "aliases": [],
+      "grounding": "shapeglmturnsegmentwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-statuswitnesseddone",
+      "canonical": "StatusWitnessedDone (loop run status)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "loopmgr.StatusWitnessedDone is the loop run-status 'witnessed_done' meaning an independent witness event confirmed the run's claimed completion (carrying evidence refs), promoting it above claimed_done.",
+      "distinction": "It is the loop-manager's per-run promoted status proving completion, not the abi WitnessConfirmed outcome of a single gate nor the claimed_done self-report it supersedes.",
+      "distinct_from": [
+        "witness-outcome",
+        "WitnessConfirmed (witness outcome)"
+      ],
+      "aliases": [],
+      "grounding": "statuswitnesseddone",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-subscriberevocations",
+      "canonical": "SubscribeRevocations (vdso observer seam)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "vdso.SubscribeRevocations registers an observer callback that fires on every refutation (Revocation) published to the integrity bus and returns a cancel func, never firing on the read hot path.",
+      "distinction": "It is the SUBSCRIPTION seam for watching refutations, not a Revocation event itself nor the refute action that triggers one.",
+      "distinct_from": [
+        "revocation",
+        "refute (revocation trigger)"
+      ],
+      "aliases": [],
+      "grounding": "subscriberevocations",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessentry",
+      "canonical": "WitnessEntry (session-image keep-bit)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "sessionimage.WitnessEntry binds one effect's keep-bit (a taskmgr.WitnessRecord) to a stable EffectID inside a persisted/restored session image, so a rehydrated session knows which effects were witnessed.",
+      "distinction": "It is a per-effect persistence row in a session image keyed by EffectID, not taskmgr's live WitnessRecord verdict it wraps nor the claim it corroborates.",
+      "distinct_from": [
+        "WitnessRecord (taskmgr evidence)",
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "witnessentry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessfunc",
+      "canonical": "WitnessFunc (vdso witness adapter)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "vdso.WitnessFunc is a per-tool adapter func(c *ToolCall, r *Result) string registered via RegisterWitness that extracts the external world-state witness a specific tool's result was admitted under, overriding the default extraction.",
+      "distinction": "It is the per-tool OVERRIDE that customizes witness extraction, distinct from the fallback defaultWitnessOf and from taskmgr's identically-named WitnessFunc that adapts a func to the Witness interface.",
+      "distinct_from": [
+        "defaultWitnessOf (vdso extractor)",
+        "world-state-witness"
+      ],
+      "aliases": [],
+      "grounding": "witnessfunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessgaps",
+      "canonical": "WitnessGaps (TUI counter)",
+      "family": "witness-proof",
+      "kind": "metric",
+      "definition": "WitnessGaps is the TUI loop-overview counter tallying runs that ended or claimed done but were never witnessed \u2014 the per-report aggregate of the unwitnessed gap, weighted into the attention score.",
+      "distinction": "It is the dashboard AGGREGATE count of missing witnesses, not a single run's unwitnessed disposition nor the ReasonUnwitnessed deny code.",
+      "distinct_from": [
+        "ReasonUnwitnessed (deny reason)"
+      ],
+      "aliases": [],
+      "grounding": "witnessgaps",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessrefused",
+      "canonical": "StatusWitnessRefused (loop run status)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "loopmgr.StatusWitnessRefused is the loop run-status 'witness_refused' (and its WitnessRefused counter) meaning a witness RAN and the evidence contradicted the run's claimed completion.",
+      "distinction": "It is the loop-manager's run-level refusal status, the operational dual of the abi.WitnessRefuted outcome enum the in-process gate uses.",
+      "distinct_from": [
+        "WitnessRefuted (witness outcome)"
+      ],
+      "aliases": [],
+      "grounding": "witnessrefused",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessrevoked",
+      "canonical": "MissWitnessRevoked (vdso cache-miss)",
+      "family": "witness-proof",
+      "kind": "metric",
+      "definition": "vdso.MissWitnessRevoked is the cache-miss reason 'WITNESS_REVOKED' counted when a cached entry was admitted under a now-refuted external witness and therefore fails closed instead of serving stale bytes.",
+      "distinction": "It is the CACHE-side miss classification for serving under a refuted witness, not the Revocation event that refuted it nor the gate's WitnessRefuted outcome.",
+      "distinct_from": [
+        "revocation",
+        "WitnessRefuted (witness outcome)"
+      ],
+      "aliases": [],
+      "grounding": "witnessrevoked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-witnessunavailable",
+      "canonical": "VerifiedUnavailable (witness unavailable)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "taskmgr.VerifiedUnavailable (and loopmgr.StatusWitnessUnavailable) is the state where a witness was ASKED but could not read the effect back \u2014 no network, a missing ref \u2014 so the claim is neither confirmed nor refused and must not downgrade to claimed-done.",
+      "distinction": "Unavailable means the witness could not be consulted, distinct from WitnessAbstain where the resolver ran but found no decisive evidence.",
+      "distinct_from": [
+        "WitnessAbstain (witness outcome)"
+      ],
+      "aliases": [],
+      "grounding": "witnessunavailable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-witness-proof-dgxglmgpuwitness",
+      "canonical": "dgxGlmGpuWitness (CUDA GPU proof)",
+      "family": "witness-proof",
+      "kind": "doc-term",
+      "definition": "dgxGlmGpuWitness is the on-DGX CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via tools/dgx_glm_gpu_witness.sh), invoked because the win32 build host cannot execute the CUDA path.",
+      "distinction": "It is a hardware-run correctness PROOF artifact for a GPU kernel, not the kernel's require-witness trust rung nor a world-state-witness on the cache coherence bus.",
+      "distinct_from": [
+        "world-state-witness",
+        "VerdictRequireWitness (abi verdict)"
+      ],
+      "aliases": [],
+      "grounding": "dgxglmgpuwitness",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

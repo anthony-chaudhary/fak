@@ -1,0 +1,670 @@
+{
+  "rows": [
+    {
+      "id": "x-session-runtime-sessionbench",
+      "canonical": "sessionbench (value-stack bench)",
+      "family": "session-runtime",
+      "kind": "subsystem",
+      "definition": "cmd/sessionbench is the Go benchmark command that measures the net value-add of fak's fused agent kernel over a synthetic multi-agent, multi-turn session workload (its prefillTokens A/B/C formula).",
+      "distinction": "Not a live runtime `session`: it is an offline measurement harness that drives many synthetic sessions to compute a value stack, never a served request.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "sessionbench",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-durabilitysession",
+      "canonical": "DurabilitySession (durability tier)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "DurabilitySession is the ctxplan/ctxmmu durability-tier constant (\"session\") that marks a stored context span as true only for the current session's lifetime.",
+      "distinction": "Not the runtime `session` object: it is a retention-class label on a span, ranking above DurabilityTurn and below DurabilityBounded/DurabilityDurable.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "durabilitysession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-batchsession",
+      "canonical": "BatchSession (batched decode)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "model.BatchSession decodes B independent user sequences in lockstep over one shared weight stream (continuous-batching decode), built via NewBatchSession.",
+      "distinction": "Not a single-user model.Session nor the gateway DRIVE-state session record: it is the multi-lane decode engine that holds one KV cache per lane.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [
+        "newbatchsession"
+      ],
+      "grounding": "batchsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-decidesession",
+      "canonical": "decideSession (admit hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "decideSession is the host-injected request-boundary hook that applies session.Table.Decide so each served model request honors run-state, turn/token/context budget, and pace before the upstream call runs.",
+      "distinction": "Not observeSession (read-only): decideSession MUTATES the drive table (debits TurnsLeft) and returns a proceed/refuse verdict.",
+      "distinct_from": [
+        "session-state",
+        "observeSession (read hook)"
+      ],
+      "aliases": [],
+      "grounding": "decidesession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-observesession",
+      "canonical": "observeSession (read hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "observeSession is the read side of the /v1/fak/session control surface, returning one served session's current DRIVE state (run-state, budget, pace) without mutating the table.",
+      "distinction": "Not decideSession (the mutating boundary): observeSession only snapshots state and an unseen trace reads the table's safe Running default.",
+      "distinct_from": [
+        "session-state",
+        "decideSession (admit hook)"
+      ],
+      "aliases": [],
+      "grounding": "observesession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-debitsession",
+      "canonical": "debitSession (usage hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "debitSession is the host hook that records a served request's post-response token usage (output + context) into the drive table so the next Decide sees budget exhaustion.",
+      "distinction": "Not decideSession (the pre-turn gate): debitSession runs AFTER the planner returns and only accounts usage, it never refuses.",
+      "distinct_from": [
+        "session-usage",
+        "decideSession (admit hook)"
+      ],
+      "aliases": [],
+      "grounding": "debitsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-newbackendsession",
+      "canonical": "NewBackendSession (HAL session)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "model.NewBackendSession starts a single-user model.Session whose per-token forward path runs through an injected compute HAL backend (CUDA/Vulkan/Metal device).",
+      "distinction": "Not BatchSession (multi-lane decode): this is one fresh session with an empty KV whose math is offloaded to a hardware backend rather than the CPU reference path.",
+      "distinct_from": [
+        "new-session",
+        "BatchSession (batched decode)"
+      ],
+      "aliases": [],
+      "grounding": "newbackendsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-servedsessionturn",
+      "canonical": "servedSessionTurn (gateway turn record)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "servedSessionTurn is the gateway's internal per-request record (traceID, resolved SessionState, maxTokens, minGapMs) produced when the session gate admits one proxied model request.",
+      "distinction": "Not the public session-turn DTO: it is an unexported gateway value carrying the pace caps for THIS request, consumed by debitServedSessionTurn.",
+      "distinct_from": [
+        "session-turn"
+      ],
+      "aliases": [],
+      "grounding": "servedsessionturn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-beginservedsessionturn",
+      "canonical": "beginServedSessionTurn (gateway admit)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Server.beginServedSessionTurn applies the live session gate to one proxied model request, calling the wired DecideSession (or the ObserveSession fallback) and enforcing the pace min-gap before the turn runs.",
+      "distinction": "Not the servedSessionTurn struct it returns: this is the method that PRODUCES that record and decides proceed/refuse/cancel.",
+      "distinct_from": [
+        "session-turn",
+        "servedSessionTurn (gateway turn record)"
+      ],
+      "aliases": [],
+      "grounding": "beginservedsessionturn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-debitservedsessionturn",
+      "canonical": "debitServedSessionTurn (gateway debit)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Server.debitServedSessionTurn reports a just-served model request's provider usage back through the injected DebitSession hook so output/context budgets are debited.",
+      "distinction": "Not beginServedSessionTurn (the pre-turn admit): this is the post-turn accounting half of the same boundary.",
+      "distinct_from": [
+        "session-usage",
+        "beginServedSessionTurn (gateway admit)"
+      ],
+      "aliases": [],
+      "grounding": "debitservedsessionturn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-resetservedsessiononbudget",
+      "canonical": "resetServedSessionOnBudget (reset hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "resetServedSessionOnBudget is the host-owned ResetOnBudgetFunc the gateway calls after a context-budget drain to distill a carryover seed, re-arm the continuation trace with a fresh context budget, and let the live request continue transparently.",
+      "distinction": "Not the SessionResetDirective wire payload: this is the server-side closure that performs the human-like reset (Recontinue), not the JSON handoff a supervisor reads.",
+      "distinct_from": [
+        "session-reset",
+        "SessionResetDirective (handoff)"
+      ],
+      "aliases": [],
+      "grounding": "resetservedsessiononbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-steersession",
+      "canonical": "steerSession (steer hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "steerSession enqueues an operator steer onto the process-global a2achan bus (keyed by the session trace) so a running detached session can splice the input at its next turn boundary.",
+      "distinction": "Not controlSession (DRIVE-state verbs): steerSession injects free-text guidance over the agent bus, subject to the a2achan default-deny floor, not a run/budget/pace mutation.",
+      "distinct_from": [
+        "session-control-request",
+        "controlSession (write hook)"
+      ],
+      "aliases": [],
+      "grounding": "steersession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-controlsession",
+      "canonical": "controlSession (write hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "controlSession is the write side of /v1/fak/session, applying one DRIVE control verb (run|budget|pace|priority) to a live session's state with optional if_rev optimistic-concurrency.",
+      "distinction": "Not observeSession (read side): controlSession mutates the table and maps a CAS/terminal refusal to 409 and a malformed verb to 400.",
+      "distinct_from": [
+        "session-control-request",
+        "observeSession (read hook)"
+      ],
+      "aliases": [],
+      "grounding": "controlsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-ingestsession",
+      "canonical": "IngestSession (cdb)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "cdb.IngestSession parses a Claude Code session JSONL transcript at a path into a recall.Recorder, applying the ctxmmu write-time seal/quarantine decision per tool result.",
+      "distinction": "Not a live runtime session: it is an offline transcript importer producing a recorder for recall/contextq, never a served or scheduled session.",
+      "distinct_from": [
+        "new-session"
+      ],
+      "aliases": [],
+      "grounding": "ingestsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionfromprefix",
+      "canonical": "SessionFromPrefix (prefix clone)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "model.SessionFromPrefix starts a model.Session whose KV cache is an independent clone of an already-computed prefix cache, so a known prefix can be spliced into a new session before prefilling a suffix.",
+      "distinction": "Not NewBackendSession (fresh empty KV on a HAL device): SessionFromPrefix is the prefix-reuse clone path used by radixkv, copying rather than starting blank.",
+      "distinct_from": [
+        "new-session",
+        "NewBackendSession (HAL session)"
+      ],
+      "aliases": [],
+      "grounding": "sessionfromprefix",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionlistresponse",
+      "canonical": "SessionListResponse (wire)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "gateway.SessionListResponse is the wire result of GET /v1/fak/sessions \u2014 a snapshot array of every live session's DRIVE state plus a Count.",
+      "distinction": "Not SessionState (one session): it is the plural fleet snapshot DTO that the CLI ps/tui panes decode.",
+      "distinct_from": [
+        "list-sessions",
+        "session-state"
+      ],
+      "aliases": [],
+      "grounding": "sessionlistresponse",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionq4kkernel",
+      "canonical": "sessionQ4KKernel (decode matvec)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "sessionQ4KKernel (with siblings sessionQ8Kernel and sessionQ4Kernel) is an allocation-light per-token decode matvec kernel that wraps a *model.Session and dispatches projections by resident quant format (Q4_K / Q8 / Q4_0), reusing the session's activation buffer.",
+      "distinction": "Not BatchSession (multi-lane decode): these wrap ONE session for a single decode position and differ only by the weight quantization they multiply.",
+      "distinct_from": [
+        "session",
+        "BatchSession (batched decode)"
+      ],
+      "aliases": [
+        "sessionq8kernel",
+        "sessionq4kernel"
+      ],
+      "grounding": "sessionq4kkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-cmdsession",
+      "canonical": "cmdSession (CLI verb)",
+      "family": "session-runtime",
+      "kind": "cli-verb",
+      "definition": "cmdSession is the `fak session` CLI entry point, delegating to its testable core runSession to read and POST DRIVE-state controls to a gateway's session REST surface.",
+      "distinction": "Not controlSession (the gateway-side host hook): cmdSession is the CLIENT command in cmd/fak that issues HTTP requests against that surface.",
+      "distinct_from": [
+        "session-control-request",
+        "controlSession (write hook)"
+      ],
+      "aliases": [
+        "sessioncmd",
+        "runsession"
+      ],
+      "grounding": "cmdsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionclient",
+      "canonical": "sessionClient (CLI HTTP client)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "sessionClient is the cmd/fak HTTP client struct (base URL, key, http.Client) that the session/ps/signal/tui commands use to call the gateway's session observe/list/control endpoints.",
+      "distinction": "Not cmdSession (the verb dispatcher): sessionClient is the transport object the verb constructs to actually talk to the gateway.",
+      "distinct_from": [
+        "session-control-request",
+        "cmdSession (CLI verb)"
+      ],
+      "aliases": [],
+      "grounding": "sessionclient",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionresetdirective",
+      "canonical": "SessionResetDirective (handoff)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "gateway.SessionResetDirective is the machine-readable handoff a supervisor receives when a served session's budget is exhausted, carrying the continuation id and carryover so a fresh window can resume.",
+      "distinction": "Not resetServedSessionOnBudget (the host closure that performs the reset): this is the JSON payload embedded in the 409 refusal/MCP response describing the reset.",
+      "distinct_from": [
+        "session-reset",
+        "resetServedSessionOnBudget (reset hook)"
+      ],
+      "aliases": [],
+      "grounding": "sessionresetdirective",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-defaultsessionaddr",
+      "canonical": "defaultSessionAddr (CLI target)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "defaultSessionAddr returns the gateway base URL the cmd/fak session/ps/signal/tui commands target \u2014 $FAK_ADDR when set, otherwise the built-in localhost default.",
+      "distinction": "Not sessionClient (the client object): defaultSessionAddr only resolves the address string that client is constructed with.",
+      "distinct_from": [
+        "session-control-request",
+        "sessionClient (CLI HTTP client)"
+      ],
+      "aliases": [],
+      "grounding": "defaultsessionaddr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionbudget",
+      "canonical": "SessionBudget (wire)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "gateway.SessionBudget is the wire form of internal/session.Budget, carrying TurnsLeft, TokensLeft, and ContextTokensLeft for one session.",
+      "distinction": "Not the internal session.Budget it mirrors: SessionBudget is the gateway DTO crossing the HTTP boundary, keeping the gateway session-internals-blind.",
+      "distinct_from": [
+        "budget"
+      ],
+      "aliases": [],
+      "grounding": "sessionbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionpace",
+      "canonical": "SessionPace (wire)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "gateway.SessionPace is the wire form of internal/session.Pace, carrying MaxTokensPerTurn and MinTurnGapMs (zero on either axis means unset).",
+      "distinction": "Not SessionBudget (the run/token allotment): SessionPace governs throttling \u2014 per-turn token cap and inter-turn gap \u2014 not how much budget remains.",
+      "distinct_from": [
+        "pace",
+        "SessionBudget (wire)"
+      ],
+      "aliases": [],
+      "grounding": "sessionpace",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-writesessionrefusal",
+      "canonical": "writeSessionRefusal (409 emitter)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "writeSessionRefusal emits the HTTP 409 a proxied request receives when an operator has held, paused, or stopped a session, embedding the SessionState reason and any reset directive.",
+      "distinction": "Not sessionAdmits (the decision): writeSessionRefusal is the response writer invoked once that gate or beginServedSessionTurn has already decided to refuse.",
+      "distinct_from": [
+        "session-state",
+        "sessionAdmits (proxy admission gate)"
+      ],
+      "aliases": [],
+      "grounding": "writesessionrefusal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-emitsessionjson",
+      "canonical": "emitSessionJSON (CLI printer)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "emitSessionJSON is the cmd/fak helper that marshals a session value (state, list, or ack) to JSON on stdout and returns the process exit code for the --json output mode.",
+      "distinction": "Not SessionListResponse (the data): emitSessionJSON is the renderer that serializes such a value, used across ps/signal/session verbs.",
+      "distinct_from": [
+        "list-sessions",
+        "sessionClient (CLI HTTP client)"
+      ],
+      "aliases": [],
+      "grounding": "emitsessionjson",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-nativescheduler",
+      "canonical": "NativeScheduler (modelengine)",
+      "family": "session-runtime",
+      "kind": "subsystem",
+      "definition": "modelengine.NativeScheduler is the continuous-batching-shaped LifecycleEngine stub whose single scheduler loop owns one model.BatchSession and advances all admitted lanes in lockstep.",
+      "distinction": "Not the session.Scheduler (DRIVE-state slot picker): NativeScheduler is the decode-side engine loop that batches token generation, not the run-state admission scheduler.",
+      "distinct_from": [
+        "scheduler",
+        "BatchSession (batched decode)"
+      ],
+      "aliases": [],
+      "grounding": "nativescheduler",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-onslotfreed",
+      "canonical": "OnSlotFreed (scheduler callback)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "session.Scheduler.OnSlotFreed registers the single host callback the scheduler invokes once per slot-freed SlotEvent when a session transitions to a slot-releasing run-state.",
+      "distinction": "Not the slot itself: OnSlotFreed is the registration seam for reacting to a freed slot, holding exactly one observer.",
+      "distinct_from": [
+        "slot",
+        "scheduler"
+      ],
+      "aliases": [],
+      "grounding": "onslotfreed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-reclaimkvonslotfreed",
+      "canonical": "ReclaimKVOnSlotFreed (gateway KV reclaim)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Server.ReclaimKVOnSlotFreed is the gateway's consumer of a scheduler SlotFreed event that, on a terminal cause (draining/stopped), drives the injected KV reclaimer to free that session's real KV-cache pages.",
+      "distinction": "Not OnSlotFreed (the scheduler-side registration): ReclaimKVOnSlotFreed is the gateway-side consumer that turns the wire-neutral SlotFreed into actual KV reclamation.",
+      "distinct_from": [
+        "slot",
+        "OnSlotFreed (scheduler callback)"
+      ],
+      "aliases": [],
+      "grounding": "reclaimkvonslotfreed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-publishsessionrevision",
+      "canonical": "PublishSessionRevision (change feed)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Server.PublishSessionRevision records one drive-state revision onto the gateway's session change feed (#630) so /v1/fak/session/changes subscribers can drain DRIVE-state updates.",
+      "distinction": "Not observeSession (a point-read of current state): PublishSessionRevision appends to a monotonically-revisioned stream the host pushes into the gateway.",
+      "distinct_from": [
+        "session-state",
+        "observeSession (read hook)"
+      ],
+      "aliases": [],
+      "grounding": "publishsessionrevision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-servesessions",
+      "canonical": "serveSessions (drive table)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "serveSessions is the process-local, TraceID-keyed, bounded-LRU session.Table holding every served session's DRIVE state (run-state/budget/priority/pace), shared by the gateway session routes and any in-process agent loop.",
+      "distinction": "Not the gateway server: the gateway holds serveSessions only by injected closure (observe/decide/debit), never by import, so it stays session-internals-blind.",
+      "distinct_from": [
+        "session-state"
+      ],
+      "aliases": [],
+      "grounding": "servesessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-sessionadmit",
+      "canonical": "sessionAdmits (proxy admission gate)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Server.sessionAdmits is the gateway's fallback proxy admission gate that reports whether a proxied request may proceed under the operator-controlled DRIVE run-state, failing OPEN when no ObserveSession hook is wired.",
+      "distinction": "Not decideSession (the mutating boundary): sessionAdmits is the observe-only fallback used when only ObserveSession is wired, debiting no budget.",
+      "distinct_from": [
+        "session-state",
+        "decideSession (admit hook)"
+      ],
+      "aliases": [],
+      "grounding": "sessionadmit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-slotcause",
+      "canonical": "SlotCause (scheduler reason)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "session.SlotCause is the closed enum naming WHY a scheduling slot freed (budget-exhausted | paused | draining | stopped), carried on a SlotEvent and rendered as a lowercase token.",
+      "distinction": "Not the slot (the capacity unit): SlotCause is the reason annotation on a slot-freed event that the gateway keys its KV-reclaim edge on.",
+      "distinct_from": [
+        "slot",
+        "OnSlotFreed (scheduler callback)"
+      ],
+      "aliases": [],
+      "grounding": "slotcause",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-togatewaysessionstate",
+      "canonical": "toGatewaySessionState (projection)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "toGatewaySessionState projects an internal/session.State value into the gateway's wire SessionState DTO so cmd/fak can publish DRIVE state without the gateway importing internal/session.",
+      "distinction": "Not SessionState (the DTO type): toGatewaySessionState is the host-side mapping function that fills it from the internal table record.",
+      "distinct_from": [
+        "session-state",
+        "serveSessions (drive table)"
+      ],
+      "aliases": [],
+      "grounding": "togatewaysessionstate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-withsessiontable",
+      "canonical": "WithSessionTable (run option)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "agent.WithSessionTable is the RunOption that threads a per-session DRIVE-state session.Table plus the run's trace id into the agent loop so each turn honors the same budget/pace/run-state as a served request.",
+      "distinction": "Not serveSessions (the table instance): WithSessionTable is the option that BINDS a table+trace into an in-process agent run.",
+      "distinct_from": [
+        "session-state",
+        "serveSessions (drive table)"
+      ],
+      "aliases": [],
+      "grounding": "withsessiontable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-session-runtime-faksession",
+      "canonical": "handleFakSession (HTTP route)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Server.handleFakSession is the gateway HTTP handler for /v1/fak/session/{id} \u2014 the read-write DRIVE-state control route that fans GET to observeSession and POST verbs to controlSession/steerSession.",
+      "distinction": "Not controlSession (the injected host hook it calls): handleFakSession is the route layer that parses the request and maps refusals to 409/400/422.",
+      "distinct_from": [
+        "session-control-request",
+        "controlSession (write hook)"
+      ],
+      "aliases": [],
+      "grounding": "faksession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

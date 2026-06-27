@@ -116,9 +116,9 @@ DOS provides three syscall-level primitives for benchmark verification:
 | **Raw throughput** | tok/s | None (single-stream) | fak: 7.8 tok/s vs llama.cpp: 127 tok/s |
 | **Reuse efficiency** | Cache hit rate | Zero cache | 86.7% hit rate (inside SGLang 50-99% band) |
 | **Live speedup** | Wall-clock ratio | Full re-prefill | 4.87× (SmolLM2-135M, agents workload) |
-| **Session value-add** | Total work saved | Naive stateless | 11.2–14.5× (vs no KV persistence) |
+| **Session value-add** | Total work saved | Naive stateless | 5.3–7.4× (SmolLM2-135M, re-measured — see [BENCHMARK-AUTHORITY.md F1](BENCHMARK-AUTHORITY.md#f1--tombstone-note-2026-06-19-governance-rule-4)) |
 
-**Never mix regimes.** A 4.87× live speedup is NOT comparable to an 11.2× session value-add —
+**Never mix regimes.** A 4.87× live speedup is NOT comparable to a 5.3× session value-add —
 they measure different baselines.
 
 ---

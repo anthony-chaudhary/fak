@@ -1,0 +1,670 @@
+{
+  "rows": [
+    {
+      "id": "x-cache-vcachecal",
+      "canonical": "vcachecal (M1 calibrate)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/vcachecal is the vCache M1 observe-and-calibrate decision layer (#716): the warmth-belief estimator plus the offline probe harness that fits the T/M_min/r warmth law and reports false-warm/false-cold prediction error, off the hot path.",
+      "distinction": "It only OBSERVES and calibrates cache-warmth belief; it is not vcachewarm, the M3 layer that actually issues warming requests.",
+      "distinct_from": [
+        "vcache",
+        "vcachewarm (M3 warming)"
+      ],
+      "aliases": [],
+      "grounding": "vcachecal",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-vcachescore",
+      "canonical": "vcachescore (operator scorecard)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/vcachescore is the vCache operator scorecard that composes the vcachecal/vcachestar/vcachegov proof leaves into the offline 2x-readiness gate and the hot-anchor index artifact.",
+      "distinction": "It is a pure off-path readiness gate over the other vCache leaves, not vcachecal which produces the calibration belief it consumes.",
+      "distinct_from": [
+        "vcache",
+        "vcachecal (M1 calibrate)"
+      ],
+      "aliases": [],
+      "grounding": "vcachescore",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-vcachewarm",
+      "canonical": "vcachewarm (M3 warming)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/vcachewarm is the vCache M3 dedicated-warming decision layer (#718): the Anthropic max_tokens:0-vs-decode-1 gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting.",
+      "distinction": "It decides how to actively warm an anchor, unlike vcachestar which only decides which first natural request becomes the anchor.",
+      "distinct_from": [
+        "vcache",
+        "vcachestar (M2 star anchors)"
+      ],
+      "aliases": [],
+      "grounding": "vcachewarm",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-vcachestar",
+      "canonical": "vcachestar (M2 star anchors)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/vcachestar is the vCache M2 star-anchor decision layer (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking.",
+      "distinction": "It chooses and keys the anchor prefix, not vcacheobserve which ingests already-observed provider-cache telemetry after the fact.",
+      "distinct_from": [
+        "vcache",
+        "vcacheobserve (fak vcache observe)"
+      ],
+      "aliases": [],
+      "grounding": "vcachestar",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-vcacheobserve",
+      "canonical": "vcacheobserve (fak vcache observe)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/vcacheobserve backs `fak vcache observe`, ingesting REAL provider-cache transcripts/telemetry into a per-session and cross-session hit-rate report.",
+      "distinction": "It is the read-only measurement of realized provider-cache reuse, not vcachestar which is the forward decision layer that places anchors.",
+      "distinct_from": [
+        "vcache",
+        "vcachestar (M2 star anchors)"
+      ],
+      "aliases": [],
+      "grounding": "vcacheobserve",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-cacheobs",
+      "canonical": "cacheobs (observability tap)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/cacheobs is the process-global observability tap that the in-kernel KV-prefix cache writes lifecycle events into for scraping.",
+      "distinction": "It is the in-kernel KV-prefix tap, not cachemeta which is the cross-plane Entry shape the events are normalized into.",
+      "distinct_from": [
+        "cachemeta",
+        "vcache"
+      ],
+      "aliases": [],
+      "grounding": "cacheobs",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-cachehit",
+      "canonical": "CacheHit (vdso event)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "CacheHit is a vDSO CacheEventKind value naming a tier-2 cache lifecycle HIT event (a cacheable lookup that an entry served), emitted to the cache-event sink.",
+      "distinction": "It is the positive lifecycle event, not NOT_CACHED which is the miss reason recorded when no tier entry answered.",
+      "distinct_from": [
+        "cache-read",
+        "NOT_CACHED (miss reason)"
+      ],
+      "aliases": [],
+      "grounding": "cachehit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-notcached",
+      "canonical": "NOT_CACHED (miss reason)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "MissNotCached (\"NOT_CACHED\") is the vDSO miss-reason recorded when a lookup was cacheable but no tier-1/tier-3/tier-2 entry answered it.",
+      "distinction": "It is the miss-classification counter, not CacheHit which records the successful serve.",
+      "distinct_from": [
+        "cache-read",
+        "CacheHit (vdso event)"
+      ],
+      "aliases": [],
+      "grounding": "notcached",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-cachedtokens",
+      "canonical": "CachedTokens (provider field)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "CachedTokens is the raw provider-reported cache-read token count carried on cachemeta.ProviderCache and on the agent Usage prompt/input token details.",
+      "distinction": "It is the raw per-response provider counter, not CacheReadMultiplier which is the price coefficient applied to it.",
+      "distinct_from": [
+        "cache-read",
+        "provider-cache"
+      ],
+      "aliases": [],
+      "grounding": "cachedtokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-cachedprompttokens",
+      "canonical": "CachedPromptTokens (normalized hit count)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "CachedPromptTokens is the agent Usage method (and AdjudicationSummary field) that normalizes Anthropic/OpenAI/Gemini prompt-cache hit counts into one cache-read prompt-token number.",
+      "distinction": "It is the cross-provider-normalized hit count, not CachedTokens which is the un-normalized per-provider raw field it reads from.",
+      "distinct_from": [
+        "cache-read",
+        "CachedTokens (provider field)"
+      ],
+      "aliases": [],
+      "grounding": "cachedprompttokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-healthycache",
+      "canonical": "healthy_cache (reset reason)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "healthy_cache is the ResetReasonHealthy value of the resetScore SHADOW policy, the verdict that a turn's OBSERVED provider cache ratios look healthy enough to keep cutting rather than reset.",
+      "distinction": "It is a recommend-only health verdict over observed ratios, not provider-cache which is the actual external cache being judged.",
+      "distinct_from": [
+        "provider-cache",
+        "cache-read"
+      ],
+      "aliases": [],
+      "grounding": "healthycache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-memorykvcache",
+      "canonical": "MemoryKVCache (capacity class)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "compute.MemoryKVCache is the MemoryClass label \"kv_cache\" used by the capacity planner to bucket KV-cache allocations in the device memory plan.",
+      "distinction": "It is the accounting class label for budgeting bytes, not kv-cache which is the actual K/V tensor store those bytes hold.",
+      "distinct_from": [
+        "kv-cache",
+        "kvlayout"
+      ],
+      "aliases": [],
+      "grounding": "memorykvcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-cachedinvfreq",
+      "canonical": "cachedInvFreq (RoPE memo)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "model.cachedInvFreq returns the memoized RoPE inverse-frequency table for a config/layer so the rotation base is computed once and reused.",
+      "distinction": "It is a memoized rotation-table cache for RoPE, not kv-cache which stores per-position key/value tensors.",
+      "distinct_from": [
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "cachedinvfreq",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-glmdsakvcache",
+      "canonical": "glmDsaKVCache (DSA session cache)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "model.glmDsaKVCache is the per-session KV cache struct for GLM-MoE-DSA sparse attention, holding pre-RoPE K, V, and the index span with reserve/evict/rerotate operations.",
+      "distinction": "It is the DSA-sparse per-session cache, not the dense full-attention KVCache that NewKVCache allocates.",
+      "distinct_from": [
+        "kv-cache",
+        "radixkv"
+      ],
+      "aliases": [
+        "newglmdsakvcache"
+      ],
+      "grounding": "glmdsakvcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-glmdsaattendcached",
+      "canonical": "glmDsaAttendCached (DSA attend)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "model.glmDsaAttendCached is the method that computes GLM-MoE-DSA sparse attention over the already-selected keys/values resident in a glmDsaKVCache (softmax(scale\u00b7q\u00b7k) then \u03a3wV).",
+      "distinction": "It is the attend OPERATION over the cache, not glmDsaKVCache which is the storage it reads from.",
+      "distinct_from": [
+        "kv-cache",
+        "glmDsaKVCache (DSA session cache)"
+      ],
+      "aliases": [],
+      "grounding": "glmdsaattendcached",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-newkvcache",
+      "canonical": "NewKVCache (dense allocator)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "model.NewKVCache allocates an empty dense full-attention KVCache (keeping pre-RoPE Kraw) for a model session.",
+      "distinction": "It allocates the dense KV cache, not newLinearAttnCache (recurrent/conv state) nor newGLMDsaKVCache (sparse DSA cache).",
+      "distinct_from": [
+        "kv-cache",
+        "linearAttnCache (Qwen3.5 recurrent)"
+      ],
+      "aliases": [],
+      "grounding": "newkvcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-newlinearattncache",
+      "canonical": "linearAttnCache (Qwen3.5 recurrent)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "model.linearAttnCache (constructed by newLinearAttnCache) is the per-session recurrent/conv state cache for Qwen3.5 hybrid linear-attention layers, held in the KVCache.linear field.",
+      "distinction": "It holds recurrent linear-attention state, not the per-position key/value tensors of the dense cache that NewKVCache allocates.",
+      "distinct_from": [
+        "kv-cache",
+        "NewKVCache (dense allocator)"
+      ],
+      "aliases": [],
+      "grounding": "newlinearattncache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-growcaches",
+      "canonical": "growCaches (batch grow)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "model.growCaches grows a slice of *KVCache up to batch size B, allocating fresh per-row caches as needed for batched decode/prefill.",
+      "distinction": "It scales a batch's worth of KV caches, not NewKVCache which allocates a single empty cache.",
+      "distinct_from": [
+        "kv-cache",
+        "NewKVCache (dense allocator)"
+      ],
+      "aliases": [],
+      "grounding": "growcaches",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-uploadcache",
+      "canonical": "uploadCache (device upload memo)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "compute.uploadCache (and its Metal twin metalUploadCache) shares one device/VRAM copy per distinct host buffer across all sessions so a weight tensor stages to the GPU once.",
+      "distinction": "It memoizes host-to-device weight uploads keyed by host pointer, not kv-cache which stores per-token attention state.",
+      "distinct_from": [
+        "kv-cache",
+        "hardware-aware-cache"
+      ],
+      "aliases": [],
+      "grounding": "uploadcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-fromprovidercache",
+      "canonical": "FromProviderCache (constructor)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "cachemeta.FromProviderCache lowers a provider-reported ProviderCache observation into a cachemeta.Entry with provider residency and prompt-prefix media type.",
+      "distinction": "It is the adapter that materializes the Entry, not ProviderCacheVerdict which then judges whether that Entry may be served.",
+      "distinct_from": [
+        "provider-cache",
+        "cachemeta"
+      ],
+      "aliases": [],
+      "grounding": "fromprovidercache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-providercacheverdict",
+      "canonical": "ProviderCacheVerdict",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "cachemeta.ProviderCacheVerdict is the typed LookupVerdict answering \"may this provider cache entry be served\", returning cost_latency_only / non-serveable for provider residency.",
+      "distinction": "It is the serveability judgment, not FromProviderCache which builds the Entry it adjudicates.",
+      "distinct_from": [
+        "provider-cache",
+        "FromProviderCache (constructor)"
+      ],
+      "aliases": [],
+      "grounding": "providercacheverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-rawhascachecontrol",
+      "canonical": "rawHasCacheControl (detector)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "agent.rawHasCacheControl is the predicate that tests whether a raw Anthropic JSON block (system, tool_result, or content) carries a cache_control breakpoint.",
+      "distinction": "It is the detector of a cache_control marker on the wire, not cache-control the concept of the Anthropic prompt-cache breakpoint itself.",
+      "distinct_from": [
+        "cache-control"
+      ],
+      "aliases": [],
+      "grounding": "rawhascachecontrol",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-cachereadmultiplier",
+      "canonical": "CacheReadMultiplier (price coeff)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "gateway.CacheReadMultiplier (=0.1, mirrored in internal/resume) is the price of a cached-prefix READ relative to base input, used to value cache-read tokens in cost math.",
+      "distinction": "It is the pricing coefficient, not cache-read which is the token count it is multiplied against.",
+      "distinct_from": [
+        "cache-read"
+      ],
+      "aliases": [],
+      "grounding": "cachereadmultiplier",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-cacherebatetokens",
+      "canonical": "cache_rebate_tokens (debug field)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "cache_rebate_tokens is the OBSERVED per-turn field in the `fak serve --debug-stats` stderr line, the token-equivalent rebate computed as cacheRead\u00b7(1\u2212CacheReadMultiplier).",
+      "distinction": "It is the realized savings projection printed per turn, not CacheReadMultiplier which is the constant coefficient inside its formula.",
+      "distinct_from": [
+        "cache-read",
+        "CacheReadMultiplier (price coeff)"
+      ],
+      "aliases": [],
+      "grounding": "cacherebatetokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-recordcompactioncacheread",
+      "canonical": "recordCompactionCacheRead",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "gateway.recordCompactionCacheRead records the provider's cache_read_input_tokens on a compacted (streamed or buffered) turn so post-compaction billing truth is captured.",
+      "distinction": "It is the metrics recorder for cache-read on compacted turns, not cache-read the underlying provider token concept it logs.",
+      "distinct_from": [
+        "cache-read"
+      ],
+      "aliases": [],
+      "grounding": "recordcompactioncacheread",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-pagecacheentries",
+      "canonical": "PageCacheEntries (image enum)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "PageCacheEntries returns the cachemeta.Entry metadata for every page-table row of a context image (cdb.Image / contextq), without materializing the pages.",
+      "distinction": "It enumerates per-page cache metadata for an image, not cachemeta which is the single Entry shape each row uses.",
+      "distinct_from": [
+        "cachemeta",
+        "viewcache"
+      ],
+      "aliases": [],
+      "grounding": "pagecacheentries",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-emitcache",
+      "canonical": "emitCache (vdso emitter)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "vdso.emitCache builds a cachemeta entry from a tier-2 identity and dispatches it (outside the lock) to the installed cache-event sink.",
+      "distinction": "It is the per-event emitter, not SetCacheEventSink which installs the observer it dispatches to.",
+      "distinct_from": [
+        "cachemeta",
+        "SetCacheEventSink"
+      ],
+      "aliases": [],
+      "grounding": "emitcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-setcacheeventsink",
+      "canonical": "SetCacheEventSink",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "vdso.SetCacheEventSink installs (or clears) the observer function that receives tier-2 cache lifecycle CacheEvents, wired by the gateway to fold them into fak_cache_*.",
+      "distinction": "It is the registration of the observer, not emitCache which fires events into the registered sink.",
+      "distinct_from": [
+        "cachemeta",
+        "emitCache (vdso emitter)"
+      ],
+      "aliases": [],
+      "grounding": "setcacheeventsink",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-vcacheprooffromcounters",
+      "canonical": "vcacheProofFromCounters",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "gateway.vcacheProofFromCounters prices the NET realized provider-cache economics over cumulative input/cached/creation counters into a vcachegov.TelemetrySavingsProof.",
+      "distinction": "It is the proof-builder over realized counters, not VCacheTokenEquiv the single token-equivalent cost figure that sits inside the proof.",
+      "distinct_from": [
+        "vcache",
+        "VCacheTokenEquiv"
+      ],
+      "aliases": [],
+      "grounding": "vcacheprooffromcounters",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-vcachetokenequiv",
+      "canonical": "VCacheTokenEquiv",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "vcachegov.VCacheTokenEquiv is the token-equivalent cost of a vCache-anchored plan (write-multiplier\u00b7anchor + reuse reads + suffix), compared against the baseline to compute savings.",
+      "distinction": "It is the single cost scalar of the anchored plan, not vcacheProofFromCounters which is the surrounding proof that derives and frames it.",
+      "distinct_from": [
+        "vcache",
+        "vcacheProofFromCounters"
+      ],
+      "aliases": [],
+      "grounding": "vcachetokenequiv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-enginecacheengine",
+      "canonical": "EngineCache* serve knobs",
+      "family": "cache",
+      "kind": "config",
+      "definition": "The EngineCache* serve flags (engine sglang|vllm, base-url, admin-key env, idle-timeout, require-exact-span) configure fak's reset of a self-hosted upstream serving-engine cache after a quarantined provider-bound tool turn.",
+      "distinction": "They are the configuration knobs for resetting an external serving engine's cache, not enginecache the in-fak engine-cache subsystem concept they tune.",
+      "distinct_from": [
+        "enginecache"
+      ],
+      "aliases": [
+        "enginecacheadminkey",
+        "enginecachebaseurl",
+        "enginecacheidletimeout",
+        "enginecacherequireexactspan"
+      ],
+      "grounding": "enginecacheengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-fakcache",
+      "canonical": "fak_cache_* (stream metrics)",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "fak_cache_* is the Prometheus metric family folding cachemeta.Entry events across ALL cache planes (the unified cross-plane events/bytes/breakdown counters rendered by the gateway's StreamMetrics).",
+      "distinction": "It is the cross-plane unified fold, not fak_engine_cache_* which counts only the live serving-engine's KV cache events.",
+      "distinct_from": [
+        "cachemeta",
+        "fak_engine_cache_* (engine metrics)"
+      ],
+      "aliases": [],
+      "grounding": "fakcache",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-fakenginecache",
+      "canonical": "fak_engine_cache_* (engine metrics)",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "fak_engine_cache_* is the Prometheus metric family for live serving-engine KV cache events (events/hits/misses/faults/bytes/tokens moved across residency tiers), namespaced alongside fak_gateway_*/fak_kernel_*.",
+      "distinction": "It counts only the engine's KV cache lifecycle, not fak_cache_* which is the unified fold over every cache plane's cachemeta entries.",
+      "distinct_from": [
+        "enginecache",
+        "fak_cache_* (stream metrics)"
+      ],
+      "aliases": [],
+      "grounding": "fakenginecache",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-hwcachedemo",
+      "canonical": "hwcachedemo (HW-aware proof cmd)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "cmd/hwcachedemo is a no-model, no-GPU command that proves fak's cache is hardware-aware by replaying an expensive hot-prefix span under hand-injected capacity pressure (demote-not-evict).",
+      "distinction": "It is the runnable single-stream proof binary, not hardware-aware-cache the cache property it demonstrates.",
+      "distinct_from": [
+        "hardware-aware-cache"
+      ],
+      "aliases": [],
+      "grounding": "hwcachedemo",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-cache-l3cache",
+      "canonical": "L3 disaggregated cache (study)",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "l3cache is the docs/notes positioning study (epic #79) that fixes fak's relationship to an external, content-addressed remote-DRAM L3 KV-cache tier and maps fak's shipped semantic primitives onto the gaps that tier leaves open.",
+      "distinction": "It is the external remote-DRAM cache tier fak positions against, not kv-transfer the in-fak primitive for moving KV between local residency tiers.",
+      "distinct_from": [
+        "kv-transfer",
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "l3cache",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
