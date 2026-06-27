@@ -139,17 +139,28 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func contentText(raw json.RawMessage) (string, error) {
+// trimmedTextScalar handles the two leaf cases both contentText and contentPartText
+// share: empty / JSON null trims to "", and a JSON string literal decodes to its value.
+// done is true when one of those cases applied (s and err are then authoritative); when
+// done is false the caller inspects the remaining trimmed bytes itself.
+func trimmedTextScalar(raw json.RawMessage) (rest json.RawMessage, s string, done bool, err error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return "", nil
+		return raw, "", true, nil
 	}
 	if raw[0] == '"' {
-		var s string
-		if err := json.Unmarshal(raw, &s); err != nil {
-			return "", err
+		if e := json.Unmarshal(raw, &s); e != nil {
+			return raw, "", true, e
 		}
-		return s, nil
+		return raw, s, true, nil
+	}
+	return raw, "", false, nil
+}
+
+func contentText(raw json.RawMessage) (string, error) {
+	raw, s, done, err := trimmedTextScalar(raw)
+	if done {
+		return s, err
 	}
 	if raw[0] == '[' {
 		var parts []json.RawMessage
@@ -172,16 +183,9 @@ func contentText(raw json.RawMessage) (string, error) {
 }
 
 func contentPartText(raw json.RawMessage) (string, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return "", nil
-	}
-	if raw[0] == '"' {
-		var s string
-		if err := json.Unmarshal(raw, &s); err != nil {
-			return "", err
-		}
-		return s, nil
+	raw, s, done, err := trimmedTextScalar(raw)
+	if done {
+		return s, err
 	}
 	var part struct {
 		Type    string `json:"type"`
@@ -489,14 +493,27 @@ func WithUpstreamBeta(beta string) SampleOpt {
 // stream flag. A body that does not parse as a JSON object is returned unchanged
 // (the planner then surfaces the upstream's own error).
 func forceAnthropicNonStreaming(raw []byte) []byte {
+	return setAnthropicStreamFlag(raw, "false", func(_ json.RawMessage, present bool) bool {
+		return !present // a body with no stream field is already non-streaming — keep its exact prefix
+	})
+}
+
+// setAnthropicStreamFlag returns raw with its top-level "stream" key set to value,
+// re-marshalling the object — UNLESS skip reports the rewrite is unnecessary (the body
+// is already in the wanted state), in which case raw is returned byte-identical so the
+// provider cache prefix survives. A body that does not parse as a JSON object, or that
+// fails to re-marshal, is returned unchanged. It is the shared core of the streaming /
+// non-streaming forcing pair; only the target value and the skip predicate differ.
+func setAnthropicStreamFlag(raw []byte, value string, skip func(v json.RawMessage, present bool) bool) []byte {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return raw
 	}
-	if _, ok := obj["stream"]; !ok {
+	v, present := obj["stream"]
+	if skip(v, present) {
 		return raw
 	}
-	obj["stream"] = json.RawMessage("false")
+	obj["stream"] = json.RawMessage(value)
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return raw
@@ -836,11 +853,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range call.headers() {
-			if v != "" {
-				req.Header.Set(k, v)
-			}
-		}
+		call.applyHeaders(req)
 		resp, err := p.Client.Do(req)
 		if err != nil {
 			// A deterministic dial-time failure (refused / NXDOMAIN / TLS) will not

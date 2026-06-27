@@ -248,6 +248,13 @@ func (s *fusionSink) resolved(txn abi.TxnID, epoch uint64) (msgs []Message, fuse
 // Promote (abi.ProvisionalSink) finalizes the fold: the fused transcript is now the
 // durable one. Idempotent — an unknown or already-resolved key is a no-op.
 func (s *fusionSink) Promote(_ context.Context, txn abi.TxnID, epoch uint64) error {
+	return s.resolve(txn, epoch, true)
+}
+
+// resolve is the shared fold-finalization for Promote/Rollback: under the lock, mark a
+// still-pending entry resolved and record whether the fused (true) or original (false)
+// transcript is now durable. Idempotent — an unknown or already-resolved key is a no-op.
+func (s *fusionSink) resolve(txn abi.TxnID, epoch uint64, committedFused bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := fusionKey{txn, epoch}
@@ -256,7 +263,7 @@ func (s *fusionSink) Promote(_ context.Context, txn abi.TxnID, epoch uint64) err
 		return nil
 	}
 	t.resolved = true
-	t.committedFused = true
+	t.committedFused = committedFused
 	s.pending[k] = t
 	return nil
 }
@@ -264,15 +271,5 @@ func (s *fusionSink) Promote(_ context.Context, txn abi.TxnID, epoch uint64) err
 // Rollback (abi.ProvisionalSink) retracts the fold: the original transcript is
 // restored byte-identical to never having folded. Idempotent.
 func (s *fusionSink) Rollback(_ context.Context, txn abi.TxnID, epoch uint64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	k := fusionKey{txn, epoch}
-	t, ok := s.pending[k]
-	if !ok || t.resolved {
-		return nil
-	}
-	t.resolved = true
-	t.committedFused = false
-	s.pending[k] = t
-	return nil
+	return s.resolve(txn, epoch, false)
 }

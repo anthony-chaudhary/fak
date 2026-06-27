@@ -198,28 +198,30 @@ func extractArrayDelimited(re *regexp.Regexp) func(string) []liftedBlock {
 		if err := json.Unmarshal([]byte(content[loc[2]:loc[3]]), &raws); err != nil {
 			return nil
 		}
-		var calls []ToolCall
-		for _, raw := range raws {
-			if call, ok := liftPayload(string(raw)); ok {
-				calls = append(calls, call)
-			}
-		}
-		if len(calls) == 0 {
-			return nil
-		}
-		blocks := make([]liftedBlock, len(calls))
-		for i, call := range calls {
-			// All array elements collapse to the single bracketed span: the first
-			// block carries the full [start,end) so the marker is stripped once; the
-			// rest are zero-width at end so they add no further strip range.
-			if i == 0 {
-				blocks[i] = liftedBlock{start: loc[0], end: loc[1], call: call}
-			} else {
-				blocks[i] = liftedBlock{start: loc[1], end: loc[1], call: call}
-			}
-		}
-		return blocks
+		return arrayLiftedBlocks(raws, loc[0], loc[1])
 	}
+}
+
+// arrayLiftedBlocks lifts a JSON array of call objects into liftedBlocks that all
+// collapse to a single stripped span [start,end): the first liftable element carries
+// the full span so the array marker is stripped exactly once, every later element is a
+// zero-width block at end so it adds no further strip range. Nameless / malformed
+// elements are skipped; nil when none lift. Shared by the [TOOL_CALLS], fenced, and
+// bare-JSON array paths.
+func arrayLiftedBlocks(raws []json.RawMessage, start, end int) []liftedBlock {
+	var blocks []liftedBlock
+	for _, raw := range raws {
+		call, ok := liftPayload(string(raw))
+		if !ok {
+			continue
+		}
+		if len(blocks) == 0 {
+			blocks = append(blocks, liftedBlock{start: start, end: end, call: call})
+		} else {
+			blocks = append(blocks, liftedBlock{start: end, end: end, call: call})
+		}
+	}
+	return blocks
 }
 
 // extractFenced lifts a tool call emitted inside a ```json … ``` fence (or a bare
@@ -240,17 +242,7 @@ func extractFenced(content string) []liftedBlock {
 			if err := json.Unmarshal([]byte(body), &raws); err != nil {
 				continue
 			}
-			for i, raw := range raws {
-				call, ok := liftPayload(string(raw))
-				if !ok {
-					continue
-				}
-				if i == 0 {
-					blocks = append(blocks, liftedBlock{start: loc[0], end: loc[1], call: call})
-				} else {
-					blocks = append(blocks, liftedBlock{start: loc[1], end: loc[1], call: call})
-				}
-			}
+			blocks = append(blocks, arrayLiftedBlocks(raws, loc[0], loc[1])...)
 			continue
 		}
 		call, ok := liftPayload(body)
@@ -280,19 +272,7 @@ func extractBareJSON(content string) []liftedBlock {
 		if err := json.Unmarshal([]byte(trimmed), &raws); err != nil {
 			return nil
 		}
-		var blocks []liftedBlock
-		for i, raw := range raws {
-			call, ok := liftPayload(string(raw))
-			if !ok {
-				continue
-			}
-			if i == 0 {
-				blocks = append(blocks, liftedBlock{start: start, end: end, call: call})
-			} else {
-				blocks = append(blocks, liftedBlock{start: end, end: end, call: call})
-			}
-		}
-		return blocks
+		return arrayLiftedBlocks(raws, start, end)
 	}
 	if !strings.HasPrefix(trimmed, "{") {
 		return nil

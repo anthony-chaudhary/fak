@@ -294,23 +294,7 @@ func geminiParamsToSchema(params any) json.RawMessage {
 
 // lowercaseSchemaTypes is the inverse of the outbound adapter's
 // uppercaseSchemaTypes: it rewrites every JSON Schema "type" field value to
-// lowercase in place, so a Gemini-inbound schema (UPPERCASE) normalizes to the
-// lowercase OpenAI-style JSON Schema every other inbound path produces.
-func lowercaseSchemaTypes(v any) {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, val := range x {
-			if k == "type" {
-				if s, ok := val.(string); ok {
-					x[k] = strings.ToLower(s)
-					continue
-				}
-			}
-			lowercaseSchemaTypes(val)
-		}
-	case []any:
-		for _, val := range x {
-			lowercaseSchemaTypes(val)
-		}
-	}
-}
+// lowercase in place (via the shared mapSchemaTypes walk), so a Gemini-inbound
+// schema (UPPERCASE) normalizes to the lowercase OpenAI-style JSON Schema every
+// other inbound path produces.
+func lowercaseSchemaTypes(v any) { mapSchemaTypes(v, strings.ToLower) }

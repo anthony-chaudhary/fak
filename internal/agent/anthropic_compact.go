@@ -91,41 +91,45 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 // CompactAnthropicHistoryWithOutcome is CompactAnthropicHistory plus the observable outcome
 // (fired vs the labeled bail reason, and the dropped-turn / shed-token counts on a fire). The
 // gateway uses it to emit the compaction metric family; the byte-level guarantees are identical.
+// anchorCompactablePrefix is the shared front half of both byte-level rewrites
+// (CompactAnthropicHistoryWithOutcome and CompactAnthropicHistoryToView): it
+// decodes the request object, finds the messages[] array (with exact byte spans),
+// requires at least minElems elements, and anchors the protected prefix on the
+// FIRST cache_control breakpoint message (or a system-level breakpoint). On any
+// ambiguity it returns ok=false with the labeled fail-safe CompactOutcome the
+// caller should return verbatim. pfxEnd is the index of the last protected message
+// (-1 when only `system` carries the cache, so every message is compactible).
+func anchorCompactablePrefix(raw []byte, minElems int) (elems []json.RawMessage, spans []elementSpan, pfxEnd int, bail CompactOutcome, ok bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, nil, 0, CompactOutcome{Reason: CompactReasonNonJSON}, false // not a JSON object — leave it alone
+	}
+	msgsRaw, hasMsgs := obj["messages"]
+	if !hasMsgs {
+		return nil, nil, 0, CompactOutcome{Reason: CompactReasonNoMsgsKey}, false
+	}
+	elems, spans, decoded := decodeArrayElements(raw, msgsRaw)
+	if !decoded || len(elems) < minElems {
+		return nil, nil, 0, CompactOutcome{Reason: CompactReasonTooFewMsgs}, false // nothing safe to compact
+	}
+	pfxEnd = firstBreakpointMessage(elems)
+	if pfxEnd < 0 && !rawHasCacheControl(obj["system"]) {
+		return nil, nil, 0, CompactOutcome{Reason: CompactReasonNoBreakpoint}, false // no anchor — identity
+	}
+	return elems, spans, pfxEnd, CompactOutcome{}, true
+}
+
 func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, CompactOutcome) {
 	if budget <= 0 || len(raw) == 0 {
 		return raw, CompactOutcome{Reason: CompactReasonUnderBudget}
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw, CompactOutcome{Reason: CompactReasonNonJSON} // not a JSON object — leave it alone
-	}
-	msgsRaw, ok := obj["messages"]
+	// The protected prefix is anchored on the FIRST cache_control breakpoint message (the
+	// stable cached head the provider reuses every turn) — see anchorCompactablePrefix and
+	// firstBreakpointMessage for why the FIRST breakpoint, not the last, lets compaction fire
+	// on real Claude Code traffic that marks both the static head AND recent turns.
+	elems, spans, pfxEnd, bail, ok := anchorCompactablePrefix(raw, 3)
 	if !ok {
-		return raw, CompactOutcome{Reason: CompactReasonNoMsgsKey}
-	}
-	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok || len(elems) < 3 {
-		return raw, CompactOutcome{Reason: CompactReasonTooFewMsgs} // nothing safe to compact
-	}
-
-	// 1. Anchor the protected prefix on the FIRST cache_control breakpoint message — the
-	//    STABLE cached head the provider reuses every turn — NOT the last. This is the fix
-	//    for the silent no-op on real Claude Code traffic: the growing-conversation cache
-	//    layout (Anthropic prompt-caching docs: up to 4 breakpoints) marks the static head
-	//    AND a RECENT turn, so the LAST breakpoint sits near the end. Anchoring on it would
-	//    "protect" the whole conversation and compact NOTHING. The span we want to drop is
-	//    the un-cacheable MIDDLE — the turns between the cached head and the recent kept
-	//    window — which the provider re-bills every turn anyway (it is beyond the recent
-	//    breakpoint's 20-block backward lookback). Removing it shifts the recent breakpoint's
-	//    position, so the provider's cache read walks back to the HEAD breakpoint (the cache
-	//    cascade), where the bytes are byte-identical → the dominant cache hit survives. A
-	//    breakpoint in `system` (or no message breakpoint) still protects the array head; we
-	//    require a breakpoint somewhere or we cannot know the cache boundary and must not
-	//    touch the body.
-	pfxEnd := firstBreakpointMessage(elems)
-	sysHasCC := rawHasCacheControl(obj["system"])
-	if pfxEnd < 0 && !sysHasCC {
-		return raw, CompactOutcome{Reason: CompactReasonNoBreakpoint} // no anchor — identity
+		return raw, bail
 	}
 	// When only `system` holds the cache, the protected message prefix is empty (-1):
 	// every message is compactible. Otherwise it ends at the FIRST breakpoint message (the
@@ -220,17 +224,12 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 		return raw, CompactOutcome{Reason: CompactReasonSpliceFailed}
 	}
 
-	// 5. Prove it: the result must still decode as a valid Messages request, and the
-	//    protected prefix bytes must be byte-identical to the input. Either failing is a
-	//    bug in the splice, not a reason to ship a broken/cache-busting body — fall back.
-	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+	// 5. Prove it: the spliced body must still decode AND keep the protected prefix bytes
+	//    intact, or we ship identity rather than a broken/cache-busting body.
+	switch verifySplicedBody(raw, out, spans, pfxEnd) {
+	case spliceVerdictRedecodeFail:
 		return raw, CompactOutcome{Reason: CompactReasonRedecodeFail}
-	}
-	prefixEnd := arrayContentStart(spans) // byte offset just inside `[`
-	if pfxEnd >= 0 {
-		prefixEnd = spans[pfxEnd].end
-	}
-	if prefixEnd > len(out) || !bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) {
+	case spliceVerdictPrefixMismatch:
 		return raw, CompactOutcome{Reason: CompactReasonPrefixMismatch}
 	}
 	return out, CompactOutcome{Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens}
@@ -239,6 +238,35 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 // elementSpan is the [start,end) byte range of one messages[] element within the original
 // body, where start points at the element's first byte and end just past its last.
 type elementSpan struct{ start, end int }
+
+// spliceVerdict is the shared "prove it" outcome for a byte-spliced request body, mapped
+// by each caller onto its own (Compact|Elide)Reason vocabulary.
+type spliceVerdict int
+
+const (
+	spliceVerdictOK             spliceVerdict = iota // re-decodes AND protected prefix is byte-identical
+	spliceVerdictRedecodeFail                        // spliced body no longer parses as a Messages request
+	spliceVerdictPrefixMismatch                      // protected cache prefix bytes changed (would burst the cache)
+)
+
+// verifySplicedBody is the shared post-splice proof both the compaction and elision rewrites
+// run: the result must still decode as a valid Messages request, and the protected prefix
+// bytes (through spans[pfxEnd], or just the array open when pfxEnd<0) must be byte-identical
+// to the input. Either failing is a splice bug, not a reason to ship a broken / cache-busting
+// body — the caller returns identity with its own labeled reason.
+func verifySplicedBody(raw, out []byte, spans []elementSpan, pfxEnd int) spliceVerdict {
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		return spliceVerdictRedecodeFail
+	}
+	prefixEnd := arrayContentStart(spans) // byte offset just inside `[` when only `system` is cached
+	if pfxEnd >= 0 {
+		prefixEnd = spans[pfxEnd].end
+	}
+	if prefixEnd > len(out) || !bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) {
+		return spliceVerdictPrefixMismatch
+	}
+	return spliceVerdictOK
+}
 
 // decodeArrayElements returns each messages[] element's raw bytes (json.RawMessage) and its
 // absolute byte span within raw, using a streaming decoder + InputOffset so the spans are
@@ -568,24 +596,11 @@ func CompactAnthropicHistoryToView(raw []byte, planned []Message) ([]byte, Compa
 	if len(raw) == 0 || len(planned) == 0 {
 		return raw, CompactOutcome{Reason: CompactReasonUnderBudget}
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw, CompactOutcome{Reason: CompactReasonNonJSON}
-	}
-	msgsRaw, ok := obj["messages"]
-	if !ok {
-		return raw, CompactOutcome{Reason: CompactReasonNoMsgsKey}
-	}
-	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
-	if !ok || len(elems) == 0 {
-		return raw, CompactOutcome{Reason: CompactReasonTooFewMsgs}
-	}
 	// Anchor the protected prefix on the FIRST cache_control breakpoint message (or a
 	// system-level breakpoint), exactly as compaction does — the stable cached head.
-	pfxEnd := firstBreakpointMessage(elems)
-	sysHasCC := rawHasCacheControl(obj["system"])
-	if pfxEnd < 0 && !sysHasCC {
-		return raw, CompactOutcome{Reason: CompactReasonNoBreakpoint}
+	elems, spans, pfxEnd, bail, ok := anchorCompactablePrefix(raw, 1)
+	if !ok {
+		return raw, bail
 	}
 
 	// Build the resident content set from the planned view. The planner renders each
@@ -628,16 +643,11 @@ func CompactAnthropicHistoryToView(raw []byte, planned []Message) ([]byte, Compa
 	if !ok {
 		return raw, CompactOutcome{Reason: CompactReasonSpliceFailed}
 	}
-	// Prove it: the result must still decode as a valid Messages request, and the
-	// protected prefix bytes must be byte-identical to the input.
-	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+	// Prove it: re-decode + protected-prefix byte-equality (shared with compaction/elision).
+	switch verifySplicedBody(raw, out, spans, pfxEnd) {
+	case spliceVerdictRedecodeFail:
 		return raw, CompactOutcome{Reason: CompactReasonRedecodeFail}
-	}
-	prefixEnd := arrayContentStart(spans)
-	if pfxEnd >= 0 {
-		prefixEnd = spans[pfxEnd].end
-	}
-	if prefixEnd > len(out) || !bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) {
+	case spliceVerdictPrefixMismatch:
 		return raw, CompactOutcome{Reason: CompactReasonPrefixMismatch}
 	}
 	shedTokens := 0

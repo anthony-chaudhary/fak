@@ -82,6 +82,16 @@ func (c *upstreamCall) headers() map[string]string {
 	return h
 }
 
+// applyHeaders sets every non-empty resolved header onto req, the shared pre-send step
+// for both the buffered (Complete) and streaming (CompleteStream) round-trips.
+func (c *upstreamCall) applyHeaders(req *http.Request) {
+	for k, v := range c.headers() {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+}
+
 // prepareUpstream resolves messages+tools+opts into a single upstreamCall. stream
 // selects whether the marshaled body asks the provider to deliver an SSE token
 // stream (honored only by the OpenAI-compatible chat wire; other adapters ignore the
@@ -234,11 +244,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range call.headers() {
-		if v != "" {
-			req.Header.Set(k, v)
-		}
-	}
+	call.applyHeaders(req)
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := p.Client.Do(req)
 	if err != nil {

@@ -63,16 +63,7 @@ func (e readEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result,
 		}
 	}
 	out, isErr := e.read(pathArg)
-	status := abi.StatusOK
-	if isErr {
-		status = abi.StatusError
-	}
-	ref := putBytes(ctx, out)
-	return &abi.Result{Call: c, Payload: ref, Status: status, Meta: map[string]string{
-		"engine":        FakReadEngineID,
-		"input_tokens":  itoa(len(body) / 4),
-		"output_tokens": itoa(len(out) / 4),
-	}}, nil
+	return engineResult(ctx, c, body, out, isErr, FakReadEngineID), nil
 }
 
 // read resolves pathArg against the engine root, refuses an escape, and returns the file

@@ -159,17 +159,7 @@ func parseAnthropicSSE(r io.Reader, onEvent func(AnthropicSSEEvent) error) error
 // forceAnthropicNonStreaming). A body that does not parse as a JSON object is returned
 // unchanged.
 func forceAnthropicStreaming(raw []byte) []byte {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw
-	}
-	if v, ok := obj["stream"]; ok && strings.TrimSpace(string(v)) == "true" {
-		return raw
-	}
-	obj["stream"] = json.RawMessage("true")
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return raw
-	}
-	return out
+	return setAnthropicStreamFlag(raw, "true", func(v json.RawMessage, present bool) bool {
+		return present && strings.TrimSpace(string(v)) == "true" // already streaming — keep its exact prefix
+	})
 }

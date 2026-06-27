@@ -227,18 +227,24 @@ func (localEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, 
 		m = map[string]any{}
 	}
 	out, isErr := execTool(c.Tool, m)
+	return engineResult(ctx, c, body, out, isErr, "localtools"), nil
+}
+
+// engineResult builds the standard *abi.Result an engine returns from its raw output:
+// it stores the payload by ref, maps the isErr flag onto Status, and attaches the
+// engine id plus the ~4-chars/token I/O size meta (the soft-secondary counts; real
+// token counts come from the planner). Shared by every package-local engine Complete.
+func engineResult(ctx context.Context, c *abi.ToolCall, body, out []byte, isErr bool, engineID string) *abi.Result {
 	status := abi.StatusOK
 	if isErr {
 		status = abi.StatusError
 	}
 	ref := putBytes(ctx, out)
-	// Token usage proportional to payload (real token counts come from the planner;
-	// the engine-side counts are the tool I/O size, used only for the soft secondary).
 	return &abi.Result{Call: c, Payload: ref, Status: status, Meta: map[string]string{
-		"engine":        "localtools",
+		"engine":        engineID,
 		"input_tokens":  itoa(len(body) / 4),
 		"output_tokens": itoa(len(out) / 4),
-	}}, nil
+	}}
 }
 
 // Configure installs the agent's policy, grammar aliases, and schemas into the

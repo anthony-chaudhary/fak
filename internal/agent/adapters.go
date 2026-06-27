@@ -95,6 +95,19 @@ func joinEndpoint(baseURL, suffix string) string {
 	return strings.TrimRight(baseURL, "/") + suffix
 }
 
+// jsonAuthHeaders builds the common JSON-content request header map and, when
+// apiKey is non-empty, sets a single credential header named authHeader to
+// authValue (e.g. "Authorization":"Bearer "+key, or "x-goog-api-key":key). The
+// providers whose only auth is one such header share this; the anthropic adapter
+// has a richer scheme and builds its own.
+func jsonAuthHeaders(apiKey, authHeader, authValue string) map[string]string {
+	h := map[string]string{"Content-Type": "application/json"}
+	if apiKey != "" {
+		h[authHeader] = authValue
+	}
+	return h
+}
+
 type apiError struct {
 	Message string `json:"message"`
 	Type    string `json:"type,omitempty"`
@@ -118,11 +131,7 @@ func (a openAIAdapter) Endpoint(baseURL, model string) string {
 // Headers sets Content-Type and, when apiKey is non-empty, an "Authorization:
 // Bearer" header for the OpenAI-compatible chat endpoint.
 func (a openAIAdapter) Headers(apiKey string) map[string]string {
-	h := map[string]string{"Content-Type": "application/json"}
-	if apiKey != "" {
-		h["Authorization"] = "Bearer " + apiKey
-	}
-	return h
+	return jsonAuthHeaders(apiKey, "Authorization", "Bearer "+apiKey)
 }
 
 type openAIRequest struct {
@@ -363,11 +372,7 @@ func (openAIResponsesAdapter) Endpoint(baseURL, model string) string {
 // Headers sets Content-Type and, when apiKey is non-empty, an "Authorization:
 // Bearer" header for the Responses endpoint.
 func (openAIResponsesAdapter) Headers(apiKey string) map[string]string {
-	h := map[string]string{"Content-Type": "application/json"}
-	if apiKey != "" {
-		h["Authorization"] = "Bearer " + apiKey
-	}
-	return h
+	return jsonAuthHeaders(apiKey, "Authorization", "Bearer "+apiKey)
 }
 
 type openAIResponsesRequest struct {
@@ -866,11 +871,7 @@ func (geminiAdapter) Endpoint(baseURL, model string) string {
 // Headers sets Content-Type and, when apiKey is non-empty, the Gemini
 // x-goog-api-key header.
 func (geminiAdapter) Headers(apiKey string) map[string]string {
-	h := map[string]string{"Content-Type": "application/json"}
-	if apiKey != "" {
-		h["x-goog-api-key"] = apiKey
-	}
-	return h
+	return jsonAuthHeaders(apiKey, "x-goog-api-key", apiKey)
 }
 
 type geminiRequest struct {
@@ -1059,25 +1060,31 @@ func geminiSchemaCompute(raw json.RawMessage) any {
 	return json.RawMessage(b)
 }
 
-func uppercaseSchemaTypes(v any) any {
+// mapSchemaTypes walks a decoded JSON Schema value and rewrites every "type" field's
+// string value through conv (in place), recursing into nested maps and arrays. It is
+// the shared engine behind the two case-folding directions: uppercaseSchemaTypes (the
+// outbound Gemini convention) and gemini_server.go's lowercase normalization on inbound.
+func mapSchemaTypes(v any, conv func(string) string) any {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, val := range x {
 			if k == "type" {
 				if s, ok := val.(string); ok {
-					x[k] = strings.ToUpper(s)
+					x[k] = conv(s)
 					continue
 				}
 			}
-			x[k] = uppercaseSchemaTypes(val)
+			x[k] = mapSchemaTypes(val, conv)
 		}
 	case []any:
 		for i, val := range x {
-			x[i] = uppercaseSchemaTypes(val)
+			x[i] = mapSchemaTypes(val, conv)
 		}
 	}
 	return v
 }
+
+func uppercaseSchemaTypes(v any) any { return mapSchemaTypes(v, strings.ToUpper) }
 
 // ParseResponse decodes a Gemini generateContent response into a Completion: the
 // first candidate's text parts become content and its functionCall parts become tool

@@ -148,17 +148,13 @@ func ElideAnthropicResultsWithOutcome(raw []byte, threshold int) ([]byte, ElideO
 	if !ok {
 		return raw, ElideOutcome{Reason: ElideReasonSpliceFailed}
 	}
-	// Prove it: the result must still decode as a valid Messages request, and the head prefix
-	// bytes must be byte-identical to the input. Either failing is a splice bug, not a reason to
-	// ship a broken / cache-busting body — fall back to identity.
-	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+	// Prove it: re-decode + protected-prefix byte-equality (shared with compaction —
+	// verifySplicedBody). Either failing is a splice bug, not a reason to ship a broken /
+	// cache-busting body — fall back to identity.
+	switch verifySplicedBody(raw, out, spans, pfxEnd) {
+	case spliceVerdictRedecodeFail:
 		return raw, ElideOutcome{Reason: ElideReasonRedecodeFail}
-	}
-	prefixEnd := arrayContentStart(spans) // byte just inside `[` when only `system` is cached
-	if pfxEnd >= 0 {
-		prefixEnd = spans[pfxEnd].end
-	}
-	if prefixEnd > len(out) || !bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) {
+	case spliceVerdictPrefixMismatch:
 		return raw, ElideOutcome{Reason: ElideReasonPrefixMismatch}
 	}
 	return out, ElideOutcome{Reason: ElideReasonNone, Elided: len(edits), ShedBytes: shed}
