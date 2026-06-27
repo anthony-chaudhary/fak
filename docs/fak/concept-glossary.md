@@ -99,6 +99,43 @@ Four planes, each a different question:
   prefilter (refuse force-push / `--no-verify`). Three different "guards", three
   different surfaces.
 
+### adjudication gate vs model gate - the headline collision
+
+The word **gate** names two COMPLETELY UNRELATED things in this repo. They share only
+the spelling; nothing in the kernel's safety layer touches the model's tensors.
+
+- **adjudication gate** (CONTROL PLANE) - a decision point in the safety layer that
+  ALLOWS / DENIES / TRANSFORMS a tool call or its result. All of the gates above are
+  adjudication gates. The data-plane result gates and the egress adjudicator:
+  - **StampGate** - a rank-20 result admitter that stamps every result's taint by
+    SOURCE (trusted-local vs untrusted-egress) and clamps its ShareScope DOWNWARD.
+  - **ScopeCeilingGate** - the rank-21 result-side ceiling (the upward dual of
+    StampGate): confines cross-agent taint visibility to the declared scope boundary.
+  - **SinkGate** - the pre-dispatch egress adjudicator: DENIES a call whose arguments
+    carry untrusted taint into a sink, per a **StrictGatedSinks** policy preset.
+  - **sealed_by_trust_gate** - a refusal REASON code, not a gate type: a sealed /
+    tombstoned context page cannot be demand-paged back in.
+
+- **model gate** (NEURAL NET) - a weight projection or tensor computation that gates
+  activations inside the forward pass. NOTHING to do with adjudication; it never sees
+  a tool call. The model-gating tokens:
+  - **mlp.gate_proj** - the FFN/SwiGLU gate projection weight (after SiLU, multiplied
+    with `up_proj`); **ffn_gate** is its GGUF spelling, canonicalized to it on load.
+  - **gate_up_proj** - the FUSED gate+up weight (`mlp.gate_up_proj.weight`) the loader
+    splits back into `gate_proj` and `up_proj`.
+  - **q_gate_proj** - Qwen3.5 linear-attention query gating weight in Gated-DeltaNet
+    layers (`self_attn.q_gate_proj`).
+  - **block_sparse_moe.gate** - the MoE router gate: the expert-selection routing
+    weights in sparse mixture-of-experts blocks.
+  - **AttnOutputGate** - a config flag enabling a sigmoid gate on attention output
+    logits; **rmsNormGatedInPlace** is the gated-RMSNorm compute (`x = w * rmsnorm(x) *
+    silu(gate)`), a COMPUTE that consumes a gate, not a weight.
+
+  Rule of thumb: if it decides about a tool call or result it is an **adjudication
+  gate**; if it lives in a `.weight` tensor name or the forward pass it is a **model
+  gate**. The inflections (`gated`, `gates`, `guards`, `guarded`) are grammar, not
+  concepts - the scorecard ignores them.
+
 ---
 
 ## The witness / evidence family
@@ -152,6 +189,14 @@ Four planes, each a different question:
   the binding that registers it as an engine backend, and the device HAL it runs
   tensor ops on. Algorithm vs registration vs device.
 
+- **engines registry** vs **engine** - the runtime dispatch table (abi.Registry.engines)
+  that maps engine IDs to EngineDriver instances, versus the abstract EngineDriver
+  interface itself. Table vs contract.
+
+- **engines registry** vs **engine** - the runtime dispatch table (abi.Registry.engines)
+  that maps engine IDs to EngineDriver instances, versus the abstract EngineDriver
+  interface itself. Table vs contract.
+
 ---
 
 ## The policy / authorization family
@@ -197,3 +242,92 @@ Four planes, each a different question:
   (distinct names for distinct concepts) vs provenance honesty (a reported number
   labeled WITNESSED vs OBSERVED). Names vs numbers - two different honesty axes that
   are themselves easy to confuse.
+
+---
+
+## The eviction family
+
+- **evict (KV cache)** - physical tensor span removal with RoPE re-rotation for memory
+  compaction in the attention cache. *Not* playbook pruning (that is logical
+  span removal, not tensor compaction).
+
+- **evict (playbook)** - logical span pruning from the rendered playbook under token
+  budget, returning the evicted bullets for legibility. *Not* KV cache eviction
+  (that is physical tensor compaction, not logical pruning).
+
+- **evict (session pool)** - model instance eviction from a bounded LRU session pool
+  to stay within budget. *Not* playbook pruning (that removes context spans, not
+  entire sessions).
+
+---
+
+## The decision family
+
+- **Decision (witness)** - git evidence adjudication verdict with CONFIRMED/REFUTED/ABSTAIN
+  labels recorded in git notes. *Not* kernel Decision (that is an explanation trace).
+
+- **Decision (kernel)** - tool-call verdict explanation trace showing why fak gave this
+  verdict, including the args digest and adjudication chain. *Not* witness Decision
+  (that is a stored adjudication verdict, not a live trace).
+
+- **Decision (scheduler)** - loop admission advisory returning whether to fire a scheduled
+  loop now with an admit boolean and reason. *Not* kernel Decision (that explains a
+  tool-call verdict, not loop admission).
+
+- **Decision (shared-task)** - shared-task execution state tracking and reconciliation
+  record with a decision ID and state machine transitions. *Not* scheduler Decision
+  (that advises on loop firing, not task reconciliation).
+
+---
+
+## The render / materialize family
+
+- **RenderPlan** - prompt-assembly layout: a stable prefix of reused views plus a volatile
+  tail of raw faults. *Not* RenderItem (that is one cell materialized, not the whole
+  layout).
+
+- **RenderItem** - one cell materialized into context by OpRender query effect, carrying
+  its span and cache entry binding. *Not* Rendered (that is a ctxplan span paged through
+  trust gate, not a memq effect).
+
+- **Rendered** - one span paged into fresh history through the trust gate. *Not* RenderItem
+  (that is a memq materialization effect, not a ctxplan trust-gate result).
+
+---
+
+## The plan family
+
+- **Plan (planner)** - the planner's chosen resident view: selected set, elided set, and
+  accounting. *Not* Plan (memq) (that is a static pre-execution explain output).
+
+- **Plan (memq)** - static pre-execution Explain output: pipeline steps, effects, and
+  mutations. *Not* Plan (planner) (that is a resident view selection, not a query plan).
+
+- **Candidate** - a scored span the planner may keep resident with cost, benefit, and
+  density metrics. *Not* Plan (the planner's output selection).
+
+---
+
+## The pool family
+
+- **Pool (session)** - bounded-LRU session state container with a fixed ceiling on
+  concurrent sessions. *Not* PoolProfile (that describes tier pooling character, not
+  the container itself).
+
+- **PoolProfile** - pooling character of a residency tier describing host count,
+  coherence model, and shareability. *Not* Pool (that is the container itself, not its
+  profile description).
+
+---
+
+## The layout family
+
+- **Layout (tensor)** - tensor element physical arrangement: RowMajor, ColMajor, or other
+  ordering carried on every Tensor. *Not* Layout (ctxplan) (that is a region profile for
+  planning, not tensor storage order).
+
+- **Layout (ctxplan)** - Base/Current/Recent/Deep region profile for layout-aware planning.
+  *Not* Layout (tensor) (that is tensor storage order, not a planning profile).
+
+- **kvLayout** - attention cache variant seam interface: standardKVLayout vs mlaKVLayout.
+  *Not* Layout (tensor) (that is element ordering, not cache variant).

@@ -127,6 +127,22 @@
       "parent": "",
       "verdict": "defined",
       "gaps": ["xenginekv vs enginecache not yet written into the glossary"]
+    },
+    {
+      "id": "engines",
+      "canonical": "engines registry",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The runtime registry (abi.Registry.engines) that maps engine IDs to their EngineDriver implementations: the kernel's dispatch table of all registered inference backends.",
+      "distinction": "The DISPATCH TABLE that holds all engine instances - NOT the engine interface (the contract) and NOT engine (one specific backend).",
+      "distinct_from": ["engine"],
+      "aliases": ["engines map", "engine registry"],
+      "grounding": "engines",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "engine",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
