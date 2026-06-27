@@ -183,6 +183,10 @@ RawPage
 
 ViewRecord
   view_id
+  # Semantic view shapes (model-agnostic content projections):
+  # snippet, fact, QA, summary, timeline, graph_edge, skill_context
+  # Storage classes (model-bound materialization forms):
+  # kv
   view_type: snippet | fact | QA | summary | timeline | graph_edge | skill_context | kv
   source_pages
   source_digests
