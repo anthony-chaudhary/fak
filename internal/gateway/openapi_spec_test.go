@@ -30,6 +30,7 @@ import (
 		"/a2a/v1/tasks/":        "/a2a/v1/tasks/{task_id}",
 		// OpenAI-compatible surface.
 		"/v1/chat/completions":      "/v1/chat/completions",
+	"/v1/completions":           "/v1/completions",
 	"/v1/responses":             "/v1/responses",
 	"/v1/embeddings":            "/v1/embeddings",
 	"/v1/moderations":           "/v1/moderations",

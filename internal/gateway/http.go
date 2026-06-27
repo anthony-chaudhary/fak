@@ -57,6 +57,11 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/a2a/v1/tasks/", s.handleA2ATask},
 		// OpenAI-compatible surface.
 		{"/v1/chat/completions", s.handleChatCompletions},
+		// Legacy OpenAI text-completion wire — the pre-chat surface vLLM/SGLang/
+		// llama.cpp-server all still serve, for older clients and eval harnesses. No
+		// tools on this wire, so no tool-call adjudication; adapts onto the same served
+		// completion path as the chat route.
+		{"/v1/completions", s.handleCompletions},
 		// OpenAI Responses API — a client-facing inbound route so a Responses-native
 		// agent (Codex CLI, the Terminal-Bench terminus agent) can route its model
 		// traffic through the kernel's tool-call adjudication, the same as the chat

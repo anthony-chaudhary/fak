@@ -408,6 +408,62 @@ type ChatChoice struct {
 	FinishReason string        `json:"finish_reason"`
 }
 
+// CompletionRequest is the LEGACY OpenAI text-completion wire (`POST
+// /v1/completions`) — the pre-chat surface vLLM, SGLang, and llama.cpp-server all
+// still serve, and that older clients and embedding/eval harnesses still hit. The
+// gateway adapts it onto the same in-kernel/upstream completion path the chat route
+// uses by wrapping `prompt` as a single user message; there are no tools on this
+// wire, so there is no tool-call adjudication. `prompt` is raw because the OpenAI
+// wire allows either a bare string or an array of strings (normalizePrompt folds
+// both); the array form is joined with newlines into one prompt.
+type CompletionRequest struct {
+	Model       string          `json:"model"`
+	Prompt      json.RawMessage `json:"prompt"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
+	Stop        json.RawMessage `json:"stop,omitempty"`
+	Stream      bool            `json:"stream,omitempty"`
+}
+
+// CompletionResponse is the legacy `text_completion` object: choices carry a bare
+// `text` field rather than a chat `message`.
+type CompletionResponse struct {
+	ID      string             `json:"id"`
+	Object  string             `json:"object"`
+	Created int64              `json:"created"`
+	Model   string             `json:"model"`
+	Choices []CompletionChoice `json:"choices"`
+	Usage   agent.Usage        `json:"usage"`
+}
+
+// CompletionChoice is one legacy completion choice (text, not a message).
+type CompletionChoice struct {
+	Index        int     `json:"index"`
+	Text         string  `json:"text"`
+	FinishReason *string `json:"finish_reason"`
+}
+
+// CompletionStreamResponse is the legacy SSE chunk shape for `stream: true` on
+// `/v1/completions`. It mirrors ChatStreamResponse but each chunk's choice carries a
+// `text` fragment instead of a chat `delta`, matching what a legacy OpenAI streaming
+// client expects from the text-completion endpoint.
+type CompletionStreamResponse struct {
+	ID      string                   `json:"id"`
+	Object  string                   `json:"object"`
+	Created int64                    `json:"created"`
+	Model   string                   `json:"model"`
+	Choices []CompletionStreamChoice `json:"choices"`
+	Usage   *agent.Usage             `json:"usage,omitempty"`
+}
+
+// CompletionStreamChoice is one streamed legacy completion choice.
+type CompletionStreamChoice struct {
+	Index        int     `json:"index"`
+	Text         string  `json:"text"`
+	FinishReason *string `json:"finish_reason"`
+}
+
 // FakExt is the gateway's non-standard response extension: inbound result
 // admissions plus the adjudication of every tool_call the model proposed,
 // including the dropped ones.

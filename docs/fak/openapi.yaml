@@ -126,6 +126,50 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
               example: { error: { message: "upstream model error", type: "server_error", code: null, param: null } }
 
+  /v1/completions:
+    post:
+      tags: [OpenAI]
+      summary: Legacy text-completion proxy
+      description: |
+        The LEGACY OpenAI text-completion wire — the pre-chat surface vLLM, SGLang,
+        and llama.cpp-server all still serve, for older clients and eval/embedding
+        harnesses. The request `prompt` (a bare string or an array of strings, joined
+        with newlines) is wrapped as a single user turn and run through the same
+        served completion path as the chat route. There are no tools on this wire, so
+        there is no tool-call adjudication. With `stream: true` a synthetic SSE stream
+        of `text` fragments is emitted after the full turn completes.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompletionRequest' }
+            examples:
+              plain:
+                summary: A plain text completion
+                value:
+                  model: qwen2.5:1.5b
+                  prompt: "The capital of France is"
+                  max_tokens: 16
+      responses:
+        '200':
+          description: The legacy `text_completion` object; each choice carries a bare `text` field.
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompletionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '502':
+          description: Upstream model error. The provider's raw error body never crosses the trust boundary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "upstream model error", type: "server_error", code: null, param: null } }
+
   /v1/responses:
     post:
       tags: [OpenAI]
@@ -1549,6 +1593,39 @@ components:
               finish_reason: { type: string, description: '`tool_calls` when a call survived; `stop` otherwise.' }
         usage: { $ref: '#/components/schemas/Usage' }
         fak: { $ref: '#/components/schemas/FakExt' }
+
+    CompletionRequest:
+      type: object
+      required: [prompt]
+      description: A legacy OpenAI text-completion body. No tools on this wire.
+      properties:
+        model: { type: string, description: Echoed back; the served model is fixed at boot. }
+        prompt:
+          description: A bare string OR an array of strings (joined with newlines into one prompt).
+        max_tokens: { type: integer, description: Forwarded to the model. Omit for the planner default. }
+        temperature: { type: number, format: float }
+        top_p: { type: number, format: float }
+        stop:
+          description: A bare string OR an array of strings (either shape accepted).
+        stream: { type: boolean, description: '`true` ⇒ a synthetic SSE stream of `text` fragments.' }
+
+    CompletionResponse:
+      type: object
+      description: The legacy `text_completion` object; choices carry a bare `text` field.
+      properties:
+        id: { type: string, description: '`cmpl-fak-<nanos>`.' }
+        object: { type: string, example: text_completion }
+        created: { type: integer, description: Unix seconds. }
+        model: { type: string }
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              text: { type: string }
+              finish_reason: { type: string, example: stop }
+        usage: { $ref: '#/components/schemas/Usage' }
 
     Usage:
       type: object
