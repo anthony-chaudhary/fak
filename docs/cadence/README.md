@@ -53,6 +53,8 @@ git commit -s -- docs/cadence/history.jsonl -m "docs(cadence): record cadence ti
 ```
 
 The weekly `cadence.yml` workflow runs the report and surfaces it to the run's
-step summary plus a downloadable artifact. It is read-only: it never pushes, so
-the ledger is extended by hand, the same way the release cadence only commits
-when an operator explicitly arms it.
+step summary plus a downloadable artifact. It is dry-run-first: scheduled ticks
+extend the ledger locally but do not push. A manual dispatch with dry_run=false
+is the explicit arm that commits and pushes the row, matching the release-cadence
+convention that scheduled jobs report (they don't auto-commit the shared trunk —
+only an explicit manual arm does).
