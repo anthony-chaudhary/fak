@@ -111,8 +111,26 @@ copy-on-write exactly like the HBM wire. Fail-open: `known=false` → request us
 `coldestColderWithRoom` walk skips DRAM and the decision's `ToTier` is the next colder tier
 (NUMA-far/CXL/disk) — the same shape as #707's HBM keep→demote flip test. Refute condition:
 if the test passes with the wire *absent* (i.e. the default already produced the colder
-target), the rung proves nothing and must be reframed. `dos verify MLCACHE MLCACHE1` +
-`dos commit-audit` on the ship.
+target), the rung proves nothing and must be reframed.
+
+> **Status: SHIPPED `8245e5de` (#985, #986–988 track the rest).** `internal/engine/capacity_dram.go`
+> + `capacity_dram_test.go` ship `HostDRAMPressure` / `PlanPlacementForHost` /
+> `PlanPlacementForDeviceAndHost` with the copy-on-write `withDRAMPressure` / `withDRAMCapacity`
+> helpers. `TestDRAMPressureFlipsDemoteTarget` passes: DRAM pressure 1.0 moves the demote target
+> off DRAM to NUMA-far, and an explicit refute guard asserts the *default* target was DRAM, so
+> the flip proves the wire and not the request. Probe math, fail-open, and copy-on-write
+> non-mutation each have a passing test.
+>
+> **Honest witness note.** `dos commit-audit 8245e5de` returns **ABSTAIN** — not because the
+> diff is empty (it adds the wire + tests) but because the subject verb "derive" is outside the
+> referee's claim-kind verb set, so it makes no *checkable* claim to the auditor. `dos review`
+> over the range is CLEAN (the abstain is `unverifiable`, not a residual). And
+> `dos verify MLCACHE MLCACHE1` is `shipped:false` because `MLCACHE`/`MLCACHE1` are this doc's
+> own plan/phase convention with no registry row or commit marker in the stamp grammar. So the
+> rung's real evidence is **the passing refute-guarded test + the diff-witnessed file set**, and
+> the lesson for later rungs is concrete: lead the ship subject with a referee-recognized verb
+> (`add`/`feat … add`) and carry the `MLCACHE<n>` marker, so both `dos commit-audit` and
+> `dos verify` bind without an amend on the shared trunk.
 
 > **First-ship target.** This is the leading rung precisely because it needs no GPU and no
 > serve loop — it is provable on the Windows dev box and in CI, and it removes the "only HBM
