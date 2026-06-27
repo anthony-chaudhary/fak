@@ -1,3 +1,8 @@
+---
+title: "Private comms channel (public stub)"
+description: "A public stub that names fak's private Slack control-bridge to the lab GPU servers and shows how to reach it, without leaking any host, channel, or token."
+---
+
 # Private comms channel (stub → `fak-private`)
 
 **This is a stub.** It names the private comms channel and tells you how to reach it.

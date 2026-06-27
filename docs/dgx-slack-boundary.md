@@ -1,3 +1,8 @@
+---
+title: "GPU-server / Slack boundary: public vs private"
+description: "The source of truth for what is public versus private in fak's GPU-server work, and the scrub and file-admission gates that enforce the boundary."
+---
+
 # GPU-Server / Slack Boundary
 
 This is the source of truth for the recurring GPU-server/Slack confusion.

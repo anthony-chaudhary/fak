@@ -1,3 +1,8 @@
+---
+title: "fleetctl: the public box-fleet control surface"
+description: "fleetctl is fak's public, transport-agnostic Go core for operating a fleet of GPU and worker boxes: typed roster, deterministic fold, readiness score."
+---
+
 # fleetctl — the public box-fleet control surface
 
 `fleetctl` (`cmd/fleetctl/`) is the **public, transport-agnostic** Go core for operating

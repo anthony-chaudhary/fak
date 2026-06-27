@@ -437,10 +437,11 @@ def test_links_skip_fenced_code(tmp_path: Path) -> None:
 def test_kpi_weights_sum_to_one() -> None:
     assert abs(sum(sc.KPI_WEIGHTS.values()) - 1.0) < 1e-9, sc.KPI_WEIGHTS
     assert "links_crawlable" in sc.KPI_WEIGHTS, sc.KPI_WEIGHTS
+    assert "alt_text" in sc.KPI_WEIGHTS, sc.KPI_WEIGHTS
 
 
-def test_schema_is_v3() -> None:
-    assert sc.SCHEMA.endswith("/3"), sc.SCHEMA
+def test_schema_is_v4() -> None:
+    assert sc.SCHEMA.endswith("/4"), sc.SCHEMA
 
 
 def test_headings_ignores_code_fence_hashes() -> None:
@@ -555,7 +556,83 @@ def test_score_page_carries_crawlable_and_meta(tmp_path: Path) -> None:
     (tmp_path / "docs").mkdir()
     d = sc.score_page("---\ntitle: T\n---\n# T\n\nfak is a thing.\n", "docs/a.md", tmp_path)
     assert "links_crawlable" in d["kpis"], d
+    assert "alt_text" in d["kpis"], d
     assert d["meta"]["title"] == "T", d
+
+
+# --- alt_text KPI (image SEO + accessibility) ------------------------------
+
+def test_alt_text_missing_is_hard() -> None:
+    k = sc.kpi_alt_text("# T\n\n![](../visuals/diagram.svg)\n")
+    assert k["score"] < 100 and any("no alt text" in d for d in k["defects"]), k
+
+
+def test_alt_text_present_is_clean() -> None:
+    k = sc.kpi_alt_text("# T\n\n![A labelled KV-cache residency diagram](x.svg)\n")
+    assert k["defects"] == [] and k["soft"] == [] and k["score"] == 100, k
+
+
+def test_alt_text_no_images_is_100() -> None:
+    k = sc.kpi_alt_text("# T\n\njust prose, no images at all.\n")
+    assert k["score"] == 100 and "no images" in k["detail"], k
+
+
+def test_alt_text_ignores_code_example() -> None:
+    # A `![](x.svg)` shown INSIDE inline code is a syntax example, not a real image.
+    inline = sc.kpi_alt_text("# T\n\nembed it directly (`![](visuals/x.svg)`).\n")
+    assert inline["defects"] == [], inline
+    fenced = sc.kpi_alt_text("# T\n\n```md\n![](visuals/x.svg)\n```\n")
+    assert fenced["defects"] == [], fenced
+
+
+def test_alt_text_html_img_without_alt_is_hard() -> None:
+    k = sc.kpi_alt_text('# T\n\n<img src="hero.png" width="600">\n')
+    assert k["score"] < 100 and any("<img>" in d for d in k["defects"]), k
+
+
+def test_alt_text_html_img_with_alt_is_clean() -> None:
+    k = sc.kpi_alt_text('# T\n\n<img src="hero.png" alt="the fak control pane in action">\n')
+    assert k["defects"] == [] and k["score"] == 100, k
+
+
+def test_alt_text_filler_is_soft_not_hard() -> None:
+    # A lone generic-filler caption is weak (SOFT) but not absent (not HARD).
+    k = sc.kpi_alt_text("# T\n\n![image](x.svg)\n")
+    assert k["defects"] == [] and any("filler" in s for s in k["soft"]), k
+
+
+# --- ai_crawlers site check (AEO) ------------------------------------------
+
+def test_ai_crawlers_bare_wildcard_is_defect() -> None:
+    ok, detail = sc.ai_crawlers_ok("User-agent: *\nAllow: /\nSitemap: https://x/y.xml\n")
+    assert ok is False and "does not explicitly welcome" in detail, detail
+
+
+def test_ai_crawlers_explicit_allowlist_passes() -> None:
+    robots = "User-agent: *\nAllow: /\n"
+    for ua in sc.AI_CRAWLER_REQUIRED:
+        robots += f"\nUser-agent: {ua}\nAllow: /\n"
+    ok, detail = sc.ai_crawlers_ok(robots)
+    assert ok is True, (ok, detail)
+
+
+def test_ai_crawlers_disallowed_bot_is_defect() -> None:
+    robots = ("User-agent: *\nAllow: /\n"
+              "\nUser-agent: GPTBot\nDisallow: /\n"
+              "\nUser-agent: ClaudeBot\nAllow: /\n"
+              "\nUser-agent: PerplexityBot\nAllow: /\n"
+              "\nUser-agent: Google-Extended\nAllow: /\n")
+    ok, detail = sc.ai_crawlers_ok(robots)
+    assert ok is False and "Disallow" in detail and "GPTBot" in detail, detail
+
+
+def test_ai_crawlers_wired_into_site_checks(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "robots.txt").write_text(
+        "User-agent: *\nAllow: /\nSitemap: https://x/y.xml\n", encoding="utf-8")
+    by = {c["name"]: c for c in sc.site_checks(tmp_path)["checks"]}
+    assert "ai_crawlers" in by, by
+    assert by["ai_crawlers"]["ok"] is False and by["ai_crawlers"]["hard"] is True, by["ai_crawlers"]
 
 
 # --- self-contained runner -------------------------------------------------

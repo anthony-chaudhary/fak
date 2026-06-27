@@ -37,9 +37,12 @@ Two layers fold into one payload:
                    crawler can actually fetch — not a disk file the site excludes
     answerability  the first screen is a self-contained plain-language answer
                    (the chunk an answer engine quotes), not bare scaffolding
+    alt_text       every image (markdown ![alt] or a raw <img>) carries usable alt
+                   text — image-search SEO + the caption a screen reader/engine reads
 
   SITE-LEVEL (the once-per-corpus infrastructure, each a unit of debt if absent):
-    robots_ok · sitemap_plugin · seo_tag_plugin · canonical_url · og_image
+    robots_ok · ai_crawlers (named answer-engine bots are explicitly welcomed)
+    sitemap_plugin · seo_tag_plugin · canonical_url · og_image
     structured_data (one defect per missing expected JSON-LD @type)
     llms_txt · llms_full (present AND fresh vs llms.txt) · llms_full_sources
     faq_structured · faq_jsonld_sync · breadcrumb_jsonld_shape
@@ -86,7 +89,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "fak-seo-aeo-scorecard/3"
+SCHEMA = "fak-seo-aeo-scorecard/4"
 
 # Repo-root-relative inputs (best-effort; a missing one degrades a check, never errors).
 CONFIG_REL = "docs/_config.yml"
@@ -136,15 +139,17 @@ JSONLD_TYPES_SOFT = ["Organization"]
 # Per-KPI weights for the per-page score. description + title weigh most — they ARE
 # the search result (the blue link + the snippet) and the first thing an engine
 # reads. links + links_crawlable together carry crawl integrity (a real link that
-# 404s on the live site is as bad as a dead one). answerability is real but a
-# judgment call, so it weighs least. The sum MUST be 1.0 (asserted in the tests).
+# 404s on the live site is as bad as a dead one). answerability + alt_text weigh
+# least: answerability is a voice judgment call, and alt_text only bites pages that
+# carry images. The sum MUST be 1.0 (asserted in the tests).
 KPI_WEIGHTS: dict[str, float] = {
-    "title": 0.22,
-    "description": 0.26,
-    "headings": 0.13,
-    "links": 0.17,
+    "title": 0.21,
+    "description": 0.25,
+    "headings": 0.12,
+    "links": 0.16,
     "links_crawlable": 0.12,
-    "answerability": 0.10,
+    "answerability": 0.08,
+    "alt_text": 0.06,
 }
 assert abs(sum(KPI_WEIGHTS.values()) - 1.0) < 1e-9, "per-page KPI weights must sum to 1.0"
 
@@ -189,6 +194,41 @@ SELF_REPO_RE = re.compile(
     r"https?://(?:github\.com|raw\.githubusercontent\.com)/anthony-chaudhary/fak/"
     r"(?:(?:blob|tree|raw)/)?(?:main|master|HEAD)/([^)\s\"'<>`#?]+)")
 
+# Image-alt regexes (the alt_text KPI). A markdown image and a raw <img> tag both
+# owe non-empty alt text (image-search SEO + the caption a screen reader / answer
+# engine reads). Inline `code` and ```fenced``` spans are stripped first, so a doc
+# that SHOWS `![](x.svg)` syntax as an example is never scored as a real missing-alt
+# image — the same fence-stripping discipline kpi_links / kpi_headings already use.
+_MD_IMG_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)]+)\)")
+_HTML_IMG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_HTML_ALT_RE = re.compile(r'\balt\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+
+# A lone generic filler word is "present" alt that is useless to image search and a
+# screen reader (the alt analogue of a _degenerate title/description). It is a SOFT
+# nudge, never a HARD defect — a real one-word caption is rare but legal.
+_ALT_FILLER = {"image", "img", "picture", "photo", "screenshot", "graphic",
+               "figure", "icon", "logo", "diagram", "chart", "svg", "png", "jpg"}
+
+# Named answer-engine / AI crawlers an AEO-optimized robots.txt must explicitly
+# welcome (2025-2026 landscape). A bare `User-agent: * / Allow: /` technically
+# permits them, but the higher AEO bar — the one this harden enforces — is to NAME
+# the major answer engines so the intent to be crawled-and-cited survives a future
+# wildcard tightening, and so a single accidental `Disallow` can't silently delist
+# the project from an answer engine. Blocking any of these makes the project
+# invisible to that engine's citations.
+AI_CRAWLER_UAS = {
+    "GPTBot", "OAI-SearchBot", "ChatGPT-User",        # OpenAI
+    "ClaudeBot", "anthropic-ai", "Claude-SearchBot",  # Anthropic
+    "PerplexityBot", "Perplexity-User",               # Perplexity
+    "Google-Extended",                                # Google Gemini / AI Overviews
+    "Applebot-Extended",                              # Apple Intelligence
+    "CCBot",                                          # Common Crawl (feeds many LLMs)
+}
+# The subset every AEO robots.txt MUST name explicitly (the four dominant answer
+# engines). Naming all of AI_CRAWLER_UAS is a bonus; missing one of these is debt.
+AI_CRAWLER_REQUIRED = ("GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended")
+
 
 def _is_question(heading: str) -> bool:
     h = heading.strip()
@@ -205,6 +245,15 @@ def _degenerate(s: str) -> bool:
     has_real = any(len(w) >= 3 for w in words)
     single_char = len(set(s.strip().replace(" ", ""))) <= 1
     return single_char or not has_real or len(distinct) < 2
+
+
+def _degenerate_alt(alt: str) -> bool:
+    """True for alt text that is 'present' but useless for image SEO / a screen
+    reader: no real word, or a single generic filler word ('image', 'diagram')."""
+    words = re.findall(r"[A-Za-z][A-Za-z'’-]+", alt)
+    if not words:
+        return True
+    return len(words) == 1 and words[0].lower() in _ALT_FILLER
 
 
 def _collect_jsonld_types(data: Any) -> set[str]:
@@ -580,6 +629,40 @@ def kpi_answerability(text: str) -> dict[str, Any]:
             "defects": [], "soft": soft}
 
 
+def kpi_alt_text(text: str) -> dict[str, Any]:
+    """Image SEO + accessibility: every image — a markdown ![alt](src) or a raw
+    <img> tag — must carry non-empty alt text. Empty alt is invisible to image
+    search and silent to a screen reader / answer engine, so it is a HARD defect; a
+    lone generic-filler caption ('image', 'diagram') is a SOFT nudge. A page with NO
+    images scores a clean 100 (nothing to caption). Inline + fenced code is stripped
+    first so a syntax example (`![](x.svg)`) is never counted as a real image."""
+    body = _INLINE_CODE_RE.sub(" ", _FENCE_RE.sub(" ", text))
+    defects: list[str] = []
+    soft: list[str] = []
+    n_img = 0
+
+    def _check(alt: str, label: str, where: str) -> None:
+        if not alt.strip():
+            defects.append(f"{label} has no alt text: {where[:60]}")
+        elif _degenerate_alt(alt):
+            soft.append(f"{label} alt is generic filler ('{alt.strip()}'): {where[:50]}")
+
+    for m in _MD_IMG_RE.finditer(body):
+        n_img += 1
+        _check(m.group("alt"), "image", m.group("src").strip())
+    for m in _HTML_IMG_RE.finditer(body):
+        n_img += 1
+        a = _HTML_ALT_RE.search(m.group(0))
+        _check(a.group(1) if a else "", "<img>", m.group(0))
+
+    score = 100 - 25 * len(defects) - 8 * len(soft)
+    detail = ("no images" if not n_img
+              else f"{n_img} image(s), all captioned" if not defects and not soft
+              else f"{len(defects)} missing + {len(soft)} weak alt of {n_img} image(s)")
+    return {"kpi": "alt_text", "score": _clamp(score), "detail": detail,
+            "defects": defects, "soft": soft}
+
+
 # ---------------------------------------------------------------------------
 # Small pure helpers
 # ---------------------------------------------------------------------------
@@ -641,6 +724,7 @@ def score_page(text: str, doc_rel: str, root: Path) -> dict[str, Any]:
         kpi_links(text, root, doc_rel),
         kpi_links_crawlable(text, root, doc_rel),
         kpi_answerability(text),
+        kpi_alt_text(text),
     ]
     by_name = {k["kpi"]: k for k in kpis}
     score = sum(KPI_WEIGHTS[name] * by_name[name]["score"] for name in KPI_WEIGHTS)
@@ -752,6 +836,59 @@ def citation_link_audit(root: Path) -> dict[str, Any]:
 # Site-level SEO/AEO infrastructure checks (each returns hard defects + soft).
 # ---------------------------------------------------------------------------
 
+def _robots_groups(robots: str) -> dict[str, list[str]]:
+    """Map each `User-agent:` to its directive lines. A record is a run of one or
+    more consecutive User-agent lines followed by directives; consecutive UA lines
+    share the directives that follow (the robots.txt grouping rule). Comments and
+    blank lines are ignored. Tiny on purpose — it only needs Allow/Disallow per UA."""
+    groups: dict[str, list[str]] = {}
+    pending: list[str] = []
+    after_directive = False
+    for raw in robots.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        m = re.match(r"(?i)^user-agent:\s*(\S+)", line)
+        if m:
+            if after_directive:       # a UA line after a directive starts a new record
+                pending = []
+                after_directive = False
+            ua = m.group(1)
+            pending.append(ua)
+            groups.setdefault(ua, [])
+            continue
+        after_directive = True
+        for ua in pending:
+            groups[ua].append(line)
+    return groups
+
+
+def ai_crawlers_ok(robots: str) -> tuple[bool, str]:
+    """AEO: an answer-engine-friendly robots.txt must explicitly NAME the major
+    answer-engine crawlers (so the intent to be cited survives a wildcard tighten)
+    AND must not Disallow any of them. A bare `User-agent: * / Allow: /` allows them
+    by default but names none — that is the HARD defect this harden surfaces."""
+    if not robots.strip():
+        return False, "robots.txt missing — no welcome for answer-engine crawlers"
+    groups = _robots_groups(robots)
+    named = set(groups)
+    disallow_all = re.compile(r"(?i)^disallow:\s*/\s*$")
+    blocked = sorted(
+        ua for ua, lines in groups.items()
+        if (ua in AI_CRAWLER_UAS or ua == "*") and any(disallow_all.match(l) for l in lines))
+    if blocked:
+        return False, (f"robots.txt Disallows answer-engine crawler(s): {', '.join(blocked)} "
+                       "(delists the project from that engine's citations)")
+    missing = [ua for ua in AI_CRAWLER_REQUIRED if ua not in named]
+    if missing:
+        return False, (f"robots.txt does not explicitly welcome {len(missing)} answer-engine "
+                       f"crawler(s): {', '.join(missing)} (name + Allow each for AEO)")
+    bonus = sorted((named & AI_CRAWLER_UAS) - set(AI_CRAWLER_REQUIRED))
+    extra = f" (+{len(bonus)} more named)" if bonus else ""
+    return True, (f"robots.txt explicitly welcomes all {len(AI_CRAWLER_REQUIRED)} major "
+                  f"answer-engine crawlers{extra}")
+
+
 def site_checks(root: Path) -> dict[str, Any]:
     config = _safe_read(root / CONFIG_REL)
     robots = _safe_read(root / ROBOTS_REL)
@@ -777,6 +914,10 @@ def site_checks(root: Path) -> dict[str, Any]:
     add("robots", robots_ok, True,
         "robots.txt allows crawl + names sitemap",
         "robots.txt missing / blocks crawl / names no Sitemap:")
+
+    # ai_crawlers (AEO): the named answer-engine bots must be explicitly welcomed.
+    ai_ok, ai_detail = ai_crawlers_ok(robots)
+    add("ai_crawlers", ai_ok, True, ai_detail, ai_detail)
 
     # jekyll-sitemap + jekyll-seo-tag plugins emit /sitemap.xml + canonical/OG/JSON-LD.
     add("sitemap_plugin", "jekyll-sitemap" in config, True,
@@ -1176,7 +1317,7 @@ def render(payload: dict[str, Any]) -> str:
         f"next: {payload.get('next_action')}",
         "",
         "per-page (worst first):",
-        f"  {'score':>5} {'gr':>2} {'def':>3}  {'ttl':>3} {'dsc':>3} {'hdg':>3} {'lnk':>3} {'crl':>3} {'ans':>3}  path",
+        f"  {'score':>5} {'gr':>2} {'def':>3}  {'ttl':>3} {'dsc':>3} {'hdg':>3} {'lnk':>3} {'crl':>3} {'ans':>3} {'alt':>3}  path",
     ]
     for d in sorted(payload.get("pages", []), key=lambda x: (x["score"], -x["n_defects"])):
         k = d.get("kpis", {})
@@ -1184,7 +1325,7 @@ def render(payload: dict[str, Any]) -> str:
             f"  {d['score']:>5} {d['grade']:>2} {d['n_defects']:>3}  "
             f"{k.get('title','-'):>3} {k.get('description','-'):>3} {k.get('headings','-'):>3} "
             f"{k.get('links','-'):>3} {k.get('links_crawlable','-'):>3} "
-            f"{k.get('answerability','-'):>3}  {d['path']}")
+            f"{k.get('answerability','-'):>3} {k.get('alt_text','-'):>3}  {d['path']}")
     lines.append("")
     lines.append("site-level checks:")
     for ch in site.get("checks", []):
@@ -1247,15 +1388,15 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("## Per-page scores")
     out.append("")
-    out.append("| Score | Grade | Debt | title | desc | head | link | crawl | ans | Page |")
-    out.append("|---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|")
+    out.append("| Score | Grade | Debt | title | desc | head | link | crawl | ans | alt | Page |")
+    out.append("|---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|")
     for d in sorted(payload.get("pages", []), key=lambda x: (x["score"], -x["n_defects"])):
         k = d.get("kpis", {})
         out.append(
             f"| {d['score']} | {d['grade']} | {d['n_defects']} | "
             f"{k.get('title','-')} | {k.get('description','-')} | {k.get('headings','-')} | "
             f"{k.get('links','-')} | {k.get('links_crawlable','-')} | "
-            f"{k.get('answerability','-')} | `{d['path']}` |")
+            f"{k.get('answerability','-')} | {k.get('alt_text','-')} | `{d['path']}` |")
     out.append("")
     out.append("## Site-level checks")
     out.append("")

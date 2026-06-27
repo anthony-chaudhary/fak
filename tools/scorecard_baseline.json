@@ -1,13 +1,13 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "12dd9468",
-  "total_debt": 1432,
+  "total_debt": 1424,
   "metrics": {
     "doc": 1,
     "readme": 0,
     "code": 15,
     "appeal": 15,
-    "seo": 9,
+    "seo": 1,
     "demo": 0,
     "robustness": 0,
     "hygiene": 23,
