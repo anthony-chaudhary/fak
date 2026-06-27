@@ -342,7 +342,55 @@ func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 			delta[i] += pk.weight * out[i]
 		}
 	}
+	// Qwen3.5-MoE (Ornith-1.0-35B/397B) adds an always-on, sigmoid-GATED shared expert
+	// on top of the routed sum: delta += sigmoid(shared_expert_gate(x)) * shared_expert(x)
+	// (HF Qwen3NextSparseMoeBlock.forward). Its tensors are the SINGULAR mlp.shared_expert.*
+	// / mlp.shared_expert_gate.weight — distinct from GLM's un-gated PLURAL mlp.shared_experts.*
+	// handled by glmMoeFFN. Presence-guard on the singular gate so Mixtral / Qwen3-MoE
+	// (no shared expert) stay byte-for-byte unchanged.
+	if m.has(qwen35SharedExpertName(layer, "gate.weight")) {
+		shared := qwen35SharedExpert(m, layer, xn, mat)
+		for i := 0; i < H; i++ {
+			delta[i] += shared[i]
+		}
+	}
 	return delta
+}
+
+// qwen35SharedExpertName resolves the singular-named qwen3_5_moe shared-expert tensors.
+// suffix "gate.weight" -> mlp.shared_expert_gate.weight (the hidden->1 sigmoid gate);
+// any other suffix -> mlp.shared_expert.<suffix> (the shared FFN's gate/up/down proj).
+func qwen35SharedExpertName(layer int, suffix string) string {
+	if suffix == "gate.weight" {
+		return layerName(layer, "mlp.shared_expert_gate.weight")
+	}
+	return layerName(layer, "mlp.shared_expert."+suffix)
+}
+
+// qwen35SharedExpert computes the gated shared-expert contribution for a qwen3_5_moe
+// layer: a plain-SiLU SwiGLU at the shared-expert FFN width, scaled by the scalar
+// sigmoid(shared_expert_gate · x). The width is SharedIntermediateSize (populated from
+// the config's shared_expert_intermediate_size by deriveConfigAxes), falling back to the
+// routed-expert intermediate width when unset.
+func qwen35SharedExpert(m *Model, layer int, xn any, mat matKernel) []float32 {
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	I := cfg.SharedIntermediateSize
+	if I == 0 {
+		I = cfg.expertIntermediate()
+	}
+	g := mat.mul(qwen35SharedExpertName(layer, "gate_proj.weight"), xn, I, H)
+	u := mat.mul(qwen35SharedExpertName(layer, "up_proj.weight"), xn, I, H)
+	for i := 0; i < I; i++ {
+		g[i] = act(g[i], cfg) * u[i]
+	}
+	out := mat.mul(qwen35SharedExpertName(layer, "down_proj.weight"), mat.prep(g), H, I)
+	// Scalar sigmoid gate: shared_expert_gate is a hidden->1 projection.
+	gate := sigmoid(mat.mul(qwen35SharedExpertName(layer, "gate.weight"), xn, 1, H)[0])
+	for i := 0; i < H; i++ {
+		out[i] *= gate
+	}
+	return out
 }
 
 type glmMoeFFN struct{}
