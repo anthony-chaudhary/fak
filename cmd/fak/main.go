@@ -501,6 +501,12 @@ func usage() {
                  records a dated row in docs/cadence/history.jsonl so the trend accrues
                  across weeks; --check is advisory (non-zero only if a dimension could
                  not be measured; the scorecard ratchet owns debt regressions))
+  fak dojo      run --corpus DIR [--ttl 5m|1h] [--lever a,b] [--json] [--check]
+                    [--append-history] [--ledger FILE] | list [--json]
+                (the prediction-vs-reality gym: scores each calibration lever's CLAIMED
+                 vs REALIZED behavior over a corpus of real Claude Code transcripts and
+                 trends the per-lever calibration error; --append-history records a dated
+                 row in docs/dojo/history.jsonl; list shows the registered levers)
   fak nightrun  next | plan | run [--apply] [--loop] [--max N] | ledger | caps  [--json]
                 (RUN IT ALL NIGHT: the local-capability-aware data-collection door.
                  Probes THIS box (gpu/weights/datasets/creds), ranks the feasible-here
@@ -547,6 +553,7 @@ func usage() {
                 make hygiene / make index-sync backstop; exit 2 lets make fall back)
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
+  fak dojo      run --corpus DIR | list    (prediction-vs-reality calibration gym)
   fak version
 
 every tool call crosses one in-process syscall boundary: vDSO -> adjudicate ->
