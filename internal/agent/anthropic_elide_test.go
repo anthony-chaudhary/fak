@@ -366,7 +366,7 @@ func TestElideShedMagnitudeOnLargeCodingSession(t *testing.T) {
 	type obj = map[string]any
 	cc := obj{"type": "ephemeral"}
 	bigElig := strings.Repeat("file line of scrolled-past output\n", 1500) // ~51 KB, old → shed
-	bigRecent := strings.Repeat("RECENTLY-FETCHED-OUTPUT-TOKEN-", 1800)     // ~52 KB, recent → kept (newline-free so the raw-bytes check is exact)
+	bigRecent := strings.Repeat("RECENTLY-FETCHED-OUTPUT-TOKEN-", 1800)    // ~52 KB, recent → kept (newline-free so the raw-bytes check is exact)
 	toolResult := func(id, text string) obj {
 		return obj{"role": "user", "content": []obj{{"type": "tool_result", "tool_use_id": id, "content": []obj{{"type": "text", "text": text}}}}}
 	}

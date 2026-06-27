@@ -55,7 +55,7 @@ func elideMarkerf(omittedRunes int) string {
 // ElideOutcome so a caller can label a metric and an operator can see WHY elision did nothing
 // (silence must not read as success). ElideReasonNone means the body was rewritten.
 const (
-	ElideReasonNone           = ""               // FIRED: a rewrite happened (Elided/ShedBytes meaningful)
+	ElideReasonNone           = ""                // FIRED: a rewrite happened (Elided/ShedBytes meaningful)
 	ElideReasonOff            = "off"             // threshold<=0 or empty body — disabled
 	ElideReasonNonJSON        = "non_json"        // body is not a JSON object
 	ElideReasonNoMsgsKey      = "no_messages_key" // no "messages" key

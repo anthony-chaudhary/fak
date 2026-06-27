@@ -12,17 +12,17 @@ import (
 // tool result, and every non-tool message are left intact; the input slice is never mutated.
 func TestElideMessagesShrinksOldToolResultsKeepsWorkingSet(t *testing.T) {
 	const threshold = 1024
-	bigOld := strings.Repeat("OLD scrolled-past command output line. ", 200)  // ~7.6 KB, eligible → shed
-	bigRecent := strings.Repeat("RECENT working-set output line. ", 200)      // ~6.4 KB, recent → kept
+	bigOld := strings.Repeat("OLD scrolled-past command output line. ", 200) // ~7.6 KB, eligible → shed
+	bigRecent := strings.Repeat("RECENT working-set output line. ", 200)     // ~6.4 KB, recent → kept
 	in := []Message{
-		{Role: "system", Content: "You are a coding agent."},     // 0
-		{Role: "user", Content: "refactor the parser"},           // 1
-		{Role: "tool", ToolCallID: "t2", Content: bigOld},        // 2 OLD oversized tool result → shrink
-		{Role: "assistant", Content: "analyzing"},                // 3
-		{Role: "user", Content: "now the lexer"},                 // 4
-		{Role: "assistant", Content: "calling read_file"},        // 5
-		{Role: "tool", ToolCallID: "t6", Content: bigRecent},     // 6 RECENT (last-4 window) → keep
-		{Role: "assistant", Content: "done"},                     // 7
+		{Role: "system", Content: "You are a coding agent."}, // 0
+		{Role: "user", Content: "refactor the parser"},       // 1
+		{Role: "tool", ToolCallID: "t2", Content: bigOld},    // 2 OLD oversized tool result → shrink
+		{Role: "assistant", Content: "analyzing"},            // 3
+		{Role: "user", Content: "now the lexer"},             // 4
+		{Role: "assistant", Content: "calling read_file"},    // 5
+		{Role: "tool", ToolCallID: "t6", Content: bigRecent}, // 6 RECENT (last-4 window) → keep
+		{Role: "assistant", Content: "done"},                 // 7
 	}
 	// Snapshot to detect in-place mutation of the caller's slice.
 	origIdx2 := in[2].Content
