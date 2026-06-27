@@ -1,0 +1,75 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "read_diff",
+    "read_file",
+    "get_pull_request",
+    "list_review_comments",
+    "post_review_comment",
+    "request_changes",
+    "approve_review",
+    "transfer_to_human_maintainer"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "deny": {
+    "merge_pull_request": "POLICY_BLOCK",
+    "git_push": "POLICY_BLOCK",
+    "force_push": "POLICY_BLOCK",
+    "delete_branch": "POLICY_BLOCK",
+    "workflow_dispatch": "POLICY_BLOCK",
+    "rerun_workflow": "POLICY_BLOCK",
+    "publish_release": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK",
+    "shell": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    ".github/workflows/",
+    "policy.json",
+    "code-review-bot-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "token",
+    "api_key",
+    "authorization",
+    "ssh_key",
+    "secret"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_maintainer"
+  ],
+  "sources": {
+    "read_diff": "untrusted",
+    "read_file": "trusted_local",
+    "get_pull_request": "untrusted"
+  },
+  "authorize": [
+    {
+      "tool": "post_review_comment",
+      "sink": "EGRESS"
+    },
+    {
+      "tool": "request_changes",
+      "sink": "EGRESS"
+    }
+  ],
+  "arg_rules": [
+    {
+      "tool": "post_review_comment",
+      "arg": "body",
+      "max_bytes": 65536,
+      "reason": "OVERSIZE"
+    }
+  ]
+}

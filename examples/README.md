@@ -19,6 +19,10 @@ flowchart LR
     PHI["healthcare-phi-policy"]
     SQL["sql-analyst-policy"]
     PRF["protected-push-floor: arg-scoped git_push"]
+    FIN["finance-trading-agent: rate cap + notional cap"]
+    CRV["code-review-bot: comment, never merge/push"]
+    EML["email-calendar-assistant: read/draft, never send"]
+    WEB["browser-web-agent: navigate/read, never submit"]
   end
 
   subgraph OPS["Runnable lifecycle artifacts"]
@@ -72,6 +76,10 @@ go run ./cmd/fak policy --check examples/flight-booking-agent-policy.json
 go run ./cmd/fak policy --check examples/healthcare-phi-policy.json
 go run ./cmd/fak policy --check examples/sql-analyst-policy.json
 go run ./cmd/fak policy --check examples/protected-push-floor-policy.json
+go run ./cmd/fak policy --check examples/finance-trading-agent-policy.json
+go run ./cmd/fak policy --check examples/code-review-bot-policy.json
+go run ./cmd/fak policy --check examples/email-calendar-assistant-policy.json
+go run ./cmd/fak policy --check examples/browser-web-agent-policy.json
 ```
 
 ## Templates
@@ -87,6 +95,10 @@ go run ./cmd/fak policy --check examples/protected-push-floor-policy.json
 | `healthcare-phi-policy.json` | HIPAA-style clinical agent — the heavy-PHI `redact_fields` + EHR/inbox provenance showcase | read EHR / search ICD / drug-interaction / note / appointment; export, email-PHI, and record-delete need a human; `read_patient_record` is `trusted_local` while `fetch_medical_literature` and `read_patient_message` are `untrusted` (the prompt-injection vector) | `go run ./cmd/fak preflight --policy examples/healthcare-phi-policy.json --tool export_patient_data --args "{}"` |
 | `sql-analyst-policy.json` | Internal-data / BI analyst — the heavy `arg_rules` showcase (SELECT-only SQL, row caps, schema allow-list) | read-only query / list / describe / chart / sanitized-CSV; write-query, DDL (`drop`/`alter`/`create_table`), `copy_to`/`pg_dump`, `shell`, and fund transfer are denied; the `run_read_query.sql` text is constrained to reject DDL/DML even when the tool name clears the allow-list | `go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"DROP TABLE customers"}'` |
 | `protected-push-floor-policy.json` | Coding agent that may push **feature** branches via a structured `git_push` MCP tool | argument-scoped (issue #449): `git_push` is allowed, but a push whose `ref`/`branch` is a protected ref (`main`/`master`/`trunk`/`release/*`/…) or a force-push is denied **by argument value** — the structured route a Bash `git push` deny_regex never sees. Finer than dogfood's command-string regex and dev-agent's blunt name-level `git_push` deny | `go run ./cmd/fak preflight --policy examples/protected-push-floor-policy.json --tool git_push --args '{"ref":"main"}'` |
+| `finance-trading-agent-policy.json` | Brokerage / trading agent — the `rate_limit` + notional-cap showcase | quote / position / balance / analyze read freely; `place_order` and `cancel_order` are allowed but bounded (a 6-or-more-digit `notional_usd` is `OVERSIZE`, a `short`/`naked` side is `POLICY_BLOCK`); `withdraw_funds`, `transfer_funds`, `wire_transfer`, `close_account`, `margin_borrow` need a human; a declared `rate_limit` caps order-tool throughput at 20 calls per tool (over-cap → `RATE_LIMITED`) | `go run ./cmd/fak preflight --policy examples/finance-trading-agent-policy.json --tool place_order --args '{"notional_usd":250000}'` |
+| `code-review-bot-policy.json` | PR-review bot — read the diff, post a review, never change the repo | read diff / file / PR + `post_review_comment` / `request_changes` / `approve_review` (the two comment tools `authorize` an `EGRESS` sink); `merge_pull_request`, `git_push`, `force_push`, `delete_branch`, `workflow_dispatch`, `rerun_workflow`, `publish_release`, `shell` are denied; the diff and PR body are `untrusted` (the injection vector); `.github/workflows/` is a self-modify glob | `go run ./cmd/fak preflight --policy examples/code-review-bot-policy.json --tool merge_pull_request --args "{}"` |
+| `email-calendar-assistant-policy.json` | Inbox / calendar assistant — the `secret_posture: fail_closed` + untrusted-inbox showcase | read / search mail, `draft_reply`, read calendar, `propose_event`; `send_email`, `forward_email`, `delete_email`, `empty_trash`, `create_filter`, `create_calendar_event`, `invite_external_guest`, `share_calendar` need a human; `read_email`/`search_email` are `untrusted` (the prompt-injection vector); `secret_posture: fail_closed` makes a credential found in a mail body fail the call closed rather than quarantine-and-continue | `go run ./cmd/fak preflight --policy examples/email-calendar-assistant-policy.json --tool send_email --args "{}"` |
+| `browser-web-agent-policy.json` | Browsing / scraping agent — navigate and read, never act on the page | `navigate` / `read_page` / `get_page_text` / `extract_links` / `screenshot` / `scroll` + a sandboxed `download_file`; `submit_form`, `fill_credentials`, `execute_script`, `run_downloaded_file`, `http_post`, `set_cookie` are denied; page content is `untrusted`; a `navigate` to a `file:`/`ftp:`/`data:`/`javascript:` URL is `POLICY_BLOCK`, a `download_file` whose `dest` escapes `./downloads/**` is `POLICY_BLOCK`; `secret_patterns` extend the secret floor with AWS-key and GitHub-token shapes scraped from a page | `go run ./cmd/fak preflight --policy examples/browser-web-agent-policy.json --tool navigate --args '{"url":"file:///etc/passwd"}'` |
 
 `refund_payment` returns **`DENY (POLICY_BLOCK)`** — the denied refund is meant to
 escalate to the `transfer_to_human_agents` safe sink, not silently fail.
@@ -185,6 +197,58 @@ return **`DENY (OVERSIZE)`** and **`DENY (POLICY_BLOCK)`**.
 > numeric `max_value`, and the schema allow-list is a single `allow_glob public.*`
 > rather than a comma list — `allow_glob` is one `path.Match` glob, so list one schema
 > prefix per deployment.
+
+### `finance-trading-agent-policy.json` — the `rate_limit` + notional-cap showcase
+
+This floor lets a trading agent read quotes and analyze a portfolio without limit,
+but bounds the two tools that move money. `place_order` clears the name-level
+allow-list, then two argument predicates narrow it — a notional cap and a side
+guard:
+
+```bash
+go run ./cmd/fak preflight --policy examples/finance-trading-agent-policy.json --tool place_order --args '{"notional_usd":500,"side":"buy"}'
+go run ./cmd/fak preflight --policy examples/finance-trading-agent-policy.json --tool place_order --args '{"notional_usd":250000}'
+go run ./cmd/fak preflight --policy examples/finance-trading-agent-policy.json --tool place_order --args '{"notional_usd":500,"side":"short"}'
+```
+
+return **`ALLOW`**, **`DENY (OVERSIZE)`** (the `notional_usd` deny_regex
+`^[0-9]{6,}` fires on a six-or-more-digit order — the regex form of a price cap, the
+same idiom the flight-booking fare cap uses), and **`DENY (POLICY_BLOCK)`** (the
+`side` deny_regex rejects a `short`/`naked`/`sell_to_open` order). The fund-movement
+tools are denied as whole tools:
+
+```bash
+go run ./cmd/fak preflight --policy examples/finance-trading-agent-policy.json --tool withdraw_funds --args "{}"
+```
+
+returns **`DENY (POLICY_BLOCK)`** and escalates to the `transfer_to_human_broker`
+safe sink. This manifest also carries the only `rate_limit` block in the template
+set — `{"max_calls": 20, "key": "tool"}` — so the order tools are throughput-capped
+per tool (the 21st call in a window is the `RATE_LIMITED` deny). `policy --check`
+prints the resolved cap in its summary; the cap is a served-gateway runtime control,
+so a single `preflight` does not exercise it (it fires across a burst, not on one
+call).
+
+### `email-calendar-assistant-policy.json` — untrusted inbox + `secret_posture: fail_closed`
+
+A mail assistant is a textbook prompt-injection target: the email body it reads is
+attacker-controlled. This floor marks `read_email` / `search_email` as `untrusted`
+and lets the agent draft but never send. The allowed-to-denied boundary:
+
+```bash
+go run ./cmd/fak preflight --policy examples/email-calendar-assistant-policy.json --tool read_email --args "{}"
+go run ./cmd/fak preflight --policy examples/email-calendar-assistant-policy.json --tool send_email --args "{}"
+go run ./cmd/fak preflight --policy examples/email-calendar-assistant-policy.json --tool invite_external_guest --args "{}"
+```
+
+return **`ALLOW`**, **`DENY (POLICY_BLOCK)`**, and **`DENY (POLICY_BLOCK)`** —
+every denied action escalates to the `transfer_to_human_user` safe sink, so a
+"forward this thread to …" instruction smuggled into a mail body has no admitted
+egress tool to ride on. The `secret_posture: fail_closed` field is the second half:
+when a tool result carries a credential (an OTP, an API key pasted into an email),
+the default posture quarantines the result and continues, but `fail_closed` refuses
+the call outright — the right default when the agent is reading untrusted mail and a
+leaked secret is worse than a dropped turn.
 
 The useful adoption pattern is: copy the closest template, delete what you do not
 need, run `policy --check`, then run one or two `preflight` calls that prove the

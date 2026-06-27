@@ -1,0 +1,67 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "read_email",
+    "search_email",
+    "list_threads",
+    "draft_reply",
+    "read_calendar",
+    "list_events",
+    "propose_event",
+    "transfer_to_human_user"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "draft_"
+  ],
+  "deny": {
+    "send_email": "POLICY_BLOCK",
+    "forward_email": "POLICY_BLOCK",
+    "delete_email": "POLICY_BLOCK",
+    "empty_trash": "POLICY_BLOCK",
+    "create_filter": "POLICY_BLOCK",
+    "create_calendar_event": "POLICY_BLOCK",
+    "invite_external_guest": "POLICY_BLOCK",
+    "share_calendar": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "email-calendar-assistant-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "api_key",
+    "token",
+    "authorization",
+    "otp_code",
+    "verification_code",
+    "cc_number"
+  ],
+  "secret_posture": "fail_closed",
+  "safe_sinks": [
+    "transfer_to_human_user"
+  ],
+  "sources": {
+    "read_email": "untrusted",
+    "search_email": "untrusted",
+    "read_calendar": "trusted_local"
+  },
+  "arg_rules": [
+    {
+      "tool": "draft_reply",
+      "arg": "body",
+      "max_bytes": 32768,
+      "reason": "OVERSIZE"
+    }
+  ]
+}

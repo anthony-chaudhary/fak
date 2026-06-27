@@ -1,0 +1,74 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "navigate",
+    "read_page",
+    "get_page_text",
+    "extract_links",
+    "screenshot",
+    "scroll",
+    "download_file",
+    "transfer_to_human_operator"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "extract_"
+  ],
+  "deny": {
+    "submit_form": "POLICY_BLOCK",
+    "fill_credentials": "POLICY_BLOCK",
+    "execute_script": "POLICY_BLOCK",
+    "run_downloaded_file": "POLICY_BLOCK",
+    "http_post": "POLICY_BLOCK",
+    "set_cookie": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "browser-web-agent-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "api_key",
+    "token",
+    "authorization",
+    "session_cookie"
+  ],
+  "secret_patterns": [
+    "AKIA[0-9A-Z]{16}",
+    "ghp_[0-9A-Za-z]{36}"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_operator"
+  ],
+  "sources": {
+    "read_page": "untrusted",
+    "get_page_text": "untrusted",
+    "extract_links": "untrusted",
+    "navigate": "untrusted"
+  },
+  "arg_rules": [
+    {
+      "tool": "navigate",
+      "arg": "url",
+      "deny_regex": "(?i)^(file|ftp|data|javascript):",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "download_file",
+      "arg": "dest",
+      "allow_glob": "./downloads/**",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}

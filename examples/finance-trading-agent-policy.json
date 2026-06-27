@@ -1,0 +1,75 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "get_quote",
+    "get_position",
+    "get_account_balance",
+    "list_orders",
+    "read_market_data",
+    "analyze_portfolio",
+    "place_order",
+    "cancel_order",
+    "transfer_to_human_broker"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "analyze_"
+  ],
+  "deny": {
+    "withdraw_funds": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK",
+    "wire_transfer": "POLICY_BLOCK",
+    "close_account": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK",
+    "margin_borrow": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "finance-trading-agent-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "account_number",
+    "routing_number",
+    "ssn",
+    "tax_id",
+    "api_key",
+    "api_secret"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_broker"
+  ],
+  "sources": {
+    "read_market_data": "untrusted",
+    "get_quote": "trusted_local",
+    "get_position": "trusted_local"
+  },
+  "rate_limit": {
+    "max_calls": 20,
+    "key": "tool",
+    "retry_after_ms": 1000
+  },
+  "arg_rules": [
+    {
+      "tool": "place_order",
+      "arg": "notional_usd",
+      "deny_regex": "^[0-9]{6,}",
+      "reason": "OVERSIZE"
+    },
+    {
+      "tool": "place_order",
+      "arg": "side",
+      "deny_regex": "(?i)\\b(short|naked|sell_to_open)\\b",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}

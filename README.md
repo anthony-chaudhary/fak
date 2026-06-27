@@ -241,6 +241,33 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 Every claim in [CLAIMS.md](CLAIMS.md) carries exactly one tag:
 `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
 
+## Use Cases By Domain
+
+Each row is a starter policy floor: a reviewable allow-list you copy, trim, and run
+`fak preflight` against to watch the floor bite. Point your agent at one with
+`fak guard --policy examples/<file>` (or `fak serve --policy …` for a gateway). The
+full catalogue, with a witness command per floor, is in
+[examples/README.md](examples/README.md).
+
+| Domain | Starter floor | The dangerous action it denies |
+|---|---|---|
+| Coding agent | [`presets/coding-agent-safe.json`](examples/presets/coding-agent-safe.json) | force-push, `git add -A`, out-of-tree writes, destructive shell |
+| Coding agent (push feature branches) | [`protected-push-floor-policy.json`](examples/protected-push-floor-policy.json) | a `git_push` whose ref is `main`/`release/*`, by argument value |
+| PR-review bot | [`code-review-bot-policy.json`](examples/code-review-bot-policy.json) | `merge_pull_request`, `git_push`, `workflow_dispatch` |
+| Customer support | [`customer-support-readonly-policy.json`](examples/customer-support-readonly-policy.json) | `refund_payment`, direct account or email action |
+| Open-web research | [`research-agent-policy.json`](examples/research-agent-policy.json) | `send_email`, shell, upload, arbitrary note path |
+| Browsing / scraping | [`browser-web-agent-policy.json`](examples/browser-web-agent-policy.json) | `submit_form`, `execute_script`, a `file:`/`javascript:` URL |
+| Email / calendar | [`email-calendar-assistant-policy.json`](examples/email-calendar-assistant-policy.json) | `send_email`, `forward_email`, `invite_external_guest` |
+| Infra / DevOps review | [`devops-dryrun-policy.json`](examples/devops-dryrun-policy.json) | `terraform_apply`, exec, delete, production deploy |
+| Flight booking | [`flight-booking-agent-policy.json`](examples/flight-booking-agent-policy.json) | `refund_payment`, `export_pnr`, a `$10k+` fare |
+| Trading / brokerage | [`finance-trading-agent-policy.json`](examples/finance-trading-agent-policy.json) | `withdraw_funds`, a six-figure order, a `short` side |
+| Clinical / PHI | [`healthcare-phi-policy.json`](examples/healthcare-phi-policy.json) | `export_patient_data`, `email_phi`, record delete |
+| BI / SQL analyst | [`sql-analyst-policy.json`](examples/sql-analyst-policy.json) | a `DROP`/`INSERT` inside an allowed read-query tool |
+
+Each denied action escalates to that floor's human safe sink instead of failing
+silently. Every refusal cites a closed reason code you can assert on, such as
+`POLICY_BLOCK`, `OVERSIZE`, or `SECRET_EXFIL`.
+
 ## For security teams
 
 If a hard capability floor is *why* you're here — not just a nice-to-have — this
