@@ -243,6 +243,8 @@ adjudicated calls):
 | refused calls (held-lane collision) | 3 |
 | dominant opaque tool | `Bash` |
 
+*All metrics from the same window: `2026-06-21T20:05Z → 2026-06-22T08:01Z` (21,156 adjudicated calls).*
+
 Every `tree_known=false` caution traced to a genuinely opaque call — free-form
 shell and editor calls the hook can't introspect — not to a call that *does*
 carry a visible path. That is the accepted floor.
