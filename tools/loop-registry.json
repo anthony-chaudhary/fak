@@ -1,0 +1,16 @@
+{
+  "schema": "fak.loop-registry.v1",
+  "jobs": {
+    "industry-freshness-cadence": {
+      "schedule": {
+        "job_id": "industry-freshness-cadence",
+        "interval_seconds": 604800,
+        "missed_run": "catch-up",
+        "jitter_seconds": 3600
+      },
+      "state": "armed",
+      "created_unix_nano": 1719475200000000000,
+      "updated_unix_nano": 1719475200000000000
+    }
+  }
+}
