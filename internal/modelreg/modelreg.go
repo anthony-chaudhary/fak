@@ -50,6 +50,24 @@ var Catalog = map[string]string{
 	// (single file, ~4.7 GB) for a more capable laptop/GPU run.
 	"qwen2.5:1.5b": "hf://mradermacher/Qwen2.5-1.5B-GGUF/Qwen2.5-1.5B.Q8_0.gguf",
 	"qwen2.5:7b":   "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+	// Ornith 1.0 — DeepReinforce's MIT-licensed Qwen3.5-family agentic-coding models
+	// (released 2026-06-25, HF org deepreinforce-ai; the collection is exactly 7 public
+	// repos — 9B/35B/397B + GGUF/FP8 siblings, NO 31B). Bare "ornith" and "ornith:9b-gguf"
+	// seed the laptop-runnable 9B Q4_K_M single-file GGUF — the "just works" default, like
+	// smollm2 above. The ":9b/:35b/:397b" aliases point at the full-precision safetensors
+	// model repos and the "-fp8" aliases at the FP8 siblings, listed for `fak ls`
+	// discoverability. NOTE: the in-kernel FP8 compressed-tensors path is not yet parsed
+	// (epic #1026 child #F), so the "-fp8" targets resolve but do not yet load in-kernel.
+	// Every repo below returned HTTP 200 and each seeded GGUF filename was confirmed present
+	// in its -GGUF repo before seeding (re-verify with a HEAD on the resolve URL if you edit).
+	"ornith":          "hf://deepreinforce-ai/Ornith-1.0-9B-GGUF/ornith-1.0-9b-Q4_K_M.gguf",
+	"ornith:9b-gguf":  "hf://deepreinforce-ai/Ornith-1.0-9B-GGUF/ornith-1.0-9b-Q4_K_M.gguf",
+	"ornith:9b":       "hf://deepreinforce-ai/Ornith-1.0-9B",
+	"ornith:35b":      "hf://deepreinforce-ai/Ornith-1.0-35B",
+	"ornith:35b-gguf": "hf://deepreinforce-ai/Ornith-1.0-35B-GGUF/ornith-1.0-35b-Q4_K_M.gguf",
+	"ornith:35b-fp8":  "hf://deepreinforce-ai/Ornith-1.0-35B-FP8",
+	"ornith:397b":     "hf://deepreinforce-ai/Ornith-1.0-397B",
+	"ornith:397b-fp8": "hf://deepreinforce-ai/Ornith-1.0-397B-FP8",
 }
 
 // Entry is one resolved alias: the name a user types and the target it expands to.
