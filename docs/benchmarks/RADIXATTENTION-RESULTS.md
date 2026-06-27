@@ -6,12 +6,9 @@ description: "Head-to-head of fak's KV-cache reuse against SGLang's RadixAttenti
 # Benchmarking fak against SGLang's KV-cache RadixAttention
 
 > **📊 AUTHORITY:** All benchmark numbers for RadixAttention are centrally indexed in
-> **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**. That document is the single source
+> **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**, including the headline **4.58× live wall-clock speedup** on SmolLM2-135M Q8 (agents workload). That document is the single source
 > of truth with full traceability to commits and artifacts. This doc provides the detailed
 > context and explanation.
->
-> **Headline Result:** **4.58×** live wall-clock speedup on SmolLM2-135M Q8 (agents workload).
-> See Authority for full details.
 
 > New here? Read **RADIXATTENTION-EXPLAINER.md** first — a
 > from-first-principles walkthrough (KV cache → RadixAttention → what we built → the
