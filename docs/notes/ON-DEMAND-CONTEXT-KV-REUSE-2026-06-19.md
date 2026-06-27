@@ -290,11 +290,16 @@ The unsaturated opportunity is not "more prefix caching." It is:
 4. attaching trust, freshness, authority, and consumer edges to every hit;
 5. proactively materializing the likely next working set.
 
-The saturation metric should shift from raw cache hit rate to:
+The saturation metric should shift from raw cache hit rate to a dimensionally consistent
+set covering both efficiency and correctness:
 
 ```text
-useful_context = answered_tasks_with_sources
-                 / (resident_tokens + page_faults + stale_faults + quality_faults)
+# Efficiency: tasks answered per token spent
+efficiency = answered_tasks_with_sources / resident_tokens
+
+# Correctness: what fraction of requests stayed correct
+correctness = answered_tasks_with_sources /
+              (answered_tasks_with_sources + page_faults + stale_faults + quality_faults)
 ```
 
 A system that gets a high non-prefix KV hit rate but silently loses quality is
