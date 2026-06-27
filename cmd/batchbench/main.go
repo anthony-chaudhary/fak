@@ -113,6 +113,32 @@ type batchPoint struct {
 	SpeedupVsNaive  float64 `json:"speedup_vs_naive_serial"` // agg tok/s ÷ 19.2 (naive f32 serial, Act 1)
 }
 
+// loadBenchModel loads the benchmark model from either a HuggingFace snapshot
+// dir (hf, which overrides) or a fak export dir (dir), returning the model plus
+// the display name and source path the report records. It exits the process on a
+// load failure (the only sensible action for a benchmark CLI with no model).
+func loadBenchModel(hf, dir string) (*model.Model, string, string) {
+	if hf != "" {
+		cfg, err := readHFConfig(hf)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "load:", err)
+			os.Exit(1)
+		}
+		m, err := model.LoadSafetensorsDir(hf, cfg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "load: safetensors:", err)
+			os.Exit(1)
+		}
+		return m, hfName(cfg, hf), hfSource(hf)
+	}
+	m, err := model.Load(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "load:", err)
+		os.Exit(1)
+	}
+	return m, filepath.Base(strings.TrimRight(dir, `/\`)), filepath.Join(dir, "weights.f32")
+}
+
 func main() {
 	dir := flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir")
 	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors); overrides -dir")
@@ -150,34 +176,7 @@ func main() {
 		}
 	}
 
-	var (
-		m           *model.Model
-		err         error
-		modelName   string
-		modelSource string
-	)
-	if *hf != "" {
-		cfg, err := readHFConfig(*hf)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "load:", err)
-			os.Exit(1)
-		}
-		m, err = model.LoadSafetensorsDir(*hf, cfg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "load: safetensors:", err)
-			os.Exit(1)
-		}
-		modelName = hfName(cfg, *hf)
-		modelSource = hfSource(*hf)
-	} else {
-		m, err = model.Load(*dir)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "load:", err)
-			os.Exit(1)
-		}
-		modelName = filepath.Base(strings.TrimRight(*dir, `/\`))
-		modelSource = filepath.Join(*dir, "weights.f32")
-	}
+	m, modelName, modelSource := loadBenchModel(*hf, *dir)
 	vocab := m.Cfg.VocabSize
 	if *quant {
 		m.Quantize()

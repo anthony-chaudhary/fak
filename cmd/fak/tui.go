@@ -944,6 +944,54 @@ func lastSeqOf(rows []journal.Row) uint64 {
 	return m
 }
 
+// resolveAutoTarget applies the #939 `--auto` policy: when auto is set it rejects
+// a conflicting explicit target/--gateway-url, ranks the registered compute
+// targets (healthy first, then cheapest/most-local) and returns the winner's name
+// so the caller's normal target-resolution path takes over. It returns the
+// (possibly unchanged) selected target, whether auto picked it, and a (code, done)
+// pair: done=true means the caller should return code immediately — either because
+// a usage/load error fired or because `--auto --json` emitted the ranked decision
+// instead of launching. When auto is off it is a pass-through (done=false).
+func resolveAutoTarget(auto bool, selectedTarget string, setFlags map[string]bool, regErr error, reg *targetRegistry, asJSON bool, stdout, stderr io.Writer) (target string, autoSelected bool, code int, done bool) {
+	if !auto {
+		return selectedTarget, false, 0, false
+	}
+	if selectedTarget != "" {
+		fmt.Fprintf(stderr, "fak console agent: --auto selects a target automatically; do not also pass a target (%q)\n", selectedTarget)
+		return selectedTarget, false, 2, true
+	}
+	if setFlags["gateway-url"] {
+		fmt.Fprintln(stderr, "fak console agent: --auto ranks the registered targets; it cannot combine with an explicit --gateway-url")
+		return selectedTarget, false, 2, true
+	}
+	if regErr != nil {
+		fmt.Fprintf(stderr, "fak console agent: --auto: load compute targets: %v\n", regErr)
+		return selectedTarget, false, 1, true
+	}
+	hc := &http.Client{Timeout: 3 * time.Second}
+	decision, winner, autoErr := autoSelectComputeTarget(context.Background(), reg, hc, 3*time.Second)
+	if asJSON {
+		// --auto --json emits the ranked decision (not a launch plan) and does not launch.
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if encErr := enc.Encode(decision); encErr != nil {
+			fmt.Fprintf(stderr, "fak console agent: encode json: %v\n", encErr)
+			return selectedTarget, false, 1, true
+		}
+		if autoErr != nil {
+			return selectedTarget, false, 1, true
+		}
+		return selectedTarget, false, 0, true
+	}
+	// Log the ranked decision so the operator sees WHY the winner won (or why nothing did).
+	renderAutoDecision(stderr, decision)
+	if autoErr != nil {
+		fmt.Fprintf(stderr, "fak console agent: --auto: %v\n", autoErr)
+		return selectedTarget, false, 1, true
+	}
+	return winner.Name, true, 0, false
+}
+
 func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	// #938: a leading non-flag token may NAME a compute target (`fak c mac`). Resolve
 	// it against the registry BEFORE flag parsing, because Go's flag package stops at
@@ -1013,43 +1061,10 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	// #939: --auto ranks the registered targets (healthy first, then cheapest/most-local)
 	// and selects the winner, which then flows through the same resolution path as an
 	// explicit target below. It is mutually exclusive with a named target or --gateway-url.
-	autoSelected := false
-	if *auto {
-		if selectedTarget != "" {
-			fmt.Fprintf(stderr, "fak console agent: --auto selects a target automatically; do not also pass a target (%q)\n", selectedTarget)
-			return 2
-		}
-		if setFlags["gateway-url"] {
-			fmt.Fprintln(stderr, "fak console agent: --auto ranks the registered targets; it cannot combine with an explicit --gateway-url")
-			return 2
-		}
-		if regErr != nil {
-			fmt.Fprintf(stderr, "fak console agent: --auto: load compute targets: %v\n", regErr)
-			return 1
-		}
-		hc := &http.Client{Timeout: 3 * time.Second}
-		decision, winner, autoErr := autoSelectComputeTarget(context.Background(), reg, hc, 3*time.Second)
-		if *asJSON {
-			// --auto --json emits the ranked decision (not a launch plan) and does not launch.
-			enc := json.NewEncoder(stdout)
-			enc.SetIndent("", "  ")
-			if encErr := enc.Encode(decision); encErr != nil {
-				fmt.Fprintf(stderr, "fak console agent: encode json: %v\n", encErr)
-				return 1
-			}
-			if autoErr != nil {
-				return 1
-			}
-			return 0
-		}
-		// Log the ranked decision so the operator sees WHY the winner won (or why nothing did).
-		renderAutoDecision(stderr, decision)
-		if autoErr != nil {
-			fmt.Fprintf(stderr, "fak console agent: --auto: %v\n", autoErr)
-			return 1
-		}
-		selectedTarget = winner.Name
-		autoSelected = true
+	selectedTarget, autoSelected, code, done := resolveAutoTarget(
+		*auto, selectedTarget, setFlags, regErr, reg, *asJSON, stdout, stderr)
+	if done {
+		return code
 	}
 	if *width < 72 {
 		*width = 72
