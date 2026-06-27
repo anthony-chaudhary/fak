@@ -86,6 +86,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 Working docs that track a specific effort. Dated by design; they age out.
 
+- [Executive roll-up](docs/EXECUTIVE-ROLLUP.md) — the leadership snapshot: flagship wins, the live GLM-5.2 goal, the real risks, and the one open decision — every number provenance-labeled (witnessed / observed / simulated / unverified). Aggregated from PRODUCT-STATUS, BENCHMARK-AUTHORITY, the AgentDojo red-team, the dispatch audit, and the industry scorecard.
 - [Issue tracker](https://github.com/anthony-chaudhary/fak/issues) — the live, always-current open-issue count. This index never hard-codes a count (it drifts); see the tracker for the current number.
 - [GPU parity tracking (#480)](docs/notes/gpu-parity-tracking-480.md) — bringing the GPU path to parity.
 - [SIMD CPU parity tracking (#400)](docs/notes/simd-cpu-parity-tracking-400.md) — Go-native SIMD (AVX2/AVX-512/NEON) vs llama.cpp on CPU: parity where SIMD is the lever, non-SIMD residuals named.
