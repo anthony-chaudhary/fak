@@ -34,11 +34,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -162,20 +164,20 @@ func nodeInstall(stdout, stderr io.Writer, argv []string) int {
 	port := fs.Int("port", 8080, "gateway port")
 	keyEnv := fs.String("key-env", "FAK_GATEWAY_KEY", "env var name for the bearer key (only used with --remote or non-loopback --addr)")
 	uninstall := fs.Bool("uninstall", false, "remove the gateway service")
+	rotateKey := fs.Bool("rotate-key", false, "mint a fresh bearer key even if one is already persisted (off-host installs reuse the existing key by default so clients keep working)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 
-	// Resolve bind address.
-	bindAddr := *addr
-	if bindAddr == "" {
-		if *remote {
-			bindAddr = fmt.Sprintf("0.0.0.0:%d", *port)
-		} else {
-			bindAddr = fmt.Sprintf("127.0.0.1:%d", *port)
-		}
+	// Resolve and validate the bind address. parseNodeAddr decomposes --addr/--port with
+	// net.SplitHostPort so a host-only --addr keeps the --port (#5 case 1), and classifies
+	// loopback with net.IP.IsLoopback so [::1] and localhost are local (#5 case 2) — replacing
+	// the old verbatim-string handling that dropped the port and mis-bound an IPv6 loopback.
+	bindAddr, localPort, offHost, err := parseNodeAddr(*addr, *port, *remote)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
+		return 2
 	}
-	offHost := !strings.HasPrefix(bindAddr, "127.") && !strings.HasPrefix(bindAddr, "localhost")
 
 	cfgDir, err := nodeConfigDir()
 	if err != nil {
@@ -183,17 +185,95 @@ func nodeInstall(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	in := nodeInstallParams{
+		addr:      bindAddr,
+		localPort: localPort,
+		offHost:   offHost,
+		keyEnv:    *keyEnv,
+		uninstall: *uninstall,
+		cfgDir:    cfgDir,
+		rotateKey: *rotateKey,
+	}
 	switch runtime.GOOS {
 	case "darwin":
-		return nodeInstallDarwin(stdout, stderr, bindAddr, offHost, *keyEnv, *uninstall, cfgDir)
+		return nodeInstallDarwin(stdout, stderr, in)
 	case "linux":
-		return nodeInstallLinux(stdout, stderr, bindAddr, offHost, *keyEnv, *uninstall, cfgDir)
+		return nodeInstallLinux(stdout, stderr, in)
 	case "windows":
-		return nodeInstallWindows(stdout, stderr, bindAddr, offHost, *keyEnv, *uninstall, cfgDir)
+		return nodeInstallWindows(stdout, stderr, in)
 	default:
 		fmt.Fprintf(stderr, "fak node install: not yet supported on %s — use scripts/dogfood-claude.sh\n", runtime.GOOS)
 		return 1
 	}
+}
+
+// nodeInstallParams carries the resolved install inputs through the per-platform installers.
+// Bundling them keeps the three platform signatures aligned and makes a new field (rotateKey,
+// the persisted localPort) a one-line change rather than a three-way signature churn.
+type nodeInstallParams struct {
+	addr      string // the validated bind address passed to `fak serve --addr`
+	localPort string // the parsed port, for the loopback health URL + persisted state (#1/#5)
+	offHost   bool   // bind reaches beyond loopback ⇒ a bearer key is required
+	keyEnv    string // env var name carrying the bearer secret
+	uninstall bool
+	cfgDir    string
+	rotateKey bool // mint a fresh bearer even when one is already persisted (#4)
+}
+
+// parseNodeAddr resolves the gateway bind address from --addr and --port, returning the
+// validated `host:port` to bind, the port alone (for the loopback health URL + persisted
+// state), and whether the bind reaches beyond loopback (so a bearer key is required).
+//
+// It fixes two #5 bugs the old verbatim handling had: a host-only --addr ("0.0.0.0") now
+// keeps --port instead of dropping it and producing a `:0.0.0.0` health URL; and loopback is
+// detected by parsing the host with net.IP.IsLoopback (plus a literal "localhost"), so an
+// IPv6 loopback [::1] is correctly local rather than being forced an off-host bearer key.
+func parseNodeAddr(addr string, port int, remote bool) (bindAddr, localPort string, offHost bool, err error) {
+	if port < 0 || port > 65535 {
+		return "", "", false, fmt.Errorf("--port %d out of range (0-65535)", port)
+	}
+	host := ""
+	if addr == "" {
+		// No --addr: bind loopback (or 0.0.0.0 with --remote) on --port.
+		if remote {
+			host = "0.0.0.0"
+		} else {
+			host = "127.0.0.1"
+		}
+		localPort = strconv.Itoa(port)
+	} else if h, p, splitErr := net.SplitHostPort(addr); splitErr == nil {
+		// --addr carried a port ("0.0.0.0:9000", "[::1]:8080") — it wins over --port.
+		host, localPort = h, p
+	} else {
+		// --addr is host-only ("0.0.0.0", "::1", "localhost") — keep --port (the #5 case-1 fix).
+		host = strings.Trim(addr, "[]") // tolerate a bracketed IPv6 host with no port
+		localPort = strconv.Itoa(port)
+	}
+	if strings.TrimSpace(host) == "" {
+		host = "0.0.0.0" // a ":9000" wildcard bind is off-host
+	}
+	if localPort == "" || localPort == "0" {
+		return "", "", false, fmt.Errorf("could not resolve a gateway port from --addr %q / --port %d", addr, port)
+	}
+	if _, convErr := strconv.Atoi(localPort); convErr != nil {
+		return "", "", false, fmt.Errorf("invalid port %q in --addr %q", localPort, addr)
+	}
+	bindAddr = net.JoinHostPort(host, localPort)
+	offHost = remote || !nodeHostIsLoopback(host)
+	return bindAddr, localPort, offHost, nil
+}
+
+// nodeHostIsLoopback reports whether a bind host is loopback-only — the literal "localhost", or
+// an IP that net.IP.IsLoopback accepts (127.0.0.0/8 and ::1). A non-IP, non-localhost host
+// (a wildcard 0.0.0.0, a routable address, an empty host) is treated as NOT loopback, so a
+// bearer key is required — the conservative direction for an exposed gateway.
+func nodeHostIsLoopback(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // ── macOS (launchd) ──────────────────────────────────────────────────────────
@@ -256,13 +336,15 @@ const darwinPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `
 
-func nodeInstallDarwin(stdout, stderr io.Writer, addr string, offHost bool, keyEnv string, uninstall bool, cfgDir string) int {
+func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
+	addr, offHost, keyEnv, uninstall, cfgDir := in.addr, in.offHost, in.keyEnv, in.uninstall, in.cfgDir
 	agentsDir := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents")
 	plistPath := filepath.Join(agentsDir, nodeGatewayLabel+".plist")
 
 	if uninstall {
 		_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
 		_ = os.Remove(plistPath)
+		_ = os.Remove(nodeInstallStatePath(cfgDir))
 		fmt.Fprintf(stdout, "[fak node] unloaded and removed %s\n", plistPath)
 		return 0
 	}
@@ -297,22 +379,19 @@ func nodeInstallDarwin(stdout, stderr io.Writer, addr string, offHost bool, keyE
 		return 1
 	}
 
-	// Generate bearer key for off-host installs.
+	// Resolve the bearer key for off-host installs WITHOUT silently rotating it: a re-install
+	// reuses the persisted key so configured clients keep working (#4); a fresh mint is flagged.
 	gatewayKey := ""
 	requireKeyEnv := ""
 	if offHost {
 		requireKeyEnv = keyEnv
-		existing := os.Getenv(keyEnv)
-		if existing != "" {
-			gatewayKey = existing
-		} else {
-			b := make([]byte, 32)
-			if _, err := rand.Read(b); err != nil {
-				fmt.Fprintf(stderr, "fak node install: generate key: %v\n", err)
-				return 1
-			}
-			gatewayKey = hex.EncodeToString(b)
+		key, minted, kerr := nodeResolveKey(cfgDir, keyEnv, in.rotateKey)
+		if kerr != nil {
+			fmt.Fprintf(stderr, "fak node install: %v\n", kerr)
+			return 1
 		}
+		gatewayKey = key
+		nodeReportKeyDisposition(stdout, minted, in.rotateKey)
 	}
 
 	// Render the plist.
@@ -368,24 +447,78 @@ func nodeInstallDarwin(stdout, stderr io.Writer, addr string, offHost bool, keyE
 	fmt.Fprintf(stdout, "           plist:   %s\n", plistPath)
 	fmt.Fprintf(stdout, "           log:     %s/serve.log\n", logDir)
 
-	// Wait briefly for the gateway to start.
-	localPort := addr[strings.LastIndex(addr, ":")+1:]
-	healthURL := "http://127.0.0.1:" + localPort + "/healthz"
+	// Persist what we installed so `status` probes the real port (#1) and a re-install can
+	// reuse the bearer key (#4). Written before the health wait so the record exists even if
+	// the gateway is slow to come up.
+	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
+
+	// Wait for the gateway and report HONESTLY: if it never answers, warn loudly pointing at
+	// the logs and return non-zero, instead of falling out of the loop silently and printing
+	// the client lines as if it were up (#2).
+	localPort := in.localPort
+	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
+		nodeWarnUnhealthy(stderr, logDir)
+		return 1
+	}
+	nodePrintClientLines(stdout, stderr, offHost, gatewayKey, localPort)
+	return 0
+}
+
+// nodeWaitHealthy polls <base>/healthz up to 20 times (~10s) and returns whether a live
+// gateway answered 2xx. It is the shared, HONEST install health gate: a caller that gets
+// false must warn and fail rather than print the client lines as if the gateway were up (#2).
+func nodeWaitHealthy(stdout io.Writer, base string) bool {
 	fmt.Fprintf(stdout, "[fak node] waiting for gateway...\n")
 	for i := 0; i < 20; i++ {
 		time.Sleep(500 * time.Millisecond)
-		resp, err := http.Get(healthURL) //nolint:noctx
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				fmt.Fprintf(stdout, "[fak node] gateway healthy at %s\n", healthURL)
-				break
-			}
+		if status, ok := nodeProbeHealth(base); ok {
+			fmt.Fprintf(stdout, "[fak node] gateway healthy at %s/healthz (%s)\n", strings.TrimRight(base, "/"), status)
+			return true
 		}
 	}
+	return false
+}
 
-	nodePrintClientLines(stdout, stderr, offHost, gatewayKey, localPort)
-	return 0
+// nodeWarnUnhealthy prints the loud, actionable failure banner when the gateway never came
+// up — pointing at the serve log/err files — so a silent install failure (a bad policy, a
+// bound port, a missing upstream credential) is reported instead of a false success (#2).
+func nodeWarnUnhealthy(stderr io.Writer, logDir string) {
+	fmt.Fprintf(stderr, "\n[fak node] ERROR: the gateway did not become healthy within ~10s.\n")
+	fmt.Fprintf(stderr, "           It may have failed to start (bad policy, port already bound, or a\n")
+	fmt.Fprintf(stderr, "           missing upstream credential). Check the logs:\n")
+	fmt.Fprintf(stderr, "             %s\n", filepath.Join(logDir, "serve.log"))
+	fmt.Fprintf(stderr, "             %s\n", filepath.Join(logDir, "serve.err"))
+	fmt.Fprintf(stderr, "           Fix the cause and re-run `fak node install`.\n")
+}
+
+// nodeReportKeyDisposition makes the bearer-key decision VISIBLE so a key rotation is never
+// silent (#4): a reused key is noted, a freshly-minted key on a re-install (an explicit
+// --rotate-key) is flagged loudly because every client still presenting the old key will 401.
+func nodeReportKeyDisposition(stdout io.Writer, minted, rotate bool) {
+	switch {
+	case minted && rotate:
+		fmt.Fprintf(stdout, "[fak node] NOTE: minted a NEW bearer key (--rotate-key) — every client must re-run `fak node use` with the new key below.\n")
+	case minted:
+		fmt.Fprintf(stdout, "[fak node] generated a new bearer key (save it below).\n")
+	default:
+		fmt.Fprintf(stdout, "[fak node] reusing the existing bearer key (configured clients keep working; pass --rotate-key to mint a fresh one).\n")
+	}
+}
+
+// nodePersistInstallState records what the host installed (addr, port, key, off-host) so
+// `status` can probe the real port (#1) and a re-install can reuse the key (#4). A write
+// failure is non-fatal (the gateway is already up) but warned, since it degrades both fixes.
+func nodePersistInstallState(stderr io.Writer, in nodeInstallParams, gatewayKey, requireKeyEnv string) {
+	st := nodeInstallState{
+		Addr:    in.addr,
+		Port:    in.localPort,
+		Key:     gatewayKey,
+		KeyEnv:  requireKeyEnv,
+		OffHost: in.offHost,
+	}
+	if err := nodeWriteInstallState(in.cfgDir, st); err != nil {
+		fmt.Fprintf(stderr, "[fak node] WARNING: could not persist install state (%v) — `status` will fall back to :8080 and a re-install may rotate the key\n", err)
+	}
 }
 
 // nodePrintClientLines emits the post-install guidance shared by every platform's
@@ -450,13 +583,15 @@ StandardError=append:{{.LogDir}}/serve.err
 WantedBy=default.target
 `
 
-func nodeInstallLinux(stdout, stderr io.Writer, addr string, offHost bool, keyEnv string, uninstall bool, cfgDir string) int {
+func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
+	addr, offHost, keyEnv, uninstall, cfgDir := in.addr, in.offHost, in.keyEnv, in.uninstall, in.cfgDir
 	unitDir := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user")
 	unitPath := filepath.Join(unitDir, "fak-serve-gateway.service")
 
 	if uninstall {
 		_ = exec.Command("systemctl", "--user", "disable", "--now", "fak-serve-gateway").Run()
 		_ = os.Remove(unitPath)
+		_ = os.Remove(nodeInstallStatePath(cfgDir))
 		fmt.Fprintf(stdout, "[fak node] disabled and removed %s\n", unitPath)
 		return 0
 	}
@@ -484,16 +619,13 @@ func nodeInstallLinux(stdout, stderr io.Writer, addr string, offHost bool, keyEn
 	gatewayKey, requireKeyEnv := "", ""
 	if offHost {
 		requireKeyEnv = keyEnv
-		if existing := os.Getenv(keyEnv); existing != "" {
-			gatewayKey = existing
-		} else {
-			b := make([]byte, 32)
-			if _, rerr := rand.Read(b); rerr != nil {
-				fmt.Fprintf(stderr, "fak node install: generate key: %v\n", rerr)
-				return 1
-			}
-			gatewayKey = hex.EncodeToString(b)
+		key, minted, kerr := nodeResolveKey(cfgDir, keyEnv, in.rotateKey)
+		if kerr != nil {
+			fmt.Fprintf(stderr, "fak node install: %v\n", kerr)
+			return 1
 		}
+		gatewayKey = key
+		nodeReportKeyDisposition(stdout, minted, in.rotateKey)
 	}
 
 	tmpl, _ := template.New("unit").Parse(linuxUnitTemplate)
@@ -515,7 +647,17 @@ func nodeInstallLinux(stdout, stderr io.Writer, addr string, offHost bool, keyEn
 		return 1
 	}
 	fmt.Fprintf(stdout, "[fak node] enabled fak-serve-gateway (systemd --user)\n")
-	localPort := addr[strings.LastIndex(addr, ":")+1:]
+
+	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
+
+	// Add the post-enable health probe the linux path was missing entirely (#2): if the unit
+	// loaded but fak serve never answered, warn at the logs and fail rather than print the
+	// client lines as if it were up.
+	localPort := in.localPort
+	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
+		nodeWarnUnhealthy(stderr, logDir)
+		return 1
+	}
 	nodePrintClientLines(stdout, stderr, offHost, gatewayKey, localPort)
 	return 0
 }
@@ -535,7 +677,8 @@ set "{{.RequireKeyEnv}}={{.GatewayKey}}"
 "{{.FakBin}}" serve --provider anthropic --base-url https://api.anthropic.com --addr {{.Addr}} --policy "{{.PolicyPath}}"{{if .RequireKeyEnv}} --require-key-env {{.RequireKeyEnv}}{{end}} >> "{{.LogDir}}\serve.log" 2>> "{{.LogDir}}\serve.err"
 `
 
-func nodeInstallWindows(stdout, stderr io.Writer, addr string, offHost bool, keyEnv string, uninstall bool, cfgDir string) int {
+func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
+	addr, offHost, keyEnv, uninstall, cfgDir := in.addr, in.offHost, in.keyEnv, in.uninstall, in.cfgDir
 	if uninstall {
 		_ = exec.Command("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
 		out, err := exec.Command("schtasks", "/Delete", "/TN", nodeWindowsTaskName, "/F").CombinedOutput()
@@ -543,6 +686,7 @@ func nodeInstallWindows(stdout, stderr io.Writer, addr string, offHost bool, key
 			fmt.Fprintf(stderr, "fak node install: schtasks /Delete: %v\n%s\n", err, out)
 			return 1
 		}
+		_ = os.Remove(nodeInstallStatePath(cfgDir))
 		fmt.Fprintf(stdout, "[fak node] removed Scheduled Task %s\n", nodeWindowsTaskName)
 		return 0
 	}
@@ -570,16 +714,13 @@ func nodeInstallWindows(stdout, stderr io.Writer, addr string, offHost bool, key
 	gatewayKey, requireKeyEnv := "", ""
 	if offHost {
 		requireKeyEnv = keyEnv
-		if existing := os.Getenv(keyEnv); existing != "" {
-			gatewayKey = existing
-		} else {
-			b := make([]byte, 32)
-			if _, rerr := rand.Read(b); rerr != nil {
-				fmt.Fprintf(stderr, "fak node install: generate key: %v\n", rerr)
-				return 1
-			}
-			gatewayKey = hex.EncodeToString(b)
+		key, minted, kerr := nodeResolveKey(cfgDir, keyEnv, in.rotateKey)
+		if kerr != nil {
+			fmt.Fprintf(stderr, "fak node install: %v\n", kerr)
+			return 1
 		}
+		gatewayKey = key
+		nodeReportKeyDisposition(stdout, minted, in.rotateKey)
 	}
 
 	// Render the runner .cmd the task launches.
@@ -605,13 +746,33 @@ func nodeInstallWindows(stdout, stderr io.Writer, addr string, offHost bool, key
 	}
 	rf.Close()
 
-	// Register an always-on Scheduled Task: /SC ONSTART keeps the gateway resident across
-	// reboots (it is a daemon, not a periodic tick), /RL LIMITED runs it as the current
-	// user without elevation, /F overwrites a prior install. Then /Run it once so the
-	// gateway comes up now, not only after the next boot.
-	taskRun := fmt.Sprintf("cmd.exe /c \"%s\"", runnerPath)
+	localPort := in.localPort
+
+	// Stop any prior instance and confirm the port is free BEFORE (re)starting (#3) — the
+	// macOS path already `launchctl unload`s first; Windows did not, so a stale fak serve
+	// kept the port and answered the health probe, making install falsely report the OLD
+	// process healthy. End the task and wait for the port to free; if a foreign process still
+	// holds it, fail loudly rather than blessing whatever answers the probe.
+	_ = exec.Command("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
+	if !nodeWaitPortFree(localPort) {
+		fmt.Fprintf(stderr, "\n[fak node] ERROR: 127.0.0.1:%s is still in use after stopping the task.\n", localPort)
+		fmt.Fprintf(stderr, "           Another process holds the port; the install would falsely report IT healthy.\n")
+		fmt.Fprintf(stderr, "           Free the port (or choose another with --port) and re-run `fak node install`.\n")
+		return 1
+	}
+
+	// Register an always-on Scheduled Task via an XML definition so it carries restart-on-
+	// failure semantics (#6) — the Windows analog of launchd KeepAlive / systemd Restart=always
+	// the simple `schtasks /Create /SC ONSTART` form cannot express. The XML triggers at boot
+	// (BootTrigger) AND restarts the runner on failure (RestartOnFailure, 1-min interval).
+	taskXML := nodeWindowsTaskXML(runnerPath)
+	xmlPath := filepath.Join(cfgDir, "serve-task.xml")
+	if err := os.WriteFile(xmlPath, []byte(taskXML), 0644); err != nil {
+		fmt.Fprintf(stderr, "fak node install: write task xml: %v\n", err)
+		return 1
+	}
 	if out, err := exec.Command("schtasks", "/Create", "/TN", nodeWindowsTaskName,
-		"/SC", "ONSTART", "/RL", "LIMITED", "/F", "/TR", taskRun).CombinedOutput(); err != nil {
+		"/XML", xmlPath, "/F").CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "fak node install: schtasks /Create: %v\n%s\n", err, out)
 		return 1
 	}
@@ -620,27 +781,82 @@ func nodeInstallWindows(stdout, stderr io.Writer, addr string, offHost bool, key
 		// run could not be kicked off.
 		fmt.Fprintf(stderr, "[fak node] note: schtasks /Run did not start the task now (%v): %s\n", err, out)
 	}
-	fmt.Fprintf(stdout, "[fak node] registered Scheduled Task %s (/SC ONSTART)\n", nodeWindowsTaskName)
+	fmt.Fprintf(stdout, "[fak node] registered Scheduled Task %s (boot + restart-on-failure)\n", nodeWindowsTaskName)
 	fmt.Fprintf(stdout, "           runner:  %s\n", runnerPath)
 	fmt.Fprintf(stdout, "           log:     %s\\serve.log\n", logDir)
-
-	// Wait briefly for the gateway to answer.
-	localPort := addr[strings.LastIndex(addr, ":")+1:]
-	fmt.Fprintf(stdout, "[fak node] waiting for gateway...\n")
-	for i := 0; i < 20; i++ {
-		time.Sleep(500 * time.Millisecond)
-		if _, ok := nodeProbeHealth("http://127.0.0.1:" + localPort); ok {
-			fmt.Fprintf(stdout, "[fak node] gateway healthy at http://127.0.0.1:%s/healthz\n", localPort)
-			break
-		}
-	}
 
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key == "" {
 		fmt.Fprintf(stderr, "[fak node] WARNING: ANTHROPIC_API_KEY not set for the task's user — set it (e.g. setx ANTHROPIC_API_KEY \"sk-ant-...\") and re-run, or the gateway has no upstream credential\n")
 	}
 
+	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
+
+	// Honest health gate (#2): on failure warn at the logs and return non-zero instead of
+	// printing the client lines as if the gateway were up.
+	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
+		nodeWarnUnhealthy(stderr, logDir)
+		return 1
+	}
 	nodePrintClientLines(stdout, stderr, offHost, gatewayKey, localPort)
 	return 0
+}
+
+// nodeWindowsTaskXML builds the Scheduled Task definition that gives the Windows gateway the
+// crash-restart the simple `schtasks /SC ONSTART` form lacks (#6): a BootTrigger keeps it
+// resident across reboots and RestartOnFailure relaunches the runner if fak serve exits,
+// matching launchd KeepAlive / systemd Restart=always. The runner path is XML-escaped.
+func nodeWindowsTaskXML(runnerPath string) string {
+	esc := func(s string) string {
+		r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
+		return r.Replace(s)
+	}
+	return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>fak serve gateway (always-on Anthropic proxy with tool adjudication) — written by fak node install</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger><Enabled>true</Enabled></BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>cmd.exe</Command>
+      <Arguments>/c "` + esc(runnerPath) + `"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+`
+}
+
+// nodeWaitPortFree polls 127.0.0.1:<port> up to ~3s and returns true once nothing is
+// listening (a fresh dial is refused). It is the pre-(re)start check that stops the Windows
+// installer from blessing a stale/foreign process already bound to the port (#3).
+func nodeWaitPortFree(port string) bool {
+	for i := 0; i < 12; i++ {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), 200*time.Millisecond)
+		if err != nil {
+			return true // refused/timeout ⇒ nothing is listening ⇒ the port is free
+		}
+		_ = conn.Close()
+		time.Sleep(250 * time.Millisecond)
+	}
+	return false
 }
 
 // ── status ────────────────────────────────────────────────────────────────────
@@ -671,9 +887,18 @@ func nodeStatus(stdout, stderr io.Writer, _ []string) int {
 		}
 	}
 
-	// Gateway health — check loopback 8080, then node config URL. nodeProbeHealth takes a
-	// base URL and appends /healthz itself, so the candidates are base URLs.
-	candidates := []string{"http://127.0.0.1:8080"}
+	// Gateway health — probe the loopback URL for the port we ACTUALLY installed with, read
+	// from the persisted install state, instead of the literal :8080 that false-reported a
+	// custom-port gateway as down (#1). Fall back to :8080 only when no install state exists
+	// (e.g. status run on a client that never installed). Then also probe the node config URL.
+	// nodeProbeHealth takes a base URL and appends /healthz itself, so the candidates are bases.
+	loopback := "http://127.0.0.1:8080"
+	if cfgDir, derr := nodeConfigDir(); derr == nil {
+		if st, serr := nodeReadInstallState(cfgDir); serr == nil && st.Port != "" {
+			loopback = "http://127.0.0.1:" + st.Port
+		}
+	}
+	candidates := []string{loopback}
 	if cfg, err := nodeReadCfg(); err == nil && cfg.URL != "" {
 		candidates = append(candidates, cfg.URL)
 	}
@@ -902,6 +1127,74 @@ func nodeWriteCfg(cfg nodeCfg) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(d, "node.json"), data, 0600)
+}
+
+// nodeInstallState is the on-disk record of WHAT THE HOST INSTALLED, written by `install`
+// (distinct from nodeCfg, which `use` writes on the CLIENT). It lets `status` probe the real
+// installed port instead of the literal :8080 (#1) and lets a re-install reuse the existing
+// bearer key instead of silently rotating it and breaking every configured client (#4).
+type nodeInstallState struct {
+	Addr    string `json:"addr"`              // the bind address `fak serve --addr` was given
+	Port    string `json:"port"`              // the local port, for the loopback health URL
+	Key     string `json:"key,omitempty"`     // the generated bearer (off-host installs only)
+	KeyEnv  string `json:"key_env,omitempty"` // the env var name carrying the bearer
+	OffHost bool   `json:"off_host"`          // whether the install required a bearer key
+}
+
+// nodeInstallStatePath is where the host-side install state lives (next to node-policy.json
+// in the config dir). It is host state, NOT the client's node.json.
+func nodeInstallStatePath(cfgDir string) string {
+	return filepath.Join(cfgDir, "node-install.json")
+}
+
+// nodeReadInstallState reads the host install state, or a zero value + error when none exists.
+func nodeReadInstallState(cfgDir string) (nodeInstallState, error) {
+	data, err := os.ReadFile(nodeInstallStatePath(cfgDir))
+	if err != nil {
+		return nodeInstallState{}, err
+	}
+	var st nodeInstallState
+	return st, json.Unmarshal(data, &st)
+}
+
+// nodeWriteInstallState persists the host install state (0600 — it can carry the bearer key),
+// creating the config dir if needed so a first install (or a test against a fresh temp dir)
+// does not fail on a missing parent.
+func nodeWriteInstallState(cfgDir string, st nodeInstallState) error {
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(nodeInstallStatePath(cfgDir), data, 0600)
+}
+
+// nodeResolveKey resolves the bearer key for an off-host install, in priority order so a
+// re-install never silently rotates the key out from under configured clients (#4):
+//
+//  1. an explicit env-var value (the operator passing the key in deliberately), or --rotate-key
+//     ⇒ mint a fresh key (the only paths that change the key);
+//  2. else the key already persisted from a prior install ⇒ REUSE it (clients keep working);
+//  3. else (first install, nothing to reuse) ⇒ mint a fresh key.
+//
+// It returns the key and whether it was freshly minted (so the installer can flag a rotation
+// loudly in its output rather than letting it pass silently — the exact #4 failure).
+func nodeResolveKey(cfgDir, keyEnv string, rotate bool) (key string, minted bool, err error) {
+	if env := strings.TrimSpace(os.Getenv(keyEnv)); env != "" {
+		return env, false, nil // operator supplied it explicitly — honor it, not a silent rotation
+	}
+	if !rotate {
+		if st, rerr := nodeReadInstallState(cfgDir); rerr == nil && st.Key != "" {
+			return st.Key, false, nil // reuse the persisted key so configured clients keep working
+		}
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", false, fmt.Errorf("generate key: %w", err)
+	}
+	return hex.EncodeToString(b), true, nil
 }
 
 // nodeChildEnv builds the base-URL (and bearer-key, when set) env pairs that point a
