@@ -55,14 +55,12 @@ fak exposes three client wires. Pick the one your tool already speaks and repoin
 |---|---|---|
 | OpenAI Chat Completions | `http://127.0.0.1:8080/v1` | base URL / `OPENAI_BASE_URL` (keep the `/v1`) |
 | Anthropic Messages | `http://127.0.0.1:8080` | `ANTHROPIC_BASE_URL` (bare host) |
+| Gemini generateContent | `http://127.0.0.1:8080/v1beta/` | base URL / `GEMINI_BASE_URL` (keep the `/v1beta/`) |
 | MCP (Model Context Protocol) | `fak serve --stdio`, or `POST /mcp` | one server entry |
 
 Those are the wires fak serves to clients. It can proxy on to more than it exposes. The
 `--provider` flag selects an upstream of OpenAI, Anthropic, Gemini, or xAI, so the same
-gate sits in front of whichever model actually serves your tokens. The asymmetry matters
-for honesty. A client that speaks the Gemini wire natively, such as the Gemini CLI or the
-`google-genai` SDK, has no fak endpoint to point at yet, even though fak can call Gemini
-upstream.
+gate sits in front of whichever model actually serves your tokens.
 
 `fak guard -- <agent>` automates the wiring for the agents it recognizes. Name a known
 agent and guard injects the right wire and base URL into the child process only, leaving
@@ -81,7 +79,7 @@ client that reads either one connects.
 
 ## What "connects" honestly means
 
-The [compatibility matrix](compatibility-matrix.md) answers a narrow question for 44
+The [compatibility matrix](compatibility-matrix.md) answers a narrow question for 45
 surveyed tools: does it let you set a base URL? This page adds the sharper one. Can fak
 actually adjudicate that wire, and how cleanly? The grades:
 
@@ -136,7 +134,7 @@ that owns each boundary, rather than reimplement the protocol.
 |---|---|---|---|
 | MCP | agent ↔ tools/resources | Drop-in / native | fak *is* the stdio server (`fak serve --stdio`) and fronts MCP-over-HTTP (`/mcp`), exposing five `fak_*` adjudication tools. stdio MCP is fronted by running fak as the server, not by repointing a URL. |
 | OpenAI Responses | agent ↔ model | Partial | fak proxies *to* a Responses upstream (`--provider openai-responses`) but exposes Chat Completions and Messages to clients. A Responses-default client connects by selecting `chat_completions`. |
-| A2A (Agent2Agent) | agent ↔ agent | Needs an adapter | fak does not speak A2A's JSON-RPC/gRPC bindings natively. It projects a policy-filtered Agent Card from its reviewed method registry (`tools/fleet_agent_link.py a2a-card`); the HTTP edge is planned. |
+| A2A (Agent2Agent) | agent ↔ agent | Partial | v1.0 production standard under Linux Foundation (April 2026). fak does not speak A2A's JSON-RPC/gRPC bindings natively. It projects a policy-filtered Agent Card from its reviewed method registry (`tools/fleet_agent_link.py a2a-card`); the HTTP edge is planned. |
 | ACP (BeeAI) | agent ↔ agent | Needs an adapter | Pre-alpha, with an unsettled transport. fak would front it through the same registry once it stabilizes. |
 | ANP | agent ↔ agent (decentralized) | Needs an adapter | DID identity plus end-to-end encryption. A transparent middle-proxy is structurally impossible, so fak would terminate the channel, holding its own DID. |
 | AG-UI | agent ↔ frontend/UI | Different boundary | Standardizes the UI event stream, not the tool-call boundary fak gates. Orthogonal, not blocked. |
@@ -165,7 +163,7 @@ is above, and the adapter position is in the protocol docs linked from each row.
 
 - [fak + LiteLLM](litellm.md): the three topologies (fak in front of a LiteLLM proxy, fak as a governed node behind it, fak's per-aspect routing dispatching through it) — the flagship router/proxy integration.
 - [Routers & gateways](routers.md): OpenRouter, Portkey, LiteLLM Router, Unify, Martian — fak as a complement to request-level routers, with the residency guarantee.
-- [Compatibility matrix](compatibility-matrix.md): the full sourced table of 44 tools, the wire each speaks, the exact repoint key, and a source link.
+- [Compatibility matrix](compatibility-matrix.md): the full sourced table of 45 tools, the wire each speaks, the exact repoint key, and a source link.
 - [Integration index](README.md): which-agent routing, the universal base-URL recipe, and the 60-second offline proof.
 - [Claude Code](claude.md) · [Cursor](cursor.md) · [OpenAI Codex](openai-codex.md): the dedicated harness guides.
 - [Agent-framework cookbook](../fak/agent-framework-integration.md): exact per-framework code (proxy and explicit-adjudication modes).
