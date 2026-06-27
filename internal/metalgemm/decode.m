@@ -146,6 +146,12 @@ kernel void d_rope(device half* Buf [[buffer(0)]],
 // roped) attends to keys 0..ctx-1 via online softmax over the resident KV (K,V hold ctx rows of
 // w=nKV*hd). GQA: head h reads kv head h/grp. The 32 lanes split hd (hd<=128 => <=4 dims/lane) so
 // q/acc stay in registers and the per-key QK dot is a simd_sum. Mirrors forward.m's attn_k.
+// Key-parallel (flash-decode): ONE threadgroup per head, SPLITS simdgroups (tgsize/32) split the
+// keys. Each simdgroup runs the online softmax over its strided key subset {sg, sg+SPLITS, …}
+// (32 lanes split hd), writes its partial (m, l, acc[hd]) to threadgroup memory, and simdgroup 0
+// flash-combines the SPLITS partials. A single 32-lane-per-head loop over all ctx keys (the old
+// shape) underused the GPU (~7% of cores) and was O(ctx) serial; splitting the keys hides the
+// growing-context latency that was the last gap to llama.cpp-Metal.
 kernel void attn_decode(device const half* Q [[buffer(0)]],   // [nH*hd] roped query
                         device const half* K [[buffer(1)]],   // [ctx*w] post-rope keys
                         device const half* V [[buffer(2)]],   // [ctx*w]
@@ -156,17 +162,20 @@ kernel void attn_decode(device const half* Q [[buffer(0)]],   // [nH*hd] roped q
                         constant uint& w [[buffer(7)]],
                         constant uint& grp [[buffer(8)]],
                         constant float& scale [[buffer(9)]],
-                        uint gid [[thread_position_in_grid]],
-                        uint lane [[thread_index_in_simdgroup]]) {
-    uint h = gid / 32u;
+                        threadgroup float* shm [[threadgroup(0)]], // SPLITS*(hd+2)
+                        uint h [[threadgroup_position_in_grid]],
+                        uint litg [[thread_index_in_threadgroup]],
+                        uint tgsize [[threads_per_threadgroup]]) {
     if (h >= nH) return;
+    uint SPLITS = tgsize / 32u;
+    uint sg = litg / 32u, lane = litg % 32u;
     uint kvh = h / grp;
     device const half* q = Q + h*hd;
     float qreg[4]; uint nd = 0;
     for (uint d=lane; d<hd; d+=32u) qreg[nd++] = float(q[d]);
     float acc[4] = {0,0,0,0};
     float m = -INFINITY, l = 0.0f;
-    for (uint j=0; j<ctx; j++) {
+    for (uint j=sg; j<ctx; j+=SPLITS) {
         device const half* k = K + j*w + kvh*hd;
         float partial = 0.0f; uint idx = 0;
         for (uint d=lane; d<hd; d+=32u) partial += qreg[idx++]*float(k[d]);
@@ -180,10 +189,23 @@ kernel void attn_decode(device const half* Q [[buffer(0)]],   // [nH*hd] roped q
         for (uint d=lane; d<hd; d+=32u) { acc[idx] = acc[idx]*corr + p*float(vv[d]); idx++; }
         m = mNew;
     }
-    device half* o = Out + h*hd;
-    float invl = (l>0.0f) ? 1.0f/l : 0.0f;
-    uint idx = 0;
-    for (uint d=lane; d<hd; d+=32u) o[d] = half(acc[idx++]*invl);
+    threadgroup float* my = shm + sg*(hd+2);
+    { uint idx=0; for (uint d=lane; d<hd; d+=32u) my[d] = acc[idx++]; }
+    if (lane == 0) { my[hd] = m; my[hd+1] = l; }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (sg == 0) {
+        float mc = -INFINITY;
+        for (uint s=0; s<SPLITS; s++) mc = max(mc, shm[s*(hd+2)+hd]);
+        float lc = 0.0f;
+        for (uint s=0; s<SPLITS; s++) lc += shm[s*(hd+2)+hd+1] * exp(shm[s*(hd+2)+hd] - mc);
+        float invl = (lc > 0.0f) ? 1.0f/lc : 0.0f;
+        device half* o = Out + h*hd;
+        for (uint d=lane; d<hd; d+=32u) {
+            float a = 0.0f;
+            for (uint s=0; s<SPLITS; s++) a += shm[s*(hd+2)+d] * exp(shm[s*(hd+2)+hd] - mc);
+            o[d] = half(a * invl);
+        }
+    }
 }
 
 kernel void d_silumul(device half* G [[buffer(0)]],
@@ -384,9 +406,13 @@ static void d_attn(id<MTLBuffer> Q, id<MTLBuffer> K, id<MTLBuffer> V, id<MTLBuff
     [e setBytes:&w length:4 atIndex:7];
     [e setBytes:&grp length:4 atIndex:8];
     [e setBytes:&gDecScale length:4 atIndex:9];
-    NSUInteger total = (NSUInteger)gDecNH*32;
-    NSUInteger tg = psoDAttn.maxTotalThreadsPerThreadgroup; tg -= tg % 32; if (tg > total) tg = total; if (tg == 0) tg = 32;
-    [e dispatchThreads:MTLSizeMake(total,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
+    // ONE threadgroup per head; SPLITS=8 simdgroups (256 threads) split the keys, threadgroup memory
+    // holds the per-split partials for the flash-combine. Clamp SPLITS to the pipeline's max.
+    NSUInteger SPLITS = 8;
+    NSUInteger maxTG = psoDAttn.maxTotalThreadsPerThreadgroup / 32;
+    if (SPLITS > maxTG) SPLITS = maxTG; if (SPLITS == 0) SPLITS = 1;
+    [e setThreadgroupMemoryLength:(NSUInteger)(SPLITS * (gDecHd + 2) * 4) atIndex:0];
+    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)gDecNH,1,1) threadsPerThreadgroup:MTLSizeMake(SPLITS*32,1,1)];
 }
 
 static void d_silu(id<MTLBuffer> G, id<MTLBuffer> U, int n) {
@@ -475,6 +501,7 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
         // from the small-kernel overhead, to decide whether the parity lever is the GEMV bandwidth or
         // fusing the small kernels.
         int matOnly = getenv("FAK_DECODE_MATMUL_ONLY") != NULL;
+        int noAttn  = getenv("FAK_DECODE_NO_ATTN") != NULL; // skip ONLY attention (isolate its cost)
 
         for (int l = 0; l < gDecNL; l++) {
             DecLayer L_ = gDecL[l];
@@ -486,7 +513,7 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
             if (!matOnly) {
                 d_rope_at(Qb, nH, L, 0);                    // RoPE Q
                 d_rope_at(gKVk[l], nKV, L, rowOff);        // RoPE the new K row in place
-                d_attn(Qb, gKVk[l], gKVv[l], attn, ctx);   // single-query attention over ctx keys
+                if (!noAttn) d_attn(Qb, gKVk[l], gKVv[l], attn, ctx); // single-query attention over ctx keys
             }
             d_gemv(L_.o, attn, tmpH, 0, -1);               // O
             if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += O
