@@ -159,6 +159,68 @@ func DefaultTierProfiles() map[ResidencyTier]TierProfile {
 	}
 }
 
+// CapacityProbe carries the live per-tier capacity readings ProbedTierProfiles needs to
+// turn DefaultTierProfiles' representative stand-ins into the ladder THIS box can prove.
+// It is plain data, so ProbedTierProfiles stays pure and witnessable with no GPU and no
+// host inspection: the startup caller fills it from the compute probes (DeviceMemoryInfo
+// for HBM, HostSystemMemoryInfo for DRAM, the spill-filesystem free-space probe for Disk)
+// — that wiring lives ABOVE cachemeta so the policy plane never imports the compute HAL —
+// and a test injects synthetic readings to assert the chosen ladder.
+type CapacityProbe struct {
+	// HBMBytes is the device (GPU) memory total; HBMPresent gates whether the box has a
+	// provable HBM tier at all. A no-GPU box leaves HBMPresent false and ProbedTierProfiles
+	// omits TierHBM entirely, so placement never targets device memory the box does not
+	// have. When present, a positive HBMBytes sizes the tier.
+	HBMBytes   int64
+	HBMPresent bool
+	// DRAMBytes is the host RAM total. The host always has DRAM, so the tier is always in
+	// the ladder; a non-positive reading keeps the representative default rather than
+	// claiming a measurement it does not have.
+	DRAMBytes int64
+	// DiskBytes is the usable capacity of the spill filesystem. Disk is always present; a
+	// non-positive reading keeps the representative default.
+	DiskBytes int64
+}
+
+// ProbedTierProfiles turns the representative DefaultTierProfiles ladder into the one THIS
+// box can prove it has: it sizes each locally-probeable physical tier (HBM, DRAM, Disk)
+// from the live CapacityProbe and DROPS a tier the box cannot prove. A no-GPU box
+// (p.HBMPresent == false) gets a ladder with no TierHBM, so the planner never places a
+// span on device memory that is not there. The speculative far-memory tiers — NUMA-far,
+// CXL, and the off-box Remote pool — have no local probe that can confirm they exist, so
+// they are left OUT of the proved ladder; an operator who has provisioned far memory
+// re-adds those tiers the same way they override any other profile. Only CapacityBytes is
+// taken from the probe — latency, bandwidth, and addressability stay at their
+// representative values, because the probe sizes the ladder, it does not re-measure the
+// physics. The returned map is independent of DefaultTierProfiles' (callers may mutate it).
+func ProbedTierProfiles(p CapacityProbe) map[ResidencyTier]TierProfile {
+	defaults := DefaultTierProfiles()
+	out := make(map[ResidencyTier]TierProfile, 3)
+
+	// DRAM and Disk are always present; size them from the probe when it read a real
+	// number, else keep the representative default.
+	dram := defaults[TierDRAM]
+	if p.DRAMBytes > 0 {
+		dram.CapacityBytes = p.DRAMBytes
+	}
+	out[TierDRAM] = dram
+
+	disk := defaults[TierDisk]
+	if p.DiskBytes > 0 {
+		disk.CapacityBytes = p.DiskBytes
+	}
+	out[TierDisk] = disk
+
+	// HBM is in the ladder only when the box proved a device with real capacity.
+	if p.HBMPresent && p.HBMBytes > 0 {
+		hbm := defaults[TierHBM]
+		hbm.CapacityBytes = p.HBMBytes
+		out[TierHBM] = hbm
+	}
+
+	return out
+}
+
 // localTierLadder is the demote/promote order of the LOCAL memory hierarchy, hottest
 // to coldest. Off-box (Remote/Provider) and the synthetic Recompute sentinel are not
 // part of the in-box relocation ladder; demotion past Disk means Recompute (drop the
