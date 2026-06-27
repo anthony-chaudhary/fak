@@ -17,3 +17,17 @@ package compute
 // cpu-ref backend never advertises). The non-cuda build provides an empty twin so a
 // host can call this unconditionally.
 func EnableCUDAGraph() { graphEnabled = true }
+
+// SetCUDAGraphKVCapacity raises the fixed device-KV capacity (in positions) that each
+// graph-capturing session preallocates, so a real prompt never grows the cache mid-capture
+// (a cudaMalloc during capture is illegal — #932). A host wires it to --context-budget-tokens
+// alongside EnableCUDAGraph. It only RAISES the default (1024): a smaller request is ignored,
+// so the decode-bench default capacity is never weakened. Must be called before the first
+// NewKV (the serve flips it at startup, before any session is created). Note the prealloc is
+// 3 buffers (K, Kraw, V) × numKVHeads × headDim × positions × 4B per layer — a large budget
+// is real VRAM, so size it to the context you actually serve, not the architectural maximum.
+func SetCUDAGraphKVCapacity(positions int) {
+	if positions > cudaKVMaxPos {
+		cudaKVMaxPos = positions
+	}
+}

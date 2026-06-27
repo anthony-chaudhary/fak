@@ -15,6 +15,13 @@ import (
 type graphBackend interface {
 	GraphBegin() bool
 	GraphEndLaunch()
+	// GraphAbort ends and DISCARDS an open capture without launching it. The HAL calls it
+	// only on the panic path (an unforeseen mid-capture cudaMalloc, or a KV append past the
+	// preallocated capacity) so the shared capture stream is not left in capture mode — which
+	// would fail every subsequent op and cascade the whole serve. The session whose capture
+	// was aborted is left inconsistent (its KV host bookkeeping advanced without the captured
+	// device writes executing) and must be dropped by the caller's decode-boundary recovery.
+	GraphAbort()
 }
 
 // NewBackendSession starts a session whose per-token path runs through the
@@ -296,14 +303,21 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	}
 	useQ8Weights := s.useHALQ8Weights()
 
-	// CUDA-graph fast path: after warm-up (so the buffer pool + weight cache are populated
-	// and no cudaMalloc happens during capture), capture this token's whole op stream and
-	// replay it as ONE launch — the only way past the proven ~12 tok/s op-per-call WSL
-	// floor. Pin the goroutine so the open capture sees a single consistent stream. The x
-	// upload above and the logits Read below stay OUTSIDE the captured region.
+	// CUDA-graph fast path: capture this token's whole op stream and replay it as ONE launch
+	// — the only way past the proven ~12 tok/s op-per-call WSL floor. Pin the goroutine so the
+	// open capture sees a single consistent stream. The x upload above and the logits Read
+	// below stay OUTSIDE the captured region.
+	//
+	// We capture ONLY a logits-producing step (the steady decode topology the kept exec graph
+	// reuses via cudaGraphExecUpdate) and ONLY after one such step has already run UNCAPTURED
+	// (halLogitsWarm). That uncaptured step pools every weight (model.norm, lm_head) and every
+	// transient size (incl. the vocab-wide logits buffer); without it the first captured logits
+	// step hit a fresh cudaMalloc mid-capture and crashed the serve (#932). A noLogits prefill
+	// step is left uncaptured: its topology differs from the decode graph, and it never warms
+	// the logits path, so it must not be the step that instantiates the reused exec.
 	gr, canGraph := be.(graphBackend)
 	capturing := false
-	if canGraph && s.halStep >= 2 {
+	if canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()
 		if gr.GraphBegin() {
 			capturing = true
@@ -311,6 +325,17 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			runtime.UnlockOSThread()
 		}
 	}
+	// Panic-safety: if anything below unwinds (e.g. an unforeseen mid-capture cudaMalloc, or a
+	// KV append past the preallocated capacity) while a capture is still open, end+discard it so
+	// the shared stream is not left in capture mode and the PROCESS survives for the next
+	// request. finishGraph clears `capturing` on the normal path, making this a no-op then.
+	defer func() {
+		if capturing {
+			gr.GraphAbort()
+			runtime.UnlockOSThread()
+			capturing = false
+		}
+	}()
 	finishGraph := func() {
 		if capturing {
 			gr.GraphEndLaunch() // end capture, instantiate, launch, fence
@@ -319,6 +344,11 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 		}
 		be.Free(x) // per-token input/residual buffer; weights and KV are owned elsewhere.
 		s.halStep++
+		if mode != halNoLogits {
+			// A full logits path just ran; its weights + transient sizes are now pooled, so the
+			// next logits step is safe to capture.
+			s.halLogitsWarm = true
+		}
 	}
 
 	for l := 0; l < cfg.NumLayers; l++ {

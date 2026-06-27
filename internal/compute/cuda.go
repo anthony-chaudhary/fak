@@ -396,6 +396,16 @@ func (c *cudaBackend) GraphReset() {
 	C.fcuda_graph_reset()
 }
 
+// GraphAbort ends and DISCARDS an open stream capture without instantiating or launching it.
+// The HAL calls it on its panic path (a capture left open because something unwound past
+// GraphEndLaunch). It clears the stream's capture state so the next op — and the next request
+// — runs normally instead of failing "operation not permitted while capturing" forever.
+func (c *cudaBackend) GraphAbort() {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_graph_abort()
+}
+
 // Name returns the registry id of this backend ("cuda").
 func (c *cudaBackend) Name() string            { return c.name }
 func (c *cudaBackend) Tier() string            { return c.tier }
@@ -1152,9 +1162,10 @@ func (c *cudaBackend) AWQBatchedMatMul(w, scales, X Tensor, P int) Tensor {
 
 // cudaKVMaxPos is the fixed cache capacity (in positions) each device KV preallocates, so
 // AppendKV never reallocs — a hard requirement for CUDA-graph capture (a cudaMalloc during
-// capture is illegal). 1024 covers the decode benchmarks; a longer-context session would
-// raise this (a future fixed-vs-ring tradeoff, tracked with the device-KV work).
-const cudaKVMaxPos = 1024
+// capture is illegal). 1024 covers the decode benchmarks; a longer-context serve raises it
+// to the context budget via SetCUDAGraphKVCapacity so a real prompt never grows the cache
+// mid-capture. Read only inside the graphEnabled NewKV prealloc, so a plain const-like var.
+var cudaKVMaxPos = 1024
 
 // NewKV creates a device-resident KV store for cfg's geometry; under graph capture it
 // preallocates a fixed cudaKVMaxPos capacity (no mid-token cudaMalloc), otherwise it stays growable.

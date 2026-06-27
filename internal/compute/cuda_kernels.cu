@@ -838,6 +838,19 @@ extern "C" void fcuda_graph_reset(void) {
   if (g_exec) { cudaGraphExecDestroy(g_exec); g_exec = nullptr; }
 }
 
+// fcuda_graph_abort ends an open capture and throws the captured graph away WITHOUT launching
+// it — the recovery half of fcuda_graph_begin for the case where the Go side unwound (panicked)
+// mid-capture. Without this the stream stays in capture mode and every subsequent op fails with
+// "operation not permitted while the stream is capturing", cascading the whole serve. Clearing
+// any sticky error keeps the context usable for the next request. Best-effort: a failed
+// EndCapture still leaves cudaGetLastError cleared so the next op is not poisoned by it.
+extern "C" void fcuda_graph_abort(void) {
+  cudaGraph_t graph = nullptr;
+  cudaStreamEndCapture(g_stream, &graph);
+  if (graph) cudaGraphDestroy(graph);
+  cudaGetLastError(); // swallow the capture-state error so the next op starts clean
+}
+
 extern "C" int fcuda_graph_begin(void) {
   // Global mode: capture every op submitted to g_stream regardless of thread (the Go
   // caller LockOSThread-pins the token, and cudaMu serializes, so nothing else submits).

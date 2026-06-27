@@ -176,7 +176,13 @@ func cmdServe(argv []string) {
 	// flip cleanly activates the fully-wired HAL capture/replay path. No-op on a non-cuda build.
 	if *cudaGraph {
 		compute.EnableCUDAGraph()
-		fmt.Println("fak: CUDA-graph decode replay enabled (#483) — witness tok/s before relying on it")
+		// Size the fixed device-KV prealloc to the served context so a real prompt never grows
+		// the cache mid-capture (a cudaMalloc during capture is illegal — #932). Off-budget (0)
+		// leaves the decode-bench default (1024). The prealloc is real VRAM (3 buffers × KV-heads
+		// × head-dim × positions × 4B/layer), so an operator who wants a large graph context must
+		// budget VRAM for it (or pair with the Q4_K weight lever to free room).
+		compute.SetCUDAGraphKVCapacity(*contextBudgetTokens)
+		fmt.Printf("fak: CUDA-graph decode replay enabled (#483), KV graph capacity=%d positions — witness tok/s before relying on it\n", max(*contextBudgetTokens, 1024))
 	}
 
 	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
@@ -766,6 +772,28 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// the Q8 dequant minority) so a glance confirms the mixed-quant expert bulk loaded
 		// resident — the slow f32 round-trip avoided — alongside the per-quant-type load-path
 		// summary the profiler already streamed.
+		fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
+		loadNanos := time.Since(tLoad).Nanoseconds()
+		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
+		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+	case backend != nil && os.Getenv("FAK_Q4K") != "" && backend.Caps().UploadDtype:
+		// Standard-arch device serve with FAK_Q4K: hold raw Q4_K matmul tensors RESIDENT on the
+		// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
+		// Q8-resident default below. Without this arm the `case backend != nil:` Q8 path matched
+		// first and silently ignored FAK_Q4K — loading ~1 B/param instead of raw Q4_K's
+		// ~0.56 B/param, ~2x the weight VRAM (#949). No expert offload here (that is the
+		// cpuOffloadExperts arm) — all weights are device-resident, so the fit uses the
+		// non-offload device plan (EstimateLoadMemoryPlan, quant-aware), same helper the Q8 arm
+		// uses; only the loader differs. A backend without UploadDtype falls through to the Q8/
+		// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
+		fmt.Printf("fak: GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)\n", backend.Name())
+		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
+		must(err)
+		prof := ggufload.NewLoadProfiler()
+		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
+		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
+		must(err)
+		modelengine.PreloadQ4K(mm)
 		fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
 		loadNanos := time.Since(tLoad).Nanoseconds()
 		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)

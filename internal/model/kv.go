@@ -34,9 +34,16 @@ type Session struct {
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)
 	halW map[string]compute.Tensor
-	// halStep counts tokens run through the HAL; the first two warm the device buffer pool
-	// + weight cache before a graph-capturing backend starts replaying captured tokens.
+	// halStep counts tokens run through the HAL (diagnostic / legacy warm-up counter).
 	halStep int
+	// halLogitsWarm gates CUDA-graph capture: it flips true only after one FULL
+	// logits-producing forward has run UNCAPTURED, so every weight on the logits path
+	// (model.norm, lm_head) and every transient size (incl. the vocab-wide logits buffer)
+	// is already pooled. Capturing before that warm step is what crashed the serve (#932):
+	// the first captured logits step hit a fresh cudaMalloc — illegal mid-capture. A
+	// noLogits prefill step never touches the logits path, so counting steps (the old
+	// halStep>=2 gate) did not guarantee it was warm; this flag does.
+	halLogitsWarm bool
 
 	// Quant selects the Q8_0 quantized forward path (quant_forward.go) for this session's
 	// prefill and decode. The f32 path is the default and is left byte-for-byte unchanged;

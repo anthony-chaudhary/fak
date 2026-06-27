@@ -186,6 +186,10 @@ int fcuda_graph_end_launch(void);
 /* fcuda_graph_reset drops the kept exec graph so the next session captures fresh (the exec
  * is tied to one session's buffer addresses). Called at session start. */
 void fcuda_graph_reset(void);
+/* fcuda_graph_abort ends an open capture and discards it WITHOUT launching — the recovery
+ * half of fcuda_graph_begin for a Go-side panic mid-capture. Clears the stream's capture
+ * state (and any sticky error) so the next op/request runs normally instead of cascading. */
+void fcuda_graph_abort(void);
 
 #ifdef __cplusplus
 }

@@ -9,3 +9,8 @@ package compute
 
 // EnableCUDAGraph is a no-op in the non-cuda build (no device, no graph path).
 func EnableCUDAGraph() {}
+
+// SetCUDAGraphKVCapacity is a no-op in the non-cuda build (no device-KV to preallocate). It
+// exists so a host can wire --context-budget-tokens to the graph-KV capacity unconditionally,
+// without a build-tag branch at the call site. The cuda twin (graph_cuda.go) does the work.
+func SetCUDAGraphKVCapacity(int) {}
