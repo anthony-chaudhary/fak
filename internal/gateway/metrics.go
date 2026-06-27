@@ -963,6 +963,7 @@ func (s *Server) renderMetrics() string {
 	s.writeInKernelPressureTrimMetrics(&b)
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
+	s.resumeProj.writeMetrics(&b) // #941: resume projected-vs-observed residual (self-contained family)
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the
 	// inference accumulators above. fak's product axis is agent-fleet serving

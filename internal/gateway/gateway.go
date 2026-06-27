@@ -547,6 +547,13 @@ type Server struct {
 	resetHealthMu sync.Mutex
 	resetHealth   map[string]*sessionResetHealth
 
+	// resumeProj holds the resume PROJECTED-vs-OBSERVED RESIDUAL accumulators (#941), a
+	// self-contained metric family (resume_projection.go) the host's opt-in resume hook folds one
+	// boundary into via observeResumeProjection. SHADOW / observe-only: nothing here resumes, cuts,
+	// or resets a session. The projection is WITNESSED (fak's resume.Plan); the first-turn cache
+	// bill it is differenced against is OBSERVED (provider-relayed). Its own mutex; zero-value ready.
+	resumeProj resumeProjMetrics
+
 	// compactHistoryBudget mirrors Config.CompactHistoryBudget: when > 0 the flagship
 	// Anthropic passthrough compacts OLD turns in the OUTBOUND body to this resident-token
 	// budget while preserving the cached-prefix bytes (agent.CompactAnthropicHistory). 0
