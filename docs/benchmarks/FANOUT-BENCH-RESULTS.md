@@ -51,6 +51,75 @@ and Anthropic's orchestrator-worker research-system writeup
 
 ---
 
+## §0 — The MEASURED real-run capstone: 1,024 real agents on one goal (`fanrun`)
+
+Everything in §1–§5 below prices a **synthetic** call stream: the cross-agent dedup is a
+real `k.Syscall` event, but the "agents" are call sequences, and the headline 72.8× is a
+**modeled** projection. `fanrun` (`cmd/fanrun`, engine `internal/bench/fanrun.go`) closes
+that gap — it actually **runs N real agent sessions** decomposing one shared goal and
+wall-clocks them. Each sub-agent is a genuine `internal/agent.RunArm` loop through a real
+`kernel.New("localtools")` with the vDSO fast path on and real tool dispatch across the
+syscall boundary; they all gather the same research goal (look up the account → fetch the
+refund policy → search flights → convert the price), the read-only orchestrator-worker
+sub-agent role. **Every number here is a wall-clock, a real kernel counter, or exact
+geometry — the artifact carries zero modeled fields** (a test gate enforces it).
+
+Measured on a CPU-only box (no GPU, no model weights, no API key — a deterministic offline
+planner drives each sub-agent so the run is reproducible and needs nothing). Checked-in
+artifact [`experiments/fanout/fanrun.json`](../../experiments/fanout/fanrun.json):
+
+| N (sub-agents) | tasks completed | tool errors | **wall-clock (serial)** | agents/s (serial) | **cross-agent vDSO hits** | **vdso_fills** | prefix tokens elided = (N−1)·P |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1    | 1    | 0 | 0.6 ms    | 1,708 | **0**     | 3 | 0         |
+| 4    | 4    | 0 | 1.7 ms    | 2,393 | **9**     | 3 | 6,144     |
+| 16   | 16   | 0 | 5.3 ms    | 3,038 | **45**    | 3 | 30,720    |
+| 64   | 64   | 0 | 25.0 ms   | 2,561 | **189**   | 3 | 129,024   |
+| 256  | 256  | 0 | 88.3 ms   | 2,899 | **765**   | 3 | 522,240   |
+| 1024 | 1024 | 0 | **364 ms** | 2,814 | **3,069** | **3** | **2,095,104** |
+
+Read three things off the capstone:
+
+1. **1,024 real agents complete one goal end-to-end in 364 ms on a laptop with no GPU.**
+   Every sub-agent finishes the research gather (`tasks_completed = N`, `tool_errors = 0`) —
+   this is the capability itself, not a projection of it. The whole N=1…1024 sweep
+   wall-clocks in **under 2 s**.
+2. **`vdso_fills` is FLAT at 3 for every N — the cross-agent-vs-warm-per-agent-cache thesis,
+   made concrete.** Sub-agent 0 fills 3 cache entries for the shared goal sources; all of
+   sub-agents 1…1023 *reuse* them. A warm **per-agent** cache would fill 3·N (3,072 fills at
+   N=1024); cross-agent dedup fills **3**. The cross-agent vDSO hit count (the sibling-only
+   delta over the N=1 baseline) grows ~linearly to **3,069 at N=1024**.
+3. **The prefill the kernel never redoes is exact `(N−1)·P` — 2,095,104 tokens at N=1024.**
+   With `-model-dir` this is additionally **wall-clocked** as a reuse-vs-no-reuse prefill
+   race (the `cmd/fleetserve` methodology): the per-clone prefill speedup measured on a tiny
+   CPU model is **3.4× (N=4) / 8.2× (N=16) / 11.7× (N=64)**, climbing with N as the geometry
+   predicts.
+
+**The honest fence (why this is not a parallel-speedup claim).** fanrun is **serial by
+construction**: the kernel's fast-path world-version is process-global, so the N sub-agents
+must share one world epoch — which is *exactly* what makes the cross-agent dedup real and
+reproducible — and they run one after another. `agents_per_sec_serial` is N ÷ Σt, **not** a
+parallel rate, and fanrun deliberately does **not** reproduce §3's modeled 72.8×. The
+measured win is **prefill elision + real cross-agent dedup**, not parallelism. The read-only
+research role is faithful to the lead-researcher → subagent pattern (sub-agents gather, the
+lead folds): a sub-agent that *wrote* would bump the process-global world and flush every
+sibling's warmed read, the honest invalidation tension §4's write-goal profile reports. The
+`no-share` profile gives exactly 0 cross-uplift at every N (the anti-inflation control,
+`internal/bench.TestFanrunNoShareZeroUplift`).
+
+**Still open (the real-MODEL rung).** fanrun's sub-agents are driven by a deterministic
+offline planner, so the wall-clock is the **kernel's** orchestration + dedup cost, not live
+decode. A real-model fan-out (live token generation per sub-agent) across the N grid is
+reachable on the lab GPU fleet and is the next rung; it does not change the measured
+orchestration/dedup numbers above, which stand on their own.
+
+Reproduce (deterministic counter+geometry — no model, runs on any agent host):
+`go run ./cmd/fanrun -agent-max 1024 -grid log -prefix 2048 -out experiments/fanout/fanrun.json`.
+Add the prefill-elision wall-clock with a small model:
+`go run ./cmd/fanrun -agents 1,4,16,64 -reps 3 -model-dir <dir>`.
+Witness: `go test ./internal/bench ./cmd/fanrun`.
+
+---
+
 ## §1 — The headline surface (research-goal profile, 16 seeded trials, sub-turns=4)
 
 `research-goal`: sub-agents mostly read the goal's shared sources (`p_shared=0.55`,

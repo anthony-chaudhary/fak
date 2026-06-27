@@ -107,7 +107,7 @@ concurrent serving), so a bounded cache thrashes under FCFS:
 | **FCFS** (interleaved arrivals) | 62.1 % | 72 % |
 | **cache-aware** (lexicographic ≡ DFS) | **86.7 %** | **100 %** |
 
-Cache-aware scheduling recovers the full hit rate — reaching 100 % of optimal (vs the paper's 96 % average across workloads for their online scheduler). Our offline lexicographic sort *is* exact DFS pre-order on the agents workload, the configuration the theorem says is optimal when the full request set is known in advance. The single-prefix workloads (few-shot,
+Cache-aware scheduling recovers the full hit rate — reaching 100 % of optimal on the agents workload with an offline lexicographic sort (optimal when the full request set is known in advance). The paper reports 96 % of optimal on average across workloads for their online scheduler; these are not directly comparable since offline sorting can achieve the optimal order while online scheduling must decide without seeing all requests. The single-prefix workloads (few-shot,
 multi-turn, ToT) are order-insensitive (FCFS already == cache-aware == optimal), which is
 itself the predicted result: scheduling only matters when independent prefix groups
 interleave.
@@ -208,7 +208,9 @@ engine offers, now measured rather than asserted.
   verified 50–99 % band — running the identical radix-tree + longest-prefix + LRU-leaf
   algorithm, soundness-pinned bit-for-bit to the proven KV core.
 - **It reproduces the scheduling theorem.** Cache-aware (≡ DFS) ordering recovers the agents
-  workload from FCFS 62.1 % to **100 % of optimal**, vs the paper's 96 % average.
+   workload from FCFS 62.1 % to **100 % of optimal** on that workload (offline lexicographic sort).
+   The paper reports 96 % of optimal on average across workloads for their online scheduler, which
+   is not directly comparable.
 - **The radix tree strictly extends fak's prior reuse**, finding 1.4–2.5× more reuse than
   the declare-one-prefix path on tree/chain workloads.
 - **And it does the one thing the LRU cache can't**: policy-driven, span-exact, provable
