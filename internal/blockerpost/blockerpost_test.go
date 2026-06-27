@@ -224,7 +224,8 @@ func TestFoldIssuesUnownedSurfacesToOperator(t *testing.T) {
 	if !strings.Contains(got, "UNOWNED") {
 		t.Fatalf("the adrift issue should be marked UNOWNED:\n%s", got)
 	}
-	if !strings.Contains(b.ActionURL, "label:blocked") {
+	// The query is url.QueryEscape'd, so the label filter rides as label%3Ablocked.
+	if !strings.Contains(b.ActionURL, "/issues?q=") || !strings.Contains(b.ActionURL, "label%3Ablocked") {
 		t.Fatalf("operator fold should link the filtered backlog, got %q", b.ActionURL)
 	}
 }
