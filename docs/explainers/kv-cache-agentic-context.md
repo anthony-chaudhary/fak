@@ -47,7 +47,7 @@ Each model call re-sends the growing message list. If the loop is **strictly app
 
 ## What actually erodes the cache hit rate in agent loops?
 
-1. **Eviction during tool latency (the dominant practical cause).** KV memory is finite. While a tool runs — a shell command, a web fetch, a sub-agent, seconds to minutes — other traffic evicts your prefix under LRU, and you return to a cold cache. This is why hosted prompt caches have a short TTL (commonly ~5 minutes); a tool slower than the TTL guarantees a miss.
+1. **Eviction during tool latency (the dominant practical cause).** KV memory is finite. While a tool runs — a shell command, a web fetch, a sub-agent, seconds to minutes — other traffic evicts your prefix under LRU, and you return to a cold cache. Hosted prompt caches have provider-specific TTLs (e.g., Anthropic 5m or 60m, OpenAI ~5–10 min, as documented in [vCache — A Virtual API Cache over Providers We Don't Control](../notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md)); a tool slower than the TTL guarantees a miss.
 
 2. **Head-mutation — the structural killer.** Anything that changes the context *ahead* of the stable part invalidates everything after it:
    - **Summarization / compaction** of old turns rewrites the head.
