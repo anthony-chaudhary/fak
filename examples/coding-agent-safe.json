@@ -1,0 +1,25 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "read",
+    "write",
+    "bash",
+    "finish"
+  ],
+  "arg_rules": [
+    { "tool": "bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK" },
+    { "tool": "bash", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "bash", "arg": "command", "deny_regex": "\\bgit\\s+push\\b", "reason": "POLICY_BLOCK" }
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ],
+  "sources": {
+    "bash": "trusted_local"
+  }
+}

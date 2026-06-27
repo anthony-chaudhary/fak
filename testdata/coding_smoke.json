@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "_name": "failing-test-fixture",
+    "_description": "A minimal, deterministic coding fixture: a tiny Python project with one failing unit test that requires a one-line fix.",
+    "_complexity": "<5min",
+    "_language": "Python",
+    "_test_framework": "unittest"
+  },
+  "instance_id": "local-coding-fixture-001",
+  "repo_url": "file://./testdata/coding-smoke",
+  "base_commit": "main",
+  "problem_statement": "The add function in calculator.py returns a + b instead of a - b. Fix the implementation so all tests pass.",
+  "expected_patch": [
+    {
+      "file": "calculator.py",
+      "old_lines": ["    return a + b"],
+      "new_lines": ["    return a - b"]
+    }
+  ],
+  "oracle": {
+    "test_command": ["python", "-m", "unittest", "test_calculator.py"],
+    "expected_pass": true
+  }
+}
