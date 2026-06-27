@@ -11,6 +11,13 @@
 # from the default binary), so every target builds static with CGO_ENABLED=0. A binary
 # shipped without a VERSION file alongside resolves its version from the BuildVersion
 # ldflag stamped here (internal/appversion.Current precedence).
+#
+# linux/arm64 is a first-class published target: it is the constrained end of the
+# deployment spectrum (Raspberry Pi / Jetson / arm64 edge gateway), the same kernel
+# binary that runs on a datacenter host. CGO_ENABLED=0 proves there is nothing to port
+# — the arm64 NEON Q8 path is the same one Apple-silicon ships — so this is a published
+# binary, not a new build (the gap the mobile/edge strategy note flagged highest-leverage).
+# See docs/explainers/cross-platform-spine.md.
 name: release-artifacts
 
 on:
@@ -43,6 +50,8 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
+          - goos: linux
+            goarch: arm64
           - goos: darwin
             goarch: amd64
           - goos: darwin
