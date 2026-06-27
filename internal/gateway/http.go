@@ -18,9 +18,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
-// maxBody bounds an inbound request body (defense against an unbounded read from
-// an untrusted client). 4 MiB is far above any real tool-args / chat payload.
+// maxBody bounds an inbound tool-args / MCP-frame body (defense against an
+// unbounded read from an untrusted client). 4 MiB is far above any real
+// tool-args payload.
 const maxBody = 4 << 20
+
+// maxTranscriptBody bounds an inbound /v1/messages or /v1/chat/completions body.
+// A RESUMED long-context session re-sends its whole transcript every turn, so the
+// request body legitimately grows past the 4 MiB tool-args cap — a 388k-token
+// resume serializes to several MiB of JSON. 32 MiB matches the real Anthropic
+// request-body ceiling, so the gateway never refuses a body the upstream would
+// have accepted (the silent-truncation 400 in #-resume).
+const maxTranscriptBody = 32 << 20
 
 // gatewayRoute pairs a ServeMux registration pattern with its handler. Handler
 // builds the mux from routeTable() rather than a sequence of inline HandleFunc
@@ -1093,7 +1102,9 @@ func (s *Server) decodeSyscall(w http.ResponseWriter, r *http.Request) (SyscallR
 // fields — drop-in OpenAI compatibility requires ignoring extra fields — but the
 // DTOs have no Ref field, so a client cannot smuggle a kernel CAS handle.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	// The chat-completions passthrough carries the same resumed transcript as the
+	// Anthropic wire, so it gets the larger transcript cap, not the tool-args cap.
+	r.Body = http.MaxBytesReader(w, r.Body, maxTranscriptBody)
 	return json.NewDecoder(r.Body).Decode(v)
 }
 

@@ -347,6 +347,31 @@ func TestGuardEnvVar(t *testing.T) {
 	}
 }
 
+func TestGuardEnsureTimeoutFloor(t *testing.T) {
+	const name = "FAK_TEST_TIMEOUT_FLOOR_S"
+
+	// Unset → the floor is applied, so a long guarded turn is not cut at 90s.
+	t.Setenv(name, "")
+	guardEnsureTimeoutFloor(name, 600)
+	if got := os.Getenv(name); got != "600" {
+		t.Errorf("unset var: got %q, want the applied floor 600", got)
+	}
+
+	// An explicit operator value wins — never clobbered.
+	t.Setenv(name, "120")
+	guardEnsureTimeoutFloor(name, 600)
+	if got := os.Getenv(name); got != "120" {
+		t.Errorf("explicit value: got %q, want the operator's 120 preserved", got)
+	}
+
+	// An explicit "0" (Go's no-timeout opt-out) is also honored, not overwritten.
+	t.Setenv(name, "0")
+	guardEnsureTimeoutFloor(name, 600)
+	if got := os.Getenv(name); got != "0" {
+		t.Errorf("explicit 0: got %q, want the no-timeout opt-out 0 preserved", got)
+	}
+}
+
 func TestGuardLogSink(t *testing.T) {
 	// Default "": muted no-op, no closer, an "off" label.
 	logf, closer, label := guardLogSink("", io.Discard)

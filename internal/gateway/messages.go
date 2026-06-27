@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -124,13 +125,23 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusMethodNotAllowed, "use POST")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	r.Body = http.MaxBytesReader(w, r.Body, maxTranscriptBody)
 	raw := make([]byte, 0, 4096)
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := r.Body.Read(buf)
+		n, readErr := r.Body.Read(buf)
 		raw = append(raw, buf[:n]...)
-		if err != nil {
+		if readErr != nil {
+			// MaxBytesReader signals overflow with *http.MaxBytesError. Forwarding
+			// the truncated prefix upstream yields an opaque 400; surface it as a
+			// clean 413 so the operator sees the real cause (a body past the cap),
+			// not a malformed-JSON guess.
+			var maxErr *http.MaxBytesError
+			if errors.As(readErr, &maxErr) {
+				writeErr(w, http.StatusRequestEntityTooLarge,
+					"request body exceeds the gateway limit ("+strconv.Itoa(maxTranscriptBody>>20)+" MiB); the transcript is too large to forward")
+				return
+			}
 			break
 		}
 	}

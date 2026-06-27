@@ -122,6 +122,16 @@ func cmdGuard(argv []string) {
 		_ = os.Setenv(guard.EnvOptIn, "1")
 	}
 
+	// Raise the gateway's HTTP write/planner timeout floors for the wrapped session. A
+	// frontier Claude turn with extended thinking can run well past fak serve's 90 s
+	// WriteTimeout / 60 s planner default, which would cut the stream off mid-turn and
+	// surface to the worker as a "context canceled" upstream error. Guard binds its own
+	// listener and calls Serve() directly, so it must set these BEFORE the server reads
+	// them (gateway.Serve consults FAK_HTTP_WRITE_TIMEOUT_S via durEnv). An explicit
+	// operator value always wins — guardEnsureTimeoutFloor never clobbers a set var.
+	guardEnsureTimeoutFloor("FAK_HTTP_WRITE_TIMEOUT_S", guardTimeoutFloorS)
+	guardEnsureTimeoutFloor("FAK_PLANNER_TIMEOUT_S", guardTimeoutFloorS)
+
 	if *dumpPolicy {
 		os.Stdout.Write(guardDefaultPolicyJSON)
 		return
@@ -668,6 +678,23 @@ func guardEnvVar(provider, override string) string {
 	default:
 		return "OPENAI_BASE_URL"
 	}
+}
+
+// guardTimeoutFloorS is the generous HTTP write / planner timeout (in seconds) a
+// guarded session raises the gateway floors to, so a long frontier turn is never cut
+// off mid-stream. It matches the value the always-on dogfood server doc documents.
+const guardTimeoutFloorS = 600
+
+// guardEnsureTimeoutFloor sets env var `name` to `floorS` seconds ONLY when the
+// operator has not already set it. An explicit value — including an explicit "0"
+// (Go's no-timeout opt-out) — always wins, so this raises the default without ever
+// clobbering a deliberate choice. It is the wiring behind the doc's promise that
+// `fak guard` lifts the gateway's 90 s WriteTimeout floor for a wrapped session.
+func guardEnsureTimeoutFloor(name string, floorS int) {
+	if strings.TrimSpace(os.Getenv(name)) != "" {
+		return // operator already chose a value; never clobber it.
+	}
+	_ = os.Setenv(name, strconv.Itoa(floorS))
 }
 
 // guardEnvValue is the base-URL VALUE injected into the child — and the two wires

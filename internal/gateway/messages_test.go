@@ -423,3 +423,38 @@ func TestAnthropicCountTokens(t *testing.T) {
 		t.Errorf("input_tokens = %d, want > 0", resp.InputTokens)
 	}
 }
+
+// TestAnthropicMessagesOversizedBodyIs413 pins the resume-body cap behavior: a
+// /v1/messages body past the transcript cap returns a clean 413, NOT a silently
+// truncated body forwarded upstream (which surfaced as an opaque upstream 400 when
+// a long-context session re-sent its whole transcript every turn). A body just
+// under the cap is accepted, so a legitimate large resume is never refused.
+func TestAnthropicMessagesOversizedBodyIs413(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = threeCallPlanner()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Build a body just over maxTranscriptBody by padding the user content. The
+	// JSON envelope adds a few hundred bytes, so a content blob of maxTranscriptBody
+	// guarantees the whole body exceeds the cap.
+	over := strings.Repeat("x", maxTranscriptBody+1)
+	body := `{"model":"claude-opus-4-8","messages":[{"role":"user","content":"` + over + `"}]}`
+	r, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body status = %d, want 413", r.StatusCode)
+	}
+
+	// A body comfortably under the cap is still served (200), proving the raised cap
+	// did not regress the normal path.
+	small := `{"model":"claude-opus-4-8","messages":[{"role":"user","content":"go"}],
+		"tools":[{"name":"allow_a","input_schema":{"type":"object"}}]}`
+	var resp anthropicMessageResponse
+	if code := postJSON(t, ts.URL+"/v1/messages", json.RawMessage(small), &resp); code != 200 {
+		t.Fatalf("under-cap body status = %d, want 200", code)
+	}
+}
