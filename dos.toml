@@ -97,6 +97,7 @@ concurrent = [
   # and the arbiter could not detect a same-tree collision on it. Declared here so the
   # referee binds the stamp and the arbiter protects internal/leaseref/** edits.
   "leaseref",
+  "windowgate", # internal/windowgate leaf (the no-desktop-popup gate); declared so the referee binds a `(fak windowgate)` stamp and the arbiter protects internal/windowgate/** edits.
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -142,6 +143,7 @@ autopick = [
   "vcacheobserve",
   "leaseref", # #825: internal/leaseref leaf, see [lanes].concurrent note
   "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
+  "windowgate", # internal/windowgate leaf (the no-desktop-popup gate), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -161,6 +163,7 @@ adjudicator = ["internal/adjudicator/**"]
 agent = ["internal/agent/**"]
 agentdojo = ["internal/agentdojo/**"]
 architest = ["internal/architest/**"]
+windowgate = ["internal/windowgate/**"]
 bench = ["internal/bench/**"]
 blob = ["internal/blob/**"]
 canon = ["internal/canon/**"]

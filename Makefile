@@ -157,6 +157,7 @@ hygiene:
 	@python3 tools/check_provenance_labels.py --audit-tree
 	@python3 tools/guard_mcp_status_audit.py
 	@go test ./internal/pythongate -run TestNoNewPythonTools
+	@go test ./internal/windowgate -run TestTrackedTreeHasNoPopups
 	@echo "hygiene OK"
 
 # demo-audit: full local demo health gate. Static checks are network-free; dynamic checks
