@@ -133,9 +133,13 @@ git laws (enforced below the agent — breaking them refuses your commit):
 - `git commit -s -- <explicit paths>` — sign-off (DCO), commit BY PATH only. \
 NEVER `git add -A` (shared multi-session tree — a blanket add steals a sibling's \
 in-flight files). Stage only the files you wrote.
-- **Reference `#{n}` in the commit subject** (e.g. `fix(scope): … (#{n})`). This is \
-what binds your commit to the issue so the closure auditor can witness it — a \
-resolved issue with no `#{n}` in the subject never closes.
+- **Reference `#{n}` in the subject AND end it with a `(fak {lane})` trailer**, \
+lead with a verb (e.g. `fix({lane}): … (#{n}) (fak {lane})`; use add/fix/implement/\
+test, NEVER a noun-led description). The `#{n}` binds your commit to the issue; the \
+verb-led subject + `(fak {lane})` trailer is what makes `dos commit-audit` grade it \
+`diff-witnessed` instead of ABSTAIN — and the closure auditor closes the issue ONLY \
+on a witnessed commit. Miss either the `#{n}` or the trailer and your resolved issue \
+never closes.
 - No push / tag / force-push / history-rewrite / reset / clean / \
 checkout-of-tracked-files. Just commit on main.
 

@@ -71,7 +71,7 @@ class RenderPromptTest(unittest.TestCase):
         big = dict(self.ISSUE, body="x" * 5000)
         p = mod.render_prompt(big, "docs", workspace="C:/work/fak")
         self.assertIn("truncated", p)
-        self.assertLess(len(p), 5000)       # not the full 5000-char body
+        self.assertNotIn("x" * 2000, p)     # the 5000-char body was truncated (cap is 1800)
 
     def test_missing_body_still_renders(self) -> None:
         mod = load()
