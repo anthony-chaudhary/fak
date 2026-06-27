@@ -49,6 +49,8 @@ func runNightrun(stdout, stderr io.Writer, argv []string) int {
 		return nightrunLedger(stdout, stderr, rest)
 	case "caps", "capabilities":
 		return nightrunCaps(stdout, stderr, rest)
+	case "gap", "compare":
+		return nightrunGap(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		nightrunUsage(stdout)
 		return 0
@@ -67,6 +69,7 @@ usage:
   fak nightrun plan   [--json]                              the whole ranked queue (+ why a task is blocked)
   fak nightrun run    [--apply] [--loop] [--max N] [--json] collect (dry-run unless --apply)
   fak nightrun ledger [--json]                              the durable collection history
+  fak nightrun gap    [--json]                              report ledger rows newer than published benchmark surface
   fak nightrun caps   [--json]                              the probed box capabilities
 
 Start here:
@@ -299,6 +302,24 @@ func nightrunCaps(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	nightrun.RenderCapabilities(stdout, caps)
+	return 0
+}
+
+func nightrunGap(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("nightrun gap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	f, err := parseNightrunFlags("gap", fs, argv)
+	if err != nil {
+		return 2
+	}
+	root := f.root()
+	rows := nightrun.ReadLedgerFile(f.ledgerPath(root))
+	report := nightrun.CompareWithAuthority(rows, root)
+	if f.asJSON {
+		emitNightrunJSON(stdout, report)
+		return 0
+	}
+	nightrun.RenderLedgerGapReport(stdout, report)
 	return 0
 }
 

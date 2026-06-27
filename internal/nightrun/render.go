@@ -143,3 +143,29 @@ func truncate72(s string) string {
 	}
 	return s[:n-1] + "…"
 }
+
+// RenderLedgerGapReport writes a human-readable report of ledger rows that are
+// newer than or missing from the published benchmark surface.
+func RenderLedgerGapReport(w io.Writer, report LedgerGapReport) {
+	fmt.Fprintf(w, "Benchmark authority (BENCHMARK-AUTHORITY.md) last updated: %s\n\n", report.AuthorityDate)
+	fmt.Fprintf(w, "Ledger summary: %d total rows, %d collected\n\n", report.TotalRows, report.TotalCollected)
+	
+	if report.AuthorityDate == "(unknown)" {
+		fmt.Fprintln(w, "Authority date could not be determined — cannot compare.")
+		return
+	}
+
+	if len(report.NewerThan) == 0 {
+		fmt.Fprintln(w, "No collected rows are newer than the published benchmark surface.")
+		return
+	}
+
+	fmt.Fprintf(w, "Collected rows newer than authority (%d):\n\n", len(report.NewerThan))
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "DATE\tBOX\tTASK\tNUMBER\tVALUE")
+	for _, r := range report.NewerThan {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			r.Date, blankDash(r.Box), r.TaskID, blankDash(r.Number), blankDash(r.Value))
+	}
+	_ = tw.Flush()
+}

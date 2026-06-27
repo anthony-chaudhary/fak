@@ -3,6 +3,8 @@ package nightrun
 import (
 	"bufio"
 	"encoding/json"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -130,4 +132,70 @@ func laterThan(a, b CollectRow) bool {
 
 func round1(f float64) float64 {
 	return float64(int64(f*10+0.5)) / 10
+}
+
+// BenchmarkAuthorityPath is the path to the published benchmark authority document.
+const BenchmarkAuthorityPath = "BENCHMARK-AUTHORITY.md"
+
+// BenchmarkAuthorityDate returns the last updated date of BENCHMARK-AUTHORITY.md,
+// or the zero time if the file cannot be read or the date cannot be parsed.
+func BenchmarkAuthorityDate(root string) time.Time {
+	path := strings.Join([]string{root, BenchmarkAuthorityPath}, string(os.PathSeparator))
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return time.Time{}
+	}
+	re := regexp.MustCompile(`\*\*Last updated:\*\*\s*(\d{4}-\d{2}-\d{2})`)
+	m := re.FindSubmatch(b)
+	if m == nil {
+		return time.Time{}
+	}
+	t, err := time.Parse("2006-01-02", string(m[1]))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// LedgerGapReport summarizes collected rows that are newer than or missing from
+// the published benchmark surface.
+type LedgerGapReport struct {
+	AuthorityDate string            `json:"authority_date"` // YYYY-MM-DD from BENCHMARK-AUTHORITY.md
+	NewerThan     []CollectRow      `json:"newer_than"`     // rows with date > authority_date
+	Collected     []CollectRow      `json:"collected"`      // all rows with outcome=collected
+	TotalRows     int               `json:"total_rows"`
+	TotalCollected int              `json:"total_collected"`
+}
+
+// CompareWithAuthority compares the ledger against the published benchmark surface
+// (BENCHMARK-AUTHORITY.md) and returns a report of rows that are newer than the
+// authority date.
+func CompareWithAuthority(rows []CollectRow, root string) LedgerGapReport {
+	authorityDate := BenchmarkAuthorityDate(root)
+	var newerThan []CollectRow
+	var collected []CollectRow
+	for _, r := range rows {
+		if r.Outcome == string(OutcomeCollected) {
+			collected = append(collected, r)
+			if !authorityDate.IsZero() {
+				rowDate, err := time.Parse("2006-01-02", r.Date)
+				if err == nil && rowDate.After(authorityDate) {
+					newerThan = append(newerThan, r)
+				}
+			}
+		}
+	}
+	var authDateStr string
+	if !authorityDate.IsZero() {
+		authDateStr = authorityDate.Format("2006-01-02")
+	} else {
+		authDateStr = "(unknown)"
+	}
+	return LedgerGapReport{
+		AuthorityDate:  authDateStr,
+		NewerThan:      newerThan,
+		Collected:      collected,
+		TotalRows:      len(rows),
+		TotalCollected: len(collected),
+	}
 }
