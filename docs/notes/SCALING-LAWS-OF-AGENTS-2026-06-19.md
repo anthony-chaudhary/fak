@@ -142,11 +142,11 @@ anchors:
 |---|---:|---:|---:|---:|---|
 | 1 agent x 1 turn | 1 | 1 | 1 | 1 | Reference point. |
 | 1 agent x 25 turns | 25 | 25 | 1 | 1 | Solo long session shape. |
-| 5 agents x 50 turns | 250 | 250 | 5 | 1 | Session JSON: 60.3x wall vs naive, 4.12x wall vs tuned, 62.0x token floor. |
+| **5 agents x 50 turns** | 250 | 250 | 5 | 1 | **Measured headline**: 60.3x wall vs naive, 4.12x wall vs tuned, 62.0x token floor. |
 | 50 agents x 50 turns | 2,500 | 2,500 | 50 | 1 | Fleet CSV: 2,344/2,500 duplicate reads deleted; 156 residual calls. |
 | 100 agents x 250 turns | 25,000 | 25,000 | 100 | 1 | Value sweep: 22,806/25,000 turns deleted; 736.9s -> 32.9s parallel wall projection. |
-| 1,000 agents x 1,000 turns | 1,000,000 | 1,000,000 | 1,000 | 1 | Frontier workload target, not measured. |
-| 10,000 agents x 10,000 turns | 100,000,000 | 100,000,000 | 10,000 | 1 | Frontier workload target, not measured. |
+| 1,000 agents x 1,000 turns | 1,000,000 | 1,000,000 | 1,000 | 1 | **Hypothetical** frontier workload target (A·T=1,000,000), not measured. |
+| 10,000 agents x 10,000 turns | 100,000,000 | 100,000,000 | 10,000 | 1 | **Hypothetical** frontier workload target, not measured. |
 
 So the line shape is calculated, while the callouts say which points are measured,
 measured-supported projections, or future workload targets.
