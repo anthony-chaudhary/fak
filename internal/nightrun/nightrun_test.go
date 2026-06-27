@@ -1,0 +1,380 @@
+package nightrun
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+)
+
+func mustTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	tm, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("parse time %q: %v", s, err)
+	}
+	return tm.UTC()
+}
+
+// --- capability probe (deterministic via injected seams) -------------------
+
+func TestProbeDeterministic(t *testing.T) {
+	env := map[string]string{
+		"FAK_BACKEND":       "",
+		"ANTHROPIC_API_KEY": "sk-xxx",
+		"FAK_MODEL_DIR":     "/models/glm",
+	}
+	exists := map[string]bool{"/models/glm": true}
+	e := probeEnv{
+		getenv:   func(k string) string { return env[k] },
+		look:     func(string) (string, error) { return "", errNotFound{} },
+		exists:   func(p string) bool { return exists[p] },
+		hostname: func() (string, error) { return "lab-box-7", nil },
+		goos:     "linux",
+	}
+	c := probe("/repo", e)
+	if c.Box != "lab-box-7" {
+		t.Errorf("box = %q, want lab-box-7", c.Box)
+	}
+	if c.GPU != "none" {
+		t.Errorf("gpu = %q, want none (no nvidia-smi, linux)", c.GPU)
+	}
+	if !c.Weights {
+		t.Error("weights should be true (FAK_MODEL_DIR exists)")
+	}
+	if !c.Creds["ANTHROPIC_API_KEY"] {
+		t.Error("ANTHROPIC_API_KEY should be present")
+	}
+	if c.Creds["HF_TOKEN"] {
+		t.Error("HF_TOKEN should be absent")
+	}
+	if !c.Net {
+		t.Error("net should default true without FAK_OFFLINE")
+	}
+}
+
+func TestDetectGPU(t *testing.T) {
+	cases := []struct {
+		name    string
+		backend string
+		nvidia  bool
+		goos    string
+		wantGPU string
+	}{
+		{"explicit cuda", "cuda", false, "linux", "cuda"},
+		{"explicit metal", "metal", false, "linux", "metal"},
+		{"nvidia-smi present", "", true, "linux", "cuda"},
+		{"darwin default metal", "", false, "darwin", "metal"},
+		{"bare linux none", "", false, "linux", "none"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := probeEnv{
+				getenv: func(k string) string {
+					if k == "FAK_BACKEND" {
+						return tc.backend
+					}
+					return ""
+				},
+				look: func(string) (string, error) {
+					if tc.nvidia {
+						return "/usr/bin/nvidia-smi", nil
+					}
+					return "", errNotFound{}
+				},
+				goos: tc.goos,
+			}
+			if got := detectGPU(e); got != tc.wantGPU {
+				t.Errorf("detectGPU = %q, want %q", got, tc.wantGPU)
+			}
+		})
+	}
+}
+
+type errNotFound struct{}
+
+func (errNotFound) Error() string { return "not found" }
+
+func TestSatisfies(t *testing.T) {
+	metalBox := Capabilities{Box: "mac", GPU: "metal", Weights: true, Net: true, Creds: map[string]bool{}}
+	cudaBox := Capabilities{Box: "a100", GPU: "cuda", Weights: true, Net: true, Creds: map[string]bool{"ANTHROPIC_API_KEY": true}}
+	bareBox := Capabilities{Box: "ci", GPU: "none", Net: true, Creds: map[string]bool{}}
+
+	metalTask := Task{ID: "m", Requires: []Requirement{ReqMetal, ReqWeights}}
+	if ok, _ := metalBox.Satisfies(metalTask); !ok {
+		t.Error("metal box should satisfy a metal+weights task")
+	}
+	if ok, why := cudaBox.Satisfies(metalTask); ok {
+		t.Errorf("cuda box should NOT satisfy a metal task; why=%q", why)
+	}
+	offline := Task{ID: "o"}
+	if ok, _ := bareBox.Satisfies(offline); !ok {
+		t.Error("bare box should satisfy an offline task")
+	}
+	credTask := Task{ID: "c", Requires: []Requirement{ReqNet}, CredEnv: []string{"ANTHROPIC_API_KEY"}}
+	if ok, _ := cudaBox.Satisfies(credTask); !ok {
+		t.Error("cuda box with the cred should satisfy a cred task")
+	}
+	if ok, why := bareBox.Satisfies(credTask); ok {
+		t.Errorf("bare box without the cred should fail; why=%q", why)
+	}
+}
+
+// --- selector determinism + ordering ---------------------------------------
+
+func TestRankFeasibleFirstAndDeterministic(t *testing.T) {
+	caps := Capabilities{Box: "mac", GPU: "metal", Weights: true, Net: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-27T00:00:00Z")
+	tasks := []Task{
+		{ID: "cuda-only", Value: ValueFrontier, Requires: []Requirement{ReqCUDA}, Run: "x"},
+		{ID: "metal-frontier", Value: ValueFrontier, Requires: []Requirement{ReqMetal}, Run: "x"},
+		{ID: "offline-smoke", Value: ValueSmoke, Run: "x"},
+	}
+	r1 := Rank(tasks, caps, nil, now)
+	r2 := Rank(tasks, caps, nil, now)
+	if len(r1) != 3 {
+		t.Fatalf("want 3 scored, got %d", len(r1))
+	}
+	// feasible first: cuda-only is infeasible on a metal box, must sort last.
+	if r1[2].Task.ID != "cuda-only" || r1[2].Feasible {
+		t.Errorf("cuda-only should be last + infeasible, got %q feasible=%v", r1[2].Task.ID, r1[2].Feasible)
+	}
+	// metal-frontier outranks offline-smoke (both feasible, frontier > smoke).
+	if r1[0].Task.ID != "metal-frontier" {
+		t.Errorf("metal-frontier should rank first, got %q", r1[0].Task.ID)
+	}
+	for i := range r1 {
+		if r1[i].Task.ID != r2[i].Task.ID || r1[i].Score != r2[i].Score {
+			t.Fatalf("rank not deterministic at %d: %v vs %v", i, r1[i], r2[i])
+		}
+	}
+	next, ok := Next(r1)
+	if !ok || next.Task.ID != "metal-frontier" {
+		t.Errorf("Next should pick metal-frontier, got ok=%v id=%q", ok, next.Task.ID)
+	}
+}
+
+func TestRankNoveltyBeatsStaleness(t *testing.T) {
+	caps := Capabilities{Box: "mac", GPU: "metal", Net: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-27T00:00:00Z")
+	tasks := []Task{
+		{ID: "never", Value: ValueSmoke, Run: "x"},
+		{ID: "collected-fresh", Value: ValueFrontier, Run: "x", RecheckDays: 7},
+	}
+	// collected-fresh was collected yesterday (fresh); never was never collected.
+	ledger := []CollectRow{
+		{Schema: CollectSchema, TaskID: "collected-fresh", Box: "mac", Outcome: string(OutcomeCollected),
+			Date: "2026-06-26", GeneratedAt: "2026-06-26T00:00:00Z"},
+	}
+	r := Rank(tasks, caps, ledger, now)
+	if r[0].Task.ID != "never" {
+		t.Errorf("a never-collected datum should outrank a fresh-collected one; got %q first", r[0].Task.ID)
+	}
+}
+
+func TestRankStaleResurfaces(t *testing.T) {
+	caps := Capabilities{Box: "a100", GPU: "cuda", Net: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-27T00:00:00Z")
+	task := Task{ID: "drift", Value: ValueRegression, Run: "x", RecheckDays: 7}
+	// collected 30d ago — well past the 7d recheck → stale.
+	stale := []CollectRow{
+		{Schema: CollectSchema, TaskID: "drift", Box: "a100", Outcome: string(OutcomeCollected),
+			Date: "2026-05-28", GeneratedAt: "2026-05-28T00:00:00Z"},
+	}
+	r := Rank([]Task{task}, caps, stale, now)
+	if r[0].Staleness < 1.0 {
+		t.Errorf("a 30d-old datum past a 7d recheck should be fully stale, got %.3f", r[0].Staleness)
+	}
+	if !strings.Contains(r[0].Reason, "overdue") {
+		t.Errorf("reason should call it overdue, got %q", r[0].Reason)
+	}
+}
+
+// --- ledger -----------------------------------------------------------------
+
+func TestLedgerRoundTripAndLastCollected(t *testing.T) {
+	rows := []CollectRow{
+		{Schema: CollectSchema, TaskID: "a", Box: "mac", Outcome: "collected", Date: "2026-06-20", GeneratedAt: "2026-06-20T00:00:00Z"},
+		{Schema: CollectSchema, TaskID: "a", Box: "mac", Outcome: "collected", Date: "2026-06-25", GeneratedAt: "2026-06-25T00:00:00Z"},
+		{Schema: CollectSchema, TaskID: "a", Box: "mac", Outcome: "failed", Date: "2026-06-26", GeneratedAt: "2026-06-26T00:00:00Z"},
+	}
+	var sb strings.Builder
+	for _, r := range rows {
+		line, err := AppendLedgerLine(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sb.WriteString(line + "\n")
+	}
+	sb.WriteString("\n")         // tolerate blank
+	sb.WriteString("not json\n") // tolerate garbage
+	got := ParseLedger(sb.String())
+	if len(got) != 3 {
+		t.Fatalf("want 3 parsed rows, got %d", len(got))
+	}
+	last, ok := lastCollected(got, "a", "mac")
+	if !ok {
+		t.Fatal("expected a last-collected row")
+	}
+	if last.Date != "2026-06-25" {
+		t.Errorf("last COLLECTED should be the 06-25 row (the 06-26 is a failure), got %s", last.Date)
+	}
+}
+
+// --- backlog ----------------------------------------------------------------
+
+func TestBacklogNoDupIDsAndSourcesPresent(t *testing.T) {
+	tasks, err := Backlog("")
+	if err != nil {
+		t.Fatalf("Backlog: %v", err)
+	}
+	seen := map[string]bool{}
+	var benchN, witnessN int
+	for _, tk := range tasks {
+		if seen[tk.ID] {
+			t.Errorf("duplicate task id %q", tk.ID)
+		}
+		seen[tk.ID] = true
+		switch tk.Source {
+		case SourceBenchmark:
+			benchN++
+		case SourceWitness:
+			witnessN++
+		}
+		if tk.Run == "" {
+			t.Errorf("task %q has no run command", tk.ID)
+		}
+	}
+	if benchN == 0 {
+		t.Error("expected benchmark-sourced tasks")
+	}
+	if witnessN == 0 {
+		t.Error("expected curated witness tasks")
+	}
+	// the curated metal witness must require metal (so it never shows on a CI box).
+	var found bool
+	for _, tk := range tasks {
+		if tk.ID == "witness-q8-decode-matvec-bw" {
+			found = true
+			if !requires(tk, ReqMetal) {
+				t.Error("the q8 decode witness must require metal")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected the q8-decode-matvec-bw witness in the backlog")
+	}
+}
+
+func requires(t Task, r Requirement) bool {
+	for _, x := range t.Requires {
+		if x == r {
+			return true
+		}
+	}
+	return false
+}
+
+// --- run loop (fake executor) ----------------------------------------------
+
+func TestRunLoopDryRunWritesNothing(t *testing.T) {
+	caps := Capabilities{Box: "ci", GPU: "none", Net: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-27T00:00:00Z")
+	tasks := []Task{{ID: "offline-a", Value: ValueSmoke, Run: "echo a"}}
+	appended := 0
+	summary, err := RunLoop(context.Background(), RunOptions{
+		Root: "/repo", Caps: caps, Tasks: tasks, Now: now,
+		Apply: false, Loop: false,
+		ReadLedger: func() []CollectRow { return nil },
+		AppendRow:  func(CollectRow) error { appended++; return nil },
+		Executor: func(context.Context, Task, string) (Outcome, string, time.Duration, error) {
+			t.Fatal("executor must not run in dry-run")
+			return "", "", 0, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appended != 0 {
+		t.Errorf("dry-run must not append to the ledger, appended=%d", appended)
+	}
+	if len(summary.Runs) != 1 || summary.Runs[0].Outcome != OutcomeDryRun {
+		t.Errorf("want one dry-run entry, got %+v", summary.Runs)
+	}
+}
+
+func TestRunLoopApplyAppendsAndStopsAtMax(t *testing.T) {
+	caps := Capabilities{Box: "ci", GPU: "none", Net: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-27T00:00:00Z")
+	tasks := []Task{
+		{ID: "offline-a", Value: ValueCoverage, Run: "echo a"},
+		{ID: "offline-b", Value: ValueCoverage, Run: "echo b"},
+		{ID: "offline-c", Value: ValueCoverage, Run: "echo c"},
+	}
+	var ledger []CollectRow
+	runs := 0
+	summary, err := RunLoop(context.Background(), RunOptions{
+		Root: "/repo", Caps: caps, Tasks: tasks, Now: now,
+		Apply: true, Loop: true, Max: 2,
+		ReadLedger: func() []CollectRow { return ledger },
+		AppendRow:  func(r CollectRow) error { ledger = append(ledger, r); return nil },
+		Executor: func(_ context.Context, tk Task, _ string) (Outcome, string, time.Duration, error) {
+			runs++
+			return OutcomeCollected, "", time.Second, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs != 2 {
+		t.Errorf("--max 2 should run exactly 2 tasks, ran %d", runs)
+	}
+	if len(ledger) != 2 {
+		t.Errorf("expected 2 ledger rows, got %d", len(ledger))
+	}
+	if !strings.Contains(summary.StopReason, "max") {
+		t.Errorf("stop reason should cite max, got %q", summary.StopReason)
+	}
+}
+
+func TestRunLoopEachTaskAttemptedOnce(t *testing.T) {
+	// A failing executor must not spin the loop: each task is attempted once.
+	caps := Capabilities{Box: "ci", GPU: "none", Net: true, Creds: map[string]bool{}}
+	now := mustTime(t, "2026-06-27T00:00:00Z")
+	tasks := []Task{
+		{ID: "offline-a", Value: ValueCoverage, Run: "false"},
+		{ID: "offline-b", Value: ValueCoverage, Run: "false"},
+	}
+	var ledger []CollectRow
+	attempts := map[string]int{}
+	_, err := RunLoop(context.Background(), RunOptions{
+		Root: "/repo", Caps: caps, Tasks: tasks, Now: now,
+		Apply: true, Loop: true, Max: 0,
+		ReadLedger: func() []CollectRow { return ledger },
+		AppendRow:  func(r CollectRow) error { ledger = append(ledger, r); return nil },
+		Executor: func(_ context.Context, tk Task, _ string) (Outcome, string, time.Duration, error) {
+			attempts[tk.ID]++
+			return OutcomeFailed, "", time.Second, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, n := range attempts {
+		if n != 1 {
+			t.Errorf("task %q attempted %d times, want exactly 1 (no spin on failure)", id, n)
+		}
+	}
+	if len(attempts) != 2 {
+		t.Errorf("both tasks should be attempted once, got %d distinct", len(attempts))
+	}
+}
+
+func TestParseNumberObservedOnly(t *testing.T) {
+	if got := parseNumber("decode: 17.73 tok/s steady"); got != "17.73 tok/s" {
+		t.Errorf("parseNumber = %q, want 17.73 tok/s", got)
+	}
+	if got := parseNumber("no headline here"); got != "" {
+		t.Errorf("parseNumber must NOT fabricate a number, got %q", got)
+	}
+}
