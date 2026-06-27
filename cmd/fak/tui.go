@@ -982,7 +982,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	gatewayURL := fs.String("gateway-url", "", "existing fak serve gateway to use instead of starting a local guard, e.g. http://node:8080")
 	gatewayKeyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the existing gateway bearer for --gateway-url")
 	apiTimeoutMS := fs.Int("api-timeout-ms", 1800000, "API_TIMEOUT_MS for --gateway-url launches; 0 leaves it inherited")
-	debugStats := fs.Bool("debug-stats", true, "print one compact token-usage overlay line per served turn to stderr (request/cache_read/cache_creation tokens, compaction, health); wired to fak guard --debug-stats")
+	debugStats := fs.Bool("debug-stats", true, "print one compact per-turn line to stderr that leads with a verdict (ok/warming/degraded/cold) + the NET write-premium-aware token saving, then cache health and compaction; wired to fak guard --debug-stats")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for dry-run human rendering")
 	dryRun := fs.Bool("dry-run", false, "render the launch plan without starting the backend agent")
@@ -1423,7 +1423,7 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	)
 	if opt.DebugStats {
 		guardArgs = append(guardArgs, "--debug-stats")
-		notes = append(notes, "debug-stats=on: one compact token-usage overlay line per served turn to stderr (cache_hit, cache_rebate_tokens, compact action, health state)")
+		notes = append(notes, "debug-stats=on: one compact per-turn line to stderr leading with a verdict (ok/warming/degraded/cold) + the NET write-premium-aware token saving, then cache health + compaction")
 	}
 	guardArgs = append(guardArgs, "--")
 	launch := append([]string{fakPath}, guardArgs...)

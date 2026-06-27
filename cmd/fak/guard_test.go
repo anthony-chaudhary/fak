@@ -495,18 +495,26 @@ func TestFormatAuditSummary(t *testing.T) {
 		t.Errorf("clean summary should not mention deferred/escalated:\n%s", clean)
 	}
 
-	// Provider prompt-cache reuse is surfaced when it happened: the daily `fak guard`
-	// session reads most of its prompt from Anthropic's cache (cache_control preserved
-	// byte-for-byte through the kernel hop), and the operator should see that saving.
-	cached := formatAuditSummary(gateway.AdjudicationSummary{Total: 2, Allowed: 2, CachedPromptTokens: 23428, CachedTurns: 1})
-	for _, want := range []string{"provider cache", "23428 prompt token(s) the provider reported serving from its cache", "across 1 turn(s)", "OBSERVED"} {
+	// Cache reuse is surfaced as the ONE number that matters: the NET token-equiv saving fak's
+	// hop preserved this session (read rebate minus write premium) — not the provider's raw
+	// cached-token count. baseline = 412+23428+756 = 24596; actual = 412 + 23428*0.1 + 756*1.25
+	// = 3699.8; saved = 20896.2 -> "20.9k" (85% of the uncached cost).
+	cached := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 2, Allowed: 2,
+		CachedPromptTokens: 23428, CachedTurns: 1, InputTokens: 412, CacheCreationTokens: 756,
+	})
+	for _, want := range []string{"cache saving", "saved ~20.9k input-token-equiv", "across 1 turn(s)", "NET of the write premium", "85%"} {
 		if !strings.Contains(cached, want) {
 			t.Errorf("cached summary missing %q:\n%s", want, cached)
 		}
 	}
-	// No cache hit → no cache line (the common first-turn / non-passthrough case).
-	if strings.Contains(clean, "provider cache") {
-		t.Errorf("a run with no provider cache read must not print a cache line:\n%s", clean)
+	// The raw provider cached-token count is fak-vs-SOTA noise — it must NOT lead the line.
+	if strings.Contains(cached, "23428 prompt token(s)") {
+		t.Errorf("the net-saving line must not dump the raw provider cached-token count:\n%s", cached)
+	}
+	// No cache activity → no cache line (the common first-turn / non-passthrough case).
+	if strings.Contains(clean, "cache saving") {
+		t.Errorf("a run with no cache activity must not print a cache line:\n%s", clean)
 	}
 }
 

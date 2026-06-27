@@ -361,7 +361,7 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	srv.MarkReady()
-	
+
 	// If --dojo is enabled, log the start of a live dojo episode.
 	if *dojoMode {
 		if err := logDojoEpisodeStart("guard"); err != nil {
@@ -464,7 +464,6 @@ func findRepoRoot(start string) string {
 		cur = parent
 	}
 }
-
 
 type guardOAuthEnvSource struct {
 	key string
@@ -1010,22 +1009,31 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		fmt.Fprintf(&b, ", %d errored", sum.Errored)
 	}
 	b.WriteByte('\n')
-	// Make the provider prompt-cache reuse legible: with passthrough the client's
-	// cache_control prefix survives the kernel hop byte-for-byte, so a daily `fak guard`
-	// session reads most of its prompt from Anthropic's cache. Show it when it happened
-	// so the operator sees the saving rather than assuming the hop re-bills the prefix.
-	if sum.CachedPromptTokens > 0 {
-		fmt.Fprintf(&b, "fak guard: provider cache - %d prompt token(s) the provider reported serving from its cache across %d turn(s) (OBSERVED, relayed; fak's part was preserving cache_control byte-for-byte through the hop, not the hit itself)\n",
-			sum.CachedPromptTokens, sum.CachedTurns)
+	// Make the cache reuse legible as the ONE number that matters: how much fak's hop saved
+	// this session. We lead with the NET saving (read rebate minus write premium) — the honest
+	// fak-vs-no-cache value, the same engine /metrics (fak_vcache_saved_token_equiv) and
+	// `fak vcache observe` report — not the provider's raw cached-token count, which measures
+	// Anthropic's cache rather than whether fak preserved it. A cold-write-dominated session
+	// reads a NEGATIVE saving ("not yet repaid") until the later reads repay the write premium.
+	// The raw cache_read/cache_creation counts stay on /metrics and in --log for deep debugging.
+	if sum.CachedPromptTokens > 0 || sum.CacheCreationTokens > 0 {
+		net := sum.ProviderCacheNetSavings()
+		repaid := ""
+		if net.SavedTokenEquiv <= 0 {
+			repaid = "; not yet repaid — a cold write the later cache reads have not paid back"
+		}
+		fmt.Fprintf(&b, "fak guard: cache saving — saved ~%s input-token-equiv across %d turn(s) (NET of the write premium, %.0f%% of the uncached cost%s)\n",
+			gateway.HumanTokenEquiv(net.SavedTokenEquiv), sum.CachedTurns, net.SavedPct, repaid)
 	}
 	if sum.CompactionFired > 0 || sum.CompactionBailed > 0 || sum.CompactionOff > 0 {
-		fmt.Fprintf(&b, "fak guard: compaction — %d fired, %d bailed, %d off; shed %d token(s), cache_read %d token(s) total, last post-fire cache_read %.0f\n",
+		// WITNESSED half only: what fak attempted and removed. The OBSERVED post-fire cache_read
+		// is a provider counter (it lives on /metrics) and is noise here — a low value with no
+		// prefix_mismatch bail is a provider-side miss fak does not control, not a fak failure.
+		fmt.Fprintf(&b, "fak guard: compaction — %d fired, %d bailed, %d off; shed %d token(s)\n",
 			sum.CompactionFired,
 			sum.CompactionBailed,
 			sum.CompactionOff,
-			sum.CompactionShedTokens,
-			sum.CompactionCacheReadTokens,
-			sum.LastCompactionCacheRead)
+			sum.CompactionShedTokens)
 	}
 	if len(sum.ByReason) > 0 {
 		reasons := make([]string, 0, len(sum.ByReason))

@@ -401,9 +401,10 @@ func usage() {
   fak c         [--dry-run] [--account ACCT] [--model MODEL] [--policy FILE] ...
                 (shorthand for 'fak console agent': the ACCOUNT LAUNCHER that
                  starts a fak-guard-wrapped interactive Claude Code session.
-                 --debug-stats is ON by default: one compact token-usage overlay
-                 line per served turn (cache_hit, cache_rebate_tokens, compact
-                 action, health state). Token-saving defaults — compact-history-
+                 --debug-stats is ON by default: one compact per-turn line leading
+                 with a verdict (ok/warming/degraded/cold) + the NET write-premium-
+                 aware token saving, then cache health + compaction. Token-saving
+                 defaults — compact-history-
                  budget and elide-result-bytes — are passed explicitly so they
                  appear in --dry-run output. 'fak c' is the canonical shortcut)
   fak console   issues [--epic N] [--issues-json FILE] [--json] |

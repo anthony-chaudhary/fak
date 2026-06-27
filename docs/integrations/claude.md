@@ -180,26 +180,39 @@ fak guard --provider openai --addr 127.0.0.1:8137 --api-key-env OPENAI_API_KEY -
 ### Observability
 
 **The observable debug layer is on by default.** `fak guard` prints one compact,
-payload-free line per served turn to stderr — the cache and token-value economy of that
-turn:
+payload-free line per served turn to stderr whose first job is to answer **"did this turn
+work?"** at a glance:
 
 ```
-fak-turn trace=guard wire=anthropic_messages stream=1 finish=end_turn request_tokens=24180 prompt=412 completion=180 cache_read=23012 cache_creation=756 cache_hit=0.95 cache_rebate_tokens=20710.8 compact=none health=healthy_cache reset_score=0.10 recommend=no
+fak-turn trace=guard ok saved=20.7k tok (95% of prompt) cache=healthy_cache compact=none finish=end_turn
 ```
 
-It works natively over your Claude subscription OAuth because `cache_read` /
-`cache_creation` / `cache_hit` are the **provider's own usage counters**, read back on each
-`/v1/messages` turn — so the cache hit ratio and the `cache_rebate_tokens` saving (cache
-reads valued at the published 0.1× read multiplier) are real, not estimated. Silence it
-with `--debug-stats=false`, or with `--quiet` (which also drops the banner + exit summary).
+Read it left to right:
 
-The heavier per-request JSON log stays off by default — one flag away — and every count it
-shows is read from the same counters `/metrics` exposes, so the views never disagree:
+- **`ok`** — the one-word turn verdict: `ok` (a proven net saving on a healthy session),
+  `warming` (cache activity but no net saving yet — a cold write the later reads haven't
+  repaid), `degraded` (the prefix is decaying/stale or a reset is recommended), or `cold`
+  (no cache activity this turn).
+- **`saved=20.7k tok (95% of prompt)`** — the **NET** token-equivalent saving this turn: the
+  cache-read rebate **minus** the cache-write premium, so a cold-write turn honestly reads a
+  **negative** saving until the later reads repay it. This is the same number `/metrics`
+  (`fak_vcache_saved_token_equiv`) and `fak vcache observe` report, so the views never
+  disagree. It is the fak-vs-no-cache value, not the provider's raw cached-token count.
+- **`cache=healthy_cache`** — the rolling resetScore health; **`compact`** — the
+  history-compaction action (`none`/`fired`).
+
+Silence it with `--debug-stats=false`, or with `--quiet` (which also drops the banner + exit
+summary).
+
+The raw provider counters (`cache_read`, `cache_creation`, `request_tokens`, `cache_hit`)
+are deliberately **off** this glanceable line — they measure Anthropic's cache, not whether
+fak is doing its job. They remain available for deep debugging in the JSON `--log` and on
+`/metrics`, where every count is read from the same accumulators, so the views never
+disagree:
 
 - **per-turn debug line** (default **ON**) — the `fak-turn …` line above, one per served
-  turn on stderr: `request_tokens`, `cache_read`, `cache_creation`, `cache_hit`,
-  `cache_rebate_tokens`, the `compact` action, and the resetScore `health`. No payload, ever.
-  `--debug-stats=false` or `--quiet` to silence.
+  turn on stderr: a verdict, the net `saved=` token-equiv, the `cache` health, and the
+  `compact` action. No payload, ever. `--debug-stats=false` or `--quiet` to silence.
 - **`--log FILE`** (or `--log -` for stderr) streams every per-request and per-verdict
   line — `event=gateway_http_request` and `event=gateway_operation`, each carrying the
   `trace_id` that ties the request, its verdicts, and the metrics together.

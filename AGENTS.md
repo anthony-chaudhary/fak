@@ -54,12 +54,13 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 This is the canonical first command. Run it before anything else:
 
 ```bash
-go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK): refused by structure, no model in the loop
-go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW: not a blanket block
-go run ./cmd/fak agent --offline                                                                                       # -> injection-in-context YES->no, destructive-op YES->no, task still booked
+go build -o fak ./cmd/fak
+./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK): refused by structure, no model in the loop
+./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW: not a blanket block
+./fak agent --offline                                                                                       # -> injection-in-context YES->no, destructive-op YES->no, task still booked
 ```
 
-The first `go run` compiles the binary (~30–60s, plus a one-time Go-1.26 toolchain fetch);
+The first `go build` compiles the binary (~30–60s, plus a one-time Go-1.26 toolchain fetch);
 later runs are instant. Full walkthrough: [`docs/repro-packet.md`](docs/repro-packet.md).
 
 ## Hard rules (these WILL bite an agent — they are enforced below the agent layer)

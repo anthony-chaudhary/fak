@@ -11,56 +11,85 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
-func TestFormatTurnDebugStats_DistinguishesAllFiveStates(t *testing.T) {
-	for _, reason := range []ResetReason{
-		ResetReasonHealthy, ResetReasonDecay, ResetReasonStalePrefix, ResetReasonCooldown, ResetReasonUnknown,
+func TestFormatTurnDebugStats_SurfacesHealthState(t *testing.T) {
+	// The cache column reports the rolling resetScore state verbatim; a healthy read-heavy
+	// turn (read 80, no write) clears the verdict to ok. stale_prefix/decay drive degraded.
+	for _, tc := range []struct {
+		reason  ResetReason
+		reset   bool
+		verdict string
+	}{
+		{ResetReasonHealthy, false, "ok"},
+		{ResetReasonCooldown, false, "ok"},
+		{ResetReasonUnknown, false, "ok"},
+		{ResetReasonDecay, false, "degraded"},
+		{ResetReasonStalePrefix, true, "degraded"},
 	} {
-		d := ResetDecision{Reason: reason, Score: 0.5, ShouldReset: reason == ResetReasonStalePrefix}
+		d := ResetDecision{Reason: tc.reason, Score: 0.5, ShouldReset: tc.reset}
 		line := formatTurnDebugStats("t1", "anthropic_messages", true, "end_turn", 20, 5, 80, 0, true, d, true)
-		if !strings.Contains(line, "health="+string(reason)) {
-			t.Fatalf("reason %q not surfaced in: %s", reason, line)
+		if !strings.Contains(line, "cache="+string(tc.reason)) {
+			t.Fatalf("reason %q not surfaced in: %s", tc.reason, line)
+		}
+		if !strings.Contains(line, "fak-turn trace=t1 "+tc.verdict+" ") {
+			t.Fatalf("reason %q want verdict %q in: %s", tc.reason, tc.verdict, line)
 		}
 	}
 }
 
 func TestFormatTurnDebugStats_NoResetHealthIsInert(t *testing.T) {
+	// A first turn with no cache activity and no rolling health reads cold + saved=0 + cache n/a.
 	line := formatTurnDebugStats("t1", "anthropic_messages", false, "", 100, 0, 0, 0, false, ResetDecision{}, false)
-	for _, want := range []string{"health=n/a", "reset_score=-", "recommend=-", "compact=none", "finish=unknown"} {
+	for _, want := range []string{"fak-turn trace=t1 cold ", "saved=0 tok", "cache=n/a", "compact=none", "finish=unknown"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("missing %q in inert line: %s", want, line)
 		}
 	}
 }
 
-func TestFormatTurnDebugStats_CompactionAndCacheHit(t *testing.T) {
+func TestFormatTurnDebugStats_LeadsWithVerdictAndNetSaving(t *testing.T) {
+	// prompt=20 (uncached input), cacheRead=60, cacheCreate=20.
+	// baseline = 20+60+20 = 100 token-equiv; actual = 20 + 60*0.1 + 20*1.25 = 51; saved = 49 (49%).
+	// A proven net saving on a healthy session reads ok.
 	fired := formatTurnDebugStats("t1", "w", true, "end_turn", 20, 5, 60, 20, true, ResetDecision{Reason: ResetReasonHealthy}, true)
-	if !strings.Contains(fired, "compact=fired") {
-		t.Fatalf("want compact=fired: %s", fired)
+	for _, want := range []string{"fak-turn trace=t1 ok ", "saved=49 tok (49% of prompt)", "compact=fired", "cache=healthy_cache"} {
+		if !strings.Contains(fired, want) {
+			t.Fatalf("want %q: %s", want, fired)
+		}
 	}
-	// cache_hit = 60/(60+20+20) = 0.60
-	if !strings.Contains(fired, "cache_hit=0.60") {
-		t.Fatalf("want cache_hit=0.60: %s", fired)
+	// The raw provider counters must be GONE from the glanceable line (the fak-vs-SOTA noise).
+	for _, gone := range []string{"request_tokens", "cache_read=", "cache_creation=", "cache_hit=", "cache_rebate_tokens", "reset_score", "recommend"} {
+		if strings.Contains(fired, gone) {
+			t.Fatalf("raw counter %q must not appear on the glanceable line: %s", gone, fired)
+		}
 	}
-	if !strings.Contains(fired, "request_tokens=100") || !strings.Contains(fired, "cache_rebate_tokens=54.0") {
-		t.Fatalf("want request total + read rebate estimate: %s", fired)
-	}
-	if !strings.Contains(fired, "recommend=no") {
-		t.Fatalf("healthy verdict should render recommend=no: %s", fired)
-	}
+	// A cold turn (no read, no write) reads cold + saved=0.
 	none := formatTurnDebugStats("t1", "w", false, "end_turn", 100, 5, 0, 0, false, ResetDecision{}, false)
-	if !strings.Contains(none, "compact=none") || !strings.Contains(none, "cache_hit=0.00") {
-		t.Fatalf("want compact=none + cache_hit=0.00: %s", none)
+	if !strings.Contains(none, "fak-turn trace=t1 cold ") || !strings.Contains(none, "saved=0 tok") {
+		t.Fatalf("want cold + saved=0: %s", none)
+	}
+}
+
+func TestFormatTurnDebugStats_ColdWriteIsWarmingWithNegativeSaving(t *testing.T) {
+	// A cold write the reads have not yet repaid: prompt=20, cacheRead=0, cacheCreate=100.
+	// baseline = 120; actual = 20 + 0 + 100*1.25 = 145; saved = -25 (REFUTED). This is the
+	// honest write-premium-aware number the old read-only rebate would have HIDDEN.
+	line := formatTurnDebugStats("t1", "w", true, "end_turn", 20, 5, 0, 100, false, ResetDecision{Reason: ResetReasonHealthy}, true)
+	if !strings.Contains(line, "fak-turn trace=t1 warming ") {
+		t.Fatalf("a cold write with no net saving must read warming: %s", line)
+	}
+	if !strings.Contains(line, "saved=-25 tok") {
+		t.Fatalf("an unrepaid write premium must show a NEGATIVE saving, not a phantom rebate: %s", line)
 	}
 }
 
 func TestFormatTurnDebugStats_FieldsAreFlattenedSingleLine(t *testing.T) {
-	// trace/wire/finish are kernel-minted tokens carrying no prompt content, but a stray
+	// trace/finish are kernel-minted tokens carrying no prompt content, but a stray
 	// whitespace must never split the line into two rows or break key=val parsing.
 	line := formatTurnDebugStats("trace one", "wire\two", true, "stop\nnow", 1, 1, 1, 0, true, ResetDecision{Reason: ResetReasonHealthy}, true)
 	if strings.ContainsAny(line, "\n\t") {
 		t.Fatalf("debug line must be a single flat row: %q", line)
 	}
-	if !strings.Contains(line, "trace=trace_one") || !strings.Contains(line, "wire=wire_wo") {
+	if !strings.Contains(line, "trace=trace_one") || !strings.Contains(line, "finish=stop_now") {
 		t.Fatalf("fields not flattened: %s", line)
 	}
 }
@@ -92,7 +121,7 @@ func TestRenderTurnDebugStats_PeeksHealthAndIsIndependentOfLogf(t *testing.T) {
 	if !strings.Contains(out, "fak-turn ") {
 		t.Fatalf("debug line did not fire with logf nil: %q", out)
 	}
-	if !strings.Contains(out, "health=healthy_cache") {
+	if !strings.Contains(out, "cache=healthy_cache") {
 		t.Fatalf("debug line must peek the rolling reset health: %q", out)
 	}
 	if !strings.Contains(out, "compact=fired") {
@@ -108,8 +137,8 @@ func TestRenderTurnDebugStats_UntrackedSessionReadsNA(t *testing.T) {
 	s.logInferenceTurn("never-compacted", "anthropic_messages", false,
 		agent.Usage{PromptTokens: 100}, "end_turn", time.Millisecond, false)
 	out := sb.String()
-	if !strings.Contains(out, "health=n/a") {
-		t.Fatalf("an untracked session must read health=n/a: %q", out)
+	if !strings.Contains(out, "cache=n/a") {
+		t.Fatalf("an untracked session must read cache=n/a: %q", out)
 	}
 	if s.resetHealth != nil {
 		t.Fatalf("the read-only peek must not mint a record for an untracked session")
@@ -148,12 +177,19 @@ func TestChatCompletionsDebugStatsEmitsOnePayloadFreeLine(t *testing.T) {
 		t.Fatalf("debug lines = %d (%q), want exactly one", len(lines), strings.Join(lines, "\n"))
 	}
 	line := lines[0]
+	// prompt=13 (uncached input), cacheRead=7, cacheCreate=3.
+	// baseline = 23; actual = 13 + 7*0.1 + 3*1.25 = 17.45; saved = 5.55 -> "6" rounded (24% of prompt).
 	for _, want := range []string{
-		"wire=openai_chat_completions", "request_tokens=23", "prompt=13", "completion=2",
-		"cache_read=7", "cache_creation=3", "cache_hit=0.30", "cache_rebate_tokens=6.3",
+		"fak-turn trace=", "saved=6 tok", "cache=", "compact=", "finish=stop",
 	} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("debug line missing %q: %s", want, line)
+		}
+	}
+	// The raw provider counters and the prompt itself must never reach the glanceable line.
+	for _, gone := range []string{"cache_read=", "cache_creation=", "request_tokens", "cache_rebate_tokens"} {
+		if strings.Contains(line, gone) {
+			t.Fatalf("raw counter %q must not appear on the glanceable line: %s", gone, line)
 		}
 	}
 	for _, leak := range []string{secretPrompt, "model payload"} {
