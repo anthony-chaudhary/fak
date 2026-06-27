@@ -113,7 +113,11 @@ planner's warm-or-cold call matched the provider 97.7% of the time. Where a turn
 cold, it re-wrote essentially the whole prompt, which is exactly what the cold-resume price tag
 assumes. The one systematic miss is in the safe direction: the planner calls a 5-to-15-minute
 gap cold, but the provider often still had the prefix warm. Anthropic's 5-minute cache is a
-floor that refreshes on use, so in practice it survives longer than the clock. The planner
+floor that refreshes on use, so in practice it survives longer than the clock. This
+conservative band reflects the governor policy derived in the vCache design note
+(`docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md` §5.4), which shows pinning is only
+justified when λT > ln((W5+μ+L)/L) ≈ 0.81–1.5 requests/TTL depending on latency value and
+rate-limit pressure — a tight band where the planner errs toward declaring cold. The planner
 errs toward declaring cold, which is the conservative way to be wrong: it never claims a warm
 cache that isn't there.
 
