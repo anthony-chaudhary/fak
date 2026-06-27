@@ -98,6 +98,14 @@ concurrent = [
   # referee binds the stamp and the arbiter protects internal/leaseref/** edits.
   "leaseref",
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate); declared so the referee binds a `(fak windowgate)` stamp and the arbiter protects internal/windowgate/** edits.
+  # reconciled 2026-06-27 (#1000): internal/scoreboard is a real committed leaf (the `fak
+  # scoreboard` Slack scorecard publisher, shipped 52ed934b with the `(fak scoreboard)`
+  # trailer) that had NO declared lane -> a `(fak scoreboard)` ship-stamp bound to a phantom
+  # unit and `fak commit --preview` warned the arbiter could not detect a same-tree collision
+  # on it. Declared here (tree = internal/scoreboard/** only; its cmd/fak/scoreboard.go shim
+  # stays in the `cmd` lane, keeping every leaf tree pairwise-disjoint as the header invariant
+  # requires) so the referee binds the stamp and the arbiter protects internal/scoreboard/** edits.
+  "scoreboard",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -145,6 +153,7 @@ autopick = [
   "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate), see [lanes].concurrent note
   "nightrun", # internal/nightrun leaf (the run-it-all-night data-collection door), see [lanes].concurrent note
+  "scoreboard", # #1000: internal/scoreboard leaf (the fak scoreboard Slack publisher), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -270,6 +279,7 @@ fakrpc = ["internal/fakrpc/**"]
 vcacheobserve = ["internal/vcacheobserve/**"]
 leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY substrate (refs/fak/locks/*)
 dojo = ["internal/dojo/**"] # #951: prediction-vs-reality gym (predict -> run -> measure -> eval -> calibrate)
+scoreboard = ["internal/scoreboard/**"] # #1000: fak scoreboard Slack scorecard publisher (cmd/fak/scoreboard.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
