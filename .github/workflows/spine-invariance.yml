@@ -1,0 +1,149 @@
+name: spine-invariance
+
+# Validates the five spine invariants reproduce byte-for-byte across targets.
+# See docs/explainers/cross-platform-spine.md for the invariant definitions.
+# Fails (reds the trunk) if any invariant does not reproduce identically.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  spine-arm64:
+    name: spine-invariants (arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Build static binary
+        run: |
+          CGO_ENABLED=0 go build -o fak-arm64 ./cmd/fak
+          ./fak-arm64 --version
+      - name: Run invariant tests
+        run: |
+          # Invariant 1: One static pure-Go binary, zero deps, CGO_ENABLED=0
+          echo "=== Invariant 1: Static binary (CGO_ENABLED=0) ===" > static-binary-arm64.txt
+          go test -v -run "TestRequestPathDefaultBuildIsCgoFree" ./internal/architest >> static-binary-arm64.txt 2>&1
+          
+          # Invariant 2: Default-deny capability floor, fail closed
+          echo "=== Invariant 2: Default-deny capability floor ===" > default-deny-arm64.txt
+          go test -v ./internal/adjudicator ./internal/policy >> default-deny-arm64.txt 2>&1
+          
+          # Invariant 3: Result quarantine at the write-time boundary
+          echo "=== Invariant 3: Result quarantine ===" > quarantine-arm64.txt
+          go test -v -run "TestQuarantine|TestQuarantined" ./internal/ctxmmu ./internal/kernel ./internal/normgate >> quarantine-arm64.txt 2>&1
+          
+          # Invariant 4: Bit-exact KV reuse + addressable eviction
+          echo "=== Invariant 4: Bit-exact KV reuse ===" > kv-reuse-arm64.txt
+          go test -v -run "TestEvictEqualsNeverSaw|TestKVQuarantineEqualsNeverSaw" ./internal/model ./internal/kvmmu ./internal/xenginekv >> kv-reuse-arm64.txt 2>&1
+          
+          # Invariant 5: Tamper-evident audit: append-only, SHA-256 hash-chained
+          echo "=== Invariant 5: Tamper-evident audit ===" > audit-arm64.txt
+          go test -v ./internal/journal >> audit-arm64.txt 2>&1
+      - name: Upload arm64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spine-arm64
+          path: |
+            static-binary-arm64.txt
+            default-deny-arm64.txt
+            quarantine-arm64.txt
+            kv-reuse-arm64.txt
+            audit-arm64.txt
+
+  spine-x86_64:
+    name: spine-invariants (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Build static binary
+        run: |
+          CGO_ENABLED=0 go build -o fak-x86_64 ./cmd/fak
+          ./fak-x86_64 --version
+      - name: Run invariant tests
+        run: |
+          # Invariant 1: One static pure-Go binary, zero deps, CGO_ENABLED=0
+          echo "=== Invariant 1: Static binary (CGO_ENABLED=0) ===" > static-binary-x86_64.txt
+          go test -v -run "TestRequestPathDefaultBuildIsCgoFree" ./internal/architest >> static-binary-x86_64.txt 2>&1
+          
+          # Invariant 2: Default-deny capability floor, fail closed
+          echo "=== Invariant 2: Default-deny capability floor ===" > default-deny-x86_64.txt
+          go test -v ./internal/adjudicator ./internal/policy >> default-deny-x86_64.txt 2>&1
+          
+          # Invariant 3: Result quarantine at the write-time boundary
+          echo "=== Invariant 3: Result quarantine ===" > quarantine-x86_64.txt
+          go test -v -run "TestQuarantine|TestQuarantined" ./internal/ctxmmu ./internal/kernel ./internal/normgate >> quarantine-x86_64.txt 2>&1
+          
+          # Invariant 4: Bit-exact KV reuse + addressable eviction
+          echo "=== Invariant 4: Bit-exact KV reuse ===" > kv-reuse-x86_64.txt
+          go test -v -run "TestEvictEqualsNeverSaw|TestKVQuarantineEqualsNeverSaw" ./internal/model ./internal/kvmmu ./internal/xenginekv >> kv-reuse-x86_64.txt 2>&1
+          
+          # Invariant 5: Tamper-evident audit: append-only, SHA-256 hash-chained
+          echo "=== Invariant 5: Tamper-evident audit ===" > audit-x86_64.txt
+          go test -v ./internal/journal >> audit-x86_64.txt 2>&1
+      - name: Upload x86_64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spine-x86_64
+          path: |
+            static-binary-x86_64.txt
+            default-deny-x86_64.txt
+            quarantine-x86_64.txt
+            kv-reuse-x86_64.txt
+            audit-x86_64.txt
+
+  compare-results:
+    name: Compare byte-for-byte reproduction
+    runs-on: ubuntu-latest
+    needs: [spine-arm64, spine-x86_64]
+    steps:
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: spine-arm64
+      - name: Download x86_64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: spine-x86_64
+      - name: Compare invariant outputs byte-for-byte
+        run: |
+          set -e
+          echo "Comparing spine invariant outputs..."
+          
+          # Invariant 1: One static pure-Go binary, zero deps, CGO_ENABLED=0
+          echo "Invariant 1: Static binary (CGO_ENABLED=0)"
+          diff -u static-binary-arm64.txt static-binary-x86_64.txt || { echo "FAIL: Static binary test outputs differ"; exit 1; }
+          echo "PASS: Static binary outputs match"
+          
+          # Invariant 2: Default-deny capability floor, fail closed
+          echo "Invariant 2: Default-deny capability floor"
+          diff -u default-deny-arm64.txt default-deny-x86_64.txt || { echo "FAIL: Default-deny test outputs differ"; exit 1; }
+          echo "PASS: Default-deny outputs match"
+          
+          # Invariant 3: Result quarantine at the write-time boundary
+          echo "Invariant 3: Result quarantine"
+          diff -u quarantine-arm64.txt quarantine-x86_64.txt || { echo "FAIL: Quarantine test outputs differ"; exit 1; }
+          echo "PASS: Quarantine outputs match"
+          
+          # Invariant 4: Bit-exact KV reuse + addressable eviction
+          echo "Invariant 4: Bit-exact KV reuse"
+          diff -u kv-reuse-arm64.txt kv-reuse-x86_64.txt || { echo "FAIL: KV reuse test outputs differ"; exit 1; }
+          echo "PASS: KV reuse outputs match"
+          
+          # Invariant 5: Tamper-evident audit: append-only, SHA-256 hash-chained
+          echo "Invariant 5: Tamper-evident audit"
+          diff -u audit-arm64.txt audit-x86_64.txt || { echo "FAIL: Audit test outputs differ"; exit 1; }
+          echo "PASS: Audit outputs match"
+          
+          echo ""
+          echo "All five spine invariants reproduce byte-for-byte across arm64 and x86_64."
