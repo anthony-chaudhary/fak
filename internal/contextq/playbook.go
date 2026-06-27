@@ -176,14 +176,24 @@ func (p *ContextPlaybook) admitContent(ctx context.Context, content string) abi.
 	return p.gate.Admit(ctx, &abi.ToolCall{Tool: "playbook.curate"}, r)
 }
 
-func (p *ContextPlaybook) add(ctx context.Context, d PlaybookDelta) PlaybookVerdict {
-	if rewriteShaped(d.Content) {
-		return PlaybookVerdict{Kind: MaterializationRefuse,
+// screenDelta runs the shared content gate for a bullet mutation: it refuses a
+// whole-playbook rewrite shape and quarantines content the ctxmmu.Admit gate
+// holds out. It returns a non-nil refusal verdict to surface, or nil to proceed.
+func (p *ContextPlaybook) screenDelta(ctx context.Context, content string) *PlaybookVerdict {
+	if rewriteShaped(content) {
+		return &PlaybookVerdict{Kind: MaterializationRefuse,
 			Reason: "REWRITE_REFUSED: delta content carries rendered bullet lines — a whole-playbook rewrite is not a bullet-localized delta"}
 	}
-	if v := p.admitContent(ctx, d.Content); v.Kind == abi.VerdictQuarantine {
-		return PlaybookVerdict{Kind: MaterializationRefuse,
+	if v := p.admitContent(ctx, content); v.Kind == abi.VerdictQuarantine {
+		return &PlaybookVerdict{Kind: MaterializationRefuse,
 			Reason: "QUARANTINED by ctxmmu.Admit: " + abi.ReasonName(v.Reason)}
+	}
+	return nil
+}
+
+func (p *ContextPlaybook) add(ctx context.Context, d PlaybookDelta) PlaybookVerdict {
+	if v := p.screenDelta(ctx, d.Content); v != nil {
+		return *v
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -200,13 +210,8 @@ func (p *ContextPlaybook) add(ctx context.Context, d PlaybookDelta) PlaybookVerd
 }
 
 func (p *ContextPlaybook) edit(ctx context.Context, d PlaybookDelta) PlaybookVerdict {
-	if rewriteShaped(d.Content) {
-		return PlaybookVerdict{Kind: MaterializationRefuse,
-			Reason: "REWRITE_REFUSED: delta content carries rendered bullet lines — a whole-playbook rewrite is not a bullet-localized delta"}
-	}
-	if v := p.admitContent(ctx, d.Content); v.Kind == abi.VerdictQuarantine {
-		return PlaybookVerdict{Kind: MaterializationRefuse,
-			Reason: "QUARANTINED by ctxmmu.Admit: " + abi.ReasonName(v.Reason)}
+	if v := p.screenDelta(ctx, d.Content); v != nil {
+		return *v
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

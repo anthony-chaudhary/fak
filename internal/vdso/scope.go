@@ -124,12 +124,7 @@ func (v *VDSO) SetNodeEpochLimit(limit int) {
 	}
 	v.mu.Lock()
 	v.nodeCap = limit
-	if v.nodeLRU == nil {
-		v.nodeLRU = list.New()
-	}
-	if v.nodeIndex == nil {
-		v.nodeIndex = map[string]*list.Element{}
-	}
+	v.ensureNodeStateLocked()
 	if v.trimNodesLocked() {
 		atomic.AddUint64(&v.worldVer, 1)
 	}
@@ -384,7 +379,7 @@ func (v *VDSO) bumpAndPublish(c *abi.ToolCall, tags []string) {
 		Seq:       v.mutSeq,
 		Principal: principalOf(c),
 	}
-	subs := append([]*subscription(nil), v.subs...)
+	subs := v.subs.snapshot()
 	v.mu.Unlock()
 
 	atomic.AddInt64(&v.mutations, 1)
@@ -453,35 +448,13 @@ type Mutation struct {
 	Principal string
 }
 
-type subscription struct {
-	id uint64
-	fn func(Mutation)
-}
-
 // Subscribe registers an observer of write mutations and returns a cancel func.
 // Subscribers are invoked synchronously AFTER the epoch bump, off the read hot path
 // (only write completions fire), and outside v.mu so a subscriber may re-enter the
 // vDSO. The cache's own invalidation is the epoch bump itself — subscribers are
 // ADDITIONAL observers (change-feed, audit, snoop, metrics).
 func (v *VDSO) Subscribe(fn func(Mutation)) (cancel func()) {
-	if fn == nil {
-		return func() {}
-	}
-	v.mu.Lock()
-	v.subSeq++
-	id := v.subSeq
-	v.subs = append(v.subs, &subscription{id: id, fn: fn})
-	v.mu.Unlock()
-	return func() {
-		v.mu.Lock()
-		for i, s := range v.subs {
-			if s.id == id {
-				v.subs = append(v.subs[:i], v.subs[i+1:]...)
-				break
-			}
-		}
-		v.mu.Unlock()
-	}
+	return subscribe(v, &v.subs, fn)
 }
 
 // Mutations reports how many write-shaped completions the vDSO has observed (the

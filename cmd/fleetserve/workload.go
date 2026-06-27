@@ -267,22 +267,7 @@ type workloadPoint struct {
 	EffToolFraction   float64 `json:"effective_tool_call_fraction"`
 	Reps              int     `json:"reps"`
 
-	ReusePrefillMS     float64 `json:"reuse_prefill_ms"`
-	ReuseCloneMS       float64 `json:"reuse_clone_ms"`
-	ReuseDecodeMS      float64 `json:"reuse_decode_ms"`
-	ReuseResultMS      float64 `json:"reuse_result_prefill_ms"`
-	ReuseTotalMS       float64 `json:"reuse_total_ms"`
-	ReuseAgentsSec     float64 `json:"reuse_agents_per_sec"`
-	ReuseAgentTurnsSec float64 `json:"reuse_agent_turns_per_sec"`
-
-	NoReusePrefillMS     *float64 `json:"noreuse_prefill_ms,omitempty"`
-	NoReuseDecodeMS      *float64 `json:"noreuse_decode_ms,omitempty"`
-	NoReuseResultMS      *float64 `json:"noreuse_result_prefill_ms,omitempty"`
-	NoReuseTotalMS       *float64 `json:"noreuse_total_ms,omitempty"`
-	NoReuseAgentsSec     *float64 `json:"noreuse_agents_per_sec,omitempty"`
-	NoReuseAgentTurnsSec *float64 `json:"noreuse_agent_turns_per_sec,omitempty"`
-
-	ReuseSpeedup *float64 `json:"reuse_speedup_vs_noreuse,omitempty"`
+	reuseMetrics
 }
 
 // runWorkloadMode replays one transcript-derived track (after tuning) across a concurrency
@@ -312,17 +297,7 @@ func runWorkloadMode(m *model.Model, quant bool, vocab int, prof *workloadProfil
 		var noReuseTotals, noReusePre, noReuseDec, noReuseResult []time.Duration
 		for r := 0; r < reps; r++ {
 			// ---- reuse: prefill once, clone C, replay schedule ----
-			t0 := time.Now()
-			base := m.NewSession()
-			base.Quant = quant
-			base.Prefill(prefix)
-			tPre := time.Since(t0)
-
-			t1 := time.Now()
-			bs := m.NewBatchFromPrefixReserve(base.Cache, C, decTot+resTot)
-			bs.SetQuant(quant)
-			tClone := time.Since(t1)
-
+			bs, tPre, tClone := newReuseBatch(m, quant, prefix, C, decTot+resTot)
 			tDec, tRes := runScheduleTurns(bs, ids0, steps, vocab, r)
 			reuseTotals = append(reuseTotals, tPre+tClone+tDec+tRes)
 			reusePre = append(reusePre, tPre)
@@ -332,17 +307,7 @@ func runWorkloadMode(m *model.Model, quant bool, vocab int, prof *workloadProfil
 
 			if ablation {
 				// ---- no-reuse: C independent prefix prefills, same schedule ----
-				prompts := make([][]int, C)
-				for b := range prompts {
-					prompts[b] = prefix
-				}
-				n0 := time.Now()
-				nbs := m.NewBatchSession(C)
-				nbs.SetQuant(quant)
-				nbs.PrefillEachNoLogits(prompts)
-				nbs.Reserve(decTot + resTot)
-				nPre := time.Since(n0)
-
+				nbs, nPre := newNoReuseBatch(m, quant, prefix, C, decTot+resTot)
 				nDec, nRes := runScheduleTurns(nbs, ids0, steps, vocab, r)
 				noReuseTotals = append(noReuseTotals, nPre+nDec+nRes)
 				noReusePre = append(noReusePre, nPre)
@@ -352,33 +317,21 @@ func runWorkloadMode(m *model.Model, quant bool, vocab int, prof *workloadProfil
 			runtime.GC()
 		}
 
-		ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
-		rTot := ms(minDur(reuseTotals))
+		rTot := msFromDur(minDur(reuseTotals))
 		rAgents := float64(C) / (rTot / 1e3)
 		rTurns := float64(C*T) / (rTot / 1e3)
 		pt := workloadPoint{
 			Concurrency: C, Turns: T, PrefixLen: prefixLen,
 			DecodeTokensTotal: float64(decTot), ResultTokensTotal: float64(resTot),
 			ToolTurns: toolTurns, EffToolFraction: effFrac, Reps: reps,
-			ReusePrefillMS: ms(minDur(reusePre)), ReuseCloneMS: ms(minDur(reuseClone)),
-			ReuseDecodeMS: ms(minDur(reuseDec)), ReuseResultMS: ms(minDur(reuseResult)),
-			ReuseTotalMS: rTot, ReuseAgentsSec: rAgents, ReuseAgentTurnsSec: rTurns,
+			reuseMetrics: reuseMetrics{
+				ReusePrefillMS: msFromDur(minDur(reusePre)), ReuseCloneMS: msFromDur(minDur(reuseClone)),
+				ReuseDecodeMS: msFromDur(minDur(reuseDec)), ReuseResultMS: msFromDur(minDur(reuseResult)),
+				ReuseTotalMS: rTot, ReuseAgentsSec: rAgents, ReuseAgentTurnsSec: rTurns,
+			},
 		}
 		if ablation {
-			nTot := ms(minDur(noReuseTotals))
-			nAgents := float64(C) / (nTot / 1e3)
-			nTurns := float64(C*T) / (nTot / 1e3)
-			nPre := ms(minDur(noReusePre))
-			nDec := ms(minDur(noReuseDec))
-			nResult := ms(minDur(noReuseResult))
-			speedup := rAgents / nAgents
-			pt.NoReusePrefillMS = &nPre
-			pt.NoReuseDecodeMS = &nDec
-			pt.NoReuseResultMS = &nResult
-			pt.NoReuseTotalMS = &nTot
-			pt.NoReuseAgentsSec = &nAgents
-			pt.NoReuseAgentTurnsSec = &nTurns
-			pt.ReuseSpeedup = &speedup
+			pt.fillNoReuse(noReuseTotals, noReusePre, noReuseDec, noReuseResult, C, T, rAgents)
 		}
 		points = append(points, pt)
 		if ablation {
@@ -415,14 +368,5 @@ func runWorkloadMode(m *model.Model, quant bool, vocab int, prof *workloadProfil
 		"result_tokens_total_per_agent": resTot,
 		"points":                        points,
 	}
-	blob, _ := json.MarshalIndent(report, "", "  ")
-	if out != "" {
-		if err := os.WriteFile(out, blob, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "write %s: %v\n", out, err)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "wrote %s\n", out)
-	} else {
-		fmt.Println(string(blob))
-	}
+	writeReport(report, out)
 }

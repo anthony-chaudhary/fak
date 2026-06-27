@@ -306,10 +306,7 @@ func Query(ctx context.Context, im *cdb.Image, req Request) Result {
 		req.Producer = "contextq"
 	}
 	frames := im.Backtrace()
-	entries := map[int]cachemeta.Entry{}
-	for i, e := range im.PageCacheEntries() {
-		entries[i] = e
-	}
+	entries := pageEntries(im)
 
 	ws := im.WorkingSet(ctx, req.Query, req.K)
 	res := Result{
@@ -398,18 +395,11 @@ func materializeRaw(ctx context.Context, im *cdb.Image, req Request, res *Result
 			continue
 		}
 		if req.BudgetBytes > 0 && usedBytes+f.Len > req.BudgetBytes {
-			res.omit(f, e.ID, "budget_exhausted")
-			res.Verdicts = append(res.Verdicts, MaterializationVerdict{
-				Kind: MaterializationAbstain, Reason: "budget_exhausted", Step: f.Step, Entry: e.ID,
-			})
+			res.omitBudgetExhausted(f, e.ID)
 			continue
 		}
-		b, err := im.Examine(ctx, step)
-		if err != nil {
-			reason := "page_in_refused"
-			if errors.Is(err, recall.ErrSealed) {
-				reason = "sealed_by_trust_gate"
-			}
+		b, reason, ok := examineStep(ctx, im, step)
+		if !ok {
 			res.refuse(f, e.ID, reason)
 			continue
 		}
@@ -445,15 +435,7 @@ func materializeRaw(ctx context.Context, im *cdb.Image, req Request, res *Result
 	for _, step := range selected {
 		selectedSet[step] = true
 	}
-	for _, f := range frames {
-		if selectedSet[f.Step] || excluded[f.Step] || f.Sealed || f.Tombstoned {
-			continue
-		}
-		if frameReferenced(f, req) {
-			e := entries[f.Step]
-			res.omit(f, e.ID, "not_selected_by_ranker")
-		}
-	}
+	omitUnselected(req, res, frames, entries, selectedSet, excluded)
 	res.Stats.RenderedBytes = usedBytes
 }
 
@@ -486,10 +468,7 @@ func materializeWithViews(ctx context.Context, im *cdb.Image, req Request, res *
 			}
 		}
 		if req.BudgetBytes > 0 && renderedBytes+estimate > req.BudgetBytes {
-			res.omit(f, e.ID, "budget_exhausted")
-			res.Verdicts = append(res.Verdicts, MaterializationVerdict{
-				Kind: MaterializationAbstain, Reason: "budget_exhausted", Step: f.Step, Entry: e.ID,
-			})
+			res.omitBudgetExhausted(f, e.ID)
 			continue
 		}
 
@@ -518,12 +497,8 @@ func materializeWithViews(ctx context.Context, im *cdb.Image, req Request, res *
 			res.appendRenderItem(RenderMemoryView, f.Step, cached.ViewID, cached.CacheEntry.ID, len(cachedPayload))
 		default:
 			// Must page in the source to build (FAULT) or rebuild (RECOMPUTE).
-			b, err := im.Examine(ctx, step)
-			if err != nil {
-				reason := "page_in_refused"
-				if errors.Is(err, recall.ErrSealed) {
-					reason = "sealed_by_trust_gate"
-				}
+			b, reason, ok := examineStep(ctx, im, step)
+			if !ok {
 				res.refuse(f, e.ID, reason)
 				continue
 			}
@@ -556,15 +531,7 @@ func materializeWithViews(ctx context.Context, im *cdb.Image, req Request, res *
 		}
 	}
 
-	for _, f := range frames {
-		if selectedSet[f.Step] || excluded[f.Step] || f.Sealed || f.Tombstoned {
-			continue
-		}
-		if frameReferenced(f, req) {
-			e := entries[f.Step]
-			res.omit(f, e.ID, "not_selected_by_ranker")
-		}
-	}
+	omitUnselected(req, res, frames, entries, selectedSet, excluded)
 	res.Stats.RenderedBytes = renderedBytes
 }
 
@@ -742,6 +709,56 @@ func (r *Result) omit(f cdb.Frame, id cachemeta.EntryID, reason string) {
 	r.Omissions = append(r.Omissions, Omission{
 		Step: f.Step, Role: f.Role, Descriptor: f.Descriptor, Reason: reason, Entry: id,
 	})
+}
+
+// pageEntries snapshots an image's page-cache entries keyed by step. Both Query
+// and IndexViews need this map; building it once here keeps the two resolvers in
+// lockstep.
+func pageEntries(im *cdb.Image) map[int]cachemeta.Entry {
+	entries := map[int]cachemeta.Entry{}
+	for i, e := range im.PageCacheEntries() {
+		entries[i] = e
+	}
+	return entries
+}
+
+// examineStep pages in one step through the trust gate. On failure it returns the
+// canonical refusal reason ("sealed_by_trust_gate" for a sealed page, else
+// "page_in_refused") so every caller refuses with identical wording; ok is false
+// when the page-in was refused.
+func examineStep(ctx context.Context, im *cdb.Image, step int) (b []byte, reason string, ok bool) {
+	b, err := im.Examine(ctx, step)
+	if err != nil {
+		reason = "page_in_refused"
+		if errors.Is(err, recall.ErrSealed) {
+			reason = "sealed_by_trust_gate"
+		}
+		return nil, reason, false
+	}
+	return b, "", true
+}
+
+// omitBudgetExhausted records the omission + abstain verdict for a frame the
+// budget can no longer admit. Shared by the raw and view materialization paths.
+func (r *Result) omitBudgetExhausted(f cdb.Frame, id cachemeta.EntryID) {
+	r.omit(f, id, "budget_exhausted")
+	r.Verdicts = append(r.Verdicts, MaterializationVerdict{
+		Kind: MaterializationAbstain, Reason: "budget_exhausted", Step: f.Step, Entry: id,
+	})
+}
+
+// omitUnselected omits every referenced benign frame the ranker did not select,
+// after a materialization pass. Shared by the raw and view paths.
+func omitUnselected(req Request, res *Result, frames []cdb.Frame, entries map[int]cachemeta.Entry, selectedSet, excluded map[int]bool) {
+	for _, f := range frames {
+		if selectedSet[f.Step] || excluded[f.Step] || f.Sealed || f.Tombstoned {
+			continue
+		}
+		if frameReferenced(f, req) {
+			e := entries[f.Step]
+			res.omit(f, e.ID, "not_selected_by_ranker")
+		}
+	}
 }
 
 func matchingSteps(frames []cdb.Frame, patterns []string) map[int]bool {

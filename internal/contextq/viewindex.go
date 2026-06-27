@@ -2,7 +2,6 @@ package contextq
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cdb"
-	"github.com/anthony-chaudhary/fak/internal/recall"
 )
 
 // The recall-image view indexer (acceptance #2 of issue #437). Where Query
@@ -102,10 +100,7 @@ func IndexViews(ctx context.Context, im *cdb.Image, req IndexRequest) IndexResul
 	}
 
 	frames := im.Backtrace()
-	entries := map[int]cachemeta.Entry{}
-	for i, e := range im.PageCacheEntries() {
-		entries[i] = e
-	}
+	entries := pageEntries(im)
 
 	res := IndexResult{Stats: IndexStats{
 		PagesTotal:  len(frames),
@@ -132,12 +127,8 @@ func IndexViews(ctx context.Context, im *cdb.Image, req IndexRequest) IndexResul
 		// Page in once per page; derive every requested content view from the
 		// same bytes. The descriptor card needs no bytes but we still gate on a
 		// successful page-in so a page that refuses on examine yields no views.
-		b, err := im.Examine(ctx, f.Step)
-		if err != nil {
-			reason := "page_in_refused"
-			if errors.Is(err, recall.ErrSealed) {
-				reason = "sealed_by_trust_gate"
-			}
+		b, reason, ok := examineStep(ctx, im, f.Step)
+		if !ok {
 			res.refuse(f, e.ID, reason)
 			res.Stats.PagesRefused++
 			continue
@@ -267,12 +258,19 @@ func buildDescriptor(f cdb.Frame) []byte {
 // buildFacts extracts the page's fact-like lines verbatim: a line carrying a
 // "key: value" / "key=value" shape or a digit. Bounded by maxIndexViewBytes.
 func buildFacts(page []byte) ([]byte, int64) {
+	return pickLines(page, factLike)
+}
+
+// pickLines extracts the page's non-empty trimmed lines for which keep returns
+// true, in page order, bounded by maxIndexViewBytes. It is the shared scaffold
+// behind the line-extracting index views (facts, timeline).
+func pickLines(page []byte, keep func(string) bool) ([]byte, int64) {
 	s := strings.ToValidUTF8(string(page), "")
 	var picked []string
 	used := 0
 	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
-		if t == "" || !factLike(t) {
+		if t == "" || (keep != nil && !keep(t)) {
 			continue
 		}
 		if used+len(t) > maxIndexViewBytes {
@@ -297,22 +295,7 @@ func factLike(t string) bool {
 // buildTimeline renders the page's non-empty lines verbatim in page order,
 // bounded by maxIndexViewBytes — the event sequence the page records.
 func buildTimeline(page []byte) ([]byte, int64) {
-	s := strings.ToValidUTF8(string(page), "")
-	var picked []string
-	used := 0
-	for _, line := range strings.Split(s, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "" {
-			continue
-		}
-		if used+len(t) > maxIndexViewBytes {
-			break
-		}
-		picked = append(picked, t)
-		used += len(t)
-	}
-	out := strings.Join(picked, "\n")
-	return []byte(out), int64(len(out))
+	return pickLines(page, nil)
 }
 
 // buildQA renders a deterministic question/answer pair. The question is a fixed
