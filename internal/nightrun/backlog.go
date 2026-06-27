@@ -130,7 +130,7 @@ func witnessTasks() []Task {
 			Title:       "re-measure GLM-5.2 native cold load time on-box (target <10 min after the parallel quant-load + resident-expert levers)",
 			Source:      SourceWitness,
 			Value:       ValueWitness,
-			Requires:    []Requirement{ReqWeights},
+			Requires:    []Requirement{ReqCUDA, ReqWeights},
 			Run:         "FAK_GGUF_LOAD_WORKERS=8 fak serve --gguf <glm-5.2.gguf> --backend cuda --load-only",
 			Acceptance:  "a recorded wall-clock load time under 10 minutes captured from the load-path visibility log",
 			RecheckDays: 14,

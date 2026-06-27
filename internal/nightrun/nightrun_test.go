@@ -378,3 +378,33 @@ func TestParseNumberObservedOnly(t *testing.T) {
 		t.Errorf("parseNumber must NOT fabricate a number, got %q", got)
 	}
 }
+
+// TestBacklogRunRequiresConsistency pins the feasibility invariant the whole
+// nightrun promise rests on: a task's declared Requires must match what its Run
+// command actually needs, so the feasibility gate can never pass a task the box
+// cannot run. Regression for witness-glm52-native-load-10min, which used
+// `--backend cuda` but declared only ReqWeights — so it ranked #1 on a gpu=none
+// box, the exact "claim a datum the hardware can't produce" failure the doc
+// forbids.
+func TestBacklogRunRequiresConsistency(t *testing.T) {
+	tasks, err := Backlog("")
+	if err != nil {
+		t.Fatalf("Backlog: %v", err)
+	}
+	has := func(reqs []Requirement, want Requirement) bool {
+		for _, r := range reqs {
+			if r == want {
+				return true
+			}
+		}
+		return false
+	}
+	for _, task := range tasks {
+		if strings.Contains(task.Run, "--backend cuda") && !has(task.Requires, ReqCUDA) {
+			t.Errorf("task %q Run uses --backend cuda but does not declare ReqCUDA (Requires=%v) — it would be falsely feasible on a non-CUDA box", task.ID, task.Requires)
+		}
+		if strings.Contains(task.Run, "-tags=metal") && !has(task.Requires, ReqMetal) {
+			t.Errorf("task %q Run uses -tags=metal but does not declare ReqMetal (Requires=%v)", task.ID, task.Requires)
+		}
+	}
+}
