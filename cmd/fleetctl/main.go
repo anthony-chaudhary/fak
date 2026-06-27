@@ -36,10 +36,38 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/anthony-chaudhary/fak/internal/fleet"
+)
+
+// The roster + report + fold + render core lives in the importable internal/fleet
+// package so this CLI and the `fak lab` verb share one implementation. These aliases
+// keep the command bodies below reading the way they did when the types were local.
+type (
+	Roster   = fleet.Roster
+	Box      = fleet.Box
+	Report   = fleet.Report
+	Snapshot = fleet.Snapshot
+	FoldOpts = fleet.FoldOpts
+)
+
+const (
+	RosterSchema    = fleet.RosterSchema
+	MaxBoxes        = fleet.MaxBoxes
+	DefaultStaleSec = fleet.DefaultStaleSec
+)
+
+var (
+	LoadRosterFile = fleet.LoadRosterFile
+	Template       = fleet.Template
+	ReadReports    = fleet.ReadReports
+	Fold           = fleet.Fold
+	Render         = fleet.Render
 )
 
 func main() {
@@ -143,7 +171,7 @@ func cmdLs(args []string) {
 	}
 	fmt.Printf("%-18s %-12s %-10s %s\n", "ID", "CLASS", "GROUP", "ENDPOINT")
 	for _, b := range ro.Boxes {
-		fmt.Printf("%-18s %-12s %-10s %s\n", b.ID, dash(b.Class), dash(b.Group), dash(b.ref()))
+		fmt.Printf("%-18s %-12s %-10s %s\n", b.ID, fleet.Dash(b.Class), fleet.Dash(b.Group), fleet.Dash(b.Ref()))
 	}
 	fmt.Printf("\n%d box(es)\n", len(ro.Boxes))
 }
@@ -232,7 +260,14 @@ func selectBoxes(ro Roster, group, class string) Roster {
 func mustReportsDir(dir string) {
 	fi, err := os.Stat(dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fleetctl: --reports %s: %v\n", dir, rootErr(err))
+		// Trim the *os.PathError to its cause for a compact message (the operator
+		// already passed the path); mirrors internal/fleet's reader-side rootErr.
+		cause := err
+		var pe *os.PathError
+		if errors.As(err, &pe) {
+			cause = pe.Err
+		}
+		fmt.Fprintf(os.Stderr, "fleetctl: --reports %s: %v\n", dir, cause)
 		os.Exit(2)
 	}
 	if !fi.IsDir() {

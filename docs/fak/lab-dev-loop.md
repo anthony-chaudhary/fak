@@ -61,7 +61,8 @@ in `fak-private`. The shape of the loop, with no lab identifiers, is:
 2. The bridge runs, on a persistent session on the box you chose:
    `cd <repo> && fak guard --remote-serve localhost:8080 -- <agent> '<task>'`.
 3. The box posts the guard exit summary back to the channel and writes one
-   `fak.fleet.report/v1` line into the reports directory.
+   `fak.fleet.report/v1` line into the reports directory (via `fak lab report`, or the
+   bridge's own writer) so `fak lab status` folds it into the public fleet view.
 
 Because the work runs in a session on the box, the body of the work never crosses Slack —
 only the task line in and the summary out. You drive it from anywhere; the compute stays
@@ -69,12 +70,36 @@ on the machine you picked.
 
 ## Folding the result (public)
 
-`fleetctl` reads the per-box report JSON the bridge wrote and gives you a bounded,
-readable fleet view and a 0–100 readiness score — see [fleet.md](../fleet.md):
+The fast front door is `fak lab status` — one command, no flags, that answers "which
+lab nodes are alive right now?" It ships a **generic** default roster (the lab boxes
+written down as `dgx-a`/`a100x8`/`lab`, never a real host or channel), folds the per-box
+report JSON against it, and renders the same bounded view + 0–100 readiness score
+`fleetctl` does (they share `internal/fleet`):
 
 ```bash
-fleetctl status --roster roster.json --reports DIR
+fak lab status            # the embedded roster, reports from ~/.config/fak/fleet/reports
+fak lab status --all      # add a per-box table
+fak lab ls                # just list the boxes in the roster
 ```
+
+When no live reports exist yet, `fak lab status` degrades **honestly** — every box reads
+`unknown` (not down) and it tells you how to populate liveness. The reports dir resolves
+`--reports` → `$FAK_FLEET_REPORTS` → `~/.config/fak/fleet/reports` (the bridge's drop
+path). The standalone `fleetctl status --roster R --reports DIR` is still there for an
+explicit roster/reports pair — see [fleet.md](../fleet.md).
+
+### Self-reporting a box (no bridge needed)
+
+A box can write its own `fak.fleet.report/v1` line with `fak lab report`, closing the
+loop for that box without the private bridge — useful on a box you can run `fak` on
+directly (the CPU GLM host, a Mac verify node):
+
+```bash
+fak lab report --id da-cpu --state live --version "$(fak version)"
+```
+
+Keep `--note` generic (no host/IP/channel/token) — it is rendered verbatim in the public
+fleet view.
 
 ## Boundary rules (do not trip)
 
