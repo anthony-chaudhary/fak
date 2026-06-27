@@ -14,8 +14,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchpost"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 func cmdLoop(argv []string) { os.Exit(runLoop(os.Stdout, os.Stderr, argv)) }
@@ -131,6 +133,9 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	source := fs.String("source", "manual", "trigger source, such as cron|launchd|task-scheduler|manual")
 	principal := fs.String("principal", "", "authenticated principal or producer id")
 	asJSON := fs.Bool("json", false, "emit a JSON run report")
+	notifySlack := fs.Bool("notify-slack", false, "post a witnessed dispatch-result card to the dispatch Slack channel when the run ends")
+	dispatchChannel := fs.String("dispatch-channel", "", "override dispatch channel id (default: $FAK_DISPATCH_CHANNEL / .env.slack.local)")
+	dispatchToken := fs.String("dispatch-token", "", "override dispatch bot token (default: $FAK_DISPATCH_TOKEN, then scoreboard token)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -146,6 +151,10 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	if *runID == "" {
 		*runID = defaultLoopRunID(*loopID)
 	}
+
+	// Capture HEAD before the dispatch so the result card can WITNESS what it landed
+	// (HeadBefore..HeadAfter), not trust the child's self-report. "" if not a git repo.
+	headBefore := dispatchpost.HeadSHA(ctx(), "")
 
 	baseEvidence := []loopmgr.EvidenceRef{{Kind: "command", Ref: filepath.Base(cmdArgs[0])}}
 	baseMetrics := map[string]int64{"argc": int64(len(cmdArgs))}
@@ -255,6 +264,23 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 	}
+
+	// Post a witnessed dispatch-result card to Slack so a slow background dispatch
+	// reports its outcome without anyone tailing the ledger. Gated and best-effort:
+	// a resolved channel (or --notify-slack) arms it, and any failure is reported to
+	// stderr without changing the run's exit code — the dispatch's result must stand
+	// on its own even if Slack is unreachable.
+	postDispatchResult(stderr, *notifySlack, *dispatchChannel, *dispatchToken,
+		dispatchpost.Result{
+			LoopID:     *loopID,
+			RunID:      *runID,
+			ExitCode:   exitCode,
+			DurationMS: durationMS,
+			Command:    filepath.Base(cmdArgs[0]),
+			HeadBefore: headBefore,
+			HeadAfter:  dispatchpost.HeadSHA(ctx(), ""),
+		})
+
 	if *asJSON {
 		rep := map[string]any{
 			"schema":      "fak.loop-run-report.v1",
@@ -801,6 +827,54 @@ func formatLoopTime(ts int64) string {
 	return time.Unix(0, ts).UTC().Format(time.RFC3339)
 }
 
+// postDispatchResult posts a witnessed dispatch-result card to the dispatch Slack
+// channel when a `fak loop run` dispatch ends. It is the wire that turns ongoing
+// background dispatch into a Slack-visible result: the run's outcome (exit code,
+// duration) PLUS the git HEAD delta it actually landed (the witness) become one
+// channel post, so a slow nightly/cron dispatch reports what it did without anyone
+// tailing the ledger.
+//
+// It is gated and best-effort. The post is attempted when --notify-slack is set OR a
+// dispatch channel resolves from the environment/.env.slack.local; otherwise it is a
+// silent no-op so an unconfigured box runs the dispatch normally. Any error (no
+// channel under --notify-slack, no token, a Slack API failure) is reported to stderr
+// and NEVER changes the run's exit code — the dispatch result stands on its own.
+func postDispatchResult(stderr io.Writer, notify bool, channelOverride, tokenOverride string, res dispatchpost.Result) {
+	ch := channelOverride
+	if ch == "" {
+		ch = dispatchpost.ResolveChannel()
+	}
+	if ch == "" {
+		// No channel: skip silently unless the operator explicitly asked to notify,
+		// in which case surface the misconfiguration (but still don't fail the run).
+		if notify {
+			fmt.Fprintln(stderr, "fak loop run: --notify-slack set but no dispatch channel: set FAK_DISPATCH_CHANNEL or pass --dispatch-channel")
+		}
+		return
+	}
+
+	// Fill the witness: the commits the dispatch landed between the captured HEADs.
+	res.Commits = dispatchpost.CommitsBetween(ctx(), "", res.HeadBefore, res.HeadAfter)
+	if res.Source == "" {
+		res.Source = defaultSource()
+	}
+
+	tok := tokenOverride
+	if tok == "" {
+		tok = dispatchpost.ResolveToken()
+	}
+	client, err := scoreboard.NewClient(tok)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop run: dispatch post skipped: %v\n", err)
+		return
+	}
+	if _, err := client.Post(ctx(), ch, res.Text(), res.Blocks()); err != nil {
+		fmt.Fprintf(stderr, "fak loop run: dispatch post failed: %v\n", err)
+		return
+	}
+	fmt.Fprintf(stderr, "fak loop run: dispatch result posted to %s\n", ch)
+}
+
 func loopUsage(w io.Writer) {
 	fmt.Fprint(w, `fak loop - durable long-running loop ledger
 
@@ -808,7 +882,7 @@ func loopUsage(w io.Writer) {
                   [--source NAME] [--principal ID] [--status STATUS]
                   [--reason CODE] [--summary TEXT] [--evidence KIND=REF]
                   [--metric NAME=INT64] [--json]
-  fak loop run --loop ID [--ledger FILE] [--source cron|launchd|task-scheduler] -- CMD [ARG...]
+  fak loop run --loop ID [--ledger FILE] [--source cron|launchd|task-scheduler] [--notify-slack] -- CMD [ARG...]
   fak loop status [--ledger FILE] [--json]
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
