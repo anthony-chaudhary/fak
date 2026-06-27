@@ -112,7 +112,8 @@ that the per-phase attribution (section 1) did not exist before #440.
 
 ## Provenance
 
-Host: AMD Ryzen 9 9950X (16C/32T), 272 GB RAM, Windows 11, `windows/amd64`,
+Host: AMD Ryzen 9 9950X (16C/32T), 256 GiB RAM (4×64 GiB DDR5; ≈253.6 GiB /
+272 GB usable after hardware-reserved), Windows 11, `windows/amd64`,
 Go 1.26.3, fak v0.34.0. Model: `Qwen3.6-27B-Q4_K_M.gguf` (16.5 GB, 851 tensors).
 Measured 2026-06-26 via `modelbench -lean -load-only -load-profile`. Raw reports
 from the commands in [Reproduce](#reproduce).

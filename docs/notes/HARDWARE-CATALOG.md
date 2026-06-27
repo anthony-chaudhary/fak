@@ -20,7 +20,7 @@ Track all benchmark machines with full specs, onboarding procedures, and baselin
 
 - **CPU**: AMD Ryzen 9 9950X — 16 cores / 32 threads, x86_64, AVX-512
 - **GPU**: AMD Radeon RX 7600 (8 GB, Vulkan 1.4)
-- **RAM**: 256 GB
+- **RAM**: 256 GiB physical (4×64 GiB DDR5); ≈253.6 GiB / 272 GB usable after hardware-reserved
 - **OS**: Windows 11 (native Vulkan)
 - **Status**: ✅ Active
 - **Benchmarks**:
