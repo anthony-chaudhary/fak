@@ -3,7 +3,7 @@ title: "Structured-output decoding for schema-valid tool-call candidates"
 description: "Research for #907: a current guided-decoding SOTA readout, a field map from every structured-output surface (OpenAI response_format, vLLM/SGLang guided fields, Anthropic/MCP tool schema, fak Grammar) onto one canonical internal constraint shape, what fak forwards in ride mode vs owns natively, and how constrained candidates still reconcile with whole-turn adjudication."
 date: 2026-06-26
 issue: 907
-status: research + ride-mode passthrough wired (internal/gateway); native sampler is #929
+status: research + ride-mode passthrough wired (internal/gateway) + native sampler sink shipped (internal/model, #929); the schema→token compiler is the remaining follow-on
 ---
 
 # Structured-output decoding for schema-valid tool-call candidates (#907)
@@ -117,17 +117,25 @@ gap for regex/EBNF-only constraints.
 On the in-kernel reference engine (`internal/model`) there is no upstream to
 forward to — the decode is fak's own greedy/argmax over post-head logits. To make
 the *same* `response_format` carrier enforceable there, fak owns the sampler hook.
-That is filed as **#929** (the issue's "implementation issue for the first minimal
-sampler constraint"), smallest-first:
+That shipped as **#929** (the issue's "implementation issue for the first minimal
+sampler constraint") in `internal/model/constraint.go`, smallest-first:
 
-1. a **logit-bias mask** at the sampler boundary (the `SampleParams.LogitBias`
-   carrier already arrives; only the in-kernel sink is missing), then
-2. a **JSON-schema / grammar logit mask** behind a feature flag, compiling the
-   `oneOf`-of-tools shape above.
+1. a **logit-bias mask** at the sampler boundary — `DecodeConstraint.Bias` applies
+   the per-request `SampleParams.LogitBias` carrier (clamped to ±100) before argmax;
+   this is the in-kernel sink the carrier was already threading to, then
+2. a **JSON-schema / grammar logit mask** behind the `FAK_NATIVE_GUIDED_DECODE`
+   feature flag (default OFF) — the injected `LogitMask` seam (`AllowedSetMask` /
+   `StepMask`) a higher layer fills with the compiled `oneOf`-of-tools shape above;
+   `internal/model` stays tier-1 and never imports `internal/grammar`.
 
-The load-bearing acceptance criterion is **bit-exact-off**: with no constraint
-set, the in-kernel decode stays token-identical (`max|Δ| = 0`) to today's greedy
-path — the hook is a proven no-op on the unconstrained path. Full criteria in #929.
+The load-bearing acceptance criterion, **bit-exact-off**, holds: with no constraint
+set, `GenerateConstrained` is token-identical (`max|Δ| = 0`) to today's greedy
+`Session.Generate` — the hook is a proven no-op on the unconstrained path (witness:
+`internal/model/constraint_test.go`). The remaining follow-on is the tokenizer-aware
+compiler that lowers a `grammar.Grammar` `oneOf`-of-tools schema (deduped once per
+fleet via `grammar.Rung`) to those per-step token masks — the `[STUB]` tracked in
+CLAIMS.md; #929 shipped the sampler sink + the concrete mask primitives, not the
+schema→token compiler.
 
 ## How constrained candidates reconcile with whole-turn adjudication
 
@@ -154,8 +162,8 @@ rule, unchanged by this work:
   `internal/agent` that #907 connected to the gateway.
 - **#649** — grammar / message-datatype work.
 - **#338 / #313** — grammar / repair demos.
-- **#929** — the native sampler implementation issue (logit-bias first, schema
-  mask flagged, bit-exact-off).
+- **#929** — the native sampler implementation issue, shipped (logit-bias first,
+  schema mask flagged behind `FAK_NATIVE_GUIDED_DECODE`, bit-exact-off).
 
 ## References (code)
 
@@ -168,4 +176,7 @@ rule, unchanged by this work:
   `internal/agent/stream.go` — the `response_format` / `logit_bias` carrier onto
   the OpenAI/vLLM/SGLang wire.
 - `internal/grammar/grammar.go` — the canonical per-tool descriptor.
-- `internal/model` — the in-kernel greedy decode boundary (#929's home).
+- `internal/model` — the in-kernel greedy decode boundary (#929's home);
+  `constraint.go` is the shipped sampler sink (`DecodeConstraint` / `LogitMask` /
+  `GenerateConstrained`), `constraint_test.go` the bit-exact-off + active-bias +
+  flagged-mask witnesses.
