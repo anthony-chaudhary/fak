@@ -92,28 +92,14 @@ func BuildDeepSWERawFakContract(in DeepSWERawFakContractInput) DeepSWERawFakCont
 	taskIDs, dist := smokeTaskSelection(in.Dataset)
 	rawPreds := joinPath(in.RawOutputDir, "predictions.json")
 	fakPreds := joinPath(in.FakOutputDir, "predictions.json")
-	arms := []SmokeArm{
-		{
-			Name:            "raw-deepswe",
-			Harness:         "deepswe-r2e-gym-raw",
-			Model:           in.Model,
-			Command:         in.RawCommand,
-			OutputDir:       in.RawOutputDir,
-			PredictionsPath: rawPreds,
-			EvalRunID:       "deepswe-raw-smoke",
-			EvalCommand:     EvalCommandHint(rawPreds, "deepswe-raw-smoke", in.MaxWorkers),
-		},
-		{
-			Name:            "fak-deepswe",
-			Harness:         "deepswe-r2e-gym-through-fak-gateway",
-			Model:           in.Model,
-			Command:         in.FakCommand,
-			OutputDir:       in.FakOutputDir,
-			PredictionsPath: fakPreds,
-			EvalRunID:       "deepswe-fak-smoke",
-			EvalCommand:     EvalCommandHint(fakPreds, "deepswe-fak-smoke", in.MaxWorkers),
-		},
-	}
+	arms := buildTwoArms(in.Model, in.RawCommand, in.FakCommand, in.RawOutputDir, in.FakOutputDir, rawPreds, fakPreds, in.MaxWorkers, twoArmNames{
+		RawName:    "raw-deepswe",
+		RawHarness: "deepswe-r2e-gym-raw",
+		RawEvalID:  "deepswe-raw-smoke",
+		FakName:    "fak-deepswe",
+		FakHarness: "deepswe-r2e-gym-through-fak-gateway",
+		FakEvalID:  "deepswe-fak-smoke",
+	})
 	gates := []SmokeGate{
 		{Name: "fixed_task_ids", OK: len(taskIDs) > 0, Detail: fmt.Sprintf("%d task ids selected", len(taskIDs))},
 		{Name: "same_task_ids", OK: true, Detail: "raw and fak arms consume the same selected task id list"},
@@ -222,12 +208,7 @@ func RenderDeepSWERawFakContractMarkdown(c DeepSWERawFakContract) string {
 	fmt.Fprintf(&b, "- Max steps: `%d`\n", c.Budget.MaxSteps)
 	fmt.Fprintf(&b, "- Timeout: `%s`\n\n", c.Budget.Timeout)
 
-	fmt.Fprintf(&b, "| Arm | Harness | Model | Predictions | Eval run id |\n")
-	fmt.Fprintf(&b, "|---|---|---|---|---|\n")
-	for _, arm := range c.Arms {
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | `%s` |\n",
-			mdCell(arm.Name), mdCell(arm.Harness), mdCell(arm.Model), mdCell(arm.PredictionsPath), mdCell(arm.EvalRunID))
-	}
+	renderSmokeArmsTable(&b, c.Arms)
 	fmt.Fprintf(&b, "\n## Compare Evidence Link\n\n")
 	fmt.Fprintf(&b, "- Required: `%t`\n", c.CompareEvidenceLink.Required)
 	fmt.Fprintf(&b, "- Predictions: `%s`\n", strings.Join(c.CompareEvidenceLink.Predictions, "`, `"))
@@ -236,20 +217,9 @@ func RenderDeepSWERawFakContractMarkdown(c DeepSWERawFakContract) string {
 	fmt.Fprintf(&b, "- fak evidence: `%s`\n", strings.Join(c.CompareEvidenceLink.FakEvidence, "`, `"))
 	fmt.Fprintf(&b, "- Join keys: `%s`\n", strings.Join(c.CompareEvidenceLink.JoinKeys, "`, `"))
 	fmt.Fprintf(&b, "- Detail: %s\n", c.CompareEvidenceLink.Detail)
-	fmt.Fprintf(&b, "\n## Gates\n\n")
-	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
-	fmt.Fprintf(&b, "|---|:---:|---|\n")
-	for _, gate := range c.Gates {
-		mark := "no"
-		if gate.OK {
-			mark = "yes"
-		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", mdCell(gate.Name), mark, mdCell(gate.Detail))
-	}
-	fmt.Fprintf(&b, "\n## Required Before Any Result Claim\n\n")
-	for _, req := range c.RequiredBeforeClaim {
-		fmt.Fprintf(&b, "- %s\n", req)
-	}
+	fmt.Fprintf(&b, "\n")
+	renderSmokeGatesTable(&b, c.Gates)
+	renderRequiredBeforeClaim(&b, c.RequiredBeforeClaim)
 	return b.String()
 }
 

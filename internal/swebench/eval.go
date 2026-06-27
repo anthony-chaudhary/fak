@@ -199,53 +199,68 @@ func parseEvalReport(path string) (resolved, total int, ids []string, ok bool) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return 0, 0, nil, false
 	}
-	for _, k := range []string{"resolved_ids", "resolved_instances", "resolved"} {
-		if raw, present := m[k]; present {
-			var arr []string
-			if json.Unmarshal(raw, &arr) == nil {
-				ids = arr
-				resolved = len(arr)
-				ok = true
-				break
-			}
-			var n int
-			if json.Unmarshal(raw, &n) == nil {
-				resolved = n
-				ok = true
-				break
-			}
-		}
+	if arr, n, found := firstRawCount(m, "resolved_ids", "resolved_instances", "resolved"); found {
+		ids = arr
+		resolved = n
+		ok = true
 	}
 	// Denominator, mirroring bench's _count_report exactly:
 	//   graded_total = report["total_instances"] or (len(resolved) + len(unresolved))
 	// We do NOT use submitted_instances (it can exceed resolved+unresolved) and we
 	// do NOT fabricate total=resolved — an absent total stays 0 so the caller's
 	// `if Total > 0` guard keeps the rate at an honest 0%, never a false 100%.
-	for _, k := range []string{"total_instances", "total"} {
-		if raw, present := m[k]; present {
-			var n int
-			if json.Unmarshal(raw, &n) == nil {
-				total = n
-				break
-			}
-		}
+	if n, found := firstRawInt(m, "total_instances", "total"); found {
+		total = n
 	}
 	if total == 0 {
 		unresolved := 0
-		for _, k := range []string{"unresolved_ids", "unresolved_instances"} {
-			if raw, present := m[k]; present {
-				var arr []string
-				if json.Unmarshal(raw, &arr) == nil {
-					unresolved = len(arr)
-					break
-				}
-			}
+		if _, n, found := firstRawCount(m, "unresolved_ids", "unresolved_instances"); found {
+			unresolved = n
 		}
 		if resolved+unresolved > 0 {
 			total = resolved + unresolved
 		}
 	}
 	return resolved, total, ids, ok
+}
+
+// firstRawCount scans keys in order and returns the first present value as a
+// (slice, count) pair. A value that decodes as a JSON string-array yields the
+// array and its length; one that decodes as a bare int yields a nil slice and
+// that int. found is false when no listed key is present and decodable.
+func firstRawCount(m map[string]json.RawMessage, keys ...string) (ids []string, count int, found bool) {
+	for _, k := range keys {
+		raw, present := m[k]
+		if !present {
+			continue
+		}
+		var arr []string
+		if json.Unmarshal(raw, &arr) == nil {
+			return arr, len(arr), true
+		}
+		var n int
+		if json.Unmarshal(raw, &n) == nil {
+			return nil, n, true
+		}
+	}
+	return nil, 0, false
+}
+
+// firstRawInt scans keys in order and returns the first present value that
+// decodes as a bare int. found is false when no listed key is present and
+// decodable.
+func firstRawInt(m map[string]json.RawMessage, keys ...string) (int, bool) {
+	for _, k := range keys {
+		raw, present := m[k]
+		if !present {
+			continue
+		}
+		var n int
+		if json.Unmarshal(raw, &n) == nil {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // EvalCommandHint returns the copy-pasteable harness command for a predictions

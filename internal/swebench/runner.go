@@ -113,16 +113,10 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		return nil, fmt.Errorf("mkdir output: %w", err)
 	}
 
-	// Load instances.
-	d, _, err := loadSwebenchInstances(cfg.Difficulty, cfg.DatasetPath)
+	// Load, filter, and cap the instance set.
+	d, err := loadFilterLimit(cfg.Difficulty, cfg.DatasetPath, cfg.Filter, cfg.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("load instances: %w", err)
-	}
-
-	// Apply filter.
-	d = applyFilter(d, cfg.Filter)
-	if cfg.Limit > 0 && cfg.Limit < d.Len() {
-		d = d.Limit(cfg.Limit)
+		return nil, err
 	}
 
 	// Select runner strategy.

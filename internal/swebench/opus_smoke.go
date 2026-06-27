@@ -84,28 +84,14 @@ func BuildOpusSmokeContract(in OpusSmokeContractInput) OpusSmokeContract {
 	taskIDs, dist := smokeTaskSelection(in.Dataset)
 	rawPreds := joinPath(in.RawOutputDir, "predictions.json")
 	fakPreds := joinPath(in.FakOutputDir, "predictions.json")
-	arms := []SmokeArm{
-		{
-			Name:            "raw-opus",
-			Harness:         "benchmark-native-or-raw-agent-scaffold",
-			Model:           in.Model,
-			Command:         in.RawCommand,
-			OutputDir:       in.RawOutputDir,
-			PredictionsPath: rawPreds,
-			EvalRunID:       "swebench-opus-raw-smoke",
-			EvalCommand:     EvalCommandHint(rawPreds, "swebench-opus-raw-smoke", in.MaxWorkers),
-		},
-		{
-			Name:            "fak-opus",
-			Harness:         "fak-gateway-fleet-runner",
-			Model:           in.Model,
-			Command:         in.FakCommand,
-			OutputDir:       in.FakOutputDir,
-			PredictionsPath: fakPreds,
-			EvalRunID:       "swebench-opus-fak-smoke",
-			EvalCommand:     EvalCommandHint(fakPreds, "swebench-opus-fak-smoke", in.MaxWorkers),
-		},
-	}
+	arms := buildTwoArms(in.Model, in.RawCommand, in.FakCommand, in.RawOutputDir, in.FakOutputDir, rawPreds, fakPreds, in.MaxWorkers, twoArmNames{
+		RawName:    "raw-opus",
+		RawHarness: "benchmark-native-or-raw-agent-scaffold",
+		RawEvalID:  "swebench-opus-raw-smoke",
+		FakName:    "fak-opus",
+		FakHarness: "fak-gateway-fleet-runner",
+		FakEvalID:  "swebench-opus-fak-smoke",
+	})
 	gates := []SmokeGate{
 		{Name: "fixed_task_ids", OK: len(taskIDs) > 0, Detail: fmt.Sprintf("%d task ids selected", len(taskIDs))},
 		{Name: "same_task_ids", OK: true, Detail: "raw and fak arms consume the same selected task id list"},
@@ -178,12 +164,7 @@ func RenderOpusSmokeContractMarkdown(c OpusSmokeContract) string {
 	fmt.Fprintf(&b, "- Tasks: `%d`\n", len(c.TaskSelection.TaskIDs))
 	fmt.Fprintf(&b, "- Same task ids: `%t`\n\n", c.TaskSelection.SameTaskIDs)
 
-	fmt.Fprintf(&b, "| Arm | Harness | Model | Predictions | Eval run id |\n")
-	fmt.Fprintf(&b, "|---|---|---|---|---|\n")
-	for _, arm := range c.Arms {
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | `%s` |\n",
-			mdCell(arm.Name), mdCell(arm.Harness), mdCell(arm.Model), mdCell(arm.PredictionsPath), mdCell(arm.EvalRunID))
-	}
+	renderSmokeArmsTable(&b, c.Arms)
 	fmt.Fprintf(&b, "\n## Compare Evidence Link\n\n")
 	fmt.Fprintf(&b, "- Required: `%t`\n", c.CompareEvidenceLink.Required)
 	fmt.Fprintf(&b, "- Predictions: `%s`\n", strings.Join(c.CompareEvidenceLink.Predictions, "`, `"))
@@ -192,20 +173,9 @@ func RenderOpusSmokeContractMarkdown(c OpusSmokeContract) string {
 	fmt.Fprintf(&b, "- fak evidence: `%s`\n", strings.Join(c.CompareEvidenceLink.FakEvidence, "`, `"))
 	fmt.Fprintf(&b, "- Join keys: `%s`\n", strings.Join(c.CompareEvidenceLink.JoinKeys, "`, `"))
 	fmt.Fprintf(&b, "- Detail: %s\n", c.CompareEvidenceLink.Detail)
-	fmt.Fprintf(&b, "\n## Gates\n\n")
-	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
-	fmt.Fprintf(&b, "|---|:---:|---|\n")
-	for _, gate := range c.Gates {
-		mark := "no"
-		if gate.OK {
-			mark = "yes"
-		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", mdCell(gate.Name), mark, mdCell(gate.Detail))
-	}
-	fmt.Fprintf(&b, "\n## Required Before Any Result Claim\n\n")
-	for _, req := range c.RequiredBeforeClaim {
-		fmt.Fprintf(&b, "- %s\n", req)
-	}
+	fmt.Fprintf(&b, "\n")
+	renderSmokeGatesTable(&b, c.Gates)
+	renderRequiredBeforeClaim(&b, c.RequiredBeforeClaim)
 	return b.String()
 }
 

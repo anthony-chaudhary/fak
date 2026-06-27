@@ -57,13 +57,9 @@ func RunComparison(ctx context.Context, cfg CompareConfig) (*ComparisonRun, erro
 	}
 
 	// Load the instance set once (both runners use the same subset).
-	d, _, err := loadSwebenchInstances(cfg.Difficulty, cfg.DatasetPath)
+	d, err := loadFilterLimit(cfg.Difficulty, cfg.DatasetPath, cfg.Filter, cfg.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("load instances: %w", err)
-	}
-	d = applyFilter(d, cfg.Filter)
-	if cfg.Limit > 0 && cfg.Limit < d.Len() {
-		d = d.Limit(cfg.Limit)
+		return nil, err
 	}
 
 	// Build a ComparisonRun skeleton.
@@ -124,6 +120,21 @@ func RunComparison(ctx context.Context, cfg CompareConfig) (*ComparisonRun, erro
 	}
 
 	return cr, nil
+}
+
+// loadFilterLimit loads the SWE-bench instance set for the given difficulty map
+// and optional dataset path, applies the named filter, and caps it to limit
+// (limit <= 0 means no cap). It is the shared front of every run/compare entry.
+func loadFilterLimit(difficulty, datasetPath, filter string, limit int) (*Dataset, error) {
+	d, _, err := loadSwebenchInstances(difficulty, datasetPath)
+	if err != nil {
+		return nil, fmt.Errorf("load instances: %w", err)
+	}
+	d = applyFilter(d, filter)
+	if limit > 0 && limit < d.Len() {
+		d = d.Limit(limit)
+	}
+	return d, nil
 }
 
 // buildRunConfig constructs a RunConfig for a single runner within a comparison.
