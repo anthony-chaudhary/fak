@@ -35,6 +35,7 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	window := fs.Int("window", cadencereport.DefaultWindowDays, "trailing window (days) the work-done dimension counts over")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
 	timeout := fs.Int("timeout", 300, "per-sub-tool timeout seconds")
+	scoresFrom := fs.String("scores-from", "", "read a scorecard_control_pane.py JSON payload (file path, or '-' for stdin) for the SCORES dimension instead of re-running the ~4-minute pane")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -61,7 +62,16 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	}
 	commit := cadencereport.HeadCommit(root)
 
-	scores, work, releases := cadencereport.Collect(root, "", time.Duration(*timeout)*time.Second, *window)
+	var scores cadencereport.Scores
+	var work cadencereport.Work
+	var releases cadencereport.Releases
+	if *scoresFrom != "" {
+		// Use the captured pane payload for SCORES; work + releases still run live.
+		s := cadencereport.InterpretScoresFromFile(*scoresFrom, os.Stdin)
+		scores, work, releases = cadencereport.CollectWithScores(root, "", s, time.Duration(*timeout)*time.Second, *window)
+	} else {
+		scores, work, releases = cadencereport.Collect(root, "", time.Duration(*timeout)*time.Second, *window)
+	}
 	report := cadencereport.Fold(scores, work, releases, cadencereport.FoldOpts{
 		Workspace:   root,
 		Commit:      commit,
