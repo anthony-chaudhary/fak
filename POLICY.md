@@ -71,7 +71,7 @@ through?"* before deploying.
 
 | Field | Meaning |
 |---|---|
-| `version` | Schema tag. Omit it (current is assumed) or set `fak-policy/v1`. A different **major** (e.g. `fak-policy/v2`) is refused; a newer v1 **minor** — written `fak-policy/v1.x`, e.g. `fak-policy/v1.3` — is forward-accepted, so an older binary tolerates a newer-minor manifest. |
+| `version` | Schema tag. Omit it (current is assumed) or set `fak-policy/v1`. A different **major** (e.g. `fak-policy/v2`) is refused; a newer v1 **minor** — written `fak-policy/v1.x`, e.g. `fak-policy/v1.3`, and matched by the `fak-policy/v1` prefix — is forward-accepted, so any binary that speaks v1 tolerates any v1-minor manifest (there is no per-minor support matrix). |
 | `posture` | Default-deny posture. Omit it or set `fail_closed` for the normal floor. Set `admit_and_log` only for unattended/batch runs that should admit low-risk read-shaped `DEFAULT_DENY` calls while logging `would_deny=DEFAULT_DENY`. |
 | `allow` | Tool names affirmatively permitted (exact match). |
 | `allow_prefix` | A call is permitted if its tool name **starts with** any of these — the read-only family (`read_`, `get_`, `search_`, …). |
