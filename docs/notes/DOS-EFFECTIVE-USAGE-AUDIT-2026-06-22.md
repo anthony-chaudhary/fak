@@ -84,7 +84,7 @@ never tracked (the same class as the known-stale `tools/new_leaf.py` paths).
    updated to the real layout + a both-conventions regression test.
 
 **Measured effect:** `dos doctor` verifiability rose **27 → 33 of 50** commits; bindable
-ship-stamp coverage (`commit_stamp_doctor.py`) **56% → 66%**; `lanes.trees` 47 → 66; and
+ship-stamp coverage (`commit_stamp_doctor.py`) **56% → 66%** (of non-bookkeeping commits); `lanes.trees` 47 → 66; and
 `dos arbitrate` now refuses the real-path collision it previously admitted. No glob starts
 with `fak/` anymore. Build/vet green; the four affected Python test suites pass.
 
