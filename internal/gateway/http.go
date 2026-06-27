@@ -207,15 +207,16 @@ func (l *noDelayTCPListener) Accept() (net.Conn, error) {
 	return c, nil
 }
 
-// withAuth enforces the configured secret on every route except /healthz when
-// RequireKey is set. With no key configured it is a pass-through (drop-in, loopback
-// default). The comparison is constant-time over SHA-256 digests so the reject
-// latency leaks neither the secret's bytes nor its length — this is the gateway's
-// only auth primitive on a network-reachable security kernel.
+// withAuth enforces the configured secret on every route except the auth-exempt
+// set (authExempt) when RequireKey is set. With no key configured it is a
+// pass-through (drop-in, loopback default). The comparison is constant-time over
+// SHA-256 digests so the reject latency leaks neither the secret's bytes nor its
+// length — this is the gateway's only auth primitive on a network-reachable
+// security kernel.
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte(s.requireKey))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.requireKey != "" && r.URL.Path != "/healthz" {
+		if s.requireKey != "" && !authExempt(r) {
 			tok, ok := gatewayCredential(r)
 			got := sha256.Sum256([]byte(tok))
 			if !ok || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
@@ -225,6 +226,47 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// authExempt reports whether a request may skip the bearer check on an
+// authenticated gateway. Two cases:
+//
+//   - /healthz is ALWAYS exempt — it is the unauthenticated liveness probe a
+//     load balancer or a `fak claude-mac-fak --debug` preflight hits before it
+//     holds a token, and it carries only the planner/engine words (no counts).
+//   - /metrics and /debug/vars are exempt ONLY for a loopback caller. They are
+//     read-only observability surfaces (Prometheus scrape + expvar diagnostics)
+//     that an operator clicks straight from the host or an SSH tunnel; gating
+//     them behind the bearer is what makes those panel links 401. A REMOTE
+//     caller still needs the token, so request counts, token volumes, the model
+//     id, and uptime are never exposed to the open internet — matching the
+//     conventional "metrics open on loopback, gated off-box" posture.
+func authExempt(r *http.Request) bool {
+	if r.URL.Path == "/healthz" {
+		return true
+	}
+	switch r.URL.Path {
+	case "/metrics", "/debug/vars":
+		return requestFromLoopback(r)
+	}
+	return false
+}
+
+// requestFromLoopback reports whether the request's peer is the loopback
+// interface, classifying by IP VALUE (net.ParseIP + IsLoopback) rather than a
+// string prefix so a spoofed RemoteAddr host cannot masquerade as local. An
+// unparseable RemoteAddr is treated as NOT loopback (fail closed). RemoteAddr is
+// the kernel-observed peer of the TCP connection, set by net/http — it is not a
+// client-supplied header (unlike X-Forwarded-For, which is deliberately ignored
+// here so a proxied header can never grant the exemption).
+func requestFromLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	host = strings.Trim(host, "[]")
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // gatewayCredential extracts the presented secret from any of the auth schemes a

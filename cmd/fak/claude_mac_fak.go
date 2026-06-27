@@ -420,11 +420,25 @@ func renderClaudeMacPreflight(h claudeMacHealth, v claudeMacDebugVars, gatewayUR
 	ageWord := inflightAgeLabel(v.Inference.InflightMaxAgeSeconds, v.Gateway.InflightRequests)
 	fmt.Fprintf(&b, "inflight %d%s\n", v.Gateway.InflightRequests, ageWord)
 	fmt.Fprintf(&b, "model %s  auth %s\n", blankDash(firstNonEmpty(model, h.Model, v.Gateway.Model)), blankDash(auth))
+	// metrics/vars are read-only observability endpoints. On an authenticated
+	// gateway they open WITHOUT a token from the gateway host itself (loopback
+	// exemption, internal/gateway authExempt), but a click from THIS box hits the
+	// remote IP and so needs the bearer — annotate that so a 401 reads as "send
+	// the token", not "the link is broken". The gateway-bearer note is only
+	// printed when auth is actually in force.
 	fmt.Fprintf(&b, "metrics: %s/metrics · %s/debug/vars", gatewayURL, gatewayURL)
-	if grafanaURL != "" {
-		fmt.Fprintf(&b, " · grafana %s", grafanaURL)
+	if auth == "gateway-bearer" {
+		fmt.Fprint(&b, "  (open on the gateway host; off-box needs the bearer)")
 	}
 	fmt.Fprintln(&b)
+	// Grafana is the OPTIONAL local dashboard stack (tools/grafana). The shipped
+	// default is http://localhost:3000, which is dead unless that stack is running
+	// on THIS box — printing it bare invites a connection-refused click. Show it
+	// only when the operator pointed it somewhere real, and label it as the local
+	// stack so the localhost host reads as intentional, not a misconfigured link.
+	if grafanaURL != "" && grafanaURL != defaultClaudeMacGrafana {
+		fmt.Fprintf(&b, "grafana (local stack): %s\n", grafanaURL)
+	}
 	// Legend: the panel is dense with infra acronyms a fresh operator can't decode on
 	// sight. Expand the ones that actually appear above so the panel is self-documenting
 	// rather than requiring the docs. Kept to two lines and printed every launch (it is

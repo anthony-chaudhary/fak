@@ -272,7 +272,8 @@ func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 		"cache-hit 0.88",
 		"inflight 2",
 		"auth gateway-bearer",
-		"grafana http://grafana.example",
+		"off-box needs the bearer",
+		"grafana (local stack): http://grafana.example",
 		"WARN: planner=mock",
 		"-> launching claude ...",
 	} {
@@ -282,6 +283,30 @@ func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 	}
 	if strings.Contains(out, "super-secret-test-key") || strings.Contains(out, "Bearer ") {
 		t.Fatalf("preflight leaked bearer material:\n%s", out)
+	}
+}
+
+// TestRenderClaudeMacPreflightLinkAnnotations pins the two link-honesty fixes:
+// the default (unreachable) Grafana URL is SUPPRESSED rather than printed as a
+// dead link, and the bearer-gated note is omitted when no auth is in force.
+func TestRenderClaudeMacPreflightLinkAnnotations(t *testing.T) {
+	var v claudeMacDebugVars
+	v.Gateway.VDSO = true
+
+	// Default Grafana + no auth: no grafana line, no bearer note.
+	out := renderClaudeMacPreflight(
+		claudeMacHealth{OK: true, Engine: "fak", Planner: "inkernel"},
+		v, "http://node.example:8080", "m", "none", defaultClaudeMacGrafana,
+	)
+	if strings.Contains(out, "grafana") {
+		t.Fatalf("default Grafana URL must be suppressed, not printed:\n%s", out)
+	}
+	if strings.Contains(out, "needs the bearer") {
+		t.Fatalf("bearer note must not show when auth is not gateway-bearer:\n%s", out)
+	}
+	// The metrics links themselves are always shown.
+	if !strings.Contains(out, "/metrics") || !strings.Contains(out, "/debug/vars") {
+		t.Fatalf("metrics/vars links must always be present:\n%s", out)
 	}
 }
 

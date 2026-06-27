@@ -130,9 +130,16 @@ $ curl -s -o /dev/null -w '%{http_code}\n' -H 'x-api-key: …' http://host:8080/
 Notes:
 - The token is read from an **environment variable**, never a flag — it won't land in your
   shell history or the process arg list.
-- Auth also covers `/metrics`, `/debug/vars`, and the `/v1/fak/*` routes, so a hardened
-  process doesn't serve its internals open. Confirm with `gateway.auth_required: true` in
-  the `/debug/vars` snapshot.
+- Auth covers the `/v1/fak/*` routes and every inference surface, so a hardened process
+  doesn't serve its internals open. Confirm with `gateway.auth_required: true` in the
+  `/debug/vars` snapshot.
+- `/metrics` and `/debug/vars` are the one exception: they are **loopback-exempt**. A
+  request from `127.0.0.1`/`::1` (the gateway host itself, or an SSH tunnel) reaches them
+  without a token so a panel/dashboard link opens cleanly on-box; a request from any other
+  peer still requires the bearer, so the counters, model id, and uptime are never exposed
+  off-box. The peer is classified by the connection's actual remote IP, not a client header
+  (`X-Forwarded-For` is ignored), so a proxied header cannot forge the exemption. Keep
+  `/metrics` behind your reverse proxy if you scrape it across hosts.
 - `/healthz` is intentionally unauthenticated and reveals only `{engine, model, ok}` — no
   secrets.
 

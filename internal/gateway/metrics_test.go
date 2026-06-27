@@ -525,16 +525,31 @@ func TestMetricsEndpointUsesGatewayAuth(t *testing.T) {
 		return srv
 	}
 	srv := abiResetTestServer()
+	h := srv.Handler()
+
+	// A REMOTE peer with no token is still gated (counters stay off-box). Driven
+	// through the Handler with a non-loopback RemoteAddr so the remote arm of the
+	// loopback exemption is exercised — httptest.NewServer only yields a loopback
+	// client, which the new posture deliberately lets through (see below).
+	rem := httptest.NewRecorder()
+	rr := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rr.RemoteAddr = "203.0.113.7:40000"
+	h.ServeHTTP(rem, rr)
+	if rem.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /metrics from a remote peer status = %d, want 401", rem.Code)
+	}
+
+	// A loopback peer with no token IS allowed: /metrics is a read-only scrape
+	// surface an operator opens straight from the gateway host.
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-
 	r, err := http.Get(ts.URL + "/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Body.Close()
-	if r.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated /metrics status = %d, want 401", r.StatusCode)
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("unauthenticated /metrics from loopback status = %d, want 200 (loopback-exempt)", r.StatusCode)
 	}
 
 	text := getMetrics(t, ts.URL+"/metrics", "Bearer sekret")
@@ -602,16 +617,31 @@ func TestDebugVarsEndpointExposesRuntimeGatewayKernelAndMetrics(t *testing.T) {
 func TestDebugVarsEndpointUsesGatewayAuth(t *testing.T) {
 	srv := newTestServer(t)
 	srv.requireKey = "sekret"
+	h := srv.Handler()
+
+	// A REMOTE peer with no token is still gated (the expvar diagnostics carry
+	// counts/model id/uptime and must not leak off-box). Driven through the
+	// Handler with a non-loopback RemoteAddr.
+	rem := httptest.NewRecorder()
+	rr := httptest.NewRequest(http.MethodGet, "/debug/vars", nil)
+	rr.RemoteAddr = "203.0.113.7:40000"
+	h.ServeHTTP(rem, rr)
+	if rem.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /debug/vars from a remote peer status = %d, want 401", rem.Code)
+	}
+
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
+	// A loopback peer with no token IS allowed (an operator opens the panel link
+	// straight from the gateway host).
 	r, err := http.Get(ts.URL + "/debug/vars")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Body.Close()
-	if r.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated /debug/vars status = %d, want 401", r.StatusCode)
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("unauthenticated /debug/vars from loopback status = %d, want 200 (loopback-exempt)", r.StatusCode)
 	}
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/debug/vars", nil)

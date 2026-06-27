@@ -614,6 +614,60 @@ func TestHTTPAuth(t *testing.T) {
 	rh.Body.Close()
 }
 
+// TestMetricsAndVarsLoopbackExempt pins the auth posture for the read-only
+// observability surface: on an authenticated gateway /metrics and /debug/vars
+// are reachable WITHOUT a token from loopback (so a panel link opens from the
+// host / an SSH tunnel) but still require the bearer from a remote peer (so the
+// counters are never exposed off-box). Driven through the real Handler so the
+// withAuth middleware is exercised, not bypassed.
+func TestMetricsAndVarsLoopbackExempt(t *testing.T) {
+	srv, err := New(Config{EngineID: "test", Model: "m", RequireKey: "sekret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
+
+	for _, path := range []string{"/metrics", "/debug/vars"} {
+		// Loopback peer, no token -> allowed.
+		loop := httptest.NewRecorder()
+		rl := httptest.NewRequest("GET", path, nil)
+		rl.RemoteAddr = "127.0.0.1:54321"
+		h.ServeHTTP(loop, rl)
+		if loop.Code == http.StatusUnauthorized {
+			t.Errorf("%s from loopback with no token must be allowed, got 401", path)
+		}
+
+		// Remote peer, no token -> still 401.
+		rem := httptest.NewRecorder()
+		rr := httptest.NewRequest("GET", path, nil)
+		rr.RemoteAddr = "203.0.113.7:40000"
+		h.ServeHTTP(rem, rr)
+		if rem.Code != http.StatusUnauthorized {
+			t.Errorf("%s from a remote peer with no token must be 401, got %d", path, rem.Code)
+		}
+
+		// Remote peer WITH the bearer -> allowed.
+		ok := httptest.NewRecorder()
+		ra := httptest.NewRequest("GET", path, nil)
+		ra.RemoteAddr = "203.0.113.7:40001"
+		ra.Header.Set("Authorization", "Bearer sekret")
+		h.ServeHTTP(ok, ra)
+		if ok.Code == http.StatusUnauthorized {
+			t.Errorf("%s from a remote peer with the bearer must be allowed, got 401", path)
+		}
+	}
+
+	// A non-exempt route from loopback still needs the token (the exemption is
+	// scoped to the two observability paths, not "anything from localhost").
+	guarded := httptest.NewRecorder()
+	rg := httptest.NewRequest("GET", "/v1/models", nil)
+	rg.RemoteAddr = "127.0.0.1:54322"
+	h.ServeHTTP(guarded, rg)
+	if guarded.Code != http.StatusUnauthorized {
+		t.Errorf("/v1/models from loopback with no token must still be 401, got %d", guarded.Code)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // HTTP — the /v1/chat/completions adjudication proxy.
 // ---------------------------------------------------------------------------
