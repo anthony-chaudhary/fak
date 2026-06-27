@@ -56,6 +56,12 @@ EXEMPT_FILES = {
     "tools/check_brand_consistency.py",          # this file's own docstring examples
     "tools/check_brand_consistency_test.py",     # the test's synthetic samples
     "tools/gen_structured_data.py",              # emits alternateName/keywords lists
+    # The Go twin of this checker (internal/hooks BRAND_CONSISTENCY gate) + its parity test
+    # carry the SAME synthetic retired-descriptor samples, so they are exempt here too — both
+    # checkers must agree, and neither should flag the other's fixtures. Kept in lockstep with
+    # brandExemptFiles in internal/hooks/gate_brandconsistency.go.
+    "internal/hooks/gate_brandconsistency.go",       # the Go gate's own docstring/regex source
+    "internal/hooks/gate_brandconsistency_test.go",  # the Go parity test's golden vectors
 }
 
 # Reader-facing text surfaces only.
