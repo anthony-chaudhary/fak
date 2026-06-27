@@ -83,7 +83,7 @@ func cmdGuard(argv []string) {
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
 	provider := fs.String("provider", "", "upstream wire the gateway proxies to: anthropic|openai|gemini|xai (default: auto-detected from the agent name — claude->anthropic, codex/opencode->openai — else anthropic)")
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
-	remoteServe := fs.String("remote-serve", "", "point the guarded turn's INFERENCE at a remote `fak serve` running on a lab box you chose (HOST or HOST:PORT, default port 8080). Forces the OpenAI-compatible wire and base URL http://HOST:PORT, so the dev turn runs on the lab GPU while the kernel still adjudicates locally. Mutually exclusive with --base-url; preflights GET /healthz and fails loud if the box is not serving.")
+	remoteServe := fs.String("remote-serve", "", "point the guarded turn's INFERENCE at a remote `fak serve` running on a lab box you chose (HOST or HOST:PORT, default port 8080). Forces the OpenAI-compatible wire and upstream base http://HOST:PORT/v1 (the /v1 fak serve serves its chat route under), so the dev turn runs on the lab GPU while the kernel still adjudicates locally. Mutually exclusive with --base-url; preflights GET /healthz AND /v1/models and fails loud if the box is not serving the /v1 surface.")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key. For --provider anthropic this is the explicit opt-IN to API billing (e.g. --api-key-env ANTHROPIC_API_KEY); the default is your Claude Pro/Max subscription via OAuth, even when ANTHROPIC_API_KEY is exported. For other providers the default forwards the client's own key (passthrough).")
 	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
@@ -711,20 +711,57 @@ func normalizeRemoteServe(operand string) (string, error) {
 	return "http://" + net.JoinHostPort(host, port), nil
 }
 
-// guardPreflightRemoteServe confirms a remote `fak serve` is actually answering before
-// guard binds its own gateway and execs the agent. A down box (not started, wrong port)
-// is the most common --remote-serve failure, and a 502 on the first real turn is a far
-// worse place to discover it than a one-line fail-loud here. It probes GET <base>/healthz
-// (the endpoint `fak serve` exposes) with a short timeout; any 2xx/3xx/4xx response means
-// the box is up (even a 401 proves a live gateway, like the witnessed /v1/models probe),
-// so only a connection-level failure is fatal.
+// guardOpenAIV1Base appends the "/v1" the OpenAI-compatible wire expects to a bare remote
+// base (http://HOST:PORT -> http://HOST:PORT/v1), so the proxy planner's
+// adapter.Endpoint(base, model) lands on the remote `fak serve`'s registered
+// /v1/chat/completions route instead of a 404'ing /chat/completions. It is the
+// upstream-base twin of guardEnvValue (which adds /v1 to the CHILD's OPENAI_BASE_URL).
+// Idempotent: a base that already ends in /v1 (e.g. an operator who typed the long-form
+// --base-url http://HOST:PORT/v1 — though --remote-serve and --base-url are mutually
+// exclusive, this keeps the helper safe to reuse) is returned unchanged. A trailing slash
+// is trimmed first so "http://host:8080/" yields "http://host:8080/v1", not ".../v1".
+func guardOpenAIV1Base(base string) string {
+	b := strings.TrimRight(strings.TrimSpace(base), "/")
+	if b == "" || strings.HasSuffix(b, "/v1") {
+		return b
+	}
+	return b + "/v1"
+}
+
+// guardPreflightRemoteServe confirms a remote `fak serve` is actually answering — and that
+// it exposes the OpenAI /v1 SURFACE the proxy hop will use — before guard binds its own
+// gateway and execs the agent. A down box (not started, wrong port) is the most common
+// --remote-serve failure, and a 404/502 on the first real turn is a far worse place to
+// discover it than a one-line fail-loud here.
+//
+// It probes two routes off the BARE base (http://HOST:PORT, no /v1):
+//
+//  1. GET <base>/healthz — the root liveness route `fak serve` exposes. Any HTTP response
+//     (even a 401) proves a live gateway; only a connection-level failure is fatal.
+//  2. GET <base>/v1/models — the OpenAI route `fak serve` registers ALONGSIDE
+//     /v1/chat/completions. This is the witness that the /v1 surface the proxy POSTs to is
+//     actually mounted: a clean 404 here means the box answers health but does NOT serve
+//     the /v1 routes (an older/mis-started serve, or not a fak serve at all), which is
+//     exactly the silent "health passes, chat 404s mid-session" trap. Any non-404 response
+//     (200, 401, 405) proves the route exists, so only a 404 — or a connection failure — is
+//     fatal.
 func guardPreflightRemoteServe(baseURL string) error {
+	base := strings.TrimRight(baseURL, "/")
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/healthz")
+	resp, err := client.Get(base + "/healthz")
 	if err != nil {
 		return err
 	}
 	_ = resp.Body.Close()
+	// Confirm the /v1 surface the proxy hop will use is mounted, not just root health.
+	mresp, merr := client.Get(base + "/v1/models")
+	if merr != nil {
+		return merr
+	}
+	_ = mresp.Body.Close()
+	if mresp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("box answers /healthz but /v1/models is 404 — it is not serving the OpenAI /v1 surface (start it with `fak serve --gguf <weights>`, or check it is a fak serve)")
+	}
 	return nil
 }
 
@@ -1088,10 +1125,20 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 	// --remote-serve pins the OpenAI-compatible wire and the box's base URL: a remote
 	// `fak serve` speaks the OpenAI routes the gateway proxies, and the caller has already
 	// validated that it does not conflict with --provider/--base-url.
+	//
+	// The base MUST carry the /v1 suffix the OpenAI wire appends "/chat/completions" to:
+	// the proxy planner POSTs adapter.Endpoint(BaseURL, model) = <base>/chat/completions,
+	// while `fak serve` registers its route at /v1/chat/completions. normalizeRemoteServe
+	// returns a bare http://HOST:PORT (so the /healthz preflight probes the ROOT health
+	// route, which is NOT under /v1), so we add /v1 HERE — symmetric with guardEnvValue,
+	// which adds /v1 only to the CHILD's OPENAI_BASE_URL. Without this the upstream proxy
+	// hop 404s on every real turn (the /healthz preflight passes regardless, so it would
+	// surface only mid-session). Idempotent: an operator base already ending in /v1 is
+	// left as-is.
 	remote := strings.TrimSpace(remoteServeBase) != ""
 	if remote {
 		providerFlag = "openai"
-		baseURLFlag = strings.TrimSpace(remoteServeBase)
+		baseURLFlag = guardOpenAIV1Base(strings.TrimSpace(remoteServeBase))
 	}
 	up, autodetected := resolveGuardProvider(providerFlag, agentName)
 	resolvedBase := strings.TrimSpace(baseURLFlag)

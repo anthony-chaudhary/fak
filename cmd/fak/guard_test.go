@@ -204,6 +204,28 @@ func TestNormalizeRemoteServe(t *testing.T) {
 	}
 }
 
+// guardOpenAIV1Base appends the /v1 the OpenAI wire needs to the proxy's upstream base,
+// idempotently. Without it the proxy POSTs <base>/chat/completions and fak serve's
+// /v1/chat/completions route 404s every turn.
+func TestGuardOpenAIV1Base(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"http://box:8080", "http://box:8080/v1"},     // bare base -> /v1 added
+		{"http://box:8080/", "http://box:8080/v1"},    // trailing slash trimmed, not doubled
+		{"http://box:8080/v1", "http://box:8080/v1"},  // already /v1 -> unchanged (idempotent)
+		{"http://box:8080/v1/", "http://box:8080/v1"}, // /v1 + slash -> trimmed, unchanged
+		{"  http://box:8080  ", "http://box:8080/v1"}, // trimmed
+		{"", ""}, // empty stays empty
+	}
+	for _, tc := range cases {
+		if got := guardOpenAIV1Base(tc.in); got != tc.want {
+			t.Errorf("guardOpenAIV1Base(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // --remote-serve must resolve to the SAME upstream the informal chain produced
 // (provider=openai, base=the box) AND inject OPENAI_BASE_URL carrying the /v1 the OpenAI
 // wire needs — the suffix whose absence is the documented 404 trap. This is the public
@@ -218,8 +240,13 @@ func TestResolveGuardUpstreamRemoteServe(t *testing.T) {
 	if us.provider != "openai" {
 		t.Errorf("remote-serve provider = %q, want openai (the wire fak serve exposes)", us.provider)
 	}
-	if us.baseURL != "http://labbox:8082" {
-		t.Errorf("remote-serve baseURL = %q, want http://labbox:8082", us.baseURL)
+	// The UPSTREAM proxy base MUST carry /v1: the proxy planner POSTs <base>/chat/completions,
+	// and `fak serve` registers /v1/chat/completions — so a bare http://labbox:8082 here 404s
+	// every real turn. /v1 is added in resolveGuardUpstream (the upstream-base twin of the
+	// child-env /v1 below), NOT in normalizeRemoteServe (which stays bare so the /healthz
+	// preflight probes the root). This assertion is the regression guard for that 404 trap.
+	if us.baseURL != "http://labbox:8082/v1" {
+		t.Errorf("remote-serve upstream baseURL = %q, want http://labbox:8082/v1 (the proxy hop 404s without /v1)", us.baseURL)
 	}
 	if !us.remoteServe {
 		t.Errorf("remoteServe flag = false, want true so the banner names the lab box")
