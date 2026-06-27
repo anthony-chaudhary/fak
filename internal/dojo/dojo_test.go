@@ -92,6 +92,9 @@ func TestFoldEmpty(t *testing.T) {
 	if r.OK || r.Finding != "dojo_empty" {
 		t.Fatalf("empty fold should be ACTION/dojo_empty, got ok=%v finding=%s", r.OK, r.Finding)
 	}
+	if r.Grade != gradeNA {
+		t.Fatalf("an empty fold measured nothing - grade should be %q not %q (vacuous A contradicts ok:false)", gradeNA, r.Grade)
+	}
 	if code, _ := CheckGate(r); code != 1 {
 		t.Fatalf("empty fold gate should fail, got %d", code)
 	}
@@ -106,6 +109,9 @@ func TestFoldAllUnmeasured(t *testing.T) {
 	if r.Finding != "dojo_unmeasured" || r.OK {
 		t.Fatalf("all-unmeasured should be ACTION/dojo_unmeasured, got ok=%v finding=%s", r.OK, r.Finding)
 	}
+	if r.Grade != gradeNA {
+		t.Fatalf("an all-unmeasured fold should grade %q not %q", gradeNA, r.Grade)
+	}
 	if r.Unmeasured != 2 || r.Measured != 0 {
 		t.Fatalf("counts wrong: measured=%d unmeasured=%d", r.Measured, r.Unmeasured)
 	}
@@ -115,7 +121,7 @@ func TestFoldRecordedWithOverClaimAdvisory(t *testing.T) {
 	eps := []Episode{
 		Score("s", pred("posture_accuracy", 1.0), obs(0.977, true), DefaultCalibBand()), // calibrated
 		Score("s", pred("cold_write_share", 0.85), obs(0.68, true), DefaultCalibBand()), // over-claim
-		Score("s", pred("warm_hit", 0.17), obs(0.30, true), DefaultCalibBand()),        // under-claim
+		Score("s", pred("warm_hit", 0.17), obs(0.30, true), DefaultCalibBand()),         // under-claim
 	}
 	r := Fold(eps, FoldOpts{Date: "2026-06-26", Commit: "abc123def456"})
 	if !r.OK || r.Finding != "dojo_recorded" {

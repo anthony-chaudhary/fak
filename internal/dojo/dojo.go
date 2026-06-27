@@ -266,7 +266,14 @@ func Fold(episodes []Episode, opts FoldOpts) Report {
 	if r.Measured > 0 {
 		r.MeanCalibErr = sumCE / float64(r.Measured)
 	}
-	r.Grade = DefaultCalibBand().grade(r.MeanCalibErr)
+	// A run that measured nothing has no calibration to grade - report n/a, not the
+	// vacuous "A" that grade(0.0) would give (which contradicts ok:false). Mirrors the
+	// per-episode gradeNA for an unmeasured episode.
+	if r.Measured == 0 {
+		r.Grade = gradeNA
+	} else {
+		r.Grade = DefaultCalibBand().grade(r.MeanCalibErr)
+	}
 
 	summary := fmt.Sprintf("%d lever(s), %d episode(s): %d calibrated, %d over-claim, %d under-claim, %d unmeasured; mean calib-err %.3f (grade %s)",
 		r.LeverCount, r.EpisodeCount, r.Calibrated, len(overs), len(unders), r.Unmeasured, r.MeanCalibErr, r.Grade)
