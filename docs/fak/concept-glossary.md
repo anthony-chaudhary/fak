@@ -85,14 +85,20 @@ Four planes, each a different question:
 - **gate** - one decision point INSIDE a guard. A gate is a POINT, not the system.
   The gates split by WHEN they fire:
   - **adjudicator** - a pre-call gate: inspects a tool call BEFORE dispatch, returns
-    Allow / Deny / Defer.
+    Allow / Deny / Defer (e.g. `residencyGate`, the rank-12 engine-residency
+    adjudicator registered in `internal/engine`).
   - **result admitter** - a post-call gate: inspects a tool RESULT after execution and
     admits / quarantines / transforms it (ctxmmu, normgate, secretgate).
   - **git-hook gate** - a commit-boundary check at git pre-commit / commit-msg
-    (`gate_brokenlink`, `gate_secretshape`, ...).
+    (`gate_brokenlink`, `gate_secretshape`, and the `internal/hooks` family
+    `gateFileAdmission` / `gateProvenanceLabel` / `gatePublicLeak`).
   - **promotion gate** - admits a cache entry to a shared tier by durability class
     (L3 promotion), distinct from **shipgate** which gates an RSI improvement to the
     codebase on witness-verified gain.
+  - **capability-floor gate** - a per-message floor on inter-agent channels
+    (`gateSend` / `gateRecv` in `internal/a2achan`): refuses a Send/Recv whose caps
+    do not advertise the channel right. A floor on a MESSAGE - NOT a tool-call
+    adjudicator and NOT a result admitter.
 
 - **trunk guard** vs **repo guard** vs **gitgate** - branch-state policy (refuse
   OFF_TRUNK), write-target policy (refuse writes outside the tree), and git-command
