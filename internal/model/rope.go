@@ -19,13 +19,7 @@ func invFreq(cfg Config, layer int) []float64 {
 	// HF: inv_freq[j] = 1 / theta^((2j)/dim) where dim is the rotated width. For full
 	// rotary dim==head_dim; for Qwen3.5/Qwen3-Next partial rotary the HF default-rope init
 	// uses dim = int(head_dim*partial_rotary_factor) (the rotary_dim), not head_dim.
-	denom := cfg.HeadDim
-	if cfg.IsQwen35Hybrid() || cfg.isMiniMax() {
-		// MiniMax-M3 (like Qwen3.5/Qwen3-Next) initializes inv_freq over the rotary_dim
-		// (= int(head_dim*partial_rotary_factor)), not the full head_dim: HF computes
-		// dim = int(head_dim*partial_rotary_factor) and inv_freq = 1/theta^(2j/dim).
-		denom = rotaryDim
-	}
+	denom := cfg.invFreqDenom()
 	inv := make([]float64, half)
 	for j := 0; j < half; j++ {
 		inv[j] = 1.0 / math.Pow(theta, float64(2*j)/float64(denom))
@@ -35,6 +29,21 @@ func invFreq(cfg Config, layer int) []float64 {
 	}
 	applyRopeScaling(cfg, inv)
 	return inv
+}
+
+// invFreqDenom is the denominator dim of the RoPE inv_freq init: inv[j] = 1/theta^(2j/denom).
+// Full rotary uses head_dim; partial-rotary (Qwen3.5/MiniMax) uses the rotary_dim; GLM-DSA /
+// DeepSeek-MLA uses qk_rope_head_dim (NOT cfg.HeadDim, which the GGUF sets from the larger MLA
+// latent attention.key_length). Centralized here so invFreq AND the cache key agree — a config
+// whose denom differs must never collide on a cached inv-freq table.
+func (c Config) invFreqDenom() int {
+	if c.IsQwen35Hybrid() || c.isMiniMax() {
+		return c.rotaryDim()
+	}
+	if c.isGLMMoeDsa() && c.QKRopeHeadDim > 0 {
+		return c.QKRopeHeadDim
+	}
+	return c.HeadDim
 }
 
 func (c Config) rotaryDim() int {
@@ -57,6 +66,7 @@ func (c Config) rotaryDim() int {
 type ropeInvKey struct {
 	headDim   int
 	rotaryDim int
+	denom     int // the inv_freq denominator (head_dim / rotary_dim / qk_rope_head_dim) — see invFreqDenom
 	thetaBits uint64
 	layer     int
 	// scaling axis: distinct scaling params must not collide in the cache. For Llama
@@ -91,6 +101,7 @@ func cachedInvFreq(cfg Config, layer int) []float64 {
 	key := ropeInvKey{
 		headDim:            cfg.HeadDim,
 		rotaryDim:          cfg.rotaryDim(),
+		denom:              cfg.invFreqDenom(),
 		thetaBits:          math.Float64bits(cfg.ropeThetaForLayer(layer)),
 		layer:              layer,
 		scaling:            cfg.RopeScaling,
