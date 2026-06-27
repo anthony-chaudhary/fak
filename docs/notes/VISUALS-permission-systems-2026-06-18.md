@@ -22,7 +22,7 @@ Sources:
 | # | Figure | Point |
 |---|---|---|
 | 35 | Permission options map | The bad alternatives are fatigue, broad authority, classifier miss risk, or no boundary; FAK/DOS is the executable floor. |
-| 36 | Deterministic risk coverage | FAK/DOS is 6/6 hard coverage; the next highest row is Codex sandboxing at 3/6. |
+| 36 | Deterministic risk coverage | FAK/DOS is 6/6 hard coverage; the next highest rows are Codex sandboxing at 3/6 (50.0%) and GitHub Copilot cloud agent at 2/6 (33.3%). |
 | 37 | Two-gate permission path | Tool calls and tool results are both admitted at the gateway boundary before the model host sees them. |
 | 38 | API-host bridge proof stack | The bridge is scope-bounded, executable proof: 7/7 source audit, 9/9 witness commands, 16/16 proof rollup, 35/35 verify-all. |
 
