@@ -169,7 +169,7 @@ The eraser sweep (A=50, T=30, same generated work) makes the fix one glance:
 |---:|---:|---:|---:|
 | 0%   | +323 | +323 | +323 |
 | 0.5% | +59  | +281 | +319 |
-| 1%   | **−28** | +242 | +313 |
+| 1%   | **−23** | +242 | +313 |
 | 5%   | −132 | +100 | +271 |
 | 10%  | −102 | +55  | +235 |
 
@@ -177,8 +177,12 @@ The **global** eraser is the only one that ever goes negative; the **resource**
 eraser keeps **97% of the no-write uplift even at a 1% write rate** (313 of 323) and
 is still strongly positive (+235) at **10%** writes. So the crossover the §4 title
 warns about is a property of the *coarse v0.1 eraser*, not of cross-agent sharing
-itself — the finer eraser pushes it out past any realistic fleet write rate. (Raw
-data: `experiments/fleet/eraser/`, summary `eraser-summary.csv`.)
+itself — the finer eraser pushes it out past any realistic fleet write rate.
+(The rows above are a representative slice of the full **0–70 % write-rate ladder**
+the sweep covers — regenerate the whole ladder, and check any single row against its
+raw per-cell measurement, with `wsl bash ./tools/eraser_sweep.sh`. It writes the
+per-cell JSON/CSV plus the rolled-up `eraser-summary.csv` under
+`experiments/fleet/eraser/` — generated locally, not committed.)
 
 (The right panel of the axes figure at the top of this section is the catalog-size
 law: per-agent uplift

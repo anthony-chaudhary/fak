@@ -54,7 +54,7 @@ batched and shared-prefix rows are **new** — and they are where the prior narr
 ## Axis 3 — batched throughput: llama.cpp dominates (the narrative correction)
 
 `MODEL-BATCHING-RESULTS.md` framed fak's multi-user batched decode (862 tok/s aggregate at
-B=512, "44.9× the naive-serial origin") as the throughput win for "the vLLM regime llama.cpp
+B=512, "44.9× the naive f32 serial baseline") as the throughput win for "the vLLM regime llama.cpp
 doesn't target," and **never measured llama.cpp's own batched decode.** It does batch — very
 well. `bench_llamacpp_batched.py` drives llama.cpp's low-level multi-sequence batch API (the
 same continuous-batching path `llama-server`'s parallel slots use):

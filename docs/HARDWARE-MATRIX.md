@@ -135,7 +135,7 @@ determinism check that proves the deterministic metrics are not arm64-specific.
 - **F16 parity** — Qwen2.5-1.5B f16 **36.6 tok/s** vs llama.cpp F16 34.3 (parity);
   SmolLM2-135M **~100–120 tok/s** (CUDA Graph).
 - **Batched multi-user decode curve** — SmolLM2-135M Q8 peaks at **862 agg tok/s** at
-  batch 512, **44.92×** over the naive baseline.
+  batch 512, **44.92×** over the naive f32 serial baseline.
   → [`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md)
 - **Cross-platform bit-exact determinism** — the RadixAttention deterministic fields
   reproduce **byte-for-byte on Windows x86_64** vs the Mac arm64 artifact (hit 86.7%,
