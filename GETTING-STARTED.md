@@ -337,10 +337,10 @@ not use `fak serve`, llama.cpp, Ollama, or an OpenAI-compatible upstream.
 
 ```bash
 go run ./cmd/fakchat \
-  -gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf \
-  -tok ~/.cache/fak-models/tokenizers/qwen3.6 \
-  -p "Say OK." \
-  -n 1
+  --gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf \
+  --tokenizer ~/.cache/fak-models/tokenizers/qwen3.6 \
+  --prompt "Say OK." \
+  --max-new 1
 ```
 
 On the witnessed M3 Pro run this loaded the model in about 75 s, peaked at about
