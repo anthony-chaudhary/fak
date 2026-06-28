@@ -62,6 +62,24 @@ type q4kTensor struct {
 // q4kRowBytes is the byte length of one resident row (nblk super-blocks).
 func (qt *q4kTensor) q4kRowBytes() int { return qt.nblk * q4kBlockBytes }
 
+// requireRawCPU is the #1067 legibility guardrail for the CPU Q4_K matmul entry points. Under
+// MetalQ4K with FAK_Q4K_FREE_CPU=1 (single residency), metalQ4KWeight drops qt.raw after a
+// successful GPU upload. Decode then takes the Metal GEMV, but the BATCHED PREFILL GEMM
+// (prefill_q4k.go's proj → q4kGemm, and the q4kGemmDispatch CPU fallback) is NOT Metal-routed —
+// so a multi-thousand-token prompt reaches the CPU q4kGemmRange* and reads the freed nil raw,
+// which previously died with a cryptic "slice bounds out of range [N:0]" deep in a parFor worker.
+// This turns that into a legible failure that names the misconfig and its two remedies: keep the
+// CPU copy (unset FAK_Q4K_FREE_CPU) or route the prefill GEMM through Metal. out>0 distinguishes a
+// real-but-freed weight from a degenerate empty tensor (which holds no rows to read either way).
+func (qt *q4kTensor) requireRawCPU(op string) {
+	if len(qt.raw) == 0 && qt.out > 0 {
+		panic(fmt.Sprintf("model: Q4_K %s on a freed CPU weight (out=%d in=%d): the resident raw "+
+			"Q4_K bytes were dropped after a Metal upload (FAK_Q4K_FREE_CPU=1) but a CPU Q4_K matmul "+
+			"ran — prefill is not GPU-routed for this weight. Unset FAK_Q4K_FREE_CPU to keep the CPU "+
+			"copy, or route the prefill GEMM through Metal (#1067).", op, qt.out, qt.in))
+	}
+}
+
 // q4kDequantSuperBlock writes the 256 weights of one 144-byte Q4_K super-block into dst
 // (len >= 256). It is ggufload.dequantQ4K factored to one super-block, so the resident
 // dequant is arithmetically identical to the loader's f32 reference path.
@@ -101,6 +119,7 @@ func q4kMatRows(qt *q4kTensor, x []float32) []float32 {
 }
 
 func q4kMatRowsInto(qt *q4kTensor, x, y []float32) {
+	qt.requireRawCPU("decode GEMV")
 	y = y[:qt.out]
 	if q4kSDOTEnabled() {
 		// int8 SDOT decode path (plan P2): the activation is quantized ONCE here (quantizeVecQ8)
@@ -173,6 +192,7 @@ func q4kGemm(qt *q4kTensor, X []float32, P int) []float32 {
 // q4kGemmInto is q4kGemm writing into a caller-provided Y (len >= P*out), the buffer-reuse
 // form matching qGemm8Into / matMulBatch's caller-alloc convention.
 func q4kGemmInto(qt *q4kTensor, X []float32, P int, Y []float32) {
+	qt.requireRawCPU("prefill GEMM")
 	out := qt.out
 	Y = Y[:P*out]
 	if q4kSDOTEnabled() {
