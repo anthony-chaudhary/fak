@@ -296,7 +296,13 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		model   string
 		finish  string
 	)
-	sc := bufio.NewScanner(resp.Body)
+	// Idle-read deadline: an upstream that opens the stream then goes silent (a transient
+	// overload / "API issue") fails in ≤streamStallTimeout() rather than blocking the
+	// scanner on resp.Body.Read until the whole-request Client.Timeout (600s under guard)
+	// fires. A healthy stream's steady deltas reset the window; only true silence trips it.
+	sr := newStallReader(resp.Body, streamStallTimeout())
+	defer sr.Close()
+	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
 	// scanner ceiling well past the 64 KiB default so a big chunk is never truncated.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -358,6 +364,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		}
 	}
 	if err := sc.Err(); err != nil {
+		if errors.Is(err, ErrUpstreamStalled) {
+			return nil, &UpstreamStalledError{Idle: streamStallTimeout(), Err: err}
+		}
 		return nil, fmt.Errorf("planner: %s: stream read: %w", call.adapter.Provider(), err)
 	}
 

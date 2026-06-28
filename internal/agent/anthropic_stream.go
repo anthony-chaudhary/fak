@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -101,7 +102,21 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "event-stream") {
 		return ErrStreamingUnsupported
 	}
-	return parseAnthropicSSE(resp.Body, onEvent)
+	// Wrap the body in an idle-read deadline so an upstream that opens the stream and then
+	// goes silent (a transient overload / "API issue") fails in ≤streamStallTimeout()
+	// instead of blocking parseAnthropicSSE on resp.Body.Read until the 600s whole-request
+	// Client.Timeout fires. A healthy stream's `ping`/keepalive/delta frames keep resetting
+	// the window, so only true silence trips it. Surface the trip as the typed
+	// UpstreamStalledError the gateway logs distinctly from a normal read failure.
+	sr := newStallReader(resp.Body, streamStallTimeout())
+	defer sr.Close()
+	if err := parseAnthropicSSE(sr, onEvent); err != nil {
+		if errors.Is(err, ErrUpstreamStalled) {
+			return &UpstreamStalledError{Idle: streamStallTimeout(), Err: err}
+		}
+		return err
+	}
+	return nil
 }
 
 // parseAnthropicSSE reads an Anthropic Messages SSE body and invokes onEvent once per
