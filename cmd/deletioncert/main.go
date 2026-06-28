@@ -240,6 +240,95 @@ func run(outPath string) error {
 		fmt.Printf("  VERIFY (journal rewrit)-> valid=false  (%s)\n", rr.Reason)
 	}
 
+	// ---- 8. The L3 page-key rung (#56): prove the span's backing L3 pages are gone ----
+	// The box cert above attests eviction from the LOCAL working set. The L3 rung adds the
+	// two facts the box cert never carried: the external L3 page-keys that backed the span,
+	// and a post-delete all-miss witness that those keys stopped resolving in the shared,
+	// multi-tenant pool. Control-path only: the witness is page-keys + presence bits, never
+	// page bytes (§6.5). Bound to the box cert by subject; reuses the box cert's Subject.
+	if err := proveL3DeletionRung(cert.Subject); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// proveL3DeletionRung mints and verifies the L3 page-key deletion rung (#56) over an
+// in-process gateway.MockL3Backend, then shows it FAILS CLOSED on a still-resident page,
+// a tampered key state, and an over-claim scope. It is the FAK-side gate for the rung —
+// no external L3 wire — bound to the box cert by subject.
+func proveL3DeletionRung(subject string) error {
+	pool := gateway.NewMockL3Backend()
+
+	// The evicted span was backed by a SET of external L3 pages; key each by its content
+	// address (the same content-addressing the real CAMA-complete store uses). In
+	// production these resolve from the span's Ref.Digest via
+	// l3region.L3RegionBackend.PageKeys; here ResolveL3PageKeys maps page Refs -> keys.
+	backing := []string{
+		"l3 working-set page backing the secret span [0]",
+		"l3 working-set page backing the secret span [1]",
+		"l3 working-set page backing the secret span [2]",
+	}
+	refs := make([]abi.Ref, 0, len(backing))
+	for _, c := range backing {
+		page := l3Page(c, abi.ScopeAgent)
+		pool.Set(page.Digest, []byte(c), gateway.L3PageMeta{Digest: page.Digest, Scope: page.Scope, OwnerTag: "tenant-A"})
+		refs = append(refs, page)
+	}
+	pageKeys := gateway.ResolveL3PageKeys(refs)
+
+	// OP_DELETE the backing pages (the store's fire-and-forget delete the rung rides above).
+	for _, k := range pageKeys {
+		pool.Delete(k)
+	}
+
+	// Mint the rung: post-delete all-miss witness over EXACTLY those keys, bound to subject.
+	rung, err := gateway.MintL3DeletionRung(subject, pageKeys, pool)
+	if err != nil {
+		return fmt.Errorf("mint L3 deletion rung: %w", err)
+	}
+	if err := gateway.VerifyL3DeletionRung(rung); err != nil {
+		return fmt.Errorf("freshly minted L3 deletion rung did not verify: %w", err)
+	}
+	fmt.Printf("\n  L3 page-key rung (#56): names %d page-keys  scope=%s  all_miss=%v\n",
+		len(rung.PageKeys), rung.Scope, rung.AllMiss)
+	fmt.Printf("  VERIFY (L3 rung intact) -> valid=true\n")
+
+	// (a) A backing page that still resolves AFTER the delete => not all-miss => FAIL closed.
+	leakyPool := gateway.NewMockL3Backend()
+	for _, c := range backing {
+		page := l3Page(c, abi.ScopeAgent)
+		leakyPool.Set(page.Digest, []byte(c), gateway.L3PageMeta{Digest: page.Digest, Scope: page.Scope, OwnerTag: "tenant-A"})
+	}
+	for _, k := range pageKeys[1:] { // delete all but ONE — the first page still resolves
+		leakyPool.Delete(k)
+	}
+	leakyRung, err := gateway.MintL3DeletionRung(subject, pageKeys, leakyPool)
+	if err != nil {
+		return fmt.Errorf("mint leaky L3 rung: %w", err)
+	}
+	if gateway.VerifyL3DeletionRung(leakyRung) == nil {
+		return fmt.Errorf("L3 rung with a still-resident backing page passed verification")
+	}
+	fmt.Printf("  VERIFY (L3 page leaks)  -> valid=false  (a backing page still resolves; not all-miss)\n")
+
+	// (b) Tamper a recorded key state in the good rung => the keyless chain must break.
+	forged := rung
+	forged.KeyStates = append([]gateway.L3KeyState(nil), rung.KeyStates...)
+	forged.KeyStates[0].Present = true
+	if gateway.VerifyL3DeletionRung(forged) == nil {
+		return fmt.Errorf("tampered L3 rung key-state passed verification")
+	}
+	fmt.Printf("  VERIFY (L3 rung forged) -> valid=false  (recorded key state tampered)\n")
+
+	// (c) Over-claim the scope => the honest-scope rung must refuse it.
+	overclaim := rung
+	overclaim.Scope = "deleted-everywhere"
+	if gateway.VerifyL3DeletionRung(overclaim) == nil {
+		return fmt.Errorf("scope-inflated L3 rung passed verification")
+	}
+	fmt.Printf("  VERIFY (L3 scope forged)-> valid=false  (scope must stay l3-working-set)\n")
+
 	return nil
 }
 

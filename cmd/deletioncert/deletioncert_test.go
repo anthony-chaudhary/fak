@@ -110,6 +110,16 @@ func TestDeletionCertificateSelfcheckRuns(t *testing.T) {
 	}
 }
 
+// TestProveL3DeletionRung (#56) gates the L3 page-key rung wired into -selfcheck: mint +
+// verify over the in-process mock pool succeeds, and the three fail-closed tamper checks
+// (still-resident page, forged key state, over-claim scope) all return errors. A
+// regression that lets any tamper pass reds CI here rather than slipping through the demo.
+func TestProveL3DeletionRung(t *testing.T) {
+	if err := proveL3DeletionRung("sha256:l3-rung-selfcheck-subject"); err != nil {
+		t.Fatalf("L3 deletion rung selfcheck failed: %v", err)
+	}
+}
+
 // --- isolation benchmark (#1065) --------------------------------------------
 // These tests make the per-tenant KV cache-isolation benchmark CI-gradeable under
 // `go test ./...` (a `make ci` step): the oracle, the leaky-baseline discrimination,
