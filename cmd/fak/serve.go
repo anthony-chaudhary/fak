@@ -767,34 +767,25 @@ func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetToken
 }
 
 func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int) compute.MemoryPlan {
-	if cfg, err := ws.File.Config(); err == nil {
-		if tokens := serveGGUFContextPlanTokens(cfg, contextBudgetTokens); tokens > 0 {
-			plan = append(plan, compute.EstimateKVStoreMemoryPlan(compute.KVConfig{
-				NumLayers:  cfg.NumLayers,
-				NumKVHeads: cfg.NumKVHeads,
-				HeadDim:    cfg.HeadDim,
-				RopeTheta:  cfg.RopeTheta,
-			}, tokens)...)
-		}
-		plan = append(plan, compute.EstimateHALTransientMemoryPlan(compute.TransformerScratchConfig{
-			HiddenSize:       cfg.HiddenSize,
-			IntermediateSize: cfg.IntermediateSize,
-			VocabSize:        cfg.VocabSize,
-			NumLayers:        cfg.NumLayers,
-			NumHeads:         cfg.NumHeads,
-			NumKVHeads:       cfg.NumKVHeads,
-			HeadDim:          cfg.HeadDim,
-			IncludeLogits:    true,
-		})...)
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return plan
 	}
-	return plan
+	// Delegate to the single context auto-sizer (#1049) so the serve boot path sizes its
+	// KV+scratch plan exactly as the in-kernel per-request planner does. avail is unknown
+	// at plan-build time (the device/host fit check runs separately on the returned plan);
+	// #1046 passes the real ceiling here to auto-derive the largest fitting context.
+	_, ctxPlan := compute.AutoSizeContextPlan(cfg.ContextSizeConfig(), plan, compute.FreeUnknown, serveContextTokenOverride(contextBudgetTokens))
+	return append(plan, ctxPlan...)
 }
 
-func serveGGUFContextPlanTokens(cfg fakmodel.Config, contextBudgetTokens int) int {
+// serveContextTokenOverride maps the serve flag convention (0 = unset, fall back to the
+// model's full window) to the auto-sizer's override convention (<0 = unset, >=0 = explicit).
+func serveContextTokenOverride(contextBudgetTokens int) int {
 	if contextBudgetTokens > 0 {
 		return contextBudgetTokens
 	}
-	return cfg.MaxPositionEmbeddings
+	return -1
 }
 
 // fitServeGGUFPathOnHost is the pure-CPU reference-path memory-fit pre-flight (#974). The CPU

@@ -932,23 +932,11 @@ func (p *InKernelPlanner) requestMemoryPlan(promptTokens, maxNew int) compute.Me
 	if plannedTokens < promptTokens {
 		plannedTokens = promptTokens
 	}
-	cfg := p.m.Cfg
-	plan := compute.EstimateKVStoreMemoryPlan(compute.KVConfig{
-		NumLayers:  cfg.NumLayers,
-		NumKVHeads: cfg.NumKVHeads,
-		HeadDim:    cfg.HeadDim,
-		RopeTheta:  cfg.RopeTheta,
-	}, plannedTokens)
-	plan = append(plan, compute.EstimateHALTransientMemoryPlan(compute.TransformerScratchConfig{
-		HiddenSize:       cfg.HiddenSize,
-		IntermediateSize: cfg.IntermediateSize,
-		VocabSize:        cfg.VocabSize,
-		NumLayers:        cfg.NumLayers,
-		NumHeads:         cfg.NumHeads,
-		NumKVHeads:       cfg.NumKVHeads,
-		HeadDim:          cfg.HeadDim,
-		IncludeLogits:    true,
-	})...)
+	// Delegate to the single context auto-sizer (#1049) — the same function the serve boot
+	// path uses — so boot and per-request build a byte-identical KV+scratch plan for the
+	// same (model, tokens). The per-request count is exact, so it is the explicit override
+	// (>=0); resident weights (below) stay this path's own demand.
+	_, plan := compute.AutoSizeContextPlan(p.m.Cfg.ContextSizeConfig(), nil, compute.FreeUnknown, plannedTokens)
 	if p.backend != nil && p.includeResidentWeightsInRequestFit() {
 		if r := p.m.ResidentReport(); r != nil && r.TotalResidentBytes > 0 {
 			plan = append(compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: r.TotalResidentBytes, Detail: "resident-weights", DType: "mixed"}}, plan...)
