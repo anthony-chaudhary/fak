@@ -46,17 +46,17 @@ func dequantQ4KRef(out []float32, raw []byte) {
 	const block = q4kBlockBytes
 	for b := 0; b < len(out)/qkK; b++ {
 		base := b * block
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
-		min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+2:])))
+		d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(raw[base:])))
+		min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(raw[base+2:])))
 		scales := raw[base+4 : base+4+12]
 		q := raw[base+4+12 : base+block]
 		qi := 0
 		is := 0
 		yi := b * qkK
 		for j := 0; j < qkK; j += 64 {
-			sc, m := getScaleMinK4(is, scales)
+			sc, m := GetScaleMinK4(is, scales)
 			d1, m1 := d*float32(sc), min*float32(m)
-			sc, m = getScaleMinK4(is+1, scales)
+			sc, m = GetScaleMinK4(is+1, scales)
 			d2, m2 := d*float32(sc), min*float32(m)
 			for l := 0; l < 32; l++ {
 				out[yi+j+l] = d1*float32(q[qi+l]&0x0f) - m1

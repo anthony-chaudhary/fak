@@ -22,7 +22,7 @@ package model
 // Format (byte-for-byte ggufload.dequantQ4K, so the resident bytes ARE the GGUF bytes):
 // one super-block per 256 weights = 144 B = d(f16,2) + min(f16,2) + scales(12) + q(128
 // nibbles). 8 sub-blocks of 32 weights; the 8 (scale,min) pairs are packed 6-bit via
-// getScaleMinK4. Per-weight dequant: d*sc*(code) - min*m. Per resident weight:
+// GetScaleMinK4. Per-weight dequant: d*sc*(code) - min*m. Per resident weight:
 // 144/256 = 0.5625 B — vs Q8_0's 1.125 and Q4_0's 0.625; fewer bytes than either.
 //
 // Correctness discipline. Quantization is lossy; this path carries its own gate
@@ -62,30 +62,20 @@ type q4kTensor struct {
 // q4kRowBytes is the byte length of one resident row (nblk super-blocks).
 func (qt *q4kTensor) q4kRowBytes() int { return qt.nblk * q4kBlockBytes }
 
-// getScaleMinK4 unpacks the j-th (scale, min) pair from the 12-byte Q4_K scales field. This
-// is byte-for-byte ggufload.getScaleMinK4 (the 6-bit packing the k-quants share); kept here
-// so the resident dequant never depends on the ggufload package.
-func getScaleMinK4(j int, q []byte) (scale, min uint8) {
-	if j < 4 {
-		return q[j] & 63, q[j+4] & 63
-	}
-	return (q[j+4] & 0x0f) | ((q[j-4] >> 6) << 4), (q[j+4] >> 4) | ((q[j] >> 6) << 4)
-}
-
 // q4kDequantSuperBlock writes the 256 weights of one 144-byte Q4_K super-block into dst
 // (len >= 256). It is ggufload.dequantQ4K factored to one super-block, so the resident
 // dequant is arithmetically identical to the loader's f32 reference path.
 func q4kDequantSuperBlock(dst []float32, blk []byte) {
-	d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[0:])))
-	min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[2:])))
+	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+	min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
 	scales := blk[4 : 4+12]
 	q := blk[4+12 : q4kBlockBytes]
 	qi := 0
 	is := 0
 	for j := 0; j < qkK; j += 64 {
-		sc, m := getScaleMinK4(is, scales)
+		sc, m := GetScaleMinK4(is, scales)
 		d1, m1 := d*float32(sc), min*float32(m)
-		sc, m = getScaleMinK4(is+1, scales)
+		sc, m = GetScaleMinK4(is+1, scales)
 		d2, m2 := d*float32(sc), min*float32(m)
 		for l := 0; l < 32; l++ {
 			dst[j+l] = d1*float32(q[qi+l]&0x0f) - m1

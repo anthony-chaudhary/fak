@@ -121,18 +121,18 @@ func q5kReduceRowScalar(row []byte, nblk int, qx []int8, IS, SS []int32) {
 
 // kQuantCombineRow folds the int32 (I_s, S_s) reductions back to the float dot using the per-sub-block
 // (scale, min) and the activation scale dx — identical affine math to q4kCombineRow (K-quant shares
-// the getScaleMinK4 sub-block scale layout). Shared compiled Go, so the int8 path's float result is
+// the GetScaleMinK4 sub-block scale layout). Shared compiled Go, so the int8 path's float result is
 // fixed by the integer reductions alone.
 func kQuantCombineRow(row []byte, nblk int, dx []float32, IS, SS []int32) float32 {
 	var acc float32
 	for b := 0; b < nblk; b++ {
 		blk := row[b*q5kBlockBytes : (b+1)*q5kBlockBytes]
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[0:])))
-		min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[2:])))
+		d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+		min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
 		scales := blk[4 : 4+12]
 		base := b * 8
 		for s := 0; s < 8; s++ {
-			sc, m := getScaleMinK4(s, scales)
+			sc, m := GetScaleMinK4(s, scales)
 			ws, wm := d*float32(sc), min*float32(m)
 			dxs := dx[base+s]
 			acc += (float32(IS[base+s]) * ws) * dxs

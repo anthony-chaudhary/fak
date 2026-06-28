@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func alignment(meta map[string]Value) (uint64, error) {
@@ -585,18 +587,11 @@ func dequantQ4K(out []float32, raw []byte) {
 // both consume per 64-element stride. It is pure code motion of the identical 4-line preamble
 // shared by dequantQ4K and dequantQ5K.
 func scaleMinPairK4(d, min float32, is int, scales []byte) (d1, m1, d2, m2 float32) {
-	sc, m := getScaleMinK4(is, scales)
+	sc, m := model.GetScaleMinK4(is, scales)
 	d1, m1 = d*float32(sc), min*float32(m)
-	sc, m = getScaleMinK4(is+1, scales)
+	sc, m = model.GetScaleMinK4(is+1, scales)
 	d2, m2 = d*float32(sc), min*float32(m)
 	return d1, m1, d2, m2
-}
-
-func getScaleMinK4(j int, q []byte) (scale, min uint8) {
-	if j < 4 {
-		return q[j] & 63, q[j+4] & 63
-	}
-	return (q[j+4] & 0x0f) | ((q[j-4] >> 6) << 4), (q[j+4] >> 4) | ((q[j] >> 6) << 4)
 }
 
 func dequantQ5K(out []float32, raw []byte) {
@@ -669,30 +664,7 @@ func dequantQ6K(out []float32, raw []byte) {
 // place. Behavior is identical to the inlined
 // f16At(raw, off) it replaces.
 func f16At(raw []byte, off int) float32 {
-	return math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[off:])))
-}
-
-func f16bitsToF32bits(h uint16) uint32 {
-	sign := uint32(h&0x8000) << 16
-	exp := int((h >> 10) & 0x1f)
-	frac := uint32(h & 0x03ff)
-	switch exp {
-	case 0:
-		if frac == 0 {
-			return sign
-		}
-		exp = -14
-		for frac&0x0400 == 0 {
-			frac <<= 1
-			exp--
-		}
-		frac &= 0x03ff
-		return sign | uint32(exp+127)<<23 | frac<<13
-	case 0x1f:
-		return sign | 0x7f800000 | frac<<13
-	default:
-		return sign | uint32(exp-15+127)<<23 | frac<<13
-	}
+	return math.Float32frombits(model.F16BitsToF32Bits(binary.LittleEndian.Uint16(raw[off:])))
 }
 
 type countingReader struct {

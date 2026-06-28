@@ -73,8 +73,8 @@ func (qt *kQuantTensor) rowBytes() int { return qt.nblk * qt.kind.blockBytes() }
 // q5kDequantSuperBlock writes the 256 weights of one 176-byte Q5_K super-block into dst
 // (len >= 256). Byte-for-byte ggufload.dequantQ5K factored to one super-block.
 func q5kDequantSuperBlock(dst []float32, blk []byte) {
-	d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[0:])))
-	min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[2:])))
+	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+	min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
 	scales := blk[4 : 4+12]
 	qh := blk[4+12 : 4+12+qkK/8]
 	ql := blk[4+12+qkK/8 : q5kBlockBytes]
@@ -82,9 +82,9 @@ func q5kDequantSuperBlock(dst []float32, blk []byte) {
 	is := 0
 	u1, u2 := byte(1), byte(2)
 	for j := 0; j < qkK; j += 64 {
-		sc, m := getScaleMinK4(is, scales)
+		sc, m := GetScaleMinK4(is, scales)
 		d1, m1 := d*float32(sc), min*float32(m)
-		sc, m = getScaleMinK4(is+1, scales)
+		sc, m = GetScaleMinK4(is+1, scales)
 		d2, m2 := d*float32(sc), min*float32(m)
 		for l := 0; l < 32; l++ {
 			hi := byte(0)
@@ -113,7 +113,7 @@ func q6kDequantSuperBlock(dst []float32, blk []byte) {
 	ql := blk[0 : qkK/2]
 	qh := blk[qkK/2 : qkK/2+qkK/4]
 	scales := blk[qkK/2+qkK/4 : qkK/2+qkK/4+qkK/16]
-	d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[q6kBlockBytes-2:])))
+	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[q6kBlockBytes-2:])))
 	qlOff, qhOff, scOff := 0, 0, 0
 	for n := 0; n < qkK; n += 128 {
 		for l := 0; l < 32; l++ {

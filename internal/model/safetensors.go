@@ -591,28 +591,5 @@ func decode16(b []byte, conv func(uint16) uint32) []byte {
 // f16 has a different exponent bias and subnormal layout, so the conversion is explicit
 // instead of a shift.
 func decodeF16(b []byte) []byte {
-	return decode16(b, f16bitsToF32bits)
-}
-
-func f16bitsToF32bits(h uint16) uint32 {
-	sign := uint32(h&0x8000) << 16
-	exp := int((h >> 10) & 0x1f)
-	frac := uint32(h & 0x03ff)
-	switch exp {
-	case 0:
-		if frac == 0 {
-			return sign
-		}
-		exp = -14
-		for frac&0x0400 == 0 {
-			frac <<= 1
-			exp--
-		}
-		frac &= 0x03ff
-		return sign | uint32(exp+127)<<23 | frac<<13
-	case 0x1f:
-		return sign | 0x7f800000 | frac<<13
-	default:
-		return sign | uint32(exp-15+127)<<23 | frac<<13
-	}
+	return decode16(b, F16BitsToF32Bits)
 }

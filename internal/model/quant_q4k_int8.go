@@ -67,7 +67,7 @@ func setQ4KSDOTForTest(on bool) {
 //
 // Sub-block layout within a super-block (matches q4kDequantSuperBlock): the 128-byte q field is
 // 4 chunks of 32 bytes; chunk k encodes sub-blocks 2k (the LOW nibble of each of 32 bytes) and
-// 2k+1 (the HIGH nibble). Sub-block s therefore reads getScaleMinK4(s) in the combine and
+// 2k+1 (the HIGH nibble). Sub-block s therefore reads GetScaleMinK4(s) in the combine and
 // activation block (b*8+s) here.
 func q4kReduceRowScalar(row []byte, nblk int, qx []int8, IS, SS []int32) {
 	for b := 0; b < nblk; b++ {
@@ -111,12 +111,12 @@ func q4kCombineRow(row []byte, nblk int, dx []float32, IS, SS []int32) float32 {
 	var acc float32
 	for b := 0; b < nblk; b++ {
 		blk := row[b*q4kBlockBytes : (b+1)*q4kBlockBytes]
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[0:])))
-		min := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[2:])))
+		d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+		min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
 		scales := blk[4 : 4+12]
 		base := b * 8
 		for s := 0; s < 8; s++ {
-			sc, m := getScaleMinK4(s, scales)
+			sc, m := GetScaleMinK4(s, scales)
 			ws, wm := d*float32(sc), min*float32(m)
 			dxs := dx[base+s]
 			acc += (float32(IS[base+s]) * ws) * dxs

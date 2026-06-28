@@ -96,7 +96,7 @@ func q6kCombineRow(row []byte, nblk int, dx []float32, IS, SS []int32) float32 {
 	for b := 0; b < nblk; b++ {
 		blk := row[b*q6kBlockBytes : (b+1)*q6kBlockBytes]
 		scales := blk[qkK/2+qkK/4 : qkK/2+qkK/4+qkK/16]
-		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(blk[q6kBlockBytes-2:])))
+		d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[q6kBlockBytes-2:])))
 		base := b * q6kGroupsPerBlock
 		for n128 := 0; n128 < 2; n128++ {
 			scOff := n128 * 8

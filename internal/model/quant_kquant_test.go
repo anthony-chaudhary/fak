@@ -125,7 +125,7 @@ func TestKQuantDequantGolden(t *testing.T) {
 		blk := make([]byte, q5kBlockBytes)
 		binary.LittleEndian.PutUint16(blk[0:], f16Two()) // d=2
 		binary.LittleEndian.PutUint16(blk[2:], 0)        // min=0
-		// scales (12 B) so getScaleMinK4(0..7) -> (1,0): see quant_kquant.go packing.
+		// scales (12 B) so GetScaleMinK4(0..7) -> (1,0): see quant_kquant.go packing.
 		sc := blk[4 : 4+12]
 		sc[0], sc[1], sc[2], sc[3] = 1, 1, 1, 1
 		sc[4], sc[5], sc[6], sc[7] = 0, 0, 0, 0
