@@ -26,22 +26,28 @@ const (
 	// LoadPathLocal — a recognized local-disk filesystem (ext4, xfs, btrfs, tmpfs, …). Loads
 	// at device speed; no load-path tax.
 	LoadPathLocal
-	// LoadPathNetwork — a recognized network filesystem (NFS, CIFS/SMB). Reads at the
-	// network's mercy; the source of the ~50–100x load-time tax on a large model.
+	// LoadPathNetwork — a recognized network/cluster filesystem (NFS, CIFS/SMB, plus the
+	// HPC/lab class: Lustre, Ceph, GFS2, OCFS2). Reads at the network's mercy; the source of
+	// the ~50–100x load-time tax on a large model. The HPC class matters here because #1062's
+	// host is a lab box, and lab/HPC weight stores ride Lustre/Ceph far more than plain NFS.
 	LoadPathNetwork
 )
 
 // Linux statfs f_type magic numbers (see man statfs(2) / linux/magic.h). Listed here as the
 // raw constants so the classifier is self-contained and unit-testable on any platform.
 const (
-	fsMagicNFS   int64 = 0x6969     // NFS_SUPER_MAGIC      — network
-	fsMagicSMB   int64 = 0x517B     // SMB_SUPER_MAGIC      — network
-	fsMagicCIFS  int64 = 0xFF534D42 // CIFS_MAGIC_NUMBER    — network
-	fsMagicEXT   int64 = 0xEF53     // EXT2/3/4_SUPER_MAGIC — local
-	fsMagicXFS   int64 = 0x58465342 // XFS_SUPER_MAGIC      — local
-	fsMagicBTRFS int64 = 0x9123683E // BTRFS_SUPER_MAGIC    — local
-	fsMagicTMPFS int64 = 0x01021994 // TMPFS_MAGIC          — local (RAM-backed)
-	fsMagicZFS   int64 = 0x2FC12FC1 // ZFS_SUPER_MAGIC      — local
+	fsMagicNFS    int64 = 0x6969     // NFS_SUPER_MAGIC      — network
+	fsMagicSMB    int64 = 0x517B     // SMB_SUPER_MAGIC      — network
+	fsMagicCIFS   int64 = 0xFF534D42 // CIFS_MAGIC_NUMBER    — network
+	fsMagicCEPH   int64 = 0x00C36400 // CEPH_SUPER_MAGIC     — network (distributed; common HPC/lab weight store)
+	fsMagicLUSTRE int64 = 0x0BD00BD0 // LL_SUPER_MAGIC       — network (Lustre; the canonical HPC scratch fs)
+	fsMagicGFS2   int64 = 0x01161970 // GFS2_MAGIC           — network (shared-disk cluster fs)
+	fsMagicOCFS2  int64 = 0x7461636F // OCFS2_SUPER_MAGIC    — network (shared-disk cluster fs)
+	fsMagicEXT    int64 = 0xEF53     // EXT2/3/4_SUPER_MAGIC — local
+	fsMagicXFS    int64 = 0x58465342 // XFS_SUPER_MAGIC      — local
+	fsMagicBTRFS  int64 = 0x9123683E // BTRFS_SUPER_MAGIC    — local
+	fsMagicTMPFS  int64 = 0x01021994 // TMPFS_MAGIC          — local (RAM-backed)
+	fsMagicZFS    int64 = 0x2FC12FC1 // ZFS_SUPER_MAGIC      — local
 )
 
 // LoadPathInfo is the result of probing a weights path's backing filesystem.
@@ -63,6 +69,14 @@ func classifyFSMagic(magic int64) (LoadPathKind, string) {
 		return LoadPathNetwork, "smb"
 	case fsMagicCIFS:
 		return LoadPathNetwork, "cifs"
+	case fsMagicCEPH:
+		return LoadPathNetwork, "ceph"
+	case fsMagicLUSTRE:
+		return LoadPathNetwork, "lustre"
+	case fsMagicGFS2:
+		return LoadPathNetwork, "gfs2"
+	case fsMagicOCFS2:
+		return LoadPathNetwork, "ocfs2"
 	case fsMagicEXT:
 		return LoadPathLocal, "ext"
 	case fsMagicXFS:

@@ -20,6 +20,10 @@ func TestClassifyFSMagic(t *testing.T) {
 		{"nfs", fsMagicNFS, LoadPathNetwork, "nfs"},
 		{"smb", fsMagicSMB, LoadPathNetwork, "smb"},
 		{"cifs", fsMagicCIFS, LoadPathNetwork, "cifs"},
+		{"ceph", fsMagicCEPH, LoadPathNetwork, "ceph"},
+		{"lustre", fsMagicLUSTRE, LoadPathNetwork, "lustre"},
+		{"gfs2", fsMagicGFS2, LoadPathNetwork, "gfs2"},
+		{"ocfs2", fsMagicOCFS2, LoadPathNetwork, "ocfs2"},
 		{"ext4", fsMagicEXT, LoadPathLocal, "ext"},
 		{"xfs", fsMagicXFS, LoadPathLocal, "xfs"},
 		{"btrfs", fsMagicBTRFS, LoadPathLocal, "btrfs"},
@@ -54,6 +58,11 @@ func TestWarnSlowLoadPath(t *testing.T) {
 		if !strings.Contains(w, "#1062") {
 			t.Errorf("network advisory %q does not cite the tracking issue", w)
 		}
+	}
+	if w := WarnSlowLoadPath(LoadPathInfo{Kind: LoadPathNetwork, FSName: "lustre", Magic: fsMagicLUSTRE, Known: true}); w == "" {
+		t.Fatal("WarnSlowLoadPath(lustre) = empty, want a non-empty advisory for the HPC network class")
+	} else if !strings.Contains(w, "lustre") {
+		t.Errorf("lustre advisory %q does not name the filesystem", w)
 	}
 	if w := WarnSlowLoadPath(LoadPathInfo{Kind: LoadPathLocal, FSName: "ext", Known: true}); w != "" {
 		t.Errorf("WarnSlowLoadPath(local) = %q, want empty", w)
