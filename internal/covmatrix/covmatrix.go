@@ -166,6 +166,62 @@ func Grid() []Cell {
 	return cells
 }
 
+// StaleReason names why a cell is on the --stale honest-but-incomplete list.
+// The matrix tracks no per-cell oracle DATE, so "stale" here is the structural
+// residual: a cell that RUNS but whose family carries no CI-runnable numeric
+// oracle (OracleInCI == false), so its correctness is asserted, not proven in
+// CI. This is the union the C5 ticket (#1084) names — "oracle older than N days
+// OR support level PROOF-PATH-ONLY past a grace window" — in the limit where a
+// family with no CI oracle has an oracle age of effectively infinite (older than
+// any N). The N-days refinement (discriminating by a real per-family oracle date)
+// is the follow-on once an oracle-date ledger exists; the structural list is what
+// ships today. A FENCED cell is honest-AND-complete (it refuses) and an UNDEFINED
+// cell is growth_debt — neither is "stale".
+type StaleReason string
+
+const (
+	// StaleProofPath: the cell is PROOF-PATH-ONLY — it runs on the scalar cpu
+	// proof path but its family has no CI oracle, so it is past any grace window
+	// (the #487/S4 residual carried forever).
+	StaleProofPath StaleReason = "PROOF-PATH-ONLY: runs on the cpu proof path, no CI oracle (correctness asserted, not proven)"
+	// StaleUnwitnessed: the cell is SUPPORTED by topology — a PreNorm family on an
+	// accelerated backend — but its family has no CI oracle, so the accelerated
+	// numeric claim is unwitnessed in CI (the "oracle older than N days" criterion,
+	// at infinite age).
+	StaleUnwitnessed StaleReason = "SUPPORTED but no CI oracle: accelerated path runs, numeric claim unwitnessed in CI"
+)
+
+// StaleCell is one honest-but-incomplete cell surfaced by the --stale lens.
+type StaleCell struct {
+	Cell
+	Reason StaleReason `json:"reason"`
+}
+
+// StaleCells returns the honest-but-incomplete residual: every cell that RUNS
+// (SUPPORTED or PROOF-PATH-ONLY) whose family carries no CI-runnable numeric
+// oracle. Llama (the only OracleInCI family today) never appears; FENCED cells
+// (honest refusals) and UNDEFINED cells (growth_debt) are excluded by design.
+// Output is deterministic: Grid() is already in (family, backend) order.
+func StaleCells() []StaleCell {
+	oracle := make(map[string]bool, len(Families))
+	for _, f := range Families {
+		oracle[f.Name] = f.OracleInCI
+	}
+	var out []StaleCell
+	for _, c := range Grid() {
+		if oracle[c.Family] {
+			continue // a CI oracle witnesses this family — not stale
+		}
+		switch c.Support {
+		case ProofPathOnly:
+			out = append(out, StaleCell{Cell: c, Reason: StaleProofPath})
+		case Supported:
+			out = append(out, StaleCell{Cell: c, Reason: StaleUnwitnessed})
+		}
+	}
+	return out
+}
+
 // countBy tallies cells by support level.
 func countBy(cells []Cell) map[Support]int {
 	m := map[Support]int{}

@@ -73,7 +73,7 @@ func TestBackends(t *testing.T) {
 	if len(Backends) == 0 {
 		t.Fatal("Backends roster is empty")
 	}
-	
+
 	// CPU must be present
 	foundCPU := false
 	for _, b := range Backends {
@@ -89,10 +89,10 @@ func TestBackends(t *testing.T) {
 
 func TestClassify(t *testing.T) {
 	tests := []struct {
-		name     string
-		family   Family
-		backend  string
-		want     Support
+		name    string
+		family  Family
+		backend string
+		want    Support
 	}{
 		{
 			name:    "Llama on CPU with CI oracle is SUPPORTED",
@@ -119,7 +119,7 @@ func TestClassify(t *testing.T) {
 			want:    ProofPathOnly,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := classify(tt.family, tt.backend)
@@ -132,13 +132,13 @@ func TestClassify(t *testing.T) {
 
 func TestGrid(t *testing.T) {
 	cells := Grid()
-	
+
 	expectedCount := len(Families) * len(Backends)
 	if len(cells) != expectedCount {
 		t.Errorf("Grid() returned %d cells, want %d (%d families × %d backends)",
 			len(cells), expectedCount, len(Families), len(Backends))
 	}
-	
+
 	// Check for duplicates
 	seen := make(map[string]bool)
 	for _, c := range cells {
@@ -152,7 +152,7 @@ func TestGrid(t *testing.T) {
 
 func TestBuildEmitsControlPanePayload(t *testing.T) {
 	payload := Build()
-	
+
 	if payload.Schema != Schema {
 		t.Errorf("Payload schema = %s, want %s", payload.Schema, Schema)
 	}
@@ -174,11 +174,74 @@ func TestBuildEmitsControlPanePayload(t *testing.T) {
 	if !foundDebt {
 		t.Error("Payload missing no_undefined_cells KPI")
 	}
-	
+
 	// Check that payload is JSON-serializable
 	_, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		t.Errorf("Payload not JSON-serializable: %v", err)
+	}
+}
+
+// TestStaleCells is the C5 (#1084) gate: the --stale lens must surface exactly the
+// honest-but-incomplete residual — cells that RUN but carry no CI oracle — and must
+// exclude the CI-witnessed family, the fenced cells, and the debt cells.
+func TestStaleCells(t *testing.T) {
+	stale := StaleCells()
+	if len(stale) == 0 {
+		t.Fatal("StaleCells returned empty; expected the non-Llama runs-but-unwitnessed residual")
+	}
+
+	// Determinism: two calls byte-identical (the package's whole-grid contract).
+	a, err := json.Marshal(StaleCells())
+	if err != nil {
+		t.Fatalf("marshal a: %v", err)
+	}
+	b, err := json.Marshal(StaleCells())
+	if err != nil {
+		t.Fatalf("marshal b: %v", err)
+	}
+	if string(a) != string(b) {
+		t.Error("StaleCells is not deterministic across two calls")
+	}
+
+	oracle := make(map[string]bool, len(Families))
+	for _, f := range Families {
+		oracle[f.Name] = f.OracleInCI
+	}
+	for _, c := range stale {
+		if oracle[c.Family] {
+			t.Errorf("family %q has a CI oracle and must not be stale: %+v", c.Family, c)
+		}
+		if c.Support == Fenced || c.Support == Undefined {
+			t.Errorf("stale list must exclude %s cells: %+v", c.Support, c)
+		}
+		if c.Support != ProofPathOnly && c.Support != Supported {
+			t.Errorf("a stale cell must be a running cell (SUPPORTED/PROOF-PATH-ONLY), got %s: %+v", c.Support, c)
+		}
+		if c.Reason == "" {
+			t.Errorf("stale cell missing a reason: %+v", c)
+		}
+		// The reason must agree with the support level.
+		if c.Support == ProofPathOnly && c.Reason != StaleProofPath {
+			t.Errorf("PROOF-PATH-ONLY cell %+v should carry StaleProofPath, got %q", c, c.Reason)
+		}
+		if c.Support == Supported && c.Reason != StaleUnwitnessed {
+			t.Errorf("SUPPORTED-no-oracle cell %+v should carry StaleUnwitnessed, got %q", c, c.Reason)
+		}
+	}
+
+	// Cross-check the count against an independent recomputation over the grid.
+	want := 0
+	for _, c := range Grid() {
+		if oracle[c.Family] {
+			continue
+		}
+		if c.Support == ProofPathOnly || c.Support == Supported {
+			want++
+		}
+	}
+	if len(stale) != want {
+		t.Errorf("StaleCells returned %d cells, recomputation expected %d", len(stale), want)
 	}
 }
 
@@ -191,9 +254,9 @@ func TestCountBy(t *testing.T) {
 		{Support: Undefined},
 		{Support: Undefined},
 	}
-	
+
 	counts := countBy(testCells)
-	
+
 	if counts[Supported] != 2 {
 		t.Errorf("counts[Supported] = %d, want 2", counts[Supported])
 	}

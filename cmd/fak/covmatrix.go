@@ -16,7 +16,28 @@ func cmdCoverageMatrix(argv []string) {
 	fs := flag.NewFlagSet("coverage-matrix", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "emit as JSON (default: human-readable)")
 	out := fs.String("out", "", "write output to file (default: stdout)")
+	stale := fs.Bool("stale", false, "list only the honest-but-incomplete cells (runs but no CI oracle) instead of the full grid")
 	_ = fs.Parse(argv)
+
+	// --stale is the C5 (#1084) gardening lens: the honest-but-incomplete residual
+	// (the #487/S4 cells carried forever), not the full grid. It is what a model/backend
+	// PR re-checks alongside the growth_debt ratchet.
+	if *stale {
+		staleCells := covmatrix.StaleCells()
+		var output []byte
+		if *asJSON {
+			jsonStale, err := json.MarshalIndent(staleCells, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fak coverage-matrix: %v\n", err)
+				os.Exit(1)
+			}
+			output = jsonStale
+		} else {
+			output = []byte(renderStale(staleCells))
+		}
+		writeOutput(output, *out)
+		return
+	}
 
 	// Build the coverage matrix from the internal package
 	payload := covmatrix.Build()
@@ -43,10 +64,45 @@ func cmdCoverageMatrix(argv []string) {
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stderr, "Coverage matrix written to: %s\n", *out)
-		
+
 		// Extract growth_debt from corpus (int in-process, float64 after a JSON round-trip).
 		fmt.Fprintf(os.Stderr, "Growth debt: %d\n", corpusInt(payload.Corpus, covmatrix.DebtKey))
 	}
+}
+
+// writeOutput writes to stdout or the named file (shared by the grid and --stale paths).
+func writeOutput(output []byte, out string) {
+	if out == "" {
+		os.Stdout.Write(output)
+		return
+	}
+	if err := os.WriteFile(out, output, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "fak coverage-matrix: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "Coverage matrix --stale written to: %s\n", out)
+}
+
+// renderStale prints the honest-but-incomplete cell list: cells that run but carry
+// no CI oracle, so their correctness is asserted rather than proven in CI.
+func renderStale(cells []covmatrix.StaleCell) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "== fak coverage-matrix --stale: %d honest-but-incomplete cell(s) ==\n", len(cells))
+	fmt.Fprintln(&b, "Cells that RUN but carry no CI-runnable numeric oracle — correctness asserted, not proven.")
+	fmt.Fprintln(&b, "(A FENCED cell is honest-and-complete; an UNDEFINED cell is growth_debt — neither is listed.)")
+	fmt.Fprintln(&b)
+	if len(cells) == 0 {
+		fmt.Fprintln(&b, "  none — every reachable cell is CI-witnessed, fenced, or already counted as growth_debt")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "  %-18s %-9s %-18s %s\n", "FAMILY", "BACKEND", "SUPPORT", "REASON")
+	for _, c := range cells {
+		fmt.Fprintf(&b, "  %-18s %-9s %-18s %s\n", c.Family, c.Backend, string(c.Support), string(c.Reason))
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Note: the matrix tracks no per-cell oracle date, so this is the structural residual")
+	fmt.Fprintln(&b, "(runs-but-unwitnessed). Retire a cell by landing its #1081 conformance row or CI oracle.")
+	return b.String()
 }
 
 func renderHumanReadable(payload scorecard.Payload, cells []covmatrix.Cell) string {
@@ -76,7 +132,7 @@ func renderHumanReadable(payload scorecard.Payload, cells []covmatrix.Cell) stri
 
 	// Print matrix as a table
 	fmt.Fprintf(&b, "%-18s", "")
-	
+
 	// Get sorted backend list
 	backendSet := make(map[string]bool)
 	for _, c := range cells {
@@ -87,7 +143,7 @@ func renderHumanReadable(payload scorecard.Payload, cells []covmatrix.Cell) stri
 		backendList = append(backendList, b)
 	}
 	sort.Strings(backendList)
-	
+
 	for _, backend := range backendList {
 		fmt.Fprintf(&b, " %-12s", backend)
 	}
