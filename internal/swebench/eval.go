@@ -2,6 +2,7 @@ package swebench
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,7 +10,21 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"time"
 )
+
+// evalHarnessTimeout bounds the OFFICIAL swebench harness subprocess so a hung child can never
+// block RunEval forever — the harness reads stdout line-by-line with no per-read deadline, so
+// without an overall bound a wedged python process hangs the eval indefinitely. Generous (the
+// harness legitimately runs for a long time over a large dataset) and env-overridable.
+func evalHarnessTimeout() time.Duration {
+	if v := os.Getenv("FAK_SWEBENCH_EVAL_TIMEOUT_S"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 2 * time.Hour
+}
 
 // This file is the resolve-rate EVAL seam: turning a predictions file into the
 // standard SWE-bench Verified number (% issues resolved) via the OFFICIAL harness
@@ -135,7 +150,12 @@ func RunEval(cfg EvalConfig) (EvalResult, error) {
 		return res, nil
 	}
 
-	cmd := exec.Command(python, "-m", "swebench.harness.run_evaluation",
+	// Bound the harness subprocess: the scanner loop + cmd.Wait below have no per-read
+	// deadline, so a hung child would block forever without this overall timeout (#793 hang
+	// audit). CommandContext kills the process group when the deadline fires.
+	ctx, cancel := context.WithTimeout(context.Background(), evalHarnessTimeout())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, "-m", "swebench.harness.run_evaluation",
 		"--dataset_name", cfg.DatasetName,
 		"--predictions_path", absPreds,
 		"--run_id", cfg.RunID,
