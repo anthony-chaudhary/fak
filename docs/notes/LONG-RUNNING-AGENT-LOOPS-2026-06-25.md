@@ -25,6 +25,21 @@ The product line should be:
 > WhatsApp, GitHub, and phones are just interrupt sources. fak owns the capability floor,
 > loop identity, run ledger, leases, witness, resume state, and notification discipline.
 
+> **Status update (2026-06-28): the in-kernel RUNTIME + tick source landed.** Rungs 1–2
+> below (the durable `loopmgr` ledger and the OS-scheduler adapters) drive every tick from
+> OUTSIDE the kernel — `loopmgr` itself "schedules, spawns, notifies, authorizes nothing".
+> `internal/bgloop` + `fak bgloop` add the piece that was missing on this whole ladder: an
+> in-kernel `Supervisor` that RUNS registered loops in their own goroutines on the
+> `fak serve` lifecycle, so a loop progresses BECAUSE the kernel is up, with no external
+> scheduler firing it. It contains panics/errors with capped backoff (a crashing loop never
+> takes the kernel down), joins cleanly on shutdown, and is observable at `GET /v1/fak/loops`,
+> via the `fak_bgloop_*` Prometheus family, and through `fak bgloop status` / `fak bgloop demo`
+> (the offline witness). It folds into this note's substrate without coupling — `WithObserver`
+> pushes ticks into the `loopmgr` ledger (so an in-kernel loop also shows in `fak loop status`)
+> and `WithAdmit` gates fires through `loopmgr.Governor.Admit`. This is the runtime + read-only
+> observability complement to Rung 3 below; the authenticated `POST /v1/fak/loops/{id}/fire|signal`
+> control bridge remains the next step. See `CLAIMS.md` (Gateway) and `internal/bgloop/doc.go`.
+
 ## External signals
 
 Current public products all point in the same direction:
