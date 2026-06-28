@@ -90,3 +90,33 @@ resident path is operator-gated on this shared box.
 - The da33 number is **llama.cpp** (the mmap baseline), labelled OBSERVED against a
   third-party engine — it is the baseline the fak-native arm is measured against,
   never reported as fak's own throughput.
+
+## Results (collected 2026-06-28, in [`collected.jsonl`](collected.jsonl))
+
+All three dgx3 numbers are WITNESSED on fak's own CUDA kernel — read-only timed
+completions against the live `--cpu-offload-experts` :8000 serve (the peer serve was
+never restarted).
+
+| datum | number | what it isolates |
+|---|---|---|
+| live decode (prefill-conflated) | **0.0694 tok/s** | 16 tok / 230.7 s wall incl. a 39-tok prefill |
+| **steady-state TPOT** (prefill-isolated) | **0.2324 tok/s** (4.30 s/tok) | (t₃₆ − t₄)/(36 − 4); ~3.3× the conflated rate — prefill dominates short turns (~4 s/prefill-tok) |
+| 2-way concurrency | **0.0639 tok/s agg (0.27×)** | two 12-tok streams *serialized* (A 375 s ≈ 2× B 187 s) |
+
+**The finding worth keeping:** concurrency makes GLM-5.2 decode on this serve
+*worse*, not better (0.27× of single-stream). The two streams contended instead of
+batching — so the #971 wall is a **shared host-resource bottleneck** (the CPU
+expert-GEMM under `--cpu-offload-experts`), **not a per-stream GPU limit**. The 7
+idle A100-80GB on dgx3 cannot be put to work by batching as the serve is configured;
+closing the wall means moving the expert GEMM off the host (resident experts, or a
+GPU expert path), not adding concurrency. This is the concrete data behind the
+"1/8 GPUs used is first-class" utilization thesis: the waste is host expert-offload,
+not GPU count.
+
+**da33 CPU baseline — not collected (honest).** Two launches were squeezed out: the
+box was driven to `avail≈14 GiB` by a **peer's 446 GiB fak-native resident serve**
+(`fak-bin`, the very all-resident path this plan flags as unsafe on a shared box).
+Recorded `skipped` (blocked-by-peer-RAM), not retried; the mmap path's own
+memory-safety held throughout (no neighbor was OOM-killed by this work). The hourly
+overnight tick re-attempts da33 **only when `avail ≥ 480 GiB` and no peer resident
+serve is up**.
