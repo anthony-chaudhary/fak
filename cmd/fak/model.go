@@ -100,13 +100,19 @@ func cmdModelLs(args []string) {
 		return
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tCACHED\tSIZE\tSOURCE\tTARGET")
+	fmt.Fprintln(tw, "NAME\tCODING\tCACHED\tSIZE\tSOURCE\tTARGET")
 	for _, e := range entries {
 		cached, size := "no", "-"
 		if e.Cached() {
 			cached, size = "yes", humanBytes(e.SizeBytes)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", e.Name, cached, size, e.Source, e.Target)
+		// CODING marks the curated tool-call-capable coding models (#1058) — the ones
+		// `fak guard --local`/`--gguf -- claude` can actually drive a coding loop with.
+		coding := "-"
+		if e.Coding {
+			coding = "yes"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Name, coding, cached, size, e.Source, e.Target)
 	}
 	_ = tw.Flush()
 }
