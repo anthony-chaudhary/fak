@@ -818,7 +818,7 @@ func New(cfg Config) (*Server, error) {
 		elideResultBytes:           cfg.ElideResultBytes,
 		toolFloorDenies:            cfg.ToolFloorDenies,
 		cacheStream:                cacheStream,
-		rungObs:                    rungobs.New(),
+		rungObs:                    rungObs,
 		feed:                       newCoherenceFeed(0),
 		sessionFeed:                newSessionFeed(0),
 		metrics:                    newGatewayMetrics(time.Now()),
