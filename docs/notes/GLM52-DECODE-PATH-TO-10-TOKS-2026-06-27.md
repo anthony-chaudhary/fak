@@ -109,8 +109,24 @@ the #971 wall — are no longer scalar.
     - **the ~436 GB GLM-5.2 q4 GGUF fits on `/mnt/nvme-glm` (3.1 TB free)** — root `/` is 95% full
       (~22 GB), but the **nvme drive** (plus `/projects` 3.6 T, `/home/mplservice` 8.9 T) is the
       staging target; pull the GGUF straight from HF to `/mnt/nvme-glm/glm52-q4/`.
-    - then a pure-CPU serve (`FAK_KQ_INT8=1`, no `--backend`, ~44–100 min load) + decode is the
-      only remaining step before matrix row C produces the real tok/s.
+    - then a pure-CPU serve (`FAK_KQ_INT8=1`, no `--backend`) + decode is the remaining step.
+
+  **ATTEMPTED on da33 (2026-06-28 ~06:00Z) — hit a hard, quantified RAM-capacity wall.** Built fak
+  on-box (Go installed to `/mnt/nvme-glm/go`, cloned + built `/mnt/nvme-glm/fak-bin`; the GGUF is at
+  `/mnt/nvme-glm/glm52-q4/UD-Q4_K_M/`), then launched `fak-bin serve --gguf <shard1> --addr :8077
+  --context-budget-tokens 2048` (`FAK_KQ_INT8=1`). It refuses with a typed `FitTooBig` every time:
+  `weights 433.82 GiB + kv 1.04 GiB needs 434.91, host has ~394 GiB`. Cause: `cmd/fak/serve.go:713
+  serveGGUFHostHeadroom = 0.15` requires `weights ≤ MemAvailable × 0.85`; da33's MemAvailable is
+  ~464 GiB, ×0.85 ≈ 394 → refuse. And the headroom guards a REAL cost — GLM-5.2 UD-Q4_K_M is **~458
+  GiB RESIDENT** in fak's path (#974 struct overshoot over the 433 on-disk), so even at zero headroom
+  the ~458 GiB barely fits ~464 GiB free and would risk an OOM mid-load. da33's remaining RAM is held
+  by a protected 66-day SWE-bench eval that must not be killed. **So the e2e fak-kernel decode tok/s
+  on da33 is RAM-capacity-gated:** GLM-5.2 q4's ~458 GiB resident footprint does not safely fit
+  da33's ~464 GiB free alongside the protected eval, and fak (correctly) loads weights resident with
+  no mmap/lazy path. Unblocking needs ONE of: a host with ≥ ~520 GiB free (da33 idle, or a DGX host's
+  RAM), a fak mmap weight-load path (doesn't exist), or a smaller GLM quant (q3/q2 ~250–330 GiB —
+  none staged; a multi-hundred-GB download). The AVX2 reducers (da33's tier) are what would run once
+  it fits; the microbench numbers above are the proven kernel witness.
 
 ## What is MEASURED vs INFERRED (kept honest)
 
