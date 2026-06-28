@@ -562,16 +562,22 @@ func isDigitString(s string) bool {
 // hand-written scanner, gated byte-exact against llama.cpp in oracle_qwen_test.go.
 // Unlike the ByteLevel default it attaches ANY non-newline/non-alnum char to a
 // following letter run ("(n", "_case", "\tand").
-func preTokenizeQwen(text string) []string {
+func preTokenizeQwen(text string) []string { return preTokenizeWith(text, matchQwenAt) }
+
+// preTokenizeWith is the shared left-to-right pre-tokenizer loop: at each position it
+// greedily consumes the run matched by matchAt and, defensively (unreachable for valid
+// input), emits a lone rune when nothing matches. The Qwen2 and GLM-4 pre-tokenizers
+// differ ONLY in their per-position matcher, so both delegate here.
+func preTokenizeWith(text string, matchAt func(rs []rune, i int) int) []string {
 	rs := []rune(text)
 	n := len(rs)
 	var out []string
 	for i := 0; i < n; {
-		if m := matchQwenAt(rs, i); m > 0 {
+		if m := matchAt(rs, i); m > 0 {
 			out = append(out, string(rs[i:i+m]))
 			i += m
 		} else {
-			out = append(out, string(rs[i:i+1])) // defensive; unreachable for valid input
+			out = append(out, string(rs[i:i+1]))
 			i++
 		}
 	}
@@ -587,21 +593,7 @@ func isWS(r rune) bool { return unicode.IsSpace(r) }
 // digits in runs of 1-3 (`\p{N}{1,3}`) where Qwen2 emits one digit at a time (`\p{N}`). GLM-5.2's
 // GGUF carries tokenizer.ggml.pre=glm4; before this it fell through to GPT-2 ByteLevel (a different
 // regex family), so GLM-5.2 prompts tokenized WRONG and the model produced garbage output.
-func preTokenizeGLM4(text string) []string {
-	rs := []rune(text)
-	n := len(rs)
-	var out []string
-	for i := 0; i < n; {
-		if m := matchGLM4At(rs, i); m > 0 {
-			out = append(out, string(rs[i:i+m]))
-			i += m
-		} else {
-			out = append(out, string(rs[i:i+1]))
-			i++
-		}
-	}
-	return out
-}
+func preTokenizeGLM4(text string) []string { return preTokenizeWith(text, matchGLM4At) }
 
 // matchGLM4At is matchQwenAt with the number alternative widened to \p{N}{1,3}. A leading digit is
 // never consumed by the contraction or letter alternatives, so intercepting it here — before
