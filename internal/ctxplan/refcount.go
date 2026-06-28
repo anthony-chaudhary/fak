@@ -77,6 +77,48 @@ type Refcount struct {
 // healthy on the refcount axes?" check for an operator surface.
 func (r Refcount) Any() bool { return len(r.FalseRetain) > 0 || len(r.FalseFree) > 0 }
 
+// falseFreePenalty / falseRetainPenalty are the per-span advisory weights the down-weight
+// folds the two counts with. They encode the frame's conservative over-retain asymmetry
+// (epic #844 "Honest fences"): a false-free SILENTLY loses needed context — the bug the
+// frame exists to kill — while a false-retain only costs a few idle tokens. So a false-free
+// span weighs strictly more than a false-retain one. The numbers are a coarse gauge (not a
+// tuned controller); their only contract is falseFreePenalty > falseRetainPenalty > 0.
+const (
+	falseFreePenalty   = 1.0
+	falseRetainPenalty = 0.25
+)
+
+// RefcountAdvice is the ADVISORY down-weight the two-class verdict implies — the "so what"
+// of the counts, kept on its own type so it can never be mistaken for a plan input. Each
+// field is a non-negative advisory magnitude an operator surface (or a later learner) MAY
+// read; nothing in the planner consumes it. A higher Total means a less reachability-healthy
+// turn. By construction it is a pure function of a Refcount's counts (no new measurement),
+// and it is purely advisory: feeding it nowhere is the only supported wiring today, so it
+// can never gate a plan decision (epic #844's law: a pin/signal that gated correctness is a
+// bug).
+type RefcountAdvice struct {
+	// FalseFree is the under-resident advisory weight: len(FalseFree) * falseFreePenalty.
+	// Weighted heavier — losing needed context is the asymmetric failure.
+	FalseFree float64 `json:"false_free"`
+	// FalseRetain is the over-resident advisory weight: len(FalseRetain) * falseRetainPenalty.
+	// Weighted lighter — idle pinned tokens are mere budget rot, not lost context.
+	FalseRetain float64 `json:"false_retain"`
+	// Total is FalseFree + FalseRetain — the single advisory health scalar for the turn (0 on
+	// a clean turn). Advisory only; never a budget, never a gate.
+	Total float64 `json:"total"`
+}
+
+// DownWeight folds the two-class verdict into the advisory down-weight it IMPLIES, applying
+// the over-retain asymmetry (a false-free outweighs a false-retain). It is a pure read of
+// the counts — adds no measurement — and is ADVISORY ONLY: it returns a magnitude an
+// operator/EXPLAIN surface may show, and is wired into no plan decision. A clean Refcount
+// (nothing flagged) yields the zero RefcountAdvice, so a healthy turn implies no penalty.
+func (r Refcount) DownWeight() RefcountAdvice {
+	ff := float64(len(r.FalseFree)) * falseFreePenalty
+	fr := float64(len(r.FalseRetain)) * falseRetainPenalty
+	return RefcountAdvice{FalseFree: ff, FalseRetain: fr, Total: ff + fr}
+}
+
 // falseRetainK is the default number of CONSECUTIVE turns a pinned span must be Wasted
 // before it is flagged false-retain. One idle turn is normal (a pin earns its keep across
 // turns, not every turn); K turns of idleness is rot worth an advisory down-weight. Coarse

@@ -183,6 +183,96 @@ func TestRefcount_TwoClassesDistinct(t *testing.T) {
 	}
 }
 
+// TestRefcountAdvice_CleanTurnZero proves a clean Refcount (nothing flagged) implies the
+// zero advisory down-weight — a healthy turn carries no penalty.
+func TestRefcountAdvice_CleanTurnZero(t *testing.T) {
+	rw := NewRefcountWitness(falseRetainK)
+	// A pinned span the turn USED, and no live goal — nothing rots, nothing is lost.
+	p := Plan{Selected: []Selection{sel("pin", 100, true)}}
+	o := Outcome{Hits: []string{"pin"}}
+
+	rc := rw.Observe(p, o, LiveGoal{})
+	if rc.Any() {
+		t.Fatalf("verdict = %+v, want clean", rc)
+	}
+	if adv := rc.DownWeight(); adv != (RefcountAdvice{}) {
+		t.Errorf("clean turn down-weight = %+v, want zero", adv)
+	}
+}
+
+// TestRefcountAdvice_OverRetainAsymmetry is the core property of the advisory down-weight:
+// the verdict folds into a magnitude that weighs a false-free (under-resident loss — the
+// bug the frame exists to kill) STRICTLY heavier than a false-retain (over-resident rot —
+// idle tokens). One false-free must imply a larger down-weight than one false-retain, and
+// the Total must be the sum of the two per-class weights.
+func TestRefcountAdvice_OverRetainAsymmetry(t *testing.T) {
+	oneFree := Refcount{FalseFree: []string{"goalspan"}}
+	oneRetain := Refcount{FalseRetain: []string{"idlepin"}}
+
+	advFree := oneFree.DownWeight()
+	advRetain := oneRetain.DownWeight()
+
+	// A false-free outweighs a false-retain — the conservative over-retain asymmetry.
+	if !(advFree.Total > advRetain.Total) {
+		t.Errorf("false-free down-weight %v not > false-retain %v — over-retain asymmetry lost",
+			advFree.Total, advRetain.Total)
+	}
+	if advFree.FalseRetain != 0 || advRetain.FalseFree != 0 {
+		t.Errorf("per-class weights leaked across axes: free=%+v retain=%+v", advFree, advRetain)
+	}
+
+	// Total is the sum of the two per-class weights, and counts scale it linearly.
+	both := Refcount{FalseFree: []string{"a", "b"}, FalseRetain: []string{"c"}}
+	adv := both.DownWeight()
+	wantFree := 2 * falseFreePenalty
+	wantRetain := 1 * falseRetainPenalty
+	if !approx(adv.FalseFree, wantFree) || !approx(adv.FalseRetain, wantRetain) {
+		t.Errorf("down-weight = %+v, want free=%v retain=%v", adv, wantFree, wantRetain)
+	}
+	if !approx(adv.Total, wantFree+wantRetain) {
+		t.Errorf("total = %v, want %v (sum of the two classes)", adv.Total, wantFree+wantRetain)
+	}
+}
+
+// TestRefcountAdvice_IsAdvisory_DoesNotChangePlan is the load-bearing acceptance check: the
+// refcount down-weight is ADVISORY — observing a turn and reading its implied down-weight
+// changes NO plan decision. The same (spans, forecast, budget) plans byte-identically
+// whether or not the refcount witness ran, proving the signal never gated correctness
+// (epic #844's law: a pin/signal that gated the answer would be a bug).
+func TestRefcountAdvice_IsAdvisory_DoesNotChangePlan(t *testing.T) {
+	spans := []Span{
+		{ID: "sys", Role: "system", Descriptor: "system prompt", Bytes: 160, Durability: DurabilityDurable},
+		{ID: "u1", Role: "user", Descriptor: "the goal", Bytes: 240, Step: 1},
+		{ID: "scratch", Role: "tool", Descriptor: "noisy tool output", Bytes: 800, Step: 2},
+	}
+	f := Forecast{Intents: []string{"goal"}, Pins: []string{"sys"}}
+	budget := Budget{Tokens: 150} // forces an elision: not every span fits
+
+	// Plan once with NO refcount involvement — the control decision (nil = default cost model).
+	want := PlanCells(spans, f, budget, nil)
+
+	// Now run a full refcount observation (false-free + false-retain both fire) against a turn,
+	// read its down-weight... and re-plan with the SAME inputs. The plan must be unchanged: the
+	// witness is a pure observer, wired into no planner input.
+	rw := NewRefcountWitness(1)
+	o := Outcome{Wasted: []string{"sys"}, Faults: []string{"scratch"}}
+	rc := rw.Observe(want, o, LiveGoal{Active: true, Reachable: []string{"scratch"}})
+	if !rc.Any() {
+		t.Fatal("expected the observation to flag something so the advisory is non-vacuous")
+	}
+	if adv := rc.DownWeight(); adv.Total <= 0 {
+		t.Fatalf("expected a positive advisory down-weight, got %+v", adv)
+	}
+
+	got := PlanCells(spans, f, budget, nil)
+	if !reflect.DeepEqual(got.Selected, want.Selected) || !reflect.DeepEqual(got.Elided, want.Elided) {
+		t.Errorf("plan changed after a refcount observation — the down-weight is NOT advisory\n got=%+v\nwant=%+v", got, want)
+	}
+	if got.CostUsed != want.CostUsed {
+		t.Errorf("CostUsed changed (%d != %d) — refcount must not affect the plan", got.CostUsed, want.CostUsed)
+	}
+}
+
 // TestRefcount_ZeroValueWitnessUsable proves the zero-value witness works (K defaults to
 // falseRetainK) so a caller can use a plain &RefcountWitness{} without the constructor.
 func TestRefcount_ZeroValueWitnessUsable(t *testing.T) {
