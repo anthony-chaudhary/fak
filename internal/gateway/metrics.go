@@ -145,6 +145,16 @@ type gatewayMetrics struct {
 	// a newGatewayMetrics'd value.
 	harnessCoherence *harnessCoherenceMetrics
 
+	// routing is the #603 (epic #595) gateway seam onto modelroute's per-aspect decision
+	// surface: an append-only DecisionJournal of every routing decision the gateway takes on
+	// the served path, plus the fak_gateway_routing_* accumulators its Counts() projects into.
+	// It is the SINGLE source both the /metrics scrape (writeRoutingMetrics) and the operator
+	// roll-up (routingSummary) fold, so the two views can never disagree. Its own lock guards
+	// the journal — kept off the locks above (a distinct, one-fold-per-routed-call hot path).
+	// Never nil for a newGatewayMetrics'd value; the journal stays empty until a RouteManifest
+	// is configured and a tool call routes.
+	routing *routingMetrics
+
 	// oomMu guards the in-kernel device-OOM visibility family. These are LOCAL resource
 	// exhaustion faults: either recovered compute.DeviceAllocError allocations or a request
 	// capacity precheck that refused a known-too-large plan before allocation, never provider
@@ -267,6 +277,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		inKernelOOM:        map[string]*inKernelOOMClassStats{},
 		upstreamErrors:     map[string]uint64{},
 		harnessCoherence:   newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
+		routing:            newRoutingMetrics(),
 	}
 }
 
@@ -1154,6 +1165,7 @@ func (s *Server) renderMetrics() string {
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
+	m.writeRoutingMetrics(&b)         // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
 	s.resumeProj.writeMetrics(&b)     // #941: resume projected-vs-observed residual (self-contained family)
 	s.writeFleetMembershipMetrics(&b) // #42: live fleet membership/health/drain/failover transitions, per worker
 

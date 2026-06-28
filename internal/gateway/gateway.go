@@ -1515,11 +1515,36 @@ func (s *Server) routeDecision(tool string, readOnly bool, meta map[string]strin
 // registered engine driver fails LOUD at dispatch ("no engine registered for route"),
 // never silently runs elsewhere.
 func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string) string {
+	began := time.Now()
 	d, ok := s.routeDecision(tool, readOnly, meta)
-	if !ok || d.Plan.IsEnsemble() {
+	if !ok {
+		// No manifest: the kernel-default path, never reached when routing is off — record
+		// nothing so the family honestly reads 0 until routing is actually live.
+		return ""
+	}
+	// Routing is LIVE for this call: fold the per-aspect Decision into the observability
+	// journal (#603) so it reaches /metrics AND the audit trail. This is the ONE fold per
+	// served tool call — routeEngine runs on every buildCall (single-model and ensemble
+	// alike); ensemblePlan re-routes the same Subject at dispatch but does not re-record, so
+	// a call is counted exactly once. The overhead is the wall-clock the decision itself cost
+	// (pure-function routing, so tiny). nil metrics / nil routing accumulator => no-op.
+	s.metrics.observeRouteDecision(s.routeManifestVersion(), d, time.Since(began))
+	if d.Plan.IsEnsemble() {
 		return ""
 	}
 	return d.Plan.Primary()
+}
+
+// routeManifestVersion returns the installed routing manifest's schema version (for the
+// decision digest), defaulting to the current modelroute.Version when the manifest omits
+// it or no manifest is installed.
+func (s *Server) routeManifestVersion() string {
+	if s.route != nil {
+		if mf := s.route.Manifest(); mf != nil && mf.Version != "" {
+			return mf.Version
+		}
+	}
+	return modelroute.Version
 }
 
 // ensemblePlan returns the routing Plan for this call WHEN it is a multi-member
