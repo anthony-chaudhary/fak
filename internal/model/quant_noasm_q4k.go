@@ -1,11 +1,11 @@
-//go:build !arm64
+//go:build !arm64 && !amd64
 
 package model
 
 import "os"
 
-// quant_noasm_q4k.go — the resident-Q4_K decode dispatch for archs without an SDOT Q4_K kernel
-// (everything but arm64). There is no SIMD Q4_K kernel here yet, BUT the SCALAR int8 reduction
+// quant_noasm_q4k.go — the resident-Q4_K decode dispatch for archs with NO SDOT/SIMD Q4_K kernel
+// (everything but arm64 NEON and amd64 AVX2). There is no SIMD Q4_K kernel here, BUT the SCALAR int8 reduction
 // (q4kReduceRowScalar) still beats the f32 path: it skips the 256-f32 per-super-block dequant and
 // does a compact integer multiply-add (the same win the Q5_K int8 path measured at 2.13x on a
 // GLM-5.2-shaped expert, sm_80). So q4kSDOTEnabled is an opt-in here via FAK_KQ_INT8 — the GLM-5.2
