@@ -14,6 +14,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
@@ -24,10 +25,12 @@ import (
 type RunOption func(*runConfig)
 
 // runConfig is the resolved option set for one RunArm invocation. The zero value is
-// the historical loop (nil table => permissive Decide => no per-turn gate).
+// the historical loop (nil table => permissive Decide => no per-turn gate; nil route
+// => Engine left unset => kernel default for every tool call).
 type runConfig struct {
 	table *session.Table
 	trace string
+	route *modelroute.Manifest
 }
 
 // WithSessionTable wires a per-session drive-state table and the trace id this run is
@@ -40,6 +43,36 @@ func WithSessionTable(table *session.Table, trace string) RunOption {
 		c.table = table
 		c.trace = trace
 	}
+}
+
+// WithRouteManifest wires an OPTIONAL per-tool-call routing policy into the in-process
+// agent loop. When set, the fak arm classifies each tool call into a
+// modelroute.Subject{Aspect: AspectToolCall, Tool: ...}, routes it, and binds the
+// chosen model for a single-model PICK to abi.ToolCall.Engine BEFORE k.Syscall — the
+// same pre-submit ordering the gateway child uses, so the residency PDP adjudicates the
+// real route (#598 / epic #595). A nil manifest is accepted and degrades to the
+// historical loop (Engine left unset => the loop's kernel.New("localtools") default), so
+// a caller may pass the option unconditionally.
+func WithRouteManifest(m *modelroute.Manifest) RunOption {
+	return func(c *runConfig) { c.route = m }
+}
+
+// routeToolEngine returns the engine route to bind to abi.ToolCall.Engine for one tool
+// call under this run's optional routing manifest, or "" for the kernel default. It
+// classifies the call into a Subject{Aspect: AspectToolCall, Tool: tool} and returns the
+// matched Plan.Primary() for a single-model PICK; a nil manifest or an ENSEMBLE plan
+// returns "" (the kernel default — an ensemble fan-out is a separate dispatch concern,
+// #597, never collapsed to one member here). It mirrors the gateway's routeEngine
+// exactly so the agent loop and the gateway can never diverge on what a call routes to.
+func (c runConfig) routeToolEngine(tool string) string {
+	if c.route == nil {
+		return ""
+	}
+	d := c.route.Route(modelroute.Subject{Aspect: modelroute.AspectToolCall, Tool: tool})
+	if d.Plan.IsEnsemble() {
+		return ""
+	}
+	return d.Plan.Primary()
 }
 
 // resolveRunConfig folds the options into a runConfig.

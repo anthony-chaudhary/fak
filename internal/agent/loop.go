@@ -131,7 +131,14 @@ func finalizeFak(k *kernel.Kernel, m *ArmMetrics) {
 // execViaKernel runs one tool call through the real syscall boundary and returns
 // the tool content the model will see (already alias-repaired, vDSO-served, or
 // MMU-sanitized as the kernel decided).
-func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs string, ev traceEvent) (string, traceEvent) {
+//
+// engine is the optional per-call model route the loop's routing manifest selected
+// for THIS tool (#598). It is bound to abi.ToolCall.Engine BEFORE k.Syscall — the
+// same pre-submit ordering the gateway child uses — so the residency PDP adjudicates
+// the real route and a routed call dispatches to the chosen engine. An empty engine
+// leaves Engine unset, so k.routeFor falls back to the loop's kernel default
+// ("localtools"): the no-manifest path is byte-for-byte the pre-routing loop.
+func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine string, ev traceEvent) (string, traceEvent) {
 	args := []byte(rawArgs)
 	if len(args) == 0 {
 		args = []byte("{}")
@@ -141,7 +148,7 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs string, 
 		ev.Note = "resolver error: " + err.Error()
 		return `{"error":"internal resolver failure"}`, ev
 	}
-	tc := &abi.ToolCall{Tool: tool, Args: ref, Meta: metaFor(tool)}
+	tc := &abi.ToolCall{Tool: tool, Args: ref, Engine: engine, Meta: metaFor(tool)}
 	r, v := k.Syscall(ctx, tc)
 	ev.Verdict = verdictName(v.Kind)
 	ev.By = v.By
@@ -307,7 +314,10 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 			var content string
 			ev := traceEvent{Turn: turn + 1, Arm: m.Arm, Tool: tool, RawArgs: rawArgs}
 			if fak {
-				content, ev = execViaKernel(ctx, k, tool, rawArgs, ev)
+				// Per-tool-call model routing (opt-in #598): classify this call and bind the
+				// chosen engine PRE-Syscall. No manifest => "" => the kernel default, so the
+				// historical loop is unchanged.
+				content, ev = execViaKernel(ctx, k, tool, rawArgs, cfg.routeToolEngine(tool), ev)
 			} else {
 				content, ev = execNaive(tool, rawArgs, &m, ev)
 			}
