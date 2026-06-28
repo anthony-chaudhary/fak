@@ -94,7 +94,7 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Leading systems:** NVIDIA GB300 NVL72 (Blackwell Ultra, TensorRT-LLM/Dynamo), NVIDIA GB200 NVL72 (Blackwell), CoreWeave / Nebius GB300 NVL72 submissions
 - **Source:** [https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform](https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform) (2026-04-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8-GPU datacenter server (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. Neutral accuracy-gated throughput is a vendor/submitter axis far from fak's reuse/adjudication value.
+- **fak note:** OUT OF SCOPE BY DESIGN for a reuse kernel. The accuracy-constrained number is now MLPerf v6.0's (2026-03-30) server scenario, carried by DeepSeek-R1 671B MoE (8,064 tok/s/GPU on GB300 NVL72 under a 2 s TTFT / 12.5 tok/s/user p99 SLO while holding the accuracy bar), superseding v5.x's Llama-3.1-405B framing. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8-GPU datacenter server (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. fak does NOT intend an own-engine MLPerf-shaped DeepSeek-R1 number; on a 671B MoE it fronts SGLang/llama.cpp, and its in-kernel DeepSeek-class-MoE path is the GLM-5.2 work (#1010, #1026; single device, commit 498a4ab). See max-model-and-moe-coverage.
 - **Trace:** none — fak has no MLPerf Inference submission and no accuracy-gated throughput run; its only live concurrent head-to-head (served-throughput-vs-sglang) is a raw tok/s race fak TRAILS, with no 99%/99.9%-accuracy gate applied
 
 ### ○ Quantization format & low-precision datatype coverage — fak: **no-claim**
@@ -112,7 +112,7 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 
 *Why it matters:* The execution speed of an int8-quantized model on CPU SIMD (AVX2/AVX-512) decides local-inference viability. fak's hand-written int8 GEMM beats the standard HuggingFace dynamic-int8 reference.
 
-- **SOTA bar:** HuggingFace dynamic-int8 is the standard same-rung CPU int8 reference (1×); llama.cpp Q8_0 CPU is the harder peer (~parity).
+- **SOTA bar:** HuggingFace dynamic-int8 is the standard same-rung CPU int8 reference (1Ã—); llama.cpp Q8_0 CPU is the harder peer (~parity).
 - **Leading systems:** HuggingFace dynamic-int8, llama.cpp Q8_0
 - **Source:** [https://huggingface.co/docs/transformers/main/quantization/overview](https://huggingface.co/docs/transformers/main/quantization/overview) (2026-06)
 - **fak:** lead — 2.97 × vs HF int8 (in-flight)
@@ -145,7 +145,7 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 
 ### ≈ Dense GPU compute correctness with ZERO vendor GEMM (cuBLAS-free) — fak: **parity**
 
-*Why it matters:* Every mainstream stack depends on NVIDIA cuBLAS for its GEMMs. Running a real model's dense path on an owned, dependency-free kernel — and proving it bit-matches the vendor oracle — is a portability/auditability differentiator.
+*Why it matters:* Every mainstream stack depends on NVIDIA cuBLAS for its GEMMs. Running a real model's dense path on an owned, dependency-free kernel â€” and proving it bit-matches the vendor oracle â€” is a portability/auditability differentiator.
 
 - **SOTA bar:** cuBLAS is the tuned vendor GEMM every other stack carries; matching it bit-for-bit (cosine=1.0) is parity by construction.
 - **Leading systems:** cuBLAS (NVIDIA tuned vendor GEMM)

@@ -24,11 +24,11 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 
 *Why it matters:* Cross-vendor, audited absolute throughput on a fixed model and SLO is what a buyer uses to compare full systems and compute cost-per-token. MLPerf Inference is the only neutral, reproducible apples-to-apples leaderboard with both offline (max throughput) and server (latency-constrained) scenarios, so it anchors the absolute SOTA bar that engine micro-benchmarks cannot.
 
-- **SOTA bar:** MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01) supersedes v5.0 and v5.1, and the headline model is now DeepSeek-R1 (671B MoE reasoning), not Llama 3.1 405B: NVIDIA's largest-ever submission of 288 Blackwell Ultra GPUs (4x GB300 NVL72 over Quantum-X800 InfiniBand) hit ~2.494 million tokens/second aggregate in the offline scenario, at 9,821 tok/s/GPU offline (8,064 tok/s/GPU server) — up to 2.7x higher than the GB300 debut six months prior via TensorRT-LLM/Dynamo software.
+- **SOTA bar:** MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01) supersedes v5.0 and v5.1, and the headline model is now DeepSeek-R1 (671B MoE reasoning), not Llama 3.1 405B: NVIDIA's largest-ever submission of 288 Blackwell Ultra GPUs (4x GB300 NVL72 over Quantum-X800 InfiniBand) hit ~2.494 million tokens/second aggregate in the offline scenario, at 9,821 tok/s/GPU offline (8,064 tok/s/GPU server) â€” up to 2.7x higher than the GB300 debut six months prior via TensorRT-LLM/Dynamo software.
 - **Leading systems:** NVIDIA GB300 NVL72 x4 (288 Blackwell Ultra GPUs, TensorRT-LLM/Dynamo), NVIDIA GB300 NVL72 single rack, CoreWeave / Nebius GB300 NVL72
 - **Source:** [https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform](https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform) (2026-04-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel: MLPerf Inference ranks absolute aggregate tok/s on standardized Blackwell/Hopper hardware (GB200 NVL72 ~13,886 tok/s offline on Llama 3.1 405B). fak has no MLPerf submission and its own engine ceilings at ~7B (data.json model-size-ceiling), so it is not in this race; on big models it FRONTS SGLang/llama.cpp rather than serving them itself. No standardized fak tok/s exists.
+- **fak note:** OUT OF SCOPE BY DESIGN for a reuse kernel: MLPerf Inference v6.0 (2026-03-30) ranks absolute aggregate tok/s on standardized Blackwell-Ultra hardware, and its headline model is now DeepSeek-R1 671B MoE, not Llama-3.1-405B — NVIDIA's 288-GPU (4x GB300 NVL72) submission hit ~2.494M tok/s aggregate / 9,821 tok/s/GPU offline, superseding the old v5.x GB200 / 405B bar. fak has no MLPerf submission and its own generic engine ceilings at ~7B (data.json model-size-ceiling), so it is not in this race and does NOT intend an own-engine MLPerf-shaped 671B number; on a frontier MoE it FRONTS SGLang/llama.cpp rather than serving them itself. fak's actual DeepSeek-class-MoE serving path is the in-kernel GLM-5.2 work (#1010, #1026): MoE/FFN experts + router on its own pure GPU kernel (cosine=1.0, commit 498a4ab) but on a SINGLE device, so no standardized fak tok/s exists. See max-model-and-moe-coverage.
 - **Trace:** No MLPerf submission or standardized-hardware aggregate tok/s in BENCHMARK-AUTHORITY.md. The only concurrent server number is the GPU server run (data.json 'served-throughput-vs-sglang', 1085.6 tok/s @ conc 64) which is fak-gateway-fronting-SGLang on non-MLPerf hardware/harness, not a standardized MLPerf result.
 
 ### ○ Latency-vs-throughput Pareto frontier — fak: **no-claim**
@@ -46,9 +46,9 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 
 *Why it matters:* Throughput per GPU is the denominator of cost-per-token and the headline capacity number every operator sizes a fleet against. MLPerf is the only neutral, audited cross-vendor source, so it anchors the SOTA bar buyers actually trust over vendor blogs.
 
-- **SOTA bar:** MLPerf Inference v5.1 / v5.0: ~1.1M tokens/s aggregate on one Azure ND GB300 v6 (GB300 NVL72) rack (unverified submission, beating 865K tok/s on GB200 NVL72); ~33,000 tok/s on a single H200 for Llama-2-70B (40% over H100). These are the buyer-citable upper bounds for engine+hardware throughput.
-- **Leading systems:** NVIDIA GB300/GB200 NVL72 (TensorRT-LLM), NVIDIA H200, MangoBoost/AMD MI300X
-- **Source:** [https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/](https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/) (2025-09-10)
+- **SOTA bar:** MLPerf Inference v6.0 (2026-03-30) is the current round and the audited per-accelerator peak: DeepSeek-R1 671B on GB300 NVL72 reaches 9,821 tok/s/GPU offline (8,064 tok/s/GPU accuracy+latency-constrained server); the full 288-GPU (4x GB300 NVL72) submission aggregates ~2.494M tok/s (see absolute-tokens-per-second-mlperf). The audited single-H200 Llama-2-70B peak of ~33,000 tok/s (40% over H100) still stands for that older/smaller workload. The prior v5.1/v5.0 ~1.1M tok/s/rack Azure GB300 figure was an unverified submission and is superseded.
+- **Leading systems:** NVIDIA GB300 NVL72 (DeepSeek-R1 671B, MLPerf v6.0, TensorRT-LLM/Dynamo), NVIDIA H200 (Llama-2-70B audited), MangoBoost/AMD MI300X
+- **Source:** [https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform](https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform) (2026-04-01)
 - **fak:** trails — 1085.6 tok/s @ conc 64 (peak) (shipped)
 - **fak note:** THE honest counter to the fleet 'lead' rows: this is the ONLY real concurrent-serving head-to-head against a LIVE SGLang process (same 8-GPU datacenter server / 27B / load harness, fak-in-front vs raw). fak TRAILS — it is the gateway/adjudication TAX: 0.60× worst (conc 8) → 0.75× at peak (conc 64) → ~0.97× converged at saturation (conc 128). fak's value here is the adjudication/coherence/measurement plane, NOT raw tok/s; the 4.1× fleet 'lead' is reuse-WORK eliminated on fak's own kernel held constant, a different axis from a throughput race against a tuned engine.
 - **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json · docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md
@@ -98,8 +98,8 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Leading systems:** MLPerf Inference v6.0 (DeepSeek-R1 interactive), MLPerf Inference v5.1 (Llama-3.1-405B interactive)
 - **Source:** [https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/](https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/) (2026-03-24)
 - **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. TTFT is adjacent to fak's actual lever (prefix-reuse cuts prefill tokens, which IS the dominant TTFT term on a cache hit), yet fak has never reported TTFT as a percentile under realistic prefill/concurrency the way MLPerf v5.1 (4.5s P99 TTFT, 405B interactive) or vLLM/GenAI-Perf do. The honest answer is no-claim until fak instruments the gateway proxy for a per-request TTFT distribution.
-- **Trace:** No TTFT row exists in BENCHMARK-AUTHORITY.md or CLAIMS.md. fak commits prefill-WORK ratios (single-stream prefill 0.58x vs llama.cpp CPU; RadixAttention live prefill 4.58x-6.95x vs full re-prefill) but never a TTFT measured as a latency percentile at fixed ISL/concurrency.
+- **fak note:** REAL GAP fak should measure. TTFT is adjacent to fak's actual lever (prefix-reuse cuts prefill tokens, which IS the dominant TTFT term on a cache hit), yet fak has never reported TTFT as a percentile under realistic prefill/concurrency the way MLPerf v6.0 (DeepSeek-R1 1.5 s P99 TTFT interactive; 405B 4.5 s still defined) or vLLM/GenAI-Perf do. The adjacent committed evidence is the +1804.9 ms E2EL gateway tax at conc 64 (end-to-end-request-latency), which is the UPPER BOUND on the TTFT tax since the gateway's admission decision (Decide 362 ns / AdmitChain <=87 us idle-box) runs before the first upstream byte. No-claim stands until a STREAMING run isolates the per-request TTFT distribution -- host-gated on the GPU box. The streaming-capable harness already exists: `fak webbench serving --dataset FILE --tracks ours,sglang --endpoints ours=<fak-gateway/v1>,sglang=<raw-sglang/v1>` captures per-request ttft_ms/itl_ms/tpot_ms over SSE (internal/webbench/serving.go MeasureSSERequest, ServingTrackStats.TTFTMillis). The committed compare.json was the OLDER non-streaming runner, so the only gap is a live fak-fronts-SGLang streaming run on the GPU box (off-box here), not new code.
+- **Trace:** No TTFT row exists in BENCHMARK-AUTHORITY.md or CLAIMS.md. fak commits prefill-WORK ratios (single-stream prefill 0.58x vs llama.cpp CPU; RadixAttention live prefill 4.58x-6.95x vs full re-prefill) but never a TTFT measured as a latency percentile at fixed ISL/concurrency. The committed fak-fronts-SGLang harness (experiments/qwen36/dgx-r4-20260622/compare.json) is NON-STREAMING -- it captures total request latency (E2EL, now committed; see end-to-end-request-latency) but cannot isolate the first-token wait, so it bounds but does not measure the TTFT tax.
 
 ### ○ Inter-token latency / time-per-output-token (ITL/TPOT) — fak: **no-claim**
 
@@ -109,30 +109,30 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Leading systems:** MLPerf Inference v6.0 (GPT-OSS 120B, DeepSeek-R1 interactive), MLPerf Inference v5.1
 - **Source:** [https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/](https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/) (2026-03-24)
 - **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. fak has decode-rate numbers (which trail llama.cpp single-stream, as it openly states it does not target single-stream) but never the per-output-token latency distribution MLPerf v5.1 encodes (12.5 tok/s/user ~= 80ms TPOT for 405B interactive). Reciprocal of a tok/s is not an ITL percentile under load; no-claim until measured.
-- **Trace:** fak commits single-stream DECODE throughput (8.7 tok/s 7B Q8 CPU, ~0.55-0.73x of llama.cpp at HEAD 374776a; ~120 tok/s GPU parity), but throughput is not inter-token LATENCY: no TPOT/ITL percentile is committed in BENCHMARK-AUTHORITY.md or CLAIMS.md.
+- **fak note:** REAL GAP fak should measure. fak has decode-rate numbers (which trail llama.cpp single-stream, as it openly states it does not target single-stream) but never the per-output-token latency distribution MLPerf v6.0 encodes (<= 15 ms P99 TPOT interactive for DeepSeek-R1 / GPT-OSS 120B; the prior 80 ms is now the server-scenario bound). The adjacent committed evidence is the +1804.9 ms E2EL gateway tax at conc 64 (end-to-end-request-latency); since the gateway is a streaming pass-through that adjudicates ONCE at admission and does not re-decide per output token, most of that tax is front-loaded into TTFT, leaving a small per-token relay component -- but the non-streaming artifact cannot separate it. No-claim stands until a STREAMING run isolates the per-request TPOT/ITL distribution -- host-gated on the GPU box. The streaming-capable harness already exists: `fak webbench serving --dataset FILE --tracks ours,sglang --endpoints ours=<fak-gateway/v1>,sglang=<raw-sglang/v1>` captures per-request tpot_ms/itl_ms over SSE (internal/webbench/serving.go MeasureSSERequest, ServingTrackStats.TPOTMillis). The committed compare.json was the OLDER non-streaming runner, so the only gap is a live fak-fronts-SGLang streaming run on the GPU box (off-box here), not new code.
+- **Trace:** fak commits single-stream DECODE throughput (8.7 tok/s 7B Q8 CPU, ~0.55-0.73x of llama.cpp at HEAD 374776a; ~120 tok/s GPU parity), but throughput is not inter-token LATENCY: no TPOT/ITL percentile is committed in BENCHMARK-AUTHORITY.md or CLAIMS.md. The committed fak-fronts-SGLang harness (experiments/qwen36/dgx-r4-20260622/compare.json) is NON-STREAMING -- it captures total request latency (E2EL, now committed; see end-to-end-request-latency) but does not timestamp individual output tokens, so it cannot isolate the per-token (TPOT) component of the gateway tax.
 
-### ○ End-to-end request latency (E2EL) — fak: **no-claim**
+### ▼ End-to-end request latency (E2EL) — fak: **trails**
 
 *Why it matters:* E2EL is the full submit-to-final-token time and is what a downstream agent or pipeline actually budgets against. It bundles queueing, prefill, all decode steps, batching effects, and network, so it is the only metric that captures the compound cost of long generations and is the right unit for multi-step agent SLA math.
 
 - **SOTA bar:** End-to-end request latency (TTFT + total decode) is reported per request by the standard tools (NVIDIA GenAI-Perf, vLLM bench serve, LLMPerf) with P99 as the default percentile; there is no single SOTA number - it is a tunable composite governed by the per-model MLPerf v6.0 TTFT+TPOT SLOs (e.g. a 1000-token DeepSeek-R1 interactive response budgets ~1.5 s TTFT + ~15 s decode).
 - **Leading systems:** NVIDIA GenAI-Perf, vLLM bench serve (--metric-percentiles, default p99), LLMPerf
 - **Source:** [https://docs.vllm.ai/en/latest/benchmarking/cli/](https://docs.vllm.ai/en/latest/benchmarking/cli/) (2026-01)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. E2EL = TTFT + (out_len-1)xTPOT + overhead, reported as a sliding-window percentile by GenAI-Perf / vLLM. fak's gateway sits exactly on the request path (and adds a measured tax) so this is directly instrumentable, but no E2EL percentile has been committed; no-claim.
-- **Trace:** No E2EL percentile is committed anywhere. fak reports whole-run wall-clocks for fleet/session benchmarks (e.g. 19.0 min for a 50-turn x 5-agent run) and a concurrency throughput sweep on the GPU server, but never a per-request end-to-end latency reported as a P50/P99 over a fixed output length with a warm-up/cool-down window.
+- **fak:** trails — 9026.9 ms E2EL P50 @ conc 64 (shipped)
+- **fak note:** WITNESSED gateway tax, the honest framing. Same 8-GPU datacenter server / Qwen3.6-27B / load harness, fak-gateway-in-front vs raw SGLang (the gateway is the only delta). At peak conc 64 fak's E2EL P50 is 9026.9 ms vs raw 7222.0 ms -> a +1804.9 ms (0.80x) end-to-end gateway tax. This is the FULL fak-in-front delta (proxy relay overhead PLUS the queueing induced by fak's lower peak throughput, 0.75x; see peak-serving-throughput-per-gpu), NOT just the in-process adjudication primitive (Decide 362 ns / AdmitChain <=87 us idle-box) which is only the small floor under it. fak fronts the backend and does NOT claim to win the raw-latency race; its value is the adjudication/coherence/measurement plane.
+- **Trace:** 044220f8 · experiments/qwen36/dgx-r4-20260622/compare.json · docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md
 
-### ○ Tail latency distribution (P50/P95/P99/P99.9) — fak: **no-claim**
+### ▼ Tail latency distribution (P50/P95/P99/P99.9) — fak: **trails**
 
 *Why it matters:* Averages hide the requests that ruin trust. A degrading P99 while P50 holds steady is the early-warning signature of queue buildup or KV-memory pressure. At scale a 1-in-100 bad request is a continuous problem (100/hr at 10k req/hr), so operators size capacity and write SLOs against tail percentiles, not means.
 
 - **SOTA bar:** P99 (99th percentile) is the canonical tail SLO across MLPerf Inference v6.0 (all TTFT/TPOT constraints are '99th percentile <= X'), NVIDIA GenAI-Perf/NIM, and vLLM bench (default --metric-percentiles p99). P99 remains the industry tail metric; some leaderboards also surface P95/P50.
 - **Leading systems:** MLPerf Inference v6.0 (99th-percentile TTFT/TPOT constraints), vLLM bench (p99 default), NVIDIA GenAI-Perf / NIM
 - **Source:** [https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/](https://mlcommons.org/2026/03/mlperf-inference-gpt-oss/) (2026-03-24)
-- **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. The only percentile fak commits is a p50 of the in-process adjudication primitive on an idle box (worst-payload AdmitChain 87 us) - useful for bounding the adjudication tax but NOT a request tail-latency distribution. MLPerf encodes its SLOs at P99 and production practice flags P99>>P50 as a saturation red flag; fak has no P99 serving number, so no-claim.
-- **Trace:** fak reports median (p50) pure-kernel decision latencies in isolation (Decide 362 ns, Admit 3.3-15.8 us, AdmitChain 29-87 us; BENCHMARK-AUTHORITY.md mac-m3pro-kernel-20260620) but NO serving-path latency DISTRIBUTION: no P95/P99/P99.9 of request latency under load is committed.
+- **fak:** trails — 9997.6 ms request-latency P99 @ conc 64 (shipped)
+- **fak note:** WITNESSED full request-latency tail on the same harness, fak-gateway-in-front vs raw SGLang. At peak conc 64 the committed distribution is fak P50/P95/P99 = 9026.9 / 9979.9 / 9997.6 ms vs raw 7222.0 / 8134.7 / 8157.9 ms; the P99 gateway tax is +1839.7 ms (0.82x). The tail is NOT widened by the gateway: fak's P99/P50 spread is 1.11x vs raw 1.13x, so fak shifts the WHOLE distribution by the ~+1.8 s tax rather than fattening the tail. Honest framing: fak fronts the backend and adds a measured tax, it does not claim to win the raw-latency race. (Sub-ms in-process primitive percentiles -- Decide 362 ns / AdmitChain <=87 us idle-box, BENCHMARK-AUTHORITY.md mac-m3pro-kernel-20260620 -- are the floor, not this under-load serving distribution.)
+- **Trace:** 044220f8 · experiments/qwen36/dgx-r4-20260622/compare.json · docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md
 
 ### ○ Prefill-decode interference & chunked-prefill TTFT/TPOT tension — fak: **no-claim**
 
@@ -149,7 +149,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 
 ### ▼ Single-stream (one chat) decode throughput on CPU — fak: **trails**
 
-*Why it matters:* The regime local/edge stacks (llama.cpp, Ollama, MLC) compete hardest on: one user, one chat, raw tokens/s on commodity hardware. fak explicitly does NOT target this — showing the loss keeps the scorecard honest.
+*Why it matters:* The regime local/edge stacks (llama.cpp, Ollama, MLC) compete hardest on: one user, one chat, raw tokens/s on commodity hardware. fak explicitly does NOT target this â€” showing the loss keeps the scorecard honest.
 
 - **SOTA bar:** llama.cpp Metal/CPU leads single-stream decode on the same box (e.g. Qwen2.5-7B Q8 ~17.3 tok/s Metal, M3 Pro).
 - **Leading systems:** llama.cpp, Ollama, MLC-LLM
@@ -160,9 +160,9 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 
 ### ▼ Single-stream prefill throughput, apples-to-apples CPU-vs-CPU — fak: **trails**
 
-*Why it matters:* Prefill (prompt ingestion) speed on CPU is a core local-inference axis. fak's arm64 build lacks the register-blocked int8 GEMM tile that x86 already has — a disclosed, narrowing loss.
+*Why it matters:* Prefill (prompt ingestion) speed on CPU is a core local-inference axis. fak's arm64 build lacks the register-blocked int8 GEMM tile that x86 already has â€” a disclosed, narrowing loss.
 
-- **SOTA bar:** llama.cpp CPU sets the prefill bar on the same box + Q8 weights (1× reference); fak arm64 is ~0.12× until the int8 tile lands.
+- **SOTA bar:** llama.cpp CPU sets the prefill bar on the same box + Q8 weights (1Ã— reference); fak arm64 is ~0.12Ã— until the int8 tile lands.
 - **Leading systems:** llama.cpp
 - **Source:** [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) (2026-06)
 - **fak:** trails — 0.12 × of llama.cpp CPU (shipped)
@@ -173,7 +173,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 
 *Why it matters:* Local GPU single-stream decode (the RTX-class laptop/desktop regime) is where llama.cpp's CUDA backend sets the bar; fak reaches parity here at higher precision via a reusable CUDA graph.
 
-- **SOTA bar:** llama.cpp Q8_0 ~120 ± 15 tok/s on an RTX 4070 (-ngl 99).
+- **SOTA bar:** llama.cpp Q8_0 ~120 Â± 15 tok/s on an RTX 4070 (-ngl 99).
 - **Leading systems:** llama.cpp (CUDA)
 - **Source:** [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) (2026-06)
 - **fak:** parity — 120 tok/s (shipped)

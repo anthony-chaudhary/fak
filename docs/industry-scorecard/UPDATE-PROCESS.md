@@ -20,26 +20,6 @@ New techniques appear and published SOTA bars move. Two mechanisms catch it:
 - **A fak number ages → re-confirm.** `measured_on` drives the `freshness` KPI; old measurements are flagged (advisory) to re-confirm when a bench node is free.
 - **A number changes → never hand-edit the doc.** Edit the data file, regenerate.
 
-## The recurring freshness cadence
-
-Run `python tools/industry_scorecard.py --stale` on a schedule (cron or `/loop`) to keep stale bars from silently regrowing. When a bar is checked and found still-current, update its dimension's `last_reviewed` field to today's date in `tools/industry_scorecard.data/_taxonomy.json` — this resets the staleness clock without fabricating a new source date.
-
-Example: marking 21 stale bars as re-confirmed:
-```bash
-# Check what's stale
-python tools/industry_scorecard.py --stale
-# For each still-current bar, edit tools/industry_scorecard.data/_taxonomy.json:
-#   "last_reviewed": "2026-06-27"
-# Re-verify the scorecard shows 0 stale
-python tools/industry_scorecard.py
-# Regenerate the docs
-python tools/industry_scorecard.py --markdown-dir docs/industry-scorecard
-# Commit the changes
-git commit -s -- tools/industry_scorecard.data/_taxonomy.json docs/industry-scorecard/ -m "chore(industry): re-confirm 21 stale SOTA bars as of 2026-06-27"
-```
-
-The `last_reviewed` field distinguishes "re-confirmed current" from "never looked" and prevents the stale count from silently climbing as the `industry_review_window_days` window slides.
-
 ## The commands
 
 ```bash

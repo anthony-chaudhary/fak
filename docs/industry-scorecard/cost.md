@@ -46,7 +46,7 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 
 *Why it matters:* Cost-per-million-tokens at the utilization you can actually sustain is the metric finance signs off on. It folds throughput, batching, quantization, and utilization into one number and exposes the gap between marketing throughput and the bill.
 
-- **SOTA bar:** GPT-4-equivalent quality now serves at ~$0.40 / 1M tokens vs ~$20 in late 2022 (≈10x/yr decline). Real production GPU utilization is only 30-60%, so realistic cost-per-token runs 2-3x above spreadsheet estimates; FP8/FP4 quantization roughly halves cost-per-token on H100/H200. Self-hosting a 7B breaks even only above ~50% utilization.
+- **SOTA bar:** GPT-4-equivalent quality now serves at ~$0.40 / 1M tokens vs ~$20 in late 2022 (â‰ˆ10x/yr decline). Real production GPU utilization is only 30-60%, so realistic cost-per-token runs 2-3x above spreadsheet estimates; FP8/FP4 quantization roughly halves cost-per-token on H100/H200. Self-hosting a 7B breaks even only above ~50% utilization.
 - **Leading systems:** Hosted frontier APIs, vLLM/SGLang self-host on H100/H200, FP8/FP4 quantization
 - **Source:** [https://introl.com/blog/inference-unit-economics-true-cost-per-million-tokens-guide](https://introl.com/blog/inference-unit-economics-true-cost-per-million-tokens-guide) (2025-09-01)
 - **fak:** no-claim — no number (stub)

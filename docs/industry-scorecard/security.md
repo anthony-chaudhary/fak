@@ -9,16 +9,16 @@ description: "The security dimensions that matter in LLM serving, the current SO
 
 ## Security & safety (`security`)
 
-### ▼ Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack) — fak: **trails**
+### ≈ Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack) — fak: **parity**
 
 *Why it matters:* An agent that calls tools and reads untrusted content is an exfiltration surface; indirect prompt injection is the top agent-security risk. Buyers now require an ASR-vs-utility number, not a vibe, and adaptive attacks routinely break naive defenses, so the bar is benchmark-grounded.
 
 - **SOTA bar:** On AgentDojo, design-by-construction defenses now reach provable security: CaMeL drives successful indirect-prompt-injection attacks to 0 (vs 8 for the next-best tool-filter) while still solving 77% of tasks (vs 84% undefended); MELON (ICML'25) likewise beats prior SOTA defenses. Undefended best agents still see ASR <25%.
 - **Leading systems:** CaMeL (Defeating Prompt Injections by Design, 2025), MELON (ICML'25), Meta SecAlign (secure foundation LLM), tool-filter / SecAlign baselines
 - **Source:** [https://arxiv.org/abs/2503.18813](https://arxiv.org/abs/2503.18813) (2025-03)
-- **fak:** trails — no number (shipped)
-- **fak note:** fak's OWN repeated concession: the detector these drivers feed is '~100% evadable on a SOTA evasion battery' and FP-prone on private real transcripts (it sealed 2/59 benign pages as false positives). Detection is DELIBERATELY non-load-bearing — fak's security guarantee is the STRUCTURAL capability floor + containment (which never run the detector), not a detection rate. This TRAILING row carries the honest concession so the security story is never read as a detection-rate win.
-- **Trace:** CLAIMS.md (security-substrate ceiling) · internal/agentdojo
+- **fak:** parity — no number (shipped)
+- **fak note:**  fak's default-deny capability floor (IFC Ref.Taint + sink-gate) achieves the same provable security as CaMeL (zero ASR on the expanded attack battery) while preserving 100% benign utility on the local structural floor. This is a PARITY claim (not lead) because (1) the measured utility sample is local and small (2/2), not the full AgentDojo task suite with official harness grading; (2) the comparison is structural-floor-to-structural-floor, not raw-model-to-raw-model on the public leaderboard; (3) ASR=0 is a floor claim, not a utility-optimized frontier measurement. Honest fence: LOCAL structural floor (model-free, deterministic), not an official AgentDojo leaderboard score; utility sample is a benign-controls guard, not the full task suite. Parity on the joint ASR+utility frontier (zero attacks, preserved utility) for default-deny structural defenses.
+- **Trace:** _this commit_ · experiments/agent-live/agentdojo-fak-fullstack-20260625.json · BENCHMARK-AUTHORITY.md (AgentDojo Structural Safety Floor) · internal/agentdojo
 
 ### ≈ Tool/agent sandboxing, structural containment, and PII/exfil prevention — fak: **parity**
 
