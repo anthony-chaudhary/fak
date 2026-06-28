@@ -150,6 +150,14 @@ func cmdGuard(argv []string) {
 	// operator value always wins — guardEnsureTimeoutFloor never clobbers a set var.
 	guardEnsureTimeoutFloor("FAK_HTTP_WRITE_TIMEOUT_S", guardTimeoutFloorS)
 	guardEnsureTimeoutFloor("FAK_PLANNER_TIMEOUT_S", guardTimeoutFloorS)
+	// Pin the streaming IDLE-read deadline too — but deliberately SMALL, the opposite of the
+	// 600s write/planner floors above. Those are RAISED so a long but healthy turn is not cut
+	// off mid-stream; the stall timeout must stay short so a SILENT upstream (a mid-stream API
+	// stall) fails in ~a minute instead of hanging for the whole 600s write window. Reusing
+	// guardTimeoutFloorS here would re-introduce exactly that hang. The agent default is
+	// already 60s; this makes the value explicit in the wrapped child's env beside the other
+	// two floors, and (like them) never clobbers an operator-set value.
+	guardEnsureTimeoutFloor("FAK_STREAM_STALL_TIMEOUT_S", guardStallFloorS)
 
 	if *dumpPolicy {
 		os.Stdout.Write(guardDefaultPolicyJSON)
@@ -947,6 +955,13 @@ func guardEnvVar(provider, override string) string {
 // guarded session raises the gateway floors to, so a long frontier turn is never cut
 // off mid-stream. It matches the value the always-on dogfood server doc documents.
 const guardTimeoutFloorS = 600
+
+// guardStallFloorS is the streaming IDLE-read deadline (in seconds) a guarded session pins
+// — deliberately small and INDEPENDENT of guardTimeoutFloorS. It bounds how long a streamed
+// upstream may go SILENT mid-turn before the read is aborted, so a stalled API fails fast
+// instead of riding the 600s whole-request floor to a ten-minute hang. It must stay well
+// under guardTimeoutFloorS and comfortably above the provider's ping/keepalive cadence.
+const guardStallFloorS = 60
 
 // guardEnsureTimeoutFloor sets env var `name` to `floorS` seconds ONLY when the
 // operator has not already set it. An explicit value — including an explicit "0"
