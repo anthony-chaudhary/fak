@@ -116,6 +116,17 @@ The `rest(...)` term **is** the CPU-hybrid recurrence cost (plus the cheap norms
 arm-A measurement #65 asks for, already in the binary. No new harness is needed; it needs a
 Mac run (§6).
 
+**A device-independent arm-A witness is now on disk and host-runnable** (no Mac, no GPU):
+[`gdn-recurrence-bench/`](gdn-recurrence-bench/) computes the recurrence-vs-projection
+**compute ratio** at the real Qwen3.6-27B GDN shapes — exact FLOP arithmetic over the layer
+dims, reproducible on any box. Measured here: the recurrent scan is **2.725%** of the
+linear_attn projections (and ~0.5% of whole prefill once the MLP GEMMs enter the
+denominator — agreeing with the on-device profile), with a native-CPU wall-time
+corroboration of 1.99%. This bounds arm B: a perfect zero-cost GPU scan kernel could save
+**at most** that few percent, while the projections (already GPU-routed by the CPU-hybrid)
+are the ~97% lever. It does **not** replace the §6 Mac capture — that measures the
+*serialization* fraction after the projections move to the GPU, a different number.
+
 **Arm B (the device GDN scan) is benchmarked counterfactually, then conditionally.** The
 on-disk 0.5% prefill figure already adjudicates the prefill comparison: even a perfect,
 zero-cost GPU scan kernel can return at most that 0.5% of prefill — below the noise of the

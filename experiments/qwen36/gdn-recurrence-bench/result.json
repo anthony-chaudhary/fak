@@ -1,0 +1,18 @@
+{
+  "schema": "fak-gdn-recurrence-compute-ratio/1",
+  "issue": "65",
+  "host": "windows/amd64 (CGO_ENABLED=0); device-independent FLOP ratio + native CPU timing",
+  "model": "Qwen3.6-27B q4_k_m",
+  "layer": "linear_attn (Gated-DeltaNet), one of 48",
+  "pp": 22,
+  "proj_macs_per_token": 115834880,
+  "conv_macs_per_token": 40960,
+  "recur_macs_per_token": 3155968,
+  "recur_frac_of_projections": 0.027245403111739744,
+  "recur_frac_of_layer": 0.026513652552433715,
+  "proj_wall_ms_pp22": 1051.17,
+  "recur_wall_ms_pp22": 21.019,
+  "recur_wall_frac_of_layer_compute": 0.019603819848925886,
+  "iters": 50,
+  "verdict": "recurrence compute is a low-single-digit % of the linear_attn projections; a perfect zero-cost GPU scan kernel (arm B/#92) could save at most that share, while the projections (already GPU-routed by the CPU-hybrid) are the ~97% lever -\u003e keep recurrence on CPU"
+}
