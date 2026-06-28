@@ -548,6 +548,65 @@ func TestFormatAuditSummary(t *testing.T) {
 	}
 }
 
+// TestFormatAuditSummaryCompactionStatusAndReasons pins the compaction-line fix: "0 fired,
+// N bailed" must NOT read as an undifferentiated lump. The line must (a) state whether the
+// lever is ENABLED (budget>0) and merely idle vs DISABLED — the two readings of "0 fired"
+// the bare counters cannot tell apart — and (b) break the bailed lump out by reason, calling
+// out the fak-fault reasons (prefix_mismatch/splice_failed/redecode_failed) that must stay 0.
+func TestFormatAuditSummaryCompactionStatusAndReasons(t *testing.T) {
+	// The originating real case: compaction ENABLED at the 48k default but idle — every bail
+	// was under_budget (the compactible suffix already fit). This must read as on-and-idle,
+	// never as broken or disabled.
+	idle := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 5, Allowed: 5,
+		CompactionBailed:      51,
+		CompactionBudget:      48000,
+		CompactionBailReasons: map[string]uint64{"under_budget": 51},
+	})
+	for _, want := range []string{
+		"ENABLED but idle, budget 48000 tok", "0 fired, 51 bailed, 0 off",
+		"bailed: under_budget", "x51",
+	} {
+		if !strings.Contains(idle, want) {
+			t.Errorf("idle compaction summary missing %q:\n%s", want, idle)
+		}
+	}
+	if strings.Contains(idle, "DISABLED") {
+		t.Errorf("an enabled-but-idle run must not read as DISABLED:\n%s", idle)
+	}
+
+	// Budget 0 → the lever is OFF; the line must say so, not imply a silent failure.
+	off := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 2, Allowed: 2,
+		CompactionOff: 9, CompactionBudget: 0,
+	})
+	for _, want := range []string{"DISABLED (budget 0", "9 off"} {
+		if !strings.Contains(off, want) {
+			t.Errorf("disabled compaction summary missing %q:\n%s", want, off)
+		}
+	}
+
+	// A prefix_mismatch bail is the ONE fak-fault cache signal — it must be flagged, never
+	// buried in the lump.
+	fault := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 3, Allowed: 3,
+		CompactionFired: 2, CompactionBailed: 1, CompactionShedTokens: 900,
+		CompactionBudget:      48000,
+		CompactionBailReasons: map[string]uint64{"prefix_mismatch": 1},
+	})
+	for _, want := range []string{"ENABLED, budget 48000 tok", "bailed: prefix_mismatch", "fak-fault"} {
+		if !strings.Contains(fault, want) {
+			t.Errorf("fault compaction summary missing %q:\n%s", want, fault)
+		}
+	}
+
+	// A run that never touched compaction prints no compaction line at all.
+	clean := formatAuditSummary(gateway.AdjudicationSummary{Total: 3, Allowed: 3})
+	if strings.Contains(clean, "compaction") {
+		t.Errorf("a run with no compaction activity must not print a compaction line:\n%s", clean)
+	}
+}
+
 // TestFormatAmplification proves the callavoid wire: the guard exit summary folds the
 // session's kernel call-path counters through internal/callavoid.Account and prints the
 // realized avoided-call amplification — and stays QUIET when nothing was avoided, so a

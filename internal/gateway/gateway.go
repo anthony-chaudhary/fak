@@ -936,7 +936,11 @@ func (s *Server) AdjudicationSummary() AdjudicationSummary {
 	if s == nil {
 		return AdjudicationSummary{ByReason: map[string]uint64{}}
 	}
-	return s.metrics.adjudicationSummary()
+	sum := s.metrics.adjudicationSummary()
+	// The compaction budget lives on the Server, not the metrics ledger; attach it here so
+	// the exit line can distinguish "enabled but idle" from "disabled" (0).
+	sum.CompactionBudget = s.compactHistoryBudget
+	return sum
 }
 
 // KernelCounters returns a snapshot of the kernel's call-path tallies (engine

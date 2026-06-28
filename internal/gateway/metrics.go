@@ -516,6 +516,20 @@ type AdjudicationSummary struct {
 	CompactionShedTokens      uint64  `json:"compaction_shed_tokens"`
 	CompactionCacheReadTokens uint64  `json:"compaction_cache_read_tokens"`
 	LastCompactionCacheRead   float64 `json:"last_compaction_cache_read"`
+	// CompactionBailReasons is the WITNESSED per-reason breakdown of the CompactionBailed
+	// lump (CompactReason* -> count). Without it, "N bailed" is uninterpretable: a session
+	// that bailed N times to under_budget (the compactible suffix already fit — benign,
+	// working-as-designed) is indistinguishable from one that bailed to prefix_mismatch (the
+	// only fak-fault cache signal, must stay 0) or no_breakpoint (no anchor — can't fire).
+	// Already surfaced on /metrics + /debug/vars; folded here so the guard exit summary can
+	// render it the same way ByReason renders deny reasons.
+	CompactionBailReasons map[string]uint64 `json:"compaction_bail_reasons,omitempty"`
+	// CompactionBudget is the resident-token threshold the history rewrite fires past
+	// (Config.CompactHistoryBudget; 0 means the lever is OFF, body forwarded byte-for-byte).
+	// Surfaced so the exit line can say whether compaction is ENABLED and merely idle
+	// (budget>0, nothing exceeded it) vs DISABLED — the two readings of "0 fired" the bare
+	// counters cannot tell apart.
+	CompactionBudget int `json:"compaction_budget"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -541,6 +555,12 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CompactionShedTokens = comp.shed
 	sum.CompactionCacheReadTokens = comp.cacheReads
 	sum.LastCompactionCacheRead = comp.lastCacheRd
+	// Carry the per-reason bail breakdown so the banner can explain the bailed lump (the
+	// snapshot already copied it under compactMu); only attach a non-empty map so a clean
+	// session keeps the JSON field absent (omitempty).
+	if len(comp.bailReasons) > 0 {
+		sum.CompactionBailReasons = comp.bailReasons
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

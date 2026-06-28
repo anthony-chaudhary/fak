@@ -1307,11 +1307,39 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		// WITNESSED half only: what fak attempted and removed. The OBSERVED post-fire cache_read
 		// is a provider counter (it lives on /metrics) and is noise here — a low value with no
 		// prefix_mismatch bail is a provider-side miss fak does not control, not a fak failure.
-		fmt.Fprintf(&b, "fak guard: compaction — %d fired, %d bailed, %d off; shed %d token(s)\n",
+		// Lead with whether the lever is ENABLED so "0 fired" can't read as "disabled": budget>0
+		// with all-under_budget bails is compaction ON and correctly idle (nothing sprawled past
+		// the cut), the opposite of OFF.
+		status := fmt.Sprintf("ENABLED, budget %d tok", sum.CompactionBudget)
+		if sum.CompactionBudget <= 0 {
+			status = "DISABLED (budget 0; body forwarded byte-for-byte)"
+		} else if sum.CompactionFired == 0 && sum.CompactionShedTokens == 0 {
+			status = fmt.Sprintf("ENABLED but idle, budget %d tok — nothing sprawled past the cut", sum.CompactionBudget)
+		}
+		fmt.Fprintf(&b, "fak guard: compaction [%s] — %d fired, %d bailed, %d off; shed %d token(s)\n",
+			status,
 			sum.CompactionFired,
 			sum.CompactionBailed,
 			sum.CompactionOff,
 			sum.CompactionShedTokens)
+		// Break the bailed lump out by reason (same shape as the deny "blocked:" loop below):
+		// without this, N bailed conflates under_budget (benign, working-as-designed) with
+		// no_breakpoint (can't fire) and prefix_mismatch (the ONLY fak-fault cache signal — call
+		// it out explicitly when nonzero so a real regression can never hide in the lump).
+		if len(sum.CompactionBailReasons) > 0 {
+			reasons := make([]string, 0, len(sum.CompactionBailReasons))
+			for r := range sum.CompactionBailReasons {
+				reasons = append(reasons, r)
+			}
+			sort.Strings(reasons)
+			for _, r := range reasons {
+				note := ""
+				if r == "prefix_mismatch" || r == "splice_failed" || r == "redecode_failed" {
+					note = "  ⚠ fak-fault: a fired rewrite would have burst the cache — must stay 0"
+				}
+				fmt.Fprintf(&b, "  bailed: %-16s x%d%s\n", r, sum.CompactionBailReasons[r], note)
+			}
+		}
 	}
 	if len(sum.ByReason) > 0 {
 		reasons := make([]string, 0, len(sum.ByReason))
