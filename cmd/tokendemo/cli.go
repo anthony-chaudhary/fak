@@ -253,66 +253,6 @@ func runParallelPrint(workers, calls, hotFiles int, delay time.Duration) int {
 	return 0
 }
 
-func runServedJSON(calls int, delay time.Duration) int {
-	proof, err := buildServedProof(context.Background(), calls, delay)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "served proof: %v\n", err)
-		return 1
-	}
-	b, _ := json.MarshalIndent(proof, "", "  ")
-	fmt.Println(string(b))
-	return 0
-}
-
-func runServedPrint(calls int, delay time.Duration) int {
-	p := colors()
-	proof, err := buildServedProof(context.Background(), calls, delay)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "served proof: %v\n", err)
-		return 1
-	}
-
-	fmt.Printf("\n  %s — %s %q through HTTP + MCP (%d calls/surface, engine delay %dms)\n",
-		p.paint(p.bold, "fak · served same-read cache proof"), proof.Tool, proof.Resource, proof.CallsPerSurface, proof.EngineDelayMs)
-	fmt.Printf("  %s\n\n", p.paint(p.dim, "raw loop executes every read; served loop POSTs /v1/fak/syscall and MCP fak_syscall against one gateway"))
-	fmt.Printf("  %-3s  %-5s  %9s  %9s  %-9s  %-6s  %-7s  %-12s\n",
-		"#", "wire", "raw ms", "served ms", "served_by", "tier", "engine", "args")
-	fmt.Printf("  %s\n", strings.Repeat("─", 74))
-	for _, c := range proof.Calls {
-		engine := "skip"
-		if c.EngineRanServed {
-			engine = "run"
-		}
-		color := p.dim
-		if c.ServedBy == "vdso" && c.Tier == "2" {
-			color = p.green
-		}
-		fmt.Printf("  %s\n", p.paint(color, fmt.Sprintf("%-3d  %-5s  %9s  %9s  %-9s  %-6s  %-7s  %-12s",
-			c.Index,
-			c.Surface,
-			formatMs(c.RawToolTimeNs),
-			formatMs(c.ServedTimeNs),
-			padTrim(c.ServedBy, 9),
-			padTrim(c.Tier, 6),
-			engine,
-			c.ArgsHash,
-		)))
-	}
-	fmt.Printf("  %s\n", strings.Repeat("─", 74))
-	fmt.Printf("  raw engine calls: %d   fak engine calls: %d   response tier-2 hits: %d\n",
-		proof.RawEngineCalls, proof.FakEngineCalls, proof.VDSOHits)
-	fmt.Printf("  /metrics delta: syscalls=%d   vdso_lookups=%d   vdso_hits=%d   cache_fills=%d   http=%d   mcp=%d\n",
-		proof.GatewayMetrics.Delta.GatewaySyscalls,
-		proof.GatewayMetrics.Delta.VDSOLookups,
-		proof.GatewayMetrics.Delta.VDSOHits,
-		proof.GatewayMetrics.Delta.VDSOFills,
-		proof.GatewayMetrics.Delta.HTTPSyscallRequests,
-		proof.GatewayMetrics.Delta.MCPRequests)
-	fmt.Printf("  measured tool time: raw %.3fms   served %.3fms   saved %.3fms\n\n",
-		nsToMs(proof.RawTotalNs), nsToMs(proof.ServedTotalNs), nsToMs(proof.TimeSavedNs))
-	return 0
-}
-
 func nsToMs(ns int64) float64 {
 	return float64(ns) / float64(time.Millisecond)
 }
