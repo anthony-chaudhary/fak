@@ -111,6 +111,14 @@ CLONE_MIN_OCCURRENCES = 2
 # far above any real count so the slop_debt integer is the TRUE group count, not a
 # silently-capped one (the render layer truncates the printed work-list, not the debt).
 CLONE_GROUPS_CAP = 5000
+# A clone GROUP counts only if its largest site spans at least this many source lines.
+# The window engine matches a 34-token window (~6 lines) but block-merge can report a
+# group whose merged span is as small as 3-4 lines — a fragment that short (an err-check,
+# a sort closure, a struct-field run, a one-line SSE/header call, a signature line) is
+# idiomatic Go, not copy-paste slop: a shared helper for it would cost as much as the
+# inline code, so "de-duplicating" it would WORSEN readability. 6 lines matches the
+# CLONE_WINDOW_TOKENS docstring's own "~6-line block" definition of a real clone.
+CLONE_MIN_GROUP_SPAN = 6
 
 # Dead code: cap per file so one messy file is not unbounded debt (mirrors
 # code_quality_scorecard.HYGIENE_CAP_PER_FILE). A symbol is dead if its identifier
@@ -705,6 +713,8 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
                 f"dispatch-arm boilerplate ({len(sites)} arms, ~{span} lines): "
                 f"{f0}:{s0}")
             continue
+        if max(e - s + 1 for f, s, e in sites) < CLONE_MIN_GROUP_SPAN:
+            continue  # sub-6-line fragment: idiomatic, not extractable slop
         groups += 1
         if len(defects) < CLONE_GROUPS_CAP:
             shown = ", ".join(f"{f}:{s}" for f, s, _ in sites[:4])

@@ -66,6 +66,32 @@ def test_duplication_real_clone_is_debt():
     assert k["score"] < 100
 
 
+def test_duplication_short_fragment_is_not_a_clone():
+    # FP: a sub-6-line fragment repeated across files (an idiomatic err-check / sort
+    # closure / one-line setup) is NOT extractable copy-paste slop — a shared helper for
+    # it would cost as much as the inline code. Must not count (CLONE_MIN_GROUP_SPAN=6).
+    frag = ("func {n}(cp []int, budget int) error {{\n"
+            "\tsort.Slice(cp, func(i, j int) bool {{ return cp[i] < cp[j] }})\n"
+            "\tif err := setBudget(budget); err != nil {{\n"
+            "\t\treturn err\n\t}}\n"
+            "\treturn nil\n}}\n")  # ~6 src lines but the SHARED window spans <6 after the differing header
+    a = "package a\n" + frag.format(n="runA") + "\nfunc tailA() {}\n"
+    b = "package b\n" + frag.format(n="runB") + "\nfunc tailB() {}\n"
+    # The only shared multi-token window is the 3-line sort+err-check middle; its merged
+    # span is < 6 lines, so it must be filtered as idiomatic, not flagged.
+    k = cs.kpi_duplication({"a.go": a, "b.go": b})
+    short = [d for d in k["defects"] if "sort.Slice" in d]
+    assert short == [], short
+
+
+def test_duplication_six_line_body_clone_still_caught():
+    # RECALL: a genuine >=6-line copy-pasted body MUST still be flagged — the min-span
+    # gate filters fragments, never real blocks. (_dup_block is an 8-line identical body.)
+    files = {"a.go": "package a\n" + _dup_block("sum"),
+             "b.go": "package b\n" + _dup_block("sum")}
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
 def test_duplication_unique_code_is_clean():
     files = {"a.go": "package a\n" + _dup_block("sum"),
              "b.go": ("package b\n"
