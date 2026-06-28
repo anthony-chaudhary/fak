@@ -112,6 +112,12 @@ func NewSynthetic(cfg Config) *Model {
 				ts{p + "self_attn.v_proj.weight", []int{nKV * hd, H}},
 				ts{p + "self_attn.o_proj.weight", []int{H, nH * hd}},
 			)
+			if cfg.QKNorm {
+				tensors = append(tensors,
+					ts{p + "self_attn.q_norm.weight", []int{nH * hd}},
+					ts{p + "self_attn.k_norm.weight", []int{nKV * hd}},
+				)
+			}
 		}
 		tensors = append(tensors,
 			ts{p + "post_attention_layernorm.weight", []int{H}},
@@ -162,6 +168,14 @@ func NewSyntheticMoE(cfg Config) *Model {
 			ts{p + "self_attn.k_proj.weight", []int{nKV * hd, H}},
 			ts{p + "self_attn.v_proj.weight", []int{nKV * hd, H}},
 			ts{p + "self_attn.o_proj.weight", []int{H, nH * hd}},
+		)
+		if cfg.QKNorm {
+			tensors = append(tensors,
+				ts{p + "self_attn.q_norm.weight", []int{nH * hd}},
+				ts{p + "self_attn.k_norm.weight", []int{nKV * hd}},
+			)
+		}
+		tensors = append(tensors,
 			ts{p + "post_attention_layernorm.weight", []int{H}},
 			ts{routerName(l), []int{E, H}}, // router: [num_experts, hidden]
 		)
