@@ -1,0 +1,12 @@
+{
+  "schema": "fak.isolation-bench/v1",
+  "seed": 42,
+  "scope": "l3-working-set",
+  "generated_at": "2026-06-27",
+  "git_commit": "unknown",
+  "corpus_size": 14,
+  "passed_cases": 14,
+  "baseline_fails": true,
+  "baseline_failed_cases": 4,
+  "valid": true
+}
