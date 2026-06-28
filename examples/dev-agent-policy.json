@@ -22,7 +22,7 @@
     "git_push": "POLICY_BLOCK",
     "git_merge": "POLICY_BLOCK",
     "git_tag": "POLICY_BLOCK",
-    "exfiltrate": "POLICY_BLOCK"
+    "exfiltrate": "SECRET_EXFIL"
   },
   "self_modify_globs": [
     "internal/abi/",
