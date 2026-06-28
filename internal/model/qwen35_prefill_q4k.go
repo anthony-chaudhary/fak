@@ -99,6 +99,16 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	}
 	s.phaseEnd("embed", t)
 
+	if s.MetalQ4K {
+		// Bulk-upload every Q4_K projection to the GPU before the layer loop, exactly as the
+		// full-attention batched path does (prefill_q4k.go). Without it the lazy per-weight
+		// upload in metalQ4KWeight interleaves an H2D round-trip with the first use of each
+		// projection, which caps warm hybrid prefill at ~7x under llama.cpp-Metal (#1113);
+		// amortizing all the copies up front restores full prefill speed on the Metal hybrid
+		// path the 27B Qwen3.6 takes (#71). No-op on the pure-Go build (stub returns nil).
+		m.metalQ4KWeights()
+	}
+
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 		Xn := make([]float32, P*H)
