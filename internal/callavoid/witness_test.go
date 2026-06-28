@@ -299,6 +299,59 @@ func TestTallyFromCountersNegativeGuards(t *testing.T) {
 	}
 }
 
+// TestTallyFromCountersAmplifiesRealSession is the #818 HEADLINE: a realistic, read-heavy
+// guard session's kernel Counters folds (via the documented mapping) to an effective-turn
+// count that strictly EXCEEDS the executed-turn work it paid — i.e. an operator looking at
+// the realized run sees amplification > 1, not just a synthetic input. The session is
+// write-light: 8 real engine dispatches, 40 reads served from the vDSO, 5 in-syscall repairs,
+// 4 hard denies. The vDSO hits and repairs are the avoidance — they cost ~0 to fak but each
+// stands in for a naive round-trip — so the effective-turn headline towers over the work paid.
+func TestTallyFromCountersAmplifiesRealSession(t *testing.T) {
+	c := Counters{EngineCalls: 8, VDSOHits: 40, Transforms: 5, Denies: 4}
+	tally := TallyFromCounters(c)
+	// The documented mapping (Execute<-EngineCalls, MemoHit<-VDSOHits, Repair<-Transforms,
+	// HardDeny<-Denies) — folded exactly, no invention.
+	if tally.Execute != 8 || tally.MemoHit != 40 || tally.Repair != 5 || tally.HardDeny != 4 {
+		t.Fatalf("mapping = %+v, want Execute8 MemoHit40 Repair5 HardDeny4", tally)
+	}
+
+	r := Account(tally)
+
+	// Executed = the work actually PAID: 8 real dispatches (capture cost 0) + 40 memo hits at
+	// the ValidateFloor (0.01 each) = 8 + 0.4 = 8.4. The repairs and hard denies pay nothing.
+	wantExecuted := 8.0 + 40*ValidateFloor
+	if !approx(r.ExecutedTurns, wantExecuted) {
+		t.Fatalf("executed = %v, want %v (8 dispatches + 40 memo validations)", r.ExecutedTurns, wantExecuted)
+	}
+	// Effective = the round-trips a naive 1:1 agent must spend to reach the same outcome:
+	// 8 dispatches + 40 avoided reads + 5 avoided retries = 53. Hard denies are symmetric (0).
+	if !approx(r.EffectiveTurns, 53) {
+		t.Fatalf("effective = %v, want 53 (denies are hard, symmetric)", r.EffectiveTurns)
+	}
+	// THE HEADLINE: effective-productive-turns strictly exceed the work paid — the amplification
+	// the operator sees for the ACTUAL run is > 1, and the status reads "amplifying".
+	if r.EffectiveTurns <= r.ExecutedTurns {
+		t.Fatalf("effective (%v) must EXCEED executed (%v) — the amplification headline is empty otherwise",
+			r.EffectiveTurns, r.ExecutedTurns)
+	}
+	if r.Amplification <= 1 || r.Status != "amplifying" {
+		t.Fatalf("amplification/status = %v/%s, want >1/amplifying", r.Amplification, r.Status)
+	}
+	if !approx(r.Amplification, 53/wantExecuted) {
+		t.Errorf("amplification = %v, want %v (effective/executed)", r.Amplification, 53/wantExecuted)
+	}
+	// AvoidedTurns is the realized rebate: effective minus what was paid.
+	if !approx(r.AvoidedTurns, 53-wantExecuted) {
+		t.Errorf("avoided = %v, want %v (effective - executed)", r.AvoidedTurns, 53-wantExecuted)
+	}
+	// RawTurns is the vanity count — every disposition, including the symmetric denies: it
+	// reconciles with the counters (8+40+5+4 = 57) and is DISTINCT from the effective headline,
+	// so a caller can show "57 raw turns -> 53 effective for 8.4 paid" without double-counting.
+	if r.RawTurns != 57 {
+		t.Errorf("raw turns = %d, want 57 (reconciles with the counters, denies counted once)", r.RawTurns)
+	}
+}
+
 // TestFoldJSONRoundTrips: the new artifact shapes marshal to stable JSON a caller consumes.
 func TestFoldJSONRoundTrips(t *testing.T) {
 	cb, err := json.Marshal(Counters{EngineCalls: 1, VDSOHits: 2})
