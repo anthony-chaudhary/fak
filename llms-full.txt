@@ -135,6 +135,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 ## Reference
 
 - [Claims ledger](CLAIMS.md): every capability with one machine-checked tag (shipped / simulated / stub).
+- [Net-true value standard](docs/standards/net-true-value.md): the lens fak judges any efficiency/perf gain by — measured against the real alternative (not a strawman), net of its own cost, scope stated, provenance-labeled, reproducible, and on by default — used both on fak's own claims and on the daily "5×" / "save 90% tokens" intake. Each rubric question maps to a stick the repo already runs.
 - [Status](STATUS.md): what is shipped and on the critical path.
 - [Architecture](ARCHITECTURE.md): the registry seams and the frozen ABI.
 - [Extending fak](EXTENDING.md): plug in an optimization → prove it correct → prove it faster → ship.
@@ -320,7 +321,7 @@ new process — it *orders* the process that exists around a single set of goals
 
 > Source: `README.md`
 
-# fak - Fused Agent Kernel
+# fak — the **F**used **A**gent **K**ernel
 
 <!-- readme-verified: 2026-06-27 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
@@ -8004,7 +8005,7 @@ The `--gguf` flag accepts a model alias (from `fak ls`), an `hf://` URI, or a lo
 ```bash
 fak ls    # list available aliases: qwen2.5:7b, qwen2.5:1.5b, smollm2, ornith:9b
 fak guard --gguf qwen2.5:1.5b -- claude               # smaller 1.5B model (~1.6 GB)
-fak guard --gguf /path/to/model.gguf -- claude       # local file
+fak guard --gguf <path/to/model.gguf> -- claude      # local file
 fak guard --gguf hf://owner/repo/model.gguf -- claude # download on demand
 ```
 
@@ -19764,6 +19765,28 @@ design panel: the deferrals are deliberate, not forgotten.
   the honest open gap: ~9× behind llama.cpp CPU and climbing with each op-fusion (Rung 2),
   bounded by per-dispatch CPU/driver overhead, not numerics. This is the discrete-GPU lens
   made concrete on a card without CUDA.*
+- **Intel XPU / OneDNN (SYCL)** (Intel Arc discrete GPUs and Data-Center GPU Max XPUs —
+  separate device memory via SYCL USM, the oneAPI runtime, native f16/bf16 and int8 XMX
+  matrix engines): a structural sibling of the CUDA and Vulkan lenses, reached through Intel's
+  oneAPI stack — the oneDNN primitive library (matmul/inner-product, softmax, normalization)
+  lowered onto a SYCL queue. It maps onto the seam exactly as the other discrete GPUs do:
+  `Upload` is an H2D copy into SYCL USM narrowing per `as` (`Caps.UploadDtype` once int8/`Q8_0`
+  rides the XMX engines), `Host`→`(nil,false)` with `Caps.DeviceMemory`, the SYCL queue makes
+  it an `Async` backend (`Buffer.Ready()` + `Caps.Async`, fencing only inside `Read`/`Argmax`),
+  `Attention` lowers to a oneDNN fused-SDPA primitive (`Caps.FusedAttn`), `Argmax` is a device
+  reduction (4 bytes out), and the Level-Zero device-memory query feeds `DeviceCapacity`
+  (`Caps.CapacityProbe`). It compiles only behind `//go:build onednn` (cgo to the oneAPI/SYCL
+  runtime + an offline-built oneDNN shim — the CUDA/Vulkan shim pattern), so the default
+  `go build ./cmd/fak` stays one pure-Go binary, and it registers an **Approx** backend (held
+  to argmax-exact + logit-cosine, never bit-identity). *Lens verdict: **designed, not yet
+  built** (#264) — the contract already carries everything this lens needs (`Dtype`/`QuantSpec`
+  for int8 XMX, async via `Caps.Async`, device residency, the capacity probe), so the XPU
+  backend is a *registration*, not a forward-loop edit. What remains is host-gated and cannot
+  be witnessed on a CPU-only box: the cgo oneDNN/SYCL shim, then the four acceptance rungs on
+  real Intel Arc silicon — runs on Arc, ≥ 5× CPU throughput, argmax-exact vs `cpu-ref` (the
+  Approx class's bit-exactness rung), and the device-memory-efficiency report.
+  `cmd/modelbench -backend onednn -require-non-reference` is the gate that will record that
+  evidence, the same way the CUDA and Vulkan witnesses above were captured.*
 - **Edge NPU** (fixed vendor op menu, native int8/int4, must pre-stage weights): uses
   `QuantSpec` (asymmetric, per-channel, int4, static-act) for its weights, `Caps.FusedFFN`
   to map a whole MLP block to one vendor primitive, and `WeightSource` to stage a
@@ -19776,6 +19799,23 @@ design panel: the deferrals are deliberate, not forgotten.
   its exact kernels, so the recorded-graph replay stays bit-identical. *Lens verdict: the
   one class needing whole-graph visibility — reachable via the GraphCompile cap without
   taxing the day-1 eager path.*
+- **TPU / Neural Engine** (two accelerators, two compiler lanes): the issue title (#261, C-004)
+  lumps Google's TPU and Apple's Neural Engine, but they lower through different lanes and the
+  split is load-bearing. A **Google TPU** (v2–v6e Trillium) is a whole-graph, ahead-of-time part:
+  it reuses the *Dataflow* mechanism above — record the in-process op-list, lower it to StableHLO,
+  hand it to XLA/PJRT which compiles & places it (`Caps.GraphCompile`), native tier **bf16** on the
+  MXU. An **Apple Neural Engine** (A17/M3-family … M4, *not* the Metal GPU backend in `metal.go`)
+  is an *Edge-NPU* fixed-op-menu part reached through CoreML: map a whole MLP block to one CoreML
+  op (`Caps.FusedFFN`), stage weights device-native via `WeightSource`, native tier **fp16**. fak
+  does **not** import an external ONNX/StableHLO graph — it lowers its own recorded op-list, so the
+  scope's "ONNX import" is reframed as that in-process path (an external-graph importer is the
+  inverse direction and out of the seam's architecture). Both register an **Approx** backend
+  (argmax-exact + logit-cosine, never bit-identity). *Lens verdict: **designed, not yet built**
+  (#261) — the always-compiled accelerator→lane taxonomy is shipped and unit-witnessed on any host
+  (`internal/compute/tpu_arch.go`: `LookupAccelArch`/`AccelTarget`, the XLA/CoreML split, the
+  native-tier-per-lane invariant). What remains is host-gated: the cgo `//go:build xla` (PJRT) and
+  `//go:build coreml` halves, then runs-on-the-accelerator + forward-parity + baseline on real TPU
+  / Apple silicon — see `internal/compute/TPU-C004-NOTES.md`.*
 - **WASM / browser** (no threads/asm/env/unsafe by default, bounded memory, WebGPU optional):
   runs the pure-Go scalar reference as the floor unchanged; selection comes through a host
   config channel (not `os.Getenv`), parallelism defaults to serial, weights stream via
@@ -20723,7 +20763,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | Qwen3.6-27B token parity | 2-token match (drift @3) | Qwen3.6-27B q4_k_m | llama.cpp oracle | `d03be46` | `model-ladder/qwen36-resident-q4k-parity-20260619.json` |
 | Qwen3.6-27B surface smoke | 4/4 surfaces PASS | Qwen3.6-27B (served) | agent/gateway/mcp/dogfood | `8a0f5bc` | `model-ladder/qwen36-surfaces-dogfood-opencode-20260619.json` |
 | **Qwen3.6-27B 8-GPU SGLang serving — fak-gateway vs raw-SGLang (model-ladder Rung 4 headline, [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak C=64: fak-gateway 1085.6 vs raw-SGLang 1451.6 completion tok/s = 0.75×; gateway tax converges to ~3% at saturation (C=128: 1074.4 vs 1103.2 = 0.97×); 3/3 fak surfaces PASS (agent / gateway-OpenAI single-stream decode 59.3 tok/s / MCP-HTTP)** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8-GPU datacenter server | raw SGLang 0.5.10.post1 (TP=8, bf16) | `a2559041` | `experiments/qwen36/dgx-r4-20260622/compare.json` (+ `COMPARE.md`, `fak-gateway.json`, `raw-sglang.json`, `surface-smoke.json`); results doc `docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md`. **SGLang-serves + fak-adjudicates, NOT fak's native CUDA engine** (no quantized multi-GPU 27B path yet; f32 27B is 108 GB > 80 GB). fak's axis is the adjudication/coherence/measurement plane, not raw tok/s — the gateway tax is the cost of mediation and amortizes to ~3% at load. Marker-compliance caveat: the load harness requires a literal `FAK_DGX_REQ_` echo the reasoning model emits only ~35–66% of the time, so throughput is over the compliant subset (`--max-error-rate 0.9`); per-point ok/requests in the JSONs (C=64: fak 55/64, raw 59/64). Single-stream rates ≪ batched and not fak's axis |
-| **Qwen3.6-27B cold standup on 8×DGX-A100-40GB — raw-SGLang serving baseline (Rung-4 fresh-standup witness, [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak 820.5 completion tok/s @ C=64 (16.5k total tok/s incl. prompt) · 0 errors across all 6 points C=1→64 · single-stream 77.8 completion tok/s @ C=1** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8×A100-SXM4-40GB, TP=8 | raw SGLang (`--tp 8 --mem-fraction-static 0.85`), cold standup from all-GPUs-idle (0 MiB) | _this commit_ | `experiments/qwen36/dgx-standup-27b-20260624/raw-sglang.json` (`fak.dgx-endpoint-bench.v1`, 6-point sweep + 8×A100 topology/driver provenance) + `STANDUP.md` (narrative) + `samples.json` (3 live temperature-0 completions). **Cold-standup witness**: at start all 8 GPUs idle and nothing on `:30000`; weights load + CUDA-graph capture, then a real OpenAI-compatible sweep. This is the **raw SGLang serving baseline** (fresh bring-up proof), NOT a fak-gateway number — the gateway-tax comparison is the dgx-r4 Rung-4 row above. C=64 cap ⇒ 820.5 is a floor, not a ceiling (throughput still climbing monotonically at the top of the sweep); the wider C=128 sweep on the same box is the dgx-r4 row (raw 1451.6 @ C=64 → 1103.2 @ C=128). Marker gate disabled (`--no-require-response-marker`: the reasoning model echoes the literal `FAK_DGX_REQ_` only ~35–66% of the time), throughput measured over completed requests (`errors=0` at every point) |
+| **Qwen3.6-27B cold standup on 8-GPU datacenter server — raw-SGLang serving baseline (Rung-4 fresh-standup witness, [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak 820.5 completion tok/s @ C=64 (16.5k total tok/s incl. prompt) · 0 errors across all 6 points C=1→64 · single-stream 77.8 completion tok/s @ C=1** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8-GPU datacenter server, TP=8 | raw SGLang (`--tp 8 --mem-fraction-static 0.85`), cold standup from all-GPUs-idle (0 MiB) | _this commit_ | `experiments/qwen36/dgx-standup-27b-20260624/raw-sglang.json` (`fak.dgx-endpoint-bench.v1`, 6-point sweep + 8-GPU datacenter server topology/driver provenance) + `STANDUP.md` (narrative) + `samples.json` (3 live temperature-0 completions). **Cold-standup witness**: at start all 8 GPUs idle and nothing on `:30000`; weights load + CUDA-graph capture, then a real OpenAI-compatible sweep. This is the **raw SGLang serving baseline** (fresh bring-up proof), NOT a fak-gateway number — the gateway-tax comparison is the dgx-r4 Rung-4 row above. C=64 cap ⇒ 820.5 is a floor, not a ceiling (throughput still climbing monotonically at the top of the sweep); the wider C=128 sweep on the same box is the dgx-r4 row (raw 1451.6 @ C=64 → 1103.2 @ C=128). Marker gate disabled (`--no-require-response-marker`: the reasoning model echoes the literal `FAK_DGX_REQ_` only ~35–66% of the time), throughput measured over completed requests (`errors=0` at every point) |
 | Synthetic model live ratio | 1.64× | 64h/4L wiring | Full re-prefill | `a200c3d` | `radixbench-synthetic.json` |
 | **GPU Q8 decode (Vulkan, RX 7600)** | **24.6 tok/s · 1.49× vs GPU f32** | SmolLM2-135M Q8 | Same forward, f32 weights on GPU | `60db592` | `q8gpu-smollm2-135m-{gpu-q8,gpu-f32}-20260619.json` |
 | **GPU/CPU Q8 decode crossover** | **CPU lead 7.2× (135M) → 1.16× (1.5B)** | SmolLM2-135M → Qwen2.5-1.5B Q8 | CPU Q8 (legacy) | `7bf666b` | `crossover-qwen2.5-1.5b-{gpu,cpu}-q8-20260619.json` |
@@ -21473,7 +21513,7 @@ No claim exists without a traceable source.
 **DOS Verify:** the offline WITNESSED headline (the deterministic prefill-elimination floor) is bound to its commit and resolves under `dos verify`; the live WITNESSED cache value is reported `not yet` (host-gated on [#1012](https://github.com/anthony-chaudhary/fak/issues/1012)). See [DOS Binding](#dos-binding--provenance-of-every-number).
 **Epic:** [#1010](https://github.com/anthony-chaudhary/fak/issues/1010) — GLM-5.2 on the pure fak kernel
 **Child Issues:** [#1014](https://github.com/anthony-chaudhary/fak/issues/1014) — this result packet · [#1013](https://github.com/anthony-chaudhary/fak/issues/1013) — DOS binding + provenance of every number
-**Observation Seam:** [`internal/cachewitness/`](../internal/cachewitness/) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
+**Observation Seam:** [`internal/cachewitness/`](https://github.com/anthony-chaudhary/fak/tree/main/internal/cachewitness) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
 
 ## Summary
 
@@ -21504,7 +21544,7 @@ This proves the in-kernel cache-value lever end-to-end even if the full patch is
 ## Workload
 
 - **Model:** GLM-5.2 (Q4_K_M quantization, served via `fak serve --engine inkernel --backend cuda --cpu-offload-experts`)
-- **Hardware:** 8×A100 sm_80 datacenter GPU (residual — box access required)
+- **Hardware:** 8-GPU datacenter server sm_80 datacenter GPU (residual — box access required)
 - **Task:** One or more solved SWE-bench Verified instances from `testdata/swebench_smoke.json`
 - **Agent:** Claude harness (`fak swebench run --agent fleet`) wired to the fak-kernel gateway
 - **Context Budget:** 8192 tokens (kept within GLM-5.2's 1M-context default to avoid `FitTooBig`)
@@ -21628,7 +21668,7 @@ the commit that produced it — never to a worker's narration. An unproven step 
 
 | Number | Trust class | Missing witness |
 |---|---|---|
-| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8×A100 dgx box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
+| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server dgx box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
 | Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
 
 When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
@@ -21642,8 +21682,8 @@ derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
 - **Observation seam:** `internal/cachewitness/` + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit_audit` → diff-witnessed)
 - **Provenance split:** WITNESSED (fak's own cache) vs OBSERVED (provider's cache), matching the conflation-scorecard line
 - **Metric definitions:** `internal/gateway/metrics.go` (`writeKVPrefixMetrics`)
-- **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](../BENCHMARK-TEMPLATE.md) standard
-- **Gate / dependency:** Datacenter GPU access (8×A100 sm_80 box) — the current residual
+- **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-TEMPLATE.md) standard
+- **Gate / dependency:** Datacenter GPU access (8-GPU datacenter server sm_80 box) — the current residual
 
 ## Cross-References
 
@@ -21660,7 +21700,7 @@ derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
 This result packet is **NOT YET SHIPPED**. The numbers are PENDING because:
 
 1. The observation seam is fully shipped and tested (`dos commit_audit 52dfea0d` → OK)
-2. The datacenter GPU box (8×A100) access is the current residual
+2. The datacenter GPU box (8-GPU datacenter server) access is the current residual
 3. Once the live run executes, the `cache-witness.json` artifact will be committed and the tables above will be filled with real WITNESSED numbers
 
 When results are collected, this document will be updated with:
@@ -21668,7 +21708,7 @@ When results are collected, this document will be updated with:
 - Actual commit hash of the results commit
 - Real numbers in the Results tables (no placeholders)
 - `dos_commit_audit <hash>` → **OK** verification
-- Entry in [BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md) referencing this document
+- Entry in [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) referencing this document
 
 **Until then, this document serves as the result packet shape — what will be measured, how, and under what provenance discipline.**
 
@@ -23444,7 +23484,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Trajectory data plane (`internal/trajectory`): a typed, exportable per-turn `Turn` record (trace, seq, query, tool, verdict, taint, digests, token/byte cost, optional embedding) folded from the kernel's lifecycle stream. A `Recorder` is an `abi.Emitter` — it reads the human query + per-turn cost from the OPEN `abi.Event.Fields` / `ToolCall.Meta` channels the producer stamps, so it adds NO field to the frozen ABI. Off by default; opt-in via `FAK_TRAJECTORY=1` (+ `FAK_TRAJECTORY_EMBED=1` to stamp query vectors) or `trajectory.Enable`, mirroring the audit journal's enablement seam. JSONL export round-trips through `ExportTo`/`ImportFrom`. Distinct from `internal/journal` by design: the journal is the tamper-evident audit ledger (a verdict over a digest), this is the analysis surface (the query text, the cost, the embedding). Witness: `go test ./internal/trajectory` (`TestRecorderFoldsTrace`, `TestFieldsEnrichment`, `TestExportImportRoundTrip`, `TestIndexSimilarity`).
 - [SHIPPED] Reference vector-similarity primitive (`internal/simhash`): a deterministic, dependency-free `Embed`/`Cosine`/`Index.TopK` over hashed word+char n-grams — the substrate for finding near-duplicate "bad" queries the lexical token-overlap ranker (`internal/contextq`) misses. Honest ceiling, measured: shared-vocabulary paraphrases score ~0.70–0.78, but same-intent/different-vocabulary pairs ("delete every row" vs "drop all records") score ~0.35; it is a hashing-trick sketch, NOT a learned model, and the `Index` is model-agnostic so a deployment swaps in real `[]float32` embeddings through the same machinery. Tier-1 foundation leaf (imports nothing internal). Witness: `go test ./internal/simhash` (`TestEmbedDeterministic`, `TestNearDuplicateRanksAboveUnrelated`, `TestIndexTopK`).
 - [SHIPPED] Pluggable trajectory-scorer seam (`internal/trajhook`): a `Registry` of named `Turn → Finding` scorers application code attaches WITHOUT a core edit — the analysis-layer analogue of `abi.RegisterEmitter`, with no ABI involved. Three reference scorers ship as worked examples (`duplicate_query` via simhash, `cost_outlier`, `high_deny_rate`); they are examples, not a hard-coded classifier. Surfaced as `fak traj similar|cluster|score|gc|export` over an exported corpus (`gc` PROPOSES prune candidates, never deletes). End-to-end proven on the shipped demo corpus (`examples/trajectory/sample-corpus.jsonl`) by the `trajectory-garden` skill. Witness: `go test ./internal/trajhook` (`TestDuplicateQueryFlagsParaphrase`, `TestDenyRate`, `TestSampleCorpusGardening`, `TestSampleCorpusGCProposes`); see `docs/observability/trajectory.md`.
-- [SHIPPED] Continuous-dogfood cache-value ledger + 2x regression gate (#1075): `internal/cachevalueledger` provides a durable, append-only JSONL ledger for cache-value observations from fak sessions (run/guard/serve), scoring the accumulated history to detect regressions. Each row records a session's cacheobs snapshot (turns, prompt_tokens, reused_tokens, reuse_ratio). `fak nightrun score` checks the ledger against a configurable 2x threshold (default 2.0x) and fails closed on regression; `fak nightrun post-cache-value` posts the rolling observed multiplier to the scoreboard. The ledger is appended to automatically on session exit in `cmd/fak/serve.go`, `run_model.go`, and `guard.go`. The Python tool `tools/cache_value_ledger.py` exposes the same gate for CI (`--check 2.0 --json`). Witness: `go test ./internal/cachevalueledger`; `python tools/cache_value_ledger_test.py` (5/5 passed); `fak nightrun score --floor 2.0` exit 0; `python tools/cache_value_ledger.py --ledger docs/nightrun/cache-value.jsonl --check 2.0 --json` emits `{"schema":"fak.cache-value-ledger.v1","ok":true,"active_multiplier":3.76,...}`.
+- [SHIPPED] Continuous-dogfood cache-value ledger + #1066-honest regression gate (#1075): `internal/cachevalueledger` provides a durable, append-only JSONL ledger for cache-value observations from fak sessions (run/guard/serve), appended automatically on session exit in `cmd/fak/serve.go`, `run_model.go`, and `guard.go`. Each row records a session's cacheobs snapshot (turns, prompt_tokens, reused_tokens, frozen/partial/cold turns). `fak nightrun score` reports the **WITNESSED realized KV-prefix reuse ratio over multi-turn sessions** (turns ≥ 2 — cold single-turn `fak run`s have no reuse opportunity and are excluded, never a false regression) and gates it against a reuse-ratio floor (`--floor`, default 0.5). Per the `internal/cachewitness` #1066 fence it NEVER surfaces the vs-naive re-prefill multiple (`1/(1-reuse)`); the honest single-session cache value is marginal-over-tuned-warm-KV ≈ 1.0×. On a thin corpus (< `MinGateTurns` multi-turn turns) it reports **INSUFFICIENT and passes** rather than fabricating a verdict. `fak nightrun post-cache-value` posts the realized reuse % under `kv-prefix-realized-reuse`, not a multiple. Witness: `go test ./internal/cachevalueledger` (`TestScoreLedger`, `TestScoreLedgerExcludesSingleTurnColdRuns`, `TestScoreLedgerThinCorpusIsInsufficient`); `fak nightrun score` over the real `docs/nightrun/cache-value.jsonl` prints the realized reuse ratio + regime buckets and exits honestly. (The legacy Python `tools/cache_value_ledger.py --check` scores the synthetic `fak vcache score` FORECAST, not this realized ledger, and is superseded by the Go gate.)
 
 ## Task manager snapshot
 
@@ -23605,6 +23645,157 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 ## Prior-art posture
 
 - [SHIPPED] Consistent with the cluster's 0/29-NOVEL finding (0 of 29 audited claims are novel): every primitive here is established/emerging; the contribution is the ASSEMBLY (a fused, fail-open, witness-gated kernel with the tool call promoted to a syscall), not any single mechanism.
+
+---
+
+# Net-true value standard
+
+> Source: `docs/standards/net-true-value.md`
+
+---
+title: "Net-true value — how fak decides a gain is real, not noise"
+description: "fak's standard for any efficiency/performance claim: a gain is reported only if it survives a six-question rubric — measured against the real alternative (not a strawman), net of the costs it introduces, scope stated, provenance-labeled, reproducible, and realized by default. The same lens reads an incoming industry '5x' / 'save 90% tokens' claim. Each criterion maps to a stick the repo already runs."
+---
+
+# Net-true value
+
+A new "5×" or "save 90% of tokens" lands almost every day. Most of it is noise: it
+beats a strawman baseline, it holds only in a narrow scope, it is a thing a tuned stack
+(or fak) already does, or it is modeled and never measured. This page is the standard fak
+holds **its own** claims to, and the lens it reads **other people's** claims with. They are
+the same rubric, used in two directions.
+
+The commitment is one sentence: **a gain is net-true at a stated scope, or it isn't a
+gain we report.** "Net-true" means the win survives after you subtract the cost the change
+itself introduces and compare against the alternative a competent operator would actually
+deploy — not the worst thing they could have done instead.
+
+This is not a new gate. It is the *name* for a discipline the repo already runs in pieces
+([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) tags, the baseline-letter convention in
+[`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), the conflation and default-value
+scorecards, the salience register). The table at the end binds each rubric question to the
+stick that mechanizes it, so this page is a lens over evidence, not prose on top of it.
+
+## The rubric — six questions a gain must answer
+
+Run any claim — yours before you ship it, or one you read — through these. A claim that
+can't answer one of the first five is `not yet`, not a result.
+
+1. **Baseline — measured against the real alternative, not a strawman.** "5× faster"
+   answers nothing until you say *than what*. The honest baseline is the best practice a
+   competent operator already runs, not the naive thing they'd never ship. When you cite
+   the easy baseline, cite the hard one beside it and lead with the hard one: fak's fleet
+   reuse is **60.3× vs naive re-send-everything** *and* **4.1× vs a tuned warm-cache
+   stack** — the 4.1× is the headline; the 60.3× must never be quoted as the serving win.
+
+2. **Net — after the cost the change itself adds.** A cache that is a win on reuse is a
+   *loss* on single use. A quantization that saves bandwidth can cost accuracy. A saved
+   tool call can cost a re-decode. A gain stated without its own cost is half a
+   measurement. Report the net, including where the net goes negative.
+
+3. **Scope — the conditions it holds under, and the ones it vanishes under.** State both.
+   fak's tool-vDSO is cache-favorable in the demo (~50% hits) but ~**0.7%** addressable on
+   real tau2-airline — so it's an upside secondary, never a headline. Cross-worker prefill
+   reuse is 8.8–9.7× vs naive but only **1.0–1.1×** once each worker already has a warm
+   cache. The scope *is* the claim.
+
+4. **Provenance — measured, not modeled (and labeled either way).** Every number carries
+   one of WITNESSED (a fact fak authored and controls), OBSERVED (a value relayed from an
+   external party), MODELED (a deterministic projection), or SIMULATED (labeled stand-in
+   data). A modeled floor is never quoted as a wall-clock; a provider-side miss is never
+   blamed on a fak action.
+
+5. **Witness — a third party can re-derive it.** A `go test`, a committed artifact plus a
+   reproduce command, a benchmark field that reads back. No witness ⇒ `not yet` with the
+   missing evidence named — never an unproven claim dressed as a shipped one.
+
+6. **Realized — on by default, or honestly gated.** A real gain ships enabled (or is
+   gated OFF with a stated reason). A value that exists only behind a flag nobody sets is
+   not a realized gain; it's a seam. This is the difference between *available* and *true
+   net for the operator who installs the defaults*.
+
+## Reading an incoming claim
+
+The four noise patterns, the question that exposes each, and the fak surface that already
+encodes the honest answer:
+
+| Pattern | The tell | Ask | fak's honest frame |
+|---|---|---|---|
+| **Strawman baseline** | "5×" with no "vs what", or vs the naive floor | Against the *tuned* alternative? | baseline letters A=naive / B=tuned / C=fak ([`BENCHMARK-AUTHORITY`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)) |
+| **Narrow scope sold as general** | one cache-favorable trace | Where does it vanish? | lossy/lossless + layer tags ([`awesome-token-efficiency`](https://github.com/anthony-chaudhary/fak/blob/main/docs/awesome-token-efficiency.md)) |
+| **Already in a tuned stack / already in ours** | a "new" trick the engines ship | Marginal over best practice? | the 10 already-shipped SOTA optimizations are the baseline ([`sota-optimizations`](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/sota-optimizations.md)) |
+| **Modeled or cherry-picked** | a headline with no artifact | Measured? reproducible? | provenance labels + traceability ([`BENCHMARK-AUTHORITY`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)) |
+
+The lens cuts constructively too. A method that **survives** the rubric and isn't in fak
+doesn't get waved away — it lands in [`awesome-token-efficiency`](https://github.com/anthony-chaudhary/fak/blob/main/docs/awesome-token-efficiency.md)
+with its honest tags and, if it can be safely default-on, a tracking issue. Net-true means
+we adopt real gains as readily as we decline noise. The daily intake from
+`tools/idea_scout.py` runs this lens; the verdict lands as a triage note, not a slogan.
+
+## How fak holds itself to it (the receipts)
+
+This standard would be decoration if fak's own claims didn't pass it. They are kept honest
+by machinery, not goodwill:
+
+- **Per-capability tags** — every `- [` line in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) carries
+  exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]`, lint-enforced by `make claims-lint`.
+- **Baseline letters + traceability** — every number in
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) pins a baseline letter and traces
+  to a commit + artifact; any number quoted elsewhere must trace back here.
+- **Provenance, not blame** — the [conflation scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/CONFLATION-SCORECARD.md) checks
+  that every reported number labels WITNESSED vs OBSERVED, so a dashboard can't say "fak
+  broke the cache" when the provider's cache simply expired.
+- **Realized, not shelved** — the [default-value scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/DEFAULT-VALUE-SCORECARD.md)
+  reds the tree when a value flag ships OFF without a documented reason.
+- **Parked ≠ dropped** — a claim true at its scope but off the live path is retained, not
+  deleted, in the [claims salience register](https://github.com/anthony-chaudhary/fak/blob/main/docs/claims-salience-register.md).
+- **Strawman headlines flagged** — `tools/docs_scorecard.py` counts strawman-led headlines
+  as doc-debt across the reachable corpus.
+
+A worked own-example: the H100 decode result. The easy story was a missing-feature "5×".
+The net-true reading named the gap as **memory bandwidth** (an f32 weight moves ~4 B where
+a Q8 weight moves ~1 B), so the headline tok/s stays hardware-gated and the lever is a Q8
+decode path, not a press release — see
+[`H100-KERNEL-5X-ROADMAP.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/H100-KERNEL-5X-ROADMAP.md). Naming the real
+bottleneck is worth more than a number measured against the wrong baseline.
+
+## Criterion → stick
+
+What keeps this page honest is that most of it is already mechanized:
+
+| Rubric question | Stick that enforces it | State |
+|---|---|---|
+| 1 · Real baseline | baseline letters (`BENCHMARK-AUTHORITY`); strawman-headline check (`docs_scorecard`) | enforced |
+| 2 · Net of cost | strawman/structure checks + review | partial — no single net-cost stick yet |
+| 3 · Scope stated | FAQ stratification caveats; awesome-token-efficiency tags | enforced by convention |
+| 4 · Provenance labeled | [conflation scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/CONFLATION-SCORECARD.md) | enforced |
+| 5 · Reproducible witness | `make claims-lint`; benchmark traceability | enforced |
+| 6 · Realized by default | [default-value scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/DEFAULT-VALUE-SCORECARD.md) | enforced |
+
+## How this is encountered by default
+
+The point of a standard is that nobody has to go looking for it.
+
+- **Agents** meet it in [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) next to the "every claim carries a
+  tag" rule — the lens an agent runs before reporting a win, and over the daily idea-scout
+  intake before importing one.
+- **Humans** meet it in the doc map ([`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md))
+  beside the claims ledger and the benchmark authority, and it is the connective tissue
+  under the [charter](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CHARTER.md)'s principle #2 (industry-leading value) and #9
+  (win-win-win).
+
+## Honest fences
+
+- This is a **standard plus a lens over existing sticks**, not a single `fak claim-check`
+  verb that grades an arbitrary claim against the six questions. That verb — a Go
+  subcommand that takes a claim + baseline + witness and returns net-true / strawman /
+  `not yet` — is the named follow-on, not built here.
+- Question 2 (net of introduced cost) is the least mechanized: strawman-headline detection
+  and the structure checks catch the loud cases, but a claim that quietly omits its own
+  cost still relies on review. Closing that gap is the highest-leverage next stick.
+- Saying a gain is net-true at a stated scope is not the same as saying it is large. A
+  small, honest, reproducible win beats a big one measured against the wrong baseline —
+  and this standard exists to keep that ordering.
 
 ---
 
@@ -24216,6 +24407,57 @@ edit **disjoint files** and never collide (the DOS arbiter leases one file-tree 
 so parallel work is collision-free by construction). If your rung or observer only applies
 to specific tools or events, declare it (`CallScope{ Tools() }` / `EventSubscriber{
 Subscriptions() }`) and the 100th tool-specific policy costs an unrelated call nothing.
+
+---
+
+## The stable-core ritual — adding a model or a backend
+
+A new optimization is one kernel. A new **model family** or a new **backend** is a whole
+*column* of the support cross-product (`internal/covmatrix`), and the thread we keep losing
+is "which cells did this just change, and which are still undefined?" The matrix is
+**generated from the tree, not hand-written** — so it only stays honest if it is *run* as
+the tree moves. That is the discipline below: the RSI scorecard loop (`#1021`, the scorecard
+family) pointed at *kernel growth* instead of doc/code quality.
+
+A new model or backend ships **only once all three hold**:
+
+1. **Its column of the matrix is generated.** `fak coverage-matrix` derives every new
+   `(family, backend)` cell from the kernel's own structural facts (the `resolveSpecFor`
+   family switch, the topology each family lowers to, the `--backend` enum, the
+   `requirePreNorm` / `requireGLMDsaSession` fences). Regenerate it and commit the snapshot
+   diff — that diff *is* the answer to "what did this change touch?"
+
+   ```bash
+   go run ./cmd/fak coverage-matrix            # the full grid (human)
+   go run ./cmd/fak coverage-matrix --json     # the control-pane payload (corpus.growth_debt)
+   ```
+
+2. **Its `SUPPORTED` cells have a CI witness.** A cell the matrix calls `SUPPORTED` by
+   topology but that carries no CI-runnable numeric oracle is *honest-but-incomplete* — it
+   runs, but its correctness is asserted, not proven. List that residual and retire it with
+   a weight-free conformance row (`#1081`):
+
+   ```bash
+   go run ./cmd/fak coverage-matrix --stale    # cells that RUN but have no CI oracle
+   ```
+
+   A `PANICS`/`FENCED` cell is honest-and-complete (it refuses); an `UNDEFINED` cell is
+   `growth_debt` (a silently-reachable wrong-result path) — neither is on the `--stale`
+   list, but an `UNDEFINED` cell **must** be fenced or witnessed before you ship.
+
+3. **`growth_debt` did not rise.** The coverage matrix folds one `growth_debt` integer into
+   the unified scorecard control-pane, and the `--check` ratchet enforces it: debt may hold
+   or fall, **never silently rise**. The gardening bundle runs this on every tick, so a
+   model/backend PR that adds an unfenced, unwitnessed cell reds the gate.
+
+   ```bash
+   python tools/scorecard_control_pane.py --check   # the ratchet (folds growth_debt)
+   go run ./cmd/fak garden --check                  # the same gate inside the gardening bundle
+   ```
+
+In short: **generate the column, witness the `SUPPORTED` cells, hold the line on
+`growth_debt`.** The full epic decomposition is in
+[`docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md).
 
 ---
 

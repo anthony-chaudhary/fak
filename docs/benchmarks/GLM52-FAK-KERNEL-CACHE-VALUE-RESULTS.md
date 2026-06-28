@@ -10,7 +10,7 @@
 **DOS Verify:** the offline WITNESSED headline (the deterministic prefill-elimination floor) is bound to its commit and resolves under `dos verify`; the live WITNESSED cache value is reported `not yet` (host-gated on [#1012](https://github.com/anthony-chaudhary/fak/issues/1012)). See [DOS Binding](#dos-binding--provenance-of-every-number).
 **Epic:** [#1010](https://github.com/anthony-chaudhary/fak/issues/1010) — GLM-5.2 on the pure fak kernel
 **Child Issues:** [#1014](https://github.com/anthony-chaudhary/fak/issues/1014) — this result packet · [#1013](https://github.com/anthony-chaudhary/fak/issues/1013) — DOS binding + provenance of every number
-**Observation Seam:** [`internal/cachewitness/`](../internal/cachewitness/) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
+**Observation Seam:** [`internal/cachewitness/`](../../internal/cachewitness/) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
 
 ## Summary
 
@@ -179,7 +179,7 @@ derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
 - **Observation seam:** `internal/cachewitness/` + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit_audit` → diff-witnessed)
 - **Provenance split:** WITNESSED (fak's own cache) vs OBSERVED (provider's cache), matching the conflation-scorecard line
 - **Metric definitions:** `internal/gateway/metrics.go` (`writeKVPrefixMetrics`)
-- **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](../BENCHMARK-TEMPLATE.md) standard
+- **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](../../BENCHMARK-TEMPLATE.md) standard
 - **Gate / dependency:** Datacenter GPU access (8-GPU datacenter server sm_80 box) — the current residual
 
 ## Cross-References
@@ -205,6 +205,6 @@ When results are collected, this document will be updated with:
 - Actual commit hash of the results commit
 - Real numbers in the Results tables (no placeholders)
 - `dos_commit_audit <hash>` → **OK** verification
-- Entry in [BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md) referencing this document
+- Entry in [BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md) referencing this document
 
 **Until then, this document serves as the result packet shape — what will be measured, how, and under what provenance discipline.**
