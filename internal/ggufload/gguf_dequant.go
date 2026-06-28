@@ -114,6 +114,11 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s IQ4_XS element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
 		return elems / qkK * blockIQ4XSBytes, nil
+	case TensorIQ3_XXS:
+		if elems%qkK != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ3_XXS element count %d is not a multiple of %d", t.Name, elems, qkK)
+		}
+		return elems / qkK * blockIQ3XXSBytes, nil
 	default:
 		return 0, fmt.Errorf("gguf: tensor %s type %d does not have a simple f32 payload", t.Name, t.Type)
 	}
@@ -264,6 +269,11 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, err
 		}
 		dequantIQ4XS(out, raw)
+	case TensorIQ3_XXS:
+		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ3XXSBytes, "IQ3_XXS"); err != nil {
+			return nil, err
+		}
+		dequantIQ3XXS(out, raw)
 	default:
 		return nil, fmt.Errorf("gguf: tensor %s type %d cannot dequantize to f32 yet", t.Name, t.Type)
 	}
@@ -397,6 +407,47 @@ func dequantIQ4XS(out []float32, raw []byte) {
 			for j := 0; j < 16; j++ {
 				out[off+j] = dl * kvaluesIQ4NL[sub[j]&0x0f]
 				out[off+j+16] = dl * kvaluesIQ4NL[sub[j]>>4]
+			}
+		}
+	}
+}
+
+// dequantIQ3XXS expands the GGML IQ3_XXS 256-element super-block (dequantize_row_iq3_xxs):
+// one f16 super-scale d, then qkK/4=64 grid-index bytes and qkK/8=32 scale/sign bytes. Each of
+// the eight 32-element sub-blocks reads a u32 (top 4 bits = scale nibble, low 28 bits = four
+// 7-bit sign selectors) and 8 grid-index bytes. The sub-block scale is db = d*(0.5+nibble)*0.5.
+// For each of the 4 lane-pairs l, two grid indices select two iq3xxsGrid entries; each entry is
+// a uint32 whose 4 little-endian bytes are 4 magnitudes; the 7-bit selector ksignsIQ2XS[sel]
+// gives an 8-bit sign mask (bit j flips output j). Layout matches ggml exactly so the f32 is
+// bit-faithful to llama.cpp's IQ3_XXS dequant.
+func dequantIQ3XXS(out []float32, raw []byte) {
+	for block := 0; block < len(out)/qkK; block++ {
+		base := block * blockIQ3XXSBytes
+		d := f16At(raw, base)
+		qs := raw[base+2 : base+2+qkK/4]                 // 64 grid-index bytes
+		sas := raw[base+2+qkK/4 : base+blockIQ3XXSBytes] // 32 scale/sign bytes (8 u32)
+		yi := block * qkK
+		for ib32 := 0; ib32 < qkK/32; ib32++ {
+			aux32 := binary.LittleEndian.Uint32(sas[4*ib32:])
+			db := d * (0.5 + float32(aux32>>28)) * 0.5
+			gi := ib32 * 8 // 8 grid-index bytes per sub-block
+			off := yi + ib32*32
+			for l := 0; l < 4; l++ {
+				signs := ksignsIQ2XS[(aux32>>(7*uint(l)))&127]
+				g1 := iq3xxsGrid[qs[gi+2*l+0]]
+				g2 := iq3xxsGrid[qs[gi+2*l+1]]
+				for j := 0; j < 4; j++ {
+					s1 := float32(1)
+					if signs&(1<<uint(j)) != 0 {
+						s1 = -1
+					}
+					s2 := float32(1)
+					if signs&(1<<uint(j+4)) != 0 {
+						s2 = -1
+					}
+					out[off+l*8+j] = db * float32(byte(g1>>(8*uint(j)))) * s1
+					out[off+l*8+j+4] = db * float32(byte(g2>>(8*uint(j)))) * s2
+				}
 			}
 		}
 	}

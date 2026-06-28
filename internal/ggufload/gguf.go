@@ -41,6 +41,11 @@ const (
 	// the eight 32-element sub-blocks carries a 6-bit scale ls (4 low bits from
 	// scales_l, 2 high bits from scales_h) applied as d*(ls-32).
 	blockIQ4XSBytes = 2 + 2 + qkK/64 + qkK/2
+	// IQ3_XXS: a 256-element super-block = one f16 super-scale d, then 3*qkK/8 = 96
+	// bytes split as qkK/4 = 64 grid-index bytes (8 per 32-element sub-block, indexing
+	// iq3xxsGrid) followed by qkK/8 = 32 scale/sign bytes (one u32 per sub-block: top
+	// 4 bits = scale, low 28 bits = four 7-bit sign selectors). 98 bytes per super-block.
+	blockIQ3XXSBytes = 2 + 3*qkK/8
 )
 
 // ValueType is the GGUF metadata value type tag (uint8/int32/string/array/... per the
@@ -81,10 +86,11 @@ const (
 	TensorQ4_K   TensorType = 12
 	TensorQ5_K   TensorType = 13
 	TensorQ6_K   TensorType = 14
-	TensorIQ4_NL TensorType = 20
-	TensorIQ4_XS TensorType = 23
-	TensorBF16   TensorType = 30
-	TensorMXFP4  TensorType = 39
+	TensorIQ3_XXS TensorType = 18
+	TensorIQ4_NL  TensorType = 20
+	TensorIQ4_XS  TensorType = 23
+	TensorBF16    TensorType = 30
+	TensorMXFP4   TensorType = 39
 )
 
 // Value is one decoded GGUF metadata value: its ValueType tag and the Go value it
@@ -133,6 +139,8 @@ func (t TensorType) String() string {
 		return "Q5_K"
 	case TensorQ6_K:
 		return "Q6_K"
+	case TensorIQ3_XXS:
+		return "IQ3_XXS"
 	case TensorIQ4_NL:
 		return "IQ4_NL"
 	case TensorIQ4_XS:
