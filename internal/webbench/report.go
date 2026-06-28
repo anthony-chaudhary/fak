@@ -42,7 +42,13 @@ type CompareInputs struct {
 	Geometry    GeometryModel
 	Workers     []int
 	BenchResult string // optional path to external benchmark results
-	GeneratedAt string
+	// PredictionsPath, when set, is a predictions JSON whose task success rate is folded
+	// into the "Task success rate + safety" family via the official harness (RunEval). It
+	// is OBSERVED, not computed: the row is "measured" when the harness ran and "gated"
+	// (with the specific reason) when this box lacks the harness/runtime — never silently
+	// dropped, so the comparison can't claim a success rate it did not actually grade.
+	PredictionsPath string
+	GeneratedAt     string
 }
 
 // BuildComparison constructs the comparison from inputs.
@@ -75,15 +81,54 @@ func BuildComparison(in CompareInputs) *Comparison {
 			Provenance: "gated", // Would need measurement
 			Rows:       []Row{{Label: "Gated on this box - requires trace data"}},
 		},
-		{
-			Name:       "Task success rate + safety",
-			Kind:       "comparable",
-			Provenance: "gated", // Requires official harness
-			Rows:       []Row{{Label: "Gated on this box - requires harness + model"}},
-		},
+		buildSuccessRateFamily(in.PredictionsPath),
 	}
 
 	return c
+}
+
+// buildSuccessRateFamily folds a predictions JSON's task success rate into the comparison
+// via the official harness (RunEval). With no --predictions it stays the honest gated
+// placeholder. With predictions it runs the eval: a "measured" row carrying the real
+// passed/total/success-rate when the harness ran, or a "gated" row naming the SPECIFIC
+// reason (no harness, no browser runtime) when this box can't grade — the OBSERVED success
+// rate is never fabricated and never silently dropped.
+func buildSuccessRateFamily(predictionsPath string) MetricFamily {
+	fam := MetricFamily{
+		Name:       "Task success rate + safety",
+		Kind:       "comparable",
+		Provenance: "gated", // Requires official harness
+		Rows:       []Row{{Label: "Gated on this box - requires harness + model"}},
+	}
+	if predictionsPath == "" {
+		return fam
+	}
+	res, err := RunEval(EvalConfig{PredictionsPath: predictionsPath, RunID: "webbench-compare"})
+	if err != nil {
+		fam.Rows = []Row{{
+			Label:  "Eval errored",
+			Values: map[string]interface{}{"predictions": predictionsPath, "error": err.Error()},
+		}}
+		return fam
+	}
+	if !res.Available {
+		fam.Rows = []Row{{
+			Label:  "Gated",
+			Values: map[string]interface{}{"predictions": predictionsPath, "reason": res.Reason, "command": res.Command},
+		}}
+		return fam
+	}
+	fam.Provenance = "measured"
+	fam.Rows = []Row{{
+		Label: "Official harness",
+		Values: map[string]interface{}{
+			"predictions":      predictionsPath,
+			"passed":           res.Passed,
+			"total":            res.Total,
+			"success_rate_pct": fmt.Sprintf("%.1f%%", res.SuccessRatePct),
+		},
+	}}
+	return fam
 }
 
 func buildPrefillRows(prefill []PrefillRow) []Row {

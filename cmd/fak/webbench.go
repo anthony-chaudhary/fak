@@ -221,7 +221,6 @@ func cmdWebbenchCompare(argv []string) {
 	out := fs.String("out", "", "write the Comparison JSON here (default: stdout)")
 	md := fs.String("md", "", "write the markdown report here (optional)")
 	_ = fs.Parse(argv)
-	_ = preds // TODO: use predictions to fold success rate
 
 	if *dataset == "" {
 		fmt.Fprintln(os.Stderr, "fak webbench compare: --dataset is required")
@@ -241,11 +240,12 @@ func cmdWebbenchCompare(argv []string) {
 	}
 
 	in := webbench.CompareInputs{
-		Dataset:     d,
-		Geometry:    webbench.DefaultGeometryModel(),
-		Workers:     workers,
-		BenchResult: *benchResult,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Dataset:         d,
+		Geometry:        webbench.DefaultGeometryModel(),
+		Workers:         workers,
+		BenchResult:     *benchResult,
+		PredictionsPath: *preds,
+		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
 	}
 
 	c := webbench.BuildComparison(in)
