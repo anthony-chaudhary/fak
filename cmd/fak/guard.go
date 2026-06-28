@@ -697,9 +697,39 @@ func (s guardOAuthCredentialsSource) Lookup(key string) (string, bool) {
 	if key != s.key {
 		return "", false
 	}
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	// Claude Code refreshes this file ~hourly by rewriting it, so a read can race the
+	// rewrite and catch a torn/empty/partial body that fails to parse. The window closes
+	// in microseconds, so when the file EXISTS but the current read does not yield a token,
+	// retry a few times over a few ms before giving up — that keeps a transient torn read
+	// from being reported as "no active login" and falling through to the sibling
+	// .oauth-token (a DIFFERENT, possibly-stale setup token). A genuinely-absent file (the
+	// first os.Stat error) still misses immediately.
+	const tornReadRetries = 3
+	for attempt := 0; ; attempt++ {
+		v, ok, transient := s.readOnce(now)
+		if ok || !transient || attempt >= tornReadRetries {
+			return v, ok
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+}
+
+// readOnce performs a single resolve of the credentials file. It returns the token and
+// ok=true on success; on failure, transient reports whether the failure looks like a
+// torn/racing read of an EXISTING file (worth a brief retry) versus a definitive miss —
+// an absent file, or a present-but-expired token (which must NOT be sent: an expired
+// bearer 401s, so it is treated as absent so a fresher source or the per-request 401
+// refresh can take over).
+func (s guardOAuthCredentialsSource) readOnce(now func() time.Time) (tok string, ok bool, transient bool) {
 	b, err := os.ReadFile(s.path)
 	if err != nil {
-		return "", false
+		// A missing file is a definitive miss; any other read error (a momentary
+		// permission/lock blip during the rewrite) is worth a short retry.
+		return "", false, !os.IsNotExist(err)
 	}
 	var doc struct {
 		ClaudeAIOauth struct {
@@ -708,20 +738,25 @@ func (s guardOAuthCredentialsSource) Lookup(key string) (string, bool) {
 		} `json:"claudeAiOauth"`
 	}
 	if json.Unmarshal(b, &doc) != nil {
-		return "", false
+		// File exists but does not parse — a torn read mid-rewrite. Retry.
+		return "", false, true
 	}
 	v := strings.TrimSpace(doc.ClaudeAIOauth.AccessToken)
 	if v == "" {
-		return "", false
+		// Parsed but no token (truncated-but-valid JSON, or a transitional empty write).
+		return "", false, true
 	}
-	now := time.Now
-	if s.now != nil {
-		now = s.now
+	// An expired access token is a KNOWN-BAD bearer (the upstream 401s on it). Treat it as
+	// absent rather than send it: a higher-priority source already lost, so falling through
+	// lets the long-lived .oauth-token setup token answer, and the per-request 401 refresh
+	// (agent.HTTPPlanner) re-reads the file once Claude Code rewrites the rotated token in.
+	if exp := doc.ClaudeAIOauth.ExpiresAt; exp > 0 && exp < now().UnixMilli() {
+		if s.warn != nil {
+			fmt.Fprintf(s.warn, "fak guard: WARNING — the OAuth token in %s expired; Claude Code normally refreshes it. Re-run `claude` once, or use `claude setup-token` for a long-lived token.\n", s.path)
+		}
+		return "", false, false
 	}
-	if exp := doc.ClaudeAIOauth.ExpiresAt; exp > 0 && exp < now().UnixMilli() && s.warn != nil {
-		fmt.Fprintf(s.warn, "fak guard: WARNING — the OAuth token in %s expired; Claude Code normally refreshes it. Re-run `claude` once, or use `claude setup-token` for a long-lived token.\n", s.path)
-	}
-	return v, true
+	return v, true, false
 }
 
 type guardOAuthFileSource struct {

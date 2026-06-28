@@ -838,6 +838,91 @@ func TestResolveAnthropicOAuthToken(t *testing.T) {
 	}
 }
 
+// TestGuardOAuthCredentialsSourceExpiredIsAbsent proves the residual-401 fix at the
+// credential boundary: an EXPIRED .credentials.json access token is a known-bad bearer
+// (the upstream 401s on it), so Lookup must report it as ABSENT rather than hand it back,
+// letting a fresher source answer and the per-request 401 refresh take over. A live
+// (unexpired) token is still returned unchanged.
+func TestGuardOAuthCredentialsSourceExpiredIsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, ".credentials.json")
+	// A fixed "now" so the test is independent of wall-clock; the token's expiry is set
+	// relative to it.
+	nowMs := int64(1_000_000_000_000)
+	now := func() time.Time { return time.UnixMilli(nowMs) }
+	src := guardOAuthCredentialsSource{
+		key:  guardAnthropicOAuthSecretKey,
+		path: credPath,
+		now:  now,
+		warn: io.Discard,
+	}
+
+	write := func(tok string, expiresAt int64) {
+		t.Helper()
+		body := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":%q,"expiresAt":%d}}`, tok, expiresAt)
+		if err := os.WriteFile(credPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Live token (expires in the future) -> returned.
+	write("sk-ant-oat01-live", nowMs+3_600_000)
+	if v, ok := src.Lookup(guardAnthropicOAuthSecretKey); !ok || v != "sk-ant-oat01-live" {
+		t.Fatalf("live token: got (%q,%v), want it returned", v, ok)
+	}
+
+	// Expired token -> reported as absent (NOT returned), so the loader can fall through.
+	write("sk-ant-oat01-expired", nowMs-1)
+	if v, ok := src.Lookup(guardAnthropicOAuthSecretKey); ok || v != "" {
+		t.Fatalf("expired token: got (%q,%v), want (\"\",false) — an expired bearer must not be sent", v, ok)
+	}
+
+	// expiresAt==0 (no expiry recorded, e.g. a long-lived token) -> still returned.
+	write("sk-ant-oat01-noexp", 0)
+	if v, ok := src.Lookup(guardAnthropicOAuthSecretKey); !ok || v != "sk-ant-oat01-noexp" {
+		t.Fatalf("no-expiry token: got (%q,%v), want it returned", v, ok)
+	}
+}
+
+// TestGuardOAuthCredentialsSourceTornReadRetries proves the mid-rewrite race fix: when
+// .credentials.json EXISTS but a read catches a torn/unparseable body (Claude Code is
+// rewriting it ~hourly), Lookup retries instead of reporting a false miss that would fall
+// through to a different, possibly-stale .oauth-token. A truly-absent file still misses
+// immediately.
+func TestGuardOAuthCredentialsSourceTornReadRetries(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, ".credentials.json")
+	src := guardOAuthCredentialsSource{
+		key:  guardAnthropicOAuthSecretKey,
+		path: credPath,
+		warn: io.Discard,
+	}
+
+	// Absent file -> immediate miss.
+	if v, ok := src.Lookup(guardAnthropicOAuthSecretKey); ok || v != "" {
+		t.Fatalf("absent file: got (%q,%v), want (\"\",false)", v, ok)
+	}
+
+	// A torn (unparseable) body present at read time, healed to a valid token by a
+	// concurrent writer partway through Lookup's bounded retry window.
+	if err := os.WriteFile(credPath, []byte(`{"claudeAiOauth":{"accessTok`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	healed := make(chan struct{})
+	go func() {
+		// Heal after a short delay so the first read(s) see the torn body and the retry
+		// catches the valid one. Well within the bounded retry budget (3 * 15ms).
+		time.Sleep(10 * time.Millisecond)
+		_ = os.WriteFile(credPath, []byte(`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-healed","expiresAt":0}}`), 0o600)
+		close(healed)
+	}()
+	v, ok := src.Lookup(guardAnthropicOAuthSecretKey)
+	<-healed
+	if !ok || v != "sk-ant-oat01-healed" {
+		t.Fatalf("torn-then-healed read: got (%q,%v), want the healed token after retry", v, ok)
+	}
+}
+
 func TestGuardAnthropicOAuthLoaderRedactsResolvedSecret(t *testing.T) {
 	dir := t.TempDir()
 	const tokenEnv = "FAK_TEST_OAUTH_REDACT"
