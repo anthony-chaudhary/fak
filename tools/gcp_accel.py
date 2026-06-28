@@ -156,6 +156,38 @@ TIERS: tuple[AccelTier, ...] = (
         ),
     ),
     AccelTier(
+        slug="a3-high-h100-1g",
+        machine_type="a3-highgpu-1g",
+        accelerator_type="nvidia-h100-80gb",
+        gpu_label="NVIDIA H100 (Hopper)",
+        gpu_count=1,
+        gpu_mem_gb_each=80,
+        vcpus=26,
+        host_mem_gb=234,
+        gen_rank=29,
+        arch="hopper",
+        compute_capability="90",
+        approx_usd_per_hour=11.0,
+        common_zones=(
+            "us-central1-a",
+            "us-east4-a",
+            "europe-west4-a",
+            "asia-northeast1-a",
+        ),
+        blackwell=False,
+        notes=(
+            "SINGLE H100-80GB (sm_90) -- the cheap 'one datacenter Hopper node' tier "
+            "for a model that fits one GPU: the deliverable is fak's OWN engine "
+            "(fak-cuda, f32) head-to-head vs llama.cpp on real Hopper silicon for "
+            "~1/8th the spend of the a3-highgpu-8g shape. CONSTRAINT: GCP requires the "
+            "partial A3-High shapes (a3-highgpu-1g/2g/4g) to be created as Spot or "
+            "Flex-start VMs -- pass --spot. Carries 2 local NVMe SSDs (auto), which "
+            "the a3-high branch of gcp_bench.provision already attaches. Its 234 GB "
+            "host RAM clears the fak-cuda f32 OOM the 32 GB g2-l4 box hit "
+            "(modelbench-cuda was SIGKILLed there)."
+        ),
+    ),
+    AccelTier(
         slug="a2-ultra-a100-80gb",
         machine_type="a2-ultragpu-8g",
         # The 80GB A100 dropped the "Tesla" prefix: its accelerator string is
