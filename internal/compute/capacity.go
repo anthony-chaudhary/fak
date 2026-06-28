@@ -97,28 +97,26 @@ type MemoryDemand struct {
 type MemoryPlan []MemoryDemand
 
 // EstimateKVStoreBytes reports the resident bytes required by the compute.KVStore
-// layout for tokens cached at once. The HAL KV contract stores three f32 rows per
-// cached position per layer: pre-RoPE K (for exact re-positioning on evict),
-// post-RoPE K, and V. Invalid or incomplete geometry returns 0 so callers can
-// fail open when a config does not carry enough evidence for a cache plan.
+// layout for tokens cached at once. The HAL KV contract stores three rows per cached
+// position per layer: pre-RoPE K (for exact re-positioning on evict), post-RoPE K, and V.
+// cfg.Precision (kvprecision.go) selects the dtype + per-row cost of those rows — the F32
+// default is three f32 rows; the denser q8 tier quantizes the two attended rows to q8_0 and
+// keeps the pre-RoPE K row f32 so evict stays exact. Invalid or incomplete geometry returns
+// 0 so callers can fail open when a config does not carry enough evidence for a cache plan.
 func EstimateKVStoreBytes(cfg KVConfig, tokens int) int64 {
-	return saturatingMulInt64(
-		int64(cfg.NumLayers),
-		int64(tokens),
-		int64(cfg.NumKVHeads),
-		int64(cfg.HeadDim),
-		3, // Kraw + K + V
-		4, // f32 bytes
-	)
+	elemsPerRow := saturatingMulInt64(int64(cfg.NumKVHeads), int64(cfg.HeadDim))
+	perTokenPerLayer := cfg.Precision.perTokenPerLayerBytes(elemsPerRow)
+	return saturatingMulInt64(int64(cfg.NumLayers), int64(tokens), perTokenPerLayer)
 }
 
-// EstimateKVStoreMemoryPlan is the classed form of EstimateKVStoreBytes.
+// EstimateKVStoreMemoryPlan is the classed form of EstimateKVStoreBytes. The demand's DType
+// reflects the tier (f32, or "mixed" for the q8 tier's f32-Kraw + q8_0-K/V layout).
 func EstimateKVStoreMemoryPlan(cfg KVConfig, tokens int) MemoryPlan {
 	bytes := EstimateKVStoreBytes(cfg, tokens)
 	if bytes <= 0 {
 		return nil
 	}
-	return MemoryPlan{{Class: MemoryKVCache, Bytes: bytes, Detail: "hal-kv-store", DType: F32.String()}}
+	return MemoryPlan{{Class: MemoryKVCache, Bytes: bytes, Detail: "hal-kv-store", DType: cfg.Precision.StorageLabel()}}
 }
 
 // TransformerScratchConfig is the geometry needed to conservatively plan the f32 transient

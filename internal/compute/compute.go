@@ -254,11 +254,15 @@ type Caps struct {
 
 // KVConfig is the minimal cache geometry the KVStore needs (mirrors the fields of
 // model.Config the cache uses), passed explicitly so the backend holds no model state.
+// Precision names the storage density tier (see kvprecision.go); its zero value is
+// KVPrecisionF32, so a config that does not set it estimates byte-identically to before
+// the tier existed.
 type KVConfig struct {
 	NumLayers  int
 	NumKVHeads int
 	HeadDim    int
 	RopeTheta  float64
+	Precision  KVPrecision
 }
 
 // KVStore is the interface the kernel-owned attention cache lives behind — the one
