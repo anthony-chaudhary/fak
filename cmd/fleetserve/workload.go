@@ -293,45 +293,31 @@ func runWorkloadMode(m *model.Model, quant bool, vocab int, prof *workloadProfil
 			continue
 		}
 		ids0 := lcgIDs(C, vocab, 991)
-		var reuseTotals, reusePre, reuseClone, reuseDec, reuseResult []time.Duration
-		var noReuseTotals, noReusePre, noReuseDec, noReuseResult []time.Duration
+		var acc reuseAccum
 		for r := 0; r < reps; r++ {
 			// ---- reuse: prefill once, clone C, replay schedule ----
 			bs, tPre, tClone := newReuseBatch(m, quant, prefix, C, decTot+resTot)
 			tDec, tRes := runScheduleTurns(bs, ids0, steps, vocab, r)
-			reuseTotals = append(reuseTotals, tPre+tClone+tDec+tRes)
-			reusePre = append(reusePre, tPre)
-			reuseClone = append(reuseClone, tClone)
-			reuseDec = append(reuseDec, tDec)
-			reuseResult = append(reuseResult, tRes)
+			acc.addReuse(tPre, tClone, tDec, tRes)
 
 			if ablation {
 				// ---- no-reuse: C independent prefix prefills, same schedule ----
 				nbs, nPre := newNoReuseBatch(m, quant, prefix, C, decTot+resTot)
 				nDec, nRes := runScheduleTurns(nbs, ids0, steps, vocab, r)
-				noReuseTotals = append(noReuseTotals, nPre+nDec+nRes)
-				noReusePre = append(noReusePre, nPre)
-				noReuseDec = append(noReuseDec, nDec)
-				noReuseResult = append(noReuseResult, nRes)
+				acc.addNoReuse(nPre, nDec, nRes)
 			}
 			runtime.GC()
 		}
 
-		rTot := msFromDur(minDur(reuseTotals))
-		rAgents := float64(C) / (rTot / 1e3)
-		rTurns := float64(C*T) / (rTot / 1e3)
+		rTot, rAgents, rTurns := acc.throughput(C, T)
 		pt := workloadPoint{
 			Concurrency: C, Turns: T, PrefixLen: prefixLen,
 			DecodeTokensTotal: float64(decTot), ResultTokensTotal: float64(resTot),
 			ToolTurns: toolTurns, EffToolFraction: effFrac, Reps: reps,
-			reuseMetrics: reuseMetrics{
-				ReusePrefillMS: msFromDur(minDur(reusePre)), ReuseCloneMS: msFromDur(minDur(reuseClone)),
-				ReuseDecodeMS: msFromDur(minDur(reuseDec)), ReuseResultMS: msFromDur(minDur(reuseResult)),
-				ReuseTotalMS: rTot, ReuseAgentsSec: rAgents, ReuseAgentTurnsSec: rTurns,
-			},
+			reuseMetrics: acc.metrics(rTot, rAgents, rTurns),
 		}
 		if ablation {
-			pt.fillNoReuse(noReuseTotals, noReusePre, noReuseDec, noReuseResult, C, T, rAgents)
+			pt.fillNoReuse(acc.nTotal, acc.nPre, acc.nDec, acc.nResult, C, T, rAgents)
 		}
 		points = append(points, pt)
 		if ablation {

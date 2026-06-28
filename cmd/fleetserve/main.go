@@ -136,8 +136,7 @@ func main() {
 			// affect matmul/attention cost, only which weights' rows are read).
 			ids0 := lcgIDs(C, vocab, 991)
 
-			var reuseTotals, reusePre, reuseClone, reuseDec, reuseResult []time.Duration
-			var noReuseTotals, noReusePre, noReuseDec, noReuseResult []time.Duration
+			var acc reuseAccum
 			tailTokens := T * *decodeSteps
 			if T > 1 {
 				tailTokens += (T - 1) * *resultTokens
@@ -148,39 +147,26 @@ func main() {
 				// ---- fak REUSE: prefill once, clone C, batched decode ----
 				bs, tPre, tClone := newReuseBatch(m, *quant, prefix, C, tailTokens)
 				tDec, tResult := runTurns(bs, ids0, resultPrompts, *decodeSteps, vocab)
-				reuseTotals = append(reuseTotals, tPre+tClone+tDec+tResult)
-				reusePre = append(reusePre, tPre)
-				reuseClone = append(reuseClone, tClone)
-				reuseDec = append(reuseDec, tDec)
-				reuseResult = append(reuseResult, tResult)
+				acc.addReuse(tPre, tClone, tDec, tResult)
 
 				if *ablation {
 					// ---- fak NO-REUSE: C independent prefix prefills, same batched decode ----
 					nbs, nPre := newNoReuseBatch(m, *quant, prefix, C, tailTokens)
 					nDec, nResult := runTurns(nbs, ids0, resultPrompts, *decodeSteps, vocab)
-					noReuseTotals = append(noReuseTotals, nPre+nDec+nResult)
-					noReusePre = append(noReusePre, nPre)
-					noReuseDec = append(noReuseDec, nDec)
-					noReuseResult = append(noReuseResult, nResult)
+					acc.addNoReuse(nPre, nDec, nResult)
 				}
 
 				runtime.GC()
 			}
 
-			rTot := msFromDur(minDur(reuseTotals))
-			rAgents := float64(C) / (rTot / 1e3)
-			rTurns := float64(C*T) / (rTot / 1e3)
+			rTot, rAgents, rTurns := acc.throughput(C, T)
 			pt := point{
 				Turns: T, Concurrency: C, PrefixLen: *prefixLen, DecodeSteps: *decodeSteps,
 				ResultTokens: *resultTokens, Reps: *reps,
-				reuseMetrics: reuseMetrics{
-					ReusePrefillMS: msFromDur(minDur(reusePre)), ReuseCloneMS: msFromDur(minDur(reuseClone)),
-					ReuseDecodeMS: msFromDur(minDur(reuseDec)), ReuseResultMS: msFromDur(minDur(reuseResult)),
-					ReuseTotalMS: rTot, ReuseAgentsSec: rAgents, ReuseAgentTurnsSec: rTurns,
-				},
+				reuseMetrics: acc.metrics(rTot, rAgents, rTurns),
 			}
 			if *ablation {
-				pt.fillNoReuse(noReuseTotals, noReusePre, noReuseDec, noReuseResult, C, T, rAgents)
+				pt.fillNoReuse(acc.nTotal, acc.nPre, acc.nDec, acc.nResult, C, T, rAgents)
 			}
 			points = append(points, pt)
 			if *ablation {

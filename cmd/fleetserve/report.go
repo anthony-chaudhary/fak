@@ -61,6 +61,51 @@ func (m *reuseMetrics) fillNoReuse(totals, pre, dec, result []time.Duration, C, 
 	m.ReuseSpeedup = &speedup
 }
 
+// reuseAccum collects the per-rep reuse and no-reuse phase timings for one sweep cell,
+// then folds them into the min-based reuseMetrics summary. It holds the accumulate-and-
+// aggregate plumbing that the grid (main.go) and workload (workload.go) run modes would
+// otherwise each spell out inline.
+type reuseAccum struct {
+	total, pre, clone, dec, result []time.Duration
+	nTotal, nPre, nDec, nResult    []time.Duration
+}
+
+// addReuse records one rep's reuse-path timings (prefill, clone, decode, result-prefill).
+func (a *reuseAccum) addReuse(tPre, tClone, tDec, tResult time.Duration) {
+	a.total = append(a.total, tPre+tClone+tDec+tResult)
+	a.pre = append(a.pre, tPre)
+	a.clone = append(a.clone, tClone)
+	a.dec = append(a.dec, tDec)
+	a.result = append(a.result, tResult)
+}
+
+// addNoReuse records one rep's no-reuse ablation timings (prefill, decode, result-prefill).
+func (a *reuseAccum) addNoReuse(nPre, nDec, nResult time.Duration) {
+	a.nTotal = append(a.nTotal, nPre+nDec+nResult)
+	a.nPre = append(a.nPre, nPre)
+	a.nDec = append(a.nDec, nDec)
+	a.nResult = append(a.nResult, nResult)
+}
+
+// throughput derives the cell's reuse total time (ms) and the agents/sec and agent-turns/sec
+// rates from the min reuse total across reps, for C concurrent agents over turns per agent.
+func (a *reuseAccum) throughput(C, turns int) (rTot, rAgents, rTurns float64) {
+	rTot = msFromDur(minDur(a.total))
+	rAgents = float64(C) / (rTot / 1e3)
+	rTurns = float64(C*turns) / (rTot / 1e3)
+	return
+}
+
+// metrics folds the accumulated reuse timings into the reuseMetrics summary (min across
+// reps, in ms) given the precomputed reuse throughput scalars for the cell.
+func (a *reuseAccum) metrics(rTot, rAgents, rTurns float64) reuseMetrics {
+	return reuseMetrics{
+		ReusePrefillMS: msFromDur(minDur(a.pre)), ReuseCloneMS: msFromDur(minDur(a.clone)),
+		ReuseDecodeMS: msFromDur(minDur(a.dec)), ReuseResultMS: msFromDur(minDur(a.result)),
+		ReuseTotalMS: rTot, ReuseAgentsSec: rAgents, ReuseAgentTurnsSec: rTurns,
+	}
+}
+
 // newReuseBatch prefills the shared prefix once and clones it into C agents reserving
 // reserve tail slots. It is the reuse-path setup shared by both run modes; the returned
 // durations are the prefill and clone timings.
