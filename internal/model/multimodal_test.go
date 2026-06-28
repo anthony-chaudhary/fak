@@ -272,6 +272,80 @@ func TestForwardMultimodalRejectsEmptyEmbedding(t *testing.T) {
 	}
 }
 
+func TestForwardMultimodalContentTypeAxisDeniesActiveContentByDefault(t *testing.T) {
+	m := multimodalTestModel()
+	img := withMediaType(validVisionEmbedding(m, 1), "image/svg+xml")
+	_, verdict, err := m.ForwardMultimodal(MultimodalRequest{
+		Policy: MultimodalPolicy{Mode: MultimodalModeQuarantine},
+		Parts:  []MultimodalPart{{Image: img}},
+	})
+	if !errors.Is(err, ErrMultimodalDenied) {
+		t.Fatalf("error = %v, want ErrMultimodalDenied", err)
+	}
+	if verdict.Decision != MultimodalDeny || !strings.Contains(verdict.Reason, "allow-list") {
+		t.Fatalf("verdict = %+v, want content-type allow-list denial", verdict)
+	}
+}
+
+func TestForwardMultimodalContentTypeAxisAdmitsListedType(t *testing.T) {
+	m := multimodalTestModel()
+	img := withMediaType(validVisionEmbedding(m, 1), "image/svg+xml")
+	_, verdict, err := m.ForwardMultimodal(MultimodalRequest{
+		Policy: MultimodalPolicy{Mode: MultimodalModeQuarantine, AllowedContentTypes: []string{"image/svg+xml"}},
+		Parts:  []MultimodalPart{{Image: img}},
+	})
+	if err != nil {
+		t.Fatalf("ForwardMultimodal with widened content-type axis: %v", err)
+	}
+	if verdict.Decision != MultimodalAllow || verdict.Images != 1 {
+		t.Fatalf("verdict = %+v, want allow for an explicitly listed content type", verdict)
+	}
+}
+
+func TestForwardMultimodalContentTypeAxisWildcardAdmitsAnyImage(t *testing.T) {
+	m := multimodalTestModel()
+	img := withMediaType(validVisionEmbedding(m, 1), "image/tiff")
+	_, verdict, err := m.ForwardMultimodal(MultimodalRequest{
+		Policy: MultimodalPolicy{Mode: MultimodalModeQuarantine, AllowedContentTypes: []string{"image/*"}},
+		Parts:  []MultimodalPart{{Image: img}},
+	})
+	if err != nil {
+		t.Fatalf("ForwardMultimodal with image/* wildcard: %v", err)
+	}
+	if verdict.Decision != MultimodalAllow {
+		t.Fatalf("verdict = %+v, want allow under image/* wildcard", verdict)
+	}
+}
+
+func TestForwardMultimodalContentTypeAxisNormalizesParameters(t *testing.T) {
+	m := multimodalTestModel()
+	img := withMediaType(validVisionEmbedding(m, 1), "Image/PNG; charset=binary")
+	_, verdict, err := m.ForwardMultimodal(MultimodalRequest{
+		Policy: MultimodalPolicy{Mode: MultimodalModeQuarantine},
+		Parts:  []MultimodalPart{{Image: img}},
+	})
+	if err != nil {
+		t.Fatalf("ForwardMultimodal with parameterized content type: %v", err)
+	}
+	if verdict.Decision != MultimodalAllow {
+		t.Fatalf("verdict = %+v, want allow after content-type normalization", verdict)
+	}
+}
+
+func TestForwardMultimodalRejectsNonImageAllowListEntry(t *testing.T) {
+	m := multimodalTestModel()
+	_, verdict, err := m.ForwardMultimodal(MultimodalRequest{
+		Policy: MultimodalPolicy{Mode: MultimodalModeQuarantine, AllowedContentTypes: []string{"text/plain"}},
+		Parts:  []MultimodalPart{{TokenIDs: []int{1}}},
+	})
+	if !errors.Is(err, ErrMultimodalDenied) {
+		t.Fatalf("error = %v, want ErrMultimodalDenied", err)
+	}
+	if verdict.Decision != MultimodalDeny || !strings.Contains(verdict.Reason, "image/*") {
+		t.Fatalf("verdict = %+v, want invalid-allow-list-entry denial", verdict)
+	}
+}
+
 func multimodalTestModel() *Model {
 	return NewSynthetic(Config{
 		HiddenSize:       8,

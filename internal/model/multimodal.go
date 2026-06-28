@@ -36,6 +36,21 @@ const (
 	defaultMultimodalMaxEmbeddingTokens = 1024
 )
 
+// defaultAllowedImageContentTypes is the fail-closed default of the content-type
+// axis: the raster media types a CLIP/LLaVA image pipeline actually consumes.
+// Active-content image types — notably image/svg+xml, which is XML that can carry
+// scripts/external references — are deliberately OFF the default list, so an
+// image-bearing part has to name a safe raster type (or the operator must opt the
+// risky type back in explicitly). A caller widens the axis with an explicit
+// AllowedContentTypes (e.g. {"image/*"} to admit any image subtype).
+var defaultAllowedImageContentTypes = []string{
+	"image/png",
+	"image/jpeg",
+	"image/webp",
+	"image/gif",
+	"image/bmp",
+}
+
 var (
 	ErrMultimodalQuarantined = errors.New("model: multimodal input quarantined")
 	ErrMultimodalDenied      = errors.New("model: multimodal input denied")
@@ -50,6 +65,12 @@ type MultimodalPolicy struct {
 	MaxImageBytes      int64
 	MaxImagePixels     int64
 	MaxEmbeddingTokens int
+	// AllowedContentTypes is the content-type axis of the image quarantine gate: an
+	// explicit allow-list of normalized image media types (e.g. "image/png"). An
+	// image part whose media type is not on the list is denied. The wildcard entries
+	// "image/*" or "*" admit any image subtype. When empty it defaults to the
+	// fail-closed defaultAllowedImageContentTypes raster set.
+	AllowedContentTypes []string
 }
 
 // MultimodalImage is the bounded image metadata used for governance. Bytes are
@@ -189,6 +210,15 @@ func (p MultimodalPolicy) withDefaults() MultimodalPolicy {
 	if p.MaxEmbeddingTokens == 0 {
 		p.MaxEmbeddingTokens = defaultMultimodalMaxEmbeddingTokens
 	}
+	if len(p.AllowedContentTypes) == 0 {
+		p.AllowedContentTypes = append([]string(nil), defaultAllowedImageContentTypes...)
+	} else {
+		norm := make([]string, 0, len(p.AllowedContentTypes))
+		for _, ct := range p.AllowedContentTypes {
+			norm = append(norm, normalizeMediaType(ct))
+		}
+		p.AllowedContentTypes = norm
+	}
 	return p
 }
 
@@ -210,6 +240,14 @@ func (p MultimodalPolicy) valid() error {
 	if p.MaxEmbeddingTokens <= 0 {
 		return fmt.Errorf("max embedding tokens must be positive")
 	}
+	for _, ct := range p.AllowedContentTypes {
+		if ct == "*" || ct == "image/*" {
+			continue
+		}
+		if !strings.HasPrefix(ct, "image/") || len(ct) <= len("image/") {
+			return fmt.Errorf("allowed content type %q must be an image/* media type", ct)
+		}
+	}
 	return nil
 }
 
@@ -219,9 +257,12 @@ func admitVisionEmbedding(img *VisionEmbedding, policy MultimodalPolicy, verdict
 		return denyMultimodal(verdict, "too many images")
 	}
 	meta := img.Image
-	media := strings.ToLower(strings.TrimSpace(meta.MediaType))
+	media := normalizeMediaType(meta.MediaType)
 	if !strings.HasPrefix(media, "image/") {
 		return denyMultimodal(verdict, "media type must be image/*")
+	}
+	if !contentTypeAllowed(media, policy.AllowedContentTypes) {
+		return denyMultimodal(verdict, fmt.Sprintf("content type %q not on the allow-list", media))
 	}
 	if meta.Width <= 0 || meta.Height <= 0 {
 		return denyMultimodal(verdict, "image dimensions must be positive")
@@ -248,6 +289,30 @@ func admitVisionEmbedding(img *VisionEmbedding, policy MultimodalPolicy, verdict
 		}
 	}
 	return nil
+}
+
+// normalizeMediaType lower-cases, trims, and strips any "; param" suffix from a
+// media type so "Image/PNG; charset=binary" and "image/png" compare equal on the
+// content-type axis.
+func normalizeMediaType(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if i := strings.IndexByte(s, ';'); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
+// contentTypeAllowed reports whether a normalized image media type is admitted by
+// the content-type axis. The wildcard entries "image/*" or "*" admit any subtype;
+// otherwise the match is exact. The allow-list entries are already normalized by
+// MultimodalPolicy.withDefaults.
+func contentTypeAllowed(media string, allow []string) bool {
+	for _, a := range allow {
+		if a == "*" || a == "image/*" || a == media {
+			return true
+		}
+	}
+	return false
 }
 
 func denyMultimodal(verdict *MultimodalVerdict, reason string) error {
