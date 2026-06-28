@@ -5,7 +5,12 @@ import (
 	"strings"
 )
 
-// Qwen3.5 / Qwen3-Next hybrid support. Three of every four decoder layers are a
+// Qwen3.5 / Qwen3-Next hybrid support. "qwen35" here names the hybrid-Gated-DeltaNet
+// arch FAMILY (HF model_type "qwen3_5_text"), NOT one model release: it is shared by both
+// Qwen3.5-0.8B AND Qwen3.6-27B, because the Qwen3.6-27B checkpoint also declares
+// model_type "qwen3_5_text" (config_test.go), so this one loader is the code path for both
+// model versions — the "3.5" in the symbol is the arch lineage, not the release number.
+// Three of every four decoder layers are a
 // Gated-DeltaNet *linear-attention* token mixer — a recurrent state-space scan, not
 // quadratic attention — and every fourth layer is gated full attention. This file adds
 // the linear-attention mixer and the load-time tensor-name normalization. The
@@ -20,7 +25,8 @@ import (
 // 1/sqrt(head_k_dim) query scale, the rank-1 delta-rule state update, and a per-head
 // gated RMSNorm of the readout.
 
-// IsQwen35Hybrid reports whether this checkpoint is a Qwen3.5/Qwen3-Next hybrid (any
+// IsQwen35Hybrid reports whether this checkpoint is a qwen35-family hybrid — i.e. any of
+// Qwen3.5 / Qwen3.6 / Qwen3-Next, which all share HF model_type "qwen3_5_text" (any
 // linear_attention layer present). It gates the (1+w) RMSNorm, the rotary-dim rope
 // denominator, the tensor-name normalization, and the per-layer mixer dispatch.
 func (c Config) IsQwen35Hybrid() bool {
