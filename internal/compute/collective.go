@@ -81,6 +81,19 @@ func (c *cpuBackend) reduceSumRankOrder(parts []Tensor) ([]float32, error) {
 	return acc, nil
 }
 
+// evenShard returns the per-rank shard length n/p for a collective whose length n must divide
+// evenly by the rank count p (real NCCL requires sendcount % nranks == 0); an indivisible n
+// fails closed with a labelled error rather than silently dropping the remainder. lenLabel
+// names the measured length ("ReduceScatter reduced", "AllToAll per-rank") and opLabel names the
+// collective ("reduce-scatter", "all-to-all"). It is the shared divisibility gate for
+// ReduceScatter and AllToAll.
+func evenShard(lenLabel, opLabel string, n, p int) (int, error) {
+	if n%p != 0 {
+		return 0, fmt.Errorf("compute: %s length %d is not divisible by rank count %d (real %s requires sendcount %% nranks == 0)", lenLabel, n, p, opLabel)
+	}
+	return n / p, nil
+}
+
 // AllReduceSum sums the equal-length per-rank partials in rank order and returns a new F32
 // tensor. The fixed order makes it bit-identical to model.sumPartialsRankOrder over the same
 // slices, so the row-parallel reduction order is pinned. A single part is the identity (a copy
@@ -109,10 +122,10 @@ func (c *cpuBackend) ReduceScatter(parts []Tensor) ([]Tensor, error) {
 	}
 	p := len(parts)
 	n := len(acc)
-	if n%p != 0 {
-		return nil, fmt.Errorf("compute: ReduceScatter reduced length %d is not divisible by rank count %d (real reduce-scatter requires sendcount %% nranks == 0)", n, p)
+	shard, err := evenShard("ReduceScatter reduced", "reduce-scatter", n, p)
+	if err != nil {
+		return nil, err
 	}
-	shard := n / p
 	out := make([]Tensor, p)
 	for r := 0; r < p; r++ {
 		seg := make([]float32, shard)
@@ -170,10 +183,10 @@ func (c *cpuBackend) AllToAll(parts []Tensor) ([]Tensor, error) {
 	}
 	p := len(views)
 	n := len(views[0])
-	if n%p != 0 {
-		return nil, fmt.Errorf("compute: AllToAll per-rank length %d is not divisible by rank count %d (real all-to-all requires sendcount %% nranks == 0)", n, p)
+	shard, err := evenShard("AllToAll per-rank", "all-to-all", n, p)
+	if err != nil {
+		return nil, err
 	}
-	shard := n / p
 	out := make([]Tensor, p)
 	for r := 0; r < p; r++ {
 		seg := make([]float32, 0, n)

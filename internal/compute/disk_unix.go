@@ -1,4 +1,4 @@
-//go:build linux
+//go:build darwin || linux
 
 package compute
 
@@ -6,7 +6,10 @@ import (
 	"syscall"
 )
 
-// diskInfo reports disk total/free bytes for path on Linux using statfs.
+// diskInfo reports disk total/free bytes for path on Unix (Darwin/macOS and Linux) using
+// statfs. The two OSes share an identical body — syscall.Statfs_t carries the same Blocks/
+// Bfree/Bsize fields on both, and the explicit uint64 conversions absorb the per-OS field
+// widths — so the implementation lives once behind a shared build tag.
 func diskInfo(path string) (total, free int64, known bool) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
