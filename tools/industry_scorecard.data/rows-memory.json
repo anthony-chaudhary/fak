@@ -257,7 +257,7 @@
       "fak_artifact": "",
       "fak_doc": "CLAIMS line 146: fak's CUDA flash-attention is correct for MHA/GQA/MQA (cosine=1.0) and line 147 serves GLM-5.2's DSA attention (dense path pure-GPU, sparse DSA still host-side). fak SERVES these architectures faithfully but measures no bytes-per-token KV footprint and ships no MLA-style footprint reduction of its own.",
       "apples_to_apples": false,
-      "comparison_note": "OUT OF SCOPE. KV footprint per token is a MODEL-architecture property (MLA vs GQA), and fak is a serving kernel, not a model designer; it faithfully serves whatever attention shape the checkpoint defines (MHA/GQA/MQA argmax-exact, GLM-5.2 DSA dense path on-GPU) but claims no KB/token figure against DeepSeek MLA's ~70 KB/token. Analogous to the swebench-resolve-rate fence: the kernel inherits, it does not set, this number.",
+      "comparison_note": "OUT OF SCOPE. KV footprint per token is a MODEL-architecture property (MLA vs GQA), and fak is a serving kernel, not a model designer; it faithfully serves whatever attention shape the checkpoint defines (MHA/GQA/MQA argmax-exact, GLM-5.2 DSA dense path on-GPU via the in-kernel GLM-5.2 / DeepSeek-class work, #1010 / #1026) but claims no KB/token figure against DeepSeek MLA's ~70 KB/token (the v6.0 / DeepSeek-R1 reference attention). Analogous to the swebench-resolve-rate fence: the kernel inherits, it does not set, this number.",
       "measured_on": "2026-06-23"
     },
     {

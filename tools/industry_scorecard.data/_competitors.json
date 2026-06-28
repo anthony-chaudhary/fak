@@ -380,32 +380,32 @@
       "notes": ""
     },
     {
-      "name": "MLPerf Inference v5.0 / v5.1 submitters",
+      "name": "MLPerf Inference v6.0 submitters (DeepSeek-R1 671B offline)",
       "kind": "serving-system",
       "last_reviewed": "2026-06-27",
       "url": "",
-      "notes": ""
+      "notes": "v6.0 (2026-03-30) supersedes v5.0/v5.1; headline model shifted to DeepSeek-R1 671B MoE."
     },
     {
-      "name": "MLPerf Inference v5.0/v5.1 submitters",
+      "name": "MLPerf Inference v6.0 server scenario (DeepSeek-R1, accuracy-constrained)",
       "kind": "serving-system",
       "last_reviewed": "2026-06-27",
       "url": "",
-      "notes": ""
+      "notes": "v6.0 accuracy+latency-constrained server scenario; 8,064 tok/s/GPU on GB300 NVL72."
     },
     {
-      "name": "MLPerf Inference v5.1",
+      "name": "MLPerf Inference v6.0",
       "kind": "serving-system",
       "last_reviewed": "2026-06-27",
       "url": "",
-      "notes": ""
+      "notes": "v6.0 (2026-03-30) is the current round; supersedes v5.1."
     },
     {
-      "name": "MLPerf Inference v5.1 interactive scenario",
+      "name": "MLPerf Inference v6.0 interactive scenario",
       "kind": "serving-system",
       "last_reviewed": "2026-06-27",
       "url": "",
-      "notes": ""
+      "notes": "v6.0 interactive floor: TPOT <= 15 ms, TTFT <= 1.5-2.0 s P99 (DeepSeek-R1 / GPT-OSS 120B)."
     },
     {
       "name": "ModelOpt accuracy harness",

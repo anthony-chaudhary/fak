@@ -195,10 +195,10 @@
       "dim_id": "mlperf-accuracy-constrained-throughput",
       "axis": "Accuracy-constrained throughput on a neutral benchmark (MLPerf Inference)",
       "category": "quantization",
-      "competitor": "NVIDIA GB200 NVL72 / B200 (TensorRT-LLM, NVFP4); AMD MI300X/MI355X (ROCm, FP8); MLPerf Inference v5.0/v5.1 submitters",
+      "competitor": "NVIDIA GB300 NVL72 (Blackwell Ultra, TensorRT-LLM/Dynamo); AMD MI355X (ROCm); MLPerf Inference v6.0 server scenario (DeepSeek-R1 671B, accuracy+latency-constrained)",
       "competitor_class": "sota",
-      "competitor_value": null,
-      "competitor_source": "https://developer.nvidia.com/blog/nvidia-blackwell-delivers-massive-performance-leaps-in-mlperf-inference-v5-0/ (2025-04)",
+      "competitor_value": 8064,
+      "competitor_source": "https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform (2026-04-01)",
       "fak_value": null,
       "unit": "accuracy-gated tok/s per GPU",
       "higher_is_better": true,
@@ -208,7 +208,7 @@
       "fak_artifact": "",
       "fak_doc": "none — fak has no MLPerf Inference submission and no accuracy-gated throughput run; its only live concurrent head-to-head (served-throughput-vs-sglang) is a raw tok/s race fak TRAILS, with no 99%/99.9%-accuracy gate applied",
       "apples_to_apples": true,
-      "comparison_note": "OUT OF SCOPE for a reuse kernel. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8-GPU datacenter server (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. Neutral accuracy-gated throughput is a vendor/submitter axis far from fak's reuse/adjudication value.",
+      "comparison_note": "OUT OF SCOPE BY DESIGN for a reuse kernel. The accuracy-constrained number is now MLPerf v6.0's (2026-03-30) server scenario, carried by DeepSeek-R1 671B MoE (8,064 tok/s/GPU on GB300 NVL72 under a 2 s TTFT / 12.5 tok/s/user p99 SLO while holding the accuracy bar), superseding v5.x's Llama-3.1-405B framing. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8-GPU datacenter server (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. fak does NOT intend an own-engine MLPerf-shaped DeepSeek-R1 number; on a 671B MoE it fronts SGLang/llama.cpp, and its in-kernel DeepSeek-class-MoE path is the GLM-5.2 work (#1010, #1026; single device, commit 498a4ab). See max-model-and-moe-coverage.",
       "measured_on": "2026-06-23"
     },
     {

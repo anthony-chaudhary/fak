@@ -61,7 +61,7 @@
       "fak_artifact": "",
       "fak_doc": "none — fak runs GLM-5.2 MoE experts on ONE datacenter GPU (CLAIMS Engine, commit 498a4ab), never EP across nodes",
       "apples_to_apples": true,
-      "comparison_note": "OUT OF SCOPE for a single-box reuse kernel. fak DOES run GLM-5.2's MoE/FFN experts + router on its own pure k_q8_gemm GPU kernel (cosine=1.0, datacenter GPU, commit 498a4ab) — but on a SINGLE device, with no expert-parallel sharding across nodes and the DSA sparse-attention still host-side. fak's own-engine ceiling is ~7B (model-size-ceiling row); giant-MoE EP is delegated to SGLang/DeepEP, which fak fronts. No fak EP number exists; verdict no-claim.",
+      "comparison_note": "OUT OF SCOPE for a single-box reuse kernel. fak DOES run GLM-5.2's MoE/FFN experts + router on its own pure k_q8_gemm GPU kernel (the in-kernel GLM-5.2 / DeepSeek-class path, #1010 / #1026; cosine=1.0, datacenter GPU, commit 498a4ab) — but on a SINGLE device, with no expert-parallel sharding across nodes and the DSA sparse-attention still host-side. fak's own-engine ceiling is ~7B (see max-model-and-moe-coverage); giant-MoE EP (the MLPerf v6.0 / DeepSeek-R1 671B reference regime) is delegated to SGLang/DeepEP, which fak fronts. No fak EP number exists; verdict no-claim.",
       "measured_on": "2026-06-23"
     },
     {
