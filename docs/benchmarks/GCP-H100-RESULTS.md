@@ -82,11 +82,22 @@ DELETE TTL, so a dead launcher cannot leak the GPU.
 
 ## Open follow-ons (not claimed as done)
 
-- **Route `modelbench -backend cuda` through the reusable CUDA graph** that reached
-  4070 parity; the gap above is the un-graphed path.
-- **Q8 device upload:** the cuda backend does not yet advertise `UploadDtype`, so
-  fak-cuda is f32-only here; a Q8 device path would be the apples-to-apples row
-  against llama.cpp Q8_0.
+> The full decomposition of this gap into ranked, code-anchored levers (with expected
+> multipliers and the next checkable step for each) now lives in
+> [H100-KERNEL-5X-ROADMAP.md](H100-KERNEL-5X-ROADMAP.md). The two follow-ons below are
+> Levers 1–2 there.
+
+- **Q8 device decode (the apples-to-apples row):** the f32 number above streams 4
+  bytes/weight where llama.cpp's Q8_0 streams ~1 — and decode is memory-bandwidth-bound,
+  so that ~3.9× byte ratio is essentially the whole 3.75× decode gap. **Correction to the
+  prose above:** the cuda backend *does* advertise `UploadDtype` (`cuda.go:450`) with a
+  native Q8 device GEMV already implemented — this run was f32 only because the bench did
+  not request `-quant`/`-lean`, not because the capability was missing. That row is now
+  wired as the opt-in **`fak-cuda-q8`** engine in `tools/gcp_bench.py`; the next run should
+  select `--engine llama,fak-cuda,fak-cuda-q8`.
+- **Route `modelbench -backend cuda` through the reusable (replay-many) CUDA graph** that
+  reached 4070 parity; the gap above is the un-graphed path. The remaining work is a
+  length-agnostic graph (device-resident `pos`/`nPos`), Lever 2 of the roadmap.
 - **Bigger silicon:** B200/GB200 are quota=0 in this project today (probe verdict
   `NO_QUOTA`); H200 was `NOT_OFFERED` in the probed zone. H100 is the
   best-provisionable current tier here.
