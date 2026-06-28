@@ -1,0 +1,11 @@
+# Artifacts the by-hand walkthrough in README.md creates in THIS directory.
+# `run.sh` builds and ingests under a mktemp scratch dir, so it never litters here;
+# but the copy-pasteable manual steps say `go build -o fak ../../cmd/fak` and
+# `--dir cdb-image`, which would drop a ~27 MB binary and a core image right here.
+# The repo-root .gitignore only anchors `/fak` to the repo root and matches `*.exe`,
+# so the bare (Linux/macOS) `fak` binary is otherwise un-ignored — keep it, and the
+# local core image, out of the shared trunk.
+/fak
+/fak.exe
+/fak.exe~
+/cdb-image/
