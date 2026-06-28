@@ -208,7 +208,21 @@ type Drafter interface {
 // are verified in ONE pass instead of kk sequential Steps — bit-identical to the sequential
 // verify (TestVerifyForwardChainMatchesSerial), so the output stays token-identical to plain
 // greedy decode. The tree-attention-masked twin (AcceptTree) is VerifyTree below.
+//
+// To accumulate the acceptance-rate metrics (#284), call SpeculativeGreedyMetered with an
+// AcceptanceMeter; this wrapper passes nil (no metrics).
 func SpeculativeGreedy(ctx context.Context, sink *Sink, target *model.Session, prompt []int, n, k int, drafter Drafter) (out []int, drafted, accepted, rolledBack int) {
+	return SpeculativeGreedyMetered(ctx, sink, target, prompt, n, k, drafter, nil)
+}
+
+// SpeculativeGreedyMetered is SpeculativeGreedy with acceptance-rate metric tracking
+// (#284 "Metrics for acceptance rate"). It is byte-for-byte the same decode — same Sink
+// resolution, same lossless output — and additionally feeds each round's (drafted,
+// accepted, advanced) counts to meter when meter != nil, so AcceptanceMeter.AcceptanceRate
+// and EffectiveTokensPerVerify report the realized acceptance over the run. A nil meter is
+// the un-metered fast path (what SpeculativeGreedy passes), so adding the meter costs
+// nothing on the path that does not want it.
+func SpeculativeGreedyMetered(ctx context.Context, sink *Sink, target *model.Session, prompt []int, n, k int, drafter Drafter, meter *AcceptanceMeter) (out []int, drafted, accepted, rolledBack int) {
 	tl := target.Prefill(prompt)
 	out = make([]int, 0, n)
 	var txn abi.TxnID
@@ -272,6 +286,12 @@ func SpeculativeGreedy(ctx context.Context, sink *Sink, target *model.Session, p
 			tl = target.Step(correction)
 		}
 		drafter.Commit(committed)
+
+		// Record this round's acceptance metrics (#284). drafted this round = kk,
+		// accepted = res.Accepted, advanced = the REAL tokens committed (len(committed)).
+		if meter != nil {
+			meter.Observe(kk, res.Accepted, len(committed))
+		}
 	}
 	return out, drafted, accepted, rolledBack
 }

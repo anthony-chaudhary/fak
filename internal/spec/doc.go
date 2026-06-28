@@ -49,6 +49,17 @@
 // masks, Medusa/EAGLE-2/SpecInfer) — is driven by VerifyTree/SpeculativeTree through
 // AcceptTree; the accepted path is token-identical to greedy.
 //
+// # Acceptance-rate metrics (#284)
+//
+// AcceptanceMeter (metrics.go) is the acceptance-rate tracker the spec-decode acceptance
+// criterion calls for: feed it one Observe per round (SpeculativeGreedyMetered does this
+// automatically) and it reports the per-token AcceptanceRate (accepted/drafted) and the
+// EffectiveTokensPerVerify (real tokens advanced per target verify pass — the realized,
+// measured-on-this-run analogue of the modeled polymodel.EffectiveTokensPerVerify, i.e.
+// the decode-speedup proxy). It is a pure accumulator (no model, no I/O), proven by
+// TestSpeculativeGreedyMeteredTracksAcceptance to mirror the decode's own counts and to
+// discriminate a full-accept drafter from an adversarial one.
+//
 // # What it deliberately does NOT do (the honest boundary)
 //
 // internal/spec moves real KV bytes but on a CPU synthetic model (PreNorm regime); the
@@ -56,7 +67,8 @@
 // EffectiveTokensPerVerify arithmetic; a measured number needs the bench harness #535),
 // and the tree recomputes the accepted path's KV (a tree-aware KV-compaction primitive is
 // the sequenced cost, not a correctness gap). Multi-model residency on a backend is rung
-// #531.
+// #531. The acceptance-rate metric above is the substrate the measured "2× decode speedup"
+// acceptance item is read off — it is NOT itself a wall-clock tokens/sec number.
 //
 // # Off by default until ready (two safety layers)
 //
