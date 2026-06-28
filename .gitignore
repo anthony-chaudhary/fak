@@ -37,6 +37,19 @@ docs/benchmarks/*.txt
 docs/explainers/kv-cache-agentic-context.html
 docs/explainers/kv-cache-agentic-context.pdf
 
+# Regenerable run-output drops that otherwise re-leak into `git status` every session
+# on the shared trunk (a trajectory-audit finding): process stdout/stderr redirects at
+# the repo root, the empty experiments run-scaffold, and the industry-scorecard cadence
+# output (written by tools/industry_freshness_cadence.py). The SCRIPTS are tracked; the
+# state they emit is not — same private-by-default guard as the bench-node run dirs below.
+# Root-level *_out.txt / *_err.txt are shell stdout/stderr redirects from ad-hoc
+# `fak serve`/`scout`/probe runs (serve_*, scout_*, …); ignore the class so a new probe
+# name never re-leaks. Tracked .txt elsewhere is unaffected (these are anchored to root).
+/*_out.txt
+/*_err.txt
+experiments/registry.jsonl
+docs/industry-scorecard/cadence-output/
+
 # Fleet session/watchdog runtime state — machine-local generated snapshots, logs and
 # PID/lease tracking (timestamps, live PIDs, account throttle windows). Regenerated on
 # every supervisor/resume-watchdog tick; the SCRIPTS under tools/ are tracked, the state
@@ -155,8 +168,11 @@ experiments/benchmark/runs/by-machine/dgx*/
 # and one carries a raw os.Hostname() box dir (pre-#970) that must never reach the public tree.
 # The durable record is docs/nightrun/collected.jsonl; the operator overlay
 # experiments/nightrun/backlog.json stays tracked (a shareable input, not an artifact).
+# docs/nightrun/cache-value.jsonl is a per-run scratch sibling of collected.jsonl —
+# regenerated each nightrun, not the durable ledger, so it stays out of the tree.
 fak/experiments/nightrun/*/
 experiments/nightrun/*/
+docs/nightrun/cache-value.jsonl
 # DGX Slack control-bridge source is PRIVATE-ONLY. Its home is the private repo
 # fak-private (tools/dgxbridge/); fleet is the sunset archive. tools/check_committed_files.py
 # already REFUSES any cmd|internal/*dgx*/ path at commit (this is exactly how cmd/dgxbridge +
