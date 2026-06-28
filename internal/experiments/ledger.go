@@ -40,13 +40,13 @@ func ReadLedgerFile(path string) []Experiment {
 
 func ReadAllLedgers(root string) []Experiment {
 	var all []Experiment
-	
+
 	// First read the default registry.jsonl if it exists
 	defaultLedger := filepath.Join(root, "experiments", "registry.jsonl")
 	if b, err := os.ReadFile(defaultLedger); err == nil {
 		all = append(all, ParseLedger(string(b))...)
 	}
-	
+
 	// Then read per-host registries under experiments/
 	root = filepath.Join(root, "experiments")
 	entries, err := os.ReadDir(root)

@@ -11,26 +11,26 @@ import (
 )
 
 const (
-	Schema          = "fak-cache-value-ledger/1"
+	Schema           = "fak-cache-value-ledger/1"
 	DefaultLedgerRel = "docs/nightrun/cache-value.jsonl"
 )
 
 type Row struct {
-	Schema      string           `json:"schema"`
-	Date        string           `json:"date"`
-	SessionType string           `json:"session_type"`
-	Context     string           `json:"context"`
-	PID         int              `json:"pid"`
-	UnixMillis  int64            `json:"unix_millis"`
-	Turns       uint64           `json:"turns"`
-	PromptTokens uint64          `json:"prompt_tokens"`
-	ReusedTokens uint64          `json:"reused_tokens"`
-	FrozenTurns  uint64          `json:"frozen_turns"`
-	PartialTurns uint64          `json:"partial_turns"`
-	ColdTurns    uint64          `json:"cold_turns"`
-	ReuseRatio   float64         `json:"reuse_ratio"`
-	Stats       cacheobs.Stats  `json:"stats"`
-	GeneratedAt string           `json:"generated_at"`
+	Schema       string         `json:"schema"`
+	Date         string         `json:"date"`
+	SessionType  string         `json:"session_type"`
+	Context      string         `json:"context"`
+	PID          int            `json:"pid"`
+	UnixMillis   int64          `json:"unix_millis"`
+	Turns        uint64         `json:"turns"`
+	PromptTokens uint64         `json:"prompt_tokens"`
+	ReusedTokens uint64         `json:"reused_tokens"`
+	FrozenTurns  uint64         `json:"frozen_turns"`
+	PartialTurns uint64         `json:"partial_turns"`
+	ColdTurns    uint64         `json:"cold_turns"`
+	ReuseRatio   float64        `json:"reuse_ratio"`
+	Stats        cacheobs.Stats `json:"stats"`
+	GeneratedAt  string         `json:"generated_at"`
 }
 
 func ParseLedger(content string) []Row {
@@ -110,12 +110,12 @@ func ReadLedgerFile(path string) []Row {
 
 // ScoreLedgerResult summarizes the cache-value ledger for regression gate checks.
 type ScoreLedgerResult struct {
-	TotalSessions        int     `json:"total_sessions"`
-	TotalTurns           uint64  `json:"total_turns"`
-	TotalCacheHitTokens  uint64  `json:"total_cache_hit_tokens"`
-	TotalGeneratedTokens uint64  `json:"total_generated_tokens"`
-	OverallMultiplier    float64 `json:"overall_multiplier"`
-	LowMultiplierSessions int    `json:"low_multiplier_sessions"`
+	TotalSessions         int     `json:"total_sessions"`
+	TotalTurns            uint64  `json:"total_turns"`
+	TotalCacheHitTokens   uint64  `json:"total_cache_hit_tokens"`
+	TotalGeneratedTokens  uint64  `json:"total_generated_tokens"`
+	OverallMultiplier     float64 `json:"overall_multiplier"`
+	LowMultiplierSessions int     `json:"low_multiplier_sessions"`
 }
 
 // ScoreLedger reads the ledger and computes aggregate metrics for the regression gate.

@@ -62,5 +62,6 @@ import "C"
 // table witnesses that the native-Windows CUDA cgo wiring (this file, `-tags cuda` on
 // GOOS=windows) was linked in — distinct from both the pure-Go default build (which omits this
 // file) and the Linux/WSL `-tags cuda` build (which omits this file's `#cgo windows` paths).
+//
 //slop:keep symbol-table provenance marker, intentionally unreferenced by design
 const cudaWindowsBuildTag = "cuda+windows-native"

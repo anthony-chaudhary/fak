@@ -41,11 +41,11 @@ func TestIssueRefs_boundaryAndDedup(t *testing.T) {
 		want []int
 	}{
 		{"closes #12 and #34", []int{12, 34}},
-		{"see #5, then #5 again", []int{5}},          // dedup, first-seen order
-		{"a token like abc#12 is not a ref", nil},     // word-char before '#'
-		{"hash-joined foo-#9 is not a ref", nil},      // '-' before '#'
-		{"snake_#7 is not a ref", nil},                // '_' before '#'
-		{"#1 leads the line", []int{1}},               // start-of-string boundary
+		{"see #5, then #5 again", []int{5}},       // dedup, first-seen order
+		{"a token like abc#12 is not a ref", nil}, // word-char before '#'
+		{"hash-joined foo-#9 is not a ref", nil},  // '-' before '#'
+		{"snake_#7 is not a ref", nil},            // '_' before '#'
+		{"#1 leads the line", []int{1}},           // start-of-string boundary
 		{"no refs here", nil},
 	}
 	for _, c := range cases {

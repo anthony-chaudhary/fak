@@ -149,7 +149,7 @@ func truncate72(s string) string {
 func RenderLedgerGapReport(w io.Writer, report LedgerGapReport) {
 	fmt.Fprintf(w, "Benchmark authority (BENCHMARK-AUTHORITY.md) last updated: %s\n\n", report.AuthorityDate)
 	fmt.Fprintf(w, "Ledger summary: %d total rows, %d collected\n\n", report.TotalRows, report.TotalCollected)
-	
+
 	if report.AuthorityDate == "(unknown)" {
 		fmt.Fprintln(w, "Authority date could not be determined — cannot compare.")
 		return

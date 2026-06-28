@@ -160,11 +160,11 @@ func BenchmarkAuthorityDate(root string) time.Time {
 // LedgerGapReport summarizes collected rows that are newer than or missing from
 // the published benchmark surface.
 type LedgerGapReport struct {
-	AuthorityDate string            `json:"authority_date"` // YYYY-MM-DD from BENCHMARK-AUTHORITY.md
-	NewerThan     []CollectRow      `json:"newer_than"`     // rows with date > authority_date
-	Collected     []CollectRow      `json:"collected"`      // all rows with outcome=collected
-	TotalRows     int               `json:"total_rows"`
-	TotalCollected int              `json:"total_collected"`
+	AuthorityDate  string       `json:"authority_date"` // YYYY-MM-DD from BENCHMARK-AUTHORITY.md
+	NewerThan      []CollectRow `json:"newer_than"`     // rows with date > authority_date
+	Collected      []CollectRow `json:"collected"`      // all rows with outcome=collected
+	TotalRows      int          `json:"total_rows"`
+	TotalCollected int          `json:"total_collected"`
 }
 
 // CompareWithAuthority compares the ledger against the published benchmark surface

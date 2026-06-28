@@ -2,8 +2,9 @@
 // This is the real measurement counterpart to the theoretical cost arm calculations.
 //
 // Usage:
-//   webbench-token-measure --responses responses.jsonl
-//   webbench-token-measure --demo
+//
+//	webbench-token-measure --responses responses.jsonl
+//	webbench-token-measure --demo
 package main
 
 import (

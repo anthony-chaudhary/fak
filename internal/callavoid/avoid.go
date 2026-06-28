@@ -180,12 +180,12 @@ func memoBreakEven(d, c float64) int {
 // MemoHit paid≈0 is honest); set them to price the cache overhead and stale-miss bet,
 // which is where ProveMemo's teeth live.
 type Tally struct {
-	Execute      int     `json:"execute"`       // real engine dispatches (Counters.EngineCalls).
-	MemoHit      int     `json:"memo_hit"`      // calls served from the vDSO without dispatch (Counters.VDSOHits).
-	Repair       int     `json:"repair"`        // malformed calls repaired in-syscall, each sparing a retry round-trip (Counters.Transforms).
-	StaleMiss    int     `json:"stale_miss"`    // entries validated, found invalidated, re-dispatched (folds into EngineCalls live; explicit here for analysis).
-	HardDeny     int     `json:"hard_deny"`     // fast-rejects with no forward guidance — symmetric, no amplification.
-	Redirects    []int   `json:"redirects"`     // each entry is the bounded futile-variant fan-out a PRODUCTIVE deny pruned.
+	Execute   int   `json:"execute"`    // real engine dispatches (Counters.EngineCalls).
+	MemoHit   int   `json:"memo_hit"`   // calls served from the vDSO without dispatch (Counters.VDSOHits).
+	Repair    int   `json:"repair"`     // malformed calls repaired in-syscall, each sparing a retry round-trip (Counters.Transforms).
+	StaleMiss int   `json:"stale_miss"` // entries validated, found invalidated, re-dispatched (folds into EngineCalls live; explicit here for analysis).
+	HardDeny  int   `json:"hard_deny"`  // fast-rejects with no forward guidance — symmetric, no amplification.
+	Redirects []int `json:"redirects"`  // each entry is the bounded futile-variant fan-out a PRODUCTIVE deny pruned.
 	// WitnessedRedirects are the productive denies whose pruned fan-out is backed by an
 	// enumerated, deduplicated variant set (a non-forgeable witness) rather than an asserted
 	// count. Account credits these from their own variants and nets them out of HardDeny; the

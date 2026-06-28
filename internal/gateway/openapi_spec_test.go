@@ -22,14 +22,14 @@ import (
 // This is the F-007 (#205) "Generated OpenAPI spec" acceptance gate: the spec
 // the Python/TypeScript/Go client SDKs are generated from cannot silently drift
 // behind the surface `fak serve` actually exposes.
-	var specPathFor = map[string]string{
-		// A2A Agent-to-Agent protocol surface (#1019).
-		"/a2a/v1/messages":      "/a2a/v1/messages",
-		"/a2a/v1/tasks":         "/a2a/v1/tasks",
-		"/a2a/v1/agent-card":    "/a2a/v1/agent-card",
-		"/a2a/v1/tasks/":        "/a2a/v1/tasks/{task_id}",
-		// OpenAI-compatible surface.
-		"/v1/chat/completions":      "/v1/chat/completions",
+var specPathFor = map[string]string{
+	// A2A Agent-to-Agent protocol surface (#1019).
+	"/a2a/v1/messages":   "/a2a/v1/messages",
+	"/a2a/v1/tasks":      "/a2a/v1/tasks",
+	"/a2a/v1/agent-card": "/a2a/v1/agent-card",
+	"/a2a/v1/tasks/":     "/a2a/v1/tasks/{task_id}",
+	// OpenAI-compatible surface.
+	"/v1/chat/completions":      "/v1/chat/completions",
 	"/v1/completions":           "/v1/completions",
 	"/v1/responses":             "/v1/responses",
 	"/v1/embeddings":            "/v1/embeddings",

@@ -416,9 +416,9 @@ func nightrunPostCacheValue(stdout, stderr io.Writer, argv []string) int {
 		Score:   value,
 		Grade:   grade,
 		Verdict: verdict,
-		Detail:  fmt.Sprintf("%d sessions, %d turns, %d/%d cache-hit/generated tokens",
+		Detail: fmt.Sprintf("%d sessions, %d turns, %d/%d cache-hit/generated tokens",
 			result.TotalSessions, result.TotalTurns, result.TotalCacheHitTokens, result.TotalGeneratedTokens),
-		Source:  source,
+		Source: source,
 	}
 
 	return scoreboardPostFlow(stdout, stderr, up, scoreboardPostOpts{

@@ -1,7 +1,7 @@
 package experiments
 
 const (
-	ExperimentSchema = "fak-experiment/1"
+	ExperimentSchema    = "fak-experiment/1"
 	ExperimentLedgerRel = "experiments/registry.jsonl"
 )
 
@@ -11,7 +11,7 @@ type Experiment struct {
 	Host         string   `json:"host"`
 	Models       []string `json:"models"`
 	Backends     []string `json:"backends"`
-	Started      string   `json:"started"`      // RFC3339
+	Started      string   `json:"started"` // RFC3339
 	ArtifactPath string   `json:"artifact_path"`
 }
 

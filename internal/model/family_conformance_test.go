@@ -36,10 +36,10 @@ import (
 )
 
 type familyConformanceRow struct {
-	name         string
-	cfg          Config
-	supported    bool // true = assert forward runs; false = skip pending real oracle
-	expectPanic  bool // true = assert forward panics (the fence is real)
+	name        string
+	cfg         Config
+	supported   bool // true = assert forward runs; false = skip pending real oracle
+	expectPanic bool // true = assert forward panics (the fence is real)
 }
 
 var familyConformanceTable = []familyConformanceRow{
@@ -194,8 +194,8 @@ var familyConformanceTable = []familyConformanceRow{
 			RMSNormEps:        1e-5,
 			RopeTheta:         10000,
 			TieWordEmbeddings: true,
-			NumExperts:        4,      // Mixtral is MoE
-			NumExpertsPerTok:  2,      // Top-2 routing
+			NumExperts:        4, // Mixtral is MoE
+			NumExpertsPerTok:  2, // Top-2 routing
 		},
 		supported: true,
 	},

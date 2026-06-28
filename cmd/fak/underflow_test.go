@@ -10,10 +10,10 @@ func TestCompactionEpisodesUnderflowGuard(t *testing.T) {
 	// uint64 underflow case: ON > OFF, which would wrap to a huge positive number
 	// without the int64 conversion fix
 	rep := CompactionBacktestReport{
-		FiredAttempts:       10,
-		ShedTokensSum:       10000,
-		InputTokensOffSum:   50000,
-		InputTokensOnSum:    60000, // ON > OFF - pathological case that would underflow
+		FiredAttempts:     10,
+		ShedTokensSum:     10000,
+		InputTokensOffSum: 50000,
+		InputTokensOnSum:  60000, // ON > OFF - pathological case that would underflow
 	}
 	ins := compactionEpisodesFromBacktest(rep)
 	if len(ins) != 2 {
