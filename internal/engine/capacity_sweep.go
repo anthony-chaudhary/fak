@@ -35,6 +35,24 @@ type CapacityPressureSweep struct {
 	TargetPressure float64
 	MaxMoves       int
 	Candidates     []CapacityPressureCandidate
+
+	// DRAMPressure, DRAMCapacityBytes, and DRAMKnown carry the host's live L2/DRAM fullness as
+	// probed by the CALLER (the served loop's HostDRAMPressure — see capacity_dram.go), threaded
+	// in so the demote TARGET is planned against real host RAM rather than the assumed-empty
+	// profile default. Without them the sweep was hardware-aware at its top rung (HBM, via
+	// Backend) but BLIND one tier below: a span under HBM pressure that PlanPlacement demotes
+	// INTO DRAM was staged there even on a box whose RAM is already full, where the honest move
+	// is to skip DRAM for a colder tier with room. This is the "probe DeviceHBMPressure AND
+	// HostDRAMPressure" half of issue #1073's wire on the executor side (PlanPlacementForDeviceAndHost
+	// is the planless sibling of the same fold).
+	//
+	// DRAMKnown gates the fold and is the fail-open contract: false (the default — an unsupported
+	// host probe, or a caller that does not probe DRAM) folds nothing, so the sweep plans exactly
+	// as it did before these fields existed. The probe is the caller's; the sweep only ACTS on it,
+	// staying a pure, deterministic function of its config.
+	DRAMPressure      float64
+	DRAMCapacityBytes int64
+	DRAMKnown         bool
 }
 
 // CapacityPressureMove records the decision and execution result for one candidate
@@ -91,7 +109,7 @@ func RunCapacityPressureSweep(ctx context.Context, cfg CapacityPressureSweep) (C
 		if res.FinalPressure < target {
 			break
 		}
-		decision := planPlacementForDeviceAtHighWater(cfg.Backend, resident, target, cand.Request)
+		decision := planPlacementForDeviceAtHighWater(cfg.Backend, resident, target, withSweepHostDRAM(cfg, cand.Request))
 		if !capacityPressureDropAction(decision.Action) {
 			continue
 		}
@@ -122,6 +140,25 @@ func RunCapacityPressureSweep(ctx context.Context, cfg CapacityPressureSweep) (C
 		res.FinalPressure = pressureAfterReclaim(cfg.Backend, resident)
 	}
 	return res, nil
+}
+
+// withSweepHostDRAM folds the caller-probed host-DRAM pressure (and, when given, capacity) into a
+// COPY of req when DRAMKnown, so a span under HBM pressure that would demote INTO DRAM is planned
+// against real host fullness — a full DRAM routes the demote one tier colder instead of staging
+// the span into a tier with no room. DRAMKnown=false returns req unchanged (the fail-open default,
+// byte-identical to the pre-DRAM-aware sweep). It mirrors withHostDRAM in capacity_dram.go but
+// takes the already-probed values rather than re-reading the host, keeping the sweep a pure,
+// deterministic function of its config; a non-positive DRAMCapacityBytes leaves the tier's profile
+// ceiling alone (pressure-only fold), matching the "only override a real ceiling" tier contract.
+func withSweepHostDRAM(cfg CapacityPressureSweep, req cachemeta.PlacementRequest) cachemeta.PlacementRequest {
+	if !cfg.DRAMKnown {
+		return req
+	}
+	req.Pressure = withTierPressure(req.Pressure, cachemeta.TierDRAM, cfg.DRAMPressure)
+	if cfg.DRAMCapacityBytes > 0 {
+		req.Profiles = withTierCapacity(req.Profiles, cachemeta.TierDRAM, cfg.DRAMCapacityBytes)
+	}
+	return req
 }
 
 // PlanPlacementForDeviceAtHighWater is PlanPlacementForDevice with an operator high-water

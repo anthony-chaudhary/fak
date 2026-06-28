@@ -130,6 +130,77 @@ func TestCapacityPressureSweepStageFaultRetainsLiveSpan(t *testing.T) {
 	}
 }
 
+// TestCapacityPressureSweepHostDRAMAwareTarget proves the #1073 host-DRAM half of the wire: the
+// live sweep plans the demote TARGET against host-DRAM fullness, not just device HBM. With the
+// host-DRAM probe absent (DRAMKnown=false, the fail-open default) an HBM-pressured span demotes to
+// DRAM — the refute guard, identical to the device-only sweep. With the SAME span and a FULL host
+// DRAM folded in (DRAMKnown, DRAMPressure 1.0) the demote target moves one tier colder (NUMA-far)
+// instead of staging the span into a tier with no room, and the move STILL applies (StageSpan then
+// Evict) — demoted, never dropped. This drives TestDRAMPressureFlipsDemoteTarget's flip through the
+// live RunCapacityPressureSweep executor instead of the bare planner.
+func TestCapacityPressureSweepHostDRAMAwareTarget(t *testing.T) {
+	const total = 100 << 20
+	backend := fakeCapBackend{Backend: compute.Default(), total: total, free: compute.FreeUnknown, probe: true}
+	candidate := func() CapacityPressureCandidate {
+		return CapacityPressureCandidate{
+			Request: expensivePrefixRequest(),
+			Move: PlacementMove{
+				SpanDigest:   "span-dram-aware",
+				From:         32,
+				N:            4000,
+				ModelID:      "sweep-model",
+				PositionMode: cachemeta.PositionPrefixAligned,
+				Owner:        "capacity-sweep",
+			},
+		}
+	}
+
+	// Refute guard: no host-DRAM probe (DRAMKnown=false) -> the demote target is DRAM, exactly as
+	// the device-only sweep. If this ever fails the flip below proves nothing.
+	kv := &sweepFakeKV{len: 4096, stageOut: abi.KVResidencyOK}
+	res, err := RunCapacityPressureSweep(context.Background(), CapacityPressureSweep{
+		Backend:        backend,
+		Adapter:        &CapacityAdapter{KV: kv, Recorder: NewCacheEventRecorder()},
+		ResidentBytes:  90 << 20,
+		TargetPressure: 0.80,
+		Candidates:     []CapacityPressureCandidate{candidate()},
+	})
+	if err != nil {
+		t.Fatalf("device-only sweep: %v", err)
+	}
+	if res.AppliedMoves != 1 || len(res.Moves) != 1 || res.Moves[0].Decision.ToTier != cachemeta.TierDRAM {
+		t.Fatalf("refute guard: without a host-DRAM probe the demote target must be DRAM, got %+v", res.Moves)
+	}
+
+	// With a FULL host DRAM folded in, the same span demotes one tier colder (NUMA-far), never into
+	// the full DRAM tier — and the move still applies (staged then evicted).
+	kv = &sweepFakeKV{len: 4096, stageOut: abi.KVResidencyOK}
+	res, err = RunCapacityPressureSweep(context.Background(), CapacityPressureSweep{
+		Backend:        backend,
+		Adapter:        &CapacityAdapter{KV: kv, Recorder: NewCacheEventRecorder()},
+		ResidentBytes:  90 << 20,
+		TargetPressure: 0.80,
+		DRAMPressure:   1.0,
+		DRAMKnown:      true,
+		Candidates:     []CapacityPressureCandidate{candidate()},
+	})
+	if err != nil {
+		t.Fatalf("host-DRAM-aware sweep: %v", err)
+	}
+	if res.AppliedMoves != 1 || len(res.Moves) != 1 {
+		t.Fatalf("a full DRAM should still demote the span one tier colder, got %+v", res)
+	}
+	if res.Moves[0].Decision.ToTier == cachemeta.TierDRAM {
+		t.Fatal("host DRAM full did not move the demote target off DRAM — the sweep ignored HostDRAMPressure")
+	}
+	if res.Moves[0].Decision.ToTier != cachemeta.TierNUMAFar {
+		t.Fatalf("a full DRAM should demote to the next colder attendable tier (NUMA-far), got %s", res.Moves[0].Decision.ToTier)
+	}
+	if kv.stageCalls != 1 || len(kv.evicts) != 1 {
+		t.Fatalf("the colder-tier demote must still stage then evict (demote-not-drop), stage=%d evicts=%+v", kv.stageCalls, kv.evicts)
+	}
+}
+
 func TestPlanPlacementForDeviceAtHighWater(t *testing.T) {
 	const total = 100 << 20
 	dev := fakeCapBackend{Backend: compute.Default(), total: total, free: compute.FreeUnknown, probe: true}
