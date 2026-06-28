@@ -36,14 +36,8 @@ func runConflationScorecard(stdout, stderr io.Writer, argv []string) int {
 	payload := conflationscore.Build(root)
 
 	if *comparePath != "" {
-		b, err := os.ReadFile(*comparePath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak conflation-scorecard: read --compare: %v\n", err)
-			return 2
-		}
-		var base map[string]any
-		if err := json.Unmarshal(b, &base); err != nil {
-			fmt.Fprintf(stderr, "fak conflation-scorecard: parse --compare: %v\n", err)
+		base, ok := readCompareBase(stderr, "fak conflation-scorecard", *comparePath)
+		if !ok {
 			return 2
 		}
 		fmt.Fprintln(stdout, scorecard.Compare(payload, base, conflationscore.DebtKey))
@@ -82,4 +76,22 @@ func okExit(ok bool) int {
 		return 0
 	}
 	return 1
+}
+
+// readCompareBase reads and JSON-parses a prior --compare scorecard payload into a
+// generic map, emitting the shared read/parse error messages under prefix (e.g.
+// "fak conflation-scorecard") and returning ok=false on failure (callers return 2).
+// It is the shared --compare loader behind the conflation/dogfood/guard-rsi scorecards.
+func readCompareBase(stderr io.Writer, prefix, path string) (map[string]any, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: read --compare: %v\n", prefix, err)
+		return nil, false
+	}
+	var base map[string]any
+	if err := json.Unmarshal(b, &base); err != nil {
+		fmt.Fprintf(stderr, "%s: parse --compare: %v\n", prefix, err)
+		return nil, false
+	}
+	return base, true
 }

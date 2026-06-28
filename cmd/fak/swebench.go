@@ -481,10 +481,14 @@ func buildSwebenchRawOpusSmokeCommand(d *swebench.Dataset, model, output string)
 	}, "; ")
 }
 
-func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int, gateway, model, output string) string {
+// swebenchRunArgsHead builds the leading `go run ./cmd/fak swebench run` argument
+// vector shared by the fak-smoke and DeepSWE-raw command builders: the agent and
+// filter, plus the optional difficulty/dataset/limit selectors. Callers append
+// their command-specific tail (gateway/model/output, env, etc.).
+func swebenchRunArgsHead(agent, filter, difficulty, dataset string, limit int) []string {
 	args := []string{
 		"go run ./cmd/fak swebench run",
-		"--agent fleet",
+		"--agent " + agent,
 		"--filter " + filter,
 	}
 	if difficulty != "" {
@@ -496,6 +500,11 @@ func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int,
 	if limit > 0 {
 		args = append(args, fmt.Sprintf("--limit %d", limit))
 	}
+	return args
+}
+
+func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int, gateway, model, output string) string {
+	args := swebenchRunArgsHead("fleet", filter, difficulty, dataset, limit)
 	args = append(args,
 		"--gateway "+quoteSwebenchArg(gateway),
 		"--model "+quoteSwebenchArg(model),
@@ -506,20 +515,7 @@ func buildSwebenchFakSmokeCommand(difficulty, dataset, filter string, limit int,
 }
 
 func buildDeepSWERawFakRunCommand(difficulty, dataset, filter string, limit int, model, baseURL, adapter, adapterArgs, output, timeoutArg string, maxSteps int) string {
-	args := []string{
-		"go run ./cmd/fak swebench run",
-		"--agent deepswe",
-		"--filter " + filter,
-	}
-	if difficulty != "" {
-		args = append(args, "--difficulty "+quoteSwebenchArg(difficulty))
-	}
-	if dataset != "" {
-		args = append(args, "--dataset "+quoteSwebenchArg(dataset))
-	}
-	if limit > 0 {
-		args = append(args, fmt.Sprintf("--limit %d", limit))
-	}
+	args := swebenchRunArgsHead("deepswe", filter, difficulty, dataset, limit)
 	if maxSteps > 0 {
 		args = append(args, fmt.Sprintf("--max-steps %d", maxSteps))
 	}

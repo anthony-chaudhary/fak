@@ -198,17 +198,25 @@ var configFieldRe = regexp.MustCompile(`(?m)^\t([A-Z][A-Za-z0-9]*)\s+[^/]`)
 
 // parseConfigFields returns the set of field names declared in the gateway.Config struct.
 func parseConfigFields(src string) map[string]bool {
+	return scanFieldSet(src, "type Config struct {", "\n}", configFieldRe)
+}
+
+// scanFieldSet returns the set of capitalized field names that re matches inside the
+// src region bounded by startMarker (the first occurrence) and the first endMarker
+// after it (or end-of-string if absent). It is the shared scanner behind the
+// Config-declaration and Config-literal field extractors.
+func scanFieldSet(src, startMarker, endMarker string, re *regexp.Regexp) map[string]bool {
 	out := map[string]bool{}
-	start := strings.Index(src, "type Config struct {")
+	start := strings.Index(src, startMarker)
 	if start < 0 {
 		return out
 	}
 	rest := src[start:]
-	end := strings.Index(rest, "\n}")
+	end := strings.Index(rest, endMarker)
 	if end < 0 {
 		end = len(rest)
 	}
-	for _, m := range configFieldRe.FindAllStringSubmatch(rest[:end], -1) {
+	for _, m := range re.FindAllStringSubmatch(rest[:end], -1) {
 		out[m[1]] = true
 	}
 	return out
@@ -219,21 +227,8 @@ var assignRe = regexp.MustCompile(`(?m)^\s*([A-Z][A-Za-z0-9]*):\s+`)
 // serveConfigAssignments returns the set of gateway.Config field names assigned inside the
 // gateway.New(gateway.Config{...}) literal in serve.go.
 func serveConfigAssignments(src string) map[string]bool {
-	out := map[string]bool{}
-	start := strings.Index(src, "gateway.New(gateway.Config{")
-	if start < 0 {
-		return out
-	}
-	rest := src[start:]
 	// The literal ends at the matching "})" that closes New(Config{...}.
-	end := strings.Index(rest, "\n\t})")
-	if end < 0 {
-		end = len(rest)
-	}
-	for _, m := range assignRe.FindAllStringSubmatch(rest[:end], -1) {
-		out[m[1]] = true
-	}
-	return out
+	return scanFieldSet(src, "gateway.New(gateway.Config{", "\n\t})", assignRe)
 }
 
 func verdictGlyph(v wiringVerdict) string {

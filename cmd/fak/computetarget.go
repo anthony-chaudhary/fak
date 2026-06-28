@@ -260,14 +260,21 @@ func levenshtein(a, b string) int {
 // defaultComputeTargetsFile is the optional user override file, additive over the
 // built-ins. FAK_TARGETS_FILE wins; otherwise ~/.fak/targets.json.
 func defaultComputeTargetsFile() string {
-	if v := strings.TrimSpace(os.Getenv("FAK_TARGETS_FILE")); v != "" {
+	return envOrHomePath("FAK_TARGETS_FILE", ".fak", "targets.json")
+}
+
+// envOrHomePath returns a trimmed env override (envVar) when set, else the
+// home-relative path home/<rel...>. It returns "" when no override is set and the
+// user home dir can't be determined.
+func envOrHomePath(envVar string, rel ...string) string {
+	if v := strings.TrimSpace(os.Getenv(envVar)); v != "" {
 		return v
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".fak", "targets.json")
+	return filepath.Join(append([]string{home}, rel...)...)
 }
 
 // loadComputeTargets builds a registry of the built-ins plus any user targets from

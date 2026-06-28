@@ -24,7 +24,10 @@ func cmdSavingsVector(argv []string) { os.Exit(runSavingsVector(os.Stdout, os.St
 
 func runSavingsVector(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runSavingsVectorSelfcheck(stdout, stderr, argv[1:])
+		return runReportSelfcheck(stdout, stderr, argv[1:], "savings-vector", savingsvector.Selfcheck,
+			"SELFCHECK OK -- vector decomposes Net (does not inflate); local_cpu "+
+				"surfaced and measured; gpu_prefill/wall_clock honestly modeled; happy control saves 0; "+
+				"binding account follows the profile.")
 	}
 
 	fs := flag.NewFlagSet("fak savings-vector", flag.ContinueOnError)
@@ -60,14 +63,8 @@ func runSavingsVector(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak savings-vector: read report: %v\n", err)
-		return 2
-	}
-	var report savingsvector.Report
-	if err := json.Unmarshal(raw, &report); err != nil {
-		fmt.Fprintf(stderr, "fak savings-vector: parse report JSON: %v\n", err)
+	report, ok := readReportJSON[savingsvector.Report](path, "savings-vector", stderr)
+	if !ok {
 		return 2
 	}
 
@@ -96,29 +93,6 @@ func runSavingsVector(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "FAIL: vector dollar saving != Net dollar saving (inflation bug)")
 		return 1
 	}
-	return 0
-}
-
-func runSavingsVectorSelfcheck(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("fak savings-vector selfcheck", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(argv); err != nil {
-		if err == flag.ErrHelp {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak savings-vector selfcheck: unexpected argument %q\n", fs.Arg(0))
-		return 2
-	}
-	if err := savingsvector.Selfcheck(); err != nil {
-		fmt.Fprintf(stderr, "SELFCHECK FAIL:\n  - %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(stdout, "SELFCHECK OK -- vector decomposes Net (does not inflate); local_cpu "+
-		"surfaced and measured; gpu_prefill/wall_clock honestly modeled; happy control saves 0; "+
-		"binding account follows the profile.")
 	return 0
 }
 
@@ -166,6 +140,48 @@ func resolveReportPath(fs *flag.FlagSet, stderr io.Writer, cmdName, missingHint,
 		return "", false
 	}
 	return path, true
+}
+
+// readReportJSON reads path and unmarshals it into a fresh T, emitting the shared
+// read/parse error messages (labeled "fak <cmdName>: ...") on failure and returning
+// ok=false (the report-replay callers return 2 on a false). It is the shared
+// report-load step behind horizon-recovery and savings-vector.
+func readReportJSON[T any](path, cmdName string, stderr io.Writer) (report T, ok bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak %s: read report: %v\n", cmdName, err)
+		return report, false
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		fmt.Fprintf(stderr, "fak %s: parse report JSON: %v\n", cmdName, err)
+		return report, false
+	}
+	return report, true
+}
+
+// runReportSelfcheck implements the shared `selfcheck` subcommand of the
+// report-replay commands (horizon-recovery, savings-vector): it accepts no flags,
+// rejects any extra argument, runs the package selfcheck, and prints okMsg on
+// success. cmdName labels the flagset and the error ("fak <cmdName> selfcheck ...").
+func runReportSelfcheck(stdout, stderr io.Writer, argv []string, cmdName string, selfcheck func() error, okMsg string) int {
+	fs := flag.NewFlagSet("fak "+cmdName+" selfcheck", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(argv); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak %s selfcheck: unexpected argument %q\n", cmdName, fs.Arg(0))
+		return 2
+	}
+	if err := selfcheck(); err != nil {
+		fmt.Fprintf(stderr, "SELFCHECK FAIL:\n  - %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, okMsg)
+	return 0
 }
 
 // reorderLeadingPositional moves a single leading non-flag token (the Report path)

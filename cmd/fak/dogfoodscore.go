@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -38,14 +37,8 @@ func runDogfoodScore(stdout, stderr io.Writer, argv []string) int {
 		WindowHours: *windowHours,
 	})
 	if *comparePath != "" {
-		b, err := os.ReadFile(*comparePath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak dogfood-score: read --compare: %v\n", err)
-			return 2
-		}
-		var base map[string]any
-		if err := json.Unmarshal(b, &base); err != nil {
-			fmt.Fprintf(stderr, "fak dogfood-score: parse --compare: %v\n", err)
+		base, ok := readCompareBase(stderr, "fak dogfood-score", *comparePath)
+		if !ok {
 			return 2
 		}
 		fmt.Fprintln(stdout, dogfoodscore.Compare(payload, base))

@@ -10,7 +10,6 @@ package main
 // number for r.
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -23,7 +22,10 @@ func cmdHorizonRecovery(argv []string) { os.Exit(runHorizonRecovery(os.Stdout, o
 
 func runHorizonRecovery(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runHorizonRecoverySelfcheck(stdout, stderr, argv[1:])
+		return runReportSelfcheck(stdout, stderr, argv[1:], "horizon-recovery", horizonrecovery.Selfcheck,
+			"SELFCHECK OK -- band emits no r/horizon_multiplier (r stays structural); "+
+				"recovery operand and its fault-rate fence co-occur; every field measured; "+
+				"a single session never yields a population band (floor refuses it).")
 	}
 
 	fs := flag.NewFlagSet("fak horizon-recovery", flag.ContinueOnError)
@@ -51,14 +53,8 @@ func runHorizonRecovery(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak horizon-recovery: read report: %v\n", err)
-		return 2
-	}
-	var report horizonrecovery.Report
-	if err := json.Unmarshal(raw, &report); err != nil {
-		fmt.Fprintf(stderr, "fak horizon-recovery: parse report JSON: %v\n", err)
+	report, ok := readReportJSON[horizonrecovery.Report](path, "horizon-recovery", stderr)
+	if !ok {
 		return 2
 	}
 
@@ -88,29 +84,6 @@ func runHorizonRecovery(stdout, stderr io.Writer, argv []string) int {
 		return encodeJSON(stdout, stderr, band)
 	}
 	writeHorizonBandHuman(stdout, band)
-	return 0
-}
-
-func runHorizonRecoverySelfcheck(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("fak horizon-recovery selfcheck", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(argv); err != nil {
-		if err == flag.ErrHelp {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak horizon-recovery selfcheck: unexpected argument %q\n", fs.Arg(0))
-		return 2
-	}
-	if err := horizonrecovery.Selfcheck(); err != nil {
-		fmt.Fprintf(stderr, "SELFCHECK FAIL:\n  - %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(stdout, "SELFCHECK OK -- band emits no r/horizon_multiplier (r stays structural); "+
-		"recovery operand and its fault-rate fence co-occur; every field measured; "+
-		"a single session never yields a population band (floor refuses it).")
 	return 0
 }
 

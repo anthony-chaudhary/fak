@@ -162,14 +162,8 @@ func runGuardRSIScorecard(stdout, stderr io.Writer, argv []string) int {
 	}
 	payload := guardrsi.BuildScorecard(root)
 	if *comparePath != "" {
-		b, err := os.ReadFile(*comparePath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak guard-rsi-scorecard: read --compare: %v\n", err)
-			return 2
-		}
-		var base map[string]any
-		if err := json.Unmarshal(b, &base); err != nil {
-			fmt.Fprintf(stderr, "fak guard-rsi-scorecard: parse --compare: %v\n", err)
+		base, ok := readCompareBase(stderr, "fak guard-rsi-scorecard", *comparePath)
+		if !ok {
 			return 2
 		}
 		fmt.Fprintln(stdout, guardrsi.Compare(payload, base))

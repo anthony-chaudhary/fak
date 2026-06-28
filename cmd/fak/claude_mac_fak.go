@@ -183,14 +183,7 @@ func defaultClaudeMacConfigDir() string {
 }
 
 func defaultClaudeMacSSHKey() string {
-	if v := strings.TrimSpace(os.Getenv("FAK_MAC_SSH_KEY")); v != "" {
-		return v
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".ssh", "id_ed25519_prod_to_laptop")
+	return envOrHomePath("FAK_MAC_SSH_KEY", ".ssh", "id_ed25519_prod_to_laptop")
 }
 
 // execCommand is the indirection seam for the ssh key-fetch so a test can
