@@ -212,6 +212,57 @@ Subscriptions() }`) and the 100th tool-specific policy costs an unrelated call n
 
 ---
 
+## The stable-core ritual — adding a model or a backend
+
+A new optimization is one kernel. A new **model family** or a new **backend** is a whole
+*column* of the support cross-product (`internal/covmatrix`), and the thread we keep losing
+is "which cells did this just change, and which are still undefined?" The matrix is
+**generated from the tree, not hand-written** — so it only stays honest if it is *run* as
+the tree moves. That is the discipline below: the RSI scorecard loop (`#1021`, the scorecard
+family) pointed at *kernel growth* instead of doc/code quality.
+
+A new model or backend ships **only once all three hold**:
+
+1. **Its column of the matrix is generated.** `fak coverage-matrix` derives every new
+   `(family, backend)` cell from the kernel's own structural facts (the `resolveSpecFor`
+   family switch, the topology each family lowers to, the `--backend` enum, the
+   `requirePreNorm` / `requireGLMDsaSession` fences). Regenerate it and commit the snapshot
+   diff — that diff *is* the answer to "what did this change touch?"
+
+   ```bash
+   go run ./cmd/fak coverage-matrix            # the full grid (human)
+   go run ./cmd/fak coverage-matrix --json     # the control-pane payload (corpus.growth_debt)
+   ```
+
+2. **Its `SUPPORTED` cells have a CI witness.** A cell the matrix calls `SUPPORTED` by
+   topology but that carries no CI-runnable numeric oracle is *honest-but-incomplete* — it
+   runs, but its correctness is asserted, not proven. List that residual and retire it with
+   a weight-free conformance row (`#1081`):
+
+   ```bash
+   go run ./cmd/fak coverage-matrix --stale    # cells that RUN but have no CI oracle
+   ```
+
+   A `PANICS`/`FENCED` cell is honest-and-complete (it refuses); an `UNDEFINED` cell is
+   `growth_debt` (a silently-reachable wrong-result path) — neither is on the `--stale`
+   list, but an `UNDEFINED` cell **must** be fenced or witnessed before you ship.
+
+3. **`growth_debt` did not rise.** The coverage matrix folds one `growth_debt` integer into
+   the unified scorecard control-pane, and the `--check` ratchet enforces it: debt may hold
+   or fall, **never silently rise**. The gardening bundle runs this on every tick, so a
+   model/backend PR that adds an unfenced, unwitnessed cell reds the gate.
+
+   ```bash
+   python tools/scorecard_control_pane.py --check   # the ratchet (folds growth_debt)
+   go run ./cmd/fak garden --check                  # the same gate inside the gardening bundle
+   ```
+
+In short: **generate the column, witness the `SUPPORTED` cells, hold the line on
+`growth_debt`.** The full epic decomposition is in
+[`docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md`](docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md).
+
+---
+
 ## Land it
 
 Once all three gates are green, ship it the same way every contributor does — the rules
