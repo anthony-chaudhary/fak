@@ -210,13 +210,14 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 // cacheBootSummary renders the startup cache-state line from the process-global cacheobs
 // snapshot (the WITNESSED in-kernel KV-prefix reuse). Idle at boot (no served turn yet); once
-// turns accumulate it reports the realized reuse ratio so an operator sees the cliff live.
+// turns accumulate it reports the realized reuse ratio AND the absolute prompt tokens served
+// from cache (saved=N tok, the snapshot's ReusedTokens) so an operator sees the cliff live (#1076).
 func cacheBootSummary(s cacheobs.Stats) string {
 	if s.Turns == 0 {
 		return "idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)"
 	}
-	return fmt.Sprintf("reuse %.0f%% over %d turns (frozen=%d partial=%d cold=%d) — WITNESSED, by=vdso",
-		s.ReuseRatio*100, s.Turns, s.FrozenTurns, s.PartialTurns, s.ColdTurns)
+	return fmt.Sprintf("reuse %.0f%% (saved=%d tok) over %d turns (frozen=%d partial=%d cold=%d) — WITNESSED, by=vdso",
+		s.ReuseRatio*100, s.ReusedTokens, s.Turns, s.FrozenTurns, s.PartialTurns, s.ColdTurns)
 }
 
 // nodelayListener wraps ln so every accepted *net.TCPConn has Nagle disabled
