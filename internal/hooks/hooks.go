@@ -154,26 +154,11 @@ func readStagedDiffWith(ctx context.Context, run Runner, root string) (*StagedDi
 	return d, nil
 }
 
-func nameList(run Runner, ctx context.Context, root, filter string) []string {
-	out, code, err := run(ctx, root, "diff", "--cached", "--name-only", filter)
-	if err != nil || code != 0 {
-		return nil
-	}
-	var paths []string
-	for _, ln := range strings.Split(out, "\n") {
-		ln = strings.TrimSpace(ln)
-		if ln != "" {
-			paths = append(paths, ln)
-		}
-	}
-	return paths
-}
-
-// nameStatusPaths runs `git diff --cached --name-status <filter>` and takes the LAST tab-field
-// of each line — the Python checkers' `_staged_paths` shape, which for a rename ("R100\told\tnew")
-// correctly yields the new path.
-func nameStatusPaths(run Runner, ctx context.Context, root, filter string) []string {
-	out, code, err := run(ctx, root, "diff", "--cached", "--name-status", filter)
+// stagedPathLines runs a `git diff --cached <listFlag> <filter>` path listing and folds each
+// non-blank trimmed output line through pick. nameList / nameStatusPaths differ only in the list
+// flag and how a line maps to a path, so the run + split + trim + skip-blank scaffold lives here.
+func stagedPathLines(run Runner, ctx context.Context, root, listFlag, filter string, pick func(line string) string) []string {
+	out, code, err := run(ctx, root, "diff", "--cached", listFlag, filter)
 	if err != nil || code != 0 {
 		return nil
 	}
@@ -183,10 +168,23 @@ func nameStatusPaths(run Runner, ctx context.Context, root, filter string) []str
 		if ln == "" {
 			continue
 		}
-		fields := strings.Split(ln, "\t")
-		paths = append(paths, fields[len(fields)-1])
+		paths = append(paths, pick(ln))
 	}
 	return paths
+}
+
+func nameList(run Runner, ctx context.Context, root, filter string) []string {
+	return stagedPathLines(run, ctx, root, "--name-only", filter, func(ln string) string { return ln })
+}
+
+// nameStatusPaths runs `git diff --cached --name-status <filter>` and takes the LAST tab-field
+// of each line — the Python checkers' `_staged_paths` shape, which for a rename ("R100\told\tnew")
+// correctly yields the new path.
+func nameStatusPaths(run Runner, ctx context.Context, root, filter string) []string {
+	return stagedPathLines(run, ctx, root, "--name-status", filter, func(ln string) string {
+		fields := strings.Split(ln, "\t")
+		return fields[len(fields)-1]
+	})
 }
 
 // AddedLines returns every added line across all files, in file-then-order, for whole-diff

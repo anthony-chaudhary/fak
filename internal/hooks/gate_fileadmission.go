@@ -54,18 +54,8 @@ var exemptDataDirs = []string{"experiments/", "testdata/", "internal/", "fak/exp
 var keepExceptions = map[string]bool{"fak/demorace-err.log": true}
 
 func gateFileAdmission(d *StagedDiff) ([]Finding, error) {
-	seen := map[string]bool{}
-	var findings []Finding
-	for _, p := range d.AddedRenamedPaths { // check_committed_files.py uses --diff-filter=AR
-		if seen[p] {
-			continue
-		}
-		seen[p] = true
-		if why := classifyFileWith(d, p); why != "" {
-			findings = append(findings, Finding{Gate: "FILE_ADMISSION", File: p, Detail: why})
-		}
-	}
-	return findings, nil
+	// check_committed_files.py uses --diff-filter=AR; the scan body is shared with the tree twin.
+	return classifyPathsFindings(d, d.AddedRenamedPaths), nil
 }
 
 func startsWithAny(s string, prefixes []string) bool {
