@@ -506,6 +506,10 @@ func defaultPython() string {
 	return "python3"
 }
 
+// DefaultPython is the exported form of defaultPython, so sibling packages
+// (e.g. cadencereport) can share this one resolver instead of copying it.
+func DefaultPython() string { return defaultPython() }
+
 func gatingKeys(results []MemberResult) []string {
 	out := []string{}
 	for _, r := range results {

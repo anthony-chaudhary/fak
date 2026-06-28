@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
 
@@ -231,27 +232,11 @@ func gitErr(err error) string {
 	return err.Error()
 }
 
-// HeadCommit returns the short HEAD commit of root, or "unknown".
-func HeadCommit(root string) string {
-	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		return "unknown"
-	}
-	s := strings.TrimSpace(string(out))
-	if s == "" {
-		return "unknown"
-	}
-	return s
-}
+// HeadCommit returns the short HEAD commit of root, or "unknown". It shares the
+// one implementation in gardenbundle rather than copying the git plumbing.
+func HeadCommit(root string) string { return gardenbundle.HeadCommit(root) }
 
-func defaultPython() string {
-	if p := os.Getenv("FAK_PYTHON"); p != "" {
-		return p
-	}
-	return "python3"
-}
+func defaultPython() string { return gardenbundle.DefaultPython() }
 
 func lastLine(s string) string {
 	s = strings.TrimRight(s, "\n")
