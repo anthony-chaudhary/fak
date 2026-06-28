@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -121,30 +120,15 @@ func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener,
 	if _, err := os.Stat(idxPath); err != nil {
 		return loadSafetensorsQuantFile(filepath.Join(dir, "model.safetensors"), cfg, open, opts...)
 	}
-	ib, err := os.ReadFile(idxPath)
+	shards, weightMap, err := safetensorsIndexShards(idxPath)
 	if err != nil {
 		return nil, err
 	}
-	var index struct {
-		WeightMap map[string]string `json:"weight_map"`
-	}
-	if err := json.Unmarshal(ib, &index); err != nil {
-		return nil, fmt.Errorf("safetensors index: %w", err)
-	}
 	// tied is a whole-model property: the embedding is the LM head iff no shard carries lm_head.
 	tied := true
-	shardSet := map[string]bool{}
-	for name, shard := range index.WeightMap {
-		shardSet[shard] = true
-		if name == "lm_head.weight" {
-			tied = false
-		}
+	if _, ok := weightMap["lm_head.weight"]; ok {
+		tied = false
 	}
-	shards := make([]string, 0, len(shardSet))
-	for s := range shardSet {
-		shards = append(shards, s)
-	}
-	sort.Strings(shards)
 
 	m := &Model{Cfg: cfg, manifest: map[string]tensorMeta{}, q8w: map[string]*q8Tensor{}}
 	var raw []byte

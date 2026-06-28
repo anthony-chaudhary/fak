@@ -394,20 +394,33 @@ func ResidentQ4KEligible(cfg Config, canon string) bool {
 	return true
 }
 
+// residentQuantTarget runs the shared eligibility gate for the resident raw-quant
+// AddResident* builders (Q4_K and the k-quant kinds): it refuses a built builder, resolves
+// the canonical name through the qwen35 source chain, and reports whether this tensor should
+// be stored as a resident raw-quant block (a 2-D quant weight that is not a fused QKV /
+// gate_up projection). ok==false with err==nil means "skip, not eligible" (idempotent).
+func (b *QuantBuilder) residentQuantTarget(canon string, shape []int) (name string, ok bool, err error) {
+	if b.built {
+		return "", false, fmt.Errorf("model: QuantBuilder already built")
+	}
+	name, keep := quantSourceTensorName(b.m.Cfg, canon)
+	if !keep || !isQuantWeight(name) || len(shape) != 2 {
+		return "", false, nil
+	}
+	if strings.HasSuffix(name, suffixQKVProj) || strings.HasSuffix(name, suffixGateUpProj) {
+		return "", false, nil
+	}
+	return name, true, nil
+}
+
 // AddResidentQ4K stores a raw Q4_K payload as a resident q4kTensor under the canonical name
 // resolved through the qwen35 source chain, skipping the f32/Q8 round-trip. shape is the
 // model [out, in] convention (in a multiple of 256). Idempotent for non-eligible names
 // (returns nil without storing) so the loader can call it unconditionally on Q4_K tensors.
 func (b *QuantBuilder) AddResidentQ4K(canon string, shape []int, raw []byte) error {
-	if b.built {
-		return fmt.Errorf("model: QuantBuilder already built")
-	}
-	name, keep := quantSourceTensorName(b.m.Cfg, canon)
-	if !keep || !isQuantWeight(name) || len(shape) != 2 {
-		return nil
-	}
-	if strings.HasSuffix(name, suffixQKVProj) || strings.HasSuffix(name, suffixGateUpProj) {
-		return nil
+	name, ok, err := b.residentQuantTarget(canon, shape)
+	if !ok || err != nil {
+		return err
 	}
 	if b.m.q4kw == nil {
 		b.m.q4kw = map[string]*q4kTensor{}
