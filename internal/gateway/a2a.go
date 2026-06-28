@@ -146,6 +146,29 @@ var (
 	a2aOnce  sync.Once
 )
 
+// A2AMethodSpecForResolver is the exported type for the capindex A2A resolver.
+// This exposes the reviewed method registry as generic Capabilities, proving
+// the loader is protocol-blind (issue #1108, C5).
+type A2AMethodSpecForResolver struct {
+	Name        string
+	Scope       string // "read" or "act"
+	Description string
+}
+
+// A2AMethodRegistryForResolver returns the reviewed method registry for use
+// by the protocol-generic capindex A2A resolver.
+func A2AMethodRegistryForResolver() []A2AMethodSpecForResolver {
+	methods := make([]A2AMethodSpecForResolver, 0, len(a2aMethodRegistry))
+	for _, spec := range a2aMethodRegistry {
+		methods = append(methods, A2AMethodSpecForResolver{
+			Name:        spec.Name,
+			Scope:       spec.Scope,
+			Description: spec.Description,
+		})
+	}
+	return methods
+}
+
 // getA2AStore returns the singleton A2A task store
 func getA2AStore() *a2aTaskStore {
 	a2aOnce.Do(func() {

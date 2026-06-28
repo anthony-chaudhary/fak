@@ -603,6 +603,14 @@ func toolDescriptors() []map[string]any {
 	}
 }
 
+// ToolDescriptorsForResolver returns the tool descriptors for use by the
+// protocol-generic capindex MCP resolver. This function is exported to allow
+// the resolver to index MCP tools as generic Capabilities, proving the loader
+// is protocol-blind (issue #1108, C5).
+func ToolDescriptorsForResolver() []map[string]any {
+	return toolDescriptors()
+}
+
 // memoryInputSchema is the {driver|query, intent, k, budget, image_dir, apply} shape
 // shared by fak_memory_explain and fak_memory_run.
 var memoryInputSchema = json.RawMessage(`{
