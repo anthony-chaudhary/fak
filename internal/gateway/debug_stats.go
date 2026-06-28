@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
@@ -61,6 +62,53 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 	}
 	d, have := s.peekResetHealth(trace)
 	s.debugStatsf("%s", formatTurnDebugStats(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, d, have))
+}
+
+// renderTurnDebugError emits one per-turn debug line on a FAILED turn — the missing half of the
+// observable layer. renderTurnDebugStats only fires on a SUCCESSFUL completion, so without this
+// a stalled / errored / fell-back turn produces no output on the default `--debug-stats` stderr
+// line: the operator sees a frozen terminal with no signal. This makes the failure VISIBLE on the
+// same line they already watch (no `--log` needed): `fak-turn trace=… FAILED reason=stalled
+// wire=anthropic_messages after=61s`. Gated on debugStatsf so it is a no-op when --debug-stats is
+// off. reason is classified from the planner error by debugErrorReason (the same closed kinds the
+// upstream-error counter uses). elapsed is the wall-clock the turn ran before it failed.
+func (s *Server) renderTurnDebugError(trace, wire string, err error, elapsed time.Duration) {
+	if s == nil || s.debugStatsf == nil {
+		return
+	}
+	s.debugStatsf("%s", formatTurnDebugError(trace, wire, debugErrorReason(err), elapsed))
+}
+
+// debugErrorReason maps a planner/proxy error to the closed reason token the FAILED debug line
+// shows. It reuses upstreamErrorKind (the classifier the /metrics counter shares) so the line and
+// the counter agree, then collapses the two status kinds into one "status" token for the
+// glanceable line. A nil error reads "error" (a failure with no typed cause — e.g. a stream that
+// opened then produced no events).
+func debugErrorReason(err error) string {
+	switch upstreamErrorKind(err) {
+	case "stalled":
+		return "stalled"
+	case "unreachable":
+		return "unreachable"
+	case "status_4xx", "status_5xx":
+		return "status"
+	case "oom":
+		return "oom"
+	default:
+		return "error"
+	}
+}
+
+// formatTurnDebugError renders one FAILED turn as a compact, payload-free line that LEADS with the
+// failure verdict and its reason — the mirror of formatTurnDebugStats's success line. Pure (no I/O,
+// no state) so the format is unit-tested directly. after= is rounded to whole seconds: the operator
+// cares "it failed after ~a minute" (a stall) vs "instantly" (an unreachable/4xx), not millis.
+func formatTurnDebugError(trace, wire, reason string, elapsed time.Duration) string {
+	if reason == "" {
+		reason = "error"
+	}
+	return fmt.Sprintf("fak-turn trace=%s FAILED reason=%s wire=%s after=%ds",
+		debugField(trace), debugField(reason), debugField(wire), int(elapsed.Round(time.Second).Seconds()))
 }
 
 // formatTurnDebugStats renders one served turn as a compact, payload-free line that LEADS with

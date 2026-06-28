@@ -98,6 +98,11 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
 			s.observePlannerRequestMemory()
 		}
+		// Surface the failure on the default --debug-stats stderr line (the s.logf calls
+		// below only reach the --log stream, OFF by default) so an errored/stalled streamed
+		// turn is visible instead of a silent freeze. plannerErrorStatus below also bumps the
+		// upstream-error counter.
+		s.renderTurnDebugError(reqTrace, "openai_chat_completions", err, time.Since(began))
 		if !started {
 			// Nothing on the wire yet — surface a real HTTP error, exactly as the
 			// buffered path does, and own the response (the message is generic so the

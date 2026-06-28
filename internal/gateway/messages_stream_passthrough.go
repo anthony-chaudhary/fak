@@ -300,17 +300,32 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		case p.started:
 			// Client bytes already flowed; we cannot change the status. Emit a terminal
 			// error frame so the client's SSE parser ends cleanly, then own the response.
+			// Count + surface it: the s.logf below only reaches the --log stream (OFF by
+			// default), so emit the FAILED line to the default --debug-stats stderr and bump
+			// the upstream-error counter — without this a mid-stream stall is a silent freeze.
+			s.metrics.observeUpstreamError(err)
+			s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
 			s.logf("gateway: upstream model error mid-stream (messages): %v", err)
+			// Carry the distinct error type to the client when we can classify it (a stall),
+			// so a harness sees "upstream_stalled" rather than an opaque api_error.
+			errType := "api_error"
+			if errors.As(err, new(*agent.UpstreamStalledError)) {
+				errType = "upstream_stalled"
+			}
 			p.send("error", map[string]any{
 				"type":  "error",
-				"error": map[string]any{"type": "api_error", "message": "upstream model error"},
+				"error": map[string]any{"type": errType, "message": "upstream model error"},
 			})
 			return true
 		case p.wroteError:
 			return true // a clean terminal HTTP error was already written
 		default:
 			// The stream never opened and nothing was written — let the caller fall back
-			// to the buffered path (exactly one upstream generation total).
+			// to the buffered path (exactly one upstream generation total). Surface the
+			// fall-back on the debug line so the operator sees WHY a turn took the slower
+			// buffered path instead of a silent gap.
+			s.metrics.observeUpstreamError(err)
+			s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
 			s.logf("gateway: anthropic passthrough stream did not open (%v); falling back to buffered", err)
 			return false
 		}

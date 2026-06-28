@@ -7,6 +7,7 @@ package gateway
 // its own byte-preserving relay in messages_stream_passthrough.go.
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -150,16 +151,28 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
 			s.observePlannerRequestMemory()
 		}
+		// Count + surface the failure on the default --debug-stats stderr line (the s.logf
+		// below only reaches the --log stream, OFF by default). Without this a stalled or
+		// errored streamed turn is a silent freeze.
+		s.metrics.observeUpstreamError(err)
+		s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
 		if !started {
+			// Nothing was written yet — map the error to its distinct status/code (a stall
+			// becomes 504 upstream_stalled) so the client sees WHAT failed, not a generic 502.
+			status, _, msg := s.plannerErrorStatus(err)
 			s.logf("gateway: upstream model error (messages stream): %v", err)
-			writeErr(w, http.StatusBadGateway, "upstream model error")
+			writeErr(w, status, msg)
 			return true
 		}
 		s.logf("gateway: upstream model error mid-stream (messages): %v", err)
 		closeText()
+		errType := "api_error"
+		if errors.As(err, new(*agent.UpstreamStalledError)) {
+			errType = "upstream_stalled"
+		}
 		sendLocked("error", map[string]any{
 			"type":  "error",
-			"error": map[string]any{"type": "api_error", "message": "upstream model error"},
+			"error": map[string]any{"type": errType, "message": "upstream model error"},
 		})
 		return true
 	}
