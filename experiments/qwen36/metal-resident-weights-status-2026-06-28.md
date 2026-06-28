@@ -180,6 +180,18 @@ resident-vs-reupload diff. Until the on-device residency-win number is recorded,
 speedup* claim is `not yet`; the **residency** deliverable (no per-forward weight upload, weights
 resident in unified memory) is shipped and CPU-parity-pinned.
 
+**Owner scope (2026-06-28 issue comment).** #69 was split into two walls. Child **#1113** now
+owns the *warm per-call* round-trip / sync wall (memcpy-in + `waitUntilCompleted` + a 65 MB
+result memcpy-out, paid 184× serially per token-batch) and the resident-activations half —
+witnessed on M3 Pro post-#1085 — while **#69 stays the parent for the lazy-weight-upload half:
+wall 1 = 8.33 GB at ~275 MB/s charged to the first prefill.** That pins the §5 step-(1) target
+precisely: the `newBufferWithBytesNoCopy` zero-copy wrap is exactly what erases wall 1 (the GPU
+addresses the page-aligned GGUF bytes in place, so the first prefill pays no 8.33 GB upload),
+and it does *not* touch the per-call activation round-trip, which is #1113's already-witnessed
+half. So #69's remaining deliverable is now scoped to one wall — the first-prefill weight upload
+— still gated on `(fak metalgemm)` + `(fak model)` Mac-side code (§5), not the `experiments`
+lane.
+
 ---
 
 ## 6 — Out of scope for #69
@@ -187,8 +199,10 @@ resident in unified memory) is shipped and CPU-parity-pinned.
 The MPS `-tags metal` registry backend's quantized device GEMM is still genuinely open
 (`internal/compute/metal.go` panics on non-F32) — a different lane from the `-tags fakmetal`
 `internal/metalgemm` lane closed here. Lifting `requirePreNorm` for the hybrid arch is #71;
-routing the full-attention Q8 twin off its `dequantQ8 → f32 → Upload` form is #70. Those are
-separate tickets in this same cluster, not part of #69.
+routing the full-attention Q8 twin off its `dequantQ8 → f32 → Upload` form is #70. The warm
+per-call round-trip / sync wall and the resident-activations half are the child #1113 (witnessed
+on M3 Pro post-#1085), not #69's lazy-weight-upload wall. Those are separate tickets in this same
+cluster, not part of #69.
 
 ---
 
