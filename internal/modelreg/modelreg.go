@@ -50,6 +50,22 @@ var Catalog = map[string]string{
 	// (single file, ~4.7 GB) for a more capable laptop/GPU run.
 	"qwen2.5:1.5b": "hf://mradermacher/Qwen2.5-1.5B-GGUF/Qwen2.5-1.5B.Q8_0.gguf",
 	"qwen2.5:7b":   "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+	// Qwen2.5-Coder instruct GGUFs — the CODING-tuned, TOOL-CALL-capable tier the
+	// `fak guard --local`/`--gguf` coding loop wants (#1058, epic #1056). They emit the
+	// Qwen2.5 == Hermes `<tool_call>` dialect the in-kernel planner already lifts into
+	// structured tool calls, so a small one of these can actually DRIVE a coding harness,
+	// not just chat. Three rungs trade footprint against tool-call reliability:
+	//   - 1.5B Q4_K_M (~0.99 GB) — the FLOOR that still tool-calls, for a tiny box.
+	//   - 3B  Q4_K_M (~1.93 GB) — the curated DEFAULT (see DefaultLocalCodingAlias):
+	//     smallest size that reliably emits well-formed multi-call turns on CPU.
+	//   - 7B  Q4_K_M (~4.68 GB) — the most capable laptop/GPU rung.
+	// bartowski is the canonical public GGUF re-publisher already used above. Each repo
+	// returned HTTP 200 unauthenticated and each filename below was confirmed present in
+	// its -GGUF repo's file tree before seeding (HF returns 401 not 404 for a missing
+	// repo, so a 200 + a tree hit is the real fetchability witness; re-verify on edit).
+	"qwen2.5-coder:1.5b": "hf://bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf",
+	"qwen2.5-coder:3b":   "hf://bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+	"qwen2.5-coder:7b":   "hf://bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
 	// Ornith 1.0 — DeepReinforce's MIT-licensed Qwen3.5-family agentic-coding models
 	// (released 2026-06-25, HF org deepreinforce-ai; the collection is exactly 7 public
 	// repos — 9B/35B/397B + GGUF/FP8 siblings, NO 31B). Bare "ornith" and "ornith:9b-gguf"
@@ -69,6 +85,34 @@ var Catalog = map[string]string{
 	"ornith:397b":     "hf://deepreinforce-ai/Ornith-1.0-397B",
 	"ornith:397b-fp8": "hf://deepreinforce-ai/Ornith-1.0-397B-FP8",
 }
+
+// codingAliases is the set of Catalog aliases that are CODING-tuned and emit the
+// `<tool_call>` dialect the in-kernel planner lifts — i.e. the ones that can actually
+// drive a coding harness agentically, not just chat (#1058). `fak ls` flags these so a
+// user picking a model for `fak guard --local`/`--gguf -- claude` knows which names are
+// the coding loop's targets. It is intentionally a small explicit set, not a name-pattern
+// heuristic: "qwen2.5:7b" is a fine chat model but is NOT seeded here because the coding
+// loop wants the Coder-tuned weights. Keep it in sync with the Qwen2.5-Coder seeds above.
+var codingAliases = map[string]bool{
+	"qwen2.5-coder:1.5b": true,
+	"qwen2.5-coder:3b":   true,
+	"qwen2.5-coder:7b":   true,
+}
+
+// DefaultLocalCodingAlias is the model `fak guard --local`/`--gguf` picks when the user
+// names no model — the smallest curated coding alias that still RELIABLY tool-calls, so
+// the one-command local-coding path (epic #1056) works with zero knowledge of aliases or
+// quant names. It resolves to Qwen2.5-Coder-3B-Instruct Q4_K_M, a single ~1.93 GB GGUF:
+// the 1.5B floor tool-calls but drops/garbles multi-call turns more often, and the 7B is
+// a heavier download than a "just works" default should pull. Callers must resolve this
+// through a Registry so a user registry.json override of the same alias still wins.
+const DefaultLocalCodingAlias = "qwen2.5-coder:3b"
+
+// IsCoding reports whether an alias is one of the curated coding / tool-call-capable
+// models. It checks the embedded set; a user-overlaid alias of the same name keeps the
+// embedded coding flag (the overlay changes the target, not the model's nature), while a
+// user-only alias is not flagged because fak cannot vouch for an arbitrary user target.
+func IsCoding(alias string) bool { return codingAliases[strings.TrimSpace(alias)] }
 
 // Entry is one resolved alias: the name a user types and the target it expands to.
 type Entry struct {
@@ -182,7 +226,7 @@ func Resolve(ref string) (string, bool) {
 func (r *Registry) Entries() []ListEntry {
 	out := make([]ListEntry, 0, len(r.entries))
 	for _, e := range r.entries {
-		le := ListEntry{Entry: e}
+		le := ListEntry{Entry: e, Coding: codingAliases[e.Name]}
 		if hfhub.IsURI(e.Target) {
 			if ref, err := hfhub.ParseURI(e.Target); err == nil && ref.File != "" {
 				c := hfhub.NewClient()
@@ -208,6 +252,7 @@ type ListEntry struct {
 	Entry
 	LocalPath string // non-empty if the target is downloaded/present locally
 	SizeBytes int64  // size of the local file, when LocalPath is set
+	Coding    bool   // true for a curated coding / tool-call-capable alias (#1058)
 }
 
 // Cached reports whether this entry's target is present on disk.

@@ -114,6 +114,95 @@ func TestEntriesReportsLocalCacheStatus(t *testing.T) {
 	_ = dir // cache root is wired via FAK_MODELS_DIR; this asserts the not-cached default path
 }
 
+// TestCodingAliasesResolveAndAreFlagged covers the #1058 curation: each seeded
+// Qwen2.5-Coder alias resolves to a concrete single-file hf:// GGUF, is flagged coding
+// via IsCoding, and surfaces Coding=true in its Entries() row; a non-coder chat alias
+// stays unflagged so the column actually discriminates.
+func TestCodingAliasesResolveAndAreFlagged(t *testing.T) {
+	withCacheRoot(t)
+	coders := []string{"qwen2.5-coder:1.5b", "qwen2.5-coder:3b", "qwen2.5-coder:7b"}
+	for _, name := range coders {
+		got, expanded := Resolve(name)
+		if !expanded {
+			t.Errorf("Resolve(%q) did not expand; got %q", name, got)
+		}
+		if want := Catalog[name]; got != want || want == "" {
+			t.Errorf("Resolve(%q) = %q; want embedded target %q", name, got, want)
+		}
+		if !IsCoding(name) {
+			t.Errorf("IsCoding(%q) = false; want true", name)
+		}
+	}
+	// A capable but non-coder chat alias must NOT be flagged coding.
+	if IsCoding("qwen2.5:7b") {
+		t.Error("IsCoding(qwen2.5:7b) = true; a non-coder chat model must not be flagged")
+	}
+	if IsCoding("definitely-not-a-known-name") {
+		t.Error("IsCoding(unknown) = true; want false")
+	}
+
+	// The Entries() row carries the same flag for `fak ls`.
+	r, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, e := range r.Entries() {
+		if IsCoding(e.Name) && !e.Coding {
+			t.Errorf("Entries(): %q is coding but row Coding=false", e.Name)
+		}
+		if !IsCoding(e.Name) && e.Coding {
+			t.Errorf("Entries(): %q is not coding but row Coding=true", e.Name)
+		}
+		seen[e.Name] = true
+	}
+	for _, name := range coders {
+		if !seen[name] {
+			t.Errorf("Entries() omitted coding alias %q", name)
+		}
+	}
+}
+
+// TestDefaultLocalCodingAliasIsACuratedCoder pins the no-name default: it must be one of
+// the curated coding aliases and resolve to a concrete embedded target, so the
+// one-command `fak guard --local`/`--gguf` path (epic #1056) has a known-good model with
+// no user knowledge of aliases.
+func TestDefaultLocalCodingAliasIsACuratedCoder(t *testing.T) {
+	withCacheRoot(t)
+	if !IsCoding(DefaultLocalCodingAlias) {
+		t.Fatalf("DefaultLocalCodingAlias %q is not flagged coding", DefaultLocalCodingAlias)
+	}
+	got, expanded := Resolve(DefaultLocalCodingAlias)
+	if !expanded || got == "" || got == DefaultLocalCodingAlias {
+		t.Fatalf("Resolve(default %q) = (%q, %v); want a concrete expanded target",
+			DefaultLocalCodingAlias, got, expanded)
+	}
+}
+
+// TestUserOverlayKeepsEmbeddedCodingFlag asserts that overriding a coding alias's TARGET
+// via registry.json does not strip its coding nature — IsCoding checks the embedded set,
+// so the flag tracks the model's identity, not the (now user-pointed) weights.
+func TestUserOverlayKeepsEmbeddedCodingFlag(t *testing.T) {
+	dir := withCacheRoot(t)
+	writeRegistry(t, dir, map[string]string{
+		"qwen2.5-coder:3b": "hf://me/my-coder/custom.gguf",
+	})
+	r, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range r.Entries() {
+		if e.Name == "qwen2.5-coder:3b" {
+			if e.Source != "user" {
+				t.Errorf("overridden coder Source = %q; want user", e.Source)
+			}
+			if !e.Coding {
+				t.Error("user override stripped the embedded coding flag; want kept")
+			}
+		}
+	}
+}
+
 func writeRegistry(t *testing.T, dir string, m map[string]string) {
 	t.Helper()
 	data, err := json.Marshal(m)
