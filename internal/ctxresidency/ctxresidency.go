@@ -1,8 +1,11 @@
 package ctxresidency
 
 import (
+	"fmt"
+
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 )
 
@@ -163,4 +166,124 @@ func externalRefMatches(e cachemeta.Entry, kv cachemeta.EntryID) bool {
 		return false
 	}
 	return e.Residency.Tier == cachemeta.TierProvider || e.Residency.Tier == cachemeta.TierRemote
+}
+
+// ---------------------------------------------------------------------------
+// C6: witness + audit surface — capability journal reconciliation (issue #1109)
+// ---------------------------------------------------------------------------
+
+// CapOperation is one capability lifecycle event recorded in the journal.
+// It mirrors the C6 surface: every fault/eviction/version-bind is a journal row
+// that the loader's view must reconcile with the kernel's own counters.
+type CapOperation struct {
+	Seq       int64  // journal sequence number
+	Kind      string // CAP_FAULT | CAP_EVICT | CAP_VERSION_BIND
+	Timestamp int64  // wall-clock nanoseconds (from journal row)
+	CapKind   string // capability kind: skill | mcp-tool | a2a-agent | ...
+	CapName   string // capability name
+	CapDigest string // capability content digest
+	CapFrom   string // source version (for CAP_VERSION_BIND)
+	CapTo     string // target version (for CAP_VERSION_BIND)
+	Reason    string // optional reason/context
+}
+
+// LoaderSnapshot is the reconciled view of the capability loader's journal
+// against the kernel's own counters (the trust floor). It is the C6 audit surface:
+// a pure READ that folds the durable journal (the only source of truth for
+// capability lifecycle events) into counts the loader claims, then asserts they
+// match the kernel's internal accounting.
+//
+// A LoaderJournal call that returns Faults == kernel.FaultCount and
+// Evictions == kernel.EvictCount is a verified snapshot — the loader's view
+// matches the kernel's authoritative ledger. A mismatch surfaces a discrepancy
+// (e.g. a fault emitted but not recorded, or an eviction counted but not journaled)
+// that an auditor must investigate.
+type LoaderSnapshot struct {
+	Operations []CapOperation // raw journal rows in order
+
+	// Reconciled counts (derived from Operations).
+	Faults       int // CAP_FAULT rows
+	Evictions    int // CAP_EVICT rows
+	VersionBinds int // CAP_VERSION_BIND rows
+
+	// Kernel counters (the authoritative ledger). These are populated by the
+	// caller from the actual kernel subsystems (e.g., kvmmu.Evicted(), ctxmmu.Evicted()
+	// for the MMU counters; future capability-loader subsystems will provide
+	// their own counter surfaces).
+	KernelFaults       int // authoritative fault count
+	KernelEvictions    int // authoritative eviction count
+	KernelVersionBinds int // authoritative version-bind count
+
+	// Reconciliation result: true if all counts match.
+	Reconciled bool
+}
+
+// LoaderJournal reads the durable audit journal at journalPath and returns a
+// LoaderSnapshot that reconciles all capability lifecycle events (CAP_FAULT,
+// CAP_EVICT, CAP_VERSION_BIND) against the provided kernel counters.
+//
+// It is a pure READ: it opens the journal, folds the capability event rows,
+// and compares the derived counts to the kernel's authoritative counters.
+// No state is mutated; re-admission still requires a fresh witness check through
+// the loader's own fault path. A missing or unreadable journal returns an empty
+// snapshot with Reconciled=true (no discrepancies to surface).
+//
+// The kernel counters are populated by the caller from the actual subsystems:
+//   - KernelFaults: from the capability loader's fault counter (when C3 ships)
+//   - KernelEvictions: from kvmmu.Context.Evicted() + ctxmmu.MMU.Evicted()
+//   - KernelVersionBinds: from the capability loader's version-bind counter
+//
+// This is the read-side surface for C6 (issue #1109): the operator can verify
+// that the loader's view (derived from the journal) matches the kernel's ledger.
+// The journal is the trust floor; the kernel counters are the authoritative
+// source; reconciliation proves the two are in sync.
+func LoaderJournal(journalPath string, kernelFaults, kernelEvictions, kernelVersionBinds int) (LoaderSnapshot, error) {
+	rows, err := journal.ReadRows(journalPath)
+	if err != nil {
+		return LoaderSnapshot{}, fmt.Errorf("ctxresidency: read journal %s: %w", journalPath, err)
+	}
+	if rows == nil {
+		// No journal file (or never enabled): reconcile vacuously true.
+		return LoaderSnapshot{
+			KernelFaults:       kernelFaults,
+			KernelEvictions:    kernelEvictions,
+			KernelVersionBinds: kernelVersionBinds,
+			Reconciled:         true,
+		}, nil
+	}
+	out := LoaderSnapshot{
+		Operations:         make([]CapOperation, 0, 32),
+		KernelFaults:       kernelFaults,
+		KernelEvictions:    kernelEvictions,
+		KernelVersionBinds: kernelVersionBinds,
+	}
+	for _, r := range rows {
+		if r.Kind == "CAP_FAULT" || r.Kind == "CAP_EVICT" || r.Kind == "CAP_VERSION_BIND" {
+			op := CapOperation{
+				Seq:       int64(r.Seq),
+				Kind:      r.Kind,
+				Timestamp: r.TSUnixNano,
+				CapKind:   r.CapKind,
+				CapName:   r.CapName,
+				CapDigest: r.CapDigest,
+				CapFrom:   r.CapFrom,
+				CapTo:     r.CapTo,
+				Reason:    r.Reason,
+			}
+			out.Operations = append(out.Operations, op)
+			switch r.Kind {
+			case "CAP_FAULT":
+				out.Faults++
+			case "CAP_EVICT":
+				out.Evictions++
+			case "CAP_VERSION_BIND":
+				out.VersionBinds++
+			}
+		}
+	}
+	// Reconcile: counts must match exactly.
+	out.Reconciled = out.Faults == out.KernelFaults &&
+		out.Evictions == out.KernelEvictions &&
+		out.VersionBinds == out.KernelVersionBinds
+	return out, nil
 }

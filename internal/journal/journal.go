@@ -8,10 +8,11 @@
 // WHAT IT GUARANTEES.
 //
 //   - DURABLE: a persisting abi.Emitter writes one JSONL row per
-//     EvDecide / EvDeny / EvResultDeny / EvQuarantine / EvVDSOHit (the vDSO-served hit included,
-//     so a cache hit is audited exactly like an engine call). Rows are appended
-//     and flushed per write, so a process crash loses nothing already returned to
-//     the caller.
+//     EvDecide / EvDeny / EvResultDeny / EvQuarantine / EvVDSOHit / EvCapFault / EvCapEvict /
+//     EvCapVersionBind (the vDSO-served hit is included, so a cache hit is audited exactly
+//     like an engine call; capability lifecycle events are the C6 witness surface).
+//     Rows are appended and flushed per write, so a process crash loses nothing already
+//     returned to the caller.
 //   - TIME/SEQUENCE ANCHORED: the journal stamps its OWN monotonic Seq (1-based)
 //     and a wall-clock timestamp on every row. The anchor lives in the row, not in
 //     abi.Event — the frozen ABI is untouched.
@@ -59,7 +60,7 @@ import (
 type Row struct {
 	Seq          uint64 `json:"seq"`          // monotonic 1-based order anchor
 	TSUnixNano   int64  `json:"ts_unix_nano"` // wall-clock time anchor
-	Kind         string `json:"kind"`         // DECIDE | DENY | RESULT_DENY | QUARANTINE | VDSO_HIT
+	Kind         string `json:"kind"`         // DECIDE | DENY | RESULT_DENY | QUARANTINE | VDSO_HIT | CAP_FAULT | CAP_EVICT | CAP_VERSION_BIND
 	Tool         string `json:"tool,omitempty"`
 	TraceID      string `json:"trace_id,omitempty"`
 	Verdict      string `json:"verdict,omitempty"`
@@ -78,6 +79,15 @@ type Row struct {
 	// debugging convenience layered on top.
 	CallSeq uint64 `json:"call_seq,omitempty"` // the kernel's per-call submission id (ToolCall.SeqNo): the join key tying a call's DECIDE to its later QUARANTINE
 	Witness string `json:"witness,omitempty"`  // the bounded-disclosure claim the verdict surfaced (offending self-modify glob / tool.arg bound / require-witness claim)
+
+	// Capability fields (for C6: witness + audit surface). These are populated for
+	// CAP_FAULT / CAP_EVICT / CAP_VERSION_BIND events to track capability lifecycle.
+	// Fields is the carrier; these are NOT part of the hash-chain pre-image.
+	CapKind   string `json:"cap_kind,omitempty"`   // capability kind: skill | mcp-tool | a2a-agent | ...
+	CapName   string `json:"cap_name,omitempty"`   // capability name
+	CapDigest string `json:"cap_digest,omitempty"` // capability content digest
+	CapFrom   string `json:"cap_from,omitempty"`   // source version (for CAP_VERSION_BIND)
+	CapTo     string `json:"cap_to,omitempty"`     // target version (for CAP_VERSION_BIND)
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
@@ -375,6 +385,12 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		kind = "QUARANTINE"
 	case abi.EvVDSOHit:
 		kind = "VDSO_HIT"
+	case abi.EvCapFault:
+		kind = "CAP_FAULT"
+	case abi.EvCapEvict:
+		kind = "CAP_EVICT"
+	case abi.EvCapVersionBind:
+		kind = "CAP_VERSION_BIND"
 	default:
 		return Row{}, false
 	}
@@ -394,6 +410,28 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 	if r := ev.Result; r != nil {
 		row.ResultDigest = refDigest(r.Payload)
 		row.Taint = taintName(r.Payload.Taint)
+	}
+	// Populate capability fields from Event.Fields (the carrier for C6 events)
+	// Fields carries: {cap_kind, cap_name, cap_digest, cap_from, cap_to, reason}
+	if ev.Fields != nil {
+		if ck, ok := ev.Fields["cap_kind"].(string); ok {
+			row.CapKind = ck
+		}
+		if cn, ok := ev.Fields["cap_name"].(string); ok {
+			row.CapName = cn
+		}
+		if cd, ok := ev.Fields["cap_digest"].(string); ok {
+			row.CapDigest = cd
+		}
+		if cf, ok := ev.Fields["cap_from"].(string); ok {
+			row.CapFrom = cf
+		}
+		if ct, ok := ev.Fields["cap_to"].(string); ok {
+			row.CapTo = ct
+		}
+		if rs, ok := ev.Fields["reason"].(string); ok && row.Reason == "" {
+			row.Reason = rs // allow override for capability events
+		}
 	}
 	return row, true
 }

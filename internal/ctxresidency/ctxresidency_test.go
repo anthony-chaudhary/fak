@@ -2,6 +2,7 @@ package ctxresidency_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -206,5 +207,75 @@ func TestNilInputsAreSafe(t *testing.T) {
 	got := ctxresidency.Query(c, nil)
 	if got.ResidentTokens != 3 || got.ByteHeld != 0 {
 		t.Errorf("KV-only query (nil mmu) = %+v, want ResidentTokens=3 byte fields=0", got)
+	}
+}
+
+// TestLoaderJournalReconciles is the C6 acceptance witness (issue #1109):
+// LoaderJournal reads capability events from the journal and reconciles
+// the derived counts with the kernel's authoritative counters. A mismatch
+// surfaces a discrepancy; a match yields Reconciled=true.
+func TestLoaderJournalReconciles(t *testing.T) {
+	// Create a temporary journal file with synthetic capability events.
+	tmpDir := t.TempDir()
+	journalPath := tmpDir + "/journal.jsonl"
+	f, err := os.Create(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write synthetic journal rows directly (the format is simple JSONL).
+	rows := []string{
+		`{"seq":1,"ts_unix_nano":1,"kind":"CAP_FAULT","cap_kind":"skill","cap_name":"skill1","cap_digest":"abc123","prev_hash":"","hash":"hash1"}`,
+		`{"seq":2,"ts_unix_nano":2,"kind":"CAP_EVICT","cap_kind":"skill","cap_name":"skill2","cap_digest":"def456","prev_hash":"hash1","hash":"hash2"}`,
+		`{"seq":3,"ts_unix_nano":3,"kind":"CAP_VERSION_BIND","cap_kind":"skill","cap_name":"skill1","cap_from":"v1","cap_to":"v2","prev_hash":"hash2","hash":"hash3"}`,
+		`{"seq":4,"ts_unix_nano":4,"kind":"CAP_FAULT","cap_kind":"mcp-tool","cap_name":"tool1","cap_digest":"ghi789","prev_hash":"hash3","hash":"hash4"}`,
+	}
+	for _, row := range rows {
+		if _, err := f.WriteString(row + "\n"); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+	}
+	f.Close()
+
+	// Reconcile: kernel counters match the journal.
+	snap, err := ctxresidency.LoaderJournal(journalPath, 2, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.Reconciled {
+		t.Errorf("LoaderJournal not reconciled: got=%+v, want Reconciled=true", snap)
+	}
+	if snap.Faults != 2 {
+		t.Errorf("Faults=%d, want 2", snap.Faults)
+	}
+	if snap.Evictions != 1 {
+		t.Errorf("Evictions=%d, want 1", snap.Evictions)
+	}
+	if snap.VersionBinds != 1 {
+		t.Errorf("VersionBinds=%d, want 1", snap.VersionBinds)
+	}
+	if len(snap.Operations) != 4 {
+		t.Errorf("Operations=%d, want 4", len(snap.Operations))
+	}
+
+	// Mismatch: kernel counters disagree with the journal.
+	snap2, err := ctxresidency.LoaderJournal(journalPath, 3, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap2.Reconciled {
+		t.Errorf("LoaderJournal reconciled despite fault count mismatch (got=%+v)", snap2)
+	}
+	if snap2.Faults != 2 {
+		t.Errorf("Faults=%d, want 2 (journal count, not kernel count)", snap2.Faults)
+	}
+
+	// Missing journal: reconciled vacuously true (no events = no discrepancies).
+	snap3, err := ctxresidency.LoaderJournal(tmpDir+"/nonexistent.jsonl", 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap3.Reconciled {
+		t.Errorf("LoaderJournal not reconciled on missing journal: got=%+v", snap3)
 	}
 }

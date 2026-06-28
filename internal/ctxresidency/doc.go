@@ -36,6 +36,16 @@
 // HeldSpans == kvmmu.Evicted, ByteHeld == ctxmmu.HeldLen, ByteCleared ==
 // len(ctxmmu.Cleared)) — so the query can never miscount vs the kernel.
 //
+// # C6: witness + audit surface (issue #1109)
+//
+// LoaderJournal reads the durable audit journal and reconciles all capability
+// lifecycle events (CAP_FAULT, CAP_EVICT, CAP_VERSION_BIND) against the kernel's
+// authoritative counters. It is the read side of the trust floor for the
+// capability loader: every fault, eviction, and version-bind is a journal row,
+// and LoaderJournal proves the loader's derived view matches the kernel's ledger.
+// A LoaderSnapshot with Reconciled=true is verified; a mismatch surfaces a
+// discrepancy the auditor must investigate.
+//
 // # The honest boundary
 //
 // The issue's target per-span shape includes {reason, bytes}; those are
