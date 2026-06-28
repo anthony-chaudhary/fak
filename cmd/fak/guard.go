@@ -1150,6 +1150,10 @@ func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, inject
 	// loopback); the audit journal is ON by default (auditLabel says where), the log
 	// stream survives the session only if asked for.
 	fmt.Fprintf(w, "  metrics    : %s/metrics  ·  %s/debug/vars  ·  %s/v1/fak/events\n", gwURL, gwURL, gwURL)
+	// Point operators at the cache-value metric family by name — it lives on /metrics
+	// above, but nothing told them to scrape for it (#1077, epic #1072). These are the
+	// numbers that answer "what did fak's owned KV cache actually save this session?".
+	fmt.Fprintf(w, "  cache value: scrape %s/metrics for the fak_vcache_* family (saved_token_equiv, hit_rate, multiplier, proven)\n", gwURL)
 	fmt.Fprintf(w, "  audit log  : %s\n", auditLabel)
 	fmt.Fprintf(w, "  gateway log: %s\n", logLabel)
 	fmt.Fprintln(w, "  every tool call the agent proposes crosses the capability floor before it runs.")
