@@ -130,18 +130,42 @@ dominates a 512-token prefill, and fix that phase specifically. This is the sing
 raw-number headroom and matters most for long-prompt agentic workloads (big system prompts,
 tool outputs).
 
-### Lever 4 — Tensor-core / TF32 prefill  ·  large on prefill  ·  HIGH (that it helps)  ·  cheap to wire
+### Lever 4 — Tensor-core / TF32 prefill  ·  large on prefill  ·  HIGH (that it helps)  ·  SHIPPED (TF32 wiring); GPU-run pending
 
 **What.** The f32 SGEMM runs on Hopper's **FP32 CUDA cores**, leaving the tensor cores idle.
-Two cheap wins for the compute-bound prefill phase: (a) wire an **F16 prefill** row — the
-`UploadDtype(F16)` → `cublasGemmEx` tensor-core path is already built (#484,
-`uploadF16`/`fcuda_matmul_f16`, floor `cudaFP16CosineMin = 0.997`); and/or (b) enable **TF32**
-math mode on the f32 SGEMM (`cublasSetMathMode(..., CUBLAS_TF32_TENSOR_OP_MATH)` at
-`cuda_kernels.cu:210`) to route f32 GEMMs through tensor cores at a tiny, disclosed precision
-cost. Both are bench-wiring-sized changes (like Lever 1), not kernel rewrites.
+The compute-bound prefill phase is exactly where routing those GEMMs onto the tensor cores pays.
 
-**Next checkable step.** Add a `fak-cuda-f16` engine (`-lean` with the F16 upload selected)
-or a TF32 toggle, and measure the prefill row against llama.cpp on H100.
+**Shipped here (TF32).** A **`FAK_CUDA_TF32=1`** toggle now routes the existing f32 SGEMM
+(`fcuda_matmul_f32` / `cublasSgemm`, `cuda_kernels.cu`) through the tensor cores at **TF32**
+input precision with F32 accumulation — `cublasSetMathMode(g_blas, CUBLAS_TF32_TENSOR_OP_MATH)`
+via the new `fcuda_set_tf32` ABI (`cuda_backend.h`), read once at init in `cuda.go`
+(`tf32Enabled`) and exposed for a host to flip post-init through the cross-build
+`EnableCUDATF32()` seam (`tf32_cuda.go`/`tf32_nocuda.go`, the twin pattern of
+`EnableCUDAGraph`). It is **default-off**, so the witnessed device-vs-cpuref cosine floors hold
+unchanged on the pedantic FP32-core path; TF32 keeps the f32 exponent, so only the mantissa
+narrows (a small, disclosed precision cost). The **`fak-cuda-tf32`** bench engine
+(`tools/gcp_bench.py`) is the apples-to-apples **prefill** row: fak's f32 device path with
+`FAK_CUDA_TF32=1` vs the pedantic-FP32 `fak-cuda` row and llama.cpp. It REUSES the
+`modelbench-cuda` binary `fak-cuda` builds (guarded) and keeps the `-require-non-reference`
+honesty gate. Opt-in until a green Hopper run witnesses the prefill gain. Host-free coverage:
+`tf32_enable_test.go` (the seam stays callable in the default non-cuda build) + the
+`gcp_bench_test.py` engine/render tests.
+
+**The F16 row is NOT yet bench-wiring-sized (correction to the record).** The F16 device GEMM
+(`uploadF16`/`fcuda_matmul_f16`, floor `cudaFP16CosineMin = 0.997`) exists at the *compute*
+layer (#484), but the modelbench **Session** forward only routes uploads as **Q8** (`s.Quant`) or
+**Q4_K** (`s.Q4K`) — there is no F16 upload-dtype path threaded through `matWeightHAL`. So an
+`fak-cuda-f16` engine needs a Session-level F16 routing change first (a new device-dtype select),
+not just a bench fragment — tracked as a separate `not yet`. **TF32 is the genuinely
+zero-Session-change Lever-4 win**, which is why it shipped first: it retunes the *existing* f32
+GEMM and needs no new forward path.
+
+**Next checkable step.** On a 1× H100:
+`python tools/gcp_bench.py --tier a3-high-h100-1g --spot --engine llama,fak-cuda,fak-cuda-tf32`.
+**Expectation:** `fak-cuda-tf32` **prefill** tok/s rises materially over the pedantic-FP32
+`fak-cuda` prefill row (tensor cores vs FP32 cores), with the forward still inside the Approx
+cosine gate. Pair it with Lever 3's `-phase-profile` to confirm the prefill phase is the one that
+moved.
 
 ## The math to 5–10×
 
@@ -161,12 +185,20 @@ identified, now on Hopper.
   measures fak's Q8 device decode apples-to-apples with llama.cpp Q8_0; reuses the
   `modelbench-cuda` binary the `fak-cuda` engine builds; corrected the stale "does not
   advertise `UploadDtype`" comments. Test coverage in `tools/gcp_bench_test.py`.
-- **This roadmap** — the ranked, code-anchored next steps.
+- **Lever 4 (TF32), shipped wiring**: a `FAK_CUDA_TF32=1` toggle (`fcuda_set_tf32` ABI in
+  `cuda_kernels.cu`/`cuda_backend.h`, applied in `cuda.go`, host seam `EnableCUDATF32()` in
+  `tf32_cuda.go`/`tf32_nocuda.go`) that routes the f32 SGEMM through Hopper/Ampere tensor cores
+  at TF32, default-off; plus the opt-in **`fak-cuda-tf32`** bench engine (the f32 prefill
+  tensor-core row). Host-free coverage: `internal/compute/tf32_enable_test.go` + the
+  `gcp_bench_test.py` engine/render tests.
+- **This roadmap** — the ranked, code-anchored next steps, now with Lever 4's TF32 lever shipped
+  and the F16-row "cheap" claim corrected (it needs a Session-level upload-dtype path first).
 
-Everything past this increment (Levers 2–4) is a **GPU-gated `not yet`**: the code paths
-exist or are scoped, but the measured Hopper number is the witness, and this host cannot
-produce it. The first witness to collect is Lever 1's `--engine llama,fak-cuda,fak-cuda-q8`
-run.
+The remaining levers are a **GPU-gated `not yet`**: the code paths exist or are scoped, but the
+measured Hopper number is the witness and this host has no NVIDIA GPU. The witnesses to collect,
+in order: Lever 1's `--engine llama,fak-cuda,fak-cuda-q8` (Q8 decode parity), Lever 4's
+`--engine llama,fak-cuda,fak-cuda-tf32` (TF32 prefill gain), Lever 3's `-phase-profile` (which
+prefill phase dominates), then Lever 2 (device-resident `pos`/`nPos` for replay-many).
 
 ## Reproduce / drive the next run
 
@@ -175,6 +207,12 @@ run.
 python tools/gcp_bench.py --tier a3-high-h100-1g --spot \
     --engine llama,fak-cuda,fak-cuda-q8
 
+# Lever 4: the TF32 tensor-core PREFILL head-to-head (f32 weights, TF32 SGEMM math)
+python tools/gcp_bench.py --tier a3-high-h100-1g --spot \
+    --engine llama,fak-cuda,fak-cuda-tf32
+
 # diagnose the prefill defect (Lever 3) on the same box, if --keep is used
 modelbench-cuda -gguf <qwen2.5-3b-q8_0.gguf> -lean -backend cuda -phase-profile
+# and confirm TF32 moved the prefill phase specifically:
+FAK_CUDA_TF32=1 modelbench-cuda -gguf <qwen2.5-3b-q8_0.gguf> -backend cuda -phase-profile
 ```
