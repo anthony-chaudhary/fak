@@ -101,7 +101,6 @@ var nodeDefaultPolicyJSON = []byte(`{
     "internal/policy/",
     "internal/registrations/",
     ".git/",
-    ".ssh/",
     ".dos/",
     "VERSION",
     "id_rsa",

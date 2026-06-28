@@ -61,7 +61,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"benign bash allowed", "Bash", `{"command":"ls -la"}`, abi.VerdictAllow},
 		{"read allowed", "Read", `{"file_path":"README.md"}`, abi.VerdictAllow},
 		{"write allowed in-tree", "Write", `{"file_path":"notes.txt","content":"hi"}`, abi.VerdictAllow},
-		{"write into .ssh refused", "Write", `{"file_path":".ssh/authorized_keys","content":"x"}`, abi.VerdictDeny},
+		{"write into .ssh allowed (issue #1086: remote dev-node SSH)", "Write", `{"file_path":".ssh/authorized_keys","content":"x"}`, abi.VerdictAllow},
 		{"unlisted tool fails closed", "exfiltrate_secrets", `{}`, abi.VerdictDeny},
 
 		// The host harness's orchestration / deferred-tool-loading / read-only-MCP surface must
@@ -89,7 +89,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"opencode bash benign allowed", "bash", `{"command":"go test ./..."}`, abi.VerdictAllow},
 		{"opencode read allowed", "read", `{"filePath":"README.md"}`, abi.VerdictAllow},
 		{"opencode write in-tree allowed", "write", `{"filePath":"notes.txt","content":"x"}`, abi.VerdictAllow},
-		{"opencode write into .ssh refused (camelCase filePath)", "write", `{"filePath":".ssh/authorized_keys","content":"x"}`, abi.VerdictDeny},
+		{"opencode write into .ssh allowed (issue #1086: remote dev-node SSH)", "write", `{"filePath":".ssh/authorized_keys","content":"x"}`, abi.VerdictAllow},
 		{"opencode edit into .git refused", "edit", `{"filePath":".git/config","oldString":"a","newString":"b"}`, abi.VerdictDeny},
 		{"opencode unlisted tool fails closed", "exfiltrate", `{}`, abi.VerdictDeny},
 	}

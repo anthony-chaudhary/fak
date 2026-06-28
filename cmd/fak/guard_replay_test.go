@@ -90,7 +90,6 @@ func TestGuardReplayRunsCleanOnBothWires(t *testing.T) {
 			for _, want := range []string{
 				"fak guard --replay-trace",
 				"DENY[POLICY_BLOCK]",
-				"DENY[SELF_MODIFY]",
 				"kernel decision(s)",
 				"journal chain verified",
 				"every call landed on its expected disposition",
