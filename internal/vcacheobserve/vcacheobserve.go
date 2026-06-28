@@ -337,6 +337,21 @@ func telemetryRow(t Turn) vcachegov.TelemetryRow {
 	}
 }
 
+// Rows converts observed turns to the vcachegov.TelemetryRow form vcachescore.Score
+// consumes, using the SAME per-turn mapping Observe uses internally — so a caller that
+// folds a persisted turn window into `fak vcache score` gets a result that reconciles
+// with `fak vcache observe` by construction. Returns nil for an empty input.
+func Rows(turns []Turn) []vcachegov.TelemetryRow {
+	if len(turns) == 0 {
+		return nil
+	}
+	rows := make([]vcachegov.TelemetryRow, len(turns))
+	for i := range turns {
+		rows[i] = telemetryRow(turns[i])
+	}
+	return rows
+}
+
 func ratio(num, den float64) float64 {
 	if den == 0 {
 		if num > 0 {

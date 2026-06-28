@@ -48,6 +48,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
+	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
@@ -956,6 +957,19 @@ func (s *Server) KernelCounters() kernel.Counters {
 		return kernel.Counters{}
 	}
 	return s.k.Counters()
+}
+
+// VCacheTurnsSnapshot returns a copy of the per-turn provider-cache window this session
+// observed (input/cache_read/cache_creation tokens per turn, the OBSERVED axis fed by
+// observeVCacheTurn on every streamed passthrough turn), plus whether the bounded window
+// has dropped older turns. It is the live source `fak vcache score` reads to report the
+// REALIZED cache multiplier instead of the synthetic-Zipf forecast — exposed here, next to
+// AdjudicationSummary, so a host can persist it at session exit. Safe on a nil Server.
+func (s *Server) VCacheTurnsSnapshot() ([]vcacheobserve.Turn, bool) {
+	if s == nil {
+		return nil, false
+	}
+	return s.metrics.vcacheTurnsSnapshot()
 }
 
 // SetModelLoadProfile records the boot-time weight-load breakdown the host captured
