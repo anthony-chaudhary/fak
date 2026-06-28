@@ -532,6 +532,12 @@ func (s *Session) Prefill(ids []int) []float32 {
 		return s.headResident(last)
 	}
 	if s.Metal {
+		// The Qwen3.6 hybrid (Gated-DeltaNet) cannot run through the generic full-attention
+		// Metal prefill, so route it to the hybrid twin — projection/MLP GEMMs batched on the
+		// GPU, GDN recurrence on the CPU — instead of tripping requirePreNorm (#71).
+		if metalQwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
+			return s.headQ(s.prefillBatchedMetalQwen35Hybrid(ids))
+		}
 		s.requirePreNorm("Metal prefill")
 		// Prefill projections on the GPU; the head stays the cheap CPU single-token GEMV.
 		return s.headQ(s.prefillBatchedMetal(ids))
@@ -625,6 +631,11 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		return
 	}
 	if s.Metal {
+		// Hybrid (Gated-DeltaNet) routes to the hybrid twin; see Prefill above (#71).
+		if metalQwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
+			s.prefillBatchedMetalQwen35Hybrid(ids)
+			return
+		}
 		s.requirePreNorm("Metal prefill")
 		s.prefillBatchedMetal(ids)
 		return
