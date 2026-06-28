@@ -243,26 +243,39 @@ func applyBudget(work []Cell, cap int64) ([]Cell, string) {
 	return kept, fmt.Sprintf("dropped %d cell(s) over the %d-byte budget", dropped, cap)
 }
 
+// pageIn routes one cell through the backend's trust gate for rendering/folding. It
+// returns the materialized body when the cell is admissible; otherwise it records the
+// refusal on res (sealed, tombstoned, or a page-in error) and returns ok=false. This is
+// the single poison-never-enters-context page-in gate shared by renderInto and
+// applyConsolidate, so the refusal vocabulary stays defined in exactly one place.
+func pageIn(ctx context.Context, b Backend, res *Result, c Cell) (body []byte, ok bool) {
+	if c.Sealed {
+		res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: "sealed_by_trust_gate"})
+		return nil, false
+	}
+	if c.Tombstoned {
+		res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: "tombstoned_by_context_control"})
+		return nil, false
+	}
+	body, err := b.Materialize(ctx, c.ID)
+	if err != nil {
+		reason := "page_in_refused"
+		if errors.Is(err, ErrSealed) {
+			reason = "sealed_by_trust_gate"
+		}
+		res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: reason})
+		return nil, false
+	}
+	return body, true
+}
+
 // renderInto materializes the working set into context, routing every page-in through
 // the backend's trust gate. A sealed or tombstoned cell is REFUSED, not rendered — the
 // poison-never-enters-context invariant. Render does not change the working set.
 func renderInto(ctx context.Context, b Backend, res *Result, work []Cell) string {
 	for _, c := range work {
-		if c.Sealed {
-			res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: "sealed_by_trust_gate"})
-			continue
-		}
-		if c.Tombstoned {
-			res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: "tombstoned_by_context_control"})
-			continue
-		}
-		body, err := b.Materialize(ctx, c.ID)
-		if err != nil {
-			reason := "page_in_refused"
-			if errors.Is(err, ErrSealed) {
-				reason = "sealed_by_trust_gate"
-			}
-			res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: reason})
+		body, ok := pageIn(ctx, b, res, c)
+		if !ok {
 			continue
 		}
 		res.Rendered = append(res.Rendered, RenderItem{
@@ -318,21 +331,8 @@ func applyConsolidate(ctx context.Context, b Backend, res *Result, work []Cell) 
 	var srcIDs []string
 	folded := 0
 	for _, c := range work {
-		if c.Sealed {
-			res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: "sealed_by_trust_gate"})
-			continue
-		}
-		if c.Tombstoned {
-			res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: "tombstoned_by_context_control"})
-			continue
-		}
-		body, err := b.Materialize(ctx, c.ID)
-		if err != nil {
-			reason := "page_in_refused"
-			if errors.Is(err, ErrSealed) {
-				reason = "sealed_by_trust_gate"
-			}
-			res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: reason})
+		body, ok := pageIn(ctx, b, res, c)
+		if !ok {
 			continue
 		}
 		head := headLine(body, 160)

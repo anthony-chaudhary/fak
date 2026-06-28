@@ -1,6 +1,7 @@
 package memq
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strconv"
@@ -244,9 +245,9 @@ func (p Pred) eval(c Cell, refcount int) bool {
 		if err != nil {
 			return false // a non-numeric value against a numeric field never matches
 		}
-		return cmpInt(p.Op, n, rv)
+		return cmpOrdered(p.Op, n, rv)
 	}
-	return cmpStr(p.Op, strField(c, p.Field), p.Value)
+	return cmpOrdered(p.Op, strField(c, p.Field), p.Value)
 }
 
 // numField returns (value, true) for the numeric fields, else (0, false).
@@ -289,25 +290,10 @@ func strField(c Cell, field string) string {
 	return ""
 }
 
-func cmpInt(op string, a, b int64) bool {
-	switch op {
-	case PredEq:
-		return a == b
-	case PredNe:
-		return a != b
-	case PredLt:
-		return a < b
-	case PredLe:
-		return a <= b
-	case PredGt:
-		return a > b
-	case PredGe:
-		return a >= b
-	}
-	return false
-}
-
-func cmpStr(op, a, b string) bool {
+// cmpOrdered evaluates a predicate operator against two ordered operands. One generic
+// body serves both the numeric (int64) and lexical (string) field comparisons — Go's
+// native ordering is the same shape for each, so the six-arm switch lives in one place.
+func cmpOrdered[T cmp.Ordered](op string, a, b T) bool {
 	switch op {
 	case PredEq:
 		return a == b
