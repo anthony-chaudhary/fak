@@ -116,6 +116,38 @@ func topKNeedsRevalidation[C any](frontier []C, topK int, name func(C) string, n
 	return flagged
 }
 
+// finalizeSearch runs the shared tail every model-free genome search ends with, so the
+// subtle ordering it depends on lives in ONE place: a stable name-ordering (a regenerable
+// artifact), Pareto-frontier stamping with the frontier RE-DERIVED afterwards (so the
+// frontier/baseline/best copies all carry the stamped OnFrontier flag), the headline best
+// pick under `better`, a baseline copy re-read from the stamped slice so it carries the
+// flag too, and the top-k live-revalidation flags (a FLAG, never an executed model run).
+// Only the frontier oracle (`frontierOf`), the headline tie-break (`better`), the
+// OnFrontier setter, and the revalidation predicate differ between the policy-genome and
+// topology searches — threaded here as closures. Returns the sorted candidates, the
+// stamped frontier, the best candidate, the refreshed baseline copy, and the flagged names.
+func finalizeSearch[C any](
+	candidates []C,
+	baseline C,
+	name func(C) string,
+	setOnFrontier func(*C, bool),
+	frontierOf func([]C) []C,
+	better func(c, incumbent C) bool,
+	needsReval func(C) bool,
+	topK int,
+) ([]C, []C, C, C, []string) {
+	sort.Slice(candidates, func(i, j int) bool { return name(candidates[i]) < name(candidates[j]) })
+	stampFrontier(candidates, frontierOf(candidates), name, setOnFrontier)
+	frontier := frontierOf(candidates) // re-derive so the frontier copies carry OnFrontier too
+	best := bestCandidate(candidates, better)
+	refreshedBaseline := baseline
+	if b, ok := candidateByName(candidates, name, "baseline"); ok {
+		refreshedBaseline = b // re-read from the stamped slice so the baseline copy carries OnFrontier
+	}
+	flagged := topKNeedsRevalidation(frontier, topK, name, needsReval)
+	return candidates, frontier, best, refreshedBaseline, flagged
+}
+
 // aliasConvertArgs builds an aliased convert_currency call's args: it picks one of the
 // {from/to, source/target} alias spellings deterministically from rng, draws an amount in
 // [50, 949], and marshals {alias_a:"USD", alias_b:"EUR", amount}. It returns the chosen

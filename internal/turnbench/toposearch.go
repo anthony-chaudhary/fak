@@ -436,31 +436,23 @@ func RunTopologySearch(ctx context.Context, cfg TopologySearchConfig, cm FanoutC
 		candidates = append(candidates, sc)
 	}
 
-	// Stable candidate ordering (by name) for a regenerable artifact.
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Name < candidates[j].Name })
-
-	// Pareto frontier on (CreditedSavings up, ArbiterCollision down). Stamp OnFrontier onto the
-	// candidates BEFORE deriving the baseline/best copies so those carry the correct flag.
-	candName := func(c TopologyCandidate) string { return c.Name }
-	stampFrontier(candidates, topoParetoFrontier(candidates), candName,
-		func(c *TopologyCandidate, on bool) { c.OnFrontier = on })
-	frontier := topoParetoFrontier(candidates)
-
-	// Best: highest CreditedSavings, ties -> lower collision -> lower width -> name. Read from
-	// the flagged slice so Best.OnFrontier is set. The frontier credit cap means an
-	// extrapolated genome can never out-credit a witnessed one.
-	best := bestCandidate(candidates, func(c, incumbent TopologyCandidate) bool {
-		return betterTopology(c.Fitness, c.Genome, incumbent.Fitness, incumbent.Genome) ||
-			(equalTopology(c.Fitness, incumbent.Fitness) && c.Name < incumbent.Name)
-	})
-	// Refresh the baseline copy from the flagged slice so its OnFrontier flag is set too.
-	if b, ok := candidateByName(candidates, candName, "baseline"); ok {
-		baseline = b
-	}
-
-	// Flag the top-k frontier genomes that need live re-validation (width past the frontier).
-	flagged := topKNeedsRevalidation(frontier, cfg.TopK, candName,
-		func(c TopologyCandidate) bool { return c.NeedsLiveRevalidation })
+	// Pareto frontier on (CreditedSavings up, ArbiterCollision down); best is highest
+	// CreditedSavings, ties -> lower collision -> lower width -> name (the frontier credit cap
+	// means an extrapolated genome can never out-credit a witnessed one). finalizeSearch runs
+	// the shared sort/stamp/best/baseline-refresh/top-k tail; only the frontier oracle and the
+	// headline tie-break are topology specific.
+	candidates, frontier, best, baseline, flagged := finalizeSearch(
+		candidates, baseline,
+		func(c TopologyCandidate) string { return c.Name },
+		func(c *TopologyCandidate, on bool) { c.OnFrontier = on },
+		topoParetoFrontier,
+		func(c, incumbent TopologyCandidate) bool {
+			return betterTopology(c.Fitness, c.Genome, incumbent.Fitness, incumbent.Genome) ||
+				(equalTopology(c.Fitness, incumbent.Fitness) && c.Name < incumbent.Name)
+		},
+		func(c TopologyCandidate) bool { return c.NeedsLiveRevalidation },
+		cfg.TopK,
+	)
 
 	return &TopologySearchReport{
 		Provenance: Provenance{

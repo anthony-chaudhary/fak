@@ -448,34 +448,22 @@ func RunPolicySearch(ctx context.Context, cfg PolicySearchConfig, cm CostModel) 
 		return nil, err
 	}
 
-	// Stable candidate ordering (by name) for a regenerable artifact.
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Name < candidates[j].Name })
-
-	// Pareto frontier on (InjectionsAdmitted, Denies): a candidate is on the frontier iff
-	// no other candidate dominates it (<= on both axes, < on at least one). Stamp the
-	// OnFrontier flag onto the candidates slice BEFORE deriving the baseline/best copies so
-	// those copies carry the correct flag (they are read out of the flagged slice).
-	candName := func(c SearchCandidate) string { return c.Name }
-	stampFrontier(candidates, paretoFrontier(candidates), candName,
-		func(c *SearchCandidate, on bool) { c.OnFrontier = on })
-	frontier := paretoFrontier(candidates) // re-derive so the frontier copies carry OnFrontier too
-
-	// Best: lowest InjectionsAdmitted, ties -> fewer DestructiveExecuted -> fewer Denies
-	// -> name. The headline improvement vs the baseline. Read from the flagged slice so
-	// Best.OnFrontier is set.
-	best := bestCandidate(candidates, func(c, incumbent SearchCandidate) bool {
-		return betterFitness(c.Fitness, incumbent.Fitness) ||
-			(equalFitness(c.Fitness, incumbent.Fitness) && c.Name < incumbent.Name)
-	})
-	// Refresh the baseline copy from the flagged slice so its OnFrontier flag is set too.
-	if b, ok := candidateByName(candidates, candName, "baseline"); ok {
-		baseline = b
-	}
-
-	// Flag the top-k frontier candidates that need live re-validation (any bounded cell).
-	// A FLAG, never an executed model run.
-	flagged := topKNeedsRevalidation(frontier, cfg.TopK, candName,
-		func(c SearchCandidate) bool { return c.NeedsLiveRevalidation })
+	// Pareto frontier on (InjectionsAdmitted, Denies); best is lowest InjectionsAdmitted,
+	// ties -> fewer DestructiveExecuted -> fewer Denies -> name. finalizeSearch runs the
+	// shared sort/stamp/best/baseline-refresh/top-k tail; only the frontier oracle and the
+	// headline tie-break are policy-genome specific.
+	candidates, frontier, best, baseline, flagged := finalizeSearch(
+		candidates, baseline,
+		func(c SearchCandidate) string { return c.Name },
+		func(c *SearchCandidate, on bool) { c.OnFrontier = on },
+		paretoFrontier,
+		func(c, incumbent SearchCandidate) bool {
+			return betterFitness(c.Fitness, incumbent.Fitness) ||
+				(equalFitness(c.Fitness, incumbent.Fitness) && c.Name < incumbent.Name)
+		},
+		func(c SearchCandidate) bool { return c.NeedsLiveRevalidation },
+		cfg.TopK,
+	)
 
 	return &PolicySearchReport{
 		Provenance: Provenance{
