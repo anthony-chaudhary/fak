@@ -9,18 +9,27 @@
       "competitor": "NVIDIA Dynamo (Smart Router); SGLang router; vLLM production router",
       "competitor_class": "sota",
       "competitor_value": null,
-      "competitor_source": "https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/ (2025-03-18)",
-      "fak_value": null,
-      "unit": "TTFT / avg-latency speedup from cache-aware routing",
+      "competitor_range": [
+        50,
+        99
+      ],
+      "competitor_source": "Baseten-on-Dynamo 0.89 cross-replica cache hit across 4 replicas (https://www.baseten.co/blog/how-baseten-achieved-2x-faster-inference-with-nvidia-dynamo/, 2025-01); SGLang RadixAttention published 50-99% hit-rate band (arXiv:2312.07104, NeurIPS 2024); NVIDIA Dynamo Smart Router (https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/, 2025-03-18).",
+      "fak_value": 93.97,
+      "unit": "% cross-replica prefix-KV cache-hit",
       "higher_is_better": true,
-      "verdict": "no-claim",
-      "status": "stub",
+      "verdict": "parity",
+      "status": "shipped",
       "fak_commit": "",
-      "fak_artifact": "",
-      "fak_doc": "No row in BENCHMARK-AUTHORITY.md; CLAIMS.md has coherence_broadcast (causal-invalidation) but no replica-routing claim",
-      "apples_to_apples": true,
-      "comparison_note": "REAL GAP fak should measure if it ever scales beyond one engine. fak is a single in-process kernel: it owns one KV cache and has a cross-agent coherence BUS (vdso.Revoke broadcast, causal invalidation witnessed) but NO multi-replica router that steers a request to the worker already holding its prefix (the Dynamo Smart Router / SGLang cache-aware router pattern). fak's cache-aware scheduling is intra-kernel (FCFS->DFS recovers 62.1%->86.7%), not cross-replica routing. No fak number exists; honest verdict is no-claim, not parity.",
-      "measured_on": "2026-06-23"
+      "fak_artifact": "experiments/kv-fleet-routing/kv-fleet-routing-hitrate-20260627.json",
+      "fak_doc": "internal/gateway/kv_fleet_routing.go (MeasureKVAwareFleetRouting) witnessed by TestKVAwareFleetRoutingHitRate; artifact kv-fleet-routing-hitrate-20260627.json (verify kv_aware_locality.hit_rate=0.9396551724137931). The cross-instance analogue of the on-instance row 'cache-aware-scheduling-routing' (FCFS 62.1% -> 86.7%).",
+      "apples_to_apples": false,
+      "comparison_note": "fak now ships the multi-replica router this row asked for: gateway.FleetCacheRouter steers a request to the instance already holding its prefix KV, homing a cold prefix on the least-loaded instance (the Dynamo Smart Router / SGLang cache-aware router pattern), composed from the on-instance residency signal + the cross-agent coherence bus (vdso.Revoke). WITNESSED number: 93.97% cross-instance prefix-KV hit rate on a Zipf-skewed shared-prefix agent fleet (4 instances x 8 prefixes vs 28 families), a +10.4% lift over the cache-blind round-robin that gateway.ReplicaRouter.pick does today (85.13%). Sits inside the published cross-replica cache-hit band (50-99%) and clears Baseten-on-Dynamo's 0.89 -> parity, the fleet analogue of the on-instance 86.7%. FENCE: this is the routing-DECISION hit rate from a deterministic host-free simulation of the placement policy (no GPUs) -> apples_to_apples=false (same metric class as Baseten's live cross-replica hit, different apparatus). The downstream wall-clock win those hits produce on real GPUs (Baseten -50% TTFT / +62% output tok/s; GORGO 2.5x median TTFT) is host-gated and explicitly NOT claimed by this number.",
+      "measured_on": "2026-06-27",
+      "verify": {
+        "field": "kv_aware_locality.hit_rate",
+        "expect": 0.9396551724137931,
+        "tol": 1e-06
+      }
     },
     {
       "id": "fleet-serving-50x5",

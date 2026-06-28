@@ -1,0 +1,40 @@
+{
+  "_about": "WITNESSED fak-authored measurement for the industry-scorecard rows kv-cache-aware-routing and kv-aware-routing-locality. The cross-instance (fleet) analogue of fak's on-instance FCFS 62.1% -> cache-aware 86.7% radix-hit recovery: it measures whether a KV-aware fleet router sends a request to the instance that already holds its prefix KV, vs a cache-blind round-robin balancer (what gateway.ReplicaRouter.pick does today).",
+  "harness": "internal/gateway.MeasureKVAwareFleetRouting (deterministic, host-free); pinned by TestKVAwareFleetRoutingHitRate",
+  "engine": "fak gateway KV-aware fleet router (internal/gateway/kv_fleet_routing.go): residency-aware placement + least-loaded cold homing, the cross-GPU composition of the on-instance residency signal",
+  "metric": "cross-instance prefix-KV routing hit rate (fraction of requests routed to an instance already holding the prefix KV -> no cold re-prefill)",
+  "workload": {
+    "name": "shared-prefix agent fleet",
+    "desc": "Zipf-skewed cross-agent traffic over distinct shared-prefix families (system prompts / agent scaffolds), interleaved one-per-family-per-round (concurrent agents, not back-to-back bursts). Aggregate working set EXCEEDS one instance's resident capacity but FITS the fleet, so locality is what keeps the hot prefixes home.",
+    "instances": 4,
+    "cap_per_instance_prefixes": 8,
+    "prefix_families": 28,
+    "zipf_hot_weight": 120,
+    "stream_requests": 464
+  },
+  "cache_blind_round_robin": {
+    "requests": 464,
+    "hits": 395,
+    "hit_rate": 0.8512931034482759
+  },
+  "kv_aware_locality": {
+    "requests": 464,
+    "hits": 436,
+    "hit_rate": 0.9396551724137931
+  },
+  "hit_rate_lift_x": 1.1037974683544303,
+  "competitor": {
+    "name": "Baseten on NVIDIA Dynamo (KV-aware router)",
+    "cross_replica_cache_hit": 0.89,
+    "replicas": 4,
+    "downstream_wallclock_effect": "-50% TTFT / -34% TPOT / +62% output tok/s / +61% RPS on Qwen3 480B ~50k-token inputs (host-gated; NOT measured here)",
+    "source": "https://www.baseten.co/blog/how-baseten-achieved-2x-faster-inference-with-nvidia-dynamo/ (2025-01)"
+  },
+  "competitor_band": {
+    "metric": "published cross-replica / cross-request prefix-KV cache-hit-rate band for cache-aware routers",
+    "low": 0.50,
+    "high": 0.99,
+    "points": "Baseten-on-Dynamo 0.89 across 4 replicas; SGLang RadixAttention published 50-99% hit-rate band (arXiv:2312.07104)"
+  },
+  "fence": "WITNESSED routing-DECISION hit rate from a deterministic simulation of the placement policy (no GPUs). It is the upstream CAUSE the SOTA wall-clock wins flow from; the downstream wall-clock TTFT/throughput win on real GPUs (Baseten -50% TTFT / +62% tok/s; GORGO 2.5x median TTFT) is host-gated and explicitly NOT claimed by this number. Same metric class as Baseten's live cross-replica cache hit, different apparatus (simulation vs live GPU fleet) -> apples_to_apples=false."
+}
