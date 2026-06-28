@@ -1059,16 +1059,16 @@
       "dimension": "Multi-node scale-out (combined TP x PP x EP x DP across hosts)",
       "why_it_matters": "Serving a frontier model means composing tensor, pipeline, expert, and data parallelism across many hosts and an InfiniBand/RoCE fabric. The relevant operator question is not 'does it run on 8 GPUs' but how many GPUs/nodes a single coherent deployment spans, what interconnect it requires, and how cleanly the parallelism dimensions compose. Datacenter-scale orchestration (rack-scale NVLink domains, cross-node fabric) is the table-stakes axis for frontier serving.",
       "sota_systems": [
-        "NVIDIA GB300 NVL72 + Dynamo (MLPerf v5.1)",
-        "SGLang/TensorRT-LLM multi-node",
+        "NVIDIA GB300 NVL72 x4 (288 GPUs over Quantum-X800 InfiniBand, MLPerf v6.0)",
+        "SGLang/TensorRT-LLM + NVIDIA Dynamo multi-node",
         "GB200 NVL72 (prior generation)"
       ],
-      "sota_bar": "GB300 NVL72 (72 Blackwell-Ultra GPUs in one NVLink domain) set MLPerf Inference v5.1 records, delivering up to 40% more DeepSeek-R1 reasoning throughput than the prior generation; disaggregated serving via NVIDIA Dynamo added up to 1.5x on Llama-3.1-405B interactive.",
+      "sota_bar": "A single GB300 NVL72 is 72 Blackwell-Ultra GPUs in one NVLink domain; MLPerf Inference v6.0 (2026-03-30) composed FOUR of them -- 288 GPUs over Quantum-X800 InfiniBand, NVIDIA's largest-ever submission -- into one coherent DeepSeek-R1 671B MoE serving run at ~2.494M tok/s aggregate offline. Disaggregated serving via NVIDIA Dynamo composes the TPxPPxEPxDP dimensions across the fabric (up to 1.5x on Llama-3.1-405B interactive).",
       "best_value": 72,
-      "metric_unit": "GPUs in one coherent served instance (NVLink domain)",
-      "source_url": "https://developer.nvidia.com/blog/nvidia-blackwell-ultra-sets-new-inference-records-in-mlperf-debut/",
-      "source_date": "2025-09",
-      "notes": "Refreshed: old source was NVIDIA Dynamo disaggregated-serving design doc (2025-03-18). The 72-GPU single-instance NVLink-domain class is unchanged in count, but the current SOTA datapoint is GB300 NVL72's MLPerf Inference v5.1 debut (Sept 2025) -- new silicon (Blackwell Ultra), +40% DeepSeek-R1 throughput, and Dynamo disaggregation giving up to 1.5x on Llama-405B. changed_vs_old=true because the SOTA system and the dated results materially advanced even though the headline GPU count (72/NVLink domain) holds. MLPerf v5.1 (Sept 2025) is the latest round; no v6.x round found as of mid-2026.",
+      "metric_unit": "GPUs in one coherent NVLink domain (GB300 NVL72; v6.0 scaled to 4 domains / 288 GPUs over InfiniBand)",
+      "source_url": "https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform",
+      "source_date": "2026-04-01",
+      "notes": "Refreshed to MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01), which supersedes the v5.1 debut bar this row previously cited. The single-NVLink-domain count is unchanged (72 GPUs / GB300 NVL72), but the current multi-node SOTA datapoint is v6.0's 288-GPU (4x GB300 NVL72 over Quantum-X800 InfiniBand) DeepSeek-R1 671B submission at ~2.494M tok/s aggregate offline -- see absolute-tokens-per-second-mlperf for the aggregate number and expert-parallelism-large-moe for the EP dimension. The earlier 'no v6.x round found' note was stale: v6.0 is the current round and DeepSeek-R1 671B MoE is now its headline multi-node workload.",
       "in_scope": true
     },
     {
@@ -1255,18 +1255,18 @@
       "id": "peak-serving-throughput-per-gpu",
       "category": "throughput",
       "dimension": "Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded)",
-      "metric_unit": "tokens/sec per GPU and per rack",
-      "best_value": 1100000,
-      "sota_bar": "MLPerf Inference v5.1 / v5.0: ~1.1M tokens/s aggregate on one Azure ND GB300 v6 (GB300 NVL72) rack (unverified submission, beating 865K tok/s on GB200 NVL72); ~33,000 tok/s on a single H200 for Llama-2-70B (40% over H100). These are the buyer-citable upper bounds for engine+hardware throughput.",
+      "metric_unit": "tokens/sec per GPU (offline, DeepSeek-R1 671B, MLPerf v6.0; per-rack aggregate cross-referenced)",
+      "best_value": 9821,
+      "sota_bar": "MLPerf Inference v6.0 (2026-03-30) is the current round and the audited per-accelerator peak: DeepSeek-R1 671B on GB300 NVL72 reaches 9,821 tok/s/GPU offline (8,064 tok/s/GPU accuracy+latency-constrained server); the full 288-GPU (4x GB300 NVL72) submission aggregates ~2.494M tok/s (see absolute-tokens-per-second-mlperf). The audited single-H200 Llama-2-70B peak of ~33,000 tok/s (40% over H100) still stands for that older/smaller workload. The prior v5.1/v5.0 ~1.1M tok/s/rack Azure GB300 figure was an unverified submission and is superseded.",
       "sota_systems": [
-        "NVIDIA GB300/GB200 NVL72 (TensorRT-LLM)",
-        "NVIDIA H200",
+        "NVIDIA GB300 NVL72 (DeepSeek-R1 671B, MLPerf v6.0, TensorRT-LLM/Dynamo)",
+        "NVIDIA H200 (Llama-2-70B audited)",
         "MangoBoost/AMD MI300X"
       ],
-      "source_url": "https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/",
-      "source_date": "2025-09-10",
+      "source_url": "https://www.storagereview.com/news/nvidia-sets-mlperf-inference-v6-0-records-with-blackwell-ultra-platform",
+      "source_date": "2026-04-01",
       "why_it_matters": "Throughput per GPU is the denominator of cost-per-token and the headline capacity number every operator sizes a fleet against. MLPerf is the only neutral, audited cross-vendor source, so it anchors the SOTA bar buyers actually trust over vendor blogs.",
-      "notes": "1.1M tok/s figure flagged unverified; H200 33K tok/s is the audited Llama-2-70B figure.",
+      "notes": "Refreshed from the v5.1/v5.0 framing to MLPerf Inference v6.0 (results 2026-03-30 / published 2026-04-01), the current round, whose headline model is DeepSeek-R1 671B MoE. The audited per-GPU peak is now 9,821 tok/s/GPU offline / 8,064 server on GB300 NVL72 (DeepSeek-R1); the prior ~1.1M tok/s/rack Azure figure was flagged unverified and is superseded by v6.0's audited 2.494M tok/s 288-GPU aggregate (absolute-tokens-per-second-mlperf). The single-H200 Llama-2-70B ~33,000 tok/s remains the audited datapoint for that workload. best_value is now the audited per-GPU offline figure, matching this dimension's per-accelerator intent.",
       "in_scope": true
     },
     {
