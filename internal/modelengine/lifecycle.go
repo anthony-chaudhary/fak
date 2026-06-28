@@ -34,6 +34,10 @@ type inkernelRequest struct {
 	done   chan struct{}
 	cancel context.CancelFunc
 
+	// tok is the engine's NL tokenizer snapshotted at Admit (nil = byte-level). It
+	// detokenizes the generated ids into the result's "generated_text".
+	tok NLTokenizer
+
 	// written once by the decode goroutine before close(done); read only after
 	// <-done (the close is the happens-before edge — no mutex needed).
 	res       *abi.Result
@@ -67,7 +71,7 @@ func (r *inkernelRequest) Reclaimed() bool {
 func (e *Engine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	m := e.model()
 	in := refBytes(ctx, c.Args)
-	prompt := tokenize(c.Tool, in, m.Cfg.VocabSize)
+	prompt := e.buildPrompt(c.Tool, in, m.Cfg.VocabSize)
 
 	sess := m.NewSession()
 	if e.q4k {
@@ -81,6 +85,7 @@ func (e *Engine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest,
 		tokens: make(chan abi.EngineToken),
 		done:   make(chan struct{}),
 		cancel: cancel,
+		tok:    e.tok,
 	}
 
 	go func() {
@@ -116,34 +121,49 @@ func (r *inkernelRequest) decode(cctx context.Context, tool string, sess *model.
 		}
 		logits = sess.Step(next)
 	}
-	r.finish(assembleResult(putCtx, tool, len(prompt), gen), nil, true)
+	r.finish(assembleResult(putCtx, tool, len(prompt), gen, r.tok), nil, true)
 }
 
 // assembleResult builds the SAME payload + Meta the one-shot Complete produced, so
 // every lifecycle consumer (the per-request decode here AND the native scheduler)
 // yields a result byte-identical to the pre-lifecycle buffered path for the same
-// call.
-func assembleResult(ctx context.Context, tool string, promptLen int, gen []int) *abi.Result {
+// call. When tok is non-nil it ADDITIVELY carries the detokenized "generated_text"
+// (and a "detokenized" Meta flag) so the /v1/fak/syscall route returns decoded text,
+// not just raw ids (#463); a nil tok (the byte-level default) omits both, leaving the
+// payload byte-identical to the pre-tokenizer path.
+func assembleResult(ctx context.Context, tool string, promptLen int, gen []int, tok NLTokenizer) *abi.Result {
+	text := ""
+	if tok != nil {
+		if s, err := tok.Decode(gen); err == nil {
+			text = s
+		}
+	}
 	body, _ := json.Marshal(struct {
 		Tool   string `json:"tool"`
 		Engine string `json:"engine"`
 		Model  string `json:"model"`
 		Tokens []int  `json:"generated_tokens"`
+		Text   string `json:"generated_text,omitempty"`
 	}{
 		Tool:   tool,
 		Engine: EngineID,
 		Model:  "smollm2-inkernel",
 		Tokens: gen,
+		Text:   text,
 	})
 	ref := putBytes(ctx, body)
+	meta := map[string]string{
+		"engine":        EngineID,
+		"input_tokens":  strconv.Itoa(promptLen),
+		"output_tokens": strconv.Itoa(len(gen)),
+	}
+	if tok != nil {
+		meta["detokenized"] = "true"
+	}
 	return &abi.Result{
 		Payload: ref,
 		Status:  abi.StatusOK,
-		Meta: map[string]string{
-			"engine":        EngineID,
-			"input_tokens":  strconv.Itoa(promptLen),
-			"output_tokens": strconv.Itoa(len(gen)),
-		},
+		Meta:    meta,
 	}
 }
 

@@ -258,7 +258,7 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 		ln.gen = append(ln.gen, next)
 		ln.emitted++
 		if ln.sess.M.Cfg.IsEOS(next) || ln.emitted >= genTokens {
-			ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen), nil)
+			ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, nil), nil)
 			continue
 		}
 		cont = append(cont, ln)

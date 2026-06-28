@@ -1080,6 +1080,12 @@ func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.Mem
 // and /v1/messages serve real in-kernel chat by default (like cmd/simpledemo); otherwise it
 // returns nil, leaving the gateway's offline MockPlanner fallback. The bool reports whether
 // a tokenizer-load startup phase should be recorded.
+//
+// On a real load it ALSO arms the in-kernel engine's detokenizer (modelengine.SetTokenizer),
+// symmetric with how loadServeInKernelModel preloads the weights: that closes #463's named
+// gap — the lower-level /v1/fak/syscall route then NL-tokenizes a call's arguments and
+// returns decoded TEXT (generated_text) instead of raw token ids. With no real tokenizer the
+// engine keeps its byte-level default, so the CI/no-export path is unchanged.
 func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool) {
 	if tokPath != "" {
 		tokFile := tokPath
@@ -1088,6 +1094,7 @@ func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool
 		}
 		tok, err := tokenizer.LoadJSON(tokFile)
 		must(err)
+		modelengine.SetTokenizer(tok)
 		return tok, true
 	}
 	if ggufPath != "" {
@@ -1098,6 +1105,7 @@ func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool
 		// tokenizer (e.g. an SPM-only checkpoint), we keep the MockPlanner fallback — pass
 		// --tokenizer to override.
 		if tok, err := embeddedGGUFTokenizer(ggufPath); err == nil {
+			modelengine.SetTokenizer(tok)
 			return tok, true
 		} else {
 			fmt.Fprintf(os.Stderr, "fak serve: --gguf set without --tokenizer and no embedded BPE tokenizer (%v);\n"+

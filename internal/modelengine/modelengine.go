@@ -40,6 +40,21 @@ import (
 // EngineID is the registered id the kernel selects this backend by.
 const EngineID = "inkernel"
 
+// NLTokenizer is the OPTIONAL natural-language tokenizer the in-kernel engine uses
+// to turn a tool call's arguments into a real NL prompt (Encode) and to turn the
+// generated token ids back into decoded TEXT (Decode), instead of the zero-dependency
+// byte-level default. The `fak serve|run|guard --gguf` boot installs the GGUF's
+// embedded BPE tokenizer here via SetTokenizer (resolveServeTokenizer); a
+// *tokenizer.Tokenizer satisfies it. When it is nil — the CI default with no model
+// export — the engine keeps the byte-level path verbatim, so the synthetic-vs-real
+// split stays exactly as it is for weights. This closes issue #463's named gap: the
+// /v1/fak/syscall route returns decoded text, not raw token ids, once a real
+// tokenizer is configured.
+type NLTokenizer interface {
+	Encode(text string) ([]int, error)
+	Decode(ids []int) (string, error)
+}
+
 // genTokens is how many tokens a single tool-call completion decodes. Small: the
 // engine demonstrates the live in-kernel decode loop, it is not a chat surface.
 const genTokens = 16
@@ -54,6 +69,11 @@ type Engine struct {
 	m    *model.Model
 	cfg  model.Config
 	q4k  bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
+
+	// tok is the OPTIONAL NL tokenizer (nil = byte-level default). Set ONCE at boot via
+	// SetTokenizer, before the server accepts requests, then read-only on the dispatch
+	// path — the same set-at-boot-then-read contract q4k uses (no lock needed).
+	tok NLTokenizer
 }
 
 // New returns an Engine backed by the default synthetic config. The model itself
@@ -127,6 +147,21 @@ func (e *Engine) PreloadQ4K(m *model.Model) {
 // PreloadQ4K installs preloaded resident-Q4_K weights on the registered Default engine.
 func PreloadQ4K(m *model.Model) { Default.PreloadQ4K(m) }
 
+// SetTokenizer arms the in-kernel engine with a real NL tokenizer so the dispatch
+// path NL-tokenizes a call's arguments (instead of byte-tokenizing them) and
+// detokenizes the generated ids back to TEXT in the result payload. Call it at boot,
+// before serving — it is a plain field write read lock-free on the request path. A
+// nil tokenizer leaves the byte-level default intact; the LAST non-nil caller wins.
+func (e *Engine) SetTokenizer(t NLTokenizer) {
+	if e == nil || t == nil {
+		return
+	}
+	e.tok = t
+}
+
+// SetTokenizer arms the registered Default engine's NL tokenizer.
+func SetTokenizer(t NLTokenizer) { Default.SetTokenizer(t) }
+
 // Caps advertises the in-kernel engine capability AND the lifecycle seam
 // (EngineLifecycleCap) the Engine implements via Admit, so a consumer can negotiate
 // streaming/cancel without a type assertion. A worker that doesn't know either cap
@@ -160,6 +195,41 @@ func (e *Engine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, er
 		res.Call = c // preserve the pre-shim Result.Call binding
 	}
 	return res, nil
+}
+
+// buildPrompt turns a tool name + argument bytes into a bounded prompt of token ids,
+// using the NL tokenizer when one is armed (SetTokenizer) and the byte-level map
+// otherwise. The NL path encodes "<tool> <args>" so distinct tools still yield distinct
+// prompts, the same property the byte path has. It falls back to the byte map if the
+// tokenizer errors, yields nothing, or emits an id outside the model's vocab (a
+// tokenizer/model mismatch must never crash prefill) — so the NL path is purely
+// additive and the byte default is preserved exactly when tok is nil.
+func (e *Engine) buildPrompt(tool string, args []byte, vocab int) []int {
+	if e.tok != nil {
+		if ids, err := e.tok.Encode(tool + " " + string(args)); err == nil && len(ids) > 0 {
+			if len(ids) > maxPromptTokens {
+				ids = ids[:maxPromptTokens]
+			}
+			if idsWithinVocab(ids, vocab) {
+				return ids
+			}
+		}
+	}
+	return tokenize(tool, args, vocab)
+}
+
+// idsWithinVocab reports whether every id is a valid index under a vocab of size
+// vocab — the mismatch guard buildPrompt uses before handing NL ids to prefill.
+func idsWithinVocab(ids []int, vocab int) bool {
+	if vocab <= 0 {
+		return false
+	}
+	for _, id := range ids {
+		if id < 0 || id >= vocab {
+			return false
+		}
+	}
+	return true
 }
 
 // tokenize turns a tool name + argument bytes into a bounded prompt of token ids.
