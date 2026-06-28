@@ -436,6 +436,29 @@ sk-ant-oat01-*
 # code that emits it, not the emission.
 memqdemo-report.json
 
+# --- ad-hoc session scratch on the shared trunk (node-local; never commit) --------
+# These re-leak into `git status` every session on the shared trunk (the same
+# trajectory-audit finding the root *_out.txt / *_err.txt rules above address) and
+# carry no durable signal — they are one-off analysis scripts, scorecard JSON dumps,
+# and commit-message drops a session writes while working. The TOOLS that emit them
+# (tools/code_slop_scorecard.py, `fak commit -F msgfile`, the AEO scorecard) are
+# tracked; this transient run state is not. Anchored to the module root where the
+# name is generic, so a tracked file of the same name elsewhere is unaffected.
+#   scratch_*  : ad-hoc throwaway analysis scripts / JSON a session writes at root
+#   /slop*.json: code-slop-scorecard output (regenerable via the tracked scorecard)
+#   .aeo_* .aeo-*: agent-experience-optimization scorecard session scratch
+#   /_tmp_*    : one-off gate/preview scratch (json/md)
+#   /*_msg_*.txt: `fak commit` message drops (commit_msg_*, docs_msg_*)
+#   /err.txt   : a bare stderr redirect drop
+/scratch_*
+/slop.json
+/slop_*.json
+.aeo_*
+.aeo-*
+/_tmp_*
+/*_msg_*.txt
+/err.txt
+
 # Trajectory-audit drops written by tools/session_audit.py (the /trajectory-audit skill,
 # `audit --json OUT`). These carry PRIVATE operator telemetry — per-session dollar costs,
 # local namespace breakdown (e.g. C--work-job, C--WINDOWS-system32), and tool-mix counts —
