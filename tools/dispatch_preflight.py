@@ -219,6 +219,24 @@ def _is_worker_cmdline(cmdline: str) -> bool:
     return any(marker.lower() in low for marker in WORKER_CMD_MARKERS)
 
 
+def _is_worker_image(image: str) -> bool:
+    """True iff ``image`` (a process name or argv[0]) is a real agent backend.
+
+    The marker substrings (``dos-dispatch-loop``, ``resolve GitHub issue #``)
+    routinely appear on the command line of a *generic shell* — a bash/powershell
+    that merely greps for, logs, or dispatches a worker, or an operator inspecting
+    the fleet. Those are NOT workers; counting them inflates the live count and
+    pins the dispatcher at cap against ghosts (the exact false-positive the
+    create-time-window fallback already guards against via _WORKER_BACKEND_IMAGES,
+    but which the primary cmdline scan did not). Require the image be one of the
+    named backends so a shell that just mentions the marker never counts.
+    """
+    base = os.path.basename((image or "").strip().strip('"')).lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return any(base == img or base.startswith(img) for img in _WORKER_BACKEND_IMAGES)
+
+
 def _collapse_descendant_pids(pids: set[int], parent_by_pid: dict[int, int | None]) -> set[int]:
     """Collapse wrapper/child matches to one worker root.
 
@@ -261,13 +279,16 @@ def _cmdline_worker_pids() -> set[int]:
     if psutil is not None:
         pids: set[int] = set()
         parent_by_pid: dict[int, int | None] = {}
-        for p in psutil.process_iter(["cmdline", "ppid"]):
+        for p in psutil.process_iter(["name", "cmdline", "ppid"]):
             try:
                 cl = " ".join(p.info.get("cmdline") or [])
                 parent_by_pid[int(p.pid)] = int(p.info.get("ppid") or 0)
             except (psutil.Error, TypeError):
                 continue
-            if _is_worker_cmdline(cl):
+            # Marker on the cmdline AND a real backend image — a shell that merely
+            # mentions the marker (a grep, a launcher, an operator inspecting) is
+            # not a live worker and must not consume a cap slot.
+            if _is_worker_cmdline(cl) and _is_worker_image(p.info.get("name") or ""):
                 pids.add(int(p.pid))
         return _collapse_descendant_pids(pids, parent_by_pid)
     # Fallback when psutil is absent. wmic.exe is removed on Win11 24H2+ (build
@@ -279,14 +300,19 @@ def _cmdline_worker_pids() -> set[int]:
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                  "$all = @(Get-CimInstance Win32_Process); "
                  "$all | Where-Object { $_.CommandLine -match 'dos-dispatch-loop|resolve GitHub issue #' } | "
-                 "ForEach-Object { \"$($_.ProcessId),$($_.ParentProcessId)\" }"],
+                 "ForEach-Object { \"$($_.ProcessId),$($_.ParentProcessId),$($_.Name)\" }"],
                 capture_output=True, text=True, timeout=30,
                 creationflags=_no_window_creationflags()).stdout
             pids: set[int] = set()
             parent_by_pid: dict[int, int | None] = {}
             for ln in out.splitlines():
-                parts = [p.strip() for p in ln.split(",", 1)]
+                parts = [p.strip() for p in ln.split(",", 2)]
                 if not parts or not parts[0].isdigit():
+                    continue
+                # require a real backend image — drop a shell (powershell/bash/cmd)
+                # that only mentions the marker, the cap-pinning false positive.
+                image = parts[2] if len(parts) > 2 else ""
+                if not _is_worker_image(image):
                     continue
                 pid = int(parts[0])
                 parent = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
@@ -302,9 +328,14 @@ def _cmdline_worker_pids() -> set[int]:
         for ln in out.splitlines():
             if not ln.strip() or not _is_worker_cmdline(ln):
                 continue
-            first = ln.split(None, 1)[0]
-            if first.isdigit():
-                pids.add(int(first))
+            # `pgrep -fa` => "<pid> <argv0> <argv1...>"; require argv0 be a real
+            # backend image so a shell that only mentions the marker never counts.
+            toks = ln.split(None, 2)
+            if len(toks) < 2 or not toks[0].isdigit():
+                continue
+            if not _is_worker_image(toks[1]):
+                continue
+            pids.add(int(toks[0]))
         return pids
     except (OSError, subprocess.TimeoutExpired):
         return set()
