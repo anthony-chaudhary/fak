@@ -135,22 +135,28 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
-// handleSuites lists the available trace fixtures and which are present on disk.
-func handleSuites(w http.ResponseWriter, r *http.Request) {
-	type s struct {
-		ID      string `json:"id"`
-		Label   string `json:"label"`
-		Present bool   `json:"present"`
-		Calls   int    `json:"calls"`
-	}
-	out := make([]s, 0, len(knownSuites))
+type suiteRow struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Present bool   `json:"present"`
+	Calls   int    `json:"calls"`
+}
+
+func suiteRows() []suiteRow {
+	out := make([]suiteRow, 0, len(knownSuites))
 	for _, ks := range knownSuites {
-		row := s{ID: ks.ID, Label: ks.Label}
+		row := suiteRow{ID: ks.ID, Label: ks.Label}
 		if t, err := turnbench.LoadTrace(suitePath(ks.ID)); err == nil {
 			row.Present, row.Calls = true, len(t.Calls)
 		}
 		out = append(out, row)
 	}
+	return out
+}
+
+// handleSuites lists the available trace fixtures and which are present on disk.
+func handleSuites(w http.ResponseWriter, r *http.Request) {
+	out := suiteRows()
 	writeJSON(w, map[string]any{
 		"suites":     out,
 		"gomaxprocs": gomax,
