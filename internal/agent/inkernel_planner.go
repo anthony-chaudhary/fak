@@ -1475,25 +1475,27 @@ func segTool(m Message) string {
 // evictPoisonedIDs drops the cached prefix lying along `ids` (a poisoned transcript token
 // path) — the token-level #14 seam EvictPoisoned wraps. Guarded by mu; no-op when reuse
 // is disabled.
-func (p *InKernelPlanner) evictPoisonedIDs(ids []int) int {
+// underTreeLock runs fn while holding mu, returning 0 (no-op) when the prefix tree
+// is absent (reuse disabled). Centralizes the nil-check + lock the prefix-tree
+// accessors share so a copy can't drop the guard.
+func (p *InKernelPlanner) underTreeLock(fn func() int) int {
 	if p.tree == nil {
 		return 0
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.tree.EvictPrefix(ids)
+	return fn()
+}
+
+func (p *InKernelPlanner) evictPoisonedIDs(ids []int) int {
+	return p.underTreeLock(func() int { return p.tree.EvictPrefix(ids) })
 }
 
 // cachedPrefixLen reports how many leading tokens of `ids` are already resident in the
 // prefix cache (read-only). It is the reuse-state probe the witnesses assert on; 0 when
 // reuse is disabled.
 func (p *InKernelPlanner) cachedPrefixLen(ids []int) int {
-	if p.tree == nil {
-		return 0
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.tree.MatchLen(ids)
+	return p.underTreeLock(func() int { return p.tree.MatchLen(ids) })
 }
 
 // checkStop reports whether the accumulated decode text ends with any of the
