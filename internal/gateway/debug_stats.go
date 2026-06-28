@@ -81,15 +81,24 @@ func (s *Server) renderTurnDebugError(trace, wire string, err error, elapsed tim
 
 // debugErrorReason maps a planner/proxy error to the closed reason token the FAILED debug line
 // shows. It reuses upstreamErrorKind (the classifier the /metrics counter shares) so the line and
-// the counter agree, then collapses the two status kinds into one "status" token for the
-// glanceable line. A nil error reads "error" (a failure with no typed cause — e.g. a stream that
-// opened then produced no events).
+// the counter agree, then collapses the generic status kinds into one "status" token for the
+// glanceable line — while keeping the operationally-distinct 4xx conditions (a rate limit, an auth
+// failure, a permission denial) as their own glanceable tokens, because "we are being rate-limited"
+// and "our credential is bad" call for very different operator action and should not both read
+// "status". A nil error reads "error" (a failure with no typed cause — e.g. a stream that opened
+// then produced no events).
 func debugErrorReason(err error) string {
 	switch upstreamErrorKind(err) {
 	case "stalled":
 		return "stalled"
 	case "unreachable":
 		return "unreachable"
+	case "rate_limited":
+		return "rate_limited"
+	case "auth":
+		return "auth"
+	case "forbidden":
+		return "forbidden"
 	case "status_4xx", "status_5xx":
 		return "status"
 	case "oom":

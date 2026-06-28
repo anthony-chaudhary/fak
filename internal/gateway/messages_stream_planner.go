@@ -157,11 +157,17 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		s.metrics.observeUpstreamError(err)
 		s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
 		if !started {
-			// Nothing was written yet — map the error to its distinct status/code (a stall
-			// becomes 504 upstream_stalled) so the client sees WHAT failed, not a generic 502.
-			status, _, msg := s.plannerErrorStatus(err)
+			// Nothing was written yet — map the error to its distinct status/code (a 429
+			// becomes upstream_rate_limited, a stall 504 upstream_stalled) so the client sees
+			// WHAT failed, not a generic 502, and gets the code + any Retry-After. The metric
+			// was already observed above (observeUpstreamError at the top of this branch), so
+			// classify with the PURE mapper here to avoid double-counting the failure.
+			status, code, msg := upstreamErrorStatus(err)
+			if ra := upstreamRetryAfter(err); ra != "" {
+				w.Header().Set("Retry-After", ra)
+			}
 			s.logf("gateway: upstream model error (messages stream): %v", err)
-			writeErr(w, status, msg)
+			writeErrCode(w, status, code, msg)
 			return true
 		}
 		s.logf("gateway: upstream model error mid-stream (messages): %v", err)

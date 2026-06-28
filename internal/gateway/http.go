@@ -463,8 +463,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// upstream provider's raw body, which must not cross the trust boundary to a
 		// (possibly unauthenticated) downstream caller.
 		s.logf("gateway: upstream model error: %v", err)
-		status, code, msg := s.plannerErrorStatus(err)
-		writeErrCode(w, status, code, msg)
+		s.writeUpstreamErr(w, err)
 		return
 	}
 
@@ -628,8 +627,64 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 			"upstream stalled — the model or provider opened the stream then went silent within the idle window"
 	}
 	var se *agent.UpstreamStatusError
-	if errors.As(err, &se) && se.Status >= 400 && se.Status < 500 {
-		return se.Status, "", fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
+	if errors.As(err, &se) {
+		// A 4xx is a REQUEST error the client can act on. Until now every 4xx collapsed
+		// into one opaque code:null "upstream rejected the request (HTTP n)" — a 401
+		// (bad credential), a 403 (login/org/permission denied), a 429 (rate limit), a
+		// 413 (too large), and a 404 (unknown model) were indistinguishable except by the
+		// bare number, even though each calls for a DIFFERENT fix. Split them into
+		// distinct, actionable OpenAI-style codes + messages so the wrapped agent — and
+		// an operator reading the wire — sees WHICH 4xx hit and what to do, not just "not
+		// 200". The upstream status passes straight through in every arm (no remap):
+		// remapping 429 in particular would silently break both fak's own backoff
+		// (chat.go retryableStatus keys on the literal 429) and any downstream client's.
+		// Every message is built from se.Status + fixed literals ONLY — the upstream's
+		// raw Body (and err.Error(), which embeds it) NEVER crosses the trust boundary to
+		// a possibly-unauthenticated downstream caller (#82/#346 invariant). The `type`
+		// the client sees comes from errType(status) at the writeErrCode site (401/403 ->
+		// authentication_error, 429 -> rate_limit_error), so these code strings are the
+		// machine-branchable companion to that human-facing type.
+		if se.Status >= 400 && se.Status < 500 {
+			switch se.Status {
+			case http.StatusBadRequest: // 400
+				return se.Status, "upstream_invalid_request",
+					"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges"
+			case http.StatusUnauthorized: // 401
+				return se.Status, "upstream_unauthorized",
+					"upstream rejected the credential (HTTP 401) — the upstream API key/token is missing, wrong, or expired (re-login or check --api-key-env)"
+			case http.StatusForbidden: // 403
+				return se.Status, "upstream_forbidden",
+					"upstream denied access (HTTP 403) — the credential is valid but lacks permission for this model, org, or region (a login/entitlement issue, not a bad key)"
+			case http.StatusNotFound: // 404
+				return se.Status, "upstream_model_not_found",
+					"upstream does not know this model or endpoint (HTTP 404) — verify the model id and that --base-url targets the right API"
+			case http.StatusRequestTimeout: // 408
+				return se.Status, "upstream_request_timeout",
+					"upstream timed out receiving the request (HTTP 408) — retry; if it persists, reduce the request size"
+			case http.StatusRequestEntityTooLarge: // 413
+				return se.Status, "upstream_payload_too_large",
+					"upstream rejected the request as too large (HTTP 413) — reduce the prompt/context size or max_tokens"
+			case http.StatusTooManyRequests: // 429
+				return se.Status, "upstream_rate_limited",
+					"upstream rate-limited the request (HTTP 429) — back off and retry (see the Retry-After response header when the provider supplied one)"
+			default:
+				// Any other 4xx (402, 405, 409, 422, 451, …): the historical generic text,
+				// now reached ONLY by un-enumerated statuses rather than every 4xx.
+				return se.Status, "upstream_request_rejected",
+					fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
+			}
+		}
+		// A 503 the upstream tagged with a Retry-After is an OVERLOAD the client should
+		// back off on, not a generic gateway fault — surface the real 503 (and the
+		// Retry-After echo happens at the write site) so a wrapped agent waits instead of
+		// hammering. Every other 5xx stays the opaque 502 below: the upstream itself
+		// failed in a way the client cannot time. code stays "" (the historical
+		// code:null shape) for both so the 5xx envelope is byte-identical apart from the
+		// genuinely-overloaded 503.
+		if se.Status == http.StatusServiceUnavailable && se.RetryAfter != "" {
+			return http.StatusServiceUnavailable, "",
+				"upstream temporarily unavailable (HTTP 503) — back off and retry (see the Retry-After response header)"
+		}
 	}
 	return http.StatusBadGateway, "", "upstream model error"
 }
@@ -640,6 +695,39 @@ func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 		s.metrics.observeUpstreamError(err)
 	}
 	return upstreamErrorStatus(err)
+}
+
+// writeUpstreamErr is the single buffered-error fold for the proxy/planner paths:
+// it classifies the upstream failure (observing the metric + mapping it to an
+// HTTP status/code/message via plannerErrorStatus), echoes the upstream's
+// Retry-After header downstream when the failure carried one, then writes the
+// OpenAI-style error envelope. Centralizing it here is what lets EVERY served
+// wire — chat, completions, responses, gemini, both Anthropic messages paths,
+// and the streaming proxy — surface the same distinct codes AND the same
+// Retry-After signal without each handler re-deriving it. The Retry-After value
+// is the upstream's header VERBATIM; fak never parses it, so a malformed provider
+// value can never reach fak's control flow — it only ever becomes a response
+// header (or, absent, a clean no-op). It must be set BEFORE writeErrCode, which
+// calls w.WriteHeader and freezes the header block.
+func (s *Server) writeUpstreamErr(w http.ResponseWriter, err error) {
+	status, code, msg := s.plannerErrorStatus(err)
+	if ra := upstreamRetryAfter(err); ra != "" {
+		w.Header().Set("Retry-After", ra)
+	}
+	writeErrCode(w, status, code, msg)
+}
+
+// upstreamRetryAfter returns the upstream's Retry-After header from a
+// *agent.UpstreamStatusError, or "" for any other error (or an absent header).
+// It is the only place the gateway reaches into the upstream error for that one
+// safe-to-forward field; everything else about the upstream error stays off the
+// wire.
+func upstreamRetryAfter(err error) string {
+	var se *agent.UpstreamStatusError
+	if errors.As(err, &se) {
+		return se.RetryAfter
+	}
+	return ""
 }
 
 func writeChatCompletionStream(w http.ResponseWriter, resp ChatResponse) {
@@ -1256,6 +1344,12 @@ func errType(status int) string {
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return "authentication_error"
+	case status == http.StatusTooManyRequests:
+		// 429 gets the OpenAI/Anthropic-standard rate_limit_error type so a client that
+		// branches on `type` (back off on a rate limit, don't on a malformed request)
+		// classifies it correctly — without this it fell through to invalid_request_error
+		// and was indistinguishable from a 400.
+		return "rate_limit_error"
 	case status >= 500:
 		return "server_error"
 	default:
