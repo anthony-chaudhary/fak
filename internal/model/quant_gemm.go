@@ -4,7 +4,6 @@ import (
 	"math"
 	"os"
 	"runtime"
-	"strconv"
 )
 
 const (
@@ -34,19 +33,10 @@ func initQGemmGroup() bool {
 	}
 }
 
-var qgemmGroupMaxP = initQGemmGroupMaxP()
-
-func initQGemmGroupMaxP() int {
-	if s := os.Getenv("FAK_QGEMM_GROUP_MAXP"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n >= 1 {
-			return n
-		}
-	}
-	// Grouping avoids repeated launch barriers across q/k/v and gate/up. After the batched
-	// activation/value loops moved off the serial path, Zen5 measurements favor grouping
-	// through B=1024; larger batches do not move the peak.
-	return 1024
-}
+// Grouping avoids repeated launch barriers across q/k/v and gate/up. After the batched
+// activation/value loops moved off the serial path, Zen5 measurements favor grouping
+// through B=1024; larger batches do not move the peak.
+var qgemmGroupMaxP = envIntMin("FAK_QGEMM_GROUP_MAXP", 1, 1024)
 
 func resolveQGemmMode(env string, envSet bool, goarch string) string {
 	if envSet {

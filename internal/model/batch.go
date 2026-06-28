@@ -56,30 +56,24 @@ func initAttnGQAFuse() bool {
 	}
 }
 
-var attnSaxpy3SIMDMinPos = initAttnSaxpy3SIMDMinPos()
-
-func initAttnSaxpy3SIMDMinPos() int {
-	if s := os.Getenv("FAK_SAXPY3_SIMD_MINPOS"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+// envIntMin returns the integer value of env var name when it is set to a valid integer
+// >= min, else def — the shared shape of the FAK_* int tuning knobs (the int twin of
+// envInt64Default).
+func envIntMin(name string, min, def int) int {
+	if s := os.Getenv(name); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= min {
 			return n
 		}
 	}
-	return 1
+	return def
 }
 
-var attnSaxpy3SIMDMinBatch = initAttnSaxpy3SIMDMinBatch()
+var attnSaxpy3SIMDMinPos = envIntMin("FAK_SAXPY3_SIMD_MINPOS", 0, 1)
 
-func initAttnSaxpy3SIMDMinBatch() int {
-	if s := os.Getenv("FAK_SAXPY3_SIMD_MINB"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n >= 1 {
-			return n
-		}
-	}
-	// Long-context batch decode spends most of its non-GEMM time accumulating V for the
-	// three GQA query heads; the amd64 helper wins even at small B and can still be
-	// disabled/tuned with FAK_SAXPY3_SIMD_MINB.
-	return 1
-}
+// Long-context batch decode spends most of its non-GEMM time accumulating V for the
+// three GQA query heads; the amd64 helper wins even at small B and can still be
+// disabled/tuned with FAK_SAXPY3_SIMD_MINB.
+var attnSaxpy3SIMDMinBatch = envIntMin("FAK_SAXPY3_SIMD_MINB", 1, 1)
 
 var attnFdot3SIMD = initAttnFdot3SIMD()
 
@@ -92,16 +86,7 @@ func initAttnFdot3SIMD() bool {
 	}
 }
 
-var attnFdot3SIMDMinBatch = initAttnFdot3SIMDMinBatch()
-
-func initAttnFdot3SIMDMinBatch() int {
-	if s := os.Getenv("FAK_FDOT3_SIMD_MINB"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n >= 1 {
-			return n
-		}
-	}
-	return 64
-}
+var attnFdot3SIMDMinBatch = envIntMin("FAK_FDOT3_SIMD_MINB", 1, 64)
 
 func batchRectFastPathOK(cfg Config, quant bool) bool {
 	return batchPreNormFastPathOK(cfg, quant)

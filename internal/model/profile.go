@@ -192,6 +192,17 @@ func (s *Session) phaseStart() time.Time {
 	return time.Now()
 }
 
+// headLogitsBuf returns the reused, grown logits buffer for one decode head together with a
+// fresh phase timer — the shared setup of headQ / headQ4 / headQ4K / headGPTQ.
+func (s *Session) headLogitsBuf() ([]float32, time.Time) {
+	if s.qDecode == nil {
+		s.qDecode = &qDecodeBuf{}
+	}
+	y := grow(s.qDecode.Logits, s.M.Cfg.VocabSize)
+	s.qDecode.Logits = y
+	return y, s.phaseStart()
+}
+
 func (s *Session) phaseEnd(phase string, start time.Time) {
 	if s == nil || s.PhaseProfiler == nil || start.IsZero() {
 		return

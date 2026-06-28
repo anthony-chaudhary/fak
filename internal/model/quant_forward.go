@@ -24,12 +24,7 @@ var qprofOn = os.Getenv("FAK_QPROFILE") != ""
 // (the 49,152×576 tied embedding, the single largest weight) is the biggest single
 // beneficiary of quantization on the decode path.
 func (s *Session) headQ(xf []float32) []float32 {
-	if s.qDecode == nil {
-		s.qDecode = &qDecodeBuf{}
-	}
-	y := grow(s.qDecode.Logits, s.M.Cfg.VocabSize)
-	s.qDecode.Logits = y
-	t := s.phaseStart()
+	y, t := s.headLogitsBuf()
 	xq := s.quantizeVecQ8(xf)
 	s.phaseEnd("q8_vector_quantize", t)
 	t = s.phaseStart()

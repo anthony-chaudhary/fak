@@ -14,6 +14,35 @@ package model
 // TestBatchedExpertDeltaMatchesLoop); only the parFor dispatch COUNT changes (3 per layer
 // instead of ~3*K). See docs/notes/GLM52-DECODE-PATH-TO-10-TOKS-2026-06-27.md (lever 2).
 
+// batchExpertRows runs fn(e, rlo, rhi) for every (expert, contiguous row-range) chunk in the
+// flattened [0, K*rowsPer) index space, splitting each parFor work chunk on expert boundaries
+// — the shared dispatch scaffold of q4kBatchRows / kQuantBatchRows. inDim is ts[0].in, used
+// only for the parThreshold serial/parallel gate; fn owns the per-row reduction, so every
+// output row is computed in the identical order regardless of how the chunk is split.
+func batchExpertRows(K, rowsPer, inDim int, fn func(e, rlo, rhi int)) {
+	if K == 0 || rowsPer == 0 {
+		return
+	}
+	total := K * rowsPer
+	body := func(lo, hi int) {
+		for g := lo; g < hi; {
+			e := g / rowsPer
+			rlo := g - e*rowsPer
+			rhi := rowsPer
+			if e*rowsPer+rhi > hi {
+				rhi = hi - e*rowsPer
+			}
+			fn(e, rlo, rhi)
+			g = e*rowsPer + rhi
+		}
+	}
+	if numWorkers <= 1 || total*inDim < parThreshold {
+		body(0, total)
+		return
+	}
+	parFor(total, numWorkers, body)
+}
+
 // q4kBatchRows computes, for K resident q4kTensors that all share the SAME activation xn
 // (shape [rowsPer, in]), every tensor's [rowsPer] output, in ONE parFor over the flattened
 // [0, K*rowsPer) row space. y[e] receives tensor e's output. The per-row reduction is the
@@ -24,33 +53,18 @@ func q4kBatchRows(ts []*q4kTensor, xn []float32, rowsPer int, y [][]float32) {
 	if K == 0 || rowsPer == 0 {
 		return
 	}
-	total := K * rowsPer
 	useInt8 := q4kSDOTEnabled()
 	var qv q8Vec
 	if useInt8 {
 		qv = quantizeVecQ8(xn)
 	}
-	body := func(lo, hi int) {
-		for g := lo; g < hi; {
-			e := g / rowsPer
-			rlo := g - e*rowsPer
-			rhi := rowsPer
-			if e*rowsPer+rhi > hi {
-				rhi = hi - e*rowsPer
-			}
-			if useInt8 {
-				q4kMatRowsRangeInt8(ts[e], qv, y[e], rlo, rhi)
-			} else {
-				q4kMatRowsRange(ts[e], xn, y[e], rlo, rhi)
-			}
-			g = e*rowsPer + rhi
+	batchExpertRows(K, rowsPer, ts[0].in, func(e, rlo, rhi int) {
+		if useInt8 {
+			q4kMatRowsRangeInt8(ts[e], qv, y[e], rlo, rhi)
+		} else {
+			q4kMatRowsRange(ts[e], xn, y[e], rlo, rhi)
 		}
-	}
-	if numWorkers <= 1 || total*ts[0].in < parThreshold {
-		body(0, total)
-		return
-	}
-	parFor(total, numWorkers, body)
+	})
 }
 
 // kQuantBatchRows is the q4kBatchRows twin for resident Q5_K/Q6_K tensors with PER-EXPERT
@@ -63,7 +77,6 @@ func kQuantBatchRows(ts []*kQuantTensor, acts [][]float32, rowsPer int, y [][]fl
 	if K == 0 || rowsPer == 0 {
 		return
 	}
-	total := K * rowsPer
 	useInt8 := make([]bool, K)
 	qvs := make([]q8Vec, K)
 	for e := range ts {
@@ -72,31 +85,17 @@ func kQuantBatchRows(ts []*kQuantTensor, acts [][]float32, rowsPer int, y [][]fl
 			qvs[e] = quantizeVecQ8(acts[e])
 		}
 	}
-	body := func(lo, hi int) {
-		for g := lo; g < hi; {
-			e := g / rowsPer
-			rlo := g - e*rowsPer
-			rhi := rowsPer
-			if e*rowsPer+rhi > hi {
-				rhi = hi - e*rowsPer
+	batchExpertRows(K, rowsPer, ts[0].in, func(e, rlo, rhi int) {
+		if useInt8[e] {
+			ranger := q5kMatRowsRangeInt8
+			if ts[e].kind == kindQ6K {
+				ranger = q6kMatRowsRangeInt8
 			}
-			if useInt8[e] {
-				ranger := q5kMatRowsRangeInt8
-				if ts[e].kind == kindQ6K {
-					ranger = q6kMatRowsRangeInt8
-				}
-				ranger(ts[e], qvs[e], y[e], rlo, rhi)
-			} else {
-				kQuantMatRowsRange(ts[e], acts[e], y[e], rlo, rhi)
-			}
-			g = e*rowsPer + rhi
+			ranger(ts[e], qvs[e], y[e], rlo, rhi)
+		} else {
+			kQuantMatRowsRange(ts[e], acts[e], y[e], rlo, rhi)
 		}
-	}
-	if numWorkers <= 1 || total*ts[0].in < parThreshold {
-		body(0, total)
-		return
-	}
-	parFor(total, numWorkers, body)
+	})
 }
 
 // batchedExpertDelta accumulates the gate-weighted SwiGLU sum of the picked experts into

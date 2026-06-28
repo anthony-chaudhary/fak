@@ -322,19 +322,10 @@ func summarizeSpanRewardReport(rows []SpanRewardRow, threshold float64) SpanRewa
 	return report
 }
 
-func selectSpanRewardChecks(rows []SpanRewardRow, k int) []int {
-	n := len(rows)
-	if k <= 0 || 2*k >= n {
-		out := make([]int, n)
-		for i := range out {
-			out[i] = i
-		}
-		return out
-	}
-	order := make([]int, n)
-	for i := range order {
-		order[i] = i
-	}
+// spanRewardOrder returns row indices [0,len(rows)) sorted by DESCENDING NormalizedReward,
+// ties broken by ASCENDING ID — the shared ranking order of the shadow span-reward rows.
+func spanRewardOrder(rows []SpanRewardRow) []int {
+	order := iotaInts(len(rows))
 	sort.Slice(order, func(i, j int) bool {
 		a, b := rows[order[i]], rows[order[j]]
 		if a.NormalizedReward != b.NormalizedReward {
@@ -342,6 +333,15 @@ func selectSpanRewardChecks(rows []SpanRewardRow, k int) []int {
 		}
 		return a.ID < b.ID
 	})
+	return order
+}
+
+func selectSpanRewardChecks(rows []SpanRewardRow, k int) []int {
+	n := len(rows)
+	if k <= 0 || 2*k >= n {
+		return iotaInts(n)
+	}
+	order := spanRewardOrder(rows)
 	seen := make(map[int]bool, 2*k)
 	var out []int
 	for _, idx := range append(order[:k:k], order[n-k:]...) {
@@ -355,17 +355,7 @@ func selectSpanRewardChecks(rows []SpanRewardRow, k int) []int {
 }
 
 func assignSpanRewardRanks(rows []SpanRewardRow) {
-	order := make([]int, len(rows))
-	for i := range order {
-		order[i] = i
-	}
-	sort.Slice(order, func(i, j int) bool {
-		a, b := rows[order[i]], rows[order[j]]
-		if a.NormalizedReward != b.NormalizedReward {
-			return a.NormalizedReward > b.NormalizedReward
-		}
-		return a.ID < b.ID
-	})
+	order := spanRewardOrder(rows)
 	for i, idx := range order {
 		rows[idx].Rank = i + 1
 	}
@@ -390,10 +380,7 @@ func averageRanksDesc(v []float64) ([]float64, bool) {
 			return nil, false
 		}
 	}
-	idx := make([]int, len(v))
-	for i := range idx {
-		idx[i] = i
-	}
+	idx := iotaInts(len(v))
 	sort.Slice(idx, func(i, j int) bool {
 		if v[idx[i]] != v[idx[j]] {
 			return v[idx[i]] > v[idx[j]]

@@ -552,18 +552,14 @@ func (s *Session) Prefill(ids []int) []float32 {
 		}
 		return s.headQ(s.prefillBatchedQ(ids))
 	}
-	if s.M.Cfg.IsMoE() || s.M.Cfg.DenseMLP || s.M.Cfg.Alibi || s.M.Cfg.IsQwen35Hybrid() || s.M.Cfg.AttnOutputGate || s.M.Cfg.BlockTopology != PreNorm || s.M.Cfg.hasLayerSpecificRopeTheta() {
+	if q8PrefillNeedsTokenLoop(s.M.Cfg) {
 		// The batched f32 GEMM is one-weight-many-rows and still hardcodes the PreNorm
 		// block copy and one shared RoPE table. MoE routes each token to its own top-k
 		// experts, DenseMLP removes the up-projection, ALiBi replaces RoPE with score
 		// bias, non-PreNorm topology changes the residual/norm graph, and Gemma3-style
 		// per-layer RoPE theta changes the rotation by layer; these axes run through
 		// blockStep here, where the FFN/topology/RoPE dispatch lives.
-		var last []float32
-		for _, id := range ids {
-			last = s.tokenHidden(id, s.Cache.Len())
-		}
-		return s.head(last)
+		return s.prefillTokenLoop(ids)
 	}
 	// PreNorm (default): batched + parallel, one GEMM over all P tokens instead of
 	// GEMV-per-token. Bit-identical to the per-token tokenHidden loop
@@ -647,7 +643,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		s.prefillBatchedQ(ids)
 		return
 	}
-	if s.M.Cfg.IsMoE() || s.M.Cfg.DenseMLP || s.M.Cfg.Alibi || s.M.Cfg.IsQwen35Hybrid() || s.M.Cfg.AttnOutputGate || s.M.Cfg.BlockTopology != PreNorm || s.M.Cfg.hasLayerSpecificRopeTheta() {
+	if q8PrefillNeedsTokenLoop(s.M.Cfg) {
 		for _, id := range ids {
 			s.tokenHidden(id, s.Cache.Len())
 		}
@@ -658,6 +654,17 @@ func (s *Session) PrefillNoLogits(ids []int) {
 
 func q8PrefillNeedsTokenLoop(cfg Config) bool {
 	return cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.IsQwen35Hybrid() || cfg.AttnOutputGate || cfg.BlockTopology != PreNorm || cfg.hasLayerSpecificRopeTheta()
+}
+
+// prefillTokenLoop runs the per-token f32 forward (tokenHidden) over ids in cache order and
+// returns the head logits of the final token — the non-batched prefill path taken by the
+// arches q8PrefillNeedsTokenLoop selects out of the one-GEMM batched lane.
+func (s *Session) prefillTokenLoop(ids []int) []float32 {
+	var last []float32
+	for _, id := range ids {
+		last = s.tokenHidden(id, s.Cache.Len())
+	}
+	return s.head(last)
 }
 
 // Step decodes one already-chosen token and returns the next-token logits. Quantized

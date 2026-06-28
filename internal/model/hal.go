@@ -2,9 +2,7 @@ package model
 
 import (
 	"fmt"
-	"os"
 	"runtime"
-	"strconv"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -127,16 +125,7 @@ func (s *Session) useHALQ4KWeights() bool {
 	return s.Q4K && s.M != nil && s.M.q4kw != nil && s.Backend != nil && s.Backend.Caps().UploadDtype
 }
 
-var halQ8BatchLayers = initHALQ8BatchLayers()
-
-func initHALQ8BatchLayers() int {
-	if s := os.Getenv("FAK_HAL_Q8_BATCH_LAYERS"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
-			return n
-		}
-	}
-	return 2
-}
+var halQ8BatchLayers = envIntMin("FAK_HAL_Q8_BATCH_LAYERS", 0, 2)
 
 // weightHALStaged caches one resident quantized weight on the backend under key,
 // uploading it as dtype exactly once. On a cache hit the cached tensor is returned

@@ -288,12 +288,7 @@ func (k sessionQ4Kernel) mul(name string, x any, out, in int) []float32 {
 
 // headQ4 applies the resident int4 LM head to a post-final-norm hidden vector.
 func (s *Session) headQ4(xf []float32) []float32 {
-	if s.qDecode == nil {
-		s.qDecode = &qDecodeBuf{}
-	}
-	y := grow(s.qDecode.Logits, s.M.Cfg.VocabSize)
-	s.qDecode.Logits = y
-	t := s.phaseStart()
+	y, t := s.headLogitsBuf()
 	qt := s.M.q4head
 	if qt == nil {
 		qt = s.M.q4(s.M.headName()) // fallback when q4w was built without freeing q8w

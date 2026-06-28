@@ -110,12 +110,8 @@ func (s *Session) prefillF32(ids []int) []float32 {
 	wasQuant := s.Quant
 	s.Quant = false
 	defer func() { s.Quant = wasQuant }()
-	if cfg := s.M.Cfg; cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.IsQwen35Hybrid() || cfg.AttnOutputGate || cfg.BlockTopology != PreNorm || cfg.hasLayerSpecificRopeTheta() {
-		var last []float32
-		for _, id := range ids {
-			last = s.tokenHidden(id, s.Cache.Len())
-		}
-		return s.head(last)
+	if q8PrefillNeedsTokenLoop(s.M.Cfg) {
+		return s.prefillTokenLoop(ids)
 	}
 	return s.head(s.prefillBatched(ids))
 }

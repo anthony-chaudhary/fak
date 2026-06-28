@@ -25,12 +25,7 @@ func (m *Model) q4kHeadName() string {
 
 // headQ4K applies the resident Q4_K LM head to a post-final-norm hidden vector.
 func (s *Session) headQ4K(xf []float32) []float32 {
-	if s.qDecode == nil {
-		s.qDecode = &qDecodeBuf{}
-	}
-	y := grow(s.qDecode.Logits, s.M.Cfg.VocabSize)
-	s.qDecode.Logits = y
-	t := s.phaseStart()
+	y, t := s.headLogitsBuf()
 	qt := s.M.q4khead
 	if qt == nil {
 		qt = s.M.q4kw[s.M.q4kHeadName()]

@@ -554,12 +554,7 @@ func (m *Model) gptqHeadName() string {
 }
 
 func (s *Session) headGPTQ(xf []float32) []float32 {
-	if s.qDecode == nil {
-		s.qDecode = &qDecodeBuf{}
-	}
-	y := grow(s.qDecode.Logits, s.M.Cfg.VocabSize)
-	s.qDecode.Logits = y
-	t := s.phaseStart()
+	y, t := s.headLogitsBuf()
 	gptqMatRowsInto(s.M.gptq(s.M.gptqHeadName()), xf, y)
 	logitScaleInPlace(y, s.M.Cfg)
 	s.phaseEnd("lm_head_gptq", t)

@@ -179,6 +179,15 @@ func (m *Model) minimaxMSAAttnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 	return attnOut
 }
 
+// iotaInts returns the identity index slice [0, 1, …, n-1].
+func iotaInts(n int) []int {
+	s := make([]int, n)
+	for i := range s {
+		s[i] = i
+	}
+	return s
+}
+
 // minimaxIndexerSelect runs the MiniMax-M3 lightning indexer over a whole sequence and
 // returns, per query, the ascending set of admitted causal key positions — ONE selection
 // shared by every attention head (the indexer max-pools its scores over all index heads).
@@ -192,10 +201,7 @@ func (m *Model) minimaxIndexerSelect(l int, xn [][]float32, rp rope) [][]int {
 	blocks := m.minimaxIndexerSelectBlocks(l, xn, rp)
 	seq := len(xn)
 	blockSize := m.Cfg.IndexBlockSize
-	keyPos := make([]int, seq)
-	for i := range keyPos {
-		keyPos[i] = i
-	}
+	keyPos := iotaInts(seq)
 	out := make([][]int, seq)
 	for qpos := 0; qpos < seq; qpos++ {
 		keys, ok := msaSelectedKeyPositions(keyPos, qpos, blockSize, blocks[qpos])
@@ -223,10 +229,7 @@ func (m *Model) minimaxIndexerSelectBlocks(l int, xn [][]float32, rp rope) [][]i
 	local := cfg.IndexLocalBlocks
 	idxQ, idxK := m.minimaxIndexerProject(l, xn, rp)
 
-	keyPos := make([]int, seq)
-	for i := range keyPos {
-		keyPos[i] = i
-	}
+	keyPos := iotaInts(seq)
 	out := make([][]int, seq)
 	for qpos := 0; qpos < seq; qpos++ {
 		// Block score = max over (all index heads, all keys in the block); pooling

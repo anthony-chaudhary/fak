@@ -66,34 +66,41 @@ func resolveTier() int {
 	return tierScalar
 }
 
-func detectAVX2() bool {
+// cpuFeatureBits returns the CPUID leaf-7 EBX feature bits, but only after confirming the OS
+// has enabled the XSAVE state selected by xcr0Mask (XMM/YMM for VEX-256, +opmask/ZMM for
+// AVX-512). ok is false when OSXSAVE is clear or any required XCR0 state bit is unset, so a
+// feature whose register state the OS never saves is reported absent. Shared probe of
+// detectAVX2 / detectAVX512, which differ only in the XCR0 mask and the feature-bit test.
+func cpuFeatureBits(xcr0Mask uint32) (uint32, bool) {
 	_, _, ecx1, _ := cpuid(1, 0)
 	const osxsave = 1 << 27
 	if ecx1&osxsave == 0 {
-		return false
+		return 0, false
 	}
 	xcr0, _ := xgetbv()
-	// bit1 = SSE (XMM) state, bit2 = AVX (YMM) state — both required for VEX-256.
-	if xcr0&0x6 != 0x6 {
-		return false
+	if xcr0&xcr0Mask != xcr0Mask {
+		return 0, false
 	}
 	_, ebx7, _, _ := cpuid(7, 0)
+	return ebx7, true
+}
+
+func detectAVX2() bool {
+	// bit1 = SSE (XMM) state, bit2 = AVX (YMM) state — both required for VEX-256.
+	ebx7, ok := cpuFeatureBits(0x6)
+	if !ok {
+		return false
+	}
 	const avx2 = 1 << 5
 	return ebx7&avx2 != 0
 }
 
 func detectAVX512() bool {
-	_, _, ecx1, _ := cpuid(1, 0)
-	const osxsave = 1 << 27
-	if ecx1&osxsave == 0 {
-		return false
-	}
-	xcr0, _ := xgetbv()
 	// need XMM(1)+YMM(2)+opmask(5)+ZMM_Hi256(6)+Hi16_ZMM(7) state = 0xe6 for zmm ops.
-	if xcr0&0xe6 != 0xe6 {
+	ebx7, ok := cpuFeatureBits(0xe6)
+	if !ok {
 		return false
 	}
-	_, ebx7, _, _ := cpuid(7, 0)
 	const avx512f = 1 << 16
 	const avx512bw = 1 << 30
 	return ebx7&avx512f != 0 && ebx7&avx512bw != 0
