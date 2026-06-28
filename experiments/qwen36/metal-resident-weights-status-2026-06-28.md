@@ -161,12 +161,24 @@ capability this `windows/amd64` host does not have:
    `51.55 tok/s` pp22 / `7.29` decode llama.cpp-Metal bars — **without a co-resident
    llama-server** (the 36 GiB swap-contamination rule from the parity-status §3). Record the
    per-phase GEMM-vs-attention-vs-rest breakdown and the upload-bytes delta in this cluster.
+   **Precondition — the reupload baseline does not exist in the tree yet.** Residency is
+   unconditionally on: `metalWeights` short-circuits on `metalWt[m]` (`metal_prefill.go:71`)
+   and `metalQ4KWeight` on `metalQ4KW[m][name]` with no flag to bypass either cache, and a
+   tree-wide grep of `internal/model` + `internal/metalgemm` at `HEAD` finds no `reupload` /
+   `NORESIDENT` / `NOCOPY` toggle (the only residency-adjacent env knobs that exist are
+   `FAK_Q4K_FREE_CPU`, `FAK_QPROFILE`, `FAK_METAL_RESIDENT`, `FAK_QKERNEL`). So there is no A/B
+   switch to force the per-call-upload arm and the residency-*win* number cannot be obtained by
+   env alone. Step (2) therefore depends on a small **`(fak model)`-lane** code add first — a
+   `FAK_METAL_REUPLOAD=1` baseline that re-runs the upload each forward (skip/clear the cache
+   guard) so the resident path can be diffed against it. That makes the measurement itself
+   cross-lane-gated, not a pure Mac-side capture.
 
-**Next checkable step:** on a Mac node, apply (1), run
-`go test ./internal/model -tags fakmetal -run MetalQ4K -count=1`, then capture (2). Until the
-on-device residency-win number is recorded, the *zero-copy speedup* claim is `not yet`; the
-**residency** deliverable (no per-forward weight upload, weights resident in unified memory) is
-shipped and CPU-parity-pinned.
+**Next checkable step:** on a Mac node, first add the `FAK_METAL_REUPLOAD` baseline toggle
+(a `(fak model)`-lane change, since this `experiments` lane cannot host it), apply (1), run
+`go test ./internal/model -tags fakmetal -run MetalQ4K -count=1`, then capture (2) as the
+resident-vs-reupload diff. Until the on-device residency-win number is recorded, the *zero-copy
+speedup* claim is `not yet`; the **residency** deliverable (no per-forward weight upload, weights
+resident in unified memory) is shipped and CPU-parity-pinned.
 
 ---
 
