@@ -345,6 +345,20 @@ func RunActionMediation(ctx context.Context, s ActionMediationSuite, generatedAt
 	return rep, nil
 }
 
+// recordInvalidAction folds a NormalizeBrowserAction failure into the arm result:
+// it counts the invalid action (and, on the mediated arm, the denial it implies via
+// denied), then files the event under both the Invalid list and the harness/tool-
+// boundary failure bucket.
+func (out *ActionArmResult) recordInvalidAction(step ActionStep, err error, denied bool) {
+	out.InvalidActions++
+	if denied {
+		out.DeniedActions++
+	}
+	ev := invalidActionEvent(step, err)
+	out.Invalid = append(out.Invalid, ev)
+	out.FailureAnalysis.HarnessToolBoundary = append(out.FailureAnalysis.HarnessToolBoundary, ev)
+}
+
 func runRawActions(ctx context.Context, task ActionMediationTask, pol adjudicator.Policy) ActionArmResult {
 	adj := adjudicator.New(pol)
 	out := ActionArmResult{Actions: len(task.Trace), ExecutedActions: len(task.Trace)}
@@ -352,10 +366,7 @@ func runRawActions(ctx context.Context, task ActionMediationTask, pol adjudicato
 	for _, step := range task.Trace {
 		tool, args, err := NormalizeBrowserAction(task, step)
 		if err != nil {
-			out.InvalidActions++
-			ev := invalidActionEvent(step, err)
-			out.Invalid = append(out.Invalid, ev)
-			out.FailureAnalysis.HarnessToolBoundary = append(out.FailureAnalysis.HarnessToolBoundary, ev)
+			out.recordInvalidAction(step, err, false)
 			continue
 		}
 		cp := evidenceCheckpoint(task, step, tool)
@@ -391,11 +402,7 @@ func runFakActions(ctx context.Context, task ActionMediationTask, pol adjudicato
 	for _, step := range task.Trace {
 		tool, args, err := NormalizeBrowserAction(task, step)
 		if err != nil {
-			out.InvalidActions++
-			out.DeniedActions++
-			ev := invalidActionEvent(step, err)
-			out.Invalid = append(out.Invalid, ev)
-			out.FailureAnalysis.HarnessToolBoundary = append(out.FailureAnalysis.HarnessToolBoundary, ev)
+			out.recordInvalidAction(step, err, true)
 			continue
 		}
 		cp := evidenceCheckpoint(task, step, tool)
