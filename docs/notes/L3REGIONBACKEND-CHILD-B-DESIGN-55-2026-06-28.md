@@ -180,8 +180,9 @@ hence the new keys.
 
 **Survivor invariant — the checkable gate.** After `evict(from, n)`, each survivor's resident K is
 **bit-exact** to a fresh prefill of the surviving tokens that never saw the evicted span:
-`max|Δ| = 0`. This is the property `internal/model/evict_test.go` `TestEvictEqualsNeverSaw` already
-proves for the resident cache; the G2 gate is that **the bytes `mset` back under the new keys are the
+`max|Δ| = 0`. This is the property `internal/compute/compute_test.go:208` `TestEvictEqualsNeverSaw` already
+proves for the resident cache (its model-layer re-RoPE twin is `internal/model/evict_test.go`
+`TestEvictRepositionsWithLayerSpecificRopeTheta`); the G2 gate is that **the bytes `mset` back under the new keys are the
 bytes that pass that test** — i.e. the L3 re-file carries the same `max|Δ|=0` survivors, not a recompute
 that drifts. A stage gate (§8) asserts this against a mock/local L3 by reading the re-keyed pages back and
 comparing to a never-saw-the-span prefill.
@@ -302,7 +303,7 @@ from any box, including the GPU-less dev box and CI**; S1/S2 are gated, optional
 - `internal/abi/types.go:64` — `Ref.Digest` (G1); `:81` `RefRegion`; `:105` `Resolver`.
 - `internal/abi/kvbackend.go:49` — the typed `KVResidency` outcome (OK / MISS / FAULT).
 - `internal/xenginekv/arena.go` — the shipped in-address-space `RegionBackend` this is the L3 dual of.
-- `internal/model/kvcache.go` / `internal/model/evict_test.go` — `KVCache.Evict` (G2) and the `max|Δ|=0` survivor witness.
+- `internal/model/kvcache.go:94` (`KVCache.Evict`, G2) · `internal/compute/compute_test.go:208` (`TestEvictEqualsNeverSaw`) and `internal/model/evict_test.go` (`TestEvictRepositionsWithLayerSpecificRopeTheta`) — the `max|Δ|=0` survivor witnesses.
 - `internal/deletioncert/deletioncert.go:133` — `deletioncert.Mint` (G3), projected onto the tier here.
 - `internal/model/pipeline.go:224` — `StageTransport` (#493), the multi-node composition.
 
