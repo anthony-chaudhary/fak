@@ -60,7 +60,16 @@ func FromPayload(title string, p scorecard.Payload, debtKey string) Update {
 }
 
 // gradeEmoji maps an A-F grade to a status glyph so the channel scans at a glance.
+// An ACTION verdict ALWAYS shows the action glyph, even when the grade is an A: a
+// scorecard whose own verdict is ACTION (e.g. the industry map grades A on honesty
+// but reports weak_standing) must not flash green in the channel — the verdict, not
+// the headline letter, decides whether the surface needs attention. Without this an
+// A-graded ACTION post read as "all good", the exact map-vs-standing conflation the
+// industry scorecard's standing_score was added to surface.
 func gradeEmoji(grade, verdict string) string {
+	if verdict == "ACTION" {
+		return ":red_circle:"
+	}
 	switch {
 	case strings.HasPrefix(grade, "A"):
 		return ":large_green_circle:"
