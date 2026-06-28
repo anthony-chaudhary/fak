@@ -180,6 +180,28 @@ design panel: the deferrals are deliberate, not forgotten.
   the honest open gap: ~9× behind llama.cpp CPU and climbing with each op-fusion (Rung 2),
   bounded by per-dispatch CPU/driver overhead, not numerics. This is the discrete-GPU lens
   made concrete on a card without CUDA.*
+- **Intel XPU / OneDNN (SYCL)** (Intel Arc discrete GPUs and Data-Center GPU Max XPUs —
+  separate device memory via SYCL USM, the oneAPI runtime, native f16/bf16 and int8 XMX
+  matrix engines): a structural sibling of the CUDA and Vulkan lenses, reached through Intel's
+  oneAPI stack — the oneDNN primitive library (matmul/inner-product, softmax, normalization)
+  lowered onto a SYCL queue. It maps onto the seam exactly as the other discrete GPUs do:
+  `Upload` is an H2D copy into SYCL USM narrowing per `as` (`Caps.UploadDtype` once int8/`Q8_0`
+  rides the XMX engines), `Host`→`(nil,false)` with `Caps.DeviceMemory`, the SYCL queue makes
+  it an `Async` backend (`Buffer.Ready()` + `Caps.Async`, fencing only inside `Read`/`Argmax`),
+  `Attention` lowers to a oneDNN fused-SDPA primitive (`Caps.FusedAttn`), `Argmax` is a device
+  reduction (4 bytes out), and the Level-Zero device-memory query feeds `DeviceCapacity`
+  (`Caps.CapacityProbe`). It compiles only behind `//go:build onednn` (cgo to the oneAPI/SYCL
+  runtime + an offline-built oneDNN shim — the CUDA/Vulkan shim pattern), so the default
+  `go build ./cmd/fak` stays one pure-Go binary, and it registers an **Approx** backend (held
+  to argmax-exact + logit-cosine, never bit-identity). *Lens verdict: **designed, not yet
+  built** (#264) — the contract already carries everything this lens needs (`Dtype`/`QuantSpec`
+  for int8 XMX, async via `Caps.Async`, device residency, the capacity probe), so the XPU
+  backend is a *registration*, not a forward-loop edit. What remains is host-gated and cannot
+  be witnessed on a CPU-only box: the cgo oneDNN/SYCL shim, then the four acceptance rungs on
+  real Intel Arc silicon — runs on Arc, ≥ 5× CPU throughput, argmax-exact vs `cpu-ref` (the
+  Approx class's bit-exactness rung), and the device-memory-efficiency report.
+  `cmd/modelbench -backend onednn -require-non-reference` is the gate that will record that
+  evidence, the same way the CUDA and Vulkan witnesses above were captured.*
 - **Edge NPU** (fixed vendor op menu, native int8/int4, must pre-stage weights): uses
   `QuantSpec` (asymmetric, per-channel, int4, static-act) for its weights, `Caps.FusedFFN`
   to map a whole MLP block to one vendor primitive, and `WeightSource` to stage a
