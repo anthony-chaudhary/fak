@@ -192,6 +192,21 @@ half. So #69's remaining deliverable is now scoped to one wall — the first-pre
 — still gated on `(fak metalgemm)` + `(fak model)` Mac-side code (§5), not the `experiments`
 lane.
 
+**Update (2026-06-28, child #1113 CLOSED).** #1113 has since closed, resolved by `e2d13e69`
+`fix(model): add bulk Metal q4_k weight upload before prefill (#1113) (fak model)`. It added
+`metalQ4KWeights()` (`internal/model/metal_q4k_on.go:148`, pure-Go stub `metal_q4k_off.go:33`):
+a bulk upfront pass that uploads *every* q4_k projection (q/k/v/o, gate/up/down across all
+layers) through the existing `metalQ4KWeight` cache **before** the prefill layer loop, wired in
+at `prefill_q4k.go:125`. The warm prefill loop now finds all q4_k weights already resident and
+pays **no per-call GPU round-trip for weights** — further closing #69's "no per-call upload"
+core ask, this time in the `(fak model)` lane. It does **not** add the literal zero-copy: it
+still rides `metalQ4KWeight` → `UploadQ4K`'s `newBufferWithLength` + `memcpy`, so wall 1's
+one-time 8.33 GB copy is *reorganized to upfront-bulk, not eliminated*, and a tree-wide grep at
+`HEAD` for `newBufferWithBytesNoCopy` / `FAK_METAL_REUPLOAD` is still empty. #69's remaining
+deliverable therefore stands exactly as §5 step (1)+(2): the `newBufferWithBytesNoCopy`
+zero-copy wrap that erases the wall-1 copy, plus its on-device residency-win measure — both
+`(fak metalgemm)` + `(fak model)` Mac-gated, not the `experiments` lane.
+
 ---
 
 ## 6 — Out of scope for #69
