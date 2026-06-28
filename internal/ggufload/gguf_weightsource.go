@@ -14,12 +14,19 @@ import (
 // regular in-kernel model.Model. GGUF tensor names are normalized to the canonical HF-Llama
 // names that internal/model already consumes.
 func LoadModel(path string) (*model.Model, error) {
+	return loadVia(path, (*WeightSource).Model)
+}
+
+// loadVia is the shared open/defer-close/delegate skeleton for the GGUF entry points that take
+// no profiler (LoadModel, LoadModelQ4KProfile): open the checkpoint, ensure the source is closed,
+// and hand it to build, which picks the resident path (dequant-f32, lean-Q8, direct-Q4_K).
+func loadVia(path string, build func(*WeightSource) (*model.Model, error)) (*model.Model, error) {
 	ws, err := OpenWeights(path)
 	if err != nil {
 		return nil, err
 	}
 	defer ws.Close()
-	return ws.Model()
+	return build(ws)
 }
 
 // LoadModelQuant loads a GGUF checkpoint through the memory-lean quant-on-load path:

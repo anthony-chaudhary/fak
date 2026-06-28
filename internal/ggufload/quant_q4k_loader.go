@@ -33,12 +33,9 @@ func LoadModelQ4K(path string) (*model.Model, error) {
 // path streams the same load-progress lines the lean-Q8 path does (a 466 GB GLM-5.2 resident load
 // must not be silent). Nil profiler = no progress, byte-identical to the old LoadModelQ4K.
 func LoadModelQ4KProfile(path string, p *LoadProfiler) (*model.Model, error) {
-	ws, err := OpenWeights(path)
-	if err != nil {
-		return nil, err
-	}
-	defer ws.Close()
-	return ws.QuantModelQ4KProfile(p)
+	return loadVia(path, func(ws *WeightSource) (*model.Model, error) {
+		return ws.QuantModelQ4KProfile(p)
+	})
 }
 
 // QuantModelQ4K is the WeightSource form of LoadModelQ4K: QuantModelProfile with the
