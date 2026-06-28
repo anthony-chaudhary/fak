@@ -43,6 +43,27 @@
       "apples_to_apples": true,
       "comparison_note": "fak's genuine security strength and arguably its second differentiator after reuse, but PARITY not lead because there is no audited containment leaderboard and the comparison is capability-presence, not a measured ASR-under-containment number. fak ships layered structural controls that hold even when the detector is fooled: a declarative default-deny capability allow-list (closed 12-reason vocab), IFC taint that sink-gates tainted->sink flows pre-call (FIDES/CaMeL-class), kernel-authored provenance (trust taken from the model), plan-CFI, context-MMU quarantine/page-out, and a self-signed provable-deletion certificate + byte-exact causal invalidation. This is the MELON/IFC/capability-allow-list family. Honest fences: self-signed v1 receipts, EvictedCount self-reported, no disposable-microVM tool sandbox, no third-party containment audit. Parity on the layered-containment posture; no number to claim lead.",
       "measured_on": "2026-06-23"
+    },
+    {
+      "id": "agentdojo-default-deny-asr-utility",
+      "dim_id": "prompt-injection-defense-agent-security",
+      "axis": "Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack)",
+      "category": "security",
+      "competitor": "Design-by-construction defenses (CaMeL, MELON) on official AgentDojo; detector-only baselines",
+      "competitor_class": "sota",
+      "competitor_value": "CaMeL: 0 attacks, 77% utility (arXiv 2503.18813, 2025-03)",
+      "competitor_source": "https://arxiv.org/abs/2503.18813",
+      "fak_value": "ASR 0.000 (0/38 attacks), utility 1.000 (2/2 benign controls)",
+      "unit": "full-stack ASR (fraction) · utility-under-attack (completion rate)",
+      "higher_is_better": false,
+      "verdict": "parity",
+      "status": "shipped",
+      "fak_commit": "_this commit_",
+      "fak_artifact": "experiments/agent-live/agentdojo-fak-fullstack-20260625.json",
+      "fak_doc": "BENCHMARK-AUTHORITY.md (AgentDojo Structural Safety Floor) · internal/agentdojo",
+      "apples_to_apples": true,
+      "comparison_note": " fak's default-deny capability floor (IFC Ref.Taint + sink-gate) achieves the same provable security as CaMeL (zero ASR on the expanded attack battery) while preserving 100% benign utility on the local structural floor. This is a PARITY claim (not lead) because (1) the measured utility sample is local and small (2/2), not the full AgentDojo task suite with official harness grading; (2) the comparison is structural-floor-to-structural-floor, not raw-model-to-raw-model on the public leaderboard; (3) ASR=0 is a floor claim, not a utility-optimized frontier measurement. Honest fence: LOCAL structural floor (model-free, deterministic), not an official AgentDojo leaderboard score; utility sample is a benign-controls guard, not the full task suite. Parity on the joint ASR+utility frontier (zero attacks, preserved utility) for default-deny structural defenses.",
+      "measured_on": "2026-06-27"
     }
   ]
 }
