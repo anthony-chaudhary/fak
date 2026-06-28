@@ -33,10 +33,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Schema is the versioned payload tag so a consumer can pin the shape it folds.
@@ -79,7 +80,7 @@ func (f Fold) ClosureRate() float64 {
 	if routed == 0 {
 		return 0
 	}
-	return round3(float64(f.VerifyShipped) / float64(routed))
+	return mathx.Round3(float64(f.VerifyShipped) / float64(routed))
 }
 
 // RegressionRate is the fraction of resolved improve candidates the loop had to undo:
@@ -90,7 +91,7 @@ func (f Fold) RegressionRate() float64 {
 	if decided == 0 {
 		return 0
 	}
-	return round3(float64(f.Revert) / float64(decided))
+	return mathx.Round3(float64(f.Revert) / float64(decided))
 }
 
 type baseline struct {
@@ -195,8 +196,8 @@ func computeHealth(path string, windowCap int) (Health, error) {
 	}
 	closure := f.ClosureRate()
 	regression := f.RegressionRate()
-	dClosure := round3(closure - Baseline.ClosureRate)
-	dRegression := round3(regression - Baseline.RegressionRate)
+	dClosure := mathx.Round3(closure - Baseline.ClosureRate)
+	dRegression := mathx.Round3(regression - Baseline.RegressionRate)
 	// Healthy = not worse than the baseline on either axis: closure no lower, regression
 	// no higher. (Within a 1e-9 epsilon so an exact-equal baseline reads as healthy.)
 	healthy := dClosure >= -1e-9 && dRegression <= 1e-9
@@ -247,8 +248,6 @@ func render(h Health) string {
 	}
 	return strings.Join(lines, "\n")
 }
-
-func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
 
 func asString(v any) string {
 	if v == nil {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 const (
@@ -205,7 +207,7 @@ func VerdictQuality(f Fold) float64 {
 		return 0
 	}
 	penalty := float64(f.BlankReasonOnDeny+f.UnknownVerdict) / float64(f.TotalRows)
-	return round3(math.Max(0, 1-penalty) * 100)
+	return mathx.Round3(math.Max(0, 1-penalty) * 100)
 }
 
 func WorstBucket(f Fold) Bucket {
@@ -255,7 +257,7 @@ func RunIteration(root, auditPath string, witness map[string]any) Iteration {
 	repaired.UnknownVerdict = 0
 	repaired.BlankReasonOnDeny = 0
 	next := VerdictQuality(repaired)
-	delta := round3(next - base)
+	delta := mathx.Round3(next - base)
 	haveWitness := false
 	if witness != nil {
 		if v, ok := witness["ok"].(bool); ok && v {
@@ -669,10 +671,6 @@ func asString(v any) string {
 		return s
 	}
 	return fmt.Sprintf("%v", v)
-}
-
-func round3(v float64) float64 {
-	return math.Round(v*1000) / 1000
 }
 
 func topCount(m map[string]int) (string, int) {
