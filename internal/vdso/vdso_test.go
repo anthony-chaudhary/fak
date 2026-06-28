@@ -3,6 +3,7 @@ package vdso
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -462,4 +463,152 @@ func itoa(n int) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// TestContentDedup tests tier-4 content deduplication (issue #1101).
+func TestContentDedup(t *testing.T) {
+	ctx := context.Background()
+	v := New(8)
+
+	// Test 1: First fill is a miss, lookup is a miss before fill.
+	content1 := []byte("hello world")
+	if ref, ok := v.LookupContent(content1); ok {
+		t.Fatalf("LookupContent before fill: ok=true, want false (got ref=%v)", ref)
+	}
+
+	ref1 := v.FillContent(ctx, content1)
+	if ref1.Kind == abi.RefInline && len(ref1.Inline) == 0 {
+		t.Fatalf("FillContent returned empty inline ref")
+	}
+
+	// Test 2: Lookup after fill should hit.
+	ref1Lookup, ok := v.LookupContent(content1)
+	if !ok {
+		t.Fatalf("LookupContent after fill: ok=false, want true")
+	}
+	if ref1Lookup.Kind != ref1.Kind {
+		t.Fatalf("LookupContent returned different ref kind: got %v, want %v", ref1Lookup.Kind, ref1.Kind)
+	}
+
+	// Test 3: Identical content should return the same ref.
+	ref2 := v.FillContent(ctx, content1)
+	if ref2.Kind != ref1.Kind {
+		t.Fatalf("FillContent same content: ref kind differs (got %v, want %v)", ref2.Kind, ref1.Kind)
+	}
+
+	// Test 4: Different content should get a different ref.
+	content2 := []byte("goodbye world")
+	ref3 := v.FillContent(ctx, content2)
+	if ref3.Kind == ref1.Kind && ref3.Kind == abi.RefInline {
+		if string(ref3.Inline) == string(ref1.Inline) {
+			t.Fatalf("FillContent different content: returned same inline bytes")
+		}
+	}
+	_, ok = v.LookupContent(content2)
+	if !ok {
+		t.Fatalf("LookupContent for content2: ok=false, want true")
+	}
+
+	// Test 5: Metrics should reflect hits and fills.
+	hits, fills := v.ContentStats()
+	if fills != 2 { // Two unique fills (content1 and content2)
+		t.Fatalf("ContentStats fills: got %d, want 2", fills)
+	}
+	if hits != 2 { // Two lookups (content1 and content2)
+		t.Fatalf("ContentStats hits: got %d, want 2", hits)
+	}
+
+	// Test 6: Empty content should return zero ref.
+	emptyRef := v.FillContent(ctx, []byte{})
+	if emptyRef.Kind != abi.RefInline || len(emptyRef.Inline) != 0 {
+		t.Fatalf("FillContent empty: got %v, want zero inline ref", emptyRef)
+	}
+	_, ok = v.LookupContent([]byte{})
+	if ok {
+		t.Fatalf("LookupContent empty: ok=true, want false")
+	}
+}
+
+// TestContentDedupLRU tests that the content cache respects LRU eviction.
+func TestContentDedupLRU(t *testing.T) {
+	ctx := context.Background()
+	// Use a tiny cache to force eviction.
+	v := New(8)
+	v.contentCacheSize = 3
+
+	// Fill 4 distinct items; the first should be evicted.
+	for i := 0; i < 4; i++ {
+		content := []byte(fmt.Sprintf("content-%d", i))
+		v.FillContent(ctx, content)
+	}
+
+	// The first item should be evicted.
+	content0 := []byte("content-0")
+	if _, ok := v.LookupContent(content0); ok {
+		t.Fatalf("LRU: content-0 still cached after eviction")
+	}
+
+	// The last three items should still be cached.
+	for i := 1; i < 4; i++ {
+		content := []byte(fmt.Sprintf("content-%d", i))
+		if _, ok := v.LookupContent(content); !ok {
+			t.Fatalf("LRU: content-%d not cached (should be)", i)
+		}
+	}
+
+	// Access content-1 to move it to front (evict content-2).
+	v.LookupContent([]byte("content-1"))
+	content5 := []byte("content-5")
+	v.FillContent(ctx, content5)
+
+	// Now content-2 should be evicted.
+	if _, ok := v.LookupContent([]byte("content-2")); ok {
+		t.Fatalf("LRU: content-2 still cached after eviction")
+	}
+
+	// content-1 and content-3 should still be cached.
+	if _, ok := v.LookupContent([]byte("content-1")); !ok {
+		t.Fatalf("LRU: content-1 not cached after refresh")
+	}
+	if _, ok := v.LookupContent([]byte("content-3")); !ok {
+		t.Fatalf("LRU: content-3 not cached")
+	}
+}
+
+// TestContentDedupConcurrent tests concurrent access to the content cache.
+func TestContentDedupConcurrent(t *testing.T) {
+	ctx := context.Background()
+	v := New(64)
+	v.contentCacheSize = 32
+
+	const goroutines = 8
+	const iters = 100
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				// Create content that will collide across goroutines.
+				key := (g*iters + i) % 16
+				content := []byte(fmt.Sprintf("shared-content-%d", key))
+
+				// Fill and lookup in parallel.
+				v.FillContent(ctx, content)
+				v.LookupContent(content)
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	// Metrics should be consistent.
+	hits, fills := v.ContentStats()
+	// We expect some fills (unique content) and many hits (duplicate lookups).
+	if fills < 16 {
+		t.Fatalf("Concurrent: fills=%d, want at least 16 (unique keys)", fills)
+	}
+	if hits <= 0 {
+		t.Fatalf("Concurrent: hits=%d, want > 0", hits)
+	}
 }

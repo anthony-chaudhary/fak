@@ -35,6 +35,9 @@ import (
 // DefaultCacheSize is the tier-2 LRU capacity (unit 35 RSI tweak target).
 const DefaultCacheSize = 1024
 
+// DefaultContentCacheSize is the tier-4 content dedup cache capacity.
+const DefaultContentCacheSize = 512
+
 // DefaultNodeEpochLimit bounds the finer-eraser epoch table. When pressure evicts
 // a node epoch, the vDSO bumps the root epoch so old keys cannot become reachable.
 const DefaultNodeEpochLimit = 8192
@@ -65,6 +68,14 @@ type VDSO struct {
 	cache    map[string]*list.Element // tier 2: key -> LRU node
 	lru      *list.List               // front = most-recent
 	worldVer uint64                   // the root ("*") epoch — lock-free Global hot path
+
+	// contentCache is the tier-4 content dedup cache: a map of content hash to Ref.
+	// It stores inbound content blocks (tool results, user messages) so identical
+	// content sent multiple times in one request is stored once and reused.
+	contentCache      map[string]abi.Ref // tier 4: content hash -> Ref
+	contentCacheSize  int
+	contentCacheLRU   *list.List
+	contentCacheIndex map[string]*list.Element
 
 	// Finer-eraser state (scope.go). gran selects how broadly a write invalidates;
 	// nodes holds the per-namespace / per-entity epochs the hierarchical key binds;
@@ -106,6 +117,10 @@ type VDSO struct {
 	lookups int64
 	hits    int64
 	fills   int64
+
+	// contentHits and contentFills track the content dedup tier-4 metrics.
+	contentHits  int64
+	contentFills int64
 
 	// missCtr attributes every ok=false to the reason that produced it, so a low
 	// hit rate is explainable ("is it write-shaped tools, missing hints, or churn?")
@@ -213,6 +228,10 @@ func New(capacity int) *VDSO {
 		revokedCap:   DefaultRevokedWitnessLimit,
 		revokedLRU:   list.New(),
 		revokedIndex: map[string]*list.Element{},
+		contentCache: map[string]abi.Ref{},
+		contentCacheSize: DefaultContentCacheSize,
+		contentCacheLRU: list.New(),
+		contentCacheIndex: map[string]*list.Element{},
 	}
 }
 
@@ -681,4 +700,103 @@ func calcSum(args []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return []byte(`{"sum":` + strconv.FormatFloat(in.A+in.B, 'g', -1, 64) + `}`), true
+}
+
+// ----------------------------------------------------------------------------
+// Tier-4 content dedup cache (issue #1101)
+// ----------------------------------------------------------------------------
+
+// contentHash computes the content-addressed hash of a content block.
+// It uses the same SHA256-based approach as argHash for consistency.
+func contentHash(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])[:24]
+}
+
+// LookupContent checks if the given content is already in the content cache.
+// If found, it returns the cached Ref (which may be inline or blob-backed).
+// If not found, it returns (zero Ref, false).
+// This is the fast path for deduplicating inbound content blocks.
+func (v *VDSO) LookupContent(b []byte) (abi.Ref, bool) {
+	if len(b) == 0 {
+		return abi.Ref{}, false
+	}
+	hash := contentHash(b)
+	v.mu.Lock()
+	ref, ok := v.contentCache[hash]
+	if ok {
+		// Move to front of LRU
+		if el, exists := v.contentCacheIndex[hash]; exists {
+			v.contentCacheLRU.MoveToFront(el)
+		}
+	}
+	v.mu.Unlock()
+	if ok {
+		atomic.AddInt64(&v.contentHits, 1)
+	}
+	return ref, ok
+}
+
+// FillContent adds a content block to the dedup cache, returning its Ref.
+// If the content is already cached, the existing Ref is returned.
+// Otherwise, the content is stored (as a Ref via the resolver) and cached.
+// The caller must supply a context for the Put operation.
+func (v *VDSO) FillContent(ctx context.Context, b []byte) abi.Ref {
+	if len(b) == 0 {
+		return abi.Ref{Kind: abi.RefInline, Inline: []byte{}}
+	}
+
+	hash := contentHash(b)
+
+	// Check if already cached
+	v.mu.Lock()
+	if ref, ok := v.contentCache[hash]; ok {
+		if el, exists := v.contentCacheIndex[hash]; exists {
+			v.contentCacheLRU.MoveToFront(el)
+		}
+		v.mu.Unlock()
+		return ref
+	}
+	v.mu.Unlock()
+
+	// Not cached: store via resolver
+	ref := abi.Ref{Kind: abi.RefInline, Inline: append([]byte(nil), b...)}
+	if res := abi.ActiveResolver(); res != nil {
+		if r, err := res.Put(ctx, b); err == nil {
+			ref = r
+		}
+	}
+
+	// Add to cache with LRU eviction
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	// Double-check in case of race
+	if existing, ok := v.contentCache[hash]; ok {
+		return existing
+	}
+
+	v.contentCache[hash] = ref
+	el := v.contentCacheLRU.PushFront(hash)
+	v.contentCacheIndex[hash] = el
+	atomic.AddInt64(&v.contentFills, 1)
+
+	// Evict if over capacity
+	for v.contentCacheLRU.Len() > v.contentCacheSize {
+		back := v.contentCacheLRU.Back()
+		if back == nil {
+			break
+		}
+		oldHash := back.Value.(string)
+		v.contentCacheLRU.Remove(back)
+		delete(v.contentCacheIndex, oldHash)
+		delete(v.contentCache, oldHash)
+	}
+
+	return ref
+}
+
+// ContentStats returns the content dedup metrics.
+func (v *VDSO) ContentStats() (hits, fills int64) {
+	return atomic.LoadInt64(&v.contentHits), atomic.LoadInt64(&v.contentFills)
 }
