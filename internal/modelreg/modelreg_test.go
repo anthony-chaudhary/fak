@@ -203,6 +203,44 @@ func TestUserOverlayKeepsEmbeddedCodingFlag(t *testing.T) {
 	}
 }
 
+// TestResolveNormalizesDashesToColons covers #1115: a user naturally types
+// "qwen2.5-1.5b" but the registry uses "qwen2.5:1.5b". The normalization step
+// treats both forms as equivalent for lookup, accepting the more intuitive dash
+// separator without breaking the canonical colon form.
+func TestResolveNormalizesDashesToColons(t *testing.T) {
+	withCacheRoot(t)
+
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"qwen2.5-1.5b", "qwen2.5:1.5b"},
+		{"qwen2.5-7b", "qwen2.5:7b"},
+		{"qwen2.5-coder-1.5b", "qwen2.5-coder:1.5b"},
+		{"qwen2.5-coder-3b", "qwen2.5-coder:3b"},
+		{"qwen2.5-coder-7b", "qwen2.5-coder:7b"},
+		{"smollm2-135m", "smollm2:135m"},
+	}
+
+	for _, tc := range cases {
+		got, expanded := Resolve(tc.name)
+		if !expanded {
+			t.Errorf("Resolve(%q) did not expand; got %q", tc.name, got)
+			continue
+		}
+		if want := Catalog[tc.want]; got != want {
+			t.Errorf("Resolve(%q) = %q; want embedded target for %q (which is %q)",
+				tc.name, got, tc.want, want)
+		}
+	}
+	// The canonical colon form must still work.
+	got, expanded := Resolve("qwen2.5:1.5b")
+	if !expanded || got != Catalog["qwen2.5:1.5b"] {
+		t.Errorf("Resolve(qwen2.5:1.5b) = (%q, %v); want expanded to embedded target",
+			got, expanded)
+	}
+}
+
 func writeRegistry(t *testing.T, dir string, m map[string]string) {
 	t.Helper()
 	data, err := json.Marshal(m)

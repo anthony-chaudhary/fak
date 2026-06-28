@@ -178,7 +178,8 @@ func cacheRoot() string {
 //  1. a bare hf:// URI passes through untouched (already concrete);
 //  2. a string that names an existing file on disk passes through untouched (a
 //     local .gguf path the user typed);
-//  3. a known alias expands to its target;
+//  3. a known alias expands to its target (dashes are normalized to colons to
+//     accept both "qwen2.5-1.5b" and "qwen2.5:1.5b");
 //  4. otherwise the input is returned unchanged so the caller's own loader can try
 //     it (and produce its own not-found error) — Resolve never invents a ref.
 //
@@ -195,7 +196,46 @@ func (r *Registry) Resolve(ref string) (string, bool) {
 	if e, ok := r.lookup(ref); ok {
 		return e.Target, true
 	}
+	// Try normalizing dashes to colons for family:size aliases (#1115).
+	// The pattern is: <family>-<size> → <family>:<size>, where the dash to
+	// replace is the second-last or last dash, depending on whether the family
+	// contains a version component (e.g., "qwen2.5-coder-1.5b" has three dashes,
+	// and the size separator is the second one).
+	if e, ok := r.tryDashedAliases(ref); ok {
+		return e.Target, true
+	}
 	return ref, false
+}
+
+// tryDashedAliases attempts to normalize dashed model names to the canonical
+// colon-separated form. It tries replacing the last dash first (for simple
+// "family-size" forms like "smollm2-135m" or "qwen2.5-coder-1.5b" → "qwen2.5-coder:1.5b"),
+// then falls back to replacing the second-last dash (for "family-version-size"
+// forms like "qwen2.5-1.5b" → "qwen2.5:1.5b").
+func (r *Registry) tryDashedAliases(ref string) (Entry, bool) {
+	parts := strings.Split(ref, "-")
+	if len(parts) < 2 {
+		return Entry{}, false
+	}
+
+	// Try replacing the last dash first (e.g., "qwen2.5-coder-1.5b" → "qwen2.5-coder:1.5b",
+	// "smollm2-135m" → "smollm2:135m")
+	lastIdx := len(parts) - 1
+	normalized := strings.Join(parts[:lastIdx], "-") + ":" + parts[lastIdx]
+	if e, ok := r.lookup(normalized); ok {
+		return e, true
+	}
+
+	// Try replacing the second-last dash (e.g., "qwen2.5-1.5b" → "qwen2.5:1.5b")
+	if len(parts) >= 3 {
+		secondLastIdx := len(parts) - 2
+		normalized = strings.Join(parts[:secondLastIdx], "-") + ":" + parts[secondLastIdx] + "-" + parts[lastIdx]
+		if e, ok := r.lookup(normalized); ok {
+			return e, true
+		}
+	}
+
+	return Entry{}, false
 }
 
 func (r *Registry) lookup(name string) (Entry, bool) {
