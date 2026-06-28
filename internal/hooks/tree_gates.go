@@ -2,7 +2,6 @@ package hooks
 
 import (
 	"path"
-	"sort"
 	"strings"
 )
 
@@ -29,16 +28,7 @@ import (
 // so the tree twin drops it, exactly like tree.go's header note about DOC_PLACEMENT's staged-only
 // sub-rule. The Rule-1 finding wording matches the staged gateDocPlacement.
 func gateDocPlacementTree(t *TrackedTree) ([]Finding, error) {
-	var findings []Finding
-	for _, n := range t.Paths {
-		if strings.HasSuffix(n, ".md") && !strings.Contains(n, "/") && !allowedRootMD[n] {
-			findings = append(findings, Finding{
-				Gate: "DOC_PLACEMENT", File: n,
-				Detail: "dated/research doc at the repo root — belongs under docs/notes/ (reached via INDEX.md): " + n + "  ->  docs/notes/" + n,
-			})
-		}
-	}
-	return findings, nil
+	return rootMDPlacementFindings(t.Paths), nil
 }
 
 // gateBrokenLinkTree is the --audit-tree BROKEN_LINK gate. The Python tree branch checks every
@@ -68,18 +58,7 @@ func gateBrokenLinkTree(t *TrackedTree) ([]Finding, error) {
 // whole tree. t.Paths is already sorted+unique (git ls-files), so it matches sorted(set(...)).
 // The classifier's only disk dependency is the size cap, taken here from t.Size.
 func gateFileAdmissionTree(t *TrackedTree) ([]Finding, error) {
-	seen := map[string]bool{}
-	var findings []Finding
-	for _, p := range t.Paths {
-		if seen[p] {
-			continue
-		}
-		seen[p] = true
-		if why := classifyFileWith(t, p); why != "" {
-			findings = append(findings, Finding{Gate: "FILE_ADMISSION", File: p, Detail: why})
-		}
-	}
-	return findings, nil
+	return classifyPathsFindings(t, t.Paths), nil
 }
 
 // gateSecretShapeTree is the --audit-tree SECRET_SHAPE gate. The Python tree branch (_tracked_text)
@@ -102,17 +81,8 @@ func gateSecretShapeTree(t *TrackedTree) ([]Finding, error) {
 		if !ok {
 			continue // OSError / UnicodeDecodeError in Python => skipped
 		}
-		for _, hit := range scanShapes(string(body)) {
-			key := f + "\x00" + hit.text
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			findings = append(findings, Finding{
-				Gate: "SECRET_SHAPE", File: f, Line: 0,
-				Detail: "[" + hit.shape + "] " + hit.text,
-			})
-		}
+		// Tree mode reads the whole file at once (no line numbers), so Line is 0.
+		findings = append(findings, shapeHitFindings(seen, f, 0, string(body))...)
 	}
 	return findings, nil
 }
@@ -123,28 +93,18 @@ func gateSecretShapeTree(t *TrackedTree) ([]Finding, error) {
 // *.json) is exactly provenanceScanExts. lineViolates + the skip sets are the shared helpers; the
 // finding wording matches the staged gateProvenanceLabel (trim160(text) + " — fix: " + fix).
 func gateProvenanceLabelTree(t *TrackedTree) ([]Finding, error) {
-	var findings []Finding
-	for _, f := range t.Paths {
+	inScope := func(f string) bool {
 		if startsWithAny(f, provenanceSkipPrefixes) || provenanceSkipBasenames[baseName(f)] {
-			continue
+			return false
 		}
-		if !provenanceScanExts[lowerExt(f)] {
-			continue
-		}
-		body, ok := t.FileBytes(f)
-		if !ok {
-			continue // OSError in Python scan_file => []
-		}
-		for i, line := range strings.Split(string(body), "\n") {
-			if fix, bad := lineViolates(line); bad {
-				findings = append(findings, Finding{
-					Gate: "PROVENANCE_LABEL", File: f, Line: i + 1,
-					Detail: trim160(line) + " — fix: " + fix,
-				})
-			}
-		}
+		return provenanceScanExts[lowerExt(f)]
 	}
-	return findings, nil
+	return scanTreeFileLines(t, t.Paths, "PROVENANCE_LABEL", inScope, func(line string) (string, bool) {
+		if fix, bad := lineViolates(line); bad {
+			return trim160(line) + " — fix: " + fix, true
+		}
+		return "", false
+	}), nil
 }
 
 // gateIndexSyncTree is the --audit-tree INDEX_SYNC gate. The Python tree branch runs both directions
@@ -155,47 +115,22 @@ func gateProvenanceLabelTree(t *TrackedTree) ([]Finding, error) {
 func gateIndexSyncTree(t *TrackedTree) ([]Finding, error) {
 	var findings []Finding
 
-	// DANGLING: for each index file present in the tree, every relative .md link must resolve.
+	// DANGLING: for each index file present in the tree, every relative .md link must resolve
+	// (shared with the staged twin).
 	for _, idx := range indexFiles {
 		body, ok := t.FileBytes(idx)
 		if !ok {
 			continue // dangling() -> [] on OSError
 		}
-		idxDir := dirOf(idx)
-		for _, link := range indexLinks(string(body)) {
-			if !t.Exists(joinClean(idxDir, link)) {
-				findings = append(findings, Finding{
-					Gate: "INDEX_SYNC", File: idx,
-					Detail: "](" + link + ")  ->  missing file",
-				})
-			}
-		}
+		findings = append(findings, danglingIndexLinkFindings(t, idx, string(body))...)
 	}
 
 	// ORPHAN: every tracked dated docs/notes note not listed in INDEX.md, sorted by path
 	// (matching orphans(root)'s `sorted(...)`). A missing INDEX.md => "" => orphans() returns []
-	// in Python (OSError), so guard on the index being readable.
-	index, idxOK := t.IndexMD()
-	if idxOK {
-		var orphans []string
-		for _, p := range t.Paths {
-			if !strings.HasPrefix(p, "docs/notes/") {
-				continue
-			}
-			if !isDatedNote(p) {
-				continue
-			}
-			if !strings.Contains(index, baseName(p)) {
-				orphans = append(orphans, p)
-			}
-		}
-		sort.Strings(orphans)
-		for _, p := range orphans {
-			findings = append(findings, Finding{
-				Gate: "INDEX_SYNC", File: p,
-				Detail: "dated note not listed in INDEX.md: " + p + "  —  add a one-line entry to INDEX.md",
-			})
-		}
+	// in Python (OSError), so guard on the index being readable. t.Paths is already sorted, so the
+	// shared orphanNoteFindings emits in path order, matching the Python sorted(...).
+	if index, idxOK := t.IndexMD(); idxOK {
+		findings = append(findings, orphanNoteFindings(t.Paths, index)...)
 	}
 	return findings, nil
 }

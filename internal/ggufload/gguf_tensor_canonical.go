@@ -207,19 +207,31 @@ func ggufArchStoresHFRotaryLayout(arch string) bool {
 	return false
 }
 
-func unpermuteRotaryTensor(name string, src []float32, heads, headDim, in int) ([]float32, error) {
+// validateUnpermuteShape checks the shape preamble shared by the rotary unpermute kernels:
+// strictly-positive dims, an even head_dim, an int-overflow-safe element count, and a src
+// length matching the expected count. mult is the per-head multiplier (1 for the plain rotary
+// layout, 2 for the qwen35 gated-q layout that stacks query+gate). label names the layout in
+// the error messages. It returns the expected element count (want = heads*mult*headDim*in).
+func validateUnpermuteShape(name, label string, src []float32, heads, headDim, in, mult int) (int, error) {
 	if heads <= 0 || headDim <= 0 || in <= 0 {
-		return nil, fmt.Errorf("gguf: tensor %s has invalid rotary shape heads=%d head_dim=%d in=%d", name, heads, headDim, in)
+		return 0, fmt.Errorf("gguf: tensor %s has invalid %s shape heads=%d head_dim=%d in=%d", name, label, heads, headDim, in)
 	}
 	if headDim%2 != 0 {
-		return nil, fmt.Errorf("gguf: tensor %s head_dim %d is not even", name, headDim)
+		return 0, fmt.Errorf("gguf: tensor %s head_dim %d is not even", name, headDim)
 	}
-	if heads > math.MaxInt/headDim || heads*headDim > math.MaxInt/in {
-		return nil, fmt.Errorf("gguf: tensor %s rotary shape overflows int", name)
+	if heads > math.MaxInt/(mult*headDim) || heads*mult*headDim > math.MaxInt/in {
+		return 0, fmt.Errorf("gguf: tensor %s %s shape overflows int", name, label)
 	}
-	want := heads * headDim * in
+	want := heads * mult * headDim * in
 	if len(src) != want {
-		return nil, fmt.Errorf("gguf: tensor %s has %d values, rotary shape wants %d", name, len(src), want)
+		return 0, fmt.Errorf("gguf: tensor %s has %d values, %s shape wants %d", name, len(src), label, want)
+	}
+	return want, nil
+}
+
+func unpermuteRotaryTensor(name string, src []float32, heads, headDim, in int) ([]float32, error) {
+	if _, err := validateUnpermuteShape(name, "rotary", src, heads, headDim, in, 1); err != nil {
+		return nil, err
 	}
 	dst := make([]float32, len(src))
 	half := headDim / 2
@@ -236,18 +248,8 @@ func unpermuteRotaryTensor(name string, src []float32, heads, headDim, in int) (
 }
 
 func unpermuteQwen35GatedQTensor(name string, src []float32, heads, headDim, in int) ([]float32, error) {
-	if heads <= 0 || headDim <= 0 || in <= 0 {
-		return nil, fmt.Errorf("gguf: tensor %s has invalid gated rotary shape heads=%d head_dim=%d in=%d", name, heads, headDim, in)
-	}
-	if headDim%2 != 0 {
-		return nil, fmt.Errorf("gguf: tensor %s head_dim %d is not even", name, headDim)
-	}
-	if heads > math.MaxInt/(2*headDim) || heads*2*headDim > math.MaxInt/in {
-		return nil, fmt.Errorf("gguf: tensor %s gated rotary shape overflows int", name)
-	}
-	want := heads * 2 * headDim * in
-	if len(src) != want {
-		return nil, fmt.Errorf("gguf: tensor %s has %d values, gated rotary shape wants %d", name, len(src), want)
+	if _, err := validateUnpermuteShape(name, "gated rotary", src, heads, headDim, in, 2); err != nil {
+		return nil, err
 	}
 	dst := make([]float32, len(src))
 	half := headDim / 2

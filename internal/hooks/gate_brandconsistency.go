@@ -81,23 +81,10 @@ func brandScanned(rel string) bool {
 // audit(): readlines() enumerated from 1, the same per-line decision. t.Paths is sorted, so
 // per-file order is stable.
 func gateBrandConsistencyTree(t *TrackedTree) ([]Finding, error) {
-	var findings []Finding
-	for _, f := range t.Paths {
-		if !brandScanned(f) {
-			continue
+	return scanTreeFileLines(t, t.Paths, "BRAND_CONSISTENCY", brandScanned, func(line string) (string, bool) {
+		if brandLineViolates(line) {
+			return trim160(line), true
 		}
-		body, ok := t.FileBytes(f)
-		if !ok {
-			continue
-		}
-		for i, line := range strings.Split(string(body), "\n") {
-			if brandLineViolates(line) {
-				findings = append(findings, Finding{
-					Gate: "BRAND_CONSISTENCY", File: f, Line: i + 1,
-					Detail: trim160(line),
-				})
-			}
-		}
-	}
-	return findings, nil
+		return "", false
+	}), nil
 }

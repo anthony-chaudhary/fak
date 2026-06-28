@@ -29,17 +29,8 @@ var allowedRootMD = map[string]bool{
 var datedRE = regexp.MustCompile(`20\d\d-\d\d-\d\d`)
 
 func gateDocPlacement(d *StagedDiff) ([]Finding, error) {
-	var findings []Finding
-
-	// Rule 1: root *.md not in the allowlist (over the touched ACMR set).
-	for _, n := range d.StagedPaths {
-		if strings.HasSuffix(n, ".md") && !strings.Contains(n, "/") && !allowedRootMD[n] {
-			findings = append(findings, Finding{
-				Gate: "DOC_PLACEMENT", File: n,
-				Detail: "dated/research doc at the repo root — belongs under docs/notes/ (reached via INDEX.md): " + n + "  ->  docs/notes/" + n,
-			})
-		}
-	}
+	// Rule 1: root *.md not in the allowlist (over the touched ACMR set). Shared with the tree twin.
+	findings := rootMDPlacementFindings(d.StagedPaths)
 
 	// Rule 2: a newly-added dated docs/notes/ note must be listed in INDEX.md.
 	index, _ := d.IndexMD() // missing INDEX.md => "" => everything reads as unlisted, matching the Python ([] on OSError) only when index exists

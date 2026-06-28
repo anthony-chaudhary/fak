@@ -28,7 +28,7 @@ func gateIndexSync(d *StagedDiff) ([]Finding, error) {
 
 	var findings []Finding
 
-	// DANGLING: for each STAGED index file, every relative .md link must resolve.
+	// DANGLING: for each STAGED index file, every relative .md link must resolve (shared with tree twin).
 	for _, idx := range indexFiles {
 		if !staged[idx] {
 			continue
@@ -37,34 +37,12 @@ func gateIndexSync(d *StagedDiff) ([]Finding, error) {
 		if !ok {
 			continue
 		}
-		idxDir := dirOf(idx)
-		for _, link := range indexLinks(string(body)) {
-			if !d.Exists(joinClean(idxDir, link)) {
-				findings = append(findings, Finding{
-					Gate: "INDEX_SYNC", File: idx,
-					Detail: "](" + link + ")  ->  missing file",
-				})
-			}
-		}
+		findings = append(findings, danglingIndexLinkFindings(d, idx, string(body))...)
 	}
 
-	// ORPHAN: newly-added dated docs/notes/ notes not listed in INDEX.md.
+	// ORPHAN: newly-added dated docs/notes/ notes not listed in INDEX.md (shared with tree twin).
 	index, _ := d.IndexMD()
-	for _, p := range d.AddedPaths {
-		if !strings.HasPrefix(p, "docs/notes/") {
-			continue
-		}
-		if !isDatedNote(p) {
-			continue
-		}
-		base := baseName(p)
-		if !strings.Contains(index, base) {
-			findings = append(findings, Finding{
-				Gate: "INDEX_SYNC", File: p,
-				Detail: "dated note not listed in INDEX.md: " + p + "  —  add a one-line entry to INDEX.md",
-			})
-		}
-	}
+	findings = append(findings, orphanNoteFindings(d.AddedPaths, index)...)
 	return findings, nil
 }
 

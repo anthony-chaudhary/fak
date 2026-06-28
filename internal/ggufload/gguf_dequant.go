@@ -171,22 +171,22 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 	out := reuseF32(scratch, int(elems))
 	switch t.Type {
 	case TensorF32:
-		if len(raw) != len(out)*4 {
-			return nil, fmt.Errorf("gguf: tensor %s f32 payload has %d bytes, want %d", t.Name, len(raw), len(out)*4)
+		if err := checkFloatPayload(t, raw, len(out)*4, "f32"); err != nil {
+			return nil, err
 		}
 		for i := range out {
 			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
 		}
 	case TensorF16:
-		if len(raw) != len(out)*2 {
-			return nil, fmt.Errorf("gguf: tensor %s f16 payload has %d bytes, want %d", t.Name, len(raw), len(out)*2)
+		if err := checkFloatPayload(t, raw, len(out)*2, "f16"); err != nil {
+			return nil, err
 		}
 		for i := range out {
 			out[i] = f16At(raw, i*2)
 		}
 	case TensorBF16:
-		if len(raw) != len(out)*2 {
-			return nil, fmt.Errorf("gguf: tensor %s bf16 payload has %d bytes, want %d", t.Name, len(raw), len(out)*2)
+		if err := checkFloatPayload(t, raw, len(out)*2, "bf16"); err != nil {
+			return nil, err
 		}
 		for i := range out {
 			out[i] = math.Float32frombits(uint32(binary.LittleEndian.Uint16(raw[i*2:])) << 16)
@@ -272,6 +272,16 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 // blocks (elems divisible by qk) and exactly the size those blocks pack to, returning that
 // expected byte count. It is the shared block-shape guard the per-type dequant cases all ran
 // inline; label is the quant name in the error text (byte-identical to the inlined checks).
+// checkFloatPayload verifies a non-quantized (f32/f16/bf16) tensor's raw byte count matches the
+// element count its decode loop will write. want is len(out) scaled by the element byte width;
+// label names the dtype in the error message.
+func checkFloatPayload(t TensorInfo, raw []byte, want int, label string) error {
+	if len(raw) != want {
+		return fmt.Errorf("gguf: tensor %s %s payload has %d bytes, want %d", t.Name, label, len(raw), want)
+	}
+	return nil
+}
+
 func checkQuantPayload(t TensorInfo, elems uint64, raw []byte, qk, blockBytes uint64, label string) (int, error) {
 	if elems%qk != 0 {
 		return 0, fmt.Errorf("gguf: tensor %s %s element count %d is not a multiple of %d", t.Name, label, elems, qk)
@@ -698,20 +708,24 @@ func (r *countingReader) readFull(b []byte) error {
 	return nil
 }
 
-func (r *countingReader) u32() (uint32, error) {
-	var b [4]byte
-	if err := r.readFull(b[:]); err != nil {
-		return 0, err
+// readLE reads size little-endian bytes from r (advancing its byte counter) and decodes them
+// with dec. It is the shared body of the u32/u64 fixed-width readers; the zero value of T is
+// returned on a short read.
+func readLE[T any](r *countingReader, size int, dec func([]byte) T) (T, error) {
+	b := make([]byte, size)
+	if err := r.readFull(b); err != nil {
+		var zero T
+		return zero, err
 	}
-	return binary.LittleEndian.Uint32(b[:]), nil
+	return dec(b), nil
+}
+
+func (r *countingReader) u32() (uint32, error) {
+	return readLE(r, 4, binary.LittleEndian.Uint32)
 }
 
 func (r *countingReader) u64() (uint64, error) {
-	var b [8]byte
-	if err := r.readFull(b[:]); err != nil {
-		return 0, err
-	}
-	return binary.LittleEndian.Uint64(b[:]), nil
+	return readLE(r, 8, binary.LittleEndian.Uint64)
 }
 
 func (r *countingReader) str() (string, error) {

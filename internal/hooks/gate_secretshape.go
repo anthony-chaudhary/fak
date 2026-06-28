@@ -56,23 +56,33 @@ func gateSecretShape(d *StagedDiff) ([]Finding, error) {
 			continue
 		}
 		for _, al := range d.AddedByFile[f] {
-			for _, hit := range scanShapes(al.Text) {
-				key := f + "\x00" + hit.text
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				findings = append(findings, Finding{
-					Gate: "SECRET_SHAPE", File: f, Line: al.New,
-					Detail: "[" + hit.shape + "] " + hit.text,
-				})
-			}
+			findings = append(findings, shapeHitFindings(seen, f, al.New, al.Text)...)
 		}
 	}
 	return findings, nil
 }
 
 type shapeHit struct{ shape, text string }
+
+// shapeHitFindings ports the SECRET_SHAPE dedup-and-emit inner loop shared by the staged gate
+// (per added line, with its new-file line number) and its tree twin (whole-file body, Line 0):
+// scan text for leak shapes, dedupe each hit on (file, hit-text) via the caller's seen map, and
+// emit a SECRET_SHAPE finding for every first sighting. The line number is the only per-mode input.
+func shapeHitFindings(seen map[string]bool, file string, line int, text string) []Finding {
+	var findings []Finding
+	for _, hit := range scanShapes(text) {
+		key := file + "\x00" + hit.text
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		findings = append(findings, Finding{
+			Gate: "SECRET_SHAPE", File: file, Line: line,
+			Detail: "[" + hit.shape + "] " + hit.text,
+		})
+	}
+	return findings
+}
 
 // scanShapes ports _scan_text (check_secret_shapes.py L58-71).
 func scanShapes(line string) []shapeHit {

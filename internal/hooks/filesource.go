@@ -20,6 +20,110 @@ type fileProbe interface {
 	Size(rel string) (int64, bool)
 }
 
+// fileReader adds the whole-file read both change-set views expose, on top of fileProbe. Used by
+// the tree-twin loop helpers that read each in-scope file in full (the --audit-tree branches).
+type fileReader interface {
+	fileProbe
+	FileBytes(rel string) ([]byte, bool)
+}
+
+// rootMDPlacementFindings ports the DOC_PLACEMENT Rule-1 scan shared by the staged gate and its
+// tree twin: every path that is a root-level *.md outside the front-door allowlist is misplaced.
+// The only difference between the two modes was the input set (d.StagedPaths vs t.Paths), so the
+// per-item decision + finding wording live here once.
+func rootMDPlacementFindings(paths []string) []Finding {
+	var findings []Finding
+	for _, n := range paths {
+		if strings.HasSuffix(n, ".md") && !strings.Contains(n, "/") && !allowedRootMD[n] {
+			findings = append(findings, Finding{
+				Gate: "DOC_PLACEMENT", File: n,
+				Detail: "dated/research doc at the repo root — belongs under docs/notes/ (reached via INDEX.md): " + n + "  ->  docs/notes/" + n,
+			})
+		}
+	}
+	return findings
+}
+
+// classifyPathsFindings ports the FILE_ADMISSION scan shared by the staged gate and its tree twin:
+// run _classify over a de-duplicated path set, emitting a FILE_ADMISSION finding for each refusal.
+// Staged mode feeds d.AddedRenamedPaths (--diff-filter=AR); tree mode feeds the whole t.Paths set.
+func classifyPathsFindings(fp fileProbe, paths []string) []Finding {
+	seen := map[string]bool{}
+	var findings []Finding
+	for _, p := range paths {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		if why := classifyFileWith(fp, p); why != "" {
+			findings = append(findings, Finding{Gate: "FILE_ADMISSION", File: p, Detail: why})
+		}
+	}
+	return findings
+}
+
+// danglingIndexLinkFindings ports the INDEX_SYNC DANGLING scan shared by the staged gate and its
+// tree twin: for one index file's body, every relative .md link that does not resolve under the
+// index's own directory is a dangling INDEX_SYNC finding. The only difference between the two modes
+// was which index files the caller iterates (staged-only vs every present index).
+func danglingIndexLinkFindings(fp fileProbe, idx, body string) []Finding {
+	var findings []Finding
+	idxDir := dirOf(idx)
+	for _, link := range indexLinks(body) {
+		if !fp.Exists(joinClean(idxDir, link)) {
+			findings = append(findings, Finding{
+				Gate: "INDEX_SYNC", File: idx,
+				Detail: "](" + link + ")  ->  missing file",
+			})
+		}
+	}
+	return findings
+}
+
+// orphanNoteFindings ports the INDEX_SYNC ORPHAN scan shared by the staged gate and its tree twin:
+// every dated docs/notes/ note in the input set whose basename is absent from INDEX.md is an
+// orphan finding. Staged mode feeds the newly-added paths (in diff order); tree mode feeds the
+// whole tracked set (the caller sorts) — the per-path predicate + wording are identical and live here.
+func orphanNoteFindings(paths []string, index string) []Finding {
+	var findings []Finding
+	for _, p := range paths {
+		if !strings.HasPrefix(p, "docs/notes/") || !isDatedNote(p) {
+			continue
+		}
+		if !strings.Contains(index, baseName(p)) {
+			findings = append(findings, Finding{
+				Gate: "INDEX_SYNC", File: p,
+				Detail: "dated note not listed in INDEX.md: " + p + "  —  add a one-line entry to INDEX.md",
+			})
+		}
+	}
+	return findings
+}
+
+// scanTreeFileLines ports the per-file-then-per-line tree scan shared by the BRAND_CONSISTENCY and
+// PROVENANCE_LABEL tree twins (and any future line-oriented --audit-tree gate): for each in-scope
+// tracked file (inScope), read it in full and run a per-line predicate, emitting a Finding{Gate,
+// File, Line:i+1, Detail} for each 1-based line the predicate marks. The gate name and the
+// inScope/perLine decisions stay with the caller; the read+split+enumerate scaffold lives here once.
+func scanTreeFileLines(fr fileReader, paths []string, gate string, inScope func(rel string) bool, perLine func(line string) (detail string, hit bool)) []Finding {
+	var findings []Finding
+	for _, f := range paths {
+		if !inScope(f) {
+			continue
+		}
+		body, ok := fr.FileBytes(f)
+		if !ok {
+			continue
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			if detail, hit := perLine(line); hit {
+				findings = append(findings, Finding{Gate: gate, File: f, Line: i + 1, Detail: detail})
+			}
+		}
+	}
+	return findings
+}
+
 // resolveRef ports _resolves (check_links.py L66-74): try normpath(join(dir,ref)), ref, and the
 // fak/-stripped form; resolve if any exists. Shared by the staged BROKEN_LINK gate and its tree
 // twin (formerly StagedDiff.resolves / treeResolves).
