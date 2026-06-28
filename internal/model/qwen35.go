@@ -452,8 +452,6 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 	core := make([]float32, valDim)
 	qNorm := make([]float32, keyDim)
 	kNorm := make([]float32, keyDim)
-	kvmem := make([]float32, vHd)
-	delta := make([]float32, vHd)
 	q := convOut[0:keyDim]
 	k := convOut[keyDim : 2*keyDim]
 	v := convOut[2*keyDim : 2*keyDim+valDim]
@@ -467,7 +465,14 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 	}
 	s.phaseEnd("qwen35_linear_step_qk_norm", t)
 	t = s.phaseStart()
-	for h := 0; h < nV; h++ {
+	// Each value head's Gated-DeltaNet update is self-contained — it reads the shared (now
+	// read-only) qNorm/kNorm and v, mutates only its OWN recurrent state lst.recurrent[h], and
+	// writes the disjoint core[h*vHd:(h+1)*vHd]. The kvmem/delta scratch is the only shared
+	// hazard, so each worker takes its own. The arithmetic per head is identical to the serial
+	// loop, so the result is BIT-IDENTICAL regardless of worker count (pinned by the bit-exact
+	// hybrid split-prefill/decode witness in qwen35_test.go) — this just spreads the nV
+	// independent heads across cores, the per-token decode lever for the 75%-of-layers GDN scan.
+	headStep := func(h int, kvmem, delta []float32) {
 		kh := h / repeat
 		qn := qNorm[kh*kHd : (kh+1)*kHd]
 		kn := kNorm[kh*kHd : (kh+1)*kHd]
@@ -503,6 +508,21 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 				od[d] += st[base+d] * qi
 			}
 		}
+	}
+	if numWorkers <= 1 || nV*kHd*vHd < parThreshold {
+		kvmem := make([]float32, vHd)
+		delta := make([]float32, vHd)
+		for h := 0; h < nV; h++ {
+			headStep(h, kvmem, delta)
+		}
+	} else {
+		parFor(nV, numWorkers, func(lo, hi int) {
+			kvmem := make([]float32, vHd) // per-worker scratch (the only cross-head hazard)
+			delta := make([]float32, vHd)
+			for h := lo; h < hi; h++ {
+				headStep(h, kvmem, delta)
+			}
+		})
 	}
 	s.phaseEnd("qwen35_linear_step_recurrent", t)
 	t = s.phaseStart()
