@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // ViewName enumerates the generated views.
@@ -94,7 +96,7 @@ func (r Registry) renderDos() string {
 	// the rehome anchor) from the view alone. Emitted in sorted role order for byte-stability.
 	if len(r.Roles) > 0 {
 		b.WriteString("\nroles:\n")
-		for _, role := range sortedKeys(r.Roles) {
+		for _, role := range maputil.SortedKeys(r.Roles) {
 			h, ok := r.home(r.Roles[role])
 			if !ok {
 				continue // Validate rejects a dangling role, so a loaded registry never hits this.

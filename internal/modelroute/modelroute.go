@@ -79,9 +79,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // Version is the current manifest schema tag. A manifest MAY omit it (treated as
@@ -583,7 +584,7 @@ func Combine(reduce Reduction, votes []Vote) (Result, error) {
 			tally[v.Output] += weightOf(v.Member)
 		}
 		// Deterministic winner: highest weight, tie-break by output string asc.
-		outputs := sortedKeys(tally)
+		outputs := maputil.SortedKeys(tally)
 		best, bestW := outputs[0], tally[outputs[0]]
 		for _, o := range outputs[1:] {
 			if tally[o] > bestW {
@@ -642,14 +643,4 @@ func winnerForOutput(votes []Vote, output string) string {
 		}
 	}
 	return winner
-}
-
-// sortedKeys returns the map keys in ascending order (determinism helper).
-func sortedKeys(m map[string]float64) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

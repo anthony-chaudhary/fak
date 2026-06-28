@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ablate"
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // fak ablate — the SELF-ABLATION sweep. Where `fak bench` ablates ONE feature (the
@@ -132,7 +133,7 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 
 // featStr renders an arm's descriptor as "k=v k=v" in sorted key order.
 func featStr(d map[string]string) string {
-	keys := sortedKeys(d)
+	keys := maputil.SortedKeys(d)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, k+"="+d[k])

@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchpost"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
@@ -515,7 +516,7 @@ func foldLoopRollup(nodes []loopRollupNode, now time.Time) loopRollupReport {
 		}
 	}
 
-	ids := sortedKeys(agg)
+	ids := maputil.SortedKeys(agg)
 	for _, id := range ids {
 		a := agg[id]
 		nodeIDs := make([]string, 0, len(a.nodes))

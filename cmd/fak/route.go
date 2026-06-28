@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -459,7 +460,7 @@ func labelStr(m map[string]string) string {
 	if len(m) == 0 {
 		return ""
 	}
-	keys := sortedKeys(m)
+	keys := maputil.SortedKeys(m)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, k+"="+m[k])
@@ -489,6 +490,6 @@ func scoutStr(scout string) string {
 }
 
 func sortedTally(m map[string]float64) []string {
-	out := sortedKeys(m)
+	out := maputil.SortedKeys(m)
 	return out
 }

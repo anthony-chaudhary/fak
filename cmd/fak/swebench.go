@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/swebench"
 )
 
@@ -261,7 +262,7 @@ func printPrefillTableLegend(w io.Writer) {
 }
 
 func sortedCountsSWE(m map[string]int) string {
-	keys := sortedKeys(m)
+	keys := maputil.SortedKeys(m)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))

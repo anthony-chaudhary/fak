@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/webbench"
 )
 
@@ -443,7 +444,7 @@ func formatTokens(n int64) string {
 }
 
 func sortedCounts(m map[string]int) string {
-	keys := sortedKeys(m)
+	keys := maputil.SortedKeys(m)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))

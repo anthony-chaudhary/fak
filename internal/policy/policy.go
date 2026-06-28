@@ -29,6 +29,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
 )
 
@@ -424,7 +425,7 @@ func Summary(p adjudicator.Policy) string {
 	fmt.Fprintf(&b, "allow (exact)      : %d tool(s)\n", allowN)
 	fmt.Fprintf(&b, "allow (prefix)     : %s\n", joinOrNone(p.AllowPrefix))
 	fmt.Fprintf(&b, "deny (explicit)    : %d tool(s)\n", len(p.Deny))
-	for _, t := range sortedKeys(p.Deny) {
+	for _, t := range maputil.SortedKeys(p.Deny) {
 		fmt.Fprintf(&b, "                     %s -> %s\n", t, abi.ReasonName(p.Deny[t]))
 	}
 	fmt.Fprintf(&b, "self-modify globs  : %s\n", joinOrNone(p.SelfModifyGlobs))
@@ -465,7 +466,7 @@ func SummaryRuntime(rt Runtime) string {
 		fmt.Fprintf(&b, "                     %s -> %s\n", r.Tool, strings.ToUpper(r.Sink))
 	}
 	fmt.Fprintf(&b, "ifc sources        : %d tool(s)\n", len(rt.Sources))
-	for _, tool := range sortedSourceKeys(rt.Sources) {
+	for _, tool := range maputil.SortedKeys(rt.Sources) {
 		fmt.Fprintf(&b, "                     %s -> %s\n", tool, rt.Sources[tool])
 	}
 	if rt.RateLimit != nil {
@@ -685,24 +686,6 @@ func joinOrNone(s []string) string {
 		return "(none)"
 	}
 	return strings.Join(s, ", ")
-}
-
-func sortedKeys(m map[string]abi.ReasonCode) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedSourceKeys(m map[string]provenance.Source) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func cloneSlice(s []string) []string {

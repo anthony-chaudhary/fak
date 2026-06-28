@@ -40,6 +40,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
@@ -207,7 +208,7 @@ func deriveProbes(manifestBytes []byte) ([]probe, error) {
 	}
 	var probes []probe
 
-	denyTools := sortedKeys(m.Deny)
+	denyTools := maputil.SortedKeys(m.Deny)
 	for _, tool := range denyTools {
 		p := probe{Tool: tool, Args: "{}", Expect: "deny", ExpectReason: m.Deny[tool], Origin: "deny"}
 		if err := validateProbe(p); err != nil {
@@ -393,17 +394,6 @@ reason; each allow / allow_prefix must be ALLOWED; and a tool the floor does not
 name must be DENIED DEFAULT_DENY. exit 0 if every probe matches (floor PROVEN),
 1 if any drifts (floor NOT proven), 2 on usage error.
 `)
-}
-
-// sortedKeys returns the keys of m sorted ascending — the "collect keys, sort"
-// half of every map-render idiom in cmd/fak (featStr, sortedTally, ...).
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func sortedStrings(s []string) []string {

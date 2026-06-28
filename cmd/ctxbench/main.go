@@ -19,13 +19,13 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the blob PageOut/Resolver backend
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/preflight"
 	_ "github.com/anthony-chaudhary/fak/internal/registrations" // built-in driver list (ctxmmu + normgate + ...)
 )
@@ -226,11 +226,11 @@ func main() {
 
 	fmt.Printf("RESULT side — ctxmmu.Admit (write-time context-admission gate)\n")
 	fmt.Printf("  results admitted : %d  (%d bytes total)\n", total, totalBytes)
-	for _, k := range sortedKeys(byVerdict) {
+	for _, k := range maputil.SortedKeys(byVerdict) {
 		fmt.Printf("    %-11s %d\n", k, byVerdict[k])
 	}
 	fmt.Printf("  quarantine reasons:\n")
-	for _, k := range sortedKeys(byReason) {
+	for _, k := range maputil.SortedKeys(byReason) {
 		if k == "NONE" {
 			continue
 		}
@@ -256,7 +256,7 @@ func main() {
 
 	fmt.Printf("\nCALL side — preflight.Adjudicate (rung ladder)\n")
 	fmt.Printf("  calls adjudicated: %d\n", ctotal)
-	for _, k := range sortedKeys(callByVerdict) {
+	for _, k := range maputil.SortedKeys(callByVerdict) {
 		fmt.Printf("    %-11s %d\n", k, callByVerdict[k])
 	}
 	if ctotal == 0 {
@@ -290,13 +290,4 @@ func main() {
 		_ = os.WriteFile(*out, b, 0644)
 		fmt.Printf("\nwrote %s\n", *out)
 	}
-}
-
-func sortedKeys(m map[string]int) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
 }

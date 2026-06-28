@@ -53,6 +53,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
@@ -183,7 +184,7 @@ func Propose(corpus []NearMiss) []Candidate {
 	out := make([]Candidate, 0, len(verbs))
 	for _, verb := range verbs {
 		cl := byVerb[verb]
-		globs := sortedKeys(cl.globs)
+		globs := maputil.SortedKeys(cl.globs)
 		rule := policy.ArgRule{
 			Tool:      cl.tool,
 			Arg:       cl.arg,
@@ -315,7 +316,7 @@ func synthRegex(verb string, globs []string) string {
 func compileCandidate(c Candidate, tools map[string]bool) (adjudicator.Policy, error) {
 	m := policy.Manifest{
 		Version:  policy.Version,
-		Allow:    sortedKeys(tools),
+		Allow:    maputil.SortedKeys(tools),
 		ArgRules: []policy.ArgRule{c.Rule},
 	}
 	return m.ToPolicy()
@@ -381,13 +382,4 @@ func toolSet(nm []NearMiss, benign []Call) map[string]bool {
 		tools[b.Tool] = true
 	}
 	return tools
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

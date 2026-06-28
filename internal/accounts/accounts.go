@@ -42,6 +42,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // RegistryVersion is this registry's on-disk schema tag, and RegistryFamily is the
@@ -462,7 +464,7 @@ func (r Registry) Validate() error {
 		}
 	}
 	// Every role must name a present, active home (in role-name order for a stable error).
-	for _, role := range sortedKeys(r.Roles) {
+	for _, role := range maputil.SortedKeys(r.Roles) {
 		name := r.Roles[role]
 		h, ok := r.home(name)
 		if !ok {
@@ -482,18 +484,6 @@ func (r Registry) Validate() error {
 		}
 	}
 	return nil
-}
-
-// sortedKeys returns m's keys sorted, for deterministic iteration (stable Validate errors and
-// stable view emission). Defined here (no generics dependency beyond the stdlib) for the small
-// string-keyed maps this package iterates.
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // ---------------------------------------------------------------------------

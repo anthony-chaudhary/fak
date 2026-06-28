@@ -3,6 +3,8 @@ package webbench
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // Comparison is the full fak<->benchmark comparison, mirroring swebench's structure.
@@ -186,7 +188,7 @@ func RenderMarkdown(c *Comparison) string {
 		b.WriteString("### Difficulty Distribution\n\n")
 		b.WriteString("| Difficulty | Count |\n")
 		b.WriteString("|------------|-------|\n")
-		for _, diff := range sortedKeys(c.Summary.DifficultyDist) {
+		for _, diff := range maputil.SortedKeys(c.Summary.DifficultyDist) {
 			b.WriteString(fmt.Sprintf("| %s | %d |\n", diff, c.Summary.DifficultyDist[diff]))
 		}
 		b.WriteString("\n")
@@ -197,7 +199,7 @@ func RenderMarkdown(c *Comparison) string {
 		b.WriteString("### Category Distribution\n\n")
 		b.WriteString("| Category | Count |\n")
 		b.WriteString("|----------|-------|\n")
-		for _, cat := range sortedKeys(c.Summary.CategoryDist) {
+		for _, cat := range maputil.SortedKeys(c.Summary.CategoryDist) {
 			b.WriteString(fmt.Sprintf("| %s | %d |\n", cat, c.Summary.CategoryDist[cat]))
 		}
 		b.WriteString("\n")
@@ -264,20 +266,4 @@ func formatTokens(n int64) string {
 	}
 	g := m / 1000
 	return fmt.Sprintf("%.2f G", g)
-}
-
-func sortedKeys(m map[string]int) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	// Simple sort.
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[i] > keys[j] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-	return keys
 }
