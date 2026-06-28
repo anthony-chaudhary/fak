@@ -417,10 +417,24 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	delta := make([]float32, H)
-	for _, pk := range glmRoute(m, layer, xn, mat) {
-		out := expertSwiGLU(m, layer, pk.expert, xn, mat)
-		for i := 0; i < H; i++ {
-			delta[i] += pk.weight * out[i]
+	picks := glmRoute(m, layer, xn, mat)
+	// Lever 2: on the pure-CPU resident path, batch the routed experts' GEMVs into ONE parFor
+	// per projection instead of ~3 per expert (moe_host_batch.go) — bit-identical to the loop
+	// below (TestBatchedExpertDeltaMatchesLoop). Any config the fast path does not model
+	// (non-resident expert shape, per-expert bias, active LoRA) declines it (writes nothing,
+	// returns false) and falls through to the proven per-expert loop.
+	batched := false
+	if _, host := mat.(residentKernel); host {
+		if xf, ok := xn.([]float32); ok {
+			batched = m.hostBatchedGLMExperts(layer, xf, delta, picks)
+		}
+	}
+	if !batched {
+		for _, pk := range picks {
+			out := expertSwiGLU(m, layer, pk.expert, xn, mat)
+			for i := 0; i < H; i++ {
+				delta[i] += pk.weight * out[i]
+			}
 		}
 	}
 	if cfg.NSharedExperts > 0 && m.hasWeight(layerName(layer, "mlp.shared_experts.gate_proj.weight")) {
