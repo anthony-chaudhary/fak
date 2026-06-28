@@ -36,6 +36,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // maxResponseBytes caps how much of a response body the client will read, so a
@@ -56,7 +57,9 @@ type Client struct {
 type Option func(*Client)
 
 // WithHTTPClient sets the underlying *http.Client (for custom timeouts, a proxy,
-// or a transport with TLS pinning). Defaults to http.DefaultClient.
+// or a transport with TLS pinning). Defaults to defaultFakHTTPClient (a 30s-timeout
+// client) — NOT http.DefaultClient, whose zero timeout would hang an SDK caller
+// forever on a dead or wedged gateway.
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) {
 		if h != nil {
@@ -64,6 +67,12 @@ func WithHTTPClient(h *http.Client) Option {
 		}
 	}
 }
+
+// defaultFakHTTPClient is the client used when a caller injects none. It carries a bounded
+// 30s timeout so an SDK consumer never hangs forever on a dead/wedged gateway — the
+// MISSING_HTTP_TIMEOUT failure mode the repo's boundarylint flags for http.DefaultClient.
+// A caller that needs streaming/long bodies supplies its own via WithHTTPClient.
+var defaultFakHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // WithAPIKey sets the bearer token sent as `Authorization: Bearer <key>` on every
 // request. Required only when the gateway was booted with --require-key-env;
@@ -84,7 +93,7 @@ func WithPrincipal(p string) Option {
 func New(baseURL string, opts ...Option) *Client {
 	c := &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: http.DefaultClient,
+		httpClient: defaultFakHTTPClient,
 	}
 	for _, o := range opts {
 		o(c)
