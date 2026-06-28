@@ -28,7 +28,9 @@ more prose.
                        .mcp.json parses and every server names a launch command, so
                        the harness actually starts the server instead of silently failing
     llms_map           llms.txt (the answer-engine / agent doc-map) is present
-    identity_statement a one-sentence "what fak is" an agent can quote verbatim
+    identity_statement a one-sentence "what fak is" an agent can quote verbatim —
+                       present near the top of EVERY orientation doc (AGENTS.md,
+                       llms.txt, README), so it resolves wherever the agent enters
     entry_links_resolve every local link on the orientation path resolves (no 404
                        when an agent follows AGENTS.md / the integration index)
     recipe_links_resolve every local link INSIDE each per-agent recipe resolves —
@@ -230,9 +232,13 @@ PROOF_NEEDS_KEY_TOKENS = ("--api-key-env", "api.openai.com", "OPENAI_API_KEY", "
 WINDOWS_BRIDGE_TOKENS = ("scripts/ci.ps1", "ci.ps1", "test.ps1", "wsl")
 
 # Identity: a one-line "<name> is a/an <kind>" an agent can lift as the answer to
-# "what is fak". Matched near the top of the orientation docs.
+# "what is fak". Matched near the top of EACH orientation doc — the instant-orientation
+# DoD is that the identity resolves verbatim wherever an agent enters (AGENTS.md,
+# llms.txt, README), not just in whichever doc happens to be read first. The <kind>
+# alternation covers both the "agent kernel/gate/firewall" framing and README's
+# equally-valid "one (static) Go binary you put in front of the agent" framing.
 IDENTITY_RE = re.compile(r"\bfak\b[^.\n]{0,60}?\bis\b[^.\n]{0,80}?"
-                         r"(kernel|firewall|gate|gateway|proxy)", re.IGNORECASE)
+                         r"(kernel|firewall|gate|gateway|proxy|binary)", re.IGNORECASE)
 IDENTITY_DOCS = [AGENTS_FILE, LLMS_FILE, "README.md"]
 IDENTITY_HEAD_LINES = 40
 
@@ -478,14 +484,22 @@ def find_install_oneliner(texts: dict[str, str]) -> tuple[bool, str]:
     return False, ""
 
 
-def find_identity(texts: dict[str, str]) -> tuple[bool, str]:
-    """Is a one-sentence '<fak> is a/an <kind>' identity near the top of an
-    orientation doc — the answer an agent quotes for 'what is fak'?"""
+def find_identity(texts: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Does a one-sentence '<fak> is a/an <kind>' identity sit near the top of EACH
+    orientation doc — the answer an agent quotes for 'what is fak', resolvable
+    verbatim from whichever doc the agent happens to enter through?
+
+    Returns (present_in, missing_from): the orientation docs (AGENTS.md, llms.txt,
+    README) that carry a quotable identity near the top, and the ones that do not.
+    The instant-orientation path is real end-to-end only when the identity resolves
+    in every one — a doc that has lost its identity line is a hole an agent falls
+    through, even while a sibling doc still carries it."""
+    present_in: list[str] = []
+    missing_from: list[str] = []
     for doc in IDENTITY_DOCS:
         head = "\n".join(texts.get(doc, "").splitlines()[:IDENTITY_HEAD_LINES])
-        if IDENTITY_RE.search(head):
-            return True, doc
-    return False, ""
+        (present_in if IDENTITY_RE.search(head) else missing_from).append(doc)
+    return present_in, missing_from
 
 
 def untagged_claims(claims_text: str | None) -> list[str]:
@@ -737,17 +751,21 @@ def kpi_llms_map(present: dict[str, bool]) -> dict[str, Any]:
             "defects": defects, "soft": soft}
 
 
-def kpi_identity_statement(found: bool, where: str) -> dict[str, Any]:
+def kpi_identity_statement(present_in: list[str], missing_from: list[str]) -> dict[str, Any]:
     """A one-sentence '<fak> is a/an <kind>' an agent can quote as the answer to
-    'what is this'. Without it an agent has to infer the pitch, and infers wrong."""
-    defects: list[str] = []
-    if not found:
-        defects.append("no one-sentence 'fak is a/an <kernel/gate/…>' identity near the "
-                       f"top of {', '.join(IDENTITY_DOCS)} — add a quotable one-liner")
+    'what is this' — present near the top of EVERY orientation doc, so the identity
+    resolves wherever the agent enters (AGENTS.md, llms.txt, or README). A doc that
+    has lost its identity line is a hole an agent falls through; without one at all an
+    agent has to infer the pitch, and infers wrong."""
+    defects = [f"no one-sentence 'fak is a/an <kernel/gate/binary/…>' identity near the "
+               f"top of {doc} — add a quotable one-liner" for doc in missing_from]
+    ok = not missing_from
     return {"kpi": "identity_statement", "group": "discover",
-            "score": 100 if found else 30,
-            "detail": (f"identity statement found in {where}" if found
-                       else "no quotable one-sentence identity"),
+            "score": 100 if ok else round(100 * len(present_in) / len(IDENTITY_DOCS)),
+            "detail": (f"identity resolves near the top of all {len(IDENTITY_DOCS)} "
+                       f"orientation docs ({', '.join(present_in)})" if ok
+                       else f"identity missing from {', '.join(missing_from)} "
+                            f"(present in {', '.join(present_in) or 'none'})"),
             "defects": defects, "soft": []}
 
 
@@ -1370,7 +1388,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
     # discover
     config_present = {label: any(present(p) for p in paths) for label, paths in AGENT_CONFIGS}
     llms_present = {LLMS_FILE: present(LLMS_FILE), LLMS_FULL_FILE: present(LLMS_FULL_FILE)}
-    id_found, id_where = find_identity(texts)
+    id_present, id_missing = find_identity(texts)
     dead_links: list[str] = []
     for doc in ORIENTATION_DOCS:
         if not present(doc):
@@ -1447,7 +1465,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_agents_entrypoint(agents_text if present(AGENTS_FILE) else None),
         kpi_agent_config(missing_agent_configs(config_present)),
         kpi_llms_map(llms_present),
-        kpi_identity_statement(id_found, id_where),
+        kpi_identity_statement(id_present, id_missing),
         kpi_entry_links_resolve(dead_links),
         kpi_first_command(fc_found, fc_where),
         kpi_first_command_runs(fcr_found, fcr_policy_ok, fcr_policy_ref, fcr_needs_key),

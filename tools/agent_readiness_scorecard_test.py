@@ -92,11 +92,22 @@ def test_find_install_oneliner_needs_both_tokens() -> None:
     assert ar.find_install_oneliner({"README.md": "go install ./cmd/fak"})[0] is False
 
 
-def test_find_identity_near_top_only() -> None:
-    assert ar.find_identity({"AGENTS.md": "**fak** is an agent kernel."})[0] is True
-    # a match buried past the head window does not count.
-    buried = {"AGENTS.md": ("\n" * 60) + "fak is a kernel"}
-    assert ar.find_identity(buried)[0] is False
+def test_find_identity_required_in_every_doc() -> None:
+    # an identity near the top of ALL THREE orientation docs => none missing.
+    every = {"AGENTS.md": "**fak** is an agent kernel.",
+             ar.LLMS_FILE: "`fak` is an agent kernel.",
+             "README.md": "`fak` is one Go binary you put in front of the agent."}
+    present_in, missing = ar.find_identity(every)
+    assert missing == [] and set(present_in) == set(ar.IDENTITY_DOCS)
+    # README's "one Go binary" framing is a legitimate identity, not only kernel/gate.
+    assert "README.md" in present_in
+    # a match buried past the head window does not count — that doc is missing.
+    buried = dict(every, **{"README.md": ("\n" * 60) + "fak is one Go binary"})
+    _, missing2 = ar.find_identity(buried)
+    assert missing2 == ["README.md"]
+    # no identity anywhere => all three orientation docs are missing it.
+    _, missing3 = ar.find_identity({})
+    assert set(missing3) == set(ar.IDENTITY_DOCS)
 
 
 def test_missing_guardrails_detects_gaps() -> None:
@@ -134,8 +145,13 @@ def test_llms_map_hard_and_soft() -> None:
 
 
 def test_identity_statement_kpi() -> None:
-    assert ar.kpi_identity_statement(False, "")["defects"]
-    assert ar.kpi_identity_statement(True, "AGENTS.md")["defects"] == []
+    # missing from one orientation doc => one defect, score below 100, doc named.
+    one = ar.kpi_identity_statement([ar.AGENTS_FILE, ar.LLMS_FILE], ["README.md"])
+    assert len(one["defects"]) == 1 and one["score"] < 100
+    assert "README.md" in one["defects"][0]
+    # present near the top of all three orientation docs => clean, full score.
+    allp = ar.kpi_identity_statement(list(ar.IDENTITY_DOCS), [])
+    assert allp["defects"] == [] and allp["score"] == 100
 
 
 def test_entry_links_resolve_kpi() -> None:
@@ -507,7 +523,7 @@ def _clean_kpis() -> list[dict]:
         ar.kpi_agent_config([]),
         ar.kpi_agent_config_valid([]),
         ar.kpi_llms_map({ar.LLMS_FILE: True, ar.LLMS_FULL_FILE: True}),
-        ar.kpi_identity_statement(True, "AGENTS.md"),
+        ar.kpi_identity_statement(list(ar.IDENTITY_DOCS), []),
         ar.kpi_entry_links_resolve([]),
         ar.kpi_recipe_links_resolve([]),
         ar.kpi_first_command(True, "AGENTS.md"),
