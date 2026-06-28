@@ -178,6 +178,81 @@ func TestRunDojoPostLatestNeedsCorpus(t *testing.T) {
 	}
 }
 
+func writeLiveMarker(t *testing.T, dir, name, command string) {
+	t.Helper()
+	body := `{"mode":"live","command":"` + command + `","started":"2026-06-27T12:00:00Z","cwd":"/x","workspace":"/x"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunDojoLiveDiscoversAndDegrades pins the forward-wire (#1093): `fak dojo
+// run --live` discovers the .dojo/live-episodes corpus `--dojo` writes, surfaces
+// the start-markers it found, and reports — without crashing or inventing a
+// score — that they are not yet scorable.
+func TestRunDojoLiveDiscoversAndDegrades(t *testing.T) {
+	root := t.TempDir()
+	liveDir := filepath.Join(root, ".dojo", "live-episodes")
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLiveMarker(t, liveDir, "episode_20260627_120000.jsonl", "guard")
+	writeLiveMarker(t, liveDir, "episode_20260627_130000.jsonl", "serve")
+
+	var out, errb bytes.Buffer
+	code := runDojoRun(&out, &errb, []string{"--live", "--workspace", root})
+	got := out.String()
+	// The run is honestly UNMEASURED (start-only markers), so it exits 1, but it
+	// must have DISCOVERED and SURFACED the two episodes it found.
+	if code != 1 {
+		t.Fatalf("a start-only live run is unmeasured -> exit 1, got %d (%s)", code, errb.String())
+	}
+	if !strings.Contains(got, "found 2 start-marker(s)") {
+		t.Fatalf("live run must surface the 2 discovered markers, got:\n%s", got)
+	}
+	if !strings.Contains(got, "episode_20260627_120000.jsonl") || !strings.Contains(got, "guard") {
+		t.Fatalf("live run must name the discovered marker files, got:\n%s", got)
+	}
+	if !strings.Contains(got, "missing to score") {
+		t.Fatalf("live run must explain what is missing to score, got:\n%s", got)
+	}
+}
+
+// TestRunDojoLiveFailsOpen pins fail-open: --live on a workspace with no
+// live-episode corpus must not error the command (it reports the empty state).
+func TestRunDojoLiveFailsOpen(t *testing.T) {
+	root := t.TempDir()
+	var out, errb bytes.Buffer
+	code := runDojoRun(&out, &errb, []string{"--live", "--workspace", root})
+	if code == 2 {
+		t.Fatalf("--live must not be a usage error even with no corpus, got %d (%s)", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "none recorded yet") {
+		t.Fatalf("an absent live corpus must report the empty state, got:\n%s", out.String())
+	}
+}
+
+// TestRunDojoLiveJSON pins the --live --json envelope: it carries BOTH the folded
+// report and the raw live-corpus discovery so a consumer sees the score and the
+// disk state in one object.
+func TestRunDojoLiveJSON(t *testing.T) {
+	root := t.TempDir()
+	liveDir := filepath.Join(root, ".dojo", "live-episodes")
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLiveMarker(t, liveDir, "episode_20260627_120000.jsonl", "guard")
+	var out, errb bytes.Buffer
+	_ = runDojoRun(&out, &errb, []string{"--live", "--workspace", root, "--json"})
+	got := out.String()
+	if !strings.Contains(got, `"live_corpus"`) || !strings.Contains(got, `"report"`) {
+		t.Fatalf("--live --json must carry both report and live_corpus, got:\n%s", got)
+	}
+	if !strings.Contains(got, `"found": 1`) {
+		t.Fatalf("--live --json must report the discovered count, got:\n%s", got)
+	}
+}
+
 func TestRunDojoList(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := runDojoList(&out, &errb, []string{"--json"}); code != 0 {

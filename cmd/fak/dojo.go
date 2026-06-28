@@ -37,7 +37,7 @@ import (
 const dojoUsage = `fak dojo — the prediction-vs-reality gym
 
 usage:
-  fak dojo run    --corpus DIR [--ttl 5m|1h] [--lever a,b] [--max-files N]
+  fak dojo run    (--corpus DIR | --live) [--ttl 5m|1h] [--lever a,b] [--max-files N]
                   [--json] [--check] [--append-history] [--ledger FILE]
                   [--workspace DIR] [--date YYYY-MM-DD]
   fak dojo board  --corpus DIR [--ttl 5m|1h] [--max-files N] [--json]
@@ -48,7 +48,11 @@ usage:
 
 run    scores every registered lever's predicted saving against billed reality
        over the corpus, folds the episodes, and (with --append-history) trends
-       the mean calibration error across runs in docs/dojo/history.jsonl.
+       the mean calibration error across runs in docs/dojo/history.jsonl. With
+       --live (auto-selected when no --corpus is given and one exists) it
+       discovers the .dojo/live-episodes corpus that --dojo writes; those markers
+       are start-only today, so it surfaces what it found and reports what is
+       missing to score them rather than inventing a calibration.
 board  folds the same run into a cross-lever leaderboard: one row per lever
        (verdict distribution, mean calib-err, worst metric, grade), worst-first.
 ablate scores the vDSO on-vs-off ablation over a trace as a WITNESSED episode:
@@ -98,6 +102,7 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dojo run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpus := fs.String("corpus", "", "directory of real Claude Code transcripts (.jsonl, scanned recursively) to score the levers against")
+	live := fs.Bool("live", false, "score the live-episode corpus `fak guard --dojo` / `fak serve --dojo` write under <root>/"+dojo.LiveEpisodesRel+" instead of --corpus. Auto-selected when neither --corpus nor --live is given and that corpus exists. The markers are start-only today, so this DISCOVERS + surfaces them and reports what is missing to score them (it never fabricates a calibration).")
 	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier the resume-posture lever scores at: 5m (default) or 1h")
 	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")
 	leverSel := fs.String("lever", "", "comma-separated levers to run (default: all registered; see `fak dojo list`)")
@@ -110,8 +115,33 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+
+	// Resolve the workspace root early — the live corpus discovery + auto-select
+	// below need it, and the fold reuses it.
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	} else if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+
+	// Live-episode path: explicit --live, or (auto) no --corpus AND a live corpus
+	// is present. This forward-wires the corpus `--dojo` already writes into the
+	// same scoring pipeline; when the markers are start-only it degrades gracefully
+	// (surface + explain) rather than crashing or inventing a score. --corpus
+	// always wins over auto-select so the documented transcript path is unchanged.
+	useLive := *live
+	if !useLive && *corpus == "" {
+		if lc, err := dojo.ReadLiveCorpus(filepath.Join(root, filepath.FromSlash(dojo.LiveEpisodesRel))); err == nil && lc.Present {
+			useLive = true
+		}
+	}
+	if useLive {
+		return runDojoLive(stdout, stderr, root, *asJSON, *check)
+	}
+
 	if *corpus == "" {
-		fmt.Fprintln(stderr, "fak dojo run: need --corpus DIR (a directory of .jsonl transcripts)")
+		fmt.Fprintln(stderr, "fak dojo run: need --corpus DIR (a directory of .jsonl transcripts), or --live to discover the .dojo/live-episodes corpus `--dojo` writes")
 		return 2
 	}
 	ttl, ok := parseResumeTTL(*ttlStr)
@@ -146,12 +176,6 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 	snapDate := *date
 	if snapDate == "" {
 		snapDate = now.Format("2006-01-02")
-	}
-	root := *workspace
-	if root == "" {
-		root = repoRoot()
-	} else if abs, err := filepath.Abs(root); err == nil {
-		root = abs
 	}
 
 	report := dojo.Fold(episodes, dojo.FoldOpts{
@@ -204,6 +228,99 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	return 1
+}
+
+// runDojoLive discovers and folds the live-episode corpus that `fak guard --dojo`
+// / `fak serve --dojo` write under <root>/.dojo/live-episodes/. It forward-wires
+// that corpus (which nothing read before #1093) into the same scoring pipeline
+// the --corpus path uses, then folds whatever it can score.
+//
+// Today the writer is start-only — each marker carries {mode, command, started,
+// workspace} and no billed usage — so there is nothing to score yet. Rather than
+// crash or silently score zero, it DEGRADES GRACEFULLY: it surfaces the episodes
+// it found and reports, in plain words, what is missing to score them. The
+// scorable-marker seam (dojo.ScorableLiveEpisodes) is already wired, so when the
+// writer side later captures full episodes those flow straight into the fold with
+// no change here. Fail-open: a missing/empty corpus is a clean "nothing recorded
+// yet", never an error.
+func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int {
+	dir := filepath.Join(root, filepath.FromSlash(dojo.LiveEpisodesRel))
+	lc, err := dojo.ReadLiveCorpus(dir)
+	if err != nil {
+		// A genuine read fault (e.g. a permission error on an existing dir) is
+		// reported, but a missing/empty corpus already returned (nil) above.
+		fmt.Fprintf(stderr, "fak dojo run --live: read live corpus: %v\n", err)
+		return 1
+	}
+
+	// Score whatever the corpus carries. While the markers are start-only this is
+	// empty, so the fold is honestly unmeasured rather than fabricated.
+	var episodes []dojo.Episode
+	for _, in := range dojo.ScorableLiveEpisodes(lc) {
+		episodes = append(episodes, dojo.Score("live-episodes", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
+	}
+	dojo.SortEpisodes(episodes)
+	now := time.Now().UTC()
+	report := dojo.Fold(episodes, dojo.FoldOpts{
+		Workspace:   root,
+		Commit:      dojoHeadCommit(root),
+		GeneratedAt: now.Format(time.RFC3339),
+		Date:        now.Format("2006-01-02"),
+	})
+
+	if asJSON {
+		// Carry the discovery summary alongside the folded report so a JSON
+		// consumer sees BOTH the (honest, possibly-empty) score and what was on
+		// disk — found count, the markers, and what is missing to score them.
+		_ = writeIndentedJSONNoEscape(stdout, dojoLiveJSON{Report: report, Live: lc})
+	} else {
+		fmt.Fprintln(stdout, dojo.Render(report))
+		fmt.Fprintln(stdout, renderLiveCorpus(lc))
+	}
+
+	if check {
+		// The advisory gate only fails when the run could not be measured. A live
+		// corpus with start-only markers is, honestly, unmeasured.
+		code, _ := dojo.CheckGate(report)
+		return code
+	}
+	if report.OK {
+		return 0
+	}
+	return 1
+}
+
+// dojoLiveJSON is the --live --json envelope: the folded report plus the raw
+// live-corpus discovery, so a consumer can see the score AND the disk state in
+// one object.
+type dojoLiveJSON struct {
+	Report dojo.Report     `json:"report"`
+	Live   dojo.LiveCorpus `json:"live_corpus"`
+}
+
+// renderLiveCorpus is the human discovery block printed under the folded report
+// on the live path: how many start-markers were found and what is missing to
+// score them, so an operator can see the loop is recording even before the
+// full-episode writer lands.
+func renderLiveCorpus(lc dojo.LiveCorpus) string {
+	var b strings.Builder
+	rel := lc.Dir
+	if r, err := filepath.Rel(repoRoot(), lc.Dir); err == nil && !strings.HasPrefix(r, "..") {
+		rel = filepath.ToSlash(r)
+	}
+	fmt.Fprintf(&b, "\n  live-episode corpus: %s\n", rel)
+	if !lc.Present {
+		b.WriteString("    (none recorded yet — enable `fak guard --dojo` / `fak serve --dojo` to start recording)\n")
+		return strings.TrimRight(b.String(), "\n")
+	}
+	fmt.Fprintf(&b, "    found %d start-marker(s); %d scorable\n", lc.Found, lc.Scorable)
+	for _, m := range lc.Markers {
+		fmt.Fprintf(&b, "      - %s  (%s, started %s)\n", m.File, m.Command, m.Started)
+	}
+	if lc.Missing != "" {
+		fmt.Fprintf(&b, "    missing to score: %s\n", lc.Missing)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func runDojoList(stdout, stderr io.Writer, argv []string) int {
