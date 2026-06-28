@@ -118,7 +118,7 @@ func TestFitServeGGUFOnDeviceUsesF32ResidentPlan(t *testing.T) {
 
 func TestServeGGUFMemoryPlanIncludesQ8WeightsAndKVCache(t *testing.T) {
 	ws := serveSynthConfiguredWeightSource(t)
-	plan, err := serveGGUFMemoryPlan(ws, false, 8)
+	plan, err := serveGGUFMemoryPlan(ws, false, 8, serveFitBudget{})
 	if err != nil {
 		t.Fatalf("serveGGUFMemoryPlan: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestServeGGUFMemoryPlanIncludesQ8WeightsAndKVCache(t *testing.T) {
 
 func TestGatewayLoadProfileCarriesServeMemoryPlanAndCapacity(t *testing.T) {
 	ws := serveSynthConfiguredWeightSource(t)
-	plan, err := serveGGUFMemoryPlan(ws, false, 8)
+	plan, err := serveGGUFMemoryPlan(ws, false, 8, serveFitBudget{})
 	if err != nil {
 		t.Fatalf("serveGGUFMemoryPlan: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestGatewayLoadProfileCarriesServeMemoryPlanAndCapacity(t *testing.T) {
 
 func TestServeGGUFCPUOffloadMemoryPlanKeepsExpertsHostScoped(t *testing.T) {
 	ws := serveSynthOffloadWeightSource(t)
-	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, 8)
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, 8, serveFitBudget{})
 	if err != nil {
 		t.Fatalf("serveGGUFCPUOffloadMemoryPlan: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestServeGGUFCPUOffloadMemoryPlanKeepsExpertsHostScoped(t *testing.T) {
 // new arm selects via fitAndPlanServeGGUFPathOnDevice(..., f32Resident=false, ...).
 func TestServeQ4KStandardArchUsesDeviceResidentNotOffloadPlan(t *testing.T) {
 	ws := serveSynthConfiguredWeightSource(t) // a standard llama-arch (qwen2) source, Q4_K weight tensor
-	plan, err := serveGGUFMemoryPlan(ws, false, 8)
+	plan, err := serveGGUFMemoryPlan(ws, false, 8, serveFitBudget{})
 	if err != nil {
 		t.Fatalf("serveGGUFMemoryPlan: %v", err)
 	}
@@ -296,5 +296,83 @@ func TestFitServeGGUFOnDeviceRawPlanAndUnknownCapacityFailOpen(t *testing.T) {
 	}
 	if err := fitServeGGUFOnDevice(ws, nil, true, 0); err != nil {
 		t.Fatalf("nil backend must be a no-op, got %v", err)
+	}
+}
+
+// serveSynthWideWindowWeightSource is a configured source whose declared context window (4096) is
+// far larger than the tiny box the #1046 auto-sizer tests size it against, so the sizer must
+// derive a context BELOW the full window.
+func serveSynthWideWindowWeightSource(t *testing.T) *ggufload.WeightSource {
+	t.Helper()
+	f := &ggufload.File{
+		Metadata: map[string]ggufload.Value{
+			"general.architecture":                   {Type: ggufload.TypeString, Value: "qwen2"},
+			"qwen2.context_length":                   {Type: ggufload.TypeUint64, Value: uint64(4096)},
+			"qwen2.embedding_length":                 {Type: ggufload.TypeUint64, Value: uint64(32)},
+			"qwen2.block_count":                      {Type: ggufload.TypeUint64, Value: uint64(2)},
+			"qwen2.feed_forward_length":              {Type: ggufload.TypeUint64, Value: uint64(64)},
+			"qwen2.attention.head_count":             {Type: ggufload.TypeUint64, Value: uint64(4)},
+			"qwen2.attention.head_count_kv":          {Type: ggufload.TypeUint64, Value: uint64(2)},
+			"qwen2.attention.layer_norm_rms_epsilon": {Type: ggufload.TypeFloat32, Value: float32(1e-5)},
+			"qwen2.rope.freq_base":                   {Type: ggufload.TypeFloat32, Value: float32(10000)},
+			"tokenizer.ggml.eos_token_id":            {Type: ggufload.TypeUint32, Value: uint32(2)},
+		},
+		Tensors: []ggufload.TensorInfo{
+			{Name: "a", Dims: []uint64{256 * 1024}, Type: ggufload.TensorF32},
+			{Name: "b", Dims: []uint64{256 * 4096}, Type: ggufload.TensorQ4_K},
+		},
+	}
+	ws, err := ggufload.NewWeightSource(f, nil, 0)
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+	return ws
+}
+
+// #1046: with no explicit --context-budget-tokens AND a known memory ceiling, the serve boot plan
+// auto-sizes the KV cache to the largest context that fits the box — strictly below the model's
+// full declared window — instead of sizing against MaxPositionEmbeddings (which would overflow and
+// refuse). The derived plan must also fit the backend (no FitError).
+func TestServeGGUFMemoryPlanAutoSizesContextToFitWhenNoBudget(t *testing.T) {
+	ws := serveSynthWideWindowWeightSource(t)
+	cfg, err := ws.File.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	csc := cfg.ContextSizeConfig()
+	fullWindowKV := compute.EstimateKVStoreBytes(csc.KV, csc.MaxContext)
+
+	// A device just large enough for the dense weights plus a partial KV window: the full 4096-token
+	// window would not fit after headroom, so the sizer must shrink the context.
+	be := serveCapBackend{Backend: compute.Default(), total: 3 << 20, free: 3 << 20, known: true}
+	plan, err := serveGGUFMemoryPlan(ws, false, 0 /* no budget -> auto-size */, serveDeviceFitBudget(be))
+	if err != nil {
+		t.Fatalf("serveGGUFMemoryPlan: %v", err)
+	}
+	kv := plan.ByClass()[compute.MemoryKVCache]
+	if kv <= 0 {
+		t.Fatalf("auto-sized plan must still carry a KV demand, got %d", kv)
+	}
+	if kv >= fullWindowKV {
+		t.Fatalf("auto-sized KV = %d, must be below the full-window KV %d (sized down, not full window)", kv, fullWindowKV)
+	}
+	if err := fitServeGGUFOnDevice(ws, be, false, 0); err != nil {
+		t.Fatalf("the auto-sized plan must fit the box it was sized against, got %v", err)
+	}
+}
+
+// #1046: auto-sizing is NOT an escape hatch around the fit check. A box too small to hold even the
+// weights still refuses with the typed FitTooBig when no budget is set — the sizer only lowers the
+// context the check runs at; it never lets an oversized model load.
+func TestFitServeGGUFOnDeviceAutoSizeStillRefusesWeightsOverflow(t *testing.T) {
+	ws := serveSynthConfiguredWeightSource(t) // ~1.56 MiB device weights
+	tooSmall := serveCapBackend{Backend: compute.Default(), total: 1 << 20, free: 1 << 20, known: true}
+	err := fitServeGGUFOnDevice(ws, tooSmall, false, 0 /* no budget -> auto-size */)
+	if err == nil {
+		t.Fatal("auto-sized boot fit must still refuse a box too small for the weights alone")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want *compute.FitError, got %T (%v)", err, err)
 	}
 }

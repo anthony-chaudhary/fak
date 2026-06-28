@@ -712,11 +712,61 @@ const serveGGUFDeviceHeadroom = 0.15
 // device fit plan, and comfortably above the observed ~6% resident overshoot.
 const serveGGUFHostHeadroom = 0.15
 
+// serveFitBudget is the memory ceiling the #1046 context auto-sizer derives the largest fitting
+// context against: the raw budget base (a backend's device free-or-total, or the host's
+// MemAvailable) and the headroom fraction the matching load-time fit check reserves. A
+// non-positive Base means the ceiling is unprobeable (the cpu-ref floor, a device that cannot
+// report capacity) — avail() then yields FreeUnknown and the auto-sizer falls open to the model's
+// full declared window, exactly as before #1046.
+type serveFitBudget struct {
+	Base     int64
+	Headroom float64
+}
+
+// avail is the headroom-adjusted budget passed to compute.AutoSizeContextPlan — byte-identical to
+// the budget the matching RefuseMemoryPlanIfTooBig* check computes (same compute.BudgetAfterHeadroom
+// formula), so a context derived against it provably passes that check. An unknown base yields
+// FreeUnknown so the sizer fails open to the full window.
+func (b serveFitBudget) avail() int64 {
+	if b.Base <= 0 {
+		return compute.FreeUnknown
+	}
+	return compute.BudgetAfterHeadroom(b.Base, b.Headroom)
+}
+
+// serveDeviceFitBudget reads the device memory ceiling a device serve arm's fit check uses
+// (DeviceMemoryInfo: free, or the total ceiling when free is unprobeable). Unknown capacity → a
+// zero base → the auto-sizer keeps the full window.
+func serveDeviceFitBudget(be compute.Backend) serveFitBudget {
+	total, free, known := compute.DeviceMemoryInfo(be)
+	return serveFitBudget{Base: serveFitBudgetBase(total, free, known), Headroom: serveGGUFDeviceHeadroom}
+}
+
+// serveHostFitBudget reads the process host's allocatable RAM the pure-CPU serve arm's fit check
+// uses (HostSystemMemoryInfo → Linux MemAvailable). Unknown → a zero base → the full window.
+func serveHostFitBudget() serveFitBudget {
+	total, free, known := compute.HostSystemMemoryInfo()
+	return serveFitBudget{Base: serveFitBudgetBase(total, free, known), Headroom: serveGGUFHostHeadroom}
+}
+
+// serveFitBudgetBase collapses a (total, free, known) capacity report into the raw budget base
+// the fit check would size against: free when known, the total ceiling when free is unprobeable
+// (parity with fitsWithinReportedMemory), and 0 when capacity is unknown.
+func serveFitBudgetBase(total, free int64, known bool) int64 {
+	if !known || total <= 0 {
+		return 0
+	}
+	if free < 0 { // FreeUnknown -> the total ceiling, conservatively
+		return total
+	}
+	return free
+}
+
 func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool, contextBudgetTokens int) error {
 	if ws == nil || be == nil {
 		return nil
 	}
-	plan, err := serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens)
+	plan, err := serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens, serveDeviceFitBudget(be))
 	if err != nil {
 		return err
 	}
@@ -727,14 +777,14 @@ func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backen
 	if ws == nil || be == nil {
 		return nil
 	}
-	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens)
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, serveDeviceFitBudget(be))
 	if err != nil {
 		return err
 	}
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
-func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
+func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
@@ -752,10 +802,10 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 		}
 		plan = append(plan, weights...)
 	}
-	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens), nil
+	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
 }
 
-func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetTokens int) (compute.MemoryPlan, error) {
+func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
@@ -763,20 +813,45 @@ func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetToken
 	if err != nil {
 		return nil, err
 	}
-	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens), nil
+	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
 }
 
-func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int) compute.MemoryPlan {
+func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int, fit serveFitBudget) compute.MemoryPlan {
 	cfg, err := ws.File.Config()
 	if err != nil {
 		return plan
 	}
 	// Delegate to the single context auto-sizer (#1049) so the serve boot path sizes its
-	// KV+scratch plan exactly as the in-kernel per-request planner does. avail is unknown
-	// at plan-build time (the device/host fit check runs separately on the returned plan);
-	// #1046 passes the real ceiling here to auto-derive the largest fitting context.
-	_, ctxPlan := compute.AutoSizeContextPlan(cfg.ContextSizeConfig(), plan, compute.FreeUnknown, serveContextTokenOverride(contextBudgetTokens))
+	// KV+scratch plan exactly as the in-kernel per-request planner does. #1046: pass the real
+	// (headroom-adjusted) memory ceiling so that when no --context-budget-tokens is set the sizer
+	// derives the LARGEST context that fits this box — instead of sizing against the full
+	// MaxPositionEmbeddings window and refusing — and log the derived size for the operator.
+	csc := cfg.ContextSizeConfig()
+	avail := fit.avail()
+	tokens, ctxPlan := compute.AutoSizeContextPlan(csc, plan, avail, serveContextTokenOverride(contextBudgetTokens))
+	logServeAutoSizedContext(csc, plan, fit, avail, contextBudgetTokens, tokens)
 	return append(plan, ctxPlan...)
+}
+
+// logServeAutoSizedContext prints the #1046 one-line auto-size record when the boot path DERIVED a
+// context (no --context-budget-tokens, and a probeable memory ceiling) that is smaller than the
+// model's full declared window — the case the operator needs to see, because the full window would
+// have overflowed the box and refused. It is silent when an explicit budget was given, when the
+// ceiling is unprobeable (the full window is kept, unchanged), or when the full window already fits
+// (nothing was shrunk).
+func logServeAutoSizedContext(csc compute.ContextSizeConfig, weights compute.MemoryPlan, fit serveFitBudget, avail int64, contextBudgetTokens, tokens int) {
+	if contextBudgetTokens > 0 || avail <= 0 || csc.MaxContext <= 0 || tokens >= csc.MaxContext {
+		return
+	}
+	kv := compute.EstimateKVStoreBytes(csc.KV, tokens)
+	headroom := fit.Base - avail
+	if headroom < 0 {
+		headroom = 0
+	}
+	fmt.Fprintf(os.Stderr,
+		"fak: auto-sized context to %d tokens (kv=%s, weights=%s, headroom=%s) — no --context-budget-tokens set; the model's full %d-token window would overflow the %s fit budget\n",
+		tokens, bytesText(uint64(max(kv, 0))), bytesText(uint64(max(weights.DeviceTotal(), 0))),
+		bytesText(uint64(headroom)), csc.MaxContext, bytesText(uint64(max(avail, 0))))
 }
 
 // serveContextTokenOverride maps the serve flag convention (0 = unset, fall back to the
@@ -800,7 +875,7 @@ func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetToke
 	if ggufPath == "" {
 		return nil
 	}
-	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens)
+	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens, serveHostFitBudget())
 	if err != nil {
 		return err
 	}
@@ -808,7 +883,7 @@ func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetToke
 }
 
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens)
+	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens, serveDeviceFitBudget(be))
 	if err != nil {
 		return nil, err
 	}
@@ -819,7 +894,7 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 }
 
 func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, contextBudgetTokens)
+	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, contextBudgetTokens, serveDeviceFitBudget(be))
 	if err != nil {
 		return nil, err
 	}
@@ -829,7 +904,7 @@ func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backe
 	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
-func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
+func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ggufPath == "" {
 		return nil, nil
 	}
@@ -838,10 +913,10 @@ func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTok
 		return nil, err
 	}
 	defer ws.Close()
-	return serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens)
+	return serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens, fit)
 }
 
-func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int) (compute.MemoryPlan, error) {
+func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ggufPath == "" {
 		return nil, nil
 	}
@@ -850,7 +925,7 @@ func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int)
 		return nil, err
 	}
 	defer ws.Close()
-	return serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens)
+	return serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, fit)
 }
 
 func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {

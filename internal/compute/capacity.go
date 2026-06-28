@@ -406,6 +406,18 @@ func DiskInfo(path string) (total, free int64, known bool) {
 	return diskInfo(path)
 }
 
+// BudgetAfterHeadroom applies a fit-check headroom fraction to a raw byte budget, reserving that
+// fraction for the demands NOT in the checked plan (KV, activations, per-op scratch). A headroom
+// outside (0,1) — or a non-positive budget — is returned unchanged. It is the one place the
+// headroom arithmetic lives, so the load-time fit checks and the #1046 context auto-sizer (which
+// must derive a context that PROVABLY passes the same check) compute byte-identical budgets.
+func BudgetAfterHeadroom(budget int64, headroom float64) int64 {
+	if budget > 0 && headroom > 0 && headroom < 1 {
+		return int64(float64(budget) * (1 - headroom))
+	}
+	return budget
+}
+
 func fitsWithinReportedMemory(total, free int64, known bool, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
 	if wantBytes <= 0 {
 		return FitOK, 0
@@ -417,9 +429,7 @@ func fitsWithinReportedMemory(total, free int64, known bool, wantBytes int64, he
 	if budget < 0 { // FreeUnknown -> fall back to the total ceiling, conservatively
 		budget = total
 	}
-	if headroom > 0 && headroom < 1 {
-		budget = int64(float64(budget) * (1 - headroom))
-	}
+	budget = BudgetAfterHeadroom(budget, headroom)
 	if wantBytes <= budget {
 		return FitOK, budget
 	}

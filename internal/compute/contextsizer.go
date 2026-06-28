@@ -49,11 +49,17 @@ func AutoSizeContextPlan(cfg ContextSizeConfig, weights MemoryPlan, avail int64,
 	return tokens, cfg.PerContextMemoryPlan(tokens)
 }
 
+// MinAutoContextTokens is the floor the #1046 auto-fit clamps a derived context to (capped at
+// MaxContext for a model whose full window is already below it). When the box is so small that
+// weights + scratch leave room for fewer than this many cached tokens, the auto-sizer still
+// returns this floor rather than 0 — so the resulting plan keeps a usefully small KV demand and
+// the LOAD-TIME fit check (RefuseMemoryPlanIfTooBig*) stays the single place a genuinely-too-small
+// box is refused with a typed FitTooBig, instead of this sizer silently picking a zero context.
+const MinAutoContextTokens = 512
+
 // contextTokens applies the auto-sizer's token policy. A non-negative override is taken
-// verbatim; a negative override falls back to the full declared window. weights/avail are
-// forwarded so the #1046 auto-fit derivation (largest context that fits avail − weights −
-// scratch − headroom) lands here when no override is set; until then the full window is
-// the historical behavior.
+// verbatim; a negative override falls back to the full declared window, or — when the memory
+// ceiling is known — to the #1046 largest-fitting derivation below.
 func (c ContextSizeConfig) contextTokens(override int, weights MemoryPlan, avail int64) int {
 	if override >= 0 {
 		return override // explicit operator/request count wins
@@ -61,9 +67,39 @@ func (c ContextSizeConfig) contextTokens(override int, weights MemoryPlan, avail
 	if c.MaxContext <= 0 {
 		return 0
 	}
-	// #1046 seam: when avail is known, derive the largest fitting context here using
-	// weights + scratch + headroom. Unset today → the full declared window, unchanged.
-	_ = weights
-	_ = avail
-	return c.MaxContext
+	if avail <= 0 {
+		return c.MaxContext // ceiling unprobeable → full declared window (historical behavior)
+	}
+	// #1046: no explicit budget and a known ceiling → derive the largest context that fits.
+	return c.largestFittingContext(weights, avail)
+}
+
+// largestFittingContext returns the largest context-token count whose resident KV store plus
+// per-token HAL scratch fits `avail` once the fixed `weights` already in that pool are
+// subtracted — the #1046 auto-fit-to-host derivation that replaces the old "size against the
+// full MaxContext window and refuse" fallback. `avail` is the headroom-adjusted budget the
+// matching load-time fit check uses, and KV + scratch are device-pool demands, so only the
+// device-scoped weights compete with them (a cpu-offload serve's host-resident experts do not —
+// see weights.DeviceTotal). The result is clamped to [MinAutoContextTokens, MaxContext]: at the
+// ceiling it is the full window (nothing to shrink); at the floor the plan stays small and the
+// load-time fit check refuses a box too small to hold even that. Fail-open: KV geometry it
+// cannot size yields the full window, never a refusal here.
+func (c ContextSizeConfig) largestFittingContext(weights MemoryPlan, avail int64) int {
+	perToken := EstimateKVStoreBytes(c.KV, 1)
+	if perToken <= 0 {
+		return c.MaxContext // cannot size KV → fail open to the full window
+	}
+	scratch := EstimateHALTransientMemoryPlan(c.Scratch).Total()
+	fit := (avail - weights.DeviceTotal() - scratch) / perToken
+	floor := int64(MinAutoContextTokens)
+	if floor > int64(c.MaxContext) {
+		floor = int64(c.MaxContext) // a model whose full window is below the floor cannot exceed it
+	}
+	if fit < floor {
+		return int(floor)
+	}
+	if fit >= int64(c.MaxContext) {
+		return c.MaxContext
+	}
+	return int(fit)
 }
