@@ -98,3 +98,55 @@ func TestTokenDefault_CtxViewShipsDarkAtZero(t *testing.T) {
 		}
 	}
 }
+
+// TestTokenDefaultsSnapshotFresh pins the committed scorecard doc to the binary's REAL
+// source-derived defaults: it regenerates the markdown the same way `--markdown` does and asserts
+// it byte-equals docs/serving/token-defaults-scorecard.md. This closes the regression hole that
+// let the doc drift unnoticed — when oversized-result elision was flipped on by default, the
+// committed snapshot kept advertising it OFF (4/6) to cost-conscious operators, because nothing
+// bound the doc to the source. A future flip the doc would misreport now reds here, with the exact
+// regenerate command. EOL is normalized so a CRLF checkout (autocrlf=true) is not a false failure.
+func TestTokenDefaultsSnapshotFresh(t *testing.T) {
+	const root = "../.."
+	raw, err := os.ReadFile(root + "/docs/serving/token-defaults-scorecard.md")
+	if err != nil {
+		t.Fatalf("read committed snapshot: %v", err)
+	}
+	want := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	got := renderTokenDefaultsMarkdown(collectTokenDefaultsScorecard(root)["corpus"].(map[string]any))
+	if want != got {
+		t.Errorf("docs/serving/token-defaults-scorecard.md is STALE vs the source-derived defaults — regenerate it:\n"+
+			"  go run ./cmd/fak token-defaults-scorecard --markdown > docs/serving/token-defaults-scorecard.md\n"+
+			"committed snapshot len=%d, regenerated len=%d", len(want), len(got))
+	}
+}
+
+// TestTokenDefaultsLeversDerivedFromSource guards the anti-gaming rule for THIS scorecard: each
+// lever's on/off must be DERIVED from the entrypoint source, never a hardcoded roster claim. It
+// asserts the elision flip is reflected (elideresult ON), the lone opt-in lever is off-and-gated
+// (ctxview), and the headline counters match (5 of 6 stacked), so the scorecard cannot report a
+// default that contradicts the binary.
+func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
+	c := collectTokenDefaultsScorecard("../..")["corpus"].(map[string]any)
+	if got := c["stacked_on"].(int); got != 5 {
+		t.Errorf("stacked_on derived = %d, want 5 (5/6 safe savers on by default)", got)
+	}
+	if got := c["levers_total"].(int); got != 6 {
+		t.Errorf("levers_total = %d, want 6", got)
+	}
+	on := map[string]bool{}
+	gated := map[string]bool{}
+	for _, raw := range c["lever_status"].([]map[string]any) {
+		on[raw["key"].(string)] = raw["on"].(bool)
+		gated[raw["key"].(string)] = raw["gated"].(bool)
+	}
+	if !on["elideresult"] {
+		t.Errorf("elideresult must derive ON from source (the default-on flip), got OFF")
+	}
+	if on["ctxview"] {
+		t.Errorf("ctxview must derive OFF (opt-in, gated), got ON")
+	}
+	if !gated["ctxview"] {
+		t.Errorf("the off-by-default ctxview lever must carry a documented gate")
+	}
+}
