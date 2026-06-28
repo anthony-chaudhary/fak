@@ -851,6 +851,31 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/loops:
+    get:
+      tags: [fak-native]
+      summary: Snapshot every supervised in-kernel background loop
+      description: |
+        A point-in-time snapshot of every supervised background loop the
+        gateway runs in-kernel (dispatch/replan/supervise cohorts), each with
+        its run state and tick count — the read side of the fak_bgloop_*
+        metric family. A deployment that wired no loops returns an empty list,
+        never a silent 404.
+      responses:
+        '200':
+          description: Every supervised background loop's status plus a schema tag.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { type: string }
+                  loops:
+                    type: array
+                    items: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/session/{trace_id}:
     get:
       tags: [fak-native]

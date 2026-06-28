@@ -50,6 +50,7 @@ var specPathFor = map[string]string{
 	"/v1/fak/session/changes":   "/v1/fak/session/changes",
 	"/v1/fak/session/":          "/v1/fak/session/{trace_id}",
 	"/v1/fak/sessions":          "/v1/fak/sessions",
+	"/v1/fak/loops":             "/v1/fak/loops",
 	"/v1/fak/tasks":             "/v1/fak/tasks",
 	"/v1/models":                "/v1/models",
 	"/mcp":                      "/mcp",
