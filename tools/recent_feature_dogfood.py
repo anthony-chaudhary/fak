@@ -188,8 +188,12 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
         ),
         Probe(
             key="vcache-score",
-            description="run vCache 2x scorecard and write artifact",
-            command=fak + ["vcache", "score", "--json", "--out", str(vcache_score_artifact)],
+            description="run vCache 2x scorecard with dogfood telemetry (OBSERVED, not PLANNED)",
+            command=fak + [
+                "vcache", "score",
+                "--telemetry", "experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl",
+                "--json", "--out", str(vcache_score_artifact),
+            ],
             json_source=str(vcache_score_artifact),
             validator="vcache_score",
         ),
@@ -338,8 +342,9 @@ def validate_payload(name: str, payload: Any) -> tuple[bool, str]:
             and payload.get("schema") == "fak.vcache.score.v1"
             and payload.get("two_x_better") is True
             and payload.get("active_multiplier", 0) >= 2
+            and payload.get("active_source") == "telemetry"
         )
-        return bool(ok), "vCache score proves 2x-ready default" if ok else "vCache score did not prove 2x"
+        return bool(ok), "vCache score proves 2x-ready from OBSERVED dogfood telemetry" if ok else "vCache score did not prove 2x from telemetry"
     if name == "vcache_recall_refuted":
         ok = (
             isinstance(payload, dict)
