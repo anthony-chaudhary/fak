@@ -22,13 +22,20 @@ the SAME model, so the numbers are directly comparable. The engines today:
                    actual strength), not the single-stream slice, also disclosed.
                    Opt-in (a ~5 GB install), so NOT pulled into the default `all`.
   * fak-cpu     -- fak's pure-Go Q8 engine via cmd/modelbench (CPU)
-  * fak-cuda    -- fak's OWN engine on the CUDA backend via cmd/modelbench (f32;
-                   the cuda backend does not yet advertise UploadDtype, so the
-                   honest device path is f32). This is the deliverable: fak's
-                   engine measured on a real datacenter GPU, head-to-head vs
-                   llama.cpp on identical hardware.
+  * fak-cuda    -- fak's OWN engine on the CUDA backend via cmd/modelbench, f32
+                   weights resident in VRAM (the un-narrowed device path). This is
+                   the deliverable: fak's engine measured on a real datacenter GPU,
+                   head-to-head vs llama.cpp on identical hardware.
+  * fak-cuda-q8 -- the SAME engine + backend, but `-lean` so the GGUF Q8 weights go
+                   resident as int8 codes + per-block f32 scales and the native Q8
+                   device GEMV runs (the cuda backend advertises UploadDtype). This
+                   is the APPLES-TO-APPLES decode row against llama.cpp's Q8_0:
+                   decode is memory-bandwidth-bound, so streaming ~1 byte/weight
+                   instead of 4 is the single largest decode lever (see
+                   docs/benchmarks/H100-KERNEL-5X-ROADMAP.md). Opt-in until a green
+                   on-H100 number witnesses the device Q8 GEMV -- then promote into `all`.
 
-`--engine {llama,vllm,fak-cpu,fak-cuda,fak,all}` selects which run (default: all;
+`--engine {llama,vllm,fak-cpu,fak-cuda,fak-cuda-q8,fak,all}` selects which run (default: all;
 vLLM is opt-in via `--engine vllm` or a comma list like `llama,vllm`). Every
 engine writes a normalized {prefill,decode}_tok_per_sec row; the driver folds them
 into ONE result.json (schema fak.gcp-vm-bench.v2) with an `engines` map plus a
@@ -121,12 +128,17 @@ ENGINES: dict[str, Engine] = {
     "vllm": Engine("vllm", "vLLM (PagedAttention, continuous batching) baseline", needs_cuda=True),
     "fak-cpu": Engine("fak-cpu", "fak pure-Go Q8 engine (CPU)", needs_cuda=False),
     "fak-cuda": Engine("fak-cuda", "fak engine on the CUDA backend (f32)", needs_cuda=True),
+    "fak-cuda-q8": Engine("fak-cuda-q8", "fak engine on the CUDA backend (Q8 device GEMV; apples-to-apples vs llama.cpp Q8_0)", needs_cuda=True),
 }
-ENGINE_ORDER = ["llama", "vllm", "fak-cpu", "fak-cuda"]
+ENGINE_ORDER = ["llama", "vllm", "fak-cpu", "fak-cuda", "fak-cuda-q8"]
 # `all` stays the CURATED fak-vs-llama.cpp default and deliberately EXCLUDES vLLM:
 # vLLM is a ~5 GB install on a different (server) serving paradigm, so pulling it
 # into every default run would change the cost/behaviour of existing benches. vLLM is
 # therefore opt-in -- select it explicitly (`--engine vllm`) or in a comma list.
+# fak-cuda-q8 is likewise opt-in: the f32 fak-cuda row is the witnessed device path
+# today; the Q8 device GEMV has off-GPU cosine witnesses but no on-H100 number yet, so
+# it is selected explicitly (`--engine fak-cuda,fak-cuda-q8`) and PROMOTED into `all`
+# only once a green Hopper run witnesses it (docs/benchmarks/H100-KERNEL-5X-ROADMAP.md).
 DEFAULT_ALL = ["llama", "fak-cpu", "fak-cuda"]
 
 
@@ -379,10 +391,12 @@ _ENGINE_BASH = {
       -out "$WORK/fak-cpu-report.json"
   python3 "$WORK/norm_fak.py" fak-cpu "$WORK/fak-cpu-report.json" "$WORK/engine-fak-cpu.json"
 }''',
-    # fak-cuda runs f32 (no -lean/-quant): the cuda backend does not advertise
-    # UploadDtype yet, so the honest device path is f32 weights resident in VRAM
-    # (uploaded once, cached). -require-non-reference fails loudly if the run did
-    # NOT actually land on the GPU, so a green number can't be a silent CPU fallback.
+    # fak-cuda runs f32 (no -lean/-quant): the un-narrowed device path -- f32 weights
+    # resident in VRAM (uploaded once, cached). That streams 4 bytes/weight where the
+    # llama/fak-cpu rows stream ~1 (Q8); decode is memory-bandwidth-bound, so the
+    # apples-to-apples Q8 device row is the fak-cuda-q8 engine below (the cuda backend
+    # DOES advertise UploadDtype). -require-non-reference fails loudly if the run did NOT
+    # actually land on the GPU, so a green number can't be a silent CPU fallback.
     "fak-cuda": r'''engine_fak_cuda(){
   cd "$SRC"
   export CUDA_HOME=/usr/local/cuda
@@ -397,9 +411,31 @@ _ENGINE_BASH = {
       -out "$WORK/fak-cuda-report.json"
   python3 "$WORK/norm_fak.py" fak-cuda "$WORK/fak-cuda-report.json" "$WORK/engine-fak-cuda.json"
 }''',
+    # fak-cuda-q8 is fak-cuda + `-lean`: the GGUF Q8 weights stay resident as int8 codes +
+    # per-block f32 scales and the native Q8 device GEMV runs (no f32 dequant round-trip), so
+    # decode streams ~1 byte/weight instead of 4 -- the apples-to-apples row vs llama.cpp Q8_0.
+    # It REUSES the modelbench-cuda binary fak-cuda already built (guarded), so selecting both
+    # engines compiles the cuda backend once; run alone, it builds the binary itself.
+    "fak-cuda-q8": r'''engine_fak_cuda_q8(){
+  cd "$SRC"
+  if [ ! -x "$WORK/bin/modelbench-cuda" ]; then
+    export CUDA_HOME=/usr/local/cuda
+    FAK_CUDA_ARCH="$CUDA_CC" bash internal/compute/build_cuda.sh build
+    export CGO_ENABLED=1
+    export CGO_CFLAGS="-I/usr/local/cuda/include"
+    export CGO_LDFLAGS="-L$SRC/internal/compute -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64"
+    go build -tags cuda -o "$WORK/bin/modelbench-cuda" ./cmd/modelbench
+  fi
+  LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
+    "$WORK/bin/modelbench-cuda" -gguf "$MODEL" -lean -backend cuda -require-non-reference \
+      -prefill-sizes 512 -prefill-reps 5 -decode-steps 128 -decode-reps 5 -decode-prompt 16 \
+      -out "$WORK/fak-cuda-q8-report.json"
+  python3 "$WORK/norm_fak.py" fak-cuda-q8 "$WORK/fak-cuda-q8-report.json" "$WORK/engine-fak-cuda-q8.json"
+}''',
 }
 _ENGINE_FN = {"llama": "engine_llama", "vllm": "engine_vllm",
-              "fak-cpu": "engine_fak_cpu", "fak-cuda": "engine_fak_cuda"}
+              "fak-cpu": "engine_fak_cpu", "fak-cuda": "engine_fak_cuda",
+              "fak-cuda-q8": "engine_fak_cuda_q8"}
 
 
 _DRIVER_PREAMBLE = r'''#!/usr/bin/env bash
@@ -818,9 +854,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--proof", action="store_true",
                     help="use the cheapest (L4) tier to prove the pipeline")
     ap.add_argument("--engine", default="all",
-                    help="which engine(s): llama, vllm, fak-cpu, fak-cuda, fak, all, or a comma "
-                         "list (default: all). vLLM is opt-in (a ~5 GB install) -- it is NOT in "
-                         "'all'; run the engine head-to-head with e.g. --engine llama,vllm,fak-cuda")
+                    help="which engine(s): llama, vllm, fak-cpu, fak-cuda, fak-cuda-q8, fak, all, "
+                         "or a comma list (default: all). vLLM and fak-cuda-q8 are opt-in -- NOT in "
+                         "'all'; run the apples-to-apples Q8 head-to-head with "
+                         "--engine llama,fak-cuda,fak-cuda-q8")
     ap.add_argument("--zone", default=None, help="override zone (else tier default)")
     ap.add_argument("--project", default=os.environ.get("GCP_PROJECT") or None)
     ap.add_argument("--account", default=os.environ.get("GCP_ACCOUNT") or None)

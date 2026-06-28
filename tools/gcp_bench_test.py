@@ -276,6 +276,20 @@ class EngineSelectionTest(unittest.TestCase):
         self.assertEqual(gcp_bench.resolve_engines("fak-cuda,vllm,llama"),
                          ["llama", "vllm", "fak-cuda"])
 
+    def test_fak_cuda_q8_is_an_optin_apples_to_apples_engine(self):
+        # fak-cuda-q8 is the Q8 device GEMV row (apples-to-apples vs llama.cpp Q8_0).
+        # Like vLLM it is opt-in: registered + CUDA-flagged + selectable, ordered right
+        # after fak-cuda, but NOT in the curated `all` default until a green Hopper run
+        # witnesses the device Q8 GEMV (then it is promoted into DEFAULT_ALL).
+        self.assertIn("fak-cuda-q8", gcp_bench.ENGINES)
+        self.assertTrue(gcp_bench.ENGINES["fak-cuda-q8"].needs_cuda)
+        self.assertIn("fak-cuda-q8", gcp_bench.ENGINE_ORDER)
+        self.assertNotIn("fak-cuda-q8", gcp_bench.resolve_engines("all"))
+        self.assertEqual(gcp_bench.resolve_engines("fak-cuda-q8"), ["fak-cuda-q8"])
+        # The apples-to-apples head-to-head, in stable ENGINE_ORDER regardless of input order.
+        self.assertEqual(gcp_bench.resolve_engines("fak-cuda-q8,fak-cuda,llama"),
+                         ["llama", "fak-cuda", "fak-cuda-q8"])
+
     def test_unknown_engine_raises(self):
         with self.assertRaises(ValueError):
             gcp_bench.resolve_engines("nope")
@@ -320,13 +334,25 @@ class DriverScriptTest(unittest.TestCase):
         self.assertIn("-DCMAKE_CUDA_ARCHITECTURES=\"$CUDA_CC\"", body)
 
     def test_fak_cuda_is_f32_device_path_with_honesty_gate(self):
-        # cuda backend lacks UploadDtype -> no -lean/-quant; -require-non-reference
+        # fak-cuda is the un-narrowed f32 device baseline (no -lean/-quant on this row);
+        # the Q8 device path is the separate fak-cuda-q8 engine. -require-non-reference
         # makes a silent CPU fallback fail loudly instead of mislabeling the number.
         body = self._driver(["fak-cuda"])
         self.assertIn("-backend cuda", body)
         self.assertIn("-require-non-reference", body)
         self.assertNotIn("modelbench-cuda\" -gguf \"$MODEL\" -lean", body)
         self.assertIn("build_cuda.sh build", body)
+
+    def test_fak_cuda_q8_renders_lean_device_q8_with_honesty_gate(self):
+        # fak-cuda-q8 is the apples-to-apples Q8 device GEMV row: -lean (resident Q8
+        # codes+scales, native device GEMV) + -backend cuda + the non-reference gate.
+        body = self._driver(["fak-cuda-q8"])
+        self.assertIn("engine_fak_cuda_q8()", body)
+        self.assertIn("run_one fak-cuda-q8 engine_fak_cuda_q8", body)
+        self.assertIn("modelbench-cuda\" -gguf \"$MODEL\" -lean -backend cuda", body)
+        self.assertIn("-require-non-reference", body)
+        # It reuses the binary fak-cuda built rather than unconditionally recompiling.
+        self.assertIn("[ ! -x \"$WORK/bin/modelbench-cuda\" ]", body)
 
     def test_fak_cpu_uses_lean_q8(self):
         body = self._driver(["fak-cpu"])
