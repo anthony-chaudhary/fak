@@ -17,10 +17,17 @@ const SnapshotSchema = "fak.fleet.snapshot/v1"
 // state word was healthy.
 const DefaultStaleSec = 900 // 15 minutes
 
+// DefaultWasteFloor is how many of a box's GPUs may sit idle before the fold raises a
+// utilization crit. A box with 8 GPUs running on 1 wastes 7 — well past this — and is
+// the founding case; a box that idles 1-3 GPUs is below the floor and not flagged, so
+// the signal stays a real waste alarm, not noise on a lightly-loaded box.
+const DefaultWasteFloor = 4
+
 // FoldOpts tunes the fold without reaching for a clock or env — the fold stays PURE
 // so the renderer, the JSON, and the tests all share one deterministic shape.
 type FoldOpts struct {
-	StaleSec float64 // silence threshold; <= 0 means DefaultStaleSec
+	StaleSec   float64 // silence threshold; <= 0 means DefaultStaleSec
+	WasteFloor int     // idle-GPU count that trips the utilization crit; <= 0 means DefaultWasteFloor
 }
 
 // Item is one ranked "what needs me now" entry — crit before warn before ok.
@@ -32,14 +39,15 @@ type Item struct {
 
 // BoxRow is the per-box render record: roster identity folded with its report.
 type BoxRow struct {
-	ID      string  `json:"id"`
-	Class   string  `json:"class,omitempty"`
-	Group   string  `json:"group,omitempty"`
-	State   State   `json:"state"`
-	Version string  `json:"version,omitempty"`
-	AgeSec  float64 `json:"age_sec,omitempty"`
-	Note    string  `json:"note,omitempty"`
-	Err     string  `json:"err,omitempty"`
+	ID      string    `json:"id"`
+	Class   string    `json:"class,omitempty"`
+	Group   string    `json:"group,omitempty"`
+	State   State     `json:"state"`
+	Version string    `json:"version,omitempty"`
+	AgeSec  float64   `json:"age_sec,omitempty"`
+	Note    string    `json:"note,omitempty"`
+	GPU     *GPUStats `json:"gpu,omitempty"`
+	Err     string    `json:"err,omitempty"`
 }
 
 type countRow struct {
@@ -59,8 +67,15 @@ type Snapshot struct {
 	Versions     []countRow    `json:"versions"`
 	ModalVersion string        `json:"modal_version,omitempty"`
 	Score        int           `json:"score"` // 0-100 readiness, see scoreOf
-	Attention    []Item        `json:"attention"`
-	Rows         []BoxRow      `json:"rows"`
+	// GPUUtil is the fleet COMPUTE-utilization aggregate over reachable boxes that
+	// reported a GPU stat — Busy/Total GPUs and a token-weighted busy percent. It is
+	// nil when no reachable box reported one, so a fleet with no util producers shows
+	// no utilization line rather than a false 0%. Distinct from Score (readiness) and
+	// from cache-tier capacity: this is "is the silicon working", not "is it up" or
+	// "does the cache have room".
+	GPUUtil   *GPUStats `json:"gpu_util,omitempty"`
+	Attention []Item    `json:"attention"`
+	Rows      []BoxRow  `json:"rows"`
 }
 
 // Fold folds a roster and its (roster-aligned) reports into a Snapshot. reports must
@@ -70,11 +85,19 @@ func Fold(ro Roster, reports []Report, opts FoldOpts) Snapshot {
 	if opts.StaleSec <= 0 {
 		opts.StaleSec = DefaultStaleSec
 	}
+	if opts.WasteFloor <= 0 {
+		opts.WasteFloor = DefaultWasteFloor
+	}
 	byState := map[State]int{}
 	verCount := map[string]int{}
 	classCount := map[string]int{}
 	rows := make([]BoxRow, len(ro.Boxes))
 	reachable, healthy := 0, 0
+	// GPU-util aggregate over reachable boxes that reported one. utilWeighted sums
+	// per-box UtilPct*Total so the fleet percent is GPU-weighted (a busy 8-GPU box
+	// counts more than a busy 1-GPU box); gpuTotal is the denominator for that mean.
+	var gpuTotal, gpuBusy, utilWeighted, utilWeight int
+	sawGPU := false
 
 	for i, b := range ro.Boxes {
 		r := Report{ID: b.ID, State: StateUnknown, Err: "no report"}
@@ -100,9 +123,21 @@ func Fold(ro Roster, reports []Report, opts FoldOpts) Snapshot {
 				verCount[r.Version]++
 			}
 		}
+		// Only a HEALTHY box's GPU reading counts: a down box is reachable (we know it
+		// is down) but does no work, so its stale "8 busy" must not mask its outage as
+		// utilization. Gate on Healthy(), not Reachable().
+		if st.Healthy() {
+			if g := r.GPU; g != nil && g.Total > 0 {
+				sawGPU = true
+				gpuTotal += g.Total
+				gpuBusy += g.Busy
+				utilWeighted += g.UtilPct * g.Total
+				utilWeight += g.Total
+			}
+		}
 		rows[i] = BoxRow{
 			ID: b.ID, Class: b.Class, Group: b.Group,
-			State: st, Version: r.Version, AgeSec: r.AgeSec, Note: r.Note, Err: r.Err,
+			State: st, Version: r.Version, AgeSec: r.AgeSec, Note: r.Note, GPU: r.GPU, Err: r.Err,
 		}
 	}
 
@@ -117,8 +152,15 @@ func Fold(ro Roster, reports []Report, opts FoldOpts) Snapshot {
 		ModalVersion: modal,
 		Rows:         rows,
 	}
+	if sawGPU {
+		util := 0
+		if utilWeight > 0 {
+			util = int(math.Round(float64(utilWeighted) / float64(utilWeight)))
+		}
+		snap.GPUUtil = &GPUStats{Total: gpuTotal, Busy: gpuBusy, UtilPct: util}
+	}
 	snap.Score = scoreOf(snap.Total, reachable, healthy, modalN)
-	snap.Attention = attentionOf(rows, modal, opts.StaleSec)
+	snap.Attention = attentionOf(rows, modal, opts.StaleSec, opts.WasteFloor)
 	return snap
 }
 
@@ -151,8 +193,8 @@ func scoreOf(total, reachable, healthy, modalN int) int {
 // first, then warn (version skew, stale), then a single ok line if the fleet is
 // clean. Each list is capped in the rendered detail so 100 down boxes do not print
 // 100 ids.
-func attentionOf(rows []BoxRow, modal string, staleSec float64) []Item {
-	var down, skew, stale []string
+func attentionOf(rows []BoxRow, modal string, staleSec float64, wasteFloor int) []Item {
+	var down, skew, stale, wasting []string
 	for _, r := range rows {
 		if r.Err != "" || r.State == StateDown || r.State == StateUnknown {
 			down = append(down, r.ID)
@@ -165,6 +207,12 @@ func attentionOf(rows []BoxRow, modal string, staleSec float64) []Item {
 		if r.AgeSec > staleSec {
 			stale = append(stale, r.ID)
 		}
+		// Utilization waste: a reachable box leaving wasteFloor+ of its GPUs idle is
+		// leased-but-unused silicon — the founding 1/8 case. Only fires when the box
+		// actually reported GPUs (nil/Total==0 is unknown-util, not idle).
+		if g := r.GPU; g != nil && g.Total > 0 && (g.Total-g.Busy) >= wasteFloor {
+			wasting = append(wasting, fmt.Sprintf("%s(%d/%d)", r.ID, g.Busy, g.Total))
+		}
 	}
 	var items []Item
 	if len(down) > 0 {
@@ -172,6 +220,13 @@ func attentionOf(rows []BoxRow, modal string, staleSec float64) []Item {
 			Level:  "crit",
 			Title:  fmt.Sprintf("%d box(es) down or unreachable", len(down)),
 			Detail: previewList(down, 6),
+		})
+	}
+	if len(wasting) > 0 {
+		items = append(items, Item{
+			Level:  "crit",
+			Title:  fmt.Sprintf("%d box(es) wasting >=%d GPUs", len(wasting), wasteFloor),
+			Detail: previewList(wasting, 6),
 		})
 	}
 	if len(skew) > 0 {

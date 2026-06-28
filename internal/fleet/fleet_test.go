@@ -455,6 +455,132 @@ func hasWarn(items []Item, substr string) bool {
 	return false
 }
 
+func hasCrit(items []Item, substr string) bool {
+	for _, it := range items {
+		if it.Level == "crit" && strings.Contains(it.Title, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func countCrit(items []Item, substr string) int {
+	n := 0
+	for _, it := range items {
+		if it.Level == "crit" && strings.Contains(it.Title, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+// ---- GPU utilization (first-class) ------------------------------------------
+
+// TestGPUWasteCrit: a reachable box reporting 1-of-8 GPUs busy raises EXACTLY one
+// "wasting >=N GPUs" crit, the founding 1/8 case becomes VISIBLE, and — critically —
+// utilization NEVER moves the readiness Score (the two axes stay orthogonal).
+func TestGPUWasteCrit(t *testing.T) {
+	ro := Template(2, "a100x8", "lab", "box")
+	withGPU := []Report{
+		{State: StateLive, Version: "1.0.0", GPU: &GPUStats{Total: 8, Busy: 1, UtilPct: 0}},
+		{State: StateLive, Version: "1.0.0"},
+	}
+	snap := Fold(ro, withGPU, FoldOpts{})
+
+	if n := countCrit(snap.Attention, "wasting >=4 GPUs"); n != 1 {
+		t.Fatalf("want exactly one waste crit, got %d in %+v", n, snap.Attention)
+	}
+	// The detail names the box and its busy/total so an operator sees which box.
+	if !hasCrit(snap.Attention, "wasting >=4 GPUs") {
+		t.Fatalf("expected a waste crit, got %+v", snap.Attention)
+	}
+	if snap.GPUUtil == nil || snap.GPUUtil.Total != 8 || snap.GPUUtil.Busy != 1 {
+		t.Fatalf("GPUUtil aggregate = %+v, want {Total:8,Busy:1}", snap.GPUUtil)
+	}
+
+	// Score must be identical to the same roster WITHOUT any GPU field — utilization
+	// is orthogonal to readiness and must never feed scoreOf.
+	noGPU := []Report{
+		{State: StateLive, Version: "1.0.0"},
+		{State: StateLive, Version: "1.0.0"},
+	}
+	if g, b := Fold(ro, withGPU, FoldOpts{}).Score, Fold(ro, noGPU, FoldOpts{}).Score; g != b {
+		t.Fatalf("GPU field moved readiness Score: with-gpu=%d no-gpu=%d (must be equal)", g, b)
+	}
+}
+
+// TestGPUNilIsFailOpen: a box that omits GPU (cannot probe) raises NO waste crit and
+// produces NO GPU UTIL render line — unknown-utilization must never read as 0%-idle.
+func TestGPUNilIsFailOpen(t *testing.T) {
+	ro := Template(2, "cpu", "", "box")
+	reps := []Report{
+		{State: StateLive, Version: "1.0.0"},
+		{State: StateLive, Version: "1.0.0"},
+	}
+	snap := Fold(ro, reps, FoldOpts{})
+	if snap.GPUUtil != nil {
+		t.Fatalf("no box reported GPU; GPUUtil should be nil, got %+v", snap.GPUUtil)
+	}
+	if hasCrit(snap.Attention, "wasting") {
+		t.Fatalf("nil GPU must not raise a waste crit, got %+v", snap.Attention)
+	}
+	if out := Render(snap, false, 72); strings.Contains(out, "GPU UTIL") {
+		t.Fatalf("no util reported, but render printed a GPU UTIL line:\n%s", out)
+	}
+}
+
+// TestGPUWasteFloor: a box idling fewer than the floor (here 7-of-8 busy, 1 idle) is
+// NOT flagged, and a busy box (8-of-8) is NOT flagged — the crit is a real waste
+// alarm, not noise on a working box. The render line still shows the utilization.
+func TestGPUWasteFloorAndRender(t *testing.T) {
+	ro := Template(2, "a100x8", "lab", "box")
+	reps := []Report{
+		{State: StateLive, Version: "1.0.0", GPU: &GPUStats{Total: 8, Busy: 7, UtilPct: 85}},
+		{State: StateLive, Version: "1.0.0", GPU: &GPUStats{Total: 8, Busy: 8, UtilPct: 95}},
+	}
+	snap := Fold(ro, reps, FoldOpts{})
+	if hasCrit(snap.Attention, "wasting") {
+		t.Fatalf("7/8 and 8/8 are below the waste floor; no crit expected, got %+v", snap.Attention)
+	}
+	if snap.GPUUtil == nil || snap.GPUUtil.Busy != 15 || snap.GPUUtil.Total != 16 {
+		t.Fatalf("GPUUtil = %+v, want {Total:16,Busy:15}", snap.GPUUtil)
+	}
+	out := Render(snap, false, 72)
+	if !strings.Contains(out, "GPU UTIL   busy=15/16 idle=1") {
+		t.Fatalf("render missing the GPU UTIL line:\n%s", out)
+	}
+}
+
+// TestGPUWasteFloorOverride: the WasteFloor knob tightens/loosens the alarm. A floor
+// of 1 flags a box idling a single GPU; a custom floor is honored over the default.
+func TestGPUWasteFloorOverride(t *testing.T) {
+	ro := Template(1, "a100x2", "lab", "box")
+	reps := []Report{{State: StateLive, Version: "1.0.0", GPU: &GPUStats{Total: 2, Busy: 1}}}
+	// Default floor (4): 1 idle GPU is below it — no crit.
+	if hasCrit(Fold(ro, reps, FoldOpts{}).Attention, "wasting") {
+		t.Fatalf("1 idle GPU should be below the default floor of 4")
+	}
+	// Floor 1: the same 1 idle GPU now trips.
+	if !hasCrit(Fold(ro, reps, FoldOpts{WasteFloor: 1}).Attention, "wasting >=1 GPUs") {
+		t.Fatalf("WasteFloor=1 should flag a single idle GPU")
+	}
+}
+
+// TestGPUStatOnlyFromReachable: a DOWN box's stale GPU reading must not mask its
+// outage as utilization — only reachable boxes feed the aggregate and the crit.
+func TestGPUStatOnlyFromReachable(t *testing.T) {
+	ro := Template(1, "a100x8", "lab", "box")
+	// A down box claiming a full 8/8 — must be ignored (the box is the real problem).
+	reps := []Report{{State: StateDown, GPU: &GPUStats{Total: 8, Busy: 8, UtilPct: 99}}}
+	snap := Fold(ro, reps, FoldOpts{})
+	if snap.GPUUtil != nil {
+		t.Fatalf("a down box's GPU stat must not enter the aggregate, got %+v", snap.GPUUtil)
+	}
+	if !hasCrit(snap.Attention, "down or unreachable") {
+		t.Fatalf("the down box should still raise the down crit, got %+v", snap.Attention)
+	}
+}
+
 // countBoxRows counts rendered per-box rows: lines that begin with exactly two
 // spaces then a box id (the BOXES table), distinct from the 8-space-indented
 // attention detail lines.

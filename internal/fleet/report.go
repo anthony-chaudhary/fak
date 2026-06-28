@@ -54,6 +54,25 @@ func (s State) Known() bool {
 	return false
 }
 
+// GPUStats is a box's COMPUTE-utilization reading — how busy its silicon is, NOT how
+// full its memory is. It is deliberately orthogonal to readiness (State) and to
+// cache-tier capacity (internal/engine/capacity_*, which measures byte fullness of
+// HBM/DRAM/disk): an 8-GPU box can be memory-full on one GPU and idle on the other
+// seven, and only this catches the wasted seven. It carries COUNTS and one percent —
+// no host, no device serial, no vendor string — so it stays on the public/private
+// seam like the rest of Report.
+//
+// A producer that cannot probe the GPU leaves Report.GPU nil, which the fold reads as
+// unknown-utilization (no signal), NEVER as "0% = idle" — a false idle alarm on a box
+// that simply can't measure would be worse than silence. UtilPct is the aggregate
+// busy percent (0-100) across the box's GPUs when the producer has it; Busy/Total are
+// the count of GPUs doing work vs present, the signal the waste crit keys on.
+type GPUStats struct {
+	Total   int `json:"total"`              // GPUs present on the box
+	Busy    int `json:"busy"`               // GPUs actively executing (util above the producer's busy threshold)
+	UtilPct int `json:"util_pct,omitempty"` // aggregate 0-100 busy percent across the box, when known
+}
+
 // Report is one box's current operational state — the seam schema. AgeSec is how
 // long ago the box last reported (the transport stamps it); a large age means the
 // box has gone quiet even if its last word was "live".
@@ -61,14 +80,18 @@ func (s State) Known() bool {
 // ID and Err are tagged json:"-": identity is the roster's authority (never the
 // wire), and Err is reader-owned (set when a box can't be reached or parsed), so a
 // report file can never inject either field and flip the fold.
+//
+// GPU is an OPTIONAL pointer: a box that cannot probe its GPUs omits it, and the fold
+// treats a nil GPU as unknown-utilization (no waste signal), never as 0%-idle.
 type Report struct {
-	Schema  string  `json:"schema,omitempty"`
-	ID      string  `json:"-"`
-	State   State   `json:"state"`
-	Version string  `json:"version,omitempty"`
-	AgeSec  float64 `json:"age_sec,omitempty"`
-	Note    string  `json:"note,omitempty"`
-	Err     string  `json:"-"`
+	Schema  string    `json:"schema,omitempty"`
+	ID      string    `json:"-"`
+	State   State     `json:"state"`
+	Version string    `json:"version,omitempty"`
+	AgeSec  float64   `json:"age_sec,omitempty"`
+	Note    string    `json:"note,omitempty"`
+	GPU     *GPUStats `json:"gpu,omitempty"`
+	Err     string    `json:"-"`
 }
 
 // Reachable reports whether a trustworthy report was obtained: no read error and a

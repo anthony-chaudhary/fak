@@ -55,6 +55,15 @@ func Render(snap Snapshot, all bool, width int) string {
 		b.WriteString("VERSION    (none reported)\n")
 	}
 
+	// GPU UTIL is the fleet COMPUTE-utilization line — busy/total GPUs and the
+	// GPU-weighted busy percent. Printed only when at least one reachable box reported
+	// a GPU stat (snap.GPUUtil != nil), so a fleet with no util producers shows no line
+	// rather than a misleading "0%". idle = total - busy is the wasted-silicon count
+	// the founding 1/8 case is about.
+	if g := snap.GPUUtil; g != nil {
+		fmt.Fprintf(&b, "GPU UTIL   busy=%d/%d idle=%d (%d%%)\n", g.Busy, g.Total, g.Total-g.Busy, g.UtilPct)
+	}
+
 	b.WriteString("\nATTENTION\n")
 	for _, it := range snap.Attention {
 		fmt.Fprintf(&b, "  [%s] %s\n", strings.ToUpper(it.Level), it.Title)
