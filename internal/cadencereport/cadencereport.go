@@ -327,23 +327,15 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		ShipsSince:       row.WorkShips,
 		Summary: fmt.Sprintf("debt %s %+d (%d->%d); work %s %+d commit(s) (%d->%d), %s %+d ship(s) (%d->%d) vs %s; %d ship(s) in the last %dd",
 			dir, debtDelta, last.ScoresDebt, row.ScoresDebt,
-			commitsDirection(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,
-			shipsDirection(workShipsDelta), workShipsDelta, last.WorkShips, row.WorkShips,
+			directionWord(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,
+			directionWord(workShipsDelta), workShipsDelta, last.WorkShips, row.WorkShips,
 			last.Date, row.WorkShips, row.WorkWindowDays),
 	}
 }
 
-func commitsDirection(delta int) string {
-	if delta > 0 {
-		return "up"
-	}
-	if delta < 0 {
-		return "down"
-	}
-	return "flat"
-}
-
-func shipsDirection(delta int) string {
+// directionWord renders the sign of a per-tick delta as a trend word
+// (up | down | flat). Shared by the commit and ship deltas in TrendVsLast.
+func directionWord(delta int) string {
 	if delta > 0 {
 		return "up"
 	}
