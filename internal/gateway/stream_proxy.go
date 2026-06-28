@@ -108,8 +108,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			// buffered path does, and own the response (the message is generic so the
 			// upstream body never crosses the trust boundary).
 			s.logf("gateway: upstream model error (stream): %v", err)
-			status, code, msg := s.plannerErrorStatus(err)
-			writeErrCode(w, status, code, msg)
+			s.writeUpstreamErr(w, err)
 			return true
 		}
 		// Headers + content already went out; we cannot change the status. Emit a

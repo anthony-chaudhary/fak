@@ -301,8 +301,7 @@ func (s *Server) writeGeminiUpstreamError(w http.ResponseWriter, err error) {
 		return
 	}
 	s.logf("gateway: upstream model error (gemini): %v", err)
-	status, code, msg := s.plannerErrorStatus(err)
-	writeErrCode(w, status, code, msg)
+	s.writeUpstreamErr(w, err)
 }
 
 // prependGeminiTextPart inserts an in-band [fak] note as the FIRST part so a client

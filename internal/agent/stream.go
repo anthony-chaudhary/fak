@@ -286,7 +286,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400)}
+		return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
 	}
 
 	// Some "OpenAI-compatible" servers ignore stream:true and answer with a single

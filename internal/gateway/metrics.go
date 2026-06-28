@@ -145,9 +145,10 @@ type gatewayMetrics struct {
 	inKernelOOM map[string]*inKernelOOMClassStats
 
 	// upstreamErrMu guards the upstream-error visibility family: a count of proxy/planner
-	// turn FAILURES keyed by a coarse KIND (stalled / unreachable / status_4xx / status_5xx /
-	// oom / other), so an operator can scrape WHY turns are failing — not just that the route
-	// returned a 502/504. This is the metric twin of the per-turn `fak-turn … FAILED` debug
+	// turn FAILURES keyed by a KIND (stalled / unreachable / oom / rate_limited / auth /
+	// forbidden / status_4xx / status_5xx / other), so an operator can scrape WHY turns are
+	// failing — including telling a rate-limit storm apart from an auth-failure storm — not
+	// just that the route returned a 502/504. This is the metric twin of the per-turn `fak-turn … FAILED` debug
 	// line: the line is glanceable-per-turn, this is cumulative-per-session. Observational
 	// only; nothing in the request path reads it.
 	upstreamErrMu  sync.Mutex
@@ -282,6 +283,20 @@ func upstreamErrorKind(err error) string {
 	}
 	var se *agent.UpstreamStatusError
 	if errors.As(err, &se) {
+		// Split the operationally-distinct 4xx conditions into their own kinds so a
+		// /metrics scrape (and the FAILED debug line) can tell a RATE-LIMIT storm apart
+		// from an AUTH-failure storm apart from a LOGIN/permission denial — the same
+		// distinction upstreamErrorStatus now draws for the client. This stays in lockstep
+		// with that ladder (the cross-ladder test pins the pairing): 429 -> rate_limited,
+		// 401 -> auth, 403 -> forbidden, every other 4xx -> the coarse status_4xx bucket.
+		switch se.Status {
+		case http.StatusTooManyRequests:
+			return "rate_limited"
+		case http.StatusUnauthorized:
+			return "auth"
+		case http.StatusForbidden:
+			return "forbidden"
+		}
 		if se.Status >= 400 && se.Status < 500 {
 			return "status_4xx"
 		}
@@ -1810,10 +1825,11 @@ func (m *gatewayMetrics) writeInKernelOOMMetrics(b *strings.Builder) {
 }
 
 // writeUpstreamErrorMetrics renders the upstream/planner turn-failure family: a count of failed
-// turns by coarse kind (stalled / unreachable / status_4xx / status_5xx / oom / other). It is the
-// cumulative metric twin of the glanceable per-turn `fak-turn … FAILED` debug line, so a scrape
-// answers WHY turns failed — not just that the route returned a 502/504. Snapshot under the lock,
-// then render in sorted key order so the scrape is byte-stable.
+// turns by kind (stalled / unreachable / oom / rate_limited / auth / forbidden / status_4xx /
+// status_5xx / other). It is the cumulative metric twin of the glanceable per-turn `fak-turn …
+// FAILED` debug line, so a scrape answers WHY turns failed — including a rate-limit storm vs an
+// auth-failure storm — not just that the route returned a 502/504. Snapshot under the lock, then
+// render in sorted key order so the scrape is byte-stable.
 func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	m.upstreamErrMu.Lock()
 	snap := make(map[string]uint64, len(m.upstreamErrors))
@@ -1821,7 +1837,7 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 		snap[k] = v
 	}
 	m.upstreamErrMu.Unlock()
-	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures by kind (stalled, unreachable, status_4xx, status_5xx, oom, other).", "counter")
+	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures by kind (stalled, unreachable, oom, rate_limited, auth, forbidden, status_4xx, status_5xx, other).", "counter")
 	kinds := make([]string, 0, len(snap))
 	for k := range snap {
 		kinds = append(kinds, k)

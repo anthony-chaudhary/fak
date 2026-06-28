@@ -210,8 +210,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		s.logf("gateway: upstream model error: %v", err)
-		status, code, msg := s.plannerErrorStatus(err)
-		writeErrCode(w, status, code, msg)
+		s.writeUpstreamErr(w, err)
 		return
 	}
 

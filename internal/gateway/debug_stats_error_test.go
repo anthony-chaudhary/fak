@@ -29,7 +29,9 @@ func TestFormatTurnDebugError_LeadsWithReason(t *testing.T) {
 }
 
 // debugErrorReason collapses the shared upstreamErrorKind into the closed glanceable token set,
-// folding the two status kinds into one "status".
+// folding the generic status kinds into one "status" while keeping the operationally-distinct 4xx
+// conditions (rate_limited / auth / forbidden) as their own glanceable tokens — "we are being
+// rate-limited" and "our credential is bad" demand different operator action.
 func TestDebugErrorReason_ClosedTokens(t *testing.T) {
 	cases := []struct {
 		err  error
@@ -37,7 +39,11 @@ func TestDebugErrorReason_ClosedTokens(t *testing.T) {
 	}{
 		{&agent.UpstreamStalledError{Idle: time.Second}, "stalled"},
 		{&agent.UpstreamUnreachableError{Err: http.ErrServerClosed}, "unreachable"},
+		{&agent.UpstreamStatusError{Status: 429}, "rate_limited"},
+		{&agent.UpstreamStatusError{Status: 401}, "auth"},
+		{&agent.UpstreamStatusError{Status: 403}, "forbidden"},
 		{&agent.UpstreamStatusError{Status: 404}, "status"},
+		{&agent.UpstreamStatusError{Status: 400}, "status"},
 		{&agent.UpstreamStatusError{Status: 500}, "status"},
 		{nil, "error"},
 		{http.ErrHandlerTimeout, "error"},

@@ -264,9 +264,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// actionable 503; a genuine upstream failure stays the opaque 502 with the raw provider
 		// body kept off the wire. writeErrCode with an empty code reproduces the historical
 		// code:null body byte-for-byte, so the non-OOM response is unchanged (#346).
-		status, code, msg := s.plannerErrorStatus(err)
-		s.logf("gateway: messages turn error (%s): %v", code, err)
-		writeErrCode(w, status, code, msg)
+		// Classify once for the operator log WITHOUT the metric side effect
+		// (upstreamErrorStatus is the pure mapper; writeUpstreamErr below does the single
+		// metric-observing classify + write, so the failure is counted exactly once).
+		status, code, _ := upstreamErrorStatus(err)
+		s.logf("gateway: messages turn error (%s, HTTP %d): %v", code, status, err)
+		s.writeUpstreamErr(w, err)
 		return
 	}
 
@@ -837,8 +840,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 		if err != nil {
 			s.logf("gateway: upstream model error (messages): %v", err)
-			status, code, msg := s.plannerErrorStatus(err)
-			writeErrCode(w, status, code, msg)
+			s.writeUpstreamErr(w, err)
 			return
 		}
 		if compacted {

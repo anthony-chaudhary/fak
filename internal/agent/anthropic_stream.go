@@ -115,7 +115,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400)}
+		return &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
 	}
 	// The gateway only takes this path against the real Anthropic API, but guard anyway:
 	// an upstream that ignores stream and replies with one buffered JSON body cannot be

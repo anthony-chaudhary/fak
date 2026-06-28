@@ -918,7 +918,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			if retryableStatus(resp.StatusCode) {
-				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200)}
+				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
 				lastStatus = resp.StatusCode
 				continue
 			}
@@ -928,14 +928,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// token the upstream just rejected — so a truly-bad credential is not masked.
 			if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKey(p) {
 				triedAuthRefresh = true
-				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200)}
+				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
 				lastStatus = resp.StatusCode
 				// Do not count the credential-refresh retry against the backoff schedule:
 				// rewind so the next iteration re-sends immediately with the fresh token.
 				attempt--
 				continue
 			}
-			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400)}
+			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
 		}
 		comp, err := call.adapter.ParseResponse(raw)
 		if err != nil {
@@ -1031,10 +1031,23 @@ func (p *HTTPPlanner) transcriptAdapter() (TranscriptAdapter, error) {
 type UpstreamStatusError struct {
 	Status int
 	Body   string
+	// RetryAfter is the upstream's Retry-After response header VERBATIM ("" when
+	// absent). It is the one piece of upstream-supplied error metadata fak
+	// propagates downstream — a rate-limited (429) or overloaded (503) upstream
+	// names when to retry, and a wrapped agent that backs off correctly instead of
+	// hammering is the whole point of surfacing it. fak NEVER parses or interprets
+	// the value (RFC 7231 allows delta-seconds OR an HTTP-date); it is echoed only
+	// as the downstream Retry-After header, so a malformed upstream value can never
+	// reach fak's control flow. Unlike Body it is safe to forward: it carries no
+	// provider error text, only timing. Empty for every non-rate-limit/overload
+	// status (the header is not set on those), so it is a clean no-op there.
+	RetryAfter string
 }
 
 // Error formats the upstream's HTTP status and truncated error body as
-// "planner: HTTP <status>: <body>".
+// "planner: HTTP <status>: <body>". RetryAfter is deliberately NOT embedded — a
+// downstream caller that logs err.Error() must not pick up an echoed header
+// (the value is surfaced only as the response header, never the message body).
 func (e *UpstreamStatusError) Error() string {
 	return fmt.Sprintf("planner: HTTP %d: %s", e.Status, e.Body)
 }
