@@ -129,6 +129,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 ## Reference
 
 - [Claims ledger](CLAIMS.md): every capability with one machine-checked tag (shipped / simulated / stub).
+- [Net-true value standard](docs/standards/net-true-value.md): the lens fak judges any efficiency/perf gain by — measured against the real alternative (not a strawman), net of its own cost, scope stated, provenance-labeled, reproducible, and on by default — used both on fak's own claims and on the daily "5×" / "save 90% tokens" intake. Each rubric question maps to a stick the repo already runs.
 - [Status](STATUS.md): what is shipped and on the critical path.
 - [Architecture](ARCHITECTURE.md): the registry seams and the frozen ABI.
 - [Extending fak](EXTENDING.md): plug in an optimization → prove it correct → prove it faster → ship.

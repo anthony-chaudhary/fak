@@ -78,6 +78,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 - [Benchmark authority](BENCHMARK-AUTHORITY.md) — the single source of truth for every number.
 - [Benchmark template](BENCHMARK-TEMPLATE.md) — the shape a new benchmark result doc must take.
+- [Net-true value standard](docs/standards/net-true-value.md) — how fak decides a gain is real, not noise: the six-question rubric (real baseline / net of cost / scope / provenance / witness / realized) used on fak's own claims and on incoming industry "5×" claims, each criterion bound to the stick that enforces it.
 - [Hardware bench plan](docs/bench-plan.md) — auto-generated: the next highest-value test per bench-node (regenerate with `tools/bench_plan.py`, don't hand-edit).
 - [Web-agent baselines](docs/webbench-baselines.md) — the modeled WebVoyager prefill geometry (vs the naive floor).
 - [Web-agent blockers](docs/webbench-blockers.md) — what is not yet measured, and why.

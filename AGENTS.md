@@ -133,6 +133,13 @@ until it clears.
 - **Every claim carries a tag.** Each `- [` line in [`fak/CLAIMS.md`](CLAIMS.md) must
   carry exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]` (lint-enforced by
   `make claims-lint`). Don't overclaim; the repo keeps an honesty ledger.
+- **A gain is net-true or it isn't reported.** Before you claim an efficiency/perf win —
+  yours, or one you read in a paper — run it through the
+  [net-true-value standard](docs/standards/net-true-value.md): measured against the *real*
+  alternative (not a strawman), net of the cost it adds, scope stated, provenance-labeled
+  (witnessed/observed/modeled), and reproducible — no witness ⇒ `not yet`. Quote the tuned
+  baseline as the headline, never the naive one (the `A=naive / B=tuned / C=fak` letters in
+  [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) are the mechanical form).
 - **Add a feature as a leaf, not a core edit.** `python tools/new_leaf.py <name> --tier
   <tier> [--register]` stamps a conforming skeleton; the frozen ABI (`fak/internal/abi`)
   is additive-only and human-owned. `internal/architest` fails the build on a bad import.
