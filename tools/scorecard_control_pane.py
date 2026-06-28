@@ -89,7 +89,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "tokendefaults", "debt": "token_defaults_debt", "script": "", "cmd": "go run ./cmd/fak token-defaults-scorecard --json", "label": "token-defaults"},
     {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak guard-rsi-scorecard --json", "label": "guard-rsi"},
     {"key": "dogfood", "debt": "dogfood_debt", "script": "", "cmd": "go run ./cmd/fak dogfood-score --json", "label": "dogfood-loop"},
-    {"key": "growth", "debt": "growth_debt", "script": "growth_debt_scorecard.py", "label": "growth-debt"},
+    {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
 ]
 
 
