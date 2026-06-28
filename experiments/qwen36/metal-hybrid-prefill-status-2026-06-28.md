@@ -20,6 +20,12 @@ Apple-Silicon M3 Pro with the macOS Metal toolchain, named in §3 as the honest 
 not faked green (the [`../../docs/proofs/00-METHOD.md`](../../docs/proofs/00-METHOD.md) honesty
 rule applies: a counter-witness would be recorded, not rounded away).
 
+> **Reconciled 2026-06-28** — this note's first draft (`5207aafb`, then `4c682b48`) was written
+> while the Metal twin/gate/stub/`kv.go` dispatch were still uncommitted in the model-lane working
+> tree. They have since landed on `main` in `5c065118`; §1's table and §3 below are updated to that
+> committed state, so the sole open residual is now the Mac M3 Pro `fakmetal` GPU witness — no
+> model-lane commit is outstanding.
+
 Sibling evidence in this cluster:
 [`metal-hybrid-prefill-spec-20260627.md`](metal-hybrid-prefill-spec-20260627.md) (the recipe
 this realizes), [`metal-gdn-recurrence-decision-2026-06-28.md`](metal-gdn-recurrence-decision-2026-06-28.md)
