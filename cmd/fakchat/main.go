@@ -262,6 +262,28 @@ func hybridBackend(quantLoaded, q4, q4k bool) string {
 	return backend
 }
 
+// streamDecode samples up to *fl.maxNew tokens from logits, writing each decoded piece to
+// out (flushed per token) and stopping at a stop id, stepping the session each token. It
+// returns the elapsed decode time and the number of tokens generated — the streaming decode
+// loop shared by the hybrid and standard prefill+decode paths.
+func streamDecode(s *model.Session, logits []float32, fl *cliFlags, rng *rand.Rand, tok *tokenizer.Tokenizer, stops map[int]bool, out *bufio.Writer) (time.Duration, int) {
+	t := time.Now()
+	gen := 0
+	for ; gen < *fl.maxNew; gen++ {
+		next := sample(logits, *fl.temp, rng)
+		if stops[next] {
+			break
+		}
+		if piece, derr := tok.Decode([]int{next}); derr == nil {
+			out.WriteString(piece)
+			out.Flush()
+		}
+		logits = s.Step(next)
+	}
+	out.Flush()
+	return time.Since(t), gen
+}
+
 // runHybrid runs the cached qwen3_5 (Gated-DeltaNet) prefill+decode path: it honours the
 // FAK_Q4/FAK_Q4_FORCE/FAK_METAL/FAK_QPROFILE env gates, streams the decode to stdout, and
 // prints the timing summary — behaviour-identical to the inline hybrid block.
@@ -309,21 +331,8 @@ func runHybrid(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.To
 		printPhaseProfile("prefill", pp.Snapshot("prefill", len(ids), 0, time.Since(tp).Nanoseconds()))
 		pp.Reset() // separate the decode phase split from prefill's
 	}
-	tg := time.Now()
-	gen := 0
-	for ; gen < *fl.maxNew; gen++ {
-		next := sample(logits, *fl.temp, rng)
-		if stops[next] {
-			break
-		}
-		if piece, derr := tok.Decode([]int{next}); derr == nil {
-			out.WriteString(piece)
-			out.Flush()
-		}
-		logits = s.Step(next)
-	}
-	out.Flush()
-	decodeNanos := time.Since(tg).Nanoseconds()
+	dec, gen := streamDecode(s, logits, fl, rng, tok, stops, out)
+	decodeNanos := dec.Nanoseconds()
 	decodeS := float64(decodeNanos) / 1e9
 	if pp != nil {
 		printPhaseProfile("decode", pp.Snapshot("decode", 0, gen, decodeNanos))
@@ -366,22 +375,8 @@ func runStandard(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.
 	// Decode loop (timed, streamed).
 	out := bufio.NewWriter(os.Stdout)
 	rng := rand.New(rand.NewSource(*fl.seed))
-	td0 := time.Now()
-	gen := 0
-	for ; gen < *fl.maxNew; gen++ {
-		next := sample(logits, *fl.temp, rng)
-		if stops[next] {
-			break
-		}
-		piece, derr := tok.Decode([]int{next})
-		if derr == nil {
-			out.WriteString(piece)
-			out.Flush()
-		}
-		logits = s.Step(next)
-	}
-	decodeS := time.Since(td0).Seconds()
-	out.Flush()
+	dec, gen := streamDecode(s, logits, fl, rng, tok, stops, out)
+	decodeS := dec.Seconds()
 
 	prefTPS := 0.0
 	if prefillS > 0 {
