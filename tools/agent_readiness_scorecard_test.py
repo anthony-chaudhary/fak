@@ -606,6 +606,21 @@ def test_live_payload_is_well_formed() -> None:
         assert {"kpi", "group", "score", "detail", "defects", "soft"} <= set(k)
 
 
+def test_live_identity_resolves_in_every_orientation_doc() -> None:
+    """The instant-orientation DoD (#1119): the one-sentence 'fak is a/an …' identity
+    must resolve near the top of EVERY orientation doc, so a cold agent quotes it
+    wherever it enters the repo — AGENTS.md, llms.txt, OR README, not just whichever
+    doc happens to be read first. A regression sentinel for the day a doc rewrite
+    drops the identity line from one of the three."""
+    root = ar.repo_root()
+    if not (root / ar.AGENTS_FILE).exists():
+        return  # tolerant: not in the repo tree
+    texts = {d: ar._safe_read(root / d) for d in ar.IDENTITY_DOCS}
+    present_in, missing = ar.find_identity(texts)
+    assert missing == [], f"identity missing from {missing} (present in {present_in})"
+    assert set(present_in) == set(ar.IDENTITY_DOCS), present_in
+
+
 def main() -> int:
     failures: list[str] = []
 
