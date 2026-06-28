@@ -237,7 +237,7 @@ def test_package_exists() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         pkg = root / "internal" / "testpkg"
-        pkg.mkdir()
+        pkg.mkdir(parents=True)
         assert crs._package_exists("internal/testpkg", root)
         assert not crs._package_exists("nonexistent/pkg", root)
 
@@ -279,6 +279,110 @@ def test_score_clamping() -> None:
     assert crs._clamp(150) == 100
 
 
+def _seed_tree(root: Path, paths: list[str]) -> None:
+    """Create empty files at the given repo-relative paths (with parents)."""
+    for rel in paths:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("{}")
+
+
+def test_artifact_resolves_dropped_prefix() -> None:
+    """An artifact cited without its real subtree prefix still resolves.
+
+    BENCHMARK-AUTHORITY cites `model-ladder/x.json`; the real tracked path is
+    `experiments/model-ladder/x.json`. The reader finds it by name, so the
+    resolver must too — a literal repo-root check would cry wolf.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _seed_tree(root, ["experiments/model-ladder/qwen-parity.json"])
+        crs._TREE_INDEX_CACHE.clear()
+        assert crs._artifact_resolves("model-ladder/qwen-parity.json", root)
+        assert crs._artifact_resolves("qwen-parity.json", root)  # bare basename
+        assert not crs._artifact_resolves("model-ladder/does-not-exist.json", root)
+
+
+def test_artifact_prose_noun_not_flagged() -> None:
+    """A bare filename noun in prose that is tracked NOWHERE is not an artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _seed_tree(root, ["internal/recall/recall.go"])
+        crs._TREE_INDEX_CACHE.clear()
+        # `manifest.json` describes a page-table STRUCTURE, not a repro handle.
+        assert crs._artifact_resolves("manifest.json", root)               # prose
+        # but the SAME bare name in a benchmark artifact cell is a genuine miss.
+        assert not crs._artifact_resolves("manifest.json", root, prose_ok=False)
+        # a gitignored OPERATOR runtime path named in CLAIMS prose is not a witness
+        assert crs._artifact_resolves(".dispatch-runs/dispatch-status.md", root)
+        # ...but the same hidden-dir path in a benchmark artifact cell is a miss
+        assert not crs._artifact_resolves(
+            ".dispatch-runs/dispatch-status.md", root, prose_ok=False)
+
+
+def test_artifact_command_not_flagged() -> None:
+    """A whole command captured in backticks is not a single artifact path."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        crs._TREE_INDEX_CACHE.clear()
+        # contains whitespace -> a command, not an artifact citation
+        assert crs._artifact_resolves(
+            "python tools/x.py validate-doc docs/y.md", root)
+        # and the tightened regex never captures it from a backticked command line
+        line = "validates JSON examples (`python tools/x.py validate-doc docs/y.md`)."
+        assert not crs._ARTIFACT_PATH_RE.search(line)
+
+
+def test_artifact_glob_and_braces() -> None:
+    """Glob (`*`) and brace (`{a,b}`) artifact citations resolve by expansion."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _seed_tree(root, [
+            "experiments/radixbench-4-agents-fresh-20260619.json",
+            "session/macbook-bench.log",
+            "session/macbook-ctx.log",
+        ])
+        crs._TREE_INDEX_CACHE.clear()
+        assert crs._artifact_resolves("radixbench-*-agents-fresh-20260619.json", root)
+        assert crs._artifact_resolves("session/macbook-{bench,ctx}.log", root)
+
+
+def test_whole_module_pkg_not_flagged() -> None:
+    """`go test ./...` (whole module) is always resolvable, never a missing pkg."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        crs._TREE_INDEX_CACHE.clear()
+        crs._ALL_FUNCS_CACHE.clear()
+        line = "- [SHIPPED] zero data races. Witness: `go test -race ./...` exit 0."
+        assert crs._resolve_claim_witnesses(line, root) == []
+
+
+def test_run_alternation_resolves_on_any_match() -> None:
+    """`-run A|B` resolves when ANY alternative names a real test func.
+
+    Exercises `_run_pattern_resolves` directly: quotes/anchors are stripped and a
+    prefix substring of a real func counts as a match. (The standalone-name check
+    independently catches a fully bogus name; that is a separate witness.)
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        pkg = root / "internal" / "session"
+        pkg.mkdir(parents=True)
+        (pkg / "session_test.go").write_text(
+            "package session\nfunc TestContextBudgetMintsAndDrains(t *testing.T) {}\n")
+        crs._PKG_FUNCS_CACHE.clear()
+        # quoted alternation; `TestContextBudget` is a prefix of the real func.
+        assert crs._run_pattern_resolves(
+            '"TestContextBudget|TestSomethingElse"', "internal/session", root)
+        # a `-run` naming NO real test is genuine debt.
+        assert not crs._run_pattern_resolves("TestNopeNope", "internal/session", root)
+        # whole-module `go test ./...` never reports a missing package.
+        crs._TREE_INDEX_CACHE.clear()
+        crs._ALL_FUNCS_CACHE.clear()
+        line = "- [SHIPPED] races. Witness: `go test -race ./...` exit 0."
+        assert crs._resolve_claim_witnesses(line, root) == []
+
+
 def run_all() -> int:
     """Run all tests."""
     tests = [
@@ -299,6 +403,12 @@ def run_all() -> int:
         test_witness_extraction_patterns,
         test_empty_files,
         test_score_clamping,
+        test_artifact_resolves_dropped_prefix,
+        test_artifact_prose_noun_not_flagged,
+        test_artifact_command_not_flagged,
+        test_artifact_glob_and_braces,
+        test_whole_module_pkg_not_flagged,
+        test_run_alternation_resolves_on_any_match,
     ]
 
     failed = 0

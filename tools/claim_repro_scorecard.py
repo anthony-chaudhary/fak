@@ -22,6 +22,7 @@ Run from the repo ROOT::
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import re
 import subprocess
@@ -41,11 +42,15 @@ _WITNESS_TEST_RE = re.compile(r"`go test\s+([^`]+)`")
 _WITNESS_FUNC_RE = re.compile(r"(Test|Benchmark|Fuzz|Example)\w+")
 _WITNESS_RUN_RE = re.compile(r"-run\s+(\S+)")
 
-# cmd/<dir> references in `go run ./cmd/<dir>` or similar
-_CMD_DIR_RE = re.compile(r"`go run\s+\./cmd/([^/`]+)`")
+# cmd/<dir> references in `go run ./cmd/<dir> …` — capture ONLY the directory
+# name (stop at the first non-name char) so a trailing flag/subcommand
+# (`go run ./cmd/ctxplanbench -selfcheck`) isn't folded into a bogus dir name.
+_CMD_DIR_RE = re.compile(r"go run\s+\./cmd/([\w-]+)")
 
-# File/artifact path patterns
-_ARTIFACT_PATH_RE = re.compile(r"`([^`]+\.(json|md|log|txt|csv))`")
+# File/artifact path patterns. A real artifact citation is a path token with NO
+# whitespace — `[^\s`]+` so a whole command in backticks (e.g.
+# `python tools/x.py validate-doc docs/y.md`) is NOT mis-captured as one artifact.
+_ARTIFACT_PATH_RE = re.compile(r"`([^\s`]+\.(json|md|log|txt|csv))`")
 
 # Markdown link patterns for artifacts
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+\.(json|md|log|txt|csv))\)")
@@ -67,20 +72,30 @@ def _safe_read(path: Path) -> str:
         return ""
 
 
-def _extract_test_functions(content: str, pkg_path: str) -> set[str]:
-    """Extract test function names from Go test files in a package."""
-    test_files = []
-    for suffix in ("_test.go",):
-        test_files.extend(list(Path(repo_root()).rglob(f"{pkg_path}/**/*{suffix}")))
+_PKG_FUNCS_CACHE: dict[tuple[str, str], set[str]] = {}
 
-    funcs = set()
-    for tf in test_files:
-        try:
-            content = tf.read_text(encoding="utf-8", errors="ignore")
+
+def _pkg_test_funcs(pkg_path: str, root: Path) -> set[str]:
+    """Test/Benchmark/Example function names declared under a package, root-relative.
+
+    Cached per (pkg, root). Resolved against the GIVEN root (not the live repo) so
+    the check is honest under a fixture tree.
+    """
+    key = (pkg_path, str(root))
+    cached = _PKG_FUNCS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    funcs: set[str] = set()
+    pkg_dir = root / pkg_path
+    if pkg_dir.is_dir():
+        for tf in pkg_dir.rglob("*_test.go"):
+            try:
+                content = tf.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
             for m in _WITNESS_FUNC_RE.finditer(content):
                 funcs.add(m.group(0))
-        except OSError:
-            continue
+    _PKG_FUNCS_CACHE[key] = funcs
     return funcs
 
 
@@ -107,69 +122,207 @@ def _go_files_in_dir(dir_path: Path) -> list[Path]:
     return list(dir_path.rglob("*.go"))
 
 
+# --- artifact / witness resolution against the real tracked tree -------------
+#
+# An outsider validates a claim by opening the cited artifact or running the
+# cited test. CLAIMS.md / BENCHMARK-AUTHORITY.md cite an artifact by NAME, which
+# may sit one subtree deep — BENCHMARK-AUTHORITY says plainly that several rows
+# dropped their `experiments/` / `docs/benchmarks/` prefix ("the real tracked
+# path is experiments/…"). So "resolvable" means *a tracked file matches this
+# citation*, resolved the way the reader actually finds it — not "a file sits at
+# this exact repo-root literal". A literal-only check cries wolf on a falsifiable
+# claim, which is itself the worst failure mode for a skeptical reader, so an
+# accurate resolver is what keeps this score honest.
+
+_PRUNE_DIRS = {".git", ".claude", "node_modules", "__pycache__", ".venv", "vendor"}
+_TREE_INDEX_CACHE: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
+_ALL_FUNCS_CACHE: dict[str, frozenset[str]] = {}
+
+
+def _tree_index(root: Path) -> tuple[frozenset[str], frozenset[str]]:
+    """(relpaths, basenames) of every file under root, '/'-normalized. Cached.
+
+    Prefers ``git ls-files`` (the tracked tree an outsider clones); falls back to
+    a filesystem walk (the fixture trees in the unit tests carry no git).
+    """
+    key = str(root)
+    cached = _TREE_INDEX_CACHE.get(key)
+    if cached is not None:
+        return cached
+    rels: set[str] = set()
+    try:
+        p = subprocess.run(["git", "ls-files"], cwd=str(root),
+                           capture_output=True, text=True, timeout=30)
+        if p.returncode == 0 and p.stdout.strip():
+            rels = {ln.strip() for ln in p.stdout.splitlines() if ln.strip()}
+    except (OSError, subprocess.SubprocessError):
+        rels = set()
+    if not rels:
+        for f in root.rglob("*"):
+            if any(part in _PRUNE_DIRS for part in f.parts) or not f.is_file():
+                continue
+            try:
+                rels.add(f.relative_to(root).as_posix())
+            except ValueError:
+                continue
+    bases = {r.rsplit("/", 1)[-1] for r in rels}
+    idx = (frozenset(rels), frozenset(bases))
+    _TREE_INDEX_CACHE[key] = idx
+    return idx
+
+
+def _all_test_funcs(root: Path) -> frozenset[str]:
+    """Every Test/Benchmark/Fuzz/Example function declared tree-wide. Cached."""
+    key = str(root)
+    cached = _ALL_FUNCS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    funcs: set[str] = set()
+    for tf in root.rglob("*_test.go"):
+        if any(part in _PRUNE_DIRS for part in tf.parts):
+            continue
+        try:
+            content = tf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for m in _WITNESS_FUNC_RE.finditer(content):
+            funcs.add(m.group(0))
+    frozen = frozenset(funcs)
+    _ALL_FUNCS_CACHE[key] = frozen
+    return frozen
+
+
+def _expand_braces(token: str) -> list[str]:
+    """Expand one ``{a,b,c}`` group: ``x-{bench,ctx}.log`` -> two paths."""
+    m = re.search(r"\{([^{}]*)\}", token)
+    if not m:
+        return [token]
+    out: list[str] = []
+    for alt in m.group(1).split(","):
+        out.extend(_expand_braces(token[:m.start()] + alt + token[m.end():]))
+    return out
+
+
+def _path_token_resolves(tok: str, rels: frozenset[str], bases: frozenset[str],
+                         prose_ok: bool) -> bool:
+    """One concrete path token resolves against the tracked index."""
+    tok = tok.strip()
+    if tok.startswith("./"):            # strip a `./` PREFIX only — never a leading
+        tok = tok[2:]                   # `.` of a hidden dir like `.dispatch-runs/`
+    if not tok:
+        return True
+    base = tok.rsplit("/", 1)[-1]
+    if any(c in tok for c in "*?["):                          # glob citation
+        return any(fnmatch.fnmatch(b, base) for b in bases)
+    if tok in rels:                                           # exact tracked path
+        return True
+    if any(r == tok or r.endswith("/" + tok) for r in rels):  # dropped-prefix suffix
+        return True
+    if "/" not in tok:                                        # bare basename, tracked nowhere
+        # In CLAIMS prose a bare name is a STRUCTURAL noun (`manifest.json`, *the
+        # page table*), not a reproduction handle -> prose_ok. In a BENCHMARK
+        # artifact cell a bare name is a deliberate citation -> a real miss.
+        return prose_ok
+    if tok.split("/", 1)[0].startswith("."):                  # untracked hidden/runtime dir
+        # e.g. `.dispatch-runs/dispatch-status.md` — a gitignored OPERATOR view the
+        # claim names in prose, not a committed witness. The real witness is the
+        # test suite cited alongside it; this path is runtime output, not debt.
+        return prose_ok
+    return False
+
+
+def _artifact_resolves(token: str, root: Path, prose_ok: bool = True) -> bool:
+    """Does a cited artifact resolve the way an outsider would find it?
+
+    A token with whitespace is a command or prose fragment, not an artifact path
+    (return True — not this check's business). ``prose_ok`` governs the bare-name
+    case: True (CLAIMS prose) treats an untracked bare name as a structural noun;
+    False (a BENCHMARK artifact cell) treats it as a genuine missing citation.
+    Every token with a real path component must resolve to a tracked file regardless.
+    """
+    token = token.strip()
+    if not token or " " in token or "\t" in token:
+        return True
+    rels, bases = _tree_index(root)
+    return any(_path_token_resolves(v, rels, bases, prose_ok)
+               for v in _expand_braces(token))
+
+
+def _norm_pkg(pkg_path: str) -> str:
+    """Normalize a ``go test`` package arg to a directory; '' = whole module."""
+    pkg_path = pkg_path.strip().replace("\\", "/").lstrip("./").rstrip("/")
+    while pkg_path.endswith("/..."):
+        pkg_path = pkg_path[: -len("/...")]
+    if pkg_path in ("", "..."):
+        return ""                                            # whole module: always resolvable
+    return pkg_path
+
+
+def _run_pattern_resolves(pattern: str, pkg_path: str, root: Path) -> bool:
+    """A ``-run A|B|C`` resolves if ANY alternative names a real test func.
+
+    Conservative: when the package declares no test funcs (a renamed/wrong package,
+    or a non-test witness) we cannot DISPROVE the witness, so we do not flag it. We
+    flag only when funcs exist and not one alternative matches — a genuinely stale
+    ``-run`` an outsider would type and get "no tests to run".
+    """
+    funcs = _pkg_test_funcs(pkg_path, root) if pkg_path else set()
+    if not funcs:
+        return True
+    # Strip the quotes/anchors/parens a `-run` regex carries so each alternative
+    # is the bare identifier prefix an outsider's `-run` would actually match.
+    alts = [a.strip().strip("\"'^$() \t") for a in pattern.split("|")]
+    alts = [a for a in alts if a]
+    return any(any(a in f for f in funcs) for a in alts)
+
+
 def _resolve_claim_witnesses(line: str, root: Path) -> list[str]:
     """Check resolvability of a claim's witness handles."""
     issues: list[str] = []
 
-    # Check `go test ./pkg -run X` patterns
+    # `go test ./pkg -run X` patterns
     for m in _WITNESS_TEST_RE.finditer(line):
         cmd = m.group(1)
-        parts = cmd.split()
         pkg_path = ""
-        for i, part in enumerate(parts):
-            if part.startswith("./") or part.startswith(".\\"):
-                pkg_path = part[2:]  # Remove ./ prefix
+        for part in cmd.split():
+            if part.startswith(("./", ".\\")):
+                pkg_path = part[2:].replace("\\", "/")
                 break
-            if "." in part and not part.startswith("-"):
+            if "/" in part and not part.startswith("-"):
                 pkg_path = part
                 break
-
+        pkg_path = _norm_pkg(pkg_path)
         if pkg_path and not _package_exists(pkg_path, root):
             issues.append(f"missing package path: {pkg_path}")
-
-        # Check test function names if -run is present
+            continue
         run_match = _WITNESS_RUN_RE.search(cmd)
-        if run_match:
-            test_name = run_match.group(1)
-            # Get all test functions in the package
-            test_funcs = _extract_test_functions(cmd, pkg_path) if pkg_path else set()
-            # Check if any test function matches the run pattern (simplified: exact match)
-            if test_funcs and not any(test_name in func for func in test_funcs):
-                issues.append(f"test pattern '{test_name}' not found in package {pkg_path}")
+        if pkg_path and run_match and not _run_pattern_resolves(run_match.group(1), pkg_path, root):
+            issues.append(f"-run '{run_match.group(1)}' matches no test in {pkg_path}")
 
-    # Check `go run ./cmd/<dir>` patterns
+    # `go run ./cmd/<dir>` patterns
     for m in _CMD_DIR_RE.finditer(line):
         cmd_name = m.group(1)
         if not _cmd_dir_exists(cmd_name, root):
             issues.append(f"missing cmd dir: cmd/{cmd_name}")
 
-    # Check artifact paths in backticks
+    # artifact paths in backticks
     for m in _ARTIFACT_PATH_RE.finditer(line):
-        artifact_path = m.group(1)
-        if not _file_exists(artifact_path, root):
-            issues.append(f"missing artifact: {artifact_path}")
+        if not _artifact_resolves(m.group(1), root):
+            issues.append(f"missing artifact: {m.group(1)}")
 
-    # Check markdown link artifact paths
+    # markdown-link artifact paths
     for m in _MD_LINK_RE.finditer(line):
-        artifact_path = m.group(2)
-        if not _file_exists(artifact_path, root):
-            issues.append(f"missing linked artifact: {artifact_path}")
+        if not _artifact_resolves(m.group(2), root):
+            issues.append(f"missing linked artifact: {m.group(2)}")
 
-    # Check standalone test function references
+    # standalone `TestX` witness cited with no `go test` wrapper
+    all_funcs: frozenset[str] | None = None
     for m in _WITNESS_FUNC_RE.finditer(line):
-        func_name = m.group(0)
-        # Search tree-wide for this test function
-        found = False
-        for go_file in root.rglob("*_test.go"):
-            try:
-                content = go_file.read_text(encoding="utf-8", errors="ignore")
-                if func_name in content:
-                    found = True
-                    break
-            except OSError:
-                continue
-        if not found:
-            issues.append(f"test function not found: {func_name}")
+        name = m.group(0)
+        if all_funcs is None:
+            all_funcs = _all_test_funcs(root)
+        if not any(name in f for f in all_funcs):
+            issues.append(f"test function not found: {name}")
 
     return issues
 
@@ -178,26 +331,21 @@ def _resolve_benchmark_witnesses(line: str, root: Path) -> list[str]:
     """Check resolvability of a benchmark row's artifact/reproduce handles."""
     issues: list[str] = []
 
-    # Check artifact paths
+    # A BENCHMARK artifact cell is a deliberate citation: a bare untracked name is
+    # a genuine missing artifact, not prose (prose_ok=False).
     for m in _ARTIFACT_PATH_RE.finditer(line):
-        artifact_path = m.group(1)
-        if not _file_exists(artifact_path, root):
-            issues.append(f"missing artifact: {artifact_path}")
+        if not _artifact_resolves(m.group(1), root, prose_ok=False):
+            issues.append(f"missing artifact: {m.group(1)}")
 
-    # Check markdown link artifact paths
     for m in _MD_LINK_RE.finditer(line):
-        artifact_path = m.group(2)
-        if not _file_exists(artifact_path, root):
-            issues.append(f"missing linked artifact: {artifact_path}")
+        if not _artifact_resolves(m.group(2), root, prose_ok=False):
+            issues.append(f"missing linked artifact: {m.group(2)}")
 
-    # Check Reproduce: command patterns
+    # Reproduce: `go run ./cmd/<dir>` must resolve to a real cmd dir
     if "Reproduce:" in line:
-        # Extract the reproduce command
         cmd_match = re.search(r"Reproduce:\s*`([^`]+)`", line)
         if cmd_match:
-            cmd = cmd_match.group(1)
-            # Check for `go run ./cmd/<dir>` patterns in reproduce
-            for m in _CMD_DIR_RE.finditer(cmd):
+            for m in _CMD_DIR_RE.finditer(cmd_match.group(1)):
                 cmd_name = m.group(1)
                 if not _cmd_dir_exists(cmd_name, root):
                     issues.append(f"Reproduce: missing cmd dir: cmd/{cmd_name}")
