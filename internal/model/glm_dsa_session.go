@@ -210,12 +210,51 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 			mlpNorm = m.parallelMLPNorms(layer, attnNorm)
 		}
 		composeBlock(cfg.BlockTopology, x, attnNorm, mlpNorm, eps, cfg, attnBody, mlpBody)
+		glmDsaDumpResidual(layer, pos, x)
 	}
 	if isLast {
 		s.Cache.pos = append(s.Cache.pos, pos)
 		return m.finalNorm(x), nil
 	}
 	return x, nil
+}
+
+// glmDsaDumpResidual prints the per-layer residual L2 norm + a few sample components at a given
+// decode position when FAK_GLMDSA_DUMP is set — a localization hook for the real-model decode
+// repetition-collapse (#996): if the residual norm blows up or collapses to a near-constant at a
+// specific layer/position, that layer is the suspect. Silent by default (no hot-path cost).
+var glmDsaDumpOn = os.Getenv("FAK_GLMDSA_DUMP") != ""
+
+func glmDsaDumpResidual(layer, pos int, x []float32) {
+	if !glmDsaDumpOn {
+		return
+	}
+	var sumsq, mn, mx float64
+	mn, mx = math.Inf(1), math.Inf(-1)
+	for _, v := range x {
+		f := float64(v)
+		sumsq += f * f
+		if f < mn {
+			mn = f
+		}
+		if f > mx {
+			mx = f
+		}
+	}
+	l2 := math.Sqrt(sumsq)
+	// sample the first 3 components so a constant-vector collapse is visible
+	var s0, s1, s2 float32
+	if len(x) > 0 {
+		s0 = x[0]
+	}
+	if len(x) > 1 {
+		s1 = x[1]
+	}
+	if len(x) > 2 {
+		s2 = x[2]
+	}
+	fmt.Fprintf(os.Stderr, "GLMDSA_DUMP pos=%d layer=%d l2=%.4f min=%.4f max=%.4f x[0:3]=[%.4f %.4f %.4f]\n",
+		pos, layer, l2, mn, mx, s0, s1, s2)
 }
 
 // glmDsaAttentionStep runs the GLM-MoE-DSA attention sublayer for one position. mat selects
