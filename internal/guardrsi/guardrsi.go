@@ -430,23 +430,32 @@ func Markdown(p ScorecardPayload) string {
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "**guard_rsi_debt: %v**; composite **%v/100 (%v)**; maturity %v/100; realized %v/100; real journal rows %v\n\n", c["guard_rsi_debt"], c["score"], c["grade"], c["maturity_score"], c["realized_score"], c["audit_rows"])
 	fmt.Fprintf(&b, "> %s\n\n", p.Reason)
-	fmt.Fprintln(&b, "## Maturity -- can the loop honestly close?")
+	writeKPITable(&b, "## Maturity -- can the loop honestly close?", p.Maturity, false)
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "| ok | criterion |")
-	fmt.Fprintln(&b, "|---|---|")
-	for _, r := range p.Maturity {
-		fmt.Fprintf(&b, "| %s | %s |\n", passMark(r.Passed), r.Label)
-	}
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Realized -- does it run on our own usage?")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "| ok | criterion | detail |")
-	fmt.Fprintln(&b, "|---|---|---|")
-	for _, r := range p.Realized {
-		fmt.Fprintf(&b, "| %s | %s | %s |\n", passMark(r.Passed), r.Label, r.Detail)
-	}
+	writeKPITable(&b, "## Realized -- does it run on our own usage?", p.Realized, true)
 	fmt.Fprintf(&b, "\n**Next:** %s\n", p.NextAction)
 	return b.String()
+}
+
+// writeKPITable renders one markdown section into b: a `## ` header line, a blank
+// line, then a criterion table. With detail it carries the 3-column (ok/criterion/
+// detail) shape; without, the 2-column (ok/criterion) shape.
+func writeKPITable(b *strings.Builder, header string, rows []KPIResult, withDetail bool) {
+	fmt.Fprintln(b, header)
+	fmt.Fprintln(b)
+	if withDetail {
+		fmt.Fprintln(b, "| ok | criterion | detail |")
+		fmt.Fprintln(b, "|---|---|---|")
+		for _, r := range rows {
+			fmt.Fprintf(b, "| %s | %s | %s |\n", passMark(r.Passed), r.Label, r.Detail)
+		}
+		return
+	}
+	fmt.Fprintln(b, "| ok | criterion |")
+	fmt.Fprintln(b, "|---|---|")
+	for _, r := range rows {
+		fmt.Fprintf(b, "| %s | %s |\n", passMark(r.Passed), r.Label)
+	}
 }
 
 func Compare(current ScorecardPayload, baseline map[string]any) string {
