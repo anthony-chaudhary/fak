@@ -2,6 +2,7 @@ package cachewitness
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -122,5 +123,66 @@ func TestRecordRoundTripsJSON(t *testing.T) {
 func TestParseRejectsNonGatewayBody(t *testing.T) {
 	if _, err := Parse("u", "# just comments\nsome_other_metric 5\n"); err == nil {
 		t.Error("Parse accepted a body with no fak cache series, want error")
+	}
+}
+
+// The #1066 honesty fence: the publishable cache-value view must frame the number
+// as marginal-over-tuned-warm-KV and never surface the vs-naive multiple — even
+// though this sample's 91.55% reuse tempts a ~11.8x (1/(1-0.9155)) re-prefill
+// number.
+func TestCacheValueIsWarmKVMarginalAndFencesVsNaive(t *testing.T) {
+	r, err := Parse("u", sampleMetrics)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cv := r.CacheValue
+	if cv.PublishableValueFamily != WarmKVMarginalFamily {
+		t.Errorf("publishable family = %q, want the marginal-over-warm-KV family", cv.PublishableValueFamily)
+	}
+	if cv.SingleSessionMarginalX != 1.0 {
+		t.Errorf("single-session marginal = %vx, want 1.0 (a tuned warm-KV server earns the same single-trajectory turn reuse)", cv.SingleSessionMarginalX)
+	}
+	if !cv.VsNaiveMultipleExcluded {
+		t.Error("VsNaiveMultipleExcluded = false, want true (the ~17.9-23.4x re-prefill band must not be published as a cache value)")
+	}
+	// The realized reuse is echoed as WITNESSED data, not dropped.
+	if cv.ReusedTokens != 15000 || cv.ReuseRatio < 0.91 || cv.ReuseRatio > 0.92 {
+		t.Errorf("cache value reuse = %d tok / %.4f ratio, want 15000 / ~0.9155", cv.ReusedTokens, cv.ReuseRatio)
+	}
+	if r.Provenance["cache_value"] != Witnessed {
+		t.Errorf("cache_value provenance = %q, want WITNESSED", r.Provenance["cache_value"])
+	}
+	// The forbidden vs-naive multiple is the COMPUTED 1/(1-reuse) value — for this
+	// sample 1/(1-0.9155) ≈ 11.8. It must never be surfaced as a number; the only
+	// permitted mentions of the band are in the fence's own prose (the `note` and
+	// the `vs_naive_multiple_excluded` flag), which name it precisely to forbid it.
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "11.8") {
+		t.Errorf("cache-witness JSON leaked the computed vs-naive multiple (~11.8x): %s", b)
+	}
+}
+
+// Even on an all-cold run (cache did not bite) the publishable view stays honest:
+// the family and fence hold, and the realized reuse echoes 0 rather than inventing
+// a speedup.
+func TestCacheValueHonestWhenColdNoBite(t *testing.T) {
+	const allCold = `fak_gateway_kv_prefix_turns_total 3
+fak_gateway_kv_prefix_prompt_tokens_total 9000
+fak_gateway_kv_prefix_reused_tokens_total 0
+fak_gateway_kv_prefix_turns_by_regime_total{regime="cold"} 3
+`
+	r, err := Parse("u", allCold)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cv := r.CacheValue
+	if cv.ReusedTokens != 0 || cv.ReuseRatio != 0 {
+		t.Errorf("cold-run cache value = %d tok / %v ratio, want 0 / 0", cv.ReusedTokens, cv.ReuseRatio)
+	}
+	if !cv.VsNaiveMultipleExcluded || cv.PublishableValueFamily != WarmKVMarginalFamily {
+		t.Error("fence/family must hold on a cold run too")
 	}
 }

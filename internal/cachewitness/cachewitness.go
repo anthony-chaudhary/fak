@@ -62,9 +62,72 @@ type Record struct {
 	// served, relayed verbatim. Provenance: OBSERVED. 0 on the pure in-kernel path.
 	ProviderCacheReadTokens uint64 `json:"provider_cache_read_tokens"`
 
+	// CacheValue is the PUBLISHABLE view of the realized reuse, framed in the only
+	// family #1066's honesty fence permits (marginal-over-tuned-warm-KV) and
+	// self-fencing against the forbidden vs-naive multiple. Derived from KVPrefix.
+	CacheValue CacheValue `json:"cache_value"`
+
 	// Provenance maps each top-level number to its trust class, so the record is
 	// self-describing — a reader never has to know which field is fak's.
 	Provenance map[string]Provenance `json:"provenance"`
+}
+
+// WarmKVMarginalFamily names the ONLY cache-value framing #1066's honesty fence
+// permits for a *published* number: fak's marginal over a tuned warm-KV server
+// (the internal/swebench cost.go B→C lever). A tuned warm-KV server (SGLang/llama
+// with kv_unified) already keeps per-agent KV across turns, so it ALREADY earns a
+// long trajectory's turn-over-turn reuse; fak's *marginal* over it is the
+// cross-worker shared-prefix win, which is ~1.0x on a single session and grows to
+// ~1.0–1.31x at modest fleets, reaching ~4.1x only on a 50×5 fleet.
+const WarmKVMarginalFamily = "marginal-over-tuned-warm-KV (internal/swebench cost.go B/C; ~1.0x single-session, ~1.0-1.31x modest fleet, ~4.1x only on a 50x5 fleet)"
+
+// CacheValue expresses the realized in-kernel reuse as a *publishable* cache
+// number under #1066's honesty fence. The trap it guards: a long R2E-Gym
+// trajectory has high turn-over-turn reuse (ReuseRatio → 0.9+), and 1/(1-reuse)
+// reads as a big "speedup" — but that is the vs-NAIVE re-prefill multiple (cost.go
+// A→C, the ~17.9–23.4x band), NOT a cache value, because no real server re-prefills
+// the whole context every turn. The honest published number is the marginal over a
+// *tuned warm-KV* server (B→C), so this view reports the realized reuse as
+// WITNESSED data while pinning the publishable framing to that family and refusing
+// to surface the vs-naive multiple.
+type CacheValue struct {
+	// ReusedTokens / PromptTokens / ReuseRatio echo the WITNESSED realized reuse —
+	// fak's own RadixAttention prefix match on this run. ReuseRatio is the fraction
+	// of this session's prefill the kernel did not redo (the warm-KV behavior itself).
+	ReusedTokens uint64  `json:"kv_prefix_reused_tokens"`
+	PromptTokens uint64  `json:"prompt_tokens"`
+	ReuseRatio   float64 `json:"realized_reuse_ratio"`
+
+	// PublishableValueFamily is the ONLY framing a published cache-value may take
+	// (WarmKVMarginalFamily); SingleSessionMarginalX is the honest marginal for a
+	// single live trajectory (1.0 — a tuned warm-KV server gets the same turn reuse);
+	// FleetMarginalSource points at where the >1.0x fleet number is actually computed
+	// (cost.AggregatePrefill B/C across worker counts), since a single-session
+	// /metrics scrape cannot see cross-worker sharing.
+	PublishableValueFamily string  `json:"publishable_value_family"`
+	SingleSessionMarginalX float64 `json:"single_session_marginal_over_warm_kv_x"`
+	FleetMarginalSource    string  `json:"fleet_marginal_source"`
+
+	// VsNaiveMultipleExcluded records that the forbidden 1/(1-reuse) vs-naive
+	// re-prefill multiple is deliberately NOT surfaced here (the #1066 fence), and
+	// Note carries the one-line reason a reader can cite.
+	VsNaiveMultipleExcluded bool   `json:"vs_naive_multiple_excluded"`
+	Note                    string `json:"note"`
+}
+
+// cacheValue derives the publishable CacheValue view from the witnessed KV-prefix
+// reuse. It never computes the vs-naive multiple — the omission is the fence.
+func cacheValue(k KVPrefixWitness) CacheValue {
+	return CacheValue{
+		ReusedTokens:            k.ReusedTokens,
+		PromptTokens:            k.PromptTokens,
+		ReuseRatio:              k.ReuseRatio(),
+		PublishableValueFamily:  WarmKVMarginalFamily,
+		SingleSessionMarginalX:  1.0,
+		FleetMarginalSource:     "internal/swebench cost.AggregatePrefill (B/C across worker counts)",
+		VsNaiveMultipleExcluded: true,
+		Note:                    "Realized reuse is WITNESSED; a tuned warm-KV server earns the same turn-over-turn reuse on a single trajectory, so fak's marginal over it is ~1.0x here. The >1.0x cache value is cross-worker shared-prefix (cost.go B/C). The vs-naive re-prefill multiple (1/(1-reuse), the ~17.9-23.4x band) is NOT a cache value and is excluded per #1066.",
+	}
 }
 
 // KVPrefixWitness is fak's own in-kernel KV-prefix reuse, all WITNESSED.
@@ -122,6 +185,7 @@ func Parse(gatewayURL string, metricsBody string) (Record, error) {
 		Provenance: map[string]Provenance{
 			"kv_prefix":                  Witnessed,
 			"provider_cache_read_tokens": Observed,
+			"cache_value":                Witnessed,
 		},
 	}
 	sc := bufio.NewScanner(strings.NewReader(metricsBody))
@@ -167,6 +231,7 @@ func Parse(gatewayURL string, metricsBody string) (Record, error) {
 	if !seen {
 		return Record{}, fmt.Errorf("no fak_gateway_kv_prefix_* / inference cache series found in %s — is this a fak gateway /metrics body?", gatewayURL)
 	}
+	r.CacheValue = cacheValue(r.KVPrefix)
 	return r, nil
 }
 

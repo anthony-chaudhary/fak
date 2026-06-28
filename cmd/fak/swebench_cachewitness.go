@@ -94,6 +94,11 @@ func cmdSwebenchCacheWitness(argv []string) {
 	}
 	fmt.Fprintf(os.Stderr, "fak in-kernel KV-prefix cache (WITNESSED): %s\n", bit)
 	fmt.Fprintf(os.Stderr, "provider cache_read (OBSERVED, relayed): %d tokens\n", rec.ProviderCacheReadTokens)
+	// The #1066 cache-value fence: publish the marginal-over-tuned-warm-KV family,
+	// never the vs-naive multiple a long trajectory's high reuse tempts.
+	cv := rec.CacheValue
+	fmt.Fprintf(os.Stderr, "publishable cache-value: %s = %.2fx single-session (fleet >1.0x via %s); vs-naive multiple excluded per #1066\n",
+		cv.PublishableValueFamily, cv.SingleSessionMarginalX, cv.FleetMarginalSource)
 }
 
 // metricsURL normalizes a --gateway value (HOST:PORT, a base URL, or a full
