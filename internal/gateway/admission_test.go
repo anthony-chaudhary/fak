@@ -211,6 +211,50 @@ func TestAdmissionMetricsFragment(t *testing.T) {
 	}
 }
 
+// TestAdmissionControllerRendersIntoLiveMetrics is the issue-#35 AC#4 LIVE-surface witness:
+// a Server emits no fak_sched_* family until a controller is wired (no phantom zero series);
+// once a host attaches one with SetAdmissionController, scraping the real /metrics render
+// surfaces the admission gate's running/waiting/admitted counts in the shared L2 serving-
+// metrics schema; detaching with nil takes the family back off the surface. This proves the
+// schema is exported per-worker on the live surface, not only in the WriteMetrics unit above.
+func TestAdmissionControllerRendersIntoLiveMetrics(t *testing.T) {
+	srv := newTestServer(t)
+
+	// No controller attached -> the family is absent from the live surface (inert by default).
+	if pre := srv.renderMetrics(); strings.Contains(pre, schedMetricPrefix) {
+		t.Fatalf("fak_sched_* present before SetAdmissionController:\n%s", pre)
+	}
+
+	c := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 1, AgingRounds: 1})
+	c.Offer(SeqRequest{TraceID: "a", Tokens: 7}) // admitted -> running 1, tokens 7
+	c.Offer(SeqRequest{TraceID: "b"})            // queued   -> waiting 1
+	c.Offer(SeqRequest{TraceID: "c"})            // shed     -> shed_total 1
+	srv.SetAdmissionController(c)
+
+	out := srv.renderMetrics()
+	for _, want := range []string{
+		"fak_sched_running 1",
+		"fak_sched_waiting 1",
+		"fak_sched_tokens_in_use 7",
+		"fak_sched_admitted_total 1",
+		"fak_sched_queued_total 1",
+		"fak_sched_shed_total 1",
+		"fak_sched_denied_total 0",
+		"# TYPE fak_sched_running gauge",
+		"# TYPE fak_sched_admitted_total counter",
+	} {
+		if !strings.Contains(out, want+"\n") {
+			t.Fatalf("live /metrics surface missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+
+	// Detaching takes the family back off the surface — host-injected, inert by default.
+	srv.SetAdmissionController(nil)
+	if post := srv.renderMetrics(); strings.Contains(post, schedMetricPrefix) {
+		t.Fatalf("fak_sched_* still present after detaching the controller:\n%s", post)
+	}
+}
+
 // floodID names the r-th flood arrival without time/randomness, so the scenario is
 // byte-reproducible across machines.
 func floodID(r int) string {

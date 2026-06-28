@@ -42,16 +42,18 @@ package gateway
 //     at its bound, it is SHED (VerdictShed → HTTP 429), replacing the unbounded-queue
 //     behavior. A per-tenant trust verdict can DENY admission outright (VerdictDenied).
 //
-// HONEST FENCE — what this is NOT (yet). This is the admission POLICY + its L2
-// serving-metrics fragment (running/waiting/admitted/rejected counts). It runs no model
-// and moves no KV. It is not yet folded into the live /metrics render or the live HTTP
-// 429 path, because the native iteration scheduler it gates is still reached only through
-// the EngineDriver seam in tests (modelengine.NativeScheduler is deliberately not
-// auto-registered as the default serve engine), not wired into `fak serve`. The host
-// folds WriteMetrics into renderMetrics and maps VerdictShed→429 on the request path once
-// the native scheduler is on the serve loop; until then this is the tested gate + schema.
-// The KV-block budget, preemption / KV swap-out, and the cross-replica router are explicit
-// non-goals here (separate sibling seeds).
+// HONEST FENCE — what this is NOT (yet). This is the admission POLICY plus its L2
+// serving-metrics fragment (running/waiting/admitted/rejected counts) and the optional
+// /metrics RENDER seam: a host wires a live controller onto the Server with
+// SetAdmissionController and renderMetrics folds WriteMetrics into the shared serving-metrics
+// surface (writeAdmissionMetrics) — inert (no fak_sched_* series) until one is attached, so
+// there is no phantom zero series. It runs no model and moves no KV. The live HTTP 429 path
+// is NOT wired yet: mapping VerdictShed→429 on the synchronous request path needs the native
+// iteration scheduler on the serve loop to run Schedule rounds (modelengine.NativeScheduler is
+// reached only through the EngineDriver seam in tests, deliberately not auto-registered as the
+// default serve engine), so the host maps VerdictShed→429 once the native scheduler is on
+// `fak serve`. The KV-block budget, preemption / KV swap-out, and the cross-replica router are
+// explicit non-goals here (separate sibling seeds).
 
 import (
 	"fmt"
@@ -375,4 +377,35 @@ func (c *AdmissionController) WriteMetrics(b *strings.Builder) {
 	writeCounter(b, schedMetricPrefix+"queued_total", "Requests placed on the waiting queue.", st.Queued)
 	writeCounter(b, schedMetricPrefix+"shed_total", "Requests shed under overload (waiting queue at bound; HTTP 429).", st.Shed)
 	writeCounter(b, schedMetricPrefix+"denied_total", "Requests rejected by a per-tenant trust verdict.", st.Denied)
+}
+
+// SetAdmissionController wires the native serving admission gate (#35) onto the Server so its
+// L2 serving-metrics fragment (fak_sched_*) renders into the live /metrics surface. The host
+// calls this once the native iteration scheduler (modelengine.NativeScheduler) is on the serve
+// loop; passing nil detaches it (the surface goes inert — no fak_sched_* series). Settable
+// after New, mirroring SetFleetMembership / SetKVResidencyReclaimer. A nil receiver is a no-op.
+func (s *Server) SetAdmissionController(c *AdmissionController) {
+	if s == nil {
+		return
+	}
+	s.admissionMu.Lock()
+	s.admissionCtl = c
+	s.admissionMu.Unlock()
+}
+
+// writeAdmissionMetrics folds the wired admission gate's L2 serving-metrics fragment
+// (fak_sched_running/waiting/admitted/...) onto the gateway /metrics surface (#35). A Server
+// with no controller attached emits nothing — no phantom zero series — the same host-injected,
+// inert-by-default posture as writeFleetMembershipMetrics and the KV-residency seams.
+func (s *Server) writeAdmissionMetrics(b *strings.Builder) {
+	if s == nil || b == nil {
+		return
+	}
+	s.admissionMu.RLock()
+	c := s.admissionCtl
+	s.admissionMu.RUnlock()
+	if c == nil {
+		return
+	}
+	c.WriteMetrics(b)
 }

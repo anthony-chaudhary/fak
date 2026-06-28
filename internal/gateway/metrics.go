@@ -1168,6 +1168,7 @@ func (s *Server) renderMetrics() string {
 	m.writeRoutingMetrics(&b)         // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
 	s.resumeProj.writeMetrics(&b)     // #941: resume projected-vs-observed residual (self-contained family)
 	s.writeFleetMembershipMetrics(&b) // #42: live fleet membership/health/drain/failover transitions, per worker
+	s.writeAdmissionMetrics(&b)       // #35: native serving-scheduler admission family (fak_sched_*), when a controller is wired
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the
 	// inference accumulators above. fak's product axis is agent-fleet serving

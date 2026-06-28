@@ -660,6 +660,18 @@ type Server struct {
 	fleetMu      sync.Mutex
 	fleet        *FleetMembership
 	fleetMetrics *FleetMembershipMetrics
+
+	// admissionCtl is the optional native-serving ADMISSION / PRIORITY / FAIRNESS gate
+	// (#35, admission.go) — the policy layer above modelengine.NativeScheduler's
+	// continuous-batching loop. nil (the default) leaves the /metrics surface free of the
+	// fak_sched_* family (no phantom zero series), the same inject-after-New posture as the
+	// fleet / KV seams. A host attaches a live controller via SetAdmissionController once the
+	// native scheduler is on the serve loop, at which point renderMetrics folds its running/
+	// waiting/admitted/rejected counts into the shared L2 serving-metrics schema so a fleet
+	// router / autoscaler can read per-worker load. admissionMu guards it: the install may
+	// race a /metrics scrape that reads it.
+	admissionMu  sync.RWMutex
+	admissionCtl *AdmissionController
 }
 
 // New builds a Server. It validates that the ABI is wired (a resolver is
