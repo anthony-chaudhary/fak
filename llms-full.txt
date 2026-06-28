@@ -124,6 +124,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 
 - [Fleet benchmark suite](docs/explainers/fleet-benchmarks.md): run the five headline fleet benchmarks yourself — fan-out to 1024 sub-agents, the 50×50 turn-tax sweep, the turn-tax A/B + safety floor, RadixAttention cache hit rate, and context-changing token accounting. Model-agnostic, no GPU/model/key; every number traced and fenced.
 - [Benchmark authority](BENCHMARK-AUTHORITY.md): the single source of truth for every number, traced to commit + artifact.
+- [GLM-5.2 fak-kernel cache value (PENDING)](docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md): result packet for epic #1010 — cache-value observation on a solved SWE-bench ticket via the Claude harness on GLM-5.2 in-kernel serve. Status: PENDING — observation seam shipped at commit 52dfea0d, datacenter GPU access is the residual. See runbook for full path.
 - [Hardware matrix](docs/HARDWARE-MATRIX.md): every machine fak has been profiled on — 4 distinct platforms spanning 2 CPU ISAs (arm64 + x86_64), 4 GPU backends (Apple Metal, AMD Vulkan, NVIDIA CUDA Ada + Ampere), and 4 operating systems. The deterministic metrics reproduce byte-for-byte across all of them.
 - [Web agent benchmark baselines](docs/webbench-baselines.md): real WebVoyager (643 tasks), 8.8–9.7× prefill elimination vs the naive floor, modeled geometry (no wall-clock).
 - [fak vs vLLM, SGLang & provider KV caching](docs/fak-vs-alternatives-comparison.md): how fak's cross-worker/cross-session fused KV cache differs from the per-session engines and the provider prompt caches, with measured token/cost ratios.
@@ -558,9 +559,37 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 | vCache proof tools | Planned and observed provider-cache savings/refutation | shipped as proof/control plane |
 | Model routing | Per-aspect routing, ensembles, routebench, gateway seam | shipped spine; deploy with current flags/docs checked |
 | In-kernel model | Pure-Go reference model, kernel-owned KV cache, GPU/backend witnesses | correctness/reference path |
+| Cross-platform spine | One kernel across the whole deployment substrate (IoT → edge → laptop → hyperscaler) | shipped (docs/explainers/cross-platform-spine.md) |
 
 Every claim in [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) carries exactly one tag:
 `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
+
+## Use Cases By Domain
+
+Each row is a starter policy floor: a reviewable allow-list you copy, trim, and run
+`fak preflight` against to watch the floor bite. Point your agent at one with
+`fak guard --policy examples/<file>` (or `fak serve --policy …` for a gateway). The
+full catalogue, with a witness command per floor, is in
+[examples/README.md](https://github.com/anthony-chaudhary/fak/blob/main/examples/README.md).
+
+| Domain | Starter floor | The dangerous action it denies |
+|---|---|---|
+| Coding agent | [`presets/coding-agent-safe.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/presets/coding-agent-safe.json) | force-push, `git add -A`, out-of-tree writes, destructive shell |
+| Coding agent (push feature branches) | [`protected-push-floor-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/protected-push-floor-policy.json) | a `git_push` whose ref is `main`/`release/*`, by argument value |
+| PR-review bot | [`code-review-bot-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/code-review-bot-policy.json) | `merge_pull_request`, `git_push`, `workflow_dispatch` |
+| Customer support | [`customer-support-readonly-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/customer-support-readonly-policy.json) | `refund_payment`, direct account or email action |
+| Open-web research | [`research-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/research-agent-policy.json) | `send_email`, shell, upload, arbitrary note path |
+| Browsing / scraping | [`browser-web-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/browser-web-agent-policy.json) | `submit_form`, `execute_script`, a `file:`/`javascript:` URL |
+| Email / calendar | [`email-calendar-assistant-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/email-calendar-assistant-policy.json) | `send_email`, `forward_email`, `invite_external_guest` |
+| Infra / DevOps review | [`devops-dryrun-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/devops-dryrun-policy.json) | `terraform_apply`, exec, delete, production deploy |
+| Flight booking | [`flight-booking-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/flight-booking-agent-policy.json) | `refund_payment`, `export_pnr`, a `$10k+` fare |
+| Trading / brokerage | [`finance-trading-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/finance-trading-agent-policy.json) | `withdraw_funds`, a six-figure order, a `short` side |
+| Clinical / PHI | [`healthcare-phi-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/healthcare-phi-policy.json) | `export_patient_data`, `email_phi`, record delete |
+| BI / SQL analyst | [`sql-analyst-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/sql-analyst-policy.json) | a `DROP`/`INSERT` inside an allowed read-query tool |
+
+Each denied action escalates to that floor's human safe sink instead of failing
+silently. Every refusal cites a closed reason code you can assert on, such as
+`POLICY_BLOCK`, `OVERSIZE`, or `SECRET_EXFIL`.
 
 ## For security teams
 
@@ -706,6 +735,25 @@ can be blocked by OS Application Control on freshly compiled test binaries. Use
   tests. Use a tuned serving stack for production throughput.
 - Dangerous tools: keep irreversible and exfil-shaped tools off the allow-list.
 
+## Three axes of the same kernel
+
+`fak`'s invariants repeat along three dimensions:
+
+- **Scale axis** (vertical): tool call → turn → session → fleet → RSI. How much of
+  the stack lives in one address space. The same observe → decide → act → verify
+  shape and trust invariant recur at every ring.
+- **Depth axis** (downward): CPU reference → CUDA → Vulkan → Metal. Which silicon
+  runs the matmul. New backends plug in via registration against the compute HAL.
+- **Deployment-substrate axis** (across): IoT → edge → laptop → hyperscaler.
+  What *kind of box* and how big. The same workload shape (agent loop proposing
+  tool calls) and the same invariants (default-deny, quarantine, bit-exact reuse,
+  tamper-evident audit) do not change with the box.
+
+The crossing point is one kernel present at the most scales, depths, and substrate
+targets, carrying the same invariants through all of them — the way Linux runs on
+the phone in your pocket and the rack training the model on it. See [the
+cross-platform spine](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cross-platform-spine.md).
+
 ## Docs Map
 
 | If you want... | Read |
@@ -751,6 +799,7 @@ and runs on CPU — no GPU needed for small models.
 | **Prove the safety gate in 60 seconds** (no model, no download, no key) | [See it in 2 minutes](https://github.com/anthony-chaudhary/fak/blob/main/README.md#see-it-in-2-minutes-no-key-no-model-no-gpu) — one structural DENY |
 | **See the gate stop a live attack** (Go only, ~1 min, no downloads) | [AgentDojo red-team demo](https://github.com/anthony-chaudhary/fak/blob/main/examples/agentdojo-redteam/README.md) |
 | **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) |
+| **Run a local model behind my existing coding agent** (no key, no network, one command) | `fak guard --gguf qwen2.5:7b -- claude` |
 | **Chat with a local AI** (most fun — needs a ~1.6 GB model download) | [Simple Demo](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/README.md) — 5 minutes |
 | **Follow a guided first session** (real output at every step) | [Tutorial](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) — 15 minutes ⭐ |
 | **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) — 98 courses, six levels ⭐ |
@@ -868,6 +917,7 @@ setup cost, and **nothing new gets installed between them**:
 |---|---|---|---|
 | **0 — Try the kernel** | Run/measure the adjudication boundary offline | `go build` | none |
 | **1 — Front a real model** | Put the kernel in front of a model you serve elsewhere (Ollama / vLLM / llama.cpp / a cloud provider) | + a running OpenAI-compatible server | a chat model |
+| **1b — Local model in one command** | Run a local GGUF model in-kernel with your existing agent — no key, no network, no second terminal | `fak guard --gguf qwen2.5:7b -- claude` | ~5 GB GGUF (cached) |
 | **2 — The fused in-kernel model** | The pure-Go SmolLM2 forward pass the kernel owns | + (real weights) Python export | ~135M params |
 | **2b — Expert: Qwen3.6 in-kernel** | Run Qwen3.6-27B through fak's own GGUF->Q8 Gated-DeltaNet path | local GGUF (tokenizer optional — embedded by default) | ~15 GB GGUF, ~26 GB RSS |
 
@@ -1255,13 +1305,8 @@ whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
 
 ## Where to go next
 
-- **`fak guard -- claude`: the one-command front door.** Run the Claude Code (or any
-  agent) you already use, with the kernel adjudicating every tool call it proposes. It
-  starts the gateway in-process, injects the base URL into the child only (your shell is
-  untouched), proxies your real Anthropic key + prompt cache through in passthrough mode,
-  and prints what it allowed vs blocked on exit. No script, no second terminal, any OS.
-  Embedded secure floor (`fak guard --dump-policy` to see it). See
-  [`docs/integrations/claude.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md).
+- **`fak guard --gguf <model> -- claude`: local model, one command.** Run Claude Code (or any OpenAI-compatible agent) with a local GGUF model behind the kernel — no API key, no network, no second terminal. The model loads in-kernel, the kernel adjudicates every tool call, and your data never leaves your box. Example: `fak guard --gguf qwen2.5:7b -- claude` (downloads on first run, ~5 GB cached). Small-model agentic quality is a ramp; for frontier-quality coding, `fak guard -- claude` (proxy to Anthropic) is still the default. See [`docs/integrations/claude.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md). For a witnessed A/B comparison of local vs frontier coding on a minimal CPU-runnable fixture, see [`docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-2026-06-27.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-2026-06-27.md).
+- **`fak guard -- claude`: the one-command proxy front door.** Run the Claude Code (or any agent) you already use, with the kernel adjudicating every tool call it proposes. It starts the gateway in-process, injects the base URL into the child only (your shell is untouched), proxies your real Anthropic key + prompt cache through in passthrough mode, and prints what it allowed vs blocked on exit. No script, no second terminal, any OS. Embedded secure floor (`fak guard --dump-policy` to see it). See [`docs/integrations/claude.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md).
 - [`docs/fak/tutorial.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md): **the guided first session**. It walks
   step by step through Tiers 0–2 with the real, captured output of every command
   (the friendliest on-ramp if this reference felt dense).
@@ -4217,6 +4262,14 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
     },
     {
       "@type": "Question",
+      "name": "What is the deployment-substrate axis?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The deployment-substrate axis is the third axis along which the same ak kernel is invariant — from a battery-powered IoT sensor, through edge gateways and laptops, up to multi-GPU hyperscaler fleets. The scale axis runs vertical: tool call to turn to session to fleet to RSI (how much of the stack lives in one address space). The depth axis runs down through the hardware abstraction layer: CPU reference to CUDA to Vulkan to Metal (which silicon runs the matmul). The deployment-substrate axis runs across the whole deployment spectrum: different boxes, same kernel, same invariants. The claim is that the workload shape (an agent loop proposing tool calls) and the invariants (default-deny, quarantine, bit-exact reuse, tamper-evident audit) do not change with the box, so an operator who learns ak on a laptop already knows it on a fleet. See The cross-platform spine."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Is fak a faster model server? How does it compare to vLLM, SGLang, or llama.cpp?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -5845,6 +5898,26 @@ kept run and evict a single span: a poisoned result, an expired secret. It leave
 can do this because it owns the cache as a kernel object instead of renting it from a
 serving engine. See [Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/addressable-kv-cache.md).
 
+
+
+## What is the deployment-substrate axis?
+
+The **deployment-substrate axis** is the third axis along which the same ak kernel
+is invariant — from a battery-powered IoT sensor, through edge gateways and laptops,
+up to multi-GPU hyperscaler fleets.
+
+- The **scale axis** runs vertical: tool call to turn to session to fleet to RSI (how
+  much of the stack lives in one address space).
+- The **depth axis** runs down through the hardware abstraction layer: CPU reference
+  to CUDA to Vulkan to Metal (which silicon runs the matmul).
+- The **deployment-substrate axis** runs across the whole deployment spectrum: different
+  boxes, same kernel, same invariants.
+
+The claim is that the workload shape (an agent loop proposing tool calls) and the
+invariants (default-deny, quarantine, bit-exact reuse, tamper-evident audit) do not
+change with the box, so an operator who learns ak on a laptop already knows it on a
+fleet. See [The cross-platform spine](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cross-platform-spine.md).
+
 ## Is fak a faster model server? How does it compare to vLLM, SGLang, or llama.cpp?
 
 No. `fak` is **not** a faster model server. It does not try to beat vLLM, SGLang, or
@@ -6878,6 +6951,9 @@ scaling laws, the explainers) live one level up in [`docs/`](https://github.com/
 | Activate the Tier-1 Mac dogfood node | [node-macos-a-activation.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/node-macos-a-activation.md) |
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/gcp-tier2-control-vm.md) |
 | Plan guard-hop RSI tuning | [guard-hop-rsi-loop.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/guard-hop-rsi-loop.md) |
+| Close the guard verdict-quality RSI loop on our own journal | [guard-verdict-rsi-loop.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/guard-verdict-rsi-loop.md) |
+| Score token-saving levers against billed reality (the prediction-vs-reality gym) | [dojo.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/dojo.md) |
+| Make the dojo self-improving — the gym's autonomous RSI loop | [dojo-rsi-loop.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/dojo-rsi-loop.md) |
 | Guard the opencode/GLM dispatch lane | [opencode-glm-guard.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/opencode-glm-guard.md) |
 | Use GLM-5.2 from the GCP kernel setup (the `claude-glm-gcp` preset) | [claude-glm-gcp.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/claude-glm-gcp.md) |
 
@@ -7671,14 +7747,12 @@ fak exposes three client wires. Pick the one your tool already speaks and repoin
 |---|---|---|
 | OpenAI Chat Completions | `http://127.0.0.1:8080/v1` | base URL / `OPENAI_BASE_URL` (keep the `/v1`) |
 | Anthropic Messages | `http://127.0.0.1:8080` | `ANTHROPIC_BASE_URL` (bare host) |
+| Gemini generateContent | `http://127.0.0.1:8080/v1beta/` | base URL / `GEMINI_BASE_URL` (keep the `/v1beta/`) |
 | MCP (Model Context Protocol) | `fak serve --stdio`, or `POST /mcp` | one server entry |
 
 Those are the wires fak serves to clients. It can proxy on to more than it exposes. The
 `--provider` flag selects an upstream of OpenAI, Anthropic, Gemini, or xAI, so the same
-gate sits in front of whichever model actually serves your tokens. The asymmetry matters
-for honesty. A client that speaks the Gemini wire natively, such as the Gemini CLI or the
-`google-genai` SDK, has no fak endpoint to point at yet, even though fak can call Gemini
-upstream.
+gate sits in front of whichever model actually serves your tokens.
 
 `fak guard -- <agent>` automates the wiring for the agents it recognizes. Name a known
 agent and guard injects the right wire and base URL into the child process only, leaving
@@ -7697,7 +7771,7 @@ client that reads either one connects.
 
 ## What "connects" honestly means
 
-The [compatibility matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md) answers a narrow question for 44
+The [compatibility matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md) answers a narrow question for 45
 surveyed tools: does it let you set a base URL? This page adds the sharper one. Can fak
 actually adjudicate that wire, and how cleanly? The grades:
 
@@ -7752,7 +7826,7 @@ that owns each boundary, rather than reimplement the protocol.
 |---|---|---|---|
 | MCP | agent ↔ tools/resources | Drop-in / native | fak *is* the stdio server (`fak serve --stdio`) and fronts MCP-over-HTTP (`/mcp`), exposing five `fak_*` adjudication tools. stdio MCP is fronted by running fak as the server, not by repointing a URL. |
 | OpenAI Responses | agent ↔ model | Partial | fak proxies *to* a Responses upstream (`--provider openai-responses`) but exposes Chat Completions and Messages to clients. A Responses-default client connects by selecting `chat_completions`. |
-| A2A (Agent2Agent) | agent ↔ agent | Needs an adapter | fak does not speak A2A's JSON-RPC/gRPC bindings natively. It projects a policy-filtered Agent Card from its reviewed method registry (`tools/fleet_agent_link.py a2a-card`); the HTTP edge is planned. |
+| A2A (Agent2Agent) | agent ↔ agent | Partial | v1.0 production standard under Linux Foundation (April 2026). fak does not speak A2A's JSON-RPC/gRPC bindings natively. It projects a policy-filtered Agent Card from its reviewed method registry (`tools/fleet_agent_link.py a2a-card`); the HTTP edge is planned. |
 | ACP (BeeAI) | agent ↔ agent | Needs an adapter | Pre-alpha, with an unsettled transport. fak would front it through the same registry once it stabilizes. |
 | ANP | agent ↔ agent (decentralized) | Needs an adapter | DID identity plus end-to-end encryption. A transparent middle-proxy is structurally impossible, so fak would terminate the channel, holding its own DID. |
 | AG-UI | agent ↔ frontend/UI | Different boundary | Standardizes the UI event stream, not the tool-call boundary fak gates. Orthogonal, not blocked. |
@@ -7781,7 +7855,7 @@ is above, and the adapter position is in the protocol docs linked from each row.
 
 - [fak + LiteLLM](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/litellm.md): the three topologies (fak in front of a LiteLLM proxy, fak as a governed node behind it, fak's per-aspect routing dispatching through it) — the flagship router/proxy integration.
 - [Routers & gateways](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/routers.md): OpenRouter, Portkey, LiteLLM Router, Unify, Martian — fak as a complement to request-level routers, with the residency guarantee.
-- [Compatibility matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md): the full sourced table of 44 tools, the wire each speaks, the exact repoint key, and a source link.
+- [Compatibility matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/compatibility-matrix.md): the full sourced table of 45 tools, the wire each speaks, the exact repoint key, and a source link.
 - [Integration index](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/README.md): which-agent routing, the universal base-URL recipe, and the 60-second offline proof.
 - [Claude Code](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md) · [Cursor](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/cursor.md) · [OpenAI Codex](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/openai-codex.md): the dedicated harness guides.
 - [Agent-framework cookbook](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/agent-framework-integration.md): exact per-framework code (proxy and explicit-adjudication modes).
@@ -7893,6 +7967,64 @@ Wrap a different agent or upstream by naming it after `--` and switching the pro
 fak guard --provider openai -- codex            # an OpenAI-compatible coding agent
 fak guard --policy my-floor.json -- claude      # enforce your own reviewed allow-list
 ```
+
+### Local model: no key, no network, one command
+
+`fak guard --gguf` runs a local GGUF model in-kernel as the upstream for your agent. No API key, no network, no second terminal — the whole stack (local model + your harness + kernel floor) is one command:
+
+```bash
+fak guard --gguf qwen2.5:7b -- claude
+```
+
+What you'll see on first run (the GGUF is cached locally after the first pull):
+
+```
+fak guard: --gguf qwen2.5:7b → hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+GET https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+fak guard: listening on http://127.0.0.1:54321 (in-process gateway)
+fak guard: loading in-kernel model: Qwen2.5-7B-Instruct-Q4_K_M.gguf
+fak guard: Claude child started (PID 12345)
+[... Claude session runs with the local model ...]
+fak guard: 23 kernel decision(s) — 19 allowed, 2 denied, 0 repaired, 0 quarantined, 2 deferred
+  blocked: POLICY_BLOCK     x2
+```
+
+**What happens:**
+
+1. The GGUF model downloads from Hugging Face on first run (~5 GB, cached in `~/.cache/fak-models/`).
+2. fak loads the model in-kernel (no separate server process).
+3. Claude Code connects to the in-process gateway over `http://127.0.0.1:<random-port>/v1`.
+4. Every tool call Claude proposes crosses the same kernel adjudication floor as the proxy path.
+5. Your data never leaves your box — no network traffic after the initial GGUF pull.
+
+**Model aliases:**
+
+The `--gguf` flag accepts a model alias (from `fak ls`), an `hf://` URI, or a local `.gguf` path:
+
+```bash
+fak ls    # list available aliases: qwen2.5:7b, qwen2.5:1.5b, smollm2, ornith:9b
+fak guard --gguf qwen2.5:1.5b -- claude               # smaller 1.5B model (~1.6 GB)
+fak guard --gguf /path/to/model.gguf -- claude       # local file
+fak guard --gguf hf://owner/repo/model.gguf -- claude # download on demand
+```
+
+**GPU acceleration (optional):**
+
+Use `--backend cuda` or `--backend metal` to run decode on GPU (requires a `-tags cuda` or `-tags fakmetal` build):
+
+```bash
+FAK_GGUF_LOAD_WORKERS=8 fak guard --gguf qwen2.5:7b --backend cuda -- claude
+```
+
+**The honest fence:**
+
+Small-model agentic quality is a ramp. `qwen2.5:7b` (or any 7B-class local model) can answer well-formed questions and follow simple instructions, but for complex coding tasks, frontier-quality reasoning, or multi-step refactoring, the proxy path (`fak guard -- claude`, which reaches Claude Sonnet/Opus via Anthropic's API) is still the default. Use `--gguf` for:
+- Offline development on air-gapped systems
+- Privacy-sensitive work where data cannot leave the box
+- Testing the kernel floor without API costs
+- Learning how local agentic models behave
+
+When you need the best coding quality and you have a subscription, use `fak guard -- claude` (proxy).
 
 ### Long-context reset budget
 
@@ -9615,7 +9747,7 @@ fak-side references:
 
 ---
 title: "Compatibility matrix — what speaks a wire fak can sit on"
-description: "A sourced reference of 44 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
+description: "A sourced reference of 45 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
 ---
 
 # Compatibility matrix
@@ -9623,7 +9755,7 @@ description: "A sourced reference of 44 agent harnesses, frameworks, model backe
 `fak serve` adjudicates over the wires your stack already speaks — OpenAI Chat
 Completions, Anthropic Messages, and MCP. So the practical question for any tool is
 narrow: **does it let you repoint its base URL?** If yes, the gate drops in front with no
-code change. This page answers that question for 44 surveyed targets, with the exact key
+code change. This page answers that question for 45 surveyed targets, with the exact key
 you set and a link to the docs that prove it.
 
 It's a reference, not a tutorial. For the copy-paste recipe, start at the
@@ -9639,8 +9771,8 @@ var, constructor arg, or config field. A **Partial** or **No** means the repoint
 templated, indirect, or undocumented — the [caveats](#caveats-worth-knowing) below say
 exactly how.
 
-> Surveyed 2026-06-23 across 44 targets (11 harnesses, 14 frameworks, 12 backends, 7
-> protocols). Each row carries a source link; 37 of 44 are high-confidence, the rest
+> Surveyed 2026-06-27 across 45 targets (11 harnesses, 14 frameworks, 13 backends, 7
+> protocols). Each row carries a source link; 38 of 45 are high-confidence, the rest
 > flagged in the caveats. Wires and config keys drift — when a row looks stale, the source
 > link is the ground truth, not this table.
 
@@ -9660,7 +9792,7 @@ Interactive coding agents and CLIs. Almost all let you set a base URL, so the ga
 | [Goose (Block)](https://github.com/block/goose/blob/main/documentation/docs/getting-started/providers.md) | OpenAI Chat Completions and Anthropic Messages (plus Bedrock/Vertex/OpenRouter/Databricks/Ollama/LiteLLM); pluggable provider layer | Yes | OPENAI_HOST (OpenAI-compatible host; default https://api.openai.com), OPENAI_BASE_PATH (default v1/chat/completions), ANTHROPIC_HOST for Anthropic-compatible; or a custom provider in ~/.config/goose/config.yaml / custom_providers with base_url |
 | [Zed editor (AI/agentic)](https://zed.dev/docs/ai/use-api-access) | OpenAI Chat Completions (native + openai_compatible) and Anthropic Messages (native providers) | Yes | settings.json: language_models.openai_compatible.<ProviderName>.api_url (with available_models[]); API key via <PROVIDER_ID>_API_KEY env (upper snake case) |
 | [Windsurf (Codeium / Devin Desktop)](https://docs.devin.ai/desktop/chat/models) | native/proprietary (requests routed through Codeium/Cognition backend to OpenAI and Anthropic flagship models) | No | — |
-| [Gemini CLI (Google)](https://github.com/google-gemini/gemini-cli/pull/2899) | Gemini (native Generative Language API via google/genai SDK) | Partial | GOOGLE_GEMINI_BASE_URL env var (consumed by the underlying google/genai SDK) |
+| [Gemini CLI (Google)](https://github.com/google-gemini/gemini-cli) | Gemini (native Generative Language API via google/genai SDK) | Partial | GOOGLE_GEMINI_BASE_URL env var (consumed by the underlying google/genai SDK); official docs do not document this var, and it has known sandbox-propagation bugs (issue #2168) |
 | [OpenHands (formerly OpenDevin)](https://docs.openhands.dev/openhands/usage/llms/llms) | Whatever LiteLLM normalizes to (OpenAI Chat Completions, Anthropic Messages, etc.); LiteLLM is the abstraction layer | Yes | config.toml [llm] base_url (with optional custom_llm_provider, model, api_key); env-var overrides LLM_BASE_URL / LLM_MODEL / LLM_API_KEY (via openhands --override-with-envs), or the Advanced > Base URL field in the UI |
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/) | OpenAI Chat Completions (official OpenAI Node.js SDK; endpoint must accept OpenAI-format requests) | Yes | OPENAI_BASE_URL env var (with OPENAI_API_KEY, OPENAI_MODEL); or ~/.qwen/settings.json modelProviders.openai[].baseUrl; or CLI --openai-base-url / --openaiBaseUrl |
 
@@ -9703,6 +9835,7 @@ What actually serves the tokens. `fak serve --base-url <here>` puts the gate in 
 | [Together AI](https://docs.together.ai/docs/openai-api-compatibility) | OpenAI Chat Completions / Completions / Embeddings / Images | Yes | OpenAI SDK base_url='https://api.together.xyz/v1' (also documented as https://api.together.ai/v1) + Together API key. From fak: --base-url https://api.together.xyz/v1 |
 | [Groq](https://console.groq.com/docs/openai) | OpenAI Chat Completions (plus a Responses API) | Yes | OpenAI SDK base_url='https://api.groq.com/openai/v1' + GROQ_API_KEY. From fak: --base-url https://api.groq.com/openai/v1 |
 | [Fireworks AI](https://docs.fireworks.ai/tools-sdks/openai-compatibility) | OpenAI Chat Completions / Completions (plus an OpenAI Responses API beta) | Yes | OpenAI SDK base_url='https://api.fireworks.ai/inference/v1' + Fireworks API key. From fak: --base-url https://api.fireworks.ai/inference/v1 |
+| [AgentGateway](https://github.com/agentgateway/agentgateway) | OpenAI Chat Completions (unified LLM gateway), MCP, A2A (Linux Foundation project) | Yes | OpenAI SDK base_url='https://<agentgateway-host>:<port>/v1' or via AgentGateway's OpenAI-compatible endpoint; also serves MCP and A2A protocols. A Linux Foundation project (donated 2026) providing connectivity for agent-to-LLM, agent-to-tool, and agent-to-agent communication. |
 
 ### Wire & interop protocols
 
@@ -9711,12 +9844,12 @@ The wires themselves. Three are runtime boundaries a gateway can sit on (MCP-ove
 | Target | Speaks | Custom base URL | How you repoint it |
 |---|---|---|---|
 | [MCP (Model Context Protocol)](https://modelcontextprotocol.io/specification/2025-11-25) | JSON-RPC 2.0 over stdio or Streamable HTTP (HTTP POST + SSE) | Yes | Client config points at a server URL/command (e.g. mcpServers entry with a "url" for HTTP transport, or "command"/"args" for stdio, in the host's config such as claude_desktop_config.json / .mcp.json) |
-| [A2A (Agent2Agent)](https://a2a-protocol.org/latest/specification/) | JSON-RPC 2.0, gRPC, or HTTP+JSON/REST; SSE for streaming | Yes | AgentCard JSON exposes the agent's service endpoint in its "url" field; clients discover/address an agent by that URL (typically published at /.well-known/agent-card.json) |
+| [A2A (Agent2Agent)](https://a2a-protocol.org/latest/) | JSON-RPC 2.0, gRPC, or HTTP+JSON/REST; SSE for streaming | Yes | AgentCard JSON exposes the agent's service endpoint in its "url" field; clients discover/address an agent by that URL (typically published at /.well-known/agent-card.json). v1.0 production standard under Linux Foundation (April 2026) |
 | [AG-UI (Agent-User Interaction Protocol)](https://docs.ag-ui.com/concepts/architecture) | Transport-agnostic; default is HTTP POST + Server-Sent Events (also WebSocket, webhook, binary variant) | Yes | Frontend client (e.g. HttpAgent) is constructed with a target agent endpoint URL; it POSTs RunAgentInput and consumes a stream of typed BaseEvents |
 | [ACP (Agent Communication Protocol / BeeAI)](https://agentcommunicationprotocol.dev/introduction/welcome) | REST over HTTP (explicitly not JSON-RPC); streaming + await/resume sessions | Yes | REST endpoints; an ACP server hosts one or more agents behind a single HTTP base URL and routes by agent name (OpenAPI-described, e.g. /agents, /runs) |
 | [ANP (Agent Network Protocol)](https://agentnetworkprotocol.com/en/specs/07-anp-agent-description-protocol-specification/) | JSON-LD messages over HTTP(S); W3C DID (did:wba) for identity | Yes | Each agent is identified by a DID whose document is hosted at an HTTPS URL; the JSON-LD Agent Description document lists service endpoints |
 | [llms.txt](https://llmstxt.org/) | none (static Markdown file served over HTTP at a fixed path) | No | — |
-| [OpenAI Responses API](https://github.com/openai/openai-python) | HTTP+JSON at POST /v1/responses; SSE for streaming (typed response.* events) | Yes | OpenAI SDK base_url client parameter, or the OPENAI_BASE_URL environment variable (default https://api.openai.com/v1); a gateway exposes an OpenAI-compatible /v1/responses and clients repoint here |
+| [OpenAI Responses API](https://github.com/openai/openai-python) | HTTP+JSON at POST /v1/responses; SSE for streaming (typed response.* events) | Yes | OpenAI SDK base_url client parameter, or the OPENAI_BASE_URL environment variable (default https://api.openai.com/v1); Responses API is now the primary OpenAI Python API (June 2026). A gateway exposes an OpenAI-compatible /v1/responses and clients repoint here. |
 
 ### Caveats worth knowing
 
@@ -9736,7 +9869,7 @@ Where a row says **Partial** or **No**, or the repoint has a sharp edge, here's 
 
 ## Summary
 
-Of the 44 targets, **38 expose a custom base URL outright** and 4 more do so partially —
+Of the 45 targets, **39 expose a custom base URL outright** and 4 more do so partially —
 because the OpenAI-compatible wire has become the field's lingua franca, and `fak serve`
 speaks it. The handful that don't (`llms.txt` is a static file; Windsurf routes through a
 closed backend) aren't runtime boundaries a gateway can sit on in the first place.
@@ -9969,6 +10102,7 @@ honest survey (full table and sourcing in [model routing](https://github.com/ant
 | LiteLLM Router | deployment | load-balance/failover of one model | complement: connectivity/HA; fak routes *which model*, per aspect — see [litellm.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/litellm.md) |
 | Unify / Martian / NotDiamond | request | none | complement: learned per-request pick; fak routes sub-request aspects + runs ensembles |
 | Vercel AI Gateway | request | none | complement: one key, many providers; fak governs + routes above it |
+| **AgentGateway** (Linux Foundation) | **connectivity** (LLM, MCP, A2A) | **guardrails** (regex, moderation, webhooks) | **connectivity peer**: AgentGateway is the head-on connectivity competitor (MCP+A2A+LLM data plane). fak does not out-connect it; it adds the in-kernel capability floor + bit-exact KV cache they leave open. They focus on multi-protocol transport and rich observability; fak focuses on adjudication at the tool-call boundary and per-aspect ensemble routing. Compose fak behind AgentGateway for governed LLM/MCP/A2A connectivity, or front AgentGateway for multi-backend HA behind fak's floor. |
 
 The claim fak makes is **categorical, not a benchmark**: to our knowledge it is the only
 design that routes at *any aspect of a single request*, each to a different model, with
@@ -13354,10 +13488,18 @@ that reads `OPENAI_BASE_URL` (Codex, OpenCode, Aider) — not Claude Code, which
 Anthropic wire (guard rejects `--remote-serve` with `--provider anthropic`).
 
 ```bash
-# on the lab box: serve a model in fak's own kernel on the GPU
+# on the lab box: serve a model in fak's own kernel on the GPU.
+# Linux/NVIDIA box (a -tags cuda build):
 FAK_Q4K=1 fak serve \
   --gguf /srv/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf \
   --engine inkernel --backend cuda \
+  --addr 0.0.0.0:8080
+
+# Apple-Silicon box (a -tags fakmetal build) — GPU prefill + resident Q8 decode on a
+# dense Qwen-class Q8 GGUF. --metal is the Metal seam, mutually exclusive with --backend:
+fak serve \
+  --gguf /srv/models/qwen2.5-coder-7b-instruct-q8_0.gguf \
+  --engine inkernel --metal \
   --addr 0.0.0.0:8080
 
 # from the box (or the bridge session on it): run a kernel-adjudicated dev turn,
@@ -19845,6 +19987,29 @@ remove flags. That "same binary, two scales" property
 property as "same kernel, two ends of the substrate axis" — this page is just that
 claim drawn all the way down to the constrained end, not only up to the fleet.
 
+### The datacenter end keeps the same invariants — and that's the witness, not throughput
+
+The interesting claim at the hyperscaler end is *not* a throughput number. It is
+that the five invariants above are the **same artifact** on a multi-GPU fleet host
+as on the laptop — and for the two that are deterministic, "same" means
+**byte-for-byte**, by construction. The bit-exact KV reuse and addressable-eviction
+metrics (`max\|Δ\|=0`, evict == never-saw) are pure-Go logic with no hardware
+dependency, so they don't merely *approximate* the laptop result on a bigger box —
+they reproduce it exactly, the same way the [hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md)
+already witnesses them reproducing across arm64 and x86_64. A datacenter host is one
+more point on that determinism axis: a faster forward pass below the contract, the
+identical verdict above it. The default-deny floor and the SHA-256 hash-chained
+audit line are likewise pure-Go and hardware-independent, so an offline
+`fak audit verify` over a fleet host's journal is the same check it is on a Pi.
+
+What is **witnessed today** vs. what is a **TARGET**, kept provenance-honest:
+
+| Datacenter-end claim | Status |
+|---|---|
+| Deterministic invariants (bit-exact KV reuse, addressable eviction, default-deny, hash-chained audit) reproduce byte-for-byte on any box, fleet host included | **Witnessed by construction** — the metrics carry no hardware dependency, and the cross-ISA reproduction is recorded in `HARDWARE-MATRIX.md`. The same logic on a bigger box yields the same numbers; there is nothing silicon-specific left to drift. |
+| A *dedicated* datacenter-scale run that re-records those same invariants on a multi-GPU fleet host, alongside [hardware matrix](https://github.com/anthony-chaudhary/fak/blob/main/docs/HARDWARE-MATRIX.md) Platform 4 | **TARGET / not-yet-witnessed** — the multi-GPU serving lane exists, but a fleet-host re-run of the determinism witness has not been captured yet. Until it is, the byte-for-byte claim rests on the construction argument plus the cross-ISA witness, not on a recorded datacenter row. |
+| Any hyperscaler *throughput* result | **Not claimed.** The spine is the governance/reuse/provenance band; tokens per second is the substrate-specific half the HAL and engine seam own (see the fences below). |
+
 ## Why this is structural, not a marketing reframe
 
 Three properties make the spine real rather than aspirational, and all three are
@@ -20575,7 +20740,10 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | **Self-ablation feature sweep — vDSO on/off (deterministic, Regime A of epic #607)** | **vdso_hits 0→7 · engine_calls 12→5 · tokens 937→417 (−520)** | tau2-airline-smoke frozen trace (12 calls), mock engine, no model | all-off baseline (vDSO off) | _this commit_ | `experiments/ablate/tau2-smoke-vdso-ablation.json` + `ABLATE-RESULTS.md`. Counter fields (workload_hash/vdso_hits/engine_calls/tokens/denies/quarantines) reproduce byte-identical (kernel event counters on a frozen trace); only p50_ns/wall_seconds/buckets are single-box. Rung 1 sweeps the one runtime knob only; env-gated features + cross-agent (Regime B) arms are separate rungs |
 | **Cross-agent ablation — bare `claude` vs `fak guard -- claude` (Regime B of epic #607, [#623](https://github.com/anthony-chaudhary/fak/issues/623))** | **K=5/arm, both 5/5 success · output 0.98× · turns 1.00× · total-ingested 1.56× (−28 986 tok, kernel overhead) · +fak: 5 ALLOW / 0 deny** | `pong` 1-tool-call task w/ deterministic check, `claude-opus-4-8`, same OAuth acct, single Windows host | `claude_code` (bare `claude -p`) baseline | _this commit_ | `experiments/ablate/cross-agent-pong-opus.json` + `ABLATE-RESULTS.md`. Regime B is DISTRIBUTIONAL (mean ± CI95 over K≥5; the `WorkloadHash` guard does NOT apply); success-gated, model-named, tokens decomposed never summed. ONE tiny tool-light task on ONE host ⇒ deny/repair/quarantine counters an honest zero, cache-split is cold-prefix illustrative not a fleet SLA. Tool: `tools/cross_agent_ablate.py` (17 hermetic tests) |
 | **AgentDojo structural safety floor (local, model-free)** | **full-stack ASR 0/38 (0.000) vs detection-only 29/38 (0.763) · benign controls 2/2 · gate PASS** | deterministic AgentDojo-style red-team, no model | detection-only lexical gates | _this commit_ | `experiments/agent-live/agentdojo-fak-fullstack-20260625.json` (reproduce: `go run ./cmd/agentdojoredteam -json`; corpus `sha256:ddc5b9ae08df0b37224a290fae212525228d2930e77afecb7bfc868b06ca1060`). LOCAL structural floor only — not an official external AgentDojo leaderboard result or raw-model arm |
+| **AgentDojo external entry — `fak_gateway` registered non-model defense (#1064; module BUILT+WITNESSED, run/PR operator-gated)** | **module loads + intercepts a tool call (26-check test PASS); local intercept witness targeted ASR 0/7 (0.000) · benign 2/2; `benign/under-attack utility = NEEDS_KEY`; `result_claim_allowed=false`** | `fak_gateway` `BasePipelineElement` in a fork of `ethz-spylab/agentdojo`; targeted-ASR mechanism WITNESSED locally, utility arms OBSERVED (paid fronted model) | the four published non-model rows (Tool Filter / Spotlighting / Transformers PI Detector / Repeat User Prompt) + the formal-isolation tier (CaMeL ASR 0 / MELON 0.0–2.4%) | _this commit_ | `experiments/agent-live/agentdojo-fak-gateway-defense-entry-20260627.json` + `.md`; module `experiments/agentdojo-fak-defense/` (reproduce witness: `python3 experiments/agentdojo-fak-defense/fak_gateway_defense.py --json`; test: `python3 experiments/agentdojo-fak-defense/test_fak_gateway_defense.py`). PLACE in the ~0-ASR tier at a stated utility cost — **not a win, not a leaderboard rank**. 629-case + 97-case run on a fronted model and the upstream PR are the recorded operator-gated blocker |
 | **ToolSandbox/tau3 policy-state adapter smoke ([SIMULATED] local fixture)** | **raw safe pass^1 1/2 (0.500) -> fak safe pass^1 2/2 (1.000); fak denied 1 policy/minefield call; `result_claim_allowed=false`** | `offline-trace`, 2 ToolSandbox-shaped tasks, no live model | raw trace replay without fak mediation | `c92bb2c` | `experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json` + `.md` (reproduce: `go run ./cmd/toolsandboxbench -suite testdata/toolsandbox/policy_state_smoke.json -out experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json -md experiments/agent-live/toolsandbox-policy-state-smoke-20260625.md`). Adapter smoke only - not an official Apple ToolSandbox or tau3 leaderboard result |
+| **GLM-5.2 fak-kernel cache value (PENDING — results not yet collected)** | **PENDING — see result packet for shape** | GLM-5.2 on pure fak kernel, solved SWE-bench ticket | No cache (work saved is the lever) | _pending_ | `docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md` (result packet shape; observation seam shipped at `52dfea0d`, datacenter GPU access is the residual). Observation metric: `kv_prefix.reused_tokens` (WITNESSED, not provider's `cache_read`). See runbook for full path. |
+| **Local-model coding witness — `fak guard --gguf` (PENDING — path assembled, awaiting real run)** | **PENDING — run commands in runbook to fill A/B table** | Qwen2.5-Coder-1.5B-Q8 (local CPU) vs Claude Haiku 3.5 (frontier) | Same minimal coding task (`testdata/coding_smoke`) | _this commit_ | `docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-2026-06-27.md` + `LOCAL-MODEL-CODING-WITNESS-RUNBOOK.md` (commands). **Issue #1061 acceptance criteria:** (a) reproducible witness on CPU, (b) honest A/B table (local vs frontier on completion + safety + cost), (c) quickstart cites it. Path proven: fixture (`calculator.py` + `test_calculator.py`), policy (`examples/coding-agent-safe.json`), guard path (`fak guard --gguf <path>`), decision journal (`--audit FILE`). Cells marked `pending` need a box with GGUF weights and frontier-model credentials. |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -20639,6 +20807,45 @@ The artifact also records the reproduce command, the attack ids, policy mode
 - `go test ./cmd/agentdojoredteam ./internal/agentdojo` -> PASS.
 - `go run ./cmd/agentdojoredteam -json` -> exit 0 and writes `gate=PASS`.
 - JSON parse/read-back confirmed the fields in the table above.
+
+---
+
+## AgentDojo External Entry — `fak_gateway` Registered Non-Model Defense (#1064, 2026-06-27)
+
+**Claim class:** module BUILT + locally WITNESSED; the public-harness row is
+operator-gated. `result_claim_allowed=false`.
+**Commit:** _this commit_
+**Files:** `experiments/agent-live/agentdojo-fak-gateway-defense-entry-20260627.json` + `.md`;
+module + test under `experiments/agentdojo-fak-defense/`.
+
+### What this is
+
+The external-entry counterpart the local floor (#869) deliberately excluded. fak's
+default-deny **tool-call admission gate** (capability floor + IFC source-stamp /
+sink-gate + result quarantine) is packaged as a real `BasePipelineElement` for the
+upstream `ethz-spylab/agentdojo` harness — `FakGatewayDefense`, selectable via
+`--defense fak_gateway` or `--module-to-load`, a faithful port of `internal/ifc/ifc.go`.
+This is a *capability-floor* class, distinct from the four published content/transform
+non-model rows.
+
+### What is WITNESSED here vs operator-gated
+
+| Item | State |
+|---|---|
+| Module loads + intercepts a tool call (unit test, 26 checks) | **WITNESSED · PASS** (`python3 experiments/agentdojo-fak-defense/test_fak_gateway_defense.py`) |
+| `targeted ASR` mechanism (local intercept witness) | **WITNESSED · 0/7 (0.000)**, benign 2/2 (`python3 experiments/agentdojo-fak-defense/fak_gateway_defense.py --json`) |
+| `benign utility` / `utility-under-attack` (629+97-case run) | **NEEDS_KEY** — OBSERVED, property of the fronted model `<model-id>`, ≈US$39 paid run |
+| Upstream PR into a fork of `ethz-spylab/agentdojo` | **operator-gated** (outward-facing; recorded blocker per #1064 AC) |
+
+### Honesty fences
+
+- `targeted ASR` is fak-authored (WITNESSED); `benign/under-attack utility` are the
+  fronted model's capability (OBSERVED) — different provenance, reported together,
+  never ASR alone. A refusing gate depresses benign utility; that cost is stated.
+- The internal `cmd/agentdojoredteam` 0/38 is **not** an AgentDojo-629 number.
+- fak's structural floor is **co-equal** with the formal-isolation tier (CaMeL ASR 0;
+  MELON 0.0–2.4%) — a PLACE in the ~0-ASR tier, never a win, never a leaderboard rank,
+  never a README headline.
 
 ---
 
@@ -21250,6 +21457,223 @@ No claim exists without a traceable source.
 
 ---
 
+# GLM-5.2 fak-kernel cache value (PENDING)
+
+> Source: `docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md`
+
+# GLM-5.2 Fak-Kernel Cache Value — On a Solved Ticket
+
+> **📊 AUTHORITY:** This document's benchmark results are indexed in **[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md)**,
+> the single source of truth for all committed performance claims.
+
+> **⚠️ RESULT STATUS:** **PENDING — Results not yet collected.** This document describes the result packet shape and what will be measured once the live run executes on datacenter compute. The observation seam (`fak swebench cache-witness`) is shipped and tested; the live GLM-5.2 cache-value number is the box residual.
+
+**Date:** 2026-06-27
+**Commit:** _live cache-value pending — see [DOS Binding](#dos-binding--provenance-of-every-number)_
+**DOS Verify:** the offline WITNESSED headline (the deterministic prefill-elimination floor) is bound to its commit and resolves under `dos verify`; the live WITNESSED cache value is reported `not yet` (host-gated on [#1012](https://github.com/anthony-chaudhary/fak/issues/1012)). See [DOS Binding](#dos-binding--provenance-of-every-number).
+**Epic:** [#1010](https://github.com/anthony-chaudhary/fak/issues/1010) — GLM-5.2 on the pure fak kernel
+**Child Issues:** [#1014](https://github.com/anthony-chaudhary/fak/issues/1014) — this result packet · [#1013](https://github.com/anthony-chaudhary/fak/issues/1013) — DOS binding + provenance of every number
+**Observation Seam:** [`internal/cachewitness/`](../internal/cachewitness/) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
+
+## Summary
+
+| Claim | Number | Baseline | Context |
+|---|---|---|---|---|
+| **Cache value (reused tokens)** | **PENDING** | No cache baseline | GLM-5.2 on pure fak kernel serving a solved SWE-bench ticket |
+
+## What This Measures
+
+This benchmark measures the **cache value** — the prefilled tokens served from fak's in-kernel KV-prefix cache that the kernel did NOT recompute. Specifically:
+
+- The work saved on turns 2..N when the Claude harness drives a real, already-solved SWE-bench ticket against a GLM-5.2 fak-kernel gateway
+- The cached KV prefix (system + tools + repo) is served on every turn, avoiding the expensive prefill cost
+- This is a **WITNESSED** metric from fak's own kernel, not an observed upstream provider number
+
+The metric that matters is `kv_prefix.reused_tokens` — the number of prefilled tokens served from the cached KV prefix.
+
+## Why a *Solved* Ticket
+
+GLM-5.2 in fak's kernel decodes at ~0.03–0.17 tok/s under `--cpu-offload-experts` (due to the MoE expert GEMM wall — [#996](https://github.com/anthony-chaudhary/fak/issues/996)/[#971](https://github.com/anthony-chaudhary/fak/issues/971)). This is too slow to generate a full patch in reasonable wall-clock. The runnable proof routes *around* the throughput wall, not *through* it:
+
+1. Take a **real, already-solved** SWE-bench Verified instance (gold patch + gold test known)
+2. Drive it through the **Claude harness wired to the GLM-5.2 fak-kernel gateway**
+3. **Observe the cache value** — the lever the goal names
+
+This proves the in-kernel cache-value lever end-to-end even if the full patch is not generated.
+
+## Workload
+
+- **Model:** GLM-5.2 (Q4_K_M quantization, served via `fak serve --engine inkernel --backend cuda --cpu-offload-experts`)
+- **Hardware:** 8×A100 sm_80 datacenter GPU (residual — box access required)
+- **Task:** One or more solved SWE-bench Verified instances from `testdata/swebench_smoke.json`
+- **Agent:** Claude harness (`fak swebench run --agent fleet`) wired to the fak-kernel gateway
+- **Context Budget:** 8192 tokens (kept within GLM-5.2's 1M-context default to avoid `FitTooBig`)
+
+## Results (PENDING — Will Fill When Data Arrives)
+
+### Cache Value — WITNESSED (fak's own cache)
+
+| Metric | Expected Artifact Field | Value | Provenance |
+|---|---|---|---|
+| **Reused tokens** | `kv_prefix.reused_tokens` | **PENDING** | WITNESSED — fak authored this count |
+| **Prefill tokens (denominator)** | `kv_prefix.prompt_tokens` | **PENDING** | WITNESSED |
+| **Cache hit ratio** | `kv_prefix.reused_tokens / kv_prefix.prompt_tokens` | **PENDING** | WITNESSED — derived from witnessed fields |
+| **Frozen turns (reuse ≥ 0.90)** | `kv_prefix.frozen_turns` | **PENDING** | WITNESSED |
+| **Partial turns** | `kv_prefix.partial_turns` | **PENDING** | WITNESSED |
+| **Cold turns (reuse < 0.10)** | `kv_prefix.cold_turns` | **PENDING** | WITNESSED |
+
+### Prefill Work-Elimination Floor — WITNESSED-derived (deterministic, offline)
+
+This is the **offline WITNESSED headline** the epic names: the prefill-token work each
+arm processes, computed *deterministically* from the SWE-bench instance geometry
+(`internal/swebench/cost.go`, `PrefillAgg.AOverC`/`AOverB`). It needs **no box, no GPU,
+no model** — it is timing-free arithmetic, so it resolves under `dos verify` today, bound
+to the shipped `cost.go` commit. It is **WITNESSED-derived** (fak computes it), distinct
+from the live WITNESSED cache count below and from any OBSERVED provider/box reading.
+
+| Metric | Source field | Value | Provenance |
+|---|---|---|---|
+| **A/C — re-prefill vs fak-fused** | `PrefillAgg.AOverC` | **17.9× → 23.4×** (workers 1→16) | WITNESSED-derived — deterministic from geometry |
+| **B/C — per-agent-KV vs fak-fused** | `PrefillAgg.BOverC` | **1.0× → 1.31×** (workers 1→16) | WITNESSED-derived |
+| **A/B — turn-tax** | `PrefillAgg.AOverB` | computed per geometry | WITNESSED-derived |
+
+These figures are the committed value-stack floor (see
+[SWEBENCH-RESULTS.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/SWEBENCH-RESULTS.md)); they are a *related but distinct* quantity
+from the live in-kernel `reused_tokens` and must never be reported as the live cache
+value. The deterministic floor answers "how much prefill work the geometry lets fak
+eliminate"; the live `reused_tokens` answers "how much fak's RadixAttention actually
+served from cache on this run."
+
+### Provider Cache — OBSERVED (upstream, not fak's)
+
+| Metric | Expected Artifact Field | Value | Provenance |
+|---|---|---|---|
+| **Provider cache read tokens** | `provider_cache_read_tokens` | **0** | OBSERVED — always 0 on pure in-kernel path (no provider) |
+
+### Live Decode Reading — OBSERVED (a reading of the box, not a fak claim)
+
+| Metric | Source | Value | Provenance |
+|---|---|---|---|
+| **Decode throughput (tok/s)** | live serve on the dgx box | **`not yet`** (~0.03–0.17 expected under `--cpu-offload-experts`) | OBSERVED — relayed reading of a live box |
+
+The tok/s is a reading of the hardware under the [#996](https://github.com/anthony-chaudhary/fak/issues/996)/[#971](https://github.com/anthony-chaudhary/fak/issues/971)
+expert-GEMM wall. It is **OBSERVED**, never WITNESSED, and the slow figure is **never
+attributed to a fak action** — it is the host's MoE-offload cost, not a kernel fault.
+
+**Honesty fence (all four number-classes).** The packet keeps **two trust classes**
+strictly apart:
+
+- **WITNESSED** (fak controls): the live in-kernel `kv_prefix.reused_tokens`, and the
+  WITNESSED-*derived* deterministic prefill-elimination floor (`AOverC`/`AOverB`).
+- **OBSERVED** (relayed from an external party): the provider `cache_read` (0 here), and
+  the live box decode tok/s.
+
+No number sums or derives across the line: the `cachewitness.Record` keeps the WITNESSED
+and OBSERVED cache fields separate and never derives one from the other, the deterministic
+floor is never reported as the live cache value, and a slow OBSERVED tok/s is never blamed
+on a fak action. This is the `fak conflation-scorecard` discipline applied to the result
+packet (`internal/conflationscore`, A / `conflation_debt 0`).
+
+## Methodology — The Observation Seam
+
+The observation is performed by `fak swebench cache-witness` (commit `52dfea0d`), which:
+
+1. Scrapes the gateway's `/metrics` endpoint for the cache family
+2. Folds it into a `cachewitness.Record` with provenance labeling
+3. Emits JSON with the structure shown in the Results tables above
+
+The command:
+
+```bash
+# Direct scrape, if gateway is HTTP-reachable:
+fak swebench cache-witness --gateway 127.0.0.1:8080 --out run-glm52-cache/cache-witness.json
+
+# Or via captured metrics (when box is reachable only over lab bridge):
+curl -s localhost:8080/metrics > metrics.txt
+fak swebench cache-witness --metrics-file metrics.txt --out cache-witness.json
+```
+
+The `cache-witness.json` artifact is the unit that graduates into BENCHMARK-AUTHORITY.md once the live number is collected.
+
+## Full Runbook
+
+See [GLM52-FAK-KERNEL-CACHE-VALUE-RUNBOOK.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RUNBOOK.md) for the complete end-to-end path:
+
+1. Serve GLM-5.2 from the pure kernel
+2. Drive the Claude harness over a solved ticket
+3. Read the cache value
+
+## Milestone 2 — The Bar for Epic #1010
+
+The cache **BIT** milestone: `cache-witness.json` shows `reused_tokens > 0` on turns 2..N from a live GLM-5.2 fak-kernel serve. This proves the cache-value lever end-to-end through fak's own kernel.
+
+**Stretch (gated on #996/#971):** A non-zero resolve-rate from GLM-5.2-fak-kernel, graded by the official harness (`fak swebench eval`). Not required to close #1010.
+
+## DOS Binding — Provenance of Every Number
+
+The rule (epic #1010, child #1013): **the cache-value number that graduates must be
+diff-witnessed, not self-reported.** It is bound by `dos verify` / `dos commit-audit` to
+the commit that produced it — never to a worker's narration. An unproven step is reported
+`not yet` with the missing witness, never shipped.
+
+**Bound now (resolves under `dos verify` today):**
+
+| Number | Trust class | Binding |
+|---|---|---|
+| Observation seam (`fak swebench cache-witness`) | WITNESSED tooling | commit `52dfea0d` — `dos commit-audit` → **diff-witnessed** |
+| Deterministic prefill-elimination floor (A/C, B/C, A/B) | WITNESSED-derived | bound to the shipped `internal/swebench/cost.go` commit; timing-free, resolves offline under `dos verify` |
+| Provider `cache_read` = 0 (pure in-kernel path) | OBSERVED | structural (no provider on the in-kernel path) — not a fak claim |
+
+**`not yet` (the missing witness is named, not faked):**
+
+| Number | Trust class | Missing witness |
+|---|---|---|
+| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8×A100 dgx box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
+| Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
+
+When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
+
+**Conflation contract:** every number above carries its trust class; no number sums or
+derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
+(grade A, `conflation_debt 0`) on the reporting surfaces.
+
+## Provenance and Discipline
+
+- **Observation seam:** `internal/cachewitness/` + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit_audit` → diff-witnessed)
+- **Provenance split:** WITNESSED (fak's own cache) vs OBSERVED (provider's cache), matching the conflation-scorecard line
+- **Metric definitions:** `internal/gateway/metrics.go` (`writeKVPrefixMetrics`)
+- **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](../BENCHMARK-TEMPLATE.md) standard
+- **Gate / dependency:** Datacenter GPU access (8×A100 sm_80 box) — the current residual
+
+## Cross-References
+
+- **Runbook:** [GLM52-FAK-KERNEL-CACHE-VALUE-RUNBOOK.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RUNBOOK.md) — how to run the benchmark
+- **Pure-kernel serving:** [SWEBENCH-PURE-KERNEL-RUNBOOK.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/SWEBENCH-PURE-KERNEL-RUNBOOK.md) — how to serve models from fak's own kernel
+- **Metric provenance:** `internal/cachewitness/cachewitness.go` — WITNESSED vs OBSERVED discipline
+- **Throughput wall:** [#996](https://github.com/anthony-chaudhary/fak/issues/996) / [#971](https://github.com/anthony-chaudhary/fak/issues/971) — why this routes around full-patch generation
+- **Epic parent:** [#1010](https://github.com/anthony-chaudhary/fak/issues/1010) — GLM-5.2 on the pure fak kernel
+
+---
+
+## Pending Status — Not Yet Collected
+
+This result packet is **NOT YET SHIPPED**. The numbers are PENDING because:
+
+1. The observation seam is fully shipped and tested (`dos commit_audit 52dfea0d` → OK)
+2. The datacenter GPU box (8×A100) access is the current residual
+3. Once the live run executes, the `cache-witness.json` artifact will be committed and the tables above will be filled with real WITNESSED numbers
+
+When results are collected, this document will be updated with:
+
+- Actual commit hash of the results commit
+- Real numbers in the Results tables (no placeholders)
+- `dos_commit_audit <hash>` → **OK** verification
+- Entry in [BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md) referencing this document
+
+**Until then, this document serves as the result packet shape — what will be measured, how, and under what provenance discipline.**
+
+---
+
 # Hardware matrix
 
 > Source: `docs/HARDWARE-MATRIX.md`
@@ -21290,6 +21714,12 @@ appears here it carries a pointer to the doc + commit that owns it.
 | **AMD Ryzen 9 9950X + Radeon RX 7600** | AMD Zen 5, 16C/32T, x86_64, AVX-512 | **Vulkan** Q8 (RX 7600) + CPU Q8 | Windows | f32 · Q8_0 · Q4_K | Q8-on-GPU throughput, the GPU/CPU crossover, 3/3 live agent surfaces on Qwen3.6-27B |
 | **Intel x86_64 + NVIDIA RTX 4070** | Intel, x86_64, AVX2/AVX-512 | **CUDA** (Ada, sm_89): f32 · F16 · Q8 · graph | Windows + WSL2 Linux | f32 · F16 · Q8_0 | In-kernel CUDA decode at llama.cpp parity, batched decode curve, cross-platform bit-exact determinism vs the Mac |
 | **an 8-GPU datacenter server** *(serving lane)* | x86_64 host | **CUDA** (Ampere, sm_80), multi-GPU | Linux | Q4_K · (FP8/BF16 target) | The multi-GPU serving + GLM-5.2 readiness lane — big-iron, where single-box ceilings stop binding |
+| **Raspberry Pi 5 / Jetson Orin** *(arm64 edge — target, not yet witnessed)* | arm64 (Cortex-A76 / Arm Cortex-A78AE), small SBC | CPU NEON Q4 · (Jetson CUDA target) | Linux | Q4_K · Q2_K (target) | **Planned witness, nothing measured yet** — the arm64 small-SBC edge rung; closes the bottom of the deployment-substrate axis. No Pi 5 / Jetson Orin tok/s has been collected — this row is a pending future witness, not a result |
+
+> **Pending 5th row.** The arm64 small-SBC edge row above is a **target**, not a witnessed
+> platform — the four rows below it carry measured artifacts, this one is open work (the
+> issue is to go *witness* it). It is listed here so the coverage axis shows the rung that
+> still needs collecting; no number is claimed for it.
 
 **Reading the spread:** the deterministic results (token-count speedups, cache hit rate,
 bit-exact eviction) are *hardware-independent by construction* and reproduce byte-for-byte
@@ -23014,6 +23444,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Trajectory data plane (`internal/trajectory`): a typed, exportable per-turn `Turn` record (trace, seq, query, tool, verdict, taint, digests, token/byte cost, optional embedding) folded from the kernel's lifecycle stream. A `Recorder` is an `abi.Emitter` — it reads the human query + per-turn cost from the OPEN `abi.Event.Fields` / `ToolCall.Meta` channels the producer stamps, so it adds NO field to the frozen ABI. Off by default; opt-in via `FAK_TRAJECTORY=1` (+ `FAK_TRAJECTORY_EMBED=1` to stamp query vectors) or `trajectory.Enable`, mirroring the audit journal's enablement seam. JSONL export round-trips through `ExportTo`/`ImportFrom`. Distinct from `internal/journal` by design: the journal is the tamper-evident audit ledger (a verdict over a digest), this is the analysis surface (the query text, the cost, the embedding). Witness: `go test ./internal/trajectory` (`TestRecorderFoldsTrace`, `TestFieldsEnrichment`, `TestExportImportRoundTrip`, `TestIndexSimilarity`).
 - [SHIPPED] Reference vector-similarity primitive (`internal/simhash`): a deterministic, dependency-free `Embed`/`Cosine`/`Index.TopK` over hashed word+char n-grams — the substrate for finding near-duplicate "bad" queries the lexical token-overlap ranker (`internal/contextq`) misses. Honest ceiling, measured: shared-vocabulary paraphrases score ~0.70–0.78, but same-intent/different-vocabulary pairs ("delete every row" vs "drop all records") score ~0.35; it is a hashing-trick sketch, NOT a learned model, and the `Index` is model-agnostic so a deployment swaps in real `[]float32` embeddings through the same machinery. Tier-1 foundation leaf (imports nothing internal). Witness: `go test ./internal/simhash` (`TestEmbedDeterministic`, `TestNearDuplicateRanksAboveUnrelated`, `TestIndexTopK`).
 - [SHIPPED] Pluggable trajectory-scorer seam (`internal/trajhook`): a `Registry` of named `Turn → Finding` scorers application code attaches WITHOUT a core edit — the analysis-layer analogue of `abi.RegisterEmitter`, with no ABI involved. Three reference scorers ship as worked examples (`duplicate_query` via simhash, `cost_outlier`, `high_deny_rate`); they are examples, not a hard-coded classifier. Surfaced as `fak traj similar|cluster|score|gc|export` over an exported corpus (`gc` PROPOSES prune candidates, never deletes). End-to-end proven on the shipped demo corpus (`examples/trajectory/sample-corpus.jsonl`) by the `trajectory-garden` skill. Witness: `go test ./internal/trajhook` (`TestDuplicateQueryFlagsParaphrase`, `TestDenyRate`, `TestSampleCorpusGardening`, `TestSampleCorpusGCProposes`); see `docs/observability/trajectory.md`.
+- [SHIPPED] Continuous-dogfood cache-value ledger + 2x regression gate (#1075): `internal/cachevalueledger` provides a durable, append-only JSONL ledger for cache-value observations from fak sessions (run/guard/serve), scoring the accumulated history to detect regressions. Each row records a session's cacheobs snapshot (turns, prompt_tokens, reused_tokens, reuse_ratio). `fak nightrun score` checks the ledger against a configurable 2x threshold (default 2.0x) and fails closed on regression; `fak nightrun post-cache-value` posts the rolling observed multiplier to the scoreboard. The ledger is appended to automatically on session exit in `cmd/fak/serve.go`, `run_model.go`, and `guard.go`. The Python tool `tools/cache_value_ledger.py` exposes the same gate for CI (`--check 2.0 --json`). Witness: `go test ./internal/cachevalueledger`; `python tools/cache_value_ledger_test.py` (5/5 passed); `fak nightrun score --floor 2.0` exit 0; `python tools/cache_value_ledger.py --ledger docs/nightrun/cache-value.jsonl --check 2.0 --json` emits `{"schema":"fak.cache-value-ledger.v1","ok":true,"active_multiplier":3.76,...}`.
 
 ## Task manager snapshot
 
