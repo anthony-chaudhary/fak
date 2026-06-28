@@ -452,6 +452,16 @@ func runLoadOnly(f *benchFlags, modelName string, loadMS float64, ggufLoadProfil
 	writeReport(*f.out, report)
 }
 
+// q8UploadUnsupported reports whether -quant was requested against a backend that cannot
+// accept quantized weight uploads. The wired Q8 HAL path routes matmul weights through
+// compute.Q8_0 only when the backend advertises Caps().UploadDtype (#472); a backend that
+// can't — cpu-ref or an f32-only device — must refuse -quant rather than silently run the
+// f32 path under a Q8 flag. When quant is false the f32 path is unchanged, so the gate never
+// fires regardless of the backend's caps.
+func q8UploadUnsupported(quant bool, caps compute.Caps) bool {
+	return quant && !caps.UploadDtype
+}
+
 // resolveBackend looks up the named compute backend (nil for "legacy") and enforces the
 // Q8-upload and non-reference gates. Returns the backend and the registered-backend list.
 func resolveBackend(f *benchFlags) (compute.Backend, []string) {
@@ -468,7 +478,7 @@ func resolveBackend(f *benchFlags) (compute.Backend, []string) {
 		// (the wired Q8 HAL path keys off Caps().UploadDtype). A backend that can't —
 		// e.g. cpu-ref or an f32-only device — still refuses -quant rather than silently
 		// running the f32 path under a Q8 flag.
-		if *f.quant && !be.Caps().UploadDtype {
+		if q8UploadUnsupported(*f.quant, be.Caps()) {
 			fmt.Fprintf(os.Stderr, "backend: %q is f32-only (no Q8 upload support); omit -quant\n", be.Name())
 			os.Exit(2)
 		}

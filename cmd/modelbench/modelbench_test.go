@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 func TestParsePositiveInts(t *testing.T) {
@@ -120,6 +122,52 @@ func TestSmokeOutcome(t *testing.T) {
 				t.Fatalf("smokeOutcome(%v, %v, %v) = %s, want %s", tt.done, tt.elapsed, tt.deadline, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestQ8UploadGate locks the modelbench -quant admission gate (#472): the -quant
+// (Q8_0) forward may run on a compute backend ONLY when that backend advertises
+// Caps().UploadDtype, because the wired Q8 HAL path keys off it. An f32-only backend
+// must refuse -quant instead of silently running the f32 path under a Q8 flag, and the
+// plain f32 path (-quant=false) must stay unchanged regardless of the backend's caps.
+// The Q8-capable case is exercised on hardware by internal/model's
+// TestHALVulkanQ8ForwardMatchesComputeQ8; this is its host-free decision-logic twin.
+func TestQ8UploadGate(t *testing.T) {
+	tests := []struct {
+		name       string
+		quant      bool
+		caps       compute.Caps
+		wantRefuse bool
+	}{
+		{name: "quant on f32-only backend refuses", quant: true, caps: compute.Caps{}, wantRefuse: true},
+		{name: "quant on Q8-upload backend allowed", quant: true, caps: compute.Caps{UploadDtype: true}, wantRefuse: false},
+		{name: "f32 path on f32-only backend unchanged", quant: false, caps: compute.Caps{}, wantRefuse: false},
+		{name: "f32 path on Q8-upload backend unchanged", quant: false, caps: compute.Caps{UploadDtype: true}, wantRefuse: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := q8UploadUnsupported(tt.quant, tt.caps); got != tt.wantRefuse {
+				t.Fatalf("q8UploadUnsupported(%v, %+v) = %v, want %v", tt.quant, tt.caps, got, tt.wantRefuse)
+			}
+		})
+	}
+
+	// Ground the gate in the real cpu-ref backend the issue names as the f32-only
+	// example: it must lack UploadDtype, so -quant against it is refused while the
+	// f32 path stays open. This binds the predicate to a production backend's caps
+	// rather than a hand-built struct, so a regression in either side is caught.
+	be, ok := compute.Lookup("cpu-ref")
+	if !ok {
+		t.Fatal("cpu-ref backend must be registered")
+	}
+	if be.Caps().UploadDtype {
+		t.Fatalf("cpu-ref unexpectedly advertises UploadDtype; the Q8-upload gate would no longer refuse it")
+	}
+	if !q8UploadUnsupported(true, be.Caps()) {
+		t.Fatalf("cpu-ref (f32-only) must refuse -quant")
+	}
+	if q8UploadUnsupported(false, be.Caps()) {
+		t.Fatalf("cpu-ref must keep the f32 path open when -quant is false")
 	}
 }
 
