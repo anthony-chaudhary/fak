@@ -85,6 +85,7 @@ const (
 	rungCmdSelfModify             // shell command writes into a guarded tree
 	rungSynthTool                 // exec of an agent-authored script into a guarded tree (+ ledger note)
 	rungArgPredicate              // per-tool arg-value predicates
+	rungEgress                    // tool call reaches a blocked network destination (cloud-metadata SSRF)
 	rungLintWrite                 // whole-file write of unparseable code
 	rungTransform                 // redact a secret-shaped arg before dispatch
 	rungAllow                     // affirmative allow + AllowPrefix (terminal)

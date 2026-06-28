@@ -1,0 +1,81 @@
+package adjudicator
+
+import (
+	"context"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	_ "github.com/anthony-chaudhary/fak/internal/blob"
+	"github.com/anthony-chaudhary/fak/internal/egressfloor"
+)
+
+// TestEgressRungBlocksMetadataWebFetch pins the headline guarantee: a WebFetch at the
+// cloud-instance metadata endpoint — the SSRF that would hand a VM-resident agent the
+// box's IAM credentials — is a PROVABLE refusal citing EGRESS_BLOCK, ahead of any
+// affirmative allow.
+func TestEgressRungBlocksMetadataWebFetch(t *testing.T) {
+	a := New(DefaultPolicy())
+	v := a.Adjudicate(context.Background(),
+		inlineCall("WebFetch", `{"url":"http://169.254.169.254/latest/meta-data/iam/security-credentials/"}`))
+	if v.Kind != abi.VerdictDeny {
+		t.Fatalf("metadata WebFetch: kind=%v, want Deny", v.Kind)
+	}
+	if v.Reason != egressfloor.ReasonEgressBlock {
+		t.Fatalf("metadata WebFetch: reason=%d (%s), want EGRESS_BLOCK", v.Reason, abi.ReasonName(v.Reason))
+	}
+	if got := abi.ReasonName(v.Reason); got != "EGRESS_BLOCK" {
+		t.Fatalf("reason name = %q, want EGRESS_BLOCK (out-of-tree reason not registered?)", got)
+	}
+}
+
+// TestEgressRungBlocksShellMetadataFetch proves the floor reaches the SHELL path too:
+// a curl to the metadata endpoint buried in a Bash command line is denied, not just a
+// first-class WebFetch arg.
+func TestEgressRungBlocksShellMetadataFetch(t *testing.T) {
+	a := New(DefaultPolicy())
+	for _, cmd := range []string{
+		`{"command":"curl -s http://169.254.169.254/latest/meta-data/"}`,
+		`{"command":"wget -qO- http://metadata.google.internal/computeMetadata/v1/instance/"}`,
+		`{"command":"curl 100.100.100.100"}`,
+	} {
+		v := a.Adjudicate(context.Background(), inlineCall("Bash", cmd))
+		if v.Kind != abi.VerdictDeny || v.Reason != egressfloor.ReasonEgressBlock {
+			t.Fatalf("shell metadata fetch %s: kind=%v reason=%s, want Deny EGRESS_BLOCK",
+				cmd, v.Kind, abi.ReasonName(v.Reason))
+		}
+	}
+}
+
+// TestEgressRungAllowsPublic proves the negative space: a fetch of a public provider
+// API is NOT egress-blocked, so the floor does not brick a real session. (Whatever the
+// permissive DefaultPolicy decides about the tool name, the verdict must not be an
+// EGRESS_BLOCK deny.)
+func TestEgressRungAllowsPublic(t *testing.T) {
+	a := New(DefaultPolicy())
+	for _, args := range []string{
+		`{"url":"https://api.anthropic.com/v1/messages"}`,
+		`{"command":"git clone https://github.com/anthony-chaudhary/fak.git"}`,
+	} {
+		v := a.Adjudicate(context.Background(), inlineCall("Bash", args))
+		if v.Kind == abi.VerdictDeny && v.Reason == egressfloor.ReasonEgressBlock {
+			t.Fatalf("public destination %s was egress-blocked, want not-blocked", args)
+		}
+	}
+}
+
+// TestEgressRungIsNonElidable proves the floor invariant: the egress rung is mandatory
+// for both risk classes (mustRun), so no RungProfile can elide it — a profile that
+// tries is clamped, and a metadata fetch is still blocked.
+func TestEgressRungIsNonElidable(t *testing.T) {
+	if !mustRun(classRead, rungEgress) || !mustRun(classWrite, rungEgress) {
+		t.Fatal("rungEgress must be mandatory for every risk class (it is a security floor)")
+	}
+	// A profile that tries to elide it for both classes is clamped by sanitizeProfile.
+	pr := (&RungProfile{}).elide(classRead, rungEgress).elide(classWrite, rungEgress)
+	a := New(Policy{Allow: map[string]bool{"WebFetch": true}, Profile: pr})
+	v := a.Adjudicate(context.Background(),
+		inlineCall("WebFetch", `{"url":"http://169.254.169.254/latest/"}`))
+	if v.Kind != abi.VerdictDeny || v.Reason != egressfloor.ReasonEgressBlock {
+		t.Fatalf("egress rung was elided by a profile: kind=%v reason=%s", v.Kind, abi.ReasonName(v.Reason))
+	}
+}

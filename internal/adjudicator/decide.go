@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/egressfloor"
 )
 
 // Policy is the decision table. A zero Policy is the fail-closed empty policy:
@@ -373,6 +374,27 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	if pr.runs(cl, rungArgPredicate) && len(argPreds) > 0 {
 		if v, denied := evalArgPredicates(argPreds, c.Tool, args); denied {
 			return v
+		}
+	}
+
+	// EGRESS: a tool call that reaches a blocked NETWORK DESTINATION — above all the
+	// cloud-instance METADATA endpoint (169.254.169.254 & peers), whose only purpose
+	// from inside a VM is to hand out the box's cloud IAM credentials — is a PROVABLE
+	// refusal. This is the structural floor that makes `fak guard` useful on a random
+	// cloud VM: a (possibly prompt-injected) agent cannot reach the metadata service to
+	// steal the instance's credentials, with no human in the loop. The blocked set is
+	// HARDWIRED in egressfloor (these addresses are never a legitimate destination), so
+	// the rung needs no policy field and fires under the zero Policy too; it is mandatory
+	// for every class (mustRun's default), so a RungProfile can never elide it. Bounded
+	// disclosure: the witness names only the offending host + class, never the policy.
+	if pr.runs(cl, rungEgress) {
+		if host, label := egressfloor.Classify(c.Tool, args); host != "" {
+			return abi.Verdict{
+				Kind:    abi.VerdictDeny,
+				Reason:  egressfloor.ReasonEgressBlock,
+				By:      "monitor",
+				Payload: abi.WitnessPayload{Claim: label + ": " + host},
+			}
 		}
 	}
 
@@ -783,4 +805,9 @@ func init() {
 	// the fold takes the most-restrictive verdict regardless of order.
 	abi.RegisterAdjudicator(100, Default)
 	abi.RegisterCapability("adjudicate.v1")
+	// Register the egress rung's OUT-OF-TREE refusal name (the closed core vocabulary in
+	// internal/abi is human-owned; RegisterReason is the sanctioned additive extension).
+	// The adjudicator owns the call because it is already a wired, self-registering leaf —
+	// so egressfloor stays a pure, init-free classifier and needs no defconfig entry.
+	abi.RegisterReason(egressfloor.ReasonEgressBlock, egressfloor.ReasonEgressBlockName)
 }
