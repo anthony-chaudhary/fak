@@ -87,9 +87,10 @@ type CacheBlindRouter struct {
 	next      int
 }
 
-// NewCacheBlindRouter builds a round-robin fleet of n instances, each able to keep
-// capPerInstance distinct prefixes resident.
-func NewCacheBlindRouter(n, capPerInstance int) *CacheBlindRouter {
+// newResidentInstances builds a clamped (n>=1) slice of n resident sets, each able to keep
+// capPerInstance distinct prefixes resident — the shared fleet-construction step of the
+// cache-blind and KV-aware routers.
+func newResidentInstances(n, capPerInstance int) []*residentSet {
 	if n < 1 {
 		n = 1
 	}
@@ -97,7 +98,13 @@ func NewCacheBlindRouter(n, capPerInstance int) *CacheBlindRouter {
 	for i := range insts {
 		insts[i] = newResidentSet(capPerInstance)
 	}
-	return &CacheBlindRouter{instances: insts}
+	return insts
+}
+
+// NewCacheBlindRouter builds a round-robin fleet of n instances, each able to keep
+// capPerInstance distinct prefixes resident.
+func NewCacheBlindRouter(n, capPerInstance int) *CacheBlindRouter {
+	return &CacheBlindRouter{instances: newResidentInstances(n, capPerInstance)}
 }
 
 func (r *CacheBlindRouter) Route(prefixKey string) (int, bool) {
@@ -121,14 +128,8 @@ type FleetCacheRouter struct {
 // NewFleetCacheRouter builds a KV-aware fleet of n instances, each able to keep
 // capPerInstance distinct prefixes resident.
 func NewFleetCacheRouter(n, capPerInstance int) *FleetCacheRouter {
-	if n < 1 {
-		n = 1
-	}
-	insts := make([]*residentSet, n)
-	for i := range insts {
-		insts[i] = newResidentSet(capPerInstance)
-	}
-	return &FleetCacheRouter{instances: insts, load: make([]int, n)}
+	insts := newResidentInstances(n, capPerInstance)
+	return &FleetCacheRouter{instances: insts, load: make([]int, len(insts))}
 }
 
 func (r *FleetCacheRouter) Route(prefixKey string) (int, bool) {
