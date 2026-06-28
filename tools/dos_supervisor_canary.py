@@ -372,6 +372,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.record:
             payload["record"] = record_payload(payload, workspace=workspace, record_dir=record_dir)
+        if args.live:
+            launch = payload.get("launch") or {}
+            if launch.get("action") == "enact_failed":
+                # Defect STOP: self-route a pickable findings-queue row before we exit (#381).
+                watchdog.route_defect_stop(workspace, launch)
     if args.json:
         print(json.dumps(payload, indent=2))
     else:

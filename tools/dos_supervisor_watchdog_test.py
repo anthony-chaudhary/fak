@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -258,6 +259,40 @@ class DosSupervisorWatchdogTest(unittest.TestCase):
         self.assertTrue(got["ok"])
         self.assertEqual(got["action"], "enacted")
         self.assertEqual(len(calls), 1)
+
+
+class RouteDefectStopTest(unittest.TestCase):
+    """The #381 closure rung: an enact_failed defect-STOP self-routes a pickable row."""
+
+    def test_enact_failed_self_routes_a_findings_queue_row(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "tools").mkdir()  # mark this tmp dir a real checkout (sink lives under tools/)
+            plan = {
+                "action": "enact_failed",
+                "reason": "worker dispatch returned non-zero",
+                "result": {"returncode": 9, "stderr": "boom"},
+                "readiness": {"spawn": ["adjudicator"]},
+            }
+            verdict = mod.route_defect_stop(root, plan)
+            self.assertIsNotNone(verdict)
+            self.assertTrue(verdict["routed"])
+            queue = root / "tools" / "_registry" / "findings_route" / "findings-followup-queue.md"
+            self.assertTrue(queue.exists())
+            text = queue.read_text(encoding="utf-8")
+            self.assertIn("supervisor-enact-failed", text)
+            self.assertIn("adjudicator", text)
+
+    def test_route_defect_stop_is_fail_open_on_bad_plan(self) -> None:
+        mod = load()
+        # A plan with no result/readiness must not raise — worst case routing is a no-op.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "tools").mkdir()
+            verdict = mod.route_defect_stop(root, {})
+            self.assertIsNotNone(verdict)
+            self.assertTrue(verdict.get("routed"))  # routes a 'default'-lane row
 
 
 if __name__ == "__main__":

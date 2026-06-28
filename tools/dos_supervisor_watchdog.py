@@ -390,6 +390,47 @@ def run_command(cmd: list[str], cwd: Path, timeout_s: int) -> dict[str, Any]:
     }
 
 
+def route_defect_stop(workspace: Path, plan: dict[str, Any]) -> dict[str, Any] | None:
+    """Self-route a live enact failure into the findings queue. Fail-open — never raises.
+
+    The deterministic-loop-spine closure rung (issue #381, tools/findings_route.py): a
+    defect STOP self-routes one pickable findings-queue row at the moment it dies, not by
+    a later audit — so a supervisor loop that keeps hitting the same wall leaves a trail a
+    future dispatch picks up instead of dying silently. ``cause_key`` is the lane-stable
+    identity (no run ts embedded) so concurrent re-fires damp onto one row and a re-fire
+    after a "fixed" close escalates. Returns the route verdict, or None if routing was
+    unavailable. Any failure here is swallowed: routing must never kill the loop.
+    """
+    try:
+        import findings_route
+    except Exception:
+        return None
+    try:
+        readiness = plan.get("readiness") or {}
+        spawn = readiness.get("spawn") or []
+        lane = str(spawn[0]) if spawn else "default"
+        result = plan.get("result") or {}
+        rc = result.get("returncode")
+        signature = "timeout" if result.get("timeout") else f"rc{rc}"
+        cause = f"supervisor-enact-failed:{lane}"
+        item = (
+            f"DOS supervisor canary enact failed on lane '{lane}' ({signature}): "
+            f"{plan.get('reason') or 'worker dispatch returned non-zero'}"
+        )
+        return findings_route.route_finding(
+            key=f"{cause}:{findings_route._utcnow()}",
+            sev="P2",
+            pattern="supervisor-enact-failed",
+            item=item,
+            source=f"dos-supervisor-watchdog:{lane}",
+            owning_plan="RSI",
+            cause_key=cause,
+            root=workspace,
+        )
+    except Exception:
+        return None  # fail-open: routing must never kill the supervisor loop
+
+
 def render(payload: dict[str, Any]) -> str:
     command = " ".join(payload.get("command") or [])
     lines = [
@@ -431,6 +472,9 @@ def main(argv: list[str] | None = None) -> int:
         allow_dirty=args.allow_dirty,
         allow_stale=args.allow_stale,
     )
+    if args.live and payload.get("action") == "enact_failed":
+        # Defect STOP: self-route a pickable findings-queue row before we exit (#381).
+        route_defect_stop(workspace, payload)
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
