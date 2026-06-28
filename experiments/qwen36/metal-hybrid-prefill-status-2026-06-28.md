@@ -1,8 +1,10 @@
 # Metal hybrid (Qwen3.6 Gated-DeltaNet) prefill twin — closure status (#71)
 
-**Status: the prefill body is a COMMITTED backend-agnostic core (`c80d64fa`) whose entire
-CPU-side logic is host-independently WITNESSED green on this box; the GPU f16 GEMM numerics +
-on-device tok/s are the only Mac-bound residual — #71 stays `not yet`.** This is the *status* half
+**Status: the host-independent slice is now FULLY COMMITTED on `main` — the backend-agnostic core
+(`c80d64fa`) plus the Metal twin, the `requirePreNorm`-lifting gate, the default-build stub, and the
+`kv.go` dispatch (`5c065118`, `dos commit-audit` `diff-witnessed`) — and its entire CPU-side logic is
+host-independently WITNESSED green on this box; the GPU f16 GEMM numerics + on-device tok/s are the
+only Mac-bound residual — #71 stays `not yet`.** This is the *status* half
 of the spec→status pair for
 [#71](https://github.com/anthony-chaudhary/fak/issues/71) (*lift `requirePreNorm` so the hybrid
 Qwen3.6 Gated-DeltaNet arch can use the Metal prefill*). Its *spec* half —
@@ -36,9 +38,9 @@ to the CPU. Each spec step maps to a concrete symbol now present in the tree:
 | spec step | symbol realized | build tag | commit state |
 |---|---|---|---|
 | §3 — the prefill **body** (structural copy of the CPU `prefillQwen35HybridQHidden` template) | **backend-agnostic core** `prefillQwen35HybridViaMM` (`metal_prefill_hybrid_core.go`): per-layer `isLinearAttnLayer(l)` split into `prefillQwen35LinearLayerMM` (5 GDN projections via the injected `mm`; conv1d+SiLU / q·k L2-norm / delta-rule scan / gated-RMSNorm readout on CPU) and `prefillQwen35FullAttnLayerMM` (q⧺gate/k/v/o via `mm`; RoPE/GQA/output-gate/QK-norm on CPU); shared `mlp.{gate,up,down}` GEMMs via `mm`. Only the projection GEMMs are abstracted behind `hybridGemmFn`; every elementwise op is the identical f32 CPU math. | **default** (no cgo) | **committed `c80d64fa`** |
-| §3 — the Metal **twin** (the one substitution the core abstracts) | `prefillBatchedMetalQwen35Hybrid` + `metalWeightsQwen35Hybrid` (`metal_prefill_hybrid.go`): a GPU f16 GEMM per projection (dequant-once-to-f16, cached per `*Model`, **layer-kind-correct** upload set — `linear_attn.{in_proj_qkv,z,b,a,out_proj}` vs `self_attn.{q,k,v,o}_proj` plus `mlp.*`), fed into the same core | `fakmetal` | model-lane working tree (uncommitted) |
-| §2 — the gate (pure `Config` logic, no cgo) | `metalQwen35HybridPrefillOK` (delegates to `q8Qwen35HybridPrefillOK`); routed from `Session.Prefill` / `Session.PrefillNoLogits` behind `s.Metal && …OK && s.Cache.Len()==0`, **lifting `requirePreNorm("Metal prefill")`** for the hybrid | **default** (`metal_prefill_hybrid_gate.go` / `kv.go`) | model-lane working tree (uncommitted) |
-| §5 — the default-build stub | `prefillBatchedMetalQwen35Hybrid` one-line panic twin (`metal_prefill_hybrid_stub.go`), so `kv.go`'s dispatch compiles cgo-free | **default** | model-lane working tree (uncommitted) |
+| §3 — the Metal **twin** (the one substitution the core abstracts) | `prefillBatchedMetalQwen35Hybrid` + `metalWeightsQwen35Hybrid` (`metal_prefill_hybrid.go`): a GPU f16 GEMM per projection (dequant-once-to-f16, cached per `*Model`, **layer-kind-correct** upload set — `linear_attn.{in_proj_qkv,z,b,a,out_proj}` vs `self_attn.{q,k,v,o}_proj` plus `mlp.*`), fed into the same core | `fakmetal` | committed `5c065118` |
+| §2 — the gate (pure `Config` logic, no cgo) | `metalQwen35HybridPrefillOK` (delegates to `q8Qwen35HybridPrefillOK`); routed from `Session.Prefill` / `Session.PrefillNoLogits` behind `s.Metal && …OK && s.Cache.Len()==0`, **lifting `requirePreNorm("Metal prefill")`** for the hybrid | **default** (`metal_prefill_hybrid_gate.go` / `kv.go`) | committed `5c065118` |
+| §5 — the default-build stub | `prefillBatchedMetalQwen35Hybrid` one-line panic twin (`metal_prefill_hybrid_stub.go`), so `kv.go`'s dispatch compiles cgo-free | **default** | committed `5c065118` |
 
 The twin keeps the GDN recurrence on the CPU and batches the projection/MLP GEMMs on the GPU —
 exactly the split the spec's §4 decision and the #65 decision doc justify from the on-disk
@@ -74,7 +76,8 @@ The witness above was captured against the **committed** tree (`git archive HEAD
 build root); pin it to the committed core `c80d64fa`, because a peer's in-flight `forward.go`
 refactor (a `normWeights` change, orthogonal to #71) transiently reddens the *live working-tree*
 build of this package. The weaker, secondary gate is the default cgo-free build of the dispatch
-wiring + panic stub (`go vet ./internal/model/`) once the model-lane twin/gate/stub land. What
+wiring + panic stub (`go vet ./internal/model/`), now that the model-lane twin/gate/stub have
+landed (`5c065118`). What
 **neither** gate exercises is the `-tags fakmetal` body's two irreducibly device-bound residuals —
 the GPU f16 GEMM numerics and the on-device throughput — which is the Mac gate in §3.
 
@@ -82,20 +85,20 @@ the GPU f16 GEMM numerics and the on-device throughput — which is the Mac gate
 
 ## 3 — The remaining gate (the honest "not yet")
 
-The model-lane **core** commit has landed (`c80d64fa`) — its host-independent correctness witness
-is §2's green test. What remains is one more model-lane commit (the thin GPU wrapper) and two
-device-bound steps that need an Apple-Silicon M3 Pro with the macOS Metal toolchain — the
-capability this host does not have:
+The model-lane code has fully landed: the backend-agnostic **core** (`c80d64fa`) and the thin GPU
+**twin** + the `requirePreNorm`-lifting **gate** + the default-build **stub** + the `kv.go`
+dispatch (`5c065118`). Both commits are `dos commit-audit` `diff-witnessed` (claim_kind
+`code_effect`), and §2's correctness witness is green against this committed tree. What remains is
+**only** the two device-bound steps that need an Apple-Silicon M3 Pro with the macOS Metal
+toolchain — the capability this host does not have:
 
-1. **Model-lane commit of the thin twin + gate + wiring.** The backend-agnostic core
-   (`metal_prefill_hybrid_core.go`) is committed; still in the `model`-lane working tree,
-   uncommitted, are the `-tags fakmetal` GPU wrapper `prefillBatchedMetalQwen35Hybrid` +
-   `metalWeightsQwen35Hybrid` (`metal_prefill_hybrid.go`), the un-tagged gate
-   `metalQwen35HybridPrefillOK` (`metal_prefill_hybrid_gate.go`) that lifts
-   `requirePreNorm("Metal prefill")`, the default-build stub, and the `kv.go` dispatch. Those are a
-   `model`-lane ship by the file-tree rule — this `experiments`-lane note records their state, it
-   does not commit them. Until that commit lands on `main`, a Mac worker cannot `git pull` the
-   wrapper.
+1. **Model-lane code — LANDED (`c80d64fa` + `5c065118`).** All on `main`: the backend-agnostic core
+   (`metal_prefill_hybrid_core.go`), the `-tags fakmetal` GPU wrapper
+   `prefillBatchedMetalQwen35Hybrid` + `metalWeightsQwen35Hybrid` (`metal_prefill_hybrid.go`), the
+   un-tagged gate `metalQwen35HybridPrefillOK` (`metal_prefill_hybrid_gate.go`) that lifts
+   `requirePreNorm("Metal prefill")`, the default-build stub (`metal_prefill_hybrid_stub.go`), and
+   the `kv.go` dispatch. A Mac worker can now `git pull` the wrapper directly — no model-lane commit
+   is outstanding.
 2. **`fakmetal` build + GPU-numerics parity witness (closes the last correctness residual).** On
    the Mac, with the wrapper committed:
    `go test ./internal/model -tags fakmetal -run Qwen35Hybrid -count=1`. Because §2 already proves
@@ -110,11 +113,11 @@ capability this host does not have:
    isolated number). Record the `[metalprof-hybrid …]` line in this cluster; §5 of the #65
    decision doc then reads the arm-A recurrence fraction directly off it.
 
-**Next checkable step:** land step (1) on the `model` lane, then run step (2) on the Mac verify
-node and append the GPU-numerics parity verdict + the `[metalprof-hybrid]` line here. Until that
-test is green on a witnessed commit, the *on-device GPU correctness + throughput* of #71 stays
-`not yet`; the host-independent slice — the recipe, its committed backend-agnostic core, and that
-core's green CPU-side correctness witness — is **done**.
+**Next checkable step:** step (1) has landed (`5c065118`); run step (2) on the Mac verify node and
+append the GPU-numerics parity verdict + the `[metalprof-hybrid]` line here. Until that test is
+green on a witnessed commit, the *on-device GPU correctness + throughput* of #71 stays `not yet`;
+the host-independent slice — the recipe, its committed backend-agnostic core, the committed Metal
+twin/gate/stub/`kv.go` wiring, and that core's green CPU-side correctness witness — is **done**.
 
 ---
 
