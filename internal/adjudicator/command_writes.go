@@ -21,6 +21,38 @@ var shellWriteVerbs = []string{
 	"perl -i", "ruby -i",
 }
 
+// commandArg returns the shell command string carried by a tool-call's args,
+// preferring the "command" key and falling back to "cmd". An empty value is treated
+// as absent, so ok is false exactly when neither key holds a non-empty command — the
+// shared "no command to inspect" early-out for the command-string floors below.
+func commandArg(args map[string]any) (string, bool) {
+	cmd, ok := argString(args, "command")
+	if !ok || cmd == "" {
+		if cmd, ok = argString(args, "cmd"); !ok || cmd == "" {
+			return "", false
+		}
+	}
+	return cmd, true
+}
+
+// guardedCommandTree decodes a tool-call's shell command and reports the guarded glob
+// it names. ok is false — the caller should ALLOW — when there is no command or the
+// command reaches no guarded tree. It is the shared front gate of the command-string
+// self-modify floors (commandSelfModify, synthToolSelfModify): each calls it to reach
+// a (cmd, guarded-glob) pair, then applies its OWN write-shaped predicate before
+// returning the glob as a deny.
+func guardedCommandTree(args map[string]any, globs []string) (cmd, glob string, ok bool) {
+	cmd, has := commandArg(args)
+	if !has {
+		return "", "", false
+	}
+	g := matchGlob(cmd, globs)
+	if g == "" {
+		return "", "", false
+	}
+	return cmd, g, true
+}
+
 // commandSelfModify reports the guarded glob a shell command would WRITE into, or
 // "" if the command is absent / read-only / writes nowhere guarded. It is the
 // shell-path dual of the targetPath self-modify check: it gates a Bash/exec call
@@ -36,15 +68,9 @@ var shellWriteVerbs = []string{
 // cheap and a false allow is the self-grading-homework failure the floor exists to
 // stop.
 func commandSelfModify(args map[string]any, globs []string) string {
-	cmd, ok := argString(args, "command")
-	if !ok || cmd == "" {
-		if cmd, ok = argString(args, "cmd"); !ok || cmd == "" {
-			return ""
-		}
-	}
-	g := matchGlob(cmd, globs)
-	if g == "" {
-		return "" // touches no guarded tree — nothing to guard
+	cmd, g, ok := guardedCommandTree(args, globs)
+	if !ok {
+		return "" // no command, or touches no guarded tree — nothing to guard
 	}
 	if !commandWrites(cmd) {
 		return "" // a read of a guarded file is allowed; only writes are refused

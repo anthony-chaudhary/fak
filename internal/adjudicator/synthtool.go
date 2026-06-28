@@ -135,11 +135,9 @@ func noteAuthoredScript(args map[string]any, tool string, authored *sync.Map, gl
 		}
 	}
 	// Shell-write surface.
-	cmd, ok := argString(args, "command")
-	if !ok || cmd == "" {
-		if cmd, ok = argString(args, "cmd"); !ok || cmd == "" {
-			return
-		}
+	cmd, ok := commandArg(args)
+	if !ok {
+		return
 	}
 	if !commandWrites(cmd) {
 		return // a read command authors nothing
@@ -172,15 +170,9 @@ func noteAuthoredScript(args map[string]any, tool string, authored *sync.Map, gl
 // enveloped; an unguarded synth-tool exec stays allowed (the tool inherits no LESS
 // capability than the agent already holds, only no MORE).
 func synthToolSelfModify(args map[string]any, authored *sync.Map, globs []string) string {
-	cmd, ok := argString(args, "command")
-	if !ok || cmd == "" {
-		if cmd, ok = argString(args, "cmd"); !ok || cmd == "" {
-			return ""
-		}
-	}
-	g := matchGlob(cmd, globs)
-	if g == "" {
-		return "" // reaches no guarded tree — nothing to envelope
+	cmd, g, ok := guardedCommandTree(args, globs)
+	if !ok {
+		return "" // no command, or reaches no guarded tree — nothing to envelope
 	}
 	if !execsAuthoredScript(cmd, authored) {
 		return "" // not a self-synthesized-tool exec — leave the command to the other rungs
