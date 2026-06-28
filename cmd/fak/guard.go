@@ -119,6 +119,7 @@ func cmdGuard(argv []string) {
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
 	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for this guard session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Mutually exclusive with --base-url / --remote-serve.")
+	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server you are ALREADY running (Ollama, LM Studio, or a llama.cpp server) and wire guard's upstream to it with zero flags — `fak guard --local -- codex` becomes a governed local coding loop with no base-URL hunting. Probes, fail-soft (~300ms each), Ollama (127.0.0.1:11434, honors OLLAMA_HOST), then LM Studio (127.0.0.1:1234), then llama.cpp (127.0.0.1:8080); the first live one wins and a coding-tuned served model is preferred. If --gguf is ALSO passed it wins (that is the no-server in-kernel path); if nothing is detected and no --gguf, fak fails loud with how to start a server. Mutually exclusive with --base-url / --remote-serve.")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
 	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
 	replayTrace := fs.String("replay-trace", "", "DON'T wrap a live agent — instead REPLAY a recorded trace fixture through the real guard end to end and watch the floor fire. Stands up the gateway against a built-in fake upstream that emits the fixture's tool_use + token-usage turns, posts each turn through the SAME adjudication path `fak guard -- claude` uses, and prints per-turn what was allowed vs denied (with the deny reason), the turn's token/cache economy, and the journal rows recorded — then the exit summary + the verify command. No API key, no GPU, no child process. Use it to understand exactly what the guard does to a trace that leads to token work, and to demo the floor. See internal/gateway/testdata/guard-trace-e2e.json for the fixture shape.")
@@ -261,6 +262,39 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard:", localConflict)
 		os.Exit(2)
 	}
+
+	// --local: auto-detect a running local OpenAI-compatible server (Ollama/LM Studio/
+	// llama.cpp) and wire the upstream to it. This is a PROXY path (the server is external),
+	// so on detection we set provider=openai + base-URL=<detected>/v1 exactly as if the user
+	// had typed those flags, and the standard resolution flow below handles it. Precedence:
+	//   - --gguf wins (it is the no-server in-kernel path); --local is then a no-op.
+	//   - --base-url / --remote-serve conflict (the detected server IS the upstream).
+	//   - nothing detected + no --gguf -> fail loud with how to start a server.
+	if *localAuto && !localModel {
+		if strings.TrimSpace(*baseURL) != "" || remoteBase != "" {
+			fmt.Fprintln(os.Stderr, "fak guard: --local auto-detects the upstream server, so it is mutually exclusive with --base-url / --remote-serve — pass only one")
+			os.Exit(2)
+		}
+		detBase, detModel, detLabel, found := guardDetectLocalBackend()
+		if !found {
+			fmt.Fprintln(os.Stderr, guardLocalNothingDetectedMessage())
+			os.Exit(2)
+		}
+		*provider, *baseURL = "openai", detBase
+		if strings.TrimSpace(*model) == "" {
+			*model = detModel
+		}
+		if !*quiet {
+			modelNote := detModel
+			if modelNote == "" {
+				modelNote = "(server default)"
+			}
+			fmt.Fprintf(os.Stderr, "fak guard --local: detected %s at %s, using model %s\n", detLabel, detBase, modelNote)
+		}
+	} else if *localAuto && localModel && !*quiet {
+		fmt.Fprintln(os.Stderr, "fak guard: --gguf is set, so --local is ignored (the in-kernel model is the upstream)")
+	}
+
 	if remoteBase != "" {
 		if strings.TrimSpace(*baseURL) != "" && strings.TrimSpace(*baseURL) != remoteBase {
 			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve and --base-url disagree (%s vs %s) — pass only one\n", remoteBase, strings.TrimSpace(*baseURL))
