@@ -307,6 +307,80 @@ Three things this proves:
   allow-list** so `DEFAULT_DENY` refuses it, not to lean on redaction to clean it up
   after admission.
 
+### `dev-agent-policy.json` — the ship-gate (witness-gated `ship_release`)
+
+The floors above witness three verdicts — `ALLOW`, `DENY`, and `TRANSFORM`. The
+dev-agent floor adds the fourth, and the most distinctive: **`REQUIRE-WITNESS`**, the
+lock that lets a coding agent *call* `ship_release` but only *lands* the ship when an
+author the agent did not control corroborates it. `ship_release` is on the allow-list,
+yet a registered `shipgate` adjudicator (rank 40) lifts the call to require-witness:
+
+```bash
+go run ./cmd/fak preflight --policy examples/dev-agent-policy.json --tool ship_release --args '{}'
+```
+
+returns **`verdict=WITNESS reason=NONE by=shipgate`** — *not* `ALLOW`. Pass `-explain`
+and the gate is visibly overriding the monitor that would otherwise have allowed it
+(excerpt — the full run prints all nine rungs and the args digest):
+
+```
+verdict: WITNESS   by: shipgate
+explanation: ship_release held pending an independent witness read-back.
+
+decision chain (9 rung(s), most-restrictive wins):
+   ...
+=> [7] shipgate.ShipAdjudicator   WITNESS   by=shipgate   <- winner (rank 40)
+   [8] adjudicator.Adjudicator    ALLOW     by=monitor
+```
+
+**The lock shape.** This is the README's "two independent gates" pattern applied to
+the ship action: `ship_release` is *allow-listed* (the agent is permitted to call it)
+**and** *witness-gated* (the call only dispatches if independent evidence corroborates
+the claimed effect). The low-level git mutations a ship is built from — `git_push`,
+`git_merge`, `git_tag` — are denied outright by this same floor (`POLICY_BLOCK`), so
+the agent cannot route around the gate by hand-rolling the ship from primitives.
+
+**Refused, then allowed — the resolution.** `preflight` is a read-only probe: it
+surfaces the gate's `WITNESS` decision but does not run the git read-back that turns it
+into the final `DENY` or `ALLOW`. The witness *claim* travels in call metadata
+(`Meta["witness"]`, a git-checkable string — `ancestor:<ref>`, `clean:<pathspec>`,
+`commit:<ref>`, per the grammar in [`internal/witness/witness.go`](../internal/witness/witness.go)),
+which the probe does not synthesize. The end-to-end refuse→allow is driven by the real
+default-driver chain, which you can run:
+
+```bash
+go test ./internal/shipgate -run TestDevAgentDefaultPath -v
+```
+
+Its two ship subtests are the witnesses this section promises:
+
+- **`unwitnessed_ship_is_refused`** — `ship_release` with no `witness` claim. The
+  `WITNESS` verdict reaches the kernel's witness fold with nothing to corroborate and
+  is fail-closed to **`DENY (UNWITNESSED)`**. `UNWITNESSED` is a name from the closed
+  refusal vocabulary in [`POLICY.md`](../POLICY.md) (a code, never free text), so the
+  structured deny carries a derived disposition for the deny-loopback: `UNWITNESSED`
+  resolves to `TERMINAL` via `kernel.Disposition` (it is not a model-fixable
+  `MISROUTE` — the fix is to *produce* a real witness, not to re-emit the same claim).
+- **`git-corroborated_ship_is_allowed`** — the same call carrying
+  `Meta["witness"]="ancestor:HEAD"`. The witness resolver confirms from *real* git
+  evidence (HEAD is reachable from HEAD — evidence the agent did not author) that the
+  claim holds, the gate opens, and the ship dispatches: **`ALLOW by=witness`**.
+
+**The agent workflow this protects.** The ship-gate is the mechanism behind the
+AGENTS.md "Hard rules" commit discipline — sign-off (`git commit -s`),
+commit-by-explicit-path, and the `(fak <leaf>)` ship-stamp trailer that binds an
+agent-authored commit to a `dos verify` referee. The gate is what makes that commit
+safe to land without a human approving every call: a ship only counts when git
+corroborates it. See [`CLAIMS.md`](../CLAIMS.md) "Security substrate" — the *Default
+dev-agent floor + the CICD pillars* claim — for the shipped capability this example
+demonstrates (`TestDevAgentDefaultPath` is its named witness).
+
+> **The witness is a *claim*, not a proof of correctness.** `clean:<pathspec>`
+> corroborates that the working tree is green and `ancestor:<ref>` that a ref really
+> shipped — both against git history — but the resolver does **not** run your tests. A
+> green tree is not a passing suite; run the suite yourself. The gate refuses a ship
+> that *no independent evidence* backs; it does not certify that the change is right.
+
 The useful adoption pattern is: copy the closest template, delete what you do not
 need, run `policy --check`, then run one or two `preflight` calls that prove the
 most important dangerous actions are denied with closed reason codes.
