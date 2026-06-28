@@ -1,5 +1,23 @@
 # Metal q4_k device GEMM for the full-attention prefill twin — implementation spec (#70)
 
+> **SUPERSEDED (2026-06-28) — do not execute §2 on a Mac.** The §2 plan below (route the
+> full-attention twin `prefillBatchedMetal` through the q4_k path) rests on a premise the
+> routing **disproves**: a q4_k model never reaches `prefillBatchedMetal`. In `kv.go` the
+> `s.Q4K` branch (`internal/model/kv.go:502`) returns through `prefillBatchedQ4K` **before**
+> the `s.Metal` branch (`kv.go:534`) is ever tested, and `prefillBatchedMetal` reads the **Q8
+> store** (`internal/model/metal_prefill.go:78-79` — `m.q8(name)` → `dequantQ8 → f32 →
+> Upload`), so it is the Q8-model lane, not a q4_k surface. #70's actual deliverable (upload
+> q4_k **raw** + device GEMM directly) therefore already ships in the q4_k lane —
+> `prefillBatchedQ4K` → `q4kGemmDispatch` (`internal/model/metal_q4k_on.go:34`) → `UploadQ4K`
+> (raw 144 B/super-block, no dequant) + `Q4KWeight.GEMM` — and the §2 edit would only add
+> **dead code** to a lane a q4_k model can never enter. The authoritative closure note is
+> [`metal-q4k-device-gemm-status-2026-06-28.md`](metal-q4k-device-gemm-status-2026-06-28.md)
+> (§1 corrects this scope, §6 marks the Q8 twin out of scope). The host-independent witness is
+> green (`go test ./internal/model -run Q4K` and `./internal/metalgemm`, isolated `git archive
+> HEAD` build); the **one** remaining gate is the Apple-Silicon M3 Pro matmul-only re-measure
+> (status §5), **not** the code change §2 proposes. Everything below is retained as the
+> original reasoning, not as work to do.
+
 **Status: SPEC / host-independent slice.** This document is the code-level recipe a
 Mac-equipped worker executes to land [#70](https://github.com/anthony-chaudhary/fak/issues/70)
 (*upload the q4_k-majority weights as raw blocks and run the device GEMM directly, instead of
