@@ -175,20 +175,31 @@ func servedCount(disp []CallDisposition) int {
 	return n
 }
 
+// firstDivergenceIndex scans the paired call indices i in [0, min(na, nb)) and returns
+// the first one — with its offending tool — for which `diverged` reports a divergence,
+// or (-1, "") when none does. na/nb are the two slice lengths the scan clamps to; only
+// the per-index divergence test differs between the observed-class and raw-redact
+// checks, so it is threaded in as the closure.
+func firstDivergenceIndex(na, nb int, diverged func(i int) (bool, string)) (int, string) {
+	n := na
+	if nb < n {
+		n = nb
+	}
+	for i := 0; i < n; i++ {
+		if ok, tool := diverged(i); ok {
+			return i, tool
+		}
+	}
+	return -1, ""
+}
+
 // firstDivergence returns the first call index where arm's observed-result class
 // differs from the reference's (with the offending tool), or (-1, "") if the arm
 // replays EXACTLY. The two slices cover the same trace, so they are equal length.
 func firstDivergence(ref, arm []CallDisposition) (int, string) {
-	n := len(ref)
-	if len(arm) < n {
-		n = len(arm)
-	}
-	for i := 0; i < n; i++ {
-		if observedClass(arm[i]) != observedClass(ref[i]) {
-			return i, arm[i].Tool
-		}
-	}
-	return -1, ""
+	return firstDivergenceIndex(len(ref), len(arm), func(i int) (bool, string) {
+		return observedClass(arm[i]) != observedClass(ref[i]), arm[i].Tool
+	})
 }
 
 // redactFingerprint is the RAW monitor verdict captured per call for the redact-aware
@@ -249,19 +260,15 @@ func captureRedactFingerprints(ctx context.Context, t *Trace, adj *adjudicator.A
 // divergence observedClass cannot see. Returns (-1, "") when the redact verdicts agree on
 // every call.
 func firstRawDivergence(t *Trace, ref, arm []redactFingerprint) (int, string) {
-	n := len(ref)
-	if len(arm) < n {
-		n = len(arm)
-	}
-	for i := 0; i < n; i++ {
+	return firstDivergenceIndex(len(ref), len(arm), func(i int) (bool, string) {
 		if ref[i].isRedact != arm[i].isRedact {
-			return i, t.Calls[i].Tool
+			return true, t.Calls[i].Tool
 		}
 		if ref[i].isRedact && arm[i].isRedact && !bytes.Equal(ref[i].rewrittenArgs, arm[i].rewrittenArgs) {
-			return i, t.Calls[i].Tool
+			return true, t.Calls[i].Tool
 		}
-	}
-	return -1, ""
+		return false, ""
+	})
 }
 
 // swapMonitor returns a COPY of the registered adjudicator chain with the rank-100
