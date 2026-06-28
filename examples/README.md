@@ -250,6 +250,63 @@ the default posture quarantines the result and continues, but `fail_closed` refu
 the call outright — the right default when the agent is reading untrusted mail and a
 leaked secret is worse than a dropped turn.
 
+### `customer-support-readonly-policy.json` — `redact_fields` in action (the TRANSFORM path)
+
+Every template declares `redact_fields`, and [`POLICY.md`](../POLICY.md) defines it —
+*"Arg keys whose value is stripped (`[REDACTED]`, a `TRANSFORM`) before dispatch —
+secret hygiene at the call boundary"* — but the sections above only witness `ALLOW`
+and `DENY`. This is the third verdict: an **allow-listed** call that carries a secret
+in a redacted field is rewritten, then dispatched. The customer-support floor allows
+`create_support_ticket` and lists `password` / `api_key` (among others) in
+`redact_fields`. Pass `-explain` to see which fields the monitor stripped:
+
+```bash
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json \
+  --tool create_support_ticket \
+  --args '{"body":"help","password":"hunter2","api_key":"sk-abc123"}' -explain
+```
+
+returns (excerpt — `-explain` also prints the args digest and the full rung chain):
+
+```
+verdict: TRANSFORM   by: monitor
+redacted: api_key, password
+explanation: create_support_ticket transformed by monitor: rewrote api_key, password before dispatch (e.g. secret redaction).
+```
+
+The same tool with no secret-shaped field is a plain `ALLOW` — nothing is rewritten:
+
+```bash
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json \
+  --tool create_support_ticket --args '{"body":"help"}'
+```
+
+returns **`verdict=ALLOW reason=NONE by=monitor`**. (Without `-explain`, the secret-bearing
+call prints the bare **`verdict=TRANSFORM reason=NONE by=monitor`** — the field-level
+`redacted:` line is what `-explain` and `-json` add. The CLI reports *which* keys were
+stripped, not a reconstructed args object; the value each becomes is the literal
+`[REDACTED]`, per the `redact` step in `internal/adjudicator/decide.go`.)
+
+Three things this proves:
+
+- **"At the call boundary" means after allow, before dispatch.** The monitor runs on a
+  call adjudication has already cleared, and replaces each `redact_fields` value with
+  `[REDACTED]` *before* the tool is invoked — so the allow-listed `create_support_ticket`
+  receives `password: "[REDACTED]"`, never `hunter2`. Redaction is a step between the
+  verdict and the tool, not a separate verdict.
+- **It is a `TRANSFORM`, not a `DENY`.** The call still runs — the ticket is created with
+  a clean body. That is the difference between *hygiene* (strip the secret, let the call
+  through) and *the lock*: `refund_payment` on this same floor returns
+  **`DENY (POLICY_BLOCK)`** and never runs at all. A `DENY` stops the action; a
+  `TRANSFORM` sanitizes it.
+- **It is best-effort, by key.** Quoting [`POLICY.md`](../POLICY.md): *"`redact_fields`
+  and `self_modify_globs` are best-effort call-boundary hygiene, not a guarantee — they
+  inspect decoded args by key."* Keys match **exactly** (no wildcard), so a secret
+  smuggled under an unlisted key — `pwd`, `x-api-key`, or buried inside `body` — sails
+  through uncredacted. The real floor for a secret-handling tool is to keep it **off the
+  allow-list** so `DEFAULT_DENY` refuses it, not to lean on redaction to clean it up
+  after admission.
+
 The useful adoption pattern is: copy the closest template, delete what you do not
 need, run `policy --check`, then run one or two `preflight` calls that prove the
 most important dangerous actions are denied with closed reason codes.
