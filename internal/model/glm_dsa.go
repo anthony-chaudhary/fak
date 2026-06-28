@@ -76,7 +76,9 @@ func glmDsaAttentionOutputFromTopKNormed(m *Model, layer int, xnFlat []float32, 
 		}
 	}
 
-	scale := float32(1.0 / math.Sqrt(float64(qkHead)))
+	// DeepSeek/GLM-MLA softmax scale = mscale / sqrt(qk_head); ropeAttentionFactor()==1 for
+	// non-YaRN models (see glmDsaAttendCached / #996). Keeps prefill and decode scales identical.
+	scale := float32(cfg.ropeAttentionFactor() / math.Sqrt(float64(qkHead)))
 	out := make([]float32, seq*H)
 	for t := 0; t < seq; t++ {
 		selected, ok := glmDsaSelectedCausalKeys(topK[t], t, seq)

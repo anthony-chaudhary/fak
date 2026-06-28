@@ -471,7 +471,12 @@ func (m *Model) glmDsaAttendCached(cache *glmDsaKVCache, layer, pos int, query [
 	if !ok || len(selected) == 0 || len(query) != nH*qkHead {
 		return nil, false
 	}
-	scale := float32(1.0 / math.Sqrt(float64(qkHead)))
+	// DeepSeek/GLM-MLA softmax scale = mscale / sqrt(qk_head). On a YaRN-scaled model (GLM-5.2)
+	// the mscale (ropeAttentionFactor) sharpens the attention; omitting it leaves attention too
+	// diffuse → low-contrast (flat) final logits → greedy decode cycles a few near-equal tokens
+	// (the witnessed repetition, #996). ropeAttentionFactor()==1 for non-YaRN models, so this is
+	// inert for them and for the synthetic fixtures.
+	scale := float32(cfg.ropeAttentionFactor() / math.Sqrt(float64(qkHead)))
 	attnConcat := m.glmDsaSparseAttend(cache, layer, query, selected, nH, qkHead, vHead, scale, mat)
 	ap := layerPrefix(layer) + "self_attn."
 	out := mat.mul(ap+"o_proj.weight", mat.prep(attnConcat), H, nH*vHead)
