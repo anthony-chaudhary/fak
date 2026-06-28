@@ -105,6 +105,8 @@ const (
 	ReasonPathspecRace    = "PATHSPEC_RACE"     // a peer swept extra files into the commit — the headline guard
 	ReasonSymlinkEscape   = "SYMLINK_ESCAPE"    // a landed path resolves (through a symlink) to a target outside the lease
 	ReasonPushRejected    = "PUSH_REJECTED"     // git push refused (e.g. non-fast-forward)
+	// ReasonStaleBaseDeletion ("STALE_BASE_DELETION") is part of this closed vocabulary too;
+	// it lives in stalebase.go with the content-level merge-base guard that emits it.
 )
 
 // Result is the structured outcome. A non-empty Reason is a refusal/race; a clean commit
@@ -211,6 +213,29 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	} else if strings.TrimSpace(out) == "" {
 		res.Reason = ReasonNothingStaged
 		return res, nil
+	}
+
+	// (4b) STALE-BASE-DELETION guard — content-level, lock-free, before any `git add`. The
+	// pathspec commit lands the WORKING-TREE blob of each requested path; if that blob predates
+	// a block a peer already pushed to origin/<trunk>, the commit SILENTLY deletes the peer's
+	// lines (the #1073 incident). PATHSPEC_RACE (step 7) is structurally blind to this — the
+	// stale file is one of MY OWN requested paths, inside the set it filters out. This guard
+	// reads the already-present-locally origin/<trunk> ref (no network fetch) and refuses if
+	// committing P would drop a contiguous peer-added run absent from the working tree. It runs
+	// before the lock and before any add, so a refusal stages and commits NOTHING — strictly
+	// cleaner than PATHSPEC_RACE, which leaves a commit behind. Gated by FAK_STALE_BASE_GUARD
+	// (block|warn|off, default block); off skips entirely, warn records the would-be refusal in
+	// Detail and proceeds.
+	if mode := staleBaseGuardMode(); mode != staleBaseOff {
+		if detail, fired := checkStaleBaseDeletion(ctx, run, opts.Dir, trunk, paths); fired {
+			if mode == staleBaseWarn {
+				res.Detail = "STALE_BASE_DELETION (warn): " + detail
+			} else {
+				res.Reason = ReasonStaleBaseDeletion
+				res.Detail = detail
+				return res, nil
+			}
+		}
 	}
 
 	// (5) Acquire the advisory lock (bounded). Busy is a value, not an error.

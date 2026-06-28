@@ -37,8 +37,22 @@ func keyFor(args []string) string {
 	}
 	switch args[0] {
 	case "rev-parse":
-		// "rev-parse --git-dir", "rev-parse HEAD", "rev-parse -q --verify MERGE_HEAD"
+		// "rev-parse --git-dir", "rev-parse HEAD", "rev-parse -q --verify MERGE_HEAD",
+		// "rev-parse --verify --quiet origin/main"
 		return strings.Join(args, " ")
+	case "merge-base":
+		// "merge-base HEAD origin/main"
+		return strings.Join(args, " ")
+	case "diff":
+		// The stale-base guard issues two diffs that must be distinguishable:
+		//   "diff <mb> origin/main -- P"  (peer-added since the fork)  -> "--" at index 3
+		//   "diff origin/main -- P"       (origin vs working tree)     -> "--" at index 2
+		// Key on the position of the "--" pathspec separator: index 2 is the single-ref
+		// working-tree form; otherwise it is the two-ref peer form.
+		if len(args) >= 3 && args[2] == "--" {
+			return "diff-wt"
+		}
+		return "diff-peer"
 	case "symbolic-ref", "status", "diff-tree", "commit", "push":
 		return args[0]
 	default:
