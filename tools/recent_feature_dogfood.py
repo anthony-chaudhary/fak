@@ -243,11 +243,11 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
         ),
         Probe(
             key="cache-value-ledger",
-            description="run cache-value ledger 2x regression gate (#1075)",
-            command=[py, "tools/cache_value_ledger.py", "--ledger", "experiments/agent-live/cache-value-ledger.jsonl", "--check", "2.0", "--json"],
+            description="run cache-value ledger regression gate with 75.1% floor (#1114)",
+            command=fak + ["nightrun", "score", "--floor", "0.751", "--json"],
             allowed_exits=(0,),
             json_source="stdout",
-            validator="cache_value_ledger",
+            validator="nightrun_score",
         ),
     ]
     if include_go_tests:
@@ -390,16 +390,17 @@ def validate_payload(name: str, payload: Any) -> tuple[bool, str]:
             and amp > 1
         )
         return bool(ok), f"callavoid CLI grades the window amplifying (amp={amp})" if ok else "callavoid CLI payload unexpected"
-    if name == "cache_value_ledger":
+    if name == "nightrun_score":
         ok = (
             isinstance(payload, dict)
-            and payload.get("schema") == "fak.cache-value-ledger.v1"
-            and payload.get("ok") is True
-            and isinstance(payload.get("active_multiplier"), (int, float))
-            and payload.get("active_multiplier", 0) >= 2.0
+            and isinstance(payload.get("multi_turn_sessions"), int)
+            and isinstance(payload.get("multi_turn_turns"), int)
+            and isinstance(payload.get("realized_reuse_ratio"), (int, float))
+            and payload.get("vs_naive_multiple_excluded") is True
         )
-        mult = payload.get("active_multiplier", 0) if isinstance(payload, dict) else 0
-        return bool(ok), f"cache-value ledger 2x gate passes (multiplier={mult})" if ok else "cache-value ledger 2x gate failed or payload invalid"
+        ratio = payload.get("realized_reuse_ratio", 0) if isinstance(payload, dict) else 0
+        mt_turns = payload.get("multi_turn_turns", 0) if isinstance(payload, dict) else 0
+        return bool(ok), f"nightrun score: reuse ratio {ratio:.1%} over {mt_turns} multi-turn turns" if ok else "nightrun score payload invalid"
     return False, f"unknown validator {name}"
 
 
@@ -443,12 +444,11 @@ def summarize_payload(name: str, payload: Any) -> Any:
             "dogfood_debt": payload.get("dogfood_debt"),
             "audit_rows": payload.get("audit_rows"),
         })
-    elif name == "cache_value_ledger":
+    elif name == "nightrun_score":
         base.update({
-            "active_multiplier": payload.get("active_multiplier"),
-            "two_x_better": payload.get("two_x_better"),
-            "grade": payload.get("grade"),
-            "threshold": payload.get("threshold"),
+            "multi_turn_turns": payload.get("multi_turn_turns"),
+            "realized_reuse_ratio": payload.get("realized_reuse_ratio"),
+            "multi_turn_sessions": payload.get("multi_turn_sessions"),
         })
     return base
 
