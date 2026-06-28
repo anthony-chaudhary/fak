@@ -140,13 +140,9 @@ func ProveStarSavings(in StarSavingsInput) StarSavingsProof {
 	if p.BaselineTokenEquiv > 0 {
 		p.SavedPct = 100 * p.SavedTokenEquiv / p.BaselineTokenEquiv
 	}
-	if p.SavedTokenEquiv <= 0 {
-		p.Status = ProofRefuted
-		p.Reason = "workload is below the natural-cache break-even point"
-		return p
-	}
-	p.Status = ProofProven
-	p.Reason = "star anchor saves token equivalents when the first natural request warms it and siblings read it"
+	p.Status, p.Reason = concludeProof(p.SavedTokenEquiv,
+		"workload is below the natural-cache break-even point",
+		"star anchor saves token equivalents when the first natural request warms it and siblings read it")
 	return p
 }
 
@@ -213,13 +209,9 @@ func ProveTelemetrySavings(in TelemetrySavingsInput) TelemetrySavingsProof {
 		p.Reason = "telemetry observed no cache reads"
 		return p
 	}
-	if p.SavedTokenEquiv <= 0 {
-		p.Status = ProofRefuted
-		p.Reason = "observed cache reads did not repay cache write cost"
-		return p
-	}
-	p.Status = ProofProven
-	p.Reason = "observed provider telemetry shows positive realized cache savings"
+	p.Status, p.Reason = concludeProof(p.SavedTokenEquiv,
+		"observed cache reads did not repay cache write cost",
+		"observed provider telemetry shows positive realized cache savings")
 	return p
 }
 
@@ -234,6 +226,16 @@ func NaturalBreakEvenRequests(writeMult, readMult float64) int {
 		return 1
 	}
 	return n
+}
+
+// concludeProof applies the shared prove/refute verdict tail used by both the
+// star-anchor and telemetry proofs: a non-positive realized saving refutes with
+// refuteReason, otherwise the workload is proven with provenReason.
+func concludeProof(saved float64, refuteReason, provenReason string) (ProofStatus, string) {
+	if saved <= 0 {
+		return ProofRefuted, refuteReason
+	}
+	return ProofProven, provenReason
 }
 
 func maxFloat(a, b float64) float64 {
