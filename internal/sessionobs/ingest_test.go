@@ -1,0 +1,127 @@
+package sessionobs
+
+import (
+	"strings"
+	"testing"
+)
+
+// jsonl joins transcript lines into one JSONL stream.
+func jsonl(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
+
+func TestFoldTranscriptShipped(t *testing.T) {
+	tr := jsonl(
+		// one billed assistant turn: Edit (mutating) + Bash + Read (read-only)
+		`{"type":"assistant","message":{"id":"m1","role":"assistant","model":"claude-opus","usage":{"output_tokens":120},"content":[{"type":"tool_use","name":"Edit","input":{}},{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_use","name":"Read","input":{}}]}}`,
+		// a DUPLICATE serialization of the same billed turn -> must be de-duped
+		`{"type":"assistant","message":{"id":"m1","role":"assistant","usage":{"output_tokens":120},"content":[]}}`,
+		// the git-commit success marker lands verbatim in a tool_result
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"[main 809c5339] feat(x): do the thing\n 3 files changed, 10 insertions(+)","is_error":false}]}}`,
+		// a /goal directive
+		`{"type":"user","message":{"role":"user","content":"<command-name>/goal</command-name> ship the thing"}}`,
+		// a second turn that was interrupted
+		`{"type":"assistant","message":{"id":"m2","role":"assistant","usage":{"output_tokens":5},"stop_reason":"interrupted","content":[]}}`,
+		// a torn / malformed final line must be skipped, not abort the fold
+		`not json {`,
+	)
+	rec, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "s1", Namespace: "C--work-fak", Account: "day24"})
+
+	if rec.AssistantTurns != 2 {
+		t.Errorf("AssistantTurns: dup must be de-duped, want 2 got %d", rec.AssistantTurns)
+	}
+	if rec.ToolCalls != 3 {
+		t.Errorf("ToolCalls want 3 got %d", rec.ToolCalls)
+	}
+	if rec.ReadOnlyCalls != 1 {
+		t.Errorf("ReadOnlyCalls want 1 (Read) got %d", rec.ReadOnlyCalls)
+	}
+	if rec.OutputTokens != 125 {
+		t.Errorf("OutputTokens want 125 got %d", rec.OutputTokens)
+	}
+	if !ev.Mutated {
+		t.Errorf("Mutated should be true (Edit ran)")
+	}
+	if len(ev.CommitSHAs) != 1 || ev.CommitSHAs[0] != "809c5339" {
+		t.Errorf("CommitSHAs want [809c5339] got %v", ev.CommitSHAs)
+	}
+	if ev.GoalEvents != 1 {
+		t.Errorf("GoalEvents want 1 got %d", ev.GoalEvents)
+	}
+	if ev.Interrupts != 1 {
+		t.Errorf("Interrupts want 1 (stop_reason interrupted) got %d", ev.Interrupts)
+	}
+	if rec.Signals.Commits != 1 || rec.Signals.GoalEvents != 1 || rec.Signals.Interrupts != 1 {
+		t.Errorf("Signals not promoted from evidence: %+v", rec.Signals)
+	}
+	// committed + in-history -> Shipped; committed + not-in-history -> Claimed.
+	if got := Classify(ev, true); got != OutcomeShipped {
+		t.Errorf("Classify(witnessed=true) want shipped got %v", got)
+	}
+	if got := Classify(ev, false); got != OutcomeClaimed {
+		t.Errorf("Classify(witnessed=false) want claimed got %v", got)
+	}
+}
+
+func TestFoldTranscriptNoOp(t *testing.T) {
+	tr := jsonl(
+		`{"type":"assistant","message":{"id":"a","usage":{"output_tokens":40},"content":[{"type":"tool_use","name":"Read","input":{}},{"type":"tool_use","name":"Grep","input":{}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"some file contents","is_error":false}]}}`,
+	)
+	rec, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "s2"})
+	if ev.Mutated || ev.committed() || ev.stopped() {
+		t.Fatalf("read-only session should have no mutation/commit/stop evidence: %+v", ev)
+	}
+	if rec.ReadOnlyCalls != 2 {
+		t.Errorf("ReadOnlyCalls want 2 got %d", rec.ReadOnlyCalls)
+	}
+	if got := Classify(ev, false); got != OutcomeNoOp {
+		t.Errorf("read-only session should classify NoOp, got %v", got)
+	}
+}
+
+func TestFoldTranscriptStopped(t *testing.T) {
+	tr := jsonl(
+		`{"type":"assistant","message":{"id":"a","usage":{"output_tokens":80},"content":[{"type":"tool_use","name":"Write","input":{}}]}}`,
+		// a blocked Stop hook reminder, no commit ever landed -> waste side
+		`{"type":"user","message":{"role":"user","content":"A Stop hook is active and will block stopping until the condition holds."}}`,
+	)
+	_, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "s3"})
+	if !ev.Mutated {
+		t.Errorf("Write should mark Mutated")
+	}
+	if ev.committed() {
+		t.Errorf("no commit marker present; committed() must be false")
+	}
+	if !ev.stopped() {
+		t.Errorf("a blocked-Stop reminder should set a stop mark")
+	}
+	if got := Classify(ev, false); got != OutcomeStopped {
+		t.Errorf("mutated-but-no-commit + stop should classify Stopped, got %v", got)
+	}
+}
+
+func TestFoldTranscriptUnknownWhenMutatedNoSignal(t *testing.T) {
+	// Mutated, no commit, no stop signal -> honestly Unknown, never guessed waste.
+	tr := jsonl(
+		`{"type":"assistant","message":{"id":"a","usage":{"output_tokens":50},"content":[{"type":"tool_use","name":"Edit","input":{}}]}}`,
+	)
+	_, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "s4"})
+	if got := Classify(ev, false); got != OutcomeUnknown {
+		t.Errorf("mutated with no terminal signal should stay Unknown, got %v", got)
+	}
+}
+
+func TestFoldExtractsMultipleSortedSHAs(t *testing.T) {
+	tr := jsonl(
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"[main ffff111] one"}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"[main 0000aaa] two"}]}}`,
+		// repeat of the first SHA must not duplicate
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"[main ffff111] one again"}]}}`,
+	)
+	_, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "s5"})
+	if len(ev.CommitSHAs) != 2 {
+		t.Fatalf("want 2 distinct SHAs got %v", ev.CommitSHAs)
+	}
+	if ev.CommitSHAs[0] != "0000aaa" || ev.CommitSHAs[1] != "ffff111" {
+		t.Errorf("SHAs must be sorted+deduped, got %v", ev.CommitSHAs)
+	}
+}
