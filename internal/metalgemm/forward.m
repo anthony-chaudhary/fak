@@ -323,7 +323,15 @@ int mg_prefill(const float *X, int P, float *lastPre, float *KrawOut, float *Kpo
     // (default headless posture — see gMPSOK / FAK_METAL_MPS) it cannot run. Decline so the caller
     // falls back to the hybrid/CPU path. The q4_k hybrid prefill issues mg_q4k_* directly and never
     // reaches here, so it is unaffected.
-    if (!gMPSOK) return 0;
+    if (!gMPSOK) {
+        static int mpsWarned = 0;
+        if (!mpsWarned) {
+            mpsWarned = 1;
+            NSLog(@"mg_prefill: MPS unavailable (FAK_METAL_MPS not set or unsupported); the f16 "
+                  @"prefill is disabled — use the q4_k prefill path (FAK_Q4K=1).");
+        }
+        return 0;
+    }
     if (!mg_fwd_init()) return 0;
     @autoreleasepool {
         int H = gH, hd = gHd, nH = gNH, nKV = gNKV, Im = gI, w = nKV*hd, qrow = nH*hd;
