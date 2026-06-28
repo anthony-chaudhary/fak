@@ -46,6 +46,63 @@ func buildTwoArms(model, rawCommand, fakCommand, rawOutputDir, fakOutputDir, raw
 	}
 }
 
+// smokeEvidenceLink is the canonical raw-vs-fak compare-evidence-link shape
+// shared by every smoke contract. The DeepSWE and Opus contracts expose it
+// under their own exported names via type aliases; the field set, JSON tags,
+// and serialized output are identical across both.
+type smokeEvidenceLink struct {
+	Required     bool     `json:"required"`
+	Predictions  []string `json:"predictions"`
+	Metadata     []string `json:"metadata"`
+	OfficialEval []string `json:"official_eval"`
+	FakEvidence  []string `json:"fak_evidence"`
+	JoinKeys     []string `json:"join_keys"`
+	Detail       string   `json:"detail"`
+}
+
+// buildSmokeEvidenceLink constructs the shared compare-evidence-link for a
+// raw-vs-fak smoke. Only the second fak-evidence artifact (the compare leaf
+// filename), the join keys, and the detail prose differ between contracts;
+// everything else (predictions, metadata, official-eval paths, the first
+// fak-evidence artifact) is derived identically here.
+func buildSmokeEvidenceLink(rawOutputDir, fakOutputDir, rawPreds, fakPreds, compareLeaf string, joinKeys []string, detail string) smokeEvidenceLink {
+	return smokeEvidenceLink{
+		Required: true,
+		Predictions: []string{
+			rawPreds,
+			fakPreds,
+		},
+		Metadata: []string{
+			joinPath(rawOutputDir, "meta.json"),
+			joinPath(fakOutputDir, "meta.json"),
+		},
+		OfficialEval: []string{
+			joinPath(rawOutputDir, "eval.json"),
+			joinPath(fakOutputDir, "eval.json"),
+		},
+		FakEvidence: []string{
+			joinPath(fakOutputDir, "fak-adjudication-evidence.jsonl"),
+			joinPath(fakOutputDir, compareLeaf),
+		},
+		JoinKeys: joinKeys,
+		Detail:   detail,
+	}
+}
+
+// renderSmokeEvidenceLink writes the shared "Compare Evidence Link" markdown
+// section for a smoke contract.
+func renderSmokeEvidenceLink(b *strings.Builder, link smokeEvidenceLink) {
+	fmt.Fprintf(b, "\n## Compare Evidence Link\n\n")
+	fmt.Fprintf(b, "- Required: `%t`\n", link.Required)
+	fmt.Fprintf(b, "- Predictions: `%s`\n", strings.Join(link.Predictions, "`, `"))
+	fmt.Fprintf(b, "- Metadata: `%s`\n", strings.Join(link.Metadata, "`, `"))
+	fmt.Fprintf(b, "- Official eval: `%s`\n", strings.Join(link.OfficialEval, "`, `"))
+	fmt.Fprintf(b, "- fak evidence: `%s`\n", strings.Join(link.FakEvidence, "`, `"))
+	fmt.Fprintf(b, "- Join keys: `%s`\n", strings.Join(link.JoinKeys, "`, `"))
+	fmt.Fprintf(b, "- Detail: %s\n", link.Detail)
+	fmt.Fprintf(b, "\n")
+}
+
 // renderSmokeArmsTable writes the shared "Arm | Harness | Model | Predictions |
 // Eval run id" markdown table for a slice of SmokeArm.
 func renderSmokeArmsTable(b *strings.Builder, arms []SmokeArm) {

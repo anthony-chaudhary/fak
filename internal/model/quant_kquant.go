@@ -24,9 +24,7 @@ package model
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
-	"strings"
 )
 
 // kQuantKind selects the super-block format of a resident k-quant tensor.
@@ -248,15 +246,9 @@ func (b *QuantBuilder) AddResidentQ5K(canon string, shape []int, raw []byte) err
 }
 
 func (b *QuantBuilder) addResidentKQuant(canon string, shape []int, raw []byte, kind kQuantKind) error {
-	if b.built {
-		return fmt.Errorf("model: QuantBuilder already built")
-	}
-	name, keep := quantSourceTensorName(b.m.Cfg, canon)
-	if !keep || !isQuantWeight(name) || len(shape) != 2 {
-		return nil
-	}
-	if strings.HasSuffix(name, suffixQKVProj) || strings.HasSuffix(name, suffixGateUpProj) {
-		return nil
+	name, ok, err := b.residentQuantTarget(canon, shape)
+	if !ok || err != nil {
+		return err
 	}
 	if b.m.kqw == nil {
 		b.m.kqw = map[string]*kQuantTensor{}

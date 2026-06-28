@@ -48,11 +48,7 @@ func (readEngine) Caps() []abi.Capability { return nil }
 // its bytes, confined to the engine root. It is the Read tool's miss path; on a hit the
 // vDSO served the result and this never runs.
 func (e readEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	body := refBytes(ctx, c.Args)
-	var m map[string]any
-	if len(body) > 0 {
-		_ = json.Unmarshal(body, &m)
-	}
+	body, m := decodeCallArgs(ctx, c.Args)
 	pathArg := ""
 	for _, k := range []string{"file_path", "path", "filename", "filepath"} {
 		if v, ok := m[k]; ok {

@@ -49,11 +49,11 @@ func RunComparison(ctx context.Context, cfg CompareConfig) (*ComparisonRun, erro
 	if len(cfg.Runners) == 0 {
 		cfg.Runners = []RunnerType{RunnerFleet, RunnerDeepSWE}
 	}
-	if cfg.OutputDir == "" {
-		cfg.OutputDir = fmt.Sprintf("swebench-compare-%s", time.Now().Format("20060102T150405Z"))
-	}
-	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir output: %w", err)
+	var err error
+	cfg.OutputDir, err = ensureOutputDir(cfg.OutputDir,
+		fmt.Sprintf("swebench-compare-%s", time.Now().Format("20060102T150405Z")))
+	if err != nil {
+		return nil, err
 	}
 
 	// Load the instance set once (both runners use the same subset).

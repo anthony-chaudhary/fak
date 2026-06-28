@@ -86,3 +86,29 @@ func TestCacheValueLine(t *testing.T) {
 		t.Errorf("idle turn line = %q; want empty", got)
 	}
 }
+
+// TestCacheTurnLine pins the showCache GATE runChatTurn applies — the wire that makes
+// the #333 cache-value line actually fire (it was a dead `showCache` parameter before:
+// threaded through runChatTurn/runChatREPL but never consumed). show=false (--quiet)
+// must suppress entirely; show=true must render the same line cacheValueLine produces.
+func TestCacheTurnLine(t *testing.T) {
+	before := cacheobs.Stats{PromptTokens: 200, ReusedTokens: 100}
+	after := cacheobs.Stats{PromptTokens: 1200, ReusedTokens: 1050}
+
+	// --quiet (show=false): suppressed regardless of how much was reused.
+	if got := cacheTurnLine(before, after, false); got != "" {
+		t.Errorf("show=false must suppress the line, got %q", got)
+	}
+	// show=true: renders exactly what cacheValueLine produces for the same delta.
+	got := cacheTurnLine(before, after, true)
+	if want := cacheValueLine(before, after); got != want {
+		t.Errorf("show=true line = %q; want %q", got, want)
+	}
+	if got == "" {
+		t.Error("show=true with real reuse must render a non-empty line")
+	}
+	// show=true but an idle turn (no prompt delta) still prints nothing.
+	if got := cacheTurnLine(cacheobs.Stats{PromptTokens: 7}, cacheobs.Stats{PromptTokens: 7}, true); got != "" {
+		t.Errorf("idle turn must print nothing even when show=true, got %q", got)
+	}
+}

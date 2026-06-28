@@ -16,6 +16,19 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
 
+// ensureOutputDir defaults an empty output dir to fallback and creates it,
+// returning the resolved directory. It is the shared front of every run/compare
+// entry point that lands artifacts in a per-run directory.
+func ensureOutputDir(dir, fallback string) (string, error) {
+	if dir == "" {
+		dir = fallback
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir output: %w", err)
+	}
+	return dir, nil
+}
+
 // RunnerType identifies the agent runner being used for a solve run.
 type RunnerType string
 
@@ -106,11 +119,11 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	if cfg.MaxSteps <= 0 {
 		cfg.MaxSteps = 50
 	}
-	if cfg.OutputDir == "" {
-		cfg.OutputDir = fmt.Sprintf("swebench-run-%s-%s", cfg.Runner, time.Now().Format("20060102T150405Z"))
-	}
-	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir output: %w", err)
+	var err error
+	cfg.OutputDir, err = ensureOutputDir(cfg.OutputDir,
+		fmt.Sprintf("swebench-run-%s-%s", cfg.Runner, time.Now().Format("20060102T150405Z")))
+	if err != nil {
+		return nil, err
 	}
 
 	// Load, filter, and cap the instance set.

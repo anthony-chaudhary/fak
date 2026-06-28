@@ -149,11 +149,17 @@ func (s *stallReader) Close() error {
 // still emitting is never tripped. The ceiling is 600s because a window longer than the
 // whole-request timeout could never fire.
 func streamStallTimeout() time.Duration {
-	d := 60 * time.Second
-	if v := os.Getenv("FAK_STREAM_STALL_TIMEOUT_S"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 5 && n <= 600 {
-			d = time.Duration(n) * time.Second
+	return envClampedTimeout("FAK_STREAM_STALL_TIMEOUT_S", 60*time.Second, 5, 600)
+}
+
+// envClampedTimeout reads a whole-second duration from env key, falling back to def when
+// unset/unparseable, and accepting the override only when it lands in [minS, maxS] seconds.
+// Shared by the planner whole-request timeout and the stream idle-read deadline.
+func envClampedTimeout(key string, def time.Duration, minS, maxS int) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= minS && n <= maxS {
+			return time.Duration(n) * time.Second
 		}
 	}
-	return d
+	return def
 }

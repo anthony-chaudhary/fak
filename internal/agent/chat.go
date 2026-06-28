@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -843,13 +842,7 @@ func reservedExtraBodyKey(k string) bool {
 // plannerTimeout is the per-request HTTP timeout, 60s unless FAK_PLANNER_TIMEOUT_S
 // overrides it (clamped to a sane [5s, 1h] band).
 func plannerTimeout() time.Duration {
-	d := 60 * time.Second
-	if v := os.Getenv("FAK_PLANNER_TIMEOUT_S"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 5 && n <= 3600 {
-			d = time.Duration(n) * time.Second
-		}
-	}
-	return d
+	return envClampedTimeout("FAK_PLANNER_TIMEOUT_S", 60*time.Second, 5, 3600)
 }
 
 // Model returns the planner's configured model id (for provenance).

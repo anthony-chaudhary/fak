@@ -268,30 +268,43 @@ func LoadSafetensorsDir(dir string, cfg Config) (*Model, error) {
 	return loadSafetensorsDir(dir, cfg, openSafetensorsFile)
 }
 
-func loadSafetensorsDir(dir string, cfg Config, open safetensorsFileOpener) (*Model, error) {
-	idxPath := filepath.Join(dir, "model.safetensors.index.json")
-	if _, err := os.Stat(idxPath); err != nil {
-		return loadSafetensorsFilePath(filepath.Join(dir, "model.safetensors"), cfg, open)
-	}
+// safetensorsIndexShards reads a model.safetensors.index.json at idxPath and returns the
+// SORTED set of distinct shard files it references plus the raw name->shard weight map (so
+// callers can derive whole-model properties such as the tied-head bit from the weight names).
+// It is the shared index-discovery step for the f32 (loadSafetensorsDir) and quant
+// (loadSafetensorsQuantDir) shard loaders.
+func safetensorsIndexShards(idxPath string) (shards []string, weightMap map[string]string, err error) {
 	ib, err := os.ReadFile(idxPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var index struct {
 		WeightMap map[string]string `json:"weight_map"`
 	}
 	if err := json.Unmarshal(ib, &index); err != nil {
-		return nil, fmt.Errorf("safetensors index: %w", err)
+		return nil, nil, fmt.Errorf("safetensors index: %w", err)
 	}
 	shardSet := map[string]bool{}
 	for _, shard := range index.WeightMap {
 		shardSet[shard] = true
 	}
-	shards := make([]string, 0, len(shardSet))
+	shards = make([]string, 0, len(shardSet))
 	for shard := range shardSet {
 		shards = append(shards, shard)
 	}
 	sort.Strings(shards)
+	return shards, index.WeightMap, nil
+}
+
+func loadSafetensorsDir(dir string, cfg Config, open safetensorsFileOpener) (*Model, error) {
+	idxPath := filepath.Join(dir, "model.safetensors.index.json")
+	if _, err := os.Stat(idxPath); err != nil {
+		return loadSafetensorsFilePath(filepath.Join(dir, "model.safetensors"), cfg, open)
+	}
+	shards, _, err := safetensorsIndexShards(idxPath)
+	if err != nil {
+		return nil, err
+	}
 
 	man := map[string]tensorMeta{}
 	var raw []byte
