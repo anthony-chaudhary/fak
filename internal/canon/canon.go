@@ -190,6 +190,10 @@ func squeezeAlnum(s string) string {
 	return b.String()
 }
 
+// SqueezeAlnum is the exported form of squeezeAlnum, so sibling packages
+// (e.g. accounts) share this one [a-z0-9] normalizer instead of copying it.
+func SqueezeAlnum(s string) string { return squeezeAlnum(s) }
+
 var b64tok = regexp.MustCompile(`[A-Za-z0-9+/]{16,}={0,2}`)
 var hextok = regexp.MustCompile(`(?:0x)?[0-9a-fA-F]{16,}`)
 

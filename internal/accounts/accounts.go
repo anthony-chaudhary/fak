@@ -43,6 +43,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
@@ -533,15 +534,7 @@ func nameTokens(name string) []string {
 
 // normAlnum lowercases and keeps only [a-z0-9], so "jack.barker" and "jack-barker"
 // compare equal and separators don't manufacture a false mismatch.
-func normAlnum(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+func normAlnum(s string) string { return canon.SqueezeAlnum(s) }
 
 // ---------------------------------------------------------------------------
 // RECONCILIATION — collapse N config homes that are really ONE account.
