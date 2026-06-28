@@ -134,6 +134,39 @@ func TestClassifyDestinationKeyCoverage(t *testing.T) {
 	}
 }
 
+// TestClassifyExtraDenyHosts proves the operator block-list TIGHTENS the floor: an
+// extra host (an org's internal secrets service) is refused in addition to the
+// hardwired metadata set, by URL and by bare host, while the hardwired set still fires
+// with no extra list and a non-listed public host stays allowed.
+func TestClassifyExtraDenyHosts(t *testing.T) {
+	extra := []string{"secrets.corp.internal", "10.0.0.53"}
+	// Operator-denied host via a destination arg.
+	if h, lbl := Classify("WebFetch", map[string]any{"url": "https://secrets.corp.internal/v1/token"}, extra...); h == "" {
+		t.Error("extra-deny host (URL) was not blocked")
+	} else if lbl == "" {
+		t.Error("extra-deny block produced an empty label")
+	}
+	// Operator-denied host via a bare host arg + a shell command.
+	if h, _ := Classify("http_get", map[string]any{"host": "10.0.0.53"}, extra...); h == "" {
+		t.Error("extra-deny bare host was not blocked")
+	}
+	if h, _ := Classify("Bash", map[string]any{"command": "curl https://secrets.corp.internal/"}, extra...); h == "" {
+		t.Error("extra-deny host in a shell command was not blocked")
+	}
+	// The hardwired metadata set still fires regardless of the extra list.
+	if h, _ := Classify("WebFetch", map[string]any{"url": "http://169.254.169.254/"}, extra...); h == "" {
+		t.Error("hardwired metadata block stopped firing when an extra list was supplied")
+	}
+	// A public host NOT on the extra list stays allowed.
+	if h, _ := Classify("WebFetch", map[string]any{"url": "https://api.anthropic.com/v1/messages"}, extra...); h != "" {
+		t.Errorf("a public host not on the extra list was blocked: %q", h)
+	}
+	// No extra list: behavior is exactly the hardwired floor (public allowed).
+	if h, _ := Classify("WebFetch", map[string]any{"url": "https://secrets.corp.internal/"}); h != "" {
+		t.Errorf("a would-be extra-deny host was blocked with no extra list: %q", h)
+	}
+}
+
 // TestClassifyDoesNotScanContent is the critical false-positive guard: a payload arg
 // (content/text/body/code/diff) that merely MENTIONS a metadata address — a doc, a
 // test, a security note being written to disk — must NOT be blocked. The floor refuses

@@ -96,6 +96,19 @@ type Manifest struct {
 	// See RateLimitRule. This is manifest/runtime-only — NOT an adjudicator.Policy
 	// field (rate config is separate from the name-level allow/deny floor).
 	RateLimit *RateLimitRule `json:"rate_limit,omitempty"`
+	// Egress (optional) extends the hardwired cloud-metadata / link-local egress floor
+	// with operator-declared destinations. It only TIGHTENS the floor — the hardwired
+	// metadata block (169.254.169.254 & peers) is always on and cannot be disabled here.
+	// Absent leaves the floor at the hardwired set. Maps to adjudicator.Policy.EgressExtraDenyHosts.
+	Egress *EgressRule `json:"egress,omitempty"`
+}
+
+// EgressRule is the manifest's network-egress block (issue: cloud-metadata SSRF floor).
+// deny_hosts is a list of exact host names / IP literals refused IN ADDITION to the
+// hardwired cloud-metadata / link-local class, so a deployment blocks its own sensitive
+// endpoints (an internal secrets service, a corp metadata mirror) without a code change.
+type EgressRule struct {
+	DenyHosts []string `json:"deny_hosts,omitempty"`
 }
 
 // AuthorizeRule releases a tainted flow into one exact sink tool/class. It is
@@ -259,6 +272,9 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		AllowPrefix:     cloneSlice(m.AllowPrefix),
 		SelfModifyGlobs: cloneSlice(m.SelfModifyGlobs),
 		RedactFields:    cloneSlice(m.RedactFields),
+	}
+	if m.Egress != nil && len(m.Egress.DenyHosts) > 0 {
+		p.EgressExtraDenyHosts = cloneSlice(m.Egress.DenyHosts)
 	}
 	if len(m.Allow) > 0 {
 		p.Allow = make(map[string]bool, len(m.Allow))

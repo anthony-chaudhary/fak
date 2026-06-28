@@ -63,6 +63,26 @@ func TestEgressRungAllowsPublic(t *testing.T) {
 	}
 }
 
+// TestEgressRungExtraDenyHosts proves the operator block-list wires through the rung:
+// a Policy.EgressExtraDenyHosts entry is refused EGRESS_BLOCK in addition to the
+// hardwired metadata set, while a public host stays allowed.
+func TestEgressRungExtraDenyHosts(t *testing.T) {
+	a := New(Policy{
+		Allow:                map[string]bool{"WebFetch": true},
+		EgressExtraDenyHosts: []string{"secrets.corp.internal"},
+	})
+	v := a.Adjudicate(context.Background(),
+		inlineCall("WebFetch", `{"url":"https://secrets.corp.internal/v1/token"}`))
+	if v.Kind != abi.VerdictDeny || v.Reason != egressfloor.ReasonEgressBlock {
+		t.Fatalf("operator-denied host: kind=%v reason=%s, want Deny EGRESS_BLOCK", v.Kind, abi.ReasonName(v.Reason))
+	}
+	// A public host not on the list is admitted (the floor only tightened).
+	pub := a.Adjudicate(context.Background(), inlineCall("WebFetch", `{"url":"https://api.anthropic.com/v1/messages"}`))
+	if pub.Kind == abi.VerdictDeny && pub.Reason == egressfloor.ReasonEgressBlock {
+		t.Fatalf("a public host was egress-blocked by the extra-deny list")
+	}
+}
+
 // TestEgressRungIsNonElidable proves the floor invariant: the egress rung is mandatory
 // for both risk classes (mustRun), so no RungProfile can elide it — a profile that
 // tries is clamped, and a metadata fetch is still blocked.

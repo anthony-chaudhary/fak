@@ -97,6 +97,13 @@ type Policy struct {
 	// canon.SecretPatterns floor at the gate — extend, never replace. Empty by
 	// default (floor patterns only), so this too is additive.
 	SecretPatterns []*regexp.Regexp
+	// EgressExtraDenyHosts are operator-declared host names/IPs the egress rung refuses
+	// IN ADDITION to the hardwired cloud-metadata / link-local class (manifest
+	// egress.deny_hosts). It only ever TIGHTENS the floor — the hardwired metadata set
+	// can never be disabled — so a deployment blocks its own sensitive endpoints (an
+	// internal secrets service, a corp metadata mirror) without a code change. Empty by
+	// default (hardwired set only), so this is additive.
+	EgressExtraDenyHosts []string
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -388,7 +395,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// for every class (mustRun's default), so a RungProfile can never elide it. Bounded
 	// disclosure: the witness names only the offending host + class, never the policy.
 	if pr.runs(cl, rungEgress) {
-		if host, label := egressfloor.Classify(c.Tool, args); host != "" {
+		if host, label := egressfloor.Classify(c.Tool, args, p.EgressExtraDenyHosts...); host != "" {
 			return abi.Verdict{
 				Kind:    abi.VerdictDeny,
 				Reason:  egressfloor.ReasonEgressBlock,

@@ -78,7 +78,14 @@ var commandKeys = map[string]bool{
 // every tool that can carry a URL (WebFetch, Bash, an MCP http tool) is covered by
 // the same set. args is the already-decoded argument map (the adjudicator's
 // decodeArgs output); a nil map yields ("", "").
-func Classify(tool string, args map[string]any) (host, label string) {
+//
+// extraDenyHosts is an OPTIONAL operator-supplied block-list (from the policy
+// manifest's egress.deny_hosts): exact, case-insensitive host names/IPs to refuse IN
+// ADDITION to the hardwired metadata/link-local class. It only ever TIGHTENS the floor
+// — there is no way to carve a hole in the hardwired set — so a deployment can block
+// its own sensitive endpoints (an internal secrets service, a corp metadata mirror)
+// without a code change. Empty/nil leaves the floor at the hardwired set.
+func Classify(tool string, args map[string]any, extraDenyHosts ...string) (host, label string) {
 	for k, v := range args {
 		s, ok := v.(string)
 		if !ok || s == "" {
@@ -87,11 +94,11 @@ func Classify(tool string, args map[string]any) (host, label string) {
 		key := strings.ToLower(k)
 		switch {
 		case destinationKeys[key]:
-			if h, lbl := classifyDestination(s); h != "" {
+			if h, lbl := classifyDestinationWith(s, extraDenyHosts); h != "" {
 				return h, lbl
 			}
 		case commandKeys[key]:
-			if h, lbl := classifyCommand(s); h != "" {
+			if h, lbl := classifyCommandWith(s, extraDenyHosts); h != "" {
 				return h, lbl
 			}
 		}
@@ -99,11 +106,12 @@ func Classify(tool string, args map[string]any) (host, label string) {
 	return "", ""
 }
 
-// classifyDestination treats the whole value as a single destination — a URL
-// (scheme://host/…) or a bare host[:port] — and classifies its host. A scheme-bearing
-// value yields its host via hostOf; a bare "host" or "host:port" (no scheme) is
-// reduced by hostnameNoPort (pure parsing, never DNS).
-func classifyDestination(v string) (host, label string) {
+// classifyDestinationWith treats the whole value as a single destination — a URL
+// (scheme://host/…) or a bare host[:port] — and classifies its host against the
+// hardwired metadata set plus any operator extra-deny hosts. A scheme-bearing value
+// yields its host via hostOf; a bare "host" or "host:port" (no scheme) is reduced by
+// hostnameNoPort (pure parsing, never DNS).
+func classifyDestinationWith(v string, extra []string) (host, label string) {
 	h := hostOf(v)
 	if h == "" {
 		h = hostnameNoPort(strings.TrimSpace(v))
@@ -111,16 +119,17 @@ func classifyDestination(v string) (host, label string) {
 	if h == "" {
 		return "", ""
 	}
-	if blocked, lbl := ClassifyHost(h); blocked {
+	if blocked, lbl := classifyHostWith(h, extra); blocked {
 		return h, lbl
 	}
 	return "", ""
 }
 
-// classifyCommand scans a shell command line for embedded destinations: every
+// classifyCommandWith scans a shell command line for embedded destinations: every
 // http(s):// URL, plus any bare metadata/link-local IP token (a `curl 169.254.169.254`
-// with no scheme still reaches the endpoint). Returns the first blocked host found.
-func classifyCommand(cmd string) (host, label string) {
+// with no scheme still reaches the endpoint). Each host is classified against the
+// hardwired set plus any operator extra-deny hosts. Returns the first blocked host.
+func classifyCommandWith(cmd string, extra []string) (host, label string) {
 	for _, tok := range tokenizeCommand(cmd) {
 		// A scheme-bearing URL (curl http://169.254.169.254/…) yields its host; a bare
 		// token (curl 169.254.169.254, curl metadata.google.internal:80) is reduced to
@@ -132,11 +141,32 @@ func classifyCommand(cmd string) (host, label string) {
 		if h == "" {
 			continue
 		}
-		if blocked, lbl := ClassifyHost(h); blocked {
+		if blocked, lbl := classifyHostWith(h, extra); blocked {
 			return h, lbl
 		}
 	}
 	return "", ""
+}
+
+// classifyHostWith folds the hardwired ClassifyHost with an operator extra-deny list:
+// the hardwired metadata/link-local class first (it can never be disabled), then an
+// exact, case-insensitive match against the operator's extra hosts. A bracket-wrapped
+// or ported host is already reduced to a bare host by the callers, so the extra-list
+// match is a plain normalized-string compare.
+func classifyHostWith(host string, extra []string) (blocked bool, label string) {
+	if b, lbl := ClassifyHost(host); b {
+		return true, lbl
+	}
+	if len(extra) == 0 {
+		return false, ""
+	}
+	h := strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
+	for _, e := range extra {
+		if h == strings.ToLower(strings.Trim(strings.TrimSpace(e), "[]")) {
+			return true, "operator-denied egress destination (policy egress.deny_hosts)"
+		}
+	}
+	return false, ""
 }
 
 // tokenizeCommand splits a command line on shell whitespace and the common
