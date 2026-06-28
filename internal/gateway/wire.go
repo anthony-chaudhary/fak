@@ -6,6 +6,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 // ---------------------------------------------------------------------------
@@ -527,18 +528,8 @@ type ResultAdmission struct {
 	Verdict    WireVerdict `json:"verdict"`
 }
 
-// itoa is a tiny dependency-free uint formatter (the repo avoids strconv on its
-// hot paths; mirror that posture here).
-func itoa(n uint64) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
-}
+// itoa is the package-local alias for numfmt.Itoa. The hand-rolled body was
+// hoisted into internal/numfmt (it was byte-identical to internal/abi's copy);
+// this thin shim stays because internal/gateway/gateway.go — a file outside this
+// change's scope — calls itoa directly, and keeping the name avoids touching it.
+func itoa(n uint64) string { return numfmt.Itoa(n) }

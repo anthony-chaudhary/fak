@@ -7,6 +7,8 @@
 // on this set degrades gracefully when a later minor adds a code.
 package abi
 
+import "github.com/anthony-chaudhary/fak/internal/numfmt"
+
 const (
 	ReasonNone             ReasonCode = iota // not a refusal
 	ReasonDefaultDeny                        // no policy affirmatively allowed it (fail-closed)
@@ -56,7 +58,7 @@ func ReasonName(c ReasonCode) string {
 	if n, ok := reg.reasons[c]; ok {
 		return n
 	}
-	return "REASON_" + itoa(uint64(c))
+	return "REASON_" + numfmt.Itoa(uint64(c))
 }
 
 // reasonCodesByName is the reverse of coreReasonNames, built once at init. It
@@ -119,17 +121,3 @@ func sortStrings(s []string) {
 // CoreReasonCount is the size of the closed core vocabulary (excludes NONE) —
 // referenced by tests asserting the closed reason set.
 const CoreReasonCount = 13
-
-func itoa(n uint64) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
-}

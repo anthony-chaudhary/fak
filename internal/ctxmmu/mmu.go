@@ -17,12 +17,12 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 const (
@@ -76,17 +76,8 @@ type MMU struct {
 // FAK_CTXMMU_MAX_HELD — the repo's "sensible default + escape hatch" idiom (FAK_WORKERS,
 // FAK_BUDGET, FAK_NORMGATE): a tight box can shrink it, a high-memory server can raise it,
 // neither needs a recompile.
-func New() *MMU { return NewWithLimit(envPositiveInt("FAK_CTXMMU_MAX_HELD", DefaultMaxHeld)) }
-
-// envPositiveInt returns the positive integer in env var key, or def if the var is unset,
-// empty, non-numeric, or <= 0 (a bad value fails safe to the sensible default, never to 0).
-func envPositiveInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return def
+func New() *MMU {
+	return NewWithLimit(numfmt.EnvPositiveInt("FAK_CTXMMU_MAX_HELD", DefaultMaxHeld))
 }
 
 // NewWithLimit builds a gate whose quarantine ledger holds at most maxHeld entries

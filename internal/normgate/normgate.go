@@ -35,12 +35,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/canon"
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
 )
 
@@ -85,17 +85,8 @@ type Gate struct {
 // New builds the registered-default-shaped gate with the standard ledger bound, overridable
 // at process start via FAK_NORMGATE_MAX_HELD (the FAK_WORKERS/FAK_BUDGET/FAK_NORMGATE idiom:
 // a sensible default with an env escape hatch).
-func New() *Gate { return NewWithLimit(envPositiveInt("FAK_NORMGATE_MAX_HELD", DefaultMaxHeld)) }
-
-// envPositiveInt returns the positive integer in env var key, or def if unset/empty/
-// non-numeric/<= 0 (a bad value fails safe to the default, never to 0).
-func envPositiveInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return def
+func New() *Gate {
+	return NewWithLimit(numfmt.EnvPositiveInt("FAK_NORMGATE_MAX_HELD", DefaultMaxHeld))
 }
 
 // NewWithLimit builds a gate whose held ledger holds at most maxHeld handles (oldest
