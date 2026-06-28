@@ -13,6 +13,7 @@ package model
 // to the GPU and frees the CPU copy is the tracked follow-up. Hence MetalQ4K is opt-in.
 
 import (
+	"os"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -23,6 +24,11 @@ var (
 	// metalQ4KW caches one GPU q4_k weight handle per (model, weight-name). A nil entry is
 	// cached too (upload failed / table full) so we don't retry the upload every token.
 	metalQ4KW = map[*Model]map[string]*metalgemm.Q4KWeight{}
+	// freeCPUCopyAfterUpload, when set, drops qt.raw after a successful GPU upload for single
+	// residency. Default OFF: the CPU prefill/decode fallbacks (q4kGemm/q4kMatRows) still read
+	// qt.raw and panic on nil when the GPU path isn't taken for some tensor (#1067). Opt in with
+	// FAK_Q4K_FREE_CPU=1 only once every q4_k matmul is provably GPU-routed.
+	freeCPUCopyAfterUpload = os.Getenv("FAK_Q4K_FREE_CPU") == "1"
 )
 
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
@@ -150,8 +156,14 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 	}
 	w := metalgemm.UploadQ4K(qt.raw, qt.out, qt.in)
 	tbl[name] = w // cache nil too, so a failed upload doesn't retry every token
-	if w != nil {
-		qt.raw = nil // GPU holds it now; drop the CPU copy → single residency
+	if w != nil && freeCPUCopyAfterUpload {
+		// Drop the CPU copy → single residency (~16 GB for 27B vs ~30 GB doubled). UNSAFE
+		// unless EVERY q4_k matmul for this weight — decode GEMV *and* batched prefill GEMM —
+		// is guaranteed to run on the GPU: the CPU fallbacks q4kGemm/q4kMatRows read qt.raw and
+		// panic on a nil slice (#1067, the multi-K-prompt prefill crash). Gated OFF by default;
+		// FAK_Q4K_FREE_CPU=1 opts back into single residency once the prefill path is fully
+		// GPU-routed and the CPU fallback is provably unreachable.
+		qt.raw = nil
 	}
 	return w
 }
