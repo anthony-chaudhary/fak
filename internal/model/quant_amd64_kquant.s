@@ -4,10 +4,12 @@
 
 // q5kc<> — kernel constants:
 //   +0x00: 0x0F0F0F0F  low-nibble mask (broadcast to 32 bytes of 0x0F)
-//   +0x04: 0x00010001  two int16 ones (broadcast to 16 lanes of +1 for the Σqx dot)
+//   +0x04: 0x00010001  two int16 ones (16 lanes of +1 for the AVX2 Σqx VPMADDWD dot)
+//   +0x08: 0x01010101  byte ones (32 bytes of 1 for the VNNI Σqx VPDPBUSD dot)
 DATA q5kc<>+0x00(SB)/4, $0x0F0F0F0F
 DATA q5kc<>+0x04(SB)/4, $0x00010001
-GLOBL q5kc<>(SB), RODATA|NOPTR, $8
+DATA q5kc<>+0x08(SB)/4, $0x01010101
+GLOBL q5kc<>(SB), RODATA|NOPTR, $12
 
 // quant_amd64_kquant.s — the AVX2 integer-reduction kernel for resident Q5_K decode, the K-quant
 // sibling of quant_amd64_q4k.s. For one weight row (nblk super-blocks) and a Q8_0 activation qx it
@@ -48,7 +50,8 @@ TEXT ·q5kReduceRowAsmAVX2(SB), NOSPLIT, $0-40
 	JLE   done
 
 	VPBROADCASTD q5kc<>+0x00(SB), Y6   // 0x0F bytes
-	VPBROADCASTD q5kc<>+0x04(SB), Y7   // int16 +1
+	VPBROADCASTD q5kc<>+0x04(SB), Y7   // int16 +1 (AVX2 Σqx)
+	VPBROADCASTD q5kc<>+0x08(SB), Y15  // byte +1 (VNNI Σqx); unused on the AVX2 path
 
 sblock:
 	LEAQ 16(SI), R12      // qh ptr (offset 16)
@@ -153,9 +156,39 @@ done:
 	RET
 
 // q5kdot computes I = Σ Y1*qx and S = Σ qx for one 32-wide sub-block (weights in Y1, 0..31,
-// activation at (DI)), stores both int32, and advances DI/R8/R9 by 32/4/4. Clobbers Y3,Y8..Y11,X0.
-// Y1 is treated as unsigned weight bytes (0..31) sign-extended to int16 (top bit always 0).
+// activation at (DI)), stores both int32, and advances DI/R8/R9 by 32/4/4. Clobbers Y3,Y8..Y13,X0.
+// Y1 is treated as unsigned weight bytes (0..31). When the package flag q5kUseVNNI is set (the box
+// has AVX512-VNNI), it takes the one-VPDPBUSD-per-dot fast path (Y15 holds byte-ones, set by the
+// caller); else the AVX2 sign-extend + VPMADDWD path. Both produce bit-identical int32 reductions.
 TEXT q5kdot<>(SB), NOSPLIT, $0-0
+	CMPB ·q5kUseVNNI(SB), $0
+	JEQ  q5kdotAVX2
+	// VNNI: I via VPDPBUSD(u8 nibble, s8 qx); S via VPDPBUSD(u8 ones, s8 qx).
+	VMOVDQU (DI), Y3
+	VPXOR   Y8, Y8, Y8
+	VPDPBUSD Y3, Y1, Y8
+	VPXOR   Y9, Y9, Y9
+	VPDPBUSD Y3, Y15, Y9
+	VEXTRACTI128 $1, Y8, X13
+	VPADDD  X13, X8, X8
+	VPSHUFD $0xEE, X8, X13
+	VPADDD  X13, X8, X8
+	VPSHUFD $0x55, X8, X13
+	VPADDD  X13, X8, X8
+	VMOVD   X8, (R8)
+	VEXTRACTI128 $1, Y9, X13
+	VPADDD  X13, X9, X9
+	VPSHUFD $0xEE, X9, X13
+	VPADDD  X13, X9, X9
+	VPSHUFD $0x55, X9, X13
+	VPADDD  X13, X9, X9
+	VMOVD   X9, (R9)
+	ADDQ $32, DI
+	ADDQ $4, R8
+	ADDQ $4, R9
+	RET
+
+q5kdotAVX2:
 	VMOVDQU (DI), Y3
 	// I = Σ w*qx : two 16-byte halves, sign-extend, VPMADDWD, add.
 	VPMOVSXBW X1, Y8

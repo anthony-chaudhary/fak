@@ -12,8 +12,20 @@ package model
 //go:noescape
 func q5kReduceRowAsmAVX2(row *byte, nblk int, qx *int8, Isum, Ssum *int32)
 
-// q5kReduceRow dispatches the Q5_K integer reduction to the AVX2 kernel when the resolved tier has
-// it, else the scalar reference. IS/SS are sized nblk*8 (one I_s/S_s per sub-block).
+// q5kUseVNNI is read by the q5k asm inner dot (CMPB q5kUseVNNI(SB)) to pick the one-VPDPBUSD-per-dot
+// VNNI fast path over the AVX2 sign-extend path — same q5kReduceRowAsmAVX2 entry/unpack either way,
+// only the inner reduction differs. 1 when the box has AVX512-VNNI (and the tier isn't pinned down).
+// A byte, not a bool, so the asm's CMPB matches its width exactly.
+var q5kUseVNNI byte = func() byte {
+	if q4kVNNI { // same CPUID gate (AVX512 + VNNI ECX bit 11), same FAK_QKERNEL pin
+		return 1
+	}
+	return 0
+}()
+
+// q5kReduceRow dispatches the Q5_K integer reduction to the AVX2/VNNI kernel when the resolved tier
+// has AVX2, else the scalar reference. The asm picks VNNI vs AVX2 internally via q5kUseVNNI. IS/SS
+// are sized nblk*8 (one I_s/S_s per sub-block).
 func q5kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {
 	if nblk > 0 && qtier >= tierAVX2 {
 		q5kReduceRowAsmAVX2(&row[0], nblk, &qx[0], &IS[0], &SS[0])
