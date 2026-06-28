@@ -214,6 +214,23 @@ design panel: the deferrals are deliberate, not forgotten.
   its exact kernels, so the recorded-graph replay stays bit-identical. *Lens verdict: the
   one class needing whole-graph visibility — reachable via the GraphCompile cap without
   taxing the day-1 eager path.*
+- **TPU / Neural Engine** (two accelerators, two compiler lanes): the issue title (#261, C-004)
+  lumps Google's TPU and Apple's Neural Engine, but they lower through different lanes and the
+  split is load-bearing. A **Google TPU** (v2–v6e Trillium) is a whole-graph, ahead-of-time part:
+  it reuses the *Dataflow* mechanism above — record the in-process op-list, lower it to StableHLO,
+  hand it to XLA/PJRT which compiles & places it (`Caps.GraphCompile`), native tier **bf16** on the
+  MXU. An **Apple Neural Engine** (A17/M3-family … M4, *not* the Metal GPU backend in `metal.go`)
+  is an *Edge-NPU* fixed-op-menu part reached through CoreML: map a whole MLP block to one CoreML
+  op (`Caps.FusedFFN`), stage weights device-native via `WeightSource`, native tier **fp16**. fak
+  does **not** import an external ONNX/StableHLO graph — it lowers its own recorded op-list, so the
+  scope's "ONNX import" is reframed as that in-process path (an external-graph importer is the
+  inverse direction and out of the seam's architecture). Both register an **Approx** backend
+  (argmax-exact + logit-cosine, never bit-identity). *Lens verdict: **designed, not yet built**
+  (#261) — the always-compiled accelerator→lane taxonomy is shipped and unit-witnessed on any host
+  (`internal/compute/tpu_arch.go`: `LookupAccelArch`/`AccelTarget`, the XLA/CoreML split, the
+  native-tier-per-lane invariant). What remains is host-gated: the cgo `//go:build xla` (PJRT) and
+  `//go:build coreml` halves, then runs-on-the-accelerator + forward-parity + baseline on real TPU
+  / Apple silicon — see `internal/compute/TPU-C004-NOTES.md`.*
 - **WASM / browser** (no threads/asm/env/unsafe by default, bounded memory, WebGPU optional):
   runs the pure-Go scalar reference as the floor unchanged; selection comes through a host
   config channel (not `os.Getenv`), parallelism defaults to serial, weights stream via
