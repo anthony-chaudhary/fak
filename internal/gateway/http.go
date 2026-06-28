@@ -617,6 +617,16 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 		return http.StatusBadGateway, "upstream_unreachable",
 			"upstream unreachable — check that --base-url points at a running server"
 	}
+	// An upstream that opened the stream then went SILENT mid-turn (the idle-deadline trip in
+	// the streaming planner). This is a timeout, not a generic upstream failure: 504 Gateway
+	// Timeout with a distinct code so a client/harness can tell a stalled provider apart from a
+	// 4xx request error or a parse failure — instead of the opaque code:null "upstream model
+	// error". Placed before the status/fallthrough cases for the same reason as unreachable.
+	var stalled *agent.UpstreamStalledError
+	if errors.As(err, &stalled) {
+		return http.StatusGatewayTimeout, "upstream_stalled",
+			"upstream stalled — the model or provider opened the stream then went silent within the idle window"
+	}
 	var se *agent.UpstreamStatusError
 	if errors.As(err, &se) && se.Status >= 400 && se.Status < 500 {
 		return se.Status, "", fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
@@ -627,6 +637,7 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 	if s != nil && s.metrics != nil {
 		s.metrics.observeInKernelOOM(err)
+		s.metrics.observeUpstreamError(err)
 	}
 	return upstreamErrorStatus(err)
 }

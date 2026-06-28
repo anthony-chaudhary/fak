@@ -130,6 +130,15 @@ type gatewayMetrics struct {
 	oomMu       sync.Mutex
 	inKernelOOM map[string]*inKernelOOMClassStats
 
+	// upstreamErrMu guards the upstream-error visibility family: a count of proxy/planner
+	// turn FAILURES keyed by a coarse KIND (stalled / unreachable / status_4xx / status_5xx /
+	// oom / other), so an operator can scrape WHY turns are failing — not just that the route
+	// returned a 502/504. This is the metric twin of the per-turn `fak-turn … FAILED` debug
+	// line: the line is glanceable-per-turn, this is cumulative-per-session. Observational
+	// only; nothing in the request path reads it.
+	upstreamErrMu  sync.Mutex
+	upstreamErrors map[string]uint64
+
 	// vcacheMu guards the per-family live-observe accumulator (#935). The cumulative
 	// fak_vcache_* family above is one aggregate row; this retains the per-turn,
 	// family-tagged provider-cache telemetry so the live gateway can expose the SAME
@@ -227,7 +236,58 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		reqMemoryTokens:    map[requestMemoryTokenKey]*requestMemoryTokenStats{},
 		reqMemoryFit:       map[requestMemoryFitKey]*requestMemoryFitStats{},
 		inKernelOOM:        map[string]*inKernelOOMClassStats{},
+		upstreamErrors:     map[string]uint64{},
 	}
+}
+
+// upstreamErrorKind classifies a planner/proxy error into the coarse KIND label the
+// upstream-error counter and the `fak-turn … FAILED` debug line both use. The ladder mirrors
+// upstreamErrorStatus's error.As order so the metric and the client-facing status never
+// disagree about what KIND of failure a turn hit. A nil error returns "" (not counted).
+func upstreamErrorKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	var stalled *agent.UpstreamStalledError
+	if errors.As(err, &stalled) {
+		return "stalled"
+	}
+	var oom *agent.InKernelOOMError
+	var capErr *agent.InKernelCapacityError
+	if errors.As(err, &oom) || errors.As(err, &capErr) {
+		return "oom"
+	}
+	var ue *agent.UpstreamUnreachableError
+	if errors.As(err, &ue) {
+		return "unreachable"
+	}
+	var se *agent.UpstreamStatusError
+	if errors.As(err, &se) {
+		if se.Status >= 400 && se.Status < 500 {
+			return "status_4xx"
+		}
+		return "status_5xx"
+	}
+	return "other"
+}
+
+// observeUpstreamError increments the upstream-error counter for the error's KIND. It is the
+// single fold point for every proxy/planner error path (called from plannerErrorStatus), so a
+// turn failure is counted exactly once. A nil or unclassifiable error is a no-op.
+func (m *gatewayMetrics) observeUpstreamError(err error) {
+	if m == nil {
+		return
+	}
+	kind := upstreamErrorKind(err)
+	if kind == "" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamErrors == nil {
+		m.upstreamErrors = map[string]uint64{}
+	}
+	m.upstreamErrors[kind]++
+	m.upstreamErrMu.Unlock()
 }
 
 // observeInKernelOOM folds a planner error into the local device-OOM visibility family when
@@ -910,6 +970,10 @@ func (s *Server) renderMetrics() string {
 			promQuote(row.key.route), promQuote(row.key.method), promQuote(row.key.status))
 		writeHistogram(&b, "fak_gateway_http_request_duration_seconds", baseLabels, row.val)
 	}
+
+	// Upstream-error visibility (the metric twin of the per-turn FAILED debug line): WHY turns
+	// failed this session, by coarse kind.
+	m.writeUpstreamErrorMetrics(&b)
 
 	writeHelpType(&b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
 	for _, row := range opRows {
@@ -1653,6 +1717,29 @@ func (m *gatewayMetrics) writeInKernelOOMMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_in_kernel_oom_last_failed_bytes", "Most recent failed allocation or refused plan size for each memory class (0 until that class has faulted).", "gauge")
 	for _, row := range rows {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_last_failed_bytes{class=\"%s\"} %d\n", promQuote(row.class), row.lastFailedBytes)
+	}
+}
+
+// writeUpstreamErrorMetrics renders the upstream/planner turn-failure family: a count of failed
+// turns by coarse kind (stalled / unreachable / status_4xx / status_5xx / oom / other). It is the
+// cumulative metric twin of the glanceable per-turn `fak-turn … FAILED` debug line, so a scrape
+// answers WHY turns failed — not just that the route returned a 502/504. Snapshot under the lock,
+// then render in sorted key order so the scrape is byte-stable.
+func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
+	m.upstreamErrMu.Lock()
+	snap := make(map[string]uint64, len(m.upstreamErrors))
+	for k, v := range m.upstreamErrors {
+		snap[k] = v
+	}
+	m.upstreamErrMu.Unlock()
+	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures by kind (stalled, unreachable, status_4xx, status_5xx, oom, other).", "counter")
+	kinds := make([]string, 0, len(snap))
+	for k := range snap {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	for _, kind := range kinds {
+		fmt.Fprintf(b, "fak_gateway_upstream_errors_total{kind=\"%s\"} %d\n", promQuote(kind), snap[kind])
 	}
 }
 
