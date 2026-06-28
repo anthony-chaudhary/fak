@@ -1,0 +1,63 @@
+{
+  "schema": "fak-coverage-matrix/1",
+  "ok": true,
+  "verdict": "OK",
+  "finding": "every one of 56 model×backend cells is supported, fenced, or proof-path — none silently undefined",
+  "reason": "clean",
+  "next_action": "hold the line: regenerate the matrix on every model/backend change and re-check growth_debt (#1084)",
+  "corpus": {
+    "backends": 4,
+    "cells": 56,
+    "families": 14,
+    "fenced": 24,
+    "grade": "C",
+    "growth_debt": 0,
+    "proof_path_only": 13,
+    "score": 71.4,
+    "supported": 19,
+    "undefined": 0
+  },
+  "kpis": [
+    {
+      "kpi": "no_undefined_cells",
+      "group": "correctness",
+      "score": 100,
+      "detail": "0 (family,backend) cell(s) reachable with neither a fence nor a CI witness",
+      "defects": [],
+      "soft": []
+    },
+    {
+      "kpi": "accelerated_coverage",
+      "group": "coverage",
+      "score": 42.857142857142854,
+      "detail": "18/42 accelerated cells run (rest fenced/proof-path — honest, not debt)",
+      "defects": [],
+      "soft": [
+        "GPT-NeoX × cuda: FENCED",
+        "GPT-NeoX × metal: FENCED",
+        "GPT-NeoX × vulkan: FENCED",
+        "Falcon × cuda: FENCED",
+        "Falcon × metal: FENCED",
+        "Falcon × vulkan: FENCED",
+        "OLMo2 × cuda: FENCED",
+        "OLMo2 × metal: FENCED",
+        "OLMo2 × vulkan: FENCED",
+        "Cohere × cuda: FENCED",
+        "Cohere × metal: FENCED",
+        "Cohere × vulkan: FENCED",
+        "Gemma2/3 × cuda: FENCED",
+        "Gemma2/3 × metal: FENCED",
+        "Gemma2/3 × vulkan: FENCED",
+        "DeepSeek-MLA × cuda: FENCED",
+        "DeepSeek-MLA × metal: FENCED",
+        "DeepSeek-MLA × vulkan: FENCED",
+        "GLM-5.2-DSA × cuda: FENCED",
+        "GLM-5.2-DSA × metal: FENCED",
+        "GLM-5.2-DSA × vulkan: FENCED",
+        "MiniMax-MSA × cuda: FENCED",
+        "MiniMax-MSA × metal: FENCED",
+        "MiniMax-MSA × vulkan: FENCED"
+      ]
+    }
+  ]
+}

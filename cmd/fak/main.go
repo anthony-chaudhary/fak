@@ -41,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/internal/newmodel"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -158,6 +159,8 @@ func main() {
 		cmdWebbench(os.Args[2:])
 	case "model":
 		cmdModel(os.Args[2:])
+	case "new-model":
+		cmdNewModel(os.Args[2:])
 	case "pull":
 		// Top-level alias for `fak model pull`: the Ollama-style run-by-name download.
 		cmdModelPull(os.Args[2:])
@@ -176,6 +179,10 @@ func main() {
 		cmdCadence(os.Args[2:])
 	case "nightrun":
 		cmdNightrun(os.Args[2:])
+	case "experiments":
+		cmdExperiments(os.Args[2:])
+	case "coverage-matrix":
+		cmdCoverageMatrix(os.Args[2:])
 	case "dojo":
 		cmdDojo(os.Args[2:])
 	case "guard-verdict-rsi":
@@ -1227,4 +1234,49 @@ func embeddedGGUFTokenizer(ggufPath string) (*tokenizer.Tokenizer, error) {
 		return nil, fmt.Errorf("no embedded BPE tokenizer in %s", filepath.Base(ggufPath))
 	}
 	return tokenizer.FromGGML(gt.Tokens, gt.Merges, gt.TokenTypes, gt.Pre)
+}
+
+func cmdNewModel(argv []string) {
+	fs := flag.NewFlagSet("new-model", flag.ExitOnError)
+	fs.SetOutput(os.Stderr)
+	family := fs.String("family", "", "family name, lowercase (e.g. myfamily)")
+	topology := fs.String("topology", "identity", "topology: prenorm, postnorm, parallel, or identity")
+	dryRun := fs.Bool("dry-run", false, "print scaffold without writing files")
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	if err := fs.Parse(argv); err != nil {
+		os.Exit(2)
+	}
+
+	if *family == "" {
+		fmt.Fprintln(os.Stderr, "fak new-model: --family is required")
+		fmt.Fprintln(os.Stderr, "usage: fak new-model --family <name> [--topology <topology>] [--dry-run] [--json]")
+		os.Exit(2)
+	}
+
+	res, err := newmodel.Run(newmodel.Scaffold{
+		Family:   *family,
+		Topology: *topology,
+		DryRun:   *dryRun,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak new-model: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(res)
+		return
+	}
+
+	fmt.Printf("=== Scaffolding model family '%s' (topology: %s) ===\n\n", res.Family, res.Topology)
+	fmt.Println("Files to edit:")
+	for _, e := range res.Edits {
+		fmt.Printf("  - %s\n", e)
+	}
+	fmt.Println("\nNext steps:")
+	for _, s := range res.NextSteps {
+		fmt.Printf("%s\n", s)
+	}
 }
