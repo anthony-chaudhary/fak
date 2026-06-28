@@ -25,8 +25,13 @@ package gateway
 //     engine.RunCapacityPressureSweep at the supplied target, and returns the typed outcome.
 //
 // FAIL-OPEN / FENCES (the issue's explicit posture, inherited from #915):
-//   - Gated behind FAK_INKERNEL_KVMMU (inkernelKVMMUEnabled, default off). Off ⇒ the path is
-//     byte-identical to today — no probe, no sweep, no allocation.
+//   - Default-ON policy with a documented disable (#987, the MLCACHE3 keystone — epic #985's
+//     "hardware-aware placement by default"). The post-decode sweep runs unless
+//     FAK_KV_PRESSURE_RELIEF is set to off/0/false/no (kvPressureReliefEnabled). The earlier
+//     FAK_INKERNEL_KVMMU coupling (#1073 first shipped the edge behind it) is lifted so the demote
+//     is the kernel default, not an opt-in. Because the production provider is still nil (the
+//     resident-span enumerator is the gated follow-on, below), default-on stays byte-identical to
+//     today in production — the nil-provider fence below makes it a no-op until that enumerator lands.
 //   - A nil provider or sweeper is a no-op. The host injects them ONLY when a device backend is
 //     present (a compute.Backend that can report DeviceMemory), so "provider+sweeper wired" IS
 //     the "there is a device to relieve pressure on" signal — the gateway needs no compute
@@ -126,22 +131,25 @@ func (s *Server) RelieveKVPressure(ctx context.Context) (relief KVPressureRelief
 	return s.maybeRelieveKVPressure(ctx)
 }
 
-// maybeRelieveKVPressure is the gateway's post-decode consumer (#1073): after a served turn has
-// mutated the KV cache, it probes live pressure and runs the injected sweep when it crosses the
-// high-water mark, demoting a hot span instead of dropping it. It is the LIVE serve-path call
-// site the keystone exists to add.
+// maybeRelieveKVPressure is the gateway's post-decode consumer (#1073, default-on per #987): after
+// a served turn has mutated the KV cache, it probes live pressure and runs the injected sweep when
+// it crosses the high-water mark, demoting a hot span instead of dropping it. It is the LIVE
+// serve-path call site the keystone exists to add, and it runs BY DEFAULT.
 //
-// Returns (relief, fired): fired reports whether the sweep edge engaged — flag on AND a provider
-// AND a sweeper wired AND a non-empty candidate list. Every non-firing path returns
-// (KVPressureRelief{}, false): flag off (the default, byte-identical to pre-#1073), no seams
-// injected yet, or nothing resident to move (fail-open, exactly as the explainer fences).
+// Returns (relief, fired): fired reports whether the sweep edge engaged — the policy enabled AND a
+// provider AND a sweeper wired AND a non-empty candidate list. Every non-firing path returns
+// (KVPressureRelief{}, false): the policy disabled via FAK_KV_PRESSURE_RELIEF=off, no seams injected
+// yet (the production posture today — a nil provider is byte-identical to pre-#1073), or nothing
+// resident to move (fail-open, exactly as the explainer fences).
 func (s *Server) maybeRelieveKVPressure(ctx context.Context) (relief KVPressureRelief, fired bool) {
 	if s == nil {
 		return KVPressureRelief{}, false
 	}
-	// Flag-off default: a no-op, byte-identical to the pre-#1073 served path. The gate mirrors
-	// the in-kernel KVMMU span bridge so the demote edge engages on exactly the same truthy set.
-	if !inkernelKVMMUEnabled() {
+	// Default-on policy (#987): the demote edge runs unless explicitly disabled via
+	// FAK_KV_PRESSURE_RELIEF=off — making hardware-aware demotion the kernel default (epic #985)
+	// rather than the FAK_INKERNEL_KVMMU opt-in #1073 first shipped it behind. Disabled ⇒ a no-op,
+	// byte-identical to the pre-#1073 served path.
+	if !kvPressureReliefEnabled() {
 		return KVPressureRelief{}, false
 	}
 	s.kvPressureMu.RLock()
@@ -162,6 +170,24 @@ func (s *Server) maybeRelieveKVPressure(ctx context.Context) (relief KVPressureR
 			relief.AppliedMoves, relief.Faults, relief.ReclaimedBytes, relief.FinalPressure)
 	}
 	return relief, true
+}
+
+// kvPressureReliefDisableEnv is the documented disable for the default-on post-decode pressure
+// sweep (#987): set it to off/0/false/no to turn the demote edge off.
+const kvPressureReliefDisableEnv = "FAK_KV_PRESSURE_RELIEF"
+
+// kvPressureReliefEnabled reports whether the post-decode capacity-pressure sweep runs. It is the
+// default-on policy #987 asks for: true unless FAK_KV_PRESSURE_RELIEF is explicitly set to a
+// disabling value (off/0/false/no, case-insensitive). An unset or unrecognized value keeps the
+// default ON, so a typo can never silently disable pressure relief — the symmetric inverse of
+// kvHighWaterTarget's fail-safe fallback. This replaces #1073's FAK_INKERNEL_KVMMU opt-in gate so
+// hardware-aware demotion is the kernel default (epic #985), with this env as the operator escape.
+func kvPressureReliefEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(kvPressureReliefDisableEnv))) {
+	case "off", "0", "false", "no":
+		return false
+	}
+	return true
 }
 
 // kvHighWaterTarget resolves the HBM high-water mark: defaultKVHighWater (0.80), overridable via

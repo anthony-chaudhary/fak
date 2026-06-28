@@ -46,8 +46,8 @@ After #706 the two planes touch **only at HBM, and only as a library**:
 1. **The executor is never called on a live serve loop.** `CapacityAdapter.Execute` /
    `RunCapacityPressureSweep` are invoked only from tests and `cmd/hwcachedemo` /
    `cmd/cxlpooldemo`. Nothing in `internal/gateway` / `internal/agent` / the served decode
-   path runs the sweep when KV pressure rises. *(Confirmed by the explainer's own honest
-   fence: "Nothing here claims … the serving loop demotes KV under live pressure.")*
+   path runs the sweep when KV pressure rises. *(This was the #706 baseline; the live serve-path
+   call site landed in #1073 and is the kernel default per #987 — see the MLCACHE3 rung below.)*
 2. **Only HBM has real pressure.** `DeviceHBMPressure` (`internal/engine/capacity_pressure.go`)
    derives live HBM fullness from `compute.DeviceMemoryInfo`. There is **no**
    `DeviceDRAMPressure` / disk-pressure equivalent — L2/DRAM, disk, and CXL plan against
@@ -189,6 +189,17 @@ under live pressure" to a cited, tested claim. `dos verify MLCACHE MLCACHE3` + a
 > **OK / diff-witnessed** (the `add`-led subject made the claim checkable, where MLCACHE1's
 > "derive" abstained), `dos review` over the ship range is **CLEAN** (zero residual), and the
 > diff touches the serve path (`internal/gateway/gateway.go`), not just a test.
+>
+> **Update — default-on policy + fence flip (#987).** The post-decode sweep is now the kernel
+> **default**: the `FAK_INKERNEL_KVMMU` opt-in #1073 first shipped it behind is lifted, replaced by
+> the documented disable `FAK_KV_PRESSURE_RELIEF=off` (`internal/gateway` `kvPressureReliefEnabled`)
+> — the "default-on policy with a documented disable" this rung's Build asks for. The explainer's
+> honest fence (`docs/explainers/hardware-limits-and-capacity.md`) is flipped from "Nothing here
+> claims … the serving loop demotes KV under live pressure" to the cited, tested claim that the
+> served decode boundary demotes a hot span by default under simulated pressure
+> (`TestMaybeRelieveKVPressureDemotesUnderPressure`, now run with no enablement env set so it
+> witnesses the *default*). The diff touches the serve path
+> (`internal/gateway/kvmmu_pressure_relief.go`), not just a test.
 >
 > **Honest fence (still in force).** The production provider is **nil** at the serve.go call
 > site: `InKernelPlanner` keeps residency in a radix reuse tree and builds a `kvmmu.Context`

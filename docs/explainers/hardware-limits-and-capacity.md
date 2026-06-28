@@ -38,10 +38,17 @@ description: "fak's HAL lifts seven hardware-SHAPE assumptions; finite device CA
 > site. The request precheck can also make one pre-decode idle-pool trim when known
 > current-free pressure is already over budget or inside the low-margin band; those actions
 > are counted as `fak_gateway_in_kernel_memory_pressure_trim_total` with sizing gauges and
-> `/debug/vars.metrics.in_kernel_pressure_trims`. Nothing here claims allocator OOM can
-> spill/demote live KV or weights, that the
-> serving loop demotes KV under live pressure, or that every model loader has a complete
-> memory plan yet. Those remain tracked planks below.
+> `/debug/vars.metrics.in_kernel_pressure_trims`. The served decode boundary now runs the
+> capacity-pressure sweep **by default** (#987, the MLCACHE3 keystone): after a served turn
+> mutates the KV cache, `internal/gateway`'s `maybeRelieveKVPressure` demotes a hot KV span to a
+> colder tier (`StageSpan` → `Evict`) once HBM pressure crosses the high-water mark, and the move
+> lands on `/metrics` as a `fak_engine_cache_*` transition — witnessed end to end by the
+> served-path test `TestMaybeRelieveKVPressureDemotesUnderPressure` under simulated HBM pressure,
+> with `FAK_KV_PRESSURE_RELIEF=off` the documented disable. What is still **not** claimed: that
+> allocator OOM can spill/demote live KV or weights, that this default-on edge demotes a *real*
+> resident span under *real* GPU pressure in production today (its resident-span provider is nil
+> until the durable `kvmmu.Segment` enumerator lands — the gated follow-on #1074), or that every
+> model loader has a complete memory plan yet. Those remain tracked planks below.
 
 *Who this is for:* contributors reasoning about what fak does when it runs out of memory —
 on a GPU, on the host, across a tier hierarchy. Prerequisites: the
@@ -143,8 +150,10 @@ own comment calls them "representative order-of-magnitude defaults, not measurem
 particular box," and against `TierPressure` values that used to be synthetic only:
 `cmd/hwcachedemo` injected escalating pressure by hand. Plank 3 now derives HBM pressure from
 the real backend and `RunCapacityPressureSweep` binds that signal to the Plank-4 adapter for
-caller-supplied candidates, but the live serving loop still does not invoke that sweep
-automatically. Meanwhile the physical allocators that *do* know the real pressure — they hold
+caller-supplied candidates, and the live serving loop now invokes that sweep **by default** at
+the post-decode boundary (#987, `internal/gateway`'s `maybeRelieveKVPressure`) — only the
+production resident-span *provider* that would feed it real GPU candidates is still nil (the gated
+follow-on #1074). Meanwhile the physical allocators that *do* know the real pressure — they hold
 `totalGlobalMem`, they are the ones that hit `nullptr` — still do not spill/demote from an OOM
 site by themselves. The served layer can now make one idle-pool trim retry around a typed
 allocation OOM, but allocator-site spill/demote and automatic live admission policy remain
@@ -248,8 +257,9 @@ through `CapacityAdapter`, and stops once estimated HBM pressure falls below tar
 candidate set is exhausted. Witness: `go test ./internal/engine -run "Test(CapacityPressureSweep|PlanPlacementForDevice)"`
 (a high-water device flips a hot prefix
 from `keep` → `demote`, stages it to DRAM, and records the move as `ddr_cache`; `cpu-ref` is
-unchanged). What remains is the live serving loop supplying real pressured KV candidates and
-calling the sweep at the right admission/pressure points.
+unchanged). The live serving loop now **calls** that sweep by default at the post-decode boundary
+(#987); what remains is the production provider supplying *real* pressured KV candidates from a
+durable resident-span ledger (the gated follow-on #1074).
 
 **Plank 4 — the engine adapter that EXECUTES a placement directive. _Shipped_ (#708).**
 `internal/engine.CapacityAdapter.Execute` is the control path the diagram in §2 was
@@ -265,8 +275,9 @@ TestCapacityAdapter`. The mechanical primitives it leans on were already in plac
 `model/paging.go: pagedKernel` pages a weight in on demand — but neither was driven by
 live capacity pressure. This adapter is the demote/spill executor that consumes a
 placement directive, and the reusable pressure sweep now performs the Plank-3 → Plank-4 bind
-for caller-supplied candidates. What remains is wiring the served decode path to invoke that
-sweep automatically.
+for caller-supplied candidates. The served decode path now invokes that sweep automatically and
+**by default** (#987, `maybeRelieveKVPressure`); what remains is the production resident-span
+provider that supplies real candidates (the gated follow-on #1074).
 
 **Plank 5 — load-time and request-time fit pre-checks. _Partially shipped._** `FitsOnDevice` before the
 `make`/`append` in the model loaders (`model: Load`, `LoadSafetensors`, `ggufload.LoadModel`)
@@ -341,7 +352,7 @@ add up to a HAL contract. Crediting them is what keeps the gap claim honest:
 | `residency.Manager` + `polymodel.Pool` (`ErrTooLarge`) | a backend-agnostic resident-weight-byte budget with LRU page-out | policy-only; caller-supplied budget, not VRAM-derived; not wired to CUDA/Metal `Upload` |
 | `model/paging.go: pagedKernel` | upload → compute → free, an on-demand page-in primitive | standalone; bit-equal to resident, but not integrated into the live weight HAL |
 | `engine.CacheEventMetrics` memory-class projection | KV residency events expose `memory_class` alongside `to_tier`: HBM is `kv_cache`, DRAM/NUMA-far/CXL are `ddr_cache`, and Disk/Remote/Provider are `offload`; byte/token breakdowns are exported as `fak_engine_cache_*_breakdown_total` series | visibility only; it does not yet drive spill/retry policy or allocate a DRAM cache |
-| `engine.RunCapacityPressureSweep` + `CapacityAdapter` | bounded report→policy→execute loop for caller-supplied KV candidates: derives HBM pressure from the backend, treats an operator high-water mark as "full", plans demote/spill/evict with `cachemeta.PlanPlacement`, executes via `StageSpan` then `Evict`, and records DRAM/CXL moves as `ddr_cache` and disk/remote/provider moves as `offload` | reusable engine primitive, not yet called by the live serving loop; candidate ordering, resident-byte accounting, restore, and retry policy still belong to the serving/cache owner |
+| `engine.RunCapacityPressureSweep` + `CapacityAdapter` | bounded report→policy→execute loop for caller-supplied KV candidates: derives HBM pressure from the backend, treats an operator high-water mark as "full", plans demote/spill/evict with `cachemeta.PlanPlacement`, executes via `StageSpan` then `Evict`, and records DRAM/CXL moves as `ddr_cache` and disk/remote/provider moves as `offload` | now called by the live serving loop **by default** (#987, `maybeRelieveKVPressure`), but its real-candidate provider is nil in production until the durable resident-span enumerator lands (#1074); candidate ordering, resident-byte accounting, restore, and retry policy still belong to the serving/cache owner |
 | `compute.DeviceAllocError` / `agent.InKernelCapacityError` → gateway `in_kernel_oom` + `/metrics` | runtime device allocation failure becomes a typed served 503 with bytes + memory class; served backend requests also refuse a known-too-large prompt+`max_tokens` KV/HAL plan before allocation with site `capacity-precheck`, but first make one idle-pool trim when current-free pressure is over budget or in the low-margin band and rerun the fit check; both remaining refusals and allocation OOMs are counted by class on `/metrics` and drillable by last site on `/debug/vars`; after an allocation OOM, the served decode path can make one idle-pool trim retry and exposes attempted/succeeded/failed counts as `fak_gateway_in_kernel_oom_retry_total`; pre-decode trims are exposed as `fak_gateway_in_kernel_memory_pressure_trim_total`; the latest served backend request plan is separately visible as `fak_gateway_in_kernel_request_memory_*`, including per-scope want/budget/margin fit rows, and process-lifetime request-plan totals/high-water rows are exposed under the same prefix plus `/debug/vars.metrics.request_memory*`; device weight, KV-cache, offload, scratchpad, HAL activation upload, GLM-DSA backend activation, and paged-weight page-in sites carry dedicated classes where the backend knows the purpose | classification/admission, one pre-decode idle-pool trim, one post-OOM idle-pool retry, and visibility only; no live spill/demote policy yet, ambiguous generic alloc sites stay `unknown`, detailed request-plan gauges remain last-request snapshots, aggregate request rows reset with the process and are not histograms, and the request precheck fails open when capacity is unknown |
 | `ggufload.WeightSource.FitOnDevice` / `FitF32OnDevice` / `FitCPUOffloadExpertsOnDevice` + `compute.EstimateKVStoreMemoryPlan` / `EstimateHALTransientMemoryPlan` + gateway model-load memory telemetry | header-only GGUF load refusal before the Go process allocates resident weights, with classed HAL KV-cache, activation, and scratchpad estimates when GGUF config exposes context geometry; expert-offload plans keep host expert bytes visible without counting them against device capacity, and optional `HostCapacity` can refuse known-too-large host-scoped `offload`/`ddr_cache` plans; successful eager device loads expose the admission profile on `/metrics` and `/debug/vars`, including bounded dtype/storage labels and per-scope want/budget/margin fit rows | shipped for GGUF serve's device load paths; quantized-upload backends are explicitly mixed precision (Q8 resident weights, f32 runtime state); f32 weights are only the fallback for backends without quantized upload; host capacity is OS physical memory, not cgroup/container quota; telemetry is visibility only, not spill/retry; not yet safetensors, generic `model.Load`, upload pre-checks, or backend-specific transient peaks |
 | `agent.KVMemoryReporter` + gateway `fak_gateway_kv_memory_*` | local in-kernel KV-prefix residency reports as `kv_cache`: bytes per KV position from `compute.EstimateKVStoreBytes`, true resident `PrefixTokens`, estimated resident bytes, configured radix LRU budget tokens, current LRU edge-token count, tree shape, splits, and LRU vs policy evictions; it also emits capacity-known/free-known, capacity bytes, headroom, and resident KV `want`/`budget`/`margin` fit rows; `fak_gateway_kv_memory_dtype_info` and `/debug/vars` carry the KV row dtype (`f32` today) and the same fit snapshot | visibility over the CPU-backed radix KV prefix cache and its known budget-vs-true-footprint gap; the host budget includes `free + resident` when free memory is known so the current cache is not counted against itself; device-HAL serve currently reports per-token geometry/capacity with `enabled=false` because it uses per-request backend sessions, not device-side radix reuse; no pressure-driven demote/spill, quantized KV, or KV-pressure retry yet |
@@ -390,7 +401,9 @@ and it is what `DeviceCapacity` begins.
 - Plank 3 (#707) makes the HBM tier's pressure and `CapacityBytes` real on a probing backend
   (`engine.PlanPlacementForDevice`), and `engine.RunCapacityPressureSweep` now binds that
   report→policy decision to the Plank-4 `CapacityAdapter` for caller-supplied KV candidates.
-  The live serving loop still does not invoke the sweep automatically, and the other tiers'
+  The live serving loop now invokes the sweep **by default** at the post-decode boundary (#987,
+  `maybeRelieveKVPressure`) — though its real-candidate provider is nil in production until the
+  durable resident-span enumerator lands (#1074) — and the other tiers'
   (`DRAM`/`NUMA-far`/`CXL`/`Disk`) numbers in `DefaultTierProfiles` remain representative
   defaults until measured per box.
 - The local KV-prefix memory surface reports the CPU-backed radix tree's true resident

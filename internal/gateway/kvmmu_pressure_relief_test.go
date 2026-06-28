@@ -129,11 +129,12 @@ func oneFatCandidate() []KVPressureCandidate {
 	}}
 }
 
-// TestMaybeRelieveKVPressureDemotesUnderPressure is the keystone witness: with the in-kernel KVMMU
-// gate ON and a device-backed provider+sweeper injected, a served turn's post-decode hook demotes
-// the hot span (StageSpan then Evict) instead of dropping it.
+// TestMaybeRelieveKVPressureDemotesUnderPressure is the keystone witness (#987): with NO enablement
+// env set — proving the DEFAULT-ON policy — and a device-backed provider+sweeper injected, a served
+// turn's post-decode hook demotes the hot span (StageSpan then Evict) instead of dropping it, and
+// the move lands on the fak_engine_cache_* stream the gateway scrapes onto /metrics.
 func TestMaybeRelieveKVPressureDemotesUnderPressure(t *testing.T) {
-	t.Setenv("FAK_INKERNEL_KVMMU", "on")
+	// No FAK_KV_PRESSURE_RELIEF (nor FAK_INKERNEL_KVMMU) set: the sweep runs BY DEFAULT (#987).
 	const total = 100 << 20
 	kv := &pressureFakeKV{}
 	rec := engine.NewCacheEventRecorder()
@@ -164,11 +165,11 @@ func TestMaybeRelieveKVPressureDemotesUnderPressure(t *testing.T) {
 	}
 }
 
-// TestMaybeRelieveKVPressureGateOffIsNoOp is the refute guard: with FAK_INKERNEL_KVMMU unset (the
-// default), the edge is a no-op even with seams wired — no stage, no evict — proving the WIRE, not
-// a default-on behavior change.
-func TestMaybeRelieveKVPressureGateOffIsNoOp(t *testing.T) {
-	t.Setenv("FAK_INKERNEL_KVMMU", "")
+// TestMaybeRelieveKVPressureDisabledIsNoOp is the refute guard for the documented disable (#987):
+// with FAK_KV_PRESSURE_RELIEF=off the edge is a no-op even with seams wired and a candidate — no
+// stage, no evict — proving the disable knob actually gates the default-on policy.
+func TestMaybeRelieveKVPressureDisabledIsNoOp(t *testing.T) {
+	t.Setenv("FAK_KV_PRESSURE_RELIEF", "off")
 	kv := &pressureFakeKV{}
 	rec := engine.NewCacheEventRecorder()
 	s := &Server{}
@@ -185,14 +186,35 @@ func TestMaybeRelieveKVPressureGateOffIsNoOp(t *testing.T) {
 	}
 }
 
-// TestMaybeRelieveKVPressureNoSeamsFailOpen proves the fail-open fence: gate on but no provider /
-// sweeper injected (the default serve.go posture today) is a clean no-op, byte-identical to
-// pre-#1073.
+// TestMaybeRelieveKVPressureNoSeamsFailOpen proves the fail-open fence: default-on policy but no
+// provider / sweeper injected (the production serve.go posture today — the resident-span enumerator
+// is the gated follow-on #1074) is a clean no-op, byte-identical to pre-#1073.
 func TestMaybeRelieveKVPressureNoSeamsFailOpen(t *testing.T) {
-	t.Setenv("FAK_INKERNEL_KVMMU", "on")
 	s := &Server{}
 	if _, fired := s.maybeRelieveKVPressure(context.Background()); fired {
 		t.Fatal("edge fired with no provider/sweeper wired — should fail open")
+	}
+}
+
+// TestKVPressureReliefEnabled covers the default-on policy and its documented disable (#987): unset
+// is ON, off/0/false/no are OFF, and an unrecognized value stays ON so a typo cannot silently
+// disable pressure relief.
+func TestKVPressureReliefEnabled(t *testing.T) {
+	t.Setenv("FAK_KV_PRESSURE_RELIEF", "")
+	if !kvPressureReliefEnabled() {
+		t.Fatal("unset env: pressure relief must default ON (#987)")
+	}
+	for _, off := range []string{"off", "0", "false", "no", "OFF", "False"} {
+		t.Setenv("FAK_KV_PRESSURE_RELIEF", off)
+		if kvPressureReliefEnabled() {
+			t.Fatalf("value %q must disable pressure relief", off)
+		}
+	}
+	for _, on := range []string{"on", "1", "true", "yes", "garbage"} {
+		t.Setenv("FAK_KV_PRESSURE_RELIEF", on)
+		if !kvPressureReliefEnabled() {
+			t.Fatalf("value %q must keep pressure relief ON (typo-safe default)", on)
+		}
 	}
 }
 
