@@ -141,8 +141,7 @@ type responsesUsage struct {
 // step-for-step over the same served-turn core; only the request decode and the
 // response render differ (the Responses shape vs the chat shape).
 func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req ResponsesRequest

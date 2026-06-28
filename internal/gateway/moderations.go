@@ -85,8 +85,7 @@ var moderationLexicon = []moderationCategory{
 // per-item result, so a batched (array) request yields one classification per
 // item in order.
 func (s *Server) handleModerations(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req ModerationsRequest

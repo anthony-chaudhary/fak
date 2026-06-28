@@ -346,8 +346,7 @@ func gatewayCredential(r *http.Request) (string, bool) {
 // form, and a fak-aware client gets the full per-call adjudication in the `fak`
 // extension. It NEVER executes the client's tools — the client does.
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req ChatRequest
@@ -826,8 +825,7 @@ func principalFor(r *http.Request, bodyPrincipal string) string {
 // the client runs it; admit contains the RESULT after. A poisoned result is
 // quarantined and the session's taint ledger raised before it is admitted.
 func (s *Server) handleFakAdmit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req AdmitRequest
@@ -957,8 +955,7 @@ func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
 
 // handleFakRevoke triggers a fleet-wide refutation of an external world-state witness.
 func (s *Server) handleFakRevoke(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req RevokeRequest
@@ -978,8 +975,7 @@ func (s *Server) handleFakRevoke(w http.ResponseWriter, r *http.Request) {
 // persisted recall core image. The only shipped mutation is a tombstone that
 // suppresses one page from future model-visible recall without deleting evidence.
 func (s *Server) handleFakContextChange(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req ContextChangeRequest
@@ -998,8 +994,7 @@ func (s *Server) handleFakContextChange(w http.ResponseWriter, r *http.Request) 
 // handleFakPolicyReload reloads the configured policy manifest in-place. The
 // actual loader is injected by cmd/fak so this package stays policy-schema blind.
 func (s *Server) handleFakPolicyReload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if s.reloadPolicy == nil {
@@ -1023,8 +1018,7 @@ func (s *Server) handleFakPolicyReload(w http.ResponseWriter, r *http.Request) {
 // handleFakTraceReset clears the per-trace IFC taint high-water mark for a live
 // served session. The reset implementation is injected by cmd/fak.
 func (s *Server) handleFakTraceReset(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if s.resetTrace == nil {
@@ -1058,8 +1052,7 @@ func (s *Server) handleFakTraceReset(w http.ResponseWriter, r *http.Request) {
 // observe id-path lands here. The observe implementation is injected by cmd/fak so
 // this package stays IFC-internals blind, mirroring resetTrace.
 func (s *Server) handleFakTraceObserve(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "use GET")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if s.observeTrace == nil {
@@ -1209,6 +1202,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // invalid_request_error) classifies a transient 502 correctly.
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeErrCode(w, status, "", msg)
+}
+
+// requireMethod enforces a single allowed HTTP method on a handler entry. On a
+// mismatch it writes the standard 405 ("use <METHOD>") and returns false so the
+// caller returns immediately; on a match it returns true.
+func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method != method {
+		writeErr(w, http.StatusMethodNotAllowed, "use "+method)
+		return false
+	}
+	return true
 }
 
 // writeErrCode is writeErr with an explicit OpenAI-style error `code`. An empty

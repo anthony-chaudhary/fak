@@ -17,37 +17,46 @@ type memoryFitRow struct {
 }
 
 func modelLoadMemoryFitRows(plan []ModelLoadMemoryDemand, caps []ModelLoadMemoryCapacity, headroom float64) []memoryFitRow {
-	wants := map[string]int64{}
-	for _, row := range plan {
-		if row.Bytes <= 0 {
-			continue
-		}
-		scope := modelLoadScope(row.Scope)
-		wants[scope] = addFitBytes(wants[scope], row.Bytes)
-	}
-	capByScope := map[string]fitCapacity{}
-	for _, cap := range caps {
-		scope := modelLoadScope(cap.Scope)
-		capByScope[scope] = fitCapacity{total: cap.TotalBytes, free: cap.FreeBytes, known: cap.Known, freeKnown: cap.Known && cap.FreeKnown}
-	}
+	wants := fitWants(plan, func(r ModelLoadMemoryDemand) (string, int64) { return r.Scope, r.Bytes })
+	capByScope := fitCapsByScope(caps, func(c ModelLoadMemoryCapacity) (string, int64, int64, bool, bool) {
+		return c.Scope, c.TotalBytes, c.FreeBytes, c.Known, c.FreeKnown
+	})
 	return memoryFitRows(wants, capByScope, headroom)
 }
 
 func requestMemoryFitRows(plan []agent.RequestMemoryDemand, caps []agent.RequestMemoryCapacity, headroom float64) []memoryFitRow {
+	wants := fitWants(plan, func(r agent.RequestMemoryDemand) (string, int64) { return r.Scope, r.Bytes })
+	capByScope := fitCapsByScope(caps, func(c agent.RequestMemoryCapacity) (string, int64, int64, bool, bool) {
+		return c.Scope, c.TotalBytes, c.FreeBytes, c.Known, c.FreeKnown
+	})
+	return memoryFitRows(wants, capByScope, headroom)
+}
+
+// fitWants sums positive demand bytes per scope. Shared by the model-load and
+// request-memory fit paths, which carry structurally identical demand rows.
+func fitWants[T any](plan []T, of func(T) (scope string, bytes int64)) map[string]int64 {
 	wants := map[string]int64{}
 	for _, row := range plan {
-		if row.Bytes <= 0 {
+		scope, bytes := of(row)
+		if bytes <= 0 {
 			continue
 		}
-		scope := modelLoadScope(row.Scope)
-		wants[scope] = addFitBytes(wants[scope], row.Bytes)
+		scope = modelLoadScope(scope)
+		wants[scope] = addFitBytes(wants[scope], bytes)
 	}
+	return wants
+}
+
+// fitCapsByScope indexes capacity rows by scope. FreeKnown is gated on Known to
+// match the prior inline behavior on both fit paths.
+func fitCapsByScope[T any](caps []T, of func(T) (scope string, total, free int64, known, freeKnown bool)) map[string]fitCapacity {
 	capByScope := map[string]fitCapacity{}
 	for _, cap := range caps {
-		scope := modelLoadScope(cap.Scope)
-		capByScope[scope] = fitCapacity{total: cap.TotalBytes, free: cap.FreeBytes, known: cap.Known, freeKnown: cap.Known && cap.FreeKnown}
+		scope, total, free, known, freeKnown := of(cap)
+		scope = modelLoadScope(scope)
+		capByScope[scope] = fitCapacity{total: total, free: free, known: known, freeKnown: known && freeKnown}
 	}
-	return memoryFitRows(wants, capByScope, headroom)
+	return capByScope
 }
 
 type fitCapacity struct {

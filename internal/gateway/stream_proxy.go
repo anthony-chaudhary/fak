@@ -121,9 +121,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 
 	// The turn finished. The buffered path records inference metrics inside
 	// s.complete; this path bypasses it, so account here.
-	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, time.Since(began))
-	s.observePlannerRequestMemory()
-	s.debitServedSessionTurn(ctx, sessionTurn, comp.Usage, req.Messages)
+	s.accountStreamedTurn(ctx, sessionTurn, comp, req.Messages, began)
 
 	// Tool-call conformance fail-closed: the upstream announced tool_calls but none
 	// survived parsing + the text-lift fallback. Proceeding would skip adjudication on

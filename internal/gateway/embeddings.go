@@ -85,8 +85,7 @@ type EmbeddingUsage struct {
 // live deployment. Batch input (an array) returns one vector per item; the
 // vectors are deterministic feature-hash projections (see embedText).
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req EmbeddingsRequest

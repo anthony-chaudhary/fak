@@ -124,8 +124,7 @@ func readFrame(br *bufio.Reader, max int) (line []byte, tooLong bool, err error)
 
 // handleMCPHTTP serves a single JSON-RPC request/response over POST /mcp.
 func (s *Server) handleMCPHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
@@ -240,13 +239,40 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 // callTool handles tools/call. The MCP `arguments` object IS a SyscallRequest
 // ({tool, arguments, read_only}). A deny returns a normal tool result (deny-as-
 // value); only a protocol/build fault is a JSON-RPC error.
+// mcpUnmarshalParams decodes a JSON-RPC method's params into the given pointer,
+// returning the uniform "invalid <method> params: ..." rpcInvalidParams fault on a
+// malformed body. Shared by tools/call, resources/read, and prompts/get.
+func mcpUnmarshalParams(params json.RawMessage, into any, method string) *rpcError {
+	if err := json.Unmarshal(params, into); err != nil {
+		return &rpcError{Code: rpcInvalidParams, Message: "invalid " + method + " params: " + err.Error()}
+	}
+	return nil
+}
+
+// mcpDecodeCall is the shared body of the tools/call arms that decode the
+// arguments into a typed request, run a server handler, and wrap the result as an
+// MCP tool result — a malformed body is rpcInvalidParams ("invalid <tool>
+// arguments: ..."), a handler error is rpcInvalidParams with the handler's own
+// message, and success is mcpToolResult(resp).
+func mcpDecodeCall[Req any](raw json.RawMessage, tool string, fn func(Req) (any, error)) (any, *rpcError) {
+	var req Req
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid " + tool + " arguments: " + err.Error()}
+	}
+	resp, err := fn(req)
+	if err != nil {
+		return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
+	}
+	return mcpToolResult(resp), nil
+}
+
 func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rpcError) {
 	var p struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid tools/call params: " + err.Error()}
+	if e := mcpUnmarshalParams(params, &p, "tools/call"); e != nil {
+		return nil, e
 	}
 	switch p.Name {
 	case "fak_syscall":
@@ -314,47 +340,23 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		evicted, te := s.revoke(req.Witness)
 		return mcpToolResult(RevokeResponse{Witness: req.Witness, Evicted: evicted, TrustEpoch: te}), nil
 	case "fak_session_reset":
-		var req SessionResetRequest
-		if err := json.Unmarshal(p.Arguments, &req); err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_session_reset arguments: " + err.Error()}
-		}
-		resp, err := s.sessionReset(ctx, req)
-		if err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
-		}
-		return mcpToolResult(resp), nil
+		return mcpDecodeCall[SessionResetRequest](p.Arguments, "fak_session_reset", func(req SessionResetRequest) (any, error) {
+			return s.sessionReset(ctx, req)
+		})
 	case "fak_context_change":
-		var req ContextChangeRequest
-		if err := json.Unmarshal(p.Arguments, &req); err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_context_change arguments: " + err.Error()}
-		}
-		resp, err := s.contextChange(ctx, req)
-		if err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
-		}
-		return mcpToolResult(resp), nil
+		return mcpDecodeCall[ContextChangeRequest](p.Arguments, "fak_context_change", func(req ContextChangeRequest) (any, error) {
+			return s.contextChange(ctx, req)
+		})
 	case "fak_memory_drivers":
 		return mcpToolResult(map[string]any{"drivers": s.memoryDrivers()}), nil
 	case "fak_memory_explain":
-		var req MemoryRequest
-		if err := json.Unmarshal(p.Arguments, &req); err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_memory_explain arguments: " + err.Error()}
-		}
-		plan, err := s.memoryExplain(req)
-		if err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
-		}
-		return mcpToolResult(plan), nil
+		return mcpDecodeCall[MemoryRequest](p.Arguments, "fak_memory_explain", func(req MemoryRequest) (any, error) {
+			return s.memoryExplain(req)
+		})
 	case "fak_memory_run":
-		var req MemoryRequest
-		if err := json.Unmarshal(p.Arguments, &req); err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_memory_run arguments: " + err.Error()}
-		}
-		res, err := s.memoryRun(ctx, req)
-		if err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
-		}
-		return mcpToolResult(res), nil
+		return mcpDecodeCall[MemoryRequest](p.Arguments, "fak_memory_run", func(req MemoryRequest) (any, error) {
+			return s.memoryRun(ctx, req)
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}

@@ -121,8 +121,7 @@ func (s *Server) anthropicUpstreamCredential(r *http.Request) string {
 // runs every PROPOSED tool call through the kernel, and renders the survivors back
 // as an Anthropic message — buffered, or as SSE when the client asked to stream.
 func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxTranscriptBody)
@@ -933,8 +932,7 @@ func streamAnthropicBlocks(send func(string, any), blocks []agent.AnthropicBlock
 // tokenizer-free estimate. Claude Code treats this as optional (a 404 is fine), but
 // answering it keeps its context-management heuristics from flying blind.
 func (s *Server) handleAnthropicCountTokens(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var raw json.RawMessage

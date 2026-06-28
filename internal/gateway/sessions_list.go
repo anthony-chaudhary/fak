@@ -38,8 +38,7 @@ type SessionListResponse struct {
 // backing store. The exact "/v1/fak/sessions" path is registered distinctly from the
 // "/v1/fak/session/" subtree, so a single-session request never lands here.
 func (s *Server) handleFakSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "use GET")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if s.listSessions == nil {

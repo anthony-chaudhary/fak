@@ -284,8 +284,7 @@ type debugBucketVars struct {
 }
 
 func (s *Server) handleDebugVars(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "use GET")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.debugVars(time.Now()))
@@ -493,25 +492,10 @@ func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {
 		HeadroomRatio: st.HeadroomRatio,
 	}
 	for _, row := range st.MemoryPlan {
-		if row.Bytes <= 0 {
-			continue
-		}
-		out.MemoryPlan = append(out.MemoryPlan, debugModelLoadMemoryPlanVars{
-			Class:  modelLoadClass(row.Class),
-			Scope:  modelLoadScope(row.Scope),
-			Bytes:  row.Bytes,
-			Detail: row.Detail,
-			DType:  modelLoadDType(row.DType),
-		})
+		out.MemoryPlan = appendDebugMemoryPlanVar(out.MemoryPlan, row.Class, row.Scope, row.Bytes, row.Detail, row.DType)
 	}
 	for _, cap := range st.Capacities {
-		out.Capacities = append(out.Capacities, debugModelLoadCapacityVars{
-			Scope:      modelLoadScope(cap.Scope),
-			TotalBytes: cap.TotalBytes,
-			FreeBytes:  cap.FreeBytes,
-			Known:      cap.Known,
-			FreeKnown:  cap.Known && cap.FreeKnown,
-		})
+		out.Capacities = appendDebugCapacityVar(out.Capacities, cap.Scope, cap.TotalBytes, cap.FreeBytes, cap.Known, cap.FreeKnown)
 	}
 	out.Fit = debugMemoryFitRows(requestMemoryFitRows(st.MemoryPlan, st.Capacities, st.HeadroomRatio))
 	return out
@@ -539,28 +523,42 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 		})
 	}
 	for _, row := range p.MemoryPlan {
-		if row.Bytes <= 0 {
-			continue
-		}
-		out.MemoryPlan = append(out.MemoryPlan, debugModelLoadMemoryPlanVars{
-			Class:  modelLoadClass(row.Class),
-			Scope:  modelLoadScope(row.Scope),
-			Bytes:  row.Bytes,
-			Detail: row.Detail,
-			DType:  modelLoadDType(row.DType),
-		})
+		out.MemoryPlan = appendDebugMemoryPlanVar(out.MemoryPlan, row.Class, row.Scope, row.Bytes, row.Detail, row.DType)
 	}
 	for _, cap := range p.sortedMemoryCapacities() {
-		out.MemoryCapacities = append(out.MemoryCapacities, debugModelLoadCapacityVars{
-			Scope:      modelLoadScope(cap.Scope),
-			TotalBytes: cap.TotalBytes,
-			FreeBytes:  cap.FreeBytes,
-			Known:      cap.Known,
-			FreeKnown:  cap.Known && cap.FreeKnown,
-		})
+		out.MemoryCapacities = appendDebugCapacityVar(out.MemoryCapacities, cap.Scope, cap.TotalBytes, cap.FreeBytes, cap.Known, cap.FreeKnown)
 	}
 	out.MemoryFit = debugMemoryFitRows(modelLoadMemoryFitRows(p.MemoryPlan, p.MemoryCapacities, p.MemoryHeadroomRatio))
 	return out
+}
+
+// appendDebugMemoryPlanVar folds one memory-plan demand row (from either the
+// request-memory or model-load reporter, which carry structurally identical rows)
+// into the shared debug var shape, dropping zero/negative-byte rows. Single source
+// of the class/scope/dtype label-mapping the request and model-load paths shared.
+func appendDebugMemoryPlanVar(out []debugModelLoadMemoryPlanVars, class, scope string, bytes int64, detail, dtype string) []debugModelLoadMemoryPlanVars {
+	if bytes <= 0 {
+		return out
+	}
+	return append(out, debugModelLoadMemoryPlanVars{
+		Class:  modelLoadClass(class),
+		Scope:  modelLoadScope(scope),
+		Bytes:  bytes,
+		Detail: detail,
+		DType:  modelLoadDType(dtype),
+	})
+}
+
+// appendDebugCapacityVar folds one memory-capacity row into the shared debug var
+// shape. FreeKnown is gated on Known to match the prior inline behavior.
+func appendDebugCapacityVar(out []debugModelLoadCapacityVars, scope string, totalBytes, freeBytes int64, known, freeKnown bool) []debugModelLoadCapacityVars {
+	return append(out, debugModelLoadCapacityVars{
+		Scope:      modelLoadScope(scope),
+		TotalBytes: totalBytes,
+		FreeBytes:  freeBytes,
+		Known:      known,
+		FreeKnown:  known && freeKnown,
+	})
 }
 
 func debugMemoryFitRows(rows []memoryFitRow) []debugMemoryFitVars {

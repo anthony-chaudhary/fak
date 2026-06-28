@@ -197,8 +197,7 @@ func validateMethodAgainstRegistry(method string) (a2aMethodSpec, error) {
 // handleA2ASendMessage implements POST /a2a/v1/messages
 // Parses a single skill invocation, validates params, dispatches short method or creates task
 func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -338,8 +337,7 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 // handleA2AListTasks implements GET /a2a/v1/tasks
 // List tasks by context/caller/tenant
 func (s *Server) handleA2AListTasks(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "use GET")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -517,8 +515,7 @@ func (s *Server) handleA2ACancelTaskByID(w http.ResponseWriter, r *http.Request,
 // Return the authenticated/private card when allowed
 // Skills are projected from the reviewed method registry (#1019)
 func (s *Server) handleA2AGetExtendedAgentCard(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "use GET")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 

@@ -161,6 +161,16 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 	}
 }
 
+// accountStreamedTurn records the post-turn accounting the streaming paths share
+// but the buffered path folds into s.complete: inference metrics, the planner
+// request-memory observation, and the session-usage debit. began is the turn start
+// (for the inference duration).
+func (s *Server) accountStreamedTurn(ctx context.Context, turn servedSessionTurn, comp *agent.Completion, messages []agent.Message, began time.Time) {
+	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, time.Since(began))
+	s.observePlannerRequestMemory()
+	s.debitServedSessionTurn(ctx, turn, comp.Usage, messages)
+}
+
 func sessionUsageFromAgent(u agent.Usage) SessionUsage {
 	return SessionUsage{
 		PromptTokens:             u.PromptTokens,

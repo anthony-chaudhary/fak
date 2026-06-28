@@ -77,8 +77,8 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 	var p struct {
 		URI string `json:"uri"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid resources/read params: " + err.Error()}
+	if e := mcpUnmarshalParams(params, &p, "resources/read"); e != nil {
+		return nil, e
 	}
 	for _, r := range s.resources() {
 		if r.uri == p.URI {
@@ -134,8 +134,8 @@ func (s *Server) getPrompt(params json.RawMessage) (any, *rpcError) {
 		Name      string            `json:"name"`
 		Arguments map[string]string `json:"arguments"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid prompts/get params: " + err.Error()}
+	if e := mcpUnmarshalParams(params, &p, "prompts/get"); e != nil {
+		return nil, e
 	}
 	switch p.Name {
 	case "fak_guarded_call":

@@ -77,6 +77,18 @@ type geminiTurn struct {
 	resultAdmissions []ResultAdmission
 }
 
+// response renders the finished, adjudicated turn as the generateContent body —
+// the single shape the buffered handler returns and the synthesized SSE frame
+// carries.
+func (t *geminiTurn) response() geminiGenerateContentResponse {
+	return geminiGenerateContentResponse{
+		Candidates:    t.candidates,
+		UsageMetadata: t.usage,
+		ModelVersion:  t.model,
+		Fak:           fakExtFrom(t.adjs, t.resultAdmissions),
+	}
+}
+
 // handleGeminiGenerateContent is the adjudication PROXY on the Gemini wire. It
 // decodes the inbound generateContent request into the canonical transcript, arms
 // the result-side floor on any inbound functionResponse, forwards the (possibly
@@ -84,8 +96,7 @@ type geminiTurn struct {
 // functionCall through the kernel, and renders the survivors back as a Gemini
 // candidate — buffered, or as SSE when the client hit :streamGenerateContent.
 func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "use POST")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	model, method, ok := parseGeminiPath(r.URL.Path)
@@ -175,12 +186,7 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 		s.writeGeminiUpstreamError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, geminiGenerateContentResponse{
-		Candidates:    turn.candidates,
-		UsageMetadata: turn.usage,
-		ModelVersion:  turn.model,
-		Fak:           fakExtFrom(turn.adjs, turn.resultAdmissions),
-	})
+	writeJSON(w, http.StatusOK, turn.response())
 }
 
 // completeGeminiTurn runs the planner, adjudicates every proposed function call,
@@ -275,13 +281,7 @@ func (s *Server) streamGeminiPending(w http.ResponseWriter, r *http.Request, req
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	frame := geminiGenerateContentResponse{
-		Candidates:    turn.candidates,
-		UsageMetadata: turn.usage,
-		ModelVersion:  turn.model,
-		Fak:           fakExtFrom(turn.adjs, turn.resultAdmissions),
-	}
-	b, _ := json.Marshal(frame)
+	b, _ := json.Marshal(turn.response())
 	_, _ = w.Write([]byte("data: "))
 	_, _ = w.Write(b)
 	_, _ = w.Write([]byte("\n\n"))
