@@ -1,5 +1,18 @@
 # Metal hybrid (Qwen3.6 Gated-DeltaNet) prefill twin — closure status (#71)
 
+> **CLOSED 2026-06-28** — [#71](https://github.com/anthony-chaudhary/fak/issues/71) was closed
+> `completed` after re-verifying the gate this session: the `requirePreNorm`-lifting implementation
+> (`c80d64fa` core, `5c065118` twin/gate/stub/`kv.go` dispatch — `dos commit-audit` `diff-witnessed`,
+> `0ffae0be` Mac parity test) is on `origin/main`; the host-independent correctness gate
+> (`TestQwen35HybridViaMMMatchesCPUTemplate` + `TestMetalQwen35HybridPrefillOK`) re-ran **green** on
+> the `windows/amd64` author host; and the on-device f16 parity is witnessed green on the M3 Pro
+> (`cos=0.999377`, recorded in `9bd73429`). The sole residual — the pp22 throughput number — is
+> structurally unreachable through this f16 twin on the 36 GiB box and rides #70 / #1085 (§3 step 3),
+> exactly the operator recommendation in §3. The issue stayed OPEN despite being fully witnessed
+> because the auto-closer walks only the top-10 open-witnessed issues sorted DESC by number, starving
+> a low number like #71 — so the close was executed surgically (`gh issue close 71 -r completed`),
+> not via the mass closer.
+
 **Status: the host-independent slice is now FULLY COMMITTED on `main` — the backend-agnostic core
 (`c80d64fa`) plus the Metal twin, the `requirePreNorm`-lifting gate, the default-build stub, and the
 `kv.go` dispatch (`5c065118`, `dos commit-audit` `diff-witnessed`) — and its entire CPU-side logic is
