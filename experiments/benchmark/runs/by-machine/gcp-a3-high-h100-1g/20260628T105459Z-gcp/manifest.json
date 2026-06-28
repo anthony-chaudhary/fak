@@ -1,0 +1,40 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z",
+  "machine_id": "gcp-a3-high-h100-1g",
+  "timestamp": "20260628T105459Z",
+  "git": {
+    "rev": "unknown",
+    "branch": "master",
+    "dirty": false
+  },
+  "harness": {
+    "name": "fak-gcp-bench",
+    "version": "2"
+  },
+  "model": {
+    "name": "qwen2.5-3b-instruct-q8_0.gguf",
+    "precision": "Q8_0"
+  },
+  "config": {
+    "zone": "us-central1-a",
+    "machine_type": "a3-highgpu-1g",
+    "accelerator": "type=nvidia-h100-80gb,count=1",
+    "engines": [
+      "llama",
+      "fak-cpu",
+      "fak-cuda"
+    ]
+  },
+  "tags": [
+    "gcp",
+    "gpu",
+    "hopper",
+    "engine-llama",
+    "engine-fak-cpu",
+    "engine-fak-cuda"
+  ],
+  "artifacts": {
+    "gpu": "result.json"
+  }
+}

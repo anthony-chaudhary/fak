@@ -1,0 +1,31 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "machine_id": "gcp-a3-high-h100-1g",
+  "hostname": "gcp-a3-highgpu-1g",
+  "registered_at": "2026-06-28T10:54:59.979814Z",
+  "hardware": {
+    "gpu": {
+      "model": "NVIDIA H100 (Hopper)",
+      "count": 1,
+      "memory_gb": 80,
+      "compute_capability": "90"
+    },
+    "cpu": {
+      "cores_logical": 26
+    },
+    "ram_gb": 234
+  },
+  "os": {
+    "name": "GCP Deep Learning VM (CUDA)"
+  },
+  "cloud": {
+    "provider": "gcp",
+    "machine_type": "a3-highgpu-1g",
+    "zone": "us-central1-a"
+  },
+  "tags": [
+    "hopper",
+    "cuda",
+    "gcp"
+  ]
+}

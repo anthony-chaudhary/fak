@@ -60,7 +60,8 @@
         "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623",
         "node-macos-a-radix-qwen25-1.5b-uncontended-20260623",
         "gcp-g2-l4-nvidia-l4-20260624T142454Z",
-        "node-macos-a-mac-battery-20260625T050017Z"
+        "node-macos-a-mac-battery-20260625T050017Z",
+        "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z"
       ]
     },
     "by_model": {
@@ -125,7 +126,8 @@
       "qwen2.5-3b-instruct-q8_0.gguf": [
         "gcp-g2-l4-nvidia-l4-20260620T155017Z",
         "gcp-g2-l4-nvidia-l4-20260620T164719Z",
-        "gcp-g2-l4-nvidia-l4-20260624T142454Z"
+        "gcp-g2-l4-nvidia-l4-20260624T142454Z",
+        "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z"
       ],
       "qwen3.6-27b": [
         "workstation-a-qwen36-qwen36-agent-amd-vul-20260619",
@@ -169,7 +171,8 @@
         "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623",
         "node-macos-a-radix-qwen25-1.5b-uncontended-20260623",
         "gcp-g2-l4-nvidia-l4-20260624T142454Z",
-        "node-macos-a-mac-battery-20260625T050017Z"
+        "node-macos-a-mac-battery-20260625T050017Z",
+        "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z"
       ],
       "n/a": [
         "node-agent-live-offline-mock-20260617",
@@ -232,7 +235,7 @@
       ]
     }
   },
-  "last_updated": "2026-06-27T00:00:00+00:00",
+  "last_updated": "2026-06-28T10:57:00.872692+00:00",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -266,6 +269,17 @@
       "os": "Windows",
       "role": "agent-host",
       "runs": 0
+    },
+    "gcp-a3-high-h100-1g": {
+      "arch": "?",
+      "cpu_cores": 26,
+      "gpu": "none",
+      "hostname": "gcp-a3-highgpu-1g",
+      "id": "gcp-a3-high-h100-1g",
+      "last_run": "20260628T105459Z",
+      "os": "GCP Deep Learning VM (CUDA)",
+      "role": "bench-node",
+      "runs": 1
     },
     "gcp-g2-l4": {
       "arch": "x86_64",
@@ -1111,6 +1125,7 @@
       "path": "experiments\\benchmark\\runs\\by-machine\\gcp-g2-l4\\20260624T142454Z-gcp",
       "peak_tok_per_sec": null,
       "precision": "Q8_0",
+      "provenance": "measured",
       "run_id": "gcp-g2-l4-nvidia-l4-20260624T142454Z",
       "speedup": null,
       "tags": [
@@ -1130,6 +1145,7 @@
       "path": "experiments\\benchmark\\runs\\by-machine\\node-macos-a\\20260625T050017Z-mac-battery",
       "peak_tok_per_sec": null,
       "precision": "Q8_0",
+      "provenance": "measured",
       "run_id": "node-macos-a-mac-battery-20260625T050017Z",
       "speedup": null,
       "tags": [
@@ -1164,6 +1180,26 @@
         "negative-result"
       ],
       "timestamp": "2026-06-27T00:00:00Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "gcp-a3-high-h100-1g",
+      "model": "qwen2.5-3b-instruct-q8_0.gguf",
+      "path": "experiments\\benchmark\\runs\\by-machine\\gcp-a3-high-h100-1g\\20260628T105459Z-gcp",
+      "peak_tok_per_sec": null,
+      "precision": "Q8_0",
+      "provenance": "measured",
+      "run_id": "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z",
+      "speedup": null,
+      "tags": [
+        "gcp",
+        "gpu",
+        "hopper",
+        "engine-llama",
+        "engine-fak-cpu",
+        "engine-fak-cuda"
+      ],
+      "timestamp": "20260628T105459Z"
     }
   ],
   "version": "1.0"
