@@ -69,15 +69,9 @@ type DeepSWEBudgetSpec struct {
 	SameBudget bool   `json:"same_budget"`
 }
 
-type DeepSWECompareEvidenceLink struct {
-	Required     bool     `json:"required"`
-	Predictions  []string `json:"predictions"`
-	Metadata     []string `json:"metadata"`
-	OfficialEval []string `json:"official_eval"`
-	FakEvidence  []string `json:"fak_evidence"`
-	JoinKeys     []string `json:"join_keys"`
-	Detail       string   `json:"detail"`
-}
+// DeepSWECompareEvidenceLink is the DeepSWE contract's name for the shared
+// raw-vs-fak compare-evidence-link shape (see smokeEvidenceLink).
+type DeepSWECompareEvidenceLink = smokeEvidenceLink
 
 func BuildDeepSWERawFakContract(in DeepSWERawFakContractInput) DeepSWERawFakContract {
 	if in.MaxWorkers <= 0 {
@@ -209,48 +203,24 @@ func RenderDeepSWERawFakContractMarkdown(c DeepSWERawFakContract) string {
 	fmt.Fprintf(&b, "- Timeout: `%s`\n\n", c.Budget.Timeout)
 
 	renderSmokeArmsTable(&b, c.Arms)
-	fmt.Fprintf(&b, "\n## Compare Evidence Link\n\n")
-	fmt.Fprintf(&b, "- Required: `%t`\n", c.CompareEvidenceLink.Required)
-	fmt.Fprintf(&b, "- Predictions: `%s`\n", strings.Join(c.CompareEvidenceLink.Predictions, "`, `"))
-	fmt.Fprintf(&b, "- Metadata: `%s`\n", strings.Join(c.CompareEvidenceLink.Metadata, "`, `"))
-	fmt.Fprintf(&b, "- Official eval: `%s`\n", strings.Join(c.CompareEvidenceLink.OfficialEval, "`, `"))
-	fmt.Fprintf(&b, "- fak evidence: `%s`\n", strings.Join(c.CompareEvidenceLink.FakEvidence, "`, `"))
-	fmt.Fprintf(&b, "- Join keys: `%s`\n", strings.Join(c.CompareEvidenceLink.JoinKeys, "`, `"))
-	fmt.Fprintf(&b, "- Detail: %s\n", c.CompareEvidenceLink.Detail)
-	fmt.Fprintf(&b, "\n")
+	renderSmokeEvidenceLink(&b, c.CompareEvidenceLink)
 	renderSmokeGatesTable(&b, c.Gates)
 	renderRequiredBeforeClaim(&b, c.RequiredBeforeClaim)
 	return b.String()
 }
 
 func deepSWECompareEvidenceLink(rawOutputDir, fakOutputDir, rawPreds, fakPreds string) DeepSWECompareEvidenceLink {
-	return DeepSWECompareEvidenceLink{
-		Required: true,
-		Predictions: []string{
-			rawPreds,
-			fakPreds,
-		},
-		Metadata: []string{
-			joinPath(rawOutputDir, "meta.json"),
-			joinPath(fakOutputDir, "meta.json"),
-		},
-		OfficialEval: []string{
-			joinPath(rawOutputDir, "eval.json"),
-			joinPath(fakOutputDir, "eval.json"),
-		},
-		FakEvidence: []string{
-			joinPath(fakOutputDir, "fak-adjudication-evidence.jsonl"),
-			joinPath(fakOutputDir, "raw-fak-deepswe-compare.json"),
-		},
-		JoinKeys: []string{
+	return buildSmokeEvidenceLink(rawOutputDir, fakOutputDir, rawPreds, fakPreds,
+		"raw-fak-deepswe-compare.json",
+		[]string{
 			"instance_id",
 			"runner",
 			"model",
 			"prediction_sha256",
 			"evidence_id",
 		},
-		Detail: "The raw/fak compare artifact must join each SWE-bench prediction and official grader row to the fak-arm adjudication evidence for the same instance id.",
-	}
+		"The raw/fak compare artifact must join each SWE-bench prediction and official grader row to the fak-arm adjudication evidence for the same instance id.",
+	)
 }
 
 func deepSWERawFakStatus(gates []SmokeGate) string {
