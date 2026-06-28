@@ -31,7 +31,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -118,6 +117,8 @@ func main() {
 		cmdDebug(os.Args[2:])
 	case "policy":
 		cmdPolicy(os.Args[2:])
+	case "egress":
+		cmdEgress(os.Args[2:])
 	case "lint":
 		cmdLint(os.Args[2:])
 	case "codelint":
@@ -230,7 +231,7 @@ func main() {
 	case "lab":
 		cmdLab(os.Args[2:])
 	case "version", "-v", "--version":
-		fmt.Println(appversion.Current())
+		cmdVersion(os.Stdout)
 	case "-h", "--help", "help":
 		usage()
 	default:

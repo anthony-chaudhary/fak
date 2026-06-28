@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -662,26 +661,63 @@ func (s *Server) anthropicPassthrough() bool {
 	return ok && hp.Provider == agent.ProviderAnthropic
 }
 
-// resultAdmissionNote names any inbound tool result the kernel PAGED OUT, so the
-// agent learns its tool output was quarantined (replaced with a stub) rather than
-// silently broken. Returns "" when every result was a clean allow.
+// resultAdmissionNote names any inbound tool result the kernel PAGED OUT and explains,
+// in plain language, WHY and what to do about it — so a quarantine stub does not read as
+// a broken tool. It is deliberately NON-ALARMING: a quarantine is a routine safety
+// precaution (most often a credential-shaped string or injection-shaped text in the
+// tool's OWN output, which CAN be a false positive on placeholder/example content), not a
+// sign the agent did anything wrong. The structured per-result verdicts still ride the
+// machine-readable `fak` extension; this is the human/agent-facing prose for both the
+// buffered and streaming Anthropic paths. Returns "" when every result was a clean allow.
 func resultAdmissionNote(adms []ResultAdmission) string {
-	quarantined := make([]string, 0, len(adms))
+	items := make([]string, 0, len(adms))
 	for _, a := range adms {
-		if a.Verdict.Kind == "QUARANTINE" {
-			tool := a.Tool
-			if tool == "" {
-				tool = "tool_result"
-			}
-			quarantined = append(quarantined, fmt.Sprintf("%s (%s)", tool, a.Verdict.Reason))
+		if a.Verdict.Kind != "QUARANTINE" {
+			continue
 		}
+		tool := a.Tool
+		if tool == "" {
+			tool = "a tool result"
+		}
+		items = append(items, tool+" — "+quarantineReasonPhrase(a.Verdict.Reason))
 	}
-	if len(quarantined) == 0 {
+	if len(items) == 0 {
 		return ""
 	}
-	return "[fak] quarantined " + strconv.Itoa(len(quarantined)) +
-		" inbound tool result(s) before the model read them: " + strings.Join(quarantined, "; ") +
-		". The content was paged out (a stub stands in its place); do not treat the stub as the real result."
+	lead := "[fak] Heads up: 1 inbound tool result was held out of context as a safety precaution"
+	if len(items) > 1 {
+		lead = "[fak] Heads up: " + strconv.Itoa(len(items)) + " inbound tool results were held out of context as a safety precaution"
+	}
+	// Paged out, not lost — a short stub stands in its place. Tell the agent it can keep
+	// going (this is expected) and where the bytes went, rather than leaving it to read a
+	// bare stub as a failed tool call.
+	return lead + " (paged out, not lost — a stub stands in its place): " + strings.Join(items, "; ") +
+		". This is routine fak guard behavior, not an error you caused — continue normally. " +
+		"The held bytes stay retrievable through the kernel page-in gate if they are genuinely needed; " +
+		"just don't treat the stub itself as the real result."
+}
+
+// quarantineReasonPhrase turns a closed-vocabulary refusal CODE (e.g. "SECRET_EXFIL")
+// into a one-line, human explanation of what fak saw and why it held the result. It maps
+// the codes the result-side floor actually emits; an unrecognized code falls back to its
+// raw name so a newly added reason is surfaced rather than silently dropped. The SECRET
+// case names the false-positive risk explicitly, because the most common trigger is the
+// agent reading its OWN files (source, .env.example, docs) where a credential-SHAPED
+// string is a placeholder, not a live secret.
+func quarantineReasonPhrase(reason string) string {
+	switch reason {
+	case "SECRET_EXFIL", "RESULT_SECRET_DISCOVERED":
+		return "a credential-shaped string was detected in its output and withheld so it never enters the model's context " +
+			"(often a false positive on a placeholder or example credential, e.g. when reading your own source/config)"
+	case "TRUST_VIOLATION":
+		return "prompt-injection-shaped text was detected in its output (e.g. \"ignore previous instructions\") and withheld so it cannot steer the model"
+	case "OVERSIZE":
+		return "the result exceeded the context-admission budget and was paged out"
+	case "":
+		return "held by the kernel result floor"
+	default:
+		return "held by the kernel result floor (" + reason + ")"
+	}
 }
 
 // anyRepaired reports whether the kernel rewrote any admitted call's arguments.
