@@ -249,6 +249,11 @@ type benchFlags struct {
 	loadProfileTraceEvery *int
 	phaseProfile          *bool
 	budget                *float64
+	preflight             *bool
+	smoke                 *bool
+	smokeDeadline         *time.Duration
+	fitCheck              *bool
+	loadProgress          *bool
 }
 
 // parseFlags defines and parses the command-line flags, then expands a leading ~
@@ -280,6 +285,11 @@ func parseFlags() *benchFlags {
 		loadProfileTraceEvery: flag.Int("load-profile-trace-every", 25, "tensor interval for -load-profile-trace after the first tensor"),
 		phaseProfile:          flag.Bool("phase-profile", false, "emit one-shot coarse Session phase profiles for prefill/decode without perturbing median timings"),
 		budget:                flag.Float64("budget", 0, "fractional core budget for this run: 0.75 = use up to 75% of the machine's logical cores (portable across box sizes; 75 or 0.75 both accepted). 0 = unset. FAK_WORKERS, if set, still overrides."),
+		preflight:             flag.Bool("preflight", false, "FAIL FAST: read only the GGUF header (no tensor load), report arch/est-size/device-fit/ETA, and exit in seconds. Refuses a bad-arch / too-big / bad-header model before the multi-minute load. Requires -gguf."),
+		smoke:                 flag.Bool("smoke", false, "header preflight, then load (under -smoke-deadline) and decode ONE token to prove the forward runs, then exit — before the full prefill/decode/workload grid. Requires -gguf."),
+		smokeDeadline:         flag.Duration("smoke-deadline", 90*time.Second, "hard wall-clock cap on the -smoke load: if the load exceeds it, abort and report SMOKE_LOAD_TIMEOUT with the last progress line instead of hanging"),
+		fitCheck:              flag.Bool("fit-check", true, "before a normal load, refuse a model that a capacity-reporting -backend KNOWS won't fit (typed refusal instead of a mid-load OOM panic). Fail-open on legacy/cpu-ref. -fit-check=false for deliberate stress runs."),
+		loadProgress:          flag.Bool("load-progress", true, "stream throttled load progress (percent / GB / elapsed / GB-per-s) to stderr on lean/q4k GGUF loads so a multi-minute load is not silent; -load-progress=false silences it"),
 	}
 	flag.Parse()
 	*f.dir = pathutil.ExpandTilde(*f.dir)
@@ -332,6 +342,20 @@ func validateFlags(f *benchFlags) {
 		fmt.Fprintln(os.Stderr, "-load-profile-trace requires -gguf and -lean")
 		os.Exit(2)
 	}
+	// -preflight / -smoke read the header (and -smoke loads) of a GGUF; the estimators cover
+	// the f32 path too, so do NOT also require -lean (that would block a plain-GGUF preflight).
+	if *f.preflight && *f.gguf == "" {
+		fmt.Fprintln(os.Stderr, "-preflight requires -gguf")
+		os.Exit(2)
+	}
+	if *f.smoke && *f.gguf == "" {
+		fmt.Fprintln(os.Stderr, "-smoke requires -gguf")
+		os.Exit(2)
+	}
+	if *f.preflight && *f.smoke {
+		fmt.Fprintln(os.Stderr, "-preflight and -smoke are mutually exclusive (preflight is header-only; smoke also loads)")
+		os.Exit(2)
+	}
 }
 
 // acquireMetalLease takes a machine-wide GPU lease so concurrent -metal runs QUEUE
@@ -353,14 +377,23 @@ func acquireMetalLease(metal bool) func() {
 	return lease.Release
 }
 
-// newGGUFLoadProfiler builds the GGUF->Q8 quant-on-load profiler when one of the
-// profile flags is set on a -gguf -lean run, else returns nil.
+// newGGUFLoadProfiler builds the GGUF->Q8 quant-on-load profiler. It is created when either a
+// -load-profile* flag is set (which attaches the machine-readable load_profile to the report) OR
+// -load-progress is on for a lean GGUF load (the default) — so a multi-minute load streams a
+// throttled percent/GB/elapsed/GB-per-s status to stderr instead of being a silent black box.
+// Returns nil when neither applies (e.g. the f32 path, which does not Tick) so the loader keeps
+// its existing no-bookkeeping behavior.
 func newGGUFLoadProfiler(f *benchFlags) *ggufload.LoadProfiler {
-	wantLoadProfile := (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) && *f.gguf != "" && *f.lean
-	if !wantLoadProfile {
+	leanGGUF := *f.gguf != "" && *f.lean
+	wantLoadProfile := (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) && leanGGUF
+	wantProgress := *f.loadProgress && leanGGUF
+	if !wantLoadProfile && !wantProgress {
 		return nil
 	}
 	lp := ggufload.NewLoadProfiler()
+	if wantProgress {
+		lp.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
+	}
 	if *f.loadProfileTrace {
 		lp.Trace = os.Stderr
 		lp.Every = *f.loadProfileTraceEvery
@@ -747,6 +780,13 @@ func main() {
 	applyBudget(*f.budget)
 	validateFlags(f)
 
+	// FAIL FAST: -preflight reads only the GGUF header and exits in seconds, never loading a
+	// tensor. It is the answer to "load something for 20 min just to learn a small thing".
+	if *f.preflight {
+		runPreflight(f)
+		return
+	}
+
 	prefillSizes, parseErr := parsePositiveInts(*f.prefillSizesCSV)
 	if parseErr != nil {
 		fmt.Fprintln(os.Stderr, "prefill-sizes:", parseErr)
@@ -765,10 +805,17 @@ func main() {
 
 	defer acquireMetalLease(*f.metal)()
 
+	// FAIL FAST before the load: when a capacity-reporting -backend is named and the model is
+	// known too big, refuse with a typed sizing message instead of OOM-panicking mid-load.
+	// Header-only and fail-open (legacy/cpu-ref never refused). -fit-check=false to override.
+	if *f.fitCheck && *f.gguf != "" {
+		runFitGate(f)
+	}
+
 	ggufLoadProfiler := newGGUFLoadProfiler(f)
 
 	t0 := time.Now()
-	m, modelName, err := loadModel(f, ggufLoadProfiler)
+	m, modelName, err := loadModelMaybeDeadline(f, ggufLoadProfiler)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load:", err)
 		os.Exit(1)
@@ -779,7 +826,10 @@ func main() {
 	loadNanos := time.Since(t0).Nanoseconds()
 	loadMS := float64(loadNanos) / 1e6
 	var ggufLoadProfile *ggufload.LoadProfile
-	if ggufLoadProfiler != nil {
+	// Attach the machine-readable load_profile to the report only when a -load-profile* flag
+	// asked for it. A profiler created solely for default-on -load-progress streams to stderr
+	// but must not bloat every report's JSON with a phase breakdown nobody requested.
+	if ggufLoadProfiler != nil && (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) {
 		ggufLoadProfile = ggufLoadProfiler.Snapshot("gguf-lean-q8", *f.gguf, loadNanos)
 	}
 	if *f.loadOnly {
@@ -797,6 +847,14 @@ func main() {
 		tq := time.Now()
 		m.Quantize()
 		quantMS = float64(time.Since(tq).Nanoseconds()) / 1e6
+	}
+
+	// -smoke: prove the forward actually runs (load + one decode) and exit BEFORE the full
+	// prefill/decode/workload grid, so a broken forward is caught in one token, not after the
+	// whole grid is set up. The load already happened under -smoke-deadline above.
+	if *f.smoke {
+		runSmoke(f, m, modelName, loadMS, vocab)
+		return
 	}
 	newSession := func() *model.Session {
 		if be != nil {
@@ -877,6 +935,193 @@ func main() {
 	}
 
 	writeReport(*f.out, report)
+}
+
+// modelbenchDeviceHeadroom matches serve's device-fit headroom (serveGGUFDeviceHeadroom): the
+// fraction of the device budget reserved for KV/scratch/activations not in the weight estimate.
+const modelbenchDeviceHeadroom = 0.15
+
+// preflightInputFor opens the GGUF header (no tensor read) and builds the classifier input for
+// the resolved backend and load regime. Returns the input ready for BuildModelPreflight; the
+// OpenErr field carries any header-open failure so the classifier reports REFUSE_BAD_HEADER.
+func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInput {
+	ws, err := ggufload.OpenWeights(*f.gguf)
+	return ggufload.PreflightInput{
+		Path:     *f.gguf,
+		OpenErr:  err,
+		Source:   ws,
+		Backend:  be,
+		Headroom: modelbenchDeviceHeadroom,
+		Lean:     *f.lean,
+		Q4K:      *f.q4k,
+	}
+}
+
+// runPreflight is the -preflight entry: resolve the backend, open only the header, classify, emit
+// the JSON report + a human summary to stderr, and exit non-zero on any REFUSE_*. It never calls
+// loadModel, so no tensor byte is read — the whole job finishes in seconds.
+func runPreflight(f *benchFlags) {
+	be, _ := resolveBackend(f)
+	in := preflightInputFor(f, be)
+	if in.Source != nil {
+		defer in.Source.Close()
+	}
+	pf := ggufload.BuildModelPreflight(in)
+	fmt.Fprint(os.Stderr, pf.Render())
+	writeReport(*f.out, map[string]any{
+		"app_version": appversion.Current(),
+		"engine":      "fak modelbench preflight",
+		"preflight":   pf,
+	})
+	if pf.Refused() {
+		os.Exit(1)
+	}
+}
+
+// runFitGate is the default pre-load device-fit refusal for a normal (non-preflight) run. It runs
+// the same header-only classifier and exits non-zero ONLY on REFUSE_TOO_BIG / REFUSE_BAD_HEADER /
+// REFUSE_BAD_ARCH — turning a would-be mid-load OOM into a typed refusal. Fail-open: with no
+// capacity-reporting backend it returns READY/FIT_UNKNOWN and the load proceeds unchanged.
+func runFitGate(f *benchFlags) {
+	be, _ := resolveBackend(f)
+	in := preflightInputFor(f, be)
+	if in.Source != nil {
+		defer in.Source.Close()
+	}
+	pf := ggufload.BuildModelPreflight(in)
+	if pf.Refused() {
+		fmt.Fprint(os.Stderr, pf.Render())
+		fmt.Fprintln(os.Stderr, "fak: refusing the load (pass -fit-check=false to override the fit gate, or -preflight to inspect)")
+		os.Exit(1)
+	}
+}
+
+// Closed-vocabulary -smoke statuses.
+const (
+	smokeStatusLoaded        = "SMOKE_LOADED"         // load finished within the deadline
+	smokeStatusTimeout       = "SMOKE_LOAD_TIMEOUT"   // load exceeded -smoke-deadline (aborted)
+	smokeStatusOK            = "SMOKE_OK"             // forward ran and produced finite logits
+	smokeStatusForwardFailed = "SMOKE_FORWARD_FAILED" // forward panicked or produced NaN/Inf
+)
+
+// smokeOutcome is the PURE deadline decision for the -smoke load: given whether the load finished
+// and how long it took against the deadline, it returns the closed status. Factored out so the
+// timeout logic is unit-testable without a real multi-minute load.
+func smokeOutcome(done bool, elapsed, deadline time.Duration) string {
+	if !done {
+		return smokeStatusTimeout
+	}
+	if deadline > 0 && elapsed > deadline {
+		return smokeStatusTimeout
+	}
+	return smokeStatusLoaded
+}
+
+// loadModelMaybeDeadline loads the model. Under -smoke it runs the load in a goroutine and races
+// it against -smoke-deadline: on timeout it reports SMOKE_LOAD_TIMEOUT with the elapsed time (the
+// load goroutine is abandoned; the process exits) so a load that would have run for an hour is
+// bounded. Without -smoke it loads synchronously, exactly as before.
+func loadModelMaybeDeadline(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
+	if !*f.smoke || *f.smokeDeadline <= 0 {
+		return loadModel(f, lp)
+	}
+	type loadRes struct {
+		m    *model.Model
+		name string
+		err  error
+	}
+	ch := make(chan loadRes, 1)
+	start := time.Now()
+	go func() {
+		m, name, err := loadModel(f, lp)
+		ch <- loadRes{m, name, err}
+	}()
+	select {
+	case r := <-ch:
+		// Won the race within the deadline window.
+		return r.m, r.name, r.err
+	case <-time.After(*f.smokeDeadline):
+		// The deadline fired first. smokeOutcome (the pure, tested classifier) names this
+		// SMOKE_LOAD_TIMEOUT; report it and exit. The load goroutine is abandoned (the process
+		// exits), so a load that would have run for an hour is bounded by -smoke-deadline.
+		elapsed := time.Since(start)
+		if smokeOutcome(false, elapsed, *f.smokeDeadline) == smokeStatusTimeout {
+			reportSmokeTimeout(f, elapsed)
+		}
+		return nil, "", nil // unreachable: reportSmokeTimeout exits
+	}
+}
+
+// reportSmokeTimeout emits the SMOKE_LOAD_TIMEOUT artifact (with the last progress visible on
+// stderr from the load profiler) and exits non-zero.
+func reportSmokeTimeout(f *benchFlags, elapsed time.Duration) {
+	fmt.Fprintf(os.Stderr, "fak: -smoke load exceeded -smoke-deadline %s (%.0fs elapsed) — aborting\n", *f.smokeDeadline, elapsed.Seconds())
+	writeReport(*f.out, map[string]any{
+		"app_version":     appversion.Current(),
+		"engine":          "fak modelbench smoke",
+		"smoke_status":    smokeStatusTimeout,
+		"source":          *f.gguf,
+		"elapsed_seconds": elapsed.Seconds(),
+		"deadline":        f.smokeDeadline.String(),
+	})
+	os.Exit(1)
+}
+
+// allFinite reports whether every logit is a finite number — the cheapest proof a forward pass
+// produced real output rather than NaN/Inf (a broken kernel or a config mismatch).
+func allFinite(logits []float32) bool {
+	if len(logits) == 0 {
+		return false
+	}
+	for _, v := range logits {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// runSmoke is the -smoke entry after a successful (deadline-bounded) load: it decodes ONE token
+// and asserts the logits are finite, emitting SMOKE_OK or SMOKE_FORWARD_FAILED and exiting. This
+// proves the forward runs before committing to the full prefill/decode/workload grid. It reuses
+// the recover-guarded prefill pattern so a panicking forward becomes a clean SMOKE_FORWARD_FAILED.
+func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, vocab int) {
+	status := smokeStatusOK
+	var detail string
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				status = smokeStatusForwardFailed
+				detail = fmt.Sprintf("forward panicked: %v", r)
+			}
+		}()
+		s := m.NewSession()
+		s.Quant = *f.quant
+		s.Q4K = *f.q4k
+		s.Metal = *f.metal
+		defer s.Close()
+		logits := s.Prefill(lcgIDs(*f.decodePrompt, vocab))
+		if !allFinite(logits) {
+			status = smokeStatusForwardFailed
+			detail = "prefill produced non-finite logits (NaN/Inf)"
+		}
+	}()
+	fmt.Fprintf(os.Stderr, "fak modelbench smoke: %s (%s, loaded in %.1fs)\n", status, modelName, loadMS/1000)
+	if detail != "" {
+		fmt.Fprintf(os.Stderr, "  detail: %s\n", detail)
+	}
+	writeReport(*f.out, map[string]any{
+		"app_version":  appversion.Current(),
+		"engine":       "fak modelbench smoke",
+		"model":        modelName,
+		"source":       loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k),
+		"smoke_status": status,
+		"load_ms":      loadMS,
+		"smoke_detail": detail,
+	})
+	if status != smokeStatusOK {
+		os.Exit(1)
+	}
 }
 
 func loadSource(hf, gguf, dir string, lean, q4k bool) string {

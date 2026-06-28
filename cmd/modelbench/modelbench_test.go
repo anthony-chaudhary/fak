@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestParsePositiveInts(t *testing.T) {
@@ -93,6 +94,52 @@ func TestArgmax(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := argmax(tt.in); got != tt.want {
 				t.Fatalf("argmax(%v) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSmokeOutcome(t *testing.T) {
+	const dl = 90 * time.Second
+	tests := []struct {
+		name     string
+		done     bool
+		elapsed  time.Duration
+		deadline time.Duration
+		want     string
+	}{
+		{name: "finished under deadline", done: true, elapsed: 5 * time.Second, deadline: dl, want: smokeStatusLoaded},
+		{name: "not finished (deadline fired)", done: false, elapsed: dl, deadline: dl, want: smokeStatusTimeout},
+		{name: "finished but over deadline", done: true, elapsed: 2 * dl, deadline: dl, want: smokeStatusTimeout},
+		{name: "finished, no deadline set", done: true, elapsed: time.Hour, deadline: 0, want: smokeStatusLoaded},
+		{name: "exactly at deadline counts as loaded", done: true, elapsed: dl, deadline: dl, want: smokeStatusLoaded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := smokeOutcome(tt.done, tt.elapsed, tt.deadline); got != tt.want {
+				t.Fatalf("smokeOutcome(%v, %v, %v) = %s, want %s", tt.done, tt.elapsed, tt.deadline, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAllFinite(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []float32
+		want bool
+	}{
+		{name: "all finite", in: []float32{-1, 0, 3.5, 1e9}, want: true},
+		{name: "empty is not a valid forward result", in: []float32{}, want: false},
+		{name: "contains NaN", in: []float32{1, float32(math.NaN()), 3}, want: false},
+		{name: "contains +Inf", in: []float32{1, float32(math.Inf(1)), 3}, want: false},
+		{name: "contains -Inf", in: []float32{float32(math.Inf(-1)), 2}, want: false},
+		{name: "single finite", in: []float32{42}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := allFinite(tt.in); got != tt.want {
+				t.Fatalf("allFinite(%v) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
 	}
