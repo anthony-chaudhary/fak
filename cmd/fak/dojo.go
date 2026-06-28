@@ -29,7 +29,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dojopost"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
-	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
@@ -585,34 +584,16 @@ func foldDojoCorpusRun(corpus string, ttl resume.CacheTTL, maxFiles int, root st
 // resolves the channel + token and posts to Slack. It reuses the scoreboard transport
 // (a plain chat.postMessage client), matching `fak bench post`.
 func emitDojoPost(stdout, stderr io.Writer, post dojopost.Post, channel, token string, dryRun bool) int {
-	if dryRun {
-		fmt.Fprintln(stdout, post.Text())
-		return 0
-	}
-	ch := channel
-	if ch == "" {
-		ch = dojopost.ResolveChannel()
-	}
-	if ch == "" {
-		fmt.Fprintln(stderr, "fak dojo post: no channel: pass --channel, set FAK_DOJO_CHANNEL, or add it to .env.slack.local")
-		return 2
-	}
-	tok := token
-	if tok == "" {
-		tok = dojopost.ResolveToken()
-	}
-	client, err := scoreboard.NewClient(tok)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak dojo post: %v\n", err)
-		return 2
-	}
-	ts, err := client.Post(ctx(), ch, post.Text(), post.Blocks())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak dojo post: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
-	return 0
+	return slackPostTail(stdout, stderr, slackPostSpec{
+		card:           post,
+		channel:        channel,
+		token:          token,
+		dryRun:         dryRun,
+		label:          "fak dojo post",
+		chanEnv:        "FAK_DOJO_CHANNEL",
+		resolveChannel: dojopost.ResolveChannel,
+		resolveToken:   dojopost.ResolveToken,
+	})
 }
 
 // resolveDojoSource picks the post source: the flag, else the shared defaultSource

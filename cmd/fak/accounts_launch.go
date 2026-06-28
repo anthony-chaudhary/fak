@@ -107,17 +107,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", err)
 		return 1
 	}
-	for i, hop := range chain {
-		to := home.Name
-		if i+1 < len(chain) {
-			to = chain[i+1]
-		}
-		fmt.Fprintf(stderr, "note: %q can't serve -> rehoming to %q\n", hop, to)
-	}
-	id := accounts.DeriveIdentity(home.Dir)
-	if !id.HasCreds {
-		fmt.Fprintf(stderr, "warning: %q (%s) has no live credentials — claude will prompt for /login\n", home.Name, home.Dir)
-	}
+	id := accountsReportHome(stderr, home, chain)
 
 	command := strings.TrimSpace(p.command)
 	if command == "" {

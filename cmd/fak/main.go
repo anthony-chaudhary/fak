@@ -14,14 +14,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -680,31 +678,13 @@ func budgetWebhookObserver(rawURL string) session.BudgetObserver {
 	if rawURL == "" {
 		return nil
 	}
-	ua := "fak/" + appversion.Current()
-	client := &http.Client{Timeout: 5 * time.Second}
 	return func(ev session.BudgetEvent) {
 		body, err := json.Marshal(ev)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fak: budget webhook encode failed: %v\n", err)
 			return
 		}
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "fak: budget webhook build failed: %v\n", err)
-				return
-			}
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("User-Agent", ua)
-			resp, err := client.Do(req)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "fak: budget webhook POST to %s failed: %v\n", rawURL, err)
-				return
-			}
-			_ = resp.Body.Close()
-		}()
+		webhookPOST("budget webhook", rawURL, body, "application/json")
 	}
 }
 

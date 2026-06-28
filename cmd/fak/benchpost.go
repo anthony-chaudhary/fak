@@ -127,36 +127,73 @@ func loadRequestPlan(planJSON, now, python string, stderr io.Writer) (*benchpost
 	}
 }
 
-// emitBenchPost is the shared dry-run / post tail for both bench subcommands.
-func emitBenchPost(stdout, stderr io.Writer, post benchpost.Post, channel, token string, dryRun bool) int {
-	if dryRun {
-		fmt.Fprintln(stdout, post.Text())
+// slackCard is the rendered payload every Slack-feeder post tail handles: a plain-text
+// fallback and the structured block list. benchpost.Post, blockerpost.Blocker, and
+// dojopost.Post all satisfy it.
+type slackCard interface {
+	Text() string
+	Blocks() []any
+}
+
+// slackPostSpec parameterizes the shared dry-run / post tail (slackPostTail). The only
+// per-command differences are the rendered card, the channel/token resolvers, and the
+// error labels.
+type slackPostSpec struct {
+	card           slackCard
+	channel, token string
+	dryRun         bool
+	label          string // error/line prefix, e.g. "fak bench post"
+	chanEnv        string // env var named in the "no channel" guidance
+	resolveChannel func() string
+	resolveToken   func() string
+}
+
+// slackPostTail renders the card on --dry-run, else resolves the channel + token and
+// posts via the shared scoreboard chat.postMessage transport. It is the tail that the
+// bench, blockers, and dojo post subcommands all share.
+func slackPostTail(stdout, stderr io.Writer, s slackPostSpec) int {
+	if s.dryRun {
+		fmt.Fprintln(stdout, s.card.Text())
 		return 0
 	}
-	ch := channel
+	ch := s.channel
 	if ch == "" {
-		ch = benchpost.ResolveChannel()
+		ch = s.resolveChannel()
 	}
 	if ch == "" {
-		fmt.Fprintln(stderr, "fak bench post: no channel: pass --channel, set FAK_BENCH_CHANNEL, or add it to .env.slack.local")
+		fmt.Fprintf(stderr, "%s: no channel: pass --channel, set %s, or add it to .env.slack.local\n", s.label, s.chanEnv)
 		return 2
 	}
-	tok := token
+	tok := s.token
 	if tok == "" {
-		tok = benchpost.ResolveToken()
+		tok = s.resolveToken()
 	}
 	client, err := scoreboard.NewClient(tok)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak bench post: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", s.label, err)
 		return 2
 	}
-	ts, err := client.Post(ctx(), ch, post.Text(), post.Blocks())
+	ts, err := client.Post(ctx(), ch, s.card.Text(), s.card.Blocks())
 	if err != nil {
-		fmt.Fprintf(stderr, "fak bench post: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", s.label, err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
 	return 0
+}
+
+// emitBenchPost is the shared dry-run / post tail for both bench subcommands.
+func emitBenchPost(stdout, stderr io.Writer, post benchpost.Post, channel, token string, dryRun bool) int {
+	return slackPostTail(stdout, stderr, slackPostSpec{
+		card:           post,
+		channel:        channel,
+		token:          token,
+		dryRun:         dryRun,
+		label:          "fak bench post",
+		chanEnv:        "FAK_BENCH_CHANNEL",
+		resolveChannel: benchpost.ResolveChannel,
+		resolveToken:   benchpost.ResolveToken,
+	})
 }
 
 // resolveBenchSource picks the post source: the flag, else the shared defaultSource

@@ -127,7 +127,7 @@ func webhookSink(rawURL string) notifySink {
 		if err != nil {
 			return err
 		}
-		webhookPOST(rawURL, body, "")
+		webhookPOST("webhook", rawURL, body, "")
 		return nil
 	}}
 }
@@ -139,7 +139,7 @@ func slackSink(rawURL string) notifySink {
 		if err != nil {
 			return err
 		}
-		webhookPOST(rawURL, body, "application/json")
+		webhookPOST("webhook", rawURL, body, "application/json")
 		return nil
 	}}
 }
@@ -194,10 +194,10 @@ func combineBudgetObservers(obs ...session.BudgetObserver) session.BudgetObserve
 
 // webhookPOST fires a fire-and-forget JSON POST: a goroutine under a short timeout, any
 // transport error logged to stderr but never blocking or failing the served turn that
-// produced the event. contentType defaults to application/json when empty. It is the
-// shared core lifted out of budgetWebhookObserver so #743's webhook and #761's sinks send
-// the same way. A blank URL is a no-op.
-func webhookPOST(rawURL string, body []byte, contentType string) {
+// produced the event. label prefixes the stderr lines (e.g. "webhook", "budget webhook").
+// contentType defaults to application/json when empty. It is the shared core that #743's
+// budget webhook and #761's sinks send through. A blank URL is a no-op.
+func webhookPOST(label, rawURL string, body []byte, contentType string) {
 	if rawURL == "" {
 		return
 	}
@@ -210,7 +210,7 @@ func webhookPOST(rawURL string, body []byte, contentType string) {
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak: webhook build failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "fak: %s build failed: %v\n", label, err)
 			return
 		}
 		req.Header.Set("Content-Type", contentType)
@@ -218,7 +218,7 @@ func webhookPOST(rawURL string, body []byte, contentType string) {
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak: webhook POST to %s failed: %v\n", rawURL, err)
+			fmt.Fprintf(os.Stderr, "fak: %s POST to %s failed: %v\n", label, rawURL, err)
 			return
 		}
 		_ = resp.Body.Close()

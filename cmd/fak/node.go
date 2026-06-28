@@ -336,7 +336,7 @@ const darwinPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 `
 
 func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
-	addr, offHost, keyEnv, uninstall, cfgDir := in.addr, in.offHost, in.keyEnv, in.uninstall, in.cfgDir
+	addr, uninstall, cfgDir := in.addr, in.uninstall, in.cfgDir
 	agentsDir := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents")
 	plistPath := filepath.Join(agentsDir, nodeGatewayLabel+".plist")
 
@@ -348,19 +348,9 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 		return 0
 	}
 
-	// Ensure dirs exist.
-	logDir := filepath.Join(cfgDir, "logs")
-	for _, d := range []string{cfgDir, logDir, agentsDir} {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			fmt.Fprintf(stderr, "fak node install: mkdir %s: %v\n", d, err)
-			return 1
-		}
-	}
-
-	// Write the default policy to the config dir.
-	policyPath := filepath.Join(cfgDir, "node-policy.json")
-	if err := os.WriteFile(policyPath, nodeDefaultPolicyJSON, 0644); err != nil {
-		fmt.Fprintf(stderr, "fak node install: write policy: %v\n", err)
+	// Ensure dirs exist and write the default policy.
+	logDir, policyPath, ok := nodeInstallDirs(stderr, cfgDir, agentsDir)
+	if !ok {
 		return 1
 	}
 
@@ -371,26 +361,10 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 		return 1
 	}
 
-	// Find our own binary.
-	fakBin, err := os.Executable()
-	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: resolve binary: %v\n", err)
+	// Resolve our own binary and (for off-host installs) the bearer key.
+	fakBin, gatewayKey, requireKeyEnv, ok := nodeInstallBinAndKey(stdout, stderr, in)
+	if !ok {
 		return 1
-	}
-
-	// Resolve the bearer key for off-host installs WITHOUT silently rotating it: a re-install
-	// reuses the persisted key so configured clients keep working (#4); a fresh mint is flagged.
-	gatewayKey := ""
-	requireKeyEnv := ""
-	if offHost {
-		requireKeyEnv = keyEnv
-		key, minted, kerr := nodeResolveKey(cfgDir, keyEnv, in.rotateKey)
-		if kerr != nil {
-			fmt.Fprintf(stderr, "fak node install: %v\n", kerr)
-			return 1
-		}
-		gatewayKey = key
-		nodeReportKeyDisposition(stdout, minted, in.rotateKey)
 	}
 
 	// Render the plist.
@@ -466,6 +440,49 @@ func nodeInstallFinalize(stdout, stderr io.Writer, in nodeInstallParams, gateway
 	}
 	nodePrintClientLines(stdout, stderr, in.offHost, gatewayKey, localPort)
 	return 0
+}
+
+// nodeInstallDirs is the shared head of every platform install path: it creates the
+// config and log dirs (plus any platform-specific extras) and writes the default node
+// policy. It returns the resolved log dir and policy path, or ok=false after reporting
+// the failure to stderr.
+func nodeInstallDirs(stderr io.Writer, cfgDir string, extraDirs ...string) (logDir, policyPath string, ok bool) {
+	logDir = filepath.Join(cfgDir, "logs")
+	for _, d := range append([]string{cfgDir, logDir}, extraDirs...) {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			fmt.Fprintf(stderr, "fak node install: mkdir %s: %v\n", d, err)
+			return "", "", false
+		}
+	}
+	policyPath = filepath.Join(cfgDir, "node-policy.json")
+	if err := os.WriteFile(policyPath, nodeDefaultPolicyJSON, 0644); err != nil {
+		fmt.Fprintf(stderr, "fak node install: write policy: %v\n", err)
+		return "", "", false
+	}
+	return logDir, policyPath, true
+}
+
+// nodeInstallBinAndKey resolves the running fak binary and, for off-host installs, the
+// bearer key WITHOUT silently rotating it: a re-install reuses the persisted key so
+// configured clients keep working (#4); a fresh mint is flagged. It returns ok=false
+// after reporting the failure to stderr.
+func nodeInstallBinAndKey(stdout, stderr io.Writer, in nodeInstallParams) (fakBin, gatewayKey, requireKeyEnv string, ok bool) {
+	fakBin, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak node install: resolve binary: %v\n", err)
+		return "", "", "", false
+	}
+	if in.offHost {
+		requireKeyEnv = in.keyEnv
+		key, minted, kerr := nodeResolveKey(in.cfgDir, in.keyEnv, in.rotateKey)
+		if kerr != nil {
+			fmt.Fprintf(stderr, "fak node install: %v\n", kerr)
+			return "", "", "", false
+		}
+		gatewayKey = key
+		nodeReportKeyDisposition(stdout, minted, in.rotateKey)
+	}
+	return fakBin, gatewayKey, requireKeyEnv, true
 }
 
 // nodeWaitHealthy polls <base>/healthz up to 20 times (~10s) and returns whether a live
@@ -588,7 +605,7 @@ WantedBy=default.target
 `
 
 func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
-	addr, offHost, keyEnv, uninstall, cfgDir := in.addr, in.offHost, in.keyEnv, in.uninstall, in.cfgDir
+	addr, uninstall, cfgDir := in.addr, in.uninstall, in.cfgDir
 	unitDir := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user")
 	unitPath := filepath.Join(unitDir, "fak-serve-gateway.service")
 
@@ -600,36 +617,14 @@ func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
 		return 0
 	}
 
-	logDir := filepath.Join(cfgDir, "logs")
-	for _, d := range []string{cfgDir, logDir, unitDir} {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			fmt.Fprintf(stderr, "fak node install: mkdir %s: %v\n", d, err)
-			return 1
-		}
-	}
-
-	policyPath := filepath.Join(cfgDir, "node-policy.json")
-	if err := os.WriteFile(policyPath, nodeDefaultPolicyJSON, 0644); err != nil {
-		fmt.Fprintf(stderr, "fak node install: write policy: %v\n", err)
+	logDir, policyPath, ok := nodeInstallDirs(stderr, cfgDir, unitDir)
+	if !ok {
 		return 1
 	}
 
-	fakBin, err := os.Executable()
-	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: resolve binary: %v\n", err)
+	fakBin, gatewayKey, requireKeyEnv, ok := nodeInstallBinAndKey(stdout, stderr, in)
+	if !ok {
 		return 1
-	}
-
-	gatewayKey, requireKeyEnv := "", ""
-	if offHost {
-		requireKeyEnv = keyEnv
-		key, minted, kerr := nodeResolveKey(cfgDir, keyEnv, in.rotateKey)
-		if kerr != nil {
-			fmt.Fprintf(stderr, "fak node install: %v\n", kerr)
-			return 1
-		}
-		gatewayKey = key
-		nodeReportKeyDisposition(stdout, minted, in.rotateKey)
 	}
 
 	tmpl, _ := template.New("unit").Parse(linuxUnitTemplate)
@@ -674,7 +669,7 @@ set "{{.RequireKeyEnv}}={{.GatewayKey}}"
 `
 
 func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
-	addr, offHost, keyEnv, uninstall, cfgDir := in.addr, in.offHost, in.keyEnv, in.uninstall, in.cfgDir
+	addr, uninstall, cfgDir := in.addr, in.uninstall, in.cfgDir
 	if uninstall {
 		_ = exec.Command("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
 		out, err := exec.Command("schtasks", "/Delete", "/TN", nodeWindowsTaskName, "/F").CombinedOutput()
@@ -687,36 +682,14 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 		return 0
 	}
 
-	logDir := filepath.Join(cfgDir, "logs")
-	for _, d := range []string{cfgDir, logDir} {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			fmt.Fprintf(stderr, "fak node install: mkdir %s: %v\n", d, err)
-			return 1
-		}
-	}
-
-	policyPath := filepath.Join(cfgDir, "node-policy.json")
-	if err := os.WriteFile(policyPath, nodeDefaultPolicyJSON, 0644); err != nil {
-		fmt.Fprintf(stderr, "fak node install: write policy: %v\n", err)
+	logDir, policyPath, ok := nodeInstallDirs(stderr, cfgDir)
+	if !ok {
 		return 1
 	}
 
-	fakBin, err := os.Executable()
-	if err != nil {
-		fmt.Fprintf(stderr, "fak node install: resolve binary: %v\n", err)
+	fakBin, gatewayKey, requireKeyEnv, ok := nodeInstallBinAndKey(stdout, stderr, in)
+	if !ok {
 		return 1
-	}
-
-	gatewayKey, requireKeyEnv := "", ""
-	if offHost {
-		requireKeyEnv = keyEnv
-		key, minted, kerr := nodeResolveKey(cfgDir, keyEnv, in.rotateKey)
-		if kerr != nil {
-			fmt.Fprintf(stderr, "fak node install: %v\n", kerr)
-			return 1
-		}
-		gatewayKey = key
-		nodeReportKeyDisposition(stdout, minted, in.rotateKey)
 	}
 
 	// Render the runner .cmd the task launches.

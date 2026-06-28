@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/blockerpost"
-	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 // cmdBlockers posts a BLOCKER to the central Slack #blockers channel — the one place
@@ -134,34 +133,16 @@ func loadFeedIssues(path string) ([]blockerpost.Issue, error) {
 // resolve channel+token and post via the scoreboard transport (the same chat.postMessage
 // client every feeder reuses).
 func emitBlocker(stdout, stderr io.Writer, b blockerpost.Blocker, channel, token string, dryRun bool) int {
-	if dryRun {
-		fmt.Fprintln(stdout, b.Text())
-		return 0
-	}
-	ch := channel
-	if ch == "" {
-		ch = blockerpost.ResolveChannel()
-	}
-	if ch == "" {
-		fmt.Fprintln(stderr, "fak blockers: no channel: pass --channel, set FAK_BLOCKERS_CHANNEL, or add it to .env.slack.local")
-		return 2
-	}
-	tok := token
-	if tok == "" {
-		tok = blockerpost.ResolveToken()
-	}
-	client, err := scoreboard.NewClient(tok)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak blockers: %v\n", err)
-		return 2
-	}
-	ts, err := client.Post(ctx(), ch, b.Text(), b.Blocks())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak blockers: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
-	return 0
+	return slackPostTail(stdout, stderr, slackPostSpec{
+		card:           b,
+		channel:        channel,
+		token:          token,
+		dryRun:         dryRun,
+		label:          "fak blockers",
+		chanEnv:        "FAK_BLOCKERS_CHANNEL",
+		resolveChannel: blockerpost.ResolveChannel,
+		resolveToken:   blockerpost.ResolveToken,
+	})
 }
 
 // resolveBlockerSource picks the post source: the flag, else the shared defaultSource

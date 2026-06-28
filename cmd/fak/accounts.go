@@ -330,6 +330,19 @@ func accountsResolve(stdout, stderr io.Writer, positional []string, registryPath
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
+	accountsReportHome(stderr, home, chain)
+	if asEnv {
+		fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", home.Dir)
+	} else {
+		fmt.Fprintln(stdout, home.Dir)
+	}
+	return 0
+}
+
+// accountsReportHome prints the rehoming-chain notes for a resolved serving home and
+// warns when it carries no live credentials, returning the derived identity for any
+// further use. Shared by `accounts resolve`/`serve` and `accounts launch`.
+func accountsReportHome(stderr io.Writer, home accounts.Home, chain []string) accounts.Identity {
 	for i, hop := range chain {
 		to := home.Name
 		if i+1 < len(chain) {
@@ -341,12 +354,7 @@ func accountsResolve(stdout, stderr io.Writer, positional []string, registryPath
 	if !id.HasCreds {
 		fmt.Fprintf(stderr, "warning: %q (%s) has no live credentials — claude will prompt for /login\n", home.Name, home.Dir)
 	}
-	if asEnv {
-		fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", home.Dir)
-	} else {
-		fmt.Fprintln(stdout, home.Dir)
-	}
-	return 0
+	return id
 }
 
 // accountsPull copies the credential bundles a name's seat depends on INTO its serving dir,
