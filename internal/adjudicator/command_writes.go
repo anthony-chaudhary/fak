@@ -49,7 +49,59 @@ func commandSelfModify(args map[string]any, globs []string) string {
 	if !commandWrites(cmd) {
 		return "" // a read of a guarded file is allowed; only writes are refused
 	}
+	// SSH/SCP identity-file READ (#1086): an `ssh -i <key>` / `scp -i <key>` names a
+	// credential glob (id_rsa / id_ed25519) only as the key it READS for auth, not a
+	// write target — but the command may carry a write verb elsewhere (scp's own `cp `
+	// substring, or a remote build's `cp`/`mv`), so commandWrites is true and the glob
+	// matched. That conflates a sanctioned remote build+bench over SSH with a self-edit
+	// of a key. Re-check the match with the `-i <keyfile>` operand removed: if no guarded
+	// glob remains, the only match WAS the identity read, so allow. A genuine write that
+	// still names a guarded glob after the identity arg is stripped (e.g. `tee ~/.ssh/
+	// id_rsa`, or a redirect into a key) keeps its deny — the floor is unchanged for it.
+	if stripped, did := stripSSHIdentityArg(cmd); did {
+		if matchGlob(stripped, globs) == "" {
+			return ""
+		}
+	}
 	return g
+}
+
+// stripSSHIdentityArg removes the `-i <keyfile>` identity operand from an ssh/scp command
+// string, returning the remainder and whether a strip happened. It fires only when the
+// command is an ssh/scp invocation (leading token, so a tool literally named `ssh-keygen`
+// or an arbitrary program with a `-i` flag is unaffected) carrying an `-i <path>` pair.
+// The keyfile token is whatever follows `-i` up to the next space — exactly what OpenSSH
+// treats as the IdentityFile argument. It is a surgical removal for the self-modify
+// re-check ONLY; the original command is what actually runs.
+func stripSSHIdentityArg(cmd string) (string, bool) {
+	lc := strings.ToLower(cmd)
+	// Only ssh / scp / sftp read a `-i <keyfile>` identity; gate on the leading token so
+	// the carve-out cannot be reached by an arbitrary program that happens to take `-i`.
+	if !hasCommandLeadingToken(lc, "ssh") &&
+		!hasCommandLeadingToken(lc, "scp") &&
+		!hasCommandLeadingToken(lc, "sftp") {
+		return cmd, false
+	}
+	fields := strings.Fields(cmd)
+	out := make([]string, 0, len(fields))
+	stripped := false
+	for i := 0; i < len(fields); i++ {
+		if fields[i] == "-i" && i+1 < len(fields) {
+			i++ // skip the keyfile operand too
+			stripped = true
+			continue
+		}
+		// The glued `-i<path>` spelling (no space) — OpenSSH accepts it.
+		if strings.HasPrefix(fields[i], "-i") && len(fields[i]) > 2 {
+			stripped = true
+			continue
+		}
+		out = append(out, fields[i])
+	}
+	if !stripped {
+		return cmd, false
+	}
+	return strings.Join(out, " "), true
 }
 
 // commandWrites reports whether a shell command string contains a write-shaped
