@@ -127,43 +127,46 @@ func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
 }
 
 // GenerateBatch greedily decodes up to n tokens for every user in lockstep after their
-// prompts, returning each user's generated ids. A user that emits EOS stops contributing new
-// tokens (its slot is re-fed its own EOS so the batch geometry stays rectangular — cheap, and
-// it keeps the per-user output bit-identical to serial Generate for the non-EOS users). This
-// is STATIC batching (fixed B for the run); the per-step primitive (StepBatch) is exactly
-// what a continuous-batching scheduler would call after admitting/evicting users between steps.
+// prompts, returning each user's generated ids. A user that emits EOS is RECLAIMED: its slot is
+// dropped from the active set and is neither decoded nor re-fed its own EOS to keep the batch
+// rectangular — so a finished sequence stops consuming weight-stream work the instant it ends,
+// instead of padding every remaining step (the #36 "free a finished slot, don't re-feed its
+// EOS" reclamation, applied to the static-batch entry point). Correctness is unchanged: the
+// per-step decode is the ragged StepBatchActive, which is bit-for-bit identical to the full
+// StepBatch for every still-active lane (its documented all-active==StepBatch / active-lane-
+// bit-exact guarantee), so each surviving user's output stays identical to serial Generate and
+// each finishing user stops at exactly the same EOS it would serially. This is STATIC batching
+// (fixed B membership for the run, finished lanes idled — not the per-iteration admit/evict the
+// continuous-batching scheduler modelengine.NativeScheduler runs over the same StepBatch
+// primitive); it just no longer burns decode compute on slots that are already done.
 func (bs *BatchSession) GenerateBatch(prompts [][]int, n int) [][]int {
 	B := len(bs.Seqs)
 	logits := bs.PrefillEach(prompts)
 	out := make([][]int, B)
 	done := make([]bool, B)
-	// eosSlot is the id re-fed into a finished slot to keep the batch rectangular. The
-	// first EOS id (scalar or list head) is fine for this; stop detection uses isEOS.
-	eosSlot := bs.M.Cfg.EOSTokenID
-	if len(bs.M.Cfg.EOSTokenIDs) > 0 {
-		eosSlot = bs.M.Cfg.EOSTokenIDs[0]
-	}
 	next := make([]int, B)
+	active := make([]bool, B) // the per-step running set: a finished lane drops out of it
 	for i := 0; i < n; i++ {
 		anyLive := false
 		for b := 0; b < B; b++ {
+			active[b] = false
 			if done[b] {
-				next[b] = eosSlot // keep slot rectangular; its logits are ignored once done
-				continue
+				continue // finished slot is reclaimed: not decoded, not re-fed its EOS
 			}
 			t := argmaxF32(logits[b])
 			out[b] = append(out[b], t)
 			next[b] = t
 			if bs.M.Cfg.IsEOS(t) {
-				done[b] = true
+				done[b] = true // retires this step: active[b] stays false, so it is not stepped
 			} else {
+				active[b] = true
 				anyLive = true
 			}
 		}
 		if !anyLive {
 			break
 		}
-		logits = bs.StepBatch(next)
+		logits = bs.StepBatchActive(next, active)
 	}
 	return out
 }
