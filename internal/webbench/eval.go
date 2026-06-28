@@ -150,15 +150,6 @@ func parseInt(s string) int {
 	return n
 }
 
-// Mock harness for when the real one isn't available.
-// This is a placeholder for development - in production, use the real harness.
-func mockHarnessEval(passed, total int) string {
-	return fmt.Sprintf(`import sys
-print("Passed %d / %d")
-sys.exit(0)
-`, passed, total)
-}
-
 // DescribeToFile writes a summary to JSON for later consumption.
 func DescribeToFile(s Summary, path string) error {
 	data, err := json.MarshalIndent(s, "", "  ")

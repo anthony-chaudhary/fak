@@ -353,9 +353,6 @@ func (m *Model) q4k(name string) *q4kTensor {
 	return qt
 }
 
-// hasQ4K reports whether a resident Q4_K copy is available for a name.
-func (m *Model) hasQ4K(name string) bool { return m.q4kw != nil && m.q4kw[name] != nil }
-
 // Q4KCount returns how many tensors hold a resident raw Q4_K copy (diagnostic for the loader).
 func (m *Model) Q4KCount() int { return len(m.q4kw) }
 

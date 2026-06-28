@@ -158,15 +158,6 @@ func (m *Model) awqGroup(name string) *awqGroupTensor {
 	return qt
 }
 
-// hasAWQGroup reports whether a real AutoAWQ group copy exists for a name.
-func (m *Model) hasAWQGroup(name string) bool {
-	if m.awqg == nil {
-		return false
-	}
-	_, ok := m.awqg[name]
-	return ok
-}
-
 // AWQGroupCount returns how many tensors hold a real AutoAWQ group copy.
 func (m *Model) AWQGroupCount() int { return len(m.awqg) }
 

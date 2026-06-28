@@ -103,25 +103,6 @@ func initAttnFdot3SIMDMinBatch() int {
 	return 64
 }
 
-var qFastSwiGLU = initQFastSwiGLU()
-
-func initQFastSwiGLU() bool {
-	switch os.Getenv("FAK_Q_FAST_SWIGLU") {
-	case "0", "false", "False", "FALSE", "off", "OFF":
-		return false
-	default:
-		return true
-	}
-}
-
-func swigluQInPlace(g, u []float32) {
-	if qFastSwiGLU {
-		swigluFastInPlace(g, u)
-		return
-	}
-	swigluInPlace(g, u)
-}
-
 func batchRectFastPathOK(cfg Config, quant bool) bool {
 	return batchPreNormFastPathOK(cfg, quant)
 }

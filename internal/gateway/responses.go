@@ -137,14 +137,6 @@ type responsesUsage struct {
 	TotalTokens  int `json:"total_tokens"`
 }
 
-// responsesStreamEvent is an SSE event on the Responses wire. The event type is
-// the event field ("response.created", "response.output_item.added", etc.); the
-// data field carries the event-specific payload.
-type responsesStreamEvent struct {
-	Event string      `json:"event"`
-	Data  interface{} `json:"data"`
-}
-
 // handleResponses serves POST /v1/responses. Its spine is handleChatCompletions
 // step-for-step over the same served-turn core; only the request decode and the
 // response render differ (the Responses shape vs the chat shape).

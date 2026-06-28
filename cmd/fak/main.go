@@ -505,44 +505,6 @@ func jsonIndent(v any) []byte {
 	return b
 }
 
-// envOrHomePath returns the trimmed value of env var name when set, else
-// $HOME joined with homeParts. It returns "" when the env var is empty and the
-// home directory cannot be resolved. Shared by the default-path helpers.
-func envOrHomePath(name string, homeParts ...string) string {
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-		return v
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(append([]string{home}, homeParts...)...)
-}
-
-// emitIndentedJSON encodes v as 2-space-indented JSON to stdout, returning 0 on
-// success or 1 after printing "<label>: encode json: <err>" to stderr. It is the
-// shared body behind the per-command emit*JSON wrappers.
-func emitIndentedJSON(stdout, stderr io.Writer, label string, v any) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(stderr, "%s: encode json: %v\n", label, err)
-		return 1
-	}
-	return 0
-}
-
-// writeJSONOrStdout writes v as indented JSON to the file at path, or prints it to
-// stdout when path is empty. It is the shared form of the repeated
-// `if *out != "" { WriteFile } else { Println }` blocks across the bench commands.
-func writeJSONOrStdout(path string, v any) {
-	if path != "" {
-		must(os.WriteFile(path, jsonIndent(v), 0o644))
-	} else {
-		fmt.Println(string(jsonIndent(v)))
-	}
-}
-
 // applyPolicy loads a capability-floor manifest and swaps it into the registered
 // adjudicator before the kernel runs. Empty path = keep the built-in
 // DefaultPolicy. A bad manifest is fatal: a misconfigured floor must fail loudly

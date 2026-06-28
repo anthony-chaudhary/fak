@@ -20,15 +20,6 @@ import (
 // differs from its `--audit-staged` branch. A gate that has a staged-ONLY sub-rule (DOC_PLACEMENT's
 // unindexed-note rule) drops it in tree mode, matching the Python.
 
-// treeReader is the disk-read surface the per-item gate helpers share between StagedDiff and
-// TrackedTree — both read the SAME working tree, so one helper implementation serves both modes.
-// (Both StagedDiff and TrackedTree satisfy it.)
-type treeReader interface {
-	FileBytes(rel string) ([]byte, bool)
-	Exists(rel string) bool
-	Size(rel string) (int64, bool)
-}
-
 // TrackedTree is the whole git-tracked tree read ONCE and shared across every hygiene gate. Paths
 // is the `git ls-files` set (sorted, forward-slash); the lazy fileCache caches a gate's file reads.
 type TrackedTree struct {

@@ -60,19 +60,6 @@ func awqDotProductScalar(src *byte, scale float32, x *float32, n int) float32 {
 
 // ---- Test helpers for verifying assembly implementations ---------------------
 
-// awqTestDequantRow is a test helper that verifies dequantization correctness.
-func awqTestDequantRow(scale float32, packed []byte) []float32 {
-	n := len(packed) * 2
-	dst := make([]float32, n)
-	awqDequantRowScalar(dst, scale, &packed[0], n)
-	return dst
-}
-
-// awqTestDotProduct is a test helper that verifies dot product correctness.
-func awqTestDotProduct(scale float32, packed []byte, x []float32) float32 {
-	return awqDotProductScalar(&packed[0], scale, &x[0], len(x))
-}
-
 // ---- Cosine similarity for oracle testing -------------------------------------
 
 // cosineSimilarity computes cosine similarity between two float32 vectors.
