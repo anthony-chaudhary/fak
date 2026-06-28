@@ -51,6 +51,12 @@ func usageCoreVerbs() {
                  Exit 0 clean, 1 a gate fired, 2 could-not-run (make/CI then falls back to
                  the Python path — fail-open). make hygiene / make index-sync prefer this.)
   fak preflight --tool NAME --args JSON [--policy FILE]
+  fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)
+                (prove the NETWORK-EGRESS floor on one destination: the cloud-metadata /
+                 link-local SSRF class (169.254.169.254, metadata.google.internal, ...) the
+                 kernel refuses so fak guard blocks instance-credential theft on a random
+                 VM with no human in the loop. Runs the real adjudication fold; exit 0
+                 allowed, 1 blocked, 2 usage. See examples/remote-vm-guard/)
   fak attest    --policy FILE [--probes FILE] [--out FILE] [--json] [--quiet]
                  (the COMPLIANCE ATTESTATION GENERATOR: prove the capability floor
                   from preflight. Runs the real adjudication fold over a probe set
