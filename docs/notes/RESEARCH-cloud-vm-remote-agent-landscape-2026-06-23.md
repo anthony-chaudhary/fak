@@ -155,6 +155,16 @@ fak-shaped (uses the boundary) rather than commodity.*
    *Why fak-shaped:* it's literally another structural deny rung, and it composes with the
    capability floor in the same hop. **Highest leverage:** universal in the field, absent in
    fak, and exactly fak's pattern.
+   *Shipped — first increment (2026-06-28):* the **cloud-metadata / link-local SSRF block**,
+   the never-legitimate half of the egress rung. `internal/egressfloor` (a pure tier-1
+   classifier) + a mandatory, non-elidable `rungEgress` in `internal/adjudicator/decide.go`
+   refuse any tool call reaching the instance-metadata family (`169.254.169.254`,
+   `metadata.google.internal`, `169.254.170.2`, `100.100.100.100`, `fd00:ec2::254`, and
+   `169.254.0.0/16` / `fe80::/10`) with a new `EGRESS_BLOCK` reason — so a guarded agent on a
+   VM cannot reach the endpoint that hands out the box's IAM credentials. Witness:
+   `fak egress check` + `examples/remote-vm-guard/`. **Still to build:** the policy-configurable
+   deny-by-default destination *allow-list* and the per-destination credential injection (the
+   rest of this recommendation).
 
 2. **`dos_arbitrate` as universal fleet admission control.** Copilot `/fleet` *names* the
    unsolved hazard, verbatim (verified 2026-06-23): *"Sub-agents share a filesystem with no
