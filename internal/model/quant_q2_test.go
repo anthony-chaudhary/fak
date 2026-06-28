@@ -119,3 +119,72 @@ func TestQ2MemoryReduction(t *testing.T) {
 		t.Fatalf("int2-vs-int8 footprint ratio %.3f not ~%.1f", got, want)
 	}
 }
+
+// q2benchDequantQ8 reconstructs the dense f32 matrix from a Q8_0 tensor (test-local: the
+// production dequantQ8 is Metal-only). Codes are int8, one f32 scale per 32-wide block.
+func q2benchDequantQ8(qt *q8Tensor) []float32 {
+	w := make([]float32, qt.out*qt.in)
+	for o := 0; o < qt.out; o++ {
+		for b := 0; b < qt.nblk; b++ {
+			d := qt.d[o*qt.nblk+b]
+			base := o*qt.in + b*qBlk
+			for i := 0; i < qBlk; i++ {
+				w[base+i] = float32(qt.q[base+i]) * d
+			}
+		}
+	}
+	return w
+}
+
+// q2benchDequantQ4 reconstructs the dense f32 matrix from an int4 tensor, mirroring
+// dequantQ2Tensor (the production int4 path keeps its dense weights only transiently).
+func q2benchDequantQ4(qt *q4Tensor) []float32 {
+	w := make([]float32, qt.out*qt.in)
+	half := qBlk4 / 2
+	blk := make([]float32, qBlk4)
+	for o := 0; o < qt.out; o++ {
+		for b := 0; b < qt.nblk; b++ {
+			dequantQ4Block(blk, qt.d[o*qt.nblk+b], qt.q[o*qt.nblk*half+b*half:])
+			copy(w[o*qt.in+b*qBlk4:], blk)
+		}
+	}
+	return w
+}
+
+// TestQ2AccuracyAcrossBitWidths is the accuracy benchmark for the aggressive-quantization
+// tiers (#275). It measures output fidelity — cosine of the dense GEMV output against the
+// f32 reference — at INT8, INT4 and INT2 from one weight matrix, and pins two honest facts:
+// INT4 retains ≥90% of INT8's accuracy (the issue's acceptance bar for the wired int4
+// path), and accuracy is monotone in bit width (INT8 ≥ INT4 ≥ INT2). INT2 is the aggressive
+// tier — it trades the most accuracy for the smallest footprint — so it carries only a
+// conservative direction-preserving floor, not the int8-parity bar.
+func TestQ2AccuracyAcrossBitWidths(t *testing.T) {
+	const out, in = 96, 1024
+	rng := rand.New(rand.NewSource(20))
+	w := make([]float32, out*in)
+	for i := range w {
+		w[i] = float32(rng.NormFloat64()) * 0.05
+	}
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = float32(rng.NormFloat64())
+	}
+	yRef := matRows(w, x, out, in)
+	acc8 := cosine(yRef, matRows(q2benchDequantQ8(quantizeQ8(w, out, in)), x, out, in))
+	acc4 := cosine(yRef, matRows(q2benchDequantQ4(quantizeQ4(w, out, in)), x, out, in))
+	acc2 := cosine(yRef, matRows(dequantQ2Tensor(quantizeQ2(w, out, in)), x, out, in))
+	t.Logf("GEMV-output cosine vs f32: INT8=%.6f INT4=%.6f INT2=%.6f", acc8, acc4, acc2)
+
+	// Acceptance #2 (for the wired int4 path): INT4 accuracy ≥ 90% of INT8.
+	if acc4 < 0.90*acc8 {
+		t.Fatalf("INT4 accuracy %.6f below 90%% of INT8 %.6f", acc4, acc8)
+	}
+	// Accuracy is monotone in bit width.
+	if !(acc8 >= acc4 && acc4 >= acc2) {
+		t.Fatalf("accuracy not monotone in bit width: INT8=%.6f INT4=%.6f INT2=%.6f", acc8, acc4, acc2)
+	}
+	// INT2 is aggressive but must still preserve the output direction.
+	if acc2 < 0.5 {
+		t.Fatalf("INT2 accuracy %.6f below conservative floor 0.5", acc2)
+	}
+}
