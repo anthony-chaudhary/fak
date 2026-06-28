@@ -19,7 +19,7 @@ post is:
 
 | Severity | Glyph | Pages anyone? | Use it for |
 |---|---|---|---|
-| `status` | :hourglass_flowing_sand: | no | an ongoing, tracked impediment — recorded, scrolls by. "GPU-gated, waiting on DGX hours", "peer merge in flight". |
+| `status` | :hourglass_flowing_sand: | no | an ongoing, tracked impediment — recorded, scrolls by. "GPU-gated, waiting on GPU server hours", "peer merge in flight". |
 | `operator` | :rotating_light: | **yes** — `<!here>` or a named owner | a blocker that needs a **human** to act, with a "do this next". "FAK_SCOREBOARD_TOKEN missing", "DA33 host unreachable — needs a manual restart". |
 | `clear` | :white_check_mark: | no | an all-clear heartbeat — the daily cadence's "no open blockers" card. |
 

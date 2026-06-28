@@ -153,7 +153,7 @@ selection):** it carries a `cudaAWQCosineMin` constant + a `-tags cuda` witness
 (`internal/compute/cuda_awq_test.go`, `TestCUDAAWQMatMul…` / `…BatchedMatMul…`) + a `run_*`-style
 acceptance script (`tools/run_926_acceptance_on_gpu.sh`, in the `cuda_acceptance.sh` manifest),
 the same recorded-then-measured pattern as every other floor. **The realized cosine is now
-measured:** the acceptance witness ran on an A100-SXM4-80GB (sm_80, CUDA 12.8, at fak HEAD
+measured:** the acceptance witness ran on a datacenter GPU (sm_80, CUDA 12.8, at fak HEAD
 `265ce03`) and recorded **cosine 1.00000000** for both `AWQMatMul` and `AWQBatchedMatMul` vs the
 cpuref f32 Reference — above the recorded `cudaAWQCosineMin = 0.995` floor, which stays conservative
 as on every sibling lane (e.g. Q8 measured 0.99999969 over its 0.999 floor, Q4_K 1.0 over 0.995).

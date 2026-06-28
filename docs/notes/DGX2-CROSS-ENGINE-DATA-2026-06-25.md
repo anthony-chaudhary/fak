@@ -1,14 +1,14 @@
 ---
-title: "dgx2 data collection — what runs, how it compares, what's next"
+title: "GPU server data collection — what runs, how it compares, what's next"
 description: "A run log from the datacenter GPU×8 node: the live stock-SGLang Qwen3.6-27B serving numbers measured there, the three real serving/kernel points now on the board with their category boundaries kept honest, why the native fak sweep belongs on the 80GB node, and the prioritized next steps."
 ---
 
-# dgx2 cross-engine data: what runs, how it compares, what's next
+# GPU server cross-engine data: what runs, how it compares, what's next
 
 _2026-06-25._ A companion run-log to
 [GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN](GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md).
 That note set the honest comparison framework and recorded fak's native kernel
-numbers on the 80GB node. This one records **what the 40GB node ("dgx2", datacenter GPU
+numbers on the 80GB node. This one records **what the 40GB node ("GPU server", datacenter GPU
 ×8) actually has running**, the **real stock-engine serving number measured on it**,
 and the next steps the data points to.
 

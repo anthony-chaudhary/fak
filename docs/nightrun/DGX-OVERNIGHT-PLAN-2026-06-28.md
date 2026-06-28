@@ -1,13 +1,13 @@
 ---
-title: "DGX overnight run plan — 2026-06-28"
-description: "Per-box overnight data-collection plan for the DGX/da33 fleet driven over the Slack control bridge: what each box collects tonight, the exact runbook, and the honesty boundary."
+title: "GPU server overnight run plan — 2026-06-28"
+description: "Per-box overnight data-collection plan for the GPU server/da33 fleet driven over the Slack control bridge: what each box collects tonight, the exact runbook, and the honesty boundary."
 ---
 
-# DGX overnight run plan — 2026-06-28
+# GPU server overnight run plan — 2026-06-28
 
 The fleet-scale companion to [`README.md`](README.md) (`fak nightrun`, which is
 *local*-box aware). `nightrun` answers "what can the box I'm sitting on collect?";
-this doc answers the same question for the **remote DGX/da33 boxes reached only
+this doc answers the same question for the **remote GPU server/da33 boxes reached only
 through the Slack control bridge** (`fak-private/tools/dgxsh.py`) — the boxes
 where the project's frontier GLM-5.2 witnesses actually live.
 
@@ -20,10 +20,10 @@ the per-box raw logs stay on the box under `/tmp/fakgpu/<tag>.log`.
 
 | box | channel | hardware | GLM-5.2 state tonight | overnight target |
 |---|---|---|---|---|
-| **dgx3** | `dgx3-control` | 8×A100-SXM4-**80GB**, 886 GiB RAM | **2 fak-kernel serves UP** (`/tmp/fakdgx` :8000, `/tmp/fakdgx_q5q6` :8001) running ~1.5 d; GPU0 ~37 GB, **GPU1-7 fully free** | **live decode tok/s witness** against :8000 (read-only chat completion — the #971 cpu-offload wall) |
+| **GPU server** | `dgx3-control` | 8-GPU datacenter server, 886 GiB RAM | **2 fak-kernel serves UP** (`/tmp/fakdgx` :8000, `/tmp/fakdgx_q5q6` :8001) running ~1.5 d; GPU0 ~37 GB, **GPU1-7 fully free** | **live decode tok/s witness** against :8000 (read-only chat completion — the #971 cpu-offload wall) |
 | **da33** | `da33-control` | CPU-only high-RAM host (256 CPU, ~1 TB RAM, **~454 GiB free**) | no serve up; **fak-bin 0.34.0 staged on NVMe** (`/mnt/nvme-glm/fak-bin`); full UD-Q4_K_M (434 GB) staged on NVMe | **llama.cpp mmap CPU throughput baseline** (memory-safe — fak-native resident needs ~458 GB > free, would OOM-wedge the shared host) |
-| **dgx2** | `dgx2-control` | 8×A100-SXM4-**40GB** | GLM-5.2 serve + a peer agent mid-flight (RC2 poll loop) | leave to peer; revisit when its session drains |
-| **dgx1** | `dgx1-control` | 8×A100-SXM4-**40GB** | OCCUPIED — sglang `gpt-oss-120b` TP-8, VRAM fully committed | **not a GLM target** (do not evict) |
+| **GPU server** | `dgx2-control` | 8-GPU datacenter server | GLM-5.2 serve + a peer agent mid-flight (RC2 poll loop) | leave to peer; revisit when its session drains |
+| **GPU server** | `dgx1-control` | 8-GPU datacenter server | OCCUPIED — sglang `gpt-oss-120b` TP-8, VRAM fully committed | **not a GLM target** (do not evict) |
 
 The symbolic `*-control` keys resolve to real Slack channel IDs in `fak-private`'s
 `tools/dgxsh.py` `_CHANNELS` map — the IDs never reach this public tree by policy
@@ -31,7 +31,7 @@ The symbolic `*-control` keys resolve to real Slack channel IDs in `fak-private`
 
 ## What each box collects tonight
 
-### dgx3 — GLM-5.2 live GPU decode tok/s (`witness-glm52-cpu-throughput`, GPU arm)
+### GPU server — GLM-5.2 live GPU decode tok/s (`witness-glm52-cpu-throughput`, GPU arm)
 
 The two serves are peer-owned and have been up ~1.5 days; **do not restart them**.
 Measure a single-stream timed completion against the live :8000 endpoint — that is
@@ -84,7 +84,7 @@ resident path is operator-gated on this shared box.
 - A box that can't run a task safely is **never launched** for it — da33 fak-native
   resident is gated on RAM headroom, so the loop can never claim a resident-path
   number it didn't actually produce.
-- The dgx3 number is a **timed live-serve completion** (`completion_tokens` over
+- The GPU server number is a **timed live-serve completion** (`completion_tokens` over
   wall, prefill included) labelled WITNESSED on fak's own kernel; it is the wall
   rate including the #971 offload tax, not a synthetic kernel microbench.
 - The da33 number is **llama.cpp** (the mmap baseline), labelled OBSERVED against a
@@ -93,7 +93,7 @@ resident path is operator-gated on this shared box.
 
 ## Results (collected 2026-06-28, in [`collected.jsonl`](collected.jsonl))
 
-All three dgx3 numbers are WITNESSED on fak's own CUDA kernel — read-only timed
+All three GPU server numbers are WITNESSED on fak's own CUDA kernel — read-only timed
 completions against the live `--cpu-offload-experts` :8000 serve (the peer serve was
 never restarted).
 
@@ -107,7 +107,7 @@ never restarted).
 *worse*, not better (0.27× of single-stream). The two streams contended instead of
 batching — so the #971 wall is a **shared host-resource bottleneck** (the CPU
 expert-GEMM under `--cpu-offload-experts`), **not a per-stream GPU limit**. The 7
-idle A100-80GB on dgx3 cannot be put to work by batching as the serve is configured;
+idle datacenter GPU on GPU server cannot be put to work by batching as the serve is configured;
 closing the wall means moving the expert GEMM off the host (resident experts, or a
 GPU expert path), not adding concurrency. This is the concrete data behind the
 "1/8 GPUs used is first-class" utilization thesis: the waste is host expert-offload,
@@ -132,7 +132,7 @@ stay CPU-offloaded. The baseline is labelled OBSERVED (third-party engine), neve
 reported as fak's own throughput.
 
 The hourly overnight tick keeps the loop alive: it re-attempts da33 only when
-`avail ≥ 440 GiB` with no peer resident serve, collects one read-only dgx3 decode
+`avail ≥ 440 GiB` with no peer resident serve, collects one read-only GPU server decode
 when the serve is idle (a 900 s timeout, never overlapping witnesses — the serve
 degrades under contention), and records `skipped`/`failed` whenever a box can't
 safely produce a datum.

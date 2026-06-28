@@ -15,7 +15,7 @@ number to the field without a category error**.
 
 - **Forward correctness** — GLM-5.2's DSA forward is bit-exact on fak's own CUDA
   kernels: cosine `1.000000`, argmax-exact, re-witnessed at HEAD `f39796e`
-  (sm_80, datacenter GPU-80GB). See the `glm-gpu-witness/1` records under
+  (sm_80, datacenter GPU). See the `glm-gpu-witness/1` records under
   `experiments/glm-gpu-witness/`.
 - **First native throughput** — `cmd/glmdsatput` times the native `glm_moe_dsa`
   decode/prefill on a real compute backend (the CUDA datacenter GPU path). Numbers in §2.
@@ -29,7 +29,7 @@ number to the field without a category error**.
   token, and surface the true `cudaMalloc` reason. No-op on cpu-ref (host forward
   stays byte-for-byte). Validated: 4/6 sweep configs that previously OOM'd now run.
 
-## 2. First native GLM-5.2 tok/s (dgx3, datacenter GPU-80GB, sm_80)
+## 2. First native GLM-5.2 tok/s (GPU server, datacenter GPU, sm_80)
 
 > **HONEST SCOPE.** `glmdsatput` builds a **synthetic, reduced-layer, dense-FFN**
 > `glm_moe_dsa` (real architecture + real per-layer dims, **random** weights, **no
@@ -92,9 +92,9 @@ Three numbers exist; only some are comparable:
   cost, fits-one-GPU, dense-FFN (no MoE). **Not** 753B serving.
 - **llama.cpp 753B baseline:** the **real** GLM-5.2 753B Q4_K_M (8 shards, ~425 GB),
   CPU-offloaded (`--n-cpu-moe`), **2.62 tok/s single / 4.84 tok/s agg @ concurrency 2**
-  on dgx2 (8-GPU datacenter server + ~1 TB host RAM). Real model, real serving.
+  on GPU server (8-GPU datacenter server + ~1 TB host RAM). Real model, real serving.
 - **vLLM / SGLang GLM-5.2:** stock-engine serving; the real DSA path needs sm_90
-  (Hopper). A stock-SGLang comparison server already runs on dgx2 (Qwen today).
+  (Hopper). A stock-SGLang comparison server already runs on GPU server (Qwen today).
 
 > **Do NOT put "fak 26 tok/s" next to "llama.cpp 2.62 tok/s".** That is a category
 > error: fak's number is a *synthetic, dense-FFN, no-MoE, fits-one-GPU kernel cost*;

@@ -358,20 +358,20 @@ llama.cpp generated-token comparison on the real 27B artifact, and the honest bo
 live in
 [`docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md`](benchmarks/FAK-NATIVE-QWEN35-RESULTS.md).
 
-## In-kernel A100 / 27B coding-loop witness — run contract (#933)
+## In-kernel datacenter GPU / 27B coding-loop witness — run contract (#933)
 
 Everything above this section fronts an **external** OpenAI-compatible model server
 (`llama-server`, LM Studio, vLLM, …). This section is the other variant: Claude Code
 driving a **real multi-turn coding loop** on fak's **own in-kernel CUDA forward** serving
-Qwen3.6-27B on a single A100 — no external engine in the loop. That is the usability bar
-for the "coding fallback when the subscription is down" goal (#933, the A100/27B extension
+Qwen3.6-27B on a single datacenter GPU — no external engine in the loop. That is the usability bar
+for the "coding fallback when the subscription is down" goal (#933, the datacenter GPU/27B extension
 of the general agentic-loop witness #610).
 
 **Status: pre-run contract, not a result.** The serve build is `-tags cuda` and the decode
-runs on the GPU HAL, so the live turn is **hardware-gated on a real A100** — it cannot be
+runs on the GPU HAL, so the live turn is **hardware-gated on a real datacenter GPU** — it cannot be
 witnessed on a GPU-less host (there, this is RECORD-only; a SKIP is not a PASS). The
 witnessed claim today is the CPU-forward correctness above (#442); this contract pins the
-*exact* reproducible procedure and the acceptance gate so the live A100 run produces a
+*exact* reproducible procedure and the acceptance gate so the live datacenter GPU run produces a
 witness an auditor can grade, not a self-report.
 
 Why the `say pong` probe above is **not** this: a one-shot headless turn proves the wire
@@ -379,7 +379,7 @@ Why the `say pong` probe above is **not** this: a one-shot headless turn proves 
 files, proposing edits, consuming `tool_result` round-trips, and converging without
 derailing or timing out. This contract drives the latter.
 
-### Step 1 — stand the in-kernel serve up (on the A100 host)
+### Step 1 — stand the in-kernel serve up (on the datacenter GPU host)
 
 ```bash
 # RUN ON THE A100 HOST, detached so a disconnect does not orphan the ~16 GB load:
@@ -454,7 +454,7 @@ Record, in the witness JSON / a sibling `.md`, the four numbers #933 asks for:
 - **PASS** = the task actually completes: `strpad/strpad.go` is correct, a real test exists,
   `go test ./...` is green, and the transcript shows the agent reaching it through tool
   round-trips on the in-kernel forward — captured under `experiments/agent-live/`.
-- **Not a pass** = a green-looking transcript with wrong edits, or a SKIP because no A100
+- **Not a pass** = a green-looking transcript with wrong edits, or a SKIP because no datacenter GPU
   was present. Record those honestly; do not file a SKIP as a PASS.
 
 ### Honest failure modes → their own follow-ons

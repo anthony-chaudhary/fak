@@ -1,14 +1,14 @@
 ---
-title: "Qwen3.6-27B on one GCP A100 via the pure fak kernel — a coding fallback for Claude Code"
-description: "One-command runbook to serve Qwen3.6-27B through fak's OWN in-kernel CUDA forward on a single GCP A100, and route Claude Code on your machine to it as a direct coding fallback when a subscription account is unavailable."
+title: "Qwen3.6-27B on one GCP datacenter GPU via the pure fak kernel — a coding fallback for Claude Code"
+description: "One-command runbook to serve Qwen3.6-27B through fak's OWN in-kernel CUDA forward on a single GCP datacenter GPU, and route Claude Code on your machine to it as a direct coding fallback when a subscription account is unavailable."
 ---
 
-# Qwen3.6-27B on one GCP A100 → Claude Code, via the pure fak kernel
+# Qwen3.6-27B on one GCP datacenter GPU → Claude Code, via the pure fak kernel
 
 When your subscription account is unavailable, this stands up **Qwen3.6-27B on a single
 GCP A100** through fak's **own** in-kernel CUDA forward (the pure fak kernel — not vLLM,
 SGLang, or llama.cpp) and points **Claude Code on this machine** at it. Every turn decodes
-on fak's forward on the A100, and `fak guard` adjudicates every tool call on the way.
+on fak's forward on the datacenter GPU, and `fak guard` adjudicates every tool call on the way.
 
 ```text
 ┌──────────────┐ /v1/messages ┌───────────────────────────┐ in-kernel ┌──────────────────┐
@@ -18,9 +18,9 @@ on fak's forward on the A100, and `fak guard` adjudicates every tool call on the
 └──────────────┘              └───────────────────────────┘           └──────────────────┘
 ```
 
-## Status — witnessed on a live A100 (2026-06-27)
+## Status — witnessed on a live datacenter GPU (2026-06-27)
 
-The whole **infra** is proven end-to-end on a single GCP A100-40GB: `--apply` → `-tags cuda`
+The whole **infra** is proven end-to-end on a single GCP datacenter GPU: `--apply` → `-tags cuda`
 build (sm_80) → GGUF load → gateway → connect from the laptop → a real coding turn comes back.
 But two honest constraints shape what to serve:
 
@@ -31,18 +31,18 @@ But two honest constraints shape what to serve:
   binds but **panics on the first decode**. Tracked as **#934** (the real blocker; #65/#67 family).
 - **The working default is `Qwen2.5-Coder-14B`** — a standard dense arch fak's forward *does*
   serve. Witnessed: correct code out, **~6.7 tok/s** (the decode is launch/op bound — the perf
-  levers are #483/#279/#401), ~16 GiB Q8-resident + a 32K context fits one A100-40GB. A standard
+  levers are #483/#279/#401), ~16 GiB Q8-resident + a 32K context fits one datacenter GPU. A standard
   **32B** is ~32 GiB Q8-resident — no KV room on 40GB (use the 80GB tier for 32B).
-- **Keep `--cuda-graph` OFF** (the default). At 14B/A100 it was witnessed to *crash* the serve
+- **Keep `--cuda-graph` OFF** (the default). At 14B/datacenter GPU it was witnessed to *crash* the serve
   (lazy KV `cudaMalloc` during graph capture, **#932**), not speed it up — until KV is
   pre-allocated before capture.
 
 So `scripts/gcp-qwen-serve.sh` and `tools/qwen36_a100_fak_serve.sh` default to the **supported
 coder**; point them at Qwen3.6-27B (via `QWEN_REPO`/`MODEL_ID`) once #934 lands.
 
-## Why a single A100 is enough
+## Why a single datacenter GPU is enough
 
-A ~14–16B coder `q4_k_m` is **~14–16 GB Q8-resident**, so it fits **one A100-40GB whole** with
+A ~14–16B coder `q4_k_m` is **~14–16 GB Q8-resident**, so it fits **one datacenter GPU whole** with
 room for a 32K KV cache (which holds a full Claude Code agent prompt). No `--cpu-offload-experts`,
 no multi-GPU, no 466 GB MoE staging (that is the GLM-5.2 frontier path —
 [`claude-glm-gcp.md`](claude-glm-gcp.md) / `scripts/gcp-glm-serve.sh`). This is the cheap,
@@ -99,16 +99,16 @@ claude
 ## Performance: the levers and how to witness them
 
 A single-stream 27B decode is **memory-bandwidth bound** (it reads ~16 GB of weights per
-token). At the A100's ~1.5 TB/s that is a low-hundreds-of-tok/s ceiling; reaching it is
+token). At the datacenter GPU's ~1.5 TB/s that is a low-hundreds-of-tok/s ceiling; reaching it is
 about keeping the memory system saturated and not paying per-kernel launch gaps.
 
 | lever | flag / env | what it does | status |
 |---|---|---|---|
 | direct-resident Q4_K | `FAK_Q4K=1` | native q4_k device GEMV, no dequant-to-f32 (#484/#485) | wired; default in the serve script |
-| CUDA-graph decode replay | `--cuda-graph` / `FAK_CUDA_GRAPH=1` | capture each token's op stream, replay as ONE launch instead of N (#483) | wired, but **witnessed to CRASH the serve** at 14B/A100 — lazy KV `cudaMalloc` during capture (#932). KEEP OFF until KV is pre-allocated before capture. |
+| CUDA-graph decode replay | `--cuda-graph` / `FAK_CUDA_GRAPH=1` | capture each token's op stream, replay as ONE launch instead of N (#483) | wired, but **witnessed to CRASH the serve** at 14B/datacenter GPU — lazy KV `cudaMalloc` during capture (#932). KEEP OFF until KV is pre-allocated before capture. |
 | fused flash attention | (automatic) | one online-softmax kernel, no `scores[nPos]` row materialized (#486) | wired |
 
-**Witnessed (14B coder, A100-40GB, 2026-06-27): ~6.7 tok/s** — only ~6% of the bandwidth
+**Witnessed (14B coder, datacenter GPU, 2026-06-27): ~6.7 tok/s** — only ~6% of the bandwidth
 ceiling, so the decode is **launch/op bound**, not BW bound. That is exactly the regime where
 graph replay (#483) should win (unlike the 0.5B/L4, where it was a measured no-win). But
 `--cuda-graph` currently **crashes** the in-kernel serve (the KV cache is allocated lazily
@@ -121,11 +121,11 @@ lever (#483) + fused kernels (#279) + continuous batching (#401).
 - **The literal Qwen3.6-27B does not run on fak's forward yet** — it's a GDN/SSM hybrid; fak
   panics on the first decode (#934). See the Status section at the top. The runbook serves a
   **supported** standard-arch coder (Qwen2.5-Coder-14B) meanwhile.
-- **Proven end-to-end on a live A100 (2026-06-27)**: provision → `-tags cuda` build (sm_80) →
+- **Proven end-to-end on a live datacenter GPU (2026-06-27)**: provision → `-tags cuda` build (sm_80) →
   GGUF load → gateway (`/healthz`, `/v1/models`) → **a real coding turn from the laptop through
   an SSH-forward tunnel** (`is_prime`, a reverse-string lambda — correct code from fak's own
   forward, weights resident on-GPU at ~16 GiB). fak's prior live CUDA-serve witness was 0.5B on
-  an L4 (466 tok/s — [`L4-INKERNEL...`](../notes/L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md)); this is the first 14B/A100 one.
+  an L4 (466 tok/s — [`L4-INKERNEL...`](../notes/L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md)); this is the first 14B/datacenter GPU one.
 - **Perf is the open item**: ~6.7 tok/s is usable-but-slow for interactive coding; the levers
   above (#932 → #483 → #279 → #401) are the path to the bandwidth ceiling.
 - The device serve is **single-stream**; drive it one request at a time until batched device
@@ -137,4 +137,4 @@ lever (#483) + fused kernels (#279) + continuous batching (#401).
 - `tools/qwen36_a100_fak_serve.sh` — the durable build+serve unit it runs on the VM.
 - [`qwen36-claude-dogfood-playbook.md`](../qwen36-claude-dogfood-playbook.md) — the
   local/Mac dogfood path and the end-to-end "what this proves" map.
-- [`claude-glm-gcp.md`](claude-glm-gcp.md) — the GLM-5.2 frontier-MoE sibling (8×A100).
+- [`claude-glm-gcp.md`](claude-glm-gcp.md) — the GLM-5.2 frontier-MoE sibling (8-GPU datacenter server).

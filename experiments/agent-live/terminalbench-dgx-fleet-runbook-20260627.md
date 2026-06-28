@@ -1,4 +1,4 @@
-# Terminal-Bench 2.1 on the DGX fleet — execution runbook
+# Terminal-Bench 2.1 on the GPU server fleet — execution runbook
 
 - Generated: `2026-06-27` (session-authored)
 - Status: `PRECREDENTIAL` — `result_claim_allowed=false`. No Terminal-Bench number.
@@ -8,10 +8,10 @@
 - Sibling artifacts: [`terminalbench-official-run-contract-20260626.json`](terminalbench-official-run-contract-20260626.json),
   [`../../docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md`](../../docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md).
 
-This runbook records the WITNESSED DGX-fleet readiness and the exact path to the credentialed
+This runbook records the WITNESSED GPU server fleet readiness and the exact path to the credentialed
 raw-vs-fak run. It makes no result claim; it makes the run turnkey.
 
-## Witnessed node readiness — a DGX node ("dgx3", 2026-06-27 16:42Z)
+## Witnessed node readiness — a GPU server node ("GPU server", 2026-06-27 16:42Z)
 
 Probed read-only via the Slack control bridge (`fak-private/tools/dgxsh.py`; the node's
 control channel and hostname live in the gitignored private tooling, never the public repo):
@@ -20,12 +20,12 @@ control channel and hostname live in the gitignored private tooling, never the p
 |---|---|
 | Docker engine | ✅ `29.2.0` — **runs containers** (`docker run hello-world` OK) |
 | `uv` / Python | ✅ `uv 0.11.21`, `Python 3.12.3` |
-| GPUs / RAM | ✅ 8×A100-SXM4-80GB, 886 GiB host RAM free |
+| GPUs / RAM | ✅ 8-GPU datacenter server, 886 GiB host RAM free |
 | Harbor / `tb` CLI | ⚠️ install via `uv tool install terminal-bench` (no auth) |
 | `go` | ❌ absent — build fak elsewhere + stage a linux binary (NOT needed at run time) |
 | **`OPENAI_API_KEY`** | ❌ **absent — the operator gate** |
 
-So dgx3 is **infrastructure-ready**. The only run-time blocker is the credential.
+So GPU server is **infrastructure-ready**. The only run-time blocker is the credential.
 
 ## The win, and why it is operator-gated
 
@@ -44,7 +44,7 @@ grant, never the agent's.
 Confirmed by a source-grounded investigation: the Terminal-Bench **oracle** agent runs the task's
 checked-in reference solution and calls **no LLM** (`total_input_tokens=0`), so it needs no key.
 
-1. **Stage the fak linux binary on dgx3 + prove the route.** A clean `linux/amd64` fak binary
+1. **Stage the fak linux binary on GPU server + prove the route.** A clean `linux/amd64` fak binary
    built at `f918250d` (the shipped `/v1/responses` code; the origin tip `e9b7238f` fails to
    compile on an unrelated `internal/callavoid` peer break, so build at the wire tip) — 25.9 MB,
    `/v1/responses` string verified present.
@@ -72,7 +72,7 @@ checked-in reference solution and calls **no LLM** (`total_input_tokens=0`), so 
      `fak.adjudications[0] = get_user_details / ALLOW / admitted=true`. The wire + kernel
      adjudication work end to end on the real binary; only the upstream-model hop is left for
      the credentialed run. (Witnessed on the dev box, where the route logic is OS-identical to
-     the staged linux binary; re-run on dgx3 once the binary is staged to pin the host.)
+     the staged linux binary; re-run on GPU server once the binary is staged to pin the host.)
 3. **Oracle smoke** (no key; validates the Harbor harness end to end — build → run reference
    solution → tests → score):
    ```bash
@@ -86,7 +86,7 @@ Then regenerate the host preflight to record the now-green gates:
 
 ## Operator handoff — the one gate, then turnkey
 
-Export a real paid `OPENAI_API_KEY` on dgx3 and authorize spend. Then:
+Export a real paid `OPENAI_API_KEY` on GPU server and authorize spend. Then:
 
 **Gateway up (fak arm's upstream):**
 ```powershell

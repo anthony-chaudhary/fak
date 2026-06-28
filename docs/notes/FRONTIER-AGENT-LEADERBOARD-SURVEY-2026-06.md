@@ -121,7 +121,7 @@ DeletionCertificate *mechanism*, not a deletion *benchmark*.)
    resolve-% held constant** (same model, same harness, fak-in vs fak-out) — a resolve-% move
    in either direction invalidates the comparison.
 2. **No throughput-loss-as-win.** fak loses raw single-stream and aggregate throughput by
-   design (fronting raw SGLang on 8×A100 = 0.60–0.97×). None of that is dressed as a win on a
+   design (fronting raw SGLang on 8-GPU datacenter server = 0.60–0.97×). None of that is dressed as a win on a
    cost row.
 3. **No fabricated safety rank.** There is **no** public board that scores safe-completion /
    policy-compliance / provable-deletion as a first-class axis, so any "fak tops a safety
@@ -140,7 +140,7 @@ no-paid-key cost/cache lane this complements) ·
 [#873](https://github.com/anthony-chaudhary/fak/issues/873) Packet E (the OpenAI-compatible
 external-run seam reused here) ·
 [#56](https://github.com/anthony-chaudhary/fak/issues/56) (per-span DeletionCertificate) ·
-[#968](https://github.com/anthony-chaudhary/fak/issues/968) (A100 weights-access block for any
+[#968](https://github.com/anthony-chaudhary/fak/issues/968) (datacenter GPU weights-access block for any
 open-weight front) · governance
 [#416](https://github.com/anthony-chaudhary/fak/issues/416) /
 [#9](https://github.com/anthony-chaudhary/fak/issues/9) /

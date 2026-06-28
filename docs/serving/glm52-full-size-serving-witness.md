@@ -176,10 +176,10 @@ datacenter server (`dgx3`) — 8× 80 GB sm_80 GPUs (640 GB aggregate VRAM, belo
 DSA floor), ~2 TB host RAM, 256 cores, `/projects` 4.1 TB free,
 go1.26.4 + cuda-12.8 + the HF CLI staged. The preflight planner run against that exact shape
 returns `BLOCKED_ARCH` for stock SGLang/vLLM (sm_80 is below the sm_90 DSA floor) — so the
-A100 **llama.cpp MLA fork is the path**, captured in the live node snapshot
+datacenter GPU **llama.cpp MLA fork is the path**, captured in the live node snapshot
 [`experiments/glm-gpu-witness/dgx3-a100-node-state-2026-06-25.json`](../../experiments/glm-gpu-witness/dgx3-a100-node-state-2026-06-25.json).
 
-**Smallest next step — run the self-staging A100 serve runner on DGX3, then the witness:**
+**Smallest next step — run the self-staging datacenter GPU serve runner on GPU server, then the witness:**
 
 ```bash
 # ON DGX3 (detached so a disconnect does not orphan a ~466 GB load):

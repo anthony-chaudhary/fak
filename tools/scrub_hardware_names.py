@@ -65,17 +65,32 @@ GENERATED_DIR_PREFIXES = (
 # the bare-token rules cannot re-rewrite a fragment a phrase already consumed.
 PROSE_RULES: list[tuple[str, str]] = [
     # --- multi-GPU server phrasings (fak's box) -------------------------------------
-    (r"8\s*[x×]\s*A100-SXM4-40GB", "8-GPU datacenter server"),
-    (r"8\s*[x×]\s*A100-40GB", "8-GPU datacenter server"),
+    # The SKU size suffix is matched generically ([0-9]+GB), not pinned to -40GB, so a
+    # -80GB / -141GB variant softens cleanly instead of leaving a "-80GB" tail behind a
+    # half-rewritten phrase. The 8×DGX-A100-NNGB and 8×A100-SXM4-NNGB forms come FIRST
+    # (most specific) so the bare-A100 and bare-DGX rules can't bite a fragment a phrase
+    # already consumed (that adjacency is what produced "GPU server-datacenter GPU").
+    # The size suffix tolerates optional markdown bold around the NNGB ("**80GB**") so a
+    # table cell like "8×A100-SXM4-**80GB**" softens whole instead of falling through to
+    # the bare "8×A100" rule and leaving a dangling "-SXM4-**80GB**".
+    (r"8\s*[x×]\s*DGX-A100-\*{0,2}[0-9]+GB\*{0,2}", "8-GPU datacenter server"),
+    (r"8\s*[x×]\s*A100-SXM4-\*{0,2}[0-9]+GB\*{0,2}", "8-GPU datacenter server"),
+    (r"8\s*[x×]\s*A100-\*{0,2}[0-9]+GB\*{0,2}", "8-GPU datacenter server"),
     (r"8\s*[x×]\s*A100", "8-GPU datacenter server"),
-    (r"A100-SXM4-40GB", "datacenter GPU"),
+    (r"DGX-A100-\*{0,2}[0-9]+GB\*{0,2}", "datacenter GPU"),
+    (r"A100-SXM4-\*{0,2}[0-9]+GB\*{0,2}", "datacenter GPU"),
     (r"A100-SXM4", "datacenter GPU"),
-    (r"A100-40GB", "datacenter GPU"),
+    (r"A100-\*{0,2}[0-9]+GB\*{0,2}", "datacenter GPU"),
     # --- "A100 DGX" / "DGX A100" machine name (fak's box) ---------------------------
     (r"\blab A100 DGX\b", "lab GPU server"),
     (r"\bA100 DGX\b", "GPU server"),
     (r"\bDGX A100\b", "GPU server"),
     (r"\bDGX-A100\b", "GPU server"),
+    # --- "DGX-<word>" hyphenated prose ("DGX-fleet readiness") — the hyphen is a word
+    # boundary so the bare \bDGX\b rule below would leave "GPU server-fleet"; rewrite the
+    # whole "DGX-<lowercaseword>" to "GPU server <word>". Uppercase-suffixed forms
+    # (DGX-OVERNIGHT, DGX-GLM52) are link/heading IDs already masked as path tokens.
+    (r"\bDGX-([a-z]\w*)", r"GPU server \1"),
     # --- plan name (specific lowercase string, safe) --------------------------------
     (r"PLAN-model-ladder-dgx-a100", "PLAN-model-ladder-gpu-server"),
     # --- "the/a/lab DGX" ------------------------------------------------------------
@@ -84,6 +99,25 @@ PROSE_RULES: list[tuple[str, str]] = [
     (r"\ba DGX\b", "a GPU server"),
     # --- bare uppercase DGX (word-bounded; never matches `dgx`/`FAK_DGX_REQ_`) ------
     (r"\bDGX\b", "GPU server"),
+    # --- digit-suffixed dgxN machine label (dgx3/dgx2/dgx1, AND uppercase DGX3/DGX2) —
+    # the ONE intentional CASE-INSENSITIVE prose rule. Unlike bare DGX (uppercase-only,
+    # because lowercase `dgx` is an identifier), the dgxN node labels appear in prose in
+    # BOTH cases ("ran on dgx3", "serve GLM-5.2 on DGX3", "DGX3's host-CPU tier"), so case
+    # cannot separate prose from code here — the lab uses the same label either way. The
+    # `[0-9]+` requirement is itself the identifier guard (FAK_DGX_REQ_ has no digit after
+    # DGX; cmd/dgxbridge has no digit), and two negative lookaheads re-establish the rest
+    # of the prose/identifier boundary for the digit-suffixed form:
+    #   (?![-\w])         — refuse a hyphen/word-char continuation, so the raw-prose
+    #                       channel names (dgx3-control), the dgx3-a100-* artifact stem,
+    #                       the dgx3-node-state schema stem, and dgx3_glm_* survive even
+    #                       when the `.sh`/`.json`/`.md` path mask does not fire.
+    #   (?!\.[A-Za-z0-9]) — refuse a dot that STARTS another id segment, so the FQDN
+    #                       dgx1.example.lab and the .v1/.sh suffixes survive — but NOT a
+    #                       sentence-final period: "ran on dgx1." still scrubs, because the
+    #                       char after the dot is a space/EOL/`)`, not [A-Za-z0-9].
+    # No competitor guard (unlike bare A100): dgxN is only ever fak's lab box — no third
+    # party cites "dgx3" — so the asymmetry is intentional, not an oversight.
+    (r"(?i)\bdgx[0-9]+(?![-\w])(?!\.[A-Za-z0-9])", "GPU server"),
 ]
 
 # GUARDED rule: bare "A100" is OVERLOADED — it is fak's private box in fak's own runs
@@ -101,6 +135,17 @@ CLEANUP_RULES: list[tuple[str, str]] = [
     (r"datacenter server GPU server", "datacenter server"),
     (r"GPU server GPU server", "GPU server"),
     (r"datacenter GPU GPU server", "GPU server"),
+    # ARTICLE fix: "A100"/"DGX" take "an"/"a" by their own sound, but the generic
+    # replacements ("datacenter GPU", "GPU server") both start with a consonant sound, so
+    # an "an A100" / "an A100-SXM4-80GB" that softened to "an datacenter GPU" now reads
+    # wrong. Demote the article. Word-bounded + case-preserving for a sentence-initial "An".
+    (r"\ban (datacenter GPU|GPU server)\b", r"a \1"),
+    (r"\bAn (datacenter GPU|GPU server)\b", r"A \1"),
+    # LEFTOVER fix: an earlier, incomplete scrub baked "A100-80GB" → "datacenter GPU-80GB"
+    # into ~6 committed docs (the bare-A100 rule fired but the "-NNGB" tail was left). The
+    # size tail is now redundant noise on the generic label — drop it so a re-run heals the
+    # half-scrubbed artifact instead of preserving it. (Markdown-bold tail too.)
+    (r"datacenter GPU-\*{0,2}[0-9]+GB\*{0,2}", "datacenter GPU"),
 ]
 COMPETITOR_MARKERS = re.compile(
     r"H100|Sarathi|vLLM|SGLang|TensorRT|DeepSpeed|Mooncake|DistServe|Falcon|Mistral|"
@@ -108,9 +153,12 @@ COMPETITOR_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
-# --check scans prose for these residual tells (uppercase, word-bounded). Bare A100 is
-# NOT a hard tell (competitor citations legitimately keep it); only DGX/SXM4 are.
-RESIDUAL_TELLS = [r"\bDGX\b", r"\bSXM4\b"]
+# --check scans prose for these residual tells. Bare A100 is NOT a hard tell (competitor
+# citations legitimately keep it); only DGX/SXM4 are. The lowercase dgxN tell carries the
+# SAME pattern + lookaheads as the PROSE_RULES rewrite above, so the lint and the rewrite
+# share one source of truth — a tell that flags a token the rule won't fix (a raw-prose
+# dgx3-control / dgx1.example.lab / dgx3-node-state.v1) is impossible by construction.
+RESIDUAL_TELLS = [r"\bDGX\b", r"\bSXM4\b", r"(?i)\bdgx[0-9]+(?![-\w])(?!\.[A-Za-z0-9])"]
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # Things a prose rule must NEVER rewrite, masked in this order before the rules run:
@@ -119,10 +167,15 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 #   3. bare URLs
 #   4. bare filename/path tokens with a known extension (so `\bDGX-A100\b` can't mangle a
 #      filename that appears outside a link). Renames are a SEPARATE deterministic pass.
+# The URL/path classes EXCLUDE the \x00 sentinel ([^\s\x00]+ not \S+) so a later mask can
+# never swallow an earlier mask's placeholder — e.g. on "[x](https://h)" the link-target
+# mask (2) leaves "[x\x000\x00" and the URL mask (3) must NOT then eat "https://…\x000\x00"
+# into a nested placeholder. Nested placeholders + forward _unmask was the latent bug that
+# corrupted plain markdown links to "...\x000\x00 " on a first --apply.
 MASK_RES = [
     re.compile(r"`[^`]*`"),
     re.compile(r"\]\([^)]*\)"),
-    re.compile(r"https?://\S+"),
+    re.compile(r"https?://[^\s\x00]+"),
     re.compile(r"[\w./\\-]+\.(?:md|json|go|py|sh|txt|png|svg|jpg|ya?ml|toml|csv|html)\b"),
 ]
 
@@ -141,8 +194,14 @@ def _mask_inline_code(line: str) -> tuple[str, list[str]]:
 
 
 def _unmask(line: str, spans: list[str]) -> str:
-    for i, s in enumerate(spans):
-        line = line.replace(f"\x00{i}\x00", s)
+    # Restore in REVERSE index order: if span j (j>i) ever contains span i's placeholder
+    # (a nested mask), restoring j first reveals "\x00i\x00" so the i-pass still resolves
+    # it. Forward order would restore i before j unhid it, leaving the inner placeholder as
+    # literal "\x00i\x00" garbage in the output. (With the \x00-excluding masks above masks
+    # no longer nest, but reverse restore is the belt-and-suspenders that makes a stray
+    # nesting heal instead of leak.)
+    for i in range(len(spans) - 1, -1, -1):
+        line = line.replace(f"\x00{i}\x00", spans[i])
     return line
 
 

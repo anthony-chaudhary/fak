@@ -93,7 +93,7 @@ RAM can serve the way llama.cpp does).
 - A `say` verb on the private Slack control bridge for operator status notes.
 
 ## Finding 3 — the slow load was path-precedence, not (only) the I/O ceiling (root cause, fixed)
-A follow-up diagnosis on the GPU staging host (DGX3) found the ~1h+ loads were **path
+A follow-up diagnosis on the GPU staging host (GPU server) found the ~1h+ loads were **path
 precedence, not a missing copy**: a verified-complete local-NVMe copy already existed, but the
 serve launchers globbed the NFS mount first, so every cold load silently paid the slow path.
 Measured on the box:

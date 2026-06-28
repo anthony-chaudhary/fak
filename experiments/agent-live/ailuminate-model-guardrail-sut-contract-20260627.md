@@ -88,7 +88,7 @@ Net: AILuminate's graded signal is the model's free-text response across all 12 
 - Do NOT claim "fak earned an Excellent/Very Good AILuminate grade." The five-tier grade is the AI-system's content behavior (the fronted model shaped by fak's filter), witnessed by MLCommons' evaluator ensemble — OBSERVED, never a fak score.
 - Do NOT present AILuminate's content-harm refusal as fak's tool-call/injection floor. They are different axes. The internal targeted ASR 0/38 = 0.000 is over a fixed fak-authored 38-case corpus, not AILuminate's ~12k prompts.
 - Do NOT imply fak has a public safety-leaderboard rank. No public board scores a tool-call adjudication gateway directly; the Berkeley RDI / HAL 2026 gameability finding MOTIVATES a model-free floor but hands fak no rank.
-- Do NOT net away the gateway tax or quote a vs-naive cache multiple. Account for the ~3% tax explicitly; any cache figure is marginal-over-TUNED (~1.0–1.31x; ~4.1x on a 50x5 fleet), never the 17.9–23.4x vs-naive multiple; never frame fak's by-design throughput loss (0.60–0.97x vs raw SGLang on 8xA100) as a win.
+- Do NOT net away the gateway tax or quote a vs-naive cache multiple. Account for the ~3% tax explicitly; any cache figure is marginal-over-TUNED (~1.0–1.31x; ~4.1x on a 50x5 fleet), never the 17.9–23.4x vs-naive multiple; never frame fak's by-design throughput loss (0.60–0.97x vs raw SGLang on 8-GPU datacenter server) as a win.
 
 ## Required before any result claim
 

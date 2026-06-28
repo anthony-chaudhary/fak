@@ -69,7 +69,7 @@ The goal's sharpest question. A heap object in the window is **retained** by exa
 kinds of referent — and its ref-count is how many are currently live:
 
 1. **A root needs it.** An open goal/pin/task that depends on this object. (The missing
-   edge.) Example: goal "serve GLM-5.2 on DGX3" retains every tool result about the node's
+   edge.) Example: goal "serve GLM-5.2 on GPU server" retains every tool result about the node's
    state until the goal is discharged.
 2. **A later turn cites it.** Turn 7's reasoning quotes turn 3's grep output ⇒ turn 3 is
    retained by turn 7. This is `ctxplan.Outcome.Hits` run *backwards*: a hit is a live

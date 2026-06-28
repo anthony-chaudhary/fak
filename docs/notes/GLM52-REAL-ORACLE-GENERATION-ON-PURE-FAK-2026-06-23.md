@@ -20,7 +20,7 @@ description: "Fresh on-hardware capture on an idle 8-GPU datacenter server-80GB 
 > real-oracle, bit-exact DSA-forward, and SmolLM2 decode witnesses (§1–3) stand; only the
 > serving boundary moved.
 
-All runs are on a fresh, idle **8× NVIDIA datacenter GPU-80GB (sm_80, compute 8.0), CUDA 12.8,
+All runs are on a fresh, idle **8× NVIDIA datacenter GPU (sm_80, compute 8.0), CUDA 12.8,
 ~2 TB host RAM** datacenter node, at the then-current `origin/main`, Go 1.26.4.
 
 ## 1. A real glm_moe_dsa checkpoint generates tokens that match HuggingFace

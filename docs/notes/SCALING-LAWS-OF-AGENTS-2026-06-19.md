@@ -275,7 +275,7 @@ one-line test for the cut:
 ### 6.2 Where the KV cache actually lives (so "hot in L1/L2" is the wrong picture)
 
 A fact that disposes of a common mental model. Take the repo's bench-class
-accelerator, an datacenter GPU: on-chip **SRAM** (the shared-memory / L1 pool) is **~192 KB
+accelerator, a datacenter GPU: on-chip **SRAM** (the shared-memory / L1 pool) is **~192 KB
 per SM**; **L2** is **40 MB** shared across all SMs; **HBM** is **40 GB** at roughly
 **1.5 TB/s**. Now size one ultra-long-context KV cache. For a Qwen2.5-7B geometry
 (28 layers, 4 KV heads under GQA, head-dim 128, fp16), each token costs

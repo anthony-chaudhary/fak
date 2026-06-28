@@ -166,7 +166,7 @@ honest fence in the explainer flipped from "Nothing here claims the serving loop
 under live pressure" to a cited, tested claim. `dos verify MLCACHE MLCACHE3` + a
 `dos commit-audit` confirming the diff touches the serve path, not just a test.
 
-> This rung is **gated on a backend that can hit real pressure** (the A100/L4 fleet via the
+> This rung is **gated on a backend that can hit real pressure** (the datacenter GPU/L4 fleet via the
 > Slack bridge, or a synthetic-pressure backend in test). It is the highest-value rung and
 > the one most likely to be refuted by "it only ran in a demo" — so its witness must show a
 > serve-path call site, not a library call.

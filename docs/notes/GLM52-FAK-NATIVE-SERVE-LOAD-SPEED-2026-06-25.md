@@ -31,9 +31,9 @@ is to re-measure the 466 GB load on the box.
   `Q5/6_K` row in `ResidentReport`. A nonzero `dequant` row for a large expert quant type is the
   slow-load signal — the diagnosis is now legible in-band, no external `gguf-dump` needed.
 
-## Update 2026-06-27 — WITNESSED on dgx3: 466 GB load ~100 min → **150 s** (3.04 GB/s)
+## Update 2026-06-27 — WITNESSED on GPU server: 466 GB load ~100 min → **150 s** (3.04 GB/s)
 
-Run on dgx3 (8× A100-80GB, sm_80), `origin/main` `6d727be7`, the staged 466 GB UD-Q4_K_M
+Run on GPU server (8-GPU datacenter server, sm_80), `origin/main` `6d727be7`, the staged 466 GB UD-Q4_K_M
 checkpoint on local NVMe, via `tools/glm52_load_witness.sh` (`fak serve --gguf <shard1>
 --backend cuda --cpu-offload-experts --context-budget-tokens 8192`, `FAK_GGUF_LOAD_WORKERS=64`):
 
@@ -68,7 +68,7 @@ q4k already has for Q4_K, extended to Q5_K/Q6_K, and/or paging experts to the de
 
 ### Original open-witness note (now closed by the run above)
 
-Re-run the self-staging serve on DGX3 and confirm the load is **< 10 min** with every
+Re-run the self-staging serve on GPU server and confirm the load is **< 10 min** with every
 routed-expert quant type on the resident path. The expected shape:
 `fak_model_load_path_tensors{...,path="dequant"}` ≈ 0 for the expert quant types, and the stderr
 load-path summary shows resident for Q4_K **and** Q5/6_K. The remaining serial cost is the small

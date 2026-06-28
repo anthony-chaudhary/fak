@@ -84,7 +84,7 @@ self-contradiction.
 
 **Different axis — served throughput (NOT the kernel rows above).** fak's 8-GPU
 *served* Qwen3.6-27B figures (single-stream ≈59–93 tok/s, batched peak ≈820–1085
-completion tok/s) come from **SGLang-serves + fak-adjudicates on 8×A100/DGX**, not
+completion tok/s) come from **SGLang-serves + fak-adjudicates on 8-GPU datacenter server/GPU server**, not
 fak's own M3 Pro engine; they live in `BENCHMARK-AUTHORITY.md` (the two "8-GPU
 SGLang serving" rows) and `docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md`. Do
 not quote them on the same line as the single-stream kernel rows above.

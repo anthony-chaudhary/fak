@@ -6,7 +6,7 @@ description: "The end-to-end path to observe fak's OWN in-kernel KV-prefix cache
 # GLM-5.2 fak-kernel cache value, on a solved ticket — runbook
 
 > **What this is.** The executable path for epic [#1010](https://github.com/anthony-chaudhary/fak/issues/1010):
-> serve GLM-5.2 from fak's **own** CUDA forward pass on our sm_80 8×A100 box, drive the
+> serve GLM-5.2 from fak's **own** CUDA forward pass on our sm_80 8-GPU datacenter server box, drive the
 > **Claude harness** against it over a **real, already-solved** SWE-bench Verified instance,
 > and **observe the cache value** — the repeated system+tools+repo prefix fak's RadixAttention
 > serves from the cached KV on turns 2..N, the prefill the kernel did **not** redo. That

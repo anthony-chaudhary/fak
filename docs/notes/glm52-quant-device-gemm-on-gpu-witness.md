@@ -1,6 +1,6 @@
 ---
 title: "Native Q8_0 / Q4_K device GEMM, recorded on a datacenter sm_80 GPU node (2026-06-24): the native-753B Pillar-2 cosines, run to a number for the first time"
-description: "First on-hardware capture of fak's native quantized device-GEMM acceptance (#485) on an idle 8x datacenter GPU-80GB (sm_80, compute 8.0) node, CUDA 12.8, Go 1.26.4. The Q8_0 and Q4_K dequant-fused GEMV/GEMM run on fak's own CUDA kernels (k_q8_gemm / k_q4k_gemm), graded against the cpu-ref f32 Reference: Q8_0 cosine 0.99999980 (gate 0.999), Q4_K cosine 1.00000000 (gate 0.995), both argmax-exact, with the resident weight 3.56x (Q8_0) and 7.11x (Q4_K) smaller than f32. This retires the named Pillar-2 honesty gap in the native-753B staged plan: the device quant cosines had never been run to a recorded number on a GPU node. The raw-FLOP throughput is honestly slower than f32 SGEMM (correctness kernels, not tensor-core tiled) - the win is the VRAM/bandwidth footprint that lets a 753B model fit."
+description: "First on-hardware capture of fak's native quantized device-GEMM acceptance (#485) on an idle 8x datacenter GPU (sm_80, compute 8.0) node, CUDA 12.8, Go 1.26.4. The Q8_0 and Q4_K dequant-fused GEMV/GEMM run on fak's own CUDA kernels (k_q8_gemm / k_q4k_gemm), graded against the cpu-ref f32 Reference: Q8_0 cosine 0.99999980 (gate 0.999), Q4_K cosine 1.00000000 (gate 0.995), both argmax-exact, with the resident weight 3.56x (Q8_0) and 7.11x (Q4_K) smaller than f32. This retires the named Pillar-2 honesty gap in the native-753B staged plan: the device quant cosines had never been run to a recorded number on a GPU node. The raw-FLOP throughput is honestly slower than f32 SGEMM (correctness kernels, not tensor-core tiled) - the win is the VRAM/bandwidth footprint that lets a 753B model fit."
 ---
 
 # Native Q8_0 / Q4_K device GEMM, recorded on a datacenter sm_80 GPU node (2026-06-24)
@@ -14,7 +14,7 @@ description: "First on-hardware capture of fak's native quantized device-GEMM ac
 > closes it. The numbers are grounded in the `go test` exit code and the run log of
 > `tools/run_485_acceptance_on_gpu.sh`, not a self-report.
 
-All runs are on a fresh, idle **8× datacenter GPU-80GB (sm_80, compute 8.0), CUDA 12.8
+All runs are on a fresh, idle **8× datacenter GPU (sm_80, compute 8.0), CUDA 12.8
 (`V12.8.61`), ~2 TB host RAM** node, GPU 0, at `origin/main` HEAD `26fe933`, Go 1.26.4.
 The kernels were built with `nvcc -arch=sm_80` into `libfakcuda.a`; the test backend
 self-reported `device=cuda tier=sm_80 class=approx`.

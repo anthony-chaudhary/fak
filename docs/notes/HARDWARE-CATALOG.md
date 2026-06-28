@@ -49,10 +49,10 @@ Track all benchmark machines with full specs, onboarding procedures, and baselin
 - **Benchmarks**:
   - GCP benchmark runs
 
-### Machine 5: A100 Datacenter Server (`a100`)
+### Machine 5: datacenter GPU Datacenter Server (`a100`)
 
 - **CPU**: x86_64, 256 cores
-- **GPU**: NVIDIA A100 (spec TBD)
+- **GPU**: NVIDIA datacenter GPU (spec TBD)
 - **RAM**: TBD
 - **OS**: Linux
 - **Status**: 🕸️ Spec needed

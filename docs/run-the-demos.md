@@ -395,7 +395,7 @@ audit, command-reference audit, browser-contract audit, and smoke-test harnesses
 
 Our live demos are backed by a **persistent, low-cost serve VM** (a single NVIDIA L4)
 that runs the fak kernel's own forward (`fak serve --backend cuda`) behind
-`/v1/messages`. Unlike the on-demand A100 serve nodes — which carry an idle gardener
+`/v1/messages`. Unlike the on-demand datacenter GPU serve nodes — which carry an idle gardener
 that self-stops or self-deletes them after an idle window (`scripts/gcp-idle-reaper.sh`)
 so a crashed control-session can't leave a GPU burning — this demo box is meant to
 **stay up**, so it has no reaper.

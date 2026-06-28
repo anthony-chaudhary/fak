@@ -41,7 +41,7 @@ This proves the in-kernel cache-value lever end-to-end even if the full patch is
 ## Workload
 
 - **Model:** GLM-5.2 (Q4_K_M quantization, served via `fak serve --engine inkernel --backend cuda --cpu-offload-experts`)
-- **Hardware:** 8×A100 sm_80 datacenter GPU (residual — box access required)
+- **Hardware:** 8-GPU datacenter server sm_80 datacenter GPU (residual — box access required)
 - **Task:** One or more solved SWE-bench Verified instances from `testdata/swebench_smoke.json`
 - **Agent:** Claude harness (`fak swebench run --agent fleet`) wired to the fak-kernel gateway
 - **Context Budget:** 8192 tokens (kept within GLM-5.2's 1M-context default to avoid `FitTooBig`)
@@ -165,7 +165,7 @@ the commit that produced it — never to a worker's narration. An unproven step 
 
 | Number | Trust class | Missing witness |
 |---|---|---|
-| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8×A100 dgx box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
+| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server dgx box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
 | Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
 
 When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
@@ -180,7 +180,7 @@ derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
 - **Provenance split:** WITNESSED (fak's own cache) vs OBSERVED (provider's cache), matching the conflation-scorecard line
 - **Metric definitions:** `internal/gateway/metrics.go` (`writeKVPrefixMetrics`)
 - **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](../BENCHMARK-TEMPLATE.md) standard
-- **Gate / dependency:** Datacenter GPU access (8×A100 sm_80 box) — the current residual
+- **Gate / dependency:** Datacenter GPU access (8-GPU datacenter server sm_80 box) — the current residual
 
 ## Cross-References
 
@@ -197,7 +197,7 @@ derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
 This result packet is **NOT YET SHIPPED**. The numbers are PENDING because:
 
 1. The observation seam is fully shipped and tested (`dos commit_audit 52dfea0d` → OK)
-2. The datacenter GPU box (8×A100) access is the current residual
+2. The datacenter GPU box (8-GPU datacenter server) access is the current residual
 3. Once the live run executes, the `cache-witness.json` artifact will be committed and the tables above will be filled with real WITNESSED numbers
 
 When results are collected, this document will be updated with:
