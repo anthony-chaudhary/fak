@@ -6,8 +6,11 @@ package model
 // does for decode:
 //
 //   - the q4_k_m majority (self_attn.v_proj/o_proj, mlp.gate/up/down — every identity-
-//     normalized matmul weight the loader held raw) runs q4kGemm, the batched Q4_K GEMM,
-//     on the f32 activation. Each weight super-block is dequantized ONCE and reused across
+//     normalized matmul weight the loader held raw) runs q4kGemmDispatch, the batched Q4_K
+//     GEMM, on the f32 activation: the CPU q4kGemm by default, and under -tags fakmetal with
+//     s.MetalQ4K the Metal q4_k dequant-GEMM on the GPU — the same GPU route decode's GEMV
+//     already took, so the resident-Q4_K prefill stops running the slow CPU GEMM that timed
+//     out real prompts (#1071). Each weight super-block is dequantized ONCE and reused across
 //     all P prompt tokens, instead of re-streaming the whole weight matrix P times as the
 //     per-token GEMV prefill does. Prefill is compute-bound, so amortizing the dequant +
 //     weight bandwidth across the P free axes is what closes the gap to llama.cpp-Metal on
@@ -83,15 +86,21 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		return scratch
 	}
 	// proj dispatches a batched projection [P,out] by resident format: q4kw-resident →
-	// q4kGemm on the f32 activation Xf; otherwise → qGemm8 on the Q8 panel Xq. The width is
-	// inferred from the resident tensor's .out, so the caller does not pass it. Xq may be
-	// nil when the caller knows the projection is q4k-resident (it is only read on the q8
-	// branch); passing the matching panel is the caller's responsibility for minority names.
+	// q4kGemmDispatch on the f32 activation Xf; otherwise → qGemm8 on the Q8 panel Xq. The
+	// width is inferred from the resident tensor's .out, so the caller does not pass it. Xq
+	// may be nil when the caller knows the projection is q4k-resident (it is only read on the
+	// q8 branch); passing the matching panel is the caller's responsibility for minority names.
+	//
+	// q4kGemmDispatch is the CPU q4kGemm by default (pure-Go build, bit-identical to before);
+	// under -tags fakmetal with s.MetalQ4K set it routes the q4_k-majority batched GEMM to the
+	// Metal q4_k dequant-GEMM, the same GPU path decode's GEMV already takes — so the resident-
+	// Q4_K prefill runs on the GPU instead of the slow CPU GEMM that timed out real prompts
+	// (#1071), mirroring the already-dispatched qwen35-hybrid prefill (qwen35_prefill_q4k.go).
 	proj := func(name string, Xf []float32, Xq *q8Panel) []float32 {
 		t := tic()
 		var r []float32
 		if qt := m.q4kw[name]; qt != nil {
-			r = q4kGemm(qt, Xf, P)
+			r = s.q4kGemmDispatch(name, qt, Xf, P)
 		} else {
 			r = qGemm8(m.q8(name), Xq)
 		}
