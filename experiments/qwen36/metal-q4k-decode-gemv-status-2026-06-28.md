@@ -1,6 +1,7 @@
 # Metal q4_k decode GEMV — closure status (#68)
 
-**Status: SHIPPED (code) / on-device measurement gated.** This note binds
+**Status: SHIPPED + on-device-parity-witnessed (per the #68 thread); throughput tracked
+under #67 — closeable as implemented.** This note binds
 [#68](https://github.com/anthony-chaudhary/fak/issues/68) (*per-token decode matmul on the
 GPU (q4_k); a resident-weight Metal GEMV plus the command-buffer fix should approach the
 llama.cpp Metal decode*) to the tree as it actually stands. The decode-GEMV deliverable the
@@ -8,10 +9,17 @@ issue asks for **is implemented and wired on `main`** — the per-token q4_k GEM
 Go dispatch, and the grouped/fused decode seams all landed under the v0.30.0 release
 baseline, the resident-decode-forward epic [#67](https://github.com/anthony-chaudhary/fak/issues/67),
 and the grouped/fused follow-up `62462799`, and were never cited back to #68, so the issue
-sat open with its work already done. It was authored on a `windows/amd64`,
-`CGO_ENABLED=0` box where the `-tags fakmetal` kernel cannot compile, run, or be measured,
-so the one genuinely-gated step — the on-device end-to-end decode tok/s on an M3 Pro — is
-named as the remaining work in §5, not faked green.
+sat open with its work already done. **The issue owner has since confirmed it on-device** in
+the #68 thread (M3 Pro, `-tags fakmetal`): `TestMetalQ4KGemvMatchesCPU` cosine **1.000000**
+(maxRel ≤ 1.2e-6 at [256,256] / [512,1024] / [5120,5120]) and `TestMetalQ4KDecodeMatchesCPU`
+(GPU greedy decode == CPU `[433 92 166 106]`) — and ruled that **a per-token GEMV in
+isolation does not move decode throughput** (each GEMV is one command buffer at ~360 µs fixed
+overhead, so the win is the one-command-buffer resident forward), so the throughput residual
+is **#67's**, not #68's. This note was authored on a `windows/amd64`, `CGO_ENABLED=0` box
+where the `-tags fakmetal` kernel cannot compile or be measured; the on-device numbers above
+are the **owner's reported witness from the #68 thread**, recorded here with attribution —
+not re-run on this host (§5). The host-independent CPU-parity gate that pins the dispatch the
+GPU kernel mirrors **was** re-run here, green (§3).
 
 Sibling evidence in this cluster:
 [`metal-q4k-device-gemm-status-2026-06-28.md`](metal-q4k-device-gemm-status-2026-06-28.md)
@@ -43,14 +51,20 @@ difference is what keeps the #68 scope honest:
    `*Model` (the #69 residency deliverable), so per-token the only host↔device traffic is the
    activation `x` and the result `y` — never the weights.
 2. **"…plus the command-buffer fix should approach the llama.cpp Metal decode."** —
-   **PARTIALLY.** The *kernel* throughput is there (the fused decode MLP sustains ~76.9 GB/s
-   on the M3 Pro — bandwidth-bound, exactly as the issue predicted), but the end-to-end
-   decode tok/s is still gated on the one-command-buffer-per-token resident forward (#67),
-   which removes the CPU↔GPU serialization each per-matmul `waitUntilCompleted` incurs. That
-   is the residual §5 names, not the GEMV itself.
+   **#67's job, not #68's.** The *kernel* throughput is there (the fused decode MLP sustains
+   ~76.9 GB/s on the M3 Pro — bandwidth-bound, exactly as the issue predicted), but a
+   per-token decode GEMV in isolation is *command-buffer-overhead-bound*: the owner measured
+   `BenchmarkMetalQ4KGemv` at 457 µs/op = 32 GB/s (~21% of peak BW), each GEMV a separate
+   command buffer at ~360 µs fixed overhead, so a clean 27B decode is only ~1.2 tok/s. The
+   end-to-end throughput win comes from the one-command-buffer-per-token resident forward
+   (#67), which removes the CPU↔GPU serialization each per-matmul `waitUntilCompleted`
+   incurs — the owner's #68-thread ruling is explicit: *"close this as implemented, and let
+   #67 carry the speed."* So the throughput is the residual §5 reassigns to #67, **not** a
+   #68 deliverable.
 
-So #68 is **not "build a q4_k decode GEMV"** (done) — the remaining work is the on-device
-end-to-end measurement of the path the GEMV is already the kernel of, on a Mac.
+So #68 is **not "build a q4_k decode GEMV"** (done, and on-device-parity-confirmed by the
+owner in-thread) — and its throughput residual is #67's, not a #68 gate. #68 is **closeable
+as implemented**.
 
 ---
 
@@ -127,7 +141,11 @@ The **on-device** GPU half is pinned by the `-tags fakmetal` tests
 (`TestMetalQ4KGemvMatchesCPU` holds the kernel to cosine ≥ 0.9999 / maxRel ≤ 5e-3 vs the CPU
 f32 reference; `TestMetalQ4KDecodeMatchesCPU` runs a greedy decode with `MetalQ4K` and
 asserts the **same tokens** as the CPU path, including after the single-residency CPU-copy
-free) — but those are the witnesses a Mac worker re-confirms, **not** ones this host can run.
+free). This host cannot run them, but **the owner has now reported them green on an M3 Pro
+in the #68 thread**: `TestMetalQ4KGemvMatchesCPU` cosine **1.000000** (maxRel ≤ 1.2e-6 at
+[256,256] / [512,1024] / [5120,5120]) — *tighter* than the test's own 5e-3 bound — and
+`TestMetalQ4KDecodeMatchesCPU` greedy decode == CPU `[433 92 166 106]`. Recorded with
+attribution (owner, in-thread); not re-run on this `windows/amd64` host.
 
 ---
 
@@ -138,36 +156,40 @@ The issue's "Step" — *per-token decode matmul on the GPU (q4_k)* — is exactl
 raw q4_k weights. The bandwidth-bound prediction is **confirmed**: the fused decode MLP
 sustains ~76.9 GB/s on the M3 Pro (`BenchmarkMetalQ4KFusedMLP`, cited in `62462799`), i.e.
 the kernel is at the bandwidth wall the issue's ceiling math assumed, not compute-bound like
-the CPU int8-SDOT path (~23 GB/s, ~1.4 tok/s decode ceiling). What is not yet closed is the
-*end-to-end* decode tok/s — the gap between "the GEMV is bandwidth-bound" and "the whole
-decode forward approaches llama.cpp" — which §5 scopes.
+the CPU int8-SDOT path (~23 GB/s, ~1.4 tok/s decode ceiling). The one thing this kernel
+**cannot** do alone is move *end-to-end* decode tok/s — the gap between "the GEMV is
+bandwidth-bound" and "the whole decode forward approaches llama.cpp" is CPU↔GPU
+serialization, which the owner reassigned to #67 (§5), not a #68 residual.
 
 ---
 
-## 5 — The remaining gate (the honest "not yet")
+## 5 — Closure state (what is #68's, and what is #67's)
 
-Two things remain, both requiring an Apple-Silicon M3 Pro with the macOS Metal toolchain —
-the capability this `windows/amd64` host does not have:
+The two things this note previously named as "remaining" have resolved into one that is
+**done for #68** and one that is **not #68's gate**:
 
-1. **End-to-end decode tok/s on the full resident forward.** The `62462799` diagnosis is
-   explicit: the decode wall is **not** kernel throughput (the big MLP matmuls already
-   sustain ~73–77 GB/s) but CPU↔GPU serialization — each per-matmul `waitUntilCompleted`
-   leaves the GPU idle while the CPU runs the inter-matmul norms / attention / GDN recurrent.
-   The fix is #67's one-command-buffer-per-token resident forward (keeps the GPU busy across
-   the whole token), which the per-token GEMV is the kernel of. Once that is wired, capture
-   with `FAK_QPROFILE=1` the decode of Qwen3.6-27B q4_k_m, against the `7.29 / 6.12 tok/s`
-   llama.cpp-Metal bars — **without a co-resident llama-server** (the 36 GiB
-   swap-contamination rule from the parity-status §3). The box's ~30% run-to-run variance
-   means the noise-free microbench is the honest signal until a stable end-to-end number is
-   recorded.
-2. **Re-confirm the on-device parity gates** on that Mac node:
-   `go test ./internal/model -tags fakmetal -run 'MetalQ4K(Gemv|Decode)' -count=1` (confirms
-   `TestMetalQ4KGemvMatchesCPU` / `TestMetalQ4KDecodeMatchesCPU` green on the real device).
+1. **On-device parity — DONE (owner, in the #68 thread).** The gate
+   `go test ./internal/model -tags fakmetal -run 'MetalQ4K(Gemv|Decode)' -count=1` was run by
+   the issue owner on an M3 Pro: `TestMetalQ4KGemvMatchesCPU` cosine **1.000000**,
+   `TestMetalQ4KDecodeMatchesCPU` greedy decode == CPU `[433 92 166 106]`. This is the
+   decode-GEMV correctness witness #68 asks for, and it is green. (Recorded with attribution;
+   not re-run on this `windows/amd64` host, which cannot build `-tags fakmetal`. A Mac worker
+   can re-confirm with the one-liner above, but the witness already exists in-thread.)
+2. **End-to-end decode tok/s — #67's deliverable, not #68's.** A per-token decode GEMV in
+   isolation cannot move throughput: the owner measured it command-buffer-overhead-bound
+   (`BenchmarkMetalQ4KGemv` 457 µs/op = 32 GB/s, ~21% BW; ~360 µs fixed per-buffer overhead;
+   clean 27B decode ~1.2 tok/s). The wall is CPU↔GPU serialization — each per-matmul
+   `waitUntilCompleted` idles the GPU while the CPU runs the inter-matmul norms / attention /
+   GDN recurrent — and the fix is #67's one-command-buffer-per-token resident forward, of
+   which this GEMV is the kernel. Capturing the `7.29 / 6.12 tok/s` llama.cpp-Metal decode
+   bars (`FAK_QPROFILE=1`, Qwen3.6-27B q4_k_m, no co-resident llama-server) is therefore the
+   **#67** gate, tracked there — full data in #59.
 
-**Next checkable step:** run gate (2) on a Mac node, then capture (1). Until the on-device
-end-to-end decode tok/s is recorded, the *approach-llama.cpp* claim is `not yet`; the **decode
-GEMV** deliverable (per-token GPU matmul on resident q4_k weights, bandwidth-bound as
-predicted) is shipped and CPU-parity-pinned.
+**Verdict:** #68 is **closeable as implemented** — the per-token GPU matmul on resident q4_k
+weights is shipped, CPU-parity-pinned here (§3), and on-device-parity-witnessed in-thread by
+the owner — exactly the owner's #68-thread ruling: *"close this as implemented, and let #67
+carry the speed."* The *approach-llama.cpp decode throughput* is **not** a #68 claim; it is
+#67's, and stays `not yet` there until #67's resident forward records it.
 
 ---
 
@@ -187,10 +209,14 @@ are part of #68.
 
 This is the host-independent slice: it binds #68 to the per-token decode GEMV that already
 shipped under the v0.30.0 baseline + the #67 resident-decode-forward epic + the `62462799`
-grouped/fused seams, corrects the issue body's conflation (the GEMV is done; the residual is
-the end-to-end forward, not the kernel), and runs the one gate this box can run (the pure-Go
-CPU-parity tests that pin the dispatch the GPU kernel mirrors). It is **not** a claim that the
-on-device decode tok/s is measured — that is the gated step in §5, and the *approach-llama.cpp*
-speedup stays `not yet` until a Mac worker records it. No fabricated pass: the only gates run
-for *this* change are the pure-Go parity tests above and the doc/commit gate on the
-`experiments` lane.
+grouped/fused seams, corrects the issue body's conflation (the GEMV is done; the throughput
+residual is the end-to-end forward, which is **#67's**, not the kernel), folds in the owner's
+on-device parity witness from the #68 thread (recorded with attribution, not re-run here), and
+runs the one gate this box can run (the pure-Go CPU-parity tests that pin the dispatch the GPU
+kernel mirrors — re-confirmed green: `TestQ4KMatRowsMatchesF32`, `TestQ4KGemmMatchesMatRows`,
+`TestQ4KGemmInt8MatchesMatRowsInt8`, `TestSessionQ4KKernelMixedDispatch`, `internal/metalgemm`).
+It is **not** a fresh on-device measurement on this host — the M3 Pro numbers are the owner's,
+attributed — and it does **not** claim the *approach-llama.cpp decode throughput*, which is
+#67's gate and stays `not yet` there. No fabricated pass: the gates run for *this* change are
+the pure-Go parity tests above (this host) plus the doc/commit gate on the `experiments` lane;
+the on-device parity is the owner's in-thread witness.
