@@ -230,5 +230,34 @@ func (m *MockL3Backend) Get(key string) ([]byte, L3PageMeta, bool) {
 // Stats reports set/get op counts for tests and KPI taps.
 func (m *MockL3Backend) Stats() (sets, gets int) { return m.sets, m.gets }
 
-// Compile-time proof the mock satisfies the backend seam the sidecar rides.
-var _ L3Backend = (*MockL3Backend)(nil)
+// Exists is the CONTROL-PATH all-miss witness the L3 deletion rung (#56) folds: for each
+// requested page-key in order it returns ONLY a presence bit — never the page bytes
+// (§6.5). It is the exists/mget the rung runs AFTER a delete to witness that a span's
+// backing pages stopped resolving in the shared pool. Reading only the map's key set, it
+// touches no payload, so the mint path stays off the data path. len(result) == len(keys).
+func (m *MockL3Backend) Exists(keys []string) []bool {
+	m.gets += len(keys) // an exists probe is an mget over the key set
+	out := make([]bool, len(keys))
+	for i, k := range keys {
+		_, ok := m.pages[k]
+		out[i] = ok
+	}
+	return out
+}
+
+// Delete removes a page-key from the pool — the external store's fire-and-forget
+// OP_DELETE / LRU eviction the deletion rung rides ABOVE (the rung adds the receipt the
+// store omits, it does not reimplement the delete). It is idempotent (deleting an absent
+// key is a no-op) and reports whether a page was actually resident.
+func (m *MockL3Backend) Delete(key string) bool {
+	_, ok := m.pages[key]
+	delete(m.pages, key)
+	return ok
+}
+
+// Compile-time proof the mock satisfies the backend seam the sidecar rides and the
+// control-path witness seam the L3 deletion rung folds.
+var (
+	_ L3Backend     = (*MockL3Backend)(nil)
+	_ L3PoolWitness = (*MockL3Backend)(nil)
+)
