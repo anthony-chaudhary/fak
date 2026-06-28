@@ -72,6 +72,11 @@ func TestRenderTurnDebugError_FiresWithLogfNil(t *testing.T) {
 // no-op — no panic, nothing emitted.
 func TestRenderTurnDebugError_GatedOffWhenSinkNil(t *testing.T) {
 	s := newResetShadowServer() // debugStatsf nil
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("nil sink must short-circuit before format, got panic: %v", r)
+		}
+	}()
 	s.renderTurnDebugError("t1", "anthropic_messages", &agent.UpstreamStalledError{Idle: time.Second}, time.Second)
-	// reaching here without a panic is the assertion (nil sink must short-circuit before format)
+	// reaching here without a panic is the contract (nil sink short-circuits before format)
 }
