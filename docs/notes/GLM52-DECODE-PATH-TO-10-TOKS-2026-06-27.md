@@ -36,6 +36,29 @@ Levers 1×2 alone land in the **~5–8 tok/s** band on a 256-core host (estimate
 below); clearing 10 reliably wants lever 3 (which is also why llama.cpp's CPU
 GLM-class decode beats fak's today — its AVX512-VNNI kernels).
 
+## UPDATE (same day) — re-measured against current trunk: lever 3 is PARTLY SHIPPED
+
+The scalar ceiling numbers below were measured against the session-start archive
+(HEAD `ad7b8a13`). Current trunk (`38806053`) already carries **AVX2/AVX512 `VPMADDWD`
+int8 reducers for BOTH Q4_K and Q5_K** (`quant_amd64_q4k.s`, `quant_amd64_kquant.s`,
+dispatched by `q4kReduceRow`/`q5kReduceRow` when `qtier >= tierAVX2`) — a peer landed
+**most of lever 3** after the first measurement. Re-measuring on the same box (now
+`qtier=AVX512`):
+
+- batched int8 = **11.26 GiB/s** on 32 cores (was 7.4 scalar), **2.09× over f32** (was 1.3×);
+- pure-CPU decode ceiling ≈ **~8.5 tok/s @ 256 cores** (8× extrapolation; batched int8 AVX512) —
+  **near 10**, not the ~5–6 the scalar estimate implied. The *current, un-batched* serve
+  (no lever 2) is ~`/1.8` of that ≈ **~4.7 tok/s @ 256 cores**.
+
+**Corrected lever picture:** lever 3's SIMD reducer (AVX2/AVX512 `VPMADDWD`) is **shipped**;
+the remaining vectorization headroom is **AVX512-VNNI** (`VPDPBUSD`, int8×int8→int32 in one
+op vs the two-step `VPMADDWD`) — another ~2–4× on a VNNI host. So the top *implementable*
+lever is now **lever 2 (batch the expert dispatch, ~1.8×)**: it is the difference between
+the ~4.7 tok/s current serve and the ~8.5 tok/s ceiling — and it is bit-identical to the
+proven path. Caveat: these are THIS box's numbers; DGX3's host-CPU tier (AVX2 vs AVX512 vs
+VNNI) and the real active-params/token set the actual figure — the matrix-row-C measurement
+still decides it.
+
 ## What is MEASURED vs INFERRED (kept honest)
 
 **Measured:**
