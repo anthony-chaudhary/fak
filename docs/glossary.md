@@ -1,6 +1,6 @@
 ---
 title: "fak glossary: core vocabulary, shared memory, preflight vs inflight"
-description: "The canonical fak glossary: overloaded core terms (session, agent, context, model, memory, tool/skill, steering), shared-memory sense splits, the active memory issue map, and the preflight/inflight/prefill gate vocabulary."
+description: "The canonical fak glossary: overloaded core terms (session, agent, context, model, memory, tool/skill, steering), shared-memory sense splits, the active memory issue map, the preflight/inflight/prefill gate vocabulary, and the vCache streaming economy (cache rebate, read rebate vs write premium, net saving, the per-turn verdict words)."
 ---
 
 # Glossary: core vocabulary, shared memory, and before/during words
@@ -173,6 +173,54 @@ opposed to `decode`, which emits one token at a time. It lives only in `internal
   context (allow / quarantine / transform). These are the project's "two gates": the
   capability floor (pre-call) and the result quarantine (post-result).
 
+## The vCache streaming economy: what `fak guard` prints per turn
+
+When you run `fak guard -- claude --debug-stats`, the gateway streams **one line per
+turn** to stderr that prices fak's caching value, and the `fak guard` exit summary plus
+`fak vcache observe` / the `fak_vcache_*` metrics report the same totals. The vocabulary
+on those surfaces is fak's own (the vCache work, [#218](https://github.com/anthony-chaudhary/fak/issues/218)
+/ [#715](https://github.com/anthony-chaudhary/fak/issues/715)-[#720](https://github.com/anthony-chaudhary/fak/issues/720)).
+A representative line:
+
+```
+fak-turn trace=t1 ok saved=20.9k tok (85% of prompt) cache=healthy compact=ok finish=end_turn
+```
+
+The whole vocabulary rests on one accounting law, inherited from `internal/vcachestar`
+and `internal/callavoid`: **cost is always booked at the full *uncached* price first, and a
+confirmed cache hit refunds part of it.** That refund is the rebate. The law's one-liner —
+*"an avoided call is a realized rebate, never a trust claim"* — is the discipline: a rebate
+is booked only from a hit the provider *confirmed* (`cache_read_input_tokens` came back
+non-zero), never from fak *believing* a prefix was warm. Belief predicts; only telemetry
+rebates.
+
+| term | what it means | the catch that the word encodes |
+|------|---------------|----------------------------------|
+| **(cache) rebate** | the cost refunded by a confirmed cache hit, in input-token-equivalents | booked only on a telemetry-confirmed read; warmth belief alone never rebates. `internal/vcachestar: CostBooking.RebateTokens` |
+| **read rebate** | the read axis of the rebate: each `cache_read` token billed at 0.1× base instead of 1× — a 0.9×/token refund | a read is the *only* axis that pays you back; on its own it overstates the value |
+| **write premium** | the first write to a cache costs *more* than uncached: 1.25× base at the 5-minute TTL, 2.0× at the 1-hour TTL | this is why caching is a net win only once reads accrue (break-even is 2 requests at 5m, 3 at 1h). `internal/gateway: CacheWrite5mMultiplier` |
+| **net saving / `saved=` (token-equiv)** | the honest fak-vs-no-cache number: **read rebate − write premium**, in input-token-equivalents | a fresh, cold-write turn reads **negative** (`saved=-25 tok`) — a real loss the writes haven't repaid, which a read-only number would have hidden. `internal/gateway: ProviderCacheNetSavings` |
+| **baseline / cost / multiplier** | `baseline` = what the session *would* have cost with no cache (every token at 1×); `cost` = what it actually cost; their ratio is the **multiplier** (`7.22x`) | baseline is a projection over OBSERVED counts, not a fak-authored claim |
+| **the turn verdict word** | one glance at the turn's state, folded from the net saving + prefix health | see the four values below. `internal/gateway: turnVerdict` |
+
+The four turn-verdict words (the `ok` slot in the line above):
+
+| word | means |
+|------|-------|
+| **cold** | no provider cache activity at all this turn (a first turn, or a non-cached path) |
+| **warming** | cache activity, but the writes have not yet been repaid by reads — net saving still ≤ 0 |
+| **ok** | a proven net saving on a healthy (or not-yet-scored) prefix |
+| **degraded** | the rolling health says the prefix is decaying / stale, or a reset is recommended |
+
+> **The one thing to internalize.** fak reports whether *fak's hop* **preserved** the
+> provider's cache — not the provider's raw cached-token count, which only measures whether
+> Anthropic's cache was warm. That is why the streamed `fak-turn` line, the `fak_vcache_*`
+> metrics, and `fak vcache observe` can never disagree: they all fold the same counters
+> through one engine (`vcacheProofFromCounters` / `vcachegov.ProveTelemetrySavings`). Every
+> input is OBSERVED (provider-relayed); the saving is a realized rebate, never a fak trust
+> claim — the same OBSERVED-vs-WITNESSED discipline the [conflation scorecard](CONFLATION-SCORECARD.md)
+> enforces across all of fak's reported numbers.
+
 ## Mnemonics
 
 - **preflight** — the **before** gate; it can **refuse** before the thing starts (a call
@@ -180,3 +228,6 @@ opposed to `decode`, which emits one token at a time. It lives only in `internal
 - **inflight** — the **during** state; what's running *right now* and not yet done (a live
   request, a held KV lease). Observed, never refused.
 - **prefill** — a **model phase**, not a check; it fills the KV cache from the prompt.
+- **rebate** — a **cost refund** from a *confirmed* cache hit, booked over an uncached
+  baseline; the net saving subtracts the **write premium**, so a cold-write turn reads
+  negative until reads repay it.
