@@ -1205,25 +1205,26 @@ func responsesText(rf json.RawMessage) *openAIResponsesText {
 	return &openAIResponsesText{Format: rf}
 }
 
+// jsonObjectOrFallback decodes s and returns it only when it is a JSON object; otherwise
+// it returns fallback. Shared by the carriers that must hand the gateway a map (a decoded
+// object when the model emitted one, a labeled wrapper otherwise).
+func jsonObjectOrFallback(s string, fallback any) any {
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err == nil {
+		if _, ok := v.(map[string]any); ok {
+			return v
+		}
+	}
+	return fallback
+}
+
 func jsonObjectOrRaw(raw string) any {
 	if strings.TrimSpace(raw) == "" {
 		return map[string]any{}
 	}
-	var v any
-	if err := json.Unmarshal([]byte(raw), &v); err == nil {
-		if _, ok := v.(map[string]any); ok {
-			return v
-		}
-	}
-	return map[string]any{"_raw": raw}
+	return jsonObjectOrFallback(raw, map[string]any{"_raw": raw})
 }
 
 func responseObject(content string) any {
-	var v any
-	if err := json.Unmarshal([]byte(content), &v); err == nil {
-		if _, ok := v.(map[string]any); ok {
-			return v
-		}
-	}
-	return map[string]any{"content": content}
+	return jsonObjectOrFallback(content, map[string]any{"content": content})
 }

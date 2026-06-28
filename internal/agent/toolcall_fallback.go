@@ -172,15 +172,21 @@ func extractDelimited(re *regexp.Regexp) func(string) []liftedBlock {
 		}
 		var blocks []liftedBlock
 		for _, loc := range matches {
-			inner := content[loc[2]:loc[3]]
-			call, ok := liftPayload(inner)
-			if !ok {
-				continue
-			}
-			blocks = append(blocks, liftedBlock{start: loc[0], end: loc[1], call: call})
+			blocks = appendLiftedSpan(blocks, content[loc[2]:loc[3]], loc[0], loc[1])
 		}
 		return blocks
 	}
+}
+
+// appendLiftedSpan lifts payload (the inner JSON of one match) into a name-bearing call and,
+// on success, appends a liftedBlock covering the whole match span [start,end); a non-liftable
+// payload is left untouched. Shared by the delimited and fenced single-object extractors.
+func appendLiftedSpan(blocks []liftedBlock, payload string, start, end int) []liftedBlock {
+	call, ok := liftPayload(payload)
+	if !ok {
+		return blocks
+	}
+	return append(blocks, liftedBlock{start: start, end: end, call: call})
 }
 
 // extractArrayDelimited builds an extractor for a dialect whose regex captures a
@@ -245,11 +251,7 @@ func extractFenced(content string) []liftedBlock {
 			blocks = append(blocks, arrayLiftedBlocks(raws, loc[0], loc[1])...)
 			continue
 		}
-		call, ok := liftPayload(body)
-		if !ok {
-			continue
-		}
-		blocks = append(blocks, liftedBlock{start: loc[0], end: loc[1], call: call})
+		blocks = appendLiftedSpan(blocks, body, loc[0], loc[1])
 	}
 	return blocks
 }

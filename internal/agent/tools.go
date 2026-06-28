@@ -218,16 +218,21 @@ type localEngine struct{}
 func (localEngine) Caps() []abi.Capability { return nil }
 
 func (localEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	body := refBytes(ctx, c.Args)
-	var m map[string]any
+	body, m := decodeCallArgs(ctx, c.Args)
+	out, isErr := execTool(c.Tool, m)
+	return engineResult(ctx, c, body, out, isErr, "localtools"), nil
+}
+
+// decodeCallArgs resolves a call's args ref to its raw bytes and the decoded argument map.
+// The map is always non-nil (an empty/undecodable body yields an empty map), so callers can
+// index it without a nil guard. Shared by the package-local engine Complete paths.
+func decodeCallArgs(ctx context.Context, args abi.Ref) (body []byte, m map[string]any) {
+	body = refBytes(ctx, args)
+	m = map[string]any{}
 	if len(body) > 0 {
 		_ = json.Unmarshal(body, &m)
 	}
-	if m == nil {
-		m = map[string]any{}
-	}
-	out, isErr := execTool(c.Tool, m)
-	return engineResult(ctx, c, body, out, isErr, "localtools"), nil
+	return body, m
 }
 
 // engineResult builds the standard *abi.Result an engine returns from its raw output:
