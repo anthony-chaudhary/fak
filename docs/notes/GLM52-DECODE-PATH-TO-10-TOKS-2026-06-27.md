@@ -93,9 +93,16 @@ the #971 wall — are no longer scalar.
 - The **end-to-end da33 decode tok/s is NOT yet measured** — the witness is host-gated and the
   Slack bridge to da33 was unresponsive this session (120 s ping timeout; dgx3 round-trips also
   empty). Matrix row C (pure-CPU + `FAK_KQ_INT8=1`, read sustained decode after prefill, A/B
-  `FAK_QKERNEL=scalar` vs default) still decides the real figure. With UPDATE-1's ~8.5 tok/s
-  AVX512 ceiling estimate and VNNI now on top, the pure-CPU + batched path is plausibly **at or
-  past 10**, but that is an estimate until matrix row C runs on a free da33-class host.
+  `FAK_QKERNEL=scalar` vs default) still decides the real figure.
+
+  **da33 witnessed (this session, via the control bridge):** AMD **EPYC 7742 (Rome/Zen2), 256
+  cores, 1007 GB RAM / 462 GB avail, AVX2-only (no AVX512/VNNI)**. So on da33 the reducers run the
+  **AVX2 tier** (Q4_K ~8.9×, Q5_K ~3.6× over scalar — the VNNI tier needs Cascade Lake / Ice Lake /
+  Zen 4+; da33 is older). Scaling UPDATE-1's batched-int8 ceiling to AVX2 on 256 cores keeps the
+  pure-CPU + batched estimate **near 10**, but it is an estimate. The e2e witness is **provisioning-
+  gated, not bridge-gated**: da33 currently has **no GLM-5.2 GGUF staged and no fak binary** (the
+  ~436 GB weights must be staged and the 26 MB binary scp/mounted — it exceeds the Slack cap), then
+  a ~44–100 min pure-CPU load + decode. That staging is the remaining step before row C can run.
 
 ## What is MEASURED vs INFERRED (kept honest)
 
