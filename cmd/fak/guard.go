@@ -40,6 +40,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/secretload"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
+	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
 
 // guardDefaultPolicyJSON is the day-to-day capability floor `fak guard` enforces when
@@ -1376,6 +1377,16 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 			}
 		}
 	}
+	// Tool-floor prune (the INBOUND tools[] lever): how many unreachable tool DEFINITIONS fak
+	// dropped from the advertised surface this session — a pure uncached-token saving that
+	// never bursts the cache (the pruner only drops tools after the cache_control breakpoint and
+	// re-proves the protected prefix is byte-identical). WITNESSED. Printed only when it actually
+	// fired, so the common run — and the dominant Claude Code path, whose single breakpoint sits on
+	// the LAST tool so nothing is droppable — stays quiet rather than printing a vacuous 0.
+	if sum.ToolPruneCount > 0 {
+		fmt.Fprintf(&b, "fak guard: tool-floor prune — dropped %d unreachable tool def(s) from tools[] across %d turn(s) (uncached-token saving; cache prefix byte-identical)\n",
+			sum.ToolPruneCount, sum.ToolPruneTurns)
+	}
 	if len(sum.ByReason) > 0 {
 		reasons := make([]string, 0, len(sum.ByReason))
 		for r := range sum.ByReason {
@@ -1856,12 +1867,19 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 		sum := srv.AdjudicationSummary()
 		fmt.Fprint(os.Stderr, formatAuditSummary(sum))
 		fmt.Fprint(os.Stderr, formatAmplification(srv.KernelCounters(), sum))
-	fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
+		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
 	stats := cacheobs.Default.Snapshot()
 	if stats.Turns > 0 {
 		_ = cachevalueledger.Append("guard", agentName, cachevalueledger.DefaultLedgerRel, stats)
+	}
+	// Persist this session's OBSERVED provider-cache window so a later `fak vcache score`
+	// (a separate process) reports the REALIZED multiplier from real traffic instead of the
+	// synthetic-Zipf forecast (#1090). Best-effort: a write failure never fails the session,
+	// and an empty window leaves the snapshot empty so the score falls open to the forecast.
+	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
+		_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns)
 	}
 	// Flush + fsync the durable trail before exit so a row returned to the agent is
 	// never lost to a buffered write (Close is safe on a nil/in-memory journal).

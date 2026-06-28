@@ -30,6 +30,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
+	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
 
 type repeatedStringFlag []string
@@ -294,8 +295,9 @@ func cmdServe(argv []string) {
 	// alone never sees. newNotifier returns nil when no sink is configured, leaving the
 	// transition seam its byte-identical no-op default.
 	notifier := newNotifier(*notifyNative, os.Stderr, *notifyWebhook, *notifySlack)
+	var transObs session.TransitionObserver
 	if notifier != nil {
-		serveSessions.WatchTransitions(notifier.transitionObserver())
+		transObs = notifier.transitionObserver()
 	}
 	var budgetObs session.BudgetObserver
 	if obs := budgetWebhookObserver(*budgetWebhook); obs != nil {
@@ -304,9 +306,10 @@ func cmdServe(argv []string) {
 	if notifier != nil {
 		budgetObs = combineBudgetObservers(budgetObs, notifier.budgetObserver())
 	}
-	if budgetObs != nil {
-		serveSessions.WatchBudget(*budgetWarnFraction, budgetObs)
-	}
+	// The two table observer seams (transObs/budgetObs) are resolved here but INSTALLED below,
+	// after srv exists: the #1095 slot-freed attach needs srv, and the scheduler's Attach owns the
+	// table's single WatchTransitions/WatchBudget slots — so the install must be a single decision
+	// (scheduler-takeover vs direct) that also has srv in hand. See the attach call after gateway.New.
 
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
@@ -379,6 +382,38 @@ func cmdServe(argv []string) {
 	must(err)
 	srv.SetModelLoadProfile(loadProfile)
 
+	// Slot-freed -> KV-free serve-path attach (#1095): with FAK_INKERNEL_KVMMU on, a
+	// session.Scheduler is attached over the live serve table and the gateway's KV-reclaim edge
+	// becomes its slot-freed observer, so a real drain/stop routes to srv.ReclaimKVOnSlotFreed at
+	// the next boundary — the FIRST non-test caller of wireSlotFreedKVReclaim + SetKVResidencyReclaimer.
+	// The scheduler's Attach OWNS the table's single WatchTransitions/WatchBudget slots, so it takes
+	// the resolved observers as pass-throughs (composing, never clobbering the notifier). When it
+	// takes over (flag on), the direct Watch* installs are skipped; flag-off they run exactly as
+	// before, so the served path is byte-identical until an operator opts in. The residency-backed
+	// reclaimer it installs is nil today (servePathResidencyReclaimer) — the edge is reachable but
+	// inert until the planner surfaces a trace-keyed residency to evict (#1074 / #987).
+	if !attachServeSlotFreedReclaim(serveSessions, srv, *budgetWarnFraction, budgetObs, transObs) {
+		if transObs != nil {
+			serveSessions.WatchTransitions(transObs)
+		}
+		if budgetObs != nil {
+			serveSessions.WatchBudget(*budgetWarnFraction, budgetObs)
+		}
+	}
+
+	// Install the #1073 post-decode KV pressure-relief sweep (#1094): the LIVE, non-test caller
+	// of SetKVPressureRelief. The sweeper closure wraps the genuine engine capacity executor over
+	// the live device backend; the gateway gates the edge on FAK_INKERNEL_KVMMU AND on a non-nil
+	// provider, so installing it unconditionally is safe — with no provider the edge stays inert
+	// (a no-op, byte-identical to today). The PROVIDER (the resident-span enumerator over
+	// kvmmu.Segment{From,Len,KV}) is nil here because no durable cross-turn resident-span ledger
+	// exists yet — the in-kernel planner builds a kvmmu.Context ephemerally per eviction and keeps
+	// only a radixkv prefix-reuse tree, not enumerable per-span candidates. Building that
+	// enumerator is the fenced follow-on #1074 / #987; when it lands, serve.go passes it here
+	// instead of nil and the sweep fires on real residency with no other change. KV is nil for the
+	// same reason (a nil-provider sweep never calls it). See wireKVPressureRelief's honest fence.
+	wireKVPressureRelief(srv, chatBackend, nil, nil)
+
 	// Stream every drive-state revision on /v1/fak/session/changes (#630). Wired
 	// AFTER gateway.New so srv exists: each Rev bump of the process-local table
 	// (a control verb, a debit, a continuation) is projected to the wire DTO and
@@ -430,6 +465,9 @@ func cmdServe(argv []string) {
 		if stats.Turns > 0 {
 			_ = cachevalueledger.Append("serve", "stdio", cachevalueledger.DefaultLedgerRel, stats)
 		}
+		if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
+			_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns) // #1090: observed window for `fak vcache score`
+		}
 		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 		return
 	}
@@ -444,6 +482,9 @@ func cmdServe(argv []string) {
 	stats := cacheobs.Default.Snapshot()
 	if stats.Turns > 0 {
 		_ = cachevalueledger.Append("serve", "http", cachevalueledger.DefaultLedgerRel, stats)
+	}
+	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
+		_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns) // #1090: observed window for `fak vcache score`
 	}
 	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 }

@@ -384,6 +384,45 @@ func TestRunVCacheScoreTelemetryHumanReportsEconomics(t *testing.T) {
 	}
 }
 
+// TestRunVCacheScoreObservedByDefaultFromSnapshot pins #1090: with no --telemetry, the
+// score reads the persisted observed cache window (the per-turn snapshot a finished
+// guard/serve session leaves) and reports the REALIZED multiplier — active source
+// "telemetry", not the synthetic-Zipf "planned" forecast.
+func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	// Two turns with heavy cache_read reuse — the observed window vcacheobserve.Rows folds.
+	body := `{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n" +
+		`{"family":"head","unix_millis":2,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json", "--snapshot", snap}); code != 0 && code != 1 {
+		// exit 0/1 is the 2x gate verdict, both valid; a 2 is a real error.
+		t.Fatalf("score --snapshot exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if rep.ActiveSource != "telemetry" || rep.Observed == nil {
+		t.Fatalf("a snapshot with turns must flip active_source to telemetry (observed), got %+v", rep)
+	}
+
+	// --snapshot off forces the planned FORECAST even when a snapshot exists.
+	var out2, errb2 bytes.Buffer
+	if code := runVCache(&out2, &errb2, []string{"score", "--json", "--snapshot", "off"}); code != 0 && code != 1 {
+		t.Fatalf("score --snapshot off exit=%d stderr=%s", code, errb2.String())
+	}
+	var rep2 vcachescore.Report
+	if err := json.Unmarshal(out2.Bytes(), &rep2); err != nil {
+		t.Fatalf("stdout invalid json: %v\n%s", err, out2.String())
+	}
+	if rep2.ActiveSource != "planned" {
+		t.Fatalf("--snapshot off must fall back to the planned forecast, got active_source=%q", rep2.ActiveSource)
+	}
+}
+
 func TestRunVCacheScoreAnchorsFileWritesIndexArtifact(t *testing.T) {
 	dir := t.TempDir()
 	anchors := filepath.Join(dir, "anchors.jsonl")

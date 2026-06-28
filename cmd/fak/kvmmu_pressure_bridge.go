@@ -21,11 +21,43 @@ package main
 import (
 	"context"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
+
+// wireKVPressureRelief is the serve-host installer for the #1073 post-decode capacity sweep — the
+// LIVE, non-test call site of gateway.Server.SetKVPressureRelief (#1094). It builds the host
+// sweeper closure over the live device backend + an engine.CapacityAdapter (the supplied
+// abi.KVBackend that owns the bytes + a fresh CacheEventRecorder, so each demote folds into the
+// fak_engine_cache_* stream the gateway already scrapes) and installs (provider, sweeper) on the
+// server. The gateway gates the edge on FAK_INKERNEL_KVMMU and on BOTH seams being non-nil, so
+// this installer can be called unconditionally — with a nil provider the edge stays inert
+// (fail-open), byte-identical to today.
+//
+// WHAT IS WIRED vs WHAT IS STILL MISSING (#1094, honest fence). The sweeper half is real: the
+// closure runs the genuine engine.RunCapacityPressureSweep executor (witnessed by
+// newCapacityPressureSweeper's tests + the gateway keystone test). The PROVIDER half — the live
+// resident-span enumerator over kvmmu.Segment{From,Len,KV} that yields the candidate list — is
+// passed in. In production serve.go passes nil for it (so the installed sweep is inert: a nil
+// provider is a clean no-op), because the durable resident-span ledger does not exist yet: the
+// InKernelPlanner builds a kvmmu.Context EPHEMERALLY per eviction (internal/agent's EvictKVSpan /
+// ElideKVSpans rebuild a fresh bridge over a fresh session and discard it) and keeps cross-turn
+// state only as the radixkv prefix-reuse tree, which is keyed by prefix node, not as enumerable
+// per-span retain-vs-evict candidates. Building that enumerator is the fenced follow-on #1074 /
+// #987. So this installer makes the executor ONE provider-construction away from live: the day the
+// span enumerator lands, serve.go passes it here instead of nil and the post-decode sweep fires on
+// real residency with no further wiring. A nil backend or KV leaves the sweeper a no-op too, so a
+// CPU-only / passthrough serve installs nothing live.
+func wireKVPressureRelief(srv *gateway.Server, backend compute.Backend, kv abi.KVBackend, provider gateway.KVPressureCandidateProvider) {
+	if srv == nil {
+		return
+	}
+	adapter := &engine.CapacityAdapter{KV: kv, Recorder: engine.NewCacheEventRecorder()}
+	srv.SetKVPressureRelief(provider, newCapacityPressureSweeper(backend, adapter))
+}
 
 // newCapacityPressureSweeper builds the host sweeper closure the gateway drives after a served
 // decode turn (#1073). It closes over the live device backend and an engine.CapacityAdapter (the

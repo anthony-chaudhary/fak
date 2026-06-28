@@ -17,7 +17,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vcachescore"
+	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
 
 func cmdVCache(argv []string) {
@@ -317,6 +319,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "write machine-readable scorecard JSON to this file")
 	telemetry := fs.String("telemetry", "", "optional provider telemetry JSONL file ('-' for stdin)")
 	anchorsFile := fs.String("anchors-file", "", "optional ranked anchor workload JSONL/JSON/CSV file ('-' for stdin)")
+	snapshot := fs.String("snapshot", "", "OBSERVED-by-default source: per-turn provider-cache window a finished `fak guard`/`fak serve` session persisted (default: the well-known path under your config dir). When no --telemetry/--anchors-file is given and this snapshot has turns, the score reports the REALIZED cache multiplier from real traffic instead of the synthetic-Zipf FORECAST. Pass 'off' to force the planned forecast; an absent/empty snapshot falls open to the forecast (clearly labeled).")
 	indexOut := fs.String("index-out", "", "write selected hot-anchor index JSON to this file")
 	anchor := fs.Float64("anchor-tokens", def.Star.AnchorTokens, "cacheable anchor size in input tokens")
 	suffix := fs.Float64("suffix-tokens", def.Star.SuffixTokens, "fresh suffix tokens per sibling request")
@@ -394,6 +397,24 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 		in.TelemetryRows = rows
+	}
+	// OBSERVED-by-default: with no explicit --telemetry and no --anchors-file, read the
+	// persisted live cache window a finished guard/serve session left at the well-known path
+	// and fold it through the SAME converter `fak vcache observe` uses. When it has turns the
+	// score flips active_source to "telemetry" and reports the REALIZED multiplier; when it is
+	// absent/empty/disabled we leave TelemetryRows nil so Score falls open to the planned
+	// FORECAST (clearly labeled), never a phantom observed 0x.
+	if len(in.TelemetryRows) == 0 && strings.TrimSpace(*anchorsFile) == "" && !strings.EqualFold(strings.TrimSpace(*snapshot), "off") {
+		snapPath := strings.TrimSpace(*snapshot)
+		if snapPath == "" {
+			snapPath = vcachesnapshot.DefaultPath()
+		}
+		turns, ok, err := vcachesnapshot.Read(snapPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
+		} else if ok {
+			in.TelemetryRows = vcacheobserve.Rows(turns)
+		}
 	}
 
 	rep := vcachescore.Score(in)

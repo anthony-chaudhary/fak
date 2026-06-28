@@ -8,6 +8,7 @@ package main
 // closes the wire end-to-end, from a real RunState transition to real freed KV.
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -159,5 +160,129 @@ func TestSlotEventToSlotFreedProjection(t *testing.T) {
 		if got.TraceID != "trace-915" || got.Rev != 7 {
 			t.Fatalf("projection dropped identity: got %+v, want TraceID=trace-915 Rev=7", got)
 		}
+	}
+}
+
+// fakeSlotReclaimer records the traces ReclaimResidency was called with, so a serve-path
+// reachability test can prove a real drain/stop transition reaches the gateway edge (which calls
+// the reclaimer) without needing a live model residency. It is the fake-reclaimer the #1095 scope
+// names for the reachability witness: the production reclaimer is nil today
+// (servePathResidencyReclaimer), so the test installs this AFTER attachServeSlotFreedReclaim to
+// observe the wire the serve-path attach built.
+type fakeSlotReclaimer struct {
+	mu     sync.Mutex
+	traces []string
+}
+
+func (r *fakeSlotReclaimer) ReclaimResidency(trace string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.traces = append(r.traces, trace)
+	return 1
+}
+
+func (r *fakeSlotReclaimer) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.traces...)
+}
+
+// TestAttachServeSlotFreedReclaimReachesEdge is the #1095 serve-path reachability witness: the
+// serve.go attach helper (attachServeSlotFreedReclaim) — the FIRST non-test caller of
+// wireSlotFreedKVReclaim + SetKVResidencyReclaimer — builds a real scheduler over a live table and
+// routes a REAL drain/stop transition to the gateway's KV-reclaim edge. With a fake reclaimer
+// installed (the production one is nil until #1074/#987), a Draining and a Stopped transition each
+// reach it exactly once; a Paused HOLD reaches it never. It also proves the composition contract:
+// the host's pass-through transition observer still fires for every transition (the scheduler did
+// not clobber it). The production reclaimer being nil means this is the edge's REACHABILITY, not a
+// real KV free on the serve path — that awaits a trace-keyed residency.
+func TestAttachServeSlotFreedReclaimReachesEdge(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_KVMMU", "on")
+
+	srv := newSlotBridgeServer(t)
+	tbl := session.NewTable()
+
+	// A host pass-through transition observer (stands in for the serve.go notifier) that must keep
+	// firing after the scheduler takes over the table's single WatchTransitions slot.
+	var passMu sync.Mutex
+	var passSaw []session.RunState
+	pass := func(ev session.TransitionEvent) {
+		passMu.Lock()
+		passSaw = append(passSaw, ev.To)
+		passMu.Unlock()
+	}
+
+	took := attachServeSlotFreedReclaim(tbl, srv, 0, nil, pass)
+	if !took {
+		t.Fatalf("flag on: attachServeSlotFreedReclaim must take over the seams and return true")
+	}
+	// The helper installs the (nil) production reclaimer last; install a fake AFTER it to observe
+	// the wire the attach built.
+	rec := &fakeSlotReclaimer{}
+	srv.SetKVResidencyReclaimer(rec)
+
+	// A HOLD (paused) frees nothing — the edge keys on terminal causes only.
+	tbl.Transition("sess-pause", session.Paused, "")
+	// Two terminal transitions each route to the reclaimer exactly once.
+	tbl.Transition("sess-drain", session.Draining, "")
+	tbl.Transition("sess-stop", session.Stopped, "")
+
+	got := rec.snapshot()
+	want := []string{"sess-drain", "sess-stop"}
+	if len(got) != len(want) {
+		t.Fatalf("serve-path edge reached reclaimer %d time(s), want %d (once per terminal): %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("reclaim %d: trace %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// Composition: the host's pass-through transition observer saw every transition (Paused too),
+	// proving the scheduler's Attach did not clobber the notifier's seam.
+	passMu.Lock()
+	defer passMu.Unlock()
+	wantPass := []session.RunState{session.Paused, session.Draining, session.Stopped}
+	if len(passSaw) != len(wantPass) {
+		t.Fatalf("pass-through transition observer saw %v, want %v (composition broken)", passSaw, wantPass)
+	}
+	for i := range wantPass {
+		if passSaw[i] != wantPass[i] {
+			t.Fatalf("pass-through transition %d: got %v, want %v", i, passSaw[i], wantPass[i])
+		}
+	}
+}
+
+// TestAttachServeSlotFreedReclaimFlagOff is the posture guard: with FAK_INKERNEL_KVMMU off (the
+// default), the serve-path attach is inert — it returns false (so serve.go installs the table
+// observers directly, byte-for-byte the pre-#1095 path) and wires NO scheduler, so even a fake
+// reclaimer installed afterward is never reached by a terminal transition.
+func TestAttachServeSlotFreedReclaimFlagOff(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_KVMMU", "") // explicitly off (the default)
+
+	srv := newSlotBridgeServer(t)
+	tbl := session.NewTable()
+
+	if took := attachServeSlotFreedReclaim(tbl, srv, 0, nil, nil); took {
+		t.Fatalf("flag off: attachServeSlotFreedReclaim must NOT take over the seams (return false)")
+	}
+	// No scheduler was attached, so a fake reclaimer is unreachable from a transition.
+	rec := &fakeSlotReclaimer{}
+	srv.SetKVResidencyReclaimer(rec)
+	tbl.Transition("sess-drain", session.Draining, "")
+	if calls := rec.snapshot(); len(calls) != 0 {
+		t.Fatalf("flag off must wire no scheduler; reclaimer reached %d time(s): %v", len(calls), calls)
+	}
+}
+
+// TestServePathResidencyReclaimerIsNilToday pins the honest #1095 boundary: the production
+// residency-backed reclaimer is nil because the in-kernel serve path holds no trace-keyed
+// residency to evict yet (the planner builds a fresh per-turn model.Session; cross-turn reuse is
+// the prefix-keyed radix tree). When the planner surfaces a trace->residency handle (#1074/#987),
+// this returns a real reclaimer and the serve-path attach above already routes a drain/stop to it.
+// The test makes the nil deliberate and visible, so a future fill-in flips a witnessed assertion.
+func TestServePathResidencyReclaimerIsNilToday(t *testing.T) {
+	if r := servePathResidencyReclaimer(); r != nil {
+		t.Fatalf("servePathResidencyReclaimer is expected nil until a trace-keyed serve residency exists (#1074/#987); got %T", r)
 	}
 }

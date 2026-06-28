@@ -115,6 +115,17 @@ func (s *Server) SetKVPressureRelief(provider KVPressureCandidateProvider, sweep
 	s.kvPressureMu.Unlock()
 }
 
+// RelieveKVPressure is the exported, host-drivable form of the post-decode pressure-relief edge
+// (#1094) — the symmetric twin of the slot sibling's exported ReclaimKVOnSlotFreed. The gateway
+// already calls maybeRelieveKVPressure on its own served tail; this lets the host (or a host-wire
+// test) drive the SAME edge through the SAME gating (flag + injected provider + sweeper), so the
+// installer wired by serve.go's wireKVPressureRelief is witnessable without reaching into an
+// unexported method. It carries no extra authority: every fence (flag-off, nil seams, empty
+// candidates) is enforced by the shared maybeRelieveKVPressure body.
+func (s *Server) RelieveKVPressure(ctx context.Context) (relief KVPressureRelief, fired bool) {
+	return s.maybeRelieveKVPressure(ctx)
+}
+
 // maybeRelieveKVPressure is the gateway's post-decode consumer (#1073): after a served turn has
 // mutated the KV cache, it probes live pressure and runs the injected sweep when it crosses the
 // high-water mark, demoting a hot span instead of dropping it. It is the LIVE serve-path call

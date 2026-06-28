@@ -21,6 +21,9 @@ package main
 // separately (the #912/#916 step); this projection is the wire both of those route through.
 
 import (
+	"os"
+	"strings"
+
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
@@ -56,4 +59,83 @@ func wireSlotFreedKVReclaim(sched *session.Scheduler, srv *gateway.Server, pass 
 		}
 		srv.ReclaimKVOnSlotFreed(slotEventToSlotFreed(ev))
 	})
+}
+
+// inkernelKVMMUEnabledHost mirrors internal/gateway.inkernelKVMMUEnabled (and internal/agent's
+// own gate) so the host's serve-path slot-freed attach engages on EXACTLY the truthy set the
+// gateway's KV-reclaim edge does — flag-off is then byte-for-byte the pre-#1095 served path
+// (no scheduler attached, the two table seams kept exactly as serve.go installs them today).
+func inkernelKVMMUEnabledHost() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_KVMMU"))) {
+	case "on", "1", "true", "yes":
+		return true
+	}
+	return false
+}
+
+// servePathResidencyReclaimer builds the residency-backed KVResidencyReclaimer the slot-freed
+// edge would drive on the live serve loop (#1095) — the implementation that maps a draining /
+// stopped session's TraceID onto the KV positions it held and frees them via the proven
+// kvmmu.Context.EvictColdest -> model.KVCache.Evict reclaim.
+//
+// IT RETURNS nil TODAY — deliberately, not as a stub to fill in casually. The reclaimer's
+// contract is per-TRACE: ReclaimResidency(trace) must free the residency THAT session held, and
+// the issue's own risk note is load-bearing ("a mis-keyed TraceID frees the wrong session" — the
+// reclaim re-RoPEs survivors). But the in-kernel serve path holds NO trace-addressable residency:
+// internal/agent.InKernelPlanner builds a FRESH model.Session every turn (p.m.NewSession(), often
+// defer s.Close()) and its cross-turn reuse is the PREFIX-keyed radix tree (radixkv, keyed on
+// token-prefix hashes), never a trace->kvmmu.Context map. By the time a drain/stop SlotEvent
+// fires at the next boundary, the residency that session "held" is already gone or shared by
+// prefix, so there is nothing a trace-keyed reclaimer can safely evict. Constructing one over the
+// ephemeral session would either no-op (free nothing) or, worse, evict a prefix another live
+// session reuses — the exact wrong-session free the risk note forbids.
+//
+// The missing construction is a PERSISTENT trace-keyed residency the planner surfaces (the same
+// kvmmu.Segment{From,Len,KV} ledger the sibling pressure executor waits on — #1074 / #987). Once
+// the planner exposes a trace->residency handle, this returns a reclaimer closing over it; the
+// call site below (attachServeSlotFreedReclaim) already routes a real drain/stop to it. Returning
+// nil keeps the edge ARMED-BUT-INERT on the serve path (ReclaimKVOnSlotFreed returns (0,false)
+// when no reclaimer is wired) rather than faking a free.
+func servePathResidencyReclaimer() gateway.KVResidencyReclaimer {
+	return nil
+}
+
+// attachServeSlotFreedReclaim is the serve-path caller #1095 adds: it gives wireSlotFreedKVReclaim
+// + SetKVResidencyReclaimer their FIRST non-test caller. With FAK_INKERNEL_KVMMU on, it builds a
+// session.Scheduler over the LIVE serve table, registers the gateway's KV-reclaim edge as the
+// scheduler's slot-freed observer, and installs the residency-backed reclaimer — so a real
+// drain/stop transition on a served session routes, at the next boundary, to the gateway edge.
+//
+// COMPOSITION (the load-bearing correctness point). Table.WatchTransitions / WatchBudget each hold
+// exactly ONE observer slot (last write wins), and serve.go already installs the notifier's
+// transition observer + the combined budget observer there. So this MUST take over both seams via
+// the scheduler's AttachOptions pass-throughs rather than calling Watch* again (which would clobber
+// the notifier). The caller therefore hands the resolved observers in and lets this own the install
+// when the flag is on; when the flag is off it returns false and the caller installs them directly,
+// byte-for-byte as before.
+//
+// It returns whether it took over the seams (so the caller knows whether to install the observers
+// itself). A nil table or server, or the flag off, returns false and changes nothing.
+func attachServeSlotFreedReclaim(tbl *session.Table, srv *gateway.Server, warnFraction float64, budgetObs session.BudgetObserver, transObs session.TransitionObserver) bool {
+	if tbl == nil || srv == nil || !inkernelKVMMUEnabledHost() {
+		return false
+	}
+	sched := session.NewScheduler(session.StrictPriority)
+	// Compose: the scheduler's Attach installs fan-out handlers that run the host's pass-through
+	// observers FIRST, then its own slot-freed accounting — so the notifier still sees every
+	// transition/budget event through transObs/budgetObs, and the scheduler's SlotEvent fires too.
+	sched.Attach(tbl, session.AttachOptions{
+		WarnFraction: warnFraction,
+		Budget:       budgetObs,
+		Transitions:  transObs,
+	})
+	// The gateway's KV-reclaim edge becomes the scheduler's slot-freed observer; a terminal
+	// drain/stop projects to SlotFreed and drives srv.ReclaimKVOnSlotFreed. pass is nil — the host
+	// has no separate slot-accounting consumer beyond the transition pass-through above.
+	wireSlotFreedKVReclaim(sched, srv, nil)
+	// Install the residency-backed reclaimer. nil today (see servePathResidencyReclaimer): the
+	// edge is armed and reachable on the serve path, but inert until the planner surfaces a
+	// trace-keyed residency to evict. SetKVResidencyReclaimer(nil) is an explicit no-op clear.
+	srv.SetKVResidencyReclaimer(servePathResidencyReclaimer())
+	return true
 }
