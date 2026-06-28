@@ -1078,6 +1078,10 @@ func (s *Server) renderMetrics() string {
 	// failed this session, by coarse kind.
 	m.writeUpstreamErrorMetrics(&b)
 
+	// In-kernel background-loop runtime: per-loop tick/error/panic/restart counters,
+	// last-tick gauge, and liveness — the proof the kernel's loops keep progressing.
+	s.writeBgloopMetrics(&b)
+
 	writeHelpType(&b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
 	for _, row := range opRows {
 		fmt.Fprintf(&b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",

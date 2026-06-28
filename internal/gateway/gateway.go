@@ -39,6 +39,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/bgloop"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
@@ -516,6 +517,13 @@ type Server struct {
 	defaultTraceMu sync.RWMutex
 	defaultTraceID string
 
+	// loops is the in-kernel background-loop supervisor (internal/bgloop): the
+	// runtime that keeps registered recurring loops progressing while the gateway is
+	// up, observable via /v1/fak/loops and the fak_bgloop_* metrics. Started on the
+	// serve lifecycle context in Serve, joined on shutdown. Built in New (never nil
+	// for a New'd Server; nil only in a bare zero value).
+	loops *bgloop.Supervisor
+
 	// startup is the one-time boot timeline (start -> ready, per-phase costs),
 	// exposed as fak_gateway_startup_* gauges. See startup.go.
 	startup *startupProfile
@@ -727,8 +735,10 @@ func New(cfg Config) (*Server, error) {
 			// #1115: kernel has real weights loaded (for fak_syscalls) but chat
 			// falls back to mock due to missing tokenizer. Flag for witness fidelity.
 			inKernelModelButChatIsMock = true
+			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. --gguf was passed but no BPE tokenizer was found (GGUF has no embedded BPE tokenizer and no --tokenizer was provided). Pass --tokenizer <dir|file> to enable real chat, or --base-url to proxy a real provider.")
+		} else {
+			logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
 		}
-		logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
 		planner = agent.NewMockPlanner(model)
 	}
 	startup.phase("planner-init", time.Since(t))
@@ -780,39 +790,39 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		k:                         k,
-		engineID:                  engineID,
-		model:                     model,
-		requireKey:                cfg.RequireKey,
-		version:                   version,
-		logf:                      logf,
-		debugStatsf:               cfg.DebugStatsf,
-		reloadPolicy:              cfg.ReloadPolicy,
-		resetTrace:                cfg.ResetTrace,
-		observeTrace:              cfg.ObserveTrace,
-		observeSession:            cfg.ObserveSession,
-		controlSession:            cfg.ControlSession,
-		steerSession:              cfg.SteerSession,
-		listSessions:              cfg.ListSessions,
-		decideSession:             cfg.DecideSession,
-		debitSession:              cfg.DebitSession,
-		resetOnBudget:             cfg.ResetOnBudget,
-		budgetDrained:             cfg.OnBudgetExhausted,
-		defaultTraceID:            strings.TrimSpace(cfg.DefaultTraceID),
-		startup:                   startup,
-		planner:                   planner,
+		k:                          k,
+		engineID:                   engineID,
+		model:                      model,
+		requireKey:                 cfg.RequireKey,
+		version:                    version,
+		logf:                       logf,
+		debugStatsf:                cfg.DebugStatsf,
+		reloadPolicy:               cfg.ReloadPolicy,
+		resetTrace:                 cfg.ResetTrace,
+		observeTrace:               cfg.ObserveTrace,
+		observeSession:             cfg.ObserveSession,
+		controlSession:             cfg.ControlSession,
+		steerSession:               cfg.SteerSession,
+		listSessions:               cfg.ListSessions,
+		decideSession:              cfg.DecideSession,
+		debitSession:               cfg.DebitSession,
+		resetOnBudget:              cfg.ResetOnBudget,
+		budgetDrained:              cfg.OnBudgetExhausted,
+		defaultTraceID:             strings.TrimSpace(cfg.DefaultTraceID),
+		startup:                    startup,
+		planner:                    planner,
 		inKernelModelButChatIsMock: inKernelModelButChatIsMock,
-		engineCache:               remoteCache,
-		ctxView:                   ctxView,
-		compactHistoryBudget:      cfg.CompactHistoryBudget,
-		elideResultBytes:          cfg.ElideResultBytes,
-		toolFloorDenies:           cfg.ToolFloorDenies,
-		cacheStream:               cacheStream,
-		rungObs:                   rungobs.New(),
-		feed:                      newCoherenceFeed(0),
-		sessionFeed:               newSessionFeed(0),
-		metrics:                   newGatewayMetrics(time.Now()),
-		route:                     newRouteLive(cfg.RouteManifest),
+		engineCache:                remoteCache,
+		ctxView:                    ctxView,
+		compactHistoryBudget:       cfg.CompactHistoryBudget,
+		elideResultBytes:           cfg.ElideResultBytes,
+		toolFloorDenies:            cfg.ToolFloorDenies,
+		cacheStream:                cacheStream,
+		rungObs:                    rungobs.New(),
+		feed:                       newCoherenceFeed(0),
+		sessionFeed:                newSessionFeed(0),
+		metrics:                    newGatewayMetrics(time.Now()),
+		route:                      newRouteLive(cfg.RouteManifest),
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}
@@ -826,6 +836,12 @@ func New(cfg Config) (*Server, error) {
 	if hp, ok := planner.(*agent.HTTPPlanner); ok {
 		hp.RetryNotify = s.onUpstreamRetry
 	}
+
+	// Build the in-kernel background-loop supervisor and register the built-in loops
+	// (a liveness heartbeat). It is not running yet — Serve starts it on the lifecycle
+	// context and joins it on shutdown, so the loops progress exactly while the kernel
+	// is up.
+	s.loops = newBgloopSupervisor(s)
 
 	return s, nil
 }

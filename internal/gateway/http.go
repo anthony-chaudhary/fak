@@ -105,6 +105,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
 		// operator enables it; the snapshot carries accounting only, no payload bytes.
 		{"/v1/fak/tasks", s.handleFakTasks},
+		// /v1/fak/loops is the in-kernel background-loop runtime view: a JSON snapshot
+		// of every supervised loop and its live progress (the observability half of the
+		// loop control plane; complements the loopmgr ledger `fak loop status` reads).
+		{"/v1/fak/loops", s.handleFakLoops},
 		{"/v1/models", s.handleModels},
 		// MCP-over-HTTP, operational endpoints.
 		{"/mcp", s.handleMCPHTTP},
@@ -190,6 +194,10 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// ready to adjudicate. Any eager model load the host did (fak serve --gguf) has
 	// already completed before this point, so time-to-ready spans it.
 	s.MarkReady()
+	// Start the in-kernel background loops on the serve lifecycle context: from here
+	// until ctx is done, registered loops keep progressing (the heartbeat, plus any a
+	// host registered), observable at /v1/fak/loops and via fak_bgloop_* metrics.
+	s.startLoops(ctx)
 	s.logf("fak gateway listening on http://%s  (engine=%s model=%s vdso=%v auth=%v)",
 		ln.Addr(), s.engineID, s.model, s.k.VDSOEnabled(), s.requireKey != "")
 	// Surface fak's core value-add — realized in-kernel KV-prefix reuse — at startup so it
@@ -200,6 +208,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.logf("fak cache: %s", cacheBootSummary(cacheobs.Default.Snapshot()))
 	select {
 	case <-ctx.Done():
+		// Join the background loops first (bounded), then drain the HTTP surface, so a
+		// wedged loop is reported rather than silently outliving the gateway.
+		s.stopLoops()
 		shctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return hs.Shutdown(shctx)
@@ -1262,9 +1273,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// #1115: in_kernel_model_but_chat_is_mock exposes when kernel has real weights
 	// loaded (for fak_syscalls) but chat uses mock due to missing tokenizer.
 	health := map[string]any{
-		"ok": true,
-		"engine": s.engineID,
-		"model": s.model,
+		"ok":      true,
+		"engine":  s.engineID,
+		"model":   s.model,
 		"planner": plannerKind(s.planner),
 	}
 	if s.inKernelModelButChatIsMock {
