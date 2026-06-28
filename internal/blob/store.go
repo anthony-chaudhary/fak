@@ -71,7 +71,7 @@ type Store struct {
 
 // New returns an empty store bounded by FAK_BLOB_MAX_BYTES (default DefaultMaxBytes).
 func New() *Store {
-	return newStore(maxBytesFromEnv())
+	return newStore(MaxBytesFromEnv("FAK_BLOB_MAX_BYTES", DefaultMaxBytes))
 }
 
 // NewWithBudget returns an empty store whose resident CAS holds at most maxBytes of
@@ -95,13 +95,19 @@ func newStore(maxBytes int64) *Store {
 	}
 }
 
-func maxBytesFromEnv() int64 {
-	if v, ok := os.LookupEnv("FAK_BLOB_MAX_BYTES"); ok {
+// MaxBytesFromEnv reads a resident-byte budget from the environment variable
+// named name, returning def when it is unset or does not hold a non-negative
+// integer. It is the budget parser shared by the in-memory and durable stores
+// (blob reads FAK_BLOB_MAX_BYTES default DefaultMaxBytes; blobfs reads
+// FAK_BLOB_DIR_MAX_BYTES default 0/unbounded) — hoisted here alongside
+// PreparePut/PageIn so the env parse lives in exactly one place.
+func MaxBytesFromEnv(name string, def int64) int64 {
+	if v, ok := os.LookupEnv(name); ok {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
 			return n
 		}
 	}
-	return DefaultMaxBytes
+	return def
 }
 
 // storeLocked inserts a NEW digest's bytes (caller holds s.mu and has confirmed the

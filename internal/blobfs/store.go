@@ -39,7 +39,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -88,8 +87,11 @@ type Store struct {
 
 // New opens (creating if absent) a durable store rooted at dir, seeding the index
 // from any blobs already on disk so a restart continues the same store. The byte
-// budget comes from FAK_BLOB_DIR_MAX_BYTES (0/unset => unbounded).
-func New(dir string) (*Store, error) { return NewWithBudget(dir, maxBytesFromEnv()) }
+// budget comes from FAK_BLOB_DIR_MAX_BYTES (0/unset => unbounded — disk is cheaper
+// than RAM, so durable stores default to no GC).
+func New(dir string) (*Store, error) {
+	return NewWithBudget(dir, blob.MaxBytesFromEnv("FAK_BLOB_DIR_MAX_BYTES", 0))
+}
 
 // NewWithBudget is New with an explicit resident-byte budget (a non-positive
 // budget disables GC). It is the seam the GC-regression test uses with a small
@@ -113,15 +115,6 @@ func NewWithBudget(dir string, maxBytes int64) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
-}
-
-func maxBytesFromEnv() int64 {
-	if v, ok := os.LookupEnv("FAK_BLOB_DIR_MAX_BYTES"); ok {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
-			return n
-		}
-	}
-	return 0 // durable stores default to unbounded; disk is cheaper than RAM
 }
 
 // scan walks the store tree once and seeds the index + footprint from the digests
