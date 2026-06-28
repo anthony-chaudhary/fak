@@ -78,6 +78,23 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   return 0;
 }
 
+// fcuda_set_tf32 toggles the cuBLAS math mode for the f32 SGEMM path (Lever 4 of the
+// H100-KERNEL-5X-ROADMAP). ON => CUBLAS_TF32_TENSOR_OP_MATH: the f32 GEMMs (the prefill
+// projections — fcuda_matmul_f32 / cublasSgemm above) run on Hopper/Ampere TENSOR CORES at
+// TF32 input precision (10-bit mantissa) with F32 accumulation, instead of the FP32 CUDA
+// cores. That is a large prefill speedup (the compute-bound phase) at a small, DISCLOSED
+// precision cost — TF32 keeps the f32 exponent, so the dynamic range is unchanged and only
+// the mantissa narrows. OFF (default) => CUBLAS_DEFAULT_MATH: the pedantic FP32-core path the
+// recorded device-vs-cpuref cosine floors were witnessed against, so an existing run's numerics
+// never change unless TF32 is explicitly requested. The F16 HGEMM peers (fcuda_matmul_f16) are
+// unaffected — they already select a tensor-op algorithm explicitly via cublasGemmEx. Idempotent
+// and safe before fcuda_init (no handle yet => nothing to set; the Go init applies it after
+// fcuda_init creates g_blas).
+extern "C" void fcuda_set_tf32(int on) {
+  if (!g_blas) return;
+  cublasSetMathMode(g_blas, on ? CUBLAS_TF32_TENSOR_OP_MATH : CUBLAS_DEFAULT_MATH);
+}
+
 extern "C" int fcuda_mem_info(size_t *free_mem, size_t *total_mem) {
   size_t free_b = 0;
   size_t total_b = 0;

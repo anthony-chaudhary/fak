@@ -53,6 +53,30 @@ var cudaMu sync.Mutex
 // stream) at its proven 7.5 tok/s without the fixed-KV memory cost.
 var graphEnabled bool
 
+// tf32Enabled gates the TF32 tensor-core math mode for the f32 SGEMM path (FAK_CUDA_TF32=1,
+// Lever 4 of the H100-KERNEL-5X-ROADMAP). OFF by default so the witnessed device-vs-cpuref cosine
+// floors hold unchanged on the pedantic FP32-core path; when on, the f32 prefill GEMMs route
+// through Hopper/Ampere tensor cores at TF32 input precision (F32 accumulate) for a large
+// compute-bound prefill speedup at a small, disclosed mantissa-only precision cost. Read once at
+// init() from the env; a host may flip it post-init via EnableCUDATF32() (tf32_cuda.go). Applied
+// through applyCUDATF32 so both entry points share the single cuBLAS handle mutation.
+var tf32Enabled bool
+
+// applyCUDATF32 pushes tf32Enabled down to the cuBLAS handle (fcuda_set_tf32). No-op-safe before
+// the device is registered (fcuda_set_tf32 itself guards a nil handle), so init() and a post-init
+// EnableCUDATF32() can both call it unconditionally. The handle mutation is serialized by cudaMu
+// — the same mutex every device call already holds — so a concurrent forward never races the mode
+// flip.
+func applyCUDATF32() {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if tf32Enabled {
+		C.fcuda_set_tf32(1)
+	} else {
+		C.fcuda_set_tf32(0)
+	}
+}
+
 // cudaFP16CosineMin is the cuda backend's RECORDED Approx cosine floor for the fp16 (HGEMM /
 // tensor-core) compute path (#484) — the device-vs-cpuref-f32 logit/GEMM cosine a witness must
 // clear. It is deliberately LOOSER than the Q8 / int8 lane's 0.999 gate, for a recorded reason,
@@ -200,6 +224,12 @@ func init() {
 		budgetBytes: cudaBudgetBytes(),
 	}
 	Register(cudaDev)
+	// Apply the TF32 tensor-core math mode from the env now that fcuda_init has created the
+	// cuBLAS handle (Lever 4). Default-off, so a run that does not set FAK_CUDA_TF32 keeps the
+	// pedantic FP32-core path and its witnessed cosine floors; a host can still flip it later
+	// via EnableCUDATF32().
+	tf32Enabled = os.Getenv("FAK_CUDA_TF32") == "1"
+	applyCUDATF32()
 }
 
 // cudaBudgetBytes reads FAK_GPU_BUDGET_MB — the device-local weight budget in MiB. 0 / unset /

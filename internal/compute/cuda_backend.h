@@ -48,6 +48,15 @@ void fcuda_hostxfer_reset(void);
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32) via cuBLAS SGEMM. */
 void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P);
 
+/* fcuda_set_tf32 toggles the cuBLAS math mode for the f32 SGEMM above (Lever 4 of the
+ * H100-KERNEL-5X-ROADMAP). on!=0 routes the f32 prefill GEMMs through Hopper/Ampere TENSOR
+ * CORES at TF32 input precision with F32 accumulation (a large compute-bound prefill win at a
+ * small, disclosed mantissa-only precision cost); on==0 (default) keeps the pedantic FP32-core
+ * path the recorded cosine floors were witnessed against. The Go side reads FAK_CUDA_TF32 at
+ * init and applies it; a host can flip it post-init via compute.EnableCUDATF32(). Idempotent
+ * and safe before fcuda_init (no handle => no-op). The F16 HGEMM path is unaffected. */
+void fcuda_set_tf32(int on);
+
 /* fp16 compute path (#484, Caps.UploadDtype + tensor-core HGEMM). __half pointers are
  * passed as void* so THIS header stays free of <cuda_fp16.h> — the cgo type-check (`go vet
  * -tags cuda`) parses it with a plain host compiler and no CUDA toolkit (the #479/#482/#483
