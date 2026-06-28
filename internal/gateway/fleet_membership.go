@@ -355,55 +355,68 @@ func (m *FleetMembership) RunHealthLoop(ctx context.Context, interval time.Durat
 // against it are allowed to finish. The worker is removed automatically when its
 // in-flight count reaches zero (see Release); a drained worker that is already
 // idle is removed at once.
-func (m *FleetMembership) Drain(id string) error {
+// withWorkerLock runs fn under mu against worker id, returning ErrWorkerUnknown
+// when id is absent. Centralizes the lock + lookup + nil-guard the error-returning
+// worker mutators share so a copy can't drop it.
+func (m *FleetMembership) withWorkerLock(id string, fn func(w *memberWorker) error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w := m.workers[id]
 	if w == nil {
 		return fmt.Errorf("%w: %q", ErrWorkerUnknown, id)
 	}
-	if !w.draining {
-		w.draining = true
-		m.emit(MembershipEvent{Kind: EventDrainStarted, WorkerID: id, Draining: true})
-	}
-	if w.inflight == 0 {
-		return m.removeLocked(id)
-	}
-	return nil
+	return fn(w)
 }
 
-// Acquire marks the start of an in-flight request against a worker so a concurrent
-// Drain waits for it before removing the worker. It refuses a non-admissible
-// worker so new work never lands on a draining/unhealthy replica.
-func (m *FleetMembership) Acquire(id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	w := m.workers[id]
-	if w == nil {
-		return fmt.Errorf("%w: %q", ErrWorkerUnknown, id)
-	}
-	if !w.admissible() {
-		return ErrNoHealthyWorker
-	}
-	w.inflight++
-	return nil
-}
-
-// Release marks an in-flight request done. If the worker was draining and this was
-// its last in-flight request, the worker is removed (drain-before-remove complete).
-func (m *FleetMembership) Release(id string) {
+// withWorkerLockVoid is the no-return form: it runs fn under mu against worker id
+// and is a no-op when id is absent.
+func (m *FleetMembership) withWorkerLockVoid(id string, fn func(w *memberWorker)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w := m.workers[id]
 	if w == nil {
 		return
 	}
-	if w.inflight > 0 {
-		w.inflight--
-	}
-	if w.draining && w.inflight == 0 {
-		_ = m.removeLocked(id)
-	}
+	fn(w)
+}
+
+func (m *FleetMembership) Drain(id string) error {
+	return m.withWorkerLock(id, func(w *memberWorker) error {
+		if !w.draining {
+			w.draining = true
+			m.emit(MembershipEvent{Kind: EventDrainStarted, WorkerID: id, Draining: true})
+		}
+		if w.inflight == 0 {
+			return m.removeLocked(id)
+		}
+		return nil
+	})
+}
+
+// Acquire marks the start of an in-flight request against a worker so a concurrent
+// Drain waits for it before removing the worker. It refuses a non-admissible
+// worker so new work never lands on a draining/unhealthy replica.
+func (m *FleetMembership) Acquire(id string) error {
+	return m.withWorkerLock(id, func(w *memberWorker) error {
+		if !w.admissible() {
+			return ErrNoHealthyWorker
+		}
+		w.inflight++
+		return nil
+	})
+}
+
+// Release marks an in-flight request done. If the worker was draining and this was
+// its last in-flight request, the worker is removed (drain-before-remove complete).
+func (m *FleetMembership) Release(id string) {
+	m.withWorkerLockVoid(id, func(w *memberWorker) {
+		if w.inflight > 0 {
+			w.inflight--
+		}
+		if w.draining && w.inflight == 0 {
+			_ = m.removeLocked(id)
+		}
+	})
 }
 
 // Pick returns the next admissible worker round-robin over the live admissible
@@ -488,12 +501,8 @@ func (m *FleetMembership) Dispatch(ctx context.Context, send func(ctx context.Co
 // worker that fails dispatches crosses to unhealthy under the same hysteresis) and
 // emits a failover transition labeled with the worker the request moved off of.
 func (m *FleetMembership) markDispatchFailure(id string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	w := m.workers[id]
-	if w == nil {
-		return
-	}
-	m.emit(MembershipEvent{Kind: EventFailover, WorkerID: id})
-	m.applyProbeLocked(w, false)
+	m.withWorkerLockVoid(id, func(w *memberWorker) {
+		m.emit(MembershipEvent{Kind: EventFailover, WorkerID: id})
+		m.applyProbeLocked(w, false)
+	})
 }
