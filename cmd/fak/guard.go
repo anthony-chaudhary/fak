@@ -63,6 +63,19 @@ import (
 // across every audited Claude Code session: the floor was DEFAULT_DENYing Task*/SendMessage/
 // ToolSearch — the harness's own tools). The genuine-danger classes above are untouched.
 //
+// The allow-list also admits the broader ULTRACODE orchestration surface (Workflow,
+// EnterWorktree/ExitWorktree, Cron*, PushNotification, RemoteTrigger, DesignSync) and the
+// READ-ONLY DOS verbs (mcp__dos__dos_verify/arbitrate/recall/review/status/doctor/answer/
+// check_reason/refuse_reasons/commit_audit/citation_resolve, acme_lane_hint). The
+// work-spawners (Workflow, EnterWorktree, Cron*) carry the same re-adjudication property as
+// Agent/Task*: the agents and future prompts they create make their own tool calls back
+// through this gateway, so every real effect still crosses the floor. The DOS verbs are pure
+// reads of git/journal state. This means a turn that advertises the full ultracode toolset is
+// never left with those names as silent prune-candidates — and matches the operator posture
+// that an ultracode/debug session is governed by re-adjudication of EFFECTS, not by withholding
+// orchestration plumbing. The genuine-danger classes (destructive Bash args, self-modify globs)
+// are still untouched, so widening the orchestration surface never widens the danger floor.
+//
 //go:embed guard-default-policy.json
 var guardDefaultPolicyJSON []byte
 

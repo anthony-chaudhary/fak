@@ -212,7 +212,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// outbound tools[], keeping the cache_control prefix byte-identical (promptmmu). Runs
 	// after the history compaction (both rewrite req.Raw; tools[] and messages[] are
 	// disjoint regions) and before either passthrough consumer of req.Raw. Identity-safe:
-	// nil predicate or no floor-denied advertised tool ⇒ req.Raw untouched.
+	// nil predicate or no floor-denied advertised tool ⇒ req.Raw untouched. The call records
+	// its WITNESSED prune count into /metrics (observeInboundToolPrune), so a turn that shed
+	// unreachable tool defs is now visible in the exit summary instead of silently discarded.
 	s.maybeCompactInboundTools(req)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
@@ -502,6 +504,12 @@ func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (
 		return nil
 	}
 	req.Raw = res.Body
+	// Record the WITNESSED prune so the lever is no longer invisible: before this, the
+	// pruned list was discarded with no metric, so an operator could not tell a turn that
+	// shed unreachable tool defs (a pure uncached-token saving) from one that fired zero
+	// times. The pruner already proved the cached prefix stayed byte-identical, so a counted
+	// prune never bursts the upstream cache (epic #1089 — is-our-thing-ENABLED-and-USED).
+	s.metrics.observeInboundToolPrune(len(res.Pruned))
 	return res.Pruned
 }
 

@@ -113,6 +113,20 @@ type gatewayMetrics struct {
 	compactCacheReads  uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
 	compactLastCacheRd float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
 
+	// toolPruneMu guards the INBOUND tool-definition prune accumulators (the twin of
+	// the compaction family above, for the tools[] axis). maybeCompactInboundTools drops
+	// tool DEFINITIONS the floor can NEVER admit from the outbound tools[] — but only the
+	// ones strictly AFTER the cache_control breakpoint, so the cached prefix stays
+	// byte-identical. Like compaction it is otherwise INVISIBLE: it returns identity with no
+	// signal, so an operator cannot tell a lever that delivered tool-def cache savings from
+	// one that fired zero times. These are WITNESSED (fak authored — fak chose what to drop):
+	//   - toolPruneTurns: turns on which at least one tool def was pruned.
+	//   - toolPruneCount: cumulative tool defs removed across all those turns.
+	// Kept off compactMu — a different transform with its own (rare) hot path.
+	toolPruneMu    sync.Mutex
+	toolPruneTurns uint64 // WITNESSED: turns where >=1 unreachable tool def was pruned from tools[]
+	toolPruneCount uint64 // WITNESSED: total tool defs removed across all prune turns
+
 	// resetShadowMu guards the per-session resetScore SHADOW accumulators (#792). The reset
 	// policy (reset_score.go) recommends cut-vs-reset; this folds the recommend-only verdict
 	// stream into /metrics so an operator sees the cut-vs-reset pressure WITHOUT the policy ever
@@ -398,6 +412,34 @@ func (m *gatewayMetrics) recordCompactionCacheRead(cacheRead int) {
 	m.compactMu.Unlock()
 }
 
+// observeInboundToolPrune records that a turn pruned n unreachable tool definitions from the
+// outbound tools[] (the INBOUND tool-floor prune lever). n<=0 is a no-op, so the common turn —
+// where no advertised tool is floor-denied past the cache_control breakpoint — records nothing,
+// exactly as a clean compaction turn does. WITNESSED: fak chose what to drop, and the pruner
+// proved the cached prefix stayed byte-identical before returning Changed=true, so a counted
+// prune never bursts the upstream cache.
+func (m *gatewayMetrics) observeInboundToolPrune(n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.toolPruneMu.Lock()
+	m.toolPruneTurns++
+	m.toolPruneCount += uint64(n)
+	m.toolPruneMu.Unlock()
+}
+
+// inboundToolPruneSnapshot reads the WITNESSED tool-prune accumulators under their lock. Pure
+// read — the exit summary and the Prometheus surface both fold the same two numbers, so the line
+// can never disagree with the scrape.
+func (m *gatewayMetrics) inboundToolPruneSnapshot() (turns, count uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.toolPruneMu.Lock()
+	defer m.toolPruneMu.Unlock()
+	return m.toolPruneTurns, m.toolPruneCount
+}
+
 // recordResetShadow folds one compacted turn's resetScore SHADOW verdict into the recommend-only
 // accumulators. The reset policy NEVER acts in shadow mode (reset_shadow.go); this only counts what
 // it WOULD recommend, bucketed by the closed ResetReason, so an operator can watch the cut-vs-reset
@@ -530,6 +572,17 @@ type AdjudicationSummary struct {
 	// (budget>0, nothing exceeded it) vs DISABLED — the two readings of "0 fired" the bare
 	// counters cannot tell apart.
 	CompactionBudget int `json:"compaction_budget"`
+
+	// ToolPrune* folds the INBOUND tool-definition prune lever into the same exit summary,
+	// WITNESSED (fak authored): ToolPruneTurns is the count of turns that dropped at least one
+	// unreachable tool def from the outbound tools[], and ToolPruneCount the total defs removed.
+	// The pruner only drops tools strictly AFTER the cache_control breakpoint and re-proves the
+	// protected prefix is byte-identical, so a counted prune is a pure uncached-token saving that
+	// never bursts the upstream cache. Zero on the dominant Claude Code path (its single breakpoint
+	// sits on the LAST tool, so nothing is droppable) — which is exactly the fact the operator
+	// could not see before, since the prune result was discarded with no metric.
+	ToolPruneTurns uint64 `json:"tool_prune_turns"`
+	ToolPruneCount uint64 `json:"tool_prune_count"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -558,6 +611,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	// Carry the per-reason bail breakdown so the banner can explain the bailed lump (the
 	// snapshot already copied it under compactMu); only attach a non-empty map so a clean
 	// session keeps the JSON field absent (omitempty).
+	sum.ToolPruneTurns, sum.ToolPruneCount = m.inboundToolPruneSnapshot()
 	if len(comp.bailReasons) > 0 {
 		sum.CompactionBailReasons = comp.bailReasons
 	}
@@ -2040,6 +2094,16 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_compaction_post_fire_cache_read_tokens",
 		"OBSERVED (provider-reported): cache_read_input_tokens on the MOST RECENT compacted turn. If this craters while fires climb, the prefix fak shipped was still byte-identical (witnessed by fired with prefix_mismatch=0), so the provider did not reuse it for a reason fak does NOT control: cache TTL expiry, eviction, or the client moving its own breakpoint. Only bail_reason{reason=\"prefix_mismatch\"}>0 is fak's bug.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_compaction_post_fire_cache_read_tokens %s\n", promFloat(snap.lastCacheRd))
+
+	// The INBOUND tool-floor prune family (the tools[] twin of the compaction shed above).
+	// WITNESSED: how many unreachable tool DEFINITIONS fak dropped from the advertised surface,
+	// a pure uncached-token saving the pruner makes only after the cache_control breakpoint so it
+	// never bursts the cache. Both stay 0 on the dominant Claude Code path (its single breakpoint
+	// sits on the LAST tool, so nothing is droppable) — which, before these rows existed, was the
+	// invisible fact: the prune result was discarded with no counter.
+	pruneTurns, pruneCount := m.inboundToolPruneSnapshot()
+	writeCounter(b, "fak_gateway_inbound_tools_pruned_total", "WITNESSED (fak authored): cumulative unreachable tool DEFINITIONS dropped from the outbound tools[] across the session. A pure uncached-token saving — the pruner drops only tools after the cache_control breakpoint and re-proves the protected prefix is byte-identical, so a counted prune never bursts the upstream cache.", int64(pruneCount))
+	writeCounter(b, "fak_gateway_inbound_tools_prune_turns_total", "WITNESSED (fak authored): turns on which at least one unreachable tool def was pruned from tools[]. Zero on a harness (e.g. Claude Code) whose single cache_control breakpoint sits on the LAST tool, since nothing is then droppable.", int64(pruneTurns))
 }
 
 // resetShadowSnapshot is a lock-free copy of the resetScore SHADOW accumulators for rendering.

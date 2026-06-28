@@ -5,6 +5,7 @@
     "Bash",
     "BashOutput",
     "KillShell",
+    "PowerShell",
     "Read",
     "Edit",
     "Write",
@@ -36,6 +37,29 @@
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
     "ReadMcpResourceDirTool",
+
+    "Workflow",
+    "EnterWorktree",
+    "ExitWorktree",
+    "CronCreate",
+    "CronList",
+    "CronDelete",
+    "PushNotification",
+    "RemoteTrigger",
+    "DesignSync",
+
+    "mcp__dos__dos_verify",
+    "mcp__dos__dos_arbitrate",
+    "mcp__dos__dos_recall",
+    "mcp__dos__dos_review",
+    "mcp__dos__dos_status",
+    "mcp__dos__dos_doctor",
+    "mcp__dos__dos_answer",
+    "mcp__dos__dos_check_reason",
+    "mcp__dos__dos_refuse_reasons",
+    "mcp__dos__dos_commit_audit",
+    "mcp__dos__dos_citation_resolve",
+    "mcp__dos__acme_lane_hint",
 
     "bash",
     "read",
@@ -74,7 +98,12 @@
     { "tool": "Bash", "arg": "command", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": ">>?\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" },
-    { "tool": "Bash", "arg": "command", "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" }
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;&]*\\s\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" },
+
+    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk|Clear-Content)\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK" }
   ],
 
   "self_modify_globs": [

@@ -31,7 +31,6 @@
 
   "self_modify_globs": [
     ".git/",
-    ".ssh/",
     ".env",
     ".aws/",
     "id_rsa",

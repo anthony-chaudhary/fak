@@ -276,6 +276,46 @@ func TestAdjudicationSummaryReportsCompaction(t *testing.T) {
 	}
 }
 
+// TestAdjudicationSummaryReportsInboundToolPrune pins the observability wire for the INBOUND
+// tool-floor prune lever: before this, maybeCompactInboundTools discarded its result, so a turn
+// that shed unreachable tool defs (a real uncached-token saving) was indistinguishable from one
+// that never fired. The accumulator must (a) ignore a zero/empty prune so the common turn records
+// nothing, and (b) fold turns + total-defs into the summary so the exit line and /metrics agree.
+func TestAdjudicationSummaryReportsInboundToolPrune(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	// A clean run records nothing — the dominant Claude Code path (breakpoint on the last tool,
+	// nothing droppable) must not show a vacuous prune line.
+	m.observeInboundToolPrune(0)
+	m.observeInboundToolPrune(-3) // a defensive guard against a negative count
+	if s := m.adjudicationSummary(); s.ToolPruneTurns != 0 || s.ToolPruneCount != 0 {
+		t.Fatalf("no-prune run = turns %d count %d, want 0/0", s.ToolPruneTurns, s.ToolPruneCount)
+	}
+
+	// Two turns that pruned: 3 defs then 2 defs -> 2 turns, 5 total defs.
+	m.observeInboundToolPrune(3)
+	m.observeInboundToolPrune(2)
+	s := m.adjudicationSummary()
+	if s.ToolPruneTurns != 2 || s.ToolPruneCount != 5 {
+		t.Fatalf("tool-prune summary = turns %d count %d, want 2/5", s.ToolPruneTurns, s.ToolPruneCount)
+	}
+
+	// The Prometheus surface must fold the SAME two numbers (the line can never disagree with
+	// the scrape), and stay WITNESSED-labeled.
+	var b strings.Builder
+	m.writeCompactionMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		"fak_gateway_inbound_tools_pruned_total 5",
+		"fak_gateway_inbound_tools_prune_turns_total 2",
+		"WITNESSED",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prometheus tool-prune surface missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestInferenceMetricsAccumulateAcrossTurns exercises the model-generation family
 // directly: the kernel/vDSO counters stay 0 on a pure chat workload, so this is the
 // signal that makes a busy gateway look busy. Two turns must sum the token totals,
