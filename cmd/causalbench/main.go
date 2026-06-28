@@ -45,6 +45,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -168,11 +169,11 @@ func run() (witnessRecord, error) {
 	if !hit1 || !hit2 {
 		return witnessRecord{}, fmt.Errorf("post-fill: read#1 hit=%v read#2 hit=%v (want both true)", hit1, hit2)
 	}
-	w1Exact := bytesEqual(got1, fresh1)
+	w1Exact := bytes.Equal(got1, fresh1)
 	if !w1Exact {
 		return witnessRecord{}, fmt.Errorf("cached read#1 bytes != fresh engine bytes — hit is not equal-to-a-fresh-call")
 	}
-	if !bytesEqual(got2, fresh2) {
+	if !bytes.Equal(got2, fresh2) {
 		return witnessRecord{}, fmt.Errorf("cached read#2 bytes != fresh engine bytes")
 	}
 	fmt.Printf("\n  ADMIT: read#1 + read#2 both serve byte-exact from cache (hit==fresh call).\n")
@@ -205,7 +206,7 @@ func run() (witnessRecord, error) {
 	if !hit2b {
 		return witnessRecord{}, fmt.Errorf("read#2 was evicted by an UNRELATED write — eviction over-fired (blunt flush)")
 	}
-	w2Identical := bytesEqual(got2b, got2)
+	w2Identical := bytes.Equal(got2b, got2)
 	if !w2Identical {
 		return witnessRecord{}, fmt.Errorf("read#2 served DIFFERENT bytes across the write (%x vs %x)", got2b, got2)
 	}
@@ -312,18 +313,6 @@ func lookupBytes(ctx context.Context, v *vdso.VDSO, c *abi.ToolCall) ([]byte, bo
 }
 
 // ---- small utilities --------------------------------------------------------
-
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
 
 func digest(s string) string {
 	sum := sha256.Sum256([]byte(s))
