@@ -79,7 +79,15 @@ DEFAULT_TIMEOUT_S = 1800
 # module IS the source of truth for how each backend is invoked, so there is no
 # second place to drift. Override per-call via the env vars below if a backend
 # changes its flags.
-CLAUDE_AGENT_PROMPT = "/dos-kernel:dos-dispatch-loop --lane {lane}"
+# Invoke the BARE project-skill form (`/dos-dispatch-loop`), not the namespaced
+# plugin form (`/dos-kernel:dos-dispatch-loop`). The skill is git-tracked at
+# `.claude/skills/dos-dispatch-loop/SKILL.md`, so a worker launched from the repo
+# root sees it under EVERY switched account dir. The plugin form fails closed
+# ("Unknown command") whenever a per-account `.claude-<acct>` plugin cache is
+# missing/empty — which it is for freshly-enrolled worker accounts — making the
+# spawned worker exit 0 with zero work done. The project skill has no such
+# per-account dependency.
+CLAUDE_AGENT_PROMPT = "/dos-dispatch-loop --lane {lane}"
 OPENCODE_AGENT = "dos-dispatch"
 OPENCODE_MESSAGE = "dispatch lane {lane}"
 

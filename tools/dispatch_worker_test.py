@@ -40,7 +40,11 @@ class DispatchWorkerTest(unittest.TestCase):
         cmd = mod.build_command("adjudicator", "claude")
         self.assertEqual(cmd[0], "claude")
         self.assertEqual(cmd[1:4], ["-p", "--permission-mode", "bypassPermissions"])
-        self.assertEqual(cmd[4], "/dos-kernel:dos-dispatch-loop --lane adjudicator")
+        # BARE project-skill form (git-tracked .claude/skills/dos-dispatch-loop),
+        # not the namespaced plugin form -- the plugin cache is per-account and is
+        # empty for freshly-enrolled worker dirs, so the namespaced form fails
+        # closed ("Unknown command") and the worker exits 0 with zero work done.
+        self.assertEqual(cmd[4], "/dos-dispatch-loop --lane adjudicator")
 
     def test_opencode_command_uses_dispatch_agent_and_skip_permissions(self) -> None:
         mod = load()
