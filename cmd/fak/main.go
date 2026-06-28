@@ -106,6 +106,8 @@ func main() {
 		cmdClaudeMacFak(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
+	case "cron":
+		cmdCron(os.Args[2:])
 	case "snapshot":
 		cmdSnapshot(os.Args[2:])
 	case "traj":

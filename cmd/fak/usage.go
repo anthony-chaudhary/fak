@@ -244,6 +244,13 @@ func usageOpsVerbs() {
                 (the DURABLE LONG-RUNNING-LOOP ledger: hash-chained fire/admit/start/
                  end/witness events, an OS-scheduler wrapper, a read fold, and the
                  tunable admission governor that gates the always-on loop by policy)
+  fak cron      emit --target launchd|systemd|taskscheduler [--loop ID | <job>]
+                [--interval DUR] [--fak-bin PATH] [--label NAME] [--ledger FILE] [-- CMD ARG...]
+                (project the in-kernel loop schedule DOWN to a real OS scheduler unit:
+                 render a launchd .plist / systemd timer+service / Windows
+                 Register-ScheduledTask snippet whose command is 'fak loop run --loop
+                 <id> ...'. The OS scheduler owns wall-clock firing; fak owns the
+                 semantics (overlap-lock, missed-run). The operator installs the unit)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL [--replica-base-url URL ...] --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--require-key-env VAR] [--vdso=true]
