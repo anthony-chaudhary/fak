@@ -61,6 +61,7 @@ type MMU struct {
 	evicted    int64 // held entries dropped by the maxHeld bound (observability)
 	screened   int64 // results additively quarantined by a registered SemanticScreen
 	digested   int64 // oversize results paged out to a digest-bearing stub (rung 3, ScreenDigest)
+	capPaged   int64 // capability bodies paged out via PageOutBody (C3, issue #1106)
 
 	mu        sync.Mutex
 	held      map[string]abi.Ref // id -> paged-out handle (quarantined bytes)
