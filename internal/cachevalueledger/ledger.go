@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
-	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
 const (
@@ -107,24 +106,6 @@ func ReadLedgerFile(path string) []Row {
 		return nil
 	}
 	return ParseLedger(string(b))
-}
-
-func ToVCacheTurns(rows []Row) []vcachegov.TelemetryRow {
-	var turns []vcachegov.TelemetryRow
-	for _, r := range rows {
-		if r.Turns == 0 {
-			continue
-		}
-		t := vcachegov.TelemetryRow{
-			InputTokens:              float64(r.PromptTokens),
-			CacheCreationInputTokens: float64(r.PromptTokens - r.ReusedTokens),
-			CacheReadInputTokens:     float64(r.ReusedTokens),
-			Ephemeral1hInputTokens:   0,
-			Ephemeral5mInputTokens:   0,
-		}
-		turns = append(turns, t)
-	}
-	return turns
 }
 
 // ScoreLedgerResult summarizes the cache-value ledger for regression gate checks.
