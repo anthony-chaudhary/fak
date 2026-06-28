@@ -882,6 +882,15 @@ def _classify_row(acct_dir: str, product: str, account: str, pol: dict) -> dict:
     if not os.path.isdir(acct_dir):
         return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
                 "kind": "non-account", "reason": "not a directory", "notes": note}
+    # Intrinsic tombstone: a dir name carrying the `.DELETED` marker (the suffix the
+    # account-decommission path stamps, e.g. `.claude-smith-netra.DELETED-2026-06-26`)
+    # is decommissioned regardless of policy and must NEVER be offered to the switcher
+    # -- otherwise the spawn gate routes a worker onto a dead login and burns the launch.
+    # This is checked before the policy-substring exclude so it can't be missed by a
+    # roster that only lists live-account name fragments.
+    if ".deleted" in account.lower():
+        return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
+                "kind": "excluded", "reason": "tombstoned (.DELETED marker)", "notes": note}
     hit = _excluded_match(tag, account, pol.get("exclude", []))
     if hit:
         why = note or f"excluded by policy (matches '{hit}')"
