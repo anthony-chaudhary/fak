@@ -261,28 +261,6 @@ func checkBrowserAction(doc map[string]any, child ChildStatus) ChildStatus {
 	return child
 }
 
-func checkFixture(doc map[string]any, child ChildStatus) ChildStatus {
-	child.EvidenceClass = str(doc, "evidence_class")
-	child.ResultClaimAllowed = boolv(doc, "result_claim_allowed")
-	if child.ResultClaimAllowed {
-		child.Gate = "PASS_RESULT"
-		child.Status = "RESULT_CLAIM_ALLOWED"
-		child.Detail = "fixture report unexpectedly allows result claim"
-		return child
-	}
-	if child.EvidenceClass == "SIMULATED_LOCAL_FIXTURE" {
-		child.Gate = "PASS_LOCAL"
-		child.Status = "SIMULATED_LOCAL_FIXTURE"
-		child.Detail = "local fixture is parseable and explicitly non-promotable"
-		child.Missing = stringSlice(doc, "promotion_requirements")
-		return child
-	}
-	child.Gate = "FAIL"
-	child.Status = "UNKNOWN_FIXTURE_CLASS"
-	child.Detail = "expected SIMULATED_LOCAL_FIXTURE with result_claim_allowed=false"
-	return child
-}
-
 func checkAuthority(doc map[string]any, child ChildStatus) ChildStatus {
 	text := fmt.Sprint(doc["text"])
 	needles := []string{
