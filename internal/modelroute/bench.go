@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -81,14 +80,7 @@ func DefaultLatencies() LatencyBook {
 
 // Overlay returns a copy of book with every entry of over applied on top.
 func (book LatencyBook) Overlay(over LatencyBook) LatencyBook {
-	merged := make(LatencyBook, len(book)+len(over))
-	for k, v := range book {
-		merged[k] = v
-	}
-	for k, v := range over {
-		merged[k] = v
-	}
-	return merged
+	return overlayMaps(book, over)
 }
 
 // ParseLatencies reads a --latencies spec into a LatencyBook overlay:
@@ -96,27 +88,13 @@ func (book LatencyBook) Overlay(over LatencyBook) LatencyBook {
 // malformed pair, mirroring ParsePrices and the manifest's DisallowUnknownFields.
 // The caller layers the result on top of DefaultLatencies.
 func ParseLatencies(spec string) (LatencyBook, error) {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		return LatencyBook{}, nil
-	}
-	out := LatencyBook{}
-	for _, pair := range strings.Split(spec, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" {
-			return nil, fmt.Errorf("modelroute: bad --latencies pair %q (want model=ms)", pair)
-		}
+	return parseBook(spec, "latencies", "model=ms", func(s string) (float64, error) {
 		var ms float64
-		if _, err := fmt.Sscanf(strings.TrimSpace(kv[1]), "%g", &ms); err != nil {
-			return nil, fmt.Errorf("modelroute: --latencies %q: %w", pair, err)
+		if _, err := fmt.Sscanf(s, "%g", &ms); err != nil {
+			return 0, err
 		}
-		out[strings.TrimSpace(kv[0])] = ms
-	}
-	return out, nil
+		return ms, nil
+	})
 }
 
 // ---------------------------------------------------------------------------

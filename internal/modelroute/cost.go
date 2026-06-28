@@ -153,40 +153,18 @@ func (s Savings) Headline() string {
 // the manifest's DisallowUnknownFields discipline. The caller layers the result on
 // top of DefaultPrices so a spec need only name the models it overrides.
 func ParsePrices(spec string) (PriceBook, error) {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		return PriceBook{}, nil
-	}
-	out := PriceBook{}
-	for _, pair := range strings.Split(spec, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" {
-			return nil, fmt.Errorf("modelroute: bad --prices pair %q (want model=in/out or model=N)", pair)
-		}
-		model := strings.TrimSpace(kv[0])
-		in, outv, err := parseInOut(strings.TrimSpace(kv[1]))
+	return parseBook(spec, "prices", "model=in/out or model=N", func(s string) (Price, error) {
+		in, outv, err := parseInOut(s)
 		if err != nil {
-			return nil, fmt.Errorf("modelroute: --prices %q: %w", pair, err)
+			return Price{}, err
 		}
-		out[model] = Price{In: in, Out: outv}
-	}
-	return out, nil
+		return Price{In: in, Out: outv}, nil
+	})
 }
 
 // Overlay returns a copy of book with every entry of over applied on top.
 func (book PriceBook) Overlay(over PriceBook) PriceBook {
-	merged := make(PriceBook, len(book)+len(over))
-	for k, v := range book {
-		merged[k] = v
-	}
-	for k, v := range over {
-		merged[k] = v
-	}
-	return merged
+	return overlayMaps(book, over)
 }
 
 // parseInOut parses "in/out" (two prices) or "N" (one price for both directions).
@@ -220,4 +198,49 @@ func money(v float64) string {
 		s = "0"
 	}
 	return s
+}
+
+// overlayMaps returns a fresh map holding every entry of base with over applied on
+// top — the shared body behind PriceBook.Overlay / LatencyBook.Overlay (the two
+// books differ only in their value type, so the merge is one generic copy).
+func overlayMaps[K comparable, V any](base, over map[K]V) map[K]V {
+	merged := make(map[K]V, len(base)+len(over))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range over {
+		merged[k] = v
+	}
+	return merged
+}
+
+// parseBook parses a comma-separated "model=value" overlay spec into a fresh
+// map[string]V — the shared body behind ParsePrices / ParseLatencies, which differ
+// only in how a single value is parsed and in their flag label. flag names the CLI
+// flag (e.g. "prices") for the error prefix, pairHint is the per-pair "want ..."
+// shape, and parseVal decodes one already-trimmed value. An empty spec yields a
+// non-nil empty map; a malformed pair or value fails loud, mirroring the manifest's
+// DisallowUnknownFields discipline.
+func parseBook[V any](spec, flag, pairHint string, parseVal func(string) (V, error)) (map[string]V, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return map[string]V{}, nil
+	}
+	out := map[string]V{}
+	for _, pair := range strings.Split(spec, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" {
+			return nil, fmt.Errorf("modelroute: bad --%s pair %q (want %s)", flag, pair, pairHint)
+		}
+		v, err := parseVal(strings.TrimSpace(kv[1]))
+		if err != nil {
+			return nil, fmt.Errorf("modelroute: --%s %q: %w", flag, pair, err)
+		}
+		out[strings.TrimSpace(kv[0])] = v
+	}
+	return out, nil
 }
