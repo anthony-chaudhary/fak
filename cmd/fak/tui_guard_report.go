@@ -246,15 +246,10 @@ func tuiGuardDefaultBlockerDetail(blocker, evidence map[string]any) string {
 		"surface=" + tuiGuardString(blocker, "surface"),
 		fmt.Sprintf("rank=%d", tuiGuardInt(blocker, "rank")),
 	}
-	for _, key := range []string{
+	bits = appendGuardIntMapBits(bits, evidence,
 		"active_settlement_action_counts",
 		"recent_active_settlement_action_counts",
-		"stale_active_settlement_action_counts",
-	} {
-		if counts := tuiGuardIntMap(evidence[key]); len(counts) > 0 {
-			bits = append(bits, key+"="+tuiGuardCompactJSON(counts))
-		}
-	}
+		"stale_active_settlement_action_counts")
 	for _, key := range []string{
 		"recent_active_consecutive_total",
 		"active_consecutive_total",
@@ -271,15 +266,10 @@ func tuiGuardDefaultBlockerDetail(blocker, evidence map[string]any) string {
 	if tags := tuiGuardIntMap(evidence["evidence_tag_counts"]); len(tags) > 0 {
 		bits = append(bits, "tags="+tuiGuardCompactJSON(tags))
 	}
-	for _, key := range []string{
+	bits = appendGuardIntMapBits(bits, evidence,
 		"recent_active_origin_counts",
 		"stale_active_origin_counts",
-		"origin_counts",
-	} {
-		if counts := tuiGuardIntMap(evidence[key]); len(counts) > 0 {
-			bits = append(bits, key+"="+tuiGuardCompactJSON(counts))
-		}
-	}
+		"origin_counts")
 	if blockers, ok := evidence["blockers"].([]any); ok && len(blockers) > 0 {
 		bits = append(bits, "blockers="+tuiGuardCompactJSON(blockers))
 	}
@@ -290,6 +280,18 @@ func tuiGuardDefaultBlockerDetail(blocker, evidence map[string]any) string {
 		bits = append(bits, "next="+next)
 	}
 	return strings.Join(nonEmptyTUI(bits), "  ")
+}
+
+// appendGuardIntMapBits appends "key=<compact-json>" for each named evidence key whose value
+// decodes to a non-empty int map, returning the grown slice. It folds the repeated
+// range-over-keys / non-empty-int-map / append shape into one named intent.
+func appendGuardIntMapBits(bits []string, evidence map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		if counts := tuiGuardIntMap(evidence[key]); len(counts) > 0 {
+			bits = append(bits, key+"="+tuiGuardCompactJSON(counts))
+		}
+	}
+	return bits
 }
 
 func tuiGuardDefaultBlockerCount(evidence map[string]any) int {

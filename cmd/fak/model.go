@@ -57,28 +57,7 @@ func cmdModelPull(args []string) {
 		fs.Usage()
 		os.Exit(2)
 	}
-	ref, expanded := modelreg.Resolve(fs.Arg(0))
-	if expanded {
-		fmt.Fprintf(os.Stderr, "fak pull: %s → %s\n", fs.Arg(0), ref)
-	}
-	// A resolved-to-local-path ref (the user pulled a name that maps to a vendored
-	// path, or passed a path) is already present: report it and stop.
-	if !hfhub.IsURI(ref) {
-		if _, err := os.Stat(ref); err == nil {
-			fmt.Println(ref)
-			return
-		}
-		fmt.Fprintf(os.Stderr, "fak pull: %q is not a known alias, an hf:// URI, or an existing path\n", fs.Arg(0))
-		os.Exit(1)
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	path, err := hfhub.FetchURI(ctx, ref, os.Stderr)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak pull: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println(path)
+	resolveAndFetchModelRef(fs.Arg(0), "pull", 1)
 }
 
 // cmdModelLs is `fak ls` / `fak model ls`: list the merged alias registry (embedded
@@ -134,24 +113,31 @@ func cmdModelLoad(args []string) {
 		fs.Usage()
 		os.Exit(2)
 	}
-	ref, expanded := modelreg.Resolve(fs.Arg(0))
+	resolveAndFetchModelRef(fs.Arg(0), "model load", 2)
+}
+
+// resolveAndFetchModelRef resolves a model ref (alias-aware), short-circuits a ref that is
+// already a local path, otherwise downloads the hf:// URI and prints the resulting local path.
+// label names the command in messages ("pull" / "model load"); notFoundExit is the exit code
+// used when the ref is neither an hf:// URI nor an existing path.
+func resolveAndFetchModelRef(arg, label string, notFoundExit int) {
+	ref, expanded := modelreg.Resolve(arg)
 	if expanded {
-		fmt.Fprintf(os.Stderr, "fak model load: %s → %s\n", fs.Arg(0), ref)
+		fmt.Fprintf(os.Stderr, "fak %s: %s → %s\n", label, arg, ref)
 	}
-	// A ref that resolved to (or already was) a local path is loadable as-is.
 	if !hfhub.IsURI(ref) {
 		if _, err := os.Stat(ref); err == nil {
 			fmt.Println(ref)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "fak model load: %q is not a known alias, an hf:// URI, or an existing path\n", fs.Arg(0))
-		os.Exit(2)
+		fmt.Fprintf(os.Stderr, "fak %s: %q is not a known alias, an hf:// URI, or an existing path\n", label, arg)
+		os.Exit(notFoundExit)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	path, err := hfhub.FetchURI(ctx, ref, os.Stderr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak model load: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fak %s: %v\n", label, err)
 		os.Exit(1)
 	}
 	fmt.Println(path)

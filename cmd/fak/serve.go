@@ -797,14 +797,6 @@ func serveGGUFContextPlanTokens(cfg fakmodel.Config, contextBudgetTokens int) in
 	return cfg.MaxPositionEmbeddings
 }
 
-func fitServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) error {
-	if ggufPath == "" || be == nil {
-		return nil
-	}
-	_, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, be, f32Resident, contextBudgetTokens)
-	return err
-}
-
 // fitServeGGUFPathOnHost is the pure-CPU reference-path memory-fit pre-flight (#974). The CPU
 // serve path (loadServeInKernelModel's FAK_Q4K and default cases) copies every super-block to
 // ANONYMOUS host RAM with NO HAL backend to refuse via RefuseMemoryPlanIfTooBig, so without this
@@ -833,14 +825,6 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 		return plan, nil
 	}
 	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
-}
-
-func fitServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) error {
-	if ggufPath == "" || be == nil {
-		return nil
-	}
-	_, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, be, contextBudgetTokens)
-	return err
 }
 
 func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) (compute.MemoryPlan, error) {
