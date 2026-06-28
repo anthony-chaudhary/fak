@@ -277,7 +277,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 // error). It returns false ONLY when the upstream stream never opened and NOTHING was
 // written to the client — so the caller can fall back to the buffered path with exactly
 // one upstream generation having been attempted.
-func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool) bool {
+func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool, hcoh harnessCoherenceInputs) bool {
 	hp, ok := s.planner.(*agent.HTTPPlanner)
 	if !ok {
 		return false
@@ -344,6 +344,11 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			s.metrics.recordCompactionCacheRead(p.cacheRead) // OBSERVED provider cache_read on a compacted streamed turn
 			s.observeResetHealth(reqTrace, p.promptTok, p.cacheRead, p.cacheCreate)
 		}
+		// Harness-coherence (#1132): fold this streamed turn with the content-free inbound-prefix
+		// digest captured before transforms and the provider's relayed cache counters (known now at
+		// stream end). Same observation the buffered path makes; the family stays path-agnostic.
+		s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+			false /*fakWorldBreak*/, false /*sealed*/, int64(p.cacheRead), int64(p.cacheCreate))
 		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             p.promptTok,
 			CompletionTokens:         p.complTok,

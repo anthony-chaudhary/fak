@@ -178,6 +178,13 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
+	// Harness-coherence seam (#1132): capture a CONTENT-FREE digest of the inbound protected
+	// prefix (bytes through the first cache_control breakpoint) BEFORE any of fak's request-side
+	// transforms below. This ordering is load-bearing — fak forwards the inbound protected prefix
+	// verbatim, so a change in this digest across turns can only be the harness rewriting its own
+	// history (auto-compaction), never fak. The observation is folded after the served turn, once
+	// the provider's cache counters are known.
+	inboundPrefixDigest := inboundProtectedPrefixDigest(req.Raw)
 	// ctxplan planned VIEW on the Anthropic passthrough (#927 — the deferred #555 req.Raw
 	// transform): when --ctx-view-budget is set, plan req.Messages into an O(1) resident
 	// view and materialize it onto req.Raw by stubbing each elided middle turn in place
@@ -195,7 +202,13 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// kernel adjudicates below are untouched, so the trust boundary is unchanged. Placed
 	// after the pace cap (which only ever rewrites the top-level max_tokens, never the
 	// cached message prefix) and before either passthrough consumer of req.Raw.
-	compacted := s.maybeCompactAnthropicRaw(req)
+	compacted, compactReason := s.compactAnthropicRawWithReason(req)
+	// fakBail is the harness-coherence view of fak's own compaction this turn: "" for a clean fire
+	// AND for a healthy under_budget no-op, the real reason for any actual bail. Threaded into the
+	// observation below so the coordinator can count a sustained fak-bail streak (when it yields the
+	// context net back to the harness).
+	fakBail := fakBailReasonFor(compactReason)
+	hcoh := harnessCoherenceInputs{inboundPrefixDigest: inboundPrefixDigest, fakBail: fakBail}
 	if viewPlanned {
 		compacted = true // the ctxview transform shrunk the body too — record the observed cache_read
 	}
@@ -241,7 +254,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// is felt, not buffered away). It returns false only if the upstream stream never
 		// opened and nothing was written — then fall back to the buffered synth path,
 		// which is also the path for a local/mock upstream that cannot stream this wire.
-		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted) {
+		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, hcoh) {
 			return
 		}
 		// For non-Anthropic upstreams that still support the generic planner streaming
@@ -253,7 +266,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		if s.streamAnthropicPlannerLive(w, r, req, reqTrace, sessionTurn) {
 			return
 		}
-		s.streamAnthropicPending(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted)
+		s.streamAnthropicPending(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, hcoh)
 		return
 	}
 
@@ -279,6 +292,13 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
 		s.observeResetHealth(reqTrace, turn.Usage.InputTokens, turn.Usage.CacheReadInputTokens, turn.Usage.CacheCreationInputTokens)
 	}
+	// Harness-coherence (#1132): fold this served turn into the per-trace coordinator with the
+	// content-free inbound-prefix digest taken before transforms and the provider's relayed cache
+	// counters. fakWorldBreak is false here — fak's deliberate cachemeta world-break does not run on
+	// this passthrough; a deliberate break, when wired, would set it so the coordinator attributes a
+	// changed prefix to fak rather than the harness.
+	s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+		false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens))
 	s.logInferenceTurn(reqTrace, "anthropic_messages", false, agent.Usage{
 		PromptTokens:             turn.Usage.InputTokens,
 		CompletionTokens:         turn.Usage.OutputTokens,
@@ -395,12 +415,22 @@ func spliceMaxTokens(raw []byte, cap int) ([]byte, bool) {
 // the caller threads that through so the post-response provider cache_read (an OBSERVED value
 // fak relays, never a fak claim) is recorded only on turns this actually compacted.
 func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
+	fired, _ = s.compactAnthropicRawWithReason(req)
+	return fired
+}
+
+// compactAnthropicRawWithReason is maybeCompactAnthropicRaw with the raw CompactOutcome.Reason
+// exposed so the harness-coherence seam (#1132) can build a TurnObservation: it needs to tell a
+// clean fire ("") and a healthy under_budget no-op apart from a real bail (prefix_mismatch,
+// cached_span, …). A configured-off lever returns ("", false) — no compaction attempt was made,
+// so there is no fak-side compaction signal to fold into the observation.
+func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest) (fired bool, reason string) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
-		return false
+		return false, ""
 	}
 	if s.compactHistoryBudget <= 0 {
 		s.metrics.observeCompaction(agent.CompactOutcome{}, true) // configured OFF
-		return false
+		return false, ""
 	}
 	// Offensive half (#806): if the caller left NO cache_control breakpoint, place one on the
 	// stable system+tools head so the provider caches it — AND so the compaction below has an
@@ -414,7 +444,7 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 	out, outcome := agent.CompactAnthropicHistoryWithOutcome(req.Raw, s.compactHistoryBudget)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
-	return outcome.Reason == agent.CompactReasonNone
+	return outcome.Reason == agent.CompactReasonNone, outcome.Reason
 }
 
 // maybeElideAnthropicRaw shrinks oversized tool_result bodies in the outbound passthrough body
@@ -833,7 +863,7 @@ func fakExtFrom(adjs []ToolAdjudication, results []ResultAdmission) *FakExt {
 	return &FakExt{Adjudications: adjs, ResultAdmissions: results}
 }
 
-func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool) {
+func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool, hcoh harnessCoherenceInputs) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		began := time.Now()
@@ -847,6 +877,8 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 			s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
 			s.observeResetHealth(reqTrace, turn.Usage.InputTokens, turn.Usage.CacheReadInputTokens, turn.Usage.CacheCreationInputTokens)
 		}
+		s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+			false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens))
 		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             turn.Usage.InputTokens,
 			CompletionTokens:         turn.Usage.OutputTokens,
@@ -913,6 +945,8 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 				s.metrics.recordCompactionCacheRead(res.turn.Usage.CacheReadInputTokens)
 				s.observeResetHealth(reqTrace, res.turn.Usage.InputTokens, res.turn.Usage.CacheReadInputTokens, res.turn.Usage.CacheCreationInputTokens)
 			}
+			s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
+				false /*fakWorldBreak*/, false /*sealed*/, int64(res.turn.Usage.CacheReadInputTokens), int64(res.turn.Usage.CacheCreationInputTokens))
 			s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
 				PromptTokens:             res.turn.Usage.InputTokens,
 				CompletionTokens:         res.turn.Usage.OutputTokens,

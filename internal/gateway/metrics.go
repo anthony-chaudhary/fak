@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -135,6 +136,14 @@ type gatewayMetrics struct {
 	resetShadowReasons   map[string]uint64 // ResetReason -> compacted turns scored that way
 	resetShadowRecommend uint64            // compacted turns whose SHADOW verdict was ShouldReset (acted on: none)
 	resetShadowLastScore float64           // the most recent turn's 0..1 reset-pressure score
+
+	// harnessCoherence is the #1132 gateway seam onto the shipped compactcohere decision surface:
+	// per-trace coordinators + the cross-session fak_harness_coherence_* accumulators. It is the
+	// SINGLE source both the /metrics scrape (writeHarnessCoherenceMetrics) and the operator line
+	// (#1135, summary) fold, so the two views can never disagree. Its own internal lock guards the
+	// per-trace state — kept off the locks above (a different, content-free hot path). Never nil for
+	// a newGatewayMetrics'd value.
+	harnessCoherence *harnessCoherenceMetrics
 
 	// oomMu guards the in-kernel device-OOM visibility family. These are LOCAL resource
 	// exhaustion faults: either recovered compute.DeviceAllocError allocations or a request
@@ -257,6 +266,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		reqMemoryFit:       map[requestMemoryFitKey]*requestMemoryFitStats{},
 		inKernelOOM:        map[string]*inKernelOOMClassStats{},
 		upstreamErrors:     map[string]uint64{},
+		harnessCoherence:   newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
 	}
 }
 
@@ -1143,6 +1153,7 @@ func (s *Server) renderMetrics() string {
 	s.writeInKernelPressureTrimMetrics(&b)
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
+	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
 	s.resumeProj.writeMetrics(&b)     // #941: resume projected-vs-observed residual (self-contained family)
 	s.writeFleetMembershipMetrics(&b) // #42: live fleet membership/health/drain/failover transitions, per worker
 
