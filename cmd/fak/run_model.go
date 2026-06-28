@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -68,9 +69,15 @@ func runChatModel(argv []string) {
 	if prompt != "" {
 		// One-shot: answer and exit.
 		runChatTurn(ctx, planner, *system, nil, prompt, opts, !*quiet)
-		return
+	} else {
+		// REPL: interactive session.
+		runChatREPL(ctx, planner, *system, opts, !*quiet)
 	}
-	runChatREPL(ctx, planner, *system, opts, !*quiet)
+	// Append cache-value observation to ledger (epic #1072, issue #1075).
+	stats := cacheobs.Default.Snapshot()
+	if stats.Turns > 0 {
+		_ = cachevalueledger.Append("run", modelRef, cachevalueledger.DefaultLedgerRel, stats)
+	}
 }
 
 // cacheValueLine renders one WITNESSED cache-value line from the per-turn delta of the

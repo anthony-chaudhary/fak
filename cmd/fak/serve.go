@@ -14,6 +14,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -423,6 +425,11 @@ func cmdServe(argv []string) {
 		if err := srv.ServeStdio(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 			must(err)
 		}
+		// Append cache-value observation to ledger (epic #1072, issue #1075).
+		stats := cacheobs.Default.Snapshot()
+		if stats.Turns > 0 {
+			_ = cachevalueledger.Append("serve", "stdio", cachevalueledger.DefaultLedgerRel, stats)
+		}
 		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 		return
 	}
@@ -432,6 +439,11 @@ func cmdServe(argv []string) {
 	}
 	if err := srv.ListenAndServe(ctx, *addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		must(err)
+	}
+	// Append cache-value observation to ledger (epic #1072, issue #1075).
+	stats := cacheobs.Default.Snapshot()
+	if stats.Turns > 0 {
+		_ = cachevalueledger.Append("serve", "http", cachevalueledger.DefaultLedgerRel, stats)
 	}
 	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 }

@@ -24,6 +24,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/callavoid"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -1735,8 +1737,13 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 	if !quiet {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprint(os.Stderr, formatAuditSummary(srv.AdjudicationSummary()))
-		fmt.Fprint(os.Stderr, formatAmplification(srv.KernelCounters()))
-		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
+	fmt.Fprint(os.Stderr, formatAmplification(srv.KernelCounters()))
+	fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
+	}
+	// Append cache-value observation to ledger (epic #1072, issue #1075).
+	stats := cacheobs.Default.Snapshot()
+	if stats.Turns > 0 {
+		_ = cachevalueledger.Append("guard", agentName, cachevalueledger.DefaultLedgerRel, stats)
 	}
 	// Flush + fsync the durable trail before exit so a row returned to the agent is
 	// never lost to a buffered write (Close is safe on a nil/in-memory journal).

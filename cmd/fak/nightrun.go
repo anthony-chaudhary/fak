@@ -26,7 +26,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/nightrun"
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 func cmdNightrun(argv []string) { os.Exit(runNightrun(os.Stdout, os.Stderr, argv)) }
@@ -50,6 +52,10 @@ func runNightrun(stdout, stderr io.Writer, argv []string) int {
 		return nightrunCaps(stdout, stderr, rest)
 	case "gap", "compare":
 		return nightrunGap(stdout, stderr, rest)
+	case "score", "vcache-score":
+		return nightrunScore(stdout, stderr, rest)
+	case "post-cache-value":
+		return nightrunPostCacheValue(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		nightrunUsage(stdout)
 		return 0
@@ -64,12 +70,14 @@ func nightrunUsage(w io.Writer) {
 	fmt.Fprint(w, `fak nightrun — run it all night: collect the next() most important data on THIS box
 
 usage:
-  fak nightrun next   [--json]                              the single most important feasible datum
-  fak nightrun plan   [--json]                              the whole ranked queue (+ why a task is blocked)
-  fak nightrun run    [--apply] [--loop] [--max N] [--json] collect (dry-run unless --apply)
-  fak nightrun ledger [--json]                              the durable collection history
-  fak nightrun gap    [--json]                              report ledger rows newer than published benchmark surface
-  fak nightrun caps   [--json]                              the probed box capabilities
+  fak nightrun next            [--json]                              the single most important feasible datum
+  fak nightrun plan            [--json]                              the whole ranked queue (+ why a task is blocked)
+  fak nightrun run             [--apply] [--loop] [--max N] [--json] collect (dry-run unless --apply)
+  fak nightrun ledger          [--json]                              the durable collection history
+  fak nightrun gap             [--json]                              report ledger rows newer than published benchmark surface
+  fak nightrun caps            [--json]                              the probed box capabilities
+  fak nightrun score           [--floor N] [--json]                  check cache-value ledger for regressions (default floor: 2.0x)
+  fak nightrun post-cache-value [--dry-run]                         post rolling observed multiplier to scoreboard
 
 Start here:
   fak nightrun next      what should I collect right now, and the exact command to do it
@@ -87,6 +95,7 @@ type nightrunFlags struct {
 	apply     bool
 	loop      bool
 	max       int
+	floor     float64
 }
 
 func parseNightrunFlags(name string, fs *flag.FlagSet, argv []string) (*nightrunFlags, error) {
@@ -100,6 +109,12 @@ func parseNightrunFlags(name string, fs *flag.FlagSet, argv []string) (*nightrun
 		fs.BoolVar(&f.apply, "apply", false, "execute real commands (default: dry-run — print what would run, write nothing)")
 		fs.BoolVar(&f.loop, "loop", false, "keep collecting until the feasible queue is exhausted or --max is hit")
 		fs.IntVar(&f.max, "max", 0, "cap the number of tasks collected this session (0 = unbounded within --loop)")
+	}
+	if name == "score" {
+		fs.Float64Var(&f.floor, "floor", 2.0, "regression floor: exit non-zero if overall multiplier is below this value")
+	}
+	if name == "post-cache-value" {
+		fs.BoolVar(&f.apply, "dry-run", false, "render the scoreboard post without sending it")
 	}
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
@@ -321,6 +336,101 @@ func nightrunGap(stdout, stderr io.Writer, argv []string) int {
 	}
 	nightrun.RenderLedgerGapReport(stdout, report)
 	return 0
+}
+
+func nightrunScore(stdout, stderr io.Writer, argv []string) int {
+	f, rc, ok := setupNightrunCmd("score", stderr, argv)
+	if !ok {
+		return rc
+	}
+	root := f.root()
+	ledgerPath := filepath.Join(root, filepath.FromSlash(cachevalueledger.DefaultLedgerRel))
+	result, err := cachevalueledger.ScoreLedger(ledgerPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak nightrun score: %v\n", err)
+		return 1
+	}
+	if f.asJSON {
+		emitNightrunJSON(stdout, result)
+	} else {
+		fmt.Fprintf(stdout, "cache-value ledger score (epic #1072, issue #1075):\n")
+		fmt.Fprintf(stdout, "  ledger: %s\n", ledgerPath)
+		fmt.Fprintf(stdout, "  sessions: %d\n", result.TotalSessions)
+		fmt.Fprintf(stdout, "  turns: %d\n", result.TotalTurns)
+		fmt.Fprintf(stdout, "  cache-hit tokens: %d\n", result.TotalCacheHitTokens)
+		fmt.Fprintf(stdout, "  generated tokens: %d\n", result.TotalGeneratedTokens)
+		if result.TotalGeneratedTokens > 0 {
+			fmt.Fprintf(stdout, "  overall multiplier: %.2fx\n", result.OverallMultiplier)
+			if result.LowMultiplierSessions > 0 {
+				fmt.Fprintf(stdout, "  low-multiplier sessions (<1.0x): %d\n", result.LowMultiplierSessions)
+			}
+		}
+	}
+	if result.TotalGeneratedTokens > 0 && result.OverallMultiplier < f.floor {
+		fmt.Fprintf(stderr, "fak nightrun score: regression detected — multiplier %.2fx is below floor %.2fx\n", result.OverallMultiplier, f.floor)
+		return 1
+	}
+	return 0
+}
+
+func nightrunPostCacheValue(stdout, stderr io.Writer, argv []string) int {
+	f, rc, ok := setupNightrunCmd("post-cache-value", stderr, argv)
+	if !ok {
+		return rc
+	}
+	root := f.root()
+	ledgerPath := filepath.Join(root, filepath.FromSlash(cachevalueledger.DefaultLedgerRel))
+	result, err := cachevalueledger.ScoreLedger(ledgerPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak nightrun post-cache-value: %v\n", err)
+		return 1
+	}
+	if result.TotalGeneratedTokens == 0 {
+		fmt.Fprintln(stdout, "no cache-value data yet — skipping scoreboard post")
+		return 0
+	}
+
+	multiplier := result.OverallMultiplier
+	value := fmt.Sprintf("%.2fx", multiplier)
+
+	grade := "A"
+	verdict := "OK"
+	if multiplier < 2.0 {
+		grade = "F"
+		verdict = "ACTION"
+	} else if multiplier < 3.0 {
+		grade = "C"
+	} else if multiplier < 4.0 {
+		grade = "B"
+	}
+
+	source := os.Getenv("FAK_SCOREBOARD_SOURCE")
+	if source == "" {
+		if h, err := os.Hostname(); err == nil {
+			source = h
+		}
+	}
+
+	up := scoreboard.Update{
+		Title:   "cache-value-rolling-multiplier",
+		Score:   value,
+		Grade:   grade,
+		Verdict: verdict,
+		Detail:  fmt.Sprintf("%d sessions, %d turns, %d/%d cache-hit/generated tokens",
+			result.TotalSessions, result.TotalTurns, result.TotalCacheHitTokens, result.TotalGeneratedTokens),
+		Source:  source,
+	}
+
+	return scoreboardPostFlow(stdout, stderr, up, scoreboardPostOpts{
+		prefix:        "fak nightrun post-cache-value",
+		channelFlag:   "",
+		tokenFlag:     "",
+		resolveChan:   scoreboard.ResolveChannel,
+		resolveToken:  scoreboard.ResolveToken,
+		noChannelHint: "fak nightrun post-cache-value: no channel: set FAK_SCOREBOARD_CHANNEL or add it to .env.slack.local",
+		dryRun:        !f.apply,
+		dedupe:        true,
+	})
 }
 
 // renderRunSummary prints the honest record of a run/dry-run session: each
