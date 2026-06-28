@@ -540,6 +540,18 @@ type Server struct {
 	kvReclaimMu sync.RWMutex
 	kvReclaimer KVResidencyReclaimer
 
+	// kvPressure{Provider,Sweeper} are the post-decode KV pressure-relief seams (#1073, the
+	// keystone of epic #1072): after a served turn mutates the KV cache, maybeRelieveKVPressure
+	// drives the provider for the live pressured spans and the sweeper for the real demote (the
+	// engine.CapacityAdapter executing abi.KVBackend.StageSpan+Evict). nil (the default) leaves
+	// the edge inert; the host injects both via SetKVPressureRelief once a device backend +
+	// served residency are loaded — so "wired" IS the "there is a device to relieve" signal,
+	// keeping the gateway free of the engine/compute imports. Guarded by kvPressureMu — the read
+	// runs on a request goroutine, so it must be race-safe against a late install.
+	kvPressureMu       sync.RWMutex
+	kvPressureProvider KVPressureCandidateProvider
+	kvPressureSweeper  KVPressureSweeper
+
 	// ctxView, when non-nil, is the guarded ctxplan seam that re-plans each buffered
 	// turn's history into an O(1) resident view (issue #555). nil (CtxViewBudget == 0)
 	// leaves the forwarded history untouched; maybePlanMessages is an inert identity then.
@@ -1146,6 +1158,11 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	}
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.Usage.CacheCreationInputTokens, comp.FinishReason, dur)
 	s.observePlannerRequestMemory()
+	// The served turn has mutated the KV cache; relieve HBM pressure by demoting a hot span to
+	// the colder tier instead of dropping it (#1073, the live serve-path call site for the
+	// capacity executor). Fail-open + gated: a no-op unless FAK_INKERNEL_KVMMU armed the bridge
+	// AND the host injected a device-backed provider+sweeper via SetKVPressureRelief.
+	s.maybeRelieveKVPressure(ctx)
 	return comp, nil
 }
 
