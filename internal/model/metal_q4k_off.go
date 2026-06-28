@@ -26,3 +26,10 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []float32 {
 	return nil
 }
+
+// metalQ4KWeights is the stub for the pure-Go build — always returns nil since there's no
+// Metal device. The on-Metal implementation (metal_q4k_on.go) uploads all Q4_K projection
+// weights upfront to avoid per-call GPU round-trips during prefill (#1113).
+func (m *Model) metalQ4KWeights() map[string]bool {
+	return nil
+}

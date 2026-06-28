@@ -1171,7 +1171,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// planner names the /v1/chat/completions backend ("mock" | "proxy" | "inkernel")
 	// so a probe can detect the silent offline-mock fallback that New also warns
 	// about at boot — scripted responses must never be mistaken for model output.
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "engine": s.engineID, "model": s.model, "planner": plannerKind(s.planner)})
+	// #1115: in_kernel_model_but_chat_is_mock exposes when kernel has real weights
+	// loaded (for fak_syscalls) but chat uses mock due to missing tokenizer.
+	health := map[string]any{
+		"ok": true,
+		"engine": s.engineID,
+		"model": s.model,
+		"planner": plannerKind(s.planner),
+	}
+	if s.inKernelModelButChatIsMock {
+		health["in_kernel_model_but_chat_is_mock"] = true
+	}
+	writeJSON(w, http.StatusOK, health)
 }
 
 // ---------------------------------------------------------------------------

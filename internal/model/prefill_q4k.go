@@ -121,6 +121,10 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		cosP[t], sinP[t] = ropeRow(cfg, base+t)
 	}
 
+	if s.MetalQ4K {
+		m.metalQ4KWeights() // upload all Q4_K weights upfront — avoids per-call GPU round-trips (#1113)
+	}
+
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 

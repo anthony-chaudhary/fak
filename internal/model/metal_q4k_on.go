@@ -138,6 +138,40 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 	return y
 }
 
+// metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,
+// caching them per *Model. This is the prefill-weight-upload twin of metalWeights(): it
+// uploads every q4_k-resident projection (q/k/v/o, gate/up/down) upfront so the prefill
+// loop never incurs a per-call GPU round-trip. The lazy upload path in metalQ4KWeight
+// caps warm prefill at ~7x under llama.cpp (#1113); calling this before the layer loop
+// restores the full prefill speed by amortizing all H2D copies up front. Returns the map
+// (read-only) so the caller can verify upload success; nil on non-Metal builds.
+func (m *Model) metalQ4KWeights() map[string]bool {
+	if !metalgemm.Available() {
+		return nil
+	}
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	uploaded := map[string]bool{}
+	cfg := m.Cfg
+	for l := 0; l < cfg.NumLayers; l++ {
+		lp := func(str string) string { return layerName(l, str) }
+		for _, name := range []string{
+			lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"),
+			lp("self_attn.v_proj.weight"), lp("self_attn.o_proj.weight"),
+			lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight"), lp("mlp.down_proj.weight"),
+		} {
+			qt := m.q4kw[name]
+			if qt == nil {
+				continue // Q8 minority — not a q4_k-resident projection
+			}
+			// metalQ4KWeight uploads if not already cached and records the result
+			w := m.metalQ4KWeight(name, qt)
+			uploaded[name] = w != nil
+		}
+	}
+	return uploaded
+}
+
 // metalQ4KWeight returns this model's GPU q4_k handle for `name`, uploading the raw blocks once.
 // On a successful upload it FREES the CPU raw copy (qt.raw = nil): with both decode and prefill
 // q4_k matmuls on the GPU, the weight is resident once (~16 GB for 27B, fits 36 GB) instead of

@@ -528,8 +528,14 @@ type Server struct {
 	// planner generates the assistant turn for the /v1/chat/completions proxy. A
 	// live HTTPPlanner/ReplicaRouter when BaseURL/ReplicaBaseURLs are set, else the
 	// offline MockPlanner. Settable in-package for tests.
-	planner     agent.Planner
-	engineCache *enginecache.Client
+	planner agent.Planner
+	// inKernelModelButChatIsMock tracks when kernel has real weights loaded (for
+	// fak_syscalls) but chat falls back to mock due to missing tokenizer (#1115).
+	// Set at New when InKernelModel != nil && Tokenizer == nil. The /healthz
+	// endpoint exposes this field as in_kernel_model_but_chat_is_mock to expose the
+	// mismatch for witness fidelity.
+	inKernelModelButChatIsMock bool
+	engineCache                *enginecache.Client
 
 	// kvReclaimer turns "a session slot freed" into "a KV block freed" for a waiting
 	// sequence (#915, the drain/stop↔evict edge of #912): when a Scheduler SlotEvent with a
@@ -698,6 +704,7 @@ func New(cfg Config) (*Server, error) {
 
 	var planner agent.Planner
 	t := time.Now()
+	inKernelModelButChatIsMock := false
 	switch {
 	case len(proxyURLs) != 0:
 		planner, err = newProxyPlanner(cfg, model, proxyURLs)
@@ -716,6 +723,11 @@ func New(cfg Config) (*Server, error) {
 		// LOUDLY so an operator never mistakes scripted demo text for real model
 		// output — the /healthz planner:"mock" field carries the same signal to a
 		// liveness probe.
+		if cfg.InKernelModel != nil && cfg.Tokenizer == nil {
+			// #1115: kernel has real weights loaded (for fak_syscalls) but chat
+			// falls back to mock due to missing tokenizer. Flag for witness fidelity.
+			inKernelModelButChatIsMock = true
+		}
 		logf("gateway: WARNING — POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.")
 		planner = agent.NewMockPlanner(model)
 	}
@@ -768,38 +780,39 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		k:                    k,
-		engineID:             engineID,
-		model:                model,
-		requireKey:           cfg.RequireKey,
-		version:              version,
-		logf:                 logf,
-		debugStatsf:          cfg.DebugStatsf,
-		reloadPolicy:         cfg.ReloadPolicy,
-		resetTrace:           cfg.ResetTrace,
-		observeTrace:         cfg.ObserveTrace,
-		observeSession:       cfg.ObserveSession,
-		controlSession:       cfg.ControlSession,
-		steerSession:         cfg.SteerSession,
-		listSessions:         cfg.ListSessions,
-		decideSession:        cfg.DecideSession,
-		debitSession:         cfg.DebitSession,
-		resetOnBudget:        cfg.ResetOnBudget,
-		budgetDrained:        cfg.OnBudgetExhausted,
-		defaultTraceID:       strings.TrimSpace(cfg.DefaultTraceID),
-		startup:              startup,
-		planner:              planner,
-		engineCache:          remoteCache,
-		ctxView:              ctxView,
-		compactHistoryBudget: cfg.CompactHistoryBudget,
-		elideResultBytes:     cfg.ElideResultBytes,
-		toolFloorDenies:      cfg.ToolFloorDenies,
-		cacheStream:          cacheStream,
-		rungObs:              rungObs,
-		feed:                 newCoherenceFeed(0),
-		sessionFeed:          newSessionFeed(0),
-		metrics:              newGatewayMetrics(time.Now()),
-		route:                newRouteLive(cfg.RouteManifest),
+		k:                         k,
+		engineID:                  engineID,
+		model:                     model,
+		requireKey:                cfg.RequireKey,
+		version:                   version,
+		logf:                      logf,
+		debugStatsf:               cfg.DebugStatsf,
+		reloadPolicy:              cfg.ReloadPolicy,
+		resetTrace:                cfg.ResetTrace,
+		observeTrace:              cfg.ObserveTrace,
+		observeSession:            cfg.ObserveSession,
+		controlSession:            cfg.ControlSession,
+		steerSession:              cfg.SteerSession,
+		listSessions:              cfg.ListSessions,
+		decideSession:             cfg.DecideSession,
+		debitSession:              cfg.DebitSession,
+		resetOnBudget:             cfg.ResetOnBudget,
+		budgetDrained:             cfg.OnBudgetExhausted,
+		defaultTraceID:            strings.TrimSpace(cfg.DefaultTraceID),
+		startup:                   startup,
+		planner:                   planner,
+		inKernelModelButChatIsMock: inKernelModelButChatIsMock,
+		engineCache:               remoteCache,
+		ctxView:                   ctxView,
+		compactHistoryBudget:      cfg.CompactHistoryBudget,
+		elideResultBytes:          cfg.ElideResultBytes,
+		toolFloorDenies:           cfg.ToolFloorDenies,
+		cacheStream:               cacheStream,
+		rungObs:                   rungobs.New(),
+		feed:                      newCoherenceFeed(0),
+		sessionFeed:               newSessionFeed(0),
+		metrics:                   newGatewayMetrics(time.Now()),
+		route:                     newRouteLive(cfg.RouteManifest),
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}
