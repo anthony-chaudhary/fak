@@ -34,8 +34,15 @@ the SAME model, so the numbers are directly comparable. The engines today:
                    instead of 4 is the single largest decode lever (see
                    docs/benchmarks/H100-KERNEL-5X-ROADMAP.md). Opt-in until a green
                    on-H100 number witnesses the device Q8 GEMV -- then promote into `all`.
+  * fak-cuda-tf32 -- the SAME engine + f32 device path, but with FAK_CUDA_TF32=1 so the f32
+                   SGEMM runs on the Hopper/Ampere TENSOR CORES at TF32 input precision (F32
+                   accumulate) instead of the FP32 CUDA cores. This is Lever 4 of the H100
+                   roadmap -- the compute-bound PREFILL lever (f32 SGEMM leaves the tensor
+                   cores idle). The weights stay f32; only the GEMM math narrows (mantissa
+                   only), disclosed in the engine label. Opt-in for the same reason as
+                   fak-cuda-q8: a deliberate side-by-side vs the pedantic-FP32 fak-cuda row.
 
-`--engine {llama,vllm,fak-cpu,fak-cuda,fak-cuda-q8,fak,all}` selects which run (default: all;
+`--engine {llama,vllm,fak-cpu,fak-cuda,fak-cuda-q8,fak-cuda-tf32,fak,all}` selects which run (default: all;
 vLLM is opt-in via `--engine vllm` or a comma list like `llama,vllm`). Every
 engine writes a normalized {prefill,decode}_tok_per_sec row; the driver folds them
 into ONE result.json (schema fak.gcp-vm-bench.v2) with an `engines` map plus a
@@ -129,8 +136,9 @@ ENGINES: dict[str, Engine] = {
     "fak-cpu": Engine("fak-cpu", "fak pure-Go Q8 engine (CPU)", needs_cuda=False),
     "fak-cuda": Engine("fak-cuda", "fak engine on the CUDA backend (f32)", needs_cuda=True),
     "fak-cuda-q8": Engine("fak-cuda-q8", "fak engine on the CUDA backend (Q8 device GEMV; apples-to-apples vs llama.cpp Q8_0)", needs_cuda=True),
+    "fak-cuda-tf32": Engine("fak-cuda-tf32", "fak engine on the CUDA backend (f32 weights, TF32 tensor-core SGEMM math; prefill tensor-core lever)", needs_cuda=True),
 }
-ENGINE_ORDER = ["llama", "vllm", "fak-cpu", "fak-cuda", "fak-cuda-q8"]
+ENGINE_ORDER = ["llama", "vllm", "fak-cpu", "fak-cuda", "fak-cuda-q8", "fak-cuda-tf32"]
 # `all` stays the CURATED fak-vs-llama.cpp default and deliberately EXCLUDES vLLM:
 # vLLM is a ~5 GB install on a different (server) serving paradigm, so pulling it
 # into every default run would change the cost/behaviour of existing benches. vLLM is
@@ -139,6 +147,10 @@ ENGINE_ORDER = ["llama", "vllm", "fak-cpu", "fak-cuda", "fak-cuda-q8"]
 # today; the Q8 device GEMV has off-GPU cosine witnesses but no on-H100 number yet, so
 # it is selected explicitly (`--engine fak-cuda,fak-cuda-q8`) and PROMOTED into `all`
 # only once a green Hopper run witnesses it (docs/benchmarks/H100-KERNEL-5X-ROADMAP.md).
+# fak-cuda-tf32 (Lever 4: the same f32 device path with TF32 tensor-core SGEMM math, via
+# FAK_CUDA_TF32=1) is opt-in for the same reason — it targets the compute-bound PREFILL row
+# and changes the f32 GEMM numerics (mantissa-only), so it stays a deliberate side-by-side
+# against the pedantic-FP32 fak-cuda row until a green Hopper run witnesses its prefill gain.
 DEFAULT_ALL = ["llama", "fak-cpu", "fak-cuda"]
 
 
@@ -432,10 +444,34 @@ _ENGINE_BASH = {
       -out "$WORK/fak-cuda-q8-report.json"
   python3 "$WORK/norm_fak.py" fak-cuda-q8 "$WORK/fak-cuda-q8-report.json" "$WORK/engine-fak-cuda-q8.json"
 }''',
+    # fak-cuda-tf32 is fak-cuda's SAME f32 device path (no -lean: f32 weights resident in VRAM)
+    # but with FAK_CUDA_TF32=1, which routes the f32 SGEMM (the prefill projections) through the
+    # Hopper/Ampere TENSOR CORES at TF32 input precision (F32 accumulate) instead of the FP32 CUDA
+    # cores — Lever 4 of the H100 roadmap, the compute-bound PREFILL lever. It REUSES the
+    # modelbench-cuda binary fak-cuda already built (guarded), so selecting both compiles the cuda
+    # backend once; run alone it builds the binary itself. -require-non-reference keeps a silent CPU
+    # fallback from masquerading as a TF32 number. The TF32 math is disclosed in the engine label;
+    # the resident weights are still f32, so the report's precision field stays "f32".
+    "fak-cuda-tf32": r'''engine_fak_cuda_tf32(){
+  cd "$SRC"
+  if [ ! -x "$WORK/bin/modelbench-cuda" ]; then
+    export CUDA_HOME=/usr/local/cuda
+    FAK_CUDA_ARCH="$CUDA_CC" bash internal/compute/build_cuda.sh build
+    export CGO_ENABLED=1
+    export CGO_CFLAGS="-I/usr/local/cuda/include"
+    export CGO_LDFLAGS="-L$SRC/internal/compute -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64"
+    go build -tags cuda -o "$WORK/bin/modelbench-cuda" ./cmd/modelbench
+  fi
+  FAK_CUDA_TF32=1 LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
+    "$WORK/bin/modelbench-cuda" -gguf "$MODEL" -backend cuda -require-non-reference \
+      -prefill-sizes 512 -prefill-reps 5 -decode-steps 128 -decode-reps 5 -decode-prompt 16 \
+      -out "$WORK/fak-cuda-tf32-report.json"
+  python3 "$WORK/norm_fak.py" fak-cuda-tf32 "$WORK/fak-cuda-tf32-report.json" "$WORK/engine-fak-cuda-tf32.json"
+}''',
 }
 _ENGINE_FN = {"llama": "engine_llama", "vllm": "engine_vllm",
               "fak-cpu": "engine_fak_cpu", "fak-cuda": "engine_fak_cuda",
-              "fak-cuda-q8": "engine_fak_cuda_q8"}
+              "fak-cuda-q8": "engine_fak_cuda_q8", "fak-cuda-tf32": "engine_fak_cuda_tf32"}
 
 
 _DRIVER_PREAMBLE = r'''#!/usr/bin/env bash
@@ -854,10 +890,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--proof", action="store_true",
                     help="use the cheapest (L4) tier to prove the pipeline")
     ap.add_argument("--engine", default="all",
-                    help="which engine(s): llama, vllm, fak-cpu, fak-cuda, fak-cuda-q8, fak, all, "
-                         "or a comma list (default: all). vLLM and fak-cuda-q8 are opt-in -- NOT in "
-                         "'all'; run the apples-to-apples Q8 head-to-head with "
-                         "--engine llama,fak-cuda,fak-cuda-q8")
+                    help="which engine(s): llama, vllm, fak-cpu, fak-cuda, fak-cuda-q8, "
+                         "fak-cuda-tf32, fak, all, or a comma list (default: all). vLLM, "
+                         "fak-cuda-q8 and fak-cuda-tf32 are opt-in -- NOT in 'all'; run the "
+                         "apples-to-apples Q8 head-to-head with --engine llama,fak-cuda,fak-cuda-q8, "
+                         "or the TF32 prefill lever with --engine llama,fak-cuda,fak-cuda-tf32")
     ap.add_argument("--zone", default=None, help="override zone (else tier default)")
     ap.add_argument("--project", default=os.environ.get("GCP_PROJECT") or None)
     ap.add_argument("--account", default=os.environ.get("GCP_ACCOUNT") or None)

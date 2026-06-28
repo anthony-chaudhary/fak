@@ -290,6 +290,22 @@ class EngineSelectionTest(unittest.TestCase):
         self.assertEqual(gcp_bench.resolve_engines("fak-cuda-q8,fak-cuda,llama"),
                          ["llama", "fak-cuda", "fak-cuda-q8"])
 
+    def test_fak_cuda_tf32_is_an_optin_prefill_tensorcore_engine(self):
+        # fak-cuda-tf32 is the TF32 tensor-core SGEMM row (Lever 4: the f32 device path with
+        # FAK_CUDA_TF32=1, the compute-bound prefill lever). Like fak-cuda-q8 it is opt-in:
+        # registered + CUDA-flagged + selectable, ordered last (after fak-cuda-q8), but NOT in the
+        # curated `all` default until a green Hopper run witnesses its prefill gain.
+        self.assertIn("fak-cuda-tf32", gcp_bench.ENGINES)
+        self.assertTrue(gcp_bench.ENGINES["fak-cuda-tf32"].needs_cuda)
+        self.assertIn("fak-cuda-tf32", gcp_bench.ENGINE_ORDER)
+        self.assertNotIn("fak-cuda-tf32", gcp_bench.resolve_engines("all"))
+        # It is also not pulled in by the `fak` alias (that stays the cpu+f32-cuda pair).
+        self.assertNotIn("fak-cuda-tf32", gcp_bench.resolve_engines("fak"))
+        self.assertEqual(gcp_bench.resolve_engines("fak-cuda-tf32"), ["fak-cuda-tf32"])
+        # The TF32 prefill head-to-head, in stable ENGINE_ORDER regardless of input order.
+        self.assertEqual(gcp_bench.resolve_engines("fak-cuda-tf32,fak-cuda,llama"),
+                         ["llama", "fak-cuda", "fak-cuda-tf32"])
+
     def test_unknown_engine_raises(self):
         with self.assertRaises(ValueError):
             gcp_bench.resolve_engines("nope")
@@ -353,6 +369,23 @@ class DriverScriptTest(unittest.TestCase):
         self.assertIn("-require-non-reference", body)
         # It reuses the binary fak-cuda built rather than unconditionally recompiling.
         self.assertIn("[ ! -x \"$WORK/bin/modelbench-cuda\" ]", body)
+
+    def test_fak_cuda_tf32_renders_f32_path_with_tf32_env(self):
+        # fak-cuda-tf32 is the TF32 tensor-core PREFILL row (Lever 4): the f32 device path
+        # (NOT -lean, so f32 weights stay resident) with FAK_CUDA_TF32=1 exported so the f32
+        # SGEMM runs on the tensor cores. It reuses the modelbench-cuda binary + keeps the
+        # non-reference honesty gate.
+        body = self._driver(["fak-cuda-tf32"])
+        self.assertIn("engine_fak_cuda_tf32()", body)
+        self.assertIn("run_one fak-cuda-tf32 engine_fak_cuda_tf32", body)
+        # The TF32 env knob is what flips the cuBLAS math mode on the f32 GEMM.
+        self.assertIn("FAK_CUDA_TF32=1", body)
+        self.assertIn("-require-non-reference", body)
+        # It reuses the binary fak-cuda built rather than unconditionally recompiling.
+        self.assertIn("[ ! -x \"$WORK/bin/modelbench-cuda\" ]", body)
+        # This is the f32 device path: the TF32 row must NOT pass -lean (that would be the Q8
+        # device GEMV row, fak-cuda-q8). The tensor-core lever applies to the f32 SGEMM.
+        self.assertNotIn("modelbench-cuda\" -gguf \"$MODEL\" -lean", body)
 
     def test_fak_cpu_uses_lean_q8(self):
         body = self._driver(["fak-cpu"])
