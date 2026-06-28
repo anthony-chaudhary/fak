@@ -22,6 +22,7 @@ package contextq
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -857,4 +858,366 @@ func short(d string) string {
 		return d[:12]
 	}
 	return d
+}
+
+// C3: Per-capability residency tracking and eviction.
+// See SKILL-LOADER-QUERY-EPIC.md issue #1106.
+
+// CapState mirrors ctxresidency.State for capability residency.
+type CapState string
+
+const (
+	CapStateResident  CapState = "resident"
+	CapStateEvictable CapState = "evictable"
+	CapStateHeld      CapState = "held"
+)
+
+// CapSpan records a single capability's residency state and metrics.
+type CapSpan struct {
+	CapRef    CapRef  `json:"cap_ref"`
+	State     CapState `json:"state"`
+	Faults    int      `json:"faults"`
+	LastFault int64    `json:"last_fault"`
+	Bytes     int      `json:"bytes"`
+}
+
+// CapSnapshot is a consistent snapshot of all tracked capabilities.
+type CapSnapshot struct {
+	Spans []CapSpan `json:"spans"`
+}
+
+// CapabilityLedger tracks per-capability residency for C3 eviction.
+// It uses fault count as a recency signal (fewer faults = colder).
+type CapabilityLedger struct {
+	mu sync.RWMutex
+
+	caps map[CapRef]*capResidency
+}
+
+type capResidency struct {
+	state     CapState
+	faults    int
+	lastFault int64
+	bytes     int
+}
+
+// NewCapabilityLedger creates a new capability residency ledger.
+func NewCapabilityLedger() *CapabilityLedger {
+	return &CapabilityLedger{
+		caps: make(map[CapRef]*capResidency),
+	}
+}
+
+// RecordFault records a capability fault, transitioning it to resident.
+func (l *CapabilityLedger) RecordFault(ref CapRef, now int64) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	cr := l.caps[ref]
+	if cr == nil {
+		cr = &capResidency{
+			bytes: len(ref.Name) * 4, // rough token estimate
+		}
+		l.caps[ref] = cr
+	}
+
+	cr.state = CapStateResident
+	cr.faults++
+	cr.lastFault = now
+}
+
+// RecordEvict records an eviction, transitioning the capability to held.
+func (l *CapabilityLedger) RecordEvict(ref CapRef) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if cr := l.caps[ref]; cr != nil {
+		cr.state = CapStateHeld
+	}
+}
+
+// MarkEvictable marks a capability as evictable.
+func (l *CapabilityLedger) MarkEvictable(ref CapRef) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if cr := l.caps[ref]; cr != nil {
+		cr.state = CapStateEvictable
+	}
+}
+
+// Query returns a consistent snapshot of all tracked capabilities.
+func (l *CapabilityLedger) Query() CapSnapshot {
+	if l == nil {
+		return CapSnapshot{Spans: []CapSpan{}}
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	snap := CapSnapshot{
+		Spans: make([]CapSpan, 0, len(l.caps)),
+	}
+
+	for ref, cr := range l.caps {
+		snap.Spans = append(snap.Spans, CapSpan{
+			CapRef:    ref,
+			State:     cr.state,
+			Faults:    cr.faults,
+			LastFault: cr.lastFault,
+			Bytes:     cr.bytes,
+		})
+	}
+
+	return snap
+}
+
+// EvictColdest evicts up to n capabilities in coldest-first order
+// (fewest recent faults).
+func (l *CapabilityLedger) EvictColdest(n int) []CapRef {
+	if l == nil || n <= 0 {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var evictable []*capResidency
+	var refs []CapRef
+	for ref, cr := range l.caps {
+		if cr.state == CapStateEvictable {
+			evictable = append(evictable, cr)
+			refs = append(refs, ref)
+		}
+	}
+
+	// Sort by fault count (coldest = fewest faults)
+	sort.Slice(evictable, func(i, j int) bool {
+		return evictable[i].faults < evictable[j].faults
+	})
+
+	evicted := make([]CapRef, 0, min(n, len(evictable)))
+	for i := 0; i < min(n, len(evictable)); i++ {
+		evicted = append(evicted, refs[i])
+		evictable[i].state = CapStateHeld
+	}
+
+	return evicted
+}
+
+// EvictUnderBudget evicts evictable capabilities until total bytes < budget.
+func (l *CapabilityLedger) EvictUnderBudget(budgetBytes int) []CapRef {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Calculate current total bytes
+	var totalBytes int
+	var evictable []*capResidency
+	var refs []CapRef
+	for ref, cr := range l.caps {
+		totalBytes += cr.bytes
+		if cr.state == CapStateEvictable {
+			evictable = append(evictable, cr)
+			refs = append(refs, ref)
+		}
+	}
+
+	if totalBytes <= budgetBytes {
+		return nil
+	}
+
+	// Sort by fault count (coldest = fewest faults)
+	sort.Slice(evictable, func(i, j int) bool {
+		return evictable[i].faults < evictable[j].faults
+	})
+
+	evicted := make([]CapRef, 0, len(evictable))
+	for i := 0; i < len(evictable) && totalBytes > budgetBytes; i++ {
+		totalBytes -= evictable[i].bytes
+		evicted = append(evicted, refs[i])
+		evictable[i].state = CapStateHeld
+	}
+
+	return evicted
+}
+
+// CapRef identifies a capability (from C2 QueryCapabilities).
+type CapRef struct {
+	Name    string `json:"name"`
+	Source  string `json:"source"`  // skill name or system
+	Card    int    `json:"card"`    // 0 = scalar, >0 = collection
+	IsQuery bool   `json:"is_query"` // true if from a query parameter
+}
+
+// CapSkill is the skill metadata from SKILL-LOADER-QUERY-EPIC.
+type CapSkill struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	File        string `json:"file"`
+}
+
+// CapResult is a resolved capability reference (from C2).
+type CapResult struct {
+	Ref   CapRef    `json:"ref"`
+	Skill *CapSkill `json:"skill,omitempty"`
+}
+
+// C2: in-kernel query front-end — model-emitted intent+budget → rank cards → fault winners.
+// See SKILL-LOADER-QUERY-EPIC.md issue #1105.
+
+// CapKind names a capability kind: skill, mcp-tool, a2a-agent, or future protocols.
+type CapKind string
+
+const (
+	CapKindSkill   CapKind = "skill"
+	CapKindMCPTool CapKind = "mcp-tool"
+	CapKindA2AAgent CapKind = "a2a-agent"
+)
+
+// CapCard is the tiny, at-rest descriptor for a capability: its name, version,
+// trigger clause (what the model searches for), and tags. It is the O(1) query
+// surface; only winners' full bodies are faulted in.
+type CapCard struct {
+	Name        string   `json:"name"`
+	Kind        CapKind  `json:"kind"`
+	Version     string   `json:"version"`
+	Trigger     string   `json:"trigger"` // search query text
+	Tags        []string `json:"tags"`
+	EstimateBytes int    `json:"estimate_bytes"` // size hint for budgeting
+}
+
+// Capability is a full capability descriptor: its reference, digest (content hash),
+// the CapCard (indexable metadata), and a Resolve function that pages in the body
+// on FAULT. The body is lazily loaded; only queried winners are materialized.
+type Capability struct {
+	Ref     CapRef          `json:"ref"`
+	Digest  string          `json:"digest"`
+	Card    CapCard         `json:"card"`
+	Resolve func() []byte   `json:"-"`
+	Scope   abi.ShareScope  `json:"scope"`
+}
+
+// Resolver is the protocol-generic capability lookup seam. Every protocol
+// (skill, MCP, A2A, future) implements Index() and Fault().
+type Resolver interface {
+	// Index returns the at-rest CapCard set — cheap metadata only.
+	Index() []CapCard
+	// Fault resolves a capability reference into a full Capability, loading its
+	// body. The same CapRef must resolve to the same Capability (cacheability).
+	Fault(ref CapRef) Capability
+}
+
+// CapQueryRequest is a model-emitted intent+budget query over the capability space.
+type CapQueryRequest struct {
+	Intent      string `json:"intent"`      // natural-language query from the model
+	BudgetBytes int64  `json:"budget_bytes"` // max rendered bytes for faulted winners
+	K           int    `json:"k,omitempty"`  // max winners to return (0 = unbounded)
+}
+
+// CapQueryResult is the outcome of QueryCapabilities: ranked winners with their
+// faulted bodies, plus omissions for budget-exhausted items.
+type CapQueryResult struct {
+	Winners   []Capability `json:"winners"`
+	Omitted   []CapCard    `json:"ommitted"`
+	BudgetHit bool         `json:"budget_hit"` // true if budget exhausted mid-rank
+}
+
+// QueryCapabilities accepts a model-emitted intent+budget query, ranks CapCards
+// by relevance, faults in winners up to the budget, and returns the resolved
+// capabilities. This is the MCP-Zero active-discovery move: the model emits a query,
+// and only the N winners are materialized into context. The query is in-kernel and
+// witnessed (every fault lands in the CapabilityLedger via RecordFault).
+func QueryCapabilities(resolvers []Resolver, req CapQueryRequest, ledger *CapabilityLedger) CapQueryResult {
+	if len(resolvers) == 0 {
+		return CapQueryResult{}
+	}
+
+	now := int64(0)
+	if ledger != nil {
+		now = 0
+	}
+
+	cards := indexAll(resolvers)
+	ranked := rankByIntent(cards, req.Intent)
+
+	var winners []Capability
+	var omitted []CapCard
+	usedBytes := int64(0)
+
+	for _, card := range ranked {
+		if req.K > 0 && len(winners) >= req.K {
+			omitted = append(omitted, card)
+			continue
+		}
+		if req.BudgetBytes > 0 && usedBytes+int64(card.EstimateBytes) > req.BudgetBytes {
+			omitted = append(omitted, card)
+			continue
+		}
+
+		var cap Capability
+		for _, r := range resolvers {
+			cap = r.Fault(CapRef{Name: card.Name, Source: string(card.Kind)})
+			if cap.Resolve != nil {
+				break
+			}
+		}
+		if cap.Resolve != nil {
+			winners = append(winners, cap)
+			usedBytes += int64(card.EstimateBytes)
+			if ledger != nil {
+				ledger.RecordFault(cap.Ref, now)
+			}
+		}
+	}
+
+	return CapQueryResult{
+		Winners:   winners,
+		Omitted:   omitted,
+		BudgetHit: len(omitted) > 0,
+	}
+}
+
+// indexAll concatenates all resolver indices into one CapCard slice.
+func indexAll(resolvers []Resolver) []CapCard {
+	var all []CapCard
+	for _, r := range resolvers {
+		all = append(all, r.Index()...)
+	}
+	return all
+}
+
+// rankByIntent orders cards by token overlap with the intent query.
+// Higher overlap = higher rank.
+func rankByIntent(cards []CapCard, intent string) []CapCard {
+	queryTokens := tokens(intent)
+	type scoredCard struct {
+		card   CapCard
+		score  int
+	}
+	var scored []scoredCard
+	for _, card := range cards {
+		score := overlap(queryTokens, tokens(card.Trigger+" "+card.Name))
+		for _, tag := range card.Tags {
+			score += overlap(queryTokens, tokens(tag))
+		}
+		scored = append(scored, scoredCard{card: card, score: score})
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+	result := make([]CapCard, len(scored))
+	for i, sc := range scored {
+		result[i] = sc.card
+	}
+	return result
 }
