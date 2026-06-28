@@ -135,22 +135,28 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
-// handleScenarios lists the available trace fixtures and which are present on disk.
-func handleScenarios(w http.ResponseWriter, r *http.Request) {
-	type s struct {
-		ID      string `json:"id"`
-		Label   string `json:"label"`
-		Present bool   `json:"present"`
-		Calls   int    `json:"calls"`
-	}
-	out := make([]s, 0, len(knownScenarios))
+type scenarioRow struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Present bool   `json:"present"`
+	Calls   int    `json:"calls"`
+}
+
+func scenarioRows() []scenarioRow {
+	out := make([]scenarioRow, 0, len(knownScenarios))
 	for _, ks := range knownScenarios {
-		row := s{ID: ks.ID, Label: ks.Label}
+		row := scenarioRow{ID: ks.ID, Label: ks.Label}
 		if t, err := turnbench.LoadTrace(suitePath(ks.ID)); err == nil {
 			row.Present, row.Calls = true, len(t.Calls)
 		}
 		out = append(out, row)
 	}
+	return out
+}
+
+// handleScenarios lists the available trace fixtures and which are present on disk.
+func handleScenarios(w http.ResponseWriter, r *http.Request) {
+	out := scenarioRows()
 	writeJSON(w, map[string]any{
 		"scenarios": out,
 		"dir":       turnTaxDir(),
