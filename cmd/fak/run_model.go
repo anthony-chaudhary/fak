@@ -103,6 +103,17 @@ func cacheValueLine(before, after cacheobs.Stats) string {
 		reused, prompt, ratio*100, regime, prompt-reused)
 }
 
+// cacheTurnLine is the show-gate over cacheValueLine: it returns the per-turn cache
+// line to print, or "" when the caller asked to suppress it (--quiet => show=false) or
+// the turn was idle. Splitting this out of runChatTurn lets the showCache gate be tested
+// without standing up a planner — the #333 wire is a no-op unless this returns non-empty.
+func cacheTurnLine(before, after cacheobs.Stats, show bool) string {
+	if !show {
+		return ""
+	}
+	return cacheValueLine(before, after)
+}
+
 // buildRunPlanner resolves the model ref, loads the weights + tokenizer through the
 // shared serve loaders, and returns a ready in-kernel planner. It exits the process
 // with a clear message on any load failure — there is no daemon to keep alive.
@@ -167,7 +178,9 @@ func runSampleOpts(maxTokens int, temp, topP float64, topK int) []agent.SampleOp
 
 // runChatTurn runs one completion and prints the assistant text to stdout. history
 // is the prior conversation (nil for a one-shot); it returns the appended messages so
-// the REPL can thread context across turns.
+// the REPL can thread context across turns. When showCache is set, it brackets the
+// turn with a cacheobs snapshot and prints the WITNESSED KV-prefix reuse line to
+// stderr (the #333 value-add the run surface advertises) — stdout stays pipe-clean.
 func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system string, history []agent.Message, prompt string, opts []agent.SampleOpt, showCache bool) []agent.Message {
 	msgs := history
 	if len(msgs) == 0 && strings.TrimSpace(system) != "" {
@@ -175,6 +188,11 @@ func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system str
 	}
 	msgs = append(msgs, agent.Message{Role: "user", Content: prompt})
 
+	// Bracket exactly this turn with the process-global cacheobs tap so the delta is
+	// THIS turn's prompt tokens and the prefix the kernel served from its cached KV.
+	// The planner feeds cacheobs.Default.Observe inside Complete; capturing before/after
+	// here is what makes the per-turn line real rather than cumulative.
+	before := cacheobs.Default.Snapshot()
 	comp, err := planner.Complete(ctx, msgs, nil, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
@@ -182,6 +200,12 @@ func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system str
 	}
 	out := comp.Message.Content
 	fmt.Println(strings.TrimSpace(out))
+	// The cache-value summary goes to STDERR (never stdout) so a `fak run ... | …` pipe
+	// stays clean; --quiet (showCache=false) silences it for scripting. An idle/empty
+	// turn (no prompt delta) renders "" and prints nothing.
+	if line := cacheTurnLine(before, cacheobs.Default.Snapshot(), showCache); line != "" {
+		fmt.Fprintln(os.Stderr, line)
+	}
 	return append(msgs, comp.Message)
 }
 
