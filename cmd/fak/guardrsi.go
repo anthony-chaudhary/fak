@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
+	"github.com/anthony-chaudhary/fak/internal/guardroute"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 )
 
@@ -37,6 +41,8 @@ func runGuardVerdictRSI(stdout, stderr io.Writer, argv []string) int {
 		return runGuardVerdictRSIFold(stdout, stderr, args)
 	case "run":
 		return runGuardVerdictRSIRun(stdout, stderr, args)
+	case "route":
+		return runGuardVerdictRSIRoute(stdout, stderr, args)
 	case "-h", "--help", "help":
 		guardVerdictRSIUsage(stdout)
 		return 0
@@ -117,6 +123,138 @@ func runGuardVerdictRSIRun(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// runGuardVerdictRSIRoute is the closure rung: it reviews the session journal,
+// decides (purely) whether the worst bucket is route-worthy, and -- when it is --
+// materializes the finding through the two EXISTING idempotent sinks:
+// tools/findings_route.py (the pickable queue row, always) and internal/dogfoodissues
+// (a deduped gh issue, for an honesty-hole). Issue filing is ON by default per the
+// operator decision; --no-issues skips it (queue-only, for a host without gh auth)
+// and --dry-run plans the issue without touching gh. Fail-open throughout: a sink
+// failure is reported, never fatal -- the queue row still gets written if it can.
+func runGuardVerdictRSIRoute(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak guard-verdict-rsi route", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	audit := fs.String("audit", "", "explicit guard-audit.jsonl to fold")
+	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	source := fs.String("source", "guard-verdict-rsi", "originating session/run id recorded on the routed row")
+	threshold := fs.Int("threshold", guardroute.DefaultReasonThreshold, "min recurrence of a denial reason before it routes")
+	noIssues := fs.Bool("no-issues", false, "skip the gh-issue half (queue-only; for a host without gh)")
+	dryRun := fs.Bool("dry-run", false, "plan the gh issue without touching gh (queue row still written)")
+	repo := fs.String("repo", "", "gh repo for the issue half (default: current repo)")
+	asJSON := fs.Bool("json", false, "emit the control-pane envelope as JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak guard-verdict-rsi route: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	}
+
+	fold := guardrsi.BuildFold(root, *audit)
+	decision := guardroute.Decide(fold.Fold, fold.WorstBucket, *threshold)
+
+	var routed, issue map[string]any
+	if decision.Route {
+		routed = routeQueueRow(stderr, root, decision, *source)
+		if decision.FileIssue && !*noIssues {
+			issue = routeFileIssue(stderr, decision, fold.JournalPaths, *repo, *dryRun)
+		}
+	}
+
+	env := guardroute.Fold(decision, routed, issue)
+	if *asJSON {
+		return encodeGuardRSIJSON(stdout, stderr, "fak guard-verdict-rsi route", env)
+	}
+	fmt.Fprintf(stdout, "guard-verdict-rsi route: %s (%s)\n", env.Verdict, env.Finding)
+	fmt.Fprintf(stdout, "  %s\n", env.Reason)
+	if routed != nil {
+		fmt.Fprintf(stdout, "  queue: action=%v n=%v sev=%v\n", routed["action"], routed["n"], routed["sev"])
+	}
+	if issue != nil {
+		fmt.Fprintf(stdout, "  issue: %v\n", issue["summary"])
+	}
+	fmt.Fprintf(stdout, "  -> %s\n", env.NextAction)
+	return 0
+}
+
+// routeQueueRow shells tools/findings_route.py to append the pickable queue row.
+// Returns the parsed verdict dict, or a fail-open error stub -- never nil-on-routed
+// so the envelope always records that routing was attempted.
+func routeQueueRow(stderr io.Writer, root string, d guardroute.RouteDecision, source string) map[string]any {
+	args := append([]string{"tools/findings_route.py"}, guardroute.RouteArgv(d, source)...)
+	args = append(args, "--json")
+	out, err := runPythonTool(root, args)
+	if err != nil {
+		fmt.Fprintf(stderr, "guard-verdict-rsi route: findings_route failed (fail-open, finding unrecorded): %v\n", err)
+		return map[string]any{"action": "error", "detail": err.Error()}
+	}
+	var verdict map[string]any
+	if jerr := json.Unmarshal(out, &verdict); jerr != nil {
+		fmt.Fprintf(stderr, "guard-verdict-rsi route: findings_route output not JSON (fail-open): %v\n", jerr)
+		return map[string]any{"action": "error", "detail": "non-JSON findings_route output"}
+	}
+	return verdict
+}
+
+// routeFileIssue runs the dogfoodissues create-vs-update sync for an honesty-hole.
+// dryRun plans without touching gh. Fail-open: a gh/auth failure is summarized, not
+// fatal.
+func routeFileIssue(stderr io.Writer, d guardroute.RouteDecision, journals []string, repo string, dryRun bool) map[string]any {
+	evidence := ""
+	if len(journals) > 0 {
+		evidence = journals[0]
+	}
+	item := guardroute.ToActionItem(d, evidence)
+	plan := dogfoodissues.BuildPlan([]dogfoodissues.ActionItem{item}, nil)
+	if dryRun {
+		return map[string]any{"mode": "dry-run", "planned": len(plan), "summary": fmt.Sprintf("dry-run: would create/update 1 issue (key=%s)", item.Key)}
+	}
+	existing, err := dogfoodissues.FetchExistingIssues(repo, 300)
+	if err != nil {
+		fmt.Fprintf(stderr, "guard-verdict-rsi route: gh issue list failed (fail-open, queue row stands): %v\n", err)
+		return map[string]any{"mode": "live", "ok": false, "summary": "gh unavailable -- queue row written, issue skipped"}
+	}
+	plan = dogfoodissues.BuildPlan([]dogfoodissues.ActionItem{item}, existing)
+	synced := dogfoodissues.Sync(plan, repo, []string{"guard-rsi", "dogfood"}, nil)
+	ok := true
+	for _, row := range synced {
+		if !row.OK {
+			ok = false
+		}
+	}
+	action := "created"
+	if len(plan) > 0 && plan[0].Number != nil {
+		action = "updated"
+	}
+	return map[string]any{"mode": "live", "ok": ok, "summary": fmt.Sprintf("%s issue (key=%s)", action, item.Key)}
+}
+
+// runPythonTool shells a repo python tool, trying FAK_PYTHON, then python3/python,
+// matching how the rest of cmd/fak shells to Python across OSes (see steering.go).
+func runPythonTool(root string, args []string) ([]byte, error) {
+	interps := []string{}
+	if p := strings.TrimSpace(os.Getenv("FAK_PYTHON")); p != "" {
+		interps = append(interps, p)
+	}
+	interps = append(interps, "python3", "python")
+	var lastErr error
+	for _, py := range interps {
+		cmd := exec.Command(py, args...)
+		cmd.Dir = root
+		cmd.Stderr = os.Stderr
+		out, err := cmd.Output()
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("python tool (tried %s): %w", strings.Join(interps, ", "), lastErr)
+}
+
 func runGuardVerdictRSICheck(stdout, stderr io.Writer, path string) int {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -192,8 +330,13 @@ func encodeGuardRSIJSON(stdout, stderr io.Writer, label string, v any) int {
 func guardVerdictRSIUsage(w io.Writer) {
 	fmt.Fprint(w, `fak guard-verdict-rsi - RSI loop over the real guard decision journal
 
-  fak guard-verdict-rsi fold [--audit FILE] [--json]
-  fak guard-verdict-rsi run  [--audit FILE] [--witness JSON] [--json] [--out FILE]
+  fak guard-verdict-rsi fold  [--audit FILE] [--json]
+  fak guard-verdict-rsi run   [--audit FILE] [--witness JSON] [--json] [--out FILE]
+  fak guard-verdict-rsi route [--source ID] [--threshold N] [--no-issues] [--dry-run] [--repo R] [--json]
   fak guard-verdict-rsi --check ITER.json
+
+  route closes the loop: it reviews the session journal and, when the worst bucket is
+  a real finding, routes a pickable findings-queue row (always) plus a deduped gh issue
+  for an honesty-hole (P1/P0; on by default, --no-issues for queue-only). Fail-open.
 `)
 }

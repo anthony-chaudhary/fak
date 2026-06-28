@@ -51,7 +51,7 @@ REALIZED - does it run on our own usage?
   empty-journal refusal.
 - **documented (SOFT)** - the real-usage loop has a doc + this skill.
 
-## The pass (the shared five-step loop)
+## The pass (the shared loop)
 
 1. **Run it** - `fak guard-rsi-scorecard` (work-list), `--json` (payload),
    `--compare baseline.json` (prove the drop and the Nx verdict).
@@ -60,11 +60,19 @@ REALIZED - does it run on our own usage?
    paired test. If `kept_iteration_on_real_rows` is red, the journal has no rows yet - run a
    guarded session (or seed via `fak serve --policy ... ` + `/v1/fak/adjudicate`, then
    `fak audit verify`) so REAL verdicts land. Never fabricate rows.
-3. **Weigh the SOFT signals, then stop** - add the doc/skill if missing; keep the latency
+3. **Route what the session found (close the loop)** - run
+   `fak guard-verdict-rsi route` so the worst bucket of THIS run's journal becomes a pickable
+   finding, not a printed-and-dropped line. An honesty-hole (blank-reason-on-deny /
+   unknown-verdict) routes a P1 queue row AND a deduped gh issue; a recurring denial reason
+   (>= `--threshold`) routes a P2 queue row only. It is idempotent (re-running the same finding
+   is a `noop`/`damped`, never a duplicate) and fail-open (a sink failure never breaks the
+   pass). Use `--no-issues` on a host without `gh`. This is the rung that makes a session
+   actually feed the backlog; the scheduled `fak garden` tick runs it `--no-issues` for you.
+4. **Weigh the SOFT signals, then stop** - add the doc/skill if missing; keep the latency
    loop's hardware-gate disclosure honest. Don't chase soft signals to zero.
-4. **Re-measure + prove** - `--compare` prints the debt delta; the scorecard reads A
+5. **Re-measure + prove** - `--compare` prints the debt delta; the scorecard reads A
    (debt 0) on the disciplined tree once registered + pinned.
-5. **Commit only the guard-RSI lane, by explicit path** - the scorecard tool/test, the
+6. **Commit only the guard-RSI lane, by explicit path** - the scorecard tool/test, the
    verdict loop tool/test, the control-pane row + pinned baseline, the doc + this skill.
    Never `git add -A`. End the subject with `(fak guard)`.
 

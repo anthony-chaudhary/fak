@@ -84,7 +84,46 @@ fak audit verify .dispatch-runs/guard-audit/seed.jsonl   # the tamper-evident ch
 go run ./cmd/fak guard-verdict-rsi fold                 # the verdict distribution + quality
 go run ./cmd/fak guard-verdict-rsi run                  # one iteration: propose -> replay -> keep/revert
 go run ./cmd/fak guard-verdict-rsi run --witness '{"ok":true,"suite":"go test ./... PASS"}'
+go run ./cmd/fak guard-verdict-rsi route                # CLOSE the loop: route the worst bucket to a finding
 go run ./cmd/fak guard-verdict-rsi --check iter.json    # honesty gate over an emitted iteration
+```
+
+## Route — closing the loop
+
+`fold`/`run` *find* the worst bucket; without a route, that finding is rendered to a human
+and dropped — so a recurring wall is re-discovered every session and never tracked. `route`
+is the closure rung: it reviews the journal and, when the worst bucket is a real finding,
+materializes it through two existing idempotent sinks so the next dispatch can *pick it up*.
+
+```
+guard-audit.jsonl -> fold -> worst bucket -> guardroute.Decide (pure)
+   ├─ blank_reason_on_deny / unknown_verdict  -> P1 honesty-hole -> queue row + gh issue
+   ├─ a denial reason recurring >= --threshold -> P2 advisory    -> queue row only
+   └─ clean fold / empty journal               -> no route (self-diagnosing why-not)
+```
+
+- **The pickable queue row** (always, for any routed finding) is appended by
+  `tools/findings_route.py` — append-only, **idempotent per key**, damping-folds concurrent
+  sessions onto one row by a **content-stable `cause_key`** (`guard-journal:<bucket>`), and
+  **escalates severity** (P2→P1→P0) when a cause re-fires after a "fixed" close.
+- **The deduped GitHub issue** (only for an honesty-hole, P1/P0) is created/updated through
+  `internal/dogfoodissues` — the same marker-keyed create-vs-update path the dogfood
+  scorecard uses, so a re-run edits the issue in place instead of opening a duplicate.
+
+Issue filing is **on by default** when you run `route` by hand; `--no-issues` is queue-only
+(for a host without `gh` auth) and `--dry-run` plans the issue without touching `gh`. Every
+step is **fail-open**: a `findings_route` / `gh` failure is reported, never fatal — the loop
+must not die on its own closure layer.
+
+The route also fires automatically on the scheduled `fak garden` tick (the non-gating
+`guard_route` member, run `--no-issues` so an unattended tick never needs `gh`), so **every
+guarded session leaves a pickable trace** without anyone invoking the command.
+
+```bash
+go run ./cmd/fak guard-verdict-rsi route --json          # review + route (issues on); JSON envelope
+go run ./cmd/fak guard-verdict-rsi route --no-issues     # queue row only (no gh)
+go run ./cmd/fak guard-verdict-rsi route --dry-run       # plan the issue without touching gh
+python tools/findings_route.py status                    # show the routed findings queue
 ```
 
 The loop's maturity + realized value is scored by `fak guard-rsi-scorecard` (the

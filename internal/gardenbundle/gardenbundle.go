@@ -41,6 +41,12 @@ type Member struct {
 	Argv  []string
 	Gates bool
 	Kind  string // "envelope" or "loop_audit"
+	// Exec selects how Argv is run. "" / "python" (the default) runs Argv[0] as a
+	// repo python script under the resolved interpreter -- the shape every original
+	// member uses. "command" runs Argv[0] as a direct executable with Argv[1:] as
+	// its args (e.g. `go run ./cmd/fak ...`), so a Go-native member can join the
+	// bundle without a python shim.
+	Exec string
 }
 
 // Members is the DEFAULT bundle: the two fast, canonical folds that already
@@ -61,6 +67,23 @@ var Members = []Member{
 		Argv:  []string{"tools/fresh_status.py", "--json"},
 		Gates: false,
 		Kind:  "envelope",
+	},
+	{
+		// The closure rung: review the latest guarded session's decision journal
+		// and route its worst bucket into a pickable findings-queue row. Re-invokes
+		// the running fak binary (Argv[0]=="fak" -> os.Executable in RunMember), NOT
+		// `go run`, so it stays green even when a peer's uncommitted edit leaves the
+		// tree uncompilable. Non-gating: a routed finding is the pass WORKING, not a
+		// broken garden. Passes --no-issues so an unattended garden tick never tries
+		// to open a gh issue from a host that may lack gh auth -- issue filing is
+		// reserved for the operator-invoked `fak guard-verdict-rsi route` (issues on
+		// by default there).
+		Key:   "guard_route",
+		Label: "guard-session route",
+		Argv:  []string{"fak", "guard-verdict-rsi", "route", "--no-issues", "--json"},
+		Gates: false,
+		Kind:  "envelope",
+		Exec:  "command",
 	},
 }
 
@@ -380,17 +403,34 @@ func Render(p Payload) string {
 
 // --- live runner -----------------------------------------------------------
 
-// RunMember runs one member via python3 and parses its JSON stdout. It returns
-// the parsed payload (nil on any failure), the process exit code, and an error
-// string (empty on success).
+// RunMember runs one member and parses its JSON stdout. A default ("" / "python")
+// member runs Argv[0] as a repo python script under the interpreter; a "command"
+// member runs Argv[0] as a direct executable. A "command" member whose Argv[0] is
+// the bare token "fak" is rewritten to the CURRENTLY-RUNNING executable
+// (os.Executable), so a Go-native member re-invokes the same built binary -- never
+// `go run`, which would recompile the whole tree and so error whenever a peer's
+// uncommitted edit leaves cmd/fak uncompilable on the shared trunk. It returns the
+// parsed payload (nil on any failure), the process exit code, and an error string
+// (empty on success).
 func RunMember(root string, member Member, python string, timeout time.Duration) (map[string]any, int, string) {
 	argv := member.Argv
-	script := filepath.Join(root, argv[0])
-	if _, err := os.Stat(script); err != nil {
-		return nil, -1, "missing member script: " + argv[0]
+	var cmd *exec.Cmd
+	if member.Exec == "command" {
+		bin := argv[0]
+		if bin == "fak" {
+			if self, err := os.Executable(); err == nil && self != "" {
+				bin = self
+			}
+		}
+		cmd = exec.Command(bin, argv[1:]...)
+	} else {
+		script := filepath.Join(root, argv[0])
+		if _, err := os.Stat(script); err != nil {
+			return nil, -1, "missing member script: " + argv[0]
+		}
+		args := append([]string{script}, argv[1:]...)
+		cmd = exec.Command(python, args...)
 	}
-	args := append([]string{script}, argv[1:]...)
-	cmd := exec.Command(python, args...)
 	cmd.Dir = root
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout

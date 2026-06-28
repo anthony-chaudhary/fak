@@ -3,6 +3,7 @@ package gardenbundle
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func member(key string, gates bool, kind string) Member {
@@ -109,6 +110,47 @@ func TestFoldErroredGatesOverRed(t *testing.T) {
 	}
 	if code, _ := CheckGate(p); code != 1 {
 		t.Fatalf("want gate 1, got %d", code)
+	}
+}
+
+func TestGuardRouteMemberIsCommandExec(t *testing.T) {
+	// The closure-rung member must run the built fak binary directly (Exec
+	// "command", Argv[0] "fak" -> os.Executable in RunMember), never `go run`,
+	// which would error whenever a peer's uncommitted edit leaves the tree
+	// uncompilable on the shared trunk. It must stay non-gating.
+	var m *Member
+	for i := range Members {
+		if Members[i].Key == "guard_route" {
+			m = &Members[i]
+			break
+		}
+	}
+	if m == nil {
+		t.Fatal("guard_route member missing from the default bundle")
+	}
+	if m.Exec != "command" {
+		t.Fatalf("guard_route must be a command member, got Exec=%q", m.Exec)
+	}
+	if len(m.Argv) == 0 || m.Argv[0] != "fak" {
+		t.Fatalf("guard_route Argv[0] must be the bare fak token (-> os.Executable), got %v", m.Argv)
+	}
+	if m.Gates {
+		t.Fatal("guard_route must be non-gating (a routed finding is the pass working, not a broken garden)")
+	}
+}
+
+func TestRunMemberCommandExecRunsDirectly(t *testing.T) {
+	// A command member runs Argv[0] as a direct executable and parses its JSON
+	// stdout -- the Go-native member path, distinct from the python-script path.
+	// `go env -json` is a portable command that emits a JSON object on stdout.
+	m := Member{Key: "k", Label: "k", Kind: "envelope", Exec: "command",
+		Argv: []string{"go", "env", "-json"}}
+	payload, code, errStr := RunMember(t.TempDir(), m, "", 60*time.Second)
+	if errStr != "" || code != 0 {
+		t.Fatalf("command member failed: code=%d err=%q", code, errStr)
+	}
+	if _, ok := payload["GOOS"]; !ok {
+		t.Fatalf("expected a parsed JSON object from `go env -json`, got %v", payload)
 	}
 }
 
