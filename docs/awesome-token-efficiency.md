@@ -224,6 +224,14 @@ fak's.
 - **SnapKV** — vote on important prefix positions from an end-of-prompt window (targets
   prefill). [arXiv:2404.14469](https://arxiv.org/abs/2404.14469). **fak: ❌**.
 - **FastGen** — per-head hybrid eviction policy chosen at end-of-prefill. [arXiv:2310.01801](https://arxiv.org/abs/2310.01801). **fak: ❌**.
+- **EpiKV (epiphany score)** — score tokens by the *change in the model's internal
+  representation* read from the forward pass (no attention matrix), not by attention weight;
+  training-free, fused-kernel-compatible. [arXiv:2606.26472](https://arxiv.org/abs/2606.26472).
+  **fak: 🟡** importance *policy* (fak's exact evictor is policy-agnostic; the shipped
+  attention-weight policy is [#856](https://github.com/anthony-chaudhary/fak/issues/856), fed by
+  `internal/model/attn_observer.go`). The epiphany score is the fused-kernel-friendly alternative
+  on fak's fused GPU decode path — filed, not built (needs a hidden-state-delta observer + a
+  served long-CoT eviction-quality witness). See [triage #1123](notes/RESEARCH-epikv-attention-free-eviction-triage-2026-06-28.md).
 - **Sliding-window / local attention** — Longformer, Mistral SWA. [arXiv:2310.06825](https://arxiv.org/abs/2310.06825). **fak: ➖** model-native.
 - **PyramidKV / PyramidInfer** — larger KV budget to lower layers. [arXiv:2406.02069](https://arxiv.org/abs/2406.02069). **fak: ❌**.
 - **Quest** — query-aware sparsity: keep full KV, load only top-K relevant pages per
