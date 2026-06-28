@@ -171,6 +171,36 @@ under live pressure" to a cited, tested claim. `dos verify MLCACHE MLCACHE3` + a
 > the one most likely to be refuted by "it only ran in a demo" — so its witness must show a
 > serve-path call site, not a library call.
 
+> **Status: SHIPPED `ca5aad6a` (#1073, the live serve-path call site).** `internal/gateway/`
+> `kvmmu_pressure_relief.go` adds `maybeRelieveKVPressure`, called from `complete()`'s
+> post-decode success tail (the boundary right after `observePlannerRequestMemory`), driving two
+> host-injected, import-clean seams — `KVPressureCandidateProvider` (live resident spans) and
+> `KVPressureSweeper` (the `engine.CapacityAdapter` closure). `cmd/fak/kvmmu_pressure_bridge.go`
+> is the host glue (twin of `kvmmu_slot_bridge.go`) that builds the sweeper over a live
+> `compute.Backend` + `CapacityAdapter` and lowers candidates into `engine.CapacityPressureCandidate`.
+> Gated behind `FAK_INKERNEL_KVMMU`, fail-open (nil seams / empty candidates ⇒ a no-op,
+> byte-identical to before), `FAK_KV_HIGHWATER` overrides the 0.80 mark. The demote folds into
+> the `fak_engine_cache_*` cache-event stream automatically via the adapter's recorder.
+>
+> **Witness.** `TestMaybeRelieveKVPressureDemotesUnderPressure` proves demote-not-drop under
+> simulated HBM pressure (StageSpan → Evict, `AppliedMoves==1`, a `ddr_cache` cache-event row),
+> with a refute guard (`…GateOffIsNoOp`) that asserts the gate-off / no-seams path is inert — so
+> the test proves the WIRE, not a default-on behavior change. `dos commit-audit ca5aad6a` returns
+> **OK / diff-witnessed** (the `add`-led subject made the claim checkable, where MLCACHE1's
+> "derive" abstained), `dos review` over the ship range is **CLEAN** (zero residual), and the
+> diff touches the serve path (`internal/gateway/gateway.go`), not just a test.
+>
+> **Honest fence (still in force).** The production provider is **nil** at the serve.go call
+> site: `InKernelPlanner` keeps residency in a radix reuse tree and builds a `kvmmu.Context`
+> ephemerally per eviction, so there is no durable resident-span list to enumerate yet. So this
+> rung ships the LIVE, non-test call site + the synthetic-pressure demote test; it does NOT yet
+> assert the served loop demotes a *real* span under *real* GPU pressure. That last step — a
+> persistent span enumerator over `kvmmu.Segment{From,Len,KV}` feeding a non-nil provider — is
+> the follow-on **#1074 / #987**. As with MLCACHE1, `dos verify MLCACHE MLCACHE3` is
+> `shipped:false` because `MLCACHE`/`MLCACHE3` are this doc's own plan/phase convention with no
+> marker in the stamp grammar; the rung's real evidence is the diff-witnessed commit-audit + the
+> passing refute-guarded test.
+
 ### Rung 4 — default profiles from the live box (`MLCACHE4`) — hardware-free
 
 **Claim.** On startup the kernel replaces `DefaultTierProfiles`' representative
