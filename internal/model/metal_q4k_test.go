@@ -260,12 +260,15 @@ func TestMetalQ4KGemmMatchesCPU(t *testing.T) {
 		t.Skip("no Metal device available")
 	}
 	defer metalgemm.ResetQ4K()
-	// Cover: small, the 22-token oracle panel, a non-square MLP-like shape, and P>128 (the
-	// tiled kernel's token-tile size) so the multi-tile / single-command-buffer path is exercised.
+	// Cover: small, the 22-token oracle panel, a non-square MLP-like shape, the real Qwen3.6-27B
+	// gate/up prefill shape ([17408,5120] — the dominant prefill GEMM, issue #1085), and P>256
+	// (the tiled kernel's token-tile size) so the multi-tile / single-command-buffer path and the
+	// new SIMD-group-reduction dot are both exercised.
 	cases := []struct{ out, in, P int }{
 		{1024, 1024, 6},
 		{2048, 1024, 22},
-		{1024, 512, 130}, // two token tiles (128 + 2)
+		{17408, 5120, 22}, // real Qwen3.6-27B gate/up panel, small-P occupancy path
+		{1024, 512, 300},  // two token tiles (256 + 44)
 	}
 	for _, c := range cases {
 		qt := randomQ4KTensor(c.out, c.in, 99)
@@ -471,8 +474,9 @@ func BenchmarkMetalQ4KGemmSteady(b *testing.B) {
 	}
 	Y := make([]float32, P*out)
 	// The tiled kernel reads each weight ONCE per token-tile, so model-bytes ≈ the weight size
-	// (×ceil(P/128) tiles). Report effective model-GB/s = weight bytes moved through the GEMM.
-	tiles := float64((P + 127) / 128)
+	// (×ceil(P/256) tiles, the Q4K_BN token-tile width). Report effective model-GB/s = weight
+	// bytes moved through the GEMM.
+	tiles := float64((P + 255) / 256)
 	weightBytes := tiles * float64(out) * float64(in) / 256.0 * 144.0
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
