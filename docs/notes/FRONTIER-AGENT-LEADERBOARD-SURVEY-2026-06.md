@@ -101,7 +101,12 @@ adherence exists (τ³-Bench, Galileo) it is folded into the model's pass-rate. 
 structural floor (full-stack **ASR 0.000** over its **own fixed 38-case corpus**,
 `agentdojo-fak-fullstack-20260625.json`, model-free, **WITNESSED**) has **no public-leaderboard
 home** and must be reported as *fak's own floor with the corpus boundary stated* — never as a
-leaderboard placement. ([#56](https://github.com/anthony-chaudhary/fak/issues/56) is the
+leaderboard placement. That model-free boundary is also its **measurement-validity** edge:
+the ASR is assigned by a deterministic adjudication witness (`succeeded := injectionReachedContext
+&& sinkExecuted`, **no judge model**), not by a safety classifier or an LLM-as-judge, so it
+cannot be moved by the calibration drift or the benign-framing / white-box-GCG attacks that
+make most *judge-mediated* reported ASR unreliable — see the metric-side idea-scout triage
+[#1097](RESEARCH-jailbreak-judge-asr-reliability-triage-2026-06-27.md). ([#56](https://github.com/anthony-chaudhary/fak/issues/56) is the
 DeletionCertificate *mechanism*, not a deletion *benchmark*.)
 
 ---
