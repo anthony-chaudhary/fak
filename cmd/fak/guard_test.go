@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,8 +18,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/callavoid"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
@@ -542,6 +545,56 @@ func TestFormatAuditSummary(t *testing.T) {
 	// No cache activity → no cache line (the common first-turn / non-passthrough case).
 	if strings.Contains(clean, "cache saving") {
 		t.Errorf("a run with no cache activity must not print a cache line:\n%s", clean)
+	}
+}
+
+// TestFormatAmplification proves the callavoid wire: the guard exit summary folds the
+// session's kernel call-path counters through internal/callavoid.Account and prints the
+// realized avoided-call amplification — and stays QUIET when nothing was avoided, so a
+// pure-Execute run does not print a vacuous 1.0× line.
+func TestFormatAmplification(t *testing.T) {
+	// A session that served calls from the vDSO and repaired a malformed one: there IS
+	// avoidance, so the headline prints with the ratio, the spared round-trips, and the
+	// breakdown of where the avoidance came from. {4,6,2,1} folds to 2.96× (verified
+	// against callavoid.Account), amplifying.
+	out := formatAmplification(kernel.Counters{
+		EngineCalls: 4, VDSOHits: 6, Transforms: 2, Denies: 1,
+	})
+	for _, want := range []string{
+		"avoided-call amplification",
+		"served from the vDSO cache", // 6 memo hits
+		"repaired in-syscall",        // 2 repairs
+		"naive round-trip",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("amplification line missing %q:\n%s", want, out)
+		}
+	}
+	// The reported amplification must equal the pure callavoid.Account result over the
+	// same mapped counters — the line can never disagree with `fak callavoid account`.
+	rep := callavoid.Account(callavoid.TallyFromCounters(callavoid.Counters{
+		EngineCalls: 4, VDSOHits: 6, Transforms: 2, Denies: 1,
+	}))
+	if !strings.Contains(out, fmt.Sprintf("%.2f×", rep.Amplification)) {
+		t.Errorf("amplification line must carry the Account ratio %.2f×:\n%s", rep.Amplification, out)
+	}
+
+	// Execute-only (no vDSO hits, no repairs): nothing was avoided, so the agent paid
+	// the naive price for every call — the headline stays empty rather than printing 1.0×.
+	if q := formatAmplification(kernel.Counters{EngineCalls: 5}); q != "" {
+		t.Errorf("a pure-Execute run must print no amplification line, got:\n%s", q)
+	}
+
+	// A pure-cache window (every proposed call served from the vDSO, zero engine
+	// dispatches) does NOT render +Inf: a memo hit still pays callavoid.ValidateFloor
+	// (=0.01), so the amplification saturates at the documented 1/ValidateFloor = 100×
+	// cap. 3 memo hits → naive=3, executed=3*0.01=0.03 → 100.00×.
+	pureCache := formatAmplification(kernel.Counters{VDSOHits: 3})
+	if !strings.Contains(pureCache, "100.00×") {
+		t.Errorf("a pure-cache window must saturate at the 100× cap:\n%s", pureCache)
+	}
+	if strings.Contains(pureCache, "Inf") {
+		t.Errorf("the amplification line must never render Go's +Inf:\n%s", pureCache)
 	}
 }
 
