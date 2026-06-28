@@ -628,6 +628,23 @@ func Active() *Journal {
 	return active
 }
 
+// ResetActiveForTest clears the process-active journal pointer so a later Enable opens a
+// FRESH journal instead of returning a prior test's idempotent one. It is TEST-ONLY plumbing:
+// a test that programmatically Enables the global journal (e.g. the `fak guard --replay-trace`
+// smoke test) must call this in cleanup so the global state does not leak into a sibling test
+// that assumes a clean boot. It closes and nils the active journal; it does NOT unregister the
+// emitter (the ABI has no unregister), so pair it with abi.ResetForTest when the ABI itself is
+// being reset. A no-op when nothing is active.
+func ResetActiveForTest() {
+	activeMu.Lock()
+	j := active
+	active = nil
+	activeMu.Unlock()
+	if j != nil {
+		_ = j.Close()
+	}
+}
+
 // Enable turns the durable decision journal ON at path AFTER init has run — the
 // programmatic equivalent of FAK_AUDIT_JOURNAL, for a front door (fak guard) that
 // decides to default the audit trail on. It creates the parent directory, opens

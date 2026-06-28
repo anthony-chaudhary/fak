@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
@@ -191,6 +192,12 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.MarkReady()
 	s.logf("fak gateway listening on http://%s  (engine=%s model=%s vdso=%v auth=%v)",
 		ln.Addr(), s.engineID, s.model, s.k.VDSOEnabled(), s.requireKey != "")
+	// Surface fak's core value-add — realized in-kernel KV-prefix reuse — at startup so it
+	// is discoverable without scraping /metrics or waiting for a long --debug-stats session
+	// (epic #1072). The cacheobs tap is the SAME WITNESSED signal /metrics renders; at boot
+	// it is idle (no served turn yet) and climbs per in-kernel turn. A pure-proxy workload
+	// never feeds it, so the honest startup line is "idle until the first in-kernel turn".
+	s.logf("fak cache: %s", cacheBootSummary(cacheobs.Default.Snapshot()))
 	select {
 	case <-ctx.Done():
 		shctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -199,6 +206,17 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	case err := <-errc:
 		return err
 	}
+}
+
+// cacheBootSummary renders the startup cache-state line from the process-global cacheobs
+// snapshot (the WITNESSED in-kernel KV-prefix reuse). Idle at boot (no served turn yet); once
+// turns accumulate it reports the realized reuse ratio so an operator sees the cliff live.
+func cacheBootSummary(s cacheobs.Stats) string {
+	if s.Turns == 0 {
+		return "idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)"
+	}
+	return fmt.Sprintf("reuse %.0f%% over %d turns (frozen=%d partial=%d cold=%d) — WITNESSED, by=vdso",
+		s.ReuseRatio*100, s.Turns, s.FrozenTurns, s.PartialTurns, s.ColdTurns)
 }
 
 // nodelayListener wraps ln so every accepted *net.TCPConn has Nagle disabled
