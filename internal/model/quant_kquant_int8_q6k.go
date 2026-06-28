@@ -127,7 +127,7 @@ func q6kMatRowsRangeInt8(qt *kQuantTensor, qv q8Vec, y []float32, lo, hi int) {
 	rowBytes := qt.rowBytes()
 	for o := lo; o < hi; o++ {
 		row := qt.raw[o*rowBytes : (o+1)*rowBytes]
-		q6kReduceRowScalar(row, qt.nblk, qx, IS, SS)
+		q6kReduceRow(row, qt.nblk, qx, IS, SS)
 		y[o] = q6kCombineRow(row, qt.nblk, dx, IS, SS)
 	}
 }

@@ -153,7 +153,7 @@ func q5kMatRowsRangeInt8(qt *kQuantTensor, qv q8Vec, y []float32, lo, hi int) {
 	rowBytes := qt.rowBytes()
 	for o := lo; o < hi; o++ {
 		row := qt.raw[o*rowBytes : (o+1)*rowBytes]
-		q5kReduceRowScalar(row, qt.nblk, qx, IS, SS)
+		q5kReduceRow(row, qt.nblk, qx, IS, SS)
 		y[o] = kQuantCombineRow(row, qt.nblk, dx, IS, SS)
 	}
 }
