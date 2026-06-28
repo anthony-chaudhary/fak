@@ -15,6 +15,7 @@ package model
 // 27B on 36 GB (q4_k_m ≈ 16 GB) AND has the bandwidth + parallel dequant to hit the bar.
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -488,5 +489,38 @@ func BenchmarkMetalQ4KGemmSteady(b *testing.B) {
 		b.ReportMetric(weightBytes*float64(b.N)/secs/1e9, "GB/s")
 		// FLOP rate: 2*out*in*P MACs per GEMM — the compute-bound view once weights are read once.
 		b.ReportMetric(2*float64(out)*float64(in)*float64(P)*float64(b.N)/secs/1e9, "GFLOP/s")
+	}
+}
+
+// BenchmarkMetalQ4KGemmPSweep sweeps the prompt length P at the real Qwen3.6-27B gate/up shape
+// [17408,5120]. The diagnosis measured a 29-token prefill (small P), but real agentic prefills are
+// hundreds-to-thousands of tokens, where the weight (read once per token-tile) is reused across many
+// more tokens — so GFLOP/s should climb steeply with P if the kernel is weight-bound and saturate
+// if it is compute/occupancy-bound. The curve says which regime the real prefill lives in.
+func BenchmarkMetalQ4KGemmPSweep(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	out, in := 17408, 5120
+	qt := randomQ4KTensor(out, in, 1)
+	w := metalgemm.UploadQ4K(qt.raw, out, in)
+	if w == nil {
+		b.Fatal("UploadQ4K returned nil")
+	}
+	for _, P := range []int{22, 64, 128, 256, 512, 1024, 2048} {
+		X := randomVecF(P*in, 2)
+		Y := make([]float32, P*out)
+		b.Run(fmt.Sprintf("P=%d", P), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				w.GEMM(X, P, Y)
+			}
+			b.StopTimer()
+			if s := b.Elapsed().Seconds(); s > 0 {
+				b.ReportMetric(2*float64(out)*float64(in)*float64(P)*float64(b.N)/s/1e9, "GFLOP/s")
+				b.ReportMetric(s/float64(b.N)*1e3, "ms/op")
+			}
+		})
 	}
 }
