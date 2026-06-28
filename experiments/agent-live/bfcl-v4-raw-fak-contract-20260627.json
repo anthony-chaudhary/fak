@@ -1,0 +1,132 @@
+{
+  "schema": "fak.bfcl-v4-raw-fak-contract.v1",
+  "generated_at": "2026-06-27T00:00:00Z",
+  "benchmark": "BFCL V4 (Berkeley Function-Calling Leaderboard V4) — held-accuracy-constant cost/latency delta contract",
+  "status": "READY_FOR_EXTERNAL_HARNESS",
+  "evidence_class": "EXTERNAL_RUN_CONTRACT",
+  "issue": "#1068",
+  "survey_doc": "docs/notes/FRONTIER-AGENT-LEADERBOARD-SURVEY-2026-06.md",
+  "claim_boundary": "External-run contract only: it fixes the raw/fak command shape, the shared model and task ids, the shared budget, the evidence paths, and the promotion gates for a benchmark-native BFCL V4 run. It is NOT an official result until external BFCL task definitions, raw/fak outputs, and the native EvalScope grader summaries are checked in. fak's number is the gateway-attributable cost/latency DELTA on the same fronted run with accuracy held constant; the BFCL accuracy rank and the board's USD/latency columns are the fronted model's (OBSERVED), never fak's.",
+  "why_this_board": "BFCL V4 is the only board in the frontier-agent family carrying BOTH a USD-cost and a latency-seconds column, so a held-accuracy-constant fak-in-vs-fak-out delta maps directly onto an existing public column with no invented metric (see survey_doc).",
+  "task_selection": {
+    "official_harness": "BFCL V4 via EvalScope (self-run)",
+    "official_task_ids_required": true,
+    "same_task_ids_required": true,
+    "same_budget_required": true,
+    "candidate_categories": [
+      "simple",
+      "parallel",
+      "multiple",
+      "irrelevance"
+    ],
+    "candidate_task_ids": [
+      "<official BFCL V4 task ids — pinned before the run, identical across both arms>"
+    ],
+    "trials": 1
+  },
+  "model": {
+    "agent_model": "shared-agent-model",
+    "fak_gateway": "http://localhost:8080/v1",
+    "same_model_required": true,
+    "note": "Fronting a frontier model needs a paid key or GPU (#968 covers the A100 weights-access block for an open-weight front). The published BFCL accuracy/rank is the model's, OBSERVED."
+  },
+  "arms": [
+    {
+      "name": "raw-bfcl",
+      "harness": "benchmark-native",
+      "command": "$env:BFCL_TASK_IDS='<space-separated official task ids>'; bfcl generate --model shared-agent-model --test-category <pinned categories>; bfcl evaluate --model shared-agent-model --test-category <pinned categories>",
+      "output_dir": "experiments/agent-live/bfcl-v4-raw-20260627",
+      "required_artifacts": [
+        "benchmark-native BFCL score summary (overall accuracy + USD cost + latency)",
+        "raw per-task result rows"
+      ]
+    },
+    {
+      "name": "fak-bfcl",
+      "harness": "benchmark-native-through-fak-gateway",
+      "command": "$env:BFCL_TASK_IDS='<space-separated official task ids>'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; bfcl generate --model shared-agent-model --test-category <pinned categories>; bfcl evaluate --model shared-agent-model --test-category <pinned categories>",
+      "output_dir": "experiments/agent-live/bfcl-v4-fak-20260627",
+      "required_artifacts": [
+        "benchmark-native BFCL score summary (overall accuracy + USD cost + latency)",
+        "fak per-task result rows",
+        "fak verdict/evidence log linked to each mediated tool call"
+      ]
+    }
+  ],
+  "score_evidence_link": {
+    "required": true,
+    "benchmark_artifacts": [
+      "experiments/agent-live/bfcl-v4-raw-20260627/score_summary.json",
+      "experiments/agent-live/bfcl-v4-fak-20260627/score_summary.json"
+    ],
+    "fak_evidence_artifacts": [
+      "experiments/agent-live/bfcl-v4-fak-20260627/fak-toolcall-evidence.jsonl",
+      "experiments/agent-live/bfcl-v4-fak-20260627/raw-fak-cost-latency-join.json"
+    ],
+    "join_keys": [
+      "task_id",
+      "tool",
+      "args_hash"
+    ],
+    "detail": "The compare artifact must join the two arms' BFCL accuracy per task (which MUST match) to the per-task USD cost and latency, so the fak delta is reported only where accuracy is held constant."
+  },
+  "compare_metrics": [
+    "bfcl_overall_accuracy_per_arm",
+    "usd_cost_per_task",
+    "latency_seconds_per_task",
+    "gateway_tax_pct",
+    "kv_reuse_marginal_over_tuned",
+    "fak_denied_calls",
+    "malformed_call_rate"
+  ],
+  "honesty_fence": {
+    "accuracy_must_be_held_constant": true,
+    "accuracy_label": "OBSERVED (the fronted model's BFCL rank, not fak's)",
+    "cost_latency_column_label": "OBSERVED (the model's token cost / latency)",
+    "fak_delta_label": "WITNESSED (gateway tax + KV-reuse saving on the same run)",
+    "forbidden_vs_naive_multiple": "Do NOT use the 17.9-23.4x (or 60.3x) vs-naive reuse multiple as the cost delta; quote only the marginal-over-TUNED figure (~1.0-1.31x single / 4.1x on a 50x5 fleet).",
+    "no_throughput_loss_as_win": "fak loses raw single-stream / aggregate throughput by design (raw SGLang 0.60-0.97x); never dress that as a cost-row win.",
+    "no_fabricated_safety_rank": "No public board scores safe-completion/policy-compliance/provable-deletion first-class; the ASR-0.000 floor is fak's own floor over its own 38-case corpus, never a leaderboard placement.",
+    "delta_validity": "A resolve-%/accuracy move in EITHER direction between arms invalidates the cost delta."
+  },
+  "fak_attributable_witnesses": {
+    "gateway_tax_pct": {
+      "value": "~3% at saturation (peak C=64 0.75x; C=128 0.97x)",
+      "witness": "experiments/qwen36/dgx-r4-20260622/compare.json (#921 Rung-4, a2559041)",
+      "label": "WITNESSED"
+    },
+    "kv_reuse_marginal_over_tuned": {
+      "value": "~1.0-1.31x single-session; 4.1x on a 50x5 fleet (net_value_add_vs_tuned=4.125)",
+      "witness": "experiments/session/headline-qwen-50x5.json (2bbda6f)",
+      "label": "WITNESSED"
+    },
+    "injection_refusal_floor": {
+      "value": "full-stack ASR 0.000 vs detection-only 0.763 over a fixed 38-case corpus",
+      "witness": "experiments/agent-live/agentdojo-fak-fullstack-20260625.json",
+      "label": "WITNESSED (model-free, fak's own corpus; no public-leaderboard home)"
+    }
+  },
+  "upstream_refs": [
+    {
+      "name": "BFCL V4 leaderboard (Berkeley Gorilla)",
+      "url": "https://gorilla.cs.berkeley.edu/leaderboard.html",
+      "notes": "Last updated 2026-04-12; carries USD-cost AND latency-seconds columns. Add-a-model is contact-the-team via Discord (no automated form); self-run harness available (EvalScope). Retrieved 2026-06."
+    },
+    {
+      "name": "BFCL V4 snapshot (llm-stats)",
+      "url": "https://llm-stats.com/benchmarks/bfcl-v4",
+      "notes": "Third-party snapshot of the BFCL V4 board. Retrieved 2026-06."
+    }
+  ],
+  "required_before_claim": [
+    "pinned official BFCL V4 task ids / categories for the selected subset",
+    "raw-arm benchmark-native output over those exact task ids",
+    "fak-arm benchmark-native output over those exact task ids",
+    "benchmark-native BFCL score summary (accuracy + USD cost + latency) for both arms",
+    "proof that raw and fak arms used the same model, task ids, budget, and retry policy",
+    "proof that BFCL accuracy matched across arms (the delta is invalid otherwise)",
+    "fak verdict/evidence log linked to each mediated tool call",
+    "raw/fak compare artifact reporting the cost/latency delta only where accuracy is held constant"
+  ],
+  "result_claim_allowed": false
+}

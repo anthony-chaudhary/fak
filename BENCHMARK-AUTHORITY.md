@@ -65,6 +65,7 @@
 | **Self-ablation feature sweep — vDSO on/off (deterministic, Regime A of epic #607)** | **vdso_hits 0→7 · engine_calls 12→5 · tokens 937→417 (−520)** | tau2-airline-smoke frozen trace (12 calls), mock engine, no model | all-off baseline (vDSO off) | _this commit_ | `experiments/ablate/tau2-smoke-vdso-ablation.json` + `ABLATE-RESULTS.md`. Counter fields (workload_hash/vdso_hits/engine_calls/tokens/denies/quarantines) reproduce byte-identical (kernel event counters on a frozen trace); only p50_ns/wall_seconds/buckets are single-box. Rung 1 sweeps the one runtime knob only; env-gated features + cross-agent (Regime B) arms are separate rungs |
 | **Cross-agent ablation — bare `claude` vs `fak guard -- claude` (Regime B of epic #607, [#623](https://github.com/anthony-chaudhary/fak/issues/623))** | **K=5/arm, both 5/5 success · output 0.98× · turns 1.00× · total-ingested 1.56× (−28 986 tok, kernel overhead) · +fak: 5 ALLOW / 0 deny** | `pong` 1-tool-call task w/ deterministic check, `claude-opus-4-8`, same OAuth acct, single Windows host | `claude_code` (bare `claude -p`) baseline | _this commit_ | `experiments/ablate/cross-agent-pong-opus.json` + `ABLATE-RESULTS.md`. Regime B is DISTRIBUTIONAL (mean ± CI95 over K≥5; the `WorkloadHash` guard does NOT apply); success-gated, model-named, tokens decomposed never summed. ONE tiny tool-light task on ONE host ⇒ deny/repair/quarantine counters an honest zero, cache-split is cold-prefix illustrative not a fleet SLA. Tool: `tools/cross_agent_ablate.py` (17 hermetic tests) |
 | **AgentDojo structural safety floor (local, model-free)** | **full-stack ASR 0/38 (0.000) vs detection-only 29/38 (0.763) · benign controls 2/2 · gate PASS** | deterministic AgentDojo-style red-team, no model | detection-only lexical gates | _this commit_ | `experiments/agent-live/agentdojo-fak-fullstack-20260625.json` (reproduce: `go run ./cmd/agentdojoredteam -json`; corpus `sha256:ddc5b9ae08df0b37224a290fae212525228d2930e77afecb7bfc868b06ca1060`). LOCAL structural floor only — not an official external AgentDojo leaderboard result or raw-model arm |
+| **AgentDojo external entry — `fak_gateway` registered non-model defense (#1064; module BUILT+WITNESSED, run/PR operator-gated)** | **module loads + intercepts a tool call (26-check test PASS); local intercept witness targeted ASR 0/7 (0.000) · benign 2/2; `benign/under-attack utility = NEEDS_KEY`; `result_claim_allowed=false`** | `fak_gateway` `BasePipelineElement` in a fork of `ethz-spylab/agentdojo`; targeted-ASR mechanism WITNESSED locally, utility arms OBSERVED (paid fronted model) | the four published non-model rows (Tool Filter / Spotlighting / Transformers PI Detector / Repeat User Prompt) + the formal-isolation tier (CaMeL ASR 0 / MELON 0.0–2.4%) | _this commit_ | `experiments/agent-live/agentdojo-fak-gateway-defense-entry-20260627.json` + `.md`; module `experiments/agentdojo-fak-defense/` (reproduce witness: `python3 experiments/agentdojo-fak-defense/fak_gateway_defense.py --json`; test: `python3 experiments/agentdojo-fak-defense/test_fak_gateway_defense.py`). PLACE in the ~0-ASR tier at a stated utility cost — **not a win, not a leaderboard rank**. 629-case + 97-case run on a fronted model and the upstream PR are the recorded operator-gated blocker |
 | **ToolSandbox/tau3 policy-state adapter smoke ([SIMULATED] local fixture)** | **raw safe pass^1 1/2 (0.500) -> fak safe pass^1 2/2 (1.000); fak denied 1 policy/minefield call; `result_claim_allowed=false`** | `offline-trace`, 2 ToolSandbox-shaped tasks, no live model | raw trace replay without fak mediation | `c92bb2c` | `experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json` + `.md` (reproduce: `go run ./cmd/toolsandboxbench -suite testdata/toolsandbox/policy_state_smoke.json -out experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json -md experiments/agent-live/toolsandbox-policy-state-smoke-20260625.md`). Adapter smoke only - not an official Apple ToolSandbox or tau3 leaderboard result |
 | **GLM-5.2 fak-kernel cache value (PENDING — results not yet collected)** | **PENDING — see result packet for shape** | GLM-5.2 on pure fak kernel, solved SWE-bench ticket | No cache (work saved is the lever) | _pending_ | `docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md` (result packet shape; observation seam shipped at `52dfea0d`, datacenter GPU access is the residual). Observation metric: `kv_prefix.reused_tokens` (WITNESSED, not provider's `cache_read`). See runbook for full path. |
 | **Local-model coding witness — `fak guard --gguf` (PENDING — path assembled, awaiting real run)** | **PENDING — run commands in runbook to fill A/B table** | Qwen2.5-Coder-1.5B-Q8 (local CPU) vs Claude Haiku 3.5 (frontier) | Same minimal coding task (`testdata/coding_smoke`) | _this commit_ | `docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-2026-06-27.md` + `LOCAL-MODEL-CODING-WITNESS-RUNBOOK.md` (commands). **Issue #1061 acceptance criteria:** (a) reproducible witness on CPU, (b) honest A/B table (local vs frontier on completion + safety + cost), (c) quickstart cites it. Path proven: fixture (`calculator.py` + `test_calculator.py`), policy (`examples/coding-agent-safe.json`), guard path (`fak guard --gguf <path>`), decision journal (`--audit FILE`). Cells marked `pending` need a box with GGUF weights and frontier-model credentials. |
@@ -131,6 +132,45 @@ The artifact also records the reproduce command, the attack ids, policy mode
 - `go test ./cmd/agentdojoredteam ./internal/agentdojo` -> PASS.
 - `go run ./cmd/agentdojoredteam -json` -> exit 0 and writes `gate=PASS`.
 - JSON parse/read-back confirmed the fields in the table above.
+
+---
+
+## AgentDojo External Entry — `fak_gateway` Registered Non-Model Defense (#1064, 2026-06-27)
+
+**Claim class:** module BUILT + locally WITNESSED; the public-harness row is
+operator-gated. `result_claim_allowed=false`.
+**Commit:** _this commit_
+**Files:** `experiments/agent-live/agentdojo-fak-gateway-defense-entry-20260627.json` + `.md`;
+module + test under `experiments/agentdojo-fak-defense/`.
+
+### What this is
+
+The external-entry counterpart the local floor (#869) deliberately excluded. fak's
+default-deny **tool-call admission gate** (capability floor + IFC source-stamp /
+sink-gate + result quarantine) is packaged as a real `BasePipelineElement` for the
+upstream `ethz-spylab/agentdojo` harness — `FakGatewayDefense`, selectable via
+`--defense fak_gateway` or `--module-to-load`, a faithful port of `internal/ifc/ifc.go`.
+This is a *capability-floor* class, distinct from the four published content/transform
+non-model rows.
+
+### What is WITNESSED here vs operator-gated
+
+| Item | State |
+|---|---|
+| Module loads + intercepts a tool call (unit test, 26 checks) | **WITNESSED · PASS** (`python3 experiments/agentdojo-fak-defense/test_fak_gateway_defense.py`) |
+| `targeted ASR` mechanism (local intercept witness) | **WITNESSED · 0/7 (0.000)**, benign 2/2 (`python3 experiments/agentdojo-fak-defense/fak_gateway_defense.py --json`) |
+| `benign utility` / `utility-under-attack` (629+97-case run) | **NEEDS_KEY** — OBSERVED, property of the fronted model `<model-id>`, ≈US$39 paid run |
+| Upstream PR into a fork of `ethz-spylab/agentdojo` | **operator-gated** (outward-facing; recorded blocker per #1064 AC) |
+
+### Honesty fences
+
+- `targeted ASR` is fak-authored (WITNESSED); `benign/under-attack utility` are the
+  fronted model's capability (OBSERVED) — different provenance, reported together,
+  never ASR alone. A refusing gate depresses benign utility; that cost is stated.
+- The internal `cmd/agentdojoredteam` 0/38 is **not** an AgentDojo-629 number.
+- fak's structural floor is **co-equal** with the formal-isolation tier (CaMeL ASR 0;
+  MELON 0.0–2.4%) — a PLACE in the ~0-ASR tier, never a win, never a leaderboard rank,
+  never a README headline.
 
 ---
 

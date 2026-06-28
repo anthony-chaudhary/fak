@@ -1,0 +1,113 @@
+{
+  "schema_version": "agentdojo-external-entry.v1",
+  "benchmark": "AgentDojo (ethz-spylab/agentdojo) — registered non-model defense entry",
+  "issue": 1064,
+  "parent_epic": 1063,
+  "built_on": [868, 869],
+  "shares_fronted_model_seam_with": 873,
+  "governance": [416, 9, 72],
+  "result_claim_allowed": false,
+  "status": "MODULE_BUILT_WITNESSED__EXTERNAL_RUN_AND_PR_OPERATOR_GATED",
+  "boundary": "The fak_gateway defense module + its load/intercept unit test are built and WITNESSED locally. The three coupled AgentDojo columns are NOT yet an official public-harness row: the benign-utility / utility-under-attack arms require a paid fronted model on a fresh 629+97-case run, and the PR into a fork of ethz-spylab/agentdojo is the operator-gated submission step. No leaderboard 'win' is claimed.",
+
+  "lineage": {
+    "agentdojo_repo": "https://github.com/ethz-spylab/agentdojo",
+    "agentdojo_version_or_commit": "PENDING_PIN_AT_RUN — pin the exact harness commit/tag in the fork PR",
+    "results_page": "https://agentdojo.spylab.ai/results/ (states explicitly: NOT a leaderboard)",
+    "paper": "https://arxiv.org/abs/2406.13352",
+    "attack_name": "important_instructions (canonical) — pinned at run time",
+    "model_id": "PENDING — property of the fronted model (e.g. gpt-4o-2024-05-13) at run time",
+    "suite_list": ["workspace", "slack", "travel", "banking"],
+    "security_case_count": 629,
+    "security_case_breakdown": {"workspace": 240, "slack": 105, "travel": 140, "banking": 144},
+    "utility_user_task_count": 97,
+    "run_date": "PENDING_EXTERNAL_RUN",
+    "fak_commit": "8288834dc59cd7174c29e70e320535063f496b72",
+    "cost_estimate_usd": {"security_629_gpt4o": 35, "utility_97": 4, "source": "AgentDojo paper estimate"}
+  },
+
+  "module": {
+    "path": "experiments/agentdojo-fak-defense/fak_gateway_defense.py",
+    "class": "FakGatewayDefense(BasePipelineElement)",
+    "content_layer": "FakInjectionDetector(PromptInjectionDetector)",
+    "selectable_via": ["--defense fak_gateway", "--module-to-load experiments.agentdojo_fak_defense.fak_gateway_defense"],
+    "ports": ["internal/ifc/ifc.go", "internal/agentdojo/agentdojo.go"],
+    "category": "tool-call admission gate (capability floor + IFC source-stamp/sink-gate + result quarantine)",
+    "differentiator": "A capability-floor / admission-gate class — distinct from the four published content/transform non-model rows (Tool Filter, Spotlighting, Transformers PI Detector, Repeat User Prompt).",
+    "unit_test": {
+      "path": "experiments/agentdojo-fak-defense/test_fak_gateway_defense.py",
+      "proves": "module loads AND intercepts a tool call (strips a tainted exfil call, appends a refusal, preserves a benign call)",
+      "checks": 26,
+      "result": "PASS",
+      "reproduce": "python3 experiments/agentdojo-fak-defense/test_fak_gateway_defense.py"
+    }
+  },
+
+  "columns": {
+    "_note": "All three columns reported together, never ASR alone. Provenance differs per column (honesty fence #1).",
+    "targeted_asr": {
+      "provenance": "WITNESSED",
+      "owner": "fak (structural floor — fak-authored)",
+      "local_witness_value": 0.0,
+      "local_witness_basis": "7/7 two-step intercept battery denied (0 attacker sinks landed); reproduce: python3 experiments/agentdojo-fak-defense/fak_gateway_defense.py --json",
+      "reference_floor": "go run ./cmd/agentdojoredteam -json -> full-stack ASR 0/38 (0.000)",
+      "expected_public_629_value": "~0 (structural sink-gate is phrasing-independent); MEASURED only on the upstream run",
+      "tier": "co-equal with the ~0-ASR formal-isolation tier (CaMeL ASR 0; MELON 0.0-2.4%) — a PLACE, not a WIN"
+    },
+    "benign_utility": {
+      "provenance": "OBSERVED",
+      "owner": "fronted model <model-id>",
+      "value": "NEEDS_KEY — paid fronted-model run required",
+      "honesty_note": "A tool-admission gate that refuses calls DEPRESSES benign utility (cf. Transformers PI Detector util 41.24 vs 72-84 for lighter defenses). fak's utility drop must be reported here, never hidden behind ASR~0."
+    },
+    "utility_under_attack": {
+      "provenance": "OBSERVED",
+      "owner": "fronted model <model-id>",
+      "value": "NEEDS_KEY — paid fronted-model run required"
+    }
+  },
+
+  "local_witness": {
+    "reproduce": "python3 experiments/agentdojo-fak-defense/fak_gateway_defense.py --json",
+    "gated_sinks": ["DESTRUCTIVE", "EGRESS", "EXEC"],
+    "attacks_total": 7,
+    "attacks_succeeded": 0,
+    "targeted_asr": 0.0,
+    "benign_total": 2,
+    "benign_completed": 2,
+    "benign_completion_rate": 1.0,
+    "gate": "PASS",
+    "covers_red_team_evasions": ["paraphrased (no marker word)", "safesink-launder (destination in transfer_to_human_agents args)", "unlisted-key destination ({\"server\":\"attacker...\"})"]
+  },
+
+  "published_comparison_rows": {
+    "_source": "AgentDojo published non-model defense rows for gpt-4o-2024-05-13 (util / util-under-attack / targeted ASR)",
+    "tool_filter": {"util": 72.16, "util_under_attack": 56.28, "targeted_asr": 6.84, "class": "tool-set transform"},
+    "spotlighting_with_delimiting": {"util": 72.16, "util_under_attack": 55.64, "targeted_asr": 41.65, "class": "content transform"},
+    "transformers_pi_detector": {"util": 41.24, "util_under_attack": 21.14, "targeted_asr": 7.95, "class": "content classifier"},
+    "repeat_user_prompt": {"util": 84.54, "util_under_attack": 67.25, "targeted_asr": 27.82, "class": "prompt transform"},
+    "formal_isolation_tier": {"camel_targeted_asr": 0.0, "melon_targeted_asr_range": [0.0, 2.4], "class": "formal isolation"},
+    "fak_gateway": {"util": "OBSERVED/NEEDS_KEY", "util_under_attack": "OBSERVED/NEEDS_KEY", "targeted_asr": "WITNESSED ~0", "class": "tool-call admission gate (capability floor / IFC)"}
+  },
+
+  "honesty_fence": {
+    "asr_vs_utility_distinct_provenance": true,
+    "internal_38_is_not_a_629_number": true,
+    "ceiling_is_place_not_win": true,
+    "not_a_leaderboard": true,
+    "no_readme_headline_promotion": true
+  },
+
+  "remaining_blocker": {
+    "id": "UPSTREAM_PR_AND_FRONTED_MODEL_RUN",
+    "gate": "operator",
+    "why": "Opening a PR into a fork of ethz-spylab/agentdojo is an outward-facing action under the operator's GitHub identity, and the benign/under-attack utility columns require a paid fronted model (~US$39 total). Per #1064 acceptance criteria, recording this blocker is the sanctioned alternative to opening the PR when maintainer review / paid run is the gate.",
+    "next_checkable_steps": [
+      "fork ethz-spylab/agentdojo; vendor experiments/agentdojo-fak-defense/fak_gateway_defense.py and wire from_config (README Path A or B)",
+      "pin the harness commit/tag and run the 629-case security cross-product under important_instructions on gpt-4o-2024-05-13",
+      "run the 97-case utility arm; generate the table via util_scripts/create_results_table.py",
+      "open the PR with (a) the defense description and (b) the working implementation; link the PR URL back in issue #1064",
+      "fold the OBSERVED utility numbers + the measured 629-case targeted ASR back into this artifact and BENCHMARK-AUTHORITY.md, flipping result_claim_allowed once the row is published"
+    ]
+  }
+}

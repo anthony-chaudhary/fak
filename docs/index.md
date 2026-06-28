@@ -202,7 +202,7 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | **Keeping a stable core as models × backends × features multiply** | [Combinatorial-growth epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md) |
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |
-| **What the words mean** (preflight vs inflight vs prefill) | [Glossary](glossary.md) |
+| **What the words mean** (preflight vs inflight vs prefill; cache rebate / net saving) | [Glossary](glossary.md) |
 | **How shared state is split** | [Shared state ladder](shared-state-ladder.md) |
 | **A collaborative task state contract** | [Shared task record contract](shared-task-record-contract.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
