@@ -118,13 +118,16 @@ func TestScoreLedger(t *testing.T) {
 		Turns:        10,
 		PromptTokens: 1000,
 		ReusedTokens: 800,
-		ReuseRatio:   4.0,
+		FrozenTurns:  6,
+		PartialTurns: 3,
+		ColdTurns:    1,
+		ReuseRatio:   0.8,
 	}
 	stats2 := cacheobs.Stats{
 		Turns:        5,
 		PromptTokens: 500,
 		ReusedTokens: 400,
-		ReuseRatio:   4.0,
+		ReuseRatio:   0.8,
 	}
 	Append("serve", "test1", ledgerPath, stats1)
 	Append("run", "test2", ledgerPath, stats2)
@@ -133,44 +136,66 @@ func TestScoreLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.TotalSessions != 2 {
-		t.Errorf("expected TotalSessions 2, got %d", result.TotalSessions)
+	if result.TotalSessions != 2 || result.MultiTurnSessions != 2 || result.SingleTurnSessions != 0 {
+		t.Errorf("session split = %d/%d/%d, want 2/2/0", result.TotalSessions, result.MultiTurnSessions, result.SingleTurnSessions)
 	}
-	if result.TotalTurns != 15 {
-		t.Errorf("expected TotalTurns 15, got %d", result.TotalTurns)
+	if result.TotalTurns != 15 || result.MultiTurnTurns != 15 {
+		t.Errorf("turns = %d total / %d multi-turn, want 15/15", result.TotalTurns, result.MultiTurnTurns)
 	}
-	if result.TotalCacheHitTokens != 1200 {
-		t.Errorf("expected TotalCacheHitTokens 1200, got %d", result.TotalCacheHitTokens)
+	if result.GateReusedTokens != 1200 || result.GatePromptTokens != 1500 {
+		t.Errorf("gate tokens = %d/%d, want 1200/1500", result.GateReusedTokens, result.GatePromptTokens)
 	}
-	if result.TotalGeneratedTokens != 1500 {
-		t.Errorf("expected TotalGeneratedTokens 1500, got %d", result.TotalGeneratedTokens)
+	if want := 1200.0 / 1500.0; result.RealizedReuseRatio != want {
+		t.Errorf("RealizedReuseRatio = %.4f, want %.4f", result.RealizedReuseRatio, want)
 	}
-	expectedMultiplier := float64(1200) / float64(1500-1200)
-	if result.OverallMultiplier != expectedMultiplier {
-		t.Errorf("expected OverallMultiplier %.2f, got %.2f", expectedMultiplier, result.OverallMultiplier)
+	if !result.HasEnoughData() {
+		t.Errorf("15 multi-turn turns should be enough data (MinGateTurns=%d)", MinGateTurns)
 	}
-	if result.LowMultiplierSessions != 0 {
-		t.Errorf("expected LowMultiplierSessions 0, got %d", result.LowMultiplierSessions)
+	// #1066: the gate must NEVER surface the vs-naive re-prefill multiple.
+	if !result.VsNaiveMultipleExcluded || result.PublishableValueFamily == "" || result.SingleSessionMarginalX != 1.0 {
+		t.Errorf("honesty-fence fields not set: excluded=%v family=%q marginal=%.2f", result.VsNaiveMultipleExcluded, result.PublishableValueFamily, result.SingleSessionMarginalX)
 	}
 }
 
-func TestScoreLedgerWithLowMultiplier(t *testing.T) {
+// A cold single-turn `fak run` has no previous turn to reuse from, so it must not drag the
+// realized-reuse ratio down — folding it in would manufacture a false regression.
+func TestScoreLedgerExcludesSingleTurnColdRuns(t *testing.T) {
 	tmpDir := t.TempDir()
 	ledgerPath := filepath.Join(tmpDir, "test-ledger.jsonl")
-	stats := cacheobs.Stats{
-		Turns:        10,
-		PromptTokens: 1000,
-		ReusedTokens: 400,
-		ReuseRatio:   0.67,
+	// One healthy multi-turn session...
+	Append("serve", "multi", ledgerPath, cacheobs.Stats{Turns: 10, PromptTokens: 1000, ReusedTokens: 800})
+	// ...and three cold single-turn runs (no reuse opportunity).
+	for i := 0; i < 3; i++ {
+		Append("run", "single", ledgerPath, cacheobs.Stats{Turns: 1, PromptTokens: 12, ReusedTokens: 0})
 	}
-	Append("serve", "test", ledgerPath, stats)
-
 	result, err := ScoreLedger(ledgerPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.LowMultiplierSessions != 1 {
-		t.Errorf("expected LowMultiplierSessions 1, got %d", result.LowMultiplierSessions)
+	if result.SingleTurnSessions != 3 || result.MultiTurnSessions != 1 {
+		t.Errorf("session split = multi %d / single %d, want 1/3", result.MultiTurnSessions, result.SingleTurnSessions)
+	}
+	// The single-turn prompt tokens (3*12) must be excluded from the gate ratio.
+	if result.GatePromptTokens != 1000 || result.RealizedReuseRatio != 0.8 {
+		t.Errorf("gate prompt %d ratio %.4f, want 1000 / 0.8 (single-turn runs excluded)", result.GatePromptTokens, result.RealizedReuseRatio)
+	}
+}
+
+// A thin multi-turn corpus is reported INSUFFICIENT (HasEnoughData false), so the gate
+// passes rather than fabricating a regression from too little data.
+func TestScoreLedgerThinCorpusIsInsufficient(t *testing.T) {
+	tmpDir := t.TempDir()
+	ledgerPath := filepath.Join(tmpDir, "test-ledger.jsonl")
+	Append("serve", "thin", ledgerPath, cacheobs.Stats{Turns: 3, PromptTokens: 300, ReusedTokens: 30})
+	result, err := ScoreLedger(ledgerPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.MultiTurnTurns >= MinGateTurns {
+		t.Fatalf("test fixture should be below MinGateTurns=%d, got %d", MinGateTurns, result.MultiTurnTurns)
+	}
+	if result.HasEnoughData() {
+		t.Errorf("a %d-turn corpus must report INSUFFICIENT, not enough to gate", result.MultiTurnTurns)
 	}
 }
 
@@ -184,7 +209,10 @@ func TestScoreLedgerEmpty(t *testing.T) {
 	if result.TotalSessions != 0 {
 		t.Errorf("expected TotalSessions 0, got %d", result.TotalSessions)
 	}
-	if result.OverallMultiplier != 0 {
-		t.Errorf("expected OverallMultiplier 0, got %f", result.OverallMultiplier)
+	if result.RealizedReuseRatio != 0 {
+		t.Errorf("expected RealizedReuseRatio 0, got %f", result.RealizedReuseRatio)
+	}
+	if result.HasEnoughData() {
+		t.Errorf("empty ledger must not be gateable")
 	}
 }

@@ -111,7 +111,7 @@ func parseNightrunFlags(name string, fs *flag.FlagSet, argv []string) (*nightrun
 		fs.IntVar(&f.max, "max", 0, "cap the number of tasks collected this session (0 = unbounded within --loop)")
 	}
 	if name == "score" {
-		fs.Float64Var(&f.floor, "floor", 2.0, "regression floor: exit non-zero if overall multiplier is below this value")
+		fs.Float64Var(&f.floor, "floor", 0.5, "regression floor: exit non-zero if the realized KV-prefix reuse ratio (over multi-turn sessions) is below this fraction in [0,1]")
 	}
 	if name == "post-cache-value" {
 		fs.BoolVar(&f.apply, "dry-run", false, "render the scoreboard post without sending it")
@@ -355,20 +355,26 @@ func nightrunScore(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		fmt.Fprintf(stdout, "cache-value ledger score (epic #1072, issue #1075):\n")
 		fmt.Fprintf(stdout, "  ledger: %s\n", ledgerPath)
-		fmt.Fprintf(stdout, "  sessions: %d\n", result.TotalSessions)
-		fmt.Fprintf(stdout, "  turns: %d\n", result.TotalTurns)
-		fmt.Fprintf(stdout, "  cache-hit tokens: %d\n", result.TotalCacheHitTokens)
-		fmt.Fprintf(stdout, "  generated tokens: %d\n", result.TotalGeneratedTokens)
-		if result.TotalGeneratedTokens > 0 {
-			fmt.Fprintf(stdout, "  overall multiplier: %.2fx\n", result.OverallMultiplier)
-			if result.LowMultiplierSessions > 0 {
-				fmt.Fprintf(stdout, "  low-multiplier sessions (<1.0x): %d\n", result.LowMultiplierSessions)
-			}
-		}
+		fmt.Fprintf(stdout, "  sessions: %d (multi-turn %d, single-turn %d)\n", result.TotalSessions, result.MultiTurnSessions, result.SingleTurnSessions)
+		fmt.Fprintf(stdout, "  turns: %d (frozen %d, partial %d, cold %d)\n", result.TotalTurns, result.FrozenTurns, result.PartialTurns, result.ColdTurns)
+		fmt.Fprintf(stdout, "  gate corpus (turns>=2): %d turns, reused %d / %d prompt tokens\n", result.MultiTurnTurns, result.GateReusedTokens, result.GatePromptTokens)
+		fmt.Fprintf(stdout, "  realized KV-prefix reuse ratio: %.3f (WITNESSED; %s)\n", result.RealizedReuseRatio, result.PublishableValueFamily)
 	}
-	if result.TotalGeneratedTokens > 0 && result.OverallMultiplier < f.floor {
-		fmt.Fprintf(stderr, "fak nightrun score: regression detected — multiplier %.2fx is below floor %.2fx\n", result.OverallMultiplier, f.floor)
+	// Honest gate: enforce the reuse-ratio floor only over a thick-enough multi-turn corpus
+	// (single-turn cold runs have no reuse opportunity and never count). A thin corpus is
+	// reported INSUFFICIENT and passes — it is not evidence of a regression.
+	if !result.HasEnoughData() {
+		if !f.asJSON {
+			fmt.Fprintf(stdout, "  verdict: INSUFFICIENT — only %d multi-turn turns (need %d); not gating\n", result.MultiTurnTurns, cachevalueledger.MinGateTurns)
+		}
+		return 0
+	}
+	if result.RealizedReuseRatio < f.floor {
+		fmt.Fprintf(stderr, "fak nightrun score: regression detected — realized reuse ratio %.3f is below floor %.3f\n", result.RealizedReuseRatio, f.floor)
 		return 1
+	}
+	if !f.asJSON {
+		fmt.Fprintf(stdout, "  verdict: OK — reuse ratio %.3f >= floor %.3f\n", result.RealizedReuseRatio, f.floor)
 	}
 	return 0
 }
@@ -385,22 +391,23 @@ func nightrunPostCacheValue(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak nightrun post-cache-value: %v\n", err)
 		return 1
 	}
-	if result.TotalGeneratedTokens == 0 {
-		fmt.Fprintln(stdout, "no cache-value data yet — skipping scoreboard post")
+	if !result.HasEnoughData() {
+		fmt.Fprintf(stdout, "insufficient multi-turn cache-value data yet (%d/%d turns) — skipping scoreboard post\n", result.MultiTurnTurns, cachevalueledger.MinGateTurns)
 		return 0
 	}
 
-	multiplier := result.OverallMultiplier
-	value := fmt.Sprintf("%.2fx", multiplier)
+	// Post the WITNESSED realized reuse ratio, never the #1066-forbidden vs-naive multiple.
+	ratio := result.RealizedReuseRatio
+	value := fmt.Sprintf("%.1f%%", 100*ratio)
 
 	grade := "A"
 	verdict := "OK"
-	if multiplier < 2.0 {
-		grade = "F"
-		verdict = "ACTION"
-	} else if multiplier < 3.0 {
+	switch {
+	case ratio < 0.5:
+		grade, verdict = "F", "ACTION"
+	case ratio < 0.7:
 		grade = "C"
-	} else if multiplier < 4.0 {
+	case ratio < 0.9:
 		grade = "B"
 	}
 
@@ -412,12 +419,12 @@ func nightrunPostCacheValue(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	up := scoreboard.Update{
-		Title:   "cache-value-rolling-multiplier",
+		Title:   "kv-prefix-realized-reuse",
 		Score:   value,
 		Grade:   grade,
 		Verdict: verdict,
-		Detail: fmt.Sprintf("%d sessions, %d turns, %d/%d cache-hit/generated tokens",
-			result.TotalSessions, result.TotalTurns, result.TotalCacheHitTokens, result.TotalGeneratedTokens),
+		Detail: fmt.Sprintf("realized reuse %.1f%% over %d multi-turn turns (%d sessions); %s",
+			100*ratio, result.MultiTurnTurns, result.MultiTurnSessions, result.PublishableValueFamily),
 		Source: source,
 	}
 
