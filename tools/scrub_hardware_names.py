@@ -31,6 +31,9 @@ Modes
           name. This is the CI/boundary-lint enforcement.
   --apply:  rewrite the files in place.
   --dry-run: print a unified diff of what --apply would change; touch nothing.
+  --audit-message MSGFILE: the COMMIT-MSG gate. Exit 1 if the commit message carries a
+          private hardware tell (a node label in the SUBJECT/BODY), so it is blocked before
+          riding into immutable history. Escape: FLEET_ALLOW_HW=1; mode: FLEET_HW_GUARD.
 
 File set: the doc args given on the command line, else the default doc set
 (git-tracked *.md minus the generated artifacts, whose SOURCES are scrubbed instead).
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import os
 import re
 import subprocess
 import sys
@@ -59,10 +63,48 @@ GENERATED_DIR_PREFIXES = (
     "docs/industry-scorecard/",  # generated from tools/industry_scorecard.data/*.json
 )
 
+# ONE declarative list of the bare private-hardware TOKENS — the single source of truth
+# consumed by THREE surfaces: the doc-rewrite (PROSE_RULES tail, below), the doc-lint and
+# the commit-message gate (RESIDUAL_TELLS / raw_hardware_hits, below). Adding a new private
+# term (a host like da33, a SKU like H200) is ONE tuple here, not an edit scattered across
+# the rewrite + the lint + the gate. Each entry is:
+#   (pattern, replacement, competitor_guarded, is_tell)
+#     pattern            — a word-bounded regex (so it never bites an identifier like
+#                          cmd/dgxbridge or FAK_DGX_REQ_); may carry an inline (?i) flag.
+#     replacement        — the generic public wording the rewrite substitutes.
+#     competitor_guarded — True ⇒ skip the match on a line citing a competitor / third party
+#                          (a published "1xA100" benchmark is a fact, not a leak). See
+#                          COMPETITOR_MARKERS.
+#     is_tell            — True ⇒ this token is a HARD leak signal the --check lint and the
+#                          commit-message gate refuse. A competitor-guarded token (bare A100)
+#                          is NOT a hard tell (a citation legitimately keeps it), so it
+#                          rewrites in prose but does not block.
+HARDWARE_TERMS: list[tuple[str, str, bool, bool]] = [
+    # bare uppercase DGX (word-bounded; never matches `dgx`/`FAK_DGX_REQ_`).
+    (r"\bDGX\b", "GPU server", False, True),
+    # SXM4 — only ever the lab SKU; a hard tell. (Standalone rewrite is conservative; it
+    # normally appears inside a phrase the phrase-rules already consumed.)
+    (r"\bSXM4\b", "GPU", False, True),
+    # digit-suffixed dgxN node label (dgx3/dgx2/dgx1 AND uppercase DGX3/DGX2) — the ONE
+    # CASE-INSENSITIVE term. The `[0-9]+` requirement is itself the identifier guard
+    # (FAK_DGX_REQ_ / cmd/dgxbridge have no digit after dgx); two negative lookaheads keep
+    # the channel names (dgx3-control), artifact stems (dgx3-a100-*), schema ids
+    # (dgx3-node-state), and the dgx1.example.lab FQDN intact while still scrubbing a
+    # sentence-final "dgx1." (the char after the dot is space/EOL, not [A-Za-z0-9]).
+    (r"(?i)\bdgx[0-9]+(?![-\w])(?!\.[A-Za-z0-9])", "GPU server", False, True),
+    # bare A100 — OVERLOADED: fak's box in fak's own runs, but a public fact when citing a
+    # COMPETITOR's published hardware (Sarathi-Serve on 1xA100). competitor_guarded so the
+    # rewrite skips a citation line; is_tell=False so it never BLOCKS a commit (a citation
+    # legitimately keeps it). The guard is enforced via COMPETITOR_MARKERS.
+    (r"\bA100\b", "datacenter GPU", True, False),
+]
+
 # UNCONDITIONAL rules: "DGX" and "SXM4" are ONLY ever the operator's lab box, and the
 # multi-GPU "A100" PHRASES below ("A100 DGX", "8×A100-SXM4-40GB", "lab A100") only ever
 # describe fak's box, so they are always safe to scrub. Phrases first (most specific) so
-# the bare-token rules cannot re-rewrite a fragment a phrase already consumed.
+# the bare-token rules cannot re-rewrite a fragment a phrase already consumed. The bare
+# unguarded token rules at the TAIL are DERIVED from HARDWARE_TERMS (see below the list)
+# so the rewrite and the lint cannot drift.
 PROSE_RULES: list[tuple[str, str]] = [
     # --- multi-GPU server phrasings (fak's box) -------------------------------------
     # The SKU size suffix is matched generically ([0-9]+GB), not pinned to -40GB, so a
@@ -97,35 +139,23 @@ PROSE_RULES: list[tuple[str, str]] = [
     (r"\blab DGX\b", "lab GPU server"),
     (r"\bthe DGX\b", "the GPU server"),
     (r"\ba DGX\b", "a GPU server"),
-    # --- bare uppercase DGX (word-bounded; never matches `dgx`/`FAK_DGX_REQ_`) ------
-    (r"\bDGX\b", "GPU server"),
-    # --- digit-suffixed dgxN machine label (dgx3/dgx2/dgx1, AND uppercase DGX3/DGX2) —
-    # the ONE intentional CASE-INSENSITIVE prose rule. Unlike bare DGX (uppercase-only,
-    # because lowercase `dgx` is an identifier), the dgxN node labels appear in prose in
-    # BOTH cases ("ran on dgx3", "serve GLM-5.2 on DGX3", "DGX3's host-CPU tier"), so case
-    # cannot separate prose from code here — the lab uses the same label either way. The
-    # `[0-9]+` requirement is itself the identifier guard (FAK_DGX_REQ_ has no digit after
-    # DGX; cmd/dgxbridge has no digit), and two negative lookaheads re-establish the rest
-    # of the prose/identifier boundary for the digit-suffixed form:
-    #   (?![-\w])         — refuse a hyphen/word-char continuation, so the raw-prose
-    #                       channel names (dgx3-control), the dgx3-a100-* artifact stem,
-    #                       the dgx3-node-state schema stem, and dgx3_glm_* survive even
-    #                       when the `.sh`/`.json`/`.md` path mask does not fire.
-    #   (?!\.[A-Za-z0-9]) — refuse a dot that STARTS another id segment, so the FQDN
-    #                       dgx1.example.lab and the .v1/.sh suffixes survive — but NOT a
-    #                       sentence-final period: "ran on dgx1." still scrubs, because the
-    #                       char after the dot is a space/EOL/`)`, not [A-Za-z0-9].
-    # No competitor guard (unlike bare A100): dgxN is only ever fak's lab box — no third
-    # party cites "dgx3" — so the asymmetry is intentional, not an oversight.
-    (r"(?i)\bdgx[0-9]+(?![-\w])(?!\.[A-Za-z0-9])", "GPU server"),
+    # --- bare unguarded tokens (DGX, SXM4, dgxN) appended from HARDWARE_TERMS below ---
+    # (extended right after the list is closed, so the source of truth for these tells is
+    # the single HARDWARE_TERMS list, not a second copy here).
 ]
+# Append the bare UNGUARDED token rules (the hard tells) to the PROSE_RULES tail, in
+# HARDWARE_TERMS order, so "phrases first, bare tokens last" holds and the rewrite tail
+# stays in lockstep with the lint/gate tells (both derive from HARDWARE_TERMS).
+PROSE_RULES += [(pat, repl) for (pat, repl, guarded, _tell) in HARDWARE_TERMS if not guarded]
 
 # GUARDED rule: bare "A100" is OVERLOADED — it is fak's private box in fak's own runs
 # ("(A100; cf. ...)", "on the A100"), but it is ALSO a public fact when citing a
 # COMPETITOR's published benchmark hardware (Sarathi-Serve on 1xA100, "needs 8×80 GB
 # H100/A100"). Scrubbing the latter would falsify a citation, so the bare-A100 rule is
 # SKIPPED on any line carrying a competitor / third-party / generic-hardware marker.
-A100_BARE = (r"\bA100\b", "datacenter GPU")
+# DERIVED: the single competitor_guarded entry in HARDWARE_TERMS (consumed by
+# _rewrite_prose's COMPETITOR_MARKERS branch). A future guarded SKU is added there, once.
+A100_BARE = next((pat, repl) for (pat, repl, guarded, _t) in HARDWARE_TERMS if guarded)
 
 # CLEANUP: a multi-GPU phrase followed by a bare DGX ("8× A100-SXM4-40GB DGX",
 # "8xA100 DGX") rewrites in two steps -- the phrase consumes the A100 part, then the
@@ -154,11 +184,11 @@ COMPETITOR_MARKERS = re.compile(
 )
 
 # --check scans prose for these residual tells. Bare A100 is NOT a hard tell (competitor
-# citations legitimately keep it); only DGX/SXM4 are. The lowercase dgxN tell carries the
-# SAME pattern + lookaheads as the PROSE_RULES rewrite above, so the lint and the rewrite
-# share one source of truth — a tell that flags a token the rule won't fix (a raw-prose
-# dgx3-control / dgx1.example.lab / dgx3-node-state.v1) is impossible by construction.
-RESIDUAL_TELLS = [r"\bDGX\b", r"\bSXM4\b", r"(?i)\bdgx[0-9]+(?![-\w])(?!\.[A-Za-z0-9])"]
+# citations legitimately keep it; is_tell=False); only DGX/SXM4/dgxN are. DERIVED from the
+# single HARDWARE_TERMS list, so the lint, the commit-message gate (raw_hardware_hits), and
+# the rewrite (PROSE_RULES tail) all share ONE source of truth — a tell that flags a token
+# the rewrite won't fix is impossible by construction.
+RESIDUAL_TELLS = [pat for (pat, _repl, _guarded, tell) in HARDWARE_TERMS if tell]
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # Things a prose rule must NEVER rewrite, masked in this order before the rules run:
@@ -255,6 +285,35 @@ def residual_hits(content: str) -> list[tuple[int, str]]:
     return hits
 
 
+# Pre-compiled (pattern, competitor_guarded) for the hard tells — the commit-message /
+# raw-text gate detector. Built once from HARDWARE_TERMS so the gate shares the doc-lint's
+# single source of truth.
+_TELL_RES = [(re.compile(pat), guarded) for (pat, _r, guarded, tell) in HARDWARE_TERMS if tell]
+
+
+def raw_hardware_hits(content: str) -> list[tuple[int, str]]:
+    """Lines carrying a hard hardware tell, scanned as RAW TEXT — the gate oracle.
+
+    The sibling of residual_hits for surfaces with NO markdown contract (a commit MESSAGE,
+    or any plain text): it does NOT skip fenced blocks and does NOT mask inline `code`
+    spans, so a label hidden in a backtick span (``datacenter server (`dgx3`)``) or a
+    fence-style comment (``# ON DGX3``) is still caught — exactly the forms residual_hits
+    deliberately exempts as identifiers in docs. A competitor_guarded tell (bare A100) is
+    skipped on a line carrying a COMPETITOR_MARKERS match, so a cited "1xA100" benchmark is
+    not flagged. Returns [(1-based line number, line)].
+    """
+    hits: list[tuple[int, str]] = []
+    for n, line in enumerate(content.splitlines(), 1):
+        competitor = COMPETITOR_MARKERS.search(line) is not None
+        for rx, guarded in _TELL_RES:
+            if guarded and competitor:
+                continue
+            if rx.search(line):
+                hits.append((n, line.rstrip()))
+                break
+    return hits
+
+
 def default_doc_set() -> list[Path]:
     tracked = subprocess.run(
         ["git", "ls-files", "*.md"], cwd=REPO, capture_output=True, text=True, check=True
@@ -270,6 +329,53 @@ def default_doc_set() -> list[Path]:
     return files
 
 
+def audit_message(msg_path: str) -> int:
+    """Scan a COMMIT MESSAGE file for a hardware tell — the commit-msg gate.
+
+    The forward fix for the leak class where a private node label rides into immutable
+    history via the commit SUBJECT/BODY (e.g. "docs: add the dgx3 decode") because the
+    secret-needle commit-msg gate never checked hardware names. Mirrors
+    scrub_public_copy.audit_message: it replicates git's own message processing — drop
+    leading-`#` comment lines, stop at the scissors line git appends under `-v` — then runs
+    raw_hardware_hits (RAW text, so a backtick/fence label is caught too) on the survivor.
+
+    Mode env FLEET_HW_GUARD (block default; "off"/"warn" downgrade); escape FLEET_ALLOW_HW=1
+    (a commit legitimately discussing the scrubber, or a competitor citation). Exit 1 on a
+    tell, 0 if clean, 2 if the file is unreadable (the hook falls open on 2).
+    """
+    mode = os.environ.get("FLEET_HW_GUARD", "block")
+    if mode == "off" or os.environ.get("FLEET_ALLOW_HW") == "1":
+        print("hardware-tell (message): skipped (FLEET_HW_GUARD=off / FLEET_ALLOW_HW=1).")
+        return 0
+    try:
+        with open(msg_path, encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        print(f"hardware-tell (warn): could not read commit message {msg_path}: {exc}", file=sys.stderr)
+        return 2
+    # Keep only what git keeps in the final message: drop comment lines and everything from
+    # the scissors marker down (the `-v` diff preview the content gate, not this one, owns).
+    kept: list[str] = []
+    for line in raw.splitlines():
+        if line.startswith("# ------------------------ >8"):
+            break
+        if line.startswith("#"):
+            continue
+        kept.append(line)
+    hits = raw_hardware_hits("\n".join(kept))
+    if not hits:
+        print("hardware-tell (message): clean.")
+        return 0
+    print(f"HARDWARE_TELL: the commit MESSAGE carries {len(hits)} private hardware name(s):", file=sys.stderr)
+    for n, line in hits:
+        print(f"  message:{n}: {line.strip()[:80]}", file=sys.stderr)
+    print("  fix: describe the box generically (GPU server / datacenter GPU), per "
+          "PUBLIC-SCRUB-POLICY.md.", file=sys.stderr)
+    print("  override once: FLEET_ALLOW_HW=1 <git cmd>  (a competitor citation / a commit "
+          "about the scrubber).", file=sys.stderr)
+    return 0 if mode == "warn" else 1
+
+
 def main() -> int:
     try:  # Windows consoles default to cp1252; doc prose carries ×, →, ✅, etc.
         sys.stdout.reconfigure(encoding="utf-8")
@@ -281,8 +387,15 @@ def main() -> int:
     mode.add_argument("--check", action="store_true", help="lint; exit 1 on residual prose hardware names")
     mode.add_argument("--apply", action="store_true", help="rewrite files in place")
     mode.add_argument("--dry-run", action="store_true", help="print the diff; change nothing (default)")
+    mode.add_argument("--audit-message", metavar="MSGFILE", default=None,
+                      help="commit-msg gate: scan a commit message file for a hardware tell "
+                           "(so a private node label in the SUBJECT/BODY is blocked before it "
+                           "rides into history)")
     ap.add_argument("files", nargs="*", help="files to process (default: tracked *.md minus generated)")
     args = ap.parse_args()
+
+    if args.audit_message:
+        return audit_message(args.audit_message)
 
     files = [Path(f) for f in args.files] if args.files else default_doc_set()
     changed = 0

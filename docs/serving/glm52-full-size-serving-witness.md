@@ -172,7 +172,7 @@ checkpoint.
 plus a multi-hour ~466 GB checkpoint download. **No measured pass may be fabricated.**
 
 **The target node is now identified and validated (2026-06-25):** an internal 8-GPU
-datacenter server (`dgx3`) — 8× 80 GB sm_80 GPUs (640 GB aggregate VRAM, below the sm_90
+datacenter server — 8× 80 GB sm_80 GPUs (640 GB aggregate VRAM, below the sm_90
 DSA floor), ~2 TB host RAM, 256 cores, `/projects` 4.1 TB free,
 go1.26.4 + cuda-12.8 + the HF CLI staged. The preflight planner run against that exact shape
 returns `BLOCKED_ARCH` for stock SGLang/vLLM (sm_80 is below the sm_90 DSA floor) — so the
@@ -182,7 +182,7 @@ datacenter GPU **llama.cpp MLA fork is the path**, captured in the live node sna
 **Smallest next step — run the self-staging datacenter GPU serve runner on GPU server, then the witness:**
 
 ```bash
-# ON DGX3 (detached so a disconnect does not orphan a ~466 GB load):
+# ON THE GPU SERVER (detached so a disconnect does not orphan a ~466 GB load):
 systemd-run --user --unit=glm52stage --collect bash tools/glm52_stage_serve_dgx3.sh
 # poll progress out-of-band:  cat /projects/glm52-q4/PHASE
 # on GLM52_SERVE_READY, capture the #413 witness through fak:

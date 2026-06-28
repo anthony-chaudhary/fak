@@ -1,13 +1,20 @@
 #!/bin/sh
-# fleet commit-message gates  --  DOS reasons: PUBLIC_LEAK, COMMIT_MSG
+# fleet commit-message gates  --  DOS reasons: PUBLIC_LEAK, HARDWARE_TELL, COMMIT_MSG
 #
-# Two gates over the commit MESSAGE itself, at the same boundary git checks it:
+# Three gates over the commit MESSAGE itself, at the same boundary git checks it:
 #
 #   PUBLIC_LEAK (block) -- a leaked hostname/credential/needle in the SUBJECT or
 #     BODY sails past the pre-commit content gate (which scans staged FILES, not
 #     the message). This closes that gap with the SAME AUDIT_NEEDLES list
 #     (tools/scrub_public_copy.py --audit-message), so a secret cannot ride into
 #     history via the message. Mode FLEET_SCRUB_GUARD; escape FLEET_ALLOW_LEAK=1.
+#
+#   HARDWARE_TELL (block) -- a private lab node label (DGX/dgx3/A100/SXM4) in the
+#     SUBJECT or BODY rides into immutable history the same way (the secret-needle
+#     gate above never checked hardware names). Closes that gap with the SAME tells
+#     the doc scrubber uses (tools/scrub_hardware_names.py --audit-message), so a
+#     "docs: add the dgx3 decode" subject is blocked, not committed. A competitor
+#     citation (1xA100) is NOT flagged. Mode FLEET_HW_GUARD; escape FLEET_ALLOW_HW=1.
 #
 #   COMMIT_MSG (warn) -- nudges the subject toward `type(scope): <verb> <what>`
 #     so the DOS commit-audit witness can grade the commit (a noun-led subject
@@ -55,6 +62,19 @@ if [ "$leak_mode" != "off" ] && [ "${FLEET_ALLOW_LEAK:-0}" != "1" ] && [ -f "$sc
 		echo "$lout" >&2
 	fi
 	# lst 0 (clean) or 2 (could-not-read) -> fall through; never wedge on a broken check.
+fi
+
+# ---- HARDWARE_TELL: scan the message for a private lab node name (block by default) ----
+# The hardware scrubber's --audit-message owns the FLEET_HW_GUARD / FLEET_ALLOW_HW logic
+# (off/warn/escape), so the wrapper just runs it and blocks on exit 1. Same fail-open contract.
+hw="$root/tools/scrub_hardware_names.py"
+if [ -f "$hw" ]; then
+	hout="$("$PY_A" $PY_B "$hw" --audit-message "$msgfile" 2>&1)"; hst=$?
+	if [ "$hst" -eq 1 ]; then
+		echo "$hout" >&2
+		exit 1
+	fi
+	# hst 0 (clean / warned / escaped) or 2 (could-not-read) -> fall through (fail open).
 fi
 
 # ---- COMMIT_MSG: subject-shape advisory (warn by default) ----

@@ -171,6 +171,8 @@ func runHooksCommitMsg(stdout, stderr io.Writer, argv []string) int {
 	r := resolveRoot(*root)
 
 	// PUBLIC_LEAK over the message (block by default) — same needle list as pre-commit.
+	// This is the fast PRE-block: a secret in the message is caught here without spawning
+	// Python. A hit returns 1 (the shell short-circuits and blocks).
 	leakMode, leakEscaped := gateMode("FLEET_SCRUB_GUARD", "FLEET_ALLOW_LEAK")
 	if leakMode != "off" && !leakEscaped {
 		if leaks := hooks.ScanMessageNeedles(msg, r); len(leaks) > 0 {
@@ -185,22 +187,15 @@ func runHooksCommitMsg(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	// COMMIT_MSG subject-shape (warn by default).
-	mode, escaped := gateMode("FLEET_MSG_GUARD", "FLEET_ALLOW_MSG")
-	// NOTE: the commit-msg hook defaults this gate to WARN, not BLOCK.
-	if strings.TrimSpace(os.Getenv("FLEET_MSG_GUARD")) == "" {
-		mode = "warn"
-	}
-	if mode != "off" && !escaped {
-		if ok, why := hooks.CommitMsgVerdict(msg); !ok {
-			fmt.Fprintf(stderr, "COMMIT_MSG: subject not witness-gradeable — %s\n", why)
-			if mode == "block" {
-				return 1
-			}
-			fmt.Fprintln(stderr, "  (advisory; FLEET_MSG_GUARD=block hard-enforces)")
-		}
-	}
-	return 0
+	// FALL THROUGH to the Python commit-msg gates (exit 2). The Go path owns ONLY the fast
+	// PUBLIC_LEAK pre-block above; the HARDWARE_TELL gate (a private node label in the
+	// subject/body) and the COMMIT_MSG subject-shape advisory live in tools/*.py, which the
+	// shell hook runs when this returns 2. Returning 0 here would make the shell exit before
+	// those gates ever run — which is exactly how a `dgx3` rode into history. There is no Go
+	// port of the hardware tells (the dgxN regex needs lookahead RE2 lacks), so 2 = "Go did
+	// its fast check; let Python finish." (Python COMMIT_MSG owns the subject-shape advisory,
+	// so it is not duplicated here.)
+	return 2
 }
 
 func formatFinding(f hooks.Finding) string {

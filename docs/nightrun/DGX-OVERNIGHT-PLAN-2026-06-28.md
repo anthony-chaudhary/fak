@@ -160,5 +160,5 @@ The hourly overnight tick keeps the loop alive: it re-attempts da33 only when
 when the serve is idle (a 900 s timeout, never overlapping witnesses — the serve
 degrades under contention), records `skipped`/`failed` whenever a box can't safely
 produce a datum, and — now that the accessible dimensions are saturated — favours a
-genuinely *new* condition (a freed dgx2, a changed serve config) over re-running a
+genuinely *new* condition (a freed GPU server, a changed serve config) over re-running a
 settled measurement.

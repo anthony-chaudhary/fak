@@ -10,6 +10,10 @@ pin that prose/identifier boundary; the pure transforms need no git/files.
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -238,6 +242,103 @@ class CleanupTest(unittest.TestCase):
         out = m.transform("8×A100 DGX cluster\n")
         self.assertNotIn("GPU server GPU server", out)
         self.assertNotIn("datacenter server GPU server", out)
+
+
+class GenericTermListTest(unittest.TestCase):
+    """The single-source-of-truth refactor: PROSE_RULES' bare-token tail, A100_BARE, and
+    RESIDUAL_TELLS are all DERIVED from the one HARDWARE_TERMS list, so the rewrite, the
+    doc-lint, and the commit-message gate cannot drift. Adding a term = one tuple."""
+
+    def test_residual_tells_derived_from_terms(self):
+        self.assertEqual(
+            set(m.RESIDUAL_TELLS),
+            {pat for (pat, _r, _g, tell) in m.HARDWARE_TERMS if tell},
+        )
+
+    def test_a100_bare_is_the_guarded_term(self):
+        guarded = [(pat, repl) for (pat, repl, g, _t) in m.HARDWARE_TERMS if g]
+        self.assertIn(m.A100_BARE, guarded)
+
+    def test_unguarded_terms_are_prose_rules(self):
+        # every unguarded HARDWARE_TERMS entry appears as a (pattern, replacement) rewrite rule
+        for pat, repl, guarded, _tell in m.HARDWARE_TERMS:
+            if not guarded:
+                self.assertIn((pat, repl), m.PROSE_RULES, f"{pat} missing from PROSE_RULES")
+
+
+class RawHardwareHitsTest(unittest.TestCase):
+    """raw_hardware_hits — the commit-message / raw-text gate oracle. Unlike residual_hits it
+    scans RAW text (no fence-skip, no inline-code mask), so a label hidden in a backtick span
+    or a fence-style comment is caught; a competitor citation and a true identifier are not."""
+
+    def test_bare_dgxn_flagged(self):
+        self.assertEqual(len(m.raw_hardware_hits("docs: add the dgx3 decode")), 1)
+
+    def test_code_span_label_flagged(self):
+        # the leak residual_hits MISSES (it masks the span) but a commit message must catch.
+        self.assertEqual(len(m.raw_hardware_hits("datacenter server (`dgx3`) is the box")), 1)
+        self.assertEqual(m.residual_hits("datacenter server (`dgx3`) is the box"), [])
+
+    def test_fence_comment_flagged(self):
+        # `# ON DGX3` inside a fence is exempt for docs (residual_hits) but caught raw.
+        self.assertEqual(len(m.raw_hardware_hits("# ON DGX3 detached")), 1)
+
+    def test_dgx_a100_phrase_flagged(self):
+        self.assertEqual(len(m.raw_hardware_hits("perf: DGX A100 serve 466 tok/s")), 1)
+
+    def test_competitor_citation_not_flagged(self):
+        # bare A100 is is_tell=False AND the line carries a competitor marker -> clean.
+        self.assertEqual(m.raw_hardware_hits("bench fak vs vLLM on 1xA100"), [])
+
+    def test_identifier_not_flagged(self):
+        self.assertEqual(m.raw_hardware_hits("the FAK_DGX_REQ_ marker"), [])
+        self.assertEqual(m.raw_hardware_hits("see cmd/dgxbridge for the bridge"), [])
+
+    def test_clean_subject(self):
+        self.assertEqual(m.raw_hardware_hits("refactor(model): tidy forward pass"), [])
+
+
+class AuditMessageCLITest(unittest.TestCase):
+    """The --audit-message commit-msg gate end-to-end: a leak subject exits 1, a clean one
+    exits 0, FLEET_ALLOW_HW=1 escapes, and a leak below the scissors / in a `#` comment line
+    (which git strips) is NOT counted."""
+
+    def _run(self, text, env_extra=None):
+        env = dict(os.environ)
+        if env_extra:
+            env.update(env_extra)
+        with tempfile.TemporaryDirectory() as d:
+            msg = os.path.join(d, "MSG")
+            with open(msg, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            r = subprocess.run(
+                [sys.executable, str(SCRIPT), "--audit-message", msg],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+            )
+        return r.returncode, r.stdout + r.stderr
+
+    def test_leak_subject_blocks(self):
+        rc, out = self._run("docs(nightrun): add the dgx3 decode (fak nightrun)\n")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("HARDWARE_TELL", out)
+
+    def test_clean_subject_passes(self):
+        rc, _ = self._run("refactor(scrub): centralize hardware tells (fak scrub)\n")
+        self.assertEqual(rc, 0)
+
+    def test_escape_env_passes(self):
+        rc, _ = self._run("docs: the dgx3 box\n", {"FLEET_ALLOW_HW": "1"})
+        self.assertEqual(rc, 0)
+
+    def test_comment_line_stripped(self):
+        # a `#` comment line git strips from the final message must NOT count.
+        rc, _ = self._run("fix(x): clean subject (fak x)\n# note: ran on dgx3\n")
+        self.assertEqual(rc, 0)
+
+    def test_scissors_block_ignored(self):
+        scissors = "# ------------------------ >8 ------------------------"
+        rc, _ = self._run("fix(x): clean (fak x)\n%s\ndiff touched dgx3\n" % scissors)
+        self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":
