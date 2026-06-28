@@ -183,8 +183,8 @@ never resident; a pin cannot launder poison.
 
 ## 6. Honest fences (what is NOT done)
 
-- **Wired to a real store, the KV cache, AND the gateway's live loop (buffered/non-passthrough
-  path, off by default); the flagship Anthropic `req.Raw` passthrough is the remaining residual.**
+- **Wired to a real store, the KV cache, AND the gateway's live loop — both the buffered and the
+  flagship Anthropic `req.Raw` passthrough path — now DEFAULT-ON at a conservative 8000-token budget.**
   The real-store adapter shipped (`recall.CtxStore`, the `recall` core image as a
   `ctxplan.Store`, #545); the planned elision now drives a bit-exact KV eviction
   (`kvmmu.ApplyPlan` — an O(1) view becomes an O(1) KV residency, #550); the empirical
@@ -198,21 +198,24 @@ never resident; a pin cannot launder poison.
   Θ(N²). The index PERSISTS alongside the recall core image (`ctxplan.IndexImage`,
   `recall.PersistIndex`/`LoadIndex`, a sibling `index.json` next to `manifest.json`/`cas.json`,
   #558 half a), so a resumed session re-attaches its index instead of rebuilding it.
-  **The gateway live-loop wiring then SHIPPED (#555, commit `7f3ae40`):** `fak serve`/`fak guard`
-  take `--ctx-view-budget` (default `0` = OFF, byte-for-byte unchanged); when set, the per-turn
-  buffered path (`gateway.Server.complete` → `maybePlanMessages`, keyed per-session) re-materializes
-  the forwarded history as an O(1) planned view in place of appending the whole transcript. It is
-  fail-safe (a planner error or empty render falls back to the full lossless history) and witnessed
-  end-to-end through the real HTTP handler (`internal/gateway/gateway_ctxview_http_test.go`: OFF
-  forwards the full history, ON forwards the bounded planned view, both read off the upstream body).
-  The residual is now narrow and specific: the planner reaches the in-kernel/non-passthrough
-  re-marshal wires, but NOT the flagship `fak guard -- claude` **Anthropic passthrough**, which
-  forwards `req.Raw` byte-for-byte so its client cache-prefix survives — there the planned view is
-  computed and discarded. That wire's live context lever today is the cache-prefix-preserving
-  `--compact-history-budget` (default-on at ~48k) + `--elide-result-bytes`; the full ctxplan view
-  on the passthrough waits on the deferred **`req.Raw` cache-prefix-preserving transform** (the
-  still-open half of #555, now tracked as #927), since you cannot re-plan that body without
-  breaking the very cache prefix the passthrough exists to preserve.
+  **The gateway live-loop wiring SHIPPED (#555, commit `7f3ae40`) and is now DEFAULT-ON
+  (2026-06-28):** `fak serve`/`fak guard` default `--ctx-view-budget` to a conservative 8000
+  resident tokens (pass 0 to disable, byte-for-byte unchanged); the per-turn buffered path
+  (`gateway.Server.complete` → `maybePlanMessages`, keyed per-session) re-materializes the
+  forwarded history as an O(1) planned view in place of appending the whole transcript. It is
+  fail-open (a planner error or empty render falls back to the full lossless history — it only ever
+  SHORTENS, on doubt shortens nothing) and witnessed end-to-end through the real HTTP handler
+  (`internal/gateway/gateway_ctxview_http_test.go`: OFF forwards the full history, ON forwards the
+  bounded planned view, both read off the upstream body). The flip's witness is
+  [CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28](CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md).
+  The flagship `fak guard -- claude` **Anthropic passthrough** now ALSO plans: the deferred
+  `req.Raw` cache-prefix-preserving transform shipped (#927, `agent.CompactAnthropicHistoryToView`),
+  so when the budget elides older history the passthrough rewrites `req.Raw` IN PLACE with same-role
+  `[fak] ctxview-elided` stubs while keeping the `cache_control` prefix and every resident message
+  BYTE-IDENTICAL (witnessed by `TestCtxViewHTTPAnthropicPassthroughPlansView`), bailing to identity
+  on any ambiguity — it is no longer "computed and discarded." The cache-prefix-preserving
+  `--compact-history-budget` (default-on at ~48k) + `--elide-result-bytes` remain the complementary
+  levers on that wire.
 - **The forecast is authored from the trajectory, not a model.** `ctxplan.TrajectoryAuthor`
   (#556) now AUTHORS `Forecast.Intents` from the recent trajectory (recency-weighted
   content-token recurrence — recurrence dominates, recency breaks near-ties), the

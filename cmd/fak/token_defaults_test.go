@@ -9,10 +9,12 @@ package main
 // cmd/fak/guard.go) or the gateway Default* constant, so it pins the binary's actual
 // default, never a copy that could drift from it.
 //
-// The remaining off-by-default lever (ctxview) is pinned too — not to keep it off, but so it
-// stays wired to its literal 0 default, making a future flip-on one deliberate edit that this
-// test moves with, never a silent per-entrypoint drift. (Elision was flipped on by default once
-// adversarial verification + a synthetic dogfood + a real-corpus prevalence scan supported it.)
+// The ctxplan O(1) view (ctxview) was flipped ON by default once its GPU-free witness landed
+// (selfcheck + the on-the-wire gateway test keeping the Anthropic cache prefix byte-identical
+// with exact recall — docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md) and the fleet
+// dogfooded the realized reuse (75.1%, #1114); the lock below now pins its conservative 8000
+// default, the same way elision was flipped on once adversarial verification + a synthetic
+// dogfood + a real-corpus prevalence scan supported it.
 // The byte-faithful provider-cache passthrough is locked separately by
 // internal/gateway's TestAnthropicMessagesPassthroughStreamsLiveAndAdjudicates (upstream
 // body byte-identical to the inbound → the client's prompt-cache prefix survives).
@@ -88,13 +90,15 @@ func TestTokenDefault_ElideDefaultsOn(t *testing.T) {
 	}
 }
 
-// TestTokenDefault_CtxViewShipsDarkAtZero pins the ctxplan view lever OFF by default (0): it
-// rewrites in-flight turn history, so it stays opt-in until a watched-live witness (its bench
-// witness — 13.3x fewer resident, 100% exact recall — is tracked by the token-defaults scorecard).
-func TestTokenDefault_CtxViewShipsDarkAtZero(t *testing.T) {
+// TestTokenDefault_CtxViewDefaultsOn pins the ctxplan O(1) view lever ON by default at the
+// conservative 8000-resident-token budget. It rewrites in-flight turn history, so the flip is
+// gated on a watched-live witness (selfcheck + the on-the-wire gateway test keeping the Anthropic
+// cache prefix byte-identical with exact recall) — docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md.
+// The planner is fail-open (only ever shortens; falls open to the full history on any doubt).
+func TestTokenDefault_CtxViewDefaultsOn(t *testing.T) {
 	for _, f := range []string{"serve.go", "guard.go"} {
-		if !strings.Contains(readEntrypoint(t, f), `fs.Int("ctx-view-budget", 0`) {
-			t.Errorf("%s must default --ctx-view-budget to 0 (off; rewrites in-flight history, gated until a live witness)", f)
+		if !strings.Contains(readEntrypoint(t, f), `fs.Int("ctx-view-budget", 8000`) {
+			t.Errorf("%s must default --ctx-view-budget to 8000 (on; fail-open planner, witnessed)", f)
 		}
 	}
 }
@@ -123,13 +127,13 @@ func TestTokenDefaultsSnapshotFresh(t *testing.T) {
 
 // TestTokenDefaultsLeversDerivedFromSource guards the anti-gaming rule for THIS scorecard: each
 // lever's on/off must be DERIVED from the entrypoint source, never a hardcoded roster claim. It
-// asserts the elision flip is reflected (elideresult ON), the lone opt-in lever is off-and-gated
-// (ctxview), and the headline counters match (5 of 6 stacked), so the scorecard cannot report a
-// default that contradicts the binary.
+// asserts the elision and ctxview flips are reflected (both ON), ctxview is no longer gated, and
+// the headline counters match (all 6 stacked), so the scorecard cannot report a default that
+// contradicts the binary.
 func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
 	c := collectTokenDefaultsScorecard("../..")["corpus"].(map[string]any)
-	if got := c["stacked_on"].(int); got != 5 {
-		t.Errorf("stacked_on derived = %d, want 5 (5/6 safe savers on by default)", got)
+	if got := c["stacked_on"].(int); got != 6 {
+		t.Errorf("stacked_on derived = %d, want 6 (6/6 safe savers on by default)", got)
 	}
 	if got := c["levers_total"].(int); got != 6 {
 		t.Errorf("levers_total = %d, want 6", got)
@@ -143,10 +147,10 @@ func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
 	if !on["elideresult"] {
 		t.Errorf("elideresult must derive ON from source (the default-on flip), got OFF")
 	}
-	if on["ctxview"] {
-		t.Errorf("ctxview must derive OFF (opt-in, gated), got ON")
+	if !on["ctxview"] {
+		t.Errorf("ctxview must derive ON from source (the default-on flip at 8000), got OFF")
 	}
-	if !gated["ctxview"] {
-		t.Errorf("the off-by-default ctxview lever must carry a documented gate")
+	if gated["ctxview"] {
+		t.Errorf("ctxview must no longer be gated once it is on by default")
 	}
 }

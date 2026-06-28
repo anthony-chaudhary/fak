@@ -57,7 +57,7 @@ fused path) runs the model with an addressable, bit-exact KV cache. Its token-sa
 | Compact-history | bounded | sheds the un-cacheable middle past a 48k-token budget by splicing original bytes | `--compact-history-budget` |
 | Oversized-result elision | bounded | shrinks a scrolled-past `tool_result` to head+tail at 16 KB | `--elide-result-bytes` |
 | Structured-output passthrough | lossless | forwards `response_format` / `json_schema` / `logit_bias` to the ride engine | structural (#907) |
-| ctxplan O(1) view | optin | re-materializes history under a budget | `--ctx-view-budget` (off) |
+| ctxplan O(1) view | bounded | re-materializes history under a budget | `--ctx-view-budget` (default-on at 8000) |
 
 The rest of this page is the wider field. Where a method **could be a safe fak
 default and isn't yet**, it links to a tracking issue (see
