@@ -108,6 +108,15 @@ type Config struct {
 	// token ("sk-ant-oat…", agent.IsAnthropicOAuthToken) goes as Authorization:
 	// Bearer + the oauth beta; a plain API key goes as x-api-key.
 	APIKey string
+	// APIKeyFunc, when non-nil, supplies the upstream credential FRESH on every proxied
+	// request instead of the frozen APIKey. It is how `fak guard` keeps a long pinned
+	// subscription session alive: a Claude Pro/Max OAuth access token is short-lived and
+	// the client rotates it on disk roughly hourly, so a planner that pinned the boot-time
+	// token would start 401ing mid-session (even after a re-login, whose refreshed token
+	// the frozen string never re-reads). With APIKeyFunc set, the proxy re-resolves the
+	// token per request. Empty result falls back to APIKey. nil keeps the static-key path
+	// unchanged.
+	APIKeyFunc func() string
 	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
 	// configured APIKey and IGNORE the inbound client's credential — the subscription
 	// path, where fak holds the real OAuth token and the wrapped client only sends a
@@ -847,7 +856,12 @@ func proxyBaseURLs(cfg Config) ([]string, error) {
 
 func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner, error) {
 	if len(baseURLs) == 1 {
-		return agent.NewProviderHTTPPlanner(cfg.Provider, baseURLs[0], model, cfg.APIKey)
+		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, baseURLs[0], model, cfg.APIKey)
+		if err != nil {
+			return nil, err
+		}
+		p.APIKeyFunc = cfg.APIKeyFunc
+		return p, nil
 	}
 	replicas := make([]PlannerReplica, 0, len(baseURLs))
 	for i, base := range baseURLs {
@@ -855,6 +869,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		if err != nil {
 			return nil, err
 		}
+		p.APIKeyFunc = cfg.APIKeyFunc
 		replicas = append(replicas, PlannerReplica{
 			Name:    fmt.Sprintf("replica-%d", i+1),
 			Planner: p,
@@ -883,6 +898,21 @@ func (s *Server) AdjudicationSummary() AdjudicationSummary {
 		return AdjudicationSummary{ByReason: map[string]uint64{}}
 	}
 	return s.metrics.adjudicationSummary()
+}
+
+// KernelCounters returns a snapshot of the kernel's call-path tallies (engine
+// dispatches, vDSO hits, in-syscall repairs, fast-reject denies) — the raw counts a
+// tier-4 caller folds through internal/callavoid to render the avoided-call
+// amplification headline for the `fak guard` exit summary. The verdict roll-up
+// (allowed/denied/…) is AdjudicationSummary; this is the orthogonal call-path axis
+// (was the call avoided, and how much further did the agent get per real dispatch?),
+// read straight from the same kernel.Counters the fak_kernel_* metrics expose. Safe
+// on a nil Server (returns the zero Counters).
+func (s *Server) KernelCounters() kernel.Counters {
+	if s == nil {
+		return kernel.Counters{}
+	}
+	return s.k.Counters()
 }
 
 // SetModelLoadProfile records the boot-time weight-load breakdown the host captured

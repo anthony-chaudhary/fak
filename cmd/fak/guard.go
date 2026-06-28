@@ -24,11 +24,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/callavoid"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -272,6 +274,12 @@ func cmdGuard(argv []string) {
 		apiKey               string
 		pinUpstream          bool
 		oauthSource          string
+		// apiKeyFunc re-resolves the upstream credential per request when set. On the
+		// pinned Claude subscription path it re-reads the short-lived OAuth access token
+		// from disk, so a long guarded session (which outlives the ~1h token) always sends
+		// the live token the client has since rotated — never the frozen boot-time one that
+		// would 401 even after a fresh /login.
+		apiKeyFunc func() string
 	)
 	if localModel {
 		up, providerAutodetected = resolveGuardProvider(*provider, command[0])
@@ -284,6 +292,24 @@ func cmdGuard(argv []string) {
 		}
 		if us.ambientKeyOverridden && !*quiet {
 			fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")
+		}
+		// Pinned Claude subscription: the OAuth access token fak holds upstream is
+		// short-lived (the provider rotates it ~hourly, and Claude Code rewrites the
+		// refreshed value into the same credential file). Resolving it ONCE at startup
+		// pins the boot-time token for the whole session, so a session that outlives the
+		// token 401s — and re-logging in does not help, because the refreshed token lands
+		// in the file the frozen string never re-reads. So on this path we hand the gateway
+		// a credential FUNC that re-reads the live token per request. It falls back to the
+		// boot-time apiKey on a transient read miss (the planner's effectiveAPIKey contract).
+		if pinUpstream {
+			tokenEnv := *oauthTokenEnv
+			apiKeyFunc = func() string {
+				tok, _, err := resolveAnthropicOAuthToken(tokenEnv)
+				if err != nil {
+					return ""
+				}
+				return tok
+			}
 		}
 	}
 
@@ -396,6 +422,10 @@ func cmdGuard(argv []string) {
 		BaseURL:  resolvedBase,
 		Provider: up,
 		APIKey:   apiKey,
+		// Re-resolve the pinned subscription OAuth token per request so a long session
+		// never sends the stale boot-time bearer (the 401-after-relogin bug). nil in every
+		// non-pinned path leaves the static-APIKey behavior byte-for-byte unchanged.
+		APIKeyFunc: apiKeyFunc,
 		// LOCAL in-kernel model (--gguf): a loaded model + tokenizer with an EMPTY BaseURL
 		// makes the gateway serve BOTH /v1/messages (claude) and /v1/chat/completions (codex)
 		// from fak's own engine — no upstream call. nil/false in the proxy path, so the
@@ -1221,6 +1251,55 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 	return b.String()
 }
 
+// formatAmplification renders the avoided-call amplification headline for the guard
+// exit summary — the realized answer to "how much further did the agent get per unit
+// of real work?" It folds the session's kernel call-path counters (engine dispatches,
+// vDSO hits, in-syscall repairs, fast-reject denies) through internal/callavoid.Account,
+// the SAME pure economics the `fak callavoid account` CLI computes, so the line can
+// never disagree with that tool. This closes the callavoid leaf's "Next milestone (not
+// yet wired)": the tier-4 caller that reads a live guard session's kernel.Counters into
+// Account for the exit summary.
+//
+// It returns the empty string when there was no avoidance to report — a session whose
+// vDSO never hit and whose kernel repaired nothing has nothing to amplify (Execute-only
+// work is 1:1), so the common clean run stays quiet rather than printing a vacuous 1.0×.
+func formatAmplification(kc kernel.Counters) string {
+	// Map the live kernel counters onto the tier-1 callavoid mirror (a total, behaviour-
+	// free field copy — the field names mirror kernel.Counters on purpose) and fold.
+	rep := callavoid.Account(callavoid.TallyFromCounters(callavoid.Counters{
+		EngineCalls: int(kc.EngineCalls),
+		VDSOHits:    int(kc.VDSOHits),
+		Transforms:  int(kc.Transforms),
+		Denies:      int(kc.Denies),
+	}))
+	// Nothing was avoided (no memo hits, no in-syscall repairs): the agent paid the
+	// naive price for every call, so there is no amplification story to tell. Stay quiet.
+	if rep.MemoHits == 0 && rep.Repairs == 0 {
+		return ""
+	}
+	var b strings.Builder
+	// Lead with the realized amplification ratio and the turns it spared, then the
+	// breakdown of WHERE the avoidance came from (vDSO cache hits + in-syscall repairs).
+	// A memo hit always pays callavoid.ValidateFloor (never free), so a pure-cache window
+	// is capped at 1/ValidateFloor (=100×), not +Inf — Amplification is always finite on
+	// this path. The only +Inf case is zero executed work, which means zero memo hits and
+	// zero repairs, which the guard above has already returned the empty string for.
+	fmt.Fprintf(&b, "fak guard: avoided-call amplification — %.2f× (%s); spared ~%.0f naive round-trip(s) of %d proposed",
+		rep.Amplification, rep.Status, rep.AvoidedTurns, rep.RawTurns)
+	parts := make([]string, 0, 2)
+	if rep.MemoHits > 0 {
+		parts = append(parts, fmt.Sprintf("%d served from the vDSO cache", rep.MemoHits))
+	}
+	if rep.Repairs > 0 {
+		parts = append(parts, fmt.Sprintf("%d repaired in-syscall", rep.Repairs))
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(&b, " — %s", strings.Join(parts, ", "))
+	}
+	b.WriteByte('\n')
+	return b.String()
+}
+
 // guardUpstream is the resolved upstream wire + credential posture for `fak guard`: which
 // provider the gateway proxies to, its base URL, the API key (if any), and — for Claude —
 // whether to hold a Pro/Max subscription OAuth token upstream (pinUpstream) and where it
@@ -1621,6 +1700,7 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 	if !quiet {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprint(os.Stderr, formatAuditSummary(srv.AdjudicationSummary()))
+		fmt.Fprint(os.Stderr, formatAmplification(srv.KernelCounters()))
 		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
 	}
 	// Flush + fsync the durable trail before exit so a row returned to the agent is

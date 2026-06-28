@@ -63,9 +63,11 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		return err
 	}
 	// Transparent hop: authenticate with the inbound client's own credential when it
-	// supplied one (passthrough), else the planner's configured key — the same scheme
-	// the buffered path resolves in prepareUpstream.
-	key := p.APIKey
+	// supplied one (passthrough), else the planner's EFFECTIVE key — the same scheme the
+	// buffered path resolves in prepareUpstream. effectiveAPIKey re-resolves a rotating
+	// subscription token per request, so a long streamed session never sends a stale
+	// boot-time bearer (the 401-after-relogin bug).
+	key := p.effectiveAPIKey()
 	if apiKey != "" {
 		key = apiKey
 	}

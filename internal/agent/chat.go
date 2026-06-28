@@ -711,9 +711,21 @@ type InKernelMemoryPressureTrimReporter interface {
 // provider transcript adapter. base_url selects the provider root; Provider
 // selects the wire shape.
 type HTTPPlanner struct {
-	BaseURL              string
-	ModelID              string
-	APIKey               string
+	BaseURL string
+	ModelID string
+	APIKey  string
+	// APIKeyFunc, when non-nil, supplies the upstream credential FRESH on every request
+	// instead of the frozen APIKey string. It is the fix for a short-lived bearer (a Claude
+	// Pro/Max subscription OAuth access token, which the provider rotates roughly hourly):
+	// a planner built once at `fak guard` startup would otherwise pin the boot-time token
+	// for the whole session and 401 the moment it expires — even after the user re-logs in,
+	// because the refreshed token lands in the on-disk credential file the frozen string
+	// never re-reads. With APIKeyFunc set, the auth path re-resolves the token per request,
+	// so a long session always sends the live credential. A non-empty per-request
+	// UpstreamAPIKey (the transparent passthrough hop) still wins over both; an empty/failed
+	// APIKeyFunc result falls back to the static APIKey. nil leaves the static-key path
+	// byte-for-byte unchanged.
+	APIKeyFunc           func() string
 	Provider             Provider
 	Adapter              TranscriptAdapter
 	ExtraBody            json.RawMessage
@@ -763,6 +775,20 @@ func NewProviderHTTPPlanner(provider, baseURL, model, apiKey string) (*HTTPPlann
 		}
 	}
 	return p, nil
+}
+
+// effectiveAPIKey is the credential the upstream hop authenticates with when the
+// caller did not supply a per-request override. It prefers a live APIKeyFunc result
+// (the rotating-token path — see APIKeyFunc) and falls back to the static APIKey when
+// the func is nil or returns empty, so a transient credential-read miss degrades to the
+// boot-time token rather than dropping auth entirely.
+func (p *HTTPPlanner) effectiveAPIKey() string {
+	if p.APIKeyFunc != nil {
+		if k := p.APIKeyFunc(); k != "" {
+			return k
+		}
+	}
+	return p.APIKey
 }
 
 // SetExtraBodyJSON validates and installs provider-specific top-level request

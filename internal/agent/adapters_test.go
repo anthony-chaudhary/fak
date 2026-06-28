@@ -725,6 +725,80 @@ func TestAnthropicAdapterOAuthScheme(t *testing.T) {
 	})
 }
 
+// TestHTTPPlannerAPIKeyFuncRotates proves the fix for the `fak guard` 401-after-relogin
+// bug: when APIKeyFunc is set, the planner re-resolves the upstream credential on EVERY
+// request instead of freezing the boot-time value. A pinned Claude subscription session
+// outlives its short-lived OAuth access token (the provider rotates it ~hourly into the
+// same on-disk credential file); a planner that pinned the first token would keep sending
+// the dead one and 401 even after the user re-logs in. This test rotates the token the
+// func returns between two requests and asserts the second request carries the NEW token.
+// It also proves the empty-result fallback to the static APIKey and that a non-empty
+// per-request UpstreamAPIKey (the transparent passthrough hop) still wins over both.
+func TestHTTPPlannerAPIKeyFuncRotates(t *testing.T) {
+	var gotAuth []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer ts.Close()
+
+	planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", "sk-ant-oat01-boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The func mimics reading a rotating token from disk: it hands out a fresh value on
+	// each call, the way Claude Code rewrites .credentials.json mid-session. Past the
+	// scripted sequence it returns "" (a real disk-read miss), which exercises the
+	// fallback to the static APIKey rather than panicking.
+	tokens := []string{"sk-ant-oat01-fresh-A", "sk-ant-oat01-fresh-B", ""}
+	call := 0
+	planner.APIKeyFunc = func() string {
+		if call >= len(tokens) {
+			return ""
+		}
+		tok := tokens[call]
+		call++
+		return tok
+	}
+
+	doReq := func() {
+		t.Helper()
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err != nil {
+			t.Fatalf("complete: %v", err)
+		}
+	}
+
+	doReq() // call 0 -> fresh-A
+	doReq() // call 1 -> fresh-B (proves the credential is NOT frozen at boot)
+	doReq() // call 2 -> "" -> falls back to the static boot key
+
+	want := []string{
+		"Bearer sk-ant-oat01-fresh-A",
+		"Bearer sk-ant-oat01-fresh-B",
+		"Bearer sk-ant-oat01-boot", // empty func result degrades to the static APIKey
+	}
+	if len(gotAuth) != len(want) {
+		t.Fatalf("got %d requests, want %d (%q)", len(gotAuth), len(want), gotAuth)
+	}
+	for i := range want {
+		if gotAuth[i] != want[i] {
+			t.Errorf("request %d Authorization = %q, want %q", i, gotAuth[i], want[i])
+		}
+	}
+
+	// A per-request UpstreamAPIKey (the transparent passthrough hop, where the client
+	// supplied its own credential) must still override BOTH the func and the static key.
+	gotAuth = nil
+	if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools(), WithUpstreamAPIKey("sk-ant-oat01-client")); err != nil {
+		t.Fatalf("complete with upstream key: %v", err)
+	}
+	if len(gotAuth) != 1 || gotAuth[0] != "Bearer sk-ant-oat01-client" {
+		t.Errorf("with UpstreamAPIKey, Authorization = %q, want the client's own key to win", gotAuth)
+	}
+}
+
 func TestHTTPPlannerFoldsProviderCachedTokensIntoCachemeta(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

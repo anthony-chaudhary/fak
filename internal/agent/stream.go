@@ -165,8 +165,10 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		}
 	}
 	// Transparent hop: when the inbound client supplied its own upstream credential
-	// (passthrough), authenticate with THAT key rather than the planner's.
-	apiKey := p.APIKey
+	// (passthrough), authenticate with THAT key rather than the planner's. Otherwise use
+	// the planner's EFFECTIVE key, which re-resolves a rotating subscription token per
+	// request (effectiveAPIKey) instead of a frozen boot-time string.
+	apiKey := p.effectiveAPIKey()
 	if sp.UpstreamAPIKey != "" {
 		apiKey = sp.UpstreamAPIKey
 	}
