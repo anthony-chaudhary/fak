@@ -880,6 +880,11 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	const maxAttempts = 4
 	var lastErr error
 	lastStatus := 0 // the status that triggered the pending retry (0 = a transient transport error)
+	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
+	// OAuth token may have rotated (or been briefly torn) between resolve and send, so we
+	// re-read it fresh and retry. triedAuthRefresh caps that at a single extra attempt so a
+	// genuinely-bad credential still fails fast instead of looping.
+	triedAuthRefresh := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Surface the retry BEFORE the silent backoff sleep — the otherwise-invisible
@@ -915,6 +920,19 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if retryableStatus(resp.StatusCode) {
 				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200)}
 				lastStatus = resp.StatusCode
+				continue
+			}
+			// A 401 on the rotating-subscription path: re-resolve the credential fresh and
+			// retry ONCE. refreshAPIKey returns false (so we fall through to the raw error)
+			// when there is no fresher token to try — a static/passthrough key, or the same
+			// token the upstream just rejected — so a truly-bad credential is not masked.
+			if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKey(p) {
+				triedAuthRefresh = true
+				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200)}
+				lastStatus = resp.StatusCode
+				// Do not count the credential-refresh retry against the backoff schedule:
+				// rewind so the next iteration re-sends immediately with the fresh token.
+				attempt--
 				continue
 			}
 			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400)}

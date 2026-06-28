@@ -59,10 +59,6 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	}
 
 	body := forceAnthropicStreaming(rawBody)
-	req, err := http.NewRequestWithContext(ctx, "POST", adapter.Endpoint(p.BaseURL, p.ModelID), bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
 	// Transparent hop: authenticate with the inbound client's own credential when it
 	// supplied one (passthrough), else the planner's EFFECTIVE key — the same scheme the
 	// buffered path resolves in prepareUpstream. effectiveAPIKey re-resolves a rotating
@@ -72,23 +68,49 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	if apiKey != "" {
 		key = apiKey
 	}
-	h := adapter.Headers(key)
-	if beta != "" {
-		h["anthropic-beta"] = mergeBeta(h["anthropic-beta"], beta)
-	}
-	for k, v := range h {
-		if v != "" {
-			req.Header.Set(k, v)
+	// A 401 here is recoverable ONCE on the pinned/rotating subscription path (the inbound
+	// client supplied no key of its own AND the planner holds a live APIKeyFunc): the
+	// on-disk OAuth token may have rotated or been briefly torn between resolve and send, so
+	// we re-read it fresh and retry. The status is checked BEFORE any SSE byte reaches the
+	// client (resp.Body is only parsed past this block), so a pre-stream retry can never
+	// corrupt an already-started response. triedAuthRefresh caps it at one extra attempt.
+	authRefreshable := apiKey == "" && p.APIKeyFunc != nil
+	triedAuthRefresh := false
+	var resp *http.Response
+	for {
+		req, err := http.NewRequestWithContext(ctx, "POST", adapter.Endpoint(p.BaseURL, p.ModelID), bytes.NewReader(body))
+		if err != nil {
+			return err
 		}
-	}
-	req.Header.Set("Accept", "text/event-stream")
+		h := adapter.Headers(key)
+		if beta != "" {
+			h["anthropic-beta"] = mergeBeta(h["anthropic-beta"], beta)
+		}
+		for k, v := range h {
+			if v != "" {
+				req.Header.Set(k, v)
+			}
+		}
+		req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := p.Client.Do(req)
-	if err != nil {
-		if deterministicTransportError(err) {
-			return &UpstreamUnreachableError{Err: err}
+		var derr error
+		resp, derr = p.Client.Do(req)
+		if derr != nil {
+			if deterministicTransportError(derr) {
+				return &UpstreamUnreachableError{Err: derr}
+			}
+			return derr
 		}
-		return err
+		if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && authRefreshable {
+			if fresh := p.effectiveAPIKey(); fresh != "" && fresh != key {
+				io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+				resp.Body.Close()
+				key = fresh
+				triedAuthRefresh = true
+				continue
+			}
+		}
+		break
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

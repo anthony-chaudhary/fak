@@ -69,6 +69,32 @@ type upstreamCall struct {
 	quarantined  int
 	redacted     int                   // rung 5 (#572): messages whose content was span-redacted pre-send
 	redactions   []TranscriptRedaction // the full reversible records (CAS Original) behind that count (#882)
+	// authRefreshable marks the pinned/rotating-credential path — no per-request
+	// UpstreamAPIKey (the transparent passthrough hop authenticates with the client's
+	// OWN key, which we must not second-guess) AND a live APIKeyFunc on the planner. On
+	// this path a single upstream 401 is recoverable: the on-disk subscription token may
+	// have rotated mid-flight (Claude Code rewrites .credentials.json ~hourly) or been
+	// briefly torn by that rewrite, so re-resolving the credential FRESH and retrying once
+	// turns an intermittent 401 into a self-healed turn. False everywhere else, so the
+	// static-key and passthrough paths are byte-for-byte unchanged.
+	authRefreshable bool
+}
+
+// refreshAPIKey re-resolves the upstream credential from the planner's live APIKeyFunc
+// (a fresh on-disk read — nothing memoizes the token) and adopts it for the next retry.
+// It reports whether the key actually changed: a no-op (func gone, empty result, or the
+// SAME token that just 401'd) returns false so the caller does NOT burn a retry re-sending
+// a credential the upstream already rejected. Only meaningful when authRefreshable is set.
+func (c *upstreamCall) refreshAPIKey(p *HTTPPlanner) bool {
+	if !c.authRefreshable || p == nil || p.APIKeyFunc == nil {
+		return false
+	}
+	fresh := p.effectiveAPIKey()
+	if fresh == "" || fresh == c.apiKey {
+		return false
+	}
+	c.apiKey = fresh
+	return true
 }
 
 // headers builds the per-request header set, applying the Anthropic-wire beta union
@@ -169,18 +195,20 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	// the planner's EFFECTIVE key, which re-resolves a rotating subscription token per
 	// request (effectiveAPIKey) instead of a frozen boot-time string.
 	apiKey := p.effectiveAPIKey()
+	authRefreshable := sp.UpstreamAPIKey == "" && p.APIKeyFunc != nil
 	if sp.UpstreamAPIKey != "" {
 		apiKey = sp.UpstreamAPIKey
 	}
 	return &upstreamCall{
-		adapter:      adapter,
-		url:          adapter.Endpoint(p.BaseURL, modelID),
-		body:         reqBody,
-		apiKey:       apiKey,
-		upstreamBeta: sp.UpstreamBeta,
-		quarantined:  len(quarantines),
-		redacted:     redactedN,
-		redactions:   redactions,
+		adapter:         adapter,
+		url:             adapter.Endpoint(p.BaseURL, modelID),
+		body:            reqBody,
+		apiKey:          apiKey,
+		upstreamBeta:    sp.UpstreamBeta,
+		quarantined:     len(quarantines),
+		redacted:        redactedN,
+		redactions:      redactions,
+		authRefreshable: authRefreshable,
 	}, nil
 }
 

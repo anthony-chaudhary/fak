@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -797,6 +798,111 @@ func TestHTTPPlannerAPIKeyFuncRotates(t *testing.T) {
 	if len(gotAuth) != 1 || gotAuth[0] != "Bearer sk-ant-oat01-client" {
 		t.Errorf("with UpstreamAPIKey, Authorization = %q, want the client's own key to win", gotAuth)
 	}
+}
+
+// TestHTTPPlannerComplete401RefreshesAndRetries proves the residual `fak guard` 401 fix:
+// when the rotating subscription token 401s mid-request (the on-disk token rotated or was
+// briefly torn between resolve and send), Complete re-resolves the credential FRESH and
+// retries ONCE, so a single stale-token 401 self-heals within the same turn instead of
+// surfacing to the wrapped agent. It also proves the cap: a token that 401s and has no
+// fresher replacement fails fast (one attempt, no loop), and the static-key path (no
+// APIKeyFunc) is NOT retried on a 401.
+func TestHTTPPlannerComplete401RefreshesAndRetries(t *testing.T) {
+	const stale = "sk-ant-oat01-stale"
+	const fresh = "sk-ant-oat01-fresh"
+
+	t.Run("rotating token 401 self-heals on a fresh re-resolve", func(t *testing.T) {
+		var gotAuth []string
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			gotAuth = append(gotAuth, auth)
+			if auth != "Bearer "+fresh {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+		defer ts.Close()
+
+		// Static boot key is the stale token; the func hands out the stale token first
+		// (the value that 401s) then the rotated-in fresh token on the refresh re-read.
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seq := []string{stale, fresh}
+		call := 0
+		planner.APIKeyFunc = func() string {
+			tok := seq[call]
+			if call < len(seq)-1 {
+				call++
+			}
+			return tok
+		}
+
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err != nil {
+			t.Fatalf("complete should succeed after the 401-triggered fresh-token retry: %v", err)
+		}
+		want := []string{"Bearer " + stale, "Bearer " + fresh}
+		if len(gotAuth) != len(want) {
+			t.Fatalf("got %d upstream requests, want %d (%q) — expected exactly one stale 401 then one fresh-token retry", len(gotAuth), len(want), gotAuth)
+		}
+		for i := range want {
+			if gotAuth[i] != want[i] {
+				t.Errorf("request %d Authorization = %q, want %q", i, gotAuth[i], want[i])
+			}
+		}
+	})
+
+	t.Run("a 401 with no fresher token fails fast (no retry loop)", func(t *testing.T) {
+		var n int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n++
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error"}}`))
+		}))
+		defer ts.Close()
+
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The func always returns the SAME stale token, so refreshAPIKey finds nothing
+		// fresher and the retry must NOT fire.
+		planner.APIKeyFunc = func() string { return stale }
+
+		_, err = planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools())
+		var statusErr *UpstreamStatusError
+		if !errors.As(err, &statusErr) || statusErr.Status != http.StatusUnauthorized {
+			t.Fatalf("want an UpstreamStatusError 401, got %v", err)
+		}
+		if n != 1 {
+			t.Errorf("upstream was hit %d times, want exactly 1 (no fresher token => no retry)", n)
+		}
+	})
+
+	t.Run("static-key path is not retried on a 401", func(t *testing.T) {
+		var n int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n++
+			w.WriteHeader(http.StatusUnauthorized)
+		}))
+		defer ts.Close()
+
+		// No APIKeyFunc => not authRefreshable => the 401 surfaces on the first attempt.
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", "sk-ant-api03-static")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err == nil {
+			t.Fatal("want a 401 error on the static-key path")
+		}
+		if n != 1 {
+			t.Errorf("upstream was hit %d times, want exactly 1 (static key is not refresh-retried)", n)
+		}
+	})
 }
 
 func TestHTTPPlannerFoldsProviderCachedTokensIntoCachemeta(t *testing.T) {
