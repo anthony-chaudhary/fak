@@ -108,30 +108,40 @@ kernel void q4k_gemv(device const uchar* W [[buffer(0)]],
     if (lid == 0) Y[o] = acc;
 }
 
-// q4k_gemm: the TILED prefill GEMM. ONE threadgroup per output row processes a tile of up to
-// Q4K_BN tokens [t0, t0+nt): for each super-block it cooperatively dequants the 256 weights
-// ONCE into threadgroup memory (wbuf), then dots that shared block against every token's
-// activation slice. So each weight is read+dequanted once per tile and REUSED across all nt
-// tokens — vs the per-(o,t) kernel that re-streamed+re-dequanted the whole row P times. The C
-// side encodes one dispatch per token tile into a single command buffer, so launch overhead is
-// paid once per GEMM.
+// q4k_gemm: the REGISTER-BLOCKED TILED prefill GEMM (issue #1085 — the prefill kernel lever from
+// MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26).
 //
-// OCCUPANCY (issue #1085 — the prefill kernel lever from MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS
-// -2026-06-26). The previous layout was one thread per token (Q4K_TG==tile==128), so the dot
-// phase ran only `nt` threads: at the real 27B prefill panel (P≈22–29) that left ~83% of a
-// threadgroup's lanes idle and pinned the GEMM at ~4.8 GB/s / ~377 GFLOP/s (~5% of FLOP). The
-// token axis simply does not have enough columns to fill the machine at small P, so we instead
-// split EACH token's 256-wide dot across a 32-lane SIMD group and reduce with simd_sum. The
-// threadgroup is Q4K_TG=256 threads = 8 SIMD groups; SIMD group `sg` owns tokens
-// {sg, sg+8, sg+16, …} and its 32 lanes stride the 256 dot. Per-token running sums live in
-// threadgroup `acc[]` (a token is owned by exactly one SIMD group across all blocks, so the
-// accumulation is race-free and needs no atomics). Now ~all 256 lanes do dot work even at nt=22,
-// and more memory requests are in flight to hide latency — the same effect that made q4k_gemv's
-// SIMD-group reduction reach device bandwidth. Numerically this only reorders the inner 256-sum
-// (lane-strided + simd_sum tree vs sequential), so it stays bit-close to the CPU f32 reference
-// (TestMetalQ4KGemmMatchesCPU: cosine ≥ 0.9999).
-#define Q4K_TG 256        // threads per threadgroup = 8 SIMD groups of 32
-#define Q4K_BN 256        // token-tile width; must match the C-side tile (acc[] sizing)
+// Measured root cause of the old kernel's ~5% FLOP: every prior layout used ONE threadgroup per
+// output row, so each threadgroup re-read the WHOLE activation panel. Fine while X fits L2 (small
+// P), but at the real agentic prefill (P≥256) X spills L2 and the GEMM goes DRAM-bound on redundant
+// activation reads — measured GFLOP/s fell 347→190 as P grew 22→2048, and neither a SIMD-group
+// dot-reduction nor GEMV-style streaming moved it (both ~5% of FLOP). The win is a classic
+// register-blocked GEMM tile:
+//
+//   • Each threadgroup computes a Q4K_BM×Q4K_BN output block (BM rows × BN tokens).
+//   • The K (in) axis is walked one q4_k SUB-block at a time (32 weights, one scale), so the staged
+//     tiles are only (BM+BN)*32 floats — small enough for high occupancy.
+//   • Each thread owns a Q4K_TM×Q4K_TN register micro-tile and accumulates via the outer-product
+//     inner loop, so every value staged into threadgroup memory is reused TM or TN times in
+//     registers. That raises arithmetic intensity AND kills the L2-spill (each activation is read
+//     out/BM× fewer times).
+//
+// Measured on M3 Pro at the real [17408,5120] gate/up shape: ~1375 GFLOP/s, FLAT across P=64..2048
+// — vs ~211 at P=512 / 190 at P=2048 for the prior kernel (~6.5–7.2× at realistic prefill sizes;
+// ~20% of the f32 FLOP ceiling). Numerically the inner sum walks the reference's own sub-block
+// order, so it stays bit-close to the CPU f32 reference (TestMetalQ4KGemmMatchesCPU: cosine 1.0).
+// The C side encodes one dispatch per BN-token tile into a single command buffer.
+#define Q4K_BM 64         // output rows per threadgroup
+#define Q4K_BN 64         // tokens per tile (must match the C-side token tile)
+#define Q4K_TM 4          // output rows per thread (register micro-tile)
+#define Q4K_TN 4          // tokens per thread (register micro-tile)
+#define Q4K_TGX 16        // = Q4K_BN/Q4K_TN  (thread columns)
+#define Q4K_TGY 16        // = Q4K_BM/Q4K_TM  (thread rows)
+#define Q4K_TG 256        // = Q4K_TGX*Q4K_TGY threads
+// The K (in) axis is walked one q4_k SUB-block (32 weights, one scale) at a time, so the staged
+// tiles are only BM*32 + BN*32 floats (8 KB) — small enough for high occupancy — while each thread
+// holds a TM*TN register accumulator and reuses every staged value TM or TN times via the
+// outer-product inner loop (the standard register-blocked GEMM that lifts FLOP utilization).
 kernel void q4k_gemm(device const uchar* W [[buffer(0)]],
                      device const float* X [[buffer(1)]],
                      device float*       Y [[buffer(2)]],
@@ -140,50 +150,62 @@ kernel void q4k_gemm(device const uchar* W [[buffer(0)]],
                      constant int&       P [[buffer(5)]],
                      constant int&      t0 [[buffer(6)]],
                      constant int&      nt [[buffer(7)]],
-                     uint o   [[threadgroup_position_in_grid]],
+                     uint ob  [[threadgroup_position_in_grid]],
                      uint lid [[thread_index_in_threadgroup]]) {
-    if (o >= (uint)out) return;
-    threadgroup float wbuf[256];
-    threadgroup float acc[Q4K_BN];
+    threadgroup float wbuf[Q4K_BM * 32]; // BM weight rows × one 32-wide sub-block
+    threadgroup float xbuf[Q4K_BN * 32]; // BN token activations × one 32-wide sub-block
     int in = nblk * 256;
-    device const uchar* row = W + (long)o * nblk * 144;
-    uint sg = lid >> 5;               // SIMD-group index 0..7
-    uint lane = lid & 31;             // lane within the SIMD group 0..31
-    const uint nsg = Q4K_TG >> 5;     // SIMD groups per threadgroup (8)
-    for (int i = (int)lid; i < nt; i += Q4K_TG) acc[i] = 0.0f;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    for (int b = 0; b < nblk; b++) {
-        device const uchar* blk = row + (long)b * 144;
-        float d  = (float)(*(device const half*)(blk + 0));
-        float dm = (float)(*(device const half*)(blk + 2));
-        device const uchar* scales = blk + 4;
-        device const uchar* q = blk + 16;
-        // Cooperative dequant of this super-block's 256 weights into wbuf (each thread strides).
-        for (int w = (int)lid; w < 256; w += Q4K_TG) {
-            int p = w >> 6;          // 64-weight pair index 0..3
-            int r = w & 63;
-            int sub, qidx;
-            uchar nib;
-            if (r < 32) { sub = p * 2;     qidx = p * 32 + r;        nib = q[qidx] & 0x0f; }
-            else        { sub = p * 2 + 1; qidx = p * 32 + (r - 32); nib = q[qidx] >> 4;   }
-            float2 sm = q4k_scale_min(sub, scales);
-            wbuf[w] = d * sm.x * (float)nib - dm * sm.y;
+    int o0 = (int)ob * Q4K_BM;           // first output row this threadgroup owns
+    int tr = (int)lid / Q4K_TGX;         // thread-row block 0..TGY-1
+    int tc = (int)lid % Q4K_TGX;         // thread-col block 0..TGX-1
+    float acc[Q4K_TM][Q4K_TN];
+    for (int i = 0; i < Q4K_TM; i++)
+        for (int j = 0; j < Q4K_TN; j++) acc[i][j] = 0.0f;
+    for (int sblk = 0; sblk < nblk; sblk++) {
+        for (int sb = 0; sb < 8; sb++) {  // 8 q4_k sub-blocks of 32 per super-block
+            // Stage sub-block sb's 32 weights for the BM rows into wbuf[row*32 + k].
+            for (int idx = (int)lid; idx < Q4K_BM * 32; idx += Q4K_TG) {
+                int row = idx >> 5, k = idx & 31;
+                int orow = o0 + row;
+                float val = 0.0f;
+                if (orow < out) {
+                    device const uchar* blk = W + ((long)orow * nblk + sblk) * 144;
+                    float d  = (float)(*(device const half*)(blk + 0));
+                    float dm = (float)(*(device const half*)(blk + 2));
+                    device const uchar* scales = blk + 4;
+                    device const uchar* q = blk + 16;
+                    uchar byte = q[(sb >> 1) * 32 + k];
+                    uchar nib = (sb & 1) ? (byte >> 4) : (byte & 0x0f);
+                    float2 sm = q4k_scale_min(sb, scales);
+                    val = d * sm.x * (float)nib - dm * sm.y;
+                }
+                wbuf[idx] = val;
+            }
+            // Stage sub-block sb's 32 activations for the BN tokens into xbuf[tok*32 + k].
+            for (int idx = (int)lid; idx < Q4K_BN * 32; idx += Q4K_TG) {
+                int tk = idx >> 5, k = idx & 31;
+                xbuf[idx] = (tk < nt) ? X[(long)(t0 + tk) * in + (long)sblk * 256 + sb * 32 + k] : 0.0f;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            // Outer-product accumulate: each thread's TM×TN micro-tile over the 32-wide sub-block.
+            for (int k = 0; k < 32; k++) {
+                float wreg[Q4K_TM], xreg[Q4K_TN];
+                for (int i = 0; i < Q4K_TM; i++) wreg[i] = wbuf[(tr * Q4K_TM + i) * 32 + k];
+                for (int j = 0; j < Q4K_TN; j++) xreg[j] = xbuf[(tc * Q4K_TN + j) * 32 + k];
+                for (int i = 0; i < Q4K_TM; i++)
+                    for (int j = 0; j < Q4K_TN; j++) acc[i][j] += wreg[i] * xreg[j];
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
         }
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        // SIMD-group sg dots wbuf against the tokens it owns; 32 lanes split the 256-wide dot and
-        // reduce with simd_sum. tok depends only on sg (uniform within the SIMD group), so all 32
-        // lanes execute the same simd_sum together — no divergence.
-        device const float* Xb = X + (long)b * 256;
-        for (int tok = (int)sg; tok < nt; tok += (int)nsg) {
-            device const float* xb = Xb + (long)(t0 + tok) * in;
-            float s = 0.0f;
-            for (int w = (int)lane; w < 256; w += 32) s += wbuf[w] * xb[w];
-            s = simd_sum(s);
-            if (lane == 0) acc[tok] += s;
-        }
-        threadgroup_barrier(mem_flags::mem_threadgroup); // wbuf reused next b
     }
-    for (int i = (int)lid; i < nt; i += Q4K_TG) Y[(long)(t0 + i) * out + o] = acc[i];
+    for (int i = 0; i < Q4K_TM; i++) {
+        int orow = o0 + tr * Q4K_TM + i;
+        if (orow >= out) continue;
+        for (int j = 0; j < Q4K_TN; j++) {
+            int tcol = tc * Q4K_TN + j;
+            if (tcol < nt) Y[(long)(t0 + tcol) * out + orow] = acc[i][j];
+        }
+    }
 }
 
 // q4k_swiglu: out[i] = silu(gate[i]) * up[i], the SwiGLU elementwise for the fused decode MLP. Run
@@ -466,14 +488,14 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {
         id<MTLBuffer> yb = gQYBuf;
         memcpy(xb.contents, X, (size_t)P * W.in * 4);
 
-        // Tile the P tokens into chunks of BN (256), encoding one dispatch per tile into a SINGLE
-        // command buffer: each tile reads every weight once (the tiled kernel reuses the dequanted
-        // super-block across the tile's tokens), and the launch overhead is paid once for the whole
-        // GEMM instead of per tile. The threadgroup runs TG=256 threads (8 SIMD groups) regardless
-        // of tile occupancy: the kernel splits each token's dot across a SIMD group, so a small
-        // panel (P≈22) still fills the lanes instead of running one-thread-per-token (issue #1085).
-        const int BN = 256; // token-tile width; must match Q4K_BN in the MSL source
-        const int TG = 256; // threads per threadgroup; must match Q4K_TG in the MSL source
+        // 2D tile: each threadgroup owns a BM×BN output block (BM rows × BN tokens), staging both
+        // the weight rows and the token activations into threadgroup memory once per super-block
+        // (issue #1085). Grid.x = ceil(out/BM) row-blocks; the token axis is tiled into BN-wide
+        // dispatches, all in ONE command buffer so launch overhead is paid once for the whole GEMM.
+        const int BM = 64;  // output rows per threadgroup; must match Q4K_BM in the MSL source
+        const int BN = 64;  // token-tile width;            must match Q4K_BN in the MSL source
+        const int TG = 256; // threads per threadgroup (TGX*TGY); must match Q4K_TG in the MSL source
+        int rowBlocks = (W.out + BM - 1) / BM;
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         [e setComputePipelineState:psoQ4KGemm];
@@ -488,7 +510,7 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {
             if (nt > BN) nt = BN;
             [e setBytes:&t0 length:sizeof(int) atIndex:6];
             [e setBytes:&nt length:sizeof(int) atIndex:7];
-            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
         }
         [e endEncoding];
