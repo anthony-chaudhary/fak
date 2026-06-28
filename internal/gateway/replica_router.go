@@ -28,6 +28,14 @@ type ReplicaRouter struct {
 	model    string
 	replicas []PlannerReplica
 	next     atomic.Uint64
+
+	// membership is the optional live health/drain/failover loop the router reads.
+	// When nil the router stays policy-free (blind round-robin over every replica).
+	// When attached (WithMembership), pick() routes only to replicas the loop
+	// currently marks admissible — so an unhealthy or draining worker drops out of
+	// the rotation within the health interval — and returns ErrNoHealthyWorker (a
+	// typed verdict, never a silent drop) when none is admissible.
+	membership *FleetMembership
 }
 
 // NewReplicaRouter builds a static, in-process planner fleet. It is intentionally
@@ -56,6 +64,20 @@ func NewReplicaRouter(model string, replicas []PlannerReplica) (*ReplicaRouter, 
 		cp[i] = repl
 	}
 	return &ReplicaRouter{model: model, replicas: cp}, nil
+}
+
+// WithMembership attaches a live FleetMembership so the router routes only to
+// admissible (healthy, non-draining) replicas. A replica is bound to a worker by
+// Name == WorkerSpec.ID; a replica absent from membership, still unknown, drained,
+// or unhealthy is dropped from the rotation, and a pick with no admissible worker
+// returns ErrNoHealthyWorker instead of falling through to a dead upstream. Passing
+// nil restores the policy-free blind round-robin. Returns r for chaining.
+func (r *ReplicaRouter) WithMembership(m *FleetMembership) *ReplicaRouter {
+	if r == nil {
+		return nil
+	}
+	r.membership = m
+	return r
 }
 
 func (r *ReplicaRouter) Model() string {
@@ -114,6 +136,26 @@ func (r *ReplicaRouter) pick() (PlannerReplica, error) {
 	if r == nil || len(r.replicas) == 0 {
 		return PlannerReplica{}, ErrReplicaRouterEmpty
 	}
-	idx := int((r.next.Add(1) - 1) % uint64(len(r.replicas)))
-	return r.replicas[idx], nil
+	n := uint64(len(r.replicas))
+	start := r.next.Add(1) - 1 // advance the shared cursor exactly once per pick
+	if r.membership == nil {
+		return r.replicas[int(start%n)], nil
+	}
+	// Membership-gated: round-robin only over the replicas the live health/drain
+	// loop currently admits, scanning forward from the cursor so picks still spread
+	// across the admissible subset. An unhealthy or draining worker is simply not in
+	// the set, so it drops from the rotation within the health interval; if nothing
+	// is admissible we return the typed verdict rather than route to a dead upstream.
+	adm := r.membership.Admissible()
+	admit := make(map[string]struct{}, len(adm))
+	for _, spec := range adm {
+		admit[spec.ID] = struct{}{}
+	}
+	for i := uint64(0); i < n; i++ {
+		repl := r.replicas[int((start+i)%n)]
+		if _, ok := admit[repl.Name]; ok {
+			return repl, nil
+		}
+	}
+	return PlannerReplica{}, ErrNoHealthyWorker
 }
