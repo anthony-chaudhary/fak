@@ -23,6 +23,30 @@ import "os"
 //go:noescape
 func q4kReduceRowAsmAVX2(row *byte, nblk int, qx *int8, Isum, Ssum *int32)
 
+//go:noescape
+func q4kReduceRowAsmVNNI(row *byte, nblk int, qx *int8, Isum, Ssum *int32)
+
+// q4kVNNI reports whether the AVX512-VNNI Q4_K reducer is usable: AVX512F+BW with OS ZMM state
+// (detectAVX512, which the YMM-VNNI form's EVEX encoding still needs) AND CPUID.(7,0):ECX bit 11
+// (AVX512_VNNI). On a VNNI box the per-sub-block dot is one VPDPBUSD instead of the AVX2 path's
+// 4×VPMOVSXBW+2×VPMADDWD. Resolved once; FAK_QKERNEL=avx2/scalar pins it off for A/B measurement.
+var q4kVNNI = func() bool {
+	switch os.Getenv("FAK_QKERNEL") {
+	case "scalar", "avx2":
+		return false
+	}
+	return detectAVX512() && detectAVX512VNNI()
+}()
+
+// detectAVX512VNNI reports CPUID.(EAX=7,ECX=0):ECX bit 11 (AVX512_VNNI). It is a DIFFERENT register
+// than detectAVX512's EBX AVX512F/BW bits — a Skylake-X has AVX512 but no VNNI, so emitting
+// VPDPBUSD there would #UD. The caller pairs this with detectAVX512 (OS ZMM state + F/BW).
+func detectAVX512VNNI() bool {
+	_, _, ecx7, _ := cpuid(7, 0)
+	const avx512vnni = 1 << 11
+	return ecx7&avx512vnni != 0
+}
+
 // q4kInt8Default resolves FAK_KQ_INT8 once: the GLM-5.2 mixed-quant offloaded-expert lever. The
 // SCALAR int8 reduction already beats the f32 dequant path on amd64 (skips the 256-f32 per-super-block
 // dequant); the AVX2 kernel here accelerates it further. Default OFF — the int8 path is APPROXIMATE
@@ -49,9 +73,15 @@ func q4kSDOTEnabled() bool {
 // q4kReduceRow dispatches the integer reduction to the AVX2 kernel when the resolved tier has it,
 // else the scalar reference. IS/SS are sized nblk*8 (one I_s/S_s per sub-block across all super-blocks).
 func q4kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {
-	if nblk > 0 && qtier >= tierAVX2 {
-		q4kReduceRowAsmAVX2(&row[0], nblk, &qx[0], &IS[0], &SS[0])
-		return
+	if nblk > 0 {
+		if q4kVNNI {
+			q4kReduceRowAsmVNNI(&row[0], nblk, &qx[0], &IS[0], &SS[0])
+			return
+		}
+		if qtier >= tierAVX2 {
+			q4kReduceRowAsmAVX2(&row[0], nblk, &qx[0], &IS[0], &SS[0])
+			return
+		}
 	}
 	q4kReduceRowScalar(row, nblk, qx, IS, SS)
 }

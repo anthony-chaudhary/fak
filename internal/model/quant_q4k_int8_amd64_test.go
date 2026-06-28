@@ -58,3 +58,50 @@ func TestQ4KReduceAsmMatchesScalar(t *testing.T) {
 	}
 	t.Logf("q4k AVX2 reduce bit-identical to scalar across %d rows x %d sub-blocks (tier=%d)", out, nblk*8, qtier)
 }
+
+// TestQ4KReduceVNNIMatchesScalar pins the AVX512-VNNI Q4_K reducer (one VPDPBUSD per sub-block dot)
+// bit-for-bit to the scalar reference, the same discipline as the AVX2 path. Skips on a CPU without
+// AVX512-VNNI (where the dispatcher never reaches it).
+func TestQ4KReduceVNNIMatchesScalar(t *testing.T) {
+	if !(detectAVX512() && detectAVX512VNNI()) {
+		t.Skip("AVX512-VNNI not available — q4k VNNI reducer inactive")
+	}
+	const out, in = 16, 768
+	rng := rand.New(rand.NewSource(11))
+	nblk := in / qkK
+	raw := make([]byte, out*nblk*q4kBlockBytes)
+	blk := make([]byte, q4kBlockBytes)
+	for o := 0; o < out; o++ {
+		for b := 0; b < nblk; b++ {
+			randQ4KBlock(rng, blk)
+			off := (o*nblk + b) * q4kBlockBytes
+			copy(raw[off:off+q4kBlockBytes], blk)
+		}
+	}
+	qt := quantizeQ4KFromRaw(raw, out, in)
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = float32(rng.NormFloat64())
+	}
+	qv := quantizeVecQ8(x)
+
+	isV := make([]int32, nblk*8)
+	ssV := make([]int32, nblk*8)
+	isSc := make([]int32, nblk*8)
+	ssSc := make([]int32, nblk*8)
+	rowBytes := qt.q4kRowBytes()
+	for o := 0; o < out; o++ {
+		row := qt.raw[o*rowBytes : (o+1)*rowBytes]
+		q4kReduceRowAsmVNNI(&row[0], nblk, &qv.q[0], &isV[0], &ssV[0])
+		q4kReduceRowScalar(row, nblk, qv.q, isSc, ssSc)
+		for i := range isV {
+			if isV[i] != isSc[i] {
+				t.Fatalf("row %d IS[%d]: vnni=%d scalar=%d (VPDPBUSD nibble-dot mismatch)", o, i, isV[i], isSc[i])
+			}
+			if ssV[i] != ssSc[i] {
+				t.Fatalf("row %d SS[%d]: vnni=%d scalar=%d (VPDPBUSD activation-sum mismatch)", o, i, ssV[i], ssSc[i])
+			}
+		}
+	}
+	t.Logf("q4k VNNI reduce bit-identical to scalar across %d rows x %d sub-blocks", out, nblk*8)
+}
