@@ -204,23 +204,7 @@ func cmdClusterCoordinator(args []string) {
 		fmt.Fprintln(os.Stderr, "fak cluster coordinator: --size must be >= 1")
 		os.Exit(2)
 	}
-	myPart, err := parseVec(*vec)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak cluster coordinator: bad --vec: %v\n", err)
-		os.Exit(2)
-	}
-	var widths []int
-	if *op == "allgather" {
-		widths, err = parseWidths(*widthsStr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak cluster coordinator: bad --widths: %v\n", err)
-			os.Exit(2)
-		}
-		if len(widths) != *size {
-			fmt.Fprintf(os.Stderr, "fak cluster coordinator: --widths has %d entries, want --size = %d\n", len(widths), *size)
-			os.Exit(2)
-		}
-	}
+	myPart, widths := parseClusterParts("coordinator", *vec, *widthsStr, *op, *size)
 
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -266,23 +250,7 @@ func cmdClusterWorker(args []string) {
 		fmt.Fprintf(os.Stderr, "fak cluster worker: --rank %d out of [1,%d)\n", *rank, *size)
 		os.Exit(2)
 	}
-	myPart, err := parseVec(*vec)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak cluster worker: bad --vec: %v\n", err)
-		os.Exit(2)
-	}
-	var widths []int
-	if *op == "allgather" {
-		widths, err = parseWidths(*widthsStr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak cluster worker: bad --widths: %v\n", err)
-			os.Exit(2)
-		}
-		if len(widths) != *size {
-			fmt.Fprintf(os.Stderr, "fak cluster worker: --widths has %d entries, want --size = %d\n", len(widths), *size)
-			os.Exit(2)
-		}
-	}
+	myPart, widths := parseClusterParts("worker", *vec, *widthsStr, *op, *size)
 
 	conn, err := dialCoordinator(*coord, *timeout)
 	if err != nil {
@@ -302,6 +270,30 @@ func cmdClusterWorker(args []string) {
 		fmt.Fprintf(os.Stderr, "fak cluster worker: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// parseClusterParts parses this rank's --vec float32 part and, for allgather, every rank's
+// --widths (validated against size). label names the subcommand in error messages
+// ("coordinator" / "worker"); a malformed flag prints to stderr and exits 2.
+func parseClusterParts(label, vec, widthsStr, op string, size int) ([]float32, []int) {
+	myPart, err := parseVec(vec)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak cluster %s: bad --vec: %v\n", label, err)
+		os.Exit(2)
+	}
+	var widths []int
+	if op == "allgather" {
+		widths, err = parseWidths(widthsStr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak cluster %s: bad --widths: %v\n", label, err)
+			os.Exit(2)
+		}
+		if len(widths) != size {
+			fmt.Fprintf(os.Stderr, "fak cluster %s: --widths has %d entries, want --size = %d\n", label, len(widths), size)
+			os.Exit(2)
+		}
+	}
+	return myPart, widths
 }
 
 // dialCoordinator retries net.Dial until the coordinator is reachable or the
