@@ -1,0 +1,24 @@
+[
+  {
+    "backends": "Metal",
+    "model_type": "qwen35 27B Q4_K - Medium",
+    "gpu_info": "Apple M3 Pro -- 18-core GPU, 36 GB unified",
+    "build_commit": "(see #459)",
+    "provenance": "observed-external",
+    "caveat": "llama.cpp-Metal SOTA bar. Provenance-caveated: #459 (build/version + exact llama.cpp flags) and #452 (bar measurement conditions) must be respected. This is a RELAYED external number, not a fak-controlled witness.",
+    "source": "epic #300 / issue #64 measured-gap table -- this box, v0.26.0, Qwen3.6-27B q4_k_m (M3 Pro)",
+    "n_prompt": 22,
+    "n_gen": 0,
+    "avg_ts": 51.55,
+    "note": "prefill bar at pp22; NOT length-matched to any witnessed fak-Metal prefill point (fak clean run is P=29) -- recorded for provenance, the gate scores it only when a matched-length fak point exists (#64 comment#2: fix P=256/512 for a real prefill assertion)"
+  },
+  {
+    "backends": "Metal",
+    "model_type": "qwen35 27B Q4_K - Medium",
+    "provenance": "observed-external",
+    "caveat": "decode bar 7.29 tok/s (a second condition reports 6.12); #459/#452 caveats apply.",
+    "n_prompt": 0,
+    "n_gen": 1,
+    "avg_ts": 7.29
+  }
+]

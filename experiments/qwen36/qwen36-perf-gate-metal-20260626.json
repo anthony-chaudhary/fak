@@ -1,0 +1,59 @@
+{
+  "cases": [
+    {
+      "failures": [
+        "metal-q4k-27b decode: fak 1.2 < 0.5x llama 7.29"
+      ],
+      "fak": {
+        "decode": {
+          "decode_steps": 64,
+          "prompt_tokens": 29,
+          "tok_per_sec": 1.2
+        },
+        "engine": "fak in-kernel Gated-DeltaNet (resident Q4_K decode + Metal q4_k prefill)",
+        "model": "Qwen3.6-27B-Q4_K_M.gguf",
+        "path": "experiments/qwen36/metal-fak-q4k-27b-20260626.json",
+        "prefill": {
+          "29": 0.6,
+          "421": 4.5
+        }
+      },
+      "label": "metal-q4k-27b",
+      "llama": {
+        "backends": "Metal",
+        "build_commit": "(see #459)",
+        "build_number": null,
+        "caveat": "llama.cpp-Metal SOTA bar. Provenance-caveated: #459 (build/version + exact llama.cpp flags) and #452 (bar measurement conditions) must be respected. This is a RELAYED external number, not a fak-controlled witness.",
+        "decode": {
+          "n_gen": 1,
+          "tok_per_sec": 7.29
+        },
+        "model_type": "qwen35 27B Q4_K - Medium",
+        "path": "experiments/qwen36/llamacpp-metal-qwen36-bar-20260626.json",
+        "prefill": {
+          "22": 51.55
+        },
+        "provenance": "observed-external"
+      },
+      "passed": false,
+      "rows": [
+        {
+          "fak_decode_steps": 64,
+          "fak_tok_per_sec": 1.2,
+          "kind": "decode",
+          "llama_n_gen": 1,
+          "llama_tok_per_sec": 7.29,
+          "metric": "decode",
+          "passed": false,
+          "ratio": 0.1646090534979424
+        }
+      ]
+    }
+  ],
+  "failures": [
+    "metal-q4k-27b decode: fak 1.2 < 0.5x llama 7.29"
+  ],
+  "min_ratio": 0.5,
+  "passed": false,
+  "schema": "fak.qwen36-perf-gate.v1"
+}

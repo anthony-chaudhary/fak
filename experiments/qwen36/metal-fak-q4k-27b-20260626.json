@@ -1,0 +1,31 @@
+{
+  "schema": "fak.qwen36-metal-fak.v1",
+  "engine": "fak in-kernel Gated-DeltaNet (resident Q4_K decode + Metal q4_k prefill)",
+  "model": "Qwen3.6-27B-Q4_K_M.gguf",
+  "precision": "Q4_K_M",
+  "machine": "node-macos-a -- Apple M3 Pro / Mac15,7, 18 GPU core, 36 GB unified, macOS 26.5, Metal 4",
+  "build_tags": ["fakmetal"],
+  "env": {"FAK_Q4K": "1", "FAK_METAL": "1", "FAK_GPU_LEASE_NOWAIT": "1"},
+  "command": "cmd/fakchat -gguf Qwen3.6-27B.q4_k_m.gguf -tok tokenizers/qwen3.6 -p <prompt> -n 64 -quiet",
+  "captured_at": "2026-06-26T05:52:39Z",
+  "source_witness": "experiments/benchmark/runs/by-machine/node-macos-a/20260626T055239Z-q4k-metal-decode-27b/score.json",
+  "greedy_parity": "TestMetalQ4KDecodeMatchesCPU PASS -- greedy token seq == CPU [433 92 166 106]; oracle 248068 path holds for the Metal lane",
+  "prefill": [
+    {
+      "tokens": 29,
+      "tok_per_sec": 0.6,
+      "note": "tiny-prompt (P=29) clean run -- weight-read-dominated, ~order of magnitude below agentic-length rate; recorded for provenance, NOT a fixed-length gate point (see #64 comment + comment#2)"
+    },
+    {
+      "tokens": 421,
+      "tok_per_sec": 4.5,
+      "note": "agentic-length (P=421) amortized prefill rate -- witnessed clean M3 Pro per #64 comment#2; the honest agentic prefill number, still ~11x under the 51.55 Metal bar"
+    }
+  ],
+  "decode": {
+    "prompt_tokens": 29,
+    "decode_steps": 64,
+    "tok_per_sec": 1.2,
+    "note": "clean (llama booted out, 36 GB GPU free) -- score.json arms.clean_llama_stopped.decode_tok_per_sec"
+  }
+}
