@@ -146,22 +146,10 @@ func withLeasePublish(inner func()) func() {
 // 56-minute commit stall in the field, made automatic and PID-guarded so it is safe to run
 // on every acquire.
 func reapStaleLock(path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return // no lockfile (or unreadable) — nothing to reap
-	}
-	s := string(data)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i] // first line only, matching gpulease's PID record format
-	}
-	pid, perr := strconv.Atoi(strings.TrimSpace(s))
-	if perr != nil || pid <= 0 {
-		return // no parseable holder PID — leave it for Acquire to arbitrate
-	}
-	if processAlive(pid) {
-		return // a live committer holds it — must NOT reap
-	}
-	_ = os.Remove(path) // stale: holder is dead. Best-effort; Acquire is the backstop.
+	// Delegate to the exported, single-source-of-truth reaper (lockprobe.go). It is
+	// PID-guarded and fail-safe: a live holder, an absent file, or an unattributable
+	// file are all left untouched; only a provably-dead holder's lock is removed.
+	_ = ReapStaleLock(path)
 }
 
 // leaseID derives a stable-enough, ref-safe lease id for this holder. It is a single safe
