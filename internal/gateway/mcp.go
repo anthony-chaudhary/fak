@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -357,6 +359,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[MemoryRequest](p.Arguments, "fak_memory_run", func(req MemoryRequest) (any, error) {
 			return s.memoryRun(ctx, req)
 		})
+	case "fak_tools_search":
+		return mcpDecodeCall[ToolsSearchRequest](p.Arguments, "fak_tools_search", func(req ToolsSearchRequest) (any, error) {
+			return s.toolsSearch(req)
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -583,6 +589,17 @@ func toolDescriptors() []map[string]any {
 			"description": "RUN a memory query against a backend: pick a built-in {driver} or supply an inline {query}; parameterize with {intent,k,budget}; point at a recall core image with {image_dir} (default: an in-memory demo corpus). Effects default to PROPOSED — set {apply:true} to enact the safe negative-only/storage mutations (tombstone, prune). Sealed spans are never rendered (the trust gate); consolidate/reclassify never persist this rung. Returns the per-step trace, the rendered set, proposed/applied effects, refusals, and stats.",
 			"inputSchema": memoryInputSchema,
 		},
+		{
+			"name":        "fak_tools_search",
+			"description": "Search and retrieve tool schemas on demand with progressive disclosure to reduce token usage. Accepts a query string to filter tools by name or description, and a detail_level (name|description|full) to control how much schema information is returned. Returns matching tools with the requested level of detail — use 'name' for a lightweight listing, 'description' to include tool descriptions, or 'full' for complete schemas.",
+			"inputSchema": json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string", "description": "optional filter string; matches tools whose name or description contains this substring (case-insensitive)"},
+    "detail_level": {"type": "string", "enum": ["name", "description", "full"], "description": "level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"}
+  }
+}`),
+		},
 	}
 }
 
@@ -600,3 +617,57 @@ var memoryInputSchema = json.RawMessage(`{
     "apply": {"type": "boolean", "description": "run only: APPLY the safe negative-only/storage mutations (tombstone, prune). Default false = propose only (fail-closed)"}
   }
 }`)
+
+// ToolsSearchRequest is the request shape for fak_tools_search.
+type ToolsSearchRequest struct {
+	Query       string `json:"query"`        // optional filter string
+	DetailLevel string `json:"detail_level"` // "name" | "description" | "full"
+}
+
+// ToolsSearchResponse is the response shape for fak_tools_search.
+type ToolsSearchResponse struct {
+	Tools []map[string]any `json:"tools"` // filtered tool descriptors at requested detail level
+}
+
+// toolsSearch implements lazy/on-demand tool schema loading with progressive disclosure.
+// Returns tool descriptors filtered by query and at the requested detail level.
+func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error) {
+	query := strings.ToLower(req.Query)
+	level := req.DetailLevel
+	if level == "" {
+		level = "description" // default to middle ground
+	}
+	if level != "name" && level != "description" && level != "full" {
+		return ToolsSearchResponse{}, fmt.Errorf("invalid detail_level: %s (must be name, description, or full)", level)
+	}
+
+	allTools := toolDescriptors()
+	result := make([]map[string]any, 0, len(allTools))
+
+	for _, t := range allTools {
+		name, _ := t["name"].(string)
+		desc, _ := t["description"].(string)
+
+		if query != "" {
+			nameLower := strings.ToLower(name)
+			descLower := strings.ToLower(desc)
+			if !strings.Contains(nameLower, query) && !strings.Contains(descLower, query) {
+				continue
+			}
+		}
+
+		tool := map[string]any{"name": name}
+		if level == "description" || level == "full" {
+			tool["description"] = desc
+		}
+		if level == "full" {
+			if schema, ok := t["inputSchema"]; ok {
+				tool["inputSchema"] = schema
+			}
+		}
+
+		result = append(result, tool)
+	}
+
+	return ToolsSearchResponse{Tools: result}, nil
+}

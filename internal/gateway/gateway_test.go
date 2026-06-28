@@ -2237,11 +2237,11 @@ func TestMCPStdioRoundtrip(t *testing.T) {
 		t.Errorf("initialize protocolVersion = %v", got)
 	}
 	// tools/list — fak_adjudicate, fak_syscall, fak_read, fak_admit, fak_changes,
-	// fak_revoke, fak_session_reset, fak_context_change, plus the memq memory-algebra trio
+	// fak_revoke, fak_session_reset, fak_context_change, fak_tools_search, plus the memq memory-algebra trio
 	// fak_memory_drivers / fak_memory_explain / fak_memory_run.
 	tools := resps[1].Result.(map[string]any)["tools"].([]any)
-	if len(tools) != 11 {
-		t.Errorf("tools/list returned %d tools, want 11", len(tools))
+	if len(tools) != 12 {
+		t.Errorf("tools/list returned %d tools, want 12", len(tools))
 	}
 	// tools/call fak_syscall (allow) -> verdict ALLOW in the embedded text
 	sc := unwrapToolResult(t, resps[2])
