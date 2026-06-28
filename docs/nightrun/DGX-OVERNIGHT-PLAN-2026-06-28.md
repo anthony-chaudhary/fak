@@ -99,9 +99,12 @@ never restarted).
 
 | datum | number | what it isolates |
 |---|---|---|
-| live decode (prefill-conflated) | **0.0694 tok/s** | 16 tok / 230.7 s wall incl. a 39-tok prefill |
-| **steady-state TPOT** (prefill-isolated) | **0.2324 tok/s** (4.30 s/tok) | (t₃₆ − t₄)/(36 − 4); ~3.3× the conflated rate — prefill dominates short turns (~4 s/prefill-tok) |
+| live decode 16-tok (prefill-conflated) | **0.0694 / 0.0698 tok/s** (replicated) | 16 tok / ~230 s wall incl. a 39-tok prefill; stable across two idle runs |
+| live decode 32-tok (amortization point) | **0.1074 tok/s** | 32 tok / 298 s — the rate rises with generation length as prefill amortizes |
+| **steady-state TPOT** (prefill-isolated) | **0.2324 tok/s** (4.30 s/tok) | (t₃₆ − t₄)/(36 − 4); the 16→32→∞-tok curve (0.069 → 0.107 → 0.2324) cleanly traces this asymptote |
+| q5q6-config serve (:8001) decode | **0.0601 tok/s** (~14 % slower than Q4_K :8000) | the heavier Q5_K/Q6_K expert dequant path costs throughput |
 | 2-way concurrency | **0.0639 tok/s agg (0.27×)** | two 12-tok streams *serialized* (A 375 s ≈ 2× B 187 s) |
+| 200-tok prefill | **> 900 s** (timed out) | prefill is host-bound too, not just decode |
 
 **The finding worth keeping:** concurrency makes GLM-5.2 decode on this serve
 *worse*, not better (0.27× of single-stream). The two streams contended instead of
@@ -131,8 +134,31 @@ finding above: the experts must move off the host (resident / GPU expert path), 
 stay CPU-offloaded. The baseline is labelled OBSERVED (third-party engine), never
 reported as fak's own throughput.
 
+**da33 NVMe load rate — 1.549 GiB/s.** A cold sequential read of the 434 GB GGUF from
+the NVMe mount took 280 s = **1.549 GiB/s** (≈4.7 min of pure I/O), vs NFS at
+0.063 GB/s (≈115 min, the prior load wall) — **~25× faster**. This settles the
+operator's "~10 min load" target *for the storage tier* (achieved). But the full
+load+bench wall was 969 s, so **CPU-bound mixed-quant dequant adds ~11 min on top of
+the ~5 min I/O** — NVMe staging fixes the secondary I/O waste; the residual gap to
+10 min is dequant. Actionable for the #1062 preflight gate: classify the load-path
+tier *and* surface the dequant cost separately.
+
+## The night's conclusion
+
+The accessible frontier dimensions are now **saturated** (decode amortization curve,
+TPOT, concurrency, prefill, quant-config, CPU baseline, NVMe load — all collected and
+in places replicated). Every measurement points one way: fak's `--cpu-offload-experts`
+path is **host-expert-GEMM-bound** — slower than pure-CPU llama.cpp (~3.8×), it does
+not batch (concurrency is 0.27×), it penalizes prefill *and* decode, and Q5_K/Q6_K
+experts cost more than Q4_K. The mandate is unambiguous: **move the expert GEMM off the
+host** (resident experts or a GPU expert path); that, not GPU count or batching, is
+what closes the #971 wall. NVMe staging independently removes the I/O load tax (~25×),
+leaving CPU dequant as the residual load cost.
+
 The hourly overnight tick keeps the loop alive: it re-attempts da33 only when
-`avail ≥ 440 GiB` with no peer resident serve, collects one read-only GPU server decode
+`avail ≥ 440 GiB` with no peer resident serve, collects one read-only GPU-server decode
 when the serve is idle (a 900 s timeout, never overlapping witnesses — the serve
-degrades under contention), and records `skipped`/`failed` whenever a box can't
-safely produce a datum.
+degrades under contention), records `skipped`/`failed` whenever a box can't safely
+produce a datum, and — now that the accessible dimensions are saturated — favours a
+genuinely *new* condition (a freed dgx2, a changed serve config) over re-running a
+settled measurement.
