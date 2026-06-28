@@ -1,6 +1,8 @@
 # Metal q4_k device GEMM — closure status (#70)
 
-**Status: SHIPPED (code) / on-device measurement gated.** This note binds
+**Status: SHIPPED (code) / first on-device number measured (~11× under SOTA) — the
+matmul-only per-phase split and the kernel work to close the gap stay Mac-gated (§5.1).**
+This note binds
 [#70](https://github.com/anthony-chaudhary/fak/issues/70) (*upload q4_k as f16/int8
 and run the device GEMM directly, not `dequantQ8 → f32 → Upload`*) to the tree as it
 actually stands. The upload-side deliverable the issue asks for **is implemented and
@@ -112,6 +114,14 @@ The **on-device** GPU half is pinned by `TestMetalQ4KGemmMatchesCPU` (the `q4k.m
 records **cosine 1.0** vs the CPU f32 reference) — but that test is `-tags fakmetal` and
 is the witness a Mac worker re-confirms, not one this host can run.
 
+A first M3 Pro run has since landed (under #64,
+[`metal-fak-q4k-27b-20260626.json`](metal-fak-q4k-27b-20260626.json)): the on-device
+**decode** greedy parity holds (`TestMetalQ4KDecodeMatchesCPU` PASS — the Metal lane
+emits the same token sequence as the CPU reference), and the artifact carries the first
+on-device prefill/decode tok/s. That witnesses the decode lane and the end-to-end path;
+the prefill **GEMM** parity (`TestMetalQ4KGemmMatchesCPU` / `…PrefillMatchesCPU`) is the
+half still awaiting a clean Mac re-confirm. The tok/s themselves are read in §5.
+
 ---
 
 ## 4 — Why this is #70's deliverable
@@ -140,8 +150,32 @@ have. On a Mac node:
    GEMM is bandwidth-bound (not occupancy-bound) at realistic P.
 
 **Next checkable step:** run gate (1) on a Mac node, then capture (2). Until the
-on-device split is recorded, the *speedup claim* for the end-to-end path is `not yet`;
+matmul-only split is recorded, the *per-phase* speedup attribution is `not yet`;
 the **code** deliverable (raw upload + device GEMM) is shipped and CPU-parity-pinned.
+
+### 5.1 — Update: a first whole-path on-device number now exists (still `not yet`)
+
+The end-to-end on-device rate is **no longer fully unrecorded**. A clean M3 Pro run is
+committed (under #64,
+[`metal-fak-q4k-27b-20260626.json`](metal-fak-q4k-27b-20260626.json) — node-macos-a,
+18-GPU-core M3 Pro / 36 GB, `-tags fakmetal`, `FAK_Q4K=1 FAK_METAL=1`, llama booted out
+per the 36 GiB swap rule):
+
+| phase | on-device (fak Q4_K + Metal) | llama.cpp-Metal bar | gap |
+|---|---|---|---|
+| prefill (P=421, agentic) | **4.5 tok/s** | 51.55 tok/s (pp22) | **~11× under** |
+| prefill (P=29, tiny) | 0.6 tok/s | — | weight-read-dominated, provenance only |
+| decode | 1.2 tok/s | 7.29 / 6.12 tok/s | ~5–6× under |
+
+So the issue's headline — *"closes most of the prefill compute gap"* — is now a
+**measured** claim, not an unmeasured one: the q4_k device GEMM runs on the GPU and the
+agentic-length prefill is up off the ~0.8 tok/s CPU floor, but it still sits **~11× under
+the 51.55 tok/s llama.cpp-Metal SOTA** at ~20 % of the f32 FLOP ceiling. The 4.5 tok/s is
+a **whole-path** number (GEMM + attention + norm + sampling), so it does **not** by itself
+prove the q4_k GEMM is the bound; that attribution is exactly the §5 step-(2) matmul-only
+`FAK_QPROFILE=1` per-phase split, which remains the open Mac-gated gate. #70 therefore
+stays a genuine `not yet`: **measured-but-gap-remains**, with the per-phase split (and the
+kernel work to close the ~11×) the remaining step — both Apple-Silicon-only.
 
 ---
 
