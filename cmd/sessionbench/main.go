@@ -401,6 +401,19 @@ type prefillTokCounts struct {
 	BOverC float64 `json:"b_over_c"` // exact prefill work-elimination vs tuned single-tenant
 }
 
+// prefillTokRow folds prefillTokens + the A/C, B/C ratio fill-in into the per-cell
+// prefillTokCounts row that both the live (-run) and deterministic (counts-only)
+// builders construct from identical arithmetic.
+func prefillTokRow(P, T, C, D, R int) prefillTokCounts {
+	ta, tb, tc := prefillTokens(P, T, C, D, R)
+	ptok := prefillTokCounts{A: ta, B: tb, C: tc}
+	if tc > 0 {
+		ptok.AOverC = float64(ta) / float64(tc)
+		ptok.BOverC = float64(tb) / float64(tc)
+	}
+	return ptok
+}
+
 type cell struct {
 	Turns       int              `json:"turns"`
 	Agents      int              `json:"agents"`
@@ -514,12 +527,7 @@ func main() {
 			cc := arm{Name: "C_fak_fused", PrefillMS: cPf, CloneMS: cCl, DecodeMS: cDc, TotalMS: cPf + cCl + cDc, Live: true}
 			// Exact, timing-free prefill work-elimination — the contention-immune floor under the
 			// measured ratios above (cannot drift with fleet load; fixed by the session structure).
-			ta, tb, tc := prefillTokens(*prefix, T, C, *decode, *result)
-			ptok := prefillTokCounts{A: ta, B: tb, C: tc}
-			if tc > 0 {
-				ptok.AOverC = float64(ta) / float64(tc)
-				ptok.BOverC = float64(tb) / float64(tc)
-			}
+			ptok := prefillTokRow(*prefix, T, C, *decode, *result)
 			cl := cell{
 				Turns: T, Agents: C, Prefix: *prefix, Decode: *decode, Result: *result,
 				A: a, B: b, C: cc, Anchor: anchor, APrefillRaw: aPfRaw, PrefillTok: ptok,
@@ -615,15 +623,10 @@ func deterministicReport(name string, quant bool, turns, agents []int, prefix, d
 			if T < 1 || C < 1 {
 				continue
 			}
-			ta, tb, tc := prefillTokens(prefix, T, C, decode, result)
-			ptok := prefillTokCounts{A: ta, B: tb, C: tc}
-			if tc > 0 {
-				ptok.AOverC = float64(ta) / float64(tc)
-				ptok.BOverC = float64(tb) / float64(tc)
-			}
+			ptok := prefillTokRow(prefix, T, C, decode, result)
 			turnTax := 0.0
-			if tb > 0 {
-				turnTax = float64(ta) / float64(tb)
+			if ptok.B > 0 {
+				turnTax = float64(ptok.A) / float64(ptok.B)
 			}
 			cells = append(cells, cell{
 				Turns: T, Agents: C, Prefix: prefix, Decode: decode, Result: result,
