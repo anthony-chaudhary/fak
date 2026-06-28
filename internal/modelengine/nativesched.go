@@ -19,15 +19,18 @@ package modelengine
 // admit -> shared-step -> per-lane-stream -> reclaim shape, expressed through the
 // frozen interface, which is the cross-shape review the seam exists to pass.
 //
-// WHAT IT IS NOT (explicit non-goals from the issue). This is a SHAPE proof, not
-// the production continuous-batching scheduler: no paged KV, no preemption, no
-// admission control / fairness, no ragged-lane MAC accounting, no throughput
-// claim. The loop rebuilds a transient BatchSession wrapper each tick over the
-// live lanes' own *Session objects (each keeps its own KV), which is correct but
-// not allocation-tuned. A lane whose consumer neither drains nor cancels will
-// back-pressure the loop (head-of-line) — acceptable for a stub, called out so no
-// one mistakes it for the real scheduler. The real scheduler (per-lane queues,
-// paged KV, preemption) is the sibling issue that CONSUMES this same contract.
+// WHAT IT IS NOT (explicit non-goals from the issue). It carries the BARE waiting/
+// running queue the issue scopes (Admit enqueues; the loop promotes waiting->running
+// between steps, FIFO, under a structural maxRunning cap), but NOT the production KV-
+// governance scheduler: no paged KV, no preemption, no priority/fairness/KV-budget
+// admission, no ragged-lane MAC accounting, no throughput claim. The maxRunning knob
+// is a plain capacity gate, not an admission POLICY — priority/fairness/budget is the
+// sibling issue's job. The loop rebuilds a transient BatchSession wrapper each tick
+// over the live lanes' own *Session objects (each keeps its own KV), which is correct
+// but not allocation-tuned. A lane whose consumer neither drains nor cancels will
+// back-pressure the loop (head-of-line) — acceptable here, called out so no one
+// mistakes it for the real scheduler. Paged KV, preemption, and the priority/fairness
+// admission policy are the sibling issues that CONSUME this same contract.
 
 import (
 	"context"
@@ -44,12 +47,43 @@ var errSchedClosed = errors.New("modelengine: native scheduler closed")
 type NativeScheduler struct {
 	m *model.Model
 
-	mu     sync.Mutex
-	lanes  []*schedLane
-	closed bool
+	mu sync.Mutex
+	// waiting holds admitted-but-not-yet-running lanes (the WAITING queue); lanes
+	// holds the RUNNING set the per-iteration StepBatch advances. Admit enqueues into
+	// waiting; run() promotes waiting->lanes between steps, FIFO, up to maxRunning.
+	waiting []*schedLane
+	lanes   []*schedLane
+	// maxRunning caps the running set; 0 = unbounded (every admitted lane runs at once,
+	// the pre-queue behaviour). A positive cap is the BARE structural admission knob the
+	// issue scopes ("the bare admit/evict loop and queues it sits on") — NOT a priority/
+	// fairness/KV-budget policy, which is the sibling issue's job.
+	maxRunning int
+	// maxObservedRunning is the high-water mark of the running set, written only by the
+	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
+	// (peak == maxRunning) without racing on a live concurrency count.
+	maxObservedRunning int
+	closed             bool
 
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
+}
+
+// SetMaxRunning bounds how many admitted lanes run concurrently; the rest wait in the
+// waiting queue and are promoted FIFO as running slots free between steps. n<=0 means
+// unbounded (the default). Set it before the first Admit; it is read by the run loop.
+func (s *NativeScheduler) SetMaxRunning(n int) {
+	s.mu.Lock()
+	s.maxRunning = n
+	s.mu.Unlock()
+}
+
+// MaxObservedRunning reports the peak running-set size the loop reached — the witness
+// that a maxRunning cap actually gated admission (peak == cap), or that an uncapped
+// scheduler co-batched every lane (peak == #admitted). Safe to read after draining.
+func (s *NativeScheduler) MaxObservedRunning() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxObservedRunning
 }
 
 // NewNativeScheduler builds a scheduler over an already-constructed model (a real
@@ -67,8 +101,11 @@ func (s *NativeScheduler) Caps() []abi.Capability {
 }
 
 // Admit registers one request: it prefills the prompt synchronously (so the lane
-// enters the batch with its first logits ready), appends the lane, and nudges the
-// scheduler loop. Decoding then proceeds in the shared StepBatch loop.
+// enters the batch with its first logits ready), enqueues the lane on the WAITING
+// queue, and nudges the scheduler loop. The loop promotes it into the running set
+// (subject to maxRunning) between steps; decoding then proceeds in the shared
+// StepBatch loop. A surviving lane's output is independent of when it is promoted —
+// each lane owns its KV and StepBatch is bit-exact regardless of co-batch membership.
 func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	s.mu.Lock()
 	if s.closed {
@@ -96,7 +133,7 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 	}
 
 	s.mu.Lock()
-	s.lanes = append(s.lanes, ln)
+	s.waiting = append(s.waiting, ln)
 	s.mu.Unlock()
 
 	s.started.Do(func() { go s.run() })
@@ -134,6 +171,9 @@ func (s *NativeScheduler) Close() {
 	for _, ln := range s.lanes {
 		ln.cancel() // unblock a lane wedged on an undrained send so run() can exit
 	}
+	for _, ln := range s.waiting {
+		ln.cancel() // a never-promoted waiting lane is aborted too, so run() can exit
+	}
 	s.mu.Unlock()
 	s.signal()
 }
@@ -145,13 +185,16 @@ func (s *NativeScheduler) signal() {
 	}
 }
 
-// run is the single scheduler loop: compact retired lanes, snapshot the live set,
-// and advance them all with one StepBatch. All lane mutation (terminal/logits/gen)
-// happens HERE, on this one goroutine, so those fields need no lock; only the
-// shared lanes slice (appended by Admit) and the closed flag are mutex-guarded.
+// run is the single scheduler loop. Each iteration recomputes the running set: it
+// compacts retired lanes out, then promotes waiting lanes into the freed slots (FIFO,
+// up to maxRunning) — so the per-step batch geometry tracks admissions and completions
+// between every decode step. All lane mutation (terminal/logits/gen) happens HERE, on
+// this one goroutine, so those fields need no lock; only the shared waiting/lanes
+// slices (appended by Admit) and the closed flag are mutex-guarded.
 func (s *NativeScheduler) run() {
 	for {
 		s.mu.Lock()
+		// 1. Drop finished/cancelled lanes from the running set, freeing their slots.
 		live := s.lanes[:0]
 		for _, ln := range s.lanes {
 			if !ln.terminal {
@@ -159,12 +202,31 @@ func (s *NativeScheduler) run() {
 			}
 		}
 		s.lanes = live
+		// 2. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
+		// cancelled while it was still waiting is retired here rather than promoted.
+		kept := s.waiting[:0]
+		for _, ln := range s.waiting {
+			if ln.ctx.Err() != nil {
+				ln.finish(nil, ln.ctx.Err())
+				continue
+			}
+			if s.maxRunning > 0 && len(s.lanes) >= s.maxRunning {
+				kept = append(kept, ln)
+				continue
+			}
+			s.lanes = append(s.lanes, ln)
+		}
+		s.waiting = kept
 		active := make([]*schedLane, len(s.lanes))
 		copy(active, s.lanes)
+		if len(active) > s.maxObservedRunning {
+			s.maxObservedRunning = len(active)
+		}
 		closed := s.closed
+		idle := len(s.lanes) == 0 && len(s.waiting) == 0
 		s.mu.Unlock()
 
-		if len(active) == 0 {
+		if idle {
 			if closed {
 				return
 			}
