@@ -1,4 +1,4 @@
-# fak - Fused Agent Kernel
+# fak — the **F**used **A**gent **K**ernel
 
 <!-- readme-verified: 2026-06-27 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
