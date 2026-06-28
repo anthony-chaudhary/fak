@@ -1,7 +1,7 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "12dd9468",
-  "total_debt": 1335,
+  "total_debt": 1174,
   "metrics": {
     "doc": 1,
     "readme": 0,
@@ -16,7 +16,7 @@
     "product": 1,
     "persona": 0,
     "stability": 0,
-    "slop": 723,
+    "slop": 562,
     "steer": 2,
     "conflation": 0,
     "disambiguation": 550,
