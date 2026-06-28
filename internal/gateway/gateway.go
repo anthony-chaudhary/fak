@@ -634,6 +634,18 @@ type Server struct {
 	// watcher can hot-swap the policy on a file edit without a torn read (#842): a
 	// classification sees either the whole old manifest or the whole new one.
 	route *modelroute.Live
+
+	// fleet is the host-injected live worker membership/health/drain/failover loop
+	// (fleet_membership.go) — the live fleet view the router reads. The metrics surface
+	// DRAINS its transition log onto /metrics with a per-worker label (#42) via the
+	// fleetMetrics bridge, whose cumulative per-(worker,kind) counter stays monotonic
+	// across scrapes even after a worker is removed. nil (the default) emits no fleet
+	// family — a host attaches a loop via SetFleetMembership once it has built the fleet
+	// view, the same inject-after-New posture as the KV seams. fleetMu guards both fields:
+	// SetFleetMembership may install the loop concurrently with a scrape that publishes it.
+	fleetMu      sync.Mutex
+	fleet        *FleetMembership
+	fleetMetrics *FleetMembershipMetrics
 }
 
 // New builds a Server. It validates that the ABI is wired (a resolver is
