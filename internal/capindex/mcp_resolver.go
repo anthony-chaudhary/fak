@@ -80,7 +80,7 @@ func (r *MCPResolver) Fault(ref CapRef) (Capability, error) {
 				Digest: digest,
 				Body:   body,
 				Scope:  abi.ScopeFleet, // MCP tools are fleet-wide by default
-				Caps:   nil, // MCP tools don't advertise capabilities in this form
+				Caps:   nil,            // MCP tools don't advertise capabilities in this form
 			}, nil
 		}
 	}
@@ -88,17 +88,11 @@ func (r *MCPResolver) Fault(ref CapRef) (Capability, error) {
 	return Capability{}, ErrNotFound
 }
 
-// simpleDigest is a placeholder for a real SHA-256 digest.
-// In the full implementation, this would be sha256.Sum256.
+// simpleDigest computes the ScaleMCP sync key: a SHA-256 over the input bytes,
+// rendered as "sha256:<hex>". A capability whose body changes gets a new digest,
+// so a hot-swap is a cheap hash compare (Digest(old) != Digest(new)) rather than
+// a re-read of the body. Defined once here and reused by every resolver and the
+// index so all kinds key on the same hash function.
 func simpleDigest(s string) string {
-	// Placeholder: for now, just use length as a poor man's hash
-	// The real implementation uses SHA-256 as specified in the epic
-	return "sha256:" + s[:min(32, len(s))]
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return Digest([]byte(s))
 }

@@ -74,7 +74,7 @@ func (r *A2AResolver) Fault(ref CapRef) (Capability, error) {
 				Digest: digest,
 				Body:   body,
 				Scope:  abi.ScopeFleet, // A2A methods are fleet-wide by default
-				Caps:   nil, // A2A methods don't advertise capabilities in this form
+				Caps:   nil,            // A2A methods don't advertise capabilities in this form
 			}, nil
 		}
 	}
