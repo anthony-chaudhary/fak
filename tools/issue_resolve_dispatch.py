@@ -616,6 +616,17 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
 # "not capped", so the gate can only ever ADD a refusal, never wedge the loop.
 
 _CAP_BANNER_RE = re.compile(r"hit your[\w\s]*limit", re.IGNORECASE)
+# The codex (OpenAI/ChatGPT) backend hits its own quota wall with a different banner
+# than Claude's: "You've hit your usage limit. Visit https://chatgpt.com/codex/...
+# purchase more credits or try again at Jul 1st, 2026 8:41 PM." It matches the phrase
+# regex above ("hit your usage limit"), but its reset clause is "try again at <date>"
+# (no "(America/Los_Angeles)" suffix), so the Claude reset parsers below miss it and
+# the hold would fall back to the short cooldown — re-spawning doomed codex workers
+# until the real (Jul-1) reset. _CODEX_RESET_RE recovers the codex reset moment so the
+# hold runs to the real wall instead.
+_CODEX_RESET_RE = re.compile(
+    r"try again at\s+([A-Za-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\s+\d{1,2}(?::\d{2})?\s*(?:am|pm))",
+    re.IGNORECASE)
 # A SESSION limit is a short rolling window (resets in hours); a WEEKLY limit is a
 # multi-day quota wall. They share the "hit your … limit" banner but must NOT share
 # the hold: treating a transient session limit as a weekly hold — and projecting a
@@ -648,13 +659,44 @@ def _backend_of_log(log: Path) -> str:
         return "claude"
 
 
+# How many trailing bytes of a worker log to inspect for the quota banner. A walled
+# worker emits the banner as the LAST thing it writes, so the tail is where it lives;
+# bounding the read keeps a multi-MB productive log cheap to scan and stops its early
+# agent prose from false-matching the phrase.
+_CAP_TAIL_BYTES = 4096
+
+
+def _log_tail_text(log: Path, *, nbytes: int = _CAP_TAIL_BYTES) -> str:
+    """The last ``nbytes`` of ``log`` decoded as utf-8 (errors replaced), or "" on
+    any read error. Used to inspect a log's ending for the quota banner without
+    reading the whole (possibly large) file."""
+    try:
+        size = log.stat().st_size
+        with log.open("rb") as fh:
+            if size > nbytes:
+                fh.seek(-nbytes, os.SEEK_END)
+            raw = fh.read()
+    except OSError:
+        return ""
+    return raw.decode("utf-8", errors="replace")
+
+
+def _log_is_cap_banner(log: Path) -> bool:
+    """True when ``log``'s tail is the quota-limit banner (Claude or codex). Lets the
+    backend-health classifier treat a credit-walled worker as a stub regardless of
+    byte size — a codex wall log clears the size floor on its startup banner alone."""
+    return bool(_CAP_BANNER_RE.search(_log_tail_text(log)))
+
+
 def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
                             now_ts: float) -> dict[str, Any] | None:
-    """The most-recent worker log (this backend, mtime within ``lookback_min``,
-    tiny) whose body is the quota-limit banner → ``{reset_text, evidence_log}``,
-    else None. The size cap (a real worker log is large; the banner is ~65 bytes)
-    plus the specific phrase keep a prose log that merely mentions "limit" from
-    false-matching."""
+    """The most-recent worker log (this backend, mtime within ``lookback_min``)
+    whose TAIL is the quota-limit banner → ``{reset_text, evidence_log}``, else None.
+    Scanning only the tail (not the whole file, and not size-gated) catches a codex
+    wall log — which clears any byte floor on its ~700-byte startup banner before the
+    error — while keeping a real multi-MB worker log cheap to inspect; the specific
+    phrase still keeps a prose log that merely mentions "limit" mid-run from
+    false-matching, because the banner only appears as the worker's final output."""
     if not runs_dir.is_dir():
         return None
     horizon = now_ts - lookback_min * 60
@@ -664,17 +706,18 @@ def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
             st = log.stat()
         except OSError:
             continue
-        if st.st_mtime < horizon or st.st_size > 512:
+        if st.st_mtime < horizon:
             continue
         if _backend_of_log(log) != product:
             continue
-        try:
-            text = log.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        text = _log_tail_text(log)
         if not _CAP_BANNER_RE.search(text):
             continue
-        m = _CAP_RESET_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text)
+        # Codex's "try again at <date>" reset wins when present (it has no
+        # "(America/Los_Angeles)" clause the Claude parsers key on); otherwise fall
+        # back to the Claude reset clauses.
+        m = (_CODEX_RESET_RE.search(text) or _CAP_RESET_RE.search(text)
+             or _CAP_RESET_FALLBACK_RE.search(text))
         reset_text = m.group(1).strip() if m else ""
         # weekly is the conservative (longer) hold; default to weekly only when the
         # banner explicitly says so, treat an explicit "session limit" as session,
@@ -848,7 +891,13 @@ def _classify_backend_logs(runs_dir: Path, *, product: str, lookback_min: int,
             continue
         if _backend_of_log(log) != product:
             continue
-        productive = st.st_size > _STUB_LOG_MAX_BYTES
+        # Size alone is not productivity. A codex credit-wall log carries a ~700-byte
+        # startup banner (workdir/model/session id/hook lines) BEFORE the quota error,
+        # so it clears the byte floor while landing zero real turns. A log whose body
+        # is the quota banner is never a real turn regardless of size -> read the tail
+        # and treat a _CAP_BANNER_RE hit as a stub, so a credit-walled codex worker
+        # joins the dead-streak instead of falsely breaking it.
+        productive = st.st_size > _STUB_LOG_MAX_BYTES and not _log_is_cap_banner(log)
         if not productive:
             # Only a DEAD pid over a stub log is evidence of a doomed spawn; a live
             # one is still running (claude streams nothing until the end).

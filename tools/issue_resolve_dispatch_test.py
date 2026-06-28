@@ -759,6 +759,55 @@ class WeeklyCapGateTest(unittest.TestCase):
                                    account_tag="smith", now_ts=1_000_000.0)
         self.assertFalse(out["capped"])
 
+    # --- codex credit-wall: banner sits behind a ~700B startup preamble, so the log
+    # clears the byte floor; the gate must still detect it (tail scan, no size cap)
+    # and parse codex's "try again at <date>" reset (not the Claude reset clause). ---
+    CODEX_WALL = (
+        "workdir: C:\\work\\fak\nmodel: gpt-5.5\nsession id: 0c1f...\n"
+        + ("hook: SessionStart\nhook: UserPromptSubmit\n" * 30)   # ~700B preamble > 512 floor
+        + "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
+          "to purchase more credits or try again at Jul 1st, 2026 8:41 PM.\n")
+
+    def test_scan_detects_codex_wall_over_size_floor(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # >512 bytes (the old size gate would have skipped it), backend=opencode/codex.
+            self.assertGreater(len(self.CODEX_WALL), 512)
+            self._write_worker(runs, "resolve-70-z.log", self.CODEX_WALL,
+                               mtime=now - 60, backend="opencode")
+            hit = mod._scan_recent_cap_banner(runs, product="opencode",
+                                              lookback_min=45, now_ts=now)
+        self.assertIsNotNone(hit)                         # banner found despite size
+        self.assertEqual(hit["reset_text"], "Jul 1st, 2026 8:41 PM")   # codex reset parsed
+
+    def test_codex_wall_parses_to_real_reset_not_short_cooldown(self) -> None:
+        import datetime as dt
+        mod = load()
+        now = dt.datetime(2026, 6, 28, 20, 0, 0)          # Jun 28, well before the Jul-1 wall
+        got = mod._parse_reset_to_utc("Jul 1st, 2026 8:41 PM", now)
+        # Jul 1 8:41 PM PDT(-7) -> Jul 2 03:41 UTC; days out >> the 60-min fallback.
+        self.assertEqual(got, dt.datetime(2026, 7, 2, 3, 41, 0))
+
+    def test_backend_health_classifies_codex_wall_as_stub(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # Three dead-pid codex wall logs (each >512B) must read as a DEAD streak,
+            # not three "productive" logs that falsely break it.
+            for i in range(mod._BACKEND_DEAD_STREAK):
+                name = f"resolve-7{i}-w.log"
+                self._write_worker(runs, name, self.CODEX_WALL,
+                                   mtime=now - 60 * (i + 1), backend="opencode")
+                (runs / name).with_suffix(".pid").write_text("0", encoding="utf-8")
+            # alive=empty set -> no pid is live -> the dead-pid guard treats each as a stub.
+            out = mod.check_backend_health(runs, product="opencode", now_ts=now, alive=set())
+        self.assertEqual(out["state"], "dead")
+
     # --- session vs weekly: a transient SESSION limit must not become a ~24h wall ---
     SESSION_BANNER = "You've hit your session limit · resets 6:10am (America/Los_Angeles)"
 
