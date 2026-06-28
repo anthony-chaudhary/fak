@@ -19,6 +19,7 @@ FLEET_DASH = os.path.join(HERE, "grafana", "dashboards", "fleet-bottleneck-overv
 GATEWAY_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-gateway-observability.json")
 DOGFOOD_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-dogfood-slow-requests.json")
 STARTUP_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-startup-load.json")
+GUARD_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-guard-adjudication.json")
 ALERTS = os.path.join(HERE, "grafana", "prometheus-alerts.yml")
 PROMETHEUS = os.path.join(HERE, "grafana", "prometheus.yml")
 # fak_gateway_/fak_kernel_ families are emitted from two files: the request/kernel
@@ -322,7 +323,7 @@ class CrossSurfaceContractTest(unittest.TestCase):
         self.assertFalse(missing, f"dashboard queries phantom metrics: {sorted(missing)}")
 
     def test_gateway_dashboard_queries_only_emitted_metrics(self):
-        for path in (GATEWAY_DASH, DOGFOOD_DASH, STARTUP_DASH):
+        for path in (GATEWAY_DASH, DOGFOOD_DASH, STARTUP_DASH, GUARD_DASH):
             with self.subTest(path=os.path.basename(path)):
                 dash = json.loads(_read(path))
                 referenced = _gateway_metric_names(_panel_exprs(dash))
@@ -353,6 +354,7 @@ class CrossSurfaceContractTest(unittest.TestCase):
             (GATEWAY_DASH, "fak-gateway-observability"),
             (DOGFOOD_DASH, "fak-dogfood-slow-requests"),
             (STARTUP_DASH, "fak-startup-load"),
+            (GUARD_DASH, "fak-guard-adjudication"),
         ):
             with self.subTest(path=os.path.basename(path)):
                 dash = json.loads(_read(path))

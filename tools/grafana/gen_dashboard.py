@@ -14,6 +14,7 @@ Re-run after changing either metric set:
                                               # and dashboards/fak-gateway-observability.json
                                               # and dashboards/fak-dogfood-slow-requests.json
                                               # and dashboards/fak-startup-load.json
+                                              # and dashboards/fak-guard-adjudication.json
 
 The committed JSON is what Grafana provisions; this generator is the maintainable
 source. `METRICS` / `GATEWAY_METRICS` below are the contract —
@@ -28,6 +29,7 @@ OUT = os.path.join(HERE, "dashboards", "fleet-bottleneck-overview.json")
 OUT_GATEWAY = os.path.join(HERE, "dashboards", "fak-gateway-observability.json")
 OUT_DOGFOOD = os.path.join(HERE, "dashboards", "fak-dogfood-slow-requests.json")
 OUT_STARTUP = os.path.join(HERE, "dashboards", "fak-startup-load.json")
+OUT_GUARD = os.path.join(HERE, "dashboards", "fak-guard-adjudication.json")
 
 DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
 
@@ -71,6 +73,28 @@ STARTUP_METRICS = [
     "fak_model_load_tensors", "fak_model_load_info",
     "fak_model_load_phase_duration_seconds", "fak_model_load_phase_bytes",
     "fak_model_load_phase_tensors",
+]
+
+# The `fak guard` session view. Guard exposes the SAME /metrics surface fak serve
+# does (it IS the gateway, bound on a private loopback port), so the guard dashboard
+# is built entirely from already-emitted families — no new metric is introduced. It
+# foregrounds the adjudication-referee story the gateway dashboard does not: what the
+# kernel allowed vs blocked (by the closed refusal vocabulary), what the cache hop
+# saved (the NET fak_vcache_* economics), and the history-compaction / tool-floor
+# shedding — the live, in-Grafana twin of the summary `fak guard` prints on exit.
+GUARD_METRICS = [
+    "fak_gateway_up", "fak_gateway_operations_total",
+    "fak_gateway_operation_duration_seconds",
+    "fak_gateway_context_pollutions_blocked_total",
+    "fak_gateway_inference_cached_prompt_tokens_total",
+    "fak_vcache_saved_token_equiv", "fak_vcache_multiplier", "fak_vcache_hit_rate",
+    "fak_vcache_proven", "fak_vcache_baseline_token_equiv",
+    "fak_vcache_actual_token_equiv", "fak_vcache_cache_creation_tokens_total",
+    "fak_gateway_compaction_attempts_total", "fak_gateway_compaction_bail_reason_total",
+    "fak_gateway_compaction_shed_tokens_total",
+    "fak_gateway_inbound_tools_pruned_total",
+    "fak_gateway_upstream_errors_total", "fak_gateway_upstream_retries_total",
+    "fak_gateway_turns_saved_total",
 ]
 
 _id = [0]
@@ -705,10 +729,206 @@ def build_startup():
     }
 
 
+PROVEN_MAP = [{"type": "value", "options": {
+    "0": {"text": "NOT YET", "color": "yellow", "index": 0},
+    "1": {"text": "PROVEN", "color": "green", "index": 1}}}]
+# Net cache saving: green is the win (saving repaid), red the cold-write hole a
+# session sits in until its reads repay the write premium. The 0 boundary is the
+# break-even line the fak_vcache_proven gate flips on.
+SAVED_TH = steps((None, "red"), (0, "green"))
+
+
+def build_guard():
+    """The `fak guard` session view — the live Grafana twin of the adjudication +
+    cache summary `fak guard` prints when the wrapped agent exits. Guard binds the
+    SAME gateway fak serve does (on a private loopback port) and serves the SAME
+    /metrics, so this dashboard is built entirely from already-emitted families. It
+    foregrounds what the referee did: verdict mix (allowed/denied/repaired/
+    quarantined), the trust floor firing by the closed refusal vocabulary, the NET
+    provider-cache economics the kernel hop preserved, and the history-compaction /
+    tool-floor token shedding. Scrape it by starting guard on the gateway port the
+    Prometheus `fak_gateway` job already targets: `fak guard --addr 127.0.0.1:8080
+    -- claude`."""
+    panels = []
+
+    # Every non-ALLOW verdict carrying a refusal reason is the trust floor firing;
+    # the empty-reason ALLOW path is excluded so the refusal panels show only the
+    # closed refusal vocabulary (internal/abi/reasons.go).
+    nonallow = 'fak_gateway_operations_total{reason!="",verdict!="ALLOW"}'
+    UP_MAP = [{"type": "value", "options": {
+        "0": {"text": "DOWN", "color": "red", "index": 0},
+        "1": {"text": "UP", "color": "green", "index": 1}}}]
+
+    panels.append(row("Session at a glance", 0))
+    panels.append(stat("Scrape", 'up{job="fak_gateway"}', 0, 1, thresholds=UP_TH,
+                       mappings=UP_MAP,
+                       desc="Prometheus scrape health. Start guard on this port with "
+                            "`fak guard --addr 127.0.0.1:8080 -- claude`."))
+    panels.append(stat("Kernel decisions", "sum(fak_gateway_operations_total) or vector(0)",
+                       4, 1, desc="Every verdict the kernel reached this session "
+                                  "(allow + deny + repair + admit)."))
+    panels.append(stat("Allowed", 'sum(fak_gateway_operations_total{verdict="ALLOW"}) or vector(0)',
+                       8, 1, desc="Tool calls the capability floor let through."))
+    panels.append(stat("Denied", 'sum(fak_gateway_operations_total{verdict="DENY"}) or vector(0)',
+                       12, 1, thresholds=ONE_RED,
+                       desc="Proposed tool calls the floor refused before they ran."))
+    panels.append(stat("Repaired", 'sum(fak_gateway_operations_total{verdict="TRANSFORM"}) or vector(0)',
+                       16, 1, desc="Calls repaired in-flight (e.g. grammar) instead of "
+                                   "costing a wasted round-trip."))
+    panels.append(stat("Quarantined", "fak_gateway_context_pollutions_blocked_total or vector(0)",
+                       20, 1, thresholds=ONE_RED,
+                       desc="Poisoned/untrusted tool-result payloads the context-MMU "
+                            "paged out before the model read them."))
+
+    panels.append(row("Trust floor — refusals by reason", 5))
+    panels.append(timeseries(
+        "Refusal rate by reason",
+        [(f"sum by (reason) (rate({nonallow}[5m]))", "{{reason}}")],
+        0, 6, w=12, h=8,
+        desc="Per-second rate of non-ALLOW verdicts grouped by the closed refusal "
+             "vocabulary (internal/abi/reasons.go: TRUST_VIOLATION, SECRET_EXFIL, "
+             "SELF_MODIFY, POLICY_BLOCK, DEFAULT_DENY, ...). 0 across the board means "
+             "the floor refused nothing."))
+    panels.append(bargauge(
+        "Refusals by reason (session total)", f"sum by (reason) ({nonallow})",
+        "{{reason}}", 12, 6, w=12, h=8, thresholds=ONE_RED,
+        desc="Cumulative count of each structured refusal reason this session — the "
+             "kernel's 'why I said no', ranked."))
+
+    panels.append(row("Verdict & disposition mix", 14))
+    panels.append(timeseries(
+        "Verdict mix (rate)",
+        [("sum by (operation, verdict) (rate(fak_gateway_operations_total[5m]))",
+          "{{operation}} {{verdict}}")],
+        0, 15, w=12, h=8,
+        desc="syscall/adjudicate/admit verdict rate while the wrapped agent runs."))
+    panels.append(timeseries(
+        "Refusal disposition (rate)",
+        [('sum by (disposition) '
+          '(rate(fak_gateway_operations_total{disposition!="",verdict!="ALLOW"}[5m]))',
+          "{{disposition}}")],
+        12, 15, w=12, h=8,
+        desc="How refusals are dispatched (DENY vs WAIT vs ...) — the action the "
+             "caller should take, aggregated over all reasons."))
+
+    panels.append(row("Cache value — what the kernel hop saved", 23))
+    panels.append(stat("Net saved (tok-equiv)", "fak_vcache_saved_token_equiv", 0, 24,
+                       thresholds=SAVED_TH,
+                       desc="NET realized provider-cache saving (read rebate MINUS write "
+                            "premium). Negative until the reads repay a cold write. Same "
+                            "number as `fak vcache observe`."))
+    panels.append(stat("Cache multiplier", "fak_vcache_multiplier", 4, 24,
+                       desc="baseline/actual token-equiv; 1.0 = no net saving."))
+    panels.append(stat("Provider hit-rate", "fak_vcache_hit_rate", 8, 24,
+                       unit="percentunit", thresholds=CACHE_TH,
+                       desc="cache_read share of the uncached baseline."))
+    panels.append(stat("Repaid?", "fak_vcache_proven", 12, 24, thresholds=UP_TH,
+                       mappings=PROVEN_MAP,
+                       desc="1 once the session's observed cache reads repaid the write "
+                            "premium (NET positive); else 0 (cold/write-dominated)."))
+    panels.append(stat("Provider cached tokens",
+                       "fak_gateway_inference_cached_prompt_tokens_total or vector(0)",
+                       16, 24,
+                       desc="Prompt tokens the provider served from its own cache, "
+                            "preserved byte-for-byte through the kernel hop."))
+    panels.append(stat("Cache writes (tok)",
+                       "fak_vcache_cache_creation_tokens_total or vector(0)", 20, 24,
+                       desc="cache_creation tokens — the write premium the reads repay."))
+    panels.append(timeseries(
+        "Cache economics over time",
+        [("fak_vcache_baseline_token_equiv", "baseline (uncached)"),
+         ("fak_vcache_actual_token_equiv", "actual (cached)"),
+         ("fak_vcache_saved_token_equiv", "net saved")],
+        0, 28, w=24, h=8,
+        desc="The uncached baseline vs actual token-equiv cost and the net saving "
+             "between them. Series appear once a turn carries provider cache activity."))
+
+    panels.append(row("Token shedding — compaction & tool-floor prune", 36))
+    panels.append(bargauge(
+        "Compaction attempts (session)",
+        "sum by (outcome) (fak_gateway_compaction_attempts_total)", "{{outcome}}",
+        0, 37, w=8, h=8,
+        desc="fired = body rewritten with the protected prefix shipped byte-identical; "
+             "bailed = returned identity; off = budget unset."))
+    panels.append(bargauge(
+        "Compaction bail reasons",
+        "sum by (reason) (fak_gateway_compaction_bail_reason_total)", "{{reason}}",
+        8, 37, w=8, h=8, thresholds=ONE_RED,
+        desc="Why a compaction bailed. under_budget/no_breakpoint are benign; "
+             "prefix_mismatch / splice_failed / redecode_failed are the only fak-fault "
+             "cache signals and must stay 0."))
+    panels.append(stat("Tokens shed", "fak_gateway_compaction_shed_tokens_total or vector(0)",
+                       16, 37, w=8, h=4,
+                       desc="Estimated tokens fak removed from the outbound body across "
+                            "all fires (what fak SENT, not a provider-billing claim)."))
+    panels.append(stat("Tool defs pruned", "fak_gateway_inbound_tools_pruned_total or vector(0)",
+                       16, 41, w=8, h=4,
+                       desc="Unreachable tool definitions dropped from tools[], "
+                            "cache-prefix-preserving. 0 on Claude Code, whose single "
+                            "breakpoint sits on the LAST tool."))
+
+    panels.append(row("Upstream health & turns saved", 45))
+    panels.append(timeseries(
+        "Upstream turn failures by kind",
+        [("sum by (kind) (rate(fak_gateway_upstream_errors_total[5m]))", "{{kind}}")],
+        0, 46, w=12, h=8,
+        desc="Why proxied turns failed (stalled / unreachable / status_4xx / "
+             "status_5xx / oom / other) — the cumulative twin of the per-turn FAILED line."))
+    panels.append(bargauge(
+        "Turns saved by mechanism",
+        "sum by (mechanism) (fak_gateway_turns_saved_total)", "{{mechanism}}",
+        12, 46, w=8, h=8,
+        desc="vdso_dedup = a duplicate read served with no engine round-trip; "
+             "grammar_repair = a malformed call repaired instead of a retry turn."))
+    panels.append(stat("Upstream retries", "fak_gateway_upstream_retries_total or vector(0)",
+                       20, 46, w=4, h=8,
+                       desc="Planner 429/5xx exponential-backoff attempts this session."))
+
+    panels.append(text_panel(
+        "Scrape a fak guard session",
+        "`fak guard` binds the same gateway `fak serve` does, on a private loopback "
+        "port that is torn down when the wrapped agent exits — so to chart a session, "
+        "pin the port the Prometheus `fak_gateway` job already scrapes:\n\n"
+        "```\nfak guard --addr 127.0.0.1:8080 -- claude\n```\n\n"
+        "Every panel here reads `fak guard`'s live `/metrics`. The durable, "
+        "hash-chained **decision journal** (`guard-audit.jsonl`, on by default) is the "
+        "tamper-evident record of the same verdicts — replay it with "
+        "`fak audit verify <path>`. Grafana shows the verdicts and savings; it never "
+        "shows raw request bodies (use `--log FILE` for the structured per-request / "
+        "per-verdict stream).",
+        0, 54, w=24, h=6,
+        desc="How to point Prometheus at a guard session, and where the durable record lives."))
+
+    return {
+        "uid": "fak-guard-adjudication",
+        "title": "FAK Guard — Kernel Adjudication",
+        "description": "The `fak guard` session view: verdict mix (allowed/denied/"
+                       "repaired/quarantined), the trust floor firing by refusal reason, "
+                       "the NET provider-cache economics the kernel hop preserved, and "
+                       "history-compaction / tool-floor token shedding. The live twin of "
+                       "the summary `fak guard` prints on exit. Source: fak guard /metrics "
+                       "(start it with --addr 127.0.0.1:8080 to reuse the fak_gateway scrape job).",
+        "tags": ["fak", "guard", "adjudication", "security"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "10s",
+        "time": {"from": "now-1h", "to": "now"},
+        "timepicker": {}, "links": [], "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
 def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     for path, dash in ((OUT, build()), (OUT_GATEWAY, build_gateway()),
-                       (OUT_DOGFOOD, build_dogfood()), (OUT_STARTUP, build_startup())):
+                       (OUT_DOGFOOD, build_dogfood()), (OUT_STARTUP, build_startup()),
+                       (OUT_GUARD, build_guard())):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(dash, f, indent=2)
             f.write("\n")
