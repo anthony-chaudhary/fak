@@ -251,41 +251,36 @@ func (t *Table) Transition(trace string, to RunState, reason string) (State, boo
 // up, cut to slow down or to let an urgent session pass. A terminal session rejects
 // the change. Pass Unbounded on an axis to clear its cap.
 func (t *Table) SetBudget(trace string, b Budget) (State, bool) {
+	return t.setLocked(trace, func(cur *State) { cur.Budget = b.withContextCap() })
+}
+
+// setLocked is the shared body of the live-setter verbs (SetBudget / SetPace /
+// SetPriority / SetTurnIntent / SetGoal): under the table lock it rejects a terminal
+// session (returning it with ok=false) and otherwise applies mutate to the current
+// record and writes it back, bumping Rev. mutate receives a pointer to the working
+// copy and must only adjust fields.
+func (t *Table) setLocked(trace string, mutate func(cur *State)) (State, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cur := t.getLocked(trace)
 	if cur.Run.terminal() {
 		return cur, false
 	}
-	cur.Budget = b.withContextCap()
+	mutate(&cur)
 	return t.putLocked(cur), true
 }
 
 // SetPace re-sets a session's per-turn throttle live. A terminal session rejects
 // the change. A zero axis means "no opinion" (planner default).
 func (t *Table) SetPace(trace string, p Pace) (State, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	cur := t.getLocked(trace)
-	if cur.Run.terminal() {
-		return cur, false
-	}
-	cur.Pace = p
-	return t.putLocked(cur), true
+	return t.setLocked(trace, func(cur *State) { cur.Pace = p })
 }
 
 // SetPriority re-sets a session's scheduling rank live. A terminal session rejects
 // the change. Lower yields first under contention; the table only records it — a
 // scheduler reading Snapshot acts on it.
 func (t *Table) SetPriority(trace string, priority int) (State, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	cur := t.getLocked(trace)
-	if cur.Run.terminal() {
-		return cur, false
-	}
-	cur.Priority = priority
-	return t.putLocked(cur), true
+	return t.setLocked(trace, func(cur *State) { cur.Priority = priority })
 }
 
 // SetTurnIntent records the ADVISORY next-turn hint set for a session (issue #807).
@@ -295,14 +290,7 @@ func (t *Table) SetPriority(trace string, priority int) (State, bool) {
 // cost/latency lever (vCache posture). Setting it bumps Rev like any other write, so a
 // /v1/fak/changes cursor sees the intent update.
 func (t *Table) SetTurnIntent(trace string, intent TurnIntent) (State, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	cur := t.getLocked(trace)
-	if cur.Run.terminal() {
-		return cur, false
-	}
-	cur.Intent = intent
-	return t.putLocked(cur), true
+	return t.setLocked(trace, func(cur *State) { cur.Intent = intent })
 }
 
 // SetGoal records the session's active goal root (issue #849, the reachability-layer
@@ -312,14 +300,7 @@ func (t *Table) SetTurnIntent(trace string, intent TurnIntent) (State, bool) {
 // root only. Setting it bumps Rev like any other write, so a /v1/fak/changes cursor
 // sees the goal update and a concurrent reader observes a monotonic version.
 func (t *Table) SetGoal(trace string, goal Goal) (State, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	cur := t.getLocked(trace)
-	if cur.Run.terminal() {
-		return cur, false
-	}
-	cur.Goal = goal
-	return t.putLocked(cur), true
+	return t.setLocked(trace, func(cur *State) { cur.Goal = goal })
 }
 
 // CompareAndSet applies want only if the session's current Rev equals expectRev —
