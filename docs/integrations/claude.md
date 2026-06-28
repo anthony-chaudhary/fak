@@ -133,7 +133,7 @@ The `--gguf` flag accepts a model alias (from `fak ls`), an `hf://` URI, or a lo
 ```bash
 fak ls    # list available aliases: qwen2.5:7b, qwen2.5:1.5b, smollm2, ornith:9b
 fak guard --gguf qwen2.5:1.5b -- claude               # smaller 1.5B model (~1.6 GB)
-fak guard --gguf /path/to/model.gguf -- claude       # local file
+fak guard --gguf <path/to/model.gguf> -- claude      # local file
 fak guard --gguf hf://owner/repo/model.gguf -- claude # download on demand
 ```
 
