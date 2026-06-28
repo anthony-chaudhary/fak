@@ -428,7 +428,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, reqTrace)
+	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
 		return

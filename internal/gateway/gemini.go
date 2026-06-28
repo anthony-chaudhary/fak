@@ -153,7 +153,7 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	// OpenAI and Anthropic proxy paths. decodeGeminiContent already turned each
 	// inbound functionResponse into a canonical RoleTool message, so
 	// admitInboundResults routes each through k.AdmitResult keyed on reqTrace.
-	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, reqTrace)
+	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
 		return

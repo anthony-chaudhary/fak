@@ -152,6 +152,41 @@ func TestPrefixInvariantWithTools(t *testing.T) {
 	}
 }
 
+// TestToolsLessEvictRenderMissesCachedToolTurn measures the cost #612 closes: when a turn is
+// generated WITH tools (renderChatMLTools folds the tool-spec into the leading system block), the
+// historical tools-LESS eviction render (renderTranscript) is NOT a string-prefix of the cached
+// turn — it diverges right at the folded tool-spec, so EvictPrefix walks off at the system block
+// and reclaims NOTHING (the fail-open this issue documents). Threading the SAME tools makes the
+// eviction render a genuine prefix again (the positive direction is TestPrefixInvariantWithTools).
+// This is the deterministic, tokenizer-free witness that the un-reclaimed span is real on EVERY
+// tool-using turn (not negligible), and a regression guard against reverting EvictPoisoned to the
+// tools-less render.
+func TestToolsLessEvictRenderMissesCachedToolTurn(t *testing.T) {
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "fetch_url", Description: "fetch", Parameters: []byte(`{"type":"object"}`)}}}
+	full := []Message{
+		{Role: "system", Content: "be careful"},
+		{Role: "user", Content: "look it up"},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "c0", Function: Func{Name: "fetch_url", Arguments: `{"u":"x"}`}}}},
+		{Role: "tool", Name: "fetch_url", Content: "secret leaked"},
+	}
+	poisonIdx := len(full) - 1 // the tool result is the poisoned message
+	cached := renderChatMLTools(full, tools)
+
+	// OLD behavior: EvictPoisoned rendered renderTranscript (tools-less). It diverges from the
+	// cached turn at the folded tool-spec, so it is NOT a prefix -> EvictPrefix reclaims nothing.
+	toolsLess := renderTranscript(full[:poisonIdx+1])
+	if strings.HasPrefix(cached, toolsLess) {
+		t.Fatalf("tools-less eviction render is unexpectedly a prefix of the tool-bearing cached turn — the #612 reuse loss would not exist\n toolsLess=%q\n   cached=%q", toolsLess, cached)
+	}
+
+	// NEW behavior (#612): rendering the SAME tools makes the eviction path a genuine prefix, so
+	// the radix walk lands on the cached node and the poison span is reclaimed.
+	withTools := renderTranscriptTools(full[:poisonIdx+1], tools)
+	if !strings.HasPrefix(cached, withTools) {
+		t.Fatalf("tools-aware eviction render must be a prefix of the cached turn (the #612 fix)\n withTools=%q\n    cached=%q", withTools, cached)
+	}
+}
+
 // TestRenderChatMLNoSystem keeps generation working when there is no system message.
 func TestRenderChatMLNoSystem(t *testing.T) {
 	got := renderChatML([]Message{{Role: "user", Content: "ping"}})

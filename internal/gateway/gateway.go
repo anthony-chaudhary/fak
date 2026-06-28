@@ -1750,7 +1750,7 @@ func (s *Server) admitOp(ctx context.Context, operation, tool, rawResult, witnes
 // adjudicates the calls the model then proposes — so an exfil call on a tainted
 // session is refused. messages is mutated in place (request-local). The per-result
 // admissions are returned for the fak response extension.
-func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Message, traceID string) ([]ResultAdmission, error) {
+func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, traceID string) ([]ResultAdmission, error) {
 	// Snapshot each message's ORIGINAL content before admission rewrites any quarantined
 	// payload in place. The in-kernel poison-eviction hook needs the original (poisoned)
 	// bytes to render the token path that was actually cached, not the paged-out form.
@@ -1801,7 +1801,7 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 	// admitted as benign on an EARLIER turn and prefilled into the in-kernel KV cache. Drop
 	// any cached prefix that attended to it so a later turn re-prefills instead of replaying
 	// the poisoned KV. Fires on the SAME quarantine event as the external engine-cache reset.
-	s.evictInKernelPoison(messages, origContent, quarantinedIdx)
+	s.evictInKernelPoison(messages, origContent, quarantinedIdx, tools)
 	if err := s.resetEngineCacheAfterQuarantine(ctx, admissions); err != nil {
 		return admissions, err
 	}
@@ -1821,9 +1821,12 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 //     that never saw the poison — the flagship guarantee, now fired by a LIVE request and not
 //     only the synthetic-model unit witness. DEFAULT OFF (FAK_INKERNEL_KVMMU opts in).
 //
-// The transcript is rendered with each message's ORIGINAL content so the evicted token path
-// matches what the cache actually prefilled before the verdict paged the bytes out.
-func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []string, quarantinedIdx []int) {
+// The transcript is rendered with each message's ORIGINAL content AND the request's tool
+// schemas (tools) so the evicted token path matches what the cache actually prefilled before
+// the verdict paged the bytes out — generation rendered renderChatMLTools(messages, tools)
+// with the tool-spec folded into the leading system block, so a tools-less eviction render
+// would not be a token-prefix of the cached tool-using turn and would reclaim nothing (#612).
+func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []string, quarantinedIdx []int, tools []agent.ToolDef) {
 	if len(quarantinedIdx) == 0 {
 		return
 	}
@@ -1841,7 +1844,7 @@ func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []str
 	}
 	for _, idx := range quarantinedIdx {
 		if hasPrefix {
-			if freed := prefixEv.EvictPoisoned(restored, idx); freed > 0 {
+			if freed := prefixEv.EvictPoisoned(restored, idx, tools); freed > 0 {
 				s.logf("gateway: in-kernel KV prefix evicted on tool-result quarantine msg=%d freed=%dtok", idx, freed)
 			}
 		}
@@ -1849,7 +1852,7 @@ func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []str
 			// Default-off bridge: a no-op (0,false) unless FAK_INKERNEL_KVMMU opted it in, so the
 			// served path is unchanged by default. When on, a non-zero freed span proves the live
 			// KVCache.Evict fired; reposition_exact records the bit-exact never-saw invariant.
-			if freed, exact := spanEv.EvictKVSpan(restored, idx); freed > 0 {
+			if freed, exact := spanEv.EvictKVSpan(restored, idx, tools); freed > 0 {
 				s.logf("gateway: in-kernel KV span evicted on tool-result quarantine msg=%d freed=%dpos reposition_exact=%v", idx, freed, exact)
 			}
 		}

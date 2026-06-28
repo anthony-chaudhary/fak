@@ -195,7 +195,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resultAdmissions, err := s.admitInboundResults(ctx, messages, reqTrace)
+	resultAdmissions, err := s.admitInboundResults(ctx, messages, tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
 		return

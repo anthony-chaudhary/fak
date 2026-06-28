@@ -597,7 +597,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// exfil call on a tainted session. Without this, the Anthropic wire — the one
 	// Claude Code uses natively — silently had a weaker floor than the OpenAI wire:
 	// a tainted result reached the model raw and the egress call was allowed.
-	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, reqTrace)
+	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		return nil, err
 	}

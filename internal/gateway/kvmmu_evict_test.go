@@ -148,7 +148,7 @@ func TestLiveKVSpanEvictionBitExact(t *testing.T) {
 	// Drive the LIVE gateway result-side path: admit each tool result, quarantine the poison,
 	// and fire the in-kernel eviction hooks (evictInKernelPoison -> KVSpanEvictor.EvictKVSpan).
 	// This must not error or panic on the real planner.
-	admissions, err := srv.admitInboundResults(context.Background(), messages, "trace-live-579")
+	admissions, err := srv.admitInboundResults(context.Background(), messages, nil, "trace-live-579")
 	if err != nil {
 		t.Fatalf("admitInboundResults (live path): %v", err)
 	}
@@ -173,7 +173,7 @@ func TestLiveKVSpanEvictionBitExact(t *testing.T) {
 		{Role: agent.RoleUser, Content: "look up the config"},
 		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: poison},
 	}
-	freed, exact := planner.EvictKVSpan(restored, 2)
+	freed, exact := planner.EvictKVSpan(restored, 2, nil)
 	if freed <= 0 {
 		t.Fatalf("live KVCache.Evict freed %d positions, want > 0 (the poison span must be evicted)", freed)
 	}
@@ -202,7 +202,7 @@ func TestLiveKVSpanEvictionDefaultOff(t *testing.T) {
 		{Role: agent.RoleSystem, Content: "you are a helper"},
 		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: `{"page":"api_key=sk-abcdef0123456789abcdef0123"}`},
 	}
-	if freed, exact := ev.EvictKVSpan(messages, 1); freed != 0 || exact {
+	if freed, exact := ev.EvictKVSpan(messages, 1, nil); freed != 0 || exact {
 		t.Fatalf("bridge OFF must be inert: got freed=%d exact=%v, want 0/false", freed, exact)
 	}
 }
@@ -219,7 +219,7 @@ func TestLiveKVSpanBenignNotEvicted(t *testing.T) {
 		{Role: agent.RoleSystem, Content: "you are a helper"},
 		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "lookup", Content: `{"ok":true,"rows":3}`},
 	}
-	admissions, err := srv.admitInboundResults(context.Background(), messages, "trace-live-benign")
+	admissions, err := srv.admitInboundResults(context.Background(), messages, nil, "trace-live-benign")
 	if err != nil {
 		t.Fatalf("admitInboundResults: %v", err)
 	}
@@ -228,4 +228,36 @@ func TestLiveKVSpanBenignNotEvicted(t *testing.T) {
 			t.Fatalf("a benign result was quarantined on the live path: %+v", a)
 		}
 	}
+}
+
+// TestLiveKVSpanEvictionWithToolsBitExact is the #612 live witness for the KV-MMU bridge half: a
+// poisoned tool result on a TOOL-USING turn (the request carries a tool schema, so generation
+// folds the tool-spec into the leading system block) must still drive a real model.KVCache.Evict
+// that leaves the cache BIT-IDENTICAL to never-having-seen the poison — proving that threading the
+// request tools into EvictKVSpan/lowerSegments (so the lowered spans match the tools-bearing
+// generation token path) does NOT break the reposition invariant. With nil tools this is exactly
+// TestLiveKVSpanEvictionBitExact; here the SAME assertion holds with the tool-spec folded in.
+func TestLiveKVSpanEvictionWithToolsBitExact(t *testing.T) {
+	planner := liveInKernelPlanner(t)
+
+	tools := []agent.ToolDef{{
+		Type:     "function",
+		Function: agent.ToolDefFunction{Name: "fetch_url", Description: "fetch a page", Parameters: []byte(`{"type":"object"}`)},
+	}}
+	const secret = "sk-abcdef0123456789abcdef0123"
+	poison := `{"page":"config loaded. api_key=` + secret + ` was found in env"}`
+	messages := []agent.Message{
+		{Role: agent.RoleSystem, Content: "you are a helper"},
+		{Role: agent.RoleUser, Content: "look up the config"},
+		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: poison},
+	}
+
+	freed, exact := planner.EvictKVSpan(messages, 2, tools)
+	if freed <= 0 {
+		t.Fatalf("tool-using KVCache.Evict freed %d positions, want > 0 (the poison span must be evicted with the tool-spec folded in)", freed)
+	}
+	if !exact {
+		t.Fatalf("post-eviction cache is NOT bit-identical to never-saw with the tool-spec folded in — threading tools broke the live reposition invariant")
+	}
+	t.Logf("LIVE #612: poison span evicted (%d positions) on a TOOL-USING turn; cache bit-exact to never-saw", freed)
 }

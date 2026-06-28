@@ -24,7 +24,8 @@ type recordingEvictor struct {
 
 type evictCall struct {
 	throughIdx int
-	content    string // messages[throughIdx].Content as EvictPoisoned saw it
+	content    string          // messages[throughIdx].Content as EvictPoisoned saw it
+	tools      []agent.ToolDef // the tool schemas threaded from the request (#612)
 }
 
 func (r *recordingEvictor) Complete(ctx context.Context, m []agent.Message, t []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
@@ -33,14 +34,14 @@ func (r *recordingEvictor) Complete(ctx context.Context, m []agent.Message, t []
 
 func (*recordingEvictor) Model() string { return "recording-evictor" }
 
-func (r *recordingEvictor) EvictPoisoned(messages []agent.Message, throughIdx int) int {
+func (r *recordingEvictor) EvictPoisoned(messages []agent.Message, throughIdx int, tools []agent.ToolDef) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c := ""
 	if throughIdx >= 0 && throughIdx < len(messages) {
 		c = messages[throughIdx].Content
 	}
-	r.calls = append(r.calls, evictCall{throughIdx: throughIdx, content: c})
+	r.calls = append(r.calls, evictCall{throughIdx: throughIdx, content: c, tools: tools})
 	return 1
 }
 
@@ -77,7 +78,7 @@ func TestQuarantineEvictsInKernelPoison(t *testing.T) {
 		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: poison},
 	}
 
-	admissions, err := srv.admitInboundResults(context.Background(), messages, "trace-poison")
+	admissions, err := srv.admitInboundResults(context.Background(), messages, nil, "trace-poison")
 	if err != nil {
 		t.Fatalf("admitInboundResults: %v", err)
 	}
@@ -106,6 +107,42 @@ func TestQuarantineEvictsInKernelPoison(t *testing.T) {
 	}
 }
 
+// TestQuarantineThreadsToolsIntoInKernelEvict is the #612 wiring witness: when the request
+// carries tool schemas, the gateway must thread that SAME tool set into EvictPoisoned so the
+// eviction render folds the tool-spec into the leading system block exactly as generation did
+// (renderChatMLTools). Without the threading the eviction renders tools-less, is not a
+// token-prefix of the cached tool-using turn, and reclaims nothing (the fail-open #612 closes).
+// The render-prefix correctness of the threaded form is proven separately by the agent
+// package's TestPrefixInvariantWithTools; this asserts the gateway actually hands the tools down.
+func TestQuarantineThreadsToolsIntoInKernelEvict(t *testing.T) {
+	srv := newResultStackServer(t)
+	ev := &recordingEvictor{comp: &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "ok"}}}
+	srv.planner = ev
+
+	tools := []agent.ToolDef{{
+		Type:     "function",
+		Function: agent.ToolDefFunction{Name: "fetch_url", Description: "fetch a page", Parameters: []byte(`{"type":"object"}`)},
+	}}
+	const secret = "sk-abcdef0123456789abcdef0123"
+	messages := []agent.Message{
+		{Role: agent.RoleUser, Content: "look up the config"},
+		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: `{"page":"api_key=` + secret + `"}`},
+	}
+
+	if _, err := srv.admitInboundResults(context.Background(), messages, tools, "trace-tools"); err != nil {
+		t.Fatalf("admitInboundResults: %v", err)
+	}
+	if len(ev.calls) != 1 {
+		t.Fatalf("EvictPoisoned called %d times, want exactly 1 on the quarantined tool result", len(ev.calls))
+	}
+	if len(ev.calls[0].tools) != len(tools) {
+		t.Fatalf("EvictPoisoned saw %d tools, want %d — the request tool set was not threaded into the eviction render (#612)", len(ev.calls[0].tools), len(tools))
+	}
+	if ev.calls[0].tools[0].Function.Name != "fetch_url" {
+		t.Errorf("threaded tool = %q, want fetch_url (the eviction must fold the SAME tool-spec generation did)", ev.calls[0].tools[0].Function.Name)
+	}
+}
+
 // TestBenignResultDoesNotEvictInKernel is the negative guard: an ALLOWed result must NOT
 // trigger an in-kernel eviction (no spurious cache drops on clean tool output).
 func TestBenignResultDoesNotEvictInKernel(t *testing.T) {
@@ -116,7 +153,7 @@ func TestBenignResultDoesNotEvictInKernel(t *testing.T) {
 	messages := []agent.Message{
 		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "lookup", Content: `{"ok":true,"rows":3}`},
 	}
-	if _, err := srv.admitInboundResults(context.Background(), messages, "trace-benign"); err != nil {
+	if _, err := srv.admitInboundResults(context.Background(), messages, nil, "trace-benign"); err != nil {
 		t.Fatalf("admitInboundResults: %v", err)
 	}
 	if len(ev.calls) != 0 {
@@ -134,7 +171,7 @@ func TestNonEvictorPlannerQuarantineIsSafe(t *testing.T) {
 	messages := []agent.Message{
 		{Role: agent.RoleTool, ToolCallID: "call_1", Name: "fetch_url", Content: `{"page":"api_key=` + secret + `"}`},
 	}
-	admissions, err := srv.admitInboundResults(context.Background(), messages, "trace-noevictor")
+	admissions, err := srv.admitInboundResults(context.Background(), messages, nil, "trace-noevictor")
 	if err != nil {
 		t.Fatalf("admitInboundResults: %v", err)
 	}

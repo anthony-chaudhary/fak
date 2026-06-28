@@ -33,7 +33,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 
-	resultAdmissions, err := s.admitInboundResults(r.Context(), req.Messages, reqTrace)
+	resultAdmissions, err := s.admitInboundResults(r.Context(), req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		s.logf("gateway: result-floor error (messages stream): %v", err)
 		writeErr(w, http.StatusBadGateway, "upstream model error")

@@ -1110,23 +1110,33 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 // mock planner — or an in-kernel planner with reuse disabled — simply does not engage it.
 type PoisonEvictor interface {
 	// EvictPoisoned drops the cached KV prefix along the transcript THROUGH and including
-	// messages[throughIdx] (the quarantined tool result, rendered with its ORIGINAL
-	// content). Returns the freed token count (0 if nothing was cached / reuse is off).
-	EvictPoisoned(messages []Message, throughIdx int) int
+	// messages[throughIdx] (the quarantined tool result, rendered with its ORIGINAL content
+	// AND the request's tool schemas). Returns the freed token count (0 if nothing was cached
+	// / reuse is off). tools MUST be the SAME tool set the generation turn was rendered with
+	// (renderChatMLTools): the tool-spec block folds into the leading system block, so a
+	// tools-less eviction render is NOT a token-prefix of a tools-bearing cached turn and
+	// fails open (reclaims nothing) — the reuse gap on tool-using turns that #612 closes.
+	EvictPoisoned(messages []Message, throughIdx int, tools []ToolDef) int
 }
 
-// EvictPoisoned renders the transcript up to and including the poisoned message — WITHOUT
-// the trailing assistant-open marker, so the token path ends exactly on the poison's
-// <|im_end|> turn boundary — encodes it, and evicts the cached branch along that path.
-// Because each turn ends on the atomic <|im_end|> special token, the encoded partial
-// transcript is a genuine token-prefix of any cached turn that contained these leading
-// messages, so the walk lands on (and EvictNode drops) the node whose KV saw the poison
-// while sparing benign siblings. It is the gateway-facing wrapper over evictPoisonedIDs.
-func (p *InKernelPlanner) EvictPoisoned(messages []Message, throughIdx int) int {
+// EvictPoisoned renders the transcript up to and including the poisoned message — WITH the
+// request's tool schemas (renderTranscriptTools) but WITHOUT the trailing assistant-open
+// marker, so the token path ends exactly on the poison's <|im_end|> turn boundary — encodes
+// it, and evicts the cached branch along that path. Rendering WITH tools is load-bearing: the
+// generation turn was cached as renderChatMLTools(messages, tools) with the tool-spec folded
+// into the leading system block, so the eviction render must fold the SAME spec in or it is
+// not a token-prefix of the cached turn and the walk reclaims nothing (the #612 fail-open on
+// tool-using turns). TestPrefixInvariantWithTools proves renderTranscriptTools(prefix, tools)
+// IS a string-prefix of renderChatMLTools(full, tools); because each turn ends on the atomic
+// <|im_end|> special token, the encoded partial transcript is a genuine token-prefix of the
+// cached turn, so the walk lands on (and EvictNode drops) the node whose KV saw the poison
+// while sparing benign siblings. nil tools renders byte-identically to the historical
+// renderTranscript, so a non-tool turn is unchanged. It wraps evictPoisonedIDs.
+func (p *InKernelPlanner) EvictPoisoned(messages []Message, throughIdx int, tools []ToolDef) int {
 	if p.tree == nil || throughIdx < 0 || throughIdx >= len(messages) {
 		return 0
 	}
-	ids, err := p.tok.Encode(renderTranscript(messages[:throughIdx+1]))
+	ids, err := p.tok.Encode(renderTranscriptTools(messages[:throughIdx+1], tools))
 	if err != nil || len(ids) == 0 {
 		return 0
 	}
@@ -1148,11 +1158,13 @@ func (p *InKernelPlanner) EvictPoisoned(messages []Message, throughIdx int) int 
 type KVSpanEvictor interface {
 	// EvictKVSpan rebuilds messages[:throughIdx+1] as labeled per-message K/V segments on a
 	// fresh session over the loaded model, then quarantines (evicts) the segment for
-	// messages[throughIdx] — the quarantined tool result, rendered with its ORIGINAL content.
-	// It returns the number of K/V positions evicted (0 when the bridge is off or nothing
-	// matched) and whether the post-eviction cache is bit-exact to a session that only ever
-	// prefilled the survivor spans (the never-saw invariant the kvmmu witnesses certify).
-	EvictKVSpan(messages []Message, throughIdx int) (freed int, repositionExact bool)
+	// messages[throughIdx] — the quarantined tool result, rendered with its ORIGINAL content
+	// AND the request's tool schemas (so the per-segment spans concatenate to EXACTLY the
+	// tools-bearing generation token path, not a tools-less one — #612). It returns the number
+	// of K/V positions evicted (0 when the bridge is off or nothing matched) and whether the
+	// post-eviction cache is bit-exact to a session that only ever prefilled the survivor spans
+	// (the never-saw invariant the kvmmu witnesses certify).
+	EvictKVSpan(messages []Message, throughIdx int, tools []ToolDef) (freed int, repositionExact bool)
 }
 
 // EvictKVSpan is the live-path KV-MMU bridge (#579): it lowers the transcript through the
@@ -1165,15 +1177,16 @@ type KVSpanEvictor interface {
 // weights, which is why a synthetic checkpoint is a faithful witness of the wiring). It is
 // inert (returns 0,false) unless FAK_INKERNEL_KVMMU opted the bridge in, so the served path is
 // unchanged by default and FAILS OPEN on any encode/cache anomaly.
-func (p *InKernelPlanner) EvictKVSpan(messages []Message, throughIdx int) (freed int, repositionExact bool) {
+func (p *InKernelPlanner) EvictKVSpan(messages []Message, throughIdx int, tools []ToolDef) (freed int, repositionExact bool) {
 	if !p.kvSpanEvict || p.m == nil || p.tok == nil || throughIdx < 0 || throughIdx >= len(messages) {
 		return 0, false
 	}
 	// Lower each message into the incremental token span it adds to the cumulative transcript.
-	// Rendering renderTranscript(messages[:i+1]) and slicing past the previous cumulative length
-	// makes the per-segment spans concatenate to EXACTLY the full transcript token path — so the
-	// poison segment evicts precisely its own span and the survivors renumber correctly.
-	segIDs, poisonSeg, ok := p.lowerSegments(messages, throughIdx)
+	// Rendering renderTranscriptTools(messages[:i+1], tools) and slicing past the previous
+	// cumulative length makes the per-segment spans concatenate to EXACTLY the full transcript
+	// token path the generation turn cached (tool-spec folded into the leading system block, #612)
+	// — so the poison segment evicts precisely its own span and the survivors renumber correctly.
+	segIDs, poisonSeg, ok := p.lowerSegments(messages, throughIdx, tools)
 	if !ok {
 		return 0, false
 	}
@@ -1256,8 +1269,11 @@ func (p *InKernelPlanner) ElideKVSpans(messages []Message, plan ctxplan.Plan) (f
 	}
 	// Lower every message into its incremental token span (the same lowering EvictKVSpan uses,
 	// through the LAST message so the spans concatenate to exactly the full transcript path). The
-	// segment ids are segIDFor(message, i) — the same ids the plan must carry.
-	segIDs, _, ok := p.lowerSegments(messages, len(messages)-1)
+	// segment ids are segIDFor(message, i) — the same ids the plan must carry. #612 threads tools
+	// into the poison-eviction render; this planned-elision residency bridge is a SEPARATE seam
+	// whose driver does not yet carry the request tools, so it keeps its historical tools-less
+	// lowering (nil) — byte-identical to before, a tracked follow-on, not a regression.
+	segIDs, _, ok := p.lowerSegments(messages, len(messages)-1, nil)
 	if !ok {
 		return 0, false
 	}
@@ -1359,12 +1375,15 @@ type kvSegment struct {
 
 // lowerSegments renders messages[:throughIdx+1] into per-message incremental token spans and
 // returns the ordered segments plus the segment id of the poisoned message (messages[throughIdx]).
-// It fails (ok=false) if any encode errors or any incremental span is empty, so a degenerate
-// tokenization fails OPEN to no eviction rather than evicting the wrong span.
-func (p *InKernelPlanner) lowerSegments(messages []Message, throughIdx int) (segs []kvSegment, poisonID string, ok bool) {
+// It renders WITH the request's tool schemas (renderTranscriptTools) so the lowered spans
+// concatenate to exactly the tools-bearing generation token path; nil tools is byte-identical
+// to the historical renderTranscript lowering. It fails (ok=false) if any encode errors or any
+// incremental span is empty, so a degenerate tokenization fails OPEN to no eviction rather than
+// evicting the wrong span.
+func (p *InKernelPlanner) lowerSegments(messages []Message, throughIdx int, tools []ToolDef) (segs []kvSegment, poisonID string, ok bool) {
 	prev := 0
 	for i := 0; i <= throughIdx; i++ {
-		cum, err := p.tok.Encode(renderTranscript(messages[:i+1]))
+		cum, err := p.tok.Encode(renderTranscriptTools(messages[:i+1], tools))
 		if err != nil || len(cum) <= prev {
 			return nil, "", false
 		}

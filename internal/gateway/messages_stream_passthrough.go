@@ -165,7 +165,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		// buffered path WITHOUT a double-admit on the same trace.
 		if !p.admitted {
 			p.admitted = true
-			adms, aerr := p.s.admitInboundResults(p.r.Context(), p.req.Messages, p.reqTrace)
+			adms, aerr := p.s.admitInboundResults(p.r.Context(), p.req.Messages, p.req.Tools, p.reqTrace)
 			if aerr != nil {
 				p.s.logf("gateway: result-floor error (messages stream): %v", aerr)
 				writeErr(p.w, http.StatusBadGateway, "upstream model error")
