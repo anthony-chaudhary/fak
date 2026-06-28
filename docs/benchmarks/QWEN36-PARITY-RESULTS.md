@@ -63,6 +63,38 @@ what makes the Apple M3 Pro good for local LLM inference."* → model opened a
 load 75.51 s, prefill 22 tokens in 40.62 s, one cached decode token in 16.25 s,
 peak RSS 25,785,204,736 bytes.)
 
+## Which fak Qwen3.6-27B decode number is which (reconciliation)
+
+Several fak Qwen3.6-27B decode numbers circulate, and a reader landing on any one
+doc cannot tell which is "the" number. This is the single table that reconciles
+them: they are **different paths on different hardware**, not three rival claims
+for the same configuration. Every row is **single-stream, batch=1, on this M3
+Pro**, and each value is labelled with where it is cited.
+
+| fak decode path | Decode (tok/s) | What it measures | Cited at (path) |
+|---|---|---|---|
+| **GGUF→Q8 cached** (CPU) | **0.1** | one cached decode token through the GGUF→Q8 round-trip path | the **Measured results** table above; `BENCHMARK-AUTHORITY.md` ("Qwen3.6-27B Q8 decode"); `docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md` |
+| **resident-q4k microbench** (CPU) | **0.9** | raw q4_k blocks stay resident (no Q8 round-trip), scalar-f32 GEMV — the model-ladder rung-4b refresh | the *fak-native status* bullet below ("decode **0.9 tok/s** … ~9× the Q8 path's 0.1"); artifact `experiments/model-ladder/qwen36-resident-q4k-parity-20260619.json` (`"decode_tok_s": 0.9`); `docs/notes/MACBOOK-SERVE-AND-AGENTIC-BENCH-2026-06-24.md` |
+| **resident-Q4_K Metal** (GPU, `-tags fakmetal FAK_Q4K=1 FAK_METAL=1`) | **1.2** | the int8-SDOT Metal decode GEMV path; bit-correct (GEMV cosine 1.0) but launch-bound (~336 command-buffer GEMVs/token) | `BENCHMARK-AUTHORITY.md` ("Qwen3.6-27B fak **Metal Q4_K**"); `docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md` |
+
+So **"fak Qwen3.6-27B decode" is 0.1 → 0.9 → 1.2 tok/s** along the GGUF→Q8-cached →
+resident-q4k-CPU → resident-Q4_K-Metal progression — one M3 Pro, all single-stream.
+It is a measured progression toward the 7.29 tok/s llama.cpp-Metal bar, not a
+self-contradiction.
+
+**Different axis — served throughput (NOT the kernel rows above).** fak's 8-GPU
+*served* Qwen3.6-27B figures (single-stream ≈59–93 tok/s, batched peak ≈820–1085
+completion tok/s) come from **SGLang-serves + fak-adjudicates on 8×A100/DGX**, not
+fak's own M3 Pro engine; they live in `BENCHMARK-AUTHORITY.md` (the two "8-GPU
+SGLang serving" rows) and `docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md`. Do
+not quote them on the same line as the single-stream kernel rows above.
+
+**On the "1.6–1.8 tok/s served-warm" figure.** An earlier migrated note cited a
+"Warm decode ≈ 1.6–1.8 tok/s" from a `FAK-NATIVE-CHAT-RESULTS.md` that **predates
+the v0.30.0 public squash and is not tracked in this tree**; no committed artifact
+reproduces 1.6–1.8 tok/s for this model. It is therefore **not asserted here** —
+the witnessed single-stream figures are the three rows above.
+
 ## What the numbers say — and why "hybrid CPU/GPU" is the right design
 
 - **Decode is bandwidth-bound**: Metal beats CPU by only 1.13×. A 27B-q4 model
