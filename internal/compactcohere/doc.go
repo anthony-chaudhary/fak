@@ -39,4 +39,22 @@
 // It is tier-1 (foundation): stdlib-only, imports nothing internal, off the hot path. It
 // takes digests as opaque strings (the caller hashes the bytes), so it never touches a
 // prompt and a shadow log of any Decision is content-free.
+//
+// # Residual exposure: the quarantine-survives-harness-summary hole (§2.4)
+//
+// fak seals a poisoned span at the KERNEL layer (ctxmmu / SegSealed) so the model never
+// reads those bytes on the WIRE. But Claude Code keeps its OWN on-disk transcript, and
+// its auto-compaction summarizes that transcript — INCLUDING spans fak sealed — into a
+// new, shorter messages[] whose summary can carry the poisoned content as ordinary prose.
+// That summary then rides every later request as bytes the kernel seal no longer covers.
+//
+// Decision.QuarantineAtRisk is the DETECTOR for this hole: it fires when a fak seal
+// precedes a harness rewrite (the poison may now be in the summary). It is a SURFACED
+// RISK, not a fix. The honest boundary is the whole point: fak controls the wire bytes,
+// NOT the harness's on-disk transcript or its summarizer. Once a sealed span is folded
+// into a harness summary, the kernel seal does not reach it and fak cannot witness it
+// further — the flag is one-shot per seal precisely because visibility ends at the wire.
+// The witness for this hole — a sealed span surviving into a harness summary, the flag
+// firing on exactly that sequence, and the clean-rewrite negative — lives in
+// quarantine_witness_test.go.
 package compactcohere
