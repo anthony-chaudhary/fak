@@ -76,7 +76,7 @@ usage:
   fak nightrun ledger          [--json]                              the durable collection history
   fak nightrun gap             [--json]                              report ledger rows newer than published benchmark surface
   fak nightrun caps            [--json]                              the probed box capabilities
-  fak nightrun score           [--floor N] [--json]                  check cache-value ledger for regressions (default floor: 2.0x)
+	fak nightrun score           [--floor N] [--json]                  check cache-value ledger for regressions (default floor: 0.751 - 75.1% reuse dogfooded from #1114)
   fak nightrun post-cache-value [--dry-run]                         post rolling observed multiplier to scoreboard
 
 Start here:
@@ -111,7 +111,7 @@ func parseNightrunFlags(name string, fs *flag.FlagSet, argv []string) (*nightrun
 		fs.IntVar(&f.max, "max", 0, "cap the number of tasks collected this session (0 = unbounded within --loop)")
 	}
 	if name == "score" {
-		fs.Float64Var(&f.floor, "floor", 0.5, "regression floor: exit non-zero if the realized KV-prefix reuse ratio (over multi-turn sessions) is below this fraction in [0,1]")
+		fs.Float64Var(&f.floor, "floor", 0.751, "regression floor: exit non-zero if the realized KV-prefix reuse ratio (over multi-turn sessions) is below this fraction in [0,1] (dogfood: 75.1% from #1114)")
 	}
 	if name == "post-cache-value" {
 		fs.BoolVar(&f.apply, "dry-run", false, "render the scoreboard post without sending it")
