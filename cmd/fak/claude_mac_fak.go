@@ -329,10 +329,14 @@ type claudeMacDebugClient struct {
 	hc      *http.Client
 }
 
-func (c *claudeMacDebugClient) get(path string, out any) error {
+// do issues an authenticated GET to c.base+path with the shared client-resolution and
+// bearer-auth, returning the live response. The caller owns resp.Body (it must defer
+// Close); get and getRaw share this request-building half but diverge on how they read
+// the body.
+func (c *claudeMacDebugClient) do(path string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, c.base+path, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if c.key != "" {
 		req.Header.Set("Authorization", "Bearer "+c.key)
@@ -341,7 +345,11 @@ func (c *claudeMacDebugClient) get(path string, out any) error {
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}
 	}
-	resp, err := hc.Do(req)
+	return hc.Do(req)
+}
+
+func (c *claudeMacDebugClient) get(path string, out any) error {
+	resp, err := c.do(path)
 	if err != nil {
 		return err
 	}
@@ -357,18 +365,7 @@ func (c *claudeMacDebugClient) get(path string, out any) error {
 // get cannot read it; getRaw carries the same auth + 2xx-gate so --metrics speaks
 // both the text and JSON surfaces through one client.
 func (c *claudeMacDebugClient) getRaw(path string) (string, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, c.base+path, nil)
-	if err != nil {
-		return "", err
-	}
-	if c.key != "" {
-		req.Header.Set("Authorization", "Bearer "+c.key)
-	}
-	hc := c.hc
-	if hc == nil {
-		hc = &http.Client{Timeout: 10 * time.Second}
-	}
-	resp, err := hc.Do(req)
+	resp, err := c.do(path)
 	if err != nil {
 		return "", err
 	}

@@ -325,18 +325,10 @@ func shortID(id string) string {
 
 // humanIdle renders an idle duration compactly (unknown, seconds, minutes, hours, or days).
 func humanIdle(s int64) string {
-	switch {
-	case s < 0:
+	if s < 0 {
 		return "unknown"
-	case s < 90:
-		return fmt.Sprintf("%ds", s)
-	case s < 5400:
-		return fmt.Sprintf("%dm", s/60)
-	case s < 172800:
-		return fmt.Sprintf("%dh", s/3600)
-	default:
-		return fmt.Sprintf("%dd", s/86400)
 	}
+	return compactDuration(s)
 }
 
 // firstResetHint pulls the "resets <when>" tail from the first crashed row that carries one,

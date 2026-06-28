@@ -448,18 +448,23 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 
 	// Persist what we installed so `status` probes the real port (#1) and a re-install can
 	// reuse the bearer key (#4). Written before the health wait so the record exists even if
-	// the gateway is slow to come up.
-	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
+	// the gateway is slow to come up — then health-gate honestly and print the client lines.
+	return nodeInstallFinalize(stdout, stderr, in, gatewayKey, requireKeyEnv, logDir)
+}
 
-	// Wait for the gateway and report HONESTLY: if it never answers, warn loudly pointing at
-	// the logs and return non-zero, instead of falling out of the loop silently and printing
-	// the client lines as if it were up (#2).
+// nodeInstallFinalize is the shared tail of every platform install path: it persists the
+// install record (so `status` probes the real port and a re-install can reuse the bearer
+// key), then health-gates the gateway HONESTLY — on a no-answer it warns at the logs and
+// returns 1 instead of printing the client lines as if it were up (#2); otherwise it prints
+// the client lines and returns 0.
+func nodeInstallFinalize(stdout, stderr io.Writer, in nodeInstallParams, gatewayKey, requireKeyEnv, logDir string) int {
+	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
 	localPort := in.localPort
 	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
 		nodeWarnUnhealthy(stderr, logDir)
 		return 1
 	}
-	nodePrintClientLines(stdout, stderr, offHost, gatewayKey, localPort)
+	nodePrintClientLines(stdout, stderr, in.offHost, gatewayKey, localPort)
 	return 0
 }
 
@@ -647,18 +652,10 @@ func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
 	}
 	fmt.Fprintf(stdout, "[fak node] enabled fak-serve-gateway (systemd --user)\n")
 
-	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
-
 	// Add the post-enable health probe the linux path was missing entirely (#2): if the unit
 	// loaded but fak serve never answered, warn at the logs and fail rather than print the
 	// client lines as if it were up.
-	localPort := in.localPort
-	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
-		nodeWarnUnhealthy(stderr, logDir)
-		return 1
-	}
-	nodePrintClientLines(stdout, stderr, offHost, gatewayKey, localPort)
-	return 0
+	return nodeInstallFinalize(stdout, stderr, in, gatewayKey, requireKeyEnv, logDir)
 }
 
 // ── Windows (Scheduled Task) ──────────────────────────────────────────────────
@@ -788,16 +785,9 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 		fmt.Fprintf(stderr, "[fak node] WARNING: ANTHROPIC_API_KEY not set for the task's user — set it (e.g. setx ANTHROPIC_API_KEY \"sk-ant-...\") and re-run, or the gateway has no upstream credential\n")
 	}
 
-	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
-
 	// Honest health gate (#2): on failure warn at the logs and return non-zero instead of
 	// printing the client lines as if the gateway were up.
-	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
-		nodeWarnUnhealthy(stderr, logDir)
-		return 1
-	}
-	nodePrintClientLines(stdout, stderr, offHost, gatewayKey, localPort)
-	return 0
+	return nodeInstallFinalize(stdout, stderr, in, gatewayKey, requireKeyEnv, logDir)
 }
 
 // nodeWindowsTaskXML builds the Scheduled Task definition that gives the Windows gateway the

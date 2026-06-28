@@ -837,18 +837,27 @@ type vcacheCodexTokenUsage struct {
 	CachedInputTokens float64 `json:"cached_input_tokens"`
 }
 
-func readVCacheTelemetry(path string, stdin io.Reader) ([]vcachegov.TelemetryRow, error) {
-	var r io.Reader
+// openInputOrStdin opens path for streaming, or returns stdin when path is "-". The
+// returned closer MUST be deferred by the caller (it is a no-op on the stdin path); it
+// keeps the file open for the lifetime of the caller's read, matching an inline
+// `defer f.Close()`.
+func openInputOrStdin(path string, stdin io.Reader) (io.Reader, func() error, error) {
 	if path == "-" {
-		r = stdin
-	} else {
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		r = f
+		return stdin, func() error { return nil }, nil
 	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, f.Close, nil
+}
+
+func readVCacheTelemetry(path string, stdin io.Reader) ([]vcachegov.TelemetryRow, error) {
+	r, closeInput, err := openInputOrStdin(path, stdin)
+	if err != nil {
+		return nil, err
+	}
+	defer closeInput()
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var rows []vcachegov.TelemetryRow

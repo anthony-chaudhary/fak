@@ -83,7 +83,7 @@ func runLeaserefLive(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref live", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
-	if code, done := parseLeaserefFlags(fs, argv, stderr); done {
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
 	store := leaseref.NewInDir(*dir)
@@ -100,7 +100,7 @@ func runLeaserefList(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
 	asJSON := fs.Bool("json", false, "emit the raw records as JSON")
-	if code, done := parseLeaserefFlags(fs, argv, stderr); done {
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
 	store := leaseref.NewInDir(*dir)
@@ -134,7 +134,7 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref reap", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
-	if code, done := parseLeaserefFlags(fs, argv, stderr); done {
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
 	store := leaseref.NewInDir(*dir)
@@ -154,23 +154,6 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "reaped %d expired lease(s)\n", reaped)
 	return 0
-}
-
-// parseLeaserefFlags parses argv, returning (code, done): done=true means the caller
-// should return code (a help request -> 0, a parse error -> 2). A trailing positional
-// is rejected so a stray arg never silently no-ops.
-func parseLeaserefFlags(fs *flag.FlagSet, argv []string, stderr io.Writer) (int, bool) {
-	if err := fs.Parse(argv); err != nil {
-		if err == flag.ErrHelp {
-			return 0, true
-		}
-		return 2, true
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "%s: unexpected argument %q\n", fs.Name(), fs.Arg(0))
-		return 2, true
-	}
-	return 0, false
 }
 
 func emitLeaserefJSON(stdout, stderr io.Writer, v any, sub string) int {

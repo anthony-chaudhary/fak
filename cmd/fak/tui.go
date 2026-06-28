@@ -401,13 +401,7 @@ func buildTUIGuardJournalReport(rows []journal.Row, path string, at time.Time, m
 	if maxRows > 0 && len(guardRows) > maxRows {
 		guardRows = guardRows[:maxRows]
 	}
-	status := "PASS"
-	switch {
-	case counts.Fail > 0 || counts.Unexpected > 0:
-		status = "FAIL"
-	case counts.Warn > 0:
-		status = "WARN"
-	}
+	status := tuiGuardStatus(counts)
 	return tuiGuardReport{
 		Schema:  tuiGuardSchema,
 		At:      at.UTC().Format(time.RFC3339),

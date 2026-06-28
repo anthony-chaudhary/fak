@@ -183,18 +183,10 @@ func dispAge(now, recency int64) string {
 		return "unknown"
 	}
 	s := now - recency
-	switch {
-	case s < 0:
+	if s < 0 {
 		return "0s"
-	case s < 90:
-		return fmt.Sprintf("%ds", s)
-	case s < 5400:
-		return fmt.Sprintf("%dm", s/60)
-	case s < 172800:
-		return fmt.Sprintf("%dh", s/3600)
-	default:
-		return fmt.Sprintf("%dd", s/86400)
 	}
+	return compactDuration(s)
 }
 
 func dispatchUsage(w io.Writer) {

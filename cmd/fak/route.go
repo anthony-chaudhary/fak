@@ -32,6 +32,22 @@ import (
 // rolled-up result — the ensemble half, proven end to end with no model in the loop.
 func cmdRoute(argv []string) { os.Exit(runRoute(os.Stdout, os.Stderr, argv)) }
 
+// resolvePriceBook returns the default price book overlaid with any --prices override; on a
+// ParsePrices error it prints "<prefix> <err>" to stderr and returns ok=false (the caller
+// returns the usage code 2). Shared by `fak route` and `fak routebench`.
+func resolvePriceBook(pricesFlag string, stderr io.Writer, prefix string) (modelroute.PriceBook, bool) {
+	book := modelroute.DefaultPrices()
+	if pricesFlag != "" {
+		over, err := modelroute.ParsePrices(pricesFlag)
+		if err != nil {
+			fmt.Fprintln(stderr, prefix, err)
+			return book, false
+		}
+		book = book.Overlay(over)
+	}
+	return book, true
+}
+
 // runRoute is the testable core: it returns the process exit code (0 ok, 1 a
 // manifest/load error, 2 a usage error) instead of calling os.Exit, and takes its
 // streams explicitly.
@@ -61,14 +77,9 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	// The rough cost lens (usage saved vs the SOTA frontier baseline): the built-in
 	// ladder, overlaid with any --prices the operator supplies. Built before the
 	// switch so --check can show the surface's cost shape too.
-	book := modelroute.DefaultPrices()
-	if *prices != "" {
-		over, err := modelroute.ParsePrices(*prices)
-		if err != nil {
-			fmt.Fprintln(stderr, "fak route:", err)
-			return 2
-		}
-		book = book.Overlay(over)
+	book, ok := resolvePriceBook(*prices, stderr, "fak route:")
+	if !ok {
+		return 2
 	}
 
 	switch {

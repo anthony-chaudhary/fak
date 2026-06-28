@@ -9,22 +9,35 @@ import (
 	"strings"
 )
 
-func cmdSkillEffectivenessScorecard(argv []string) {
-	fs := flag.NewFlagSet("fak skill-effectiveness-scorecard", flag.ContinueOnError)
+// scorecardCmdSetup runs the shared front-half of a scorecard subcommand: it parses
+// the common --json/--markdown flags, collects the payload, and on the --json path
+// emits it and signals the caller to stop. It returns the payload p, its corpus map
+// c, whether --markdown was requested, and done=true when the --json branch already
+// rendered (the caller returns immediately). On a flag parse error it exits(2), the
+// same as the inline form it replaces.
+func scorecardCmdSetup(name string, argv []string, collect func(string) map[string]any) (p, c map[string]any, asMarkdown, done bool) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "emit machine-readable scorecard JSON")
-	asMarkdown := fs.Bool("markdown", false, "emit markdown")
+	md := fs.Bool("markdown", false, "emit markdown")
 	fs.SetOutput(io.Discard)
 	if err := fs.Parse(argv); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	p := collectSkillEffectivenessScorecard(repoRoot())
+	p = collect(repoRoot())
 	if *asJSON {
 		_ = writeIndentedJSONNoEscape(os.Stdout, p)
+		return p, nil, false, true
+	}
+	return p, p["corpus"].(map[string]any), *md, false
+}
+
+func cmdSkillEffectivenessScorecard(argv []string) {
+	p, c, asMarkdown, done := scorecardCmdSetup("fak skill-effectiveness-scorecard", argv, collectSkillEffectivenessScorecard)
+	if done {
 		return
 	}
-	c := p["corpus"].(map[string]any)
-	if *asMarkdown {
+	if asMarkdown {
 		fmt.Printf("# fak skill-effectiveness scorecard\n\n**skill_debt: %v** across **%v** skills.\n", c["skill_debt"], c["skills"])
 		return
 	}

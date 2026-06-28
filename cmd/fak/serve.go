@@ -460,14 +460,8 @@ func cmdServe(argv []string) {
 		if err := srv.ServeStdio(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 			must(err)
 		}
-		// Append cache-value observation to ledger (epic #1072, issue #1075).
-		stats := cacheobs.Default.Snapshot()
-		if stats.Turns > 0 {
-			_ = cachevalueledger.Append("serve", "stdio", cachevalueledger.DefaultLedgerRel, stats)
-		}
-		if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
-			_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns) // #1090: observed window for `fak vcache score`
-		}
+		// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
+		persistCacheValueObservations(srv, "serve", "stdio")
 		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 		return
 	}
@@ -478,15 +472,24 @@ func cmdServe(argv []string) {
 	if err := srv.ListenAndServe(ctx, *addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		must(err)
 	}
-	// Append cache-value observation to ledger (epic #1072, issue #1075).
+	// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
+	persistCacheValueObservations(srv, "serve", "http")
+	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
+}
+
+// persistCacheValueObservations writes the post-session cache-value ledger row (tagged
+// kind/name) and persists this session's OBSERVED provider-cache window so a later
+// `fak vcache score` reports the REALIZED multiplier from real traffic instead of the
+// synthetic-Zipf forecast (#1090). Best-effort: a write failure never fails the session.
+// It is the shared shutdown tail of the guard and serve (stdio + http) front doors.
+func persistCacheValueObservations(srv *gateway.Server, kind, name string) {
 	stats := cacheobs.Default.Snapshot()
 	if stats.Turns > 0 {
-		_ = cachevalueledger.Append("serve", "http", cachevalueledger.DefaultLedgerRel, stats)
+		_ = cachevalueledger.Append(kind, name, cachevalueledger.DefaultLedgerRel, stats)
 	}
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
-		_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns) // #1090: observed window for `fak vcache score`
+		_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns)
 	}
-	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 }
 
 // restoreServeSessions re-attaches the persisted DRIVE state of every session (the COLD
@@ -963,19 +966,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// pool against the box's real MemAvailable so a load that would OOM-kill the host (or a second
 		// concurrent large load on a contended box) refuses cleanly here instead of wedging the box.
 		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
-		prof := ggufload.NewLoadProfiler()
-		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
-		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
-		must(err)
-		modelengine.PreloadQ4K(mm)
-		// Operator visibility: the post-load resident split (raw Q4_K + raw Q5/6_K experts vs
-		// the Q8 dequant minority) so a glance confirms the mixed-quant expert bulk loaded
-		// resident — the slow f32 round-trip avoided — alongside the per-quant-type load-path
-		// summary the profiler already streamed.
-		fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
-		loadNanos := time.Since(tLoad).Nanoseconds()
-		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
-		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend)
 	case backend != nil && os.Getenv("FAK_Q4K") != "" && backend.Caps().UploadDtype:
 		// Standard-arch device serve with FAK_Q4K: hold raw Q4_K matmul tensors RESIDENT on the
 		// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
@@ -989,15 +980,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		fmt.Printf("fak: GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)\n", backend.Name())
 		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
 		must(err)
-		prof := ggufload.NewLoadProfiler()
-		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
-		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
-		must(err)
-		modelengine.PreloadQ4K(mm)
-		fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
-		loadNanos := time.Since(tLoad).Nanoseconds()
-		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
-		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend)
 	case backend != nil:
 		if backend.Caps().UploadDtype {
 			// A device backend that can consume Q8_0 uploads should not be forced through
@@ -1047,16 +1030,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// (dequant≈0) or the slow f32 round-trip. Thread a real profiler here too (parity with
 		// the device cpu-offload case) so both the streamed summary and the gateway /metrics
 		// profile carry the resident-vs-dequant breakdown — the witness #975 needs.
-		prof := ggufload.NewLoadProfiler()
-		prof.Progress = os.Stderr // stream load % + the load-path summary to stderr so the load is not silent
-		mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
-		must(err)
-		modelengine.PreloadQ4K(mm)
-		// Operator visibility: the post-load resident split confirms at a glance that the
-		// mixed-quant expert bulk loaded resident (the slow f32 round-trip avoided), alongside
-		// the per-quant-type load-path summary the profiler already streamed.
-		fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
-		loadNanos := time.Since(tLoad).Nanoseconds()
+		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad)
 		profile := toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos))
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	default:
@@ -1072,6 +1046,32 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8", ggufPath, loadNanos))
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	}
+}
+
+// loadResidentQ4KProfiled runs the profiled raw-Q4_K resident load shared by the three Q4_K
+// serve arms (device cpu-offload, device-resident, pure-CPU): it streams load % to stderr,
+// loads + preloads the resident super-blocks, prints the post-load resident split (so a glance
+// confirms the mixed-quant expert bulk loaded resident, the slow f32 round-trip avoided), and
+// returns the model, the profiler (the caller folds prof.Snapshot into its own profile), and
+// the elapsed load nanos.
+func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time) (*fakmodel.Model, *ggufload.LoadProfiler, int64) {
+	prof := ggufload.NewLoadProfiler()
+	prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
+	mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
+	must(err)
+	modelengine.PreloadQ4K(mm)
+	fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
+	loadNanos := time.Since(tLoad).Nanoseconds()
+	return mm, prof, loadNanos
+}
+
+// loadResidentQ4KDevice is the device Q4_K arm's shared tail: it runs the profiled resident
+// load and folds the host/device memory plan into the streamed profile. The cpu-offload and
+// device-resident arms differ only in how memPlan is derived upstream.
+func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
+	mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad)
+	profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
+	return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 }
 
 // resolveServeTokenizer picks the in-kernel chat planner's tokenizer: an explicit

@@ -67,7 +67,7 @@ func runCallavoidProveMemo(stdin io.Reader, stdout, stderr io.Writer, argv []str
 	fs.SetOutput(stderr)
 	inPath := fs.String("in", "", "read MemoInput JSON from this file (default: stdin)")
 	asJSON := fs.Bool("json", true, "emit the proof as JSON (the default; --json=false for human text)")
-	if code, done := parseCallavoidFlags(fs, argv, stderr); done {
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
 
@@ -96,7 +96,7 @@ func runCallavoidAccount(stdin io.Reader, stdout, stderr io.Writer, argv []strin
 	inPath := fs.String("in", "", "read Tally JSON from this file (default: stdin)")
 	asJSON := fs.Bool("json", true, "emit the report as JSON (the default; --json=false for human text)")
 	gate := fs.Bool("gate", false, "exit 1 when the window is regressing (avoidance was a net loss)")
-	if code, done := parseCallavoidFlags(fs, argv, stderr); done {
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
 
@@ -125,23 +125,6 @@ func runCallavoidAccount(stdin io.Reader, stdout, stderr io.Writer, argv []strin
 		return 1
 	}
 	return 0
-}
-
-// parseCallavoidFlags parses argv, returning (code, done): done=true means the caller
-// should return code (a help request -> 0, a parse error -> 2). A trailing positional
-// is rejected so a stray arg never silently no-ops.
-func parseCallavoidFlags(fs *flag.FlagSet, argv []string, stderr io.Writer) (int, bool) {
-	if err := fs.Parse(argv); err != nil {
-		if err == flag.ErrHelp {
-			return 0, true
-		}
-		return 2, true
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "%s: unexpected argument %q\n", fs.Name(), fs.Arg(0))
-		return 2, true
-	}
-	return 0, false
 }
 
 func readCallavoidInput(stdin io.Reader, stderr io.Writer, inPath, sub string) ([]byte, int) {

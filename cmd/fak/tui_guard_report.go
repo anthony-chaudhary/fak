@@ -39,13 +39,7 @@ func buildTUIGuardReport(artifacts []tuiGuardArtifact, at time.Time) tuiGuardRep
 		return rows[i].Kind < rows[j].Kind
 	})
 	counts := countTUIGuard(rows, sources)
-	status := "PASS"
-	switch {
-	case counts.Fail > 0 || counts.Unexpected > 0:
-		status = "FAIL"
-	case counts.Warn > 0:
-		status = "WARN"
-	}
+	status := tuiGuardStatus(counts)
 	return tuiGuardReport{
 		Schema:  tuiGuardSchema,
 		At:      at.UTC().Format(time.RFC3339),
@@ -786,6 +780,18 @@ func scoreTUIGuardRow(row tuiGuardRow) ([]string, int) {
 		tags = append(tags, "status")
 	}
 	return tags, score
+}
+
+// tuiGuardStatus folds the guard-row counts into the headline status: any FAIL/Unexpected
+// row -> "FAIL", else any WARN -> "WARN", else "PASS".
+func tuiGuardStatus(counts tuiGuardCounts) string {
+	switch {
+	case counts.Fail > 0 || counts.Unexpected > 0:
+		return "FAIL"
+	case counts.Warn > 0:
+		return "WARN"
+	}
+	return "PASS"
 }
 
 func countTUIGuard(rows []tuiGuardRow, sources []tuiGuardSource) tuiGuardCounts {

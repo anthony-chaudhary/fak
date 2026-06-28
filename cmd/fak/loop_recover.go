@@ -166,11 +166,11 @@ func renderLoopRecover(w io.Writer, ledger string, r looprecover.Result, all boo
 	}
 }
 
-// agoString renders a non-negative age in seconds compactly (Ns / Nm / Nh / Nd).
-func agoString(s int64) string {
+// compactDuration renders a non-negative age in seconds compactly (Ns / Nm / Nh / Nd).
+// Callers handle the negative/zero sentinel themselves — it differs by surface ("0s" vs
+// "unknown") — so this shared core covers only the positive bands.
+func compactDuration(s int64) string {
 	switch {
-	case s < 0:
-		return "0s"
 	case s < 90:
 		return fmt.Sprintf("%ds", s)
 	case s < 5400:
@@ -180,6 +180,14 @@ func agoString(s int64) string {
 	default:
 		return fmt.Sprintf("%dd", s/86400)
 	}
+}
+
+// agoString renders a non-negative age in seconds compactly (Ns / Nm / Nh / Nd).
+func agoString(s int64) string {
+	if s < 0 {
+		return "0s"
+	}
+	return compactDuration(s)
 }
 
 // shortRunID trims a run id to a readable width.

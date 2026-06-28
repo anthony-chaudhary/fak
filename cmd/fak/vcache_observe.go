@@ -169,17 +169,11 @@ type observeTelemetryRec struct {
 // readObserveTelemetry reads a session-telemetry JSONL into Turns. Rows are ordered as
 // read; the leaf re-sorts each family by timestamp.
 func readObserveTelemetry(path string, stdin io.Reader) ([]vcacheobserve.Turn, error) {
-	var r io.Reader
-	if path == "-" {
-		r = stdin
-	} else {
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		r = f
+	r, closeInput, err := openInputOrStdin(path, stdin)
+	if err != nil {
+		return nil, err
 	}
+	defer closeInput()
 	var out []vcacheobserve.Turn
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<20), 16<<20)

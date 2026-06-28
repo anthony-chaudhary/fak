@@ -1,30 +1,18 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 func cmdTokenDefaultsScorecard(argv []string) {
-	fs := flag.NewFlagSet("fak token-defaults-scorecard", flag.ContinueOnError)
-	asJSON := fs.Bool("json", false, "emit machine-readable scorecard JSON")
-	asMarkdown := fs.Bool("markdown", false, "emit markdown")
-	fs.SetOutput(io.Discard)
-	if err := fs.Parse(argv); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	p := collectTokenDefaultsScorecard(repoRoot())
-	if *asJSON {
-		_ = writeIndentedJSONNoEscape(os.Stdout, p)
+	p, c, asMarkdown, done := scorecardCmdSetup("fak token-defaults-scorecard", argv, collectTokenDefaultsScorecard)
+	if done {
 		return
 	}
-	c := p["corpus"].(map[string]any)
-	if *asMarkdown {
+	if asMarkdown {
 		fmt.Printf("# fak token-saving-defaults scorecard\n\n**token_defaults_debt: %v**; grade **%v**.\n", c["token_defaults_debt"], c["grade"])
 		return
 	}

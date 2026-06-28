@@ -91,14 +91,9 @@ func runRoutebench(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	// The two rough lenses: the default books overlaid with any operator overrides.
-	book := modelroute.DefaultPrices()
-	if *prices != "" {
-		over, err := modelroute.ParsePrices(*prices)
-		if err != nil {
-			fmt.Fprintln(stderr, "fak routebench:", err)
-			return 2
-		}
-		book = book.Overlay(over)
+	book, ok := resolvePriceBook(*prices, stderr, "fak routebench:")
+	if !ok {
+		return 2
 	}
 	lat := modelroute.DefaultLatencies()
 	if *latencies != "" {
