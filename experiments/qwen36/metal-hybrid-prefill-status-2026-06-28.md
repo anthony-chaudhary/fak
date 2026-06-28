@@ -8,7 +8,7 @@ host-independently WITNESSED green on this box. **Update 2026-06-28 (later):** t
 verify node** (`FAK_METAL_MPS=1 go test ./internal/model -tags fakmetal -run
 TestPrefillQwen35HybridMetalMatchesCPU` → `argmax=61 cos=0.999377 maxRel=0.05078 OK`, PASS; see §3
 step 2 for the `FAK_METAL_MPS=1` opt-in this needs over headless SSH), so the only residual still open
-is the on-device **throughput** (§3 step 3) — #71 stays `not yet` on throughput alone.** This is the *status* half
+is the on-device **throughput** (§3 step 3) — and that number is structurally q4_k-bound (the f16 twin's ≈ 54 GB working set overflows the 36 GiB box; it rides #70 / #1085), so #71's own deliverable is closeable as *implementation + on-device-correctness shipped*.** This is the *status* half
 of the spec→status pair for
 [#71](https://github.com/anthony-chaudhary/fak/issues/71) (*lift `requirePreNorm` so the hybrid
 Qwen3.6 Gated-DeltaNet arch can use the Metal prefill*). Its *spec* half —
@@ -160,14 +160,23 @@ toolchain — the capability this host does not have:
 (`cos=0.999377`, PASS, §3 step 2, with `FAK_METAL_MPS=1`). The ONLY residual still open is step (3),
 the on-device **throughput**: an `FAK_QPROFILE=1` pp22 prefill of the real `Qwen3.6-27B.q4_k_m.gguf`
 through this f16 twin against the `51.55 tok/s` llama.cpp-Metal bar, capturing the
-`[metalprof-hybrid]` line here. Note that throughput residual is bounded by unified-memory capacity
-— the twin uploads *f16* projection copies, so the full 27B f16 working set may not fit the 36 GiB
-box; the SOTA-throughput lever is the pure-MSL **q4_k** device GEMM tracked in sibling #70 / #1085
-(witnessed warm 2.6 tok/s @ P=27 → 7.3 tok/s @ P=940 on 2026-06-28), not this f16 correctness twin.
-So #71's *implementation + on-device correctness* is **done and witnessed**; only its *throughput*
-number stays `not yet`, and that number rides the q4_k siblings. The host-independent slice — the
-recipe, its committed backend-agnostic core, the committed Metal twin/gate/stub/`kv.go` wiring, and
-that core's green CPU-side correctness witness — plus the now-green Mac f16 GEMM parity, is **done**.
+`[metalprof-hybrid]` line here. **That throughput run cannot be served by *this* f16 twin on *this*
+box** — it is a structural capacity wall, not a deferred run. The twin holds every projection
+f16-resident on the GPU (`internal/metalgemm/metalgemm.go:57`), dequantized from the Q8 CPU store,
+and the codebase's own sizing constant records f16 ≈ 54 GB for the 27B (`internal/metalgemm/q4k.go:4`),
+which overflows the 36 GiB unified pool by ~1.5× (worse once the resident Q8 store is counted). The
+in-budget route is q4_k_m ≈ 16 GB, so the **SOTA-throughput lever is the pure-MSL q4_k device GEMM
+tracked in sibling #70 / #1085** (witnessed warm 2.6 tok/s @ P=27 → 7.3 tok/s @ P=940 on 2026-06-28),
+not this f16 correctness twin — the throughput number rides those q4_k siblings permanently.
+So #71's *implementation + on-device correctness* — its actual deliverable (*lift `requirePreNorm`*
++ *build the hybrid twin*) — is **done and witnessed**; its *throughput* number is the one residual,
+and because that number is structurally unreachable through this f16 twin (above) it rides the q4_k
+siblings #70 / #1085 rather than any further #71 work. **Operator recommendation:** #71 is closeable
+as *implementation + on-device-correctness shipped*, with the SOTA-throughput close tracked where it
+can actually land (#70 / #1085) — leaving it open pends a pp22 number this twin can never produce on
+the 36 GiB box. The host-independent slice — the recipe, its committed backend-agnostic core, the
+committed Metal twin/gate/stub/`kv.go` wiring, and that core's green CPU-side correctness witness —
+plus the now-green Mac f16 GEMM parity, is **done**.
 
 ---
 
