@@ -121,6 +121,24 @@ WITNESSES: tuple[Witness, ...] = (
         doc_command="go run ./cmd/deletioncert -selfcheck -out deletioncert.json",
         json_outputs=("{tmp}/deletioncert.json",),
     ),
+    Witness(
+        "deletioncert-isolation-bench",
+        ("go", "run", "./cmd/deletioncert", "-isolation-bench"),
+        ("baseline leaked:", "benchmark passed"),
+    ),
+    Witness(
+        "deletioncert-isolation-bench-out",
+        ("go", "run", "./cmd/deletioncert", "-isolation-bench", "-out", "{tmp}/isolation-result.json"),
+        ("wrote result to",),
+        doc_command="go run ./cmd/deletioncert -isolation-bench -out isolation-result.json",
+        json_outputs=("{tmp}/isolation-result.json",),
+    ),
+    Witness(
+        "deletioncert-isolation-bench-seed",
+        ("go", "run", "./cmd/deletioncert", "-isolation-bench", "-seed", "42"),
+        ("seed: 42",),
+        doc_command="go run ./cmd/deletioncert -isolation-bench -seed 42",
+    ),
 )
 
 

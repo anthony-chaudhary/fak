@@ -113,16 +113,27 @@ The benchmark emits a JSON result artifact:
   "git_commit": "unknown",
   "corpus_size": 14,
   "passed_cases": 14,
-  "failed_cases": [],
   "baseline_fails": true,
   "baseline_failed_cases": 4,
-  "valid": true
+  "valid": true,
+  "boundary": "fak's structural floor over a fak-authored read-back corpus, NOT a public-leaderboard rank; the max|Δ|=0 / L3 all-miss / scope-refusal witnesses are the honest figures, never a vs-naive-cache multiple"
 }
 ```
 
 - `valid`: true only if all cases pass AND the baseline leaked
 - `baseline_failed_cases`: number of cross-tenant private leaks the baseline demonstrated
-- `failed_cases`: per-case failure details (name, want, got, reason)
+- `failed_cases`: per-case failure details (name, want, got, reason) — omitted when the run is clean
+- `boundary`: the verbatim honest limit, stamped on EVERY emitted artifact so it travels with the score and is never buried in adjacent prose
+
+### Honesty fences asserted over the artifact (CI-gradeable)
+
+The harness re-checks three fences over the EMITTED result before it exits — they are not self-reports:
+
+1. **Boundary present**: the verbatim `boundary` string above must be stamped, else the run fails closed.
+2. **Scope honest**: `scope` is `l3-working-set` and no over-claim token (`deleted-everywhere`, `weights`, `backups`, `replicas`, `embeddings`) appears anywhere in the artifact.
+3. **Control-path only**: no page payload byte from any corpus case may surface in the artifact — only digests, scopes, tenant tags, and counts. A corpus or field edit that smuggles in a secret reds CI.
+
+These fences are pinned by Go tests in `cmd/deletioncert/deletioncert_test.go` (run under `go test ./...`, a `make ci` step) AND by the headless witnesses `deletioncert-isolation-bench[-out|-seed]` in `tools/demo_headless_smoke.py` (run under `make ci`'s `demo-headless-smoke`), so the benchmark is wired into CI on both the unit and command-surface paths.
 
 ## Reproduction
 

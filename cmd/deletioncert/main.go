@@ -365,10 +365,10 @@ func shortHash(ids []int) string {
 // no network, and exits non-zero on any leak.
 //
 // The metric is two-fold:
-//   1. Cross-tenant isolation: a private page is NEVER served to a different tenant
-//   2. Same-tenant sharing: a private page IS served within the same tenant
-//   3. Fleet sharing: a fleet-scoped page IS served across tenants
-//   4. Digest verification: a tampered page is refused even on permissive paths
+//  1. Cross-tenant isolation: a private page is NEVER served to a different tenant
+//  2. Same-tenant sharing: a private page IS served within the same tenant
+//  3. Fleet sharing: a fleet-scoped page IS served across tenants
+//  4. Digest verification: a tampered page is refused even on permissive paths
 //
 // The oracle is deterministic: each case has a MUST admit or MUST refuse verdict
 // based on the (scope, owner, reader) tuple, and the harness fails closed on any
@@ -381,14 +381,85 @@ func shortHash(ids []int) string {
 // deletion from weights, backups, or replicas. The honest boundary is stated in
 // the result and in docs/proofs/isolation-bench.md.
 func runIsolationBench(outPath string, seed int64) error {
+	result := computeIsolationBench(seed)
+
+	// Fail closed if the leaky baseline did not demonstrate any leak — a benchmark
+	// that only ever passes on its author's happy path measures nothing; the
+	// discrimination is the deliverable.
+	if result.BaselineFailedCases == 0 {
+		return fmt.Errorf("leaky baseline did not demonstrate any leaks (0/%d cases) — metric does not discriminate", len(isolationCorpus))
+	}
+
+	// Honesty fence: the emitted artifact must carry the verbatim boundary, stamp
+	// the honest l3-working-set scope (never an over-claim token), and leak no page
+	// payload byte into any field. These are CI-gradeable assertions over the
+	// artifact itself, not self-reports.
+	if err := assertHonestArtifact(result); err != nil {
+		return err
+	}
+
+	if outPath != "" {
+		b, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(outPath, b, 0o644); err != nil {
+			return err
+		}
+		fmt.Printf("  wrote result to %s\n", outPath)
+	}
+
+	fmt.Printf("\n== per-tenant KV cache-isolation benchmark ==\n")
+	fmt.Printf("  scope: %s\n", result.Scope)
+	fmt.Printf("  seed: %d\n", result.Seed)
+	fmt.Printf("  corpus: %d cases\n", result.CorpusSize)
+	fmt.Printf("  passed: %d\n", result.PassedCases)
+	fmt.Printf("  failed: %d\n", len(result.FailedCases))
+	fmt.Printf("  baseline leaked: %d/%d (discrimination proof)\n", result.BaselineFailedCases, len(isolationCorpus))
+	fmt.Printf("  valid: %v\n", result.Valid)
+	fmt.Printf("  boundary: %s\n", result.Boundary)
+
+	if !result.Valid {
+		for _, fc := range result.FailedCases {
+			fmt.Printf("\n  FAILED: case %d (%s)\n", fc.Case, fc.Name)
+			fmt.Printf("    want: %s\n", fc.Want)
+			fmt.Printf("    got:  %s\n", fc.Got)
+			fmt.Printf("    reason: %s\n", fc.Reason)
+			fmt.Printf("    details: %s\n", fc.Details)
+		}
+		return fmt.Errorf("benchmark failed: %d/%d cases passed", result.PassedCases, result.CorpusSize)
+	}
+
+	return nil
+}
+
+// isolationBoundary is the honest limit stamped verbatim on every emitted result:
+// there is no incumbent leaderboard, so the score is a structural floor over fak's
+// OWN corpus, and the marginal witnesses (max|Δ|=0 / L3 all-miss / scope-refusal)
+// are the honest figures — never a vs-naive-cache multiple.
+const isolationBoundary = "fak's structural floor over a fak-authored read-back corpus, NOT a public-leaderboard rank; the max|Δ|=0 / L3 all-miss / scope-refusal witnesses are the honest figures, never a vs-naive-cache multiple"
+
+// bannedScopeTokens are the over-claim strings the honest l3-working-set scope must
+// never contain — this proves the working-set pages stopped resolving in the shared
+// L3 tier, NOT deletion from weights, backups, replicas, or embeddings. Mirrors the
+// TestL3DeletionRung_ScopeIsHonestWorkingSet ban-list, applied over the emitted
+// artifact rather than a rung.
+var bannedScopeTokens = []string{"deleted-everywhere", "weights", "backups", "replicas", "embeddings"}
+
+// computeIsolationBench runs the fixed adversarial corpus against the isolation gate
+// AND against the leaky baseline, returning the result artifact. It is pure (no I/O,
+// no printing) so the oracle, the baseline discrimination, and the honesty fences are
+// unit-testable; runIsolationBench wraps it with the fail-closed checks and emission.
+func computeIsolationBench(seed int64) BenchmarkResult {
 	result := BenchmarkResult{
-		Schema:             "fak.isolation-bench/v1",
-		Seed:               seed,
-		Scope:              "l3-working-set",
-		GeneratedAt:        "2026-06-27",
-		GitCommit:          "unknown",
-		CorpusSize:         len(isolationCorpus),
-		BaselineFails:      true,
+		Schema:        "fak.isolation-bench/v1",
+		Seed:          seed,
+		Scope:         "l3-working-set",
+		GeneratedAt:   "2026-06-27",
+		GitCommit:     "unknown",
+		CorpusSize:    len(isolationCorpus),
+		BaselineFails: true,
+		Boundary:      isolationBoundary,
 	}
 
 	// Run the corpus against the isolation gate
@@ -468,43 +539,41 @@ func runIsolationBench(outPath string, seed int64) error {
 	}
 
 	result.BaselineFailedCases = leakyFails
-	if result.BaselineFailedCases == 0 {
-		return fmt.Errorf("leaky baseline did not demonstrate any leaks (0/%d cases) — metric does not discriminate", len(isolationCorpus))
-	}
-
 	result.Valid = len(result.FailedCases) == 0
+	return result
+}
 
-	if outPath != "" {
-		b, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(outPath, b, 0o644); err != nil {
-			return err
-		}
-		fmt.Printf("  wrote result to %s\n", outPath)
+// assertHonestArtifact enforces the three honesty fences over the EMITTED artifact
+// (not a self-report): the verbatim boundary travels with the score, the scope is the
+// honest l3-working-set token with no over-claim string anywhere in the JSON, and no
+// page payload byte from the corpus leaks into any field (the control-path-only
+// guarantee — only digests, scopes, tags, and counts may appear). It marshals the
+// result and scans it so a future corpus or field edit that smuggles in a secret or an
+// over-claim fails CI closed.
+func assertHonestArtifact(result BenchmarkResult) error {
+	if result.Boundary != isolationBoundary {
+		return fmt.Errorf("emitted artifact is missing the verbatim boundary statement")
 	}
-
-	fmt.Printf("\n== per-tenant KV cache-isolation benchmark ==\n")
-	fmt.Printf("  scope: %s\n", result.Scope)
-	fmt.Printf("  seed: %d\n", result.Seed)
-	fmt.Printf("  corpus: %d cases\n", result.CorpusSize)
-	fmt.Printf("  passed: %d\n", result.PassedCases)
-	fmt.Printf("  failed: %d\n", len(result.FailedCases))
-	fmt.Printf("  baseline leaked: %d/%d (discrimination proof)\n", result.BaselineFailedCases, len(isolationCorpus))
-	fmt.Printf("  valid: %v\n", result.Valid)
-
-	if !result.Valid {
-		for _, fc := range result.FailedCases {
-			fmt.Printf("\n  FAILED: case %d (%s)\n", fc.Case, fc.Name)
-			fmt.Printf("    want: %s\n", fc.Want)
-			fmt.Printf("    got:  %s\n", fc.Got)
-			fmt.Printf("    reason: %s\n", fc.Reason)
-			fmt.Printf("    details: %s\n", fc.Details)
-		}
-		return fmt.Errorf("benchmark failed: %d/%d cases passed", result.PassedCases, result.CorpusSize)
+	if result.Scope != "l3-working-set" {
+		return fmt.Errorf("scope %q is not the honest l3-working-set token", result.Scope)
 	}
-
+	b, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	blob := string(b)
+	for _, tok := range bannedScopeTokens {
+		if strings.Contains(blob, tok) {
+			return fmt.Errorf("emitted artifact contains over-claim scope token %q (scope must stay l3-working-set)", tok)
+		}
+	}
+	// Control-path only: no page payload byte may enter the artifact. Every corpus
+	// content string is a page's bytes; none may surface in the emitted result.
+	for _, tc := range isolationCorpus {
+		if strings.Contains(blob, tc.content) {
+			return fmt.Errorf("emitted artifact leaked page payload bytes for case %q (control-path-only violated)", tc.name)
+		}
+	}
 	return nil
 }
 
@@ -575,6 +644,10 @@ type BenchmarkResult struct {
 	BaselineFails       bool         `json:"baseline_fails"`
 	BaselineFailedCases int          `json:"baseline_failed_cases"`
 	Valid               bool         `json:"valid"`
+	// Boundary is stamped verbatim on every emitted artifact so the honest limit
+	// travels WITH the score and is never buried in adjacent prose: this is a
+	// structural floor over fak's OWN corpus, not a public-leaderboard rank.
+	Boundary string `json:"boundary"`
 }
 
 // CaseResult is one failed test case.

@@ -4,7 +4,11 @@
 // expected values.
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // TestArgmax pins argmax's exact contract: it scans with a strict '>' from an
 // initial best of -1e30 at index 0, so it returns the FIRST index of the maximum
@@ -103,5 +107,111 @@ func TestConcat(t *testing.T) {
 func TestDeletionCertificateSelfcheckRuns(t *testing.T) {
 	if err := run(""); err != nil {
 		t.Fatalf("deletioncert selfcheck failed: %v", err)
+	}
+}
+
+// --- isolation benchmark (#1065) --------------------------------------------
+// These tests make the per-tenant KV cache-isolation benchmark CI-gradeable under
+// `go test ./...` (a `make ci` step): the oracle, the leaky-baseline discrimination,
+// and the three honesty fences are all asserted here, so a regression in the gate or
+// a dishonest corpus/scope edit reds CI rather than slipping through a self-graded run.
+
+// TestIsolationBenchPasses pins the full oracle: every adversarial read-back case is
+// admitted-or-refused exactly as its (scope, owner, reader) tuple requires, so the
+// run is valid with no failed cases.
+func TestIsolationBenchPasses(t *testing.T) {
+	r := computeIsolationBench(42)
+	if !r.Valid {
+		t.Fatalf("isolation bench not valid: %d/%d passed, failures=%+v", r.PassedCases, r.CorpusSize, r.FailedCases)
+	}
+	if r.PassedCases != r.CorpusSize {
+		t.Fatalf("passed %d of %d cases; want all", r.PassedCases, r.CorpusSize)
+	}
+	if len(r.FailedCases) != 0 {
+		t.Fatalf("unexpected failed cases: %+v", r.FailedCases)
+	}
+}
+
+// TestIsolationBenchBaselineDiscriminates is the deliverable: the SAME corpus run
+// against the leaky (non-isolating) baseline MUST surface leaks. A benchmark that only
+// ever passes on its author's happy path measures nothing.
+func TestIsolationBenchBaselineDiscriminates(t *testing.T) {
+	r := computeIsolationBench(42)
+	if r.BaselineFailedCases == 0 {
+		t.Fatalf("leaky baseline leaked nothing — metric does not discriminate")
+	}
+}
+
+// TestIsolationBenchScopeIsHonest enforces AC #6: the emitted scope is the honest
+// l3-working-set token and no over-claim string (weights/backups/replicas/embeddings/
+// deleted-everywhere) appears anywhere in the artifact.
+func TestIsolationBenchScopeIsHonest(t *testing.T) {
+	r := computeIsolationBench(42)
+	if r.Scope != "l3-working-set" {
+		t.Fatalf("scope = %q, want l3-working-set", r.Scope)
+	}
+	if err := assertHonestArtifact(r); err != nil {
+		t.Fatalf("honest-artifact fence failed: %v", err)
+	}
+	b, _ := json.Marshal(r)
+	for _, tok := range bannedScopeTokens {
+		if strings.Contains(string(b), tok) {
+			t.Fatalf("emitted artifact contains over-claim token %q", tok)
+		}
+	}
+}
+
+// TestIsolationBenchControlPathNoPayload enforces AC #8: no page payload byte from the
+// corpus may surface in the emitted artifact — only digests, scopes, tags, and counts.
+func TestIsolationBenchControlPathNoPayload(t *testing.T) {
+	r := computeIsolationBench(42)
+	b, _ := json.Marshal(r)
+	blob := string(b)
+	for _, tc := range isolationCorpus {
+		if strings.Contains(blob, tc.content) {
+			t.Fatalf("emitted artifact leaked payload bytes for case %q", tc.name)
+		}
+	}
+}
+
+// TestIsolationBenchBoundaryStated enforces AC #9: the verbatim structural-floor
+// boundary travels WITH the score, never buried in adjacent prose.
+func TestIsolationBenchBoundaryStated(t *testing.T) {
+	r := computeIsolationBench(42)
+	if !strings.Contains(r.Boundary, "structural floor") ||
+		!strings.Contains(r.Boundary, "NOT a public-leaderboard rank") {
+		t.Fatalf("boundary missing the verbatim structural-floor statement: %q", r.Boundary)
+	}
+}
+
+// TestIsolationBenchHasConcurrentDimension enforces AC #7: the corpus includes
+// interleaved multi-tenant delete/read cases (the mem0 concurrent-load gap).
+func TestIsolationBenchHasConcurrentDimension(t *testing.T) {
+	n := 0
+	for _, tc := range isolationCorpus {
+		if strings.HasPrefix(tc.name, "concurrent-") {
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatalf("corpus has no concurrent-load cases")
+	}
+}
+
+// TestIsolationBenchDeterministic pins reproducibility: a fixed seed yields a
+// byte-identical artifact, so a third party re-runs it exactly.
+func TestIsolationBenchDeterministic(t *testing.T) {
+	a, _ := json.Marshal(computeIsolationBench(42))
+	b, _ := json.Marshal(computeIsolationBench(42))
+	if string(a) != string(b) {
+		t.Fatalf("isolation bench is not deterministic for a fixed seed")
+	}
+}
+
+// TestRunIsolationBenchExitsCleanly is the end-to-end smoke: the wrapped runner (with
+// its fail-closed checks) completes without error on the shipped corpus.
+func TestRunIsolationBenchExitsCleanly(t *testing.T) {
+	if err := runIsolationBench("", 42); err != nil {
+		t.Fatalf("runIsolationBench failed: %v", err)
 	}
 }
