@@ -100,9 +100,17 @@ the #971 wall — are no longer scalar.
   **AVX2 tier** (Q4_K ~8.9×, Q5_K ~3.6× over scalar — the VNNI tier needs Cascade Lake / Ice Lake /
   Zen 4+; da33 is older). Scaling UPDATE-1's batched-int8 ceiling to AVX2 on 256 cores keeps the
   pure-CPU + batched estimate **near 10**, but it is an estimate. The e2e witness is **provisioning-
-  gated, not bridge-gated**: da33 currently has **no GLM-5.2 GGUF staged and no fak binary** (the
-  ~436 GB weights must be staged and the 26 MB binary scp/mounted — it exceeds the Slack cap), then
-  a ~44–100 min pure-CPU load + decode. That staging is the remaining step before row C can run.
+  gated, not bridge-gated — and every blocker is removable ON da33 (no scp, no Slack binary
+  transfer):**
+    - **`go` is missing on da33, but it can be ADDED on-box:** `git` + internet both work
+      (github.com and huggingface.co return HTTP/2 200), so `wget` the go.dev linux-amd64 tarball,
+      extract it, `git clone` fak, and `go build ./cmd/fak` natively on the EPYC — the 26 MB binary
+      never has to cross Slack.
+    - **the ~436 GB GLM-5.2 q4 GGUF fits on `/mnt/nvme-glm` (3.1 TB free)** — root `/` is 95% full
+      (~22 GB), but the **nvme drive** (plus `/projects` 3.6 T, `/home/mplservice` 8.9 T) is the
+      staging target; pull the GGUF straight from HF to `/mnt/nvme-glm/glm52-q4/`.
+    - then a pure-CPU serve (`FAK_KQ_INT8=1`, no `--backend`, ~44–100 min load) + decode is the
+      only remaining step before matrix row C produces the real tok/s.
 
 ## What is MEASURED vs INFERRED (kept honest)
 
