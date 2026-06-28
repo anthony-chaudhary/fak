@@ -1,0 +1,48 @@
+{
+  "version": "fak-policy/v1",
+
+  "allow": [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "bash",
+    "read",
+    "write",
+    "edit"
+  ],
+
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_"
+  ],
+
+  "arg_rules": [
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK" }
+  ],
+
+  "self_modify_globs": [
+    ".git/",
+    ".ssh/",
+    ".env",
+    ".aws/",
+    "id_rsa",
+    "/etc/"
+  ],
+
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ]
+}
