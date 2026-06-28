@@ -21,17 +21,9 @@ import (
 // lab/DGX control bridge), so a CI job or a local agent publishes a number the
 // moment it changes without touching the lab plumbing.
 func cmdScoreboard(argv []string) {
-	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "fak scoreboard: missing subcommand (post)")
-		os.Exit(2)
-	}
-	switch argv[0] {
-	case "post":
-		os.Exit(runScoreboardPost(os.Stdout, os.Stderr, argv[1:]))
-	default:
-		fmt.Fprintf(os.Stderr, "fak scoreboard: unknown subcommand %q (want: post)\n", argv[0])
-		os.Exit(2)
-	}
+	dispatchSubcommands("scoreboard", "post", argv,
+		subcommand{"post", runScoreboardPost},
+	)
 }
 
 func runScoreboardPost(stdout, stderr io.Writer, argv []string) int {
@@ -59,35 +51,15 @@ func runScoreboardPost(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	if *dryRun {
-		fmt.Fprintln(stdout, up.Text())
-		return 0
-	}
-
-	ch := *channel
-	if ch == "" {
-		ch = scoreboard.ResolveChannel()
-	}
-	if ch == "" {
-		fmt.Fprintln(stderr, "fak scoreboard post: no channel: pass --channel, set FAK_SCOREBOARD_CHANNEL, or add it to .env.slack.local")
-		return 2
-	}
-	client, err := scoreboard.NewClient(*token)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak scoreboard post: %v\n", err)
-		return 2
-	}
-	ts, err := client.PostWithUpdate(ctx(), ch, up, up.Text(), up.Blocks())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak scoreboard post: %v\n", err)
-		return 1
-	}
-	if ts == "" {
-		fmt.Fprintln(stdout, "skipped: no change from last post for this title")
-		return 0
-	}
-	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
-	return 0
+	return scoreboardPostFlow(stdout, stderr, up, scoreboardPostOpts{
+		prefix:        "fak scoreboard post",
+		channelFlag:   *channel,
+		tokenFlag:     *token,
+		resolveChan:   scoreboard.ResolveChannel,
+		noChannelHint: "fak scoreboard post: no channel: pass --channel, set FAK_SCOREBOARD_CHANNEL, or add it to .env.slack.local",
+		dryRun:        *dryRun,
+		dedupe:        true,
+	})
 }
 
 // buildUpdate assembles the scoreboard Update from either a --from payload or the

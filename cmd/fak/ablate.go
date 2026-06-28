@@ -1,12 +1,10 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ablate"
@@ -41,11 +39,8 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "write the AblationReport JSON to this path")
 	asJSON := fs.Bool("json", false, "emit the AblationReport JSON to stdout (no table)")
 	engine := fs.String("engine", "mock", "engine id (the offline mock by default)")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	path := *tracePath
@@ -137,11 +132,7 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 
 // featStr renders an arm's descriptor as "k=v k=v" in sorted key order.
 func featStr(d map[string]string) string {
-	keys := make([]string, 0, len(d))
-	for k := range d {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := sortedKeys(d)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, k+"="+d[k])

@@ -10,7 +10,6 @@ package main
 // when FAK_GARDEN is off (the env-side governor brake).
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -78,10 +77,7 @@ func runGarden(stdout, stderr io.Writer, argv []string) int {
 }
 
 func emitGardenJSON(w io.Writer, p gardenbundle.Payload) {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(p)
+	_ = writeIndentedJSONNoEscape(w, p)
 }
 
 // repoRoot resolves the repo root the way the Python tool did: the parent of

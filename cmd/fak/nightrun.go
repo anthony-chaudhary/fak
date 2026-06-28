@@ -19,7 +19,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -108,6 +107,19 @@ func parseNightrunFlags(name string, fs *flag.FlagSet, argv []string) (*nightrun
 	return f, nil
 }
 
+// setupNightrunCmd builds the shared `fak nightrun <name>` flag set, parses argv, and
+// returns the parsed flags. On a parse error it returns (nil, 2, false) so the caller
+// does `f, rc, ok := setupNightrunCmd(name, stderr, argv); if !ok { return rc }`.
+func setupNightrunCmd(name string, stderr io.Writer, argv []string) (*nightrunFlags, int, bool) {
+	fs := flag.NewFlagSet("nightrun "+name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	f, err := parseNightrunFlags(name, fs, argv)
+	if err != nil {
+		return nil, 2, false
+	}
+	return f, 0, true
+}
+
 func (f *nightrunFlags) root() string {
 	if f.workspace == "" {
 		return repoRoot()
@@ -174,11 +186,9 @@ func (f *nightrunFlags) load(stderr io.Writer) (root string, caps nightrun.Capab
 }
 
 func nightrunNext(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("nightrun next", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	f, err := parseNightrunFlags("next", fs, argv)
-	if err != nil {
-		return 2
+	f, rc, ok := setupNightrunCmd("next", stderr, argv)
+	if !ok {
+		return rc
 	}
 	_, caps, tasks, ledger, now, ok := f.load(stderr)
 	if !ok {
@@ -207,11 +217,9 @@ func nightrunNext(stdout, stderr io.Writer, argv []string) int {
 }
 
 func nightrunPlan(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("nightrun plan", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	f, err := parseNightrunFlags("plan", fs, argv)
-	if err != nil {
-		return 2
+	f, rc, ok := setupNightrunCmd("plan", stderr, argv)
+	if !ok {
+		return rc
 	}
 	_, caps, tasks, ledger, now, ok := f.load(stderr)
 	if !ok {
@@ -240,11 +248,9 @@ func nightrunPlan(stdout, stderr io.Writer, argv []string) int {
 }
 
 func nightrunRun(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("nightrun run", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	f, err := parseNightrunFlags("run", fs, argv)
-	if err != nil {
-		return 2
+	f, rc, ok := setupNightrunCmd("run", stderr, argv)
+	if !ok {
+		return rc
 	}
 	root, caps, tasks, _, now, ok := f.load(stderr)
 	if !ok {
@@ -273,11 +279,9 @@ func nightrunRun(stdout, stderr io.Writer, argv []string) int {
 }
 
 func nightrunLedger(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("nightrun ledger", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	f, err := parseNightrunFlags("ledger", fs, argv)
-	if err != nil {
-		return 2
+	f, rc, ok := setupNightrunCmd("ledger", stderr, argv)
+	if !ok {
+		return rc
 	}
 	root := f.root()
 	rows := nightrun.ReadLedgerFile(f.ledgerPath(root))
@@ -290,11 +294,9 @@ func nightrunLedger(stdout, stderr io.Writer, argv []string) int {
 }
 
 func nightrunCaps(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("nightrun caps", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	f, err := parseNightrunFlags("caps", fs, argv)
-	if err != nil {
-		return 2
+	f, rc, ok := setupNightrunCmd("caps", stderr, argv)
+	if !ok {
+		return rc
 	}
 	caps := nightrun.ProbeLocal(f.root())
 	if f.asJSON {
@@ -306,11 +308,9 @@ func nightrunCaps(stdout, stderr io.Writer, argv []string) int {
 }
 
 func nightrunGap(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("nightrun gap", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	f, err := parseNightrunFlags("gap", fs, argv)
-	if err != nil {
-		return 2
+	f, rc, ok := setupNightrunCmd("gap", stderr, argv)
+	if !ok {
+		return rc
 	}
 	root := f.root()
 	rows := nightrun.ReadLedgerFile(f.ledgerPath(root))
@@ -352,8 +352,5 @@ func renderRunSummary(w io.Writer, caps nightrun.Capabilities, s nightrun.RunSum
 }
 
 func emitNightrunJSON(w io.Writer, v any) {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(v)
+	_ = writeIndentedJSONNoEscape(w, v)
 }

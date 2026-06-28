@@ -10,7 +10,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -35,11 +34,8 @@ func runAnswerShape(stdin io.Reader, stdout, stderr io.Writer, argv []string) in
 	maxChars := fs.Int("max-chars", 0, "largest in-shape rune count; 0 disables the length check")
 	ngram := fs.Int("ngram", answershape.DefaultNGram, "word n-gram width for the repeat metric")
 	asJSON := fs.Bool("json", false, "emit the shape Report as JSON")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0 // an explicit -h/--help is not a usage error
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	input, err := readShapeInput(*text, *file, stdin)

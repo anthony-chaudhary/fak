@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -62,9 +61,7 @@ func runHooksLaneAudit(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if encErr := enc.Encode(map[string]any{"undeclared": gaps, "count": len(gaps)}); encErr != nil {
+		if encErr := writeIndentedJSON(stdout, map[string]any{"undeclared": gaps, "count": len(gaps)}); encErr != nil {
 			fmt.Fprintf(stderr, "fak hooks lane-audit: %v\n", encErr)
 			return 2
 		}
@@ -132,16 +129,10 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		if mode == "block" {
 			blocked = true
 			if !*asJSON {
-				fmt.Fprintf(stderr, "%s: %d finding(s):\n", g.Name, len(findings))
-				for _, f := range findings {
-					fmt.Fprintf(stderr, "  %s\n", formatFinding(f))
-				}
+				printGateFindings(stderr, g.Name, findings)
 			}
 		} else if !*asJSON { // warn
-			fmt.Fprintf(stderr, "%s (advisory): %d finding(s):\n", g.Name, len(findings))
-			for _, f := range findings {
-				fmt.Fprintf(stderr, "  %s\n", formatFinding(f))
-			}
+			printGateFindings(stderr, g.Name+" (advisory)", findings)
 		}
 	}
 
@@ -227,13 +218,21 @@ func formatFinding(f hooks.Finding) string {
 	return loc + ": " + f.Detail
 }
 
+// printGateFindings writes a gate's findings to w under "<label>: N finding(s):" —
+// the human render the pre-commit and hygiene gate loops share. label carries the gate
+// name plus any " (advisory)" suffix.
+func printGateFindings(w io.Writer, label string, findings []hooks.Finding) {
+	fmt.Fprintf(w, "%s: %d finding(s):\n", label, len(findings))
+	for _, f := range findings {
+		fmt.Fprintf(w, "  %s\n", formatFinding(f))
+	}
+}
+
 func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding) {
 	if findings == nil {
 		findings = []hooks.Finding{}
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(map[string]any{"findings": findings, "count": len(findings)}); err != nil {
+	if err := writeIndentedJSON(stdout, map[string]any{"findings": findings, "count": len(findings)}); err != nil {
 		fmt.Fprintf(stderr, "fak hooks: %v\n", err)
 	}
 }

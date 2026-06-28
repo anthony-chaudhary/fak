@@ -55,9 +55,7 @@ func runDogfoodScore(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(payload); err != nil {
+		if err := writeIndentedJSON(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fak dogfood-score: encode json: %v\n", err)
 			return 1
 		}

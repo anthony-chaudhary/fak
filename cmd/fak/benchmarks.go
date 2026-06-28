@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -87,9 +86,7 @@ func benchmarksList(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(list)
+		_ = writeIndentedJSON(stdout, list)
 		return 0
 	}
 

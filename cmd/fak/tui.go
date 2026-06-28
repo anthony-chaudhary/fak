@@ -128,13 +128,7 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 	}
 	report := buildTUIIssueReport(issues, source, asOf, *epic)
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console issues: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console issues")
 	}
 	fmt.Fprint(stdout, renderTUIIssues(report, *top, *width))
 	return 0
@@ -186,13 +180,7 @@ func runTUILoops(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console loops: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console loops")
 	}
 	fmt.Fprint(stdout, renderTUILoops(report, *top, *width))
 	return 0
@@ -234,13 +222,7 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 	}
 	report := buildTUISessionReport(list, source, at)
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console sessions: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console sessions")
 	}
 	fmt.Fprint(stdout, renderTUISessions(report, *top, *width))
 	return 0
@@ -283,13 +265,7 @@ func runTUIGarden(stdout, stderr io.Writer, argv []string) int {
 	}
 	report := buildTUIGardenReport(payload, source, at, *check)
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console garden: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console garden")
 	}
 	fmt.Fprint(stdout, renderTUIGarden(report, *width))
 	return 0
@@ -353,13 +329,7 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	}
 	report := buildTUIGuardReport(artifacts, at)
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console guard: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console guard")
 	}
 	fmt.Fprint(stdout, renderTUIGuard(report, *width))
 	return 0
@@ -382,13 +352,7 @@ func runTUIGuardJournal(stdout, stderr io.Writer, path string, at time.Time, wid
 	}
 	report := buildTUIGuardJournalReport(rows, path, at, maxRows)
 	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console guard: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console guard")
 	}
 	fmt.Fprint(stdout, renderTUIGuard(report, width))
 	if follow {
@@ -558,9 +522,7 @@ func resolveAutoTarget(auto bool, selectedTarget string, setFlags map[string]boo
 	decision, winner, autoErr := autoSelectComputeTarget(context.Background(), reg, hc, 3*time.Second)
 	if asJSON {
 		// --auto --json emits the ranked decision (not a launch plan) and does not launch.
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if encErr := enc.Encode(decision); encErr != nil {
+		if encErr := writeIndentedJSON(stdout, decision); encErr != nil {
 			fmt.Fprintf(stderr, "fak console agent: encode json: %v\n", encErr)
 			return selectedTarget, false, 1, true
 		}
@@ -725,13 +687,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	}
 	report.Target = selectedTarget
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console agent: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console agent")
 	}
 	if *dryRun {
 		fmt.Fprint(stdout, renderTUIAgent(report, *width))
@@ -870,13 +826,7 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak console overview: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak console overview")
 	}
 	fmt.Fprint(stdout, renderTUIOverview(report, *width))
 	return 0

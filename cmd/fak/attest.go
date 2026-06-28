@@ -29,7 +29,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -57,11 +56,8 @@ func runAttest(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "write the attestation JSON to FILE (default: stdout)")
 	asJSON := fs.Bool("json", false, "emit the attestation as JSON on stdout (the machine-readable form)")
 	quiet := fs.Bool("quiet", false, "suppress the human summary; still exit by pass/fail")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 	if *policyPath == "" {
 		fmt.Fprintln(stderr, "fak attest: --policy FILE is required (the capability floor to prove)")
@@ -399,7 +395,9 @@ name must be DENIED DEFAULT_DENY. exit 0 if every probe matches (floor PROVEN),
 `)
 }
 
-func sortedKeys(m map[string]string) []string {
+// sortedKeys returns the keys of m sorted ascending — the "collect keys, sort"
+// half of every map-render idiom in cmd/fak (featStr, sortedTally, ...).
+func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

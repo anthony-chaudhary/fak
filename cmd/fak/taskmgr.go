@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -75,13 +74,7 @@ func runTaskSample(stdout, stderr io.Writer, argv []string) int {
 
 	snap := m.Snapshot()
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(snap); err != nil {
-			fmt.Fprintf(stderr, "fak task sample: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, snap, "fak task sample")
 	}
 	renderTaskSample(stdout, snap)
 	return 0

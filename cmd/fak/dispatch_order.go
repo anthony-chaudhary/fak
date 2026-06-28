@@ -96,9 +96,7 @@ func runDispatchOrder(stdout, stderr io.Writer, argv []string) int {
 	})
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(struct {
+		if err := writeIndentedJSON(stdout, struct {
 			dispatchorder.Result
 			Pick string `json:"pick"`
 		}{res, res.Pick()}); err != nil {

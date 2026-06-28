@@ -174,11 +174,5 @@ func strictUnmarshal(raw []byte, v any) error {
 }
 
 func emitCallavoidJSON(stdout, stderr io.Writer, v any, sub string) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(stderr, "fak callavoid %s: encode json: %v\n", sub, err)
-		return 1
-	}
-	return 0
+	return encodeJSONOrFail(stdout, stderr, v, "fak callavoid "+sub)
 }

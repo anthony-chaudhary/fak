@@ -14,7 +14,6 @@ package main
 // the pure internal/dojo package.
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -216,10 +215,7 @@ func runDojoList(stdout, stderr io.Writer, argv []string) int {
 	}
 	cat := dojoLeverCatalog()
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(cat)
+		_ = writeIndentedJSONNoEscape(stdout, cat)
 		return 0
 	}
 	fmt.Fprintln(stdout, "registered dojo levers (predict a saving -> score it against billed reality):")
@@ -355,10 +351,7 @@ func runDojoBoard(stdout, stderr io.Writer, argv []string) int {
 	}
 	board := dojo.BoardFromEpisodes(episodes)
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(board)
+		_ = writeIndentedJSONNoEscape(stdout, board)
 		return 0
 	}
 	fmt.Fprintln(stdout, dojo.RenderBoard(board))
@@ -759,10 +752,7 @@ func dojoHeadCommit(root string) string {
 }
 
 func emitDojoJSON(w io.Writer, r dojo.Report) {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(r)
+	_ = writeIndentedJSONNoEscape(w, r)
 }
 
 // readDojoLedgerRows reads the durable ledger if present (absent ledger -> no

@@ -2,12 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -55,11 +53,8 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	accountsDump := fs.Bool("accounts-dump", false, "write the built-in DefaultRoster (the account-switcher starter) to stdout")
 	accountsCheck := fs.String("accounts-check", "", "validate an account roster and print the account + binding surface")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0 // an explicit -h/--help is not a usage error
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	// The rough cost lens (usage saved vs the SOTA frontier baseline): the built-in
@@ -464,11 +459,7 @@ func labelStr(m map[string]string) string {
 	if len(m) == 0 {
 		return ""
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := sortedKeys(m)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, k+"="+m[k])
@@ -498,10 +489,6 @@ func scoutStr(scout string) string {
 }
 
 func sortedTally(m map[string]float64) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := sortedKeys(m)
 	return out
 }

@@ -66,10 +66,7 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 		allFindings = append(allFindings, findings...)
 		blocked = true
 		if !*asJSON {
-			fmt.Fprintf(stderr, "%s: %d finding(s):\n", g.Name, len(findings))
-			for _, f := range findings {
-				fmt.Fprintf(stderr, "  %s\n", formatFinding(f))
-			}
+			printGateFindings(stderr, g.Name, findings)
 		}
 	}
 

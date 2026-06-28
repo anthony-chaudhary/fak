@@ -26,19 +26,10 @@ import (
 // the card and prints it without posting, matching the scoreboard/bench "safe by
 // default" idiom.
 func cmdBlockers(argv []string) {
-	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "fak blockers: missing subcommand (post | feed)")
-		os.Exit(2)
-	}
-	switch argv[0] {
-	case "post":
-		os.Exit(runBlockersPost(os.Stdout, os.Stderr, argv[1:]))
-	case "feed":
-		os.Exit(runBlockersFeed(os.Stdout, os.Stderr, argv[1:]))
-	default:
-		fmt.Fprintf(os.Stderr, "fak blockers: unknown subcommand %q (want: post | feed)\n", argv[0])
-		os.Exit(2)
-	}
+	dispatchSubcommands("blockers", "post | feed", argv,
+		subcommand{"post", runBlockersPost},
+		subcommand{"feed", runBlockersFeed},
+	)
 }
 
 // runBlockersPost handles `fak blockers post` — one hand-built blocker.

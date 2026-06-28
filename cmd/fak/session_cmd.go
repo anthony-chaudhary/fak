@@ -31,7 +31,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -104,11 +103,8 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	contextTokens := fs.Int("context-tokens", sessionFlagUnset, "budget: remaining prompt/context tokens (0 = off)")
 	maxTokens := fs.Int("max-tokens", sessionFlagUnset, "pace: max output tokens this turn (0 = planner default)")
 	gapMs := fs.Int("gap-ms", sessionFlagUnset, "pace: minimum inter-turn gap in ms (0 = none)")
-	if err := fs.Parse(flagArgs); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, flagArgs); !ok {
+		return rc
 	}
 	// flag.Parse stops at the first non-flag token, so a stray positional (or a flag
 	// placed BEFORE the id) would otherwise be silently dropped or misread as the id.
@@ -291,9 +287,7 @@ func (c *sessionClient) renderList(stdout, stderr io.Writer, asJSON bool) int {
 }
 
 func emitSessionJSON(stdout, stderr io.Writer, v any) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	if err := writeIndentedJSON(stdout, v); err != nil {
 		fmt.Fprintf(stderr, "fak session: encode json: %v\n", err)
 		return 1
 	}

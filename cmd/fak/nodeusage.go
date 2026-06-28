@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/nodeusagepost"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -24,17 +23,9 @@ import (
 // (FAK_NODE_USAGE_CHANNEL). A node-usage post NEVER falls back to #scoreboard — that
 // would put node-usage status in the number feed.
 func cmdNodeUsage(argv []string) {
-	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "fak nodeusage: missing subcommand (post)")
-		os.Exit(2)
-	}
-	switch argv[0] {
-	case "post":
-		os.Exit(runNodeUsagePost(os.Stdout, os.Stderr, argv[1:]))
-	default:
-		fmt.Fprintf(os.Stderr, "fak nodeusage: unknown subcommand %q (want: post)\n", argv[0])
-		os.Exit(2)
-	}
+	dispatchSubcommands("nodeusage", "post", argv,
+		subcommand{"post", runNodeUsagePost},
+	)
 }
 
 func runNodeUsagePost(stdout, stderr io.Writer, argv []string) int {
@@ -63,35 +54,16 @@ func runNodeUsagePost(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	if *dryRun {
-		fmt.Fprintln(stdout, up.Text())
-		return 0
-	}
-
-	ch := *channel
-	if ch == "" {
-		ch = nodeusagepost.ResolveChannel()
-	}
-	if ch == "" {
-		fmt.Fprintln(stderr, "fak nodeusage post: no channel: pass --channel, set FAK_NODE_USAGE_CHANNEL, or add it to .env.slack.local")
-		return 2
-	}
-	tok := *token
-	if tok == "" {
-		tok = nodeusagepost.ResolveToken()
-	}
-	client, err := scoreboard.NewClient(tok)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak nodeusage post: %v\n", err)
-		return 2
-	}
-	ts, err := client.Post(ctx(), ch, up.Text(), up.Blocks())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak nodeusage post: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
-	return 0
+	return scoreboardPostFlow(stdout, stderr, up, scoreboardPostOpts{
+		prefix:        "fak nodeusage post",
+		channelFlag:   *channel,
+		tokenFlag:     *token,
+		resolveChan:   nodeusagepost.ResolveChannel,
+		resolveToken:  nodeusagepost.ResolveToken,
+		noChannelHint: "fak nodeusage post: no channel: pass --channel, set FAK_NODE_USAGE_CHANNEL, or add it to .env.slack.local",
+		dryRun:        *dryRun,
+		dedupe:        false,
+	})
 }
 
 // buildNodeUsageUpdate assembles the Update from exactly one content source: a fleet

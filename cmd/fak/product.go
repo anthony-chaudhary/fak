@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -27,17 +26,9 @@ import (
 // (FAK_SCOREBOARD_TOKEN); only the channel differs (FAK_PRODUCT_CHANNEL). A product post
 // never falls back to #scoreboard — that would put direction prose in the number feed.
 func cmdProduct(argv []string) {
-	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "fak product: missing subcommand (post)")
-		os.Exit(2)
-	}
-	switch argv[0] {
-	case "post":
-		os.Exit(runProductPost(os.Stdout, os.Stderr, argv[1:]))
-	default:
-		fmt.Fprintf(os.Stderr, "fak product: unknown subcommand %q (want: post)\n", argv[0])
-		os.Exit(2)
-	}
+	dispatchSubcommands("product", "post", argv,
+		subcommand{"post", runProductPost},
+	)
 }
 
 func runProductPost(stdout, stderr io.Writer, argv []string) int {
@@ -64,31 +55,15 @@ func runProductPost(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	if *dryRun {
-		fmt.Fprintln(stdout, up.Text())
-		return 0
-	}
-
-	ch := *channel
-	if ch == "" {
-		ch = scoreboard.ResolveProductChannel()
-	}
-	if ch == "" {
-		fmt.Fprintln(stderr, "fak product post: no channel: pass --channel, set FAK_PRODUCT_CHANNEL, or add it to .env.slack.local")
-		return 2
-	}
-	client, err := scoreboard.NewClient(*token)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak product post: %v\n", err)
-		return 2
-	}
-	ts, err := client.Post(ctx(), ch, up.Text(), up.Blocks())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak product post: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
-	return 0
+	return scoreboardPostFlow(stdout, stderr, up, scoreboardPostOpts{
+		prefix:        "fak product post",
+		channelFlag:   *channel,
+		tokenFlag:     *token,
+		resolveChan:   scoreboard.ResolveProductChannel,
+		noChannelHint: "fak product post: no channel: pass --channel, set FAK_PRODUCT_CHANNEL, or add it to .env.slack.local",
+		dryRun:        *dryRun,
+		dedupe:        false,
+	})
 }
 
 // buildProductUpdate assembles the Update from exactly one content source: a scorecard

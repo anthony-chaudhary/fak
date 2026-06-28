@@ -192,13 +192,7 @@ func runGuardRSIScorecard(stdout, stderr io.Writer, argv []string) int {
 }
 
 func encodeGuardRSIJSON(stdout, stderr io.Writer, label string, v any) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(stderr, "%s: encode json: %v\n", label, err)
-		return 1
-	}
-	return 0
+	return encodeJSONOrFail(stdout, stderr, v, label)
 }
 
 func guardVerdictRSIUsage(w io.Writer) {

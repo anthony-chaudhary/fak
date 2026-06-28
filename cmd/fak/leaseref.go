@@ -25,7 +25,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -175,9 +174,7 @@ func parseLeaserefFlags(fs *flag.FlagSet, argv []string, stderr io.Writer) (int,
 }
 
 func emitLeaserefJSON(stdout, stderr io.Writer, v any, sub string) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	if err := writeIndentedJSON(stdout, v); err != nil {
 		fmt.Fprintf(stderr, "fak leaseref %s: encode json: %v\n", sub, err)
 		return 1
 	}

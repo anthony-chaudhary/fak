@@ -115,13 +115,7 @@ func runHorizonRecoverySelfcheck(stdout, stderr io.Writer, argv []string) int {
 }
 
 func encodeJSON(stdout, stderr io.Writer, v any) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(stderr, "fak horizon-recovery: encode json: %v\n", err)
-		return 1
-	}
-	return 0
+	return encodeJSONOrFail(stdout, stderr, v, "fak horizon-recovery")
 }
 
 func writeHorizonBandHuman(w io.Writer, b horizonrecovery.RecoveryBand) {

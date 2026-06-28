@@ -132,11 +132,8 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("vcache status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit machine-readable status")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	rep := defaultVCacheStatus()
@@ -187,11 +184,8 @@ func runVCacheProve(stdout, stderr io.Writer, argv []string) int {
 	readMult := fs.Float64("read-mult", 0.1, "provider cached-read input-token multiplier")
 	writeMult := fs.Float64("write-mult", vcachegov.WriteMult5Minutes, "provider cache-write input-token multiplier")
 	content := fs.String("content", "public", "prefix content class: public, secret, regulated")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	proof := vcachegov.ProveStarSavings(vcachegov.StarSavingsInput{
@@ -232,11 +226,8 @@ func runVCacheProveRecall(stdout, stderr io.Writer, argv []string) int {
 	unit := fs.Int64("unit-tokens", 10, "recalled unit fresh-prefill length in tokens (U)")
 	readMult := fs.Float64("read-mult", 0.1, "provider cached-read token multiplier (r)")
 	siblings := fs.Int("siblings", 1, "co-recalled sibling units sharing the prefix (S, the amortization)")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 	proof := vcachechain.ProveRecall(vcachechain.ProveRecallInput{
 		PrefixTokens: *prefix,
@@ -280,11 +271,8 @@ func runVCacheProveTelemetry(stdout, stderr io.Writer, argv []string) int {
 	readMult := fs.Float64("read-mult", 0.1, "provider cached-read input-token multiplier")
 	write5mMult := fs.Float64("write-5m-mult", vcachegov.WriteMult5Minutes, "5m cache-write input-token multiplier")
 	write1hMult := fs.Float64("write-1h-mult", vcachegov.WriteMult1Hour, "1h cache-write input-token multiplier")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 	if strings.TrimSpace(*file) == "" {
 		fmt.Fprintln(stderr, "fak vcache prove-telemetry: --file is required")
@@ -352,11 +340,8 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	recallUnit := fs.Int64("recall-unit-tokens", def.Recall.UnitTokens, "M4 recall proof unit tokens (U)")
 	recallSiblings := fs.Int("recall-siblings", def.Recall.Siblings, "M4 recall proof sibling count (S)")
 	recallReadMult := fs.Float64("recall-read-mult", def.Recall.ReadMult, "M4 recall cached-read token multiplier")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 	if strings.TrimSpace(*telemetry) == "-" && strings.TrimSpace(*anchorsFile) == "-" {
 		fmt.Fprintln(stderr, "fak vcache score: --telemetry - and --anchors-file - cannot both read stdin")

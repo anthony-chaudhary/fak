@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -73,9 +72,7 @@ func runSwebenchSotaSnapshot(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	if *asJSON || *out == "" {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(doc); err != nil {
+		if err := writeIndentedJSON(stdout, doc); err != nil {
 			fmt.Fprintf(stderr, "fak swebench sota-snapshot: encode json: %v\n", err)
 			return 1
 		}

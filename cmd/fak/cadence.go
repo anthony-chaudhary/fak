@@ -11,7 +11,6 @@ package main
 // dimension failed to MEASURE; the scorecard ratchet owns debt regressions).
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -125,10 +124,7 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 }
 
 func emitCadenceJSON(w io.Writer, r cadencereport.Report) {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(r)
+	_ = writeIndentedJSONNoEscape(w, r)
 }
 
 // readLedgerRows reads the durable ledger if present (absent ledger -> no prior

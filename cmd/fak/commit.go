@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -109,9 +108,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if encErr := enc.Encode(res); encErr != nil {
+		if encErr := writeIndentedJSON(stdout, res); encErr != nil {
 			fmt.Fprintf(stderr, "fak commit: %v\n", encErr)
 			return 1
 		}
@@ -210,9 +207,7 @@ func short(sha string) string {
 func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root string, asJSON, requireIssue bool) int {
 	rep := hooks.LintCommitMessageWithOptions(message, paths, root, requireIssue)
 	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(rep); err != nil {
+		if err := writeIndentedJSON(stdout, rep); err != nil {
 			fmt.Fprintf(stderr, "fak commit: %v\n", err)
 			return 1
 		}

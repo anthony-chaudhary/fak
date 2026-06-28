@@ -50,9 +50,7 @@ func runConflationScorecard(stdout, stderr io.Writer, argv []string) int {
 		return okExit(payload.OK)
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(payload); err != nil {
+		if err := writeIndentedJSON(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fak conflation-scorecard: encode json: %v\n", err)
 			return 1
 		}

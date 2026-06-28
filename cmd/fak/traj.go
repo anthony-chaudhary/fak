@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -306,9 +305,7 @@ func clusterByQuery(turns []trajectory.Turn, threshold float64) [][]trajectory.T
 }
 
 func emitJSON(v any) {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	if err := writeIndentedJSON(os.Stdout, v); err != nil {
 		fmt.Fprintf(os.Stderr, "fak traj: json: %v\n", err)
 		os.Exit(1)
 	}

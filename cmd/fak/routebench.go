@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,11 +44,8 @@ func runRoutebench(stdout, stderr io.Writer, argv []string) int {
 	latencies := fs.String("latencies", "", "override the rough latency book: model=ms[,model=ms,...]")
 	asJSON := fs.Bool("json", false, "emit the comparison as JSON")
 	dumpCorpus := fs.Bool("dump-corpus", false, "write the built-in demo corpus as JSON to stdout (to edit into your own)")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	if *dumpCorpus {

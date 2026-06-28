@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -111,13 +110,7 @@ func runLoopAppend(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(appended); err != nil {
-			fmt.Fprintf(stderr, "fak loop append: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, appended, "fak loop append")
 	}
 	fmt.Fprintf(stdout, "appended loop event seq=%d kind=%s loop=%s ledger=%s\n",
 		appended.Seq, appended.Kind, appended.LoopID, *ledger)
@@ -290,9 +283,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 			"exit_code":   exitCode,
 			"duration_ms": durationMS,
 		}
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(rep); err != nil {
+		if err := writeIndentedJSON(stdout, rep); err != nil {
 			fmt.Fprintf(stderr, "fak loop run: encode json: %v\n", err)
 			return 1
 		}
@@ -321,13 +312,7 @@ func runLoopStatus(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(st); err != nil {
-			fmt.Fprintf(stderr, "fak loop status: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, st, "fak loop status")
 	}
 	renderLoopStatus(stdout, st)
 	return 0
@@ -374,13 +359,7 @@ func runLoopRollup(stdout, stderr io.Writer, argv []string) int {
 
 	rep := foldLoopRollup(nodes, time.Now())
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(rep); err != nil {
-			fmt.Fprintf(stderr, "fak loop rollup: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, rep, "fak loop rollup")
 	}
 	renderLoopRollup(stdout, rep)
 	return 0
@@ -536,11 +515,7 @@ func foldLoopRollup(nodes []loopRollupNode, now time.Time) loopRollupReport {
 		}
 	}
 
-	ids := make([]string, 0, len(agg))
-	for id := range agg {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := sortedKeys(agg)
 	for _, id := range ids {
 		a := agg[id]
 		nodeIDs := make([]string, 0, len(a.nodes))
@@ -673,9 +648,7 @@ func runLoopAdmit(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(map[string]any{
+		if err := writeIndentedJSON(stdout, map[string]any{
 			"schema":      "fak.loop-admit.v1",
 			"ledger_path": *ledger,
 			"policy_path": *policyPath,

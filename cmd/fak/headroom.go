@@ -14,7 +14,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -104,11 +103,8 @@ func runHeadroomCompress(stdout, stderr io.Writer, argv []string) int {
 	via := fs.String("via", "", "compressor plugin to use (default: selected / FAK_COMPRESSOR)")
 	model := fs.String("model", "", "target model id for token-accounting plugins")
 	emit := fs.Bool("emit", false, "write the compressed bytes to stdout instead of a report")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	data, err := readBlob(fs.Args())

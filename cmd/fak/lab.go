@@ -26,7 +26,6 @@ package main
 import (
 	"bytes"
 	_ "embed"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -161,9 +160,7 @@ func labStatus(stdout, stderr io.Writer, argv []string) int {
 	snap := fleet.Fold(ro, reps, fleet.FoldOpts{StaleSec: *staleMin * 60})
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(snap); err != nil {
+		if err := writeIndentedJSON(stdout, snap); err != nil {
 			fmt.Fprintf(stderr, "fak lab: encode: %v\n", err)
 			return 1
 		}
@@ -230,9 +227,7 @@ func labLs(stdout, stderr io.Writer, argv []string) int {
 	}
 	ro = labSelect(ro, *group, *class)
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(ro); err != nil {
+		if err := writeIndentedJSON(stdout, ro); err != nil {
 			fmt.Fprintf(stderr, "fak lab: encode: %v\n", err)
 			return 1
 		}

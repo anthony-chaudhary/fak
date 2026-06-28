@@ -21,7 +21,6 @@ package main
 // probe is a later, more precise rung.
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -71,13 +70,7 @@ func runLoopRecover(stdout, stderr io.Writer, argv []string) int {
 	})
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(res); err != nil {
-			fmt.Fprintf(stderr, "fak loop recover: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, res, "fak loop recover")
 	}
 	renderLoopRecover(stdout, *ledger, res, *all)
 	return 0

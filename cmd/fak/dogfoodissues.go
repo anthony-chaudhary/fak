@@ -92,9 +92,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(result); err != nil {
+		if err := writeIndentedJSON(stdout, result); err != nil {
 			fmt.Fprintf(stderr, "dogfood-issues: encode json: %v\n", err)
 			return 1
 		}

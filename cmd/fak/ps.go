@@ -27,7 +27,6 @@ package main
 // actually carries rather than fabricate a progress estimate it cannot source.
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -70,11 +69,8 @@ func runPS(stdout, stderr io.Writer, argv []string, watchDefault bool) int {
 	watch := fs.Bool("watch", watchDefault, "refresh continuously (the `top` mode)")
 	interval := fs.Duration("interval", psDefaultInterval, "watch refresh cadence")
 	frames := fs.Int("frames", 0, "watch: stop after N frames (0 = until interrupted)")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 	// `fak ps` takes only flags; a stray positional is almost always a mistake (a
 	// session id meant for `fak session`), so reject it loudly rather than ignore it.

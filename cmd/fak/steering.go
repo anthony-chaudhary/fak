@@ -38,23 +38,15 @@ const steeringBaselineRel = "tools/steering_baseline.json"
 //	fak steering alert --pin       # ...and ratchet the floor down on an improvement
 //	fak steering pin               # re-baseline the floor from the current scorecard
 func cmdSteering(argv []string) {
-	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "fak steering: missing subcommand (status | alert | report | pin)")
-		os.Exit(2)
+	mode := func(m string) func(stdout, stderr io.Writer, a []string) int {
+		return func(stdout, stderr io.Writer, a []string) int { return runSteering(stdout, stderr, m, a) }
 	}
-	switch argv[0] {
-	case "status":
-		os.Exit(runSteering(os.Stdout, os.Stderr, "status", argv[1:]))
-	case "report":
-		os.Exit(runSteering(os.Stdout, os.Stderr, "report", argv[1:]))
-	case "alert":
-		os.Exit(runSteering(os.Stdout, os.Stderr, "alert", argv[1:]))
-	case "pin":
-		os.Exit(runSteeringPin(os.Stdout, os.Stderr, argv[1:]))
-	default:
-		fmt.Fprintf(os.Stderr, "fak steering: unknown subcommand %q (want: status | alert | report | pin)\n", argv[0])
-		os.Exit(2)
-	}
+	dispatchSubcommands("steering", "status | alert | report | pin", argv,
+		subcommand{"status", mode("status")},
+		subcommand{"report", mode("report")},
+		subcommand{"alert", mode("alert")},
+		subcommand{"pin", runSteeringPin},
+	)
 }
 
 // steeringSnapshot is the slice of the steerability payload the alert gate and the

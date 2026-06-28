@@ -83,9 +83,7 @@ func runSavingsVector(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(v); err != nil {
+		if err := writeIndentedJSON(stdout, v); err != nil {
 			fmt.Fprintf(stderr, "fak savings-vector: encode json: %v\n", err)
 			return 1
 		}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -21,10 +20,7 @@ func cmdSkillEffectivenessScorecard(argv []string) {
 	}
 	p := collectSkillEffectivenessScorecard(repoRoot())
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(p)
+		_ = writeIndentedJSONNoEscape(os.Stdout, p)
 		return
 	}
 	c := p["corpus"].(map[string]any)

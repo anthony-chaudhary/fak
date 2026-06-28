@@ -12,7 +12,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -36,11 +35,8 @@ func runCodelint(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the findings as a JSON array")
 	list := fs.Bool("list", false, "list the languages this build can lint, then exit")
 	errorsOnly := fs.Bool("errors-only", false, "report only hard (parse/compile) errors, suppressing warnings")
-	if err := fs.Parse(argv); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
 	}
 
 	reg := codelint.DefaultRegistry()

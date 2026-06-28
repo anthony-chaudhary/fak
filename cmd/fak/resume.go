@@ -122,13 +122,7 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 
 	rep := resume.Plan(in)
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(rep); err != nil {
-			fmt.Fprintf(stderr, "fak resume plan: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, rep, "fak resume plan")
 	}
 	renderResumeReport(stdout, rep, groundNote)
 	return 0
@@ -190,13 +184,7 @@ func runResumeValidate(stdout, stderr io.Writer, argv []string) int {
 
 	rep := resume.Backtest(sessions, ttl, resume.DefaultRecoveryBand())
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(rep); err != nil {
-			fmt.Fprintf(stderr, "fak resume validate: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, rep, "fak resume validate")
 	}
 	renderBacktestReport(stdout, rep, scanned, len(sessions))
 	return 0
