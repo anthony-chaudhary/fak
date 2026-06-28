@@ -267,12 +267,28 @@ def _data(rows: list[dict], dims: list[dict] | None = None,
     }
 
 
-def test_build_payload_zero_debt_full_coverage_is_ok() -> None:
-    p = isc.build_payload(workspace=".", data=_data([row()]))
+def test_build_payload_zero_debt_full_coverage_AND_strong_standing_is_ok() -> None:
+    # OK now requires BOTH a complete + honest map (zero parity/coverage debt) AND a
+    # strong competitive STANDING. A lead row clears the standing floor, so this is OK.
+    p = isc.build_payload(workspace=".", data=_data([row(verdict="lead",
+                          fak_value=20.0, competitor_value=10.0)]))
     assert p["ok"] is True and p["verdict"] == "OK"
+    assert p["finding"] == "complete_honest_and_competitive"
     assert p["corpus"]["parity_debt"] == 0 and p["corpus"]["coverage_debt"] == 0
     assert p["corpus"]["grade"] == "A"
     assert p["corpus"]["coverage"]["coverage_pct"] == 100.0
+    assert p["corpus"]["standing_score"] >= isc.STANDING_OK_FLOOR
+
+
+def test_build_payload_honest_map_but_weak_standing_drives_action() -> None:
+    # The harshness fix: an honest, fully-covered map whose only row is a LOSS is NOT a
+    # clean OK. Map-honesty (grade A, zero parity-debt) must not masquerade as field
+    # standing -- a weak standing_score downgrades the verdict to ACTION/weak_standing.
+    p = isc.build_payload(workspace=".", data=_data([row(verdict="trails")]))
+    assert p["corpus"]["parity_debt"] == 0 and p["corpus"]["coverage_debt"] == 0
+    assert p["corpus"]["grade"] == "A"          # the MAP is still honestly drawn
+    assert p["corpus"]["standing_score"] < isc.STANDING_OK_FLOOR
+    assert p["ok"] is False and p["finding"] == "weak_standing"
 
 
 def test_build_payload_coverage_gap_drives_action() -> None:
@@ -321,7 +337,11 @@ def test_render_doc_folder_emits_index_and_group_pages() -> None:
 
 # --- the load-bearing live smoke: the shipped map is complete + honest ------
 
-def test_live_real_data_is_complete_and_honest() -> None:
+def test_live_real_data_map_is_complete_and_honest() -> None:
+    # The MAP-quality contract: the committed competitive scorecard must be complete and
+    # honestly drawn -- zero parity-debt, every in-scope dimension positioned, grade A on
+    # the map-honesty score. This is SEPARATE from competitive standing (next test): an
+    # honest map of a field fak mostly does not yet contest still earns map-grade A.
     root = isc.repo_root()
     path = isc.default_data_path(root)
     if not path.exists():
@@ -332,11 +352,34 @@ def test_live_real_data_is_complete_and_honest() -> None:
     assert p["corpus"]["parity_debt"] == 0, p["reason"]
     # ...and have positioned every in-scope industry dimension (zero coverage-debt).
     assert p["corpus"]["coverage_debt"] == 0, p["reason"]
-    assert p["ok"] is True and p["corpus"]["grade"] == "A"
+    # the MAP is honestly drawn -- grade A on map-honesty (not the same as a clean OK).
+    assert p["corpus"]["grade"] == "A", p["reason"]
     # the losses must be shown, not buried.
     assert p["corpus"]["positions"]["overall"]["trails"] >= 1, "the losses must be shown"
     # and the map must be genuinely industry-first, not just the handful fak measured.
     assert p["corpus"]["dimensions"] >= 30, "the taxonomy must cover the field, not a highlight reel"
+
+
+def test_live_real_data_standing_is_reported_honestly() -> None:
+    # The STANDING contract (the harshness fix): the live verdict must NOT read as a clean
+    # OK on map-honesty alone. standing_score is a real [0,100] competitive-position number
+    # distinct from the map-honesty grade, and when it is below the floor the verdict is
+    # ACTION/weak_standing -- the map-honesty A can never masquerade as field strength.
+    root = isc.repo_root()
+    path = isc.default_data_path(root)
+    if not path.exists():
+        return  # tolerant: not in the repo tree
+    p = isc.collect(root, data_path=path)
+    standing = p["corpus"]["standing_score"]
+    assert isinstance(standing, (int, float)) and 0 <= standing <= 100, p
+    o = p["corpus"]["positions"]["overall"]
+    # standing must reflect the substantive distribution, not just that the map is honest:
+    # a map that leads on few axes and contests little of the field scores LOWER than its
+    # map-honesty grade. (The two numbers are meant to diverge -- that IS the honest story.)
+    if standing < isc.STANDING_OK_FLOOR:
+        assert p["ok"] is False and p["finding"] == "weak_standing", p["reason"]
+    else:
+        assert o["lead"] + o["parity"] >= 1, "a strong standing needs real wins"
 
 
 def test_live_verify_sources_present_match() -> None:

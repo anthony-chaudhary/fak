@@ -573,7 +573,50 @@ def positions(rows: list[dict[str, Any]]) -> dict[str, Any]:
         by_cat.setdefault(cat, {x: 0 for x in VERDICTS})
         if v in counts:
             by_cat[cat][v] += 1
-    return {"overall": counts, "by_category": by_cat}
+    return {"overall": counts, "by_category": by_cat,
+            "standing_score": standing_score(counts)}
+
+
+# Parity-weighted credit per verdict, used by `standing_score`. A lead is a full win;
+# parity is most of one; trailing still earns a little for showing up and being honest
+# about it; a no-claim gap earns nothing toward STANDING (it is honest, not competitive).
+STANDING_WEIGHTS = {"lead": 1.0, "parity": 0.6, "trails": 0.2, "no-claim": 0.0}
+# The standing blend: WHERE-WE-PLAY (parity-weighted win rate over contested axes) vs
+# HOW-MUCH-WE-CONTEST (share of the field fak ships anything on). Weighted toward the
+# former -- being strong where you compete matters more than competing everywhere -- but
+# the contest term keeps a "leads on its 2 axes, absent from 89" project from reading high.
+STANDING_PLAY_WEIGHT = 0.70
+STANDING_CONTEST_WEIGHT = 0.30
+# Below this standing the headline verdict is downgraded from a clean OK: a complete,
+# honest map of a field fak mostly does not yet contest is real work to surface, not a win.
+STANDING_OK_FLOOR = 60.0
+
+
+def standing_score(counts: dict[str, int]) -> float:
+    """The substantive competitive-position number in [0, 100] -- the COUNTERWEIGHT to the
+    composite honesty/coverage score, which rises toward A as every gap is truthfully
+    declared (map quality, not field standing). This answers the other question: given the
+    field, how well does fak actually stand? A no-claim gap is honest (it lifts the
+    composite) but is NOT a competitive win (it earns zero here) -- the two numbers are
+    meant to diverge, and the gap between them is the honest story.
+
+    contested = lead+parity+trails (axes where fak ships something to compare).
+    play  = parity-weighted credit over contested axes (lead=1, parity=.6, trails=.2).
+    field = contested / all positioned axes (how much of the industry fak contests).
+    standing = 100 * (0.7*play + 0.3*field). Zero when fak contests nothing."""
+    lead = counts.get("lead", 0)
+    parity = counts.get("parity", 0)
+    trails = counts.get("trails", 0)
+    gap = counts.get("no-claim", 0)
+    contested = lead + parity + trails
+    total = contested + gap
+    if total == 0:
+        return 0.0
+    play = (sum(STANDING_WEIGHTS[v] * counts.get(v, 0)
+                for v in ("lead", "parity", "trails")) / contested
+            if contested else 0.0)
+    field = contested / total
+    return round(100 * (STANDING_PLAY_WEIGHT * play + STANDING_CONTEST_WEIGHT * field), 1)
 
 
 def _fmt_value(v: Any, unit: Any) -> str:
@@ -681,8 +724,10 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None,
         key=lambda x: (-x["debt"], x["score"]))
 
     pos = positions(rows)
+    standing = pos["standing_score"]
     corpus = {
         "score": score, "grade": grade,
+        "standing_score": standing,
         "honesty_score": honesty_score,
         "parity_debt": parity_debt,
         "coverage_debt": cov["coverage_debt"],
@@ -705,24 +750,39 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None,
     }
 
     o = pos["overall"]
-    standing = (f"{o['lead']} lead · {o['parity']} parity · {o['trails']} trails "
-                f"· {o['no-claim']} honest gap")
+    standing_line = (f"{o['lead']} lead · {o['parity']} parity · {o['trails']} trails "
+                     f"· {o['no-claim']} honest gap")
+    standing_clause = f"standing {standing}/100 ({standing_line})"
     cov_line = (f"coverage {cov['coverage_pct']}% ({cov['covered']}/{cov['in_scope']} "
                 f"industry dimensions positioned)")
-    if parity_debt == 0 and cov["coverage_debt"] == 0:
-        ok, verdict, finding = True, "OK", "scorecard_complete_and_honest"
-        reason = (f"competitive map complete + honest: score {score}/100 (grade {grade}); "
-                  f"{cov_line}; zero parity-debt across {len(kpis)} KPIs over {len(rows)} rows "
-                  f"({standing}; {meas['measured']} measured, {meas['gap']} honest gaps; "
+    if parity_debt == 0 and cov["coverage_debt"] == 0 and standing >= STANDING_OK_FLOOR:
+        ok, verdict, finding = True, "OK", "complete_honest_and_competitive"
+        reason = (f"complete + honest map AND competitive: map-score {score}/100 (grade {grade}), "
+                  f"{standing_clause}; {cov_line}; zero parity-debt across {len(kpis)} KPIs over "
+                  f"{len(rows)} rows ({meas['measured']} measured, {meas['gap']} honest gaps; "
                   f"{n_soft}+{n_ind_soft} advisory)")
         next_action = ("hold the line; when the field moves add the new industry dimension to "
                        f"_taxonomy.json (coverage drops → position it), and when a benchmark "
                        f"lands turn a no-claim into a measured row; re-run to keep both debts at 0")
+    elif parity_debt == 0 and cov["coverage_debt"] == 0:
+        # The map is complete + honestly drawn, but fak's SUBSTANTIVE standing is weak:
+        # it leads/parities on few axes and contests little of the field. An honest map
+        # is real work, but it is NOT a competitive win -- surface it as ACTION, not a
+        # clean A, so the map-honesty score can never masquerade as field strength.
+        ok, verdict, finding = False, "ACTION", "weak_standing"
+        reason = (f"map complete + honest (map-score {score}/100, parity-debt 0) but "
+                  f"{standing_clause} is below the {STANDING_OK_FLOOR:g} floor -- fak contests "
+                  f"{o['lead'] + o['parity'] + o['trails']} of {len(rows)} positioned axes and "
+                  f"leads on {o['lead']}; {cov_line}")
+        next_action = ("raise STANDING, not just honesty: turn a parity/no-claim axis into a "
+                       "measured LEAD by shipping + benchmarking the differentiator (cache value, "
+                       "defense, deletion), or contest a no-claim axis fak can actually win; "
+                       "re-run to prove standing rose")
     elif cov["coverage_debt"] > 0 and parity_debt == 0:
         ok, verdict, finding = False, "ACTION", "coverage_debt"
         reason = (f"{cov['coverage_debt']} industry dimension(s) not yet positioned; "
-                  f"{cov_line}; score {score}/100 (grade {grade}); rows are honest "
-                  f"(parity-debt 0); standing {standing}")
+                  f"{cov_line}; map-score {score}/100 (grade {grade}); rows are honest "
+                  f"(parity-debt 0); {standing_clause}")
         next_action = ("close coverage worst-group-first (see corpus.coverage.by_group + "
                        "--gaps): add an honest fak position row for each uncovered taxonomy "
                        "dimension (a no-claim gap is a valid position — most will be); re-run")
@@ -730,8 +790,8 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None,
         ok, verdict, finding = False, "ACTION", "parity_debt"
         worst = breakdown[0]
         reason = (f"{parity_debt} unit(s) of parity-debt + {cov['coverage_debt']} coverage "
-                  f"gap(s); score {score}/100 (grade {grade}); heaviest KPI: {worst['kpi']} "
-                  f"({worst['debt']} defect(s)); {cov_line}; standing {standing}")
+                  f"gap(s); map-score {score}/100 (grade {grade}); heaviest KPI: {worst['kpi']} "
+                  f"({worst['debt']} defect(s)); {cov_line}; {standing_clause}")
         next_action = ("retire parity-debt worst-first (corpus.breakdown + per-KPI defects): "
                        "name every competitor, align each verdict to its ratio, drop naive "
                        "baselines, disclose non-comparable rows, trace + source every number; "
@@ -922,15 +982,17 @@ def render(payload: dict[str, Any]) -> str:
         f"industry-scorecard: {payload.get('verdict')} ({payload.get('finding')})",
         f"  {payload.get('reason')}",
         "",
-        (f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) "
+        (f"map-score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}, map honesty + "
+         f"coverage) · STANDING {c.get('standing_score', 0)}/100 (competitive position) "
          f"· PARITY-DEBT {c.get('parity_debt', 0)} · COVERAGE-DEBT {c.get('coverage_debt', 0)} "
          f"· {c.get('soft_signals', 0)}+{c.get('industry_soft_signals', 0)} advisory"),
         (f"coverage: {cov.get('coverage_pct', 0)}% "
          f"({cov.get('covered', 0)}/{cov.get('in_scope', 0)} industry dimensions positioned) "
          f"· {meas.get('measured', 0)} measured, {meas.get('gap', 0)} honest gaps "
          f"· {c.get('dimensions', 0)} dims / {c.get('competitors', 0)} competitors tracked"),
-        (f"standing: {pos.get('lead', 0)} lead · {pos.get('parity', 0)} parity "
-         f"· {pos.get('trails', 0)} trails · {pos.get('no-claim', 0)} honest gap"),
+        (f"standing {c.get('standing_score', 0)}/100: {pos.get('lead', 0)} lead "
+         f"· {pos.get('parity', 0)} parity · {pos.get('trails', 0)} trails "
+         f"· {pos.get('no-claim', 0)} honest gap"),
         ("debt by group: " + "  ".join(
             f"{g}:{(c.get('debt_by_group') or {}).get(g, 0)}" for g in GROUPS)),
     ]
@@ -1097,7 +1159,9 @@ def _front_matter(title: str, desc: str) -> list[str]:
 
 def _standing_line(pos: dict[str, Any]) -> str:
     o = pos.get("overall", {})
-    return (f"{o.get('lead', 0)} lead · {o.get('parity', 0)} parity · "
+    sc = pos.get("standing_score")
+    head = f"**{sc}/100** — " if sc is not None else ""
+    return (f"{head}{o.get('lead', 0)} lead · {o.get('parity', 0)} parity · "
             f"{o.get('trails', 0)} trails · {o.get('no-claim', 0)} honest gap")
 
 
@@ -1121,7 +1185,8 @@ def render_index_chart(payload: dict[str, Any]) -> str:
     lines: list[str] = [
         (f"industry standing chart — {c.get('dimensions', 0)} dimensions · "
          f"{c.get('competitors', 0)} competitors · "
-         f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) · "
+         f"map {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) · "
+         f"standing {c.get('standing_score', 0)}/100 · "
          f"parity-debt {c.get('parity_debt', 0)}"),
         "",
         "coverage of the field (positioned / in-scope dimensions):",

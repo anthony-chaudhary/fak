@@ -549,6 +549,25 @@ _COMPARE_TOKENS = frozenset({"<", ">", "<=", ">=", "!=", "=="})
 _CONTROL_KEYWORDS = frozenset({"for", "range", "if", "switch", "select"})
 
 
+# Entry-point scaffold (#FP-entry). A clone group whose EVERY site is a `cmd/*/main.go`
+# command entry point is parallel-by-design CLI plumbing (the `flag` parse -> build ->
+# WriteFile -> Fprintf(os.Stderr) skeleton each `fak` sub-binary repeats), NOT a hot-path
+# logic clone. The CLONE_WINDOW_TOKENS docstring's own rule applies: de-duplicating two
+# independent `main()`s into a shared helper couples unrelated binaries and worsens, not
+# improves, readability. Demoted to ADVISORY (soft), never silently dropped, so the count
+# stays visible. The conjunct is strict: ONE `internal/` site (real shipped kernel code)
+# makes the `all(...)` False and the group stays HARD -- so a clone that leaked from a
+# benchmark main into a hot path is still caught.
+_CMD_MAIN_RE = re.compile(r"^cmd/[^/]+/main\.go$")
+
+
+def _is_entry_point_only(sites: list[tuple[str, int, int]]) -> bool:
+    """True iff every site of a clone group is a `cmd/*/main.go` command entry point --
+    parallel-by-design CLI scaffolding, demoted to advisory rather than counted as debt.
+    A single non-entry-point (any `internal/` or library) site makes this False."""
+    return bool(sites) and all(_CMD_MAIN_RE.match(f) for f, _, _ in sites)
+
+
 def _is_sort_scaffold_only(key: tuple[str, ...]) -> bool:
     """True iff the token window contains a `sort.<verb>` call (one of _SORT_VERBS)
     but NONE of the real-logic tells (a _COMPARE_TOKENS operator or a _CONTROL_KEYWORDS
@@ -711,6 +730,16 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
             span = max(1, e0 - s0 + 1)
             soft.append(
                 f"dispatch-arm boilerplate ({len(sites)} arms, ~{span} lines): "
+                f"{f0}:{s0}")
+            continue
+        # Pure-entry-point group -> advisory, not debt. Every site is a cmd/*/main.go
+        # command skeleton; de-duplicating across independent binaries worsens
+        # readability. One internal/ site keeps the group HARD (see _is_entry_point_only).
+        if _is_entry_point_only(sites):
+            f0, s0, e0 = sites[0]
+            span = max(1, e0 - s0 + 1)
+            soft.append(
+                f"entry-point scaffold ({len(sites)} cmd mains, ~{span} lines): "
                 f"{f0}:{s0}")
             continue
         if max(e - s + 1 for f, s, e in sites) < CLONE_MIN_GROUP_SPAN:

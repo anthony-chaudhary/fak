@@ -66,6 +66,29 @@ def test_duplication_real_clone_is_debt():
     assert k["score"] < 100
 
 
+def test_duplication_entry_point_scaffold_is_advisory_not_debt():
+    # A clone whose EVERY site is a cmd/*/main.go command entry point is parallel-by-
+    # design CLI scaffolding (the flag->build->write->Fprintf skeleton each sub-binary
+    # repeats). De-duplicating across independent mains worsens readability, so it is
+    # demoted to advisory (soft), not counted as HARD slop-debt.
+    mains = {"cmd/onebench/main.go": "package main\n" + _dup_block("run"),
+             "cmd/twobench/main.go": "package main\n" + _dup_block("run")}
+    k = cs.kpi_duplication(mains)
+    assert k["defects"] == [], k["defects"]
+    assert any("entry-point scaffold" in s for s in k["soft"]), k["soft"]
+
+
+def test_duplication_entry_point_clone_leaking_to_internal_stays_debt():
+    # The conjunct is strict: ONE internal/ (real shipped kernel) site makes the group
+    # HARD again. A clone that leaked from a benchmark main into a hot path is still
+    # caught -- only a PURE-entry-point group is excused.
+    mixed = {"cmd/onebench/main.go": "package main\n" + _dup_block("run"),
+             "internal/hot/path.go": "package hot\n" + _dup_block("run")}
+    k = cs.kpi_duplication(mixed)
+    assert len(k["defects"]) >= 1, k
+    assert k["score"] < 100
+
+
 def test_duplication_short_fragment_is_not_a_clone():
     # FP: a sub-6-line fragment repeated across files (an idiomatic err-check / sort
     # closure / one-line setup) is NOT extractable copy-paste slop — a shared helper for
