@@ -73,8 +73,46 @@ def test_default_artifacts_pass_current_committed_gate():
     assert {"prefill_P16", "prefill_P64", "prefill_P256", "prefill_P512", "prefill_P1024", "decode"} <= metrics
 
 
+def test_metal_arm_records_the_open_decode_gap_at_the_within_2x_bar():
+    # #64/#300: the Metal arm asserts fak-Metal decode vs the llama.cpp-Metal bar
+    # at the within-2x acceptance (min_ratio 0.5). fak is ~0.16x today, so the gate
+    # is fail-closed -- it RECORDS the open gap; it does not fabricate a pass.
+    report = gate.build_report(gate.METAL_CASES, min_ratio=gate.METAL_TARGET_RATIO)
+
+    assert report["passed"] is False, "Metal arm must be fail-closed until fak reaches the bar"
+    decode = next(
+        row for case in report["cases"] for row in case["rows"] if row["metric"] == "decode"
+    )
+    assert decode["fak_tok_per_sec"] == 1.2
+    assert decode["llama_tok_per_sec"] == 7.29
+    assert abs(decode["ratio"] - (1.2 / 7.29)) < 1e-9
+    assert any("decode" in failure for failure in report["failures"])
+
+
+def test_metal_arm_passes_once_fak_clears_the_checked_ratio():
+    # Proves the comparison math + threshold both work: at a ratio below today's
+    # 0.16x the same artifacts PASS, so a future fak-Metal speedup flips the gate green.
+    report = gate.build_report(gate.METAL_CASES, min_ratio=0.16)
+
+    assert report["passed"] is True, report["failures"]
+
+
+def test_metal_bar_provenance_caveat_is_surfaced():
+    # The bar is observed-external (#459/#452) -- the gate must carry the caveat
+    # through so it is never silently asserted as a fak-controlled witness.
+    report = gate.build_report(gate.METAL_CASES, min_ratio=gate.METAL_TARGET_RATIO)
+    llama = report["cases"][0]["llama"]
+    assert llama.get("provenance") == "observed-external"
+    assert "#459" in llama.get("caveat", "")
+    assert "#452" in llama.get("caveat", "")
+    assert "provenance" in gate.render_markdown(report).lower()
+
+
 if __name__ == "__main__":
     test_gate_passes_when_fak_meets_every_ratio()
     test_gate_fails_when_any_ratio_is_below_threshold()
+    test_metal_arm_records_the_open_decode_gap_at_the_within_2x_bar()
+    test_metal_arm_passes_once_fak_clears_the_checked_ratio()
+    test_metal_bar_provenance_caveat_is_surfaced()
     test_default_artifacts_pass_current_committed_gate()
     print("PASS qwen36_perf_gate_test")

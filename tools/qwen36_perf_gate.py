@@ -29,6 +29,25 @@ DEFAULT_CASES = (
     ),
 )
 
+# The Apple-Silicon Metal arm (#64, epic #300). fak-Metal Q4_K tok/s vs the
+# (provenance-caveated #459/#452) llama.cpp-Metal SOTA bar, both witnessed on the
+# M3 Pro verify node (node-macos-a). Greedy/first-token parity for the Metal lane
+# already holds (TestMetalQ4KDecodeMatchesCPU, token seq == CPU); this is the
+# perf half. The #300 acceptance is "within 2x llama.cpp Metal" -> run with
+# --min-ratio 0.5. The decode metric is length-agnostic and asserted here; the
+# prefill bar (51.55 @ pp22) is recorded but only scored once a matched-length
+# fak-Metal prefill point exists (#64 comment#2: fix P=256/512, not P~22).
+METAL_CASES = (
+    (
+        "metal-q4k-27b",
+        "experiments/qwen36/metal-fak-q4k-27b-20260626.json",
+        "experiments/qwen36/llamacpp-metal-qwen36-bar-20260626.json",
+    ),
+)
+
+# #300 acceptance bar: fak within 2x of the llama.cpp-Metal SOTA -> fak/llama >= 0.5.
+METAL_TARGET_RATIO = 0.5
+
 
 def repo_path(path: str) -> Path:
     p = Path(path)
@@ -108,6 +127,13 @@ def llama_metrics(path: Path) -> dict:
                 "backends": row.get("backends"),
                 "model_type": row.get("model_type"),
             }
+        # Carry forward bar-provenance caveats (#459/#452) from any row that
+        # declares them, so an observed-external bar is never silently asserted
+        # as a fak-controlled witness.
+        if row.get("provenance") and "provenance" not in meta:
+            meta["provenance"] = row.get("provenance")
+        if row.get("caveat") and "caveat" not in meta:
+            meta["caveat"] = row.get("caveat")
         n_prompt = as_int(row.get("n_prompt")) or 0
         n_gen = as_int(row.get("n_gen")) or 0
         tps = as_float(row.get("avg_ts"))
@@ -194,6 +220,14 @@ def render_markdown(report: dict) -> str:
                 f"{row['fak_tok_per_sec']:.2f} | {row['llama_tok_per_sec']:.2f} | "
                 f"{row['ratio']:.2f}x | {'PASS' if row['passed'] else 'FAIL'} |"
             )
+    caveats = []
+    for case in report["cases"]:
+        caveat = (case.get("llama") or {}).get("caveat")
+        if caveat:
+            caveats.append(f"- {case['label']}: {caveat}")
+    if caveats:
+        lines.extend(["", "Bar provenance (the llama.cpp-Metal bar is observed-external, not a fak witness):"])
+        lines.extend(caveats)
     if report["failures"]:
         lines.extend(["", "Failures:"])
         lines.extend(f"- {failure}" for failure in report["failures"])
@@ -226,6 +260,12 @@ def parse_args(argv):
         metavar=("LABEL", "FAK_JSON", "LLAMA_JSON"),
         help="comparison case; may be repeated. Defaults to the committed AMD Qwen3.6 artifacts.",
     )
+    ap.add_argument(
+        "--metal",
+        action="store_true",
+        help="run the Apple-Silicon Metal arm (#64/#300: fak-Metal vs the llama.cpp-Metal bar) "
+        "instead of the default AMD cases. The #300 acceptance is within-2x -> pair with --min-ratio 0.5.",
+    )
     ap.add_argument("--min-ratio", type=float, default=1.0, help="required fak/llama tok/s ratio")
     ap.add_argument("--out", help="write machine-readable gate report JSON")
     ap.add_argument("--markdown", help="write markdown report")
@@ -234,7 +274,12 @@ def parse_args(argv):
 
 def main(argv=None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    cases = args.case if args.case else DEFAULT_CASES
+    if args.case:
+        cases = args.case
+    elif args.metal:
+        cases = METAL_CASES
+    else:
+        cases = DEFAULT_CASES
     report = build_report(cases, args.min_ratio)
     if args.out:
         out = repo_path(args.out)
