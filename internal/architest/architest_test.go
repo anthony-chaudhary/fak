@@ -55,6 +55,12 @@ var tier = map[string]int{
 	"benchscore":       1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":        1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"accounts":         1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
+	// stdlib-only foundation leaves (import nothing internal); off the hot path.
+	"bgloop": 1, "cachewitness": 1, "cmdutil": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newmodel": 1, "numfmt": 1,
+	"modelladder":     2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
+	"modelreg":        2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
+	"skillenv":        4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
+	"guardroute":      4,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"conflationscore": 1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
 	"scoreboard":      1,                // outbound Slack publisher for scorecard/score/run-event status posts; stdlib-only, off the hot path.
 	"benchpost":       1,                // outbound Slack publisher for bench-channel rollups/run-requests; folds catalog/baseline/plan JSON, reuses scoreboard(1) transport, off the hot path.
@@ -79,6 +85,11 @@ var tier = map[string]int{
 	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
+	// capindex is tier-4 ONLY because its mcp/a2a resolvers import gateway(4) (#1104 C1).
+	// DEBT: the core CapRef/Capability/Index/skill-resolver want tier-1/2 so the tier-3 skill-loader
+	// (ctxresidency/ctxmmu, #1106) can import them — invert the resolvers through a registration seam,
+	// then drop this to its honest low tier. Until then, tier-3 dependents key on a local CapKey mirror.
+	"capindex":  4,
 	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
 	"agenttest": 4, // public agent-workflow TEST harness (#238, D-008): deterministic fixtures + tool-call assertion library + mock tool responses + reproduce-from-transcript replay; imports agent(4), off the hot path.
 	"ablate":    4, // the N-arm self-ablation sweep: a bench sibling; imports bench(4)+registrations(4)+metrics(1), off the hot path.
@@ -140,6 +151,7 @@ var tier = map[string]int{
 	"fakrpc":          1, // disaggregated agent-RPC contract (#930): the pure Request envelope + the FAKRES nonce/sha frame (encode/decode/verify) a resident worker (cmd/fakrpcd) and pluggable text-only bridges build on. stdlib-only, imports nothing internal, off the hot path — the same frame tools/dgx_witness_run.sh emits.
 	"resume":          1, // deterministic resume-cache decision (#745/#774 family): prices RESUME_FULL/CUT/RESET against the projected cold/warm prompt-cache posture at the resume boundary and recommends a cut-by-default re-entry; pure Plan(Input) Report, stdlib-only, imports nothing internal, off the hot path. The computable answer to "resume a 250k session — what happens to the cache".
 	"vcacheobserve":   2,
+	"vcachesnapshot":  2, // vCache observed-cache-window snapshot bridge (#827d882f): folds vcacheobserve's realized traffic into the read-side snapshot the score consumes; imports vcacheobserve(2)+stdlib only, off the hot path.
 	"cadencereport":   3, // the consolidated regular-cadence report: a read-only fold-over-folds that distills the scorecard control pane (scores), git (work-done), and release-status (releases) into one schema/ok/verdict/finding envelope + a durable JSONL trend ledger. Composer (like gardenbundle): shells to the Python folds + git off the hot path, imports nothing internal.
 	"dispatchorder":   1, // pure dispatch-ordering helper; stdlib-only, imports nothing internal, off the hot path.
 	"dojo":            1, // the prediction-vs-reality gym's pure scoring/fold/ledger/board core: Prediction/Outcome/Episode scoring + the cross-lever leaderboard fold; stdlib-only, imports nothing internal (the corpus-scanning levers live in cmd/fak), off the hot path.
@@ -400,9 +412,10 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // path too. cmd/fak's help text also names it but lives outside internal/, so it is
 // not scanned.
 var chatEndpointRole = map[string]string{
-	"agent":    "the single outbound chat-completions client (HTTPPlanner)",
-	"gateway":  "the inbound /v1/chat/completions server route (adjudication proxy)",
-	"webbench": "the off-path serving-parity benchmark client (not a live planner)",
+	"agent":      "the single outbound chat-completions client (HTTPPlanner)",
+	"gateway":    "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"webbench":   "the off-path serving-parity benchmark client (not a live planner)",
+	"guardtrace": "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the

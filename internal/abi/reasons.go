@@ -7,7 +7,7 @@
 // on this set degrades gracefully when a later minor adds a code.
 package abi
 
-import "github.com/anthony-chaudhary/fak/internal/numfmt"
+import "strconv"
 
 const (
 	ReasonNone             ReasonCode = iota // not a refusal
@@ -58,7 +58,7 @@ func ReasonName(c ReasonCode) string {
 	if n, ok := reg.reasons[c]; ok {
 		return n
 	}
-	return "REASON_" + numfmt.Itoa(uint64(c))
+	return "REASON_" + strconv.FormatUint(uint64(c), 10)
 }
 
 // reasonCodesByName is the reverse of coreReasonNames, built once at init. It
