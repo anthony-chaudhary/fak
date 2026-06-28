@@ -46,7 +46,7 @@ func TestClaudeCommandShapeMatchesDosTomlReference(t *testing.T) {
 	if cmd[0] != "claude" || cmd[1] != "-p" || cmd[2] != "--permission-mode" || cmd[3] != "bypassPermissions" {
 		t.Errorf("claude prefix wrong: %v", cmd)
 	}
-	if cmd[4] != "/dos-kernel:dos-dispatch-loop --lane adjudicator" {
+	if cmd[4] != "/dos-dispatch-loop --lane adjudicator" {
 		t.Errorf("claude prompt = %q", cmd[4])
 	}
 }

@@ -34,7 +34,15 @@ const (
 	// min is generous for a real lane yet bounds a runaway; opt out with 0.
 	defaultTimeoutS = 1800
 
-	claudeAgentPrompt = "/dos-kernel:dos-dispatch-loop --lane %s"
+	// Invoke the BARE project-skill form (`/dos-dispatch-loop`), not the namespaced
+	// plugin form (`/dos-kernel:dos-dispatch-loop`). The skill is git-tracked at
+	// `.claude/skills/dos-dispatch-loop/SKILL.md`, so a worker launched from the
+	// repo root sees it under EVERY switched account dir. The plugin form fails
+	// closed ("Unknown command") whenever a per-account `.claude-<acct>` plugin
+	// cache is missing/empty — which it is for freshly-enrolled worker accounts —
+	// making the spawned worker exit 0 with zero work done. This mirrors
+	// dispatch_worker.CLAUDE_AGENT_PROMPT, which was already fixed to the bare form.
+	claudeAgentPrompt = "/dos-dispatch-loop --lane %s"
 	opencodeAgent     = "dos-dispatch"
 	opencodeMessage   = "dispatch lane %s"
 )
