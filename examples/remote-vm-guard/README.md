@@ -54,6 +54,19 @@ cannot be elided by a rung profile — a security floor narrows, never widens. A
 cites the `EGRESS_BLOCK` reason and a bounded witness naming only the offending host and
 its class, never the policy.
 
+**Extend it for your VM.** The hardwired metadata set is the floor; a policy manifest can
+*tighten* it with your own sensitive destinations (an internal secrets service, a corp
+metadata mirror) — it can never carve a hole in the hardwired block:
+
+```json
+{ "version": "fak-policy/v1",
+  "egress": { "deny_hosts": ["secrets.corp.internal", "10.0.0.53"] } }
+```
+
+```bash
+fak guard --policy my-floor.json -- claude   # blocks the metadata class AND your hosts
+```
+
 Wrap a live agent the same way and the floor rides into the VM with it:
 
 ```bash
