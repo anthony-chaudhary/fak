@@ -41,9 +41,18 @@ func realRunner(ctx context.Context, dir string, args ...string) (string, int, e
 // realLock is the default LockFunc: an advisory OS flock on <Dir>/.git/fak-commit.lock,
 // reusing gpulease's cross-platform lock (flock on unix, LockFileEx on windows). gpulease
 // is GPU-named but mechanically generic once its Path is overridden; its only specifics —
-// the default lease path and a best-effort PID in the file — are harmless here. A held
-// lock maps to ErrLockBusy (the LOCK_BUSY reason); the kernel drops the flock if the holder
-// dies, so a crashed peer never wedges the lane.
+// the default lease path and a best-effort PID in the file — are harmless here, and the
+// recorded PID is exactly what reapStaleLock keys on.
+//
+// A held lock maps to ErrLockBusy (the LOCK_BUSY reason). On a clean exit the OS drops the
+// flock, but an ABNORMALLY terminated committer (killed/crashed, not a clean os.Exit) can
+// on Windows leave its LockFileEx region orphaned on the path — observed in the field as a
+// ~56-minute fak-commit.lock wedge that stalled the WHOLE shared-trunk auto-gardening lane
+// (every peer's commit blocked behind a dead PID's lock). reapStaleLock is the guard: a
+// pre-flight that removes the lockfile when its recorded holder PID is no longer alive, so
+// a dead committer can never wedge the lane. It runs only for THIS commit lock (never the
+// GPU-lease hot path) and only deletes a provably-dead holder's file, so a live committer
+// is never disturbed.
 func realLock(opts LockOptions) (func(), error) {
 	path := opts.Path
 	if path == "" {
@@ -53,6 +62,9 @@ func realLock(opts LockOptions) (func(), error) {
 		if gd, err := gitDir(); err == nil {
 			path = filepath.Join(gd, "fak-commit.lock")
 		}
+	}
+	if path != "" {
+		reapStaleLock(path)
 	}
 	timeout := opts.Timeout
 	if timeout == 0 {
@@ -118,6 +130,38 @@ func withLeasePublish(inner func()) func() {
 		}
 		inner()
 	}
+}
+
+// reapStaleLock removes the commit lockfile at path when its recorded holder PID is no
+// longer a live process. It is the pre-flight that stops a dead committer from wedging the
+// shared-trunk commit lane (see realLock's doc): gpulease records the holder's PID in the
+// lockfile, so a stale lock is one whose PID is gone. We read that PID, and only if the
+// process is provably not alive do we delete the file — gpulease.Acquire then takes a clean
+// lock on a fresh inode. Every step is best-effort and fail-safe:
+//   - an unreadable/absent file, an unparseable PID, or a STILL-ALIVE holder => do nothing
+//     (we never delete a lock a live committer holds);
+//   - a remove failure is ignored — Acquire's bounded wait/timeout is the backstop, so the
+//     worst case is the pre-reap regression (wait it out), never a corrupted lock.
+// This is the in-code form of the manual `rm .git/fak-commit.lock` that unblocked a wedged
+// 56-minute commit stall in the field, made automatic and PID-guarded so it is safe to run
+// on every acquire.
+func reapStaleLock(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // no lockfile (or unreadable) — nothing to reap
+	}
+	s := string(data)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i] // first line only, matching gpulease's PID record format
+	}
+	pid, perr := strconv.Atoi(strings.TrimSpace(s))
+	if perr != nil || pid <= 0 {
+		return // no parseable holder PID — leave it for Acquire to arbitrate
+	}
+	if processAlive(pid) {
+		return // a live committer holds it — must NOT reap
+	}
+	_ = os.Remove(path) // stale: holder is dead. Best-effort; Acquire is the backstop.
 }
 
 // leaseID derives a stable-enough, ref-safe lease id for this holder. It is a single safe
