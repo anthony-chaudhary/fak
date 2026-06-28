@@ -1,6 +1,9 @@
 package model
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
@@ -44,6 +47,9 @@ type Session struct {
 	// noLogits prefill step never touches the logits path, so counting steps (the old
 	// halStep>=2 gate) did not guarantee it was warm; this flag does.
 	halLogitsWarm bool
+
+	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).
+	glmDsaHeadNameLogged bool
 
 	// Quant selects the Q8_0 quantized forward path (quant_forward.go) for this session's
 	// prefill and decode. The f32 path is the default and is left byte-for-byte unchanged;
@@ -200,19 +206,54 @@ func (s *Session) requireGLMDsaSession() {
 }
 
 func (s *Session) glmDsaHead(xf []float32) []float32 {
+	var out []float32
 	if s.Backend != nil {
 		// #86 (partial): the vocab projection (the largest single GEMM) runs on the backend.
 		// lmHeadMatHAL resolves the resident head weight (untied q8 / f32) + uploads it.
 		be := s.Backend
 		xt := uploadHostF32Class(be, []int{s.M.Cfg.HiddenSize}, xf, compute.MemoryActivation, "glm-dsa-lm-head-activation")
-		out := be.Read(be.MatMul(s.lmHeadMatHAL(), xt))
+		out = be.Read(be.MatMul(s.lmHeadMatHAL(), xt))
 		be.Free(xt)
-		return out
+	} else if s.Quant {
+		out = s.headQ(xf)
+	} else {
+		out = s.head(xf)
 	}
-	if s.Quant {
-		return s.headQ(xf)
+	glmDsaDumpHead(s, out)
+	return out
+}
+
+// glmDsaDumpHead localizes the GLM-5.2 LM-head bug (#996): the residual dump proved the final
+// hidden VARIES per decode step yet the output tokens REPEAT, so the head maps varying residuals to
+// the same few tokens. Under FAK_GLMDSA_DUMP it logs (once) which head weight resolved (tied
+// embedding vs untied lm_head) + (per call) the top-3 logit ids/values — if a few ids dominate every
+// step regardless of the residual, the head weight for those ids is anomalous.
+func glmDsaDumpHead(s *Session, logits []float32) {
+	if !glmDsaDumpOn || len(logits) == 0 {
+		return
 	}
-	return s.head(xf)
+	if !s.glmDsaHeadNameLogged {
+		s.glmDsaHeadNameLogged = true
+		hn := s.M.headName()
+		_, tiedInManifest := s.M.q8w["lm_head.weight"]
+		_, tiedQ4K := s.M.q4kw["lm_head.weight"]
+		fmt.Fprintf(os.Stderr, "GLMDSA_HEAD resolved head=%q hasLMHeadF32=%v hasLMHeadQ8=%v hasLMHeadQ4K=%v tied=%v\n",
+			hn, s.M.has("lm_head.weight"), tiedInManifest, tiedQ4K, !s.M.has("lm_head.weight") && !tiedInManifest && !tiedQ4K)
+	}
+	// top-3 logits
+	var i0, i1, i2 int
+	for i, v := range logits {
+		switch {
+		case v > logits[i0]:
+			i2, i1, i0 = i1, i0, i
+		case v > logits[i1]:
+			i2, i1 = i1, i
+		case v > logits[i2]:
+			i2 = i
+		}
+	}
+	fmt.Fprintf(os.Stderr, "GLMDSA_HEAD top3=[(%d,%.3f) (%d,%.3f) (%d,%.3f)]\n",
+		i0, logits[i0], i1, logits[i1], i2, logits[i2])
 }
 
 // head applies the (tied) LM head to a post-final-norm hidden vector. Split out from
