@@ -740,6 +740,16 @@ type HTTPPlanner struct {
 	// world witness breaks the now-stale provider-prefix span. nil = behavior unchanged
 	// (the default): no shaping, byte-for-byte the prior request path.
 	CoherenceShaper func([]Message) []Message
+
+	// RetryNotify, when non-nil, is called ONCE before each retry of Complete's backoff loop
+	// (i.e. on attempt 1..N-1, never on the first try), with the upcoming attempt index, the
+	// status that triggered the retry (the upstream HTTP status for a 429/5xx, or 0 for a
+	// transient transport error), and the backoff wait about to elapse. It is the observability
+	// hook for the otherwise-INVISIBLE retry window: a 429/5xx storm used to burn up to ~8s of
+	// silent backoff with no log, metric, or debug line. The gateway sets it to a closure that
+	// bumps a retry counter and prints a `fak-turn … retry` debug line, so an operator sees the
+	// backoff happening instead of a frozen terminal. nil = behavior byte-for-byte unchanged.
+	RetryNotify func(attempt int, status int, wait time.Duration)
 }
 
 // NewHTTPPlanner builds a live planner with a bounded timeout. The per-request
@@ -869,8 +879,15 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// ~8s backoff budget and is tagged so the gateway can surface its cause (#346).
 	const maxAttempts = 4
 	var lastErr error
+	lastStatus := 0 // the status that triggered the pending retry (0 = a transient transport error)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
+			// Surface the retry BEFORE the silent backoff sleep — the otherwise-invisible
+			// window. nil hook = unchanged. status carries WHY we are retrying (the upstream
+			// HTTP status, or 0 for a transport error) so the operator line can say "429".
+			if p.RetryNotify != nil {
+				p.RetryNotify(attempt, lastStatus, backoffDuration(attempt))
+			}
 			if err := backoff(ctx, attempt); err != nil {
 				return nil, err
 			}
@@ -889,6 +906,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				return nil, &UpstreamUnreachableError{Err: err}
 			}
 			lastErr = err
+			lastStatus = 0 // a transient transport error has no HTTP status
 			continue
 		}
 		raw, _ := io.ReadAll(resp.Body)
@@ -896,6 +914,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if resp.StatusCode != http.StatusOK {
 			if retryableStatus(resp.StatusCode) {
 				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200)}
+				lastStatus = resp.StatusCode
 				continue
 			}
 			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400)}
@@ -1078,9 +1097,15 @@ func retryableStatus(code int) bool {
 
 // backoff sleeps attempt^2 * 600ms (0.6s, 2.4s, 5.4s), honoring context
 // cancellation, before the next retry.
+// backoffDuration is the exponential backoff wait before retry `attempt` (attempt² × 600ms:
+// 0, 600ms, 2.4s, 5.4s). Extracted so the RetryNotify hook can report the SAME wait the loop
+// is about to elapse, without duplicating the formula.
+func backoffDuration(attempt int) time.Duration {
+	return time.Duration(attempt*attempt) * 600 * time.Millisecond
+}
+
 func backoff(ctx context.Context, attempt int) error {
-	d := time.Duration(attempt*attempt) * 600 * time.Millisecond
-	t := time.NewTimer(d)
+	t := time.NewTimer(backoffDuration(attempt))
 	defer t.Stop()
 	select {
 	case <-ctx.Done():

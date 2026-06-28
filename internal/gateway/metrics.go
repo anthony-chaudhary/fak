@@ -139,6 +139,11 @@ type gatewayMetrics struct {
 	upstreamErrMu  sync.Mutex
 	upstreamErrors map[string]uint64
 
+	// upstreamRetries counts upstream retry ATTEMPTS (the planner's 429/5xx backoff loop) this
+	// session — the otherwise-invisible backoff window. Bumped atomically from the planner's
+	// RetryNotify hook, off the request path. The metric twin of the `fak-turn … retry` line.
+	upstreamRetries uint64
+
 	// vcacheMu guards the per-family live-observe accumulator (#935). The cumulative
 	// fak_vcache_* family above is one aggregate row; this retains the per-turn,
 	// family-tagged provider-cache telemetry so the live gateway can expose the SAME
@@ -288,6 +293,15 @@ func (m *gatewayMetrics) observeUpstreamError(err error) {
 	}
 	m.upstreamErrors[kind]++
 	m.upstreamErrMu.Unlock()
+}
+
+// observeUpstreamRetry counts one upstream retry attempt (the planner's 429/5xx backoff). Atomic
+// and off the request path, called from the RetryNotify hook.
+func (m *gatewayMetrics) observeUpstreamRetry() {
+	if m == nil {
+		return
+	}
+	atomic.AddUint64(&m.upstreamRetries, 1)
 }
 
 // observeInKernelOOM folds a planner error into the local device-OOM visibility family when
@@ -1741,6 +1755,7 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	for _, kind := range kinds {
 		fmt.Fprintf(b, "fak_gateway_upstream_errors_total{kind=\"%s\"} %d\n", promQuote(kind), snap[kind])
 	}
+	writeCounter(b, "fak_gateway_upstream_retries_total", "Upstream retry attempts (the planner's 429/5xx exponential backoff) since process start.", int64(atomic.LoadUint64(&m.upstreamRetries)))
 }
 
 // writeInferenceMetrics renders the model-generation family from the live

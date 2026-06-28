@@ -742,7 +742,7 @@ func New(cfg Config) (*Server, error) {
 		ctxView = &agent.CtxViewPlanner{Enabled: true, Budget: cfg.CtxViewBudget}
 	}
 
-	return &Server{
+	s := &Server{
 		k:                    k,
 		engineID:             engineID,
 		model:                model,
@@ -777,7 +777,34 @@ func New(cfg Config) (*Server, error) {
 		route:                newRouteLive(cfg.RouteManifest),
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
-	}, nil
+	}
+
+	// Wire retry observability onto the proxy planner (#793 follow-on): Complete's 429/5xx
+	// backoff is otherwise invisible — up to ~8s of silent waiting. The hook bumps a retry
+	// counter and prints a glanceable `fak-turn … retry` line to the default --debug-stats
+	// sink, so an operator sees the backoff happening instead of a frozen terminal. Only the
+	// direct HTTPPlanner carries the loop; the mock/in-kernel/replica planners don't, so this
+	// is a no-op for them.
+	if hp, ok := planner.(*agent.HTTPPlanner); ok {
+		hp.RetryNotify = s.onUpstreamRetry
+	}
+
+	return s, nil
+}
+
+// onUpstreamRetry is the planner's RetryNotify hook: count the retry and surface it on the
+// default debug-stats line so the otherwise-silent 429/5xx backoff window is visible. status is
+// the upstream HTTP status that triggered the retry (0 for a transient transport error).
+func (s *Server) onUpstreamRetry(attempt, status int, wait time.Duration) {
+	if s == nil {
+		return
+	}
+	if s.metrics != nil {
+		s.metrics.observeUpstreamRetry()
+	}
+	if s.debugStatsf != nil {
+		s.debugStatsf("fak-turn retry attempt=%d status=%d wait=%s", attempt, status, wait.Round(100*time.Millisecond))
+	}
 }
 
 // newRouteLive wraps the validated config manifest in an atomic Live holder, or
