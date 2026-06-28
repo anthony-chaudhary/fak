@@ -618,7 +618,7 @@ func TestFormatAmplification(t *testing.T) {
 	// against callavoid.Account), amplifying.
 	out := formatAmplification(kernel.Counters{
 		EngineCalls: 4, VDSOHits: 6, Transforms: 2, Denies: 1,
-	})
+	}, gateway.AdjudicationSummary{})
 	for _, want := range []string{
 		"avoided-call amplification",
 		"served from the vDSO cache", // 6 memo hits
@@ -638,9 +638,10 @@ func TestFormatAmplification(t *testing.T) {
 		t.Errorf("amplification line must carry the Account ratio %.2f×:\n%s", rep.Amplification, out)
 	}
 
-	// Execute-only (no vDSO hits, no repairs): nothing was avoided, so the agent paid
-	// the naive price for every call — the headline stays empty rather than printing 1.0×.
-	if q := formatAmplification(kernel.Counters{EngineCalls: 5}); q != "" {
+	// Execute-only (no vDSO hits, no repairs) AND no proxy floor activity: nothing was
+	// avoided, so the agent paid the naive price for every call — the headline stays empty
+	// rather than printing 1.0×.
+	if q := formatAmplification(kernel.Counters{EngineCalls: 5}, gateway.AdjudicationSummary{}); q != "" {
 		t.Errorf("a pure-Execute run must print no amplification line, got:\n%s", q)
 	}
 
@@ -648,12 +649,30 @@ func TestFormatAmplification(t *testing.T) {
 	// dispatches) does NOT render +Inf: a memo hit still pays callavoid.ValidateFloor
 	// (=0.01), so the amplification saturates at the documented 1/ValidateFloor = 100×
 	// cap. 3 memo hits → naive=3, executed=3*0.01=0.03 → 100.00×.
-	pureCache := formatAmplification(kernel.Counters{VDSOHits: 3})
+	pureCache := formatAmplification(kernel.Counters{VDSOHits: 3}, gateway.AdjudicationSummary{})
 	if !strings.Contains(pureCache, "100.00×") {
 		t.Errorf("a pure-cache window must saturate at the 100× cap:\n%s", pureCache)
 	}
 	if strings.Contains(pureCache, "Inf") {
 		t.Errorf("the amplification line must never render Go's +Inf:\n%s", pureCache)
+	}
+
+	// PROXY PATH (the dominant fak guard -- claude case): the kernel counters are all 0
+	// (Decide increments none), but the floor repaired and denied real proposed calls. The
+	// line must NOT stay silent — it must surface the floor effect, framed as repairs/denies
+	// applied (NOT "calls avoided", since the client still executes every allowed tool).
+	proxy := formatAmplification(kernel.Counters{}, gateway.AdjudicationSummary{Transformed: 3, Denied: 2})
+	for _, want := range []string{"floor effect", "3 call(s) repaired", "2 denied", "proxy path"} {
+		if !strings.Contains(proxy, want) {
+			t.Errorf("proxy floor-effect line missing %q:\n%s", want, proxy)
+		}
+	}
+	if strings.Contains(proxy, "avoided-call amplification") {
+		t.Errorf("the proxy line must not claim avoided-call amplification (Decide avoids no calls):\n%s", proxy)
+	}
+	// A proxy session where the floor neither repaired nor denied anything stays quiet.
+	if q := formatAmplification(kernel.Counters{}, gateway.AdjudicationSummary{Allowed: 9}); q != "" {
+		t.Errorf("a clean all-allowed proxy run must print no floor-effect line, got:\n%s", q)
 	}
 }
 

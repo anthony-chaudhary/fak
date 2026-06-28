@@ -1401,7 +1401,16 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 // It returns the empty string when there was no avoidance to report — a session whose
 // vDSO never hit and whose kernel repaired nothing has nothing to amplify (Execute-only
 // work is 1:1), so the common clean run stays quiet rather than printing a vacuous 1.0×.
-func formatAmplification(kc kernel.Counters) string {
+//
+// kc is the in-kernel call-path axis (vDSO memo hits + in-syscall repairs), which only moves
+// on the Submit/Reap path `fak serve` drives. On the flagship `fak guard -- claude` PROXY the
+// kernel adjudicates with Decide, which increments none of those counters — so kc is empty
+// every guard session and the kernel-axis line would never fire there. sum carries the
+// Decide-path verdicts that DO move on the proxy (grammar repairs = Transformed, fast-reject
+// denies = Denied); when kc is empty but the proxy repaired/denied real calls, we print a
+// proxy-honest line about what the floor DID, framed as "repairs/denies applied" rather than
+// "calls avoided" (a Decide-only proxy avoids no calls — the client still executes each tool).
+func formatAmplification(kc kernel.Counters, sum gateway.AdjudicationSummary) string {
 	// Map the live kernel counters onto the tier-1 callavoid mirror (a total, behaviour-
 	// free field copy — the field names mirror kernel.Counters on purpose) and fold.
 	rep := callavoid.Account(callavoid.TallyFromCounters(callavoid.Counters{
@@ -1410,9 +1419,16 @@ func formatAmplification(kc kernel.Counters) string {
 		Transforms:  int(kc.Transforms),
 		Denies:      int(kc.Denies),
 	}))
-	// Nothing was avoided (no memo hits, no in-syscall repairs): the agent paid the
-	// naive price for every call, so there is no amplification story to tell. Stay quiet.
+	// Nothing was avoided on the kernel axis. Before staying silent, check the PROXY axis:
+	// on `fak guard -- claude` the kernel counters are structurally 0 (Decide increments none),
+	// but the floor may have repaired or denied real proposed calls — work the agent would
+	// otherwise have paid a failed round-trip for. Surface THAT so the dominant path is not
+	// silently blank when the floor was actually doing its job.
 	if rep.MemoHits == 0 && rep.Repairs == 0 {
+		if sum.Transformed > 0 || sum.Denied > 0 {
+			return fmt.Sprintf("fak guard: floor effect — %d call(s) repaired in-flight, %d denied before a wasted round-trip (proxy path: the kernel adjudicates with Decide, so the in-kernel vDSO/amplification axis does not apply)\n",
+				sum.Transformed, sum.Denied)
+		}
 		return ""
 	}
 	var b strings.Builder
@@ -1837,8 +1853,9 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 	serr := <-serveErr
 	if !quiet {
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprint(os.Stderr, formatAuditSummary(srv.AdjudicationSummary()))
-	fmt.Fprint(os.Stderr, formatAmplification(srv.KernelCounters()))
+		sum := srv.AdjudicationSummary()
+		fmt.Fprint(os.Stderr, formatAuditSummary(sum))
+		fmt.Fprint(os.Stderr, formatAmplification(srv.KernelCounters(), sum))
 	fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
