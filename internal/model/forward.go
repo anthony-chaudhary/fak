@@ -451,21 +451,6 @@ func softmaxInPlace(s []float32) {
 
 func silu(z float32) float32 { return z / (1 + float32(math.Exp(float64(-z)))) }
 
-func fastExp32(x float32) float32 {
-	if x <= -87 {
-		return 0
-	}
-	if x >= 88 {
-		return float32(math.Inf(1))
-	}
-	// Schraudolph-style exp approximation. This is only used by the Q8 decode path, never by
-	// the exact f32 serial-equivalence path.
-	return math.Float32frombits(uint32(12102203*x + 1064866805))
-}
-
-func fastSilu(z float32) float32 { return z / (1 + fastExp32(-z)) }
-
-
 func addBias(y, b []float32) {
 	for i := range y {
 		y[i] += b[i]

@@ -291,22 +291,6 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 	return out
 }
 
-// qgemmBatch quantizes a [B, width] activation panel into the session's reused scratch and
-// runs the register-blocked Q8_0 tile GEMM against the named weight, returning [B, out].
-func (bs *BatchSession) qgemmBatch(name string, X []float32, B, width int) []float32 {
-	if bs.scratch == nil {
-		bs.scratch = &q8Panel{}
-	}
-	quantizeBatchPanelInto(bs.scratch, X, B, width)
-	return qGemm8(bs.M.q8(name), bs.scratch)
-}
-
-// qgemmBatchInto is qgemmBatch writing the GEMM result into a caller-provided dst (reused
-// across decode steps). Bit-identical to qgemmBatch.
-func (bs *BatchSession) qgemmBatchInto(name string, X []float32, B, width int, dst []float32) {
-	bs.qgemmBatchTensorInto(bs.M.q8(name), X, B, width, dst)
-}
-
 func (bs *BatchSession) qgemmBatchTensorInto(qt *q8Tensor, X []float32, B, width int, dst []float32) {
 	if bs.scratch == nil {
 		bs.scratch = &q8Panel{}
