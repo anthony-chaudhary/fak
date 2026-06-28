@@ -86,6 +86,8 @@ func main() {
 		cmdSession(os.Args[2:])
 	case "resume":
 		cmdResume(os.Args[2:])
+	case "dispatch":
+		cmdDispatch(os.Args[2:])
 	case "ps":
 		cmdPS(os.Args[2:])
 	case "top":
