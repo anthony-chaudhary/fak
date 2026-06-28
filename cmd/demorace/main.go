@@ -36,17 +36,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelladder"
 )
 
 //go:embed page.html
@@ -57,93 +55,6 @@ const version = "fak-demorace-v1"
 // heartbeat is how often a blocking phase (model load, prefill measurement) emits a
 // keep-alive "tick" so the page updates ~1×/s instead of freezing on a long load.
 const heartbeat = 700 * time.Millisecond
-
-// ---------------------------------------------------------------------------
-// model ladder
-// ---------------------------------------------------------------------------
-
-type spec struct {
-	Name    string // display label
-	Dir     string // weights dir
-	Kind    string // "dir" (fak export) or "hf" (safetensors snapshot, lean Q8 load)
-	Params  string // human param count, for the curve x-axis
-	Order   int    // ladder order
-	Present bool
-}
-
-func ladderSpecs() []spec {
-	home, _ := os.UserHomeDir()
-	hf := filepath.Join(home, ".cache", "fak-models", "hf")
-	candidates := []spec{
-		{Name: "SmolLM2-135M", Params: "0.14B", Order: 0, Kind: "dir",
-			Dir: "internal/model/.cache/smollm2-135m"},
-		{Name: "Qwen2.5-0.5B", Params: "0.5B", Order: 1, Kind: "hf",
-			Dir: filepath.Join(hf, "Qwen2.5-0.5B-Instruct")},
-		{Name: "Qwen2.5-1.5B", Params: "1.5B", Order: 2, Kind: "hf",
-			Dir: filepath.Join(hf, "Qwen2.5-1.5B-Instruct")},
-		{Name: "Qwen2.5-3B", Params: "3B", Order: 3, Kind: "hf",
-			Dir: filepath.Join(hf, "Qwen2.5-3B-Instruct")},
-	}
-	wd, _ := os.Getwd()
-	for i := range candidates {
-		dir := candidates[i].Dir
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(wd, dir)
-		}
-		_, err := os.Stat(dir)
-		candidates[i].Present = err == nil
-		candidates[i].Dir = dir
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Order < candidates[j].Order })
-	return candidates
-}
-
-// registry: lazily load + quantize each model once, memoize.
-type registry struct {
-	mu    sync.Mutex
-	cache map[string]*loaded
-}
-
-type loaded struct {
-	m     *model.Model
-	vocab int
-	name  string
-}
-
-func newRegistry() *registry { return &registry{cache: map[string]*loaded{}} }
-
-func (r *registry) get(s spec) (*loaded, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if l, ok := r.cache[s.Name]; ok {
-		return l, nil
-	}
-	m, err := loadSpec(s)
-	if err != nil {
-		return nil, err
-	}
-	m.Quantize()
-	l := &loaded{m: m, vocab: m.Cfg.VocabSize, name: s.Name}
-	r.cache[s.Name] = l
-	return l, nil
-}
-
-func loadSpec(s spec) (*model.Model, error) {
-	switch s.Kind {
-	case "hf":
-		cfg, err := benchcli.ReadHFConfig(s.Dir)
-		if err != nil {
-			return nil, err
-		}
-		// sharded vs single safetensors
-		if _, err := os.Stat(filepath.Join(s.Dir, "model.safetensors.index.json")); err == nil {
-			return model.LoadSafetensorsQuantDir(s.Dir, cfg)
-		}
-		return model.LoadSafetensorsQuant(filepath.Join(s.Dir, "model.safetensors"), cfg)
-	default:
-		return model.Load(s.Dir)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // small helpers
@@ -214,8 +125,8 @@ type emitter func(event)
 // liveArmC runs the fak fused arm live: prefix ONCE + clone into C agents + batched decode
 // + incremental result ingestion. Emits one "turn" event per turn (each turn serves all C
 // agents, so requests advance by C per turn).
-func liveArmC(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
-	m, vocab := l.m, l.vocab
+func liveArmC(l *modelladder.Loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
+	m, vocab := l.M, l.Vocab
 	prefix := lcgIDs(P, vocab, 1)
 	ids0 := lcgIDs(C, vocab, 991)
 	start := time.Now()
@@ -271,8 +182,8 @@ func liveArmC(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS flo
 // caching, a persistent KV per session — so the fak-vs-tuned gap is the honest number
 // (cross-agent prefix reuse + batched decode on top of a warm cache). Emits one "turn"
 // event per (agent,turn).
-func liveArmB(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
-	m, vocab := l.m, l.vocab
+func liveArmB(l *modelladder.Loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
+	m, vocab := l.M, l.Vocab
 	prefix := lcgIDs(P, vocab, 1)
 	ids0 := lcgIDs(C, vocab, 991)
 	start := time.Now()
@@ -316,9 +227,9 @@ func liveArmB(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS flo
 // ---------------------------------------------------------------------------
 
 var (
-	reg   *registry
+	reg   *modelladder.Registry
 	runMu sync.Mutex // only one heavy run at a time (avoids CPU-contending two big runs)
-	specs []spec
+	specs []modelladder.Spec
 	gomax = runtime.GOMAXPROCS(0)
 )
 
@@ -401,13 +312,13 @@ func args(r *http.Request) (P, T, C, D, R int) {
 	return
 }
 
-func findSpec(name string) (spec, bool) {
+func findSpec(name string) (modelladder.Spec, bool) {
 	for _, s := range specs {
 		if s.Name == name {
 			return s, true
 		}
 	}
-	return spec{}, false
+	return modelladder.Spec{}, false
 }
 
 // handleRace streams a live fak-vs-tuned race for one model. Both arms run fully live on the
@@ -442,13 +353,13 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 	s.emit(event{"type": "info", "msg": "loading model " + name + " on " + hw.Summary})
 	// Model load + quantize is the longest blocking phase (tens of seconds on the big
 	// rungs); heartbeat it so the page shows a live elapsed counter instead of freezing.
-	var l *loaded
+	var l *modelladder.Loaded
 	var err error
 	demoui.Beat(heartbeat,
 		func(el time.Duration) {
 			s.emit(event{"type": "tick", "phase": "loading model " + name, "elapsed_ms": ms(el)})
 		},
-		func() { l, err = reg.get(sp) },
+		func() { l, err = reg.Get(sp) },
 	)
 	if err != nil {
 		s.emit(event{"type": "error", "msg": "load: " + err.Error()})
@@ -458,9 +369,9 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 	runtime.GC()
 
 	// warm
-	ws := l.m.NewSession()
+	ws := l.M.NewSession()
 	ws.Quant = true
-	ws.Prefill(lcgIDs(8, l.vocab, 77))
+	ws.Prefill(lcgIDs(8, l.Vocab, 77))
 	ws.Step(1)
 	ws.Close()
 
@@ -543,22 +454,22 @@ func handleCurve(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// model load + quantize — heartbeat so a multi-second load shows a live counter.
-		var l *loaded
+		var l *modelladder.Loaded
 		var err error
 		demoui.Beat(heartbeat,
 			func(el time.Duration) {
 				s.emit(event{"type": "phase", "model": sp.Name, "phase": fmt.Sprintf("loading · %.1fs", el.Seconds())})
 			},
-			func() { l, err = reg.get(sp) },
+			func() { l, err = reg.Get(sp) },
 		)
 		if err != nil {
 			s.emit(event{"type": "point", "model": sp.Name, "params": sp.Params, "error": err.Error()})
 			continue
 		}
 		// warm
-		ws := l.m.NewSession()
+		ws := l.M.NewSession()
 		ws.Quant = true
-		ws.Prefill(lcgIDs(8, l.vocab, 77))
+		ws.Prefill(lcgIDs(8, l.Vocab, 77))
 		ws.Step(1)
 		ws.Close()
 
@@ -616,8 +527,8 @@ func main() {
 		runtime.GOMAXPROCS(model.NumWorkers())
 		gomax = model.NumWorkers()
 	}
-	reg = newRegistry()
-	specs = ladderSpecs()
+	reg = modelladder.NewRegistry()
+	specs = modelladder.LadderSpecs()
 
 	app := http.NewServeMux()
 	app.HandleFunc("/", handleIndex)

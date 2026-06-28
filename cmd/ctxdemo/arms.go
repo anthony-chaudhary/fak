@@ -1,6 +1,10 @@
 package main
 
-import "time"
+import (
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/modelladder"
+)
 
 // arms.go runs the two serving strategies LIVE on a real in-kernel model over a
 // Workload, mirroring the proven methodology of cmd/demorace / cmd/sessionbench. The
@@ -42,8 +46,8 @@ type armResult struct {
 // into C agents, decoded in one batched stream, and after each turn every agent's
 // (distinct-sized) tool result is ingested incrementally. Emits one "turn" event per
 // turn (a turn advances all C agents, so requests jump by C).
-func liveArmFak(l *loaded, w Workload, emit emitter) armResult {
-	m, vocab := l.m, l.vocab
+func liveArmFak(l *modelladder.Loaded, w Workload, emit emitter) armResult {
+	m, vocab := l.M, l.Vocab
 	P, C, T, D := w.Scn.Prefix, w.Scn.Agents, w.Scn.Turns, w.Scn.Decode
 	prefix := lcgIDs(P, vocab, 1)
 	ids0 := lcgIDs(C, vocab, 991)
@@ -104,8 +108,8 @@ func liveArmFak(l *loaded, w Workload, emit emitter) armResult {
 // you — vLLM / SGLang prefix caching, provider prompt-caching, a persistent KV per session.
 // fak's win over THIS arm (cross-agent prefix reuse + batched decode on top of a warm
 // cache) is the honest number. No quadratic re-prefill, so it always runs live.
-func liveArmTuned(l *loaded, w Workload, emit emitter) armResult {
-	m, vocab := l.m, l.vocab
+func liveArmTuned(l *modelladder.Loaded, w Workload, emit emitter) armResult {
+	m, vocab := l.M, l.Vocab
 	P, C, T, D := w.Scn.Prefix, w.Scn.Agents, w.Scn.Turns, w.Scn.Decode
 	prefix := lcgIDs(P, vocab, 1)
 	ids0 := lcgIDs(C, vocab, 991)
@@ -153,10 +157,10 @@ func liveArmTuned(l *loaded, w Workload, emit emitter) armResult {
 }
 
 // warm runs a tiny prefill+step so the first measured token doesn't eat lazy init.
-func warm(l *loaded) {
-	ws := l.m.NewSession()
+func warm(l *modelladder.Loaded) {
+	ws := l.M.NewSession()
 	ws.Quant = true
-	ws.Prefill(lcgIDs(8, l.vocab, 77))
+	ws.Prefill(lcgIDs(8, l.Vocab, 77))
 	ws.Step(1)
 	ws.Close()
 }

@@ -48,17 +48,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelladder"
 )
 
 //go:embed page.html
@@ -72,103 +70,12 @@ const version = "fak-ctxdemo-v1"
 const heartbeat = 700 * time.Millisecond
 
 // ---------------------------------------------------------------------------
-// model ladder (same detection demorace uses; kept local so the demos stay
-// independent commands)
-// ---------------------------------------------------------------------------
-
-type spec struct {
-	Name    string
-	Dir     string
-	Kind    string // "dir" (fak export) or "hf" (safetensors snapshot, lean Q8 load)
-	Params  string
-	Order   int
-	Present bool
-}
-
-func ladderSpecs() []spec {
-	home, _ := os.UserHomeDir()
-	hf := filepath.Join(home, ".cache", "fak-models", "hf")
-	candidates := []spec{
-		{Name: "SmolLM2-135M", Params: "0.14B", Order: 0, Kind: "dir", Dir: "internal/model/.cache/smollm2-135m"},
-		{Name: "Qwen2.5-0.5B", Params: "0.5B", Order: 1, Kind: "hf", Dir: filepath.Join(hf, "Qwen2.5-0.5B-Instruct")},
-		{Name: "Qwen2.5-1.5B", Params: "1.5B", Order: 2, Kind: "hf", Dir: filepath.Join(hf, "Qwen2.5-1.5B-Instruct")},
-		{Name: "Qwen2.5-3B", Params: "3B", Order: 3, Kind: "hf", Dir: filepath.Join(hf, "Qwen2.5-3B-Instruct")},
-	}
-	wd, _ := os.Getwd()
-	for i := range candidates {
-		dir := candidates[i].Dir
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(wd, dir)
-		}
-		_, err := os.Stat(dir)
-		candidates[i].Present = err == nil
-		candidates[i].Dir = dir
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Order < candidates[j].Order })
-	return candidates
-}
-
-func smallestPresent() (spec, bool) {
-	for _, s := range specs {
-		if s.Present {
-			return s, true
-		}
-	}
-	return spec{}, false
-}
-
-type loaded struct {
-	m     *model.Model
-	vocab int
-	name  string
-}
-
-type registry struct {
-	mu    sync.Mutex
-	cache map[string]*loaded
-}
-
-func newRegistry() *registry { return &registry{cache: map[string]*loaded{}} }
-
-func (r *registry) get(s spec) (*loaded, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if l, ok := r.cache[s.Name]; ok {
-		return l, nil
-	}
-	m, err := loadSpec(s)
-	if err != nil {
-		return nil, err
-	}
-	m.Quantize()
-	l := &loaded{m: m, vocab: m.Cfg.VocabSize, name: s.Name}
-	r.cache[s.Name] = l
-	return l, nil
-}
-
-func loadSpec(s spec) (*model.Model, error) {
-	switch s.Kind {
-	case "hf":
-		cfg, err := benchcli.ReadHFConfig(s.Dir)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := os.Stat(filepath.Join(s.Dir, "model.safetensors.index.json")); err == nil {
-			return model.LoadSafetensorsQuantDir(s.Dir, cfg)
-		}
-		return model.LoadSafetensorsQuant(filepath.Join(s.Dir, "model.safetensors"), cfg)
-	default:
-		return model.Load(s.Dir)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // shared globals
 // ---------------------------------------------------------------------------
 
 var (
-	reg   *registry
-	specs []spec
+	reg   *modelladder.Registry
+	specs []modelladder.Spec
 	runMu sync.Mutex // one heavy run at a time, so two races don't contend the box
 	gomax = runtime.GOMAXPROCS(0)
 )
@@ -301,10 +208,10 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 	scn = scn.scale(intArg(r, "P"), intArg(r, "C"), intArg(r, "T"), intArg(r, "D"))
 
 	modelName := r.URL.Query().Get("model")
-	var sp spec
+	var sp modelladder.Spec
 	if modelName == "" {
 		var has bool
-		if sp, has = smallestPresent(); !has {
+		if sp, has = modelladder.SmallestPresent(specs); !has {
 			http.Error(w, "no model present on disk (need a ladder model)", 400)
 			return
 		}
@@ -331,7 +238,7 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 }
 
 // runRace is the shared race engine used by the HTTP handler and the headless -race.
-func runRace(scn Scenario, sp spec, emit emitter) {
+func runRace(scn Scenario, sp modelladder.Spec, emit emitter) {
 	v := viewOf(scn)
 	emit(event{"type": "plan", "view": v, "model": sp.Name})
 
@@ -340,13 +247,13 @@ func runRace(scn Scenario, sp spec, emit emitter) {
 	emit(event{"type": "info", "msg": "loading model " + sp.Name + " on " + hw.Summary})
 	// Model load + quantize is the longest blocking phase (tens of seconds on the big
 	// rungs); heartbeat it so the page shows a live elapsed counter instead of freezing.
-	var l *loaded
+	var l *modelladder.Loaded
 	var err error
 	demoui.Beat(heartbeat,
 		func(el time.Duration) {
 			emit(event{"type": "tick", "phase": "loading model " + sp.Name, "elapsed_ms": ms(el)})
 		},
-		func() { l, err = reg.get(sp) },
+		func() { l, err = reg.Get(sp) },
 	)
 	if err != nil {
 		emit(event{"type": "error", "msg": "load: " + err.Error()})
@@ -565,7 +472,7 @@ func main() {
 	D := flag.Int("D", 0, "override decode tokens/turn")
 	flag.Parse()
 
-	specs = ladderSpecs()
+	specs = modelladder.LadderSpecs()
 
 	if *print {
 		printCatalog(*asJSON)
@@ -577,7 +484,7 @@ func main() {
 	}
 
 	applyResourceCaps(*jobs, *budget)
-	reg = newRegistry()
+	reg = modelladder.NewRegistry()
 
 	if *race != "" {
 		scn, ok := findScenario(*race)
@@ -586,7 +493,7 @@ func main() {
 			os.Exit(2)
 		}
 		scn = scn.scale(*P, *C, *T, *D)
-		sp, has := smallestPresent()
+		sp, has := modelladder.SmallestPresent(specs)
 		if !has {
 			fmt.Fprintln(os.Stderr, "no model present on disk — need a ladder model (see cmd/demorace ladder)")
 			os.Exit(1)
