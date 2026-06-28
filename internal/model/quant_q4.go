@@ -35,9 +35,6 @@ type q4Tensor struct {
 	q             []byte    // out*nblk*16 packed 4-bit codes (2 per byte, low nibble first)
 }
 
-// qBlk4Bytes is the resident byte cost of one 32-wide int4 block (f32 scale + 16 code bytes).
-const qBlk4Bytes = 4 + qBlk4/2
-
 // quantizeQ4Block stores the 32 weights of src as one (d, 16 nibble bytes) block at dst,
 // returning the per-block scale. d = amax/7 (so the largest magnitude maps to code 7 or 0);
 // a zero block stays zero. Codes are round(w/d)+8 clamped to [0,15] (signed range [-8,7]).
@@ -160,20 +157,6 @@ func q4MatRowsRange(qt *q4Tensor, x, y []float32, lo, hi int) {
 	}
 }
 
-// dequantQ8RowToF32 expands one Q8_0 weight row (codes q + per-block scales dw, nblk
-// blocks) into dst as f32. (quantizeQ4FromQ8 supersedes this for the build path, but it is
-// kept as the readable reference for the Q8_0 block layout.)
-func dequantQ8RowToF32(dst []float32, q []int8, dw []float32, nblk int) {
-	for b := 0; b < nblk; b++ {
-		d := dw[b]
-		qb := q[b*qBlk:]
-		off := b * qBlk
-		for i := 0; i < qBlk; i++ {
-			dst[off+i] = float32(qb[i]) * d
-		}
-	}
-}
-
 // quantizeQ4FromQ8 builds the int4 tensor directly from a Q8_0 tensor, block-by-block:
 // each 32-wide Q8_0 block dequantizes into a tiny 32-f32 buffer and re-quantizes to one
 // int4 block. q8 block size (qBlk = 32) equals qBlk4, so the block grids are identical.
@@ -278,9 +261,6 @@ func (m *Model) q4(name string) *q4Tensor {
 	}
 	return qt
 }
-
-// hasQ4 reports whether a resident int4 copy is available for a name.
-func (m *Model) hasQ4(name string) bool { return m.q4w != nil && m.q4w[name] != nil }
 
 // q4Kernel runs the single-position block in int4: prep is the identity (the GEMV
 // dequantizes weight blocks on the fly and consumes the f32 activation directly, so the

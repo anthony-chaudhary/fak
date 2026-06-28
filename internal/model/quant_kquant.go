@@ -220,15 +220,6 @@ func quantizeKQuantFromRaw(raw []byte, out, in int, kind kQuantKind) *kQuantTens
 	return &kQuantTensor{out: out, in: in, nblk: nblk, kind: kind, raw: raw}
 }
 
-// kq returns the prebuilt resident k-quant tensor for a name.
-func (m *Model) kq(name string) *kQuantTensor {
-	qt, ok := m.kqw[name]
-	if !ok {
-		panic("model: resident k-quant tensor not built: " + name)
-	}
-	return qt
-}
-
 // hasKQuant reports whether a resident Q5_K/Q6_K copy is available for a name.
 func (m *Model) hasKQuant(name string) bool { return m.kqw != nil && m.kqw[name] != nil }
 

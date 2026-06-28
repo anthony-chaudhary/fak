@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -43,6 +44,12 @@ func runChatModel(argv []string) {
 	temp := fs.Float64("temp", 0, "sampling temperature (0 = greedy/deterministic)")
 	topP := fs.Float64("top-p", 0, "nucleus-sampling cutoff (0 = off)")
 	topK := fs.Int("top-k", 0, "top-k truncation (0 = full distribution)")
+	// fak's core value-add — KV-prefix reuse — is invisible by default everywhere else
+	// (#333: only --debug-stats or /metrics show it). On the daemon-less `fak run` front
+	// door we print a one-line WITNESSED cache-value summary per turn to STDERR (never
+	// stdout, so the model answer stays pipe-clean) so a developer SEES the prefix the
+	// kernel served from cache instead of recomputed. --quiet silences it for scripting.
+	quiet := fs.Bool("quiet", false, "suppress the per-turn cache-value summary line on stderr (the kernel's WITNESSED KV-prefix reuse)")
 
 	// argv[0] is the model ref (a non-flag, guaranteed by the cmdRun dispatch); the
 	// rest are flags and/or the prompt words. Parse the flags out of argv[1:].
@@ -60,10 +67,40 @@ func runChatModel(argv []string) {
 	opts := runSampleOpts(*maxTokens, *temp, *topP, *topK)
 	if prompt != "" {
 		// One-shot: answer and exit.
-		runChatTurn(ctx, planner, *system, nil, prompt, opts)
+		runChatTurn(ctx, planner, *system, nil, prompt, opts, !*quiet)
 		return
 	}
-	runChatREPL(ctx, planner, *system, opts)
+	runChatREPL(ctx, planner, *system, opts, !*quiet)
+}
+
+// cacheValueLine renders one WITNESSED cache-value line from the per-turn delta of the
+// process-global cacheobs tap (the SAME realized KV-prefix reuse the gateway scrapes onto
+// /metrics). before/after bracket exactly one served turn, so the delta is this turn's
+// prompt tokens and the prefix of them the kernel served from its cached KV — fak's own
+// measurement (WITNESSED), not a provider's reported counter. It returns "" for an
+// idle/empty turn (no prompt delta) so the caller prints nothing.
+func cacheValueLine(before, after cacheobs.Stats) string {
+	prompt := int64(after.PromptTokens) - int64(before.PromptTokens)
+	reused := int64(after.ReusedTokens) - int64(before.ReusedTokens)
+	if prompt <= 0 {
+		return ""
+	}
+	if reused < 0 {
+		reused = 0
+	}
+	ratio := float64(reused) / float64(prompt)
+	regime := "cold"
+	switch {
+	case ratio >= cacheobs.FrozenFloor:
+		regime = "frozen"
+	case ratio >= cacheobs.ColdCeil:
+		regime = "partial"
+	}
+	// by=vdso names the mechanism that served the reuse (the in-kernel RadixAttention
+	// KV-prefix cache, fak's vDSO fast path) — closing #333's missing attribution on the
+	// run surface. prompt−reused is the suffix the kernel actually recomputed this turn.
+	return fmt.Sprintf("  cache: reused %d/%d prompt tok (%.0f%% %s, by=vdso) — computed %d",
+		reused, prompt, ratio*100, regime, prompt-reused)
 }
 
 // buildRunPlanner resolves the model ref, loads the weights + tokenizer through the
@@ -131,7 +168,7 @@ func runSampleOpts(maxTokens int, temp, topP float64, topK int) []agent.SampleOp
 // runChatTurn runs one completion and prints the assistant text to stdout. history
 // is the prior conversation (nil for a one-shot); it returns the appended messages so
 // the REPL can thread context across turns.
-func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system string, history []agent.Message, prompt string, opts []agent.SampleOpt) []agent.Message {
+func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system string, history []agent.Message, prompt string, opts []agent.SampleOpt, showCache bool) []agent.Message {
 	msgs := history
 	if len(msgs) == 0 && strings.TrimSpace(system) != "" {
 		msgs = append(msgs, agent.Message{Role: "system", Content: system})
@@ -150,7 +187,7 @@ func runChatTurn(ctx context.Context, planner *agent.InKernelPlanner, system str
 
 // runChatREPL is the interactive mode: read a line, answer, repeat. EOF (Ctrl-D) or
 // an interrupt ends it. Conversation context is threaded across turns.
-func runChatREPL(ctx context.Context, planner *agent.InKernelPlanner, system string, opts []agent.SampleOpt) {
+func runChatREPL(ctx context.Context, planner *agent.InKernelPlanner, system string, opts []agent.SampleOpt, showCache bool) {
 	fmt.Fprintf(os.Stderr, "fak run: interactive chat on %q — Ctrl-D to exit\n", planner.Model())
 	var history []agent.Message
 	sc := bufio.NewScanner(os.Stdin)
@@ -165,6 +202,6 @@ func runChatREPL(ctx context.Context, planner *agent.InKernelPlanner, system str
 		if line == "" {
 			continue
 		}
-		history = runChatTurn(ctx, planner, system, history, line, opts)
+		history = runChatTurn(ctx, planner, system, history, line, opts, showCache)
 	}
 }

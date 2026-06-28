@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 )
 
 // TestRunDispatchRule pins the argv[0] split that keeps `fak run --trace` (trace mode)
@@ -18,9 +19,9 @@ func TestRunDispatchRule(t *testing.T) {
 		{[]string{"--trace", "x.json"}, false}, // flag-first → trace
 		{[]string{"-trace", "x.json"}, false},  // single-dash flag → trace
 		{[]string{}, false},                    // bare → trace (errors on --trace required)
-		{[]string{"smollm2", "hi"}, true},       // alias → chat
-		{[]string{"./model.gguf"}, true},        // path → chat
-		{[]string{"hf://o/r/m.gguf"}, true},     // hf uri → chat
+		{[]string{"smollm2", "hi"}, true},      // alias → chat
+		{[]string{"./model.gguf"}, true},       // path → chat
+		{[]string{"hf://o/r/m.gguf"}, true},    // hf uri → chat
 	}
 	for _, c := range cases {
 		isChat := len(c.argv) > 0 && !strings.HasPrefix(c.argv[0], "-")
@@ -55,5 +56,33 @@ func TestRunSampleOpts(t *testing.T) {
 	}
 	if sp.TopP != nil {
 		t.Errorf("TopP should be unset (top-p=0), got %v", *sp.TopP)
+	}
+}
+
+// TestCacheValueLine pins the WITNESSED per-turn cache-value summary `fak run` prints by
+// default (#333). It is the DELTA of the cacheobs tap across one turn, so the line reports
+// this turn's reuse, not the cumulative process total — and an idle turn (no prompt delta)
+// prints nothing rather than a phantom 0/0 line.
+func TestCacheValueLine(t *testing.T) {
+	// A frozen turn: 1000 prompt tokens, 950 served from the cached KV prefix.
+	before := cacheobs.Stats{PromptTokens: 200, ReusedTokens: 100}
+	after := cacheobs.Stats{PromptTokens: 1200, ReusedTokens: 1050}
+	got := cacheValueLine(before, after)
+	for _, want := range []string{"reused 950/1000", "95% frozen", "by=vdso", "computed 50"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("cacheValueLine = %q; missing %q", got, want)
+		}
+	}
+	// A cold first turn (no reuse) lands in the cold regime.
+	if got := cacheValueLine(cacheobs.Stats{}, cacheobs.Stats{PromptTokens: 500}); !strings.Contains(got, "0% cold") {
+		t.Errorf("cold turn line = %q; want 0%% cold", got)
+	}
+	// A partial turn (between ColdCeil and FrozenFloor) is labeled partial.
+	if got := cacheValueLine(cacheobs.Stats{}, cacheobs.Stats{PromptTokens: 100, ReusedTokens: 50}); !strings.Contains(got, "partial") {
+		t.Errorf("partial turn line = %q; want partial", got)
+	}
+	// An idle turn with no prompt delta prints nothing (no phantom 0/0 line).
+	if got := cacheValueLine(cacheobs.Stats{PromptTokens: 7}, cacheobs.Stats{PromptTokens: 7}); got != "" {
+		t.Errorf("idle turn line = %q; want empty", got)
 	}
 }
