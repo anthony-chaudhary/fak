@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 func TestAppendLoadValidatesHashChainAndSummary(t *testing.T) {
@@ -204,10 +206,10 @@ func TestAppendBusyFailsClosed(t *testing.T) {
 		t.Fatalf("open lock: %v", err)
 	}
 	defer lock.Close()
-	if err := tryFlock(lock); err != nil {
+	if err := flock.TryLock(lock); err != nil {
 		t.Fatalf("hold lock: %v", err)
 	}
-	defer func() { _ = unflock(lock) }()
+	defer func() { _ = flock.Unlock(lock) }()
 
 	// withLedgerLock polls for appendLockWait (2s) then ErrLedgerBusy; assert the
 	// fail-closed contract without waiting the full budget by checking the error type.

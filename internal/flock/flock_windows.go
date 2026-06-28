@@ -1,6 +1,6 @@
 //go:build windows
 
-package gpulease
+package flock
 
 import (
 	"errors"
@@ -22,7 +22,9 @@ var (
 	procUnlockFileEx = kernel32.NewProc("UnlockFileEx")
 )
 
-func tryLock(f *os.File, _ string) error {
+// TryLock takes a non-blocking exclusive advisory lock on f. It returns
+// ErrLockBusy when another holder owns the lock, nil on success.
+func TryLock(f *os.File) error {
 	var ol syscall.Overlapped
 	r, _, err := procLockFileEx.Call(
 		f.Fd(),
@@ -36,12 +38,13 @@ func tryLock(f *os.File, _ string) error {
 		return nil
 	}
 	if errors.Is(err, errLockViolation) || errors.Is(err, errSharingViolation) {
-		return errLockBusy
+		return ErrLockBusy
 	}
 	return err
 }
 
-func unlock(f *os.File, _ string) error {
+// Unlock releases the advisory lock held on f.
+func Unlock(f *os.File) error {
 	var ol syscall.Overlapped
 	r, _, err := procUnlockFileEx.Call(
 		f.Fd(),

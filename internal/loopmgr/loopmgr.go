@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 )
 
@@ -147,10 +148,6 @@ func WithClock(clock func() time.Time) Option {
 // Callers (the one-shot `fak loop ...` producer) can retry.
 var ErrLedgerBusy = errors.New("loopmgr: loop ledger append lock is busy")
 
-// errLockBusy is the unexported sentinel the per-platform tryFlock primitives return
-// when the OS advisory lock is already held (mirrors internal/gpulease).
-var errLockBusy = errors.New("loopmgr: append lock busy")
-
 // appendLockWait bounds how long Append polls for the append lock before failing with
 // ErrLedgerBusy. A local single-line append holds the lock for microseconds, so this
 // should essentially never elapse; it only bounds a pathological stuck holder.
@@ -222,7 +219,7 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 }
 
 // withLedgerLock runs fn while holding an exclusive cross-process advisory lock on
-// <path>.lock. The per-platform tryFlock is non-blocking, so it polls until the lock
+// <path>.lock. flock.TryLock is non-blocking, so it polls until the lock
 // is free or wait elapses (then ErrLedgerBusy). The lock fd is closed on return, which
 // also releases the OS lock (and the OS releases it if this process dies mid-write).
 func withLedgerLock(path string, wait time.Duration, fn func() error) error {
@@ -235,11 +232,11 @@ func withLedgerLock(path string, wait time.Duration, fn func() error) error {
 
 	deadline := time.Now().Add(wait)
 	for {
-		lerr := tryFlock(f)
+		lerr := flock.TryLock(f)
 		if lerr == nil {
 			break
 		}
-		if !errors.Is(lerr, errLockBusy) {
+		if !errors.Is(lerr, flock.ErrLockBusy) {
 			return fmt.Errorf("lock loop ledger: %w", lerr)
 		}
 		if time.Now().After(deadline) {
@@ -247,7 +244,7 @@ func withLedgerLock(path string, wait time.Duration, fn func() error) error {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	defer func() { _ = unflock(f) }()
+	defer func() { _ = flock.Unlock(f) }()
 	return fn()
 }
 
