@@ -146,6 +146,7 @@ var tier = map[string]int{
 	"looprecover":     1, // pure loop-recovery decision helper; stdlib-only, imports nothing internal, off the hot path.
 	"nightrun":        1, // RUN-IT-ALL-NIGHT local-capability data-collection planner: probes the box + ranks feasible-here collection tasks over the benchmark grid; imports benchcatalog(1)+stdlib, off the hot path.
 	"sessionobs":      1, // SESSION-OBSERVABILITY-for-RSI scorecard: the value-side complement to tools/session_audit.py — grades how far our coding-session data has climbed the capture->structure->link->aggregate->learn ladder, folding the missing rungs into one sessionobs_debt integer. Pure scorer (Record/Outcome/Pipeline/Score), stdlib-only, imports nothing internal, off the hot path.
+	"compactcohere":   1, // fak<->harness context-manager COHERENCE policy (#1131): attributes a served turn's prefix event (stable/fak_cut/fak_world_break/harness_rewrite/cold_ttl) + a standing PreCompact block/allow posture to suppress Claude Code's cache-destroying auto-compaction while fak's cache-preserving compaction copes. Pure sensor+policy, stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
