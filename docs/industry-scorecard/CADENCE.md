@@ -13,16 +13,38 @@ Output is captured to `docs/industry-scorecard/cadence-output/freshness-cadence-
 
 ## Install the scheduled task
 
-The schedule is registered in `.dos/loop-registry.json` (weekly, catch-up policy, 1-hour jitter).
+The schedule is defined in `tools/loop-registry.json` (weekly, catch-up policy, 1-hour jitter).
 
 ### macOS (launchd)
 
-```bash
-# Emit the .plist
-./fak cron emit --registry .dos/loop-registry.json industry-freshness-cadence \
-  --target launchd --fak-bin ./fak \
-  -- python tools/industry_freshness_cadence.py > ~/Library/LaunchAgents/com.fak.industry-freshness-cadence.plist
+Create `~/Library/LaunchAgents/com.fak.industry-freshness-cadence.plist`:
 
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fak.industry-freshness-cadence</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>python</string>
+        <string>tools/industry_freshness_cadence.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/path/to/fak/repo</string>
+    <key>StartInterval</key>
+    <integer>604800</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/fak-industry-freshness-cadence.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/fak-industry-freshness-cadence.err</string>
+</dict>
+</plist>
+```
+
+Then:
+```bash
 # Install
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fak.industry-freshness-cadence.plist
 
@@ -32,36 +54,56 @@ launchctl list | grep industry-freshness
 
 ### Linux (systemd)
 
-```bash
-# Emit the unit
-./fak cron emit --registry .dos/loop-registry.json industry-freshness-cadence \
-  --target systemd --fak-bin ./fak \
-  -- python tools/industry_freshness_cadence.py > /tmp/fak-industry-freshness-cadence.service
+Create `/etc/systemd/system/fak-industry-freshness-cadence.service`:
 
-# Install (copy to /etc/systemd/system/ or ~/.config/systemd/user/)
-sudo cp /tmp/fak-industry-freshness-cadence.service /etc/systemd/system/
+```ini
+[Unit]
+Description=fak industry scorecard freshness cadence
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/fak/repo
+ExecStart=python tools/industry_freshness_cadence.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Create `/etc/systemd/system/fak-industry-freshness-cadence.timer`:
+
+```ini
+[Unit]
+Description=fak industry scorecard freshness cadence weekly timer
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Then:
+```bash
 sudo systemctl daemon-reload
-sudo systemctl enable fak-industry-freshness-cadence.service
-sudo systemctl start fak-industry-freshness-cadence.service
+sudo systemctl enable fak-industry-freshness-cadence.timer
+sudo systemctl start fak-industry-freshness-cadence.timer
 
 # Verify
-sudo systemctl status fak-industry-freshness-cadence.service
+sudo systemctl status fak-industry-freshness-cadence.timer
 ```
 
 ### Windows (Task Scheduler)
 
-```powershell
-# Emit the XML
-.\fak.exe cron emit --registry .dos\loop-registry.json industry-freshness-cadence `
-  --target taskscheduler --fak-bin .\fak.exe `
-  -- python tools\industry_freshness_cadence.py > $env:TEMP\fak-industry-freshness-cadence.xml
-
-# Import into Task Scheduler (GUI or PowerShell)
-# GUI: Open Task Scheduler -> Import Task -> select the XML file
-# PowerShell (optional):
-#   Register-ScheduledTask -Xml (Get-Content $env:TEMP\fak-industry-freshness-cadence.xml | Out-String) `
-#     -TaskName "fak-industry-freshness-cadence"
-```
+Use Task Scheduler to create a weekly task:
+- Trigger: Weekly, every 7 days, with a 1-hour random delay
+- Action: Start a program
+  - Program: `python`
+  - Arguments: `tools\industry_freshness_cadence.py`
+  - Start in: `C:\path\to\fak\repo`
 
 ## Manual run
 
