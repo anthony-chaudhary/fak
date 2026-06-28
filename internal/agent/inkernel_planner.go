@@ -1179,19 +1179,13 @@ func (p *InKernelPlanner) EvictKVSpan(messages []Message, throughIdx int) (freed
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	sess := p.m.NewSession()
-	sess.Quant, sess.Q4K = p.quant, p.q4k
-	// Fail OPEN on a cache whose eviction is formally unsupported (a hybrid Gated-DeltaNet
-	// recurrence: kvmmu's evict would panic KVCache.Evict). The byte-gate quarantine already
-	// paged the result out; the KV-MMU span eviction simply does not engage on such a model
-	// rather than crash the served turn. CanEvict reads the empty fresh cache's verdict, which
-	// is the model's structural capability — independent of contents.
-	if sess.Cache.CanEvict() != nil {
+	// Build a fresh-session kvmmu bridge over the lowered segments. Fail OPEN on a cache whose
+	// eviction is formally unsupported (a hybrid Gated-DeltaNet recurrence: kvmmu's evict would
+	// panic KVCache.Evict). The byte-gate quarantine already paged the result out, so the KV-MMU
+	// span eviction simply does not engage on such a model rather than crash the served turn.
+	sess, bridge, ok := p.newSegmentBridge(segIDs)
+	if !ok {
 		return 0, false
-	}
-	bridge := kvmmu.NewWithGate(sess, kvmmu.FoldedGate{})
-	for _, sg := range segIDs {
-		bridge.Append(sg.id, sg.tool, sg.ids)
 	}
 	freed, found := bridge.Quarantine(poisonSeg)
 	if !found || freed == 0 {
@@ -1269,16 +1263,11 @@ func (p *InKernelPlanner) ElideKVSpans(messages []Message, plan ctxplan.Plan) (f
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	sess := p.m.NewSession()
-	sess.Quant, sess.Q4K = p.quant, p.q4k
 	// Fail OPEN on a cache whose eviction is formally unsupported (a recurrent / GDN cache):
 	// the residency plan simply does not engage rather than panic the served turn.
-	if sess.Cache.CanEvict() != nil {
+	sess, bridge, ok := p.newSegmentBridge(segIDs)
+	if !ok {
 		return 0, false
-	}
-	bridge := kvmmu.NewWithGate(sess, kvmmu.FoldedGate{})
-	for _, sg := range segIDs {
-		bridge.Append(sg.id, sg.tool, sg.ids)
 	}
 	freed = bridge.ApplyPlan(plan)
 	if freed == 0 {
@@ -1357,14 +1346,7 @@ func (p *InKernelPlanner) residencyIsExact(elided *model.Session, segs []kvSegme
 		}
 		refIDs = append(refIDs, sg.ids...)
 	}
-	if len(refIDs) == 0 || elided.Cache.Len() != len(refIDs) {
-		return false
-	}
-	ref := p.m.NewSession()
-	ref.Quant, ref.Q4K = p.quant, p.q4k
-	ref.Prefill(refIDs)
-	last := refIDs[len(refIDs)-1]
-	return logitsClose(elided.Step(last), ref.Step(last))
+	return p.refLogitsExact(elided, refIDs)
 }
 
 // kvSegment is one lowered per-message K/V span: its kvmmu segment id (the message index +
@@ -1397,6 +1379,25 @@ func (p *InKernelPlanner) lowerSegments(messages []Message, throughIdx int) (seg
 	return segs, poisonID, len(segs) > 0
 }
 
+// newSegmentBridge builds a FRESH model.Session over the loaded model (carrying the planner's
+// quant config) and a kvmmu bridge with every lowered segment appended — the shared session +
+// bridge construction EvictKVSpan and ElideKVSpans both run under p.mu before quarantining a
+// span or applying a residency plan. It returns ok=false (with a nil session and bridge) on a
+// cache whose eviction is formally unsupported (a recurrent / GDN cache, whose CanEvict reads
+// non-nil on the empty fresh cache), so the caller fails OPEN rather than panicking the turn.
+func (p *InKernelPlanner) newSegmentBridge(segs []kvSegment) (*model.Session, *kvmmu.Context, bool) {
+	sess := p.m.NewSession()
+	sess.Quant, sess.Q4K = p.quant, p.q4k
+	if sess.Cache.CanEvict() != nil {
+		return nil, nil, false
+	}
+	bridge := kvmmu.NewWithGate(sess, kvmmu.FoldedGate{})
+	for _, sg := range segs {
+		bridge.Append(sg.id, sg.tool, sg.ids)
+	}
+	return sess, bridge, true
+}
+
 // repositionIsExact rebuilds a reference session that prefills ONLY the survivor spans (every
 // segment except the poison) and compares the bridge session's post-eviction next-token
 // distribution to the reference's. The evicted cache holds the survivor spans at compacted
@@ -1411,14 +1412,24 @@ func (p *InKernelPlanner) repositionIsExact(evicted *model.Session, segs []kvSeg
 		}
 		refIDs = append(refIDs, sg.ids...)
 	}
-	if len(refIDs) == 0 || evicted.Cache.Len() != len(refIDs) {
+	return p.refLogitsExact(evicted, refIDs)
+}
+
+// refLogitsExact builds a reference session that prefills ONLY refIDs (the resident survivor
+// token path, carrying the planner's quant config) and reports whether `cache`'s post-eviction
+// next-token distribution is bit-identical to that reference within the cross-path FMA tolerance.
+// It is the shared bit-exact reposition check repositionIsExact and residencyIsExact both close
+// on, and returns false when the resident path is empty or the cache length already diverges
+// from it.
+func (p *InKernelPlanner) refLogitsExact(cache *model.Session, refIDs []int) bool {
+	if len(refIDs) == 0 || cache.Cache.Len() != len(refIDs) {
 		return false
 	}
 	ref := p.m.NewSession()
 	ref.Quant, ref.Q4K = p.quant, p.q4k
 	ref.Prefill(refIDs)
 	last := refIDs[len(refIDs)-1]
-	return logitsClose(evicted.Step(last), ref.Step(last))
+	return logitsClose(cache.Step(last), ref.Step(last))
 }
 
 // logitsClose reports whether two next-token logit vectors are equal within the cross-path FMA
@@ -1717,11 +1728,7 @@ func sampleLogits(logits []float32, temp, topP float64, topK int, rng *rand.Rand
 // the single most-probable token is always kept so the nucleus is never empty.
 // probs is unsorted on entry and stays index-aligned to the caller's logits.
 func nucleusTruncate(probs []float64, sum, topP float64) float64 {
-	order := make([]int, len(probs))
-	for i := range order {
-		order[i] = i
-	}
-	sort.Slice(order, func(a, b int) bool { return probs[order[a]] > probs[order[b]] })
+	order := descProbOrder(probs, func(i, j int) bool { return probs[i] > probs[j] })
 	target := topP * sum
 	var cum float64
 	kept := make(map[int]bool, len(order))
@@ -1735,6 +1742,27 @@ func nucleusTruncate(probs []float64, sum, topP float64) float64 {
 		kept[idx] = true
 		cum += probs[idx]
 	}
+	return maskKept(probs, kept)
+}
+
+// descProbOrder returns the indices of probs ordered by the caller's less comparator, which
+// ranks two ELEMENT indices (not positions in the returned slice). It is the shared
+// highest-probability-first index permutation nucleusTruncate and topKTruncate sort on; each
+// passes its own tie-break (nucleus leaves equal masses in arbitrary order; topK breaks ties by
+// the lower index for a stable kept set).
+func descProbOrder(probs []float64, less func(i, j int) bool) []int {
+	order := make([]int, len(probs))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool { return less(order[a], order[b]) })
+	return order
+}
+
+// maskKept zeroes every probability whose index is not in kept (in place) and returns the
+// surviving mass (the new normalization sum) — the shared renormalization tail of
+// nucleusTruncate and topKTruncate.
+func maskKept(probs []float64, kept map[int]bool) float64 {
 	var newSum float64
 	for i := range probs {
 		if kept[i] {
@@ -1754,31 +1782,19 @@ func nucleusTruncate(probs []float64, sum, topP float64) float64 {
 // 0 < k < len(probs); k>=len(probs) is a no-op handled before the call so the full
 // distribution stays byte-for-byte the pre-seam draw.
 func topKTruncate(probs []float64, sum float64, k int) float64 {
-	order := make([]int, len(probs))
-	for i := range order {
-		order[i] = i
-	}
 	// Highest probability first; ties resolve to the lower index so the kept set is
 	// stable and reproducible across runs.
-	sort.Slice(order, func(a, b int) bool {
-		if probs[order[a]] != probs[order[b]] {
-			return probs[order[a]] > probs[order[b]]
+	order := descProbOrder(probs, func(i, j int) bool {
+		if probs[i] != probs[j] {
+			return probs[i] > probs[j]
 		}
-		return order[a] < order[b]
+		return i < j
 	})
 	kept := make(map[int]bool, k)
 	for rank := 0; rank < k; rank++ {
 		kept[order[rank]] = true
 	}
-	var newSum float64
-	for i := range probs {
-		if kept[i] {
-			newSum += probs[i]
-		} else {
-			probs[i] = 0
-		}
-	}
-	return newSum
+	return maskKept(probs, kept)
 }
 
 func envInt(key string, def int) int {
