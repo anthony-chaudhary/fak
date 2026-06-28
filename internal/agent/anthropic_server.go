@@ -156,11 +156,7 @@ func decodeAnthropicMessage(m anthropicInboundMessage) []Message {
 				})
 			}
 		}
-		msg := Message{Role: RoleAssistant, Content: text.String(), ToolCalls: calls}
-		if msg.Content == "" && len(msg.ToolCalls) == 0 {
-			return nil
-		}
-		return []Message{msg}
+		return assistantMessages(text.String(), calls)
 	default: // user (and any other role): text + tool_result fan-out
 		var msgs []Message
 		var text strings.Builder
@@ -176,10 +172,7 @@ func decodeAnthropicMessage(m anthropicInboundMessage) []Message {
 				appendText(&text, b.Text)
 			}
 		}
-		if text.Len() > 0 {
-			msgs = append(msgs, Message{Role: RoleUser, Content: text.String()})
-		}
-		return msgs
+		return appendUserText(msgs, &text)
 	}
 }
 
@@ -260,6 +253,29 @@ func canonRole(role string) string {
 	default:
 		return RoleUser
 	}
+}
+
+// assistantMessages wraps a decoded assistant turn (its accumulated text + tool calls)
+// into the canonical 0-or-1-element Message slice the inbound decoders return: nil when
+// the turn is empty (no content AND no tool calls), else a single assistant Message.
+// Shared by the Anthropic and Gemini content decoders, which assemble identical turns.
+func assistantMessages(text string, calls []ToolCall) []Message {
+	msg := Message{Role: RoleAssistant, Content: text, ToolCalls: calls}
+	if msg.Content == "" && len(msg.ToolCalls) == 0 {
+		return nil
+	}
+	return []Message{msg}
+}
+
+// appendUserText flushes any accumulated plain text as one trailing user-role Message,
+// appending it to msgs only when the builder is non-empty and returning the (possibly
+// extended) slice. It is the shared tail of the Anthropic and Gemini inbound user-turn
+// decoders: each fans tool results into msgs, then emits leftover text as a final user turn.
+func appendUserText(msgs []Message, text *strings.Builder) []Message {
+	if text.Len() > 0 {
+		msgs = append(msgs, Message{Role: RoleUser, Content: text.String()})
+	}
+	return msgs
 }
 
 func appendText(b *strings.Builder, s string) {

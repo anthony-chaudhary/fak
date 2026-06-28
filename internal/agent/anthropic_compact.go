@@ -220,17 +220,10 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 	//    array-open when pfxEnd<0) is copied verbatim; then the stub; then the kept
 	//    elements verbatim; then the verbatim tail from the array close onward.
 	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole)
-	if !ok {
-		return raw, CompactOutcome{Reason: CompactReasonSpliceFailed}
-	}
-
 	// 5. Prove it: the spliced body must still decode AND keep the protected prefix bytes
 	//    intact, or we ship identity rather than a broken/cache-busting body.
-	switch verifySplicedBody(raw, out, spans, pfxEnd) {
-	case spliceVerdictRedecodeFail:
-		return raw, CompactOutcome{Reason: CompactReasonRedecodeFail}
-	case spliceVerdictPrefixMismatch:
-		return raw, CompactOutcome{Reason: CompactReasonPrefixMismatch}
+	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
+		return raw, outcome
 	}
 	return out, CompactOutcome{Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens}
 }
@@ -266,6 +259,26 @@ func verifySplicedBody(raw, out []byte, spans []elementSpan, pfxEnd int) spliceV
 		return spliceVerdictPrefixMismatch
 	}
 	return spliceVerdictOK
+}
+
+// compactSpliceVerdict maps a post-splice (out, ok) result onto the CompactOutcome reason
+// vocabulary shared by the compaction and ctxplan-view rewrites. It returns (outcome,
+// false) — the identity reason the caller ships — when the splice itself failed (!ok), the
+// body no longer re-decodes, or the protected prefix bytes changed; and (zero, true) when
+// the spliced body is proven safe to ship. Behaviorally identical to inlining the
+// `if !ok { …SpliceFailed } switch verifySplicedBody(…) { …RedecodeFail / …PrefixMismatch }`
+// guard at each call site.
+func compactSpliceVerdict(raw, out []byte, ok bool, spans []elementSpan, pfxEnd int) (CompactOutcome, bool) {
+	if !ok {
+		return CompactOutcome{Reason: CompactReasonSpliceFailed}, false
+	}
+	switch verifySplicedBody(raw, out, spans, pfxEnd) {
+	case spliceVerdictRedecodeFail:
+		return CompactOutcome{Reason: CompactReasonRedecodeFail}, false
+	case spliceVerdictPrefixMismatch:
+		return CompactOutcome{Reason: CompactReasonPrefixMismatch}, false
+	}
+	return CompactOutcome{}, true
 }
 
 // decodeArrayElements returns each messages[] element's raw bytes (json.RawMessage) and its
@@ -640,15 +653,9 @@ func CompactAnthropicHistoryToView(raw []byte, planned []Message) ([]byte, Compa
 	}
 
 	out, ok := spliceToView(raw, spans, pfxEnd, stubIdx, elems)
-	if !ok {
-		return raw, CompactOutcome{Reason: CompactReasonSpliceFailed}
-	}
 	// Prove it: re-decode + protected-prefix byte-equality (shared with compaction/elision).
-	switch verifySplicedBody(raw, out, spans, pfxEnd) {
-	case spliceVerdictRedecodeFail:
-		return raw, CompactOutcome{Reason: CompactReasonRedecodeFail}
-	case spliceVerdictPrefixMismatch:
-		return raw, CompactOutcome{Reason: CompactReasonPrefixMismatch}
+	if outcome, good := compactSpliceVerdict(raw, out, ok, spans, pfxEnd); !good {
+		return raw, outcome
 	}
 	shedTokens := 0
 	for _, i := range stubIdx {

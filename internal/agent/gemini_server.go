@@ -112,11 +112,7 @@ func decodeGeminiContent(c geminiContent) []Message {
 				})
 			}
 		}
-		msg := Message{Role: RoleAssistant, Content: text.String(), ToolCalls: calls}
-		if msg.Content == "" && len(msg.ToolCalls) == 0 {
-			return nil
-		}
-		return []Message{msg}
+		return assistantMessages(text.String(), calls)
 	}
 	// user (and any other role): functionResponse fan-out + trailing text.
 	var msgs []Message
@@ -134,10 +130,7 @@ func decodeGeminiContent(c geminiContent) []Message {
 			appendText(&text, p.Text)
 		}
 	}
-	if text.Len() > 0 {
-		msgs = append(msgs, Message{Role: RoleUser, Content: text.String()})
-	}
-	return msgs
+	return appendUserText(msgs, &text)
 }
 
 // --- outbound: a Completion's assistant turn -> Gemini candidate parts ----------
