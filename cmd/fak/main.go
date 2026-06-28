@@ -127,6 +127,8 @@ func main() {
 		cmdAnswerShape(os.Args[2:])
 	case "doctor":
 		cmdDoctor(os.Args[2:])
+	case "tree-doctor":
+		cmdTreeDoctor(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":
