@@ -202,6 +202,24 @@ design panel: the deferrals are deliberate, not forgotten.
   Approx class's bit-exactness rung), and the device-memory-efficiency report.
   `cmd/modelbench -backend onednn -require-non-reference` is the gate that will record that
   evidence, the same way the CUDA and Vulkan witnesses above were captured.*
+- **OpenVINO (Intel CPU/GPU/NPU)** (Intel's inference runtime: ingest an IR, dispatch the whole
+  model across the CPU, integrated/discrete GPU, or NPU plugins): distinct from the oneDNN-SYCL
+  XPU lens above — that hand-lowers oneDNN primitives onto a SYCL queue op-by-op on an Arc GPU,
+  whereas OpenVINO is the higher-level runtime whose load-bearing decision is *device selection*
+  and whose unique reach is the **Intel NPU** (the AI-Boost accelerator on Meteor/Lunar/Arrow
+  Lake) that oneDNN-SYCL does not target. It maps onto the seam by registering an **Approx**
+  backend named `"openvino"` (`//go:build openvino`) that exports fak's in-process op-list to an
+  OpenVINO IR and `core.compile_model(model, device)`s it: a discrete GPU advertises
+  `Caps.DeviceMemory`, the NPU advertises `Caps.GraphCompile` (it compiles the whole IR to a
+  static device blob ahead of time), and the CPU plugin is the programmable parity floor — the
+  "within 1.5× native CPU" baseline. The native precision is a real `Dtype` (F32 on the CPU
+  plugin, F16 on GPU/NPU), and AUTO/HETERO/MULTI/BATCH are recognized as virtual meta-plugins that
+  delegate to physical devices, never a compile target. *Lens verdict: **designed, not yet built**
+  (#257) — the always-compiled device-plugin taxonomy is shipped and unit-witnessed on any host
+  (`internal/compute/openvino_arch.go`: `LookupOVDevice`/`OVDeviceToken`/`IsVirtualOVDevice`, the
+  CPU/GPU/NPU split, the native-precision-per-device invariant). What remains is host-gated: the
+  cgo `//go:build openvino` half, then runs-via-OpenVINO + within-1.5×-CPU + NPU-support on real
+  Intel silicon — see `internal/compute/OPENVINO-C006-NOTES.md`.*
 - **Edge NPU** (fixed vendor op menu, native int8/int4, must pre-stage weights): uses
   `QuantSpec` (asymmetric, per-channel, int4, static-act) for its weights, `Caps.FusedFFN`
   to map a whole MLP block to one vendor primitive, and `WeightSource` to stage a
