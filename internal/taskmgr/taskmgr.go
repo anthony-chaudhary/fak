@@ -355,67 +355,51 @@ func (m *Manager) StartStep(taskID string, spec StepSpec) (*Step, error) {
 }
 
 func (m *Manager) SetTaskProgress(taskID string, done, total float64, unit string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	task, ok := m.tasks[taskID]
-	if !ok {
-		return fmt.Errorf("taskmgr: task %q not found", taskID)
-	}
-	p, err := normalizeProgress(done, total, unit, task.progress)
-	if err != nil {
-		return err
-	}
-	task.progress = p
-	beat(&task.heartbeat, m.clock())
-	return nil
+	return m.withTask(taskID, func(task *taskState) error {
+		p, err := normalizeProgress(done, total, unit, task.progress)
+		if err != nil {
+			return err
+		}
+		task.progress = p
+		beat(&task.heartbeat, m.clock())
+		return nil
+	})
 }
 
 func (m *Manager) SetStepProgress(taskID, stepID string, done, total float64, unit string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	step, err := m.stepLocked(taskID, stepID)
-	if err != nil {
-		return err
-	}
-	p, err := normalizeProgress(done, total, unit, step.progress)
-	if err != nil {
-		return err
-	}
-	step.progress = p
-	now := m.clock()
-	beat(&step.heartbeat, now)
-	if task := m.tasks[taskID]; task != nil {
-		beat(&task.heartbeat, now)
-	}
-	return nil
+	return m.withStep(taskID, stepID, func(step *stepState) error {
+		p, err := normalizeProgress(done, total, unit, step.progress)
+		if err != nil {
+			return err
+		}
+		step.progress = p
+		now := m.clock()
+		beat(&step.heartbeat, now)
+		if task := m.tasks[taskID]; task != nil {
+			beat(&task.heartbeat, now)
+		}
+		return nil
+	})
 }
 
 func (m *Manager) BeatTask(taskID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	task, ok := m.tasks[taskID]
-	if !ok {
-		return fmt.Errorf("taskmgr: task %q not found", taskID)
-	}
-	beat(&task.heartbeat, m.clock())
-	return nil
+	return m.withTask(taskID, func(task *taskState) error {
+		beat(&task.heartbeat, m.clock())
+		return nil
+	})
 }
 
 func (m *Manager) BeatStep(taskID, stepID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	task, ok := m.tasks[taskID]
-	if !ok {
-		return fmt.Errorf("taskmgr: task %q not found", taskID)
-	}
-	step, ok := task.steps[stepID]
-	if !ok {
-		return fmt.Errorf("taskmgr: step %q not found on task %q", stepID, taskID)
-	}
-	now := m.clock()
-	beat(&step.heartbeat, now)
-	beat(&task.heartbeat, now)
-	return nil
+	return m.withTask(taskID, func(task *taskState) error {
+		step, ok := task.steps[stepID]
+		if !ok {
+			return fmt.Errorf("taskmgr: step %q not found on task %q", stepID, taskID)
+		}
+		now := m.clock()
+		beat(&step.heartbeat, now)
+		beat(&task.heartbeat, now)
+		return nil
+	})
 }
 
 func (m *Manager) FinishTask(taskID string) error {
@@ -471,52 +455,70 @@ func (m *Manager) endTask(taskID string, state State, reason string) error {
 	if !terminalState(state) {
 		return fmt.Errorf("taskmgr: invalid terminal task state %q", state)
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	task, ok := m.tasks[taskID]
-	if !ok {
-		return fmt.Errorf("taskmgr: task %q not found", taskID)
-	}
-	if terminalState(task.state) {
-		return nil
-	}
-	now := m.clock()
-	sample := m.sampleAt(now)
-	for _, stepID := range task.stepOrder {
-		step := task.steps[stepID]
-		if step != nil && step.state == StateRunning {
-			step.state = state
-			step.reason = reason
-			step.ended = now
-			step.end = sample
+	return m.withTask(taskID, func(task *taskState) error {
+		if terminalState(task.state) {
+			return nil
 		}
-	}
-	task.state = state
-	task.reason = reason
-	task.ended = now
-	task.end = sample
-	return nil
+		now := m.clock()
+		sample := m.sampleAt(now)
+		for _, stepID := range task.stepOrder {
+			step := task.steps[stepID]
+			if step != nil && step.state == StateRunning {
+				step.state = state
+				step.reason = reason
+				step.ended = now
+				step.end = sample
+			}
+		}
+		task.state = state
+		task.reason = reason
+		task.ended = now
+		task.end = sample
+		return nil
+	})
 }
 
 func (m *Manager) endStep(taskID, stepID string, state State, reason string) error {
 	if !terminalState(state) {
 		return fmt.Errorf("taskmgr: invalid terminal step state %q", state)
 	}
+	return m.withStep(taskID, stepID, func(step *stepState) error {
+		if terminalState(step.state) {
+			return nil
+		}
+		now := m.clock()
+		step.state = state
+		step.reason = reason
+		step.ended = now
+		step.end = m.sampleAt(now)
+		return nil
+	})
+}
+
+// withTask runs fn against the named task under the manager lock, returning a
+// not-found error if the task is unknown. It centralises the lock / defer-unlock /
+// lookup-or-error preamble shared by the task mutators.
+func (m *Manager) withTask(taskID string, fn func(*taskState) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("taskmgr: task %q not found", taskID)
+	}
+	return fn(task)
+}
+
+// withStep runs fn against the named step under the manager lock, returning the
+// stepLocked error if the task or step is unknown. The lock-held step mutators share
+// this preamble.
+func (m *Manager) withStep(taskID, stepID string, fn func(*stepState) error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	step, err := m.stepLocked(taskID, stepID)
 	if err != nil {
 		return err
 	}
-	if terminalState(step.state) {
-		return nil
-	}
-	now := m.clock()
-	step.state = state
-	step.reason = reason
-	step.ended = now
-	step.end = m.sampleAt(now)
-	return nil
+	return fn(step)
 }
 
 func (m *Manager) stepLocked(taskID, stepID string) (*stepState, error) {

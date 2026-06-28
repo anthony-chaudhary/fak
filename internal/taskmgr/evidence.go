@@ -125,14 +125,10 @@ func (m *Manager) SetTaskWitness(taskID string, rec WitnessRecord) error {
 	if err := validateVerifiedState(rec.VerifiedState); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	task, ok := m.tasks[taskID]
-	if !ok {
-		return fmt.Errorf("taskmgr: task %q not found", taskID)
-	}
-	task.witness = cloneWitness(&rec)
-	return nil
+	return m.withTask(taskID, func(task *taskState) error {
+		task.witness = cloneWitness(&rec)
+		return nil
+	})
 }
 
 // SetStepWitness attaches a precomputed WitnessRecord to a step, leaving the
@@ -141,14 +137,10 @@ func (m *Manager) SetStepWitness(taskID, stepID string, rec WitnessRecord) error
 	if err := validateVerifiedState(rec.VerifiedState); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	step, err := m.stepLocked(taskID, stepID)
-	if err != nil {
-		return err
-	}
-	step.witness = cloneWitness(&rec)
-	return nil
+	return m.withStep(taskID, stepID, func(step *stepState) error {
+		step.witness = cloneWitness(&rec)
+		return nil
+	})
 }
 
 // WitnessTask builds a Claim from the task's current claimed state plus refs, runs
