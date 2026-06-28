@@ -166,7 +166,7 @@ func TestParity_MarkdownRenders(t *testing.T) {
 			Turns: 2, PromptTokens: 1700, CompletionTokens: 216,
 		}})
 	md := rep.Markdown()
-	for _, want := range []string{"Local-vs-Frontier parity", "## Cards", "Parity verdicts", "local-1.5b", "$0 (local)"} {
+	for _, want := range []string{"Local-vs-Frontier parity", "What τ-bench is", "sierra-research/tau-bench", "## Cards", "Parity verdicts", "local-1.5b", "$0 (local)"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q\n---\n%s", want, md)
 		}

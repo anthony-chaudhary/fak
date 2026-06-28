@@ -411,6 +411,7 @@ func (r *ParityReport) JSON() []byte { return marshalArtifact(r) }
 func (r *ParityReport) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Local-vs-Frontier parity — τ-bench airline task\n\n")
+	fmt.Fprintf(&b, "**What τ-bench is:** [τ-bench](https://github.com/sierra-research/tau-bench) (tau-bench) is a multi-turn tool-agent-user interaction benchmark from sierra-research ([arXiv:2406.12045](https://arxiv.org/abs/2406.12045)); the *airline* task below is one of its domains. The per-model rates in the Cards table are this report's own measured numbers — the source of record for any document that cites them.\n\n")
 	fmt.Fprintf(&b, "**Task:** %s\n\n", r.Task)
 	fmt.Fprintf(&b, "**Oracle:** %s\n\n", r.Oracle)
 	fmt.Fprintf(&b, "**Frontier reference:** `%s`\n\n", r.Reference)
