@@ -51,29 +51,31 @@ import (
 // forward pass already handles GQA, RoPE theta, SwiGLU, tied embeddings, and Qwen2 qkv-bias.
 // Returns the model and a display name derived from model_type + parameter scale.
 func loadHF(dir string) (*model.Model, string, error) {
-	cfg, err := benchcli.ReadHFConfig(dir)
-	if err != nil {
-		return nil, "", err
-	}
-	m, err := model.LoadSafetensorsDir(dir, cfg)
-	if err != nil {
-		return nil, "", fmt.Errorf("safetensors: %w", err)
-	}
-	return m, hfName(cfg, dir), nil
+	return loadHFWith(dir, "safetensors", "", model.LoadSafetensorsDir)
 }
 
 // loadHFLean loads via the memory-lean quantize-at-load path (f32 of the big weights dropped),
 // the loader that lets a 7B-class model fit on this box. Quant-only: the bench forces -quant.
 func loadHFLean(dir string) (*model.Model, string, error) {
+	return loadHFWith(dir, "safetensors(lean)", " [lean]", func(d string, c model.Config) (*model.Model, error) {
+		return model.LoadSafetensorsQuantDir(d, c)
+	})
+}
+
+// loadHFWith reads the HF config from dir and loads the model via load, wrapping a load
+// failure as "<label>: <err>" and returning the hfName display string with nameSuffix
+// appended. It is the shared body of loadHF (full) and loadHFLean (memory-lean) which
+// differ only by loader, error label, and name suffix.
+func loadHFWith(dir, label, nameSuffix string, load func(string, model.Config) (*model.Model, error)) (*model.Model, string, error) {
 	cfg, err := benchcli.ReadHFConfig(dir)
 	if err != nil {
 		return nil, "", err
 	}
-	m, err := model.LoadSafetensorsQuantDir(dir, cfg)
+	m, err := load(dir, cfg)
 	if err != nil {
-		return nil, "", fmt.Errorf("safetensors(lean): %w", err)
+		return nil, "", fmt.Errorf("%s: %w", label, err)
 	}
-	return m, hfName(cfg, dir) + " [lean]", nil
+	return m, hfName(cfg, dir) + nameSuffix, nil
 }
 
 func loadGGUF(path string) (*model.Model, string, error) {
@@ -644,6 +646,47 @@ func modelConfigReport(cfg model.Config) map[string]any {
 	}
 }
 
+// timePrefillReps runs reps fresh-session prefills of ids (a new Session per rep, closed
+// after timing) and returns the median wall time in ms.
+func timePrefillReps(newSession func() *model.Session, ids []int, reps int) float64 {
+	ds := make([]time.Duration, reps)
+	for r := 0; r < reps; r++ {
+		s := newSession()
+		t := time.Now()
+		s.Prefill(ids)
+		ds[r] = time.Since(t)
+		s.Close()
+	}
+	return medianMS(ds)
+}
+
+// medDecodeReps runs reps fresh-session decodes of prompt (a new Session per rep, closed
+// after timing), seeding each rep's first token via seedID(r), and returns the median
+// per-token time in ms over steps decode steps.
+func medDecodeReps(newSession func() *model.Session, prompt []int, reps, steps, vocab int, seedID func(r int) int) float64 {
+	perTok := make([]time.Duration, 0, reps)
+	for r := 0; r < reps; r++ {
+		s := newSession()
+		s.Prefill(prompt)
+		id := seedID(r)
+		perTok = append(perTok, stepDecode(s, id, steps, vocab)/time.Duration(steps))
+		s.Close()
+	}
+	return medianMS(perTok)
+}
+
+// stepDecode runs steps incremental Step() calls from the seed id, advancing the id
+// deterministically (argmax-free, value-irrelevant to cost), and returns the elapsed time.
+func stepDecode(s *model.Session, id, steps, vocab int) time.Duration {
+	t := time.Now()
+	for i := 0; i < steps; i++ {
+		logits := s.Step(id)
+		id = (id*48271 + 1) % vocab
+		_ = logits
+	}
+	return time.Since(t)
+}
+
 // runPrefill times Session.Prefill over each P in prefillSizes (builds KV cache, last
 // logits) and records the median timings and any phase profiles into the report maps.
 func runPrefill(f *benchFlags, newSession func() *model.Session, vocab int, prefillSizes []int, report, phaseReport map[string]any) {
@@ -651,15 +694,7 @@ func runPrefill(f *benchFlags, newSession func() *model.Session, vocab int, pref
 	var prefillPhases []*model.PhaseProfile
 	for _, p := range prefillSizes {
 		ids := lcgIDs(p, vocab)
-		ds := make([]time.Duration, *f.prefillReps)
-		for r := 0; r < *f.prefillReps; r++ {
-			s := newSession()
-			t := time.Now()
-			s.Prefill(ids)
-			ds[r] = time.Since(t)
-			s.Close()
-		}
-		med := medianMS(ds)
+		med := timePrefillReps(newSession, ids, *f.prefillReps)
 		prefills = append(prefills, prefillResult{
 			Tokens: p, Reps: *f.prefillReps, MedianMS: med,
 			TokPerSec: float64(p) / (med / 1e3),
@@ -688,22 +723,9 @@ func runPrefill(f *benchFlags, newSession func() *model.Session, vocab int, pref
 // per-token median and any phase profile into the report maps.
 func runDecode(f *benchFlags, newSession func() *model.Session, vocab int, report, phaseReport map[string]any) {
 	prompt := lcgIDs(*f.decodePrompt, vocab)
-	perTok := make([]time.Duration, 0, *f.decodeReps)
-	for r := 0; r < *f.decodeReps; r++ {
-		s := newSession()
-		s.Prefill(prompt)
-		id := int(uint64(r*131+7) % uint64(vocab))
-		t := time.Now()
-		for i := 0; i < *f.decodeSteps; i++ {
-			logits := s.Step(id)
-			// pick next deterministically (argmax-free, value-irrelevant to cost)
-			id = (id*48271 + 1) % vocab
-			_ = logits
-		}
-		perTok = append(perTok, time.Since(t)/time.Duration(*f.decodeSteps))
-		s.Close()
-	}
-	med := medianMS(perTok)
+	med := medDecodeReps(newSession, prompt, *f.decodeReps, *f.decodeSteps, vocab, func(r int) int {
+		return int(uint64(r*131+7) % uint64(vocab))
+	})
 	report["decode"] = decodeResult{
 		PromptTokens: *f.decodePrompt, DecodeSteps: *f.decodeSteps, Reps: *f.decodeReps,
 		PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
@@ -715,13 +737,7 @@ func runDecode(f *benchFlags, newSession func() *model.Session, vocab int, repor
 		pp := model.NewPhaseProfiler()
 		s.PhaseProfiler = pp
 		id := 7
-		t := time.Now()
-		for i := 0; i < *f.decodeSteps; i++ {
-			logits := s.Step(id)
-			id = (id*48271 + 1) % vocab
-			_ = logits
-		}
-		total := time.Since(t)
+		total := stepDecode(s, id, *f.decodeSteps, vocab)
 		snap := pp.Snapshot("decode", *f.decodePrompt, *f.decodeSteps, total.Nanoseconds())
 		phaseReport["decode"] = snap
 		fmt.Fprint(os.Stderr, phaseTable(snap))
@@ -736,15 +752,7 @@ func runWorkload(f *benchFlags, newSession func() *model.Session, vocab int, wor
 	for i, c := range workload.Cases {
 		n := capPositive(c.PromptTokens, *f.workloadPrefillCap)
 		ids := lcgIDsSeed(n, vocab, 0xC0FFEE+uint64(i)*977)
-		ds := make([]time.Duration, *f.prefillReps)
-		for r := 0; r < *f.prefillReps; r++ {
-			s := newSession()
-			t := time.Now()
-			s.Prefill(ids)
-			ds[r] = time.Since(t)
-			s.Close()
-		}
-		med := medianMS(ds)
+		med := timePrefillReps(newSession, ids, *f.prefillReps)
 		wp = append(wp, prefillResult{
 			Name: c.Name, Source: c.Source, Tokens: n, RecordedTokens: c.PromptTokens,
 			Reps: *f.prefillReps, MedianMS: med, TokPerSec: float64(n) / (med / 1e3),
@@ -758,21 +766,9 @@ func runWorkload(f *benchFlags, newSession func() *model.Session, vocab int, wor
 		promptN := capPositive(c.PromptTokens, *f.workloadPrefillCap)
 		steps := capPositive(c.CompletionTokens, *f.decodeSteps)
 		prompt := lcgIDsSeed(promptN, vocab, 0xA11CE+uint64(i)*131)
-		perTok := make([]time.Duration, 0, *f.decodeReps)
-		for r := 0; r < *f.decodeReps; r++ {
-			s := newSession()
-			s.Prefill(prompt)
-			id := int((uint64(r+1)*2654435761 + uint64(i)) % uint64(vocab))
-			t := time.Now()
-			for j := 0; j < steps; j++ {
-				logits := s.Step(id)
-				id = (id*48271 + 1) % vocab
-				_ = logits
-			}
-			perTok = append(perTok, time.Since(t)/time.Duration(steps))
-			s.Close()
-		}
-		med := medianMS(perTok)
+		med := medDecodeReps(newSession, prompt, *f.decodeReps, steps, vocab, func(r int) int {
+			return int((uint64(r+1)*2654435761 + uint64(i)) % uint64(vocab))
+		})
 		wd = append(wd, workloadDecodeResult{
 			Name: c.Name, Source: c.Source,
 			PromptTokens: promptN, RecordedPromptTokens: c.PromptTokens,
