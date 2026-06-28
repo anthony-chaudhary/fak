@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 // ErrBusy is returned by Acquire when NoWait is set and the lease is already held.
@@ -30,8 +32,6 @@ var ErrBusy = errors.New("gpulease: lease is held by another process")
 
 // ErrTimeout is returned by Acquire when Timeout elapses before the lease is free.
 var ErrTimeout = errors.New("gpulease: timed out waiting for the lease")
-
-var errLockBusy = errors.New("gpulease: lock busy")
 
 // Lease is a held machine-wide GPU lease. Release frees it; the OS also drops the
 // underlying flock if the process exits without calling Release.
@@ -92,7 +92,7 @@ func Acquire(opts Options) (*Lease, error) {
 	}
 	waited := false
 	for {
-		err := tryLock(f, path)
+		err := flock.TryLock(f)
 		if err == nil {
 			// Record our pid so a future waiter can name the holder (best-effort).
 			// Write-THEN-truncate (not truncate-then-write): a concurrent waiter's
@@ -103,7 +103,7 @@ func Acquire(opts Options) (*Lease, error) {
 			}
 			return &Lease{f: f, path: path}, nil
 		}
-		if !errors.Is(err, errLockBusy) {
+		if !errors.Is(err, flock.ErrLockBusy) {
 			f.Close()
 			return nil, fmt.Errorf("gpulease: lock %s: %w", path, err)
 		}
@@ -137,7 +137,7 @@ func (l *Lease) Release() {
 	if l == nil || l.f == nil {
 		return
 	}
-	_ = unlock(l.f, l.path)
+	_ = flock.Unlock(l.f)
 	_ = l.f.Close()
 	l.f = nil
 }
