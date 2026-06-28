@@ -113,10 +113,26 @@ GPU expert path), not adding concurrency. This is the concrete data behind the
 "1/8 GPUs used is first-class" utilization thesis: the waste is host expert-offload,
 not GPU count.
 
-**da33 CPU baseline — not collected (honest).** Two launches were squeezed out: the
-box was driven to `avail≈14 GiB` by a **peer's 446 GiB fak-native resident serve**
-(`fak-bin`, the very all-resident path this plan flags as unsafe on a shared box).
-Recorded `skipped` (blocked-by-peer-RAM), not retried; the mmap path's own
-memory-safety held throughout (no neighbor was OOM-killed by this work). The hourly
-overnight tick re-attempts da33 **only when `avail ≥ 480 GiB` and no peer resident
-serve is up**.
+**da33 CPU baseline — COLLECTED (the headline comparison).** The first two launches
+were squeezed out by a **peer's 446 GiB fak-native resident serve** (driving da33 to
+`avail≈14 GiB`); a later tick caught the box freed (peer serve gone, `avail≈461 GiB`)
+and the mmap llama-bench completed safely (rc=0, 969 s, `free_after=252 GiB`, no wedge):
+
+| llama.cpp CPU (96-thread, mmap, NVMe) | GLM-5.2 UD-Q4_K_M (433.82 GiB / 753.86 B) |
+|---|---|
+| prefill (pp64) | **3.34 tok/s** |
+| decode (tg16) | **0.89 tok/s** |
+
+**The headline:** llama.cpp CPU decode (**0.89 tok/s**, OBSERVED) is **~3.8× faster**
+than fak's GPU + `--cpu-offload-experts` steady-state (**0.2324 tok/s**, WITNESSED) on
+the *same* model. fak's cpu-offload path is currently *slower than pure-CPU llama.cpp*
+— which sharply quantifies the #971 optimization opportunity and reinforces the
+finding above: the experts must move off the host (resident / GPU expert path), not
+stay CPU-offloaded. The baseline is labelled OBSERVED (third-party engine), never
+reported as fak's own throughput.
+
+The hourly overnight tick keeps the loop alive: it re-attempts da33 only when
+`avail ≥ 440 GiB` with no peer resident serve, collects one read-only dgx3 decode
+when the serve is idle (a 900 s timeout, never overlapping witnesses — the serve
+degrades under contention), and records `skipped`/`failed` whenever a box can't
+safely produce a datum.
