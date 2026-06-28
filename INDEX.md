@@ -71,6 +71,8 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 ## Operating the agent fleet
 
 - [`fleet` operator console](tools/FLEET.md) — one command to watch the agent fleet on a host: live session/account health, what stopped and why, which accounts are resumable, and what needs you. The session-health companion to `dos top`; install it onto PATH with `fleet install`.
+- [Run it all night (`fak nightrun`)](docs/nightrun/README.md) — the data-collection center of excellence: the one door an operator/agent uses to answer "what is the single most important datum I can collect on THIS box, right now?" then collect the feasible queue on a loop into a durable ledger.
+- [DGX overnight run plan (2026-06-28)](docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md) — the fleet-scale companion: per-box overnight data-collection plan for the DGX/da33 boxes reached over the Slack control bridge (where the frontier GLM-5.2 witnesses live), with the live fleet state, the exact runbook per box, and the honesty boundary.
 
 ## Benchmarks & methodology
 
