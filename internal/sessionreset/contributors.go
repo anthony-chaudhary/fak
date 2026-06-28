@@ -3,6 +3,7 @@ package sessionreset
 import (
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
@@ -111,10 +112,43 @@ func (taskDistill) Contribute(in Input) (Part, bool) {
 //
 // Emits a DESCRIPTOR for replaying the stable prefix (system preamble + durable
 // preamble) from the vCache prefix-DAG, so the fresh window does not re-pay to
-// prefill the part that never changed. HONEST SCOPE: vCache is a decision layer
-// (vcachechain is "NOT registered; gated OFF by default"), so v1 emits the recall
-// PLAN, not a live KV splice — live same-model KV reuse is the named follow-on. The
+// prefill the part that never changed. The live_kv_reuse stamp is HONEST about which
+// path is wired: "deferred" when only the decision layer exists, and "live" once a
+// concrete same-model KV mover is wired (session.WarmKVStore: KVCache.Clone +
+// cachemeta.MoveTo(KVRestore), issue #916) and registered via MarkLiveKVReuse. The
 // part is Order 0 so the prefix sits at the very top of the seed.
+
+// LiveKVReuse stamp values for the warm_prefix Meta["live_kv_reuse"] field. Deferred is the
+// honest default (a decision layer, no live splice); Live is set once a concrete warm-KV
+// splice path (session.WarmKVStore) is wired into the resume loop, so the seed audit reflects
+// that a resumed same-model session reattaches warm KV instead of cold re-prefilling.
+const (
+	LiveKVReuseDeferred = "deferred"
+	LiveKVReuseLive     = "live"
+)
+
+// liveKVReuse holds the current warm-KV-reuse stamp value (0 = deferred, 1 = live). It is
+// flipped by MarkLiveKVReuse when the host wires a live splicer, so the descriptor the reset
+// emits tracks the live wiring instead of being hardcoded. atomic so a gateway can wire the
+// live path concurrently with a reset building a seed.
+var liveKVReuse atomic.Bool
+
+// MarkLiveKVReuse flips the warm_prefix live_kv_reuse stamp to "live" (live==true) or back to
+// "deferred" (live==false). The host calls MarkLiveKVReuse(true) when it wires a concrete
+// same-model warm-KV splicer (session.WarmKVStore.Splicer) into the resume loop, so a seed
+// audit honestly reports that a resumed session reattaches warm KV rather than re-prefilling.
+// Idempotent and safe to call concurrently.
+func MarkLiveKVReuse(live bool) { liveKVReuse.Store(live) }
+
+// LiveKVReuseStamp returns the current warm-KV-reuse stamp — LiveKVReuseLive once a live
+// splicer is wired (MarkLiveKVReuse(true)), else LiveKVReuseDeferred. It is the single source
+// of the warm_prefix Meta stamp so the descriptor and the live wiring cannot drift apart.
+func LiveKVReuseStamp() string {
+	if liveKVReuse.Load() {
+		return LiveKVReuseLive
+	}
+	return LiveKVReuseDeferred
+}
 
 type warmPrefix struct{}
 
@@ -130,13 +164,18 @@ func (warmPrefix) Contribute(in Input) (Part, bool) {
 	// re-prefilling it is worth avoiding. ReplayCost is a pure, deterministic price.
 	prefixTokens := int64(approxTokens(sys))
 	cost := vcachechain.ReplayCost(prefixTokens, 1.0)
+	stamp := LiveKVReuseStamp()
 	meta := map[string]string{
 		"prefix_tokens": strconv.FormatInt(prefixTokens, 10),
 		"replay_cost":   strconv.FormatFloat(cost, 'f', 2, 64),
-		"live_kv_reuse": "deferred", // honest: decision layer only, no live splice in v1
+		"live_kv_reuse": stamp, // "deferred" until a live splicer is wired (MarkLiveKVReuse)
+	}
+	tail := "live KV reuse is a follow-on"
+	if stamp == LiveKVReuseLive {
+		tail = "live same-model KV reuse is wired (warm splice on resume)"
 	}
 	text := "Stable prefix retained for warm-cache replay (" +
-		strconv.FormatInt(prefixTokens, 10) + " approx tokens; live KV reuse is a follow-on)."
+		strconv.FormatInt(prefixTokens, 10) + " approx tokens; " + tail + ")."
 	return Part{Name: "warm_prefix", Order: 0, Text: text, Meta: meta}, true
 }
 

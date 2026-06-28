@@ -73,6 +73,44 @@ func TestWarmPrefixDescribesStablePrefix(t *testing.T) {
 	}
 }
 
+// TestWarmPrefixStampFlipsToLive proves the #916 stamp flip: with no live splicer wired the
+// warm_prefix part honestly marks live_kv_reuse "deferred"; once a concrete same-model warm-KV
+// mover is wired (MarkLiveKVReuse(true), the session.WarmKVStore path), the SAME contributor
+// flips the stamp to "live" — the descriptor tracks the live wiring instead of being hardcoded.
+func TestWarmPrefixStampFlipsToLive(t *testing.T) {
+	// Default (unwired) is deferred.
+	if got := LiveKVReuseStamp(); got != LiveKVReuseDeferred {
+		t.Fatalf("default stamp = %q, want %q", got, LiveKVReuseDeferred)
+	}
+	p, ok := warmPrefix{}.Contribute(Input{Messages: sampleTranscript()})
+	if !ok || p.Meta["live_kv_reuse"] != LiveKVReuseDeferred {
+		t.Fatalf("unwired warm prefix stamp = %q, want %q", p.Meta["live_kv_reuse"], LiveKVReuseDeferred)
+	}
+
+	// Wire a live splicer -> the stamp flips to live, and the rendered text reflects it.
+	MarkLiveKVReuse(true)
+	defer MarkLiveKVReuse(false) // restore the global so other tests see the default
+	if got := LiveKVReuseStamp(); got != LiveKVReuseLive {
+		t.Fatalf("wired stamp = %q, want %q", got, LiveKVReuseLive)
+	}
+	live, ok := warmPrefix{}.Contribute(Input{Messages: sampleTranscript()})
+	if !ok {
+		t.Fatal("warmPrefix declined after MarkLiveKVReuse")
+	}
+	if live.Meta["live_kv_reuse"] != LiveKVReuseLive {
+		t.Fatalf("wired warm prefix stamp = %q, want %q (the live splice flips deferred->live)", live.Meta["live_kv_reuse"], LiveKVReuseLive)
+	}
+	if !strings.Contains(live.Text, "wired") {
+		t.Fatalf("wired warm prefix text should announce the live splice, got %q", live.Text)
+	}
+
+	// Flipping back restores the honest deferred default.
+	MarkLiveKVReuse(false)
+	if got := LiveKVReuseStamp(); got != LiveKVReuseDeferred {
+		t.Fatalf("after reset stamp = %q, want %q", got, LiveKVReuseDeferred)
+	}
+}
+
 // TestVerbatimTailKeepsLastTurnsOldestFirst proves the tail is the last N messages in
 // chronological order.
 func TestVerbatimTailKeepsLastTurnsOldestFirst(t *testing.T) {
