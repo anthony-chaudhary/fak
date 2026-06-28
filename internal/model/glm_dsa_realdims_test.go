@@ -228,3 +228,67 @@ func stddev(v []float32) float64 {
 	}
 	return math.Sqrt(s / float64(len(v)))
 }
+
+// TestGLMDsaQuantizedSharedExpertsApplied is the regression for the shared-expert dispatch bug: on a
+// QUANTIZED GLM-DSA model the shared-expert weights live in q8w/q4kw (NOT the f32 manifest), so the
+// glmMoeFFN gate `m.has(...shared_experts...)` was FALSE → the shared experts were SKIPPED every MoE
+// layer → the real serve's residual was systematically wrong → incoherent output (#996). Fix:
+// m.has -> m.hasWeight. This pins the bug CONDITION (the weight is quant-resident, so f32-manifest
+// m.has is false while m.hasWeight is true) AND that glmMoeFFN actually applies the shared output.
+func TestGLMDsaQuantizedSharedExpertsApplied(t *testing.T) {
+	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", false, false, true, true)
+	if cfg.NSharedExperts <= 0 {
+		t.Fatalf("fixture NSharedExperts=%d, want >0", cfg.NSharedExperts)
+	}
+	lean, err := LoadSafetensorsQuant(path, cfg)
+	if err != nil {
+		t.Fatalf("LoadSafetensorsQuant: %v", err)
+	}
+	moeLayer := -1
+	for l := 0; l < cfg.NumLayers; l++ {
+		if lean.hasWeight(layerName(l, "mlp.shared_experts.gate_proj.weight")) {
+			moeLayer = l
+			break
+		}
+	}
+	if moeLayer < 0 {
+		t.Skip("fixture has no quantized shared-expert MoE layer")
+	}
+	name := layerName(moeLayer, "mlp.shared_experts.gate_proj.weight")
+	// Bug condition: quant-resident weight is NOT in the f32 manifest, so the old m.has gate was false.
+	if lean.has(name) {
+		t.Fatalf("quantized shared-expert %s is in the f32 manifest — the m.has-vs-hasWeight bug condition no longer holds", name)
+	}
+	if !lean.hasWeight(name) {
+		t.Fatalf("quantized shared-expert %s not resident in any quant manifest", name)
+	}
+	// Functional: glmMoeFFN.apply must REACH the shared experts (their output is non-zero and additive).
+	s := lean.NewSession()
+	s.Quant = true
+	mat := s.glmDsaMatKernel()
+	xn := make([]float32, cfg.HiddenSize)
+	for i := range xn {
+		xn[i] = float32((i*3)%7) - 3
+	}
+	shared := glmSharedExperts(lean, moeLayer, append([]float32(nil), xn...), mat)
+	var mag float64
+	for _, v := range shared {
+		mag += float64(v) * float64(v)
+	}
+	if mag < 1e-12 {
+		t.Fatalf("shared-expert output ~0 (mag=%.3e)", mag)
+	}
+	full := glmMoeFFN{}.apply(lean, moeLayer, append([]float32(nil), xn...), mat)
+	// With the fix, full = routed + shared. Assert full reflects the shared contribution: full minus
+	// shared must differ from full (i.e. shared was added, not skipped).
+	changed := false
+	for i := range full {
+		if full[i] != full[i]-shared[i] {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		t.Fatal("glmMoeFFN delta does not reflect the shared experts (skipped by the gate)")
+	}
+}

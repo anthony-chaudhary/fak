@@ -423,7 +423,7 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 			delta[i] += pk.weight * out[i]
 		}
 	}
-	if cfg.NSharedExperts > 0 && m.has(layerName(layer, "mlp.shared_experts.gate_proj.weight")) {
+	if cfg.NSharedExperts > 0 && m.hasWeight(layerName(layer, "mlp.shared_experts.gate_proj.weight")) {
 		shared := glmSharedExperts(m, layer, xn, mat)
 		for i := 0; i < H; i++ {
 			delta[i] += shared[i]
