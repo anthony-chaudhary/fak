@@ -598,13 +598,19 @@ func gitArgv(seg []string) []string {
 // stripped, is exactly "git". So `git`, `/usr/bin/git`, `C:\Program Files\Git\git.exe`,
 // and `GIT` all match; `mygit`, `git-secret`, `legitimate` do not.
 func isGitProgram(tok string) bool {
+	return programBasename(tok) == "git"
+}
+
+// programBasename normalizes a command-position token to its lowercased basename
+// with a trailing .exe stripped (after the last / or \). Shared by isGitProgram
+// and isShellProgram.
+func programBasename(tok string) string {
 	b := tok
 	if k := strings.LastIndexAny(b, `/\`); k >= 0 {
 		b = b[k+1:]
 	}
 	b = strings.ToLower(b)
-	b = strings.TrimSuffix(b, ".exe")
-	return b == "git"
+	return strings.TrimSuffix(b, ".exe")
 }
 
 // isAssign reports whether a token is a leading shell env assignment (NAME=...,
@@ -912,13 +918,7 @@ func dashCStrings(s string) []string {
 // program whose `-c` operand is a nested program to unwrap. Mirrors isGitProgram's basename
 // normalization (path + .exe stripped, lowercased).
 func isShellProgram(tok string) bool {
-	b := tok
-	if k := strings.LastIndexAny(b, `/\`); k >= 0 {
-		b = b[k+1:]
-	}
-	b = strings.ToLower(b)
-	b = strings.TrimSuffix(b, ".exe")
-	switch b {
+	switch programBasename(tok) {
 	case "sh", "bash", "dash", "zsh", "ksh":
 		return true
 	}

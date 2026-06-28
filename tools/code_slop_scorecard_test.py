@@ -864,6 +864,18 @@ def test_fix7_unmarked_dead_symbol_still_caught():
     assert len(cs.kpi_dead_code(files, {})["defects"]) >= 1
 
 
+def test_claude_worktree_go_files_excluded_from_gather():
+    # A peer's `.claude/worktrees/<wt>/` is a full repo CHECKOUT; walking it counts every
+    # copied .go as a phantom clone of the real tree (a peer worktree once inflated
+    # slop-debt 473 -> 2613, which would make the snapshot + #779 gate flap on a transient
+    # checkout). The gather drops the whole `.claude` subtree, like `.git`/`vendor`.
+    assert cs._excluded_go(".claude/worktrees/upstream-err/internal/model/arch.go")
+    assert cs._excluded_go(".claude/worktrees/wt/cmd/fak/main.go")
+    # RECALL GUARD: a first-party kernel file is still gathered.
+    assert not cs._excluded_go("internal/model/arch.go")
+    assert not cs._excluded_go("cmd/fak/main.go")
+
+
 def main() -> int:
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))

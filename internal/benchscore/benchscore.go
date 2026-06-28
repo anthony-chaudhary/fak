@@ -429,7 +429,9 @@ func (c *collector) warn(field, message string) {
 	c.warnings = append(c.warnings, Issue{Path: c.meta.path, Field: field, Message: message})
 }
 
-func prefillTokPerSec(root map[string]any, tokens int) (float64, bool) {
+// prefillField returns field `field` of the prefill row whose "tokens" equals
+// `tokens`. Shared body of prefillTokPerSec / prefillMedianMS.
+func prefillField(root map[string]any, tokens int, field string) (float64, bool) {
 	for _, raw := range arrayAt(root, "prefill") {
 		row, ok := raw.(map[string]any)
 		if !ok {
@@ -439,24 +441,17 @@ func prefillTokPerSec(root map[string]any, tokens int) (float64, bool) {
 		if !ok || int(tok) != tokens {
 			continue
 		}
-		return floatAt(row, "tok_per_sec")
+		return floatAt(row, field)
 	}
 	return 0, false
 }
 
+func prefillTokPerSec(root map[string]any, tokens int) (float64, bool) {
+	return prefillField(root, tokens, "tok_per_sec")
+}
+
 func prefillMedianMS(root map[string]any, tokens int) (float64, bool) {
-	for _, raw := range arrayAt(root, "prefill") {
-		row, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		tok, ok := floatAt(row, "tokens")
-		if !ok || int(tok) != tokens {
-			continue
-		}
-		return floatAt(row, "median_ms")
-	}
-	return 0, false
+	return prefillField(root, tokens, "median_ms")
 }
 
 func objectAt(root map[string]any, path ...string) map[string]any {

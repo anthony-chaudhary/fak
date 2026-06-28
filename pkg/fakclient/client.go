@@ -252,8 +252,14 @@ func parseAPIError(status int, body []byte) *APIError {
 // the production path for a client that runs its own tools. On a TRANSFORM
 // verdict, resp.RepairedArguments carries the canonical args to run instead.
 func (c *Client) Adjudicate(ctx context.Context, req SyscallRequest) (*SyscallResponse, error) {
+	return c.postSyscall(ctx, "/v1/fak/adjudicate", req)
+}
+
+// postSyscall POSTs req to a syscall-family endpoint and decodes a SyscallResponse.
+// Shared body of Adjudicate / Syscall / Admit.
+func (c *Client) postSyscall(ctx context.Context, path string, req any) (*SyscallResponse, error) {
 	var resp SyscallResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/fak/adjudicate", req, &resp); err != nil {
+	if err := c.do(ctx, http.MethodPost, path, req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -263,21 +269,13 @@ func (c *Client) Adjudicate(ctx context.Context, req SyscallRequest) (*SyscallRe
 // (POST /v1/fak/syscall) — the self-contained / CI path. On ALLOW, resp.Result
 // carries the executed result envelope.
 func (c *Client) Syscall(ctx context.Context, req SyscallRequest) (*SyscallResponse, error) {
-	var resp SyscallResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/fak/syscall", req, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
+	return c.postSyscall(ctx, "/v1/fak/syscall", req)
 }
 
 // Admit runs a CLIENT-produced tool result through the kernel's result-side stack
 // (POST /v1/fak/admit). A QUARANTINE verdict means the bytes were paged out.
 func (c *Client) Admit(ctx context.Context, req AdmitRequest) (*SyscallResponse, error) {
-	var resp SyscallResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/fak/admit", req, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
+	return c.postSyscall(ctx, "/v1/fak/admit", req)
 }
 
 // Changes drains the cross-agent change feed for events after the since cursor
