@@ -59,6 +59,44 @@ proven path. Caveat: these are THIS box's numbers; DGX3's host-CPU tier (AVX2 vs
 VNNI) and the real active-params/token set the actual figure — the matrix-row-C measurement
 still decides it.
 
+## UPDATE-2 (same day, later) — lever 3 fully landed: AVX512-VNNI reducers shipped
+
+The VNNI headroom UPDATE-1 named is now **shipped** for both dominant GLM-5.2 expert quants,
+each bit-identical to the scalar reference (every reduction carries an asm-matches-scalar test):
+
+- **Q4_K** (gate/up): `VPDPBUSD` (unsigned nibble × signed qx → int32 in one op) added as the top
+  tier in `quant_amd64_q4k.s`, dispatched by `q4kVNNI` (CPUID `(7,0):ECX` bit 11). Witnessed
+  `c9ae28e9`.
+- **Q5_K** (down): the same `VPDPBUSD` inner dot keyed on `q5kUseVNNI`, sharing the AVX2 path's
+  qh-bit unpack and outer loop (no duplication). Witnessed `fa585c70`.
+
+**Witnessed tiers** on a GLM-5.2-shaped expert (out=2048, in=6144), single worker, Zen 5
+(AVX512-VNNI), via `BenchmarkQ4KInt8GEMV` / `BenchmarkQ5KInt8GEMV` with `FAK_QKERNEL` pinning:
+
+| Quant | scalar int8 | AVX2 | VNNI | VNNI vs scalar |
+|---|---|---|---|---|
+| Q4_K | ~10.4 ms/op | ~1.17 ms/op | **~0.875 ms/op** | **~11.9×** |
+| Q5_K | ~10.6 ms/op | ~2.94 ms/op | **~2.42 ms/op** | **~4.4×** |
+
+So lever 3 is **done** on amd64: AVX2 is the floor (every da33-class CPU has it), VNNI auto-lights
+on Cascade Lake / Ice Lake / Zen 4+ via CPUID. The Q4_K win (11.9×) is far above the original
+~2–4× estimate — Go's scalar int8 path emits per-byte sign-extend + scalar `imul`, so SIMD buys
+much more than the f32 comparison implied. The aggregate forward gain is bounded by Q5_K's smaller
+win (its cost is the qh unpack, not the dot) and by the non-expert work, but the expert GEMVs —
+the #971 wall — are no longer scalar.
+
+**Remaining to the goal (kept honest — `not yet`):**
+
+- The top *unshipped* lever is now **lever 2 (batch the expert dispatch, ~1.8×)** and the
+  pure-CPU **serve config (lever 1)** — both are the path from the per-kernel wins to sustained
+  decode tok/s.
+- The **end-to-end da33 decode tok/s is NOT yet measured** — the witness is host-gated and the
+  Slack bridge to da33 was unresponsive this session (120 s ping timeout; dgx3 round-trips also
+  empty). Matrix row C (pure-CPU + `FAK_KQ_INT8=1`, read sustained decode after prefill, A/B
+  `FAK_QKERNEL=scalar` vs default) still decides the real figure. With UPDATE-1's ~8.5 tok/s
+  AVX512 ceiling estimate and VNNI now on top, the pure-CPU + batched path is plausibly **at or
+  past 10**, but that is an estimate until matrix row C runs on a free da33-class host.
+
 ## What is MEASURED vs INFERRED (kept honest)
 
 **Measured:**
