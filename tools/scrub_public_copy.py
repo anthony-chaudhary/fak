@@ -37,7 +37,7 @@ import scrub_hardware_names
 DELETE_PATHS = [
     ".claude/memory",
     "AGENTS.md",  # operator-machine workflow guidance; private side only
-    "CLAUDE.md",  # Claude Code mirror of AGENTS.md; private side only (symmetric)
+    "CLAUDE.md",  # Claude Code thin pointer to AGENTS.md; private side only
     # The scrub POLICY is private-side only. PUBLIC-SCRUB-POLICY.md is the
     # human-readable companion to this file: it names every private concept, lab
     # machine, and redaction reason in one place, so publishing it hands a reader

@@ -49,8 +49,8 @@ MD_TOKEN_RE = re.compile(r"\A[\w./-]+\.md\Z")
 # CONTRIBUTING.md -> CLAUDE.md). The target EXISTS in canonical, so a plain
 # "does the target exist?" check passes it — but the reference is dead in the
 # public export. See scrub_public_copy.py DELETE_PATHS.
-#   - CLAUDE.md: "Claude Code mirror of AGENTS.md; private side only (symmetric)"
-#     — a pure mirror, so it is never the correct reference target.
+#   - CLAUDE.md: "Claude Code thin pointer to AGENTS.md; private side only"
+#     — private side only, so it is never the correct public reference target.
 #   - PUBLIC-SCRUB-POLICY.md: the narrative map of what is hidden and why — pure
 #     private (absent from this tree today; a forward guard if ever written).
 # AGENTS.md is deliberately NOT here: it is the agent-orientation SOURCE (not a

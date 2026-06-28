@@ -117,7 +117,7 @@ def test_scrub_private_fak_prefix_detected() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _doc(root, "CLAUDE.md", "x")
-        _doc(root, "CONTRIBUTING.md", "the mirror is `fak/CLAUDE.md`.")
+        _doc(root, "CONTRIBUTING.md", "the pointer is `fak/CLAUDE.md`.")
         bad = cl._scrub_private_refs(str(root), "CONTRIBUTING.md")
         assert bad and bad[0][1] == "fak/CLAUDE.md", bad
 
