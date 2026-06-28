@@ -188,77 +188,54 @@ func checkGLM(doc map[string]any, child ChildStatus) ChildStatus {
 	return child
 }
 
-func checkOpus(doc map[string]any, child ChildStatus) ChildStatus {
+// checkResultContract folds the five external-harness result-contract children
+// (Opus, DeepSWE, ToolSandbox, Terminal-Bench, Browser/computer-use), which share
+// an identical gate body and differ only in the evidence class and the two detail
+// strings. evidenceClass is applied verbatim — passing "" leaves the field empty,
+// matching the children that never set it.
+func checkResultContract(doc map[string]any, child ChildStatus, evidenceClass, passDetail, pendingSuffix string) ChildStatus {
 	child.Status = str(doc, "status")
 	child.ResultClaimAllowed = boolv(doc, "result_claim_allowed")
+	child.EvidenceClass = evidenceClass
 	if child.ResultClaimAllowed {
 		child.Gate = "PASS_RESULT"
-		child.Detail = "Opus SWE-bench result claim enabled"
+		child.Detail = passDetail
 		return child
 	}
 	child.Gate = "PENDING_EXTERNAL_HARNESS"
-	child.Detail = child.Status + "; raw/fak predictions and official SWE-bench reports still required"
+	child.Detail = child.Status + pendingSuffix
 	child.Missing = stringSlice(doc, "required_before_claim")
 	return child
+}
+
+func checkOpus(doc map[string]any, child ChildStatus) ChildStatus {
+	return checkResultContract(doc, child, "",
+		"Opus SWE-bench result claim enabled",
+		"; raw/fak predictions and official SWE-bench reports still required")
 }
 
 func checkDeepSWE(doc map[string]any, child ChildStatus) ChildStatus {
-	child.Status = str(doc, "status")
-	child.ResultClaimAllowed = boolv(doc, "result_claim_allowed")
-	if child.ResultClaimAllowed {
-		child.Gate = "PASS_RESULT"
-		child.Detail = "DeepSWE result claim enabled"
-		return child
-	}
-	child.Gate = "PENDING_EXTERNAL_HARNESS"
-	child.Detail = child.Status + "; raw/fak DeepSWE predictions and official SWE-bench reports still required"
-	child.Missing = stringSlice(doc, "required_before_claim")
-	return child
+	return checkResultContract(doc, child, "",
+		"DeepSWE result claim enabled",
+		"; raw/fak DeepSWE predictions and official SWE-bench reports still required")
 }
 
 func checkToolSandbox(doc map[string]any, child ChildStatus) ChildStatus {
-	child.Status = str(doc, "status")
-	child.ResultClaimAllowed = boolv(doc, "result_claim_allowed")
-	child.EvidenceClass = "EXTERNAL_RUN_CONTRACT"
-	if child.ResultClaimAllowed {
-		child.Gate = "PASS_RESULT"
-		child.Detail = "ToolSandbox/tau3 result claim enabled"
-		return child
-	}
-	child.Gate = "PENDING_EXTERNAL_HARNESS"
-	child.Detail = child.Status + "; benchmark-native tau3/ToolSandbox raw/fak outputs and grader summaries still required"
-	child.Missing = stringSlice(doc, "required_before_claim")
-	return child
+	return checkResultContract(doc, child, "EXTERNAL_RUN_CONTRACT",
+		"ToolSandbox/tau3 result claim enabled",
+		"; benchmark-native tau3/ToolSandbox raw/fak outputs and grader summaries still required")
 }
 
 func checkTerminalBench(doc map[string]any, child ChildStatus) ChildStatus {
-	child.Status = str(doc, "status")
-	child.ResultClaimAllowed = boolv(doc, "result_claim_allowed")
-	child.EvidenceClass = "EXTERNAL_RUN_CONTRACT"
-	if child.ResultClaimAllowed {
-		child.Gate = "PASS_RESULT"
-		child.Detail = "Terminal-Bench result claim enabled"
-		return child
-	}
-	child.Gate = "PENDING_EXTERNAL_HARNESS"
-	child.Detail = child.Status + "; benchmark-native Terminal-Bench raw/fak run dirs, command logs, and official test summaries still required"
-	child.Missing = stringSlice(doc, "required_before_claim")
-	return child
+	return checkResultContract(doc, child, "EXTERNAL_RUN_CONTRACT",
+		"Terminal-Bench result claim enabled",
+		"; benchmark-native Terminal-Bench raw/fak run dirs, command logs, and official test summaries still required")
 }
 
 func checkBrowserAction(doc map[string]any, child ChildStatus) ChildStatus {
-	child.Status = str(doc, "status")
-	child.ResultClaimAllowed = boolv(doc, "result_claim_allowed")
-	child.EvidenceClass = "EXTERNAL_RUN_CONTRACT"
-	if child.ResultClaimAllowed {
-		child.Gate = "PASS_RESULT"
-		child.Detail = "Browser/computer-use result claim enabled"
-		return child
-	}
-	child.Gate = "PENDING_EXTERNAL_HARNESS"
-	child.Detail = child.Status + "; benchmark-native browser/computer-use raw/fak traces, score reports, and linked fak action evidence still required"
-	child.Missing = stringSlice(doc, "required_before_claim")
-	return child
+	return checkResultContract(doc, child, "EXTERNAL_RUN_CONTRACT",
+		"Browser/computer-use result claim enabled",
+		"; benchmark-native browser/computer-use raw/fak traces, score reports, and linked fak action evidence still required")
 }
 
 func checkAuthority(doc map[string]any, child ChildStatus) ChildStatus {
@@ -367,29 +344,27 @@ func num(m map[string]any, key string) float64 {
 	}
 }
 
-func nestedString(m map[string]any, keys ...string) string {
+// nestedAny walks the key path through nested map[string]any values, returning the
+// value reached or nil if any key is absent or its parent is not a nested map.
+func nestedAny(m map[string]any, keys ...string) any {
 	cur := any(m)
 	for _, key := range keys {
 		next, ok := cur.(map[string]any)
 		if !ok {
-			return ""
+			return nil
 		}
 		cur = next[key]
 	}
-	v, _ := cur.(string)
+	return cur
+}
+
+func nestedString(m map[string]any, keys ...string) string {
+	v, _ := nestedAny(m, keys...).(string)
 	return v
 }
 
 func nestedNumber(m map[string]any, keys ...string) float64 {
-	cur := any(m)
-	for _, key := range keys {
-		next, ok := cur.(map[string]any)
-		if !ok {
-			return 0
-		}
-		cur = next[key]
-	}
-	switch v := cur.(type) {
+	switch v := nestedAny(m, keys...).(type) {
 	case json.Number:
 		f, _ := v.Float64()
 		return f

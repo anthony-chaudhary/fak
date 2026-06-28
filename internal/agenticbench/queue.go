@@ -138,7 +138,7 @@ func queueGLM(child ChildStatus, doc map[string]any) ExternalHarnessQueueItem {
 		if id != "preflight" && !strings.HasPrefix(kind, "live-") && kind != "manual-live-serving" {
 			continue
 		}
-		cmd := nestedMapString(m, "command", "shell")
+		cmd := nestedString(m, "command", "shell")
 		if cmd == "" {
 			continue
 		}
@@ -307,29 +307,8 @@ func writeQueueFile(path string, b []byte) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
-func nestedMapString(m map[string]any, keys ...string) string {
-	cur := any(m)
-	for _, key := range keys {
-		next, ok := cur.(map[string]any)
-		if !ok {
-			return ""
-		}
-		cur = next[key]
-	}
-	v, _ := cur.(string)
-	return v
-}
-
 func nestedStringSlice(m map[string]any, keys ...string) []string {
-	cur := any(m)
-	for _, key := range keys {
-		next, ok := cur.(map[string]any)
-		if !ok {
-			return nil
-		}
-		cur = next[key]
-	}
-	return stringsFromAny(cur)
+	return stringsFromAny(nestedAny(m, keys...))
 }
 
 func stringsFromAny(raw any) []string {
