@@ -157,6 +157,8 @@ func main() {
 		cmdSwebench(os.Args[2:])
 	case "webbench":
 		cmdWebbench(os.Args[2:])
+	case "ailuminate":
+		cmdAILuminate(os.Args[2:])
 	case "model":
 		cmdModel(os.Args[2:])
 	case "new-model":

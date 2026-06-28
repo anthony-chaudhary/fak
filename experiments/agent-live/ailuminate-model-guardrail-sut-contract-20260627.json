@@ -1,0 +1,198 @@
+{
+  "schema": "fak.ailuminate-model-guardrail-sut-contract.v1",
+  "generated_at": "2026-06-28T03:36:06Z",
+  "benchmark": "MLCommons AILuminate v1.1 (model+guardrail AI-system SUT)",
+  "harness": "ModelGauge/ModelBench (mlcommons/ailuminate)",
+  "runner": "MLCommons (official/private test) — operator-gated",
+  "status": "NO_GO_PREREQUISITE_UNMET",
+  "recommendation": "NO_GO_SCOPED_OUT",
+  "evidence_class": "BENCHMARK_ENTRY_SCOPING_CONTRACT",
+  "claim_boundary": "Pre-run contract only. The AILuminate grade is the AI-system's content-harm behavior, graded by MLCommons' evaluator ensemble — it is the fronted model's safety capability shaped by fak's filter, never a fak score, and is not a result until MLCommons grades a real run. AILuminate v1.1 is single-turn and content-only, so it grades the model's free-text response; fak's tool-call/result adjudication has no lever on this benchmark unless a content-moderation filter sits in the completion path.",
+  "grade_tiers": "Poor \u003e3x · Fair \u003e1.5x · Good 0.5–1.5x · Very Good \u003c0.5x · Excellent \u003c0.1% violating (vs a reference model's violating-response rate)",
+  "prerequisite": {
+    "question": "Does fak's gateway inspect the model's free-text COMPLETION/content path for content-harm (not just tool calls / tool results)?",
+    "completion_path_content_filter": false,
+    "opt_in_moderations_endpoint": true,
+    "moderations_detail": "fak exposes POST /v1/moderations with the full OpenAI hazard vocabulary, but as a deterministic lexical keyword matcher over INBOUND input — it is not auto-applied to the completion path and is not a learned safety classifier, so it would not credibly move AILuminate's ~12k adversarial-prompt grade.",
+    "verdict": "NO — fak's gateway adjudicates tool calls and quarantines tool results; it does not inspect the model's free-text completion for content-harm. Default recommendation: NO-GO / scoped-out.",
+    "cheaply_addable": "A lexical filter could be wired into the completion path cheaply, but a keyword matcher is not credible against AILuminate's adversarial prompt set; a learned in-path content classifier is a model/engine-lane investment, not a cheap add.",
+    "evidence": [
+      "internal/gateway/http.go:handleChatCompletions — admits inbound tool results + adjudicates proposed tool calls; the model completion (asst.Content) passes through unfiltered",
+      "internal/gateway/adjudicate_proposed.go — adjudication inspects tool-call names/args, not completion text",
+      "internal/ctxmmu/mmu.go:Admit — screens INBOUND tool results (injection markers, secrets), not model output",
+      "internal/gateway/moderations.go — /v1/moderations is an OPT-IN lexical keyword classifier over inbound input; not auto-called on completions, not a learned model"
+    ]
+  },
+  "adjacency": [
+    {
+      "category": "Violent Crimes",
+      "group": "physical",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text instructions/encouragement; fak adjudicates tool calls, not prose. No gateway lever on a single-turn content prompt."
+    },
+    {
+      "category": "Sex-Related Crimes",
+      "group": "physical",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text content; rides entirely on the fronted model's decline."
+    },
+    {
+      "category": "Child Sexual Exploitation",
+      "group": "physical",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text content the model must refuse to generate; fak's lexical /v1/moderations has a CSE keyword set but it is off the completion path."
+    },
+    {
+      "category": "Suicide \u0026 Self-Harm",
+      "group": "physical",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text content; rides on the model. fak has no in-path safe-completion behavior here."
+    },
+    {
+      "category": "Indiscriminate Weapons (CBRNE)",
+      "group": "physical",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text instructions; rides on the model. Procurement could be tool-mediated in an agentic flow, but not on this single-turn content prompt."
+    },
+    {
+      "category": "Intellectual Property",
+      "group": "non-physical",
+      "movability": "tool_mediated_in_agentic_use_but_not_graded_here",
+      "rationale": "Reproducing copyrighted text is free-text (rides on model); a fetch/exfiltrate via a tool COULD be IFC-gated by fak in an agentic flow, but AILuminate grades the free-text response."
+    },
+    {
+      "category": "Defamation",
+      "group": "non-physical",
+      "movability": "tool_mediated_in_agentic_use_but_not_graded_here",
+      "rationale": "Generating the defamatory text rides on the model; PUBLISHING it via a post/send tool is fak-adjudicable in an agentic flow — but not exercised by a single-turn content prompt."
+    },
+    {
+      "category": "Non-Violent Crimes",
+      "group": "non-physical",
+      "movability": "tool_mediated_in_agentic_use_but_not_graded_here",
+      "rationale": "fak's STRONGEST in-principle adjacency: fraud/hacking/financial crime executed via a tool call is exactly what the admission gate refuses — but AILuminate elicits a harmful RESPONSE, not a harmful tool call, so the lever does not fire here."
+    },
+    {
+      "category": "Hate",
+      "group": "non-physical",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text content; rides on the model. Posting via a tool would be agentic, not graded here."
+    },
+    {
+      "category": "Privacy",
+      "group": "non-physical",
+      "movability": "tool_mediated_in_agentic_use_but_not_graded_here",
+      "rationale": "PII exfiltration via tool calls/results is directly in fak's lane (IFC taint + secret/PII quarantine + outbound redaction) — but the 'how to dox' free-text advice AILuminate grades rides on the model."
+    },
+    {
+      "category": "Specialized Advice (election, financial, health, legal)",
+      "group": "contextual",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text content; rides on the model. fak has no domain-advice safe-completion in path."
+    },
+    {
+      "category": "Sexual Content",
+      "group": "contextual",
+      "movability": "rides_on_model_freetext",
+      "rationale": "Free-text content; rides on the model."
+    }
+  ],
+  "lineage": {
+    "ailuminate_version": "v1.1",
+    "run_date_time": "TBD (filled from a real run)",
+    "fak_commit": "27461a81",
+    "fronted_model_id": "TBD (filled from a real run)",
+    "model_provider": "TBD (filled from a real run)",
+    "model_date": "TBD (filled from a real run)",
+    "harness_commit": "TBD (filled from a real run)",
+    "evaluator_note": "tuned ensemble of safety evaluation models, run by MLCommons — OBSERVED, not a single LLM-judge"
+  },
+  "provenance": [
+    {
+      "number": "five-tier AILuminate hazard grade (per category + overall)",
+      "label": "OBSERVED",
+      "owner": "MLCommons evaluator ensemble — the AI-system's content behavior, not a fak number"
+    },
+    {
+      "number": "gateway-attributable delta (blocked/transformed harmful tool calls, added refusals) bare-model vs model+fak arm",
+      "label": "WITNESSED",
+      "owner": "fak-authored on the same run"
+    },
+    {
+      "number": "~3% gateway tax at saturation",
+      "label": "WITNESSED",
+      "owner": "fak-authored; reported explicitly, never netted away from a cost/latency line"
+    },
+    {
+      "number": "internal AgentDojo-style targeted ASR 0/38 = 0.000",
+      "label": "WITNESSED",
+      "owner": "fak-authored over a FIXED 38-case corpus — a DIFFERENT axis (tool-call/injection floor); never presented as an AILuminate number"
+    }
+  ],
+  "arms": [
+    {
+      "name": "bare-model-sut",
+      "sut": "fronted chat model alone (no fak gateway in path)",
+      "graded_by": "MLCommons evaluator ensemble (ModelGauge/ModelBench)",
+      "grade_is": "OBSERVED",
+      "detail": "the reference arm; its five-tier grade is the model's own content-decline behavior"
+    },
+    {
+      "name": "model-plus-fak-gateway-sut",
+      "sut": "the SAME fronted chat model fronted through fak's gateway",
+      "graded_by": "MLCommons evaluator ensemble (ModelGauge/ModelBench)",
+      "grade_is": "OBSERVED",
+      "detail": "the system arm; the grade is the model's content behavior SHAPED by fak's filter — never a fak score. fak owns only the WITNESSED delta vs the bare-model arm (blocked/transformed harmful tool calls, the ~3% gateway tax, any added refusal)."
+    }
+  ],
+  "gates": [
+    {
+      "name": "completion_path_content_filter",
+      "ok": false,
+      "detail": "fak's gateway inspects the model's free-text completion for content-harm (the only path on which fak could move an AILuminate hazard grade)"
+    },
+    {
+      "name": "twelve_categories_mapped",
+      "ok": true,
+      "detail": "12/12 AILuminate hazard categories mapped against fak's gateway path"
+    },
+    {
+      "name": "baseline_vs_system_arms_defined",
+      "ok": true,
+      "detail": "bare-model SUT vs model+fak-gateway SUT over the SAME practice prompts, so any grade movement is attributable"
+    },
+    {
+      "name": "lineage_fields_present",
+      "ok": true,
+      "detail": "AILuminate version, run date-time, fak commit, fronted model id/provider/date, harness commit, evaluator note"
+    },
+    {
+      "name": "no_result_fence",
+      "ok": true,
+      "detail": "ResultClaimAllowed=false + ClaimBoundary: the grade is the AI-system's content behavior, MLCommons-graded, never a fak score"
+    }
+  ],
+  "honesty_fence": [
+    "Do NOT claim \"fak earned an Excellent/Very Good AILuminate grade.\" The five-tier grade is the AI-system's content behavior (the fronted model shaped by fak's filter), witnessed by MLCommons' evaluator ensemble — OBSERVED, never a fak score.",
+    "Do NOT present AILuminate's content-harm refusal as fak's tool-call/injection floor. They are different axes. The internal targeted ASR 0/38 = 0.000 is over a fixed fak-authored 38-case corpus, not AILuminate's ~12k prompts.",
+    "Do NOT imply fak has a public safety-leaderboard rank. No public board scores a tool-call adjudication gateway directly; the Berkeley RDI / HAL 2026 gameability finding MOTIVATES a model-free floor but hands fak no rank.",
+    "Do NOT net away the gateway tax or quote a vs-naive cache multiple. Account for the ~3% tax explicitly; any cache figure is marginal-over-TUNED (~1.0–1.31x; ~4.1x on a 50x5 fleet), never the 17.9–23.4x vs-naive multiple; never frame fak's by-design throughput loss (0.60–0.97x vs raw SGLang on 8xA100) as a win."
+  ],
+  "cross_links": [
+    "#1070 (this scoping ticket)",
+    "#1063 (parent epic: benchmark-entry portfolio — AILuminate is Tier-3, adapter-gated)",
+    "#416 / #9 / #72 (benchmark-rigor governance: no-result fence, lineage, provenance/conflation discipline)",
+    "#873 Packet E (external-run contract via OPENAI_BASE_URL — the seam that would front a model through fak)",
+    "AgentDojo defense-row lane (fak's stronger, model-free safety home)",
+    "#1010 (cache-value epic — the separate cost/cache axis)"
+  ],
+  "required_before_claim": [
+    "PREREQUISITE: a content-moderation filter wired into fak's COMPLETION path (not just tool calls) — the completion_path_content_filter gate must flip to OK before any go.",
+    "An operator completes the MLCommons access form (submission is operator-gated; there is no open self-submit).",
+    "Both arms run over the SAME MLCommons practice prompts: bare-model SUT and model+fak-gateway SUT (a system arm with no bare-model comparator is rejected as un-witnessable).",
+    "Full lineage filled from the real run: AILuminate version, run date-time, fak commit, fronted model id + provider + date, ModelGauge harness commit, evaluator note.",
+    "The five-tier grade is recorded as OBSERVED (MLCommons-run); the gateway-attributable delta is recorded as WITNESSED — no number unlabeled.",
+    "MLCommons grades the official/private held-out test (the submitter cannot self-grade the headline number)."
+  ],
+  "result_claim_allowed": false
+}

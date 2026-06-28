@@ -115,6 +115,12 @@ concurrent = [
   # stays in the `cmd` lane, keeping every leaf tree pairwise-disjoint as the header invariant
   # requires) so the referee binds the stamp and the arbiter protects internal/scoreboard/** edits.
   "scoreboard",
+  # reconciled 2026-06-27 (#1070): internal/ailuminate is a new committed leaf (the
+  # MLCommons-AILuminate benchmark-entry scoping/go-no-go contract). Declared so a
+  # `(fak ailuminate)` ship-stamp binds and the arbiter detects a same-tree collision
+  # on internal/ailuminate/** edits; its cmd/fak/ailuminate.go shim stays in the `cmd`
+  # lane, keeping every leaf tree pairwise-disjoint per the header invariant.
+  "ailuminate",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -164,6 +170,7 @@ autopick = [
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate), see [lanes].concurrent note
   "nightrun", # internal/nightrun leaf (the run-it-all-night data-collection door), see [lanes].concurrent note
   "scoreboard", # #1000: internal/scoreboard leaf (the fak scoreboard Slack publisher), see [lanes].concurrent note
+  "ailuminate", # #1070: internal/ailuminate leaf (the AILuminate benchmark-entry scoping contract), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -251,6 +258,7 @@ toollint = ["internal/toollint/**"]
 tracesink = ["internal/tracesink/**"]
 urllint = ["internal/urllint/**"]
 webbench = ["internal/webbench/**"]
+ailuminate = ["internal/ailuminate/**"]
 codelint = ["internal/codelint/**"]
 headroom = ["internal/headroom/**"]
 residency = ["internal/residency/**"]

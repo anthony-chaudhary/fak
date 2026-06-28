@@ -47,6 +47,7 @@ var tier = map[string]int{
 	"abi": 0,
 
 	"agenticbench": 1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
+	"ailuminate":   1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"benchcatalog": 1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"cachevalueledger": 1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
 	"benchcli":     1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
