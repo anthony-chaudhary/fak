@@ -40,7 +40,9 @@ var (
 	ready    bool
 )
 
-// Available reports whether a Metal device + MPS are present and the queue initialised.
+// Available reports whether a Metal device + command queue are present and initialised. MPS is
+// a SEPARATE, opt-in capability (FAK_METAL_MPS) — the pure-MSL q4_k prefill path needs no MPS, so
+// Available is true on a headless/SSH device where MPSSupportsMTLDevice would otherwise fault.
 // Safe to call repeatedly; the device probe runs once.
 func Available() bool {
 	initOnce.Do(func() { ready = C.mg_init() == 1 })

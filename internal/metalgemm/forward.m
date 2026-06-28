@@ -20,6 +20,7 @@
 // Shared with metal.m.
 extern id<MTLDevice> gDev;
 extern id<MTLCommandQueue> gQueue;
+extern int gMPSOK; // f16 resident prefill uses MPS matmuls; refuse when MPS was not validated
 typedef struct { CFTypeRef buf; int out; int in; } MGWeight;
 extern MGWeight gW[];
 extern int gNW;
@@ -318,6 +319,11 @@ static void k_add(id<MTLBuffer> X, id<MTLBuffer> Y, int n) {
 // lastPre = f32[H] (last token, pre-final-norm); KrawOut/KpostOut/Vout = f32[nL*P*w]
 // (pre-RoPE K, post-RoPE K, V) for the CPU cache. Returns 1 on success.
 int mg_prefill(const float *X, int P, float *lastPre, float *KrawOut, float *KpostOut, float *Vout) {
+    // The resident f16 prefill issues MPS matmuls (mpsMatmul); without a validated MPS device
+    // (default headless posture — see gMPSOK / FAK_METAL_MPS) it cannot run. Decline so the caller
+    // falls back to the hybrid/CPU path. The q4_k hybrid prefill issues mg_q4k_* directly and never
+    // reaches here, so it is unaffected.
+    if (!gMPSOK) return 0;
     if (!mg_fwd_init()) return 0;
     @autoreleasepool {
         int H = gH, hd = gHd, nH = gNH, nKV = gNKV, Im = gI, w = nKV*hd, qrow = nH*hd;

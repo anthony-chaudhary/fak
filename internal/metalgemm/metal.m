@@ -16,6 +16,7 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #import <Accelerate/Accelerate.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <stdlib.h> // getenv (FAK_METAL_MPS opt-in)
 
 // f32<->f16 bulk conversion via Accelerate's vImage (SIMD): the per-call activation and
 // result round-trip was a single-threaded scalar loop and measured as a large chunk of the
@@ -37,6 +38,16 @@ void mg_f16_to_f32(const __fp16 *src, float *dst, long n) {
 id<MTLDevice>       gDev = nil;
 id<MTLCommandQueue> gQueue = nil;
 
+// gMPSOK records whether MetalPerformanceShaders was validated for gDev. It is a SEPARATE,
+// opt-in capability from the base device+queue: MPSSupportsMTLDevice can hard-fault the process
+// in a headless / SSH context (it reaches into display-server state), so mg_init only probes it
+// when FAK_METAL_MPS is set. The q4_k prefill path (q4k.m / mg_q4k_*) is pure MSL and needs NO
+// MPS, so it stays usable with gMPSOK==0; only the f16 MPS GEMM entry points (mg_matmul here,
+// mg_prefill in forward.m) require gMPSOK and refuse cleanly when it is off. This is what lets the
+// #1085 q4_k GPU prefill run on a remote/headless Apple-Silicon box (where the device + queue +
+// MSL compile + dispatch all work, but MPSSupportsMTLDevice would otherwise kill the process).
+int gMPSOK = 0;
+
 typedef struct {
     CFTypeRef buf; // retained id<MTLBuffer>, f16 [out, in] row-major
     int out;
@@ -56,9 +67,17 @@ int mg_init(void) {
     if (gDev != nil) return 1;
     gDev = MTLCreateSystemDefaultDevice();
     if (gDev == nil) return 0;
-    if (!MPSSupportsMTLDevice(gDev)) { gDev = nil; return 0; }
     gQueue = [gDev newCommandQueue];
-    return gQueue != nil ? 1 : 0;
+    if (gQueue == nil) { gDev = nil; return 0; }
+    // MPS is a separate, optional capability — see gMPSOK. MPSSupportsMTLDevice can hard-fault in
+    // a headless/SSH context, so only probe it when the operator opts in (FAK_METAL_MPS). Default
+    // OFF keeps the pure-MSL q4_k prefill path (the #1085 GPU GEMM) fully usable headless; the f16
+    // MPS GEMM paths refuse cleanly when gMPSOK is 0.
+    gMPSOK = 0;
+    if (getenv("FAK_METAL_MPS") != NULL) {
+        gMPSOK = MPSSupportsMTLDevice(gDev) ? 1 : 0;
+    }
+    return 1;
 }
 
 // mg_upload converts a row-major f32 weight [out, in] to f16 in a shared MTLBuffer and
@@ -98,6 +117,18 @@ int mg_upload(const float *w, int out, int in) {
 // f16 inputs, f32 internal accumulation (MPS), f16 result converted back to the f32 y.
 void mg_matmul(int wid, const float *x, int P, float *y) {
     if (wid < 0 || wid >= gNW) return;
+    if (!gMPSOK) {
+        // The f16 GEMM is an MPSMatrixMultiplication; MPS was not validated for this device
+        // (default headless posture — see gMPSOK / FAK_METAL_MPS). The caller (the f16 Metal
+        // prefill) is expected to fall back; the q4_k MSL path does not reach here. Warn once.
+        static int mpsWarned = 0;
+        if (!mpsWarned) {
+            mpsWarned = 1;
+            NSLog(@"mg_matmul: MPS unavailable (FAK_METAL_MPS not set or unsupported); the f16 "
+                  @"GEMM is disabled — use the q4_k prefill path (FAK_Q4K=1).");
+        }
+        return;
+    }
     @autoreleasepool {
         MGWeight W = gW[wid];
         int in = W.in, out = W.out;
