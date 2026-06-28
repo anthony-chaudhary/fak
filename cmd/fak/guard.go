@@ -115,7 +115,7 @@ func cmdGuard(argv []string) {
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
 	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
-	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: record this guard session as a dojo episode for later scoring with `fak dojo run`. The episode is written to a dojo corpus directory under the workspace root.")
+	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for this guard session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Mutually exclusive with --base-url / --remote-serve.")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
 	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
@@ -575,8 +575,16 @@ func cmdGuard(argv []string) {
 const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"
 
 // logDojoEpisodeStart records the start of a live dojo episode when --dojo is enabled.
-// This is the minimal implementation for issue #956: create a dojo corpus directory
-// and log the episode start with basic metadata.
+// This is the minimal implementation for issue #956: create the .dojo/live-episodes
+// corpus directory and write a start-marker with basic metadata (mode, command, started,
+// cwd, workspace).
+//
+// SCOPE (honest boundary): this writes ONLY the start-marker. It does NOT yet capture the
+// session's turn transcript or AdjudicationSummary, and `fak dojo run` does NOT yet read
+// .dojo/live-episodes (it scores Claude Code transcripts passed via --corpus). So the
+// marker is not yet consumed by the scorer — closing that loop (capture the full episode
+// in dojo's scored format + teach `fak dojo run` to discover this corpus) is the rest of
+// #956. The flag help says the same so it does not over-promise a wired scoring path.
 func logDojoEpisodeStart(mode string) error {
 	cwd, err := os.Getwd()
 	if err != nil {

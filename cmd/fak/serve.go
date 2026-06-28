@@ -113,7 +113,7 @@ func cmdServe(argv []string) {
 	notifyWebhook := fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
 	notifySlack := fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
 	debugStats := fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
-	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: record each serve session as a dojo episode for later scoring with `fak dojo run`. Episodes are written to a dojo corpus directory under the workspace root.")
+	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
