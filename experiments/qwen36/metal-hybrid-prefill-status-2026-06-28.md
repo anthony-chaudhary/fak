@@ -105,22 +105,33 @@ toolchain — the capability this host does not have:
    `requirePreNorm("Metal prefill")`, the default-build stub (`metal_prefill_hybrid_stub.go`), and
    the `kv.go` dispatch. A Mac worker can now `git pull` the wrapper directly — no model-lane commit
    is outstanding.
-2. **`fakmetal` build + GPU-numerics parity witness (closes the last correctness residual).** On
-   the Mac, with the wrapper committed:
-   `go test ./internal/model -tags fakmetal -run Qwen35Hybrid -count=1`. Because §2 already proves
-   the CPU-side orchestration host-independently, this Mac run adds the **one** residual it cannot
-   reach: the GPU f16 GEMM numerics. Mirror `TestPrefillQwen35HybridQ4KMatchesTokenLoop` — run the
-   twin and the proven CPU template on the same prompt, assert the hidden states match within the
-   f16-GEMM + Q8 deferred-reduction / FMA-rounding drift band. **This is the green gate that closes
-   #71's last correctness residual; it cannot be run here (no darwin/cgo/Metal).**
+2. **`fakmetal` build + GPU-numerics parity witness (closes the last correctness residual).**
+   That parity test is now **authored** — `TestPrefillQwen35HybridMetalMatchesCPU`
+   (`internal/model/metal_prefill_hybrid_test.go`, `-tags fakmetal`, committed `0ffae0be`,
+   `dos commit-audit` `diff-witnessed`). It mirrors `TestMetalDecodeResidentMatchesCPU` (#67's
+   resident-decode f16-vs-CPU-Q8 gate) and `TestPrefillQwen35HybridQ4KMatchesTokenLoop`: it runs
+   the Metal twin (`s.Metal` → `prefillBatchedMetalQwen35Hybrid`) and the proven CPU Q8 hybrid
+   prefill (`s.Quant` → `prefillQwen35HybridQ`) on the same 16-token prompt — both read the
+   identical Q8 store, so the only divergence is the projection backend — and asserts the logits
+   (cosine ≥ 0.999, same argmax) plus the per-full-attention-layer KV cache match within the
+   GPU f16 GEMM accumulation-order drift band. Because §2 already proves the CPU-side orchestration
+   host-independently, this Mac run adds the **one** residual it cannot reach: the GPU f16 GEMM
+   numerics. So the Mac worker no longer authors a test — it runs ONE command:
+   `go test ./internal/model -tags fakmetal -run TestPrefillQwen35HybridMetalMatchesCPU -count=1`.
+   The test's default-build exclusion and its non-`fakmetal` symbol usages were verified green on
+   this `windows/amd64`, `CGO_ENABLED=0` host (`go build` / `go vet ./internal/model`); the
+   `-tags fakmetal` compile + GPU run itself **cannot be done here (no darwin/cgo/Metal)** — that
+   is the green gate that closes #71's last correctness residual.
 3. **On-device tok/s measure.** `FAK_QPROFILE=1` prefill of `Qwen3.6-27B.q4_k_m.gguf` at pp22,
    against the `51.55 tok/s` llama.cpp-Metal bar, captured **without a co-resident llama-server**
    (the swap-contamination rule: on a 36 GiB box two 27B copies page to swap — trust the clean
    isolated number). Record the `[metalprof-hybrid …]` line in this cluster; §5 of the #65
    decision doc then reads the arm-A recurrence fraction directly off it.
 
-**Next checkable step:** step (1) has landed (`5c065118`); run step (2) on the Mac verify node and
-append the GPU-numerics parity verdict + the `[metalprof-hybrid]` line here. Until that test is
+**Next checkable step:** step (1) has landed (`5c065118`) and the step-(2) parity-test artifact is
+now authored (`0ffae0be`); run
+`go test ./internal/model -tags fakmetal -run TestPrefillQwen35HybridMetalMatchesCPU -count=1` on
+the Mac verify node and append the GPU-numerics parity verdict + the `[metalprof-hybrid]` line here. Until that test is
 green on a witnessed commit, the *on-device GPU correctness + throughput* of #71 stays `not yet`;
 the host-independent slice — the recipe, its committed backend-agnostic core, the committed Metal
 twin/gate/stub/`kv.go` wiring, and that core's green CPU-side correctness witness — is **done**.
