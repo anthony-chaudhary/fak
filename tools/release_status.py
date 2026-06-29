@@ -583,12 +583,16 @@ def cadence_status(root: Path) -> dict:
     if not path.exists():
         return {"present": False, "path": ".github/workflows/release-cadence.yml"}
     text = path.read_text(encoding="utf-8", errors="replace")
+    manual_dry_run_gate = (
+        "inputs.dry_run == false" in text
+        or 'inputs.dry_run }}" = "false"' in text
+    )
     return {
         "present": True,
         "path": ".github/workflows/release-cadence.yml",
         "schedule": "schedule:" in text,
         "manual_dispatch": "workflow_dispatch:" in text,
-        "dry_run_first": "dry_run:" in text and "inputs.dry_run == false" in text,
+        "dry_run_first": "dry_run:" in text and manual_dry_run_gate,
         "single_writer": "group: release-cadence" in text and "cancel-in-progress: false" in text,
         "tag_after_green": "tools/release_tag.py" in text and "--require-ci" in text and "--wait-ci" in text,
         "checked_github_release": "tools/release_publish.py" in text and "--execute" in text,
