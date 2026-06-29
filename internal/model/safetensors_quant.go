@@ -226,16 +226,39 @@ func quantizeBlobInto(buf []byte, m *Model, tied bool, raw *[]byte, off *int) er
 	if err != nil {
 		return err
 	}
-	names := safetensorsTensorNames(hdr)
-	consumed := map[string]bool{}
+	tensorBytes := func(e stEntry) ([]byte, error) {
+		return safetensorsBufferBytes(buf, dataBase, e)
+	}
+	return quantizeNamedTensorsInto(safetensorsTensorNames(hdr), hdr, tensorBytes, nil, m, tied, raw, off)
+}
 
+func quantizeFileInto(sf *safetensorsFile, m *Model, tied bool, raw *[]byte, off *int, lo loadOptions) error {
+	// Pipeline-parallel partition: skip tensors whose transformer layer is
+	// outside this worker's band. Layer-agnostic tensors (embeddings, final
+	// norm, untied lm_head) report layer -1 and are always kept. The default
+	// window keeps every layer, so a plain load is unchanged (no-op gate).
+	keepLayer := func(name string) bool {
+		return lo.window.keepsLayer(tensorLayerForWindow(name))
+	}
+	return quantizeNamedTensorsInto(safetensorsTensorNames(sf.hdr), sf.hdr, sf.tensorBytes, keepLayer, m, tied, raw, off)
+}
+
+// quantizeNamedTensorsInto is the shared streaming loop behind quantizeBlobInto (whole-blob)
+// and quantizeFileInto (per-shard): for each name it tries the MXFP4 block/scale pairing, then
+// decodes and quantizes the tensor via tensorBytes. keepLayer, when non-nil, gates each name on
+// the pipeline-parallel window (a returned false consumes the name and skips it); a nil keepLayer
+// keeps every tensor.
+func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, tensorBytes func(stEntry) ([]byte, error), keepLayer func(name string) bool, m *Model, tied bool, raw *[]byte, off *int) error {
+	consumed := map[string]bool{}
 	for _, name := range names {
 		if consumed[name] {
 			continue
 		}
-		handled, err := quantizeMXFP4TensorInto(name, hdr, func(e stEntry) ([]byte, error) {
-			return safetensorsBufferBytes(buf, dataBase, e)
-		}, m, tied, raw, off, consumed)
+		if keepLayer != nil && !keepLayer(name) {
+			consumed[name] = true
+			continue
+		}
+		handled, err := quantizeMXFP4TensorInto(name, hdr, tensorBytes, m, tied, raw, off, consumed)
 		if err != nil {
 			return err
 		}
@@ -249,47 +272,7 @@ func quantizeBlobInto(buf []byte, m *Model, tied bool, raw *[]byte, off *int) er
 		if skipSafetensorsTensor(name, e) {
 			continue
 		}
-		src, err := safetensorsBufferBytes(buf, dataBase, e)
-		if err != nil {
-			return fmt.Errorf("safetensors: tensor %s: %w", name, err)
-		}
-		if err := quantizeTensorInto(name, e, src, m, tied, raw, off); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func quantizeFileInto(sf *safetensorsFile, m *Model, tied bool, raw *[]byte, off *int, lo loadOptions) error {
-	names := safetensorsTensorNames(sf.hdr)
-	consumed := map[string]bool{}
-	for _, name := range names {
-		if consumed[name] {
-			continue
-		}
-		// Pipeline-parallel partition: skip tensors whose transformer layer is
-		// outside this worker's band. Layer-agnostic tensors (embeddings, final
-		// norm, untied lm_head) report layer -1 and are always kept. The default
-		// window keeps every layer, so a plain load is unchanged (no-op gate).
-		if !lo.window.keepsLayer(tensorLayerForWindow(name)) {
-			consumed[name] = true
-			continue
-		}
-		handled, err := quantizeMXFP4TensorInto(name, sf.hdr, sf.tensorBytes, m, tied, raw, off, consumed)
-		if err != nil {
-			return err
-		}
-		if handled {
-			continue
-		}
-		var e stEntry
-		if err := json.Unmarshal(sf.hdr[name], &e); err != nil {
-			return fmt.Errorf("safetensors: entry %s: %w", name, err)
-		}
-		if skipSafetensorsTensor(name, e) {
-			continue
-		}
-		src, err := sf.tensorBytes(e)
+		src, err := tensorBytes(e)
 		if err != nil {
 			return fmt.Errorf("safetensors: tensor %s: %w", name, err)
 		}

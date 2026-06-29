@@ -47,6 +47,17 @@ func synthBuildRaw(tensors []synthTensor, fill func(name string, next func() flo
 	return man, raw
 }
 
+// synthMatmulFill returns the deterministic [-scale, scale] LCG draw used for every
+// non-norm (matmul) tensor in a synthetic checkpoint. Embeddings use a wider scale so
+// distinct ids separate cleanly. Shared by the NewSynthetic* fill closures.
+func synthMatmulFill(name string, next func() float32) float32 {
+	scale := float32(0.1)
+	if strings.Contains(name, "embed_tokens") {
+		scale = 0.2 // wider so distinct ids separate cleanly
+	}
+	return next() * scale
+}
+
 // NewSynthetic builds an in-memory Model with deterministic pseudo-random weights
 // for an arbitrary (small) Config — no files, no torch, no 538MB HF export.
 //
@@ -133,11 +144,7 @@ func NewSynthetic(cfg Config) *Model {
 		if norm {
 			return 1.0
 		}
-		scale := float32(0.1)
-		if strings.Contains(name, "embed_tokens") {
-			scale = 0.2 // wider so distinct ids separate cleanly
-		}
-		return next() * scale
+		return synthMatmulFill(name, next)
 	})
 
 	cfg.TieWordEmbeddings = true // synthetic head is tied to the embedding
@@ -194,11 +201,7 @@ func NewSyntheticMoE(cfg Config) *Model {
 		if norm {
 			return 1.0
 		}
-		scale := float32(0.1)
-		if strings.Contains(name, "embed_tokens") {
-			scale = 0.2
-		}
-		return next() * scale
+		return synthMatmulFill(name, next)
 	})
 
 	cfg.TieWordEmbeddings = true
@@ -282,11 +285,7 @@ func NewSyntheticGLMDsa(cfg Config) *Model {
 		case isZero:
 			return 0.0
 		}
-		scale := float32(0.1)
-		if strings.Contains(name, "embed_tokens") {
-			scale = 0.2
-		}
-		return next() * scale
+		return synthMatmulFill(name, next)
 	})
 
 	cfg.TieWordEmbeddings = true
