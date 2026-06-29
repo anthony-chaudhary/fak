@@ -188,8 +188,11 @@ forking fak. The seed is **DOS** (the trust substrate fak dogfoods on its own re
 - **The next verbs (under-expressed concepts):** readiness · verification-ladder ·
   promote · context-contract · calibrate · taint-check · route · claim-check.
 
-The full design — what is already lifted, the recipe for a correct lift, and the
-`G1–G9` backlog — is in
+The **normative standard** — the closed nouns, the verb signatures, the lift recipe as
+MUST clauses, the `G6` one-sided-screen polarity predicate, and the per-verb conformance
+checklist a second implementation is checked against — is
+[`docs/standards/agent-grammar.md`](standards/agent-grammar.md). The full design — what is
+already lifted, the recipe for a correct lift, and the `G1–G9` backlog — is in
 [`CONCEPT-AGENT-PROGRAMMING-GRAMMAR`](notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md).
 The actioning epic groups the lifts as child issues.
 
