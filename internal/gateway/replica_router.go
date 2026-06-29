@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -10,6 +12,17 @@ import (
 )
 
 var ErrReplicaRouterEmpty = errors.New("gateway: replica router has no replicas")
+
+// PickPolicy is the pluggable placement policy behind ReplicaRouter.pick(). The
+// skeleton supplies the candidate set (the live admissible replicas), the request's
+// shared prefix (a leading run of stable segment identities — see prefixSegments),
+// and a load function (each candidate's live in-flight count, 0 when unknown); the
+// policy returns the chosen replica. Returning ok=false makes the router fall back to
+// its built-in round-robin, so a policy is purely additive and never strands a request.
+// CacheAwarePolicy is the issue-#41 implementation; nil leaves the router policy-free.
+type PickPolicy interface {
+	Pick(candidates []PlannerReplica, prefix []string, load func(name string) int) (PlannerReplica, bool)
+}
 
 // PlannerReplica is one statically-declared upstream in a gateway fleet.
 type PlannerReplica struct {
@@ -36,6 +49,14 @@ type ReplicaRouter struct {
 	// the rotation within the health interval — and returns ErrNoHealthyWorker (a
 	// typed verdict, never a silent drop) when none is admissible.
 	membership *FleetMembership
+
+	// policy is the optional cache-aware placement policy (issue #41). When nil the
+	// router keeps its round-robin pick unchanged; when set (WithPickPolicy), pick()
+	// scores the admissible candidates by prefix residency × inverse load and falls
+	// back to round-robin only if the policy declines. It composes with membership:
+	// the candidate set is the admissible subset, and the load function is each
+	// admissible worker's live in-flight count.
+	policy PickPolicy
 }
 
 // NewReplicaRouter builds a static, in-process planner fleet. It is intentionally
@@ -80,6 +101,18 @@ func (r *ReplicaRouter) WithMembership(m *FleetMembership) *ReplicaRouter {
 	return r
 }
 
+// WithPickPolicy attaches a cache-aware placement policy (issue #41). pick() then asks
+// the policy to choose among the admissible candidates, falling back to round-robin if
+// the policy declines. Passing nil restores the policy-free round-robin. Returns r for
+// chaining (composes with WithMembership).
+func (r *ReplicaRouter) WithPickPolicy(p PickPolicy) *ReplicaRouter {
+	if r == nil {
+		return nil
+	}
+	r.policy = p
+	return r
+}
+
 func (r *ReplicaRouter) Model() string {
 	if r == nil {
 		return ""
@@ -100,7 +133,7 @@ func (r *ReplicaRouter) Replicas() []ReplicaInfo {
 }
 
 func (r *ReplicaRouter) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	repl, err := r.pick()
+	repl, err := r.pickForMessages(messages)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +154,7 @@ func (r *ReplicaRouter) StreamingSupported() bool {
 }
 
 func (r *ReplicaRouter) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	repl, err := r.pick()
+	repl, err := r.pickForMessages(messages)
 	if err != nil {
 		return nil, err
 	}
@@ -132,10 +165,76 @@ func (r *ReplicaRouter) CompleteStream(ctx context.Context, sink agent.StreamSin
 	return sp.CompleteStream(ctx, sink, messages, tools, opts...)
 }
 
-func (r *ReplicaRouter) pick() (PlannerReplica, error) {
+// pickForMessages derives the request's shared prefix from its messages (only when a
+// cache-aware policy is attached — otherwise it is wasted work) and picks a replica.
+func (r *ReplicaRouter) pickForMessages(messages []agent.Message) (PlannerReplica, error) {
+	if r != nil && r.policy != nil {
+		return r.pick(prefixSegments(messages))
+	}
+	return r.pick(nil)
+}
+
+func (r *ReplicaRouter) pick(prefix []string) (PlannerReplica, error) {
 	if r == nil || len(r.replicas) == 0 {
 		return PlannerReplica{}, ErrReplicaRouterEmpty
 	}
+	if r.policy != nil {
+		if repl, err, handled := r.pickByPolicy(prefix); handled {
+			return repl, err
+		}
+	}
+	return r.pickRoundRobin()
+}
+
+// pickByPolicy runs the attached cache-aware policy over the admissible candidate set.
+// handled=false means the policy declined and the caller should fall back to
+// round-robin; handled=true carries the policy's decision (or the typed no-worker
+// verdict when membership leaves nothing admissible).
+func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err error, handled bool) {
+	candidates, load := r.candidatesAndLoad()
+	if len(candidates) == 0 {
+		if r.membership != nil {
+			return PlannerReplica{}, ErrNoHealthyWorker, true
+		}
+		return PlannerReplica{}, ErrReplicaRouterEmpty, true
+	}
+	if chosen, ok := r.policy.Pick(candidates, prefix, load); ok {
+		return chosen, nil, true
+	}
+	return PlannerReplica{}, nil, false
+}
+
+// candidatesAndLoad returns the replicas the policy may place on (every replica, or —
+// when membership is attached — only the admissible subset) plus a load function that
+// reports each worker's live in-flight count (nil when there is no membership to read
+// load from, so the policy scores on residency alone).
+func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int) {
+	if r.membership == nil {
+		return r.replicas, nil
+	}
+	adm := r.membership.Admissible()
+	admit := make(map[string]struct{}, len(adm))
+	for _, spec := range adm {
+		admit[spec.ID] = struct{}{}
+	}
+	candidates := make([]PlannerReplica, 0, len(r.replicas))
+	for _, repl := range r.replicas {
+		if _, ok := admit[repl.Name]; ok {
+			candidates = append(candidates, repl)
+		}
+	}
+	inflight := make(map[string]int, len(candidates))
+	for _, st := range r.membership.Snapshot() {
+		inflight[st.Spec.ID] = st.Inflight
+	}
+	return candidates, func(name string) int { return inflight[name] }
+}
+
+// pickRoundRobin is the policy-free placement: round-robin over every replica, or —
+// when membership is attached — over the admissible subset, returning the typed
+// no-worker verdict rather than routing to a dead upstream. This is the router's
+// behavior whenever no cache-aware policy is attached or the policy declines.
+func (r *ReplicaRouter) pickRoundRobin() (PlannerReplica, error) {
 	n := uint64(len(r.replicas))
 	start := r.next.Add(1) - 1 // advance the shared cursor exactly once per pick
 	if r.membership == nil {
@@ -158,4 +257,22 @@ func (r *ReplicaRouter) pick() (PlannerReplica, error) {
 		}
 	}
 	return PlannerReplica{}, ErrNoHealthyWorker
+}
+
+// prefixSegments lowers a request's messages into the shared-prefix segment run the
+// residency index keys on: one stable digest per leading message (role + content), in
+// order. Two requests that share a leading conversation (the same system prompt /
+// agent scaffold / early turns) share that many leading segments, so the index's
+// longest-common-prefix is their reusable-KV overlap — the gateway-level analogue of a
+// token-block prefix, derived without a tokenizer in the routing path.
+func prefixSegments(messages []agent.Message) []string {
+	if len(messages) == 0 {
+		return nil
+	}
+	segs := make([]string, len(messages))
+	for i, m := range messages {
+		sum := sha256.Sum256([]byte(m.Role + "\x00" + m.Content))
+		segs[i] = hex.EncodeToString(sum[:12])
+	}
+	return segs
 }
