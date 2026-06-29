@@ -22,10 +22,10 @@ defect by adding the missing release affordance.
 
 | Metric | Value |
 |---|---|
-| **Release-debt (total HARD defects)** | **8** |
-| Composite score | 43.8/100 (grade F) |
-| @latest staleness | v0.34.0 — 1919 commits / 4.1d behind HEAD → **VERY_STALE** |
-| Release lifecycle | discover 62 · automate 20 · validate 75 · trust 17 |
+| **Release-debt (total HARD defects)** | **6** |
+| Composite score | 62.5/100 (grade D) |
+| @latest staleness | v0.34.0 — 1925 commits / 4.1d behind HEAD → **VERY_STALE** |
+| Release lifecycle | discover 62 · automate 60 · validate 75 · trust 50 |
 | Documented gotcha count | 5 |
 | Stable rollback anchors | 0 |
 | Unwitnessed (offline) signals | 0 |
@@ -41,11 +41,11 @@ defect by adding the missing release affordance.
 | llms.txt points at the release path | ✅ met |  |
 | `fak release-staleness` exists | ✅ met |  |
 
-### Automate — the machine cuts on green, not a human — 20/100 (debt 3)
+### Automate — the machine cuts on green, not a human — 60/100 (debt 2)
 
 | KPI | State | Fix if open |
 |---|---|---|
-| cadence can cut on a scheduled tick | ❌ **debt** | Add guarded auto-cut to release-cadence.yml (#1355) |
+| cadence can cut on a scheduled tick | ✅ met |  |
 | staleness signal wired into make/CI | ✅ met |  |
 | @latest is not VERY_STALE | ❌ **debt** | Cut a release; automate the cadence (#1355) |
 | @latest is FRESH vs HEAD | ❌ **debt** | Cut on green at agentic cadence (#1355) |
@@ -59,14 +59,14 @@ defect by adding the missing release affordance.
 | single-writer release lock present | ✅ met |  |
 | documented gotcha count <= 1 | ❌ **debt** | Eliminate the chicken-egg gotchas (#1368) |
 
-### Trust — stable anchors, signed artifacts, rollback — 17/100 (debt 3)
+### Trust — stable anchors, signed artifacts, rollback — 50/100 (debt 2)
 
 | KPI | State | Fix if open |
 |---|---|---|
 | a stable/* rollback anchor exists | ❌ **debt** | Cut the first stable/* tag (#1370) |
-| artifacts carry signing/provenance | ❌ **debt** | Sign artifacts with cosign/SLSA (#1372) |
+| artifacts carry signing/provenance | ✅ met |  |
 | linux/arm64 leg actually shipped | ❌ **debt** | Ship the arm64 asset (#1371) |
 | recent release carries archives+checksums | ✅ met |  |
 
-**Next action:** Add guarded auto-cut to release-cadence.yml (#1355)
+**Next action:** Add a `fak release` subcommand (#1356)
 
