@@ -1,0 +1,8 @@
+{
+  "version": "fak-ladder/v1",
+  "rungs": [
+    { "id": 1, "name": "in-process structural", "cost": "in_process", "max_risk": "read" }
+  ],
+  "on_exhaustion": "allow",
+  "escalate_on": ["indeterminate"]
+}

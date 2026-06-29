@@ -1,0 +1,10 @@
+{
+  "_comment": "MUST REJECT (Decision, $defs/Decision). The FINAL verdict is 'indeterminate'. The schema closes the committed verdict to {allow, deny}; an indeterminate can never be a committed verdict (a residual indeterminate folds to deny via on_exhaustion). Witnesses: INDETERMINATE escalates, it is never the last word.",
+  "subject": { "risk_class": "write" },
+  "path": [
+    { "rung": 1, "verdict": "indeterminate" }
+  ],
+  "rung_reached": 1,
+  "climbed": true,
+  "verdict": "indeterminate"
+}

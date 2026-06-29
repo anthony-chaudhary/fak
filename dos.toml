@@ -591,6 +591,26 @@ summary  = "A lifecycle rung's measured overhead (elapsed ns or tokens added) ex
 fix      = "Confirm the breach against the rung's declared envelope (internal/turntaxmeter.DefaultBudget); if it is a real regression, fix or re-budget the added overhead; if the rung also SAVES more than it costs, the net line (epic T6) decides red/green, not this single breach. Floor: go test ./internal/turntaxmeter."
 see_also = ["internal/turntaxmeter/overheadbudget.go", "docs/notes/self-tax-performance-assurance-tracking-1147.md", "GATE_LATENCY_REGRESSION"]
 
+# Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
+# epic #1208): the first-class verdict the declarable verification ladder
+# (docs/standards/verification-ladder-spec.md) folds to when a cheap rung could NOT
+# conclusively decide and the ladder exhausted without a costlier rung resolving it.
+# It is the kernel's shipped VerdictIndeterminate (internal/abi/types.go,
+# FoldRank 15 between Defer and Transform in internal/abi/registry.go; the lazy fold
+# in internal/kernel/kernel.go makes it non-committable -- a residual Indeterminate
+# yields Deny) lifted into the closed REFUSAL vocabulary so a ladder's fail-closed
+# deny carries a dos_check_reason-validatable token instead of free text. Distinct
+# from a fail-open allow and from a bare DEFAULT_DENY abstention: it names "I could
+# not decide cheaply; the costlier rung was unavailable, so fail closed -- escalate,
+# never silently allow." Pure DATA: it introduces no spontaneous refusal, it only
+# gives the ladder's existing fail-closed tail a checkable name.
+[reasons.INDETERMINATE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Verification-ladder rung could not CONCLUSIVELY decide the claim cheaply and the ladder exhausted with no costlier rung available -- the residual indeterminate folds to a fail-closed deny (escalate, never silently allow). The kernel-side VerdictIndeterminate (internal/abi/types.go) is non-committable by construction; this token names the ladder's fail-closed tail."
+fix      = "Consult a costlier rung that can conclusively decide (require-witness / CI / git-evidence / isolated-worktree keep-bit / human ESCALATE), or accept the fail-closed deny. The ladder is DATA: declare a sufficient rung whose max_risk covers the claim's risk class in the dos.toml [ladder] (docs/standards/verification-ladder-spec.md). Floor: go test ./internal/kernel (the shipped lazy fold + residual-Indeterminate-fails-closed)."
+see_also = ["docs/standards/verification-ladder-spec.md", "docs/notes/verification-ladder-doctrine.md", "internal/abi/types.go", "internal/kernel/kernel.go"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/verification-ladder-spec.json",
+  "title": "Verification-ladder spec (fak-ladder/v1)",
+  "description": "A portable, engine-free schema for a DECLARABLE verification ladder: a cost-ordered set of rungs (cheapest->costliest) plus a first-class INDETERMINATE verdict, so any host states its rungs as DATA (a dos.toml [ladder]) and a checker picks the smallest rung that can conclusively decide a claim, climbing only on INDETERMINATE. The root validates a Ladder (the authored policy); $defs/Decision is the verdict a checker returns after walking it. The verdict set, the risk-class set, and the cost set are CLOSED enums. Two rules are encoded STRUCTURALLY so a fail-open ladder is rejected at the authoring boundary, never admitted: on_exhaustion is pinned to deny, and escalate_on MUST contain indeterminate; in a Decision, a path that contains an indeterminate rung MUST have climbed, and the FINAL verdict is closed to allow|deny (an INDETERMINATE is never a committed verdict). The kernel-side VerdictIndeterminate + lazy fold is the separate epic #657 follow-on; this is the declarable spec it implements.",
+  "$ref": "#/$defs/Ladder",
+  "$defs": {
+    "Verdict": {
+      "description": "The CLOSED, additive per-rung verdict vocabulary. 'allow'/'deny' are conclusive (committable). 'defer' is a bare abstention ('I have no opinion, ask the next rung'). 'indeterminate' is the first-class C2 verdict: 'I could not CONCLUSIVELY decide this cheaply -- a costlier rung MUST be consulted before commit', distinct from both a fail-open allow and a defer-to-DEFAULT_DENY. An out-of-set token is UNCLASSIFIED and rejected here. A new verdict is a new enum value + a fold arm, never free text.",
+      "type": "string",
+      "enum": ["allow", "deny", "indeterminate", "defer"]
+    },
+    "RiskClass": {
+      "description": "The CLOSED, ordered risk class of a claim, low->high: 'read' (a low-risk read/lookup), 'write' (a state-mutating write, e.g. into a shared tree), 'self_modify' (the call would modify the agent/kernel itself). Risk selects the smallest sufficient rung: a checker picks the cheapest rung whose max_risk covers the claim's risk_class. CLOSED enum; an out-of-set value is rejected at the boundary.",
+      "type": "string",
+      "enum": ["read", "write", "self_modify"]
+    },
+    "Cost": {
+      "description": "The CLOSED, cost-ordered class of a rung (cheapest->costliest): 'reuse' (a cached/vDSO re-output, ns, in-proc), 'in_process' (a structural name/arg/lint check, ns-us, in-proc), 'corroborate' (a require-witness handback to one out-of-band resolver), 'suite' (a local build+vet+test or git-evidence read, seconds), 'worktree_spawn' (an isolated-worktree measure, ms-spawn + suite), 'human' (an operator ESCALATE). The cost is the reason to prefer the smallest sufficient rung. CLOSED enum.",
+      "type": "string",
+      "enum": ["reuse", "in_process", "corroborate", "suite", "worktree_spawn", "human"]
+    },
+    "Rung": {
+      "description": "One declarable rung. 'id' is its position in the ladder (0 = cheapest); rungs are listed cheapest->costliest. 'max_risk' is the highest-risk claim this rung can CONCLUSIVELY ALLOW -- a higher-risk claim returns indeterminate at this rung and climbs. (A rung may still conclusively DENY a higher-risk claim, e.g. a structural self-modify refusal; max_risk bounds only the affirmative allow.) Closed object -- an unknown field is rejected, never silently ignored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "cost", "max_risk"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0, "description": "Ladder position; 0 is the cheapest rung. Ascending == costlier." },
+        "name": { "type": "string", "description": "A human label, e.g. 'in-process structural' or 'require-witness'." },
+        "cost": { "$ref": "#/$defs/Cost" },
+        "max_risk": { "$ref": "#/$defs/RiskClass" },
+        "establishes": { "type": "string", "description": "OPTIONAL prose: what property this rung conclusively establishes (and therefore what it cannot, so you climb)." }
+      }
+    },
+    "Subject": {
+      "description": "The claim a checker classifies against the ladder: its risk class selects the smallest sufficient rung. Closed object.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk_class"],
+      "properties": {
+        "risk_class": { "$ref": "#/$defs/RiskClass" },
+        "label": { "type": "string", "description": "OPTIONAL bounded, payload-free note naming the claim (never the value's bytes)." }
+      }
+    },
+    "Step": {
+      "description": "One consulted rung and the verdict it returned, along the ladder walk. The ordered list of Steps is the Decision's audit path.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rung", "verdict"],
+      "properties": {
+        "rung": { "type": "integer", "minimum": 0, "description": "The rung id consulted." },
+        "verdict": { "$ref": "#/$defs/Verdict" }
+      }
+    },
+    "Ladder": {
+      "description": "The INPUT a host declares (the dos.toml [ladder] shape, as JSON -- TOML and JSON are isomorphic as data). A cost-ordered list of rungs plus the two fail-closed floors. NO spontaneous refusal: this is DATA, validated offline, that a checker walks. Closed object -- an unknown field is rejected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rungs", "on_exhaustion", "escalate_on"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^fak-ladder/v1",
+          "description": "Schema tag. Omitted => current version. A different MAJOR is refused; a newer MINOR is forward-accepted (additive-only discipline)."
+        },
+        "rungs": {
+          "type": "array",
+          "description": "The rungs, ordered cheapest->costliest. At least one. A checker selects the smallest rung whose max_risk covers the claim's risk_class.",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Rung" }
+        },
+        "on_exhaustion": {
+          "const": "deny",
+          "description": "The fail-closed tail: when the ladder is exhausted and the residual is still indeterminate, the verdict is DENY -- never allow. Pinned to 'deny' so a ladder CANNOT declare a fail-open tail (the fail-closed recipe rule, made structural)."
+        },
+        "escalate_on": {
+          "type": "array",
+          "description": "The verdicts that trigger a climb to the next-costlier rung. MUST contain 'indeterminate' (an INDETERMINATE rung escalates, never silently allows). May also contain 'defer'.",
+          "items": { "$ref": "#/$defs/Verdict" },
+          "contains": { "const": "indeterminate" }
+        }
+      }
+    },
+    "Decision": {
+      "description": "The OUTPUT a checker returns after walking the ladder for a Subject. 'path' is the ordered audit of rungs consulted and what each returned; 'rung_reached' is the rung that committed; 'climbed' is true iff it escalated past a cheaper rung. The FINAL 'verdict' is closed to allow|deny -- an indeterminate is NEVER a committed verdict (a residual indeterminate folds to deny via on_exhaustion). Structural rule: if any step in the path is indeterminate, the ladder MUST have climbed (it cannot decide in place on an indeterminate). A richer implementation MAY add fields (additionalProperties open), but a deny MUST carry a reason.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["subject", "verdict", "rung_reached", "climbed", "path"],
+      "properties": {
+        "subject": { "$ref": "#/$defs/Subject" },
+        "path": {
+          "type": "array",
+          "description": "The ordered rungs consulted and the verdict each returned. The last step's verdict is conclusive (allow|deny).",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Step" }
+        },
+        "rung_reached": { "type": "integer", "minimum": 0, "description": "The rung id whose verdict committed (== the last step's rung)." },
+        "climbed": { "type": "boolean", "description": "True iff the checker escalated past a cheaper rung (path length > 1)." },
+        "verdict": {
+          "type": "string",
+          "enum": ["allow", "deny"],
+          "description": "The FINAL committed verdict. CLOSED to the two committable outcomes -- an indeterminate or a defer can NEVER be a committed verdict (fail-closed)."
+        },
+        "reason": { "type": "string", "description": "REQUIRED when verdict==deny: a token from the closed refusal vocabulary -- INDETERMINATE on a ladder that exhausted with a residual indeterminate (the fail-closed tail), or a more specific provable-refusal token (e.g. SELF_MODIFY). dos_check_reason-validatable: INDETERMINATE is declared in this workspace's dos.toml [reasons]." },
+        "witness": { "type": "string", "description": "A bounded, payload-free note (the rung and risk labels, never the claim's bytes)." }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "path": { "contains": { "properties": { "verdict": { "const": "indeterminate" } }, "required": ["verdict"] } } },
+            "required": ["path"]
+          },
+          "then": { "properties": { "climbed": { "const": true } }, "required": ["climbed"] }
+        },
+        {
+          "if": { "properties": { "verdict": { "const": "deny" } }, "required": ["verdict"] },
+          "then": { "required": ["reason"] }
+        }
+      ]
+    }
+  }
+}

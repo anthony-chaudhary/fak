@@ -1,0 +1,10 @@
+{
+  "_comment": "MUST REJECT (Decision, $defs/Decision). A path step carries verdict 'maybe' -- not in the closed Verdict lattice {allow, deny, indeterminate, defer}. An out-of-set verdict is UNCLASSIFIED drift; the schema refuses it at the boundary rather than admitting an unknown disposition.",
+  "subject": { "risk_class": "read" },
+  "path": [
+    { "rung": 1, "verdict": "maybe" }
+  ],
+  "rung_reached": 1,
+  "climbed": false,
+  "verdict": "allow"
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "AC#3 witness (smallest-sufficient-rung): a LOW-RISK READ stops at rung 1. The in-process structural rung conclusively allows a read (its max_risk covers 'read'), so the checker never climbs: path is one step, climbed=false, rung_reached=1, verdict=allow. No costlier rung is paid. Validate against verification-ladder-spec.json $defs/Decision.",
+  "subject": { "risk_class": "read", "label": "read a tracked file" },
+  "path": [
+    { "rung": 1, "verdict": "allow" }
+  ],
+  "rung_reached": 1,
+  "climbed": false,
+  "verdict": "allow",
+  "witness": "READ conclusively allowed at the in-process structural rung"
+}

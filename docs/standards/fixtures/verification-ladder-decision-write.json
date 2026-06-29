@@ -1,0 +1,12 @@
+{
+  "_comment": "AC#3 witness (smallest-sufficient-rung): a WRITE climbs. The in-process structural rung (max_risk 'read') cannot CONCLUSIVELY allow a shared-tree write, so it returns indeterminate; escalate_on contains indeterminate, so the checker climbs to rung 3 (require-witness, max_risk 'write'), which corroborates the claimed effect and conclusively allows. path has two steps, climbed=true (forced by the contains-indeterminate rule), rung_reached=3, verdict=allow. Validate against verification-ladder-spec.json $defs/Decision.",
+  "subject": { "risk_class": "write", "label": "write into a shared tree" },
+  "path": [
+    { "rung": 1, "verdict": "indeterminate" },
+    { "rung": 3, "verdict": "allow" }
+  ],
+  "rung_reached": 3,
+  "climbed": true,
+  "verdict": "allow",
+  "witness": "WRITE indeterminate at rung 1 -> climbed to require-witness rung 3"
+}

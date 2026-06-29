@@ -1,0 +1,12 @@
+{
+  "version": "fak-ladder/v1",
+  "rungs": [
+    { "id": 0, "name": "vDSO re-output", "cost": "reuse", "max_risk": "read", "establishes": "this exact call was answered before and the answer is reproducible" },
+    { "id": 1, "name": "in-process structural", "cost": "in_process", "max_risk": "read", "establishes": "a provable refusal (deny-map / self-modify / arg-predicate) or an affirmative low-risk allow" },
+    { "id": 2, "name": "posture admit-and-log", "cost": "in_process", "max_risk": "read", "establishes": "a low-risk read-shaped default-deny is safe to admit while recording a would_deny record" },
+    { "id": 3, "name": "require-witness", "cost": "corroborate", "max_risk": "write", "establishes": "a claimed git/object effect is corroborated by evidence the agent did not author" },
+    { "id": 4, "name": "isolated-worktree keep-bit", "cost": "worktree_spawn", "max_risk": "self_modify", "establishes": "a candidate strictly improved a measured metric AND the suite is green AND truth is clean, non-forgeably" }
+  ],
+  "on_exhaustion": "deny",
+  "escalate_on": ["indeterminate", "defer"]
+}

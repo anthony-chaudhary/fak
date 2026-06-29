@@ -1,0 +1,9 @@
+{
+  "version": "fak-ladder/v1",
+  "rungs": [
+    { "id": 1, "name": "in-process structural", "cost": "in_process", "max_risk": "read" },
+    { "id": 3, "name": "require-witness", "cost": "corroborate", "max_risk": "write" }
+  ],
+  "on_exhaustion": "deny",
+  "escalate_on": ["defer"]
+}
