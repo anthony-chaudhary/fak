@@ -171,12 +171,7 @@ func (b *Bus) Recv(ctx context.Context, to ChannelKey, caps ...abi.Capability) (
 		b.cond.Wait()
 		stop()
 	}
-	msg := b.queues[to][0]
-	b.queues[to] = b.queues[to][1:]
-	if len(b.queues[to]) == 0 {
-		delete(b.queues, to)
-	}
-	v := screenIngress(msg.Body)
+	msg, v := b.dequeue(to)
 	if v.Kind == abi.VerdictQuarantine {
 		atomic.AddInt64(&b.held, 1)
 		return msg, v, nil
@@ -198,18 +193,25 @@ func (b *Bus) TryRecv(ctx context.Context, to ChannelKey, caps ...abi.Capability
 	if len(b.queues[to]) == 0 {
 		return Message{}, abi.Verdict{Kind: abi.VerdictDefer, By: "a2achan"}, false
 	}
-	msg := b.queues[to][0]
-	b.queues[to] = b.queues[to][1:]
-	if len(b.queues[to]) == 0 {
-		delete(b.queues, to)
-	}
-	v := screenIngress(msg.Body)
+	msg, v := b.dequeue(to)
 	if v.Kind == abi.VerdictQuarantine {
 		atomic.AddInt64(&b.held, 1)
 	} else {
 		atomic.AddInt64(&b.recvd, 1)
 	}
 	return msg, v, true
+}
+
+// dequeue pops the head message for `to`, compacts (and prunes the now-empty)
+// queue, and screens the body. The caller must hold b.mu. Shared by Recv and
+// TryRecv, which differ only in their blocking and counter policy.
+func (b *Bus) dequeue(to ChannelKey) (Message, abi.Verdict) {
+	msg := b.queues[to][0]
+	b.queues[to] = b.queues[to][1:]
+	if len(b.queues[to]) == 0 {
+		delete(b.queues, to)
+	}
+	return msg, screenIngress(msg.Body)
 }
 
 // Len reports how many messages are queued on a channel (forensics/tests).
