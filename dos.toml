@@ -61,6 +61,7 @@ concurrent = [
   "agenttopo",
   "promptmmu",
   "vcacheobserve",
+  "loopdrive",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -130,6 +131,7 @@ concurrent = [
   # so the walk reaches them and the arbiter protects internal/dojo/** & internal/nightrun/** edits.
   "dojo",
   "nightrun",
+  "loopdrive",
   "loopgate",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
@@ -182,7 +184,8 @@ autopick = [
   "scoreboard", # #1000: internal/scoreboard leaf (the fak scoreboard Slack publisher), see [lanes].concurrent note
   "ailuminate", # #1070: internal/ailuminate leaf (the AILuminate benchmark-entry scoping contract), see [lanes].concurrent note
   "marketing", # internal/marketing leaf (completion-driven marketing subsystem), see [lanes].concurrent note
-  "loopgate", # internal/loopgate leaf (the witnessed loop exit gate), see [lanes].concurrent note
+  "loopdrive",
+  "loopgate",
   # new-leaf:lane
 ]
 
@@ -318,7 +321,8 @@ leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY subst
 dojo = ["internal/dojo/**"] # #951: prediction-vs-reality gym (predict -> run -> measure -> eval -> calibrate)
 scoreboard = ["internal/scoreboard/**"] # #1000: fak scoreboard Slack scorecard publisher (cmd/fak/scoreboard.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 marketing = ["internal/marketing/**"] # completion-driven marketing subsystem (any cmd/fak shim lives in the `cmd` lane to keep leaf trees pairwise-disjoint)
-loopgate = ["internal/loopgate/**"] # witnessed loop exit gate; pure leaf, no cmd shim
+loopdrive = ["internal/loopdrive/**"]
+loopgate = ["internal/loopgate/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -569,6 +573,23 @@ refusal  = true
 summary  = "G1 verify rung: the bytes the L3 get returned do not hash to the digest the page CLAIMS (Ref.Digest) -- a hash collision or a mis-tag the semantics-free store cannot detect. Refused for EVERY reader, same-tenant included: a corrupt/ambiguous page is served to no one. A full-content digest recompute, not a truncated locality hash."
 fix      = "do not admit the page -- the content address does not match its bytes. Re-fetch / re-key at the store, or re-mint the page so its Ref.Digest is the true hex(sha256) of its content. Floor: go test ./internal/gateway -run TestL3Share_DigestMismatch."
 see_also = ["internal/gateway/l3share.go", "internal/abi/types.go", "internal/model/evict_test.go"]
+
+# Self-tax overhead budget breach (#1150, epic #1147 T2): the closed-vocabulary token a
+# per-rung/per-method overhead breach names. The plane declares an EXPECTED overhead
+# envelope per lifecycle rung (internal/turntaxmeter overheadbudget.go -- a generous,
+# scope-stated ceiling, not a measured p99); a span over its declared ns/token envelope
+# reads back as THIS token rather than free-text prose, reusing the same closed-set
+# discipline as the refusal vocabulary so a breach is emittable, verifiable, and
+# refusable. A budget is an envelope with a stated scope, NOT a promise of zero cost: a
+# rung that costs more but SAVES more is a net win, so the gate's red/green is a
+# net-of-savings decision (epic T6), not this single-rung breach alone.
+# Floor: `go test ./internal/turntaxmeter -run TestOverBudgetSpanReadsBackAsBreach`.
+[reasons.OVERHEAD_BUDGET_EXCEEDED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A lifecycle rung's measured overhead (elapsed ns or tokens added) exceeded its declared per-rung/per-method budget envelope -- the 'expected' baseline a breach is defined against. The witness gate is subprocess-bound (it spawns git) and carries a deliberately wide envelope so a slow disk does not read as a kernel regression."
+fix      = "Confirm the breach against the rung's declared envelope (internal/turntaxmeter.DefaultBudget); if it is a real regression, fix or re-budget the added overhead; if the rung also SAVES more than it costs, the net line (epic T6) decides red/green, not this single breach. Floor: go test ./internal/turntaxmeter."
+see_also = ["internal/turntaxmeter/overheadbudget.go", "docs/notes/self-tax-performance-assurance-tracking-1147.md", "GATE_LATENCY_REGRESSION"]
 
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
