@@ -132,6 +132,7 @@ func cmdGuard(argv []string) {
 	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a terminal multiplexer (tmux, or Windows Terminal via $WT_SESSION); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no multiplexer is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a \"bottom\" strip or a \"right\" column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
+	splitDryRun := fs.Bool("split-dry-run", false, "preview the --split 80/20 plan (resolved multiplexer, geometry, and the exact `fak info` pane command) and EXIT, without bringing up the gateway, spawning a pane, or launching the agent. Use it to see what --split will do before handing the terminal to the agent.")
 	ctxViewBudget := fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
@@ -159,6 +160,16 @@ func cmdGuard(argv []string) {
 	}
 	_ = fs.Parse(argv)
 
+	// --split-dry-run is a pure PREVIEW: render the resolved 80/20 split plan and exit BEFORE
+	// any gateway bind, pane spawn, or agent launch. The live gateway URL is not known yet (the
+	// OS picks the port at bind time), so the preview shows a placeholder loopback URL — the
+	// resolved multiplexer, geometry, and `fak info` argv shape are what the operator is
+	// previewing, and those do not depend on the port.
+	if *splitDryRun {
+		out, code := renderGuardInfoPaneDryRun(os.Getenv, *splitWhere, "http://127.0.0.1:<gateway-port>", *splitInterval)
+		fmt.Fprint(os.Stdout, out)
+		os.Exit(code)
+	}
 	// The --landlock-hooks flag and FAK_GUARD_LANDLOCK env are equivalent; normalize the
 	// flag into the env so buildGuardChild (called from two paths) consults one source.
 	if *landlockHooks {

@@ -28,7 +28,7 @@ import (
 
 // guardSplitGOOS / guardSplitLookPath are the indirection seams for multiplexer detection so a
 // test can pin the platform and the available multiplexers without touching the real host
-// (mirrors splitGOOS/splitLookPath in claude_mac_split.go).
+// (the os/exec-style seam used throughout cmd/fak).
 var (
 	guardSplitGOOS     = runtime.GOOS
 	guardSplitLookPath = exec.LookPath
@@ -187,8 +187,7 @@ func guardChildInteractive(command []string) bool {
 // is the os/exec seam shared with claude_mac_fak.go so a test can capture the spawn.
 func openGuardInfoPane(stderr io.Writer, getenv func(string) string, where, gwURL string, interval time.Duration) {
 	selfExe := tuiExecutable()
-	overlayArgs := []string{"info", "--gateway-url", gwURL, "--interval", interval.String()}
-	plan, err := buildGuardSplitPlan(guardSplitGOOS, getenv, guardSplitLookPath, selfExe, where, overlayArgs)
+	plan, err := buildGuardSplitPlan(guardSplitGOOS, getenv, guardSplitLookPath, selfExe, where, guardInfoPaneOverlayArgs(gwURL, interval))
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard: --split: %v\n", err)
 		return
@@ -204,4 +203,25 @@ func openGuardInfoPane(stderr io.Writer, getenv func(string) string, where, gwUR
 		return
 	}
 	fmt.Fprintf(stderr, "fak guard: --split · opened a 20%% fak-info pane (%s); launching the agent in this pane ...\n", plan.Geometry)
+}
+
+// guardInfoPaneOverlayArgs is the single source of truth for the `fak info` child argv the
+// split pane runs, so the dry-run preview and the live spawn can never drift. Kept beside
+// openGuardInfoPane (which calls the same shape inline) so the two stay in lockstep.
+func guardInfoPaneOverlayArgs(gwURL string, interval time.Duration) []string {
+	return []string{"info", "--gateway-url", gwURL, "--interval", interval.String()}
+}
+
+// renderGuardInfoPaneDryRun resolves the split plan and renders it WITHOUT spawning anything —
+// the --split-dry-run surface. An operator can preview the resolved multiplexer, the 80/20
+// geometry, and the exact `fak info` pane command before handing the terminal to the agent,
+// instead of having to launch the split (which takes over the screen) to find out what it does.
+// A bad --split-where is the only error; it returns the message and a non-zero code.
+func renderGuardInfoPaneDryRun(getenv func(string) string, where, gwURL string, interval time.Duration) (string, int) {
+	selfExe := tuiExecutable()
+	plan, err := buildGuardSplitPlan(guardSplitGOOS, getenv, guardSplitLookPath, selfExe, where, guardInfoPaneOverlayArgs(gwURL, interval))
+	if err != nil {
+		return fmt.Sprintf("fak guard: --split: %v\n", err), 2
+	}
+	return renderGuardSplitPlan(plan), 0
 }

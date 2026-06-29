@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // envFunc builds a getenv closure over a fixed map for the pure plan/decision tests.
@@ -100,6 +101,42 @@ func TestBuildGuardSplitPlanNoMultiplexerFallback(t *testing.T) {
 func TestBuildGuardSplitPlanInvalidWhere(t *testing.T) {
 	if _, err := buildGuardSplitPlan("linux", envFunc(map[string]string{"TMUX": "x"}), lookPathFail, "fak", "diagonal", guardOverlayArgs()); err == nil {
 		t.Fatal("expected an error for an invalid --split-where value")
+	}
+}
+
+// TestGuardInfoPaneOverlayArgsSingleSource proves the pane's `fak info` argv carries the live
+// gateway URL and interval and nothing else — the single shape both the dry-run preview and
+// the live spawn read, so the two can never drift.
+func TestGuardInfoPaneOverlayArgsSingleSource(t *testing.T) {
+	got := guardInfoPaneOverlayArgs("http://127.0.0.1:8080", 3*time.Second)
+	want := []string{"info", "--gateway-url", "http://127.0.0.1:8080", "--interval", "3s"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("overlay args = %v, want %v", got, want)
+	}
+}
+
+// TestRenderGuardInfoPaneDryRun proves --split-dry-run renders the resolved plan (multiplexer,
+// geometry, and the exact pane command) with exit 0, and returns a non-zero code with a message
+// on a bad --split-where — the preview surface an operator reads before launching the split. It
+// pins the detection seams so the test does not depend on the host's real multiplexer.
+func TestRenderGuardInfoPaneDryRun(t *testing.T) {
+	savedGOOS, savedLook := guardSplitGOOS, guardSplitLookPath
+	t.Cleanup(func() { guardSplitGOOS, guardSplitLookPath = savedGOOS, savedLook })
+	guardSplitGOOS, guardSplitLookPath = "windows", lookPathOK
+
+	out, code := renderGuardInfoPaneDryRun(envFunc(map[string]string{"WT_SESSION": "x"}), "right", "http://127.0.0.1:9", 2*time.Second)
+	if code != 0 {
+		t.Fatalf("dry-run code = %d, want 0; out=%s", code, out)
+	}
+	for _, want := range []string{"host: wt", "right column", "split-pane", "-V", "--gateway-url http://127.0.0.1:9"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+
+	badOut, badCode := renderGuardInfoPaneDryRun(envFunc(nil), "sideways", "http://127.0.0.1:9", 2*time.Second)
+	if badCode == 0 || !strings.Contains(badOut, "split-where") {
+		t.Fatalf("bad --split-where: code=%d out=%q", badCode, badOut)
 	}
 }
 

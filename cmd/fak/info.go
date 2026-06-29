@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // `fak info` — the live fak-info overlay. It polls a running `fak guard` / `fak serve`
@@ -104,17 +106,36 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 		}
 		return encodeJSONOrFail(stdout, stderr, v, "fak info")
 	}
-	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once)
+	// A TTY stdout (the normal split-pane case) lets the watch loop REDRAW one status line
+	// in place instead of scrolling a new line every tick — the difference between a clean
+	// dashboard and a spam-filled pane. A redirected/piped stdout keeps append-per-line so a
+	// captured log stays intact. term.IsTerminal is the same probe guard uses (guard.go).
+	infoTTY := !*once && term.IsTerminal(int(os.Stdout.Fd()))
+	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY)
 }
 
-// runGuardInfoOverlay polls /debug/vars and prints one live line per tick until Ctrl-C — the
-// second-pane companion to an interactive `fak guard` session. It mirrors the poll-loop shape
-// of runClaudeMacOverlay (signal.NotifyContext + ticker) and never launches an agent. A
+// runGuardInfoOverlay polls /debug/vars and shows one live status line until Ctrl-C — the
+// second-pane companion to an interactive `fak guard` session. On a TTY (tty=true) the line
+// REDRAWS in place each tick so the pane is a single-line dashboard, not a scrolling log;
+// off a TTY each tick appends so a captured log stays whole. It never launches an agent. A
 // transient fetch error prints a one-line note and keeps polling; once the gateway HAS been
 // seen healthy, a sustained run of misses means the guarded session ended and its in-process
 // gateway was torn down — so the overlay prints a closing line and exits 0, which lets the
-// pane close itself rather than spin forever on a dead port.
-func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once bool) int {
+// pane close itself rather than spin forever on a dead port. --once (once=true) is a scripted
+// one-shot: it prints a single line with no header/legend and exits non-zero on a failed fetch.
+func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool) int {
+	// --once is a scripted one-shot probe: print ONE line (or fail), no header, no legend —
+	// the standing header is noise when there is no watch loop to head.
+	if once {
+		var v guardInfoVars
+		if err := c.get("/debug/vars", &v); err != nil {
+			fmt.Fprintf(stderr, "fak info: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "%s\n", renderGuardInfoLine(v))
+		return 0
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fmt.Fprintf(stdout, "fak info · %s  (every %s, Ctrl-C to stop)\n", c.base, interval)
@@ -122,6 +143,30 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 
 	sawHealthy := false
 	misses := 0
+	dirty := false // a status line is currently parked on the cursor row (TTY in-place mode)
+
+	// On a TTY the status line REDRAWS in place: \r returns to column 0 and \033[K clears to
+	// end of line, so each tick overwrites the previous one instead of scrolling — the pane
+	// shows a live single-line dashboard, not an ever-growing log. Off a TTY (piped/redirected)
+	// every tick appends its own line so a captured log stays whole.
+	writeStatus := func(line string) {
+		if tty {
+			fmt.Fprintf(stdout, "\r\033[K  %s", line)
+			dirty = true
+			return
+		}
+		fmt.Fprintf(stdout, "  %s\n", line)
+	}
+	// A note (transient error / closing line) must not be clobbered by, or clobber, the parked
+	// in-place status line: on a TTY, break to a fresh row first.
+	writeNote := func(w io.Writer, line string) {
+		if tty && dirty {
+			fmt.Fprintln(stdout)
+			dirty = false
+		}
+		fmt.Fprintln(w, line)
+	}
+
 	// emit fetches + renders once. ok is true when a line was rendered; stop is true when the
 	// watch loop should END — the gateway was healthy and has now been unreachable for a few
 	// ticks, i.e. the guarded session exited and tore its in-process gateway down.
@@ -130,25 +175,18 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		if err := c.get("/debug/vars", &v); err != nil {
 			misses++
 			if sawHealthy && misses >= 3 {
-				fmt.Fprintln(stdout, "fak info: gateway closed — guarded session ended")
+				writeNote(stdout, "fak info: gateway closed — guarded session ended")
 				return false, true
 			}
-			fmt.Fprintf(stderr, "fak info: %v\n", err)
+			writeNote(stderr, fmt.Sprintf("fak info: %v", err))
 			return false, false
 		}
 		sawHealthy = true
 		misses = 0
-		fmt.Fprintf(stdout, "  %s\n", renderGuardInfoLine(v))
+		writeStatus(renderGuardInfoLine(v))
 		return true, false
 	}
 
-	// --once is a scripted one-shot: a failed fetch is an error exit, not a silent 0.
-	if once {
-		if ok, _ := emit(); !ok {
-			return 1
-		}
-		return 0
-	}
 	if _, stop := emit(); stop {
 		return 0
 	}
@@ -157,6 +195,9 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	for {
 		select {
 		case <-ctx.Done():
+			if tty && dirty {
+				fmt.Fprintln(stdout) // leave the cursor on a clean row on Ctrl-C
+			}
 			return 0
 		case <-ticker.C:
 			if _, stop := emit(); stop {
