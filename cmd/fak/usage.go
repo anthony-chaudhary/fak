@@ -425,13 +425,15 @@ func usageScorecardVerbs() {
                  'send' posts an ad-hoc message to ANY channel (token defaults to
                  FAK_SCOREBOARD_TOKEN), --text - reads the body from stdin, --dry-run previews)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
-                (the CONSOLIDATED regular-cadence report: folds the three dimensions
-                 an operator tracks  -  SCORES (scorecard control pane), WORK-DONE
-                 (git commits + '(fak ' ships over a trailing window), RELEASES
-                 (release-status)  -  into one control-pane envelope. --append-history
-                 records a dated row in docs/cadence/history.jsonl so the trend accrues
-                 across weeks; --check is advisory (non-zero only if a dimension could
-                 not be measured; the scorecard ratchet owns debt regressions))
+                (the CONSOLIDATED regular-cadence report: folds the four dimensions
+                 an operator tracks  -  SCORES (scorecard control pane), MATURITY
+                 (feature lifecycle ladder), WORK-DONE (git commits + '(fak ' ships
+                 over a trailing window), RELEASES (release-status)  -  into one
+                 control-pane envelope. --append-history records a dated row in
+                 docs/cadence/history.jsonl, including unbounded standing_score +
+                 difficulty fields, so the trend accrues across weeks; --check is
+                 advisory (non-zero only if a dimension could not be measured; the
+                 scorecard ratchet owns debt regressions))
   fak release   [status|staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|stable|stable-context]
                 (the RELEASE front door: one discoverable binary entrypoint over the
                  existing tools/release_*.py and tools/stable_release_*.py helpers.

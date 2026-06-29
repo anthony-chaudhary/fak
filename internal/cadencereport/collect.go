@@ -1,9 +1,9 @@
 package cadencereport
 
-// Live runners for `fak cadence`: the three dimensions are measured by shelling
-// to the existing Python control-pane folds (scores, releases) and to git
-// (work-done). Kept separate from the pure fold so cadencereport.go stays
-// unit-testable without a process or a repo.
+// Live runners for `fak cadence`: scores/releases are measured by shelling to
+// the existing Python control-pane folds, maturity is measured in-process, and
+// work-done is read from git. Kept separate from the pure fold so
+// cadencereport.go stays unit-testable without a process or a repo.
 
 import (
 	"context"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
 	"github.com/anthony-chaudhary/fak/internal/releasestale"
 )
 
@@ -32,7 +33,7 @@ var ScoresArgv = []string{"tools/scorecard_control_pane.py", "--json"}
 // and network-free.
 var ReleasesArgv = []string{"tools/release_status.py", "--json", "--skip-gh", "--skip-cut-plan"}
 
-// Collect measures all three dimensions live. The scores/releases members run
+// Collect measures the original live dimensions. The scores/releases members run
 // the Python folds; work is derived from git over the trailing window. A member
 // that cannot run yields an errored dimension (never a silent zero).
 func Collect(root, python string, timeout time.Duration, windowDays int) (Scores, Work, Releases) {
@@ -44,6 +45,13 @@ func Collect(root, python string, timeout time.Duration, windowDays int) (Scores
 	return InterpretScores(scoresPayload, scoresErr),
 		WorkFromGit(root, windowDays),
 		withPublishStaleness(root, InterpretReleases(releasesPayload, releasesErr))
+}
+
+// CollectMaturity measures the feature-lifecycle scorecard in-process. Unlike
+// SCORES/RELEASES it is already Go-native, so cadence can read it directly
+// without shelling through the control-pane runner.
+func CollectMaturity(root string) Maturity {
+	return MaturityFromScorecard(maturityscore.Build(maturityscore.Options{Root: root}))
 }
 
 // withPublishStaleness layers the Go-native @latest-vs-HEAD lag onto a Releases
@@ -85,7 +93,7 @@ func InterpretScoresFromFile(path string, stdin io.Reader) Scores {
 	return InterpretScores(payload, "")
 }
 
-// CollectWithScores runs the WORK-DONE (git) and RELEASES (release-status) live
+// CollectWithScores runs the WORK-DONE (git) and RELEASES (release-status)
 // dimensions but takes the SCORES dimension as a pre-interpreted value, so the
 // scorecard pane is NOT shelled when --scores-from supplied it. The default path
 // (Collect) is unchanged, so the standalone command and the weekly cadence run

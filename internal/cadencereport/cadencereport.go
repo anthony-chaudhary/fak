@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
 )
 
 // Schema is the stable control-pane schema identifier for the report envelope.
@@ -27,14 +29,39 @@ const DefaultLedgerRel = "docs/cadence/history.jsonl"
 // DefaultWindowDays is the trailing window the WORK-DONE dimension counts over.
 const DefaultWindowDays = 7
 
+const (
+	standingBase                  = 1000
+	standingHealthBPScale         = 10000
+	standingGradeDebtPerScorecard = 8
+)
+
 // Scores is the SCORES dimension, distilled from the scorecard control pane.
 type Scores struct {
 	Debt           int    `json:"debt"`
+	GradeDebt      int    `json:"grade_debt"`
 	Measured       int    `json:"measured"`
 	TrendDirection string `json:"trend_direction"`
 	TrendSummary   string `json:"trend_summary"`
 	OK             bool   `json:"ok"`
 	Err            string `json:"err,omitempty"`
+}
+
+// Maturity is the feature-lifecycle dimension distilled from `fak maturity`.
+// It makes the capability ladder visible in the regular cadence report, not just
+// as an on-demand scorecard: debt is the ratcheted ladder-skip count, while
+// score/backlog/distribution are the human/agent work-shaping signals.
+type Maturity struct {
+	Debt         int            `json:"debt"`
+	Score        int            `json:"score"`
+	Grade        string         `json:"grade"`
+	Capabilities int            `json:"capabilities"`
+	LadderSkips  int            `json:"ladder_skips"`
+	Backlog      int            `json:"backlog"`
+	Distribution map[string]int `json:"distribution,omitempty"`
+	NextLane     string         `json:"next_lane,omitempty"`
+	NextItem     string         `json:"next_item,omitempty"`
+	OK           bool           `json:"ok"`
+	Err          string         `json:"err,omitempty"`
 }
 
 // Work is the WORK-DONE dimension, derived from git over a trailing window: the
@@ -87,20 +114,41 @@ func WithPublishStaleness(r Releases, commitsBehind int, daysBehind float64, ver
 // Trend is the per-tick delta vs the previous ledger row (the durable history's
 // reason for existing: a trend across ticks, not against one pinned baseline).
 type Trend struct {
-	PrevDate         string `json:"prev_date"`
-	PrevCommit       string `json:"prev_commit"`
-	Direction        string `json:"direction"` // improved | regressed | flat | new
-	DebtFrom         int    `json:"debt_from"`
-	DebtTo           int    `json:"debt_to"`
-	DebtDelta        int    `json:"debt_delta"`
-	WorkCommitsFrom  int    `json:"work_commits_from"`
-	WorkCommitsTo    int    `json:"work_commits_to"`
-	WorkCommitsDelta int    `json:"work_commits_delta"`
-	WorkShipsFrom    int    `json:"work_ships_from"`
-	WorkShipsTo      int    `json:"work_ships_to"`
-	WorkShipsDelta   int    `json:"work_ships_delta"`
-	ShipsSince       int    `json:"ships_since"`
-	Summary          string `json:"summary"`
+	PrevDate                string `json:"prev_date"`
+	PrevCommit              string `json:"prev_commit"`
+	Direction               string `json:"direction"` // improved | regressed | flat | new
+	DebtFrom                int    `json:"debt_from"`
+	DebtTo                  int    `json:"debt_to"`
+	DebtDelta               int    `json:"debt_delta"`
+	GradeDebtFrom           int    `json:"grade_debt_from"`
+	GradeDebtTo             int    `json:"grade_debt_to"`
+	GradeDebtDelta          int    `json:"grade_debt_delta"`
+	StandingFrom            int    `json:"standing_from"`
+	StandingTo              int    `json:"standing_to"`
+	StandingDelta           int    `json:"standing_delta"`
+	StandingHealthFromBP    int    `json:"standing_health_from_bp"`
+	StandingHealthToBP      int    `json:"standing_health_to_bp"`
+	StandingHealthDeltaBP   int    `json:"standing_health_delta_bp"`
+	StandingDifficultyFrom  int    `json:"standing_difficulty_from"`
+	StandingDifficultyTo    int    `json:"standing_difficulty_to"`
+	StandingDifficultyDelta int    `json:"standing_difficulty_delta"`
+	WorkCommitsFrom         int    `json:"work_commits_from"`
+	WorkCommitsTo           int    `json:"work_commits_to"`
+	WorkCommitsDelta        int    `json:"work_commits_delta"`
+	WorkShipsFrom           int    `json:"work_ships_from"`
+	WorkShipsTo             int    `json:"work_ships_to"`
+	WorkShipsDelta          int    `json:"work_ships_delta"`
+	ShipsSince              int    `json:"ships_since"`
+	MaturityScoreFrom       int    `json:"maturity_score_from"`
+	MaturityScoreTo         int    `json:"maturity_score_to"`
+	MaturityScoreDelta      int    `json:"maturity_score_delta"`
+	MaturityDebtFrom        int    `json:"maturity_debt_from"`
+	MaturityDebtTo          int    `json:"maturity_debt_to"`
+	MaturityDebtDelta       int    `json:"maturity_debt_delta"`
+	MaturityBacklogFrom     int    `json:"maturity_backlog_from"`
+	MaturityBacklogTo       int    `json:"maturity_backlog_to"`
+	MaturityBacklogDelta    int    `json:"maturity_backlog_delta"`
+	Summary                 string `json:"summary"`
 }
 
 // Report is one folded cadence-report control-pane envelope.
@@ -116,6 +164,7 @@ type Report struct {
 	GeneratedAt string   `json:"generated_at"`
 	Date        string   `json:"date"`
 	Scores      Scores   `json:"scores"`
+	Maturity    Maturity `json:"maturity"`
 	Work        Work     `json:"work"`
 	Releases    Releases `json:"releases"`
 	Trend       *Trend   `json:"trend,omitempty"`
@@ -125,21 +174,38 @@ type Report struct {
 }
 
 // LedgerRow is one durable, append-only history line (a flattened projection of
-// the three dimensions, so the ledger is a self-describing time series).
+// the cadence dimensions, so the ledger is a self-describing time series).
 type LedgerRow struct {
-	Schema               string `json:"schema"`
-	Date                 string `json:"date"`
-	Commit               string `json:"commit"`
-	GeneratedAt          string `json:"generated_at"`
-	Verdict              string `json:"verdict"`
-	ScoresDebt           int    `json:"scores_debt"`
-	ScoresTrend          string `json:"scores_trend"`
-	WorkWindowDays       int    `json:"work_window_days"`
-	WorkCommits          int    `json:"work_commits"`
-	WorkShips            int    `json:"work_ships"`
-	ReleaseVersion       string `json:"release_version"`
-	ReleaseAction        string `json:"release_action"`
-	ReleaseCommitsBehind int    `json:"release_commits_behind,omitempty"`
+	Schema                  string `json:"schema"`
+	Date                    string `json:"date"`
+	Commit                  string `json:"commit"`
+	GeneratedAt             string `json:"generated_at"`
+	Verdict                 string `json:"verdict"`
+	ScoresDebt              int    `json:"scores_debt"`
+	ScoresGradeDebt         int    `json:"scores_grade_debt,omitempty"`
+	ScoresMeasured          int    `json:"scores_measured,omitempty"`
+	ScoresTrend             string `json:"scores_trend"`
+	StandingScore           int    `json:"standing_score,omitempty"`
+	StandingDelta           int    `json:"standing_delta,omitempty"`
+	StandingHealthBP        int    `json:"standing_health_bp,omitempty"`
+	StandingDifficulty      int    `json:"standing_difficulty,omitempty"`
+	StandingDifficultyDelta int    `json:"standing_difficulty_delta,omitempty"`
+	MaturityDebt            int    `json:"maturity_debt"`
+	MaturityScore           int    `json:"maturity_score"`
+	MaturityGrade           string `json:"maturity_grade,omitempty"`
+	MaturityBacklog         int    `json:"maturity_backlog"`
+	MaturityCapabilities    int    `json:"maturity_capabilities"`
+	MaturityProposed        int    `json:"maturity_proposed"`
+	MaturityPrototyped      int    `json:"maturity_prototyped"`
+	MaturityTested          int    `json:"maturity_tested"`
+	MaturityDogfooded       int    `json:"maturity_dogfooded"`
+	MaturityDefault         int    `json:"maturity_default"`
+	WorkWindowDays          int    `json:"work_window_days"`
+	WorkCommits             int    `json:"work_commits"`
+	WorkShips               int    `json:"work_ships"`
+	ReleaseVersion          string `json:"release_version"`
+	ReleaseAction           string `json:"release_action"`
+	ReleaseCommitsBehind    int    `json:"release_commits_behind,omitempty"`
 }
 
 // --- pure interpretation of the sub-tool payloads --------------------------
@@ -154,8 +220,12 @@ func InterpretScores(payload map[string]any, runErr string) Scores {
 	}
 	s := Scores{
 		Debt:           asInt(payload["total_debt"]),
+		GradeDebt:      asInt(payload["grade_debt"]),
 		Measured:       asInt(payload["measured"]),
 		TrendDirection: "unknown",
+	}
+	if _, ok := payload["grade_debt"]; !ok && s.Debt > 0 && s.Measured > 0 {
+		s.GradeDebt = minInt(s.Debt, s.Measured*standingGradeDebtPerScorecard)
 	}
 	if tr, ok := payload["trend"].(map[string]any); ok {
 		s.TrendDirection = asString(tr["direction"])
@@ -172,6 +242,28 @@ func InterpretScores(payload map[string]any, runErr string) Scores {
 	// SCORES is healthy when the ratchet did not regress (debt may hold or fall).
 	s.OK = s.Err == "" && s.TrendDirection != "regressed"
 	return s
+}
+
+// MaturityFromScorecard distills the Go-native maturity scorecard payload into
+// the cadence dimension. It accepts the typed payload so the live path does not
+// JSON round-trip just to read corpus fields.
+func MaturityFromScorecard(payload maturityscore.ScorecardPayload) Maturity {
+	c := payload.Corpus
+	m := Maturity{
+		Debt:         asInt(c["maturity_debt"]),
+		Score:        asInt(c["score"]),
+		Grade:        asString(c["grade"]),
+		Capabilities: asInt(c["capabilities"]),
+		LadderSkips:  asInt(c["ladder_skips"]),
+		Backlog:      asInt(c["backlog"]),
+		Distribution: asIntMap(c["distribution"]),
+		OK:           payload.OK,
+	}
+	if len(payload.Backlog) > 0 {
+		m.NextLane = payload.Backlog[0].Lane
+		m.NextItem = payload.Backlog[0].Title
+	}
+	return m
 }
 
 // InterpretReleases distills a release_status.py --json payload into the
@@ -206,7 +298,9 @@ func InterpretReleases(payload map[string]any, runErr string) Releases {
 
 // --- the fold --------------------------------------------------------------
 
-// Fold folds the three dimensions into one cadence-report control-pane envelope.
+// Fold folds the original three dimensions into one cadence-report control-pane
+// envelope. Production uses FoldWithMaturity so the maturity dimension is also
+// visible; this wrapper keeps older pure tests and callers stable.
 //
 // The verdict ladder is deliberately a REPORT contract, not a second quality
 // gate: the scorecard ratchet (ci.yml) already gates debt regressions, so the
@@ -215,6 +309,13 @@ func InterpretReleases(payload map[string]any, runErr string) Releases {
 // otherwise, surfacing a regressed score or a pending release as an advisory
 // line in the reason. This mirrors fresh_status's advisory contract.
 func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
+	return FoldWithMaturity(scores, Maturity{}, work, releases, opts)
+}
+
+// FoldWithMaturity folds the cadence dimensions into one report, including the
+// feature-maturity ladder. The no-maturity Fold wrapper is kept for older tests
+// and callers that only exercise the original three-dimension fold.
+func FoldWithMaturity(scores Scores, maturity Maturity, work Work, releases Releases, opts FoldOpts) Report {
 	r := Report{
 		Schema:      Schema,
 		Workspace:   opts.Workspace,
@@ -222,6 +323,7 @@ func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
 		GeneratedAt: opts.GeneratedAt,
 		Date:        opts.Date,
 		Scores:      scores,
+		Maturity:    maturity,
 		Work:        work,
 		Releases:    releases,
 	}
@@ -229,6 +331,9 @@ func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
 	var unmeasured []string
 	if scores.Err != "" {
 		unmeasured = append(unmeasured, "scores ("+scores.Err+")")
+	}
+	if maturity.Err != "" {
+		unmeasured = append(unmeasured, "maturity ("+maturity.Err+")")
 	}
 	if work.Err != "" {
 		unmeasured = append(unmeasured, "work ("+work.Err+")")
@@ -238,6 +343,7 @@ func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
 	}
 
 	scoreLine := fmt.Sprintf("scores: debt %d (%s)", scores.Debt, scores.TrendDirection)
+	maturityLine := fmt.Sprintf("maturity: index %d/100, debt %d, backlog %d", maturity.Score, maturity.Debt, maturity.Backlog)
 	workLine := fmt.Sprintf("work: %d commit(s)/%d ship(s) in %dd", work.Commits, work.Ships, work.WindowDays)
 	relLine := fmt.Sprintf("releases: %s -> %s", releases.Version, releases.ActionKind)
 	if releases.CommitsBehind > 0 {
@@ -247,7 +353,7 @@ func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
 		}
 		relLine += ")"
 	}
-	summary := strings.Join([]string{scoreLine, workLine, relLine}, "; ")
+	summary := strings.Join([]string{scoreLine, maturityLine, workLine, relLine}, "; ")
 
 	switch {
 	case len(unmeasured) > 0:
@@ -258,10 +364,14 @@ func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
 		r.OK, r.Verdict, r.Finding = true, "OK", "cadence_advisory"
 		r.Reason = "cadence recorded; " + summary + " (advisory: score debt regressed — the scorecard ratchet owns that gate)"
 		r.NextAction = "retire the regressed scorecard worst-first; the cadence tick keeps recording the trend"
+	case maturity.Debt > 0:
+		r.OK, r.Verdict, r.Finding = true, "OK", "cadence_advisory"
+		r.Reason = "cadence recorded; " + summary + " (advisory: maturity ladder-skip debt exists — the scorecard ratchet owns that gate)"
+		r.NextAction = "run `fak maturity next` and retire ladder-skips first; the cadence tick keeps recording the trend"
 	default:
 		r.OK, r.Verdict, r.Finding = true, "OK", "cadence_recorded"
 		r.Reason = "cadence recorded; " + summary
-		r.NextAction = "hold the line; the scheduled cadence tick keeps scores/work/releases trended"
+		r.NextAction = "hold the line; the scheduled cadence tick keeps scores/maturity/work/releases trended"
 	}
 	return r
 }
@@ -276,6 +386,7 @@ type FoldOpts struct {
 
 // RowFromReport projects a folded report into one durable ledger row.
 func RowFromReport(r Report) LedgerRow {
+	dist := r.Maturity.Distribution
 	return LedgerRow{
 		Schema:               LedgerSchema,
 		Date:                 r.Date,
@@ -283,7 +394,19 @@ func RowFromReport(r Report) LedgerRow {
 		GeneratedAt:          r.GeneratedAt,
 		Verdict:              r.Verdict,
 		ScoresDebt:           r.Scores.Debt,
+		ScoresGradeDebt:      r.Scores.GradeDebt,
+		ScoresMeasured:       r.Scores.Measured,
 		ScoresTrend:          r.Scores.TrendDirection,
+		MaturityDebt:         r.Maturity.Debt,
+		MaturityScore:        r.Maturity.Score,
+		MaturityGrade:        r.Maturity.Grade,
+		MaturityBacklog:      r.Maturity.Backlog,
+		MaturityCapabilities: r.Maturity.Capabilities,
+		MaturityProposed:     dist["proposed"],
+		MaturityPrototyped:   dist["prototyped"],
+		MaturityTested:       dist["tested"],
+		MaturityDogfooded:    dist["dogfooded"],
+		MaturityDefault:      dist["default"],
 		WorkWindowDays:       r.Work.WindowDays,
 		WorkCommits:          r.Work.Commits,
 		WorkShips:            r.Work.Ships,
@@ -291,6 +414,72 @@ func RowFromReport(r Report) LedgerRow {
 		ReleaseAction:        r.Releases.ActionKind,
 		ReleaseCommitsBehind: r.Releases.CommitsBehind,
 	}
+}
+
+// ProjectStanding adds the durable, unbounded standing fields to a ledger row.
+// The raw scorecards still use bounded local scores (usually 0..100), but the
+// cadence ledger needs a value that can keep climbing or fall across ticks. The
+// formula first normalizes the current row into a 0..10000 health reading so a
+// harder tick (more scorecards or more maturity capabilities) is visible as
+// difficulty rather than as an eyeballed "100". Only the delta in normalized
+// health moves standing; the starting point is an arbitrary 1000-base index.
+func ProjectStanding(row LedgerRow, prior []LedgerRow) LedgerRow {
+	row.StandingHealthBP, row.StandingDifficulty = standingHealthBP(row)
+	last, ok := latestBefore(row, prior)
+	if !ok {
+		row.StandingScore = standingBase
+		return row
+	}
+	lastHealth, lastDifficulty := last.StandingHealthBP, last.StandingDifficulty
+	if lastHealth == 0 && lastDifficulty == 0 {
+		lastHealth, lastDifficulty = standingHealthBP(last)
+	}
+	row.StandingDifficultyDelta = row.StandingDifficulty - lastDifficulty
+	if last.StandingScore == 0 {
+		row.StandingScore = standingBase
+		return row
+	}
+	row.StandingDelta = standingPointDelta(row.StandingHealthBP - lastHealth)
+	row.StandingScore = last.StandingScore + row.StandingDelta
+	return row
+}
+
+func standingHealthBP(row LedgerRow) (healthBP int, difficulty int) {
+	var components []int
+	if row.ScoresMeasured > 0 {
+		capacity := row.ScoresMeasured * standingGradeDebtPerScorecard
+		gradeDebt := row.ScoresGradeDebt
+		if gradeDebt == 0 && row.ScoresDebt > 0 {
+			gradeDebt = minInt(row.ScoresDebt, capacity)
+		}
+		gradeDebt = clampInt(gradeDebt, 0, capacity)
+		components = append(components, standingHealthBPScale-(gradeDebt*standingHealthBPScale)/capacity)
+		difficulty += capacity
+	}
+	if row.MaturityCapabilities > 0 || row.MaturityScore > 0 {
+		score := clampInt(row.MaturityScore, 0, 100)
+		components = append(components, score*100)
+		if row.MaturityCapabilities > 0 {
+			difficulty += row.MaturityCapabilities
+		} else {
+			difficulty++
+		}
+	}
+	if len(components) == 0 {
+		return 0, 0
+	}
+	total := 0
+	for _, c := range components {
+		total += c
+	}
+	return (total + len(components)/2) / len(components), difficulty
+}
+
+func standingPointDelta(healthDeltaBP int) int {
+	if healthDeltaBP >= 0 {
+		return (healthDeltaBP + 50) / 100
+	}
+	return -((-healthDeltaBP + 50) / 100)
 }
 
 // --- the durable history ledger --------------------------------------------
@@ -323,46 +512,114 @@ func ParseLedger(content string) []LedgerRow {
 // row in `prior` (the rows already on the ledger). With no prior row the trend
 // is "new" (the first tick establishes the series).
 func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
+	if row.StandingScore == 0 {
+		row = ProjectStanding(row, prior)
+	}
 	last, ok := latestBefore(row, prior)
 	if !ok {
 		return Trend{
-			Direction:     "new",
-			DebtTo:        row.ScoresDebt,
-			WorkCommitsTo: row.WorkCommits,
-			WorkShipsTo:   row.WorkShips,
-			ShipsSince:    row.WorkShips,
-			Summary:       fmt.Sprintf("first cadence tick (debt %d, %d ship(s) in %dd)", row.ScoresDebt, row.WorkShips, row.WorkWindowDays),
+			Direction:            "new",
+			DebtTo:               row.ScoresDebt,
+			GradeDebtTo:          row.ScoresGradeDebt,
+			StandingTo:           row.StandingScore,
+			StandingHealthToBP:   row.StandingHealthBP,
+			StandingDifficultyTo: row.StandingDifficulty,
+			WorkCommitsTo:        row.WorkCommits,
+			WorkShipsTo:          row.WorkShips,
+			ShipsSince:           row.WorkShips,
+			MaturityScoreTo:      row.MaturityScore,
+			MaturityDebtTo:       row.MaturityDebt,
+			MaturityBacklogTo:    row.MaturityBacklog,
+			Summary: fmt.Sprintf("first cadence tick (standing %d, health %s, difficulty %d; debt %d, maturity %d/100 with %d backlog item(s), %d ship(s) in %dd)",
+				row.StandingScore, formatBP(row.StandingHealthBP), row.StandingDifficulty,
+				row.ScoresDebt, row.MaturityScore, row.MaturityBacklog, row.WorkShips, row.WorkWindowDays),
 		}
 	}
 	debtDelta := row.ScoresDebt - last.ScoresDebt
+	gradeDebtDelta := row.ScoresGradeDebt - last.ScoresGradeDebt
 	workCommitsDelta := row.WorkCommits - last.WorkCommits
 	workShipsDelta := row.WorkShips - last.WorkShips
-	dir := "flat"
-	if debtDelta < 0 {
-		dir = "improved"
-	} else if debtDelta > 0 {
-		dir = "regressed"
+	maturityScoreDelta := row.MaturityScore - last.MaturityScore
+	maturityDebtDelta := row.MaturityDebt - last.MaturityDebt
+	maturityBacklogDelta := row.MaturityBacklog - last.MaturityBacklog
+	standingDelta := row.StandingDelta
+	if row.StandingScore != 0 && last.StandingScore != 0 {
+		standingDelta = row.StandingScore - last.StandingScore
+	}
+	standingHealthDelta := row.StandingHealthBP - last.StandingHealthBP
+	standingDifficultyDelta := row.StandingDifficulty - last.StandingDifficulty
+	standingComparable := last.StandingScore != 0 && row.StandingScore != 0
+	dir := trendDirection(debtDelta, standingDelta, standingComparable)
+	summary := fmt.Sprintf("debt %s %+d (%d->%d); maturity score %+d (%d->%d), debt %+d (%d->%d), backlog %+d (%d->%d); work %s %+d commit(s) (%d->%d), %s %+d ship(s) (%d->%d) vs %s; %d ship(s) in the last %dd",
+		dir, debtDelta, last.ScoresDebt, row.ScoresDebt,
+		maturityScoreDelta, last.MaturityScore, row.MaturityScore,
+		maturityDebtDelta, last.MaturityDebt, row.MaturityDebt,
+		maturityBacklogDelta, last.MaturityBacklog, row.MaturityBacklog,
+		directionWord(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,
+		directionWord(workShipsDelta), workShipsDelta, last.WorkShips, row.WorkShips,
+		last.Date, row.WorkShips, row.WorkWindowDays)
+	if standingComparable {
+		summary = fmt.Sprintf("standing %+d (%d->%d; health %s->%s; difficulty %+d, %d->%d); ",
+			standingDelta, last.StandingScore, row.StandingScore,
+			formatBP(last.StandingHealthBP), formatBP(row.StandingHealthBP),
+			standingDifficultyDelta, last.StandingDifficulty, row.StandingDifficulty) + summary
 	}
 	return Trend{
-		PrevDate:         last.Date,
-		PrevCommit:       last.Commit,
-		Direction:        dir,
-		DebtFrom:         last.ScoresDebt,
-		DebtTo:           row.ScoresDebt,
-		DebtDelta:        debtDelta,
-		WorkCommitsFrom:  last.WorkCommits,
-		WorkCommitsTo:    row.WorkCommits,
-		WorkCommitsDelta: workCommitsDelta,
-		WorkShipsFrom:    last.WorkShips,
-		WorkShipsTo:      row.WorkShips,
-		WorkShipsDelta:   workShipsDelta,
-		ShipsSince:       row.WorkShips,
-		Summary: fmt.Sprintf("debt %s %+d (%d->%d); work %s %+d commit(s) (%d->%d), %s %+d ship(s) (%d->%d) vs %s; %d ship(s) in the last %dd",
-			dir, debtDelta, last.ScoresDebt, row.ScoresDebt,
-			directionWord(workCommitsDelta), workCommitsDelta, last.WorkCommits, row.WorkCommits,
-			directionWord(workShipsDelta), workShipsDelta, last.WorkShips, row.WorkShips,
-			last.Date, row.WorkShips, row.WorkWindowDays),
+		PrevDate:                last.Date,
+		PrevCommit:              last.Commit,
+		Direction:               dir,
+		DebtFrom:                last.ScoresDebt,
+		DebtTo:                  row.ScoresDebt,
+		DebtDelta:               debtDelta,
+		GradeDebtFrom:           last.ScoresGradeDebt,
+		GradeDebtTo:             row.ScoresGradeDebt,
+		GradeDebtDelta:          gradeDebtDelta,
+		StandingFrom:            last.StandingScore,
+		StandingTo:              row.StandingScore,
+		StandingDelta:           standingDelta,
+		StandingHealthFromBP:    last.StandingHealthBP,
+		StandingHealthToBP:      row.StandingHealthBP,
+		StandingHealthDeltaBP:   standingHealthDelta,
+		StandingDifficultyFrom:  last.StandingDifficulty,
+		StandingDifficultyTo:    row.StandingDifficulty,
+		StandingDifficultyDelta: standingDifficultyDelta,
+		WorkCommitsFrom:         last.WorkCommits,
+		WorkCommitsTo:           row.WorkCommits,
+		WorkCommitsDelta:        workCommitsDelta,
+		WorkShipsFrom:           last.WorkShips,
+		WorkShipsTo:             row.WorkShips,
+		WorkShipsDelta:          workShipsDelta,
+		ShipsSince:              row.WorkShips,
+		MaturityScoreFrom:       last.MaturityScore,
+		MaturityScoreTo:         row.MaturityScore,
+		MaturityScoreDelta:      maturityScoreDelta,
+		MaturityDebtFrom:        last.MaturityDebt,
+		MaturityDebtTo:          row.MaturityDebt,
+		MaturityDebtDelta:       maturityDebtDelta,
+		MaturityBacklogFrom:     last.MaturityBacklog,
+		MaturityBacklogTo:       row.MaturityBacklog,
+		MaturityBacklogDelta:    maturityBacklogDelta,
+		Summary:                 summary,
 	}
+}
+
+func trendDirection(debtDelta, standingDelta int, standingComparable bool) string {
+	if standingComparable {
+		if standingDelta > 0 {
+			return "improved"
+		}
+		if standingDelta < 0 {
+			return "regressed"
+		}
+		return "flat"
+	}
+	if debtDelta < 0 {
+		return "improved"
+	}
+	if debtDelta > 0 {
+		return "regressed"
+	}
+	return "flat"
 }
 
 // directionWord renders the sign of a per-tick delta as a trend word
@@ -428,8 +685,11 @@ func Render(r Report) string {
 	lines := []string{
 		fmt.Sprintf("cadence report — %s (%s)  @%s  %s", r.Verdict, r.Finding, r.Commit, r.Date),
 		"",
-		fmt.Sprintf("  %s scores      debt %d across %d scorecard(s); trend %s",
-			mark(r.Scores.OK, r.Scores.Err), r.Scores.Debt, r.Scores.Measured, dashIfEmpty(r.Scores.TrendSummary)),
+		fmt.Sprintf("  %s scores      debt %d; grade-debt %d across %d scorecard(s); trend %s",
+			mark(r.Scores.OK, r.Scores.Err), r.Scores.Debt, r.Scores.GradeDebt, r.Scores.Measured, dashIfEmpty(r.Scores.TrendSummary)),
+		fmt.Sprintf("  %s maturity    index %d/100 [%s]; debt %d; backlog %d%s",
+			mark(r.Maturity.OK, r.Maturity.Err), r.Maturity.Score, dashIfEmpty(r.Maturity.Grade),
+			r.Maturity.Debt, r.Maturity.Backlog, maturityNextSuffix(r.Maturity)),
 		fmt.Sprintf("  %s work        %d commit(s) / %d ship(s) in the last %dd",
 			mark(r.Work.Err == "", r.Work.Err), r.Work.Commits, r.Work.Ships, r.Work.WindowDays),
 		fmt.Sprintf("  %s releases    %s%s; next: %s — %s",
@@ -448,6 +708,11 @@ func Render(r Report) string {
 		lines = append(lines, "      by lane: "+strings.Join(parts, ", "))
 	}
 	if r.Trend != nil {
+		if r.Trend.StandingTo != 0 {
+			lines = append(lines, fmt.Sprintf("  standing   score %d (%+d); health %s; difficulty %d (%+d)",
+				r.Trend.StandingTo, r.Trend.StandingDelta, formatBP(r.Trend.StandingHealthToBP),
+				r.Trend.StandingDifficultyTo, r.Trend.StandingDifficultyDelta))
+		}
 		lines = append(lines, "", "  trend: "+r.Trend.Summary)
 	}
 	lines = append(lines, "", "  -> "+r.NextAction)
@@ -465,6 +730,13 @@ func publishLagSuffix(r Releases) string {
 		suffix += ", " + r.PublishVerdict
 	}
 	return suffix + "]"
+}
+
+func maturityNextSuffix(m Maturity) string {
+	if m.NextLane == "" || m.NextItem == "" {
+		return ""
+	}
+	return "; next " + m.NextLane + ": " + m.NextItem
 }
 
 // CheckGate is the advisory CI gate over a folded report (pure: exit code +
@@ -543,4 +815,40 @@ func asInt(v any) int {
 	default:
 		return 0
 	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func clampInt(n, lo, hi int) int {
+	if n < lo {
+		return lo
+	}
+	if n > hi {
+		return hi
+	}
+	return n
+}
+
+func formatBP(bp int) string {
+	return fmt.Sprintf("%.1f%%", float64(bp)/100)
+}
+
+func asIntMap(v any) map[string]int {
+	out := map[string]int{}
+	switch m := v.(type) {
+	case map[string]int:
+		for k, n := range m {
+			out[k] = n
+		}
+	case map[string]any:
+		for k, n := range m {
+			out[k] = asInt(n)
+		}
+	}
+	return out
 }

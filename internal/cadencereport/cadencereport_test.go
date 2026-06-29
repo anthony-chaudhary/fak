@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
 )
 
 // jsonMap unmarshals a JSON literal into the map[string]any shape the live
@@ -28,6 +30,9 @@ func TestInterpretScores(t *testing.T) {
 	if good.Debt != 40 || good.Measured != 13 {
 		t.Fatalf("debt/measured = %d/%d, want 40/13", good.Debt, good.Measured)
 	}
+	if good.GradeDebt != 40 {
+		t.Fatalf("grade debt fallback = %d, want 40 for legacy payload", good.GradeDebt)
+	}
 	if good.TrendDirection != "improved" || !strings.Contains(good.TrendSummary, "was 44") {
 		t.Fatalf("trend = %q / %q", good.TrendDirection, good.TrendSummary)
 	}
@@ -48,6 +53,11 @@ func TestInterpretScores(t *testing.T) {
 	failed := InterpretScores(nil, "timed out after 300s")
 	if failed.Err != "timed out after 300s" || failed.TrendDirection != "unknown" {
 		t.Fatalf("failed run = %+v", failed)
+	}
+
+	withSeverity := InterpretScores(jsonMap(t, `{"total_debt": 500, "grade_debt": 7, "measured": 20, "errored": 0, "trend": {"direction": "flat"}}`), "")
+	if withSeverity.GradeDebt != 7 {
+		t.Fatalf("grade_debt should come from payload when present, got %d", withSeverity.GradeDebt)
 	}
 }
 
@@ -154,8 +164,50 @@ func TestWithPublishStalenessIsInformationalAndSurfaced(t *testing.T) {
 	}
 }
 
+func TestMaturityFromScorecard(t *testing.T) {
+	got := MaturityFromScorecard(maturityscore.ScorecardPayload{
+		OK: true,
+		Corpus: map[string]any{
+			"maturity_debt": 0,
+			"score":         81,
+			"grade":         "B",
+			"capabilities":  12,
+			"ladder_skips":  0,
+			"backlog":       3,
+			"distribution": map[string]int{
+				"tested":    5,
+				"dogfooded": 7,
+			},
+		},
+		Backlog: []maturityscore.NextWork{{Lane: "alpha", Title: "dogfood alpha: wire it into fak"}},
+	})
+	if got.Score != 81 || got.Grade != "B" || got.Backlog != 3 || got.NextLane != "alpha" ||
+		got.Distribution["dogfooded"] != 7 || !got.OK {
+		t.Fatalf("maturity projection = %+v", got)
+	}
+}
+
 func okScores() Scores {
 	return Scores{Debt: 40, Measured: 13, TrendDirection: "improved", TrendSummary: "improved -4", OK: true}
+}
+func okMaturity() Maturity {
+	return Maturity{
+		Debt:         0,
+		Score:        78,
+		Grade:        "C",
+		Capabilities: 111,
+		Backlog:      88,
+		Distribution: map[string]int{
+			"proposed":   1,
+			"prototyped": 0,
+			"tested":     18,
+			"dogfooded":  56,
+			"default":    36,
+		},
+		NextLane: "dgxbridge",
+		NextItem: "prototype dgxbridge: land a v1 in internal/dgxbridge",
+		OK:       true,
+	}
 }
 func okWork() Work { return Work{WindowDays: 7, Commits: 23, Ships: 18} }
 func okReleases() Releases {
@@ -195,6 +247,23 @@ func TestFoldScoreRegressionIsAdvisoryNotGate(t *testing.T) {
 	}
 }
 
+func TestFoldMaturityDebtIsAdvisoryNotGate(t *testing.T) {
+	m := okMaturity()
+	m.Debt = 2
+	m.LadderSkips = 2
+	m.OK = false
+	r := FoldWithMaturity(okScores(), m, okWork(), okReleases(), foldOpts())
+	if !r.OK || r.Finding != "cadence_advisory" {
+		t.Fatalf("maturity debt should be advisory-OK, got ok=%v finding=%q", r.OK, r.Finding)
+	}
+	if !strings.Contains(r.Reason, "maturity ladder-skip debt") {
+		t.Fatalf("reason should surface maturity advisory, got %q", r.Reason)
+	}
+	if code, _ := CheckGate(r); code != 0 {
+		t.Fatalf("maturity advisory must not fail --check, got exit %d", code)
+	}
+}
+
 func TestFoldUnmeasuredGates(t *testing.T) {
 	w := okWork()
 	w.Err = "git rev-list failed: not a repo"
@@ -205,6 +274,18 @@ func TestFoldUnmeasuredGates(t *testing.T) {
 	code, msg := CheckGate(r)
 	if code != 1 || !strings.Contains(msg, "INCOMPLETE") {
 		t.Fatalf("CheckGate over unmeasured = %d %q", code, msg)
+	}
+}
+
+func TestFoldUnmeasuredMaturityGates(t *testing.T) {
+	m := okMaturity()
+	m.Err = "maturity read failed"
+	r := FoldWithMaturity(okScores(), m, okWork(), okReleases(), foldOpts())
+	if r.OK || r.Verdict != "ACTION" || r.Finding != "cadence_unmeasured" {
+		t.Fatalf("unmeasured maturity must gate, got ok=%v verdict=%q finding=%q", r.OK, r.Verdict, r.Finding)
+	}
+	if !strings.Contains(r.Reason, "maturity") {
+		t.Fatalf("reason should name maturity, got %q", r.Reason)
 	}
 }
 
@@ -258,6 +339,101 @@ func TestTrendVsLast(t *testing.T) {
 	}
 }
 
+func TestStandingNormalizesDifficultyChange(t *testing.T) {
+	prior := ProjectStanding(LedgerRow{
+		Date:                 "2026-06-20",
+		Commit:               "a",
+		GeneratedAt:          "2026-06-20T00:00:00Z",
+		ScoresDebt:           10,
+		ScoresGradeDebt:      10,
+		ScoresMeasured:       10,
+		MaturityScore:        80,
+		MaturityCapabilities: 10,
+		WorkCommits:          20,
+		WorkShips:            15,
+	}, nil)
+	row := ProjectStanding(LedgerRow{
+		Date:                 "2026-06-26",
+		Commit:               "b",
+		GeneratedAt:          "2026-06-26T00:00:00Z",
+		ScoresDebt:           20,
+		ScoresGradeDebt:      20,
+		ScoresMeasured:       20,
+		MaturityScore:        80,
+		MaturityCapabilities: 10,
+		WorkCommits:          25,
+		WorkShips:            18,
+	}, []LedgerRow{prior})
+
+	tr := TrendVsLast(row, []LedgerRow{prior})
+	if tr.DebtDelta != 10 {
+		t.Fatalf("raw debt delta = %d, want +10 to prove difficulty changed", tr.DebtDelta)
+	}
+	if tr.Direction != "flat" || tr.StandingDelta != 0 || row.StandingScore != prior.StandingScore {
+		t.Fatalf("standing should stay flat under equal normalized health: row=%+v trend=%+v prior=%+v", row, tr, prior)
+	}
+	if tr.StandingDifficultyDelta <= 0 {
+		t.Fatalf("difficulty should record the harder tick, got %+d", tr.StandingDifficultyDelta)
+	}
+}
+
+func TestStandingCanClimbAndFall(t *testing.T) {
+	base := ProjectStanding(LedgerRow{
+		Date:                 "2026-06-20",
+		GeneratedAt:          "2026-06-20T00:00:00Z",
+		ScoresDebt:           20,
+		ScoresGradeDebt:      20,
+		ScoresMeasured:       10,
+		MaturityScore:        75,
+		MaturityCapabilities: 10,
+	}, nil)
+	better := ProjectStanding(LedgerRow{
+		Date:                 "2026-06-21",
+		GeneratedAt:          "2026-06-21T00:00:00Z",
+		ScoresDebt:           12,
+		ScoresGradeDebt:      12,
+		ScoresMeasured:       10,
+		MaturityScore:        85,
+		MaturityCapabilities: 10,
+	}, []LedgerRow{base})
+	if better.StandingScore <= base.StandingScore || better.StandingDelta <= 0 {
+		t.Fatalf("standing did not climb: base=%+v better=%+v", base, better)
+	}
+	up := TrendVsLast(better, []LedgerRow{base})
+	if up.Direction != "improved" {
+		t.Fatalf("up trend = %+v, want improved", up)
+	}
+
+	worse := ProjectStanding(LedgerRow{
+		Date:                 "2026-06-22",
+		GeneratedAt:          "2026-06-22T00:00:00Z",
+		ScoresDebt:           28,
+		ScoresGradeDebt:      28,
+		ScoresMeasured:       10,
+		MaturityScore:        65,
+		MaturityCapabilities: 10,
+	}, []LedgerRow{better})
+	if worse.StandingScore >= better.StandingScore || worse.StandingDelta >= 0 {
+		t.Fatalf("standing did not fall: better=%+v worse=%+v", better, worse)
+	}
+	down := TrendVsLast(worse, []LedgerRow{better})
+	if down.Direction != "regressed" {
+		t.Fatalf("down trend = %+v, want regressed", down)
+	}
+}
+
+func TestTrendCarriesMaturityDeltas(t *testing.T) {
+	prior := []LedgerRow{{Date: "2026-06-25", ScoresDebt: 40, MaturityScore: 70, MaturityDebt: 1, MaturityBacklog: 10, GeneratedAt: "2026-06-25T00:00:00Z"}}
+	row := LedgerRow{Date: "2026-06-26", ScoresDebt: 40, MaturityScore: 78, MaturityDebt: 0, MaturityBacklog: 8, GeneratedAt: "2026-06-26T00:00:00Z"}
+	tr := TrendVsLast(row, prior)
+	if tr.MaturityScoreDelta != 8 || tr.MaturityDebtDelta != -1 || tr.MaturityBacklogDelta != -2 {
+		t.Fatalf("maturity deltas wrong: %+v", tr)
+	}
+	if !strings.Contains(tr.Summary, "maturity score +8") {
+		t.Fatalf("trend summary should surface maturity delta, got %q", tr.Summary)
+	}
+}
+
 func TestTrendExcludesSameGeneratedAt(t *testing.T) {
 	// An idempotent re-append (same generated_at) must not trend against itself.
 	prior := []LedgerRow{
@@ -272,9 +448,10 @@ func TestTrendExcludesSameGeneratedAt(t *testing.T) {
 }
 
 func TestRowFromReportRoundTrip(t *testing.T) {
-	r := Fold(okScores(), okWork(), okReleases(), foldOpts())
+	r := FoldWithMaturity(okScores(), okMaturity(), okWork(), okReleases(), foldOpts())
 	row := RowFromReport(r)
 	if row.Schema != LedgerSchema || row.Date != "2026-06-26" || row.ScoresDebt != 40 ||
+		row.MaturityScore != 78 || row.MaturityBacklog != 88 || row.MaturityTested != 18 ||
 		row.WorkCommits != 23 || row.WorkShips != 18 || row.ReleaseVersion != "v1.2.3" || row.ReleaseAction != "wait" {
 		t.Fatalf("row projection = %+v", row)
 	}
@@ -286,7 +463,7 @@ func TestRowFromReportRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &back); err != nil {
 		t.Fatalf("ledger line not valid JSON: %v", err)
 	}
-	if back.ScoresDebt != 40 || back.ScoresTrend != "improved" {
+	if back.ScoresDebt != 40 || back.ScoresTrend != "improved" || back.MaturityDefault != 36 {
 		t.Fatalf("round-trip lost fields: %+v", back)
 	}
 }
@@ -344,11 +521,11 @@ func TestShipsBySubjects(t *testing.T) {
 }
 
 func TestRenderSmoke(t *testing.T) {
-	r := Fold(okScores(), okWork(), okReleases(), foldOpts())
+	r := FoldWithMaturity(okScores(), okMaturity(), okWork(), okReleases(), foldOpts())
 	tr := TrendVsLast(RowFromReport(r), []LedgerRow{{Date: "2026-06-20", ScoresDebt: 44, GeneratedAt: "2026-06-20T00:00:00Z"}})
 	r.Trend = &tr
 	out := Render(r)
-	for _, want := range []string{"cadence report", "scores", "work", "releases", "trend:", "->"} {
+	for _, want := range []string{"cadence report", "scores", "maturity", "work", "releases", "trend:", "->"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q:\n%s", want, out)
 		}

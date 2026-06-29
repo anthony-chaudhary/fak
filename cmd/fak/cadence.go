@@ -1,9 +1,10 @@
 package main
 
 // fak cadence -- the consolidated regular-cadence report: one read-only fold
-// over the three dimensions an operator tracks on a cadence -- SCORES (the
-// scorecard control pane), WORK-DONE (git commits + `(fak ` ships over a
-// trailing window), and RELEASES (the release-status fold) -- into one
+// over the four dimensions an operator tracks on a cadence -- SCORES (the
+// scorecard control pane), MATURITY (the feature lifecycle ladder), WORK-DONE
+// (git commits + `(fak ` ships over a trailing window), and RELEASES
+// (the release-status fold) -- into one
 // schema/ok/verdict/finding/reason/next_action envelope. With --append-history it
 // also appends a dated row to the durable JSONL ledger
 // (docs/cadence/history.jsonl) so the cadence is trended across weeks, not just a
@@ -62,6 +63,7 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	commit := cadencereport.HeadCommit(root)
 
 	var scores cadencereport.Scores
+	var maturity cadencereport.Maturity
 	var work cadencereport.Work
 	var releases cadencereport.Releases
 	if *scoresFrom != "" {
@@ -71,7 +73,8 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		scores, work, releases = cadencereport.Collect(root, "", time.Duration(*timeout)*time.Second, *window)
 	}
-	report := cadencereport.Fold(scores, work, releases, cadencereport.FoldOpts{
+	maturity = cadencereport.CollectMaturity(root)
+	report := cadencereport.FoldWithMaturity(scores, maturity, work, releases, cadencereport.FoldOpts{
 		Workspace:   root,
 		Commit:      commit,
 		GeneratedAt: now.Format(time.RFC3339),
@@ -86,6 +89,7 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	}
 	row := cadencereport.RowFromReport(report)
 	prior := readLedgerRows(ledgerPath)
+	row = cadencereport.ProjectStanding(row, prior)
 	trend := cadencereport.TrendVsLast(row, prior)
 	report.Trend = &trend
 	if *appendHistory {
