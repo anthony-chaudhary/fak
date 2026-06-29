@@ -1,0 +1,40 @@
+#!/bin/sh
+# fleet marketing trigger  --  the instant, event-exact half of the completion-driven
+# marketing subsystem (internal/marketing).
+#
+# When a ship-stamped commit lands on the trunk, fire one idempotent `fak marketing tick`
+# so the witnessed feature shows up in #marketing (and, via `fak marketing aeo`, the AEO
+# recency surface) the moment it ships — without waiting for the serve bgloop's interval.
+# The tick reads the high-water mark and only posts genuinely-new ships, so two triggers
+# (this hook + the bgloop) over the same commit cleanly resolve to ONE post.
+#
+# Why a git hook (not just the bgloop): the bgloop only runs while `fak serve` is up, and a
+# human committing locally may have no kernel running. The hook binds the trigger to the
+# commit event itself, below the agent layer, so it fires for Claude Code, Codex, and a human
+# alike — the same cross-agent reach the pre-commit / pre-push guards have.
+#
+# Mode  (env FLEET_MARKETING_HOOK):  off (default) | on
+#   off   do nothing (a marketing post is an outward side effect — opt in explicitly)
+#   on    run `fak marketing tick --source hook` in the background
+# Default is OFF: posting to a channel is a side effect a host opts into, never automatic on
+# every commit. Enable with FLEET_MARKETING_HOOK=on (or 1/true).
+#
+# Fail-open and NON-BLOCKING by design: a post-commit hook runs AFTER the commit is recorded,
+# so it can never block or undo the commit. It backgrounds the tick (so a slow Slack round
+# trip never stalls the committer's shell) and swallows all errors — a marketing failure must
+# never disrupt development. The `fak` binary not being on PATH is a silent no-op.
+
+case "$(printf '%s' "${FLEET_MARKETING_HOOK:-off}" | tr '[:upper:]' '[:lower:]')" in
+  on|1|true|yes) ;;
+  *) exit 0 ;;
+esac
+
+# Only fire when `fak` is available; a missing binary is a silent no-op (never a hook error).
+command -v fak >/dev/null 2>&1 || exit 0
+
+# Background + fully detached so the committer's shell returns immediately; all output and
+# errors are discarded (the tick is idempotent, so a dropped run is harmless — the next
+# trigger catches up from the high-water mark).
+( fak marketing tick --source hook >/dev/null 2>&1 & ) >/dev/null 2>&1
+
+exit 0
