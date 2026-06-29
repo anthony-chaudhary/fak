@@ -410,6 +410,11 @@ func usageScorecardVerbs() {
                  vs REALIZED behavior over a corpus of real Claude Code transcripts and
                  trends the per-lever calibration error; --append-history records a dated
                  row in docs/dojo/history.jsonl; list shows the registered levers)
+  fak dojo-rsi  fold|propose|run|loop|trend
+                (the self-pacing dojo RSI loop: selects the next calibration cell by
+                 novelty x value x staleness, journals KEEP/REVERT/ESCALATE rows in
+                 docs/dojo/rsi-journal.jsonl, routes REPROJECT/HARVEST to the agent arm,
+                 and renders the committed KEEP/REVERT trend for CI)
   fak nightrun  next | plan | run [--apply] [--loop] [--max N] | ledger | caps  [--json]
                 (RUN IT ALL NIGHT: the local-capability-aware data-collection door.
                  Probes THIS box (gpu/weights/datasets/creds), ranks the feasible-here
@@ -457,6 +462,7 @@ func usageScorecardVerbs() {
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
   fak dojo      run --corpus DIR | list    (prediction-vs-reality calibration gym)
+  fak dojo-rsi  fold|propose|run|loop|trend (dojo self-improvement loop)
   fak version
 
 every tool call crosses one in-process syscall boundary: vDSO -> adjudicate ->

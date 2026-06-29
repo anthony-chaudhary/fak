@@ -1,0 +1,66 @@
+name: dojo-rsi-feed
+
+# Publish the committed dojo-RSI keep/revert trend. This is the self-improving
+# loop's status feed, sibling to dojo-feed.yml: it reads docs/dojo/rsi-journal.jsonl
+# only, so CI never needs the private transcript corpus.
+on:
+  schedule:
+    - cron: "43 8 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dojo-rsi-feed
+  cancel-in-progress: false
+
+jobs:
+  dojo-rsi-feed:
+    name: dojo RSI trend -> dojo channel
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_DOJO_CHANNEL: ${{ vars.FAK_DOJO_CHANNEL || 'C0BDP2V51L1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: render dojo-RSI trend
+        run: |
+          go run ./cmd/fak dojo-rsi trend | tee dojo-rsi-card.txt
+          {
+            echo "## dojo-rsi-feed - KEEP/REVERT trend"
+            echo '```'
+            cat dojo-rsi-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: post to the dojo channel
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak slack send --channel "$FAK_DOJO_CHANNEL" --text - < dojo-rsi-card.txt
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set - ran in dry-run; nothing posted." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dojo-rsi-card
+          path: dojo-rsi-card.txt
+          if-no-files-found: ignore

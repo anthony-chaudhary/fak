@@ -79,6 +79,39 @@ func TestProposeRecalsRanksWorstEstimateFirst(t *testing.T) {
 	}
 }
 
+// TestProposeRoutesAgentArms proves Phase 3's split: a pinned projection target
+// routes to REPROJECT with a declared path set, while an under-claimed saving
+// routes to HARVEST rather than being auto-recalibrated.
+func TestProposeRoutesAgentArms(t *testing.T) {
+	eps := []dojo.Episode{
+		scoreEp(t, "resume-posture", "posture_accuracy", 1.0, 0.70, 10, false, false),
+		scoreEp(t, "compaction", "token_shed_ratio", 1.0, 1.40, 10, false, false),
+	}
+	pl := ProposeRecals(report(eps))
+	byMetric := map[string]Recal{}
+	for _, c := range pl.Candidates {
+		byMetric[c.Metric] = c
+	}
+	reproject := byMetric["posture_accuracy"]
+	if reproject.Kind != ReprojectKind {
+		t.Fatalf("posture_accuracy kind = %s, want REPROJECT (%+v)", reproject.Kind, reproject)
+	}
+	if len(reproject.DeclaredPaths) == 0 {
+		t.Fatalf("REPROJECT candidate must declare path allow-list: %+v", reproject)
+	}
+	if reproject.NewClaimed != reproject.OldClaimed {
+		t.Fatalf("REPROJECT must not rewrite the claim, got old=%v new=%v", reproject.OldClaimed, reproject.NewClaimed)
+	}
+
+	harvest := byMetric["token_shed_ratio"]
+	if harvest.Kind != HarvestKind {
+		t.Fatalf("token_shed_ratio kind = %s, want HARVEST (%+v)", harvest.Kind, harvest)
+	}
+	if harvest.NewClaimed != harvest.OldClaimed {
+		t.Fatalf("HARVEST must not rewrite the claim, got old=%v new=%v", harvest.OldClaimed, harvest.NewClaimed)
+	}
+}
+
 // TestKeepOnEstimateGain — the positive arm: a RECALIBRATE that strictly lowers
 // the folded calibrable, with enough samples and a green witness, KEEPs; and the
 // keep bit survives CheckIteration.

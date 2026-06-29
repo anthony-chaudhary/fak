@@ -217,6 +217,8 @@ func main() {
 		cmdSupportMaturityScorecard(os.Args[2:])
 	case "dojo":
 		cmdDojo(os.Args[2:])
+	case "dojo-rsi":
+		cmdDojoRSI(os.Args[2:])
 	case "guard-verdict-rsi":
 		cmdGuardVerdictRSI(os.Args[2:])
 	case "guard-rsi-scorecard":

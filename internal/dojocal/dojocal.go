@@ -56,6 +56,13 @@ const (
 	// RecalibrateKind re-points a genuine ESTIMATE claim at its corpus central
 	// tendency — the mechanical, self-keepable win.
 	RecalibrateKind RecalKind = "RECALIBRATE"
+	// ReprojectKind routes a projection-code fix: the claim stays pinned, and an
+	// agent proposes a patch that moves realized behavior toward it. It is never
+	// self-KEPT by the pure recalibration loop.
+	ReprojectKind RecalKind = "REPROJECT"
+	// HarvestKind routes a real under-claimed saving to the issue/harvest arm. A
+	// human decides whether to build it; the pure loop never auto-lands it.
+	HarvestKind RecalKind = "HARVEST"
 	// RouteFloor marks a candidate whose target cell is an INTENTIONAL FLOOR: a
 	// guard the dojo defends, never a recalibration. A breach is a belief-code bug
 	// to escalate, so the loop routes it and never proposes a claim swap.
@@ -92,6 +99,10 @@ type Recal struct {
 	IntentionalFloor bool `json:"intentional_floor"`
 	// Reason is the one-line rationale (why this cell, why this kind).
 	Reason string `json:"reason"`
+	// DeclaredPaths is the path allow-list the agent arm must stay within for a
+	// REPROJECT candidate. The command layer verifies changed paths against this
+	// list before any re-measured FoldCalibrable gain can be trusted.
+	DeclaredPaths []string `json:"declared_paths,omitempty"`
 }
 
 // ProposePayload is the proposal envelope: the worst-first candidates, the folded
@@ -114,6 +125,7 @@ type cell struct {
 	worstVerdict     string
 	oldClaimed       float64
 	intentionalFloor bool
+	lowerIsBetter    bool
 	anyMeasured      bool
 }
 
@@ -150,7 +162,7 @@ func ProposeRecals(r dojo.Report) ProposePayload {
 		key := [2]string{e.Lever, e.Metric}
 		c, ok := cells[key]
 		if !ok {
-			c = &cell{lever: e.Lever, metric: e.Metric, oldClaimed: e.Claimed, intentionalFloor: e.IntentionalFloor}
+			c = &cell{lever: e.Lever, metric: e.Metric, oldClaimed: e.Claimed, intentionalFloor: e.IntentionalFloor, lowerIsBetter: e.LowerIsBetter}
 			cells[key] = c
 			order = append(order, key)
 		}
@@ -181,6 +193,15 @@ func ProposeRecals(r dojo.Report) ProposePayload {
 			rc.Kind = RouteFloor
 			rc.NewClaimed = c.oldClaimed // never swap a floor's claim
 			rc.Reason = fmt.Sprintf("%s/%s is an intentional floor (claim %.3g) — a breach is a belief-code bug to escalate, never a recalibration; routed, not kept", c.lever, c.metric, c.oldClaimed)
+		} else if c.worstVerdict == dojo.VerdictUnderClaim {
+			rc.Kind = HarvestKind
+			rc.NewClaimed = c.oldClaimed // harvest records the opportunity; it does not rewrite the claim
+			rc.Reason = fmt.Sprintf("%s/%s is UNDER_CLAIM (reality %.3g beats claim %.3g, worst calib_err %.3g over %d sample(s)) — route a harvest issue behind the goal gate instead of auto-landing a claim rewrite", c.lever, c.metric, mean, c.oldClaimed, rc.CalibErr, c.measured)
+		} else if wantsReproject(c) {
+			rc.Kind = ReprojectKind
+			rc.NewClaimed = c.oldClaimed // reproject changes code, not the claim
+			rc.DeclaredPaths = ProjectionPaths(c.lever, c.metric)
+			rc.Reason = fmt.Sprintf("%s/%s is a pinned projection target (claim %.3g, corpus mean %.3g, worst calib_err %.3g over %d sample(s)) — route an agent REPROJECT patch constrained to declared paths, then re-measure FoldCalibrable", c.lever, c.metric, c.oldClaimed, mean, rc.CalibErr, c.measured)
 		} else {
 			rc.Kind = RecalibrateKind
 			rc.NewClaimed = mean
@@ -215,14 +236,42 @@ func ProposeRecals(r dojo.Report) ProposePayload {
 	return payload
 }
 
-// sortCandidates orders worst-first: a RECALIBRATE candidate (with a real
-// calib_err gap) sorts ahead of any routed one; among recalibrations, the largest
-// calib_err first; then lever, then metric, for a deterministic, CI-stable order.
+// wantsReproject reports whether a measured non-floor cell is a projection target
+// rather than a claim estimate. A claim pinned at perfection (1.0 accuracy,
+// recall, prefix preservation) that reality falls short of is a code-quality
+// finding: improving the projection should move reality toward the unchanged
+// claim. The mechanical RECALIBRATE arm is for central-tendency estimates such
+// as cold_write_share.
+func wantsReproject(c *cell) bool {
+	if c == nil || c.worstVerdict != dojo.VerdictOverClaim {
+		return false
+	}
+	return c.oldClaimed >= 0.999 && !c.lowerIsBetter
+}
+
+// ProjectionPaths returns the conservative declared path set for an agent
+// REPROJECT candidate. The command layer verifies actual changed paths stay
+// within this set before accepting any re-measurement.
+func ProjectionPaths(lever, metric string) []string {
+	switch lever {
+	case "resume-posture":
+		return []string{"internal/resume/", "cmd/fak/dojo.go"}
+	case "vcache-warmth":
+		return []string{"internal/vcacheobserve/", "internal/vcachecal/", "cmd/fak/dojo.go"}
+	case "compaction":
+		return []string{"cmd/fak/dojo.go"}
+	default:
+		return []string{"cmd/fak/dojo.go"}
+	}
+}
+
+// sortCandidates orders deterministic action candidates first, then routed
+// candidates. The Phase-3 selector re-ranks the full list by novelty, value, and
+// staleness; this sort is the stable presentation order for propose/run.
 func sortCandidates(cs []Recal) {
 	sort.SliceStable(cs, func(i, j int) bool {
-		ri, rj := cs[i].Kind == RecalibrateKind, cs[j].Kind == RecalibrateKind
-		if ri != rj {
-			return ri
+		if candidatePriority(cs[i].Kind) != candidatePriority(cs[j].Kind) {
+			return candidatePriority(cs[i].Kind) > candidatePriority(cs[j].Kind)
 		}
 		if cs[i].CalibErr != cs[j].CalibErr {
 			return cs[i].CalibErr > cs[j].CalibErr
@@ -232,6 +281,21 @@ func sortCandidates(cs []Recal) {
 		}
 		return cs[i].Metric < cs[j].Metric
 	})
+}
+
+func candidatePriority(k RecalKind) int {
+	switch k {
+	case RecalibrateKind:
+		return 4
+	case ReprojectKind:
+		return 3
+	case HarvestKind:
+		return 2
+	case RouteFloor:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // Iteration is one replayed self-scoring tick — the dojo twin of
@@ -300,6 +364,16 @@ func RunIteration(r dojo.Report, candidate Recal, minSample int, witness map[str
 		it.ReplayedFold = base
 		it.ReplayedValue = base.Value
 		it.Reason = fmt.Sprintf("REVERT: %s had no MEASURED episode — an unmeasured corpus is uncandidatable; point the scenario at a billed corpus before it can be scored", candidate.Lever)
+		return it
+	case ReprojectKind:
+		it.ReplayedFold = base
+		it.ReplayedValue = base.Value
+		it.Reason = fmt.Sprintf("REVERT: %s/%s is a REPROJECT candidate — an agent-authored patch must stay within declared_paths and then be re-measured; the pure recalibration loop cannot keep it", candidate.Lever, candidate.Metric)
+		return it
+	case HarvestKind:
+		it.ReplayedFold = base
+		it.ReplayedValue = base.Value
+		it.Reason = fmt.Sprintf("REVERT: %s/%s is a HARVEST candidate — file a goal-gated issue with the board row and corpus evidence; no auto-land from the pure loop", candidate.Lever, candidate.Metric)
 		return it
 	}
 
