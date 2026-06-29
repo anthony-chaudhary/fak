@@ -419,12 +419,21 @@ def fetch_open_issues(limit: int) -> list[dict[str, Any]]:
 
 
 def ensure_label() -> None:
-    """Idempotently ensure the `dispatch` label exists so `gh issue create` never
-    fails on a missing label. Best-effort, but warns loudly on a real failure."""
+    """Ensure the `dispatch` label exists so `gh issue create` never fails on a
+    missing label. ``dispatch`` is a SHARED, curated repo label (it predates this
+    tool — #1300 carries it), so unlike idea_scout's own `idea-scout` label this
+    NEVER ``--force``-overwrites an existing label's curated color/description: it
+    only creates the label when absent. Best-effort; warns loudly on a real failure."""
+    try:
+        existing = gh_json(["label", "list", "--search", AUDIT_LABEL, "--json", "name"])
+        if any(str(lab.get("name", "")).lower() == AUDIT_LABEL for lab in existing):
+            return  # already present -> leave its curated color/description untouched
+    except Exception:  # noqa: BLE001 — fall through to a best-effort create
+        pass
     try:
         proc = subprocess.run(
             ["gh", "label", "create", AUDIT_LABEL, "--color", "b60205",
-             "--description", "Worker-dispatch defect / log-audit finding", "--force"],
+             "--description", "Worker-dispatch defect / log-audit finding"],
             capture_output=True, text=True, encoding="utf-8", timeout=30)
     except (OSError, subprocess.TimeoutExpired) as e:
         print(f"warning: could not run `gh label create {AUDIT_LABEL}`: {e}",

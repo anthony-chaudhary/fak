@@ -251,6 +251,40 @@ class ScanRunsTest(unittest.TestCase):
             self.assertIn("panic-traceback", dets)
 
 
+class EnsureLabelTest(unittest.TestCase):
+    """The `dispatch` label is shared+curated, so ensure_label must never clobber
+    it: skip create when present, and create WITHOUT --force when absent."""
+
+    def setUp(self) -> None:
+        self._gh, self._run = M.gh_json, M.subprocess.run
+
+    def tearDown(self) -> None:
+        M.gh_json, M.subprocess.run = self._gh, self._run
+
+    def test_skips_create_when_label_exists(self) -> None:
+        M.gh_json = lambda *a, **k: [{"name": "dispatch"}]
+        calls: list = []
+        M.subprocess.run = lambda *a, **k: calls.append(a)  # would raise if used as proc
+        M.ensure_label()
+        self.assertEqual(calls, [])  # no create attempted -> curated label untouched
+
+    def test_creates_without_force_when_absent(self) -> None:
+        M.gh_json = lambda *a, **k: []
+        captured: dict = {}
+
+        class _Proc:
+            returncode = 0
+            stderr = ""
+
+        def _run(cmd, **k):
+            captured["cmd"] = cmd
+            return _Proc()
+        M.subprocess.run = _run
+        M.ensure_label()
+        self.assertIn("create", captured["cmd"])
+        self.assertNotIn("--force", captured["cmd"])  # never clobber the shared label
+
+
 class MainHermeticTest(unittest.TestCase):
     """Drive main() end to end with every gh boundary stubbed, to lock the
     load-bearing safety contracts: dry-run mutates nothing; --enact files + records;
