@@ -120,7 +120,7 @@ func cmdGuard(argv []string) {
 	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
-	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
+	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	ctxViewBudget := fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
@@ -1870,6 +1870,23 @@ func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) {
 	}
 }
 
+// formatGuardResumeGuidance is the concise, actionable note printed when the wrapped agent
+// exits abnormally (a non-zero code — a crash, an OOM, or a terminal upstream error). The
+// guard process holds no agent conversation state itself — the wrapped tool owns that — so
+// "resume" means re-running the same `fak guard -- <command>` with the agent's own
+// resume/continue flag. The last line encodes a hard-won recovery: a guarded resume that
+// dies IMMEDIATELY with "upstream model error" (a malformed-request rejection that can
+// follow a mid-conversation quarantine) usually clears if that one resume is retried WITHOUT
+// fak guard, then re-wrapped. Returned as a string (not printed) so it is unit-testable.
+func formatGuardResumeGuidance(agentName string, code int) string {
+	return fmt.Sprintf(
+		"\nfak guard: %s exited abnormally (code %d).\n"+
+			"  resume: re-run the same `fak guard -- %s …` — launch the agent with its own resume/continue flag (e.g. `claude --continue`) so it picks the conversation back up.\n"+
+			"  this session's decision journal is replayable with `fak audit verify` (path in the audit summary above).\n"+
+			"  if a guarded resume dies IMMEDIATELY with \"upstream model error\", retry that one resume WITHOUT fak guard to recover, then re-wrap.\n",
+		agentName, code, agentName)
+}
+
 func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
 
 	// Tear the gateway down and report what the kernel decided this session.
@@ -1903,6 +1920,12 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 	// scripts see what the agent returned).
 	if runErr != nil {
 		if ee, isExit := runErr.(*exec.ExitError); isExit {
+			// An abnormal (non-zero) exit is a crash / OOM / terminal upstream error — print
+			// the actionable resume note so the operator isn't left with a bare exit code.
+			// Suppressed under --quiet (scripted `-p` runs) and skipped on a clean 0 exit.
+			if code := ee.ExitCode(); code != 0 && !quiet {
+				fmt.Fprint(os.Stderr, formatGuardResumeGuidance(agentName, code))
+			}
 			os.Exit(ee.ExitCode())
 		}
 		fmt.Fprintf(os.Stderr, "fak guard: could not run %q: %v\n", agentName, runErr)
