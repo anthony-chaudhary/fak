@@ -151,6 +151,8 @@ func main() {
 		cmdSelfUpdate(os.Args[2:])
 	case "slack":
 		cmdSlack(os.Args[2:])
+	case "release":
+		cmdRelease(os.Args[2:])
 	case "release-staleness":
 		cmdReleaseStaleness(os.Args[2:])
 	case "serve":

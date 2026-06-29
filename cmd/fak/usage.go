@@ -432,6 +432,12 @@ func usageScorecardVerbs() {
                  records a dated row in docs/cadence/history.jsonl so the trend accrues
                  across weeks; --check is advisory (non-zero only if a dimension could
                  not be measured; the scorecard ratchet owns debt regressions))
+  fak release   [status|staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|stable|stable-context]
+                (the RELEASE front door: one discoverable binary entrypoint over the
+                 existing tools/release_*.py and tools/stable_release_*.py helpers.
+                 Default status is read-only; cut/tag execute only when the helper's
+                 own --execute gate is passed, and the canonical order is surfaced in
+                 fak release --help)
   fak release-staleness [--json] [--check] [--stale-commits N] [--stale-days N]
                 (the PUBLISH-freshness signal: how far the latest published vX.Y.Z tag
                  -  what 'go install ...@latest' resolves to  -  lags HEAD, in commits AND
