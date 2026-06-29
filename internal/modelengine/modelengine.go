@@ -33,6 +33,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -213,6 +214,9 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 			}
 		})
 		sched.SetMaxRunning(nativeMaxRunningFromEnv())
+		if p := nativePreemptionPolicyFromEnv(); p.MaxBlocks > 0 {
+			sched.SetKVPreemptionPolicy(p)
+		}
 		e.sched = sched
 	})
 	return e.sched
@@ -228,6 +232,27 @@ func nativeMaxRunningFromEnv() int {
 		return 0
 	}
 	return n
+}
+
+func nativePreemptionPolicyFromEnv() NativePreemptionPolicy {
+	p := NativePreemptionPolicy{Mode: NativePreemptSwap}
+	if raw := os.Getenv("FAK_NATIVE_KV_MAX_BLOCKS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			p.MaxBlocks = n
+		}
+	}
+	if raw := os.Getenv("FAK_NATIVE_KV_BLOCK_TOKENS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			p.BlockTokens = n
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_NATIVE_KV_PREEMPT_MODE"))) {
+	case "", "swap", "swap-to-host":
+		p.Mode = NativePreemptSwap
+	case "recompute":
+		p.Mode = NativePreemptRecompute
+	}
+	return p
 }
 
 // buildPrompt turns a tool name + argument bytes into a bounded prompt of token ids,

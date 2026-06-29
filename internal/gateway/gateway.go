@@ -684,6 +684,12 @@ type Server struct {
 	// race a /metrics scrape that reads it.
 	admissionMu  sync.RWMutex
 	admissionCtl *AdmissionController
+
+	// preemptionMetrics is the optional native-serving KV preemption / swap / recompute
+	// metric writer (#31). nil leaves fak_sched_preempt_* absent; a host attaches the live
+	// native scheduler only after a positive paged-KV block budget arms preemption.
+	preemptionMu      sync.RWMutex
+	preemptionMetrics KVPreemptionMetricWriter
 }
 
 // New builds a Server. It validates that the ABI is wired (a resolver is

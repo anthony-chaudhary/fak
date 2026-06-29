@@ -207,6 +207,51 @@ func TestEngineNativeSchedulerMaxRunningEnv(t *testing.T) {
 	}
 }
 
+func TestEngineNativeSchedulerKVPreemptionEnv(t *testing.T) {
+	t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", "1")
+	t.Setenv("FAK_NATIVE_KV_BLOCK_TOKENS", "128")
+	t.Setenv("FAK_NATIVE_KV_PREEMPT_MODE", "recompute")
+	ctx := context.Background()
+	e := New()
+	calls := []*abi.ToolCall{
+		inlineCall("issue31_first", `{"prompt":"alpha"}`),
+		inlineCall("issue31_second", `{"prompt":"bravo"}`),
+	}
+
+	reqs := make([]abi.EngineRequest, len(calls))
+	for i, c := range calls {
+		r, err := e.Admit(ctx, c)
+		if err != nil {
+			t.Fatalf("Admit %d: %v", i, err)
+		}
+		reqs[i] = r
+	}
+
+	var wg sync.WaitGroup
+	for _, r := range reqs {
+		wg.Add(1)
+		go func(r abi.EngineRequest) {
+			defer wg.Done()
+			for range r.Tokens() {
+			}
+		}(r)
+	}
+	wg.Wait()
+	for i, r := range reqs {
+		if _, err := r.Result(); err != nil {
+			t.Fatalf("Result %d: %v", i, err)
+		}
+	}
+
+	stats := e.nativeScheduler().KVPreemptionStats()
+	if stats.Preemptions != 1 || stats.RecomputeCount != 1 || stats.Readmitted != 1 || stats.SwappedOut != 0 {
+		t.Fatalf("FAK_NATIVE_KV_* stats = %+v, want one recompute preemption/readmit", stats)
+	}
+	if stats.SwapPreemptions != 0 || stats.SwapBytes != 0 || stats.SwapRestoredBytes != 0 {
+		t.Fatalf("FAK_NATIVE_KV_PREEMPT_MODE=recompute used swap stats: %+v", stats)
+	}
+}
+
 func serialGreedyTokens(m *model.Model, prompt []int) []int {
 	sess := m.NewSession()
 	logits := sess.Prefill(prompt)

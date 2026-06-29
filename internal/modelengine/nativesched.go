@@ -60,6 +60,15 @@ type NativeScheduler struct {
 	maxObservedRunning int
 	closed             bool
 
+	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
+	// the live paged-KV block budget and preempts running lanes at scheduler boundaries
+	// when the running set exceeds that budget.
+	preemption   NativePreemptionPolicy
+	preempted    []*schedLane
+	seqNo        int64
+	preemptRound int64
+	preemptStats NativePreemptionStats
+
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
 }
@@ -137,8 +146,9 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 		ctx:       cctx,
 		cancel:    cancel,
 		sess:      sess,
-		logits:    copyF32(logits),
+		logits:    logits,
 		tool:      c.Tool,
+		prompt:    append([]int(nil), prompt...),
 		promptLen: len(prompt),
 		putCtx:    ctx,
 		tok:       prep.tok,
@@ -148,6 +158,8 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 	}
 
 	s.mu.Lock()
+	s.seqNo++
+	ln.seqNo = s.seqNo
 	s.waiting = append(s.waiting, ln)
 	s.mu.Unlock()
 
@@ -189,6 +201,9 @@ func (s *NativeScheduler) Close() {
 	for _, ln := range s.waiting {
 		ln.cancel() // a never-promoted waiting lane is aborted too, so run() can exit
 	}
+	for _, ln := range s.preempted {
+		ln.cancel() // a swapped/recompute-held lane is aborted too
+	}
 	s.mu.Unlock()
 	s.signal()
 }
@@ -217,7 +232,11 @@ func (s *NativeScheduler) run() {
 			}
 		}
 		s.lanes = live
-		// 2. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
+		// 2. Retire cancelled preempted lanes, then readmit older preempted lanes before
+		// promoting fresh waiting work so a preempted victim cannot starve behind arrivals.
+		s.dropCanceledPreemptedLocked()
+		s.readmitPreemptedLocked()
+		// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
 		// cancelled while it was still waiting is retired here rather than promoted.
 		kept := s.waiting[:0]
 		for _, ln := range s.waiting {
@@ -232,13 +251,21 @@ func (s *NativeScheduler) run() {
 			s.lanes = append(s.lanes, ln)
 		}
 		s.waiting = kept
-		active := make([]*schedLane, len(s.lanes))
-		copy(active, s.lanes)
-		if len(active) > s.maxObservedRunning {
-			s.maxObservedRunning = len(active)
+		s.enforcePreemptionLocked()
+		running := len(s.lanes)
+		if running > s.maxObservedRunning {
+			s.maxObservedRunning = running
+		}
+		var solo *schedLane
+		var active []*schedLane
+		if running == 1 && len(s.waiting) == 0 && len(s.preempted) == 0 {
+			solo = s.lanes[0]
+		} else if running > 0 {
+			active = make([]*schedLane, running)
+			copy(active, s.lanes)
 		}
 		closed := s.closed
-		idle := len(s.lanes) == 0 && len(s.waiting) == 0
+		idle := len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
 		s.mu.Unlock()
 
 		if idle {
@@ -248,7 +275,42 @@ func (s *NativeScheduler) run() {
 			<-s.wake
 			continue
 		}
+		if solo != nil {
+			s.stepSolo(solo)
+			continue
+		}
 		s.stepOnce(active)
+	}
+}
+
+// stepSolo advances one lane without rebuilding the scheduler batch between every token.
+// It returns to run() whenever another Admit/Close signal arrives, preserving in-flight
+// batch addition while keeping uncontended B=1 latency off the shared-batch bookkeeping path.
+func (s *NativeScheduler) stepSolo(ln *schedLane) {
+	for {
+		if ln.ctx.Err() != nil {
+			ln.finish(nil, ln.ctx.Err())
+			return
+		}
+		next := argmax(ln.logits)
+		select {
+		case ln.tokens <- abi.EngineToken{ID: next}:
+		case <-ln.ctx.Done():
+			ln.finish(nil, ln.ctx.Err())
+			return
+		}
+		ln.gen = append(ln.gen, next)
+		ln.emitted++
+		if ln.sess.M.Cfg.IsEOS(next) || ln.emitted >= genTokens {
+			ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, ln.tok), nil)
+			return
+		}
+		ln.logits = ln.sess.Step(next)
+		select {
+		case <-s.wake:
+			return
+		default:
+		}
 	}
 }
 
@@ -282,9 +344,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	if len(cont) == 0 {
 		return
 	}
-	if anyQ4K(cont) {
+	if len(cont) == 1 || anyQ4K(cont) {
 		for i, ln := range cont {
-			ln.logits = copyF32(ln.sess.Step(ids[i]))
+			ln.logits = ln.sess.Step(ids[i])
 		}
 		return
 	}
@@ -323,11 +385,20 @@ type schedLane struct {
 	gen       []int
 	emitted   int
 	tool      string
+	prompt    []int
 	promptLen int
 	putCtx    context.Context
 	tok       NLTokenizer
 	q4k       bool
 	terminal  bool
+	seqNo     int64
+
+	// Preemption state. A preempted lane is removed from the running set without closing
+	// its token stream; readmit restores sess/logits and the stream resumes.
+	preemptMode  NativePreemptionMode
+	preemptRound int64
+	hostKV       []byte
+	savedLogits  []float32
 
 	tokens chan abi.EngineToken
 	done   chan struct{}
