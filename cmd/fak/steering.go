@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -160,6 +161,15 @@ func loadSteeringSnapshot(path string) (steeringSnapshot, error) {
 // runSteerabilityScorecard invokes `python tools/steerability_scorecard.py --json`
 // and returns its stdout. It tries the FAK_PYTHON override, then python3, then
 // python — matching how the rest of the repo shells to Python across OSes.
+//
+// A scorecard's EXIT CODE is its verdict, not a run failure: it exits non-zero
+// precisely when the verdict is ACTION (there is steerability-debt) while still
+// printing the full, valid JSON payload to stdout — and that payload is exactly
+// what the steering surface folds. So a non-zero exit with JSON-shaped stdout is a
+// SUCCESS here (the same tolerance runScorecardJSON gives the product/persona
+// scorecards); only a missing interpreter or empty/non-JSON stdout is a real error.
+// Without this, `fak steering status/report/alert` died ("exit status 1") the
+// moment any steerability-debt existed — i.e. almost always.
 func runSteerabilityScorecard() ([]byte, error) {
 	interps := []string{}
 	if p := strings.TrimSpace(os.Getenv("FAK_PYTHON")); p != "" {
@@ -169,14 +179,20 @@ func runSteerabilityScorecard() ([]byte, error) {
 	var lastErr error
 	for _, py := range interps {
 		cmd := exec.Command(py, "tools/steerability_scorecard.py", "--json")
-		cmd.Stderr = os.Stderr
-		out, err := cmd.Output()
-		if err == nil {
-			return out, nil
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		runErr := cmd.Run()
+		if out.Len() > 0 && bytes.HasPrefix(bytes.TrimSpace(out.Bytes()), []byte("{")) {
+			// Valid-looking JSON on stdout: the verdict (exit code) is the payload, not a failure.
+			return out.Bytes(), nil
 		}
-		lastErr = err
+		if runErr != nil {
+			lastErr = fmt.Errorf("%s tools/steerability_scorecard.py --json: %w (%s)", py, runErr, strings.TrimSpace(errb.String()))
+			continue
+		}
+		lastErr = fmt.Errorf("%s tools/steerability_scorecard.py --json produced no JSON output", py)
 	}
-	return nil, fmt.Errorf("run steerability scorecard (tried %s): %w", strings.Join(interps, ", "), lastErr)
+	return nil, lastErr
 }
 
 // parseSteeringSnapshot folds the payload's corpus into the alert-gate slice. The
