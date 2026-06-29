@@ -125,7 +125,7 @@ func ClassifyOutcome(committed, witnessed, stopped, mutated bool) Outcome {
 // and waste sessions. Every field is a count derived from the transcript or the
 // linked outcome -- structured, never prose, so the record stays committable.
 type Signals struct {
-	GuardRefusals int `json:"guard_refusals,omitempty"` // kernel/guard DENY/QUARANTINE hits the session provoked
+	GuardRefusals int `json:"guard_refusals,omitempty"` // turns the kernel DENIED a proposed tool call (not result quarantines)
 	ToolErrors    int `json:"tool_errors,omitempty"`    // is_error tool_results
 	Interrupts    int `json:"interrupts,omitempty"`     // interrupted assistant turns
 	Commits       int `json:"commits,omitempty"`        // commits the session landed (linked from git)

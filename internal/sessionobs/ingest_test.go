@@ -132,17 +132,30 @@ func TestFoldCountsGuardRefusals(t *testing.T) {
 		`{"type":"assistant","message":{"id":"g1","role":"assistant","usage":{"output_tokens":10},"content":[{"type":"text","text":"[fak] refused 1 tool call(s): Write (DEFAULT_DENY/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative."},{"type":"tool_use","name":"Edit","input":{}}]}}`,
 		// the fak-unaware wire all-denied summary (no [fak] prefix)
 		`{"type":"assistant","message":{"id":"g2","role":"assistant","usage":{"output_tokens":8},"content":[{"type":"text","text":"All proposed tool calls were refused by the fak kernel: Bash: DENY (POLICY_BLOCK/TERMINAL)"}]}}`,
-		// a quarantine page-out note (SECRET_EXFIL held out of context)
+		// QUARANTINE-EXCLUDED: a result page-out note. It is a real gateway banner but a
+		// DIFFERENT phenomenon (an inbound result held out, often a false positive) that fires
+		// per-result -- 150+ times in a single real session -- so it must NOT count as a
+		// tool-call denial. guard_refusals tracks denials only; this turn contributes 0.
 		`{"type":"assistant","message":{"id":"g3","role":"assistant","usage":{"output_tokens":6},"content":[{"type":"text","text":"[fak] Heads up: 1 inbound tool result was held out of context as a safety precaution (paged out, not lost)."}]}}`,
 		// a benign assistant turn -- a non-refusal [fak] note must NOT count as friction
 		`{"type":"assistant","message":{"id":"g4","role":"assistant","usage":{"output_tokens":4},"content":[{"type":"text","text":"[fak] compacted 12 turns. Looks good, shipping."}]}}`,
-		// a user tool_result that merely QUOTES a refusal banner (a Read of this file or a gateway
+		// HARDENING PROOF: a META/ANALYSIS turn that casually mentions "[fak] refused" in its
+		// own prose but never reproduces the full banner. The old short-prefix marker would
+		// have counted this (and inflated to hundreds across an analysis session); the
+		// distinctive-phrase marker correctly reads it as talk ABOUT friction, not friction.
+		`{"type":"assistant","message":{"id":"g5","role":"assistant","usage":{"output_tokens":7},"content":[{"type":"text","text":"As discussed, the [fak] refused note appears when the kernel denies a call; nothing was actually denied here."}]}}`,
+		// PER-TURN PROOF: one turn whose content carries the deny banner in TWO text blocks
+		// still counts as ONE guard-friction event (the gateway emits one note per turn).
+		`{"type":"assistant","message":{"id":"g6","role":"assistant","usage":{"output_tokens":9},"content":[{"type":"text","text":"refused 2 tool call(s): Bash (POLICY_BLOCK/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative."},{"type":"text","text":"Continuing. Do not re-propose a refused call unchanged."}]}}`,
+		// a user tool_result that merely QUOTES the full banner (a Read of this file or a gateway
 		// test fixture) lands in a user block -- it must NOT be mistaken for a real refusal.
-		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"// fixture text: [fak] refused 1 tool call(s): Write ...","is_error":false}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"// fixture: ... Do not re-propose a refused call unchanged; choose an allowed alternative.","is_error":false}]}}`,
 	)
 	rec, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "gr"})
+	// g1 deny + g2 all-denied + g6 two-blocks-one-turn = 3. g3 quarantine, g4 benign, g5
+	// casual mention, and the quoting user block all correctly contribute 0.
 	if ev.GuardRefusals != 3 {
-		t.Errorf("GuardRefusals want 3 (deny + kernel-deny + quarantine), got %d", ev.GuardRefusals)
+		t.Errorf("GuardRefusals want 3 (deny + kernel-deny + one per-turn; quarantine excluded), got %d", ev.GuardRefusals)
 	}
 	if rec.Signals.GuardRefusals != 3 {
 		t.Errorf("Signals.GuardRefusals must be promoted from evidence, want 3 got %d", rec.Signals.GuardRefusals)

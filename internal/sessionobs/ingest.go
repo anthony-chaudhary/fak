@@ -46,7 +46,7 @@ type Evidence struct {
 	GoalEvents    int      // /goal directives the session ran under
 	StopMarks     int      // goal-block / stop-hook system-reminders (a blocked Stop)
 	ToolErrors    int      // is_error tool_result blocks (a tool call that failed)
-	GuardRefusals int      // [fak] guard DENY/QUARANTINE banners the gateway injected into a turn
+	GuardRefusals int      // turns carrying a [fak] tool-call DENY banner (not result quarantines)
 }
 
 // committed reports whether the session landed at least one commit.
@@ -89,14 +89,28 @@ var commitMarker = regexp.MustCompile(`\[[^\]]*?\b([0-9a-f]{7,40})\]`)
 var goalDirective = regexp.MustCompile(`(?i)(<command-name>\s*/?goal|^\s*/goal\b)`)
 
 // guardRefusalMarkers are the literal banners the fak gateway injects into an ASSISTANT
-// turn when the kernel DENIES a proposed tool call or QUARANTINES an inbound tool result
-// -- the guard-friction signal the contrast ranks first (see contrast.go). They are the
-// emission strings of internal/gateway/{http.go:adjudicationNote/denySummary,
-// messages.go:resultAdmissionNote}. We scan them ONLY in assistant text, where the
-// gateway actually emits them; a tool_result that merely QUOTES one (a Read of this file
-// or a gateway test) lands in a user block and so cannot be mistaken for a real refusal.
-// Bare "[fak]" is deliberately NOT a marker -- it also prefixes "[fak] compacted" and
-// "[fak] ctxview-elided" notes, which are not refusals.
+// turn when the kernel DENIES a proposed tool CALL -- the tool-denial friction the contrast
+// ranks first (see contrast.go). They are the emission strings of
+// internal/gateway/http.go:{adjudicationNote,denySummary}. We scan them ONLY in assistant
+// text, where the gateway emits them; a tool_result that merely QUOTES one (a Read of this
+// file or a gateway test) lands in a user block and so cannot be mistaken for a real denial.
+//
+// DENIAL, NOT QUARANTINE -- by evidence. The field could read "any guard hit", but a fold
+// over ~1850 real sessions proved that conflates two very different events. The result-floor
+// QUARANTINE banner ("held out of context as a safety precaution") is a PAGE-OUT of an
+// inbound tool result, and it fires per-result -- on one host's sessions it appeared in
+// 150+ assistant turns of a SINGLE session (a credential-/injection-shaped string in routine
+// output, which the banner itself flags as "often a false positive"). Counting those as
+// guard friction swamped the real signal: the tool-DENIAL banner appeared 2 times in the
+// same session. So guard_refusals counts tool-call denials ONLY; the quarantine page-out is
+// a distinct phenomenon (result-floor over-fire, not the agent's calls being refused) and is
+// deliberately excluded here. The contrast's own action for this feature -- "the agent
+// fights the guard into a STOP" -- is about denied calls, not paged-out results.
+//
+// Bare "[fak]" is likewise not a marker -- it also prefixes "[fak] compacted" /
+// "[fak] ctxview-elided" / the quarantine "[fak] Heads up" notes, none of which are denials.
+// The authoritative, non-text source of guard hits is the guard decision journal; this
+// transcript fold is the best signal available without joining that per-host store.
 //
 // NON-CIRCULARITY: GuardRefusals is a behavior FEATURE the value-vs-waste contrast ranks,
 // so it must never feed the cohort-defining stopped() evidence -- if a refusal defined the
@@ -104,9 +118,8 @@ var goalDirective = regexp.MustCompile(`(?i)(<command-name>\s*/?goal|^\s*/goal\b
 // signal; never classify an outcome on it. (A refusal that escalates to a blocked Stop is
 // already counted on the StopMarks pathway.)
 var guardRefusalMarkers = []string{
-	"[fak] refused",                              // adjudicationNote: proposed call denied (Anthropic wire)
-	"refused by the fak kernel",                  // denySummary: all-denied turn (fak-unaware wires)
-	"held out of context as a safety precaution", // resultAdmissionNote: quarantine page-out
+	"Do not re-propose a refused call unchanged",             // adjudicationNote: proposed call(s) denied (Anthropic wire)
+	"All proposed tool calls were refused by the fak kernel", // denySummary: all-denied turn (fak-unaware wires)
 }
 
 // hasGuardRefusal reports whether an assistant text block carries a guard-refusal banner.
@@ -217,14 +230,16 @@ func FoldTranscript(r io.Reader, meta FoldMeta) (Record, Evidence) {
 }
 
 // foldAssistantContent walks an assistant message's content blocks, counting tool
-// calls (read-only vs mutating) and the guard-refusal banners the gateway prepends as
-// text. One refusal-bearing text block counts as one guard-friction event (the gateway
-// emits at most one note per turn), so the count tracks refusal turns, not refused calls.
+// calls (read-only vs mutating) and whether the turn carried a guard-refusal banner.
+// The gateway prepends at most ONE such note per turn, so a turn contributes at most one
+// guard-friction event regardless of how many text blocks mention it -- the count tracks
+// refusal turns, not refused calls or stray mentions.
 func foldAssistantContent(raw json.RawMessage, rec *Record, ev *Evidence) {
 	var blocks []contentBlock
 	if json.Unmarshal(raw, &blocks) != nil {
 		return
 	}
+	refused := false
 	for _, b := range blocks {
 		switch b.Type {
 		case "tool_use":
@@ -237,9 +252,12 @@ func foldAssistantContent(raw json.RawMessage, rec *Record, ev *Evidence) {
 			}
 		case "text":
 			if hasGuardRefusal(b.Text) {
-				ev.GuardRefusals++
+				refused = true
 			}
 		}
+	}
+	if refused {
+		ev.GuardRefusals++
 	}
 }
 
