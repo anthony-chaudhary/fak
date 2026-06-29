@@ -183,7 +183,9 @@ win, and the plane must say so rather than red on the 8% alone.
 ### L1 — turn-by-turn meter
 - **T3 · promote `cmd/turntaxdemo` → first-class `fak turntax` meter.** Per-turn tax: kernel-ns
   vs engine-ns, tokens added vs saved, vs the T2 budget; live on `/metrics` and offline.
-  *Witness:* golden turn → golden tax table; budget breach observable. *(depends on T1, T2)*
+  *Witness:* golden turn → golden tax table; budget breach observable. *(depends on T1, T2 —
+  contract pinned in [§13](#13-l1--the-per-turn-turn-tax-meter-pinned-contract); executable
+  cost-axis meter is the named follow-on, blocked until T1/T2 land)*
 - **T4 · observer-effect fence.** The meter **samples** (rate-bounded), never full-instruments
   the hot path; a bench proves the meter's own overhead < a declared cap. *Witness:* meter-cost
   bench under cap; sampling rate honored under load. *(depends on T3)*
@@ -358,7 +360,7 @@ additive as each dep lands.
 
 | Input | Source (current) | What it contributes to the read-out | Build state |
 |---|---|---|---|
-| **T3** per-turn meter | `cmd/turntaxdemo` → first-class `fak turntax` | kernel-ns vs engine-ns; tokens *added* (transform/quarantine) vs *saved* (vDSO/radix) per turn, vs the T2 budget | OPEN ([#1151](https://github.com/anthony-chaudhary/fak/issues/1151)) — still a demo |
+| **T3** per-turn meter | `cmd/turntaxdemo` → first-class `fak turntax` | kernel-ns vs engine-ns; tokens *added* (transform/quarantine) vs *saved* (vDSO/radix) per turn, vs the T2 budget | OPEN ([#1151](https://github.com/anthony-chaudhary/fak/issues/1151)) — demo + contract pinned ([§13](#13-l1--the-per-turn-turn-tax-meter-pinned-contract)); cost-axis build blocked on T1/T2 |
 | **T5** session ledger | `internal/sessionobs` outcome-link rung (reusing `cadencereport`) | per-session **HELPED / WASH / HURT** verdict, provenance-labeled | OPEN ([#1159](https://github.com/anthony-chaudhary/fak/issues/1159)) — no `HELPED/WASH/HURT` in code yet |
 | **T6** ablate gate | `cmd/fak/ablate` + `internal/turnbench` LeverFlip | fak-on vs fak-off delta on a frozen workload, signed, vs budget | OPEN ([#1162](https://github.com/anthony-chaudhary/fak/issues/1162)) — `ablate` exists as a one-off, not an always-on gate |
 | `internal/benchscore` | `benchscore.Scan(root) → Report` (`fak.benchscore-report.v1`) | the frozen-workload **baseline rows** the deltas are measured against | **BUILT** |
@@ -697,3 +699,132 @@ not-yet-in-tree hardening tickets. Pinning the gate's shape here (frozen workloa
 `all-off`/`all-on` arms, the on−off over-budget delta, the persistence rule, the budget-breach
 red) is the docs-lane increment of L3; the executable always-on gate and its `make ci` hook are
 the named follow-on in the `cmd` / `turnbench` / `ci` lane, unblocked by T2.
+
+## 13. L1 — the per-turn turn-tax meter (pinned contract)
+
+T3 ([#1151](https://github.com/anthony-chaudhary/fak/issues/1151)) is the *turn-by-turn* rung of
+the ladder (§5): promote the existing `cmd/turntaxdemo` tax breakdown into a **first-class meter**
+— a `fak` verb plus a live `/metrics` family — that reports, **per turn**, kernel-ns vs engine-ns
+and tokens *added* (transform/quarantine) vs *saved* (vDSO/radix) against the T2 budget. This
+section does for L1 what §12/§11/§10 did for L3/L4/L5: fix the meter's shape — the per-turn tax
+table, the offline verb, the live family, the golden-turn witness, the budget-breach signal — so
+the eventual build is **wiring against a fixed contract**, and fence honestly what blocks the live
+meter today (the epic's own sequencing law, §8: *no budget ⇒ no breach ⇒ no gate*).
+
+### 13.1 The substrate (the inputs, each with its current build state)
+
+The honest accounting: the *replay path* and the *golden-turn discipline* are built and tested
+today — the meter is **additive wiring**, not greenfield — but the two cost axes it folds (the
+per-span ns and token-delta) and the budget a breach is judged against are not yet in-tree.
+
+| Input | Source (current) | What it contributes to the meter | Build state |
+|---|---|---|---|
+| the per-turn replay + report | `fak turntax` (`cmd/fak`) + `cmd/turntaxdemo` over `internal/turnbench.RunWithCalls` | the per-turn turn ladder + the `turn_kinds` (forced/elision) the tax table hangs the cost axes on | **BUILT** (turn-count axis green) |
+| the golden-turn discipline | `cmd/turntaxdemo -selfcheck` (the `demoui.SelfcheckChecker` invariants) | asserts a frozen suite reproduces its documented table and exits non-zero on drift — the "golden turn → golden table" witness pattern, today on the turn-count axis | **BUILT** (extend to the ns/token axes) |
+| tokens *added* / *saved* (event source) | `internal/kernel` `Counters` (`Transforms`, `Quarantines` = added; `VDSOHits`, RadixAttention reuse = saved) | the token-delta numerator: what mediation re-emitted vs what reuse elided, per turn | **BUILT** as counts; the per-turn *token-delta* fold is T1 |
+| kernel-ns vs engine-ns (cost source) | T1 cost spans ([#1149](https://github.com/anthony-chaudhary/fak/issues/1149)) over the lifecycle events (`EvSubmit→EvDecide` = kernel; `EvDispatch→EvComplete` = engine) | the two ns axes the meter splits per turn — kernel mediation vs engine inference | OPEN ([#1149](https://github.com/anthony-chaudhary/fak/issues/1149)) — **blocker** (no cost on the spans yet) |
+| the **budget** envelope | T2 `OVERHEAD_BUDGET_EXCEEDED` ([#1150](https://github.com/anthony-chaudhary/fak/issues/1150)) | the declared per-turn ns/token envelope a breach is defined **against** — the calibration "over budget" needs | OPEN ([#1150](https://github.com/anthony-chaudhary/fak/issues/1150)) — **blocker** |
+| the meter's own-cost fence | T4 rate-bounded sampler ([#1156](https://github.com/anthony-chaudhary/fak/issues/1156)), per [`observer-effect.md`](../standards/observer-effect.md) | bounds how *often* the meter samples so the meter is not itself the regression it measures | OPEN ([#1156](https://github.com/anthony-chaudhary/fak/issues/1156)) — lands separately; the meter consumes it, doesn't build it |
+
+### 13.2 The per-turn tax-table shape (golden-testable)
+
+A stable, deterministic per-turn row — schema `fak.turn-tax.v1`, the `turn_tax` fold §10.2 already
+names — so a frozen single-turn fixture round-trips byte-identically and *that* is the golden test.
+Percentiles, never means (§4): a meter that averages hides the tail a guardrail hurts first.
+
+| Field | From | Meaning |
+|---|---|---|
+| `turn` | replay index | the turn the row prices |
+| `kernel_ns` | T1 `EvSubmit→EvDecide` span | mediation cost this turn (adjudication/gate/witness ns) |
+| `engine_ns` | T1 `EvDispatch→EvComplete` span | inference cost this turn (the engine round-trip ns) |
+| `tokens_added` | `Counters` `Transforms`+`Quarantines` | tokens mediation *re-emitted* into context this turn |
+| `tokens_saved` | `Counters` `VDSOHits` + RadixAttention reuse | tokens reuse *elided* this turn (local-served / cache-hit) |
+| `budget_ns` | T2 envelope for this turn-class | the declared ceiling `kernel_ns` is judged against |
+| `verdict` | `kernel_ns ≤ budget_ns` | `within` / `over` — the per-turn breach bit |
+
+The signed per-turn net is `tokens_saved − tokens_added` (positive = the turn paid for itself); the
+breach bit is `kernel_ns > budget_ns`. The engine-ns is reported beside the kernel-ns but **never
+folded into the breach** — engine inference is not fak's mediation tax (the §6 honesty fence: the
+meter prices fak's overhead, not the model's own cost). Illustrative shape (numbers from §10.2's
+worked row, **not** a benchmark claim — the structure is the witness):
+
+```
+fak turntax --meter  (schema fak.turn-tax.v1)
+  turn  kernel_ns  engine_ns   tokens_added  tokens_saved   budget_ns  verdict
+  #6        420      83,000,000          0         9,400        2,000   within   (net −9,400 tok)
+  #7      4,800      71,000,000        140             0        2,000   OVER     (breach: kernel_ns > budget)
+```
+
+### 13.3 The live `/metrics` family
+
+One family — proposed prefix `fak_turn_tax_*` — makes the same per-turn axes a first-class
+read-back surface, each member **net-true-labeled** (WITNESSED / OBSERVED / MODELED) in its help
+text. It is the live twin of the offline table; `fak_turn_tax_budget_breach_total` is the
+*live* half of the issue's "observable both live and offline."
+
+| Member | Type | Folds (source) | Provenance |
+|---|---|---|---|
+| `fak_turn_tax_kernel_seconds` | histogram | T1 `EvSubmit→EvDecide` span | **WITNESSED** (in-kernel) |
+| `fak_turn_tax_engine_seconds` | histogram | T1 `EvDispatch→EvComplete` span | **OBSERVED** (engine-relayed) |
+| `fak_turn_tax_tokens_added_total{source="transform"\|"quarantine"}` | counter | `Counters` `Transforms`/`Quarantines` | **WITNESSED** |
+| `fak_turn_tax_tokens_saved_total{source="vdso"\|"radix"}` | counter | `Counters` `VDSOHits` + RadixAttention reuse | **WITNESSED** |
+| `fak_turn_tax_budget_breach_total` | counter | T2 `OVERHEAD_BUDGET_EXCEEDED` per turn | **WITNESSED** |
+
+"Reads back" (the acceptance) = a test scrapes `/metrics`, parses the family, and confirms the
+breach counter increments exactly when a turn's `fak_turn_tax_kernel_seconds` sample crosses its
+T2 budget — the same offline `over` verdict, surfaced live. The engine histogram is OBSERVED, not
+WITNESSED: the engine round-trip is the provider's number fak relays, never fak's own (the §10.3
+provenance discipline, applied per turn).
+
+### 13.4 Acceptance, and what blocks it today
+
+The issue's two acceptance clauses, each tied to the witness that proves it:
+
+- **AC1 — a golden turn produces a golden tax table.** A frozen single-turn fixture round-trips to
+  the §13.2 `fak.turn-tax.v1` schema byte-identically, asserted by a `-selfcheck`-style golden test
+  (the `cmd/turntaxdemo -selfcheck` discipline, extended from today's turn-count invariants to the
+  ns/token-cost axes). *The golden-turn harness exists and is green on the turn-count axis today*;
+  AC1 adds the two cost axes once T1 sources them.
+- **AC2 — a budget breach is observable both live and offline.** *Offline:* the verb prints `OVER`
+  for the breaching turn and exits non-zero (the §13.2 `verdict` column + the `-selfcheck` exit
+  discipline). *Live:* `fak_turn_tax_budget_breach_total` increments and the `fak_turn_tax_kernel_seconds`
+  sample crosses budget on `/metrics` (§13.3). Both are gated on T2's calibrated budget.
+- **Blocked-on (the honest fence).** AC1's cost axes and *all* of AC2 are blocked on **T1
+  ([#1149](https://github.com/anthony-chaudhary/fak/issues/1149), OPEN)** — the lifecycle spans
+  carry no elapsed-ns or token-delta yet, so `kernel_ns`/`engine_ns`/`tokens_added`/`tokens_saved`
+  have no source — and on **T2 ([#1150](https://github.com/anthony-chaudhary/fak/issues/1150),
+  OPEN)** — without a declared budget there is no calibrated "over," and a meter that reds on *any*
+  overhead violates the §6 fence (an 8%-cost/40%-save turn is a **net win**) and the §8 sequencing
+  law. The meter's own observer-effect cap is **T4
+  ([#1156](https://github.com/anthony-chaudhary/fak/issues/1156))**, the rate-bounded sampler
+  [`observer-effect.md`](../standards/observer-effect.md) requires — landing separately; the meter
+  *consumes* it, it does not build it here.
+- **Built, so the build is additive.** The `fak turntax` verb, the `cmd/turntaxdemo` replay, the
+  `-selfcheck` golden-turn discipline, and the kernel `Counters` (the token-added/saved event
+  source) are built and green — so once T1/T2 land the meter is **wiring against this fixed
+  contract**: fold the T1 spans into the two ns axes, fold the `Counters` deltas into the two token
+  axes, judge `kernel_ns` against the T2 budget, emit the §13.3 family. **Lane for the build:** the
+  verb is `cmd` (`cmd/fak` `turntax` + a pure `internal/turntaxmeter` fold beside T4's sampler), the
+  family is `gateway`/`metrics` — **not** `docs`. This docs increment pins the contract only; it
+  does not itself satisfy AC1/AC2.
+
+### 13.5 Reproduce (the turn ladder today; the cost-axis meter once T1/T2 land)
+
+```sh
+# Available today — the per-turn turn ladder + the golden-turn selfcheck (no model, $0):
+go run ./cmd/turntaxdemo -selfcheck   # replays each suite, asserts the golden table, non-zero on drift
+fak turntax --suite turntax-airline   # the per-turn turn-tax report (turn-count axis)
+
+# The cost-axis meter + the budget breach, once the deps land:
+fak turntax --meter --json | jq '.schema, .turns[] | {turn, kernel_ns, tokens_saved, verdict}'   # AC1
+curl -s localhost:PORT/metrics | grep -E '^fak_turn_tax_'                                         # AC2 (live half)
+```
+
+Stated plainly, like §12.5 / §10.5: this is the **contract** the follow-on build verifies, not a
+live cost-axis meter today — the per-turn `kernel_ns`/`engine_ns`/token-delta breakdown and the
+budget breach do not exist until T1 (#1149) emits the spans and T2 (#1150) declares the budget. The
+reused substrate — the `fak turntax` verb, the `cmd/turntaxdemo` replay, the `-selfcheck` golden
+discipline, and the kernel `Counters` — **is** built and green. Pinning the meter's shape here (the
+per-turn tax table, the offline verb verdict, the live `fak_turn_tax_*` family, the golden-turn +
+budget-breach witnesses) is the docs-lane increment of L1; the executable cost-axis meter and its
+live family are the named follow-on in the `cmd` / `gateway` / `metrics` lane, unblocked by T1+T2.
