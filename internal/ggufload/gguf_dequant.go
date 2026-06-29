@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -149,6 +151,63 @@ func reuseF32(buf []float32, n int) []float32 {
 		return buf[:n]
 	}
 	return make([]float32, n)
+}
+
+const (
+	dequantParallelMinBlocks       = 4096
+	dequantParallelBlocksPerWorker = 4096
+)
+
+func dequantParallelWorkers(blocks int) int {
+	if blocks < dequantParallelMinBlocks {
+		return 1
+	}
+	workers := dequantWorkers()
+	if workers < 2 {
+		return 1
+	}
+	maxByWork := (blocks + dequantParallelBlocksPerWorker - 1) / dequantParallelBlocksPerWorker
+	if workers > maxByWork {
+		workers = maxByWork
+	}
+	if workers > blocks {
+		workers = blocks
+	}
+	if workers < 2 {
+		return 1
+	}
+	return workers
+}
+
+func dequantWorkers() int {
+	n := runtime.GOMAXPROCS(0)
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func dequantKBlocks(out []float32, raw []byte, qk, blockBytes int, body func([]float32, []byte)) {
+	blocks := len(out) / qk
+	workers := dequantParallelWorkers(blocks)
+	if workers <= 1 {
+		body(out, raw)
+		return
+	}
+
+	var wg sync.WaitGroup
+	for w := 1; w < workers; w++ {
+		lo := blocks * w / workers
+		hi := blocks * (w + 1) / workers
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body(out[lo*qk:hi*qk], raw[lo*blockBytes:hi*blockBytes])
+		}()
+	}
+	hi := blocks / workers
+	body(out[:hi*qk], raw[:hi*blockBytes])
+	wg.Wait()
 }
 
 // dequantF32 decodes a GGUF tensor's raw payload into a freshly-allocated f32 slice.
@@ -390,6 +449,10 @@ func dequantIQ4NL(out []float32, raw []byte) {
 // 2 bits from a scales_h field — applied as dl = d*(ls-32). Within a sub-block byte j holds
 // element j in its low nibble and element j+16 in its high nibble: y = dl*kvaluesIQ4NL[code].
 func dequantIQ4XS(out []float32, raw []byte) {
+	dequantKBlocks(out, raw, qkK, blockIQ4XSBytes, dequantIQ4XSScalar)
+}
+
+func dequantIQ4XSScalar(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockIQ4XSBytes
 		d := f16At(raw, base)
@@ -421,6 +484,10 @@ func dequantIQ4XS(out []float32, raw []byte) {
 // gives an 8-bit sign mask (bit j flips output j). Layout matches ggml exactly so the f32 is
 // bit-faithful to llama.cpp's IQ3_XXS dequant.
 func dequantIQ3XXS(out []float32, raw []byte) {
+	dequantKBlocks(out, raw, qkK, blockIQ3XXSBytes, dequantIQ3XXSScalar)
+}
+
+func dequantIQ3XXSScalar(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockIQ3XXSBytes
 		d := f16At(raw, base)
@@ -511,6 +578,10 @@ func dequantQ5_1(out []float32, raw []byte) {
 }
 
 func dequantQ2K(out []float32, raw []byte) {
+	dequantKBlocks(out, raw, qkK, blockQ2KBytes, dequantQ2KScalar)
+}
+
+func dequantQ2KScalar(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockQ2KBytes
 		scales := raw[base : base+qkK/16]
@@ -545,6 +616,10 @@ func dequantQ2K(out []float32, raw []byte) {
 }
 
 func dequantQ3K(out []float32, raw []byte) {
+	dequantKBlocks(out, raw, qkK, blockQ3KBytes, dequantQ3KScalar)
+}
+
+func dequantQ3KScalar(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockQ3KBytes
 		hmask := raw[base : base+qkK/8]
@@ -610,6 +685,10 @@ func unpackQ3KScales(raw []byte) [16]int8 {
 }
 
 func dequantQ4K(out []float32, raw []byte) {
+	dequantKBlocks(out, raw, qkK, blockQ4KBytes, dequantQ4KScalar)
+}
+
+func dequantQ4KScalar(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockQ4KBytes
 		d := f16At(raw, base)
@@ -646,6 +725,10 @@ func scaleMinPairK4(d, min float32, is int, scales []byte) (d1, m1, d2, m2 float
 }
 
 func dequantQ5K(out []float32, raw []byte) {
+	dequantKBlocks(out, raw, qkK, blockQ5KBytes, dequantQ5KScalar)
+}
+
+func dequantQ5KScalar(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockQ5KBytes
 		d := f16At(raw, base)
@@ -682,6 +765,10 @@ func dequantQ5K(out []float32, raw []byte) {
 }
 
 func dequantQ6K(out []float32, raw []byte) {
+	dequantKBlocks(out, raw, qkK, blockQ6KBytes, dequantQ6KScalar)
+}
+
+func dequantQ6KScalar(out []float32, raw []byte) {
 	for block := 0; block < len(out)/qkK; block++ {
 		base := block * blockQ6KBytes
 		ql := raw[base : base+qkK/2]
