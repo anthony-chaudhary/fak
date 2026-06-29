@@ -172,6 +172,7 @@ var tier = map[string]int{
 	"turntaxmeter":    1, // pure observer-effect sampling and overhead-budget meter; stdlib-only, off the hot path.
 	"slackenv":        1, // the ONE .env.slack.local token/channel resolver every outbound Slack publisher (scoreboard/blockerpost/benchpost/dispatchpost/dojopost/marketing/nodeusagepost) and chatrelay delegates to; pure stdlib, off the hot path.
 	"dormancy":        1, // dormancy clock + horizon bucketer (#1179, epic #1178): a durable monotonic LastActiveAt Stamp + a pure Horizon(gap) -> {warm,cool,cold,frozen,ancient} bucketer (thresholds anchored to the resume cache TTLs); stdlib-only, imports nothing internal, off the hot path. Surfaced on session/loop/lease as the shared "how long dormant" field.
+	"syspromptmmu": 2, // system-prompt MMU Rung 1 (#1259): emits fak's ordered base-context plan — the SegStable spine + versioned policy floor as []cachemeta.PromptSegment, each with a content-derived Witness. Pure authorship/decision layer: imports only cachemeta(1)+stdlib, off the hot path, no wire mutation.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
