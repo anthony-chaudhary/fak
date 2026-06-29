@@ -50,6 +50,7 @@ var tier = map[string]int{
 	"ailuminate":       1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"benchcatalog":     1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"cachevalueledger": 1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
+	"cachevaluereport": 1, // pure weekly trend roll-up over cachevalueledger rows; stdlib-only plus cachevalueledger, off the hot path.
 	"benchcli":         1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
 	"benchids":         1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
 	"benchscore":       1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
@@ -82,6 +83,7 @@ var tier = map[string]int{
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
+	"cachevaluereport": 2, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
 	"harvest": 2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
 	"journal": 2, "gitgate": 2, "safecommit": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
