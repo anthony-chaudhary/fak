@@ -3,7 +3,7 @@
 
 Drives the PURE grader (build_payload / collect with an injected verifier) so the
 tests need no `dos` binary, then a tolerant live smoke check that `collect` folds
-the real committed store when `dos memory verify` is available.
+the real per-project store when `dos memory verify` is available.
 
 Run: `python tools/memory_recall_audit_test.py`  (exit 0 = all pass).
 """
@@ -95,10 +95,27 @@ def main() -> int:
     finally:
         mra.verify_store = orig
 
-    # 7) LIVE smoke (tolerant): if dos is available, collect must fold the real
-    #    committed store without crashing and return a well-formed payload.
+    # 6b) the default store resolves to the real per-project location, NOT a
+    #     repo-relative ".claude/memory" mirror (regression guard for #1141).
+    #     project_namespace resolves its arg, so the encoding is asserted on the
+    #     transform itself: every drive-colon / separator collapses to "-", and
+    #     no separator survives in the namespace.
+    ns = mra.project_namespace(Path("/work/fak"))
+    check("namespace has no path separators", "/" not in ns and "\\" not in ns and ":" not in ns, ns)
+    check("namespace collapses separators to dash", ns.endswith("-work-fak"), ns)
+    store = mra.default_store(Path("/work/fak"))
+    check("default store is under ~/.claude/projects", "projects" in store.parts, str(store))
+    check("default store ends in <ns>/memory",
+          store.parts[-1] == "memory" and store.parts[-2] == ns, str(store))
+    check("default store is NOT repo-relative .claude/memory",
+          ".claude/memory" not in str(store).replace("\\", "/").rsplit("projects", 1)[0],
+          str(store))
+
+    # 7) LIVE smoke (tolerant): if dos is available and the real per-project
+    #    store exists, collect must fold it without crashing and return a
+    #    well-formed payload.
     root = mra.repo_root()
-    store = root / mra.STORE_REL
+    store = mra.default_store(root)
     if store.is_dir():
         live = mra.collect(root)
         ok_shape = (
