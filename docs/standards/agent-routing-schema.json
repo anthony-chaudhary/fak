@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/agent-routing-schema.json",
+  "title": "Agent routing schema (fak-route/v1)",
+  "description": "A portable, engine-free schema for a per-aspect routing policy: choose WHICH model (or which ensemble + reduction) serves any ASPECT of a request, under one declarative, deterministic, reviewable manifest. Author against this with any JSON Schema validator; no fak engine is required. The root validates a routing Manifest (the authored policy). $defs/Subject is the request shape `dos route` classifies; $defs/Decision is the plan it returns. The reduction vocabulary is a CLOSED enum — an out-of-set token is rejected at the boundary, never routed silently.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["default"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^fak-route/v1",
+      "description": "Schema tag. Omitted => current version. A different MAJOR is refused; a newer MINOR is forward-accepted (additive-only discipline)."
+    },
+    "default": {
+      "$ref": "#/$defs/Plan",
+      "description": "The fail-closed plan applied when no rule matches. Absence of a match is a deny-to-default, never a silent fall-through."
+    },
+    "rules": {
+      "type": "array",
+      "description": "Ordered match -> plan rules. The FIRST rule whose match fires wins; put the most specific rules first.",
+      "items": { "$ref": "#/$defs/Rule" }
+    }
+  },
+  "$defs": {
+    "Reduction": {
+      "description": "How an ensemble's member outputs fold into one result. CLOSED, additive vocabulary — a new reduction is a new enum value + a fold arm, never manifest free text. An out-of-set value is UNCLASSIFIED and rejected.",
+      "type": "string",
+      "enum": ["first", "vote", "best_of", "all_reduce", "concat"]
+    },
+    "Latency": {
+      "description": "Latency requirement a subject carries. Closed set; omitted => unconstrained.",
+      "type": "string",
+      "enum": ["interactive", "batch"]
+    },
+    "Complexity": {
+      "description": "Coarse, ordered difficulty (low < medium < high) so a match can set a floor. Closed set; omitted => no floor.",
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "Aspect": {
+      "description": "The GRANULARITY of the routed unit — the 'every level' axis. OPEN set: the listed values are well-known, but a deployment may route its own named stage with any string. Not restricted by validation.",
+      "type": "string"
+    },
+    "Member": {
+      "description": "One model in a plan.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1, "description": "The model / worker id this member dispatches to." },
+        "weight": { "type": "number", "minimum": 0, "description": "Vote / aggregation weight (<= 0 treated as 1 at use)." },
+        "role": { "type": "string", "description": "Optional structural label (primary / drafter / verifier / judge / ...) the fold may read." }
+      }
+    },
+    "Plan": {
+      "description": "A single model PICK (one member) or an ENSEMBLE (>1 member) folded by a Reduction. Must carry >= 1 member (the fail-closed invariant); an ensemble MUST name a known reduction.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["members"],
+      "properties": {
+        "members": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Member" } },
+        "reduce": { "$ref": "#/$defs/Reduction" },
+        "scout": { "type": "string", "description": "Optional cheap model that classifies the subject FIRST (scout-then-route)." },
+        "reason": { "type": "string", "description": "Free-text note surfaced in the decision trace." }
+      },
+      "if": { "properties": { "members": { "minItems": 2 } }, "required": ["members"] },
+      "then": { "required": ["members", "reduce"] }
+    },
+    "Match": {
+      "description": "A rule's predicate over a Subject. A rule fires when EVERY set field holds (logical AND); an unset field is a wildcard.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "aspect": { "$ref": "#/$defs/Aspect" },
+        "tool": { "type": "string", "description": "Exact tool name, or a single trailing-'*' prefix wildcard (git_* matches git_push)." },
+        "min_prompt_tokens": { "type": "integer", "minimum": 0 },
+        "max_prompt_tokens": { "type": "integer", "minimum": 0, "description": "0 => unbounded." },
+        "latency": { "$ref": "#/$defs/Latency" },
+        "min_complexity": { "$ref": "#/$defs/Complexity" },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Open k=v signals (domain, language, tenant, taint, ...). Every pair must equal." }
+      }
+    },
+    "Rule": {
+      "description": "One ordered routing rule: a unique name, a match predicate, and the plan to apply when it fires.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "plan"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "Unique label surfaced in the decision." },
+        "match": { "$ref": "#/$defs/Match" },
+        "plan": { "$ref": "#/$defs/Plan" }
+      }
+    },
+    "Subject": {
+      "description": "The classified thing to route — the INPUT `dos route` takes. Generalizes 'a request' to ANY aspect at any granularity. Not part of the manifest; defined here so the portable contract carries the request shape too.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "aspect": { "$ref": "#/$defs/Aspect" },
+        "tool": { "type": "string", "description": "The tool name when aspect == tool_call." },
+        "prompt_tokens": { "type": "integer", "minimum": 0 },
+        "latency": { "$ref": "#/$defs/Latency" },
+        "complexity": { "$ref": "#/$defs/Complexity" },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "Decision": {
+      "description": "The OUTPUT `dos route` returns: the echoed subject, which rule fired (matched=false => the default plan), and the chosen plan. Reviewable as data, no narration. An OUTPUT shape (not an authored policy), so a richer implementation MAY add fields — additionalProperties is open here.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["plan"],
+      "properties": {
+        "subject": { "$ref": "#/$defs/Subject" },
+        "rule": { "type": "string", "description": "The name of the rule that fired ('' or absent => the fail-closed default was used)." },
+        "matched": { "type": "boolean" },
+        "plan": { "$ref": "#/$defs/Plan" }
+      }
+    }
+  }
+}

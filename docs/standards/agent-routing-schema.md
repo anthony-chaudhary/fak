@@ -133,7 +133,13 @@ can check without fak's engine:
 2. **The reduction set is a closed, validatable vocabulary.** The five values in the
    [table above](#the-reduction-vocabulary) are the whole set; an ensemble must carry
    one; an unknown token fails validation. A validator decides membership with a
-   finite switch, not a lookup against a live service.
+   finite switch, not a lookup against a live service. The schema is published as a
+   machine-checkable JSON Schema — [`agent-routing-schema.json`](agent-routing-schema.json)
+   (Draft 2020-12) — so any orchestrator authors and validates a manifest with an
+   off-the-shelf validator, **no fak engine present**: the
+   [manifest fixture below](#the-round-trip-as-data) is checked against it, and an
+   out-of-set `reduce`, a zero-member (non-fail-closed) plan, an ensemble missing its
+   reduction, and an unknown field are each rejected at the boundary.
 3. **The plan is deterministic and reviewable.** Routing is a pure function of the
    subject shape and the manifest: the same `Subject` against the same `Manifest`
    always yields the same `Decision`. "Deterministic" is scoped to the routing
@@ -203,6 +209,7 @@ implementation's proof that the three contracts hold.
 
 ## Cross-references
 
+- [`agent-routing-schema.json`](agent-routing-schema.json) — the machine-checkable JSON Schema (Draft 2020-12) for this contract: validate a manifest with any off-the-shelf validator, no fak engine present.
 - [Model routing — first-class at every level](../model-routing.md) — fak's reference implementation of this schema, with the per-aspect spine, the surveyed-router comparison, and the live-dispatch `[STUB]`.
 - [Routers & gateways](../integrations/routers.md) — why fak is a complement to a request-level router, the three topologies, and the residency floor that holds for every router.
 - [The agent-programming grammar](../notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md) — the epic this schema is `G8` of, and the recipe every lift keeps (closed vocabulary, evidence-bound, fail-closed, data-not-code, pays on both lenses).
