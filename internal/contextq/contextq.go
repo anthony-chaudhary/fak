@@ -929,8 +929,10 @@ func (l *CapabilityLedger) RecordFault(ref CapRef, now int64) {
 	cr.lastFault = now
 }
 
-// RecordEvict records an eviction, transitioning the capability to held.
-func (l *CapabilityLedger) RecordEvict(ref CapRef) {
+// setState transitions a tracked capability to the given state under the ledger
+// lock. A nil ledger or an unknown ref is a no-op. Shared by the single-field
+// state transitions (RecordEvict, MarkEvictable).
+func (l *CapabilityLedger) setState(ref CapRef, state CapState) {
 	if l == nil {
 		return
 	}
@@ -938,22 +940,15 @@ func (l *CapabilityLedger) RecordEvict(ref CapRef) {
 	defer l.mu.Unlock()
 
 	if cr := l.caps[ref]; cr != nil {
-		cr.state = CapStateHeld
+		cr.state = state
 	}
 }
+
+// RecordEvict records an eviction, transitioning the capability to held.
+func (l *CapabilityLedger) RecordEvict(ref CapRef) { l.setState(ref, CapStateHeld) }
 
 // MarkEvictable marks a capability as evictable.
-func (l *CapabilityLedger) MarkEvictable(ref CapRef) {
-	if l == nil {
-		return
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if cr := l.caps[ref]; cr != nil {
-		cr.state = CapStateEvictable
-	}
-}
+func (l *CapabilityLedger) MarkEvictable(ref CapRef) { l.setState(ref, CapStateEvictable) }
 
 // Query returns a consistent snapshot of all tracked capabilities.
 func (l *CapabilityLedger) Query() CapSnapshot {
