@@ -12,7 +12,7 @@
 # Deconfliction strategies:
 # - Same lanes, different nodes: OK (arbiter serializes by lane)
 # - Different lanes: ideal (parallel work, no arbitration needed)
-# - Lane filtering via env: FLEET_LANE_ALLOWLIST (not yet implemented)
+# - Lane steering via env: FLEET_LANE_ALLOWLIST (advisory; GitRefStore is the floor)
 #
 # Laptop (user) defaults:
 # - Target: 2 workers (laptop is for testing/dev, desktop is production)

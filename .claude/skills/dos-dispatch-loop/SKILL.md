@@ -51,12 +51,15 @@ the `/dos-self-improve` loop uses, now gating each dispatch iteration's net gain
 
 ```bash
 dos doctor --workspace . --json
-dos arbitrate --workspace . --lane <LANE> --kind cluster --leases '<SIBLING_LEASES>'
+python tools/dos_fleet_lease.py --workspace . acquire --lane <LANE> --kind cluster
 ```
 
-The arbiter ADMITs a free lane (or auto-picks one); a REFUSE means a sibling loop
-already holds an overlapping lane — pick a free one from `free_clusters` or exit.
-Initialise the loop counters (iteration=1, the breakers at 0).
+The fleet lease wrapper materializes the live lease union, feeds it to the kernel
+acquire, then republishes this node's held set. For ordinary shard lanes this is the
+same-host fast path; for the three global lanes (`abi`, `release`, `global`) it uses
+the GitRefStore cross-node transport by default (#21). A REFUSE means a sibling loop
+already holds an overlapping lane — pick a free one from `kernel.free_clusters` or
+exit. Initialise the loop counters (iteration=1, the breakers at 0).
 
 ## Step 1 — Pick-selection: skip held + cooled units (the anti-churn gate)
 
@@ -257,9 +260,9 @@ Keep the beat alive across iterations — `acquire` once, `heartbeat` each pass,
 real evidence (a beat is not an event):
 
 ```bash
-$ dos lease-lane acquire   --workspace . --lane benchmark    # writes ACQUIRE to the WAL
-$ dos lease-lane heartbeat --workspace . --lane benchmark    # writes HEARTBEAT each iteration
-$ dos lease-lane release   --workspace . --lane benchmark    # writes RELEASE when the loop stops
+$ python tools/dos_fleet_lease.py --workspace . acquire   --lane benchmark    # writes ACQUIRE, then publishes this node's held set
+$ python tools/dos_fleet_lease.py --workspace . heartbeat --lane benchmark    # writes HEARTBEAT, then republishes
+$ python tools/dos_fleet_lease.py --workspace . release   --lane benchmark    # writes RELEASE, then republishes
 ```
 
 Ask the kernel if the run is moving (the temporal verdict, from git delta — never

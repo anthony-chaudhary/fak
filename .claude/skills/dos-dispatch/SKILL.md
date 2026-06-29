@@ -44,19 +44,24 @@ declared trees — two dispatches on disjoint trees both ADMIT; overlapping tree
 COLLIDE.
 
 ```bash
-dos arbitrate --workspace . --lane <LANE> --kind cluster --leases '<LIVE_LEASES>'
+python tools/dos_fleet_lease.py --workspace . acquire --lane <LANE> --kind cluster
 ```
 
-Read the `LaneDecision` JSON: `{outcome, lane, tree, reason, free_clusters, …}`.
+Read the wrapper JSON. On success, top-level `lane` is the admitted lane and
+`kernel` is the underlying `LaneDecision` (`{outcome, lane, tree, reason,
+free_clusters, ...}`).
 
-- `outcome: "acquire"` → admitted. `lane` is the lane to run on (may differ from
-  the request when auto-pick reassigned it); `tree` is its file tree. Proceed.
-- `outcome: "refuse"` → not admitted. `reason` explains why; `free_clusters`
+- `kernel.outcome: "acquire"` -> admitted. Top-level `lane` is the lane to run on
+  (may differ from the request when auto-pick reassigned it); `kernel.tree` is its
+  file tree. Proceed.
+- `kernel.outcome: "refuse"` -> not admitted. `kernel.reason` explains why; `kernel.free_clusters`
   lists lanes you could pick instead. **Stop** (or retry on a free lane). Do not
-  force — `--force` is an operator-only override, not an automation default.
+  force - `--force` is an operator-only override, not an automation default.
 
-The exit code mirrors the outcome (0 = acquire, 1 = refuse), so the screenplay
-can branch on it directly.
+The exit code mirrors the wrapper verdict (0 = acquire, 3 = refused/contended), so
+the screenplay can branch on it directly. The wrapper is the #21 activation seam:
+ordinary shard lanes stay on the local WAL fast path, while `abi`, `release`, and
+`global` materialize/publish through GitRefStore by default.
 
 ## Step 2 — Snapshot the portfolio (the packet)
 
@@ -108,8 +113,8 @@ or scope. Honor the returned action:
 
 Record the S0 counts (`collisions_avoided`, `lanes_utilized`,
 `serialization_wasted`) with the run archive when the pricing surface provides
-them. The reactive `dos arbitrate` lease in Step 1 remains mandatory; pricing
-does not replace it.
+them. The reactive fleet lease acquire in Step 1 remains mandatory; pricing does
+not replace it.
 
 ## Step 4 — Ship the packet (LIVE only)
 
@@ -126,14 +131,14 @@ a commit prefix.** (`dos doctor --json`'s `stamp` names the active grammar.)
 
 ## Step 6 — Release the lane lease
 
-If you took a cross-process `dos lease` for the archive, release it:
+If you took a cross-process lane lease for the archive, release it:
 
 ```bash
-dos lease --workspace . release <owner>
+python tools/dos_fleet_lease.py --workspace . release --lane <LANE>
 ```
 
-The lane lease itself is advisory state in `live_leases`; a real loop
-(`/dos-dispatch-loop`) threads it forward. A single dispatch simply finishes.
+The wrapper releases the local WAL entry and republishes this node's held set, so
+global-lane peers stop seeing the lane as held after the dispatch finishes.
 
 ## Out-of-scope findings — file an issue, don't widen the lane
 

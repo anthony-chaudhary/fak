@@ -316,10 +316,36 @@ class FleetLeaseGateTest(unittest.TestCase):
         mod = load()
         self.assertIsNone(mod.fleet_lease_gate("adjudicator", workspace=ROOT, env={}))
 
-    def test_global_lane_default_backend_is_noop(self):
-        # Un-opted node (no FAK_FLEET_LEASE_STORE, no injected store): zero-network no-op.
+    def test_global_lane_default_store_is_gitref(self):
+        # Issue #21 activation: unconfigured global lanes default to the git-ref floor.
         mod = load()
-        self.assertIsNone(mod.fleet_lease_gate("release", workspace=ROOT, env={}))
+        self.assertIsInstance(mod.fleet_lease_store(ROOT, {}, lane="release"), fl.GitRefStore)
+
+    def test_shard_lane_default_store_remains_local(self):
+        mod = load()
+        self.assertIsInstance(mod.fleet_lease_store(ROOT, {}, lane="docs"), fl.LocalDirStore)
+
+    def test_global_lane_default_gate_consults_store(self):
+        mod = load()
+        store = self._store()
+        seen = {}
+        original = mod.fleet_lease_store
+
+        def fake_store(workspace, env, *, lane=""):
+            seen["lane"] = lane
+            return store
+
+        mod.fleet_lease_store = fake_store
+        try:
+            got = mod.fleet_lease_gate(
+                "release", workspace=ROOT, env={},
+                live=lambda _ws: [], now=T0,
+            )
+        finally:
+            mod.fleet_lease_store = original
+
+        self.assertIsNone(got)
+        self.assertEqual(seen["lane"], "release")
 
     def test_global_lane_proceeds_when_no_foreign_holder(self):
         mod = load()
@@ -349,7 +375,7 @@ class FleetLeaseGateTest(unittest.TestCase):
         self.assertEqual(got["host_id"], "B")
         self.assertIn("release", got["detail"])
 
-    def test_git_backend_publish_failure_fails_closed(self):
+    def test_global_publish_failure_fails_closed(self):
         mod = load()
 
         class FailPublish:
@@ -360,13 +386,13 @@ class FleetLeaseGateTest(unittest.TestCase):
                 return False, None  # publish lost / store unreachable
 
         got = mod.fleet_lease_gate(
-            "release", workspace=ROOT, env={"FAK_FLEET_LEASE_STORE": "git"},
+            "release", workspace=ROOT, env={},
             store=FailPublish(), live=lambda _ws: [], now=T0,
         )
-        self.assertIsNotNone(got)  # the git floor refuses rather than silently double-grant
+        self.assertIsNotNone(got)  # the global floor refuses rather than silently double-grant
         self.assertIn("release", got["detail"])
 
-    def test_git_backend_store_exception_fails_closed(self):
+    def test_global_store_exception_fails_closed(self):
         mod = load()
 
         class BoomStore:
@@ -377,7 +403,7 @@ class FleetLeaseGateTest(unittest.TestCase):
                 raise RuntimeError("remote down")
 
         got = mod.fleet_lease_gate(
-            "release", workspace=ROOT, env={"FAK_FLEET_LEASE_STORE": "git"},
+            "release", workspace=ROOT, env={},
             store=BoomStore(), live=lambda _ws: [], now=T0,
         )
         self.assertIsNotNone(got)
