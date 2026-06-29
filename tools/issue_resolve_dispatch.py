@@ -1195,8 +1195,10 @@ def acquire_lane_lease(root: Path, lane: str, *, tree: list[str], ttl_s: int,
     """ATOMICALLY take the fenced refs/fak/locks/resolve-<lane> lease before a
     spawn. Returns {"acquired": bool, "refused": bool, "id", "holder", ...}.
 
-    - acquired=True  -> exit 0: we hold the lease; carry the id+holder so the
-                        worker-exit path can RELEASE it.
+    - acquired=True  -> exit 0: we hold the lease; carry the id+holder so a later
+                        tick can renew/reap it. There is no early-release verb yet
+                        (`fak leaseref` exposes only acquire/reap), so the lane is
+                        freed by TTL + reap, not an explicit release on worker exit.
     - refused=True   -> exit 3: a LIVE peer (this host OR another clone after a
                         fetch) holds the lane; the caller refuses LANE_LEASE_HELD.
     - acquired=False, refused=False -> FAIL OPEN: no fak binary / a git-store

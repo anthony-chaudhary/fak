@@ -1430,6 +1430,32 @@ class LaneLeaseHelperTest(unittest.TestCase):
         self.assertFalse(out["acquired"])
         self.assertEqual(out["reason"], "LEASE_HELD")
 
+    def test_acquire_argv_carries_id_ttl_and_every_tree(self) -> None:
+        # Regression guard for the FENCE parameters: the acquire argv MUST carry the
+        # TTL (drop it and the lease never expires -> a crashed holder wedges the lane
+        # forever, defeating the reap backstop) and ONE --tree per lane glob (drop them
+        # and the arbiter cannot reason cross-lane disjointness). Pin the exact argv so
+        # a refactor cannot silently weaken the lease the way the issue's gate depends on.
+        mod = load()
+        seen: dict = {}
+        def runner(root, args, **k):
+            seen["args"] = list(args)
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-docs", "generation": 1}}}
+        out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**", "internal/spec/**"],
+                                     ttl_s=1234, holder="sess-7", runner=runner)
+        self.assertTrue(out["acquired"])
+        argv = seen["args"]
+        self.assertEqual(argv[0], "acquire")
+        # --id resolve-<lane>, --holder, and the exact --ttl value are all present.
+        self.assertEqual(argv[argv.index("--id") + 1], "resolve-docs")
+        self.assertEqual(argv[argv.index("--holder") + 1], "sess-7")
+        self.assertEqual(argv[argv.index("--ttl") + 1], "1234")
+        # one --tree per glob, each glob carried through verbatim.
+        self.assertEqual(argv.count("--tree"), 2)
+        self.assertIn("docs/**", argv)
+        self.assertIn("internal/spec/**", argv)
+
     def test_acquire_other_exit_fails_open(self) -> None:
         mod = load()
         for rc in (1, 2, 127):
