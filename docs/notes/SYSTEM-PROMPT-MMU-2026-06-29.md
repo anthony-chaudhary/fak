@@ -224,6 +224,141 @@ Numbered so the keystone lands first and each rung holds all five invariants.
 - Not a replacement for #751/#1103/#1217 — it is the authorship layer that sits
   on their machinery and gives the skill-loader keystone its first live caller.
 
+## Rung 5 — witness-gated runtime modification: the live base (pinned contract, #1263)
+
+Rung 5 ([#1263](https://github.com/anthony-chaudhary/fak/issues/1263)) is the
+*live-base* rung — the system prompt becomes a first-class object fak rewrites at
+runtime, under a witness gate, **never edit-in-place**. This section does for
+Rung 5 what an epic's per-child pinned contracts do for the rest of a ladder: fix
+the contract's shape — the four `fak prompt` verbs, the versioned-delta record,
+the witness gate, the spine-off-limits hard refusal, the auto-demote journal row
+— so the eventual code build is **wiring against a fixed contract**, and fence
+honestly what blocks the live verb today (Rungs 1/2/4 are unbuilt — there is no
+`internal/syspromptmmu` package yet, so the verbs have nothing to edit). This is
+a *docs-lane* increment: it pins the contract; it does **not** itself satisfy the
+acceptance tests, which are a named code follow-on (§R5.5).
+
+### R5.1 The substrate (the inputs, each with its current build state)
+
+The honest accounting: the *cache-safe splice floor*, the *rebuild seam*, and the
+*witness* are built and tested today — Rung 5 is **the versioned-store + verb
+surface on top of them**, not greenfield in those parts — but the tier model the
+verbs target and the residency rule that bounds promote/demote are not yet in-tree.
+
+| Input | Source (current) | What it contributes to Rung 5 | Build state |
+|---|---|---|---|
+| the tiered spine + policy + overlay model | `internal/syspromptmmu` segment plan (Rung 1, [#1259](https://github.com/anthony-chaudhary/fak/issues/1259)) | the `SegStable` spine / versioned policy floor / overlay tiers a verb may (or may not) target | OPEN ([#1259](https://github.com/anthony-chaudhary/fak/issues/1259)) — **blocker** (no package yet) |
+| the next-rebuild seam (when a swap takes effect) | Rung-2 splice adapter ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260)) + `internal/promptmmu` `bytes.Equal(prefix)` floor + `internal/sessionreset` `Contributor` re-pin | where a versioned swap lands at the *next prefix rebuild*, never mid-prefix (invariants 1–2) | promptmmu + sessionreset **BUILT**; the Rung-2 adapter is OPEN ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260)) — **blocker** |
+| the witness gate (acceptance) | `dos verify` / the `fak guard` decision journal | the independent gate a self-authored delta must pass before it can become resident — the agent never grades its own edit (invariant 5) | **BUILT** (`dos verify` + the hash-chained guard journal are live) |
+| the residency rule (what may move) | Rung-4 residency policy ([#1262](https://github.com/anthony-chaudhary/fak/issues/1262)) over `ctxresidency.MeasureBlastRadius` | which blocks are promotable/demotable vs spine-pinned; refuses an edit whose blast radius crosses the spine | OPEN ([#1262](https://github.com/anthony-chaudhary/fak/issues/1262)) — **blocker** for `promote`/`demote` |
+| the auto-demote routing | guard-RSI worst-bucket routing (`cmd/fak/guardrsi.go`) | demote a learned rule that later correlates with worse witnessed outcomes, and leave a journal row | **BUILT** as a routing shape; needs the syspromptmmu version-log binding |
+| the versioned-delta store + rollback | NEW in `internal/syspromptmmu` (this rung's own surface) | the append-mostly version log (ACE incremental deltas, never a full rewrite) that preserves prior versions for bit-for-bit rollback | the rung's one genuinely new surface |
+
+### R5.2 The `fak prompt` verb surface (the four verbs)
+
+Each verb edits a *base-context block* as a **versioned delta** — ACE-style
+incremental, never a full rewrite (full rewrites cause context collapse + brevity
+bias that erodes safety text). A verb may target the **overlay** or the
+**versioned policy floor**; targeting the **spine** or the **edit-governing
+meta-rules** is a hard refusal.
+
+| Verb | Does | May target | Witness requirement |
+|---|---|---|---|
+| `fak prompt add <block>` | append a new overlay block as version `v1` (proposed) | overlay / policy floor | gated — proposed→resident only on an independent witness pass |
+| `fak prompt promote <block>` | paged → resident (pin a block into the always-resident set) | overlay / policy floor (bounded by Rung-4 residency) | gated — a promotion that would cross into the spine tier is **refused** |
+| `fak prompt demote <block>` | resident → paged (the reversible inverse of `promote`); the auto-demote path uses this on a worse-witnessed-outcome signal | overlay / policy floor | the auto variant leaves a journal row (§R5.4) |
+| `fak prompt version <block>` | swap `v_n` for `v_{n+1}` as a versioned delta, preserving `v_n` for rollback | overlay / policy floor | gated — the new version is byte-stable until the next rebuild, then takes effect (§R5.5 AC2) |
+
+Hard refusal (tested): any verb whose target resolves to the **spine tier** or the
+**edit-governing meta-rules** returns a structured refusal (`SPINE_OFF_LIMITS`)
+and exits non-zero — the agent may *propose* over the overlay/policy tiers, but
+the spine and the meta-rules that govern editing are out of its reach by
+construction, not by convention (invariant 5; "What this epic is *not*", bullet 3).
+
+### R5.3 The versioned-block record shape (golden-testable)
+
+A stable, deterministic per-block record — schema `fak.prompt-block.v1` — so a
+frozen block round-trips byte-identically and *that* is the golden test; rollback
+is then "re-pin `parent_version`'s bytes," provable bit-for-bit.
+
+| Field | Meaning |
+|---|---|
+| `block_id` | the base-context block this record versions |
+| `tier` | `policy` or `overlay` — never `spine` (a `spine` value is rejected at write) |
+| `version` / `parent_version` | the monotone version + its predecessor (the rollback target) |
+| `delta` | the ACE incremental change from `parent_version` (never a full-rewrite snapshot) |
+| `witness` | the `dos verify` / guard verdict id that admitted this version to resident |
+| `state` | `proposed` / `resident` / `paged` / `demoted` |
+| `demoted_reason` | set when auto-demote fires — the worse-witnessed-outcome signal that routed it down |
+
+Rollback restores `parent_version` bit-for-bit (the prior `delta` chain re-applied
+to the same base = the same bytes); an auto-demote transitions `state`→`demoted`,
+stamps `demoted_reason`, and appends a journal row — it never rewrites history.
+
+### R5.4 The witness gate + auto-demote journal (invariant 5)
+
+- **propose → witness → resident.** A self-authored delta is `proposed`; it becomes
+  `resident` *only* after an **independent** witness (`dos verify` / the guard
+  journal) accepts it (the Voyager acceptance-gate shape). The agent never grades
+  its own edit — the success signal comes from the witness, not the author.
+- **spine + meta-rules off-limits.** Enforced by the §R5.2 tier check in every
+  verb (hard refusal), and by the §R5.3 write-time rejection of a `spine` tier
+  value — two independent fences, so a bug in one does not open the spine.
+- **auto-demote leaves a journal row.** A `resident` rule whose subsequent
+  witnessed outcomes regress is demoted automatically (the guard-RSI worst-bucket
+  routing shape), writing a `demoted` record with its `demoted_reason` — the
+  demotion is itself a witnessed event, auditable after the fact.
+
+### R5.5 Acceptance, and what blocks it today
+
+The issue's four acceptance clauses, each tied to the witness that proves it:
+
+- **AC1 — a self-proposed overlay rule is rejected unless it passes the witness;
+  the spine cannot be targeted by any `fak prompt` verb (hard refusal, tested).**
+  Proven by two tests: a proposed delta with a failing witness never reaches
+  `resident` (§R5.4), and every verb against a spine-tier target returns
+  `SPINE_OFF_LIMITS` and exits non-zero (§R5.2).
+- **AC2 — a version swap is byte-stable until the next rebuild, then takes effect
+  with the prefix re-pinned (invariant 1 holds across the swap).** `fak prompt
+  version` stages `v_{n+1}` but the realized wire prefix stays byte-identical
+  (the `internal/promptmmu` `bytes.Equal(prefix)` floor) until the Rung-2 splice
+  re-pins at the next `sessionreset` rebuild — asserted by a before/after prefix
+  equality test across the swap.
+- **AC3 — rollback restores the prior version bit-for-bit; an auto-demoted rule
+  leaves a journal row.** The §R5.3 `parent_version` re-pin is a byte-equality
+  test; the §R5.4 auto-demote writes an auditable `demoted` row.
+- **AC4 — the agent never grades its own edit (invariant 5).** The acceptance
+  signal is the independent witness verdict, structurally separated from the
+  proposing path (§R5.4).
+- **Blocked-on (the honest fence).** AC1's "becomes resident" half, AC2 end-to-end,
+  and the `promote`/`demote` residency bound are blocked on **Rung 1
+  ([#1259](https://github.com/anthony-chaudhary/fak/issues/1259), OPEN)** — the
+  tiered segment model the verbs target does not exist yet (`internal/syspromptmmu`
+  is unbuilt) — on **Rung 2 ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260),
+  OPEN)** — the splice adapter that realizes a swap at the next rebuild — and on
+  **Rung 4 ([#1262](https://github.com/anthony-chaudhary/fak/issues/1262), OPEN)** —
+  the residency rule that says what may move. The witness (`dos verify` + the guard
+  journal) and the rebuild seam (`promptmmu` + `sessionreset`) are **built**, so
+  once Rungs 1/2/4 land Rung 5 is **wiring against this fixed contract**: stand up
+  the `fak.prompt-block.v1` version log in `internal/syspromptmmu`, add the four
+  `cmd/fak` `prompt` verbs over it, gate `proposed→resident` on the witness, and
+  bind auto-demote to the guard-RSI worst-bucket signal.
+- **Lane for the build:** the verbs are `cmd` (`cmd/fak` `prompt` + the version
+  log in `internal/syspromptmmu`), the witness binding is `gateway`/`guard` — **not**
+  `docs`. This docs increment pins the contract only; it does not itself satisfy
+  AC1–AC4.
+
+### R5.6 Reproduce (the contract today; the live verb once Rungs 1/2/4 land)
+
+Today the contract is checkable as text: the four verbs (§R5.2), the
+`fak.prompt-block.v1` record (§R5.3), and the two off-limits fences (§R5.4) are
+fixed, and the witness + rebuild seam they bind to are already green
+(`go test ./internal/promptmmu/... ./internal/sessionreset/...`). Once Rung 1's
+segment model and Rung 2's splice adapter land, `fak prompt version <block>`
+followed by a `--reset-on-budget` rebuild reproduces AC2 (prefix byte-stable, then
+re-pinned), and `fak prompt add` with a deliberately failing witness reproduces
+AC1 (never reaches `resident`).
+
 ## Sources
 
 Context as a finite budget / just-in-time retrieval — Anthropic, *Effective
