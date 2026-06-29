@@ -212,7 +212,9 @@ win, and the plane must say so rather than red on the 8% alone.
 - **T9 · quality-regression FAST tier (deterministic).** A cheap continuous check that
   repair/quarantine/deny didn't drop a *legit* result — the AgentDojo benign-controls +
   bit-identity pattern, run on every gated run. *Witness:* a benign result wrongly dropped reds;
-  a correct quarantine does not.
+  a correct quarantine does not. *(contract pinned in
+  [§14](#14-l4--the-quality-regression-fast-tier-pinned-contract); the deterministic benign-control
+  scorer + steward are the named follow-on, buildable today — no unbuilt dep gates it)*
 - **T10 · quality-regression SLOW tier (model-as-judge).** Reuse `modelroute.Judge` to grade the
   intervened answer vs the un-intervened one (pairwise win-rate, position-swap debias), periodic;
   validate the judge against human labels (Spearman ≥ 0.7 or the metric is flagged untrustworthy).
@@ -450,8 +452,9 @@ golden-tested verb and the live metric family are the named follow-on in the `cm
 ## 11. L4 — the model-as-judge slow tier (pinned contract)
 
 T10 ([#1166](https://github.com/anthony-chaudhary/fak/issues/1166)) is the *quality* dual of the
-speed ladder: the fast tier (T9, [#1165](https://github.com/anthony-chaudhary/fak/issues/1165))
-proves an intervention didn't **drop** a legit result (a deterministic, run-on-every-gate
+speed ladder: the fast tier (T9, [#1165](https://github.com/anthony-chaudhary/fak/issues/1165),
+pinned in [§14](#14-l4--the-quality-regression-fast-tier-pinned-contract)) proves an intervention
+didn't **drop** a legit result (a deterministic, run-on-every-gate
 bit-identity / benign-control check); the slow tier proves an intervention didn't **degrade** the
 answer it let through — a thing no bit-check can see, because the answer still parses and still
 passes the security floor, it is just *worse*. The acceptance is code: *a planted degradation is
@@ -828,3 +831,158 @@ discipline, and the kernel `Counters` — **is** built and green. Pinning the me
 per-turn tax table, the offline verb verdict, the live `fak_turn_tax_*` family, the golden-turn +
 budget-breach witnesses) is the docs-lane increment of L1; the executable cost-axis meter and its
 live family are the named follow-on in the `cmd` / `gateway` / `metrics` lane, unblocked by T1+T2.
+
+## 14. L4 — the quality-regression fast tier (pinned contract)
+
+T9 ([#1165](https://github.com/anthony-chaudhary/fak/issues/1165)) is the *fast, deterministic*
+half of the L4 quality dual — the every-gate counterpart of the slow model-as-judge tier
+([§11](#11-l4--the-model-as-judge-slow-tier-pinned-contract), T10). The two catch **opposite**
+failures. The slow tier catches an answer fak's mediation *let through but degraded* — it still
+parses, still passes the security floor, it is just *worse* — a thing no byte-check can see, so it
+needs a model. The fast tier catches the other side: a *legitimate* result fak's mediation
+**wrongly dropped** — quarantined, transformed, or denied when it should have passed untouched.
+That failure **is** byte-visible: a benign result that should have round-tripped byte-identical
+came back held-out or rewritten. So the fast tier needs **no model** — it is a deterministic,
+`$0`, run-on-every-gate check, the §5 "L1 cheap continuous" tier. This is the AgentDojo discipline's
+*other half*: AgentDojo scores both robustness (ASR over an attack set) **and** utility (does the
+defense still let benign tasks through unharmed?). fak already ships the attack half — `internal/agentdojo`
+folds the real stacked defense over an adaptive attack `Matrix()` and scores ASR — and the **missing**
+half is the benign-utility control. This section upgrades T9 from a one-line ticket to a **pinned
+contract** — the benign-control corpus it adds, the bit-identity assertion, the every-gate steward,
+and the two-sided witness — so the eventual build is **wiring against a fixed contract**, the same
+move §9/§10/§11/§12/§13 made for T13/T11/T10/T6/T3.
+
+The load-bearing reuse, and the honesty fence on it: the checker is **not** new gate machinery — it
+folds the **same** `abi.ResultAdmitter` stack (`normgate` + `ctxmmu`, plus the IFC stamp/sink) that
+the live result path *and* `agentdojo.Defense` already fold. The agentdojo harness's `Defense.Run`
+already loops `det.Admit(ctx, call, result)` over those admitters and reads the *attack* bit (was the
+poisoned read quarantined / the tainted sink denied). The fast tier inherits that fold unchanged and
+reads the **dual** bit on a benign input (did a legit result survive *bit-identical*). So "reuse the
+agentdojo harness" means: add a benign-control corpus beside `Matrix()`, a bit-identity scorer beside
+`Score`, and a benign-control `Steward` beside `ASRSteward` — never a second adjudicator in the leaf.
+
+### 14.1 What the fast tier checks (the benign control, not the attack)
+
+The checked unit is a **benign control**: a legitimate tool result that fak's result-admission gates
+must pass into context **untouched** — the structural dual of an `agentdojo.Attack`. The judged
+question is the dual of the attack harness's "did the attacker's sink land?": *did a legitimate result
+survive the gate byte-identical?*
+
+| Field of a benign control | Source | Why |
+|---|---|---|
+| `result` | a legitimate tool-result body — a real refund policy, a normal file read, an ordinary webpage — with **no** injection, secret, or destructive marker | the control: the gate must not touch it |
+| `want_verdict` | `abi.VerdictAllow` | the only non-dropping verdict — "enter context as-is" |
+| `admitted_bytes` | the payload the `abi.ResultAdmitter` fold returns | the bit-identity probe: must equal the input bytes |
+| `dropped` | `verdict ∈ {VerdictQuarantine, VerdictTransform, VerdictDeny}` | the **false positive** — a legit result the gate held out or rewrote |
+
+A benign control that returns `VerdictAllow` with bytes unchanged is utility **preserved**; one that
+returns `VerdictQuarantine` (held out of context), `VerdictTransform` (Args rewritten, payload
+`TransformPayload{NewArgs}`), or `VerdictDeny` is utility **lost** — a false positive — even though no
+attack was present. Utility loss is exactly the cost AgentDojo's benign controls exist to measure.
+
+### 14.2 The protocol — benign-control corpus + bit-identity, on every gated run
+
+A single verdict is cheap and deterministic, so unlike the slow tier this check runs on **every**
+gate, not on a cadence. The contract pins three pieces:
+
+- **A committed benign-control corpus** (`testdata`-style, the `agentdojo.Matrix()` discipline) of
+  legitimate results across the **same** surfaces the attack matrix exercises — a webpage read, a file
+  read, a normal tool result — each labeled benign, each expected to admit `VerdictAllow` byte-identical.
+  This is the false-positive control set AgentDojo runs **beside** its attack set.
+- **The bit-identity check.** Fold the live `[]abi.ResultAdmitter` (the same `normgate` + `ctxmmu` the
+  `agentdojo.Defense` and the kernel result path fold) over each benign control and assert **both**:
+  the verdict is `VerdictAllow`, **and** the admitted payload bytes are byte-identical to the input
+  (no `VerdictTransform` rewrite, no `VerdictQuarantine` hold-out). This is the `Defense.Run` shape —
+  fold the detectors over an `*abi.Result` — reading the dual bit (admitted-unchanged) instead of the
+  attack bit (sink-denied). No model, deterministic, `$0`.
+- **Run on every gated run, as a `Steward`.** The check is an `abi.Steward` (the `ASRSteward` pattern:
+  `var _ abi.Steward`, `Check(ctx) → (violated bool, witness string)`) registered alongside the
+  `agentdojo-asr-zero` steward, so it fires on every gate, not periodically. Like every steward it
+  **never blocks on its own opinion** — a violation carries the **dropped benign control** as an
+  independently-reproducible witness (any auditor re-folds the same control through the same admitters
+  to confirm), exactly as `ASRSteward.Check` returns the winning attack.
+
+### 14.3 The two-sided witness — the acceptance, made precise
+
+The issue's acceptance is two-sided, and the fast tier is built to honor **both** directions because
+the benign and attack corpora are **disjoint**:
+
+- **A benign result wrongly dropped reds.** A benign control the gate quarantines / transforms / denies
+  fails the bit-identity check (verdict ≠ `VerdictAllow`, or bytes changed) → the steward returns
+  `violated=true` with that control as the witness → red. This is a **false positive**: utility a
+  working defense must not cost. (A future over-broad `normgate` rule that quarantines a benign read is
+  exactly what this catches.)
+- **A correct quarantine does not red.** A genuine attack from `agentdojo.Matrix()` that the gate
+  correctly quarantines or denies is a **true positive** — and it is **not** in the benign-control
+  corpus, so the fast tier never sees it as a drop. The fast tier scores **only** the benign set; the
+  attack set is `ASRSteward`'s job. The two stewards are duals: `ASRSteward` reds on a false **negative**
+  (an attack that landed, ASR > 0); the fast tier reds on a false **positive** (a benign result dropped).
+  Neither reds on the other's correct behavior — that **orthogonality is the acceptance**.
+
+Because the benign verdict and the attack verdict are read on **disjoint corpora**, "a correct
+quarantine" (of an attack) and "a wrongly-dropped benign result" can never be conflated — the same
+structural disjointness that makes §9.1's double-count guard hold by construction rather than by
+bookkeeping.
+
+### 14.4 The read-out (golden-testable) and where it folds
+
+A stable report — schema `fak.quality-fast.v1` — so a frozen benign-control corpus round-trips
+deterministically (no model ⇒ the verdicts are pure given the fixed admitters), and *that* is the
+golden test:
+
+| Field | Meaning | Verdict |
+|---|---|---|
+| `n_controls` | benign controls checked this run | — |
+| `false_positives` | benign controls dropped (verdict ≠ `VerdictAllow`, or bytes changed) | `0` healthy / `>0` reds |
+| `utility_preserved_rate` | `(n_controls − false_positives) / n_controls` | `1.0` healthy / `<1.0` utility lost |
+| `witness` | the first dropped benign control (the reproducible witness) | — |
+
+It folds into the §10.2 `fak perf` read-out as a fold (`quality_fast`, beside §11.4's `quality_judge`)
+and surfaces one `/metrics` member, `fak_self_tax_quality_false_positive_total` — net-true-labeled
+**WITNESSED**, because it is a deterministic count of gate verdicts fak itself produced, **not** a
+model's opinion. So it sits with the WITNESSED reuse counters of §10.3, never collapsed with the
+**MODELED** `fak_self_tax_quality_win_rate{judge_trust}` of §11.4. The two L4 members are explicitly
+distinguished by provenance: the fast tier's count is WITNESSED (deterministic), the slow tier's
+win-rate is MODELED (a judge's opinion) — they share the `quality` family but are never summed.
+
+### 14.5 Acceptance, and what blocks it today
+
+- **AC1 — a benign result wrongly dropped reds.** A benign-control fixture the gate drops drives
+  `false_positives > 0` → `Steward.Check` returns `violated=true`, the gated target exits non-zero; the
+  witness is the dropped control, re-foldable through the same admitters.
+- **AC2 — a correct quarantine does not red.** An `agentdojo.Matrix()` attack the gate correctly
+  quarantines is a true positive, **not** in the benign corpus → `false_positives == 0` → no red. Both
+  branches are exercised by fixtures (one benign-drop, one correct-quarantine).
+- **Continuous, not periodic.** Unlike T10's model-call cadence, the fast check is `$0` / no-model /
+  deterministic, so it runs on **every** gated run (§5 L1 tier), satisfying the issue's "run on every
+  gated run."
+- **Blocked-on (the honest fence).** AC1/AC2 are **buildable today** — the `abi.ResultAdmitter` fold,
+  the `agentdojo.Defense.Run` harness, the `abi.Steward` / `ASRSteward` seam, and the kernel `Counters`
+  (`Admitted` / `Quarantines` / `Transforms` / `ResultDenies`) all exist and are green; the missing
+  pieces are the committed **benign-control corpus**, the **bit-identity assertion** (`VerdictAllow`
+  **and** bytes unchanged), and the **benign-control `Steward`** registered on the gate. **No unbuilt
+  dep gates this** (unlike §10's T3/T5/T6 block) — the build is additive in `internal/agentdojo` (the
+  benign corpus + the bit-identity scorer + the steward, beside `steward.go`) plus its registry wiring.
+  **Lane for the build:** `agentdojo` / `adjudicator` (the corpus, scorer, and steward) and `cmd` /
+  `gateway` (the every-gate registration + the metric) — **not** `docs`. This docs increment pins the
+  contract only; it does not itself satisfy AC1/AC2.
+
+### 14.6 Reproduce (the contract check, once the benign corpus + steward land)
+
+```sh
+fak quality-fast --json | jq '.schema, .false_positives, .utility_preserved_rate, .witness'
+# AC1: a wrongly-dropped benign-control fixture → .false_positives > 0  (the steward reds)
+# AC2: an agentdojo attack the gate correctly quarantines is NOT a benign control → .false_positives == 0
+
+# The reused substrate the fast tier is built on (green today):
+go test ./internal/agentdojo ./internal/abi -run 'Steward|Admit|Defense|Score' -count=1
+```
+
+Stated plainly, like §9.4 / §10.5 / §11.6 / §12.5: this is the **contract** the follow-on build
+verifies, not a live witness today — the benign-control corpus, the bit-identity scorer, and the
+`fak.quality-fast.v1` report do not exist until the `agentdojo` benign-control set + steward land. The
+reused half — `abi.ResultAdmitter`, `agentdojo.Defense` / `ASRSteward`, and the kernel `Counters` —
+**is** built and green. Pinning the protocol here (the benign-control corpus, the bit-identity
+assertion, the every-gate steward, the two-sided false-positive-reds / correct-quarantine-passes
+witness) is the docs-lane increment of L4's fast tier; the executable scorer + steward are the named
+follow-on in the `agentdojo` / `adjudicator` / `cmd` / `gateway` lanes, unblocked today.
