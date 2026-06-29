@@ -1,7 +1,7 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "12dd9468",
-  "total_debt": 1150,
+  "total_debt": 1187,
   "metrics": {
     "doc": 1,
     "readme": 0,
@@ -25,6 +25,7 @@
     "guard_rsi": 0,
     "dogfood": 4,
     "growth": 0,
+    "support_maturity": 37,
     "claim_repro": 3
   },
   "_doc": "Pinned per-metric scorecard-debt baseline for the unified control pane. Re-pin after a debt drop to ratchet the trend down: python tools/scorecard_control_pane.py --pin"

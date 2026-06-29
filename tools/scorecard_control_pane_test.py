@@ -96,6 +96,17 @@ def test_readme_scorecard_registered() -> None:
     }
 
 
+def test_support_maturity_scorecard_registered() -> None:
+    card = next(c for c in scp.SCORECARDS if c["key"] == "support_maturity")
+    assert card == {
+        "key": "support_maturity",
+        "debt": "support_maturity_debt",
+        "script": "",
+        "cmd": "go run ./cmd/fak support-maturity-scorecard --json",
+        "label": "support-maturity",
+    }
+
+
 # --- fold: portfolio sum + verdict ladder ----------------------------------
 
 def test_fold_sums_portfolio_debt() -> None:

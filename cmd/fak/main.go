@@ -198,6 +198,8 @@ func main() {
 		cmdExperiments(os.Args[2:])
 	case "coverage-matrix":
 		cmdCoverageMatrix(os.Args[2:])
+	case "support-maturity-scorecard":
+		cmdSupportMaturityScorecard(os.Args[2:])
 	case "dojo":
 		cmdDojo(os.Args[2:])
 	case "guard-verdict-rsi":
