@@ -8,7 +8,7 @@ tree. Each leaf is its **own directory**, so the file-tree collision graph
 `dos-plan-price` scores is empty by construction — two workers editing two different
 leaves never touch the same files — except `internal/abi` itself, which is **wave-0,
 human-owned, and unleasable**. (The *import* graph is a layered DAG, not a star —
-leaves import lower-tier leaves, enforced by `internal/architest`; see `fak/GROWTH.md`.
+leaves import lower-tier leaves, enforced by `internal/architest`.
 It is the file-tree disjointness, not import independence, that keeps the leases disjoint.)
 
 > **Hour notation:** `hN` means `N` hours from the start of the build (e.g., [`h6`](#h6)–[`h30`](#h30) is the 6–30 hour window).
@@ -55,19 +55,30 @@ v0.1.
 ## Growth slots — where the *next* ideas land (still disjoint)
 
 These are pre-allocated trees + reserved number ranges (see `registry.go`), so the
-post-v0.1 ideas attach without re-pricing the partition:
+post-v0.1 ideas attach without re-pricing the partition.
+
+**Shipped — CLOSED (no longer growth slots).** These trees are now current packages
+on disk under `internal/` (the layering is enforced by `internal/architest`), so a
+reader who tries to "add the leaf" per this table would collide with an existing
+package. They are out of the future table below:
+
+| Shipped tree | Reserved range | Lease needed |
+|---|---|---|
+| speculative exec — `internal/spec/**` | `OpsSpec`, `ExtSpec` | yes (side-effecting) |
+| syscall-tuned model — `internal/model/**` | `EventsLabel` | no |
+| headroom codec — `internal/headroom/**` | (PageOutBackend) | no |
+| witness enforcement — `internal/witness/**` | (WitnessResolver) | yes |
+
+**Still open (future).** Genuinely unbuilt — no package exists on disk yet:
 
 | Future idea | Tree | Reserved range | Lease needed |
 |---|---|---|---|
-| speculative exec | `internal/spec/**` | `OpsSpec`, `ExtSpec` | yes (side-effecting) |
 | async / io_uring | `internal/async/**` | `OpsAsync`, `ExtAsync` | yes |
 | zero-copy backend | `internal/zerocopy/**` | (RegionBackend, no opcode) | no |
-| syscall-tuned model | `internal/labeler/**`, `internal/model/**` | `ExtLabel`, `EventsLabel` | no |
-| headroom codec | `internal/headroom/**` | (PageOutBackend) | no |
-| witness enforcement | `internal/witness/**` | (WitnessResolver) | yes |
+| syscall-tuned labeler | `internal/labeler/**` | `ExtLabel` | no |
 | federated trust | `internal/fedtrust/**` | `ExtTrust`, `VerdictsVendor` | no |
 | cross-agent result pool | `internal/sharepool/**` | (SharePolicy Adjudicator) | no |
 
-Each is a new leaf in its **own tree** (importing lower tiers per the layering, see
-`fak/GROWTH.md`); `dos-plan-price` stays empty-collision because no two leaves share a
-file tree or a reserved number.
+Each is a new leaf in its **own tree** (importing lower tiers per the layering,
+enforced by `internal/architest`); `dos-plan-price` stays empty-collision because no
+two leaves share a file tree or a reserved number.
