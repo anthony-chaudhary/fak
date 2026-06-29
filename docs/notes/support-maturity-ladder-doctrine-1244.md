@@ -33,7 +33,10 @@ not a failure.
 
 The order is total by construction: `Rung` is a `uint8` and `M0 < M1 < … < M7`. The
 witness test (`supportmaturity_test.go`) asserts the ladder is exactly eight rungs,
-strictly increasing, and a strict total order (irreflexive + trichotomy).
+strictly increasing, and a strict total order (irreflexive + trichotomy). It also pins
+each lowering's *band* — `TestLoweringBands` fails if `covmatrix.Support` ever maps
+outside M0–M4 or a preflight verdict outside M0–M2 — so the prose claims below cannot
+silently drift from the code.
 
 ## The line drawn against each sibling vocabulary
 

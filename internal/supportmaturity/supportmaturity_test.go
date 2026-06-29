@@ -1,6 +1,7 @@
 package supportmaturity
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -88,6 +89,85 @@ func TestCorrectnessClassMaps(t *testing.T) {
 		if got := FromCorrectnessClass(c); got != M4Correct {
 			t.Fatalf("FromCorrectnessClass(%s) = %s, want %s (M4 is the correctness bar)", c, got, M4Correct)
 		}
+	}
+}
+
+// TestLoweringBands pins the doctrine's claim about WHERE each sibling vocabulary sits
+// on the ladder: covmatrix.Support spans the M0–M4 band (M2 'loads' is owned by the
+// preflight verdict, not by covmatrix), and the preflight verdicts span the narrower
+// M0–M2 sub-band. If a future mapping drifts out of its declared band, this fails.
+func TestLoweringBands(t *testing.T) {
+	supLo, supHi := rungSpan(t, func() []Rung {
+		out := make([]Rung, 0, len(allSupport))
+		for _, s := range allSupport {
+			out = append(out, FromSupport(s))
+		}
+		return out
+	}())
+	if supLo != M0None || supHi != M4Correct {
+		t.Fatalf("covmatrix.Support band = [%s,%s], want [M0,M4]", supLo, supHi)
+	}
+
+	preLo, preHi := rungSpan(t, func() []Rung {
+		out := make([]Rung, 0, len(allPreflightVerdicts))
+		for _, v := range allPreflightVerdicts {
+			out = append(out, FromPreflightVerdict(v))
+		}
+		return out
+	}())
+	if preLo != M0None || preHi != M2Loads {
+		t.Fatalf("preflight band = [%s,%s], want [M0,M2]", preLo, preHi)
+	}
+}
+
+// rungSpan returns the lowest and highest rung in rs (rs must be non-empty).
+func rungSpan(t *testing.T, rs []Rung) (lo, hi Rung) {
+	t.Helper()
+	if len(rs) == 0 {
+		t.Fatalf("rungSpan: empty rung set")
+	}
+	lo, hi = rs[0], rs[0]
+	for _, r := range rs[1:] {
+		if r.Less(lo) {
+			lo = r
+		}
+		if hi.Less(r) {
+			hi = r
+		}
+	}
+	return lo, hi
+}
+
+// TestRungRender asserts every closed rung renders a distinct "M<n>" id matching its
+// ordinal and a distinct non-empty doctrine label, and that an out-of-range rung is both
+// not-Valid and rendered as the explicit unknown form — the closed-vocabulary guard the
+// From* defaults rely on (an unrecognized input floors to M0None, never to a bogus rung).
+func TestRungRender(t *testing.T) {
+	seenID, seenLabel := map[string]bool{}, map[string]bool{}
+	for i, r := range Rungs {
+		id := r.String()
+		if id != fmt.Sprintf("M%d", i) {
+			t.Fatalf("Rungs[%d].String() = %q, want M%d", i, id, i)
+		}
+		if seenID[id] {
+			t.Fatalf("duplicate rung id %q", id)
+		}
+		seenID[id] = true
+		lbl := r.Label()
+		if lbl == "" || lbl == "unknown" {
+			t.Fatalf("rung %s has no doctrine label", id)
+		}
+		if seenLabel[lbl] {
+			t.Fatalf("duplicate rung label %q", lbl)
+		}
+		seenLabel[lbl] = true
+	}
+	bad := Rung(len(Rungs))
+	if bad.Valid() {
+		t.Fatalf("out-of-range rung %d reports Valid", uint8(bad))
+	}
+	if got := bad.Label(); got != "unknown" {
+		t.Fatalf("out-of-range rung Label() = %q, want \"unknown\"", got)
 	}
 }
 
