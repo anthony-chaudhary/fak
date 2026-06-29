@@ -135,8 +135,9 @@ func cmdSlack(argv []string) {
 	if len(argv) == 0 {
 		os.Exit(runSlackCheck(os.Stdout, os.Stderr, nil))
 	}
-	dispatchSubcommands("slack", "check | send", argv,
+	dispatchSubcommands("slack", "check | health | send", argv,
 		subcommand{"check", runSlackCheck},
+		subcommand{"health", runSlackHealth},
 		subcommand{"send", runSlackSend},
 	)
 }

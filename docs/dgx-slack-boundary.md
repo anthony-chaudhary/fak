@@ -45,6 +45,17 @@ Private-only paths and concepts:
 - raw Slack-control state, transcripts, tokens, workspace IDs, lab hostnames, and
   operator paths
 
+## Confirming a feeder actually posted
+
+The feeders fail OPEN by design (a secret-less run renders to the step summary and exits 0),
+so a misconfigured feeder is silent. `fak slack health` is the public watchdog that CONFIRMS
+a post landed: per surface it folds resolution + `auth.test` + a real `conversations.history`
+read into an `OK | INCOMPLETE | AUTH_FAIL | STALE` verdict and exits non-zero on any non-OK.
+The unattended arm is `.github/workflows/slack-watchdog.yml`, which files one deduped issue on
+a non-OK verdict. Like every public Slack surface here, it carries no token, channel id, or
+lab identifier — it reads them from env/`vars` at run time. See
+[`cli-reference.md`](cli-reference.md).
+
 ## Go vs Python
 
 New public tooling is Go. Add a `fak` subcommand or a small `cmd/<name>/` binary, with

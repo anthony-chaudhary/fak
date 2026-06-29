@@ -1,0 +1,160 @@
+name: slack-watchdog
+
+# The WATCHDOG dual of the cadence feeders (#1274). The feeders POST a card on a schedule
+# and fail OPEN — a missing token/channel renders to the step summary and exits 0 — so a
+# misconfigured or broken feeder is SILENT (green CI, nothing in the channel). This job
+# CONFIRMS the other half: once a day, after the feeders have run, it folds every Slack
+# surface's resolution + auth.test + a real `conversations.history` read into one verdict
+# (`fak slack health`) and, when a surface is non-OK, files ONE deduped GitHub issue so the
+# dispatch loop can pick it up.
+#
+# Three silent-failure modes it catches:
+#   1. AUTH drift   — the shared bot token was rotated/revoked (auth.test rejects it).
+#   2. CONFIG drift — a FAK_*_CHANNEL var is unset/wrong (the surface resolves INCOMPLETE).
+#   3. STALENESS    — the channel has no recent post inside the feeder's intended cadence.
+#
+# Fails OPEN like the feeders: without FAK_SCOREBOARD_TOKEN the health probe still runs and
+# reports to the step summary, but NOTHING is filed (a secret-less fork makes everything
+# INCOMPLETE, which is expected, not a real alarm).
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the scoreboard-workspace
+# bot token) and the per-surface FAK_*_CHANNEL repo variables under Settings -> Secrets and
+# variables -> Actions. See docs/dgx-slack-boundary.md and docs/cli-reference.md.
+on:
+  schedule:
+    # Daily 10:19 UTC — an off-the-hour minute AFTER every cadence feeder has run
+    # (the latest is cachevalue 09:37), so "quiet" reflects the day's posts.
+    - cron: "19 10 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run the health probe but do NOT file an issue"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: slack-watchdog
+  cancel-in-progress: false
+
+jobs:
+  slack-watchdog:
+    name: slack feeders -> health verdict
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      # Tokens are secrets; channel ids are repo variables — the same keys the feeders read.
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_SCOREBOARD_CHANNEL: ${{ vars.FAK_SCOREBOARD_CHANNEL }}
+      FAK_PRODUCT_CHANNEL: ${{ vars.FAK_PRODUCT_CHANNEL }}
+      FAK_GRAFANA_TOKEN: ${{ secrets.FAK_GRAFANA_TOKEN }}
+      FAK_GRAFANA_CHANNEL: ${{ vars.FAK_GRAFANA_CHANNEL }}
+      FAK_BLOCKERS_TOKEN: ${{ secrets.FAK_BLOCKERS_TOKEN }}
+      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL }}
+      FAK_CACHEVALUE_TOKEN: ${{ secrets.FAK_CACHEVALUE_TOKEN }}
+      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL }}
+      FAK_BENCH_TOKEN: ${{ secrets.FAK_BENCH_TOKEN }}
+      FAK_BENCH_CHANNEL: ${{ vars.FAK_BENCH_CHANNEL }}
+      FAK_DISPATCH_TOKEN: ${{ secrets.FAK_DISPATCH_TOKEN }}
+      FAK_DISPATCH_CHANNEL: ${{ vars.FAK_DISPATCH_CHANNEL }}
+      FAK_DOJO_TOKEN: ${{ secrets.FAK_DOJO_TOKEN }}
+      FAK_DOJO_CHANNEL: ${{ vars.FAK_DOJO_CHANNEL }}
+      FAK_MARKETING_TOKEN: ${{ secrets.FAK_MARKETING_TOKEN }}
+      FAK_MARKETING_CHANNEL: ${{ vars.FAK_MARKETING_CHANNEL }}
+      FAK_NODE_USAGE_TOKEN: ${{ secrets.FAK_NODE_USAGE_TOKEN }}
+      FAK_NODE_USAGE_CHANNEL: ${{ vars.FAK_NODE_USAGE_CHANNEL }}
+      FAK_STEERING_CHANNEL: ${{ vars.FAK_STEERING_CHANNEL }}
+      FAK_CHATRELAY_TOKEN: ${{ secrets.FAK_CHATRELAY_TOKEN }}
+      FAK_CHATRELAY_CHANNEL: ${{ vars.FAK_CHATRELAY_CHANNEL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Run the health probe. It exits non-zero on ANY non-OK surface, so capture the code
+      # rather than let it fail the job (this job decides what to do with a non-OK verdict).
+      - name: slack health probe
+        id: health
+        run: |
+          set +e
+          go run ./cmd/fak slack health --json > slack-health.json
+          rc=$?
+          go run ./cmd/fak slack health > slack-health.txt 2>&1
+          set -e
+          test -s slack-health.json || echo '[]' > slack-health.json
+          echo "rc=${rc}"
+          if [ "${rc}" -ne 0 ]; then
+            echo "nonok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nonok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Always render the verdict to the step summary so the run is auditable even when
+      # nothing is filed (clean verdict / missing secret / fork).
+      - name: render verdict to step summary
+        if: always()
+        run: |
+          {
+            echo "## slack-watchdog — feeder health"
+            echo '```'
+            cat slack-health.txt 2>/dev/null || echo "(no report)"
+            echo '```'
+            echo '<details><summary>machine report</summary>'
+            echo
+            echo '```json'
+            cat slack-health.json 2>/dev/null || echo "[]"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # FILE one deduped issue on a non-OK verdict — only when the token is present (fail
+      # open without it) and not a manual dry-run. The fixed `slack-watchdog` label dedups
+      # so a steady misconfiguration files exactly ONE open issue (then refreshes it), never
+      # a daily storm.
+      - name: file or refresh watchdog issue
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && steps.health.outputs.nonok == 'true' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create slack-watchdog --color B60205 \
+            --description "A Slack feeder is silently not posting (auth/config/staleness)" 2>/dev/null || true
+          title="slack-watchdog: a Slack feeder is not posting (auth/config/staleness)"
+          {
+            echo "The slack-watchdog health probe found one or more surfaces NOT OK."
+            echo "Modes: AUTH_FAIL (token rotated/revoked) · INCOMPLETE (channel var unset) · STALE (no recent post inside cadence)."
+            echo
+            echo '```'
+            cat slack-health.txt
+            echo '```'
+            echo
+            echo "Re-run locally: \`fak slack health\` (add \`--json\` for the machine report). See docs/cli-reference.md."
+          } > issue-body.md
+          existing=$(gh issue list --state open --label slack-watchdog --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body-file issue-body.md
+            echo "refreshed #${existing}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh issue create --title "${title}" --label slack-watchdog --body-file issue-body.md
+          fi
+
+      - name: note when filing was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — ran the health probe in report-only mode; nothing filed. Add the secret to enable the watchdog." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload health artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slack-health
+          path: |
+            slack-health.txt
+            slack-health.json
+          if-no-files-found: ignore

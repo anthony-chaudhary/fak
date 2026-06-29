@@ -274,6 +274,25 @@ restarts it if it has stopped — the same probe/restart/lease/debounce machiner
 fleet supervisors alive (`FAK_WATCHDOG_AUTOHEAL=off` disables it; `=warn` logs without
 restarting). `FAK_GARDEN=off` is the env-side brake on the garden pass itself.
 
+`fak slack health` is the watchdog **dual of the Slack feeders**. The cadence feeders
+(`scoreboard-feed.yml`, `bench-feed.yml`, …) POST a card on a schedule and fail OPEN — a
+missing token or channel renders to the step summary and exits 0 — so a misconfigured or
+broken feeder is SILENT (green CI, nothing in the channel). `fak slack health` CONFIRMS the
+other half: per surface it folds resolution + `auth.test` + a real `conversations.history`
+read into one closed verdict — `OK | INCOMPLETE | AUTH_FAIL | STALE` — and exits non-zero on
+any non-OK so a scheduled job can gate on it. Staleness is judged against the feeder's own
+cadence (a daily feed is STALE after ~36h, a weekly feed after ~8d); a surface with no
+scheduled feeder is never graded STALE. `--json` emits `{surface, ready, auth_ok,
+last_post_age_s, budget_s, verdict}` per surface. The unattended arm is
+`.github/workflows/slack-watchdog.yml` (daily 10:19 UTC, fails open without the token): on a
+non-OK verdict it files ONE deduped GitHub issue so the dispatch loop picks it up.
+
+```bash
+fak slack check --auth   # resolution + does each token work? (offline-by-default)
+fak slack health         # + did a post actually land inside each feeder's cadence?
+fak slack health --json  # machine-readable verdict for the watchdog / a dashboard
+```
+
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
 from a declarative JSON **manifest** instead of the compiled-in default — so WHICH
 tools the agent may call is a reviewable file, not a Go edit. See `POLICY.md`.
