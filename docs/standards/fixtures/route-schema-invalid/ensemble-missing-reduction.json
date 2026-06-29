@@ -1,0 +1,13 @@
+{
+  "version": "fak-route/v1",
+  "default": { "members": [{ "model": "medium", "role": "primary" }], "reason": "fail-closed mid-tier" },
+  "rules": [
+    {
+      "name": "no-reduce",
+      "match": { "aspect": "query" },
+      "plan": {
+        "members": [{ "model": "a" }, { "model": "b" }]
+      }
+    }
+  ]
+}

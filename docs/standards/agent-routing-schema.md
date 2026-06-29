@@ -137,9 +137,13 @@ can check without fak's engine:
    machine-checkable JSON Schema — [`agent-routing-schema.json`](agent-routing-schema.json)
    (Draft 2020-12) — so any orchestrator authors and validates a manifest with an
    off-the-shelf validator, **no fak engine present**: the
-   [manifest fixture below](#the-round-trip-as-data) is checked against it, and an
-   out-of-set `reduce`, a zero-member (non-fail-closed) plan, an ensemble missing its
-   reduction, and an unknown field are each rejected at the boundary.
+   [manifest fixture below](#the-round-trip-as-data) validates against it, and four
+   on-disk [negative fixtures](fixtures/route-schema-invalid/) — an out-of-set
+   `reduce`, a zero-member (non-fail-closed) plan, an ensemble missing its reduction,
+   and an unknown field — are each rejected at the boundary. The
+   [validation recipe](fixtures/route-schema-invalid/README.md) runs the whole
+   round-trip (manifest + plan accepted, all four negatives rejected) with a stock
+   Draft 2020-12 validator, so the "validatable" claim is checkable, not asserted.
 3. **The plan is deterministic and reviewable.** Routing is a pure function of the
    subject shape and the manifest: the same `Subject` against the same `Manifest`
    always yields the same `Decision`. "Deterministic" is scoped to the routing

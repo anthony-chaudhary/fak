@@ -1,0 +1,5 @@
+{
+  "version": "fak-route/v1",
+  "default": { "members": [{ "model": "medium", "role": "primary" }], "reason": "fail-closed mid-tier" },
+  "fallback": "oops"
+}

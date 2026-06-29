@@ -1,0 +1,4 @@
+{
+  "version": "fak-route/v1",
+  "default": { "members": [], "reason": "empty plan is not fail-closed" }
+}
