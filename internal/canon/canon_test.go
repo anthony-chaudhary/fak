@@ -32,12 +32,12 @@ func TestObfuscatedInjectionCaught(t *testing.T) {
 // keys.
 func TestObfuscatedSecretCaught(t *testing.T) {
 	cases := map[string]string{
-		"openai":     `key = "sk-abcdef0123456789abcdef0123"`,
-		"aws-sts":    `{"AccessKeyId":"ASIAZ4QF7K2NXP9LMQ8R"}`,
-		"google":     "key=AIzaSyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG",
-		"github-pat": "token: github_pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5N4m3L2k1J0",
-		"jwt":        "auth: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
-		"base64-sk":  "creds=" + base64.StdEncoding.EncodeToString([]byte("sk-abcdef0123456789abcdef0123")),
+		"openai":     `key = "sk-` + `abcdef0123456789abcdef0123"`,
+		"aws-sts":    `{"AccessKeyId":"ASIA` + `Z4QF7K2NXP9LMQ8R"}`,
+		"google":     "key=AIza" + "SyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG",
+		"github-pat": "token: github_" + "pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5N4m3L2k1J0",
+		"jwt":        "auth: eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
+		"base64-sk":  "creds=" + base64.StdEncoding.EncodeToString([]byte("sk-"+"abcdef0123456789abcdef0123")),
 		"proximity":  `bearer  AbCdEf0123456789AbCdEf01`,
 	}
 	for name, body := range cases {
@@ -96,16 +96,16 @@ func anySecretPattern(v string) bool {
 func TestCombinedSecretEquivalence(t *testing.T) {
 	corpus := []string{
 		// one positive per pattern (case as the pattern requires)
-		"sk-abcdef0123456789abcdef0123",
-		"sk-proj-abcdef0123456789",
-		"AKIAZ4QF7K2NXP9LMQ8R",
-		"ASIAZ4QF7K2NXP9LMQ8R",
-		"AIzaSyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG",
-		"ghp_ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5",
-		"github_pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5",
-		"xoxb-1234567890-abcdefghij",
-		"-----BEGIN RSA PRIVATE KEY-----",
-		"eyJhbGciOiJIUzI1Ni.eyJzdWIiOiIxMjM0.dozjgNryP4J3jVm",
+		"sk-" + "abcdef0123456789abcdef0123",
+		"sk-proj-" + "abcdef0123456789",
+		"AKIA" + "Z4QF7K2NXP9LMQ8R",
+		"ASIA" + "Z4QF7K2NXP9LMQ8R",
+		"AIza" + "SyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG",
+		"ghp_" + "ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5",
+		"github_" + "pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5",
+		"xoxb-" + "1234567890-abcdefghij",
+		"-----BEGIN RSA " + "PRIVATE KEY-----",
+		"eyJ" + "hbGciOiJIUzI1Ni.eyJzdWIiOiIxMjM0.dozjgNryP4J3jVm",
 		`bearer  AbCdEf0123456789AbCdEf01`,
 		// adversarial: lowercased twins of the case-SENSITIVE prefixes must NOT match
 		// (proves the (?i) of the sk-/keyword patterns never leaks across the | ).
