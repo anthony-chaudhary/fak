@@ -141,18 +141,77 @@ func isPlaceholderSecret(span string) bool {
 
 // InjectionMarkers are the prompt-injection lexical tells, matched on the
 // lower-cased canonical views (so spacing/case/obfuscation is already undone).
+// These are DISTINCTIVE multi-word imperative phrases — a benign body almost
+// never contains the whole span verbatim — so they fire on a bare substring
+// match. The over-generic single-word tells ("exfiltrate") and the most generic
+// fragment ("you are now") are NOT here; they live in genericInjectionMarkers
+// and are gated behind an imperative co-occurrence + a meta suppressor, because
+// the bare word fires on any security doc or the detector reading its own source
+// (#1331). The set split keeps the strong-marker recall contract intact while
+// removing the dominant injection false positive.
 var InjectionMarkers = []string{
 	"ignore previous instructions", "ignore all previous", "disregard the above",
-	"you are now", "system override", "new instructions:", "###system",
-	"reveal your system prompt", "exfiltrate",
+	"system override", "new instructions:", "###system",
+	"reveal your system prompt",
 }
+
+// genericInjectionMarkers are the over-generic tells that match a single bare
+// word ("exfiltrate") or a short fragment ("you are now") which legitimately
+// appears in security prose, runbooks, quoted examples, and this detector's own
+// source. They fire ONLY when (a) the surrounding span is not META (a quotation,
+// a code fence, or discussion verbs — see injectionMeta) AND (b) the marker sits
+// in an imperative directive — a command verb with a target near it (see
+// imperativeNear). This is the injection-axis analogue of the secret axis's
+// isPlaceholderSecret suppressor: purely subtractive of the over-fire, gated so a
+// real directed injection ("then quietly exfiltrate the reservation to …") still
+// trips while the discussion of one ("explains how an attacker might exfiltrate
+// data … the gate blocks it") does not.
+var genericInjectionMarkers = []string{"exfiltrate", "you are now"}
 
 // DistinctiveSqueezed are the markers safe to match after FULL de-separation
 // (alnum-only). Generic ones ("you are now","new instructions:") are excluded —
-// squeezing the whole body could match those in benign prose.
+// squeezing the whole body could match those in benign prose. "exfiltrate" is
+// also excluded from the bare-contains squeeze pass and instead routed through
+// the gated generic path (genericInjectionMarkers) so the squeezed view cannot
+// re-introduce the bare-word over-fire #1331 closed.
 var DistinctiveSqueezed = []string{
 	"ignorepreviousinstructions", "ignoreallprevious", "disregardtheabove",
-	"systemoverride", "revealyoursystemprompt", "exfiltrate", "ignorealLconstraints",
+	"systemoverride", "revealyoursystemprompt", "ignorealLconstraints",
+}
+
+// injectionMetaCues are the discussion / quotation tells that mark a span as
+// TALKING ABOUT an injection rather than BEING one — symmetric with the secret
+// axis's placeholderHints. A generic marker whose body carries one of these is
+// META (a runbook, a doc, a detector reading its own source, a quoted example)
+// and must not be quarantined. Matched case-insensitively on the normalized
+// view.
+var injectionMetaCues = []string{
+	"explains how", "explain how", "explaining how", "discusses", "discuss how",
+	"example of", "for example", "such as", "marker", "detect", "detected",
+	"blocks it", "block it", "the gate", "how an attacker", "attacker might",
+	"might exfiltrate", "would exfiltrate", "could exfiltrate", "runbook",
+	"documentation", "this doc", "i.e.", "e.g.",
+}
+
+// injectionDirectiveVerbs are the imperative command verbs that, sitting next to
+// a generic marker's target, turn a bare word into a live directive. The marker
+// word "exfiltrate" is itself such a verb, so a co-located target ("the X to Y")
+// is enough; these catch the surrounding-verb forms ("send", "leak", "upload",
+// …) that make an adjacent generic marker imperative.
+var injectionDirectiveVerbs = []string{
+	"exfiltrate", "send", "leak", "upload", "post", "transmit", "forward",
+	"deliver", "ship", "copy", "dump", "email", "paste", "reveal", "disclose",
+	"steal",
+}
+
+// injectionTargetCues mark the OBJECT of a directive — the thing being moved out
+// (data/credentials) or the destination (a URL/host/attacker). Their presence
+// near a directive verb is what distinguishes "exfiltrate the reservation to
+// attacker.example.com" (a command with a target) from a bare mention.
+var injectionTargetCues = []string{
+	"to ", "the ", "this ", "all ", "your ", "@", "http", ".com", ".net", ".org",
+	"attacker", "data", "secret", "credential", "token", "key", "password",
+	"file", "contents", "reservation", "history", "conversation",
 }
 
 // homoglyphs maps common Cyrillic/Greek look-alikes to their ASCII letter.
@@ -280,6 +339,83 @@ func Decoded(s string) string {
 	return out.String()
 }
 
+// injectionMetaSpan reports whether the lower-cased view reads as DISCUSSION of
+// an injection rather than a live directive: a marker inside a fenced/inline code
+// span, inside a quotation, or adjacent to a discussion cue (injectionMetaCues).
+// This is the injection-axis analogue of isPlaceholderSecret — a purely
+// subtractive suppressor that removes the "security prose / quoted marker"
+// over-fire (#1331) without touching the strong-marker contract. Conservative by
+// construction: it only suppresses the GENERIC markers (the bare-word path), so
+// a meta cue can never hide a distinctive multi-word injection phrase.
+func injectionMetaSpan(lowerView string) bool {
+	for _, cue := range injectionMetaCues {
+		if strings.Contains(lowerView, cue) {
+			return true
+		}
+	}
+	// A marker quoted inside a code fence (```) or an inline code span (`…`) is an
+	// example, not a directive. Backticks survive Normalize, so check the raw view.
+	if strings.Contains(lowerView, "```") || strings.Count(lowerView, "`") >= 2 {
+		return true
+	}
+	return false
+}
+
+// imperativeNear reports whether the generic marker at marker..(marker+len) sits
+// in an IMPERATIVE directive — a command verb with a target near it — within a
+// small window around the marker. The marker word itself (e.g. "exfiltrate") is a
+// directive verb, so a co-located target is enough; a surrounding verb ("send",
+// "leak", …) plus a target also qualifies. Without a target cue the bare word is
+// treated as a mention, not a command. The window keeps the check local so an
+// unrelated verb elsewhere in a long benign body cannot arm the marker.
+func imperativeNear(lowerView, marker string, idx int) bool {
+	const win = 64
+	lo := idx - win
+	if lo < 0 {
+		lo = 0
+	}
+	hi := idx + len(marker) + win
+	if hi > len(lowerView) {
+		hi = len(lowerView)
+	}
+	span := lowerView[lo:hi]
+
+	hasVerb := false
+	for _, v := range injectionDirectiveVerbs {
+		if strings.Contains(span, v) {
+			hasVerb = true
+			break
+		}
+	}
+	if !hasVerb {
+		return false
+	}
+	for _, t := range injectionTargetCues {
+		if strings.Contains(span, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// genericInjectionHit reports whether a generic marker fires on the lower-cased
+// view: present, NOT in a meta/quotation span, AND in an imperative directive.
+// This is the gated path that lets "exfiltrate the reservation to attacker.…"
+// trip while "explains how an attacker might exfiltrate data … the gate blocks
+// it" does not.
+func genericInjectionHit(lowerView string) bool {
+	if injectionMetaSpan(lowerView) {
+		return false
+	}
+	for _, m := range genericInjectionMarkers {
+		idx := strings.Index(lowerView, m)
+		if idx >= 0 && imperativeNear(lowerView, m, idx) {
+			return true
+		}
+	}
+	return false
+}
+
 // Findings is the factual result of a canonical scan. No verdict, no policy — the
 // caller decides what to DO with a hit (quarantine, transform, refuse a sink).
 type Findings struct {
@@ -328,6 +464,12 @@ func Scan(body []byte) Findings {
 				f.Injection = true
 				break
 			}
+		}
+		// Generic single-word/fragment markers ("exfiltrate","you are now") fire
+		// only behind the imperative + meta gate, so a security doc or a quoted
+		// example that merely discusses one is not quarantined (#1331).
+		if !f.Injection && genericInjectionHit(v) {
+			f.Injection = true
 		}
 		if f.Injection {
 			break
