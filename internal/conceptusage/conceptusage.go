@@ -473,6 +473,12 @@ func Markdown(p ScorecardPayload) string {
 		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n## Run it\n\n```bash\ngo run ./cmd/fak concept-usage-score            # score this tree's concept dogfooding\ngo run ./cmd/fak concept-usage-score --markdown # regenerate this doc\ngo test ./internal/conceptusage/...             # prove the fold over a thin vs healthy corpus\n```\n\n")
+	b.WriteString("## The 3× program — grow the witness axis honestly\n\n")
+	b.WriteString("The usage axis is already saturated (commit discipline + lane arbitration are fully dogfooded); the witness axis is the lever. It is thin because **witnessing is manual and rare** — `dos verify` / `dos improve --observe` rows accrue only when someone runs them by hand, while passive `memory_recall` rows dominate the journal. So a 3× is NOT firing verify calls by hand during the measurement window (that is the data-gaming pattern every fak scorecard refuses) — it is making the witness syscall a **byproduct of real work** so the share rises structurally across sessions:\n\n")
+	b.WriteString("1. **Witness every ship.** Run `dos verify <PLAN> <PHASE>` (or `dos improve --observe`) at ship time, not `dos commit-audit` alone — commit-audit is read-only and writes no row; `verify`/`improve` are the syscalls this axis counts.\n")
+	b.WriteString("2. **Re-verify recalled memory.** When a memory is recalled, re-check it against ground truth (`dos recall <name>`) so it resolves to FRESH/STALE instead of sitting at the 76%-UNVERIFIABLE floor.\n")
+	b.WriteString("3. **Wire it into the dev loop.** The durable fix is a ship-path step (a post-commit / Stop-hook auto-`dos verify`) so the witness share climbs without anyone remembering to — the same way the usage axis is green because the commit hooks make the stamp/DCO automatic.\n\n")
+	b.WriteString("Re-run after a dev session and `--compare` against a pinned `--json` baseline: the verdict reports the multiple on the witness score (the lever), so a real 3× (witness 6% → 18% share) is provable, not asserted.\n\n")
 	b.WriteString("**Next:** " + p.NextAction + "\n")
 	return b.String()
 }

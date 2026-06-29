@@ -18,7 +18,7 @@ The question: when an agent builds fak, how much does that development route thr
 | yes | recent commits carry the (fak <leaf>) ship-stamp the dos verify referee binds | 200/200 (100%) carry the (fak <leaf>) trailer |
 | yes | recent commits are DCO signed-off (git commit -s) | 200/200 (100%) signed-off |
 | yes | recent commits use a Conventional-Commits type | 199/200 (100%) conventional |
-| yes | recent commit subjects lead with a verb the witness BINDS (not surface/print) | 146/200 (73%) lead with a binding verb |
+| yes | recent commit subjects lead with a verb the witness BINDS (not surface/print) | 147/200 (74%) lead with a binding verb |
 | yes | concurrent dev arbitrated disjoint lanes (dos_arbitrate ACQUIRE/RELEASE rows) | 44 lane ACQUIRE(s) across 49 distinct lane(s) |
 
 ## Witness — does development TRUST EVIDENCE over self-report?
@@ -37,5 +37,15 @@ go run ./cmd/fak concept-usage-score            # score this tree's concept dogf
 go run ./cmd/fak concept-usage-score --markdown # regenerate this doc
 go test ./internal/conceptusage/...             # prove the fold over a thin vs healthy corpus
 ```
+
+## The 3× program — grow the witness axis honestly
+
+The usage axis is already saturated (commit discipline + lane arbitration are fully dogfooded); the witness axis is the lever. It is thin because **witnessing is manual and rare** — `dos verify` / `dos improve --observe` rows accrue only when someone runs them by hand, while passive `memory_recall` rows dominate the journal. So a 3× is NOT firing verify calls by hand during the measurement window (that is the data-gaming pattern every fak scorecard refuses) — it is making the witness syscall a **byproduct of real work** so the share rises structurally across sessions:
+
+1. **Witness every ship.** Run `dos verify <PLAN> <PHASE>` (or `dos improve --observe`) at ship time, not `dos commit-audit` alone — commit-audit is read-only and writes no row; `verify`/`improve` are the syscalls this axis counts.
+2. **Re-verify recalled memory.** When a memory is recalled, re-check it against ground truth (`dos recall <name>`) so it resolves to FRESH/STALE instead of sitting at the 76%-UNVERIFIABLE floor.
+3. **Wire it into the dev loop.** The durable fix is a ship-path step (a post-commit / Stop-hook auto-`dos verify`) so the witness share climbs without anyone remembering to — the same way the usage axis is green because the commit hooks make the stamp/DCO automatic.
+
+Re-run after a dev session and `--compare` against a pinned `--json` baseline: the verdict reports the multiple on the witness score (the lever), so a real 3× (witness 6% → 18% share) is provable, not asserted.
 
 **Next:** retire worst-first: witness_share — 6% of 321 decision point(s) used a proactive witness syscall (target >=15%)
