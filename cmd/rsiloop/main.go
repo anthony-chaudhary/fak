@@ -41,7 +41,8 @@ func main() {
 	suitePkgs := flag.String("suite-pkgs", "./...", "package pattern the suite-green gate builds+vets")
 	harness := flag.String("harness", "worktree", "which REAL subsystem the loop drives: "+
 		"worktree (rewrite DefaultCacheSize, measured in an isolated worktree) | "+
-		"rulesynth (synthesize an adjudicator deny-rule from the frozen near-miss corpus)")
+		"rulesynth (synthesize an adjudicator deny-rule from the frozen near-miss corpus) | "+
+		"sessionobs (drive the session->outcome S0 loop-index score as the RSI objective)")
 	dosObserve := flag.Bool("dos-observe", false, "also emit a `dos improve --observe` "+
 		"receipt of each keep/revert verdict to the DOS audit journal (record-only "+
 		"telemetry; never re-gates the loop; no-op when dos is absent) — #588")
@@ -80,9 +81,11 @@ func main() {
 // shipgate.Evaluate): the worktree harness rewrites the DefaultCacheSize literal and
 // measures the candidate in an isolated git worktree off main; the rulesynth harness
 // synthesizes an adjudicator deny-rule from the frozen near-miss corpus and proves it
-// against the real model-free adjudicator. A second REAL subsystem — not a second knob
-// on the same one — is what makes the loop a general improver rather than a cache-size
-// demo (#586).
+// against the real model-free adjudicator; the sessionobs harness makes the full S0
+// loop-index score, with its Learn stage derived from sessionobs, the measured RSI
+// objective. A
+// second REAL subsystem — not a second knob on the same one — is what makes the loop
+// a general improver rather than a cache-size demo (#586).
 func selectHarness(kind, repo, baselineRef, candidates, probePkg, suitePkgs string) (rsiloop.Harness, error) {
 	switch kind {
 	case "worktree":
@@ -100,8 +103,13 @@ func selectHarness(kind, repo, baselineRef, candidates, probePkg, suitePkgs stri
 		// this harness needs no git fork — its baseline is the zero-catch floor and its
 		// replay is a pure adjudicator call.
 		return rsiloop.NewRuleSynthHarness(rsiloop.FrozenRuleSynthCorpus()), nil
+	case "sessionobs":
+		// Deterministic S0 witness for #1161: a no-op sessionobs toolchain proposal
+		// reverts, while the closed session->outcome->consuming-loop state keeps only
+		// after the S0 loop-index strictly rises to 100.
+		return rsiloop.NewSessionObsDemoHarness(), nil
 	default:
-		return rsiloop.Harness{}, fmt.Errorf("unknown -harness %q (want worktree|rulesynth)", kind)
+		return rsiloop.Harness{}, fmt.Errorf("unknown -harness %q (want worktree|rulesynth|sessionobs)", kind)
 	}
 }
 

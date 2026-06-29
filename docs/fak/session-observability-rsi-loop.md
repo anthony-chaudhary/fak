@@ -28,8 +28,8 @@ corpus where value is invisible.
 The single piece of data that is missing is the link from a session to its
 **outcome**. Concretely, for each session: did it land a commit? Was that commit's
 claim later confirmed by a witness, or is it a `CLAIMED_CLOSED` that no diff
-supports? Did the session end at a STOP, a guard refusal, or an interrupt with
-nothing shipped? Or was it a read-only session that explored and answered a question
+supports? Did the session end at a STOP or an interrupt with nothing shipped? Or
+was it a read-only session that explored and answered a question
 and was never meant to mutate anything?
 
 The fleet already computes exactly this vocabulary at the *issue* level — the
@@ -102,9 +102,9 @@ at all.
 ## What an RSI loop does with it
 
 Once the corpus has outcomes and signals, the loop is a contrast: hold the
-value-side sessions (shipped, witnessed) against the waste-side (stopped, refused)
-and ask which behaviors separate them. Candidate questions the corpus can finally
-answer, none of which cost data can:
+value-side sessions (shipped, witnessed) against the waste-side (stopped) and ask
+which behaviors, including guard refusals, separate them. Candidate questions the
+corpus can finally answer, none of which cost data can:
 
 - Do sessions that read `AGENTS.md` early ship more often than those that don't?
 - What is the tool-sequence signature of a session that fights the guard into a STOP,
@@ -134,10 +134,15 @@ This lands in increments, debt-retiring worst-first.
   signals, links it to a git/witness outcome via `ClassifyOutcome`, and writes the
   scrubbed `Record` corpus. This retires the `outcome_link_rate`,
   `value_waste_separable`, and `corpus_committed` rungs.
-- **Increment 3: the loop.** A registered RSI pass that reads the committed corpus,
-  proposes one behavior refinement on a strict witnessed gain, and folds the
-  scorecard into the control-pane ratchet. This retires `loop_consumes` and
-  `registered_in_control_pane`, closing the ladder.
+- **Increment 3 (shipped for the S0 objective): the loop.** `cmd/rsiloop
+  -harness sessionobs` makes the loop-index itself the RSI objective:
+  `internal/rsiloop.NewSessionObsDemoHarness` measures S0 as the higher-better
+  `loop_index` score, with the Learn stage derived from `sessionobs.Score`. It
+  first REVERTs a no-op toolchain proposal whose index does not move, then KEEPs
+  the closed session->outcome->consuming-loop state only after the S0 loop-index
+  rises to 100 with a clean sessionobs report. The consuming loop is now
+  demonstrable end-to-end; the remaining productionization step is feeding it the
+  committed fleet corpus and folding the scorecard into the control-pane ratchet.
 
 The honesty boundary holds at every step: the score is deterministic, the corpus is
 scrubbed, and debt is retired by building the rung, never by editing the detector.

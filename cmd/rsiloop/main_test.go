@@ -43,3 +43,14 @@ func TestParseInts(t *testing.T) {
 		t.Fatal("empty candidate list should parse to no candidates")
 	}
 }
+
+func TestSelectHarnessSessionObs(t *testing.T) {
+	h, err := selectHarness("sessionobs", ".", "main", "", "", "")
+	if err != nil {
+		t.Fatalf("selectHarness(sessionobs): %v", err)
+	}
+	if h.MetricName != "s0_loop_index" || h.LowerBetter {
+		t.Fatalf("sessionobs harness should expose higher-better S0 loop-index, got %q lower=%v",
+			h.MetricName, h.LowerBetter)
+	}
+}

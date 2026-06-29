@@ -12,10 +12,11 @@
 // tools/session_audit.py already folds those transcripts into exact COST observability
 // -- tokens, tool mix, cache reuse, dollars. That answers "what did a session SPEND".
 // It cannot answer "what did a session ACHIEVE": there is no link from a session to
-// its OUTCOME (a shipped + witnessed commit vs a STOP, a refusal, or a CLAIMED_CLOSED
+// its OUTCOME (a shipped + witnessed commit vs a STOP/interrupt, or a CLAIMED_CLOSED
 // that no witness confirms). Without that outcome link the corpus is unlearnable -- an
 // RSI loop cannot contrast the behavior of value-producing sessions against wasteful
-// ones, because it cannot tell them apart.
+// ones, because it cannot tell them apart. Guard refusals stay behavior signals, not
+// cohort-defining outcome evidence.
 //
 // THE LADDER. Session data becomes RSI-useful one rung at a time, and this scorecard
 // grades how far up the ladder the pipeline has climbed:
@@ -61,8 +62,9 @@ const (
 	// OutcomeClaimed: the session landed a commit but no witness confirms its claim
 	// (the CLAIMED_CLOSED analog) -- value asserted, not proven.
 	OutcomeClaimed
-	// OutcomeStopped: the session ended at a STOP, a guard refusal, or an interrupt
-	// with no commit landed -- the "waste" exemplar a loop must be able to see.
+	// OutcomeStopped: the session ended at a STOP or interrupt with no commit landed
+	// -- the "waste" exemplar a loop must be able to see. Guard refusals are stored
+	// as Signals so the value-vs-waste contrast can rank them without circularity.
 	OutcomeStopped
 	// OutcomeNoOp: a read-only / exploratory session that mutated nothing by design
 	// (a question answered, a tree explored). Not waste, but not a value ship either;
@@ -101,7 +103,7 @@ func (o Outcome) value() bool { return o == OutcomeShipped || o == OutcomeClaime
 //
 //   - a commit landed AND a witness confirmed its claim -> Shipped (proven value).
 //   - a commit landed but no witness yet                -> Claimed (asserted value).
-//   - no commit, and the session hit a STOP/refusal     -> Stopped (waste).
+//   - no commit, and the session hit a STOP/interrupt   -> Stopped (waste).
 //   - no commit, no stop, and nothing was mutated       -> NoOp (exploratory).
 //   - none of the above                                 -> Unknown (unlinked).
 func ClassifyOutcome(committed, witnessed, stopped, mutated bool) Outcome {

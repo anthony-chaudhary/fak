@@ -198,6 +198,8 @@ func main() {
 		cmdNightrun(os.Args[2:])
 	case "sessions":
 		cmdSessions(os.Args[2:])
+	case "loop-index-scorecard":
+		cmdLoopIndexScorecard(os.Args[2:])
 	case "experiments":
 		cmdExperiments(os.Args[2:])
 	case "coverage-matrix":

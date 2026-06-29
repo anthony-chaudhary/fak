@@ -68,6 +68,22 @@ With the default candidates `6,8,8,10` the loop produces **KEEP, KEEP, REVERT, K
 each strict gain is kept (advancing the baseline), and the no-op `8` (no gain over the
 already-kept `8`) is reverted — driven by the *measurement*, not a flag.
 
+## S0 as the objective: session outcomes
+
+The same engine now has a session-observability harness for the dev-ex learning loop:
+
+```bash
+go run ./cmd/rsiloop -mode improve -harness sessionobs
+```
+
+That harness uses the full `loop_index` score as S0, with the Learn stage derived
+from `internal/sessionobs.Score` and `LowerBetter=false`. The first candidate is a
+no-op sessionobs toolchain proposal and REVERTs because S0 does not move. The second
+links value and waste outcomes, marks the scrubbed corpus consumed by the loop, and
+KEEPs only after the S0 loop-index rises to 100 with a clean sessionobs report. This
+closes the session->outcome->toolchain loop for issue #1161 without adding a
+separate keep/revert path; it reuses `shipgate.Evaluate`.
+
 ## Run it
 
 ```bash
