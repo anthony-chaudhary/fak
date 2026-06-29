@@ -203,6 +203,15 @@ func (s *Store) AcquireFenced(ctx context.Context, rec Record, now time.Time) (R
 		}, nil
 	}
 
+	return s.commitFenced(ctx, ref, out, oldOID, hasRef, "acquire", rec.ID)
+}
+
+// commitFenced performs the CAS write that ends both AcquireFenced and Renew, then maps the
+// outcome to a verdict: a lost CAS becomes LEASE_CONTENDED tagged with op (the verb that
+// raced) and id, a clean write becomes an OK verdict carrying out's generation. hasRef is
+// whether ref already existed (the casWrite precondition), op is "acquire"/"renew" for the
+// contended message, and id names the lease in that message.
+func (s *Store) commitFenced(ctx context.Context, ref string, out Record, oldOID string, hasRef bool, op, id string) (Record, FenceVerdict, error) {
 	written, err := s.casWrite(ctx, ref, out, oldOID, hasRef)
 	if err != nil {
 		return Record{}, FenceVerdict{}, err
@@ -210,7 +219,7 @@ func (s *Store) AcquireFenced(ctx context.Context, rec Record, now time.Time) (R
 	if !written {
 		return Record{}, FenceVerdict{
 			Reason: ReasonLeaseContended,
-			Detail: fmt.Sprintf("lease %s changed under the acquire (CAS lost); re-read and retry", rec.ID),
+			Detail: fmt.Sprintf("lease %s changed under the %s (CAS lost); re-read and retry", id, op),
 		}, nil
 	}
 	return out, FenceVerdict{OK: true, Presented: out.Generation, Current: out.Generation, Holder: out.Holder}, nil
@@ -260,14 +269,7 @@ func (s *Store) Renew(ctx context.Context, id, holder string, ttlSeconds int64, 
 	if ttlSeconds > 0 {
 		out.TTLSeconds = ttlSeconds
 	}
-	written, err := s.casWrite(ctx, ref, out, oldOID, true)
-	if err != nil {
-		return Record{}, FenceVerdict{}, err
-	}
-	if !written {
-		return Record{}, FenceVerdict{Reason: ReasonLeaseContended, Detail: fmt.Sprintf("lease %s changed under the renew (CAS lost); re-read and retry", id)}, nil
-	}
-	return out, FenceVerdict{OK: true, Presented: out.Generation, Current: out.Generation, Holder: out.Holder}, nil
+	return s.commitFenced(ctx, ref, out, oldOID, true, "renew", id)
 }
 
 // currentOID returns the object id ref currently points at and whether ref exists, via

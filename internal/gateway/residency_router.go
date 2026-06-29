@@ -129,13 +129,19 @@ func newWorkerResidency(capacity int) *workerResidency {
 
 func residencyKey(prefix []string) string { return strings.Join(prefix, "\x1f") }
 
-func (w *workerResidency) touch(k string) {
+// removeFromOrder drops the first occurrence of k from the LRU order slice (a no-op if
+// absent). Shared by touch (re-append to the MRU end) and drop (forget entirely).
+func (w *workerResidency) removeFromOrder(k string) {
 	for i, kk := range w.order {
 		if kk == k {
 			w.order = append(w.order[:i], w.order[i+1:]...)
-			break
+			return
 		}
 	}
+}
+
+func (w *workerResidency) touch(k string) {
+	w.removeFromOrder(k)
 	w.order = append(w.order, k)
 }
 
@@ -160,12 +166,7 @@ func (w *workerResidency) drop(prefix []string) {
 		return
 	}
 	delete(w.held, k)
-	for i, kk := range w.order {
-		if kk == k {
-			w.order = append(w.order[:i], w.order[i+1:]...)
-			break
-		}
-	}
+	w.removeFromOrder(k)
 }
 
 func (w *workerResidency) dropContaining(segments []string) int {
