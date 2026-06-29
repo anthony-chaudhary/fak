@@ -37,6 +37,17 @@ func q5kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {
 //go:noescape
 func q6kReduceRowAsmAVX2(row *byte, nblk int, qx *int8, Isum, Ssum *int32)
 
+// q6kUseVNNI gates the Q6_K asm inner dot the same way q5kUseVNNI gates Q5_K: 1 when the box has
+// AVX512-VNNI (and the tier isn't pinned down via FAK_QKERNEL), so q6kReduceRowAsmAVX2 takes the
+// one-VPDPBUSD-per-group path (·q6kUseVNNI(SB) CMPB) over the AVX2 sign-extend + VPMADDWD path.
+// Both paths produce bit-identical int32 reductions. A byte, not a bool, so the asm's CMPB matches.
+var q6kUseVNNI byte = func() byte {
+	if q4kVNNI { // same CPUID gate (AVX512 + VNNI ECX bit 11), same FAK_QKERNEL pin as Q4_K/Q5_K
+		return 1
+	}
+	return 0
+}()
+
 // q6kReduceRow computes the per-group (I_g = Σ q6*qx, S_g = Σ qx) reductions for a Q6_K row.
 // AVX2/VNNI kernel when the resolved tier has AVX2, else the scalar reference. IS/SS
 // are sized nblk*16 (one I_g/S_g per group).
