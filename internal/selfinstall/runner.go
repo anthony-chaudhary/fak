@@ -2,10 +2,42 @@ package selfinstall
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
+
+// ErrBusy is returned by TrySingleFlight when another self-update already holds the lock.
+var ErrBusy = errors.New("selfinstall: another self-update is in progress")
+
+// TrySingleFlight takes a NON-BLOCKING advisory lock so at most one self-update builds at a
+// time on a host. A second concurrent invocation returns ErrBusy immediately instead of
+// stacking another expensive origin checkout + build — critical on a saturated box where the
+// scheduled tick could otherwise pile builds on top of a slow one. The returned release frees
+// the lock; the OS also drops it if the process exits. dir is where the lockfile lives (""
+// => OS temp); the lock file is named fak-selfupdate.lock there.
+func TrySingleFlight(dir string) (release func(), err error) {
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	path := filepath.Join(dir, "fak-selfupdate.lock")
+	f, oerr := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if oerr != nil {
+		return nil, oerr
+	}
+	if lerr := flock.TryLock(f); lerr != nil {
+		f.Close()
+		if errors.Is(lerr, flock.ErrLockBusy) {
+			return nil, ErrBusy
+		}
+		return nil, lerr
+	}
+	return func() { _ = flock.Unlock(f); _ = f.Close() }, nil
+}
 
 // RealRunner runs the command for real, merging stdout+stderr, and reports ok=false on any
 // non-zero exit or exec failure (so a failed gate is a clean ok=false, not a panic).

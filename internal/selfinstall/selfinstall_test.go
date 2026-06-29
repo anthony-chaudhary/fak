@@ -154,6 +154,25 @@ func TestPrepareOriginReportsAddFailure(t *testing.T) {
 	}
 }
 
+func TestSingleFlightSecondCallIsBusy(t *testing.T) {
+	dir := t.TempDir()
+	rel1, err := TrySingleFlight(dir)
+	if err != nil {
+		t.Fatalf("first TrySingleFlight: %v", err)
+	}
+	// While the first holds the lock, a second must report ErrBusy, not block or steal.
+	if _, err := TrySingleFlight(dir); err != ErrBusy {
+		t.Fatalf("second TrySingleFlight while held: got %v, want ErrBusy", err)
+	}
+	rel1()
+	// After release, a new acquire succeeds.
+	rel2, err := TrySingleFlight(dir)
+	if err != nil {
+		t.Fatalf("TrySingleFlight after release: %v", err)
+	}
+	rel2()
+}
+
 var errSwap = swapErr("swap-fail")
 
 type swapErr string
