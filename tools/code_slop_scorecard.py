@@ -160,13 +160,15 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Directories whose .go is NOT first-party shipped kernel code (same exclusion the
 # code-quality scorecard uses): fixtures, vendored/generated trees.
-GO_EXCLUDE_DIRS = {".git", ".claude", "node_modules", "testdata", "vendor", "__pycache__"}
-# `.claude` holds agent tooling, incl. `.claude/worktrees/<wt>/` — full repo CHECKOUTS
-# created by the worktree-isolation feature. Walking them counts every copied .go as a
-# phantom clone of the real tree (a peer worktree once inflated slop-debt 473 -> 2613),
+GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", "node_modules", "testdata", "vendor", "__pycache__"}
+# `.claude` and `.fak` both hold full repo CHECKOUTS created by the agent machinery:
+# `.claude/worktrees/<wt>/` (the worktree-isolation feature) and `.fak/tmp/issue<N>-clean-<sha>/`
+# (a dispatch worker's clean clone). Both are gitignored scratch, not first-party source.
+# Walking them counts every copied .go as a phantom clone of the real tree (a `.claude`
+# worktree once inflated slop-debt 473 -> 2613; a `.fak/tmp` checkout inflated it ~6x, 488 -> 3029),
 # which would make the committed snapshot + the #779 gate flap on a transient checkout.
 # A worktree copy is identical to its source by construction, never kernel slop — so the
-# gather drops the whole `.claude` subtree, exactly as it drops `.git`/`vendor`.
+# gather drops the whole `.claude`/`.fak` subtrees, exactly as it drops `.git`/`vendor`.
 
 _TESTFUNC_RE = re.compile(r"^func\s+(Test|Benchmark|Fuzz)(\w*)\s*\(\s*(\w+)\s+\*?", re.MULTILINE)
 # A top-level declaration. Captures kind + name so we can find unexported symbols.
