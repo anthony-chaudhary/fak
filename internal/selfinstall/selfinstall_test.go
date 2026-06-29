@@ -106,6 +106,54 @@ func (r *recordTmp) run(_ context.Context, _, name string, args ...string) (stri
 	return "ok", true
 }
 
+func TestPrepareOriginAddsAndCleansWorktree(t *testing.T) {
+	r := &scriptRunner{}
+	dir, cleanup, err := PrepareOrigin(context.Background(), r.run, "/repo", "origin/main", "/repo/.wt")
+	if err != nil {
+		t.Fatalf("PrepareOrigin err: %v", err)
+	}
+	if dir != "/repo/.wt" {
+		t.Fatalf("dir = %q, want /repo/.wt", dir)
+	}
+	// It should have fetched then added a detached worktree.
+	sawFetch, sawAdd := false, false
+	for _, c := range r.ran {
+		j := strings.Join(c, " ")
+		if strings.Contains(j, "git fetch origin") {
+			sawFetch = true
+		}
+		if strings.Contains(j, "worktree add --detach /repo/.wt origin/main") {
+			sawAdd = true
+		}
+	}
+	if !sawFetch || !sawAdd {
+		t.Fatalf("prepare did not fetch+add detached worktree; ran %v", r.ran)
+	}
+	// Cleanup must remove + prune the worktree.
+	cleanup()
+	sawRemove, sawPrune := false, false
+	for _, c := range r.ran {
+		j := strings.Join(c, " ")
+		if strings.Contains(j, "worktree remove --force /repo/.wt") {
+			sawRemove = true
+		}
+		if strings.Contains(j, "worktree prune") {
+			sawPrune = true
+		}
+	}
+	if !sawRemove || !sawPrune {
+		t.Fatalf("cleanup did not remove+prune; ran %v", r.ran)
+	}
+}
+
+func TestPrepareOriginReportsAddFailure(t *testing.T) {
+	r := &scriptRunner{failOn: "worktree add"}
+	_, _, err := PrepareOrigin(context.Background(), r.run, "/repo", "origin/main", "/repo/.wt")
+	if err == nil {
+		t.Fatal("PrepareOrigin should return an error when worktree add fails")
+	}
+}
+
 var errSwap = swapErr("swap-fail")
 
 type swapErr string

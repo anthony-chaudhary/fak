@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
@@ -41,7 +42,11 @@ func cmdSelfUpdate(argv []string) {
 		os.Exit(2)
 	}
 
-	headRev := repoHeadRev(repoRoot)
+	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
+	// local tree is always ahead-or-behind with peer WIP, and origin/main is the verified
+	// line we actually want guards converged on.
+	_, _ = selfinstall.RealRunner(context.Background(), repoRoot, "git", "fetch", "origin", "--quiet")
+	headRev := repoRevOf(repoRoot, "origin/main")
 	self := binstamp.Self()
 	verdict := binstamp.Compare(self, headRev)
 
@@ -75,9 +80,22 @@ func cmdSelfUpdate(argv []string) {
 		fmt.Fprintln(os.Stderr, "self-update: cannot resolve this binary's own path:", err)
 		os.Exit(1)
 	}
-	fmt.Printf("self-update: rebuilding + gating, then swapping %s …\n", target)
-	res := selfinstall.Install(context.Background(), selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
-		RepoRoot: repoRoot,
+
+	// Build from a PRISTINE detached origin/main checkout, never the live (peer-dirty)
+	// tree: that gives a clean VCS stamp on the installed binary and guarantees we install
+	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
+	ctx := context.Background()
+	buildDir, cleanup, perr := selfinstall.PrepareOrigin(ctx, selfinstall.RealRunner, repoRoot, "origin/main",
+		filepath.Join(repoRoot, ".git", "fak-selfupdate-build"))
+	if perr != nil {
+		fmt.Fprintln(os.Stderr, "self-update:", perr)
+		os.Exit(1)
+	}
+	defer cleanup()
+
+	fmt.Printf("self-update: building origin/main + gating, then swapping %s …\n", target)
+	res := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
+		RepoRoot: buildDir,
 		Target:   target,
 	})
 	fmt.Println(selfinstall.FormatResult(res))
@@ -86,9 +104,9 @@ func cmdSelfUpdate(argv []string) {
 	}
 }
 
-// repoHeadRev returns the full HEAD SHA of the repo at root, or "" on any error.
-func repoHeadRev(root string) string {
-	out, ok := selfinstall.RealRunner(context.Background(), root, "git", "rev-parse", "HEAD")
+// repoRevOf returns the full SHA a ref resolves to in the repo at root, or "" on error.
+func repoRevOf(root, ref string) string {
+	out, ok := selfinstall.RealRunner(context.Background(), root, "git", "rev-parse", ref)
 	if !ok {
 		return ""
 	}

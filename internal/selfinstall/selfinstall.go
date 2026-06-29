@@ -95,6 +95,34 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 	return Result{Installed: true, Stage: StageSwap, Detail: "installed " + filepath.Base(opts.Target)}
 }
 
+// PrepareOrigin checks out a PRISTINE detached copy of a ref (e.g. "origin/main") into a
+// fresh temp worktree under the repo, and returns its path plus a cleanup func. Building
+// from this — instead of the live working tree — is what makes self-update viable on a
+// permanently-dirty shared trunk: a build from the live tree always stamps vcs.modified=true
+// (because peers are mid-edit), which would make every binary look "dirty" and defeat the
+// staleness check; worse, it would bake peer work-in-progress INTO the installed binary.
+// A detached origin worktree gives a clean VCS stamp AND installs exactly verified
+// origin/main, never a contaminated local build.
+//
+// It is best-effort and self-cleaning: the cleanup removes the worktree (git worktree
+// remove --force) and prunes the admin entry. A failure to create returns ("", noop, err).
+func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (string, func(), error) {
+	noop := func() {}
+	if strings.TrimSpace(ref) == "" {
+		ref = "origin/main"
+	}
+	// Make sure the ref is current before we detach onto it.
+	_, _ = run(ctx, repoRoot, "git", "fetch", "origin", "--quiet")
+	if out, ok := run(ctx, repoRoot, "git", "worktree", "add", "--detach", dir, ref); !ok {
+		return "", noop, fmt.Errorf("prepare-origin: git worktree add %s @ %s failed: %s", dir, ref, trim(out))
+	}
+	cleanup := func() {
+		_, _ = run(ctx, repoRoot, "git", "worktree", "remove", "--force", dir)
+		_, _ = run(ctx, repoRoot, "git", "worktree", "prune")
+	}
+	return dir, cleanup, nil
+}
+
 func trim(s string) string {
 	s = strings.TrimSpace(s)
 	const max = 2000
