@@ -39,8 +39,13 @@ package bench
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
 // dos verdicts a turn's commit can carry, mirroring the dos truth syscall:
@@ -263,6 +268,11 @@ type Provenance struct {
 	Note        string `json:"note"`
 }
 
+const (
+	ProvenanceSimulated = "SIMULATED"
+	ProvenanceObserved  = "OBSERVED"
+)
+
 // LoopVerifyReport is the full naive-vs-gated comparison.
 type LoopVerifyReport struct {
 	Schema         string        `json:"schema"`
@@ -295,6 +305,18 @@ func BuildLoopVerifyReport() LoopVerifyReport {
 // BuildLoopVerifyReportFor folds an arbitrary corpus (the seam the live driver
 // will feed real turn records into).
 func BuildLoopVerifyReportFor(corpus []Episode) LoopVerifyReport {
+	return buildLoopVerifyReport(corpus, Provenance{
+		Kind:        ProvenanceSimulated,
+		Command:     "go test ./internal/bench/ -run TestLoopVerifyBench",
+		GeneratedBy: "fak/internal/bench.BuildLoopVerifyReport",
+		Note: "Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) " +
+			"is shipped, but this report is not a live naive-vs-gated wall-clock. This " +
+			"witnesses the MEASUREMENT and the metric definitions; live turn records " +
+			"can feed the same report shape.",
+	})
+}
+
+func buildLoopVerifyReport(corpus []Episode, provenance Provenance) LoopVerifyReport {
 	naiveOuts := make([]EpisodeOutcome, 0, len(corpus))
 	gatedOuts := make([]EpisodeOutcome, 0, len(corpus))
 	pairs := make([]EpisodePair, 0, len(corpus))
@@ -325,16 +347,8 @@ func BuildLoopVerifyReportFor(corpus []Episode) LoopVerifyReport {
 	d.NetTrueFinding = netTrueFinding(naive, gated, d)
 
 	return LoopVerifyReport{
-		Schema: "loopverify.v1",
-		Provenance: Provenance{
-			Kind:        "SIMULATED",
-			Command:     "go test ./internal/bench/ -run TestLoopVerifyBench",
-			GeneratedBy: "fak/internal/bench.BuildLoopVerifyReport",
-			Note: "Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) " +
-				"is shipped, but this report is not a live naive-vs-gated wall-clock. This " +
-				"witnesses the MEASUREMENT and the metric definitions; live turn records " +
-				"can feed the same report shape.",
-		},
+		Schema:         "loopverify.v1",
+		Provenance:     provenance,
 		CorpusEpisodes: len(corpus),
 		CorpusTurns:    turns,
 		Naive:          naive,
@@ -343,6 +357,173 @@ func BuildLoopVerifyReportFor(corpus []Episode) LoopVerifyReport {
 		Episodes:       pairs,
 		Verdict:        verdict,
 	}
+}
+
+// BuildLoopVerifyReportFromLoopLedger loads a fak loop-drive ledger and folds its
+// observed turn/witness rows into the same loopverify.v1 report shape. It refuses
+// claimed-done turns without an external witnessed/refuted verdict: OBSERVED
+// provenance is only emitted when the witness data is actually present.
+func BuildLoopVerifyReportFromLoopLedger(path string) (LoopVerifyReport, error) {
+	events, err := loopmgr.Load(path)
+	if err != nil {
+		return LoopVerifyReport{}, err
+	}
+	return BuildLoopVerifyReportFromLoopEvents(events, "fak loop drive ledger "+path)
+}
+
+// BuildLoopVerifyReportFromLoopEvents converts fak loop-drive ledger events into
+// benchmark episodes. One LoopID becomes one episode; each EventEnd is one turn;
+// each claimed-done turn must have a matching EventWitness verdict.
+func BuildLoopVerifyReportFromLoopEvents(events []loopmgr.Event, command string) (LoopVerifyReport, error) {
+	corpus, err := loopEventsToEpisodes(events)
+	if err != nil {
+		return LoopVerifyReport{}, err
+	}
+	if len(corpus) == 0 {
+		return LoopVerifyReport{}, errors.New("loopverify: no loop-drive turns in ledger")
+	}
+	if strings.TrimSpace(command) == "" {
+		command = "fak loop drive ledger"
+	}
+	return buildLoopVerifyReport(corpus, Provenance{
+		Kind:        ProvenanceObserved,
+		Command:     command,
+		GeneratedBy: "fak/internal/bench.BuildLoopVerifyReportFromLoopEvents",
+		Note:        "Corpus is OBSERVED from fak loop-drive ledger rows: EventEnd supplies the self-reported done boundary, EventWitness supplies the external verdict, and claimed-done turns without a witnessed/refuted verdict are refused rather than summarized.",
+	}), nil
+}
+
+type observedTurn struct {
+	loopID          string
+	runID           string
+	order           int
+	summary         string
+	selfReported    bool
+	slopIntroduced  int
+	witnessStatus   loopmgr.RunStatus
+	witnessReason   string
+	witnessSummary  string
+	witnessObserved bool
+	gateCostUnits   float64
+}
+
+func loopEventsToEpisodes(events []loopmgr.Event) ([]Episode, error) {
+	loops := map[string][]*observedTurn{}
+	turns := map[string]*observedTurn{}
+	var order int
+	for _, ev := range events {
+		if ev.RunID == "" || ev.LoopID == "" {
+			continue
+		}
+		key := ev.LoopID + "\x00" + ev.RunID
+		t := turns[key]
+		if t == nil {
+			t = &observedTurn{loopID: ev.LoopID, runID: ev.RunID}
+			turns[key] = t
+			loops[ev.LoopID] = append(loops[ev.LoopID], t)
+		}
+		switch ev.Kind {
+		case loopmgr.EventEnd:
+			if t.order == 0 {
+				order++
+				t.order = order
+			}
+			t.summary = firstNonEmpty(ev.Summary, ev.Reason, ev.RunID)
+			t.selfReported = ev.Status == loopmgr.StatusClaimedDone
+			t.slopIntroduced = intMetric(ev.Metrics, "slop_introduced", "slop_delta")
+		case loopmgr.EventWitness:
+			t.witnessStatus = ev.Status
+			t.witnessReason = ev.Reason
+			t.witnessSummary = ev.Summary
+			t.witnessObserved = true
+			if n, ok := floatMetric(ev.Metrics, "gate_cost_units"); ok {
+				t.gateCostUnits = n
+			} else {
+				t.gateCostUnits = 1
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(loops))
+	for id := range loops {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	episodes := make([]Episode, 0, len(ids))
+	for _, id := range ids {
+		obs := loops[id]
+		sort.SliceStable(obs, func(i, j int) bool {
+			if obs[i].order == obs[j].order {
+				return obs[i].runID < obs[j].runID
+			}
+			if obs[i].order == 0 {
+				return false
+			}
+			if obs[j].order == 0 {
+				return true
+			}
+			return obs[i].order < obs[j].order
+		})
+		ep := Episode{Name: id}
+		for _, ot := range obs {
+			if ot.order == 0 {
+				continue // a start/fire/witness without an end is not a completed turn
+			}
+			turn := Turn{
+				SelfReportedDone: ot.selfReported,
+				DosVerdict:       VerdictWorking,
+				SlopIntroduced:   ot.slopIntroduced,
+				GateCostUnits:    ot.gateCostUnits,
+				Note:             firstNonEmpty(ot.witnessSummary, ot.summary, ot.runID),
+			}
+			if ot.selfReported {
+				if !ot.witnessObserved {
+					return nil, fmt.Errorf("loopverify: claimed-done turn %s/%s has no witness verdict", id, ot.runID)
+				}
+				switch ot.witnessStatus {
+				case loopmgr.StatusWitnessedDone:
+					turn.DosVerdict = VerdictWitnessed
+				case loopmgr.StatusWitnessRefused:
+					turn.DosVerdict = VerdictRefuted
+				default:
+					return nil, fmt.Errorf("loopverify: claimed-done turn %s/%s has non-observed witness status %q", id, ot.runID, ot.witnessStatus)
+				}
+				if ot.witnessReason != "" {
+					turn.Note = strings.TrimSpace(turn.Note + " [" + ot.witnessReason + "]")
+				}
+			}
+			ep.Turns = append(ep.Turns, turn)
+		}
+		if len(ep.Turns) > 0 {
+			episodes = append(episodes, ep)
+		}
+	}
+	return episodes, nil
+}
+
+func intMetric(m map[string]int64, keys ...string) int {
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			return int(v)
+		}
+	}
+	return 0
+}
+
+func floatMetric(m map[string]int64, key string) (float64, bool) {
+	if v, ok := m[key]; ok {
+		return float64(v), true
+	}
+	return 0, false
+}
+
+func firstNonEmpty(xs ...string) string {
+	for _, x := range xs {
+		if s := strings.TrimSpace(x); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func netTrueFinding(naive, gated ArmSummary, d Delta) string {

@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
 // TestLoopVerifyBench is the re-runnable witness for issue #1190: it produces the
@@ -13,6 +16,9 @@ import (
 // corpus.
 func TestLoopVerifyBench(t *testing.T) {
 	r := BuildLoopVerifyReport()
+	if r.Provenance.Kind != ProvenanceSimulated {
+		t.Fatalf("fixture provenance = %q, want %q", r.Provenance.Kind, ProvenanceSimulated)
+	}
 
 	// Corpus shape.
 	if r.CorpusEpisodes != 4 || r.CorpusTurns != 11 {
@@ -109,5 +115,95 @@ func TestLoopVerifyCorpusTooEasy(t *testing.T) {
 	}
 	if r.Delta.FalseDoneRateReduction != 0 {
 		t.Errorf("false_done_rate_reduction = %v; want 0", r.Delta.FalseDoneRateReduction)
+	}
+}
+
+func TestLoopVerifyFromLoopLedgerObserved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	appendLoopVerifyEvent(t, path, loopmgr.Event{
+		LoopID:  "goal/live",
+		RunID:   "goal-live-turn-1",
+		Kind:    loopmgr.EventEnd,
+		Status:  loopmgr.StatusClaimedDone,
+		Reason:  "EXIT_0",
+		Summary: "child self-reported done",
+		Metrics: map[string]int64{"slop_introduced": 3},
+	})
+	appendLoopVerifyEvent(t, path, loopmgr.Event{
+		LoopID:  "goal/live",
+		RunID:   "goal-live-turn-1",
+		Kind:    loopmgr.EventWitness,
+		Status:  loopmgr.StatusWitnessRefused,
+		Reason:  "LOOP_DONE_UNWITNESSED",
+		Summary: "commit-audit refuted the done claim",
+	})
+	appendLoopVerifyEvent(t, path, loopmgr.Event{
+		LoopID:  "goal/live",
+		RunID:   "goal-live-turn-2",
+		Kind:    loopmgr.EventEnd,
+		Status:  loopmgr.StatusClaimedDone,
+		Reason:  "EXIT_0",
+		Summary: "child self-reported done after rework",
+		Metrics: map[string]int64{"slop_introduced": -2},
+	})
+	appendLoopVerifyEvent(t, path, loopmgr.Event{
+		LoopID:  "goal/live",
+		RunID:   "goal-live-turn-2",
+		Kind:    loopmgr.EventWitness,
+		Status:  loopmgr.StatusWitnessedDone,
+		Reason:  "WITNESS_OK",
+		Summary: "commit-audit witnessed the fix",
+	})
+
+	r, err := BuildLoopVerifyReportFromLoopLedger(path)
+	if err != nil {
+		t.Fatalf("BuildLoopVerifyReportFromLoopLedger: %v", err)
+	}
+	if r.Provenance.Kind != ProvenanceObserved {
+		t.Fatalf("provenance = %q, want %q", r.Provenance.Kind, ProvenanceObserved)
+	}
+	if r.Schema != "loopverify.v1" || r.CorpusEpisodes != 1 || r.CorpusTurns != 2 {
+		t.Fatalf("report shape schema=%q episodes=%d turns=%d", r.Schema, r.CorpusEpisodes, r.CorpusTurns)
+	}
+	if r.Naive.FalseDoneRate != 1 || r.Gated.FalseDoneRate != 0 {
+		t.Fatalf("false-done rates naive/gated = %.3f/%.3f, want 1/0", r.Naive.FalseDoneRate, r.Gated.FalseDoneRate)
+	}
+	if r.Delta.SlopAvoided != 2 || r.Delta.WastedIterationsAvoided != 1 {
+		t.Fatalf("delta slop/wasted = %d/%d, want 2/1", r.Delta.SlopAvoided, r.Delta.WastedIterationsAvoided)
+	}
+	if r.Delta.GateCostUnits != 2 || r.Delta.ExtraIterationsToWitness != 1 {
+		t.Fatalf("delta gate/extra-iters = %.1f/%d, want 2/1", r.Delta.GateCostUnits, r.Delta.ExtraIterationsToWitness)
+	}
+	if r.Episodes[0].Naive.FalseDone != true || r.Episodes[0].Gated.FalseDone != false {
+		t.Fatalf("episode false-done detail = %+v", r.Episodes[0])
+	}
+}
+
+func TestLoopVerifyFromLoopEventsRefusesMissingWitness(t *testing.T) {
+	_, err := BuildLoopVerifyReportFromLoopEvents([]loopmgr.Event{{
+		LoopID: "goal/live",
+		RunID:  "goal-live-turn-1",
+		Kind:   loopmgr.EventEnd,
+		Status: loopmgr.StatusClaimedDone,
+	}}, "fixture")
+	if err == nil || !strings.Contains(err.Error(), "no witness verdict") {
+		t.Fatalf("missing witness error = %v, want no witness verdict", err)
+	}
+}
+
+func TestLoopVerifyFromLoopEventsRefusesUnavailableWitness(t *testing.T) {
+	_, err := BuildLoopVerifyReportFromLoopEvents([]loopmgr.Event{
+		{LoopID: "goal/live", RunID: "goal-live-turn-1", Kind: loopmgr.EventEnd, Status: loopmgr.StatusClaimedDone},
+		{LoopID: "goal/live", RunID: "goal-live-turn-1", Kind: loopmgr.EventWitness, Status: loopmgr.StatusWitnessUnavailable},
+	}, "fixture")
+	if err == nil || !strings.Contains(err.Error(), "non-observed witness status") {
+		t.Fatalf("unavailable witness error = %v, want non-observed witness status", err)
+	}
+}
+
+func appendLoopVerifyEvent(t *testing.T, path string, ev loopmgr.Event) {
+	t.Helper()
+	if _, err := loopmgr.Append(path, ev); err != nil {
+		t.Fatalf("append loop event: %v", err)
 	}
 }
