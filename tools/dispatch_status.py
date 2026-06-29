@@ -53,6 +53,13 @@ WATCHDOG_TASK = "FleetIssueDispatch"
 RUNS_DIRNAME = ".dispatch-runs"
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
+# The real-turn byte floor: a log at or below this carried no productive turn — it
+# is a 0-byte spawn or a banner-only stub (e.g. a detached opencode worker that
+# prints `> build · <model>` and exits). Mirrors the canonical
+# ``issue_resolve_dispatch._STUB_LOG_MAX_BYTES`` (a drift test pins them equal) so a
+# banner-only no-op counts as "produced nothing", not as output. See #1276.
+_STUB_LOG_MAX_BYTES = 512
+_BACKEND_STUB_LOOKBACK_MIN = 90
 _RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
 
 
@@ -177,12 +184,19 @@ def silent_workers(
     alive: set[int] | None = None,
     probe: Any | None = None,
 ) -> list[dict[str, Any]]:
-    """Issue-resolution workers that exited having produced NOTHING — a 0-byte
-    ``resolve-<N>-<stamp>.log`` whose ``.pid`` process is dead.
+    """Issue-resolution workers that exited having produced NOTHING — a
+    ``resolve-<N>-<stamp>.log`` at or below the real-turn floor
+    (``_STUB_LOG_MAX_BYTES``) whose ``.pid`` process is dead.
+
+    "Produced nothing" is NOT only a 0-byte file: a detached worker that prints its
+    spawn header + a TUI banner (e.g. opencode's ``> build · <model>``, ~122 bytes)
+    and exits landed zero turns just the same, yet ``size != 0`` hid it from this
+    card before #1276. The byte floor catches both; each row carries its ``size`` and
+    a ``kind`` (``empty``/``stub``) so the render is honest about which it found.
 
     A ``claude -p`` worker writes nothing to stdout until its final message, so a
-    0-byte log with a *live* pid is still-running (not silent) and is excluded. A
-    dead pid over an empty log is the "spun, produced nothing" residual the cooldown
+    sub-floor log with a *live* pid is still-running (not silent) and is excluded. A
+    dead pid over a sub-floor log is the "spun, produced nothing" residual the cooldown
     self-corrects but leaves operator-invisible — this is the signal. Best effort:
     psutil is optional (its absence means we cannot prove a pid dead, so we report
     nothing rather than a false silent), exactly like
@@ -203,10 +217,11 @@ def silent_workers(
         if not m:
             continue
         try:
-            if log.stat().st_size != 0:
-                continue  # produced output -> not silent
+            size = log.stat().st_size
         except OSError:
             continue
+        if size > _STUB_LOG_MAX_BYTES:
+            continue  # over the real-turn floor -> produced output, not silent
         pid_file = log.with_suffix(".pid")
         if not pid_file.exists():
             continue
@@ -219,7 +234,8 @@ def silent_workers(
         if dispatch_preflight.resolve_sidecar_pid_is_live(
             pid_file, alive=alive, probe=probe):
             continue  # still running -> not (yet) silent
-        out.append({"issue": int(m.group(1)), "stamp": m.group(2), "log": log.name, "pid": pid})
+        out.append({"issue": int(m.group(1)), "stamp": m.group(2), "log": log.name,
+                    "pid": pid, "size": size, "kind": "empty" if size == 0 else "stub"})
     out.sort(key=lambda r: r["stamp"], reverse=True)
     return out
 
@@ -301,6 +317,81 @@ def read_backend_health(runs_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _recent_backend_products(runs_dir: Path, *, lookback_min: int,
+                             now_ts: float, backend_of_log: Any) -> list[str]:
+    if not runs_dir.is_dir():
+        return []
+    horizon = now_ts - lookback_min * 60
+    products: set[str] = set()
+    for log in runs_dir.glob("resolve-*.log"):
+        if not _RESOLVE_LOG_RE.search(log.name):
+            continue
+        try:
+            if log.stat().st_mtime < horizon:
+                continue
+        except OSError:
+            continue
+        product = str(backend_of_log(log) or "claude")
+        if product:
+            products.add(product)
+    return sorted(products)
+
+
+def backend_stub_rates(
+    runs_dir: Path,
+    *,
+    lookback_min: int = _BACKEND_STUB_LOOKBACK_MIN,
+    now_ts: float | None = None,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Recent per-backend productive-vs-stub rollup from worker log content.
+
+    This is intentionally independent of ``backend-health-*.json`` sidecars: a
+    backend that stopped reaching its own dispatch tick may never persist a DEAD
+    hold, but its recent ``resolve-*.log`` files can still prove that it is mostly
+    spawning banner-only/0-byte no-ops. The per-log classification is delegated to
+    ``issue_resolve_dispatch._classify_backend_logs`` so this status card shares
+    the dispatcher's real-turn floor and quota-banner exception.
+    """
+    if not runs_dir.is_dir():
+        return []
+    import time
+    try:
+        import issue_resolve_dispatch as ird  # type: ignore
+    except ImportError:
+        return []
+    now_ts = time.time() if now_ts is None else now_ts
+    products = _recent_backend_products(
+        runs_dir, lookback_min=lookback_min, now_ts=now_ts,
+        backend_of_log=ird._backend_of_log)
+    out: list[dict[str, Any]] = []
+    for product in products:
+        rows = ird._classify_backend_logs(
+            runs_dir, product=product, lookback_min=lookback_min,
+            now_ts=now_ts, alive=alive, probe=probe)
+        if not rows:
+            continue
+        productive = sum(1 for r in rows if r.get("productive"))
+        stub = len(rows) - productive
+        evidence = [str(r.get("log")) for r in rows
+                    if not r.get("productive") and r.get("log")][:5]
+        out.append({
+            "product": product,
+            "lookback_min": lookback_min,
+            "total": len(rows),
+            "productive": productive,
+            "stub": stub,
+            "stub_rate": round(stub / len(rows), 3),
+            "majority_stub": stub > productive,
+            "evidence_logs": evidence,
+        })
+    out.sort(key=lambda r: (-float(r.get("stub_rate") or 0),
+                            -int(r.get("stub") or 0),
+                            str(r.get("product") or "")))
+    return out
+
+
 def _total_commits(root: Path) -> int | None:
     """Commits reachable from HEAD, or None if git can't answer. Used to size the
     closure-audit window to the repo so it never silently scans a stale slice."""
@@ -353,12 +444,14 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     weekly_cap = read_active_weekly_cap(root / RUNS_DIRNAME,
                                         (pre.get("account") or {}).get("tag"))
     backend_health = read_backend_health(root / RUNS_DIRNAME)
+    backend_stub_rate = backend_stub_rates(root / RUNS_DIRNAME)
     run_status = read_run_status_digests(root)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
                          silent=silent, weekly_cap=weekly_cap, throughput=throughput,
-                         backend_health=backend_health, run_status=run_status)
+                         backend_health=backend_health,
+                         backend_stub_rate=backend_stub_rate, run_status=run_status)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -367,6 +460,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   weekly_cap: dict[str, Any] | None = None,
                   throughput: dict[str, Any] | None = None,
                   backend_health: list[dict[str, Any]] | None = None,
+                  backend_stub_rate: list[dict[str, Any]] | None = None,
                   run_status: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
@@ -449,6 +543,12 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                           for b in backend_health[:4])
         reasons.append(f"{len(backend_health)} backend(s) held dead, lane reallocated "
                        f"({names}) — a healthy backend is covering; auto-restores on recovery")
+    backend_stub_rate = backend_stub_rate or []
+    majority_stub = [r for r in backend_stub_rate if r.get("majority_stub")]
+    if majority_stub:
+        names = ", ".join(f"{r.get('product')} {r.get('stub')}/{r.get('total')} stub"
+                          for r in majority_stub[:4])
+        reasons.append(f"backend stub-rate majority-stub over recent logs ({names}) — inspect backend output")
 
     if not tp_na:
         tp_verdict = throughput.get("verdict")
@@ -531,6 +631,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "backend_health": {
             "dead_count": len(backend_health),
             "dead": backend_health,
+            "stub_rate": backend_stub_rate,
         },
         "run_status": {
             "source": "dos status",
@@ -590,7 +691,13 @@ def render(p: dict[str, Any]) -> str:
     sc = w.get("silent_count") or 0
     if sc:
         nums = ", ".join(f"#{s['issue']}" for s in (w.get("silent") or [])[:6])
-        lines.append(f"║ workers   : {sc} silent (0-byte log, exited) [{nums}]")
+        lines.append(f"║ workers   : {sc} silent (<= {_STUB_LOG_MAX_BYTES} B log, exited) [{nums}]")
+    bh = p.get("backend_health") or {}
+    flagged_rates = [r for r in (bh.get("stub_rate") or []) if r.get("majority_stub")]
+    if flagged_rates:
+        bits = ", ".join(f"{r.get('product')}={r.get('stub')}/{r.get('total')} stub"
+                         for r in flagged_rates[:4])
+        lines.append(f"║ backend   : majority-stub recent logs [{bits}]")
     rs = p.get("run_status") or {}
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
@@ -723,9 +830,16 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
 
     bh = payload.get("backend_health") or {}
     dead = bh.get("dead") or []
+    stub_rates = bh.get("stub_rate") or []
+    majority_stub = [r for r in stub_rates if r.get("majority_stub")]
     out += ["", "## Backend health / reallocation", ""]
-    if not dead:
+    if not dead and not majority_stub:
         out.append("All backends healthy — none held dead, no lane reallocated.")
+    elif not dead:
+        out.append(
+            "No `backend-health-*.json` sidecar is holding a backend dead, but the "
+            "recent log sweep flags a majority-stub backend. That means the status "
+            "card is no longer treating absence of a sidecar as proof of health.")
     else:
         out += [
             f"**{len(dead)}** backend(s) are spinning dead (a streak of banner-only / "
@@ -741,6 +855,21 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         for b in dead:
             out.append(f"| {b.get('product')} | {b.get('since')} | "
                        f"{b.get('abandoned_lane') or '—'} | {b.get('reprobe_min') or '—'} |")
+    out += ["", "Backend stub-rate (recent resolve logs):", ""]
+    if not stub_rates:
+        out.append("_No recent resolve logs in the backend sweep window._")
+    else:
+        out += [
+            "| backend | lookback | recent logs | productive | stub | stub rate | verdict | evidence |",
+            "|---|---:|---:|---:|---:|---:|---|---|",
+        ]
+        for row in stub_rates:
+            verdict = "**MAJORITY_STUB**" if row.get("majority_stub") else "ok"
+            evidence = ", ".join(f"`{log}`" for log in (row.get("evidence_logs") or [])[:3]) or "—"
+            rate = row.get("stub_rate")
+            out.append(f"| {row.get('product')} | {row.get('lookback_min')}m | "
+                       f"{row.get('total')} | {row.get('productive')} | {row.get('stub')} | "
+                       f"{rate} | {verdict} | {evidence} |")
 
     sc = w.get("silent_count") or 0
     out += ["", "## Workers that produced nothing", ""]
@@ -748,16 +877,19 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         out.append("None — every spawned worker either produced output or is still running.")
     else:
         out += [
-            f"**{sc}** worker(s) exited with a 0-byte log (spawned, committed nothing). "
-            "The anti-churn cooldown advances the picker past these, so the loop still "
-            "progresses — but each is worth an operator's eye (often an epic-shaped "
-            "issue too large to land in one shot).",
+            f"**{sc}** worker(s) exited at or below the real-turn floor "
+            f"({_STUB_LOG_MAX_BYTES} B) — a 0-byte spawn or a banner-only stub "
+            "(spawned, committed nothing). The anti-churn cooldown advances the picker "
+            "past these, so the loop still progresses — but each is worth an operator's "
+            "eye: an epic-shaped issue too large to land in one shot, or a dead backend "
+            "spawning no-ops (a majority-stub backend is the tell — see #1276).",
             "",
-            "| issue | spawned (utc stamp) | log |",
-            "|---|---|---|",
+            "| issue | spawned (utc stamp) | kind | bytes | log |",
+            "|---|---|---|---|---|",
         ]
         for sw in (w.get("silent") or []):
-            out.append(f"| #{sw.get('issue')} | {sw.get('stamp')} | `{sw.get('log')}` |")
+            out.append(f"| #{sw.get('issue')} | {sw.get('stamp')} | {sw.get('kind') or '—'} | "
+                       f"{sw.get('size') if sw.get('size') is not None else '—'} | `{sw.get('log')}` |")
 
     out += ["", "---", "", "Reasons: " + "; ".join(payload.get("reasons") or [])]
     return "\n".join(out) + "\n"

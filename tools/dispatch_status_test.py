@@ -331,6 +331,105 @@ class SilentWorkersScanTest(unittest.TestCase):
             self.assertEqual([w["stamp"] for w in out],
                              ["20260621-232003", "20260621-225432"])
 
+    def test_banner_only_stub_dead_pid_is_silent(self) -> None:
+        # A detached opencode worker that prints `> build · <model>` and exits is a
+        # 122-byte banner-only stub: below the real-turn floor, so it produced
+        # nothing even though size != 0 (the #1276 blind spot).
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1207, "20260629-165930", size=122, pid=16752)
+            out = mod.silent_workers(runs, alive=set())  # nothing alive
+            self.assertEqual([w["issue"] for w in out], [1207])
+            self.assertEqual(out[0]["kind"], "stub")
+            self.assertEqual(out[0]["size"], 122)
+
+    def test_banner_only_stub_live_pid_is_excluded(self) -> None:
+        # A sub-floor log over a LIVE pid is still-running, not silent — the same
+        # dead-pid guard that protects a claude worker streaming nothing until the end.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1207, "20260629-165930", size=122, pid=16752)
+            out = mod.silent_workers(runs, alive={16752},
+                                     probe=lambda pid: {"alive": True,
+                                                        "cmdline": "opencode run resolve GitHub issue #1207"})
+            self.assertEqual(out, [])
+
+    def test_at_floor_is_silent_over_floor_is_not(self) -> None:
+        # Boundary: exactly _STUB_LOG_MAX_BYTES is still a stub; one byte over is output.
+        mod = load()
+        floor = mod._STUB_LOG_MAX_BYTES
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1, "20260629-100000", size=floor, pid=111)
+            self._mk(runs, 2, "20260629-100001", size=floor + 1, pid=222)
+            out = mod.silent_workers(runs, alive=set())
+            self.assertEqual([w["issue"] for w in out], [1])
+
+    def test_stub_floor_matches_canonical(self) -> None:
+        # Drift pin: the status-card floor must equal the dispatcher's classifier floor
+        # so the two surfaces agree on what "produced a real turn" means.
+        mod = load()
+        spec = importlib.util.spec_from_file_location(
+            "issue_resolve_dispatch", ROOT / "tools" / "issue_resolve_dispatch.py")
+        ird = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ird)
+        self.assertEqual(mod._STUB_LOG_MAX_BYTES, ird._STUB_LOG_MAX_BYTES)
+
+
+class BackendStubRateScanTest(unittest.TestCase):
+    """backend_stub_rates() is a content sweep, not a backend-health sidecar read."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, size: int, pid: int,
+            backend: str, mtime: float) -> None:
+        import os
+
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_bytes(b"x" * size)
+        (runs / f"resolve-{issue}-{stamp}.pid").write_text(str(pid), encoding="utf-8")
+        (runs / f"resolve-{issue}-{stamp}.backend").write_text(backend, encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+
+    def test_majority_stub_backend_is_flagged_without_health_sidecar(self) -> None:
+        mod = load()
+        now = 2_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # 8/9 opencode attempts are banner-only stubs, and no
+            # backend-health-opencode.json sidecar exists. This is the #1276 blind
+            # spot: absence of the sidecar must not render as proof of health.
+            for i in range(8):
+                self._mk(runs, 1200 + i, f"20260629-1659{i:02d}",
+                         size=122, pid=16_000 + i, backend="opencode",
+                         mtime=now - i)
+            self._mk(runs, 1299, "20260629-170000", size=2048, pid=17_000,
+                     backend="opencode", mtime=now - 20)
+            self._mk(runs, 1300, "20260629-170001", size=2048, pid=18_000,
+                     backend="claude", mtime=now - 30)
+
+            out = mod.backend_stub_rates(runs, now_ts=now, alive=set())
+            by_product = {r["product"]: r for r in out}
+            self.assertFalse((runs / "backend-health-opencode.json").exists())
+            self.assertEqual(by_product["opencode"]["total"], 9)
+            self.assertEqual(by_product["opencode"]["stub"], 8)
+            self.assertEqual(by_product["opencode"]["productive"], 1)
+            self.assertTrue(by_product["opencode"]["majority_stub"])
+            self.assertFalse(by_product["claude"]["majority_stub"])
+
+    def test_live_stub_log_is_not_counted_as_backend_evidence_yet(self) -> None:
+        mod = load()
+        now = 2_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1207, "20260629-165930", size=122, pid=16752,
+                     backend="opencode", mtime=now)
+            out = mod.backend_stub_rates(
+                runs, now_ts=now, alive={16752},
+                probe=lambda pid: {"alive": True,
+                                   "cmdline": "opencode run resolve GitHub issue #1207"})
+            self.assertEqual(out, [])
+
 
 class RenderMdTest(unittest.TestCase):
     """render_md is pure: a hand-built payload -> the committed-doc markdown."""
@@ -356,6 +455,35 @@ class RenderMdTest(unittest.TestCase):
         md = mod.render_md(self._payload(mod, silent=silent), date="2026-06-21")
         self.assertIn("## Workers that produced nothing", md)
         self.assertIn("| #465 | 20260621-232003 |", md)
+
+    def test_md_silent_section_shows_kind_and_bytes(self) -> None:
+        mod = load()
+        silent = [{"issue": 1207, "stamp": "20260629-165930", "kind": "stub",
+                   "size": 122, "log": "resolve-1207-20260629-165930.log", "pid": 16752}]
+        md = mod.render_md(self._payload(mod, silent=silent), date="2026-06-29")
+        self.assertIn("| kind | bytes |", md)
+        self.assertIn("| #1207 | 20260629-165930 | stub | 122 |", md)
+
+    def test_md_backend_stub_rate_flags_majority_without_dead_sidecar(self) -> None:
+        mod = load()
+        stub_rate = [{
+            "product": "opencode",
+            "lookback_min": 90,
+            "total": 9,
+            "productive": 1,
+            "stub": 8,
+            "stub_rate": 0.889,
+            "majority_stub": True,
+            "evidence_logs": ["resolve-1207-20260629-165930.log"],
+        }]
+        p = self._payload(mod, backend_health=[], backend_stub_rate=stub_rate)
+        self.assertTrue(any("backend stub-rate majority-stub" in r
+                            for r in p["reasons"]))
+        md = mod.render_md(p, date="2026-06-29")
+        self.assertIn("Backend stub-rate", md)
+        self.assertIn("No `backend-health-*.json` sidecar", md)
+        self.assertNotIn("All backends healthy", md)
+        self.assertIn("| opencode | 90m | 9 | 1 | 8 | 0.889 | **MAJORITY_STUB** |", md)
 
     def test_md_silent_section_says_none_when_clean(self) -> None:
         mod = load()
