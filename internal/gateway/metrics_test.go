@@ -557,7 +557,7 @@ func TestFleetValueMetricsDeriveHeroKPIs(t *testing.T) {
 		VDSOHits:    7,
 		Transforms:  3,
 		Quarantines: 4,
-	}, 12.5)
+	}, 0, 12.5)
 	out := b.String()
 
 	for _, want := range []string{
@@ -577,7 +577,7 @@ func TestFleetValueMetricsDeriveHeroKPIs(t *testing.T) {
 
 	// An idle kernel (no submissions) must not divide by zero in the pollution rate.
 	var idle strings.Builder
-	writeFleetValueMetrics(&idle, kernel.Counters{}, 0)
+	writeFleetValueMetrics(&idle, kernel.Counters{}, 0, 0)
 	if !strings.Contains(idle.String(), "fak_gateway_context_pollution_rate 0\n") {
 		t.Fatalf("idle pollution rate should be 0:\n%s", idle.String())
 	}
