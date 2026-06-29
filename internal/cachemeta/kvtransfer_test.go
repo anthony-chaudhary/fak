@@ -49,6 +49,11 @@ func TestFromKVTransferCarriesTrustDescriptor(t *testing.T) {
 		Scope:            abi.ScopeAgent,
 		AdmissionVerdict: AdmissionQuarantine,
 		AdmittedBy:       "admission-gate",
+		DeletionCertificate: DeletionCertificate{
+			Schema:  "fak.deletioncert/v1",
+			Subject: "span-trust",
+			Digest:  "cert-digest",
+		},
 	})
 	if e.Derivation.SerializerID != "fak-paged-kv-f32-v1" {
 		t.Fatalf("serializer id = %q", e.Derivation.SerializerID)
@@ -61,6 +66,13 @@ func TestFromKVTransferCarriesTrustDescriptor(t *testing.T) {
 	}
 	if e.Residency.Lease != "lease-1" {
 		t.Fatalf("lease not carried: %+v", e.Residency)
+	}
+	gov := GovernanceFromEntry(e)
+	if gov.Lease != "lease-1" ||
+		gov.DeletionCertificate.Schema != "fak.deletioncert/v1" ||
+		gov.DeletionCertificate.Subject != "span-trust" ||
+		gov.DeletionCertificate.Digest != "cert-digest" {
+		t.Fatalf("governance descriptor did not carry deletion certificate: %+v", gov)
 	}
 }
 

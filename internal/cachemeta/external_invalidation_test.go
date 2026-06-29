@@ -6,6 +6,8 @@ func TestPlanExternalInvalidationsDropsRemoteKVAndReferencingAttentionIndex(t *t
 	remoteKV := FromKVPrefix(
 		KVPrefix{Tokens: []int{10, 20, 30, 40}, ModelID: "glm-5.2", TokenizerID: "glm-tokenizer", Owner: "radixkv"},
 		WithResidency(TierProvider, "sglang", "session-7"),
+		WithAdmission(AdmissionQuarantine, "l3-referee"),
+		WithDeletionCertificate(DeletionCertificate{Schema: "fak.deletioncert/v1", Subject: "kv-subject", Digest: "cert-digest"}),
 		WithLabel("provider", "sglang"),
 		WithLabel("engine", "glm-moe-dsa"),
 	)
@@ -55,8 +57,19 @@ func TestPlanExternalInvalidationsDropsRemoteKVAndReferencingAttentionIndex(t *t
 	if d := byKind[ExternalInvalidateKVSpan]; d.Entry != remoteKV.ID || d.Reason != "poisoned_kv" {
 		t.Fatalf("bad K/V directive: %+v", d)
 	}
+	if d := byKind[ExternalInvalidateKVSpan]; d.Governance.Security.AdmissionVerdict != AdmissionQuarantine ||
+		d.Governance.Security.AdmittedBy != "l3-referee" ||
+		d.Governance.Lease != "session-7" ||
+		d.Governance.DeletionCertificate.Digest != "cert-digest" {
+		t.Fatalf("K/V directive lost governance attestation: %+v", d.Governance)
+	}
 	if d := byKind[ExternalInvalidateAttentionIndex]; d.Entry != idx.ID || d.Reason != "parent_kv_poisoned" {
 		t.Fatalf("bad attention-index directive: %+v", d)
+	}
+	if d := byKind[ExternalInvalidateAttentionIndex]; d.Governance.DeletionCertificate.Digest != "cert-digest" ||
+		d.Governance.Security.AdmittedBy != "l3-referee" ||
+		d.Governance.Lease != "session-7" {
+		t.Fatalf("dependent attention-index directive did not inherit K/V governance: %+v", d.Governance)
 	}
 	for _, d := range dirs {
 		if d.Entry == telemetry.ID {
@@ -106,8 +119,43 @@ func TestExactSpanTargetsProjectsNamedKVAndAttentionIndex(t *testing.T) {
 	if tg := byKind[ExternalInvalidateKVSpan]; tg.Digest != remoteKV.ID.Digest || tg.MediaType != remoteKV.ID.MediaType || tg.Reason != "poisoned_kv" {
 		t.Fatalf("bad K/V span target: %+v", tg)
 	}
+	if tg := byKind[ExternalInvalidateKVSpan]; tg.Governance.Lease != "session-7" {
+		t.Fatalf("exact-span target lost governance descriptor: %+v", tg.Governance)
+	}
 	if tg := byKind[ExternalInvalidateAttentionIndex]; tg.Digest != idx.ID.Digest || tg.MediaType != idx.ID.MediaType || tg.Reason != "parent_kv_poisoned" {
 		t.Fatalf("bad attention-index target: %+v", tg)
+	}
+}
+
+func TestAttestInvalidationsSurfacesDegradedGovernedOutcome(t *testing.T) {
+	kv := FromKVPrefix(
+		KVPrefix{Tokens: []int{1, 2}, ModelID: "m", Owner: "kvmmu"},
+		WithResidency(TierProvider, "vllm", "lease-27"),
+		WithAdmission(AdmissionQuarantine, "l3-referee"),
+		WithDeletionCertificate(DeletionCertificate{Schema: "fak.deletioncert/v1", Subject: "span-27", Digest: "cert-27"}),
+	)
+	dirs := []ExternalInvalidationDirective{{
+		Kind:       ExternalInvalidateKVSpan,
+		Entry:      kv.ID,
+		Residency:  kv.Residency,
+		Reason:     "poisoned_kv",
+		Governance: GovernanceFromEntry(kv),
+	}}
+
+	att := AttestInvalidations(dirs, KVEvictionScopeWholePrefixCache, false, "exact_span_unsupported_whole_prefix_flush")
+	if len(att) != 1 {
+		t.Fatalf("attestations = %d, want 1", len(att))
+	}
+	if !att[0].Degraded || att[0].Scope != KVEvictionScopeWholePrefixCache || att[0].ExactSpanSupported {
+		t.Fatalf("degraded whole-prefix outcome not surfaced: %+v", att[0])
+	}
+	if !att[0].RefereeAdmitted || att[0].RefereeReason != KVRefereeAdmitted {
+		t.Fatalf("degraded outcome did not pass through the referee: %+v", att[0])
+	}
+	if att[0].Governance.Security.AdmissionVerdict != AdmissionQuarantine ||
+		att[0].Governance.Lease != "lease-27" ||
+		att[0].Governance.DeletionCertificate.Digest != "cert-27" {
+		t.Fatalf("governance not carried in attestation: %+v", att[0].Governance)
 	}
 }
 

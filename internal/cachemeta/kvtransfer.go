@@ -32,25 +32,26 @@ const (
 // and owner separate from the payload (§2.2: "residency tier and owner recorded
 // separately from payload").
 type KVTransfer struct {
-	Direction        KVTransferDirection
-	SpanDigest       string // identity of the KV span being moved/restored/routed
-	Tokens           int64  // span length in positions
-	ModelID          string
-	TokenizerID      string
-	SerializerID     string
-	PositionMode     PositionMode
-	FromTier         ResidencyTier
-	ToTier           ResidencyTier
-	Owner            string
-	Lease            string
-	SecuritySet      bool
-	Taint            abi.TaintLabel
-	Scope            abi.ShareScope
-	AdmissionVerdict AdmissionVerdict
-	AdmittedBy       string
-	Outcome          KVTransferOutcome
-	FaultReason      string // free-text when Outcome == fault
-	BytesMoved       int64
+	Direction           KVTransferDirection
+	SpanDigest          string // identity of the KV span being moved/restored/routed
+	Tokens              int64  // span length in positions
+	ModelID             string
+	TokenizerID         string
+	SerializerID        string
+	PositionMode        PositionMode
+	FromTier            ResidencyTier
+	ToTier              ResidencyTier
+	Owner               string
+	Lease               string
+	SecuritySet         bool
+	Taint               abi.TaintLabel
+	Scope               abi.ShareScope
+	AdmissionVerdict    AdmissionVerdict
+	AdmittedBy          string
+	DeletionCertificate DeletionCertificate
+	Outcome             KVTransferOutcome
+	FaultReason         string // free-text when Outcome == fault
+	BytesMoved          int64
 }
 
 // FromKVTransfer normalizes a live-engine KV residency event into a cache entry on
@@ -130,6 +131,7 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 	if t.FaultReason != "" {
 		e.Labels["fault_reason"] = t.FaultReason
 	}
+	putDeletionCertificateLabels(e.Labels, t.DeletionCertificate)
 	apply(&e, opts)
 	return e
 }

@@ -122,6 +122,47 @@ type Security struct {
 	Reason           string
 }
 
+const (
+	deletionCertificateSchemaLabel  = "deletion_certificate_schema"
+	deletionCertificateSubjectLabel = "deletion_certificate_subject"
+	deletionCertificateDigestLabel  = "deletion_certificate_digest"
+)
+
+// DeletionCertificate is the payload-free reference to a deletioncert.Certificate
+// that attested a governed K/V eviction. cachemeta carries only the certificate's
+// stable identity and subject so low-level cache/engine packages do not import
+// internal/deletioncert or duplicate its verifier.
+type DeletionCertificate struct {
+	Schema  string
+	Subject string
+	Digest  string
+}
+
+// Valid reports whether this descriptor names a concrete certificate artifact.
+func (c DeletionCertificate) Valid() bool {
+	return c.Schema != "" && c.Subject != "" && c.Digest != ""
+}
+
+// KVGovernance is the shared, field-only referee descriptor for a K/V movement or
+// eviction. It reuses the existing Security and Residency.Lease vocabulary rather
+// than inventing a second governance model, and carries the deletion certificate
+// reference that attests the eviction.
+type KVGovernance struct {
+	Security            Security
+	Lease               string
+	DeletionCertificate DeletionCertificate
+}
+
+// GovernanceFromEntry projects an Entry's admission, lease, and deletion
+// certificate metadata into the shared referee descriptor.
+func GovernanceFromEntry(e Entry) KVGovernance {
+	return KVGovernance{
+		Security:            e.Security,
+		Lease:               e.Residency.Lease,
+		DeletionCertificate: deletionCertificateFromLabels(e.Labels),
+	}
+}
+
 // AdmissionVerdict is the cache-facing form of the admission decision that let
 // this entry be stored or reused.
 type AdmissionVerdict string
@@ -355,6 +396,19 @@ func WithAdmission(v AdmissionVerdict, by string) Option {
 	}
 }
 
+// WithDeletionCertificate attaches the deletion certificate that attests a K/V
+// eviction. The certificate bytes themselves live elsewhere; cachemeta carries the
+// content digest and subject so native/external lowerings can prove which receipt
+// they propagated.
+func WithDeletionCertificate(cert DeletionCertificate) Option {
+	return func(e *Entry) {
+		if e.Labels == nil {
+			e.Labels = map[string]string{}
+		}
+		putDeletionCertificateLabels(e.Labels, cert)
+	}
+}
+
 // WithResidency replaces the entry's residency record with the given tier,
 // owner, and lease.
 func WithResidency(t ResidencyTier, owner, lease string) Option {
@@ -400,6 +454,29 @@ func WithLabel(k, v string) Option {
 			e.Labels = map[string]string{}
 		}
 		e.Labels[k] = v
+	}
+}
+
+func putDeletionCertificateLabels(labels map[string]string, cert DeletionCertificate) {
+	if cert.Schema != "" {
+		labels[deletionCertificateSchemaLabel] = cert.Schema
+	}
+	if cert.Subject != "" {
+		labels[deletionCertificateSubjectLabel] = cert.Subject
+	}
+	if cert.Digest != "" {
+		labels[deletionCertificateDigestLabel] = cert.Digest
+	}
+}
+
+func deletionCertificateFromLabels(labels map[string]string) DeletionCertificate {
+	if labels == nil {
+		return DeletionCertificate{}
+	}
+	return DeletionCertificate{
+		Schema:  labels[deletionCertificateSchemaLabel],
+		Subject: labels[deletionCertificateSubjectLabel],
+		Digest:  labels[deletionCertificateDigestLabel],
 	}
 }
 
