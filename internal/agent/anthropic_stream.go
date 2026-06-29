@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // AnthropicSSEEvent is one event parsed from an upstream Anthropic Messages SSE
@@ -90,8 +91,11 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	// the loop; only the successful 200 escapes to the SSE reader below.
 	authRefreshable := apiKey == "" && p.APIKeyFunc != nil
 	triedAuthRefresh := false
-	maxAttempts := plannerMaxAttempts()
+	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var lastErr error
+	// lastStatusErr: see Complete (#1358) — the last real-HTTP-status error, never cleared
+	// by a later transport glitch, so exhaustion surfaces the true status + Retry-After.
+	var lastStatusErr *UpstreamStatusError
 	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
 	lastRetryAfter := "" // the triggering response's Retry-After, honored as the next wait
 	var resp *http.Response
@@ -101,8 +105,17 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			// the buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry`
 			// line and retry counter fire for the streaming passthrough too), then wait —
 			// honoring a named Retry-After, else the jittered exponential schedule. A
-			// cancelled context aborts the wait promptly rather than sleeping it out.
-			wait := retryWait(attempt, lastRetryAfter)
+			// cancelled context aborts the wait promptly rather than sleeping it out. When the
+			// time budget is the bound, the wait is clamped to the remaining budget.
+			var wait time.Duration
+			if budgetOn {
+				wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())
+				if wait < 0 {
+					break
+				}
+			} else {
+				wait = retryWait(attempt, lastRetryAfter)
+			}
 			if p.RetryNotify != nil {
 				p.RetryNotify(attempt, lastStatus, wait)
 			}
@@ -136,7 +149,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			lastErr = derr
 			lastStatus = 0
 			lastRetryAfter = ""
-			continue
+			continue // lastStatusErr left intact
 		}
 		if r.StatusCode == http.StatusOK {
 			resp = r
@@ -146,7 +159,9 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		r.Body.Close()
 		if retryableStatus(r.StatusCode) {
 			ra := r.Header.Get("Retry-After")
-			lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
+			se := &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
+			lastErr = se
+			lastStatusErr = se
 			lastStatus = r.StatusCode
 			lastRetryAfter = ra
 			continue
@@ -165,7 +180,11 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
 	if resp == nil {
-		return fmt.Errorf("planner: streaming failed after %d attempts: %w", maxAttempts, lastErr)
+		// Prefer the real upstream status (and Retry-After) over a later transport glitch (#1358).
+		if lastStatusErr != nil {
+			return fmt.Errorf("planner: streaming failed after retries: %w", lastStatusErr)
+		}
+		return fmt.Errorf("planner: streaming failed after retries: %w", lastErr)
 	}
 	defer resp.Body.Close()
 	// The gateway only takes this path against the real Anthropic API, but guard anyway:

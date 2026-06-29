@@ -883,8 +883,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// deliberately generous and operator-tunable (FAK_PLANNER_MAX_ATTEMPTS): a fleet
 	// sharing one upstream account rides out a long 429/529 overload window far better with
 	// more, longer-spaced retries than with a fast give-up.
-	maxAttempts := plannerMaxAttempts()
+	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var lastErr error
+	// lastStatusErr holds the last error that carried a real upstream HTTP status (and any
+	// Retry-After). It is kept SEPARATE from lastErr and is NEVER cleared by a subsequent
+	// transient transport error, so a network glitch on a later attempt cannot shadow the
+	// 429/503/529 that actually drove the failure: on exhaustion we surface the real status
+	// (and Retry-After), not an opaque 502 (#1358).
+	var lastStatusErr *UpstreamStatusError
 	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
 	lastRetryAfter := "" // the triggering response's Retry-After header, honored as the next wait
 	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
@@ -898,8 +904,18 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// window. nil hook = unchanged. status carries WHY we are retrying (the upstream
 			// HTTP status, or 0 for a transport error) so the operator line can say "429".
 			// The wait is computed ONCE and shared with the hook so the reported wait is the
-			// exact one slept (it carries jitter and any honored Retry-After).
-			wait := retryWait(attempt, lastRetryAfter)
+			// exact one slept (it carries jitter and any honored Retry-After). When the TIME
+			// budget is the bound, the wait is clamped to the remaining budget; a non-positive
+			// result means the budget is spent, so stop and surface the last error.
+			var wait time.Duration
+			if budgetOn {
+				wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())
+				if wait < 0 {
+					break
+				}
+			} else {
+				wait = retryWait(attempt, lastRetryAfter)
+			}
 			if p.RetryNotify != nil {
 				p.RetryNotify(attempt, lastStatus, wait)
 			}
@@ -923,14 +939,16 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			lastErr = err
 			lastStatus = 0      // a transient transport error has no HTTP status
 			lastRetryAfter = "" // ...and no Retry-After to honor — fall back to backoff
-			continue
+			continue            // lastStatusErr is left intact: a glitch can't shadow a real status
 		}
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			if retryableStatus(resp.StatusCode) {
 				ra := resp.Header.Get("Retry-After")
-				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: ra}
+				se := &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: ra}
+				lastErr = se
+				lastStatusErr = se
 				lastStatus = resp.StatusCode
 				lastRetryAfter = ra // a 429/503/529 may NAME when to retry — honor it as the next wait
 				continue
@@ -963,7 +981,13 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		comp.PreSendRedactionRecords = call.redactions
 		return comp, nil
 	}
-	return nil, fmt.Errorf("planner: failed after %d attempts: %w", maxAttempts, lastErr)
+	// Prefer the last error that carried a real upstream status (and Retry-After) over a
+	// later transient transport glitch, so the gateway surfaces the true 429/503/529 +
+	// Retry-After rather than an opaque 502 (#1358).
+	if lastStatusErr != nil {
+		return nil, fmt.Errorf("planner: failed after retries: %w", lastStatusErr)
+	}
+	return nil, fmt.Errorf("planner: failed after retries: %w", lastErr)
 }
 
 func (p *HTTPPlanner) attachProviderCacheTelemetry(comp *Completion, reqBody []byte, provider Provider) {
@@ -1171,32 +1195,116 @@ func plannerMaxAttempts() int {
 	return 8
 }
 
+// defaultRetryBudget is how long the retry loop will keep trying a transient upstream
+// failure when the attempt count is NOT explicitly pinned — long enough to ride out the
+// multi-hour rate-limit/overload windows a session actually hits (a 5-hour-cap reset, a
+// sustained 429/529 storm) rather than dropping the turn after a couple of minutes.
+const defaultRetryBudget = 4 * time.Hour
+
+// maxRetryBudget bounds FAK_PLANNER_RETRY_BUDGET so a fat-fingered value cannot wedge a
+// turn effectively forever; the caller's context is still the real ceiling under it.
+const maxRetryBudget = 24 * time.Hour
+
+// retryAttemptHardCap is a spin guard for the time-bounded path: even with a huge budget
+// and near-zero waits the loop can never exceed this many upstream tries. 4h of ~300ms
+// minimum jittered waits is well under this, so it only catches a pathological zero-wait
+// loop, never a legitimate long backoff.
+const retryAttemptHardCap = 100000
+
+// retryBounds resolves the two independent limits the retry loop runs under. When the
+// operator PINS the attempt count (FAK_PLANNER_MAX_ATTEMPTS set in range), that count is
+// authoritative and exact — the historical behavior, relied on by callers that want a
+// fast, bounded give-up. When it is NOT pinned, the TIME budget is the primary limiter
+// (default 4h, FAK_PLANNER_RETRY_BUDGET override) and the attempt cap rises to the hard
+// spin guard so the full window is actually reachable. The loop stops at whichever bound
+// trips first; the caller's context cancels under both. budgetOn is false only when the
+// resolved budget is non-positive (FAK_PLANNER_RETRY_BUDGET=0 disables the time bound and
+// restores pure attempt-count behavior).
+func retryBounds(now time.Time) (maxAttempts int, deadline time.Time, budgetOn bool) {
+	pinned := false
+	if v := os.Getenv("FAK_PLANNER_MAX_ATTEMPTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 16 {
+			pinned = true
+		}
+	}
+	budget := plannerRetryBudget()
+	budgetOn = budget > 0
+	if pinned || !budgetOn {
+		// Attempt count is the bound (explicitly pinned, or the time bound is disabled).
+		return plannerMaxAttempts(), now.Add(budget), budgetOn
+	}
+	// Time budget is the bound; attempts only backstop a pathological spin.
+	return retryAttemptHardCap, now.Add(budget), true
+}
+
+// plannerRetryBudget is the TOTAL wall-clock window across all retries of one upstream
+// call. It defaults to defaultRetryBudget (4h) so a long rate-limit/overload window is
+// ridden out instead of dropping the turn; FAK_PLANNER_RETRY_BUDGET overrides it (any Go
+// duration, e.g. "30m", "4h"), clamped to [0, maxRetryBudget]. A value of 0 disables the
+// time bound, restoring pure attempt-count behavior. The caller's context is still the
+// real bound: on the synchronous serve path the http.Server WriteTimeout
+// (FAK_HTTP_WRITE_TIMEOUT_S) caps the in-handler wait far below this — there the durable
+// session park (#1363) is what extends the wait across a process boundary.
+func plannerRetryBudget() time.Duration {
+	if v := os.Getenv("FAK_PLANNER_RETRY_BUDGET"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			if d > maxRetryBudget {
+				return maxRetryBudget
+			}
+			return d
+		}
+	}
+	return defaultRetryBudget
+}
+
 // maxBackoff caps a single exponential backoff wait. The attempt²×600ms schedule would
 // otherwise grow without bound as the attempt budget rises; the cap keeps any ONE wait
 // reasonable while still letting the OVERALL retry window stretch across many attempts.
 const maxBackoff = 30 * time.Second
 
-// maxHonoredRetryAfter caps how long an upstream-supplied Retry-After can make us wait. A
-// rate-limited/overloaded upstream names when to come back and is usually right, so we
-// honor it — but only up to a ceiling, so a hostile or fat-fingered header value cannot
-// wedge a turn for minutes. Beyond the cap we wait the cap, then retry (re-reading a
-// fresh Retry-After if the upstream still isn't ready).
-const maxHonoredRetryAfter = 60 * time.Second
+// maxHonoredRetryAfter caps how long an upstream-supplied Retry-After can make us wait in
+// a SINGLE sleep. A rate-limited/overloaded upstream names when to come back and is
+// usually right, so we honor it — up to this per-wait ceiling. It is now 1h (was 60s): the
+// real bound on the total wait is the retry BUDGET (plannerRetryBudget, default 4h) and
+// the remaining-budget clamp in retryWaitWithin, so a genuine multi-minute window can be
+// honored in one sleep without a fat-fingered or hostile header running away — the total
+// can never exceed the budget regardless. Beyond this per-wait cap we wait the cap, then
+// re-read a fresh Retry-After on the next try.
+const maxHonoredRetryAfter = time.Hour
 
 // retryWait returns how long to sleep before `attempt`. A server-directed Retry-After
-// (delta-seconds) wins — the upstream knows when it will be ready better than any local
-// schedule — capped, and nudged with a little UPWARD jitter so a fleet honoring the SAME
-// value does not stampede the instant it expires. Otherwise it falls back to the
-// exponential schedule with equal jitter, which both desynchronizes lockstep retries and
-// keeps the reported wait strictly positive.
+// (delta-seconds OR HTTP-date) wins — the upstream knows when it will be ready better than
+// any local schedule — capped at the per-wait ceiling, and nudged with a little UPWARD
+// jitter so a fleet honoring the SAME value does not stampede the instant it expires.
+// Otherwise it falls back to the exponential schedule with equal jitter, which both
+// desynchronizes lockstep retries and keeps the reported wait strictly positive.
 func retryWait(attempt int, retryAfter string) time.Duration {
-	if d, ok := parseRetryAfterSeconds(retryAfter); ok {
+	if d, ok := parseRetryAfter(retryAfter, time.Now()); ok {
 		if d > maxHonoredRetryAfter {
 			d = maxHonoredRetryAfter
 		}
 		return jitterUp(d)
 	}
 	return jitter(backoffDuration(attempt))
+}
+
+// retryWaitWithin is retryWait bounded by a deadline: it never returns a wait that would
+// sleep PAST `deadline`, so the total retry window cannot exceed the budget. It returns a
+// negative duration when there is no budget left to even wait (the caller treats that as
+// exhaustion). With a zero deadline (time bound disabled) it is exactly retryWait.
+func retryWaitWithin(attempt int, retryAfter string, deadline time.Time, now time.Time) time.Duration {
+	w := retryWait(attempt, retryAfter)
+	if deadline.IsZero() {
+		return w
+	}
+	rem := deadline.Sub(now)
+	if rem <= 0 {
+		return -1
+	}
+	if w > rem {
+		return rem
+	}
+	return w
 }
 
 // backoffDuration is the exponential backoff base for retry `attempt`: attempt²×600ms
@@ -1252,6 +1360,30 @@ func parseRetryAfterSeconds(v string) (time.Duration, bool) {
 		return 0, false
 	}
 	return time.Duration(n) * time.Second, true
+}
+
+// parseRetryAfter parses an RFC 7231 Retry-After in EITHER supported form into a wait
+// relative to `now`: the delta-seconds form ("120") OR the HTTP-date form
+// ("Wed, 21 Oct 2025 07:28:00 GMT"). The date form is resolved against `now` (passed in so
+// the parse is testable and deterministic) and yields the remaining duration until that
+// instant; a date already in the past yields ok=false (nothing to wait for). A non-numeric
+// non-date value yields ok=false and the caller falls back to local exponential backoff.
+// The total wait is bounded elsewhere (the per-wait cap in retryWait, the remaining-budget
+// clamp in retryWaitWithin), so honoring an absolute date can never imply an unbounded wait.
+func parseRetryAfter(v string, now time.Time) (time.Duration, bool) {
+	if d, ok := parseRetryAfterSeconds(v); ok {
+		return d, true
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d, true
+		}
+	}
+	return 0, false
 }
 
 // sleepCtx waits for d, returning ctx.Err() early if the context is cancelled. A

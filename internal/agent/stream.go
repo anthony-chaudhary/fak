@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 )
 
 // StreamSink receives incremental assistant CONTENT fragments as they arrive from
@@ -278,15 +279,26 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// backoff). A 401 on the rotating-credential path self-heals once via a fresh-token
 	// re-send (a no-op on the static-key/passthrough paths). Each non-200 response body is
 	// drained+closed in the loop; only the successful 200 escapes to the streaming reader.
-	maxAttempts := plannerMaxAttempts()
+	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var lastErr error
+	// lastStatusErr: see Complete (#1358) — the last real-HTTP-status error, never cleared
+	// by a later transport glitch, so exhaustion surfaces the true status + Retry-After.
+	var lastStatusErr *UpstreamStatusError
 	lastStatus := 0
 	lastRetryAfter := ""
 	triedAuthRefresh := false
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			wait := retryWait(attempt, lastRetryAfter)
+			var wait time.Duration
+			if budgetOn {
+				wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())
+				if wait < 0 {
+					break
+				}
+			} else {
+				wait = retryWait(attempt, lastRetryAfter)
+			}
 			if p.RetryNotify != nil {
 				p.RetryNotify(attempt, lastStatus, wait)
 			}
@@ -308,7 +320,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			lastErr = err
 			lastStatus = 0
 			lastRetryAfter = ""
-			continue
+			continue // lastStatusErr left intact
 		}
 		if r.StatusCode == http.StatusOK {
 			resp = r
@@ -318,7 +330,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		r.Body.Close()
 		if retryableStatus(r.StatusCode) {
 			ra := r.Header.Get("Retry-After")
-			lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
+			se := &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
+			lastErr = se
+			lastStatusErr = se
 			lastStatus = r.StatusCode
 			lastRetryAfter = ra
 			continue
@@ -336,7 +350,11 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		return nil, &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
 	if resp == nil {
-		return nil, fmt.Errorf("planner: streaming failed after %d attempts: %w", maxAttempts, lastErr)
+		// Prefer the real upstream status (and Retry-After) over a later transport glitch (#1358).
+		if lastStatusErr != nil {
+			return nil, fmt.Errorf("planner: streaming failed after retries: %w", lastStatusErr)
+		}
+		return nil, fmt.Errorf("planner: streaming failed after retries: %w", lastErr)
 	}
 	defer resp.Body.Close()
 
