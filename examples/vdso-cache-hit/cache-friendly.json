@@ -1,0 +1,8 @@
+{
+  "slice_id": "vdso-cache-friendly",
+  "_provenance": "operator-authored fixture for examples/vdso-cache-hit (#333). Two identical read-shaped calls; the second is served from the tier-2 content cache. NOT worker-authored.",
+  "calls": [
+    { "tool": "get_reservation_details", "args": {"reservation_id": "ABC123"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "get_reservation_details", "args": {"reservation_id": "ABC123"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} }
+  ]
+}
