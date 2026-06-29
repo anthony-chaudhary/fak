@@ -590,6 +590,10 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	if status, code, msg, ok := admissionErrorStatus(err); ok {
 		return status, code, msg
 	}
+	if recurrentEvictUnsupported(err) {
+		return http.StatusConflict, "in_kernel_recurrent_evict_unsupported",
+			"context budget exhausted but this Gated-DeltaNet recurrent cache cannot evict in place; retry in a fresh session or start fak serve with --reset-on-budget"
+	}
 	// An in-kernel device-allocation failure (e.g. the model decode OOM'd on a small GPU under
 	// a large prompt) is a LOCAL resource exhaustion the caller can act on, not an upstream
 	// failure. It is in-kernel by construction (only the in-kernel planner produces it), so the
