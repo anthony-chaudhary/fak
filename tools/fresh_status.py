@@ -24,8 +24,12 @@ standing this minute?".
 Four domain panes, each a PURE fold over data that already exists — never a
 re-measure:
 
-  * git        — HEAD sha + branch + dirty count + ahead/behind vs upstream. The
-                 "crystal clear on git" center. A HARD pane (git is ground truth).
+  * git        — HEAD sha + branch + dirty count + ahead/behind vs upstream + push
+                 lag. The "crystal clear on git" center. A HARD pane (git is ground
+                 truth). Push lag (age of the oldest unpushed commit) is the
+                 keep-git-up-to-date velocity gate: past --push-lag-mins it trips
+                 ACTION, so committed work that silently stopped reaching origin
+                 fails --check instead of sitting unnoticed.
   * benchmarks — experiments/benchmark/catalog.json: run/machine counts, newest-run
                  staleness, and a per-benchmark provenance tag via the shared
                  bench_provenance classifier (measured | modeled | functional |
@@ -72,6 +76,14 @@ AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 # per-commit); the point is to catch a catalog that quietly stopped being fed.
 STALE_DAYS = 30
 
+# Committed-but-unpushed work IS git falling behind: a push that silently failed
+# leaves local commits piling up ahead of origin. Past this lag the git pane trips
+# ACTION so the rollup/--check nudges a push — the "keep git up to date" velocity
+# gate. Generous on purpose: in healthy operation work is pushed within minutes
+# (ahead returns to 0 and there is no lag), so this only fires on a genuinely
+# stalled or failed push, never on a normal in-flight commit.
+DEFAULT_PUSH_LAG_ACTION_SECONDS = 45 * 60
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -95,13 +107,22 @@ def head_commit(root: Path) -> str:
     return _git_line(["rev-parse", "--short", "HEAD"], root) or "unknown"
 
 
-def git_pane(root: Path) -> dict[str, Any]:
-    """HEAD sha + branch + dirty count + ahead/behind vs upstream — the center.
+def git_pane(root: Path, *, now: datetime | None = None,
+             push_lag_action_seconds: int = DEFAULT_PUSH_LAG_ACTION_SECONDS) -> dict[str, Any]:
+    """HEAD sha + branch + dirty count + ahead/behind vs upstream + push lag — the center.
 
     A HARD pane: if ``git rev-parse`` cannot answer at all we report ERROR (the
     rollup has no ground truth). A missing UPSTREAM is NOT an error — a detached
-    or local-only branch just reports ahead/behind as null.
+    or local-only branch just reports ahead/behind (and push lag) as null.
+
+    The push-lag dimension is the velocity signal. ahead/behind are STOCKS; "keep
+    git up to date" is about TIME, so when local commits are AHEAD of upstream we
+    also measure how long the OLDEST unpushed commit has been waiting to reach
+    origin. Past ``push_lag_action_seconds`` the pane trips ACTION so the rollup
+    and ``--check`` nudge a push. ``now`` is injectable so the lag is deterministic
+    in tests.
     """
+    now = now or datetime.now(timezone.utc)
     sha = _git_line(["rev-parse", "--short", "HEAD"], root)
     branch = _git_line(["rev-parse", "--abbrev-ref", "HEAD"], root)
     if not sha:
@@ -109,6 +130,7 @@ def git_pane(root: Path) -> dict[str, Any]:
             "key": "git", "label": "git", "ok": False, "verdict": "ERROR",
             "reason": "git rev-parse HEAD failed — not a repo or git unavailable",
             "sha": None, "branch": None, "dirty": None, "ahead": None, "behind": None,
+            "push_lag_seconds": None, "oldest_unpushed_ts": None,
         }
     porcelain = _git_line(["status", "--porcelain"], root)
     dirty = len([ln for ln in porcelain.splitlines() if ln.strip()]) if porcelain else 0
@@ -118,15 +140,34 @@ def git_pane(root: Path) -> dict[str, Any]:
         parts = counts.split()
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
             behind, ahead = int(parts[0]), int(parts[1])
+    # Push lag: age of the OLDEST unpushed commit's committer date. Only meaningful
+    # when an upstream exists AND we are ahead of it; otherwise there is nothing
+    # waiting to be pushed and the lag is None (not zero — "no upstream" and "fully
+    # pushed" both legitimately have no lag).
+    push_lag_seconds: int | None = None
+    oldest_unpushed_ts: int | None = None
+    if ahead:
+        cts = _git_line(["log", "--format=%ct", "@{upstream}..HEAD"], root)
+        stamps = [int(s) for s in cts.split() if s.isdigit()] if cts else []
+        if stamps:
+            oldest_unpushed_ts = min(stamps)
+            push_lag_seconds = max(0, int(now.timestamp()) - oldest_unpushed_ts)
+    stale_push = push_lag_seconds is not None and push_lag_seconds > push_lag_action_seconds
     bits = [f"{sha} ({branch or 'detached'})"]
     bits.append(f"{dirty} dirty" if dirty else "clean tree")
     if ahead is not None:
         bits.append(f"+{ahead}/-{behind} vs upstream")
+    if push_lag_seconds is not None:
+        mins = push_lag_seconds // 60
+        bits.append(f"{ahead} unpushed, oldest {mins}m old — push to origin"
+                    if stale_push else f"{ahead} unpushed, oldest {mins}m")
     return {
-        "key": "git", "label": "git", "ok": True, "verdict": "OK",
+        "key": "git", "label": "git", "ok": not stale_push,
+        "verdict": "ACTION" if stale_push else "OK",
         "reason": ", ".join(bits),
         "sha": sha, "branch": branch or None, "dirty": dirty,
         "ahead": ahead, "behind": behind,
+        "push_lag_seconds": push_lag_seconds, "oldest_unpushed_ts": oldest_unpushed_ts,
     }
 
 
@@ -292,8 +333,12 @@ def fold(panes: list[dict[str, Any]], *, workspace: str, commit: str,
         # Point next_action at the heaviest concern: an unreadable git/catalog
         # before a staleness, before anything else.
         first = actionable[0]
-        if first["key"] == "git":
+        if first["key"] == "git" and first.get("verdict") == "ERROR":
             next_action = "fix the git context (not a repo / git unavailable) before trusting any other pane"
+        elif first["key"] == "git":
+            mins = (first.get("push_lag_seconds") or 0) // 60
+            next_action = (f"push to origin — {first.get('ahead')} commit(s) have been unpushed "
+                           f"for {mins}m; committed work is not reaching the remote")
         elif first["key"] == "benchmarks" and first.get("stale"):
             next_action = ("refresh the benchmark catalog — run the relevant bench + "
                            "`python tools/bench_catalog.py build`")
@@ -396,12 +441,14 @@ def enrich_catalog_engines(root: Path, catalog: dict[str, Any] | None) -> dict[s
 
 
 def collect(root: Path, *, python: str = "", timeout: int = 60,
-            now: datetime | None = None) -> list[dict[str, Any]]:
+            now: datetime | None = None,
+            push_lag_action_seconds: int = DEFAULT_PUSH_LAG_ACTION_SECONDS
+            ) -> list[dict[str, Any]]:
     """Collect all four domain panes from the live tree (git + 1 file read + 2
     sub-tools). ``now`` is injectable so freshness is deterministic in tests."""
     python = python or sys.executable
     now = now or datetime.now(timezone.utc)
-    git = git_pane(root)
+    git = git_pane(root, now=now, push_lag_action_seconds=push_lag_action_seconds)
     bench = fold_benchmarks(enrich_catalog_engines(root, load_catalog(root)), now=now)
     plan_payload, plan_err = run_tool(root, "plan_audit.py", "--json", python=python, timeout=timeout)
     work = fold_work(plan_payload, plan_err)
@@ -484,6 +531,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="regenerate the committed snapshot note under docs/notes/")
     ap.add_argument("--date", default="", help="snapshot date YYYY-MM-DD for --write-doc (default: today UTC)")
     ap.add_argument("--timeout", type=int, default=60, help="per-sub-tool timeout seconds")
+    ap.add_argument("--push-lag-mins", type=int, default=DEFAULT_PUSH_LAG_ACTION_SECONDS // 60,
+                    help="trip the git pane to ACTION when the oldest unpushed commit is older "
+                         "than this many minutes (the keep-git-up-to-date velocity gate)")
     args = ap.parse_args(argv)
 
     try:
@@ -493,7 +543,8 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     now = datetime.now(timezone.utc)
-    panes = collect(root, timeout=args.timeout, now=now)
+    panes = collect(root, timeout=args.timeout, now=now,
+                    push_lag_action_seconds=max(0, args.push_lag_mins) * 60)
     payload = fold(panes, workspace=str(root), commit=head_commit(root),
                    generated_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
