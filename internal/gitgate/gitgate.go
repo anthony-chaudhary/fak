@@ -147,8 +147,8 @@ var defaultHazards = []hazard{
 	// Never open a feature branch — the argv-decidable half of OFF_TRUNK (AGENTS.md).
 	{sub: "checkout", short: 'b', law: offTrunkBranchLaw},
 	{sub: "checkout", short: 'B', law: offTrunkBranchLaw},
-	{sub: "switch", short: 'c', law: offTrunkBranchLaw},
-	{sub: "switch", short: 'C', law: offTrunkBranchLaw},
+	{sub: "switch", long: "--create", short: 'c', law: offTrunkBranchLaw},
+	{sub: "switch", long: "--force-create", short: 'C', law: offTrunkBranchLaw},
 	// `git push --mirror` overwrites EVERY remote ref (and deletes remote refs
 	// absent locally) — catastrophic on a shared remote (a superset of force-push).
 	{sub: "push", long: "--mirror", law: "push-mirror refused: `git push --mirror` overwrites EVERY remote ref and deletes remote refs absent locally — catastrophic on a shared remote. Push specific refs without --mirror."},
