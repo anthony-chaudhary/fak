@@ -1,0 +1,8 @@
+{
+  "verb": "version",
+  "target_tier": "policy",
+  "block_id": "policy/deny-floor.egress",
+  "delta_kind": "full_rewrite",
+  "base_version": 1,
+  "author": "operator"
+}

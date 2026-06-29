@@ -1,0 +1,8 @@
+{
+  "verb": "add",
+  "target_tier": "tail",
+  "block_id": "tail/live-query",
+  "delta_kind": "append",
+  "author": "agent",
+  "witness": { "grader": "dos_verify", "verdict": "pass" }
+}

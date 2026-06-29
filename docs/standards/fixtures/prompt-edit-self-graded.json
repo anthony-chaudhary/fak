@@ -1,0 +1,12 @@
+{
+  "version": "fak-prompt/v1",
+  "verb": "version",
+  "target_tier": "policy",
+  "block_id": "policy/deny-floor.egress",
+  "meta_rule": false,
+  "delta_kind": "version_swap",
+  "base_version": 2,
+  "author": "agent",
+  "witness": { "grader": "self", "verdict": "pass" },
+  "effect_timing": "next_rebuild"
+}

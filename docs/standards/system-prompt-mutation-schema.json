@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/system-prompt-mutation-schema.json",
+  "title": "System-prompt-mutation schema (fak-prompt/v1)",
+  "description": "A portable, engine-free admission check for a SELF-AUTHORED edit to a runtime base context: may this proposed PromptEdit become resident? Author a PromptEdit (the root) against this with any JSON Schema validator; no fak engine is required. $defs/EditDecision is the admit|refuse(reason)|demote the `fak prompt` verb returns. The verb set, the tier set, the delta-kind set, the witness vocabulary, and the refuse-reason set are CLOSED enums — an out-of-set token is rejected at the authoring boundary, never admitted silently. The check is fail-closed and append-mostly: the spine is off-limits to every verb; a full rewrite is inexpressible; an activating agent edit with no independent witness PASS is refused; an edit takes effect at the next prefix rebuild, never mid-prefix.",
+  "$ref": "#/$defs/PromptEdit",
+  "$defs": {
+    "Verb": {
+      "description": "The `fak prompt` operation over a base-context block. CLOSED enum. 'add' introduces a new overlay block (append-mostly); 'promote' moves a block paged->resident (makes it active); 'demote' moves a block resident->paged (deactivates it — always safe, and the auto-demote path); 'version' swaps a resident block v_n -> v_{n+1} as a versioned delta. A full rewrite is NOT a verb — it is inexpressible (ACE: full rewrites cause context collapse + brevity bias that erodes safety text). An out-of-set verb is UNKNOWN_VERB.",
+      "type": "string",
+      "enum": ["add", "promote", "demote", "version"]
+    },
+    "Tier": {
+      "description": "Which layer of the base context the edit targets — the system-prompt-MMU layout. CLOSED enum. 'spine' is the immutable fak-authored head (the attention-sink anchor, byte-identical every turn) and is OFF-LIMITS to every verb; 'policy' is the versioned deny/allow floor below the spine, changing only at a marked cache breakpoint; 'overlay' is the queried harness cards appended AFTER the breakpoint (append+mask). An out-of-set tier is UNKNOWN_TIER; a verb targeting 'spine' is SPINE_OFF_LIMITS (a hard refusal).",
+      "type": "string",
+      "enum": ["spine", "policy", "overlay"]
+    },
+    "DeltaKind": {
+      "description": "How the edit changes bytes — never a full rewrite. CLOSED enum. 'append' adds a new block after the cache breakpoint (free, cache-stable); 'version_swap' replaces a resident block with a new version that takes effect at the next prefix rebuild; 'mask' hides/unhides an overlay block without mutating resident bytes. 'rewrite'/'full_rewrite' is intentionally absent — an out-of-set delta is FULL_REWRITE_FORBIDDEN, refused at the authoring boundary.",
+      "type": "string",
+      "enum": ["append", "version_swap", "mask"]
+    },
+    "Author": {
+      "description": "Who proposed the edit. CLOSED enum. 'operator' is a human-authored or operator-tooling edit; 'agent' is a self-authored edit by the model itself. An 'agent'-authored activating edit (add/promote/version) MUST carry an independent witness PASS (invariant 5); the agent may PROPOSE via this path but never grades its own edit.",
+      "type": "string",
+      "enum": ["operator", "agent"]
+    },
+    "Grader": {
+      "description": "WHO produced the witness verdict — the independent acceptance gate. CLOSED enum. 'dos_verify' and 'guard' are independent witnesses (the truth syscall / the guard journal); 'operator' is a human reviewer; 'self' is the editing author grading its own edit. For an 'agent'-authored edit, grader == 'self' is SELF_GRADED and refused (invariant 5: the agent never grades its own edit). An out-of-set grader is rejected here.",
+      "type": "string",
+      "enum": ["dos_verify", "guard", "operator", "self"]
+    },
+    "Verdict": {
+      "description": "The witness verdict. CLOSED enum. 'pass' is an independent witness PASS; 'fail' is a witnessed failure (WITNESS_FAILED); 'absent' is no witness run yet (WITNESS_REQUIRED for an activating agent edit — fail-closed: absence of a PASS is never an admit).",
+      "type": "string",
+      "enum": ["pass", "fail", "absent"]
+    },
+    "EffectTiming": {
+      "description": "WHEN the edit takes effect. CLOSED enum. 'next_rebuild' applies the delta at the next prefix rebuild (session start / --reset-on-budget / internal/sessionreset), so the warm prefix cache is never busted (invariant 2) and the spine bytes are re-pinned (invariant 1 holds across the swap). 'mid_prefix' would mutate the resident array mid-session and is MID_PREFIX_EDIT — refused. Omitted => next_rebuild.",
+      "type": "string",
+      "enum": ["next_rebuild", "mid_prefix"]
+    },
+    "Outcome": {
+      "description": "OPTIONAL observed witnessed correlation of an ALREADY-resident rule, read after it became active. CLOSED enum. 'improved'/'neutral' keep the rule; 'regressed' routes it to auto-demotion (the guard-RSI worst-bucket shape) — a 'demote' with outcome 'regressed' is AUTO_DEMOTED and leaves a journal row; 'unknown' is the default for a fresh edit (no correlation yet).",
+      "type": "string",
+      "enum": ["improved", "neutral", "regressed", "unknown"]
+    },
+    "RefuseReason": {
+      "description": "The closed refuse/demote vocabulary the check returns. A new reason is a new enum value + a decision arm, never free text. Every token names a load-bearing invariant of the system-prompt MMU (the design note's invariants 1, 2, 5).",
+      "type": "string",
+      "enum": [
+        "UNKNOWN_VERB",
+        "UNKNOWN_TIER",
+        "SPINE_OFF_LIMITS",
+        "META_RULE_OFF_LIMITS",
+        "FULL_REWRITE_FORBIDDEN",
+        "MID_PREFIX_EDIT",
+        "WITNESS_REQUIRED",
+        "SELF_GRADED",
+        "WITNESS_FAILED",
+        "AUTO_DEMOTED"
+      ]
+    },
+    "Witness": {
+      "description": "The independent acceptance gate's verdict — WHO graded the edit and what they said. The agent never grades its own edit (invariant 5): for an agent-authored activating edit, grader must not be 'self' and verdict must be 'pass'.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grader", "verdict"],
+      "properties": {
+        "grader": { "$ref": "#/$defs/Grader" },
+        "verdict": { "$ref": "#/$defs/Verdict" }
+      }
+    },
+    "PromptEdit": {
+      "description": "The INPUT `fak prompt` takes: a proposed self-modification of the base context. The core nouns are verb + target_tier + block_id + delta_kind + author; witness is REQUIRED when author == 'agent' and the verb is activating (add/promote/version); base_version is REQUIRED for a version_swap delta (the rollback chain). Closed object — an unknown field is rejected, never silently ignored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verb", "target_tier", "block_id", "delta_kind", "author"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^fak-prompt/v1",
+          "description": "Schema tag. Omitted => current version. A different MAJOR is refused; a newer MINOR is forward-accepted (additive-only discipline)."
+        },
+        "verb": { "$ref": "#/$defs/Verb" },
+        "target_tier": { "$ref": "#/$defs/Tier" },
+        "block_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The base-context block this edit targets (an overlay card id, a policy block id). NOT the spine — a spine target is refused SPINE_OFF_LIMITS."
+        },
+        "meta_rule": {
+          "type": "boolean",
+          "description": "Is block_id one of the edit-GOVERNING meta-rules (the rules that decide what may be edited)? Default false. A true value is META_RULE_OFF_LIMITS — the meta-rules are out of the agent's reach, the same as the spine."
+        },
+        "delta_kind": { "$ref": "#/$defs/DeltaKind" },
+        "base_version": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The version this delta applies to — the rollback chain anchor. REQUIRED for a version_swap (rollback re-pins a prior base_version bit-for-bit). A prior version is preserved, never overwritten."
+        },
+        "author": { "$ref": "#/$defs/Author" },
+        "witness": { "$ref": "#/$defs/Witness" },
+        "effect_timing": { "$ref": "#/$defs/EffectTiming" },
+        "outcome": { "$ref": "#/$defs/Outcome" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "author": { "const": "agent" },
+              "verb": { "enum": ["add", "promote", "version"] }
+            },
+            "required": ["author", "verb"]
+          },
+          "then": { "required": ["witness"] }
+        },
+        {
+          "if": {
+            "properties": { "delta_kind": { "const": "version_swap" } },
+            "required": ["delta_kind"]
+          },
+          "then": { "required": ["base_version"] }
+        }
+      ]
+    },
+    "EditDecision": {
+      "description": "The OUTPUT `fak prompt` returns: the echoed edit, the admit/refuse/demote verdict, and — on anything but 'admit' — the closed reason. Reviewable as data, no narration. An OUTPUT shape (not an authored policy), so a richer implementation MAY add fields — additionalProperties is open. A refuse or demote MUST carry a reason from the closed RefuseReason set; a demote MUST leave a journal row.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["decision"],
+      "properties": {
+        "edit": { "$ref": "#/$defs/PromptEdit" },
+        "decision": { "type": "string", "enum": ["admit", "refuse", "demote"] },
+        "reason": { "$ref": "#/$defs/RefuseReason" },
+        "effective_at": {
+          "type": "string",
+          "enum": ["next_rebuild"],
+          "description": "When an 'admit' takes effect — always the next prefix rebuild, never mid-prefix (invariants 1 + 2). Byte-stable until then; the prefix is re-pinned across the swap."
+        },
+        "journal": {
+          "type": "boolean",
+          "description": "Did this decision leave a hash-chained journal row? A 'demote' (esp. AUTO_DEMOTED) and a refused agent edit are journaled — the success/failure signal is durable and independent of the agent's self-report."
+        },
+        "witness": {
+          "type": "string",
+          "description": "A bounded, payload-free note (the verb + tier + reason / the journal id), never the block bytes."
+        }
+      },
+      "if": { "properties": { "decision": { "enum": ["refuse", "demote"] } }, "required": ["decision"] },
+      "then": { "required": ["decision", "reason"] }
+    }
+  }
+}

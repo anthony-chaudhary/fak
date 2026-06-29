@@ -1,0 +1,17 @@
+{
+  "edit": {
+    "version": "fak-prompt/v1",
+    "verb": "demote",
+    "target_tier": "overlay",
+    "block_id": "overlay/learned-rule.terse-replies",
+    "meta_rule": false,
+    "delta_kind": "mask",
+    "author": "agent",
+    "effect_timing": "next_rebuild",
+    "outcome": "regressed"
+  },
+  "decision": "demote",
+  "reason": "AUTO_DEMOTED",
+  "journal": true,
+  "witness": "resident learned rule correlates with regressed witnessed outcomes — auto-demoted (guard-RSI worst-bucket), journal row written"
+}

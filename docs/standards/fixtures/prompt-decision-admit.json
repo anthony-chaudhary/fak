@@ -1,0 +1,18 @@
+{
+  "edit": {
+    "version": "fak-prompt/v1",
+    "verb": "add",
+    "target_tier": "overlay",
+    "block_id": "overlay/skill-card.refund-policy",
+    "meta_rule": false,
+    "delta_kind": "append",
+    "author": "agent",
+    "witness": { "grader": "dos_verify", "verdict": "pass" },
+    "effect_timing": "next_rebuild",
+    "outcome": "unknown"
+  },
+  "decision": "admit",
+  "effective_at": "next_rebuild",
+  "journal": true,
+  "witness": "add overlay block, witness=dos_verify:pass — admitted, effective at next prefix rebuild"
+}

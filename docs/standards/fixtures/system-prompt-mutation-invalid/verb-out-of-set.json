@@ -1,0 +1,8 @@
+{
+  "verb": "rewrite",
+  "target_tier": "overlay",
+  "block_id": "overlay/skill-card.refund-policy",
+  "delta_kind": "append",
+  "author": "agent",
+  "witness": { "grader": "dos_verify", "verdict": "pass" }
+}

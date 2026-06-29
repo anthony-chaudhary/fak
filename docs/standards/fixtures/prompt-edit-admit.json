@@ -1,0 +1,12 @@
+{
+  "version": "fak-prompt/v1",
+  "verb": "add",
+  "target_tier": "overlay",
+  "block_id": "overlay/skill-card.refund-policy",
+  "meta_rule": false,
+  "delta_kind": "append",
+  "author": "agent",
+  "witness": { "grader": "dos_verify", "verdict": "pass" },
+  "effect_timing": "next_rebuild",
+  "outcome": "unknown"
+}

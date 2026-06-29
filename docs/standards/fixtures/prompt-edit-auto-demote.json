@@ -1,0 +1,11 @@
+{
+  "version": "fak-prompt/v1",
+  "verb": "demote",
+  "target_tier": "overlay",
+  "block_id": "overlay/learned-rule.terse-replies",
+  "meta_rule": false,
+  "delta_kind": "mask",
+  "author": "agent",
+  "effect_timing": "next_rebuild",
+  "outcome": "regressed"
+}

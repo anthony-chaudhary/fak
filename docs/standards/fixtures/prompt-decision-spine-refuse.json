@@ -1,0 +1,18 @@
+{
+  "edit": {
+    "version": "fak-prompt/v1",
+    "verb": "version",
+    "target_tier": "spine",
+    "block_id": "spine/fak-identity",
+    "meta_rule": false,
+    "delta_kind": "version_swap",
+    "base_version": 1,
+    "author": "agent",
+    "witness": { "grader": "dos_verify", "verdict": "pass" },
+    "effect_timing": "next_rebuild"
+  },
+  "decision": "refuse",
+  "reason": "SPINE_OFF_LIMITS",
+  "journal": true,
+  "witness": "version targets tier=spine — hard refusal, no verb may edit the spine (even with a witness pass)"
+}

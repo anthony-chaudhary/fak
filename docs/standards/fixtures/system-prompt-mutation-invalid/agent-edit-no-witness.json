@@ -1,0 +1,7 @@
+{
+  "verb": "add",
+  "target_tier": "overlay",
+  "block_id": "overlay/skill-card.refund-policy",
+  "delta_kind": "append",
+  "author": "agent"
+}
