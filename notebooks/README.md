@@ -1,29 +1,33 @@
 # Notebooks — try `fak` in a hosted cloud notebook
 
 Lowest-friction way to see the agent kernel work: no local Go toolchain, no clone on your
-machine, a free GPU on demand. These are a hosted re-skin of [`GETTING-STARTED.md`](../GETTING-STARTED.md)'s
-tier ladder — every command already ships; the notebook just wraps it.
+machine, a free GPU on demand. These are hosted demos over commands that already ship; the
+quickstart is a modular case menu, and the in-kernel notebook is the deeper tier walk.
 
 ```mermaid
 flowchart LR
     GEN["tools/gen_notebooks.py<br/>(generates both notebooks)"]
-    QS["fak-quickstart.ipynb<br/>Colab / Kaggle (free T4)"]
+    QS["fak-quickstart.ipynb<br/>fresh modular cases"]
     IK["fak-inkernel.ipynb<br/>Lightning AI / RunPod"]
-    T0["Tier 0<br/>CPU, no GPU"]
-    T1["Tier 1<br/>front a real model on a GPU"]
+    A["Case A<br/>policy floor"]
+    B["Case B<br/>HTTP adjudication"]
+    C["Case C<br/>offline value measurement"]
+    D["Case D<br/>real model gateway"]
     T2["Tier 2<br/>fused in-kernel decode + stable endpoint"]
     GEN --> QS
     GEN --> IK
-    QS --> T0
-    T0 --> T1
+    QS --> A
+    QS --> B
+    QS --> C
+    QS --> D
     IK --> T2
 ```
 
-*The tier ladder and which generated notebook covers each rung.*
+*The generated notebooks and which proof/demo each one covers.*
 
-| Notebook | Host | Tiers | Status |
+| Notebook | Host | Covers | Status |
 |---|---|---|---|
-| [`fak-quickstart.ipynb`](fak-quickstart.ipynb) | **Google Colab** / Kaggle (free T4) | 0 (CPU) + 1 (front a real model on a GPU) | runnable |
+| [`fak-quickstart.ipynb`](fak-quickstart.ipynb) | **Google Colab** / Kaggle (free T4) | Policy proof, HTTP adjudication, offline value measurement, optional real-model gateway | runnable |
 | [`fak-inkernel.ipynb`](fak-inkernel.ipynb) | Lightning AI / RunPod Jupyter (neocloud) | 2 — fused in-kernel decode + a stable endpoint | runnable |
 
 Open the quickstart directly:
@@ -33,18 +37,20 @@ Open the quickstart directly:
 
 1. Open it in [Google Colab](https://colab.research.google.com/) (or Kaggle), or run
    locally with `jupyter lab`.
-2. **No key, no token.** `fak` is a public repo, so the *Get the binary* cell clones and
-   builds it anonymously (no `GITHUB_TOKEN` needed). The clone also brings the `examples/`
-   the demos use.
-3. **Tier 0 needs no GPU.** For **Tier 1**, set **Runtime → Change runtime type → T4 GPU**,
-   then ▶ **Run all**.
+2. **No key, no token.** `fak` is a public repo, so the *Get the binary* cell clones,
+   refreshes to `FAK_BRANCH` (default `main`), and builds it anonymously. The cell prints
+   the exact commit and `fak version` before the demos run.
+3. Cases **A-C need no GPU**: policy proof, HTTP adjudication, and offline value
+   measurement. For **Case D**, set **Runtime → Change runtime type → T4 GPU**, then
+   ▶ **Run all**.
 
-The notebook is **Run-all idempotent** (re-builds the binary and re-pulls the model on a
-fresh runtime) and degrades gracefully — with no GPU it runs Tier 0 only and tells you so.
+The notebook is **Run-all idempotent** (refreshes/re-builds the binary and re-pulls the
+model on a fresh runtime) and degrades gracefully — with no GPU it runs the CPU cases and
+tells you why Case D was skipped.
 
 > **Knobs** (environment / Colab secrets): `FAK_REPO`, `FAK_BRANCH` (pin a release tag
-> here), `FAK_MODEL` (default `qwen2.5:7b`), `FAK_WORK`, and `FAK_LIVE` (optional — point at
-> a remote `fak serve` endpoint you already run; unset by default).
+> here), `FAK_REFRESH=0` (reuse an existing checkout without fetching), `FAK_MODEL`
+> (default `qwen2.5:1.5b`), `FAK_WORK`, and `FAK_API_ADDR` (default `127.0.0.1:8765`).
 
 ## These notebooks are generated — don't hand-edit them
 
@@ -62,6 +68,7 @@ git commit -s -- tools/gen_notebooks.py notebooks/
 
 `--check` is the anti-rot layer: it re-renders in memory and diffs against the committed
 files (a "generated, do not edit" guard), **and** verifies every repo path/verb the cells
-depend on still exists (`examples/…policy.json`, `scripts/fetch-model.sh`, the `preflight`
-/ `serve` / `agent` / `policy` verbs) — so a refactor that removes one of those fails here
+depend on still exists (`examples/…policy.json`, `testdata/…`, `scripts/fetch-model.sh`,
+the `preflight` / `serve` / `agent` / `policy` / `attest` / `benchmarks` / `bench` /
+`turntax` / `version` verbs) — so a refactor that removes one of those fails here
 instead of failing a reader mid-notebook. Wire it into CI alongside the other lints.
