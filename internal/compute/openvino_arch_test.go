@@ -94,16 +94,16 @@ func TestOVDeviceClassInvariant(t *testing.T) {
 // target).
 func TestOVDeviceNormalization(t *testing.T) {
 	want := map[string]string{
-		"CPU":    "CPU",
-		"cpu":    "CPU",
-		" CPU ":  "CPU",
-		"GPU":    "GPU",
-		"GPU.0":  "GPU", // integrated-GPU instance ordinal
-		"GPU.1":  "GPU", // discrete-GPU instance ordinal
-		"gpu.0":  "GPU",
-		"iGPU":   "GPU",
-		"NPU":    "NPU",
-		"npu":    "NPU",
+		"CPU":   "CPU",
+		"cpu":   "CPU",
+		" CPU ": "CPU",
+		"GPU":   "GPU",
+		"GPU.0": "GPU", // integrated-GPU instance ordinal
+		"GPU.1": "GPU", // discrete-GPU instance ordinal
+		"gpu.0": "GPU",
+		"iGPU":  "GPU",
+		"NPU":   "NPU",
+		"npu":   "NPU",
 	}
 	for in, exp := range want {
 		got, ok := OVDeviceToken(in)
