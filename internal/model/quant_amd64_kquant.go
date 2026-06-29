@@ -34,8 +34,16 @@ func q5kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {
 	q5kReduceRowScalar(row, nblk, qx, IS, SS)
 }
 
+//go:noescape
+func q6kReduceRowAsmAVX2(row *byte, nblk int, qx *int8, Isum, Ssum *int32)
+
 // q6kReduceRow computes the per-group (I_g = Σ q6*qx, S_g = Σ qx) reductions for a Q6_K row.
-// Scalar until the Q6_K AVX2 kernel lands (its 16-wide groups + position gather are a separate slice).
+// AVX2/VNNI kernel when the resolved tier has AVX2, else the scalar reference. IS/SS
+// are sized nblk*16 (one I_g/S_g per group).
 func q6kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {
+	if nblk > 0 && qtier >= tierAVX2 {
+		q6kReduceRowAsmAVX2(&row[0], nblk, &qx[0], &IS[0], &SS[0])
+		return
+	}
 	q6kReduceRowScalar(row, nblk, qx, IS, SS)
 }
