@@ -207,6 +207,8 @@ func main() {
 		cmdSessions(os.Args[2:])
 	case "loop-index-scorecard":
 		cmdLoopIndexScorecard(os.Args[2:])
+	case "loop-map":
+		cmdLoopMap(os.Args[2:])
 	case "experiments":
 		cmdExperiments(os.Args[2:])
 	case "coverage-matrix":
