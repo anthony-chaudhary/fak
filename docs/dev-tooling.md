@@ -39,15 +39,12 @@ The 60-second, no-key/no-model/no-GPU proof is the canonical first run — see
 the tier you ask for and, on Windows, routes it through `test.ps1` (WSL) automatically
 so you never hit the OS-policy block below. The `make` target set is the authoritative
 gate it sits over; `fak test --list` prints the tiers, and `fak test -n <tier>` prints
-the resolved command without running it.
-
-| `fak test [fast\|full\|race\|<pkg>]` | the host-aware wrapper over `go test`; default tier is `fast`; routes to WSL on Windows | the one-verb inner loop — `fak test fast -- -run TestX` to pass flags through |
-
-The underlying `make` targets remain the canonical gates, with one host caveat that
-bites on Windows.
+the resolved command without running it. It sits over the `make` target set — the
+authoritative gates — with one host caveat that bites on Windows.
 
 | Command | What it runs | When |
 |---|---|---|
+| `fak test [fast\|full\|race\|<pkg>]` | the host-aware wrapper over `go test` (default tier `fast`); on Windows routes to WSL via `test.ps1`; `fak test fast -- -run TestX` passes flags through | the one-verb inner loop over the targets below |
 | `make test-fast` | `build` + `vet` + `go test -short ./...` (~2s smoke tier; skips the weight-backed model witnesses) | the pre-commit / pre-push floor — ~95% of logic regressions in seconds |
 | `make test` | `go test ./...` (full suite incl. the ~538 MB f32/safetensors model oracle) | the authoritative gate before you trust a model-touching change |
 | `make test-affected` | `fak affected` → `go test` for only the packages your working-tree change can reach (changed + transitive importers, test imports included) | the fast inner loop on the REAL oracle (no `-short`) for a one-leaf edit |
