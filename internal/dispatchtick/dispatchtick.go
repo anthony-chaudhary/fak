@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	Schema                 = "fleet-issue-resolve-dispatch/1"
-	RunsDirName            = ".dispatch-runs"
-	WaveSidecarSuffix      = ".wave"
-	AccountSidecarSuffix   = ".account"
-	BaseSHASidecarSuffix   = ".basesha"
+	Schema               = "fleet-issue-resolve-dispatch/1"
+	RunsDirName          = ".dispatch-runs"
+	WaveSidecarSuffix    = ".wave"
+	AccountSidecarSuffix = ".account"
+	BaseSHASidecarSuffix = ".basesha"
 	// DefaultMaxWorkers is the operator's *aspirational* outer ceiling on live
 	// dispatch workers, not the safety bound. The real DoS proof is the preflight's
 	// adaptive cap = min(this, host_cap, seats): host_cap (#1337) auto-throttles to
