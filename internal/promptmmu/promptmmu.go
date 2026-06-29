@@ -141,6 +141,53 @@ func CompactInboundTools(raw []byte, plan ToolPlan, decode func([]byte) error) P
 	return PruneResult{Body: out, Pruned: pruned, Changed: true}
 }
 
+// ArraySplicePoints reports the byte offsets a SIBLING MMU needs to swap the tail
+// of a top-level JSON array `key` while preserving the provider-cached prefix, using
+// the EXACT same byte-span discipline CompactInboundTools uses for tools[]. It is the
+// shared primitive behind the system-prompt MMU's overlay swap (syspromptmmu Rung 2,
+// #1260): that splice replaces the after-breakpoint overlay segments instead of
+// dropping denied tools, but anchors on the same cached-prefix boundary.
+//
+//   - breakIdx is the index of the LAST element of array `key` carrying a
+//     cache_control breakpoint — the element the cached prefix ends on.
+//   - prefixEnd is the absolute byte offset in raw just past that element (the end of
+//     the protected cached prefix; a sibling splices STRICTLY after this offset).
+//   - lastElemEnd is the absolute byte offset just past the LAST element of the array
+//     (where the array's closing `]` and any trailing body bytes begin), so a caller
+//     can drop/replace the elements in (prefixEnd, lastElemEnd] by copying
+//     raw[:prefixEnd] + new-tail + raw[lastElemEnd:].
+//
+// ok is false — fail-safe, exactly as CompactInboundTools returns identity — on a
+// non-object body, an absent/empty/undecodable array, or no cache_control anchor (no
+// way to know the cache boundary, so a caller must not touch the body). Unlike
+// CompactInboundTools this helper does NOT consult a `system` fallback breakpoint: it
+// reports the named array's OWN anchor, which is what a per-block splice needs.
+func ArraySplicePoints(raw []byte, key string) (breakIdx, prefixEnd, lastElemEnd int, ok bool) {
+	if len(raw) == 0 {
+		return 0, 0, 0, false
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return 0, 0, 0, false
+	}
+	arrRaw, has := obj[key]
+	if !has {
+		return 0, 0, 0, false
+	}
+	elems, spans, decoded := decodeArrayElements(raw, arrRaw)
+	if !decoded || len(elems) == 0 {
+		return 0, 0, 0, false
+	}
+	// lastToolBreakpoint scans for the last element carrying cache_control; the logic
+	// is element-name-agnostic (rawHasCacheControl reads a top-level key), so it is the
+	// generic last-breakpoint index for any array of objects.
+	last := lastToolBreakpoint(elems)
+	if last < 0 {
+		return 0, 0, 0, false
+	}
+	return last, spans[last].end, spans[len(spans)-1].end, true
+}
+
 // elementSpan is the [start,end) byte range of one tools[] element within raw,
 // where start points at the element's first byte and end just past its last.
 type elementSpan struct{ start, end int }
