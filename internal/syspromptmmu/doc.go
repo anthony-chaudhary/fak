@@ -21,7 +21,11 @@
 // turn intent, faults winners up to a token budget, and emits the overlay segments the
 // splice consumes; OverlayCache serves a HIT on an unchanged rank digest with no
 // re-fault. The spine/policy non-evictable flags are the substrate Rung 4 (#1262) enforces.
-// Rung 6 (audit.go, #1264) is the observability witness: AuditRealizedPrefix re-derives a
+// Rung 5 (edit.go, #1263) is the witness-gated base-edit core: GateEdit/ApplyEdit admit a
+// self-proposed delta only when an INJECTED witness passes (the agent never grades its own
+// edit), hard-refuse any edit to the spine or policy floor (the agent never rewrites its
+// own meta-rules), and apply append-mostly over a copy so the prior plan is a bit-for-bit
+// rollback. Rung 6 (audit.go, #1264) is the observability witness: AuditRealizedPrefix re-derives a
 // wire body's resident prefix and proves it equals the planned spine — divergence is a
 // loud alarm (an accidental head mutation caught before a cache miss), a harness-authored
 // body is a neutral AuditAbsent. It consumes the context-safety doctrine (#1217); it does
