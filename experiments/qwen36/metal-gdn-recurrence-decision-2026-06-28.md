@@ -1,18 +1,17 @@
 # Metal Gated-DeltaNet recurrence — GPU kernel vs CPU-hybrid decision (#65)
 
-**Status: DECIDED (CPU-hybrid, both phases) / one benchmark arm instrumented, the
-on-device capture gated.** This note answers the "Step" of
+**Status: DECIDED + WITNESSED (CPU-hybrid, both phases).** This note answers the "Step" of
 [#65](https://github.com/anthony-chaudhary/fak/issues/65) (*the 48 linear_attn
 Gated-DeltaNet layers' recurrent scan — GPU scan kernel vs CPU-hybrid; decide + benchmark
 both*). The issue carries the measured finding itself — the GDN recurrence is **≈0.5% of
 prefill** on this M3 Pro, the projections are the wall — and asks for the decision and a
-two-arm benchmark, not for a new kernel. It was authored on a `windows/amd64`,
-`CGO_ENABLED=0` box where the `-tags fakmetal` model lane **cannot compile, run, or be
-measured**, so the one genuinely-gated step (the on-device `FAK_QPROFILE` capture of the
-recurrence split on the M3 Pro) is named in §6 as the remaining work, not faked green. The
-decision is grounded in measurement that is already on disk and in code that already
-exists — the honesty rule of [`../../docs/proofs/00-METHOD.md`](../../docs/proofs/00-METHOD.md)
-applies (a counter-witness would be recorded with its counterexample, not rounded away).
+two-arm benchmark, not for a new kernel. The original host-runnable decision was authored
+on a `windows/amd64`, `CGO_ENABLED=0` box where the `-tags fakmetal` model lane cannot run;
+the remaining on-device M3 Pro capture has now been run and recorded as
+[`metal-gdn-recurrence-m3pro-20260629.json`](metal-gdn-recurrence-m3pro-20260629.json). The
+decision is grounded in measurement that is on disk and in code that exists — the honesty
+rule of [`../../docs/proofs/00-METHOD.md`](../../docs/proofs/00-METHOD.md) applies (a
+counter-witness would be recorded with its counterexample, not rounded away).
 
 Sibling evidence in this cluster:
 [`QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md`](QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md)
@@ -41,7 +40,7 @@ baked in now — the #977 playbook forbids guessing the bottleneck.
 
 | arm | what it is | exists today? |
 |---|---|---|
-| **A — CPU-hybrid** | projection / MLP GEMMs on the GPU; the conv1d+SiLU mixer, q/k L2-norm, the per-head **delta-rule recurrent scan**, and the gated-RMSNorm readout stay in the f32 CPU recurrence | **yes** — `prefillQwen35LinearLayerMetal` (`internal/model/metal_prefill.go:494`), driven by `prefillBatchedMetalQwen35Hybrid` (`metal_prefill.go:384`); decode's `linearAttnStep` (`qwen35.go:399`) is the same CPU recurrence |
+| **A — CPU-hybrid** | projection / MLP GEMMs on the GPU; the conv1d+SiLU mixer, q/k L2-norm, the per-head **delta-rule recurrent scan**, and the gated-RMSNorm readout stay in the f32 CPU recurrence | **yes** — `prefillBatchedMetalQwen35Hybrid` (`internal/model/metal_prefill_hybrid.go`) injects a GPU GEMM into `prefillQwen35HybridViaMM` / `prefillQwen35LinearLayerMM` (`internal/model/metal_prefill_hybrid_core.go`); the resident-Q4_K lane uses `prefillQwen35HybridQ4KHidden` / `prefillQwen35LinearLayerQ4K` (`internal/model/qwen35_prefill_q4k.go`); decode's `linearAttnStep` (`qwen35.go:399`) is the same CPU recurrence |
 | **B — GPU scan kernel** | the delta-rule scan itself written as a Metal kernel (per-head rank-1 state update across the sequence), so the recurrence never leaves the GPU | **no** — would be new `-tags fakmetal` work; scoped to **#92** (chunked/Q8/device GDN), explicitly deferred here |
 
 Arm A is the proven path: its recurrence math is **byte-for-byte** the scalar CPU reference
@@ -54,10 +53,11 @@ from scratch on a Metal kernel — cost the 0.5% measurement says is not yet wor
 
 ## 3 — Prefill decision: CPU-hybrid (measured, not assumed)
 
-The split is the one `prefillBatchedMetalQwen35Hybrid` already makes (`metal_prefill.go:432`):
-`isLinearAttnLayer(l)` routes to `prefillQwen35LinearLayerMetal` (five GDN projections to the
-GPU via `mm`, recurrence on CPU); the full-attention minority routes to
-`prefillQwen35FullAttnLayerMetal`. The justification is on-disk measurement:
+The split is the one `prefillQwen35HybridViaMM` already makes: `isLinearAttnLayer(l)` routes
+to `prefillQwen35LinearLayerMM` (five GDN projections via the injected GEMM, recurrence on
+CPU); the full-attention minority routes to `prefillQwen35FullAttnLayerMM`. The
+resident-Q4_K lane mirrors that same split in `prefillQwen35HybridQ4KHidden`. The
+justification is on-disk measurement:
 
 - `FAK_QPROFILE` per-phase breakdown on this M3 Pro (status doc §3): **`mlp_gate_up ≈ 43%`,
   `mlp_down ≈ 20%`** of the prefill wall, while the **GDN recurrence ≈ 0.5%**. #65's own body
@@ -66,9 +66,9 @@ GPU via `mm`, recurrence on CPU); the full-attention minority routes to
   FLOP-rich path is the whole prefill lever. A CPU recurrence at 0.5% is sufficient; it cannot
   be the thing that closes the ~14× GPU-vs-CPU factor #65 decomposes.
 
-The in-flight #71 twin encodes exactly this rationale at its head comment
-(`metal_prefill.go:379-381`, citing `#65, #977`) — this doc is the canonical decision record
-that comment points back to.
+The #71 twin encodes exactly this rationale in `internal/model/metal_prefill_hybrid.go` and
+`internal/model/metal_prefill_hybrid_core.go`, citing `#65, #977`; this doc is the
+canonical decision record those comments point back to.
 
 ---
 
@@ -105,16 +105,16 @@ is the §5 trigger into #92.
 "Benchmark both" does not mean build a kernel we have already decided not to build. It means
 **measure arm A on the device, and define the number that would flip the decision to arm B.**
 
-**Arm A is already instrumented.** `prefillBatchedMetalQwen35Hybrid` under `FAK_QPROFILE`
-(`metalProf`, `metal_prefill.go:31`) prints the split directly (`metal_prefill.go:483`):
+**Arm A is already instrumented.** `prefillQwen35HybridViaMM` and the resident-Q4_K
+`prefillQwen35HybridQ4KHidden` path print the hybrid split directly under `FAK_QPROFILE`:
 
 ```
 [metalprof-hybrid P=22] total=<t>  gemm+roundtrip=<g>  rest(recurrence/attn/norm)=<r> ms
 ```
 
-The `rest(...)` term **is** the CPU-hybrid recurrence cost (plus the cheap norms/attn) — the
-arm-A measurement #65 asks for, already in the binary. No new harness is needed; it needs a
-Mac run (§6).
+The `rest(...)` term **is** the CPU-hybrid recurrence upper bound (plus the cheap norms/attn)
+— the arm-A measurement #65 asks for, already in the binary. No new harness is needed; the
+Mac run is recorded below (§6).
 
 **A device-independent arm-A witness is now on disk and host-runnable** (no Mac, no GPU):
 [`gdn-recurrence-bench/`](gdn-recurrence-bench/) computes the recurrence-vs-projection
@@ -126,6 +126,24 @@ corroboration of 1.99%. This bounds arm B: a perfect zero-cost GPU scan kernel c
 **at most** that few percent, while the projections (already GPU-routed by the CPU-hybrid)
 are the ~97% lever. It does **not** replace the §6 Mac capture — that measures the
 *serialization* fraction after the projections move to the GPU, a different number.
+
+**The on-device arm-A capture is now on disk.** On `node-macos-a` (Mac15,7 / Apple M3 Pro
+18-core GPU / 36 GB unified / macOS 26.5 / Metal 4), the resident-Q4_K Metal path for the
+real `Qwen3.6-27B.q4_k_m.gguf` was run at pp22 with `FAK_QPROFILE=1`, `FAK_Q4K=1`,
+`FAK_METAL=1`, `CGO_ENABLED=1`, and `-tags fakmetal`. Witness:
+[`metal-gdn-recurrence-m3pro-20260629.json`](metal-gdn-recurrence-m3pro-20260629.json).
+
+```
+[metalprof-hybrid P=22] total=6720.7  gemm+roundtrip=6051.6  rest(recurrence/attn/norm)=669.1 ms  path=q4k
+```
+
+That puts projection GEMM/round-trip at **90.0%** of the measured hybrid split, with the
+entire non-projection bucket at **10.0%**. The `rest(...)` bucket is an **upper bound** for
+GDN recurrence because it also contains full-attention, norms, q8 panel quantization, conv,
+gating, residuals, cache bookkeeping, and the linear-attention recurrence. Combined with the
+device-independent recurrence compute bound above, the live Mac result keeps the same
+decision: the projections remain the wall; a bespoke GPU scan kernel still chases the wrong
+part of the profile.
 
 **Arm B (the device GDN scan) is benchmarked counterfactually, then conditionally.** The
 on-disk 0.5% prefill figure already adjudicates the prefill comparison: even a perfect,
@@ -144,37 +162,34 @@ real, falsifiable condition under which it would be built and raced against arm 
 
 ---
 
-## 6 — The remaining gate (the honest "not yet")
+## 6 — The on-device gate (now reached)
 
-One step remains, requiring an Apple-Silicon M3 Pro with the macOS Metal toolchain — the
-capability this `windows/amd64`, `CGO_ENABLED=0` host does not have:
+The former "not yet" gate was the Apple-Silicon capture of arm A after the projections move
+to Metal. It is now reached:
 
-1. **On-device arm-A capture.** On the M3 Pro Mac verify node over Tailscale (the only place
-   `-tags fakmetal` builds), once #71's twin is built:
-   `FAK_QPROFILE=1` prefill of `Qwen3.6-27B.q4_k_m.gguf` at pp22, captured **without a
-   co-resident llama-server** (the status doc §3 36-GiB swap-contamination rule). Record the
-   `[metalprof-hybrid]` line in this cluster. That is the arm-A number; the §5 trigger then
-   reads directly off `rest(...)` vs `gemm+roundtrip`.
+| field | value |
+|---|---|
+| witness | [`metal-gdn-recurrence-m3pro-20260629.json`](metal-gdn-recurrence-m3pro-20260629.json) |
+| host | `node-macos-a` — Mac15,7 / Apple M3 Pro 18-core GPU / 36 GB unified / macOS 26.5 / Metal 4 |
+| command shape | `FAK_QPROFILE=1 FAK_METAL=1 FAK_Q4K=1 CGO_ENABLED=1 go run -tags fakmetal ./cmd/modelbench ... -q4k -metal -prefill-sizes 22 -prefill-reps 1` |
+| profile line | `[metalprof-hybrid P=22] total=6720.7  gemm+roundtrip=6051.6  rest(recurrence/attn/norm)=669.1 ms  path=q4k` |
+| interpretation | projection GEMM/round-trip is **90.0%**; the whole non-projection bucket is **10.0%** and is an upper bound on recurrence |
 
-Building arm B is **#92's** scope and is gated behind the §5 trigger — not part of #65.
-
-**Next checkable step:** run gate (1) on the Mac node and append the `[metalprof-hybrid]`
-result here. Until that line is on disk, the *on-device recurrence fraction* stays `not yet`
-(the design decision, however, is **made** — from the 0.5% prefill profile already on disk and
-the serialization analysis in §4, both independent of that capture).
+Building arm B remains **#92's** scope and is gated behind the §5 trigger — not part of #65.
+The trigger did not fire here: this capture does not isolate recurrence as the wall; it shows
+the projection/round-trip bucket is still dominant.
 
 ---
 
 ## 7 — Why this is the right increment (and what it is not)
 
-This is the host-independent slice #65 actually asks for: it turns "decide + benchmark both"
-into (a) a **made decision** — CPU-hybrid for both phases, with the prefill call grounded in
-the on-disk 0.5% profile and the decode call grounded in the round-trip/serialization analysis
-that a GPU scan kernel does **not** address (#61/#67 do); and (b) a **two-arm benchmark
-protocol** — arm A already instrumented (`[metalprof-hybrid]`), arm B reduced to a falsifiable
-trigger into #92 rather than a speculative kernel. It corrects the tempting-but-wrong inference
-(that the decode round-trip justifies a GPU scan kernel) and binds the decision to the code
-that realizes it (#71). It is **not** a claim that the on-device recurrence fraction has been
-re-measured here, nor that a Metal GDN-scan kernel was built or beaten — those are the gated /
-deferred steps in §6 and §5. No fabricated pass: the only gate run for *this* change is the
-doc/commit gate on the `experiments` lane.
+This is the smallest close for #65: it turns "decide + benchmark both" into (a) a **made
+decision** — CPU-hybrid for both phases, with the prefill call grounded in the 0.5% prior
+profile, the host-runnable recurrence/projection compute ratio, and the fresh M3 Pro
+resident-Q4_K `[metalprof-hybrid]` capture; and (b) a **two-arm benchmark protocol** — arm A
+measured, arm B reduced to a falsifiable trigger into #92 rather than a speculative kernel.
+It corrects the tempting-but-wrong inference (that the decode round-trip justifies a GPU scan
+kernel) and binds the decision to the code that realizes it (#71). It is **not** a claim that
+a Metal GDN-scan kernel was built or beaten — #65 decides not to build it unless the #92
+trigger fires. No fabricated pass: the on-device gate is now recorded, and the rest bucket is
+kept as an upper bound rather than mislabeled as recurrence-only time.

@@ -20,7 +20,8 @@
 //
 // What this does NOT measure: the on-device Mac hybrid serialization / CPU<->GPU
 // round-trip fraction (the recurrence fraction AFTER the projections move to the GPU).
-// That stays the §6 gate of the decision doc — it needs Apple Silicon + -tags fakmetal.
+// That companion arm is recorded in ../metal-gdn-recurrence-m3pro-20260629.json; this
+// command remains the reproducible, device-independent compute-ratio witness.
 //
 // Real Qwen3.6-27B GDN dims are sourced from the in-tree fixture
 // internal/model/quant_q4k_resident_test.go (HiddenSize 5120; LinearNumKeyHeads 16,

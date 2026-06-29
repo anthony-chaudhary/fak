@@ -65,11 +65,11 @@ into a scratch root). See `metal-hybrid-prefill-status-2026-06-28.md` §2.
 
 ---
 
-## 3 — `not yet` (Apple-Silicon / GPU / 27B-artifact gated)
+## 3 — Apple-Silicon / GPU / 27B-artifact gates
 
-Each row needs a host this orchestrator does not have. The figures shown are **recorded
-prior witnesses** from the named Mac/Vulkan node, never re-measured here; the repro is the
-exact one command that re-confirms the gated half.
+Each row needs a host this orchestrator does not have. Most rows remain **`not yet`**; any
+row marked **REACHED** has an on-disk Mac witness recorded from the named node, never
+re-measured here. The repro is the exact one command that re-confirms the gated half.
 
 | # | Gated witness | Recorded prior result | Host needed | One-command repro |
 |---|---|---|---|---|
@@ -80,10 +80,11 @@ exact one command that re-confirms the gated half.
 | 5 | **#70 q4_k device GEMM matmul-only split** | code shipped; whole-path warm prefill 7.3 tok/s @P=940 (~7× under 51.55) | M3 Pro, `-tags fakmetal`, no co-resident llama-server | `go test ./internal/model -tags fakmetal -run MetalQ4K -count=1`; then `FAK_QPROFILE=1` pp22/long-prompt prefill |
 | 6 | **#69 zero-copy residency + residency-win measure** | residency SHIPPED; `newBufferWithBytesNoCopy` upgrade + A/B win unmeasured | M3 Pro, `-tags fakmetal` (also needs a `(fak model)`-lane `FAK_METAL_REUPLOAD` baseline toggle first) | `go test ./internal/model -tags fakmetal -run MetalQ4K -count=1` after the toggle lands |
 | 7 | **#67 end-to-end decode tok/s → 7.29 bar** | clean decode **1.2** tok/s (ratio 0.16×, perf-gate FAIL is the expected fail-closed state) | M3 Pro, `-tags fakmetal`, no co-resident llama-server | `python tools/qwen36_perf_gate.py --metal --min-ratio 0.5` (exit 1 = recorded gap) |
-| 8 | **#65 GDN-recurrence on-device fraction** | DECIDED (CPU-hybrid, both phases — recurrence ≈0.5% of prefill); on-device capture pending | M3 Pro, `-tags fakmetal` | `FAK_QPROFILE=1` pp22 prefill → read `rest(recurrence/…)` vs `gemm+roundtrip` off `[metalprof-hybrid]` |
+| 8 | **#65 GDN-recurrence on-device fraction** | REACHED — CPU-hybrid decision witnessed; pp22 `[metalprof-hybrid]` measured `total=6720.7 ms`, `gemm+roundtrip=6051.6 ms` (**90.0%**), `rest(recurrence/attn/norm)=669.1 ms` (**10.0%**, upper bound on recurrence), so the #92 GPU-scan trigger did not fire | M3 Pro, `-tags fakmetal`, captured on `node-macos-a` | Witness: [`experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json`](../../experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json); decision: [`experiments/qwen36/metal-gdn-recurrence-decision-2026-06-28.md`](../../experiments/qwen36/metal-gdn-recurrence-decision-2026-06-28.md) |
 
-The single one-command Mac gate that drives rows 2–8 in sequence is being assembled at
-`tools/qwen36_mac_parity_gate.sh` (sibling agent, this campaign).
+The single one-command Mac gate that drives the still-open rows 2–7 in sequence is being
+assembled at `tools/qwen36_mac_parity_gate.sh` (sibling agent, this campaign). Row 8 is
+now independently witnessed by the #65 decision artifact above.
 
 ---
 
@@ -146,7 +147,7 @@ Deeper root-cause investigation (which GDN/RoPE op compounds the error):
 Mac verify node runs to re-confirm the gated half of §3 in one go — the `-tags fakmetal`
 build + GPU numerics parity + the clean (no co-resident llama-server) `FAK_QPROFILE` tok/s
 captures, against the recorded 51.55 / 7.29 bars. Until it is green on a witnessed commit,
-rows 1–8 of §3 stay `not yet`.
+rows 1–7 of §3 stay `not yet`.
 
 **Build-hole closure (2026-06-29, #1242).** The prior ultracode dogfood (2026-06-28) left
 exactly one hole: its `build-sanity` lane was policy-blocked in the subagent sandbox and
@@ -159,8 +160,10 @@ witness (build re-run, `SKIP != PASS`, commit ancestry, oracle ids, secret-shape
 [`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](../../experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json).
 This closes a §2-class (host-independent) item; it does **not** move §3 — the Apple-Silicon
 gate (`tools/qwen36_mac_parity_gate.sh` Arms 1–3 on a real M3 Pro) was **not** run here, so
-rows 1–8 of §3 honestly **stay `not yet`**, gated on the M3 Pro verify node + the 27B GGUF +
-llama.cpp b9707 that this orchestrator does not have.
+rows 1–7 of §3 honestly **stay `not yet`**, gated on the M3 Pro verify node + the 27B GGUF +
+llama.cpp b9707 that this orchestrator does not have. Row 8 is the later #65 decision witness,
+recorded separately in
+[`experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json`](../../experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json).
 
 ---
 

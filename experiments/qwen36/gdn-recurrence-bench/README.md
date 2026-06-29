@@ -45,12 +45,13 @@ measured. The projections are the ~97% lever and the CPU-hybrid already routes t
 GPU. So the arithmetic agrees with the on-device profile: **keep the recurrence on the CPU;
 do not write a speculative Metal GDN-scan kernel.**
 
-## What this does NOT measure (still the §6 gate of the decision doc)
+## Companion on-device witness
 
-This is the **compute-ratio** arm only. It does **not** measure the on-device Mac hybrid
-**serialization / CPU↔GPU round-trip** fraction — the recurrence fraction *after* the
-projections move to the GPU, captured by `[metalprof-hybrid]` on Apple Silicon. That stays
-the honest `not yet` of
-[the decision doc §6](../metal-gdn-recurrence-decision-2026-06-28.md) and needs an M3 Pro
-with `-tags fakmetal`. The decode-side cost is *serialization*, addressed by the resident
-forward of #61/#67 — not by a scan kernel (decision doc §4).
+This directory is the **device-independent compute-ratio** arm. The companion on-device arm
+now lives at
+[`../metal-gdn-recurrence-m3pro-20260629.json`](../metal-gdn-recurrence-m3pro-20260629.json):
+on the M3 Pro resident-Q4_K Metal path at pp22, `[metalprof-hybrid]` measured
+`gemm+roundtrip=6051.6 ms` and `rest(recurrence/attn/norm)=669.1 ms`, so projections still
+dominate the split. The `rest(...)` bucket is an upper bound on recurrence, not
+recurrence-only time. The decode-side cost is still *serialization*, addressed by the
+resident forward of #61/#67 — not by a scan kernel (decision doc §4).

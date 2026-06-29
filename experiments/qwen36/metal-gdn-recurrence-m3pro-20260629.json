@@ -1,0 +1,48 @@
+{
+  "schema": "fak-metal-gdn-recurrence-decision/1",
+  "issue": "65",
+  "captured_at_utc": "2026-06-29T12:14:40Z",
+  "machine": {
+    "name": "node-macos-a",
+    "model": "Mac15,7",
+    "gpu": "Apple M3 Pro, 18-core GPU",
+    "memory_bytes": 38654705664,
+    "os": "macOS 26.5",
+    "metal": "Metal 4"
+  },
+  "repo": {
+    "base_commit": "881b7daf6868775acff91fa07849b04f9796f9af",
+    "patch_scope": [
+      "internal/model/metal_prefill_hybrid_core.go",
+      "internal/model/metal_prefill_hybrid_core_test.go",
+      "internal/model/qwen35_prefill_q4k.go",
+      "internal/model/qwen35_prefill_q4k_test.go"
+    ]
+  },
+  "command": "FAK_QPROFILE=1 FAK_METAL=1 FAK_Q4K=1 CGO_ENABLED=1 go run -tags fakmetal ./cmd/modelbench -gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf -q4k -metal -prefill-sizes 22 -prefill-reps 1 -decode-reps 1 -decode-steps 1 -decode-prompt 1 -out /tmp/fak-issue65-gdn-result.json",
+  "model": "Qwen3.6-27B.q4_k_m.gguf",
+  "engine": "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)",
+  "profile_line": "[metalprof-hybrid P=22] total=6720.7  gemm+roundtrip=6051.6  rest(recurrence/attn/norm)=669.1 ms  path=q4k",
+  "prefill": {
+    "tokens": 22,
+    "reps": 1,
+    "median_ms": 6851.735417,
+    "tok_per_sec": 3.2108653736709227
+  },
+  "hybrid_split_ms": {
+    "total": 6720.7,
+    "gemm_plus_roundtrip": 6051.6,
+    "rest_recurrence_attn_norm": 669.1
+  },
+  "hybrid_split_fraction": {
+    "gemm_plus_roundtrip": 0.9004,
+    "rest_recurrence_attn_norm": 0.0996
+  },
+  "resident_summary": "resident: Q4_K=184 tensors/7942.50MiB  Q5/6_K=0/0.00MiB  Q8=313/11604.37MiB  f32=354/4860.09MiB  total=24406.96MiB  decode=19.08GiB/tok",
+  "notes": [
+    "The logged rest bucket is an upper bound for GDN recurrence because it also includes full-attention, norms, q8 panel quantization, conv, gating, residuals, and cache bookkeeping.",
+    "The run waited for the GPU lease before loading; the profile line was emitted after the lease was acquired.",
+    "This is a decision witness for #65, not a throughput authority row."
+  ],
+  "verdict": "CPU-hybrid remains the correct #65 decision: with resident-Q4_K projections on Metal, projection GEMM/round-trip is still about 90.0% of the measured pp22 hybrid prefill split, while the entire non-projection bucket is about 10.0% and the recurrence-only compute bound stays low-single-digit. Keep the GDN recurrence on CPU; build a Metal scan kernel only under the separate #92 trigger if a later resident-forward profile isolates recurrence as the wall."
+}
