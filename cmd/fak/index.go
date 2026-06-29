@@ -6,11 +6,12 @@ package main
 //	fak index lane <path>...   which lane/leaf owns these paths (+ the commit stamp)
 //	fak index leaf [<query>]   the lane taxonomy, filtered by name/tree/description
 //	fak index docs <query>     the curated doc map, ranked by relevance
+//	fak index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
 //
 // It is a thin shell over internal/devindex, which reads the facts live from the
-// files that already own them (dos.toml's [lanes.trees], the curated INDEX.md), so
-// the index is a VIEW, never a competing source of truth. --json on every
-// subcommand makes the same answers machine- and MCP-consumable.
+// files that already own them (dos.toml's [lanes.trees], the curated INDEX.md, the
+// CLAIMS.md ledger), so the index is a VIEW, never a competing source of truth.
+// --json on every subcommand makes the same answers machine- and MCP-consumable.
 
 import (
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/devindex"
@@ -79,6 +81,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexLeaf(stdout, stderr, cat, args, *asJSON, *limit)
 	case "docs", "doc":
 		return indexDocs(stdout, stderr, cat, args, *asJSON, *limit)
+	case "claims", "claim":
+		return indexClaims(stdout, stderr, cat, args, *asJSON, *limit)
 	default:
 		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
@@ -129,9 +133,53 @@ func indexLeaf(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 		if desc == "" {
 			desc = l.Tree
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", l.Name, mark, desc)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", l.Name, mark, statusBadge(l.Status), desc)
 	}
 	return flushTab(tw, stderr, "fak index leaf")
+}
+
+// statusBadge renders a leaf's CLAIMS.md maturity rollup as a compact, model- and
+// human-readable cell — "[4 shipped · 1 stub]" — or "" when the ledger names no
+// capability for the leaf (so the column stays empty rather than noisy).
+func statusBadge(s devindex.Status) string {
+	if s.Total() == 0 {
+		return ""
+	}
+	var parts []string
+	if s.Shipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d shipped", s.Shipped))
+	}
+	if s.Simulated > 0 {
+		parts = append(parts, fmt.Sprintf("%d sim", s.Simulated))
+	}
+	if s.Stub > 0 {
+		parts = append(parts, fmt.Sprintf("%d stub", s.Stub))
+	}
+	return "[" + strings.Join(parts, " · ") + "]"
+}
+
+func indexClaims(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "fak index claims: needs a search query (a lane, a token, or a capability)")
+		return 2
+	}
+	hits := capClaims(cat.SearchClaims(joinArgs(args)), limit)
+	if asJSON {
+		return encodeJSONOrFail(stdout, stderr, hits, "fak index claims")
+	}
+	if len(hits) == 0 {
+		fmt.Fprintln(stdout, "no matching claim")
+		return 0
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	for _, cl := range hits {
+		lanes := strings.Join(cl.Lanes, ",")
+		if lanes == "" {
+			lanes = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", cl.Tag, lanes, truncRunes(cl.Text, 96))
+	}
+	return flushTab(tw, stderr, "fak index claims")
 }
 
 func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
@@ -157,8 +205,9 @@ func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 func writeIndexUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak index lane <path>...    which lane/leaf owns each path, + the (fak <leaf>) commit stamp
-  fak index leaf [<query>]    the lane taxonomy, filtered by name/tree/description
+  fak index leaf [<query>]    the lane taxonomy (+ shipped/sim/stub rollup), filtered by name/tree/desc
   fak index docs <query>      the curated doc map (INDEX.md), ranked by relevance
+  fak index claims <query>    the CLAIMS.md honesty ledger, ranked by relevance (shipped/simulated/stub)
   flags: --json  --limit N  --root DIR
 `)
 }
@@ -186,6 +235,24 @@ func capDocs(ds []devindex.Doc, limit int) []devindex.Doc {
 		return ds[:limit]
 	}
 	return ds
+}
+
+func capClaims(cs []devindex.Claim, limit int) []devindex.Claim {
+	if limit > 0 && len(cs) > limit {
+		return cs[:limit]
+	}
+	return cs
+}
+
+// truncRunes shortens s to at most n runes (UTF-8-safe — a claim line carries em
+// dashes and middots that a byte slice would split), appending an ellipsis when it
+// cuts. The package-wide truncate (benchmarks.go) is byte-based and ASCII-only.
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func flushTab(tw *tabwriter.Writer, stderr io.Writer, label string) int {

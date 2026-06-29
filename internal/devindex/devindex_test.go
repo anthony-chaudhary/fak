@@ -3,6 +3,7 @@ package devindex
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,23 @@ ignored = ["internal/ignored/**"]
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "INDEX.md"), []byte(indexMd), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A synthetic CLAIMS.md exercising the claim/status join (C2 #1289): the legend
+	// line writes its tag in backticks and MUST be excluded; real claims bind to a
+	// lane via their internal/<pkg> reference; a product claim names no package and
+	// must stay searchable with no rollup.
+	claimsMd := "# CLAIMS.md — synthetic honesty ledger\n" +
+		"- `[SHIPPED]` — legend line; backticked tag, must be EXCLUDED.\n" +
+		"\n## Gateway\n" +
+		"- [SHIPPED] The `internal/gateway` front door speaks OpenAI. Witness: gateway tests.\n" +
+		"- [SHIPPED] Admission control in internal/gateway sheds at 429.\n" +
+		"- [STUB] internal/gateway streaming backpressure is deferred.\n" +
+		"\n## Session\n" +
+		"- [SIMULATED] internal/session cost ring uses labeled stand-in data.\n" +
+		"\n## Product\n" +
+		"- [SHIPPED] One statically-linked Go binary runs the loop (no package ref).\n"
+	if err := os.WriteFile(filepath.Join(root, "CLAIMS.md"), []byte(claimsMd), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Make internal/gateway real so Exists is exercised in both polarities.
@@ -167,6 +185,104 @@ func TestSearchLeaves(t *testing.T) {
 	}
 }
 
+func TestParseClaimsAndRollup(t *testing.T) {
+	c, err := Load(writeSyntheticRepo(t))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// 5 real claims; the backticked legend line is excluded by claimTagRE.
+	if len(c.Claims) != 5 {
+		t.Fatalf("got %d claims, want 5 (legend excluded): %+v", len(c.Claims), c.Claims)
+	}
+	for _, cl := range c.Claims {
+		if strings.HasPrefix(cl.Text, "—") || strings.Contains(cl.Text, "legend line") {
+			t.Errorf("legend line leaked into the ledger as a claim: %q", cl.Text)
+		}
+	}
+
+	gw, ok := c.LeafByName("gateway")
+	if !ok {
+		t.Fatal("gateway leaf missing")
+	}
+	if gw.Status.Shipped != 2 || gw.Status.Stub != 1 || gw.Status.Simulated != 0 {
+		t.Errorf("gateway status = %+v, want {Shipped:2 Simulated:0 Stub:1}", gw.Status)
+	}
+	if gw.Status.Total() != 3 {
+		t.Errorf("gateway Total() = %d, want 3", gw.Status.Total())
+	}
+
+	sess, _ := c.LeafByName("session")
+	if sess.Status.Simulated != 1 || sess.Status.Total() != 1 {
+		t.Errorf("session status = %+v, want exactly 1 SIMULATED", sess.Status)
+	}
+
+	// The product claim names no package -> it stays in the ledger but binds to no
+	// lane (no rollup), so it never inflates a leaf's status.
+	var product *Claim
+	for i := range c.Claims {
+		if strings.Contains(c.Claims[i].Text, "statically-linked") {
+			product = &c.Claims[i]
+		}
+	}
+	if product == nil {
+		t.Fatal("product claim missing from the ledger")
+	}
+	if len(product.Lanes) != 0 {
+		t.Errorf("product claim bound to %v, want no lane", product.Lanes)
+	}
+}
+
+func TestSearchAndClaimsForLeaf(t *testing.T) {
+	c, _ := Load(writeSyntheticRepo(t))
+
+	// An empty query is a usage error the caller surfaces -> nil.
+	if got := c.SearchClaims(""); got != nil {
+		t.Errorf("empty query should return nil, got %v", got)
+	}
+	// A lane token outranks a bare text hit (lane weight 3 > text weight 1).
+	hits := c.SearchClaims("gateway")
+	if len(hits) == 0 {
+		t.Fatal("expected gateway claim hits")
+	}
+	for _, h := range hits[:1] {
+		hasLane := false
+		for _, l := range h.Lanes {
+			if l == "gateway" {
+				hasLane = true
+			}
+		}
+		if !hasLane {
+			t.Errorf("top gateway hit does not bind to the gateway lane: %+v", h)
+		}
+	}
+	// ClaimsForLeaf is the strict bound set: exactly the 3 gateway-bound claims.
+	if got := c.ClaimsForLeaf("GateWay"); len(got) != 3 { // case-insensitive
+		t.Errorf("ClaimsForLeaf(gateway) = %d claims, want 3", len(got))
+	}
+	if got := c.ClaimsForLeaf("nonexistent"); len(got) != 0 {
+		t.Errorf("ClaimsForLeaf(nonexistent) = %d, want 0", len(got))
+	}
+}
+
+func TestLoadMissingClaimsDegrades(t *testing.T) {
+	// A repo with dos.toml but no CLAIMS.md loads cleanly with an empty rollup.
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"),
+		[]byte("[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load without CLAIMS.md should not error: %v", err)
+	}
+	if len(c.Claims) != 0 {
+		t.Errorf("no CLAIMS.md should mean no claims, got %d", len(c.Claims))
+	}
+	if gw, _ := c.LeafByName("gateway"); gw.Status.Total() != 0 {
+		t.Errorf("missing ledger should leave an empty rollup, got %+v", gw.Status)
+	}
+}
+
 func TestLoadMissingDosToml(t *testing.T) {
 	if _, err := Load(t.TempDir()); err == nil {
 		t.Error("Load with no dos.toml should error (no taxonomy to serve)")
@@ -194,6 +310,14 @@ func TestRealRepoDogfood(t *testing.T) {
 	}
 	if c.LaneForPath("internal/gateway/gateway.go") != "gateway" {
 		t.Error("live LaneForPath disagrees with the gateway tree")
+	}
+	// The claim/status join must bind to the live CLAIMS.md, not silently no-op:
+	// the gateway leaf carries shipped claims in the real ledger.
+	if len(c.Claims) == 0 {
+		t.Error("live catalog parsed no CLAIMS.md claims (the C2 join is dead)")
+	}
+	if gw, _ := c.LeafByName("gateway"); gw.Status.Shipped == 0 {
+		t.Error("live gateway leaf has no SHIPPED claims bound (join broken or regex drift)")
 	}
 }
 

@@ -8,7 +8,11 @@ package devindex
 //   - the leaf catalog (lane name -> tree glob + the inline `# …` description) and
 //     the path->lane resolver come from dos.toml `[lanes.trees]`, the SAME taxonomy
 //     the commit-stamp lint and the DOS arbiter bind to;
-//   - the doc map (title -> path + blurb) comes from the curated INDEX.md.
+//   - the doc map (title -> path + blurb) comes from the curated INDEX.md;
+//   - the maturity rollup (how many of a leaf's claims are SHIPPED / SIMULATED /
+//     STUB) comes from CLAIMS.md, the lint-enforced honesty ledger (C2 #1289). Each
+//     ledger line names the package paths it touches; we resolve those to lanes with
+//     the SAME LaneForPath the stamp lint uses, so the join cannot drift off-taxonomy.
 //
 // Because it reads the sources rather than caching them, it cannot drift into a
 // parallel reality — a freshness gate (C6 #1293) reds the build if it ever does.
@@ -31,6 +35,34 @@ type Leaf struct {
 	Dir    string `json:"dir,omitempty"`
 	Exists bool   `json:"exists"`
 	Desc   string `json:"desc,omitempty"`
+	// Status is the CLAIMS.md maturity rollup for this leaf (C2 #1289): how many of
+	// the ledger claims that name a path under this leaf are SHIPPED / SIMULATED /
+	// STUB. The zero value means the honesty ledger names no capability here.
+	Status Status `json:"status"`
+}
+
+// Status is a per-leaf rollup of the CLAIMS.md maturity tags that bind to a leaf.
+// It answers the recurring "what's shipped vs simulated vs stub for X" without
+// reading the ledger prose.
+type Status struct {
+	Shipped   int `json:"shipped"`
+	Simulated int `json:"simulated"`
+	Stub      int `json:"stub"`
+}
+
+// Total is the number of ledger claims bound to the leaf (across all three tags).
+func (s Status) Total() int { return s.Shipped + s.Simulated + s.Stub }
+
+// Claim is one line of the CLAIMS.md honesty ledger: its maturity tag, the `##`
+// section it sits under, the lanes its in-line package-path references resolve to
+// (via LaneForPath — the SAME taxonomy the commit-stamp lint binds to), and the
+// claim prose (the `- [TAG] ` prefix stripped). fak index reads it so an agent
+// asks the ledger instead of grepping it.
+type Claim struct {
+	Tag     string   `json:"tag"`               // SHIPPED | SIMULATED | STUB
+	Section string   `json:"section,omitempty"` // the nearest `##`/`###` header above it
+	Lanes   []string `json:"lanes,omitempty"`   // leaves the claim's path refs bind to
+	Text    string   `json:"text"`              // the claim prose, tag prefix removed
 }
 
 // Doc is one entry of the curated doc map (INDEX.md): a human title, the path or
@@ -44,9 +76,10 @@ type Doc struct {
 // Catalog is the loaded self-index: the leaf taxonomy and the doc map, plus the
 // path-prefix maps the lane resolver needs. Build it with Load.
 type Catalog struct {
-	Root   string `json:"root"`
-	Leaves []Leaf `json:"leaves"`
-	Docs   []Doc  `json:"docs"`
+	Root   string  `json:"root"`
+	Leaves []Leaf  `json:"leaves"`
+	Docs   []Doc   `json:"docs"`
+	Claims []Claim `json:"claims,omitempty"`
 
 	// prefixes maps a tree prefix ("internal/gateway/") to its lane ("gateway");
 	// exact maps a bare file entry ("version") to its lane. Both lowercased.
@@ -92,6 +125,11 @@ func Load(root string) (*Catalog, error) {
 
 	if idx, err := os.ReadFile(filepath.Join(root, "INDEX.md")); err == nil {
 		c.parseDocs(string(idx))
+	}
+	// CLAIMS.md is parsed AFTER the lanes so the claim->lane join can use the
+	// resolver. A missing ledger degrades to an empty rollup, not an error.
+	if cl, err := os.ReadFile(filepath.Join(root, "CLAIMS.md")); err == nil {
+		c.parseClaims(string(cl))
 	}
 	return c, nil
 }
@@ -192,6 +230,147 @@ func (c *Catalog) parseDocs(text string) {
 		seen[title+"\x00"+path] = true
 		c.Docs = append(c.Docs, Doc{Title: title, Path: path, Blurb: strings.TrimSpace(m[3])})
 	}
+}
+
+// claimTagRE matches a real ledger claim line: `- [TAG] prose`. The legend lines
+// at the top of CLAIMS.md write the tag in backticks (“ - `[SHIPPED]` — … “), so
+// the literal `[` right after the bullet excludes them — only the lint-enforced
+// `- [TAG]` capability lines (unit 96) are taken.
+var claimTagRE = regexp.MustCompile(`^-\s*\[(SHIPPED|SIMULATED|STUB)\]\s*(.*)$`)
+
+// pkgRefRE finds the in-line package/path references a claim names (a lane dir like
+// `internal/gitgate`, `cmd/ctxbench`, `tools/...`), in or out of backticks. It
+// captures only the top dir + FIRST path segment — the part that determines the
+// lane — so a package-qualified Go SYMBOL (`internal/engine.RunCapacityPressure…`)
+// resolves to its package lane (`engine`), not a bogus dotted pseudo-lane. Each
+// match is resolved by LaneForPath so the join binds to the SAME taxonomy the
+// commit-stamp lint uses.
+var pkgRefRE = regexp.MustCompile(`(?:internal|cmd|tools|docs|examples|visuals|experiments)/[A-Za-z0-9_-]+`)
+
+// parseClaims scans the CLAIMS.md honesty ledger into c.Claims and folds each
+// claim's maturity tag onto every leaf its path references resolve to. It is a
+// VIEW: it never rewrites the ledger, only reads the bytes the lint already
+// guards. Section headers (`##` / `###`) are tracked so a claim carries the
+// subsystem it sits under.
+func (c *Catalog) parseClaims(text string) {
+	section := ""
+	for _, raw := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if strings.HasPrefix(trimmed, "#") {
+			section = strings.TrimSpace(strings.TrimLeft(trimmed, "# "))
+			continue
+		}
+		m := claimTagRE.FindStringSubmatch(trimmed)
+		if m == nil {
+			continue
+		}
+		c.Claims = append(c.Claims, Claim{
+			Tag:     m[1],
+			Section: section,
+			Lanes:   c.lanesInText(m[2]),
+			Text:    strings.TrimSpace(m[2]),
+		})
+	}
+
+	idx := make(map[string]int, len(c.Leaves))
+	for i := range c.Leaves {
+		idx[c.Leaves[i].Name] = i
+	}
+	for _, cl := range c.Claims {
+		for _, lane := range cl.Lanes {
+			i, ok := idx[lane]
+			if !ok {
+				continue // a claim may name a path with no declared leaf; still searchable
+			}
+			switch cl.Tag {
+			case "SHIPPED":
+				c.Leaves[i].Status.Shipped++
+			case "SIMULATED":
+				c.Leaves[i].Status.Simulated++
+			case "STUB":
+				c.Leaves[i].Status.Stub++
+			}
+		}
+	}
+}
+
+// lanesInText resolves every package-path reference in a claim line to its lane,
+// de-duplicated and sorted, so a claim that names a path three times counts once.
+func (c *Catalog) lanesInText(text string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, ref := range pkgRefRE.FindAllString(text, -1) {
+		lane := c.LaneForPath(ref)
+		if lane == "" || seen[lane] {
+			continue
+		}
+		seen[lane] = true
+		out = append(out, lane)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ClaimsForLeaf returns the ledger claims that bind to the named (case-insensitive)
+// leaf, in ledger order — the detail behind a leaf's Status rollup.
+func (c *Catalog) ClaimsForLeaf(name string) []Claim {
+	n := strings.ToLower(strings.TrimSpace(name))
+	var out []Claim
+	for _, cl := range c.Claims {
+		for _, l := range cl.Lanes {
+			if l == n {
+				out = append(out, cl)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// SearchClaims returns the ledger claims matching the query, lexically scored (a
+// lane match weighs most, then the section, then the prose) and ranked best-first.
+// An empty query returns nothing — a ledger search with no terms is a usage error
+// the caller surfaces. This is the "what's shipped vs simulated vs stub for X" ask.
+func (c *Catalog) SearchClaims(query string) []Claim {
+	toks := tokens(query)
+	if len(toks) == 0 {
+		return nil
+	}
+	type scored struct {
+		cl Claim
+		s  int
+	}
+	var hits []scored
+	for _, cl := range c.Claims {
+		lanes := strings.ToLower(strings.Join(cl.Lanes, " "))
+		section, text := strings.ToLower(cl.Section), strings.ToLower(cl.Text)
+		score := 0
+		for _, tk := range toks {
+			if strings.Contains(lanes, tk) {
+				score += 3
+			}
+			if strings.Contains(section, tk) {
+				score += 2
+			}
+			if strings.Contains(text, tk) {
+				score++
+			}
+		}
+		if score > 0 {
+			hits = append(hits, scored{cl, score})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].s != hits[j].s {
+			return hits[i].s > hits[j].s
+		}
+		return hits[i].cl.Text < hits[j].cl.Text
+	})
+	out := make([]Claim, len(hits))
+	for i, h := range hits {
+		out[i] = h.cl
+	}
+	return out
 }
 
 // LaneForPath maps one repo-relative path to its lane: the exact-file map first,
