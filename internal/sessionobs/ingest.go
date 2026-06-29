@@ -40,12 +40,13 @@ type FoldMeta struct {
 // outcome is derived from, kept separate from the Record so a caller can audit WHY a
 // session was classified the way it was. CommitSHAs are the non-fuzzy outcome link.
 type Evidence struct {
-	CommitSHAs []string // distinct SHAs from "[<branch> <sha>] <subject>" git-commit success markers
-	Mutated    bool     // an Edit / Write / NotebookEdit ran (the session changed the tree)
-	Interrupts int      // assistant turns the user/harness interrupted
-	GoalEvents int      // /goal directives the session ran under
-	StopMarks  int      // goal-block / stop-hook system-reminders (a blocked Stop)
-	ToolErrors int      // is_error tool_result blocks (a tool call that failed)
+	CommitSHAs    []string // distinct SHAs from "[<branch> <sha>] <subject>" git-commit success markers
+	Mutated       bool     // an Edit / Write / NotebookEdit ran (the session changed the tree)
+	Interrupts    int      // assistant turns the user/harness interrupted
+	GoalEvents    int      // /goal directives the session ran under
+	StopMarks     int      // goal-block / stop-hook system-reminders (a blocked Stop)
+	ToolErrors    int      // is_error tool_result blocks (a tool call that failed)
+	GuardRefusals int      // [fak] guard DENY/QUARANTINE banners the gateway injected into a turn
 }
 
 // committed reports whether the session landed at least one commit.
@@ -87,6 +88,37 @@ var commitMarker = regexp.MustCompile(`\[[^\]]*?\b([0-9a-f]{7,40})\]`)
 // goalDirective matches a /goal slash-command wrapper or a typed "/goal" prompt.
 var goalDirective = regexp.MustCompile(`(?i)(<command-name>\s*/?goal|^\s*/goal\b)`)
 
+// guardRefusalMarkers are the literal banners the fak gateway injects into an ASSISTANT
+// turn when the kernel DENIES a proposed tool call or QUARANTINES an inbound tool result
+// -- the guard-friction signal the contrast ranks first (see contrast.go). They are the
+// emission strings of internal/gateway/{http.go:adjudicationNote/denySummary,
+// messages.go:resultAdmissionNote}. We scan them ONLY in assistant text, where the
+// gateway actually emits them; a tool_result that merely QUOTES one (a Read of this file
+// or a gateway test) lands in a user block and so cannot be mistaken for a real refusal.
+// Bare "[fak]" is deliberately NOT a marker -- it also prefixes "[fak] compacted" and
+// "[fak] ctxview-elided" notes, which are not refusals.
+//
+// NON-CIRCULARITY: GuardRefusals is a behavior FEATURE the value-vs-waste contrast ranks,
+// so it must never feed the cohort-defining stopped() evidence -- if a refusal defined the
+// waste cohort, "refusals separate waste" would be tautology, not a finding. Count it as a
+// signal; never classify an outcome on it. (A refusal that escalates to a blocked Stop is
+// already counted on the StopMarks pathway.)
+var guardRefusalMarkers = []string{
+	"[fak] refused",                              // adjudicationNote: proposed call denied (Anthropic wire)
+	"refused by the fak kernel",                  // denySummary: all-denied turn (fak-unaware wires)
+	"held out of context as a safety precaution", // resultAdmissionNote: quarantine page-out
+}
+
+// hasGuardRefusal reports whether an assistant text block carries a guard-refusal banner.
+func hasGuardRefusal(s string) bool {
+	for _, m := range guardRefusalMarkers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // transcriptLine is the minimal projection of a transcript JSONL record the fold
 // needs. Everything else (thinking text, attachments, file-history snapshots) is
 // ignored. Decoding is defensive: a wrong-shaped field is skipped, never panics.
@@ -114,6 +146,7 @@ type contentBlock struct {
 	Name    string          `json:"name"`    // tool_use
 	Input   json.RawMessage `json:"input"`   // tool_use
 	Content json.RawMessage `json:"content"` // tool_result: string OR []block
+	Text    string          `json:"text"`    // assistant text block (carries the gateway's [fak] notes)
 	IsError bool            `json:"is_error"`
 }
 
@@ -179,11 +212,14 @@ func FoldTranscript(r io.Reader, meta FoldMeta) (Record, Evidence) {
 	rec.Signals.GoalEvents = ev.GoalEvents
 	rec.Signals.StopEvents = ev.StopMarks
 	rec.Signals.ToolErrors = ev.ToolErrors
+	rec.Signals.GuardRefusals = ev.GuardRefusals
 	return rec, ev
 }
 
 // foldAssistantContent walks an assistant message's content blocks, counting tool
-// calls (read-only vs mutating) and goal/stop signals carried in any text.
+// calls (read-only vs mutating) and the guard-refusal banners the gateway prepends as
+// text. One refusal-bearing text block counts as one guard-friction event (the gateway
+// emits at most one note per turn), so the count tracks refusal turns, not refused calls.
 func foldAssistantContent(raw json.RawMessage, rec *Record, ev *Evidence) {
 	var blocks []contentBlock
 	if json.Unmarshal(raw, &blocks) != nil {
@@ -198,6 +234,10 @@ func foldAssistantContent(raw json.RawMessage, rec *Record, ev *Evidence) {
 			}
 			if mutatingTools[b.Name] {
 				ev.Mutated = true
+			}
+		case "text":
+			if hasGuardRefusal(b.Text) {
+				ev.GuardRefusals++
 			}
 		}
 	}

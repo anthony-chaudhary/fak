@@ -126,6 +126,38 @@ func TestFoldCountsToolErrors(t *testing.T) {
 	}
 }
 
+func TestFoldCountsGuardRefusals(t *testing.T) {
+	tr := jsonl(
+		// the canonical Anthropic-wire denial note, prepended by the gateway as assistant text
+		`{"type":"assistant","message":{"id":"g1","role":"assistant","usage":{"output_tokens":10},"content":[{"type":"text","text":"[fak] refused 1 tool call(s): Write (DEFAULT_DENY/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative."},{"type":"tool_use","name":"Edit","input":{}}]}}`,
+		// the fak-unaware wire all-denied summary (no [fak] prefix)
+		`{"type":"assistant","message":{"id":"g2","role":"assistant","usage":{"output_tokens":8},"content":[{"type":"text","text":"All proposed tool calls were refused by the fak kernel: Bash: DENY (POLICY_BLOCK/TERMINAL)"}]}}`,
+		// a quarantine page-out note (SECRET_EXFIL held out of context)
+		`{"type":"assistant","message":{"id":"g3","role":"assistant","usage":{"output_tokens":6},"content":[{"type":"text","text":"[fak] Heads up: 1 inbound tool result was held out of context as a safety precaution (paged out, not lost)."}]}}`,
+		// a benign assistant turn -- a non-refusal [fak] note must NOT count as friction
+		`{"type":"assistant","message":{"id":"g4","role":"assistant","usage":{"output_tokens":4},"content":[{"type":"text","text":"[fak] compacted 12 turns. Looks good, shipping."}]}}`,
+		// a user tool_result that merely QUOTES a refusal banner (a Read of this file or a gateway
+		// test fixture) lands in a user block -- it must NOT be mistaken for a real refusal.
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"// fixture text: [fak] refused 1 tool call(s): Write ...","is_error":false}]}}`,
+	)
+	rec, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "gr"})
+	if ev.GuardRefusals != 3 {
+		t.Errorf("GuardRefusals want 3 (deny + kernel-deny + quarantine), got %d", ev.GuardRefusals)
+	}
+	if rec.Signals.GuardRefusals != 3 {
+		t.Errorf("Signals.GuardRefusals must be promoted from evidence, want 3 got %d", rec.Signals.GuardRefusals)
+	}
+	// NON-CIRCULARITY: a guard refusal is a behavior FEATURE the contrast ranks, never a
+	// cohort definer. Even with an Edit (Mutated) and refusals present but no stop/commit, the
+	// session must NOT classify Stopped on the strength of the refusals alone -- it stays Unknown.
+	if ev.stopped() {
+		t.Errorf("guard refusals must not set stopped(); they are a feature, not a waste definition")
+	}
+	if got := Classify(ev, false); got == OutcomeStopped {
+		t.Errorf("a guard refusal alone must not classify Stopped, got %v", got)
+	}
+}
+
 func TestFoldExtractsMultipleSortedSHAs(t *testing.T) {
 	tr := jsonl(
 		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"[main ffff111] one"}]}}`,
