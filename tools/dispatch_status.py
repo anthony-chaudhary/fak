@@ -1198,16 +1198,112 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     return "\n".join(out) + "\n"
 
 
+def _rate_str(v: Any) -> str:
+    """Trim a float rate to a compact form (0.80 -> 0.8, 2.0 -> 2) without trailing
+    zero noise, leaving non-numbers untouched."""
+    if isinstance(v, (int, float)):
+        s = f"{float(v):.2f}".rstrip("0").rstrip(".")
+        return s or "0"
+    return str(v)
+
+
+def render_slack(payload: dict[str, Any]) -> str:
+    r"""The COMPACT Slack body for the dispatch card — the signal-dense peer of
+    ``render`` (which keeps the box-drawn rails for the terminal + committed doc).
+
+    The boxed ``render`` is built for a monospace wall: ``╔═ ║ ╚═`` rails, a column
+    label on every line (``workers   :``), and a ``╚═``-prefixed footer that restates
+    every row again in prose. In a Slack channel — read on a phone, in mrkdwn, not a
+    code fence — that chrome and that restated footer are pure noise: the reader
+    re-reads the same fact twice and scans past box-drawing to reach a number.
+
+    This renderer keeps the SIGNAL (every value an operator acts on) and drops the
+    noise: ONE dense summary line carries capacity / account / backlog / closure /
+    rate, then one targeted ``⚠``/``🔴`` line PER problem that needs an eye (a silent
+    worker, a majority-stub or unhooked backend, a held backend, an uninstalled
+    watchdog, a weekly cap). A healthy steady state collapses to the summary line plus
+    a single ``✓`` — no restated footer, no rails, no fence. Pure given the payload."""
+    d = payload.get("dispatcher") or {}
+    a = d.get("account") or {}
+    b = payload.get("backlog") or {}
+    c = payload.get("closure") or {}
+    tp = payload.get("throughput") or {}
+    wd = d.get("watchdog") or {}
+
+    # --- one dense summary line: only the state an operator reads at a glance ---
+    parts: list[str] = []
+    if d.get("live") is not None or d.get("cap") is not None:
+        hr = d.get("headroom")
+        parts.append(f"{d.get('live')}/{d.get('cap')} live"
+                     + (f" (hr {hr})" if isinstance(hr, int) else ""))
+    if a.get("tag"):
+        parts.append(f"{a.get('tag')} t{a.get('tier')}"
+                     + ("" if a.get("available") else " ✗avail"))
+    if not d.get("host_safe"):
+        parts.append("host ⚠FLAGGED")
+    if not b.get("na") and b.get("open_issues") is not None:
+        ur = b.get("unrouted")
+        parts.append(f"backlog {b.get('open_issues')}"
+                     + (f" ({ur} unrouted)" if ur else ""))
+    if not c.get("na") and c.get("closure_rate") is not None:
+        hk = c.get("honest_close_rate")
+        parts.append(f"closure {_rate_str(c.get('closure_rate'))}"
+                     + (f"/{_rate_str(hk)}" if hk is not None else ""))
+    if not tp.get("na") and tp.get("verdict"):
+        below = tp.get("verdict") in ("BELOW_TARGET", "AUDIT_ERROR")
+        parts.append((" ⚠ " if below else " ").strip()
+                     + f"rate {_rate_str(tp.get('completed_rate_per_hour'))}"
+                     f"/{_rate_str(tp.get('target_per_hour'))}·h")
+    lines = [" · ".join(parts)] if parts else []
+
+    # --- one targeted action line per problem (replaces the restated footer) ---
+    actions: list[str] = []
+    cap = payload.get("weekly_cap") or {}
+    if cap:
+        actions.append(f"🔴 {a.get('tag')} weekly-capped — resets "
+                       f"{cap.get('reset_text') or cap.get('until') or '?'}")
+    if wd.get("installed") is False:
+        actions.append("⚠ always-on watchdog NOT installed "
+                       "(register_dos_dispatch_watchdog.ps1)")
+    w = payload.get("workers") or {}
+    if w.get("silent_count"):
+        nums = " ".join(f"#{s.get('issue')}" for s in (w.get("silent") or [])[:8])
+        actions.append(f"⚠ {w.get('silent_count')} worker(s) silent (produced nothing): {nums}")
+    bh = payload.get("backend_health") or {}
+    for r in [x for x in (bh.get("stub_rate") or []) if x.get("majority_stub")][:4]:
+        actions.append(f"⚠ {r.get('product')} majority-stub {r.get('stub')}/{r.get('total')} recent logs")
+    for r in (bh.get("dead") or [])[:4]:
+        actions.append(f"🔴 {r.get('product')} backend held dead → lane "
+                       f"{r.get('abandoned_lane') or '?'} reallocated")
+    hh = payload.get("hook_health") or {}
+    for r in [x for x in (hh.get("by_backend") or []) if x.get("all_sessions_unhooked")][:4]:
+        actions.append(f"⚠ {r.get('product')} guard-hooks UNBOUND "
+                       f"{r.get('sessions')}/{r.get('sessions')} sess "
+                       f"({r.get('hook_failures')} fails) — running unhooked")
+    sup = payload.get("supervisor") or {}
+    if sup.get("verdict") and sup.get("verdict") not in ("READY", "OK", None):
+        actions.append(f"⚠ supervisor {sup.get('verdict')} "
+                       f"(alive {sup.get('alive')}/{sup.get('target')})")
+
+    if actions:
+        lines.extend(actions)
+    elif payload.get("ok"):
+        lines.append("✓ healthy — nothing needs an operator")
+    return "\n".join(lines) if lines else "(no dispatcher signal)"
+
+
 def slack_text(payload: dict[str, Any]) -> str:
     """The Slack message body for a status card: a one-line headline (so the channel
-    preview and notification carry the verdict) above the full boxed card in a code
-    fence (monospace keeps the box-drawing aligned)."""
+    preview and notification carry the verdict) above the COMPACT, signal-dense card
+    (``render_slack``). The boxed ``render`` stays the terminal / committed-doc surface;
+    Slack gets mrkdwn, not a monospace box, so the channel/phone reader scans state,
+    not chrome (see the fleet-slack signal scorecard in tools/fleet_slack_status.py)."""
     import slack_post  # sibling module in tools/
 
     verdict = payload.get("verdict")
     ok = payload.get("ok")
     headline = f"*dispatch status:* `{verdict}` ({'ok' if ok else 'ACTION'})"
-    return headline + "\n" + slack_post.wrap_code(render(payload))
+    return slack_post.append_signal_noise(headline + "\n" + render_slack(payload))
 
 
 def post_to_slack(payload: dict[str, Any], *, channel: str = "",

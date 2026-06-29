@@ -103,13 +103,16 @@ class ResolutionTests(unittest.TestCase):
             self.assertIn("scoreboard-fallback", src)
 
     def test_channel_precedence_explicit_then_env_then_default(self):
-        with _EnvGuard():
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = Path(d)
             self.assertEqual(sp.resolve_channel("C0EXPLICIT", default="C0DEF")[0], "C0EXPLICIT")
             os.environ["FAK_DISPATCH_CHANNEL"] = "C0ENV"
             self.assertEqual(sp.resolve_channel("", default="C0DEF")[0], "C0ENV")
             del os.environ["FAK_DISPATCH_CHANNEL"]
-            self.assertEqual(sp.resolve_channel("", default="C0DEF"), ("C0DEF", "built-in default"))
-            self.assertEqual(sp.resolve_channel("", default=""), ("", "unset"))
+            self.assertEqual(sp.resolve_channel("", default="C0DEF", start=root),
+                             ("C0DEF", "built-in default"))
+            self.assertEqual(sp.resolve_channel("", default="", start=root), ("", "unset"))
 
 
 class SendTests(unittest.TestCase):
@@ -130,7 +133,9 @@ class SendTests(unittest.TestCase):
             self.assertTrue(call["url"].endswith("/chat.postMessage"))
             self.assertEqual(call["headers"]["Authorization"], "Bearer xoxb-shared-999")
             self.assertEqual(call["body"]["channel"], "C0DISPATCH")
-            self.assertEqual(call["body"]["text"], "dispatch is green")
+            self.assertIn("dispatch is green", call["body"]["text"])
+            self.assertIn("S/N self-score", call["body"]["text"])
+            self.assertIn("signal_noise", res)
 
     def test_code_wraps_in_fence(self):
         import tempfile
@@ -140,6 +145,7 @@ class SendTests(unittest.TestCase):
             sp.send("│ card │", code=True, transport=rec, start=root)
             self.assertTrue(rec.calls[0]["body"]["text"].startswith("```\n"))
             self.assertIn("│ card │", rec.calls[0]["body"]["text"])
+            self.assertIn("S/N self-score", rec.calls[0]["body"]["text"])
 
     def test_dry_run_resolves_but_never_calls_transport(self):
         import tempfile
@@ -212,7 +218,21 @@ class EventTests(unittest.TestCase):
             res = sp.event("supervisor respawned", "pid=42", level="warn",
                            transport=rec, start=root)
             self.assertTrue(res["posted"])
-            self.assertEqual(rec.calls[0]["body"]["text"], "⚠️ *supervisor respawned* — pid=42")
+            self.assertIn("⚠️ *supervisor respawned* — pid=42", rec.calls[0]["body"]["text"])
+            self.assertIn("S/N self-score", rec.calls[0]["body"]["text"])
+
+
+class SignalNoiseTests(unittest.TestCase):
+    def test_signal_noise_score_counts_frame_as_noise(self):
+        score = sp.signal_noise_score("*headline*\n```\n┌ frame\nvalue\n└ end\n```")
+        self.assertEqual(score["signal"], 2)
+        self.assertEqual(score["noise"], 5)
+        self.assertIn("S/N self-score", sp.signal_noise_line(score))
+
+    def test_append_signal_noise_is_idempotent(self):
+        once = sp.append_signal_noise("hello")
+        twice = sp.append_signal_noise(once)
+        self.assertEqual(once, twice)
 
 
 class RedactTests(unittest.TestCase):

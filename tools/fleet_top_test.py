@@ -199,8 +199,10 @@ class SlackPostTest(unittest.TestCase):
         self.assertIn("*fleet status:*", text)
         self.assertIn("session(s)", text)
         self.assertIn("accounts usable", text)
-        self.assertIn("```", text)                # fenced for monospace
-        self.assertIn("ATTENTION", text)          # the frame body is included
+        self.assertIn("sessions:", text)
+        self.assertIn("accounts:", text)
+        self.assertIn("S/N self-score", text)
+        self.assertNotIn("```", text)             # Slack uses compact mrkdwn.
 
     def test_post_to_slack_via_injected_transport(self):
         import json as _json
@@ -222,6 +224,7 @@ class SlackPostTest(unittest.TestCase):
         self.assertEqual(verdict["channel"], "C0FLEET")
         self.assertEqual(calls[0]["auth"], "Bearer xoxb-test-tok")
         self.assertIn("fleet status", calls[0]["body"]["text"])
+        self.assertEqual(calls[0]["body"]["text"].count("S/N self-score"), 1)
 
     def test_post_to_slack_dry_run_does_not_call_transport(self):
         import os

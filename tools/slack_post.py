@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 SCHEMA = "fak-slack-post/1"
+SN_MARKER = "S/N self-score"
 
 # The gitignored file every Slack surface reads its token/channel from — the same
 # constant internal/slackenv exports (slackenv.EnvFileName). Kept byte-identical so a
@@ -232,6 +233,57 @@ def wrap_code(text: str) -> str:
     return "```\n" + text.rstrip("\n") + "\n```"
 
 
+def signal_noise_score(text: str, *, signal: int | None = None,
+                       noise: int | None = None,
+                       basis: str = "message facts vs transport/frame context") -> dict[str, Any]:
+    """Return the per-message S/N meta self-score carried by Slack reports.
+
+    This is a self-score, not Slack readback: the message counts non-empty content
+    lines as signal and code-fence/box/source wrapper lines as noise. Callers may pass
+    explicit counts when they have a stronger domain fold.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if signal is None or noise is None:
+        noise_lines = 0
+        signal_lines = 0
+        for ln in lines:
+            if (ln == "```" or ln.startswith("┌") or ln.startswith("└")
+                    or ln.startswith("_posted by") or SN_MARKER in ln):
+                noise_lines += 1
+            else:
+                signal_lines += 1
+        signal = signal_lines if signal is None else signal
+        noise = 1 + noise_lines if noise is None else noise
+    signal = max(0, int(signal or 0))
+    noise = max(1, int(noise or 0))
+    return {
+        "signal": signal,
+        "noise": noise,
+        "ratio": round(signal / noise, 3),
+        "basis": basis.strip(),
+    }
+
+
+def signal_noise_line(score: dict[str, Any]) -> str:
+    basis = str(score.get("basis") or "").strip()
+    line = ("S/N self-score "
+            f"{float(score.get('ratio') or 0):.1f} "
+            f"({int(score.get('signal') or 0)} signal / "
+            f"{int(score.get('noise') or 0)} noise)")
+    if basis:
+        line += ": " + basis
+    return line
+
+
+def append_signal_noise(text: str, score: dict[str, Any] | None = None) -> str:
+    if SN_MARKER in text:
+        return text
+    score = score or signal_noise_score(text)
+    if not text.strip():
+        return signal_noise_line(score)
+    return text.rstrip("\n") + "\n_" + signal_noise_line(score) + "_"
+
+
 # Level glyphs for one-line watchdog events (a respawn, an auth wall, a failed canary).
 # The watchdogs post a single actionable line, not a card, so a glyph + bold title reads
 # at a glance in the channel and in a mobile push preview.
@@ -292,6 +344,8 @@ def send(
     tok, tok_src = resolve_token(token_key, token_fallback, start=start)
     chan, chan_src = resolve_channel(channel, channel_key, default_channel, start=start)
     body = wrap_code(text) if code else text
+    sn = signal_noise_score(body)
+    body = append_signal_noise(body, sn)
 
     base = {
         "schema": SCHEMA,
@@ -304,6 +358,7 @@ def send(
         "ts": None,
         "error": None,
         "skipped": None,
+        "signal_noise": sn,
     }
 
     if not chan:
@@ -333,11 +388,12 @@ def send(
 def _render(result: dict[str, Any]) -> str:
     if result.get("posted"):
         return f"slack_post: posted to {result['channel']} (ts={result.get('ts')})"
+    sn = result.get("signal_noise") or {}
     if result.get("dry_run"):
         return (f"slack_post (dry-run): would post to "
                 f"{result['channel'] or '(unset)'} [{result['channel_source']}]; "
                 f"token {redact_token('x' if result['token_set'] else '')} "
-                f"[{result['token_source']}]")
+                f"[{result['token_source']}]; {signal_noise_line(sn)}")
     if result.get("skipped"):
         return f"slack_post: skipped — {result['skipped']}"
     return f"slack_post: FAILED — {result.get('error')}"

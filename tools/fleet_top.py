@@ -370,10 +370,94 @@ def _footer(snap: dict[str, Any], interval: float | None) -> str:
 
 # ----- slack -----------------------------------------------------------------
 
+def _sess_summary(sess: dict[str, Any]) -> str:
+    """One compact line of the session breakdown — chip + count + dominant cause per
+    non-empty category, in render order, suppressing the zero rows the boxed frame
+    still prints a header for."""
+    by_cat = sess.get("by_category") or {}
+    causes = sess.get("causes") or {}
+    bits: list[str] = []
+    for cat in CATEGORY_ORDER + sorted(set(by_cat) - set(CATEGORY_ORDER)):
+        n = by_cat.get(cat)
+        if not n:
+            continue
+        chip = CHIP[CATEGORY_CHIP.get(cat, "white")]
+        cz = causes.get(cat) or {}
+        top = max(cz.items(), key=lambda kv: kv[1])[0] if cz else ""
+        bits.append(f"{chip}{n} {cat.lower()}" + (f"({top})" if top and top != cat.lower() else ""))
+    return " · ".join(bits)
+
+
+_BLOCK_SHORT = {"auth": "/login", "access": "access-wall"}
+
+
+def _acct_summary(acc: dict[str, Any]) -> str:
+    """One compact GLANCE line of account health: available tags, then each
+    throttled / blocked account with a terse status (reset time, ``/login``,
+    ``access-wall``). The full reason + the fix command live in the ATTENTION
+    lines, so the summary never restates them — it points, the attention acts."""
+    bits: list[str] = []
+    avail = acc.get("available") or []
+    if avail:
+        bits.append(f"🟢 {', '.join(avail)}")
+    for t in acc.get("throttled") or []:
+        bits.append(f"🔴 {t.get('tag')} throttled→{t.get('reset') or '?'}")
+    for b in acc.get("blocked") or []:
+        short = _BLOCK_SHORT.get(b.get("kind")) or b.get("reason")
+        bits.append(f"🔴 {b.get('tag')} {short}")
+    return " · ".join(bits)
+
+
+def slack_compact(snap: dict[str, Any]) -> str:
+    r"""The COMPACT Slack body for a fleet-top snapshot — the signal-dense peer of
+    ``render_frame`` (which keeps the boxed live-dashboard chrome for the terminal).
+
+    ``render_frame`` is built for a refreshing terminal: a ``┌─ … ─┐`` rule padded to
+    78 cells, blank lines between sections, a two-space indent on every row, and a
+    ``└─ … snapshot ─┘`` footer. Posted to Slack — read on a phone, NOT a refreshing
+    terminal — that box-drawing, padding, and blank-line scaffolding is pure noise the
+    reader scans past to reach the one thing that needs them: the ATTENTION items and
+    their resume command.
+
+    This keeps the signal and drops the chrome: a one-line session breakdown, a
+    one-line account-health line (both suppressing the zero rows the boxed frame still
+    prints a header for), then ONE line per attention item carrying its command as
+    inline code (copy-paste on mobile). A quiet fleet collapses to the two summary
+    lines plus a single ``✓``. Pure given the snapshot; no fence, no box, no rules."""
+    if snap.get("error"):
+        return f"🔴 signal unavailable: {snap['error']}"
+    sess = snap.get("sessions") or {}
+    acc = snap.get("accounts") or {}
+    attn = snap.get("attention") or []
+    lines: list[str] = []
+    ssum = _sess_summary(sess)
+    if ssum:
+        lines.append("sessions: " + ssum)
+    asum = _acct_summary(acc)
+    if asum:
+        lines.append("accounts: " + asum)
+    for item in attn:
+        chip = CHIP["red"] if item.get("level") == "crit" else CHIP["yellow"]
+        line = f"{chip} {item.get('title', '')}"
+        detail = item.get("detail")
+        if detail:
+            line += f" — {detail}"
+        cmd = item.get("command")
+        if cmd:
+            line += f" → `{cmd}`"
+        lines.append(line)
+    if not attn:
+        lines.append("✓ no attention — fleet is quiet")
+    return "\n".join(lines) if lines else "(no fleet signal)"
+
+
 def slack_text(snap: dict[str, Any]) -> str:
     """The Slack body for a fleet-top snapshot: a one-line headline (sessions /
     usable accounts / attention count, so the channel preview carries the state)
-    above the plain (color-off) frame in a code fence for monospace alignment."""
+    above the COMPACT, signal-dense body (``slack_compact``). The boxed
+    ``render_frame`` stays the terminal surface; Slack gets mrkdwn, not a monospace
+    box, so the channel/phone reader scans state, not chrome (see the fleet-slack
+    signal scorecard in tools/fleet_slack_status.py)."""
     import slack_post  # sibling module in tools/
 
     sess = snap.get("sessions") or {}
@@ -383,8 +467,7 @@ def slack_text(snap: dict[str, Any]) -> str:
     headline = (f"*fleet status:* {sess.get('total', 0)} session(s), "
                 f"{acc.get('usable', 0)}/{acc.get('total', 0)} accounts usable, "
                 f"{len(attn)} attention" + (f" ({crit} critical)" if crit else ""))
-    frame = render_frame(snap, color=False, interval=None)
-    return headline + "\n" + slack_post.wrap_code(frame)
+    return slack_post.append_signal_noise(headline + "\n" + slack_compact(snap))
 
 
 def post_to_slack(snap: dict[str, Any], *, channel: str = "",
