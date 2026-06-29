@@ -1,15 +1,16 @@
-package capindex
+package capindexgw
 
 import (
 	"encoding/json"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/capindex"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
-// A2AResolver wraps the existing gateway/a2a.go code as a Resolver.
+// A2AResolver wraps the existing gateway/a2a.go code as a capindex.Resolver.
 // It proves the loader is protocol-blind: this resolver exposes A2A methods
-// as generic Capabilities, using the same abi.Capability type that MCP
+// as generic Capabilities, using the same capindex.Capability type that MCP
 // and skills use.
 type A2AResolver struct {
 	// No server reference needed; A2A uses a static registry
@@ -22,11 +23,11 @@ func NewA2AResolver() *A2AResolver {
 
 // Index returns cheap cards only — the at-rest cost.
 // For A2A, this is the method registry (name + description + scope).
-func (r *A2AResolver) Index() []CapCard {
+func (r *A2AResolver) Index() []capindex.CapCard {
 	// Use the existing A2A method registry from gateway/a2a.go
 	methodSpecs := gateway.A2AMethodRegistryForResolver()
 
-	cards := make([]CapCard, 0, len(methodSpecs))
+	cards := make([]capindex.CapCard, 0, len(methodSpecs))
 	for _, spec := range methodSpecs {
 		// Serialize the card for CapCard.CardBytes
 		cardBytes, _ := json.Marshal(map[string]any{
@@ -38,9 +39,9 @@ func (r *A2AResolver) Index() []CapCard {
 		// Digest is a hash of the method definition
 		digest := simpleDigest(spec.Name + ":" + spec.Scope)
 
-		cards = append(cards, CapCard{
-			Ref: CapRef{
-				Kind:    CapKindA2AAgent,
+		cards = append(cards, capindex.CapCard{
+			Ref: capindex.CapRef{
+				Kind:    capindex.CapKindA2AAgent,
 				Name:    spec.Name,
 				Version: "", // A2A methods don't version in this form
 			},
@@ -56,9 +57,9 @@ func (r *A2AResolver) Index() []CapCard {
 
 // Fault pages in the full body for a given reference on demand.
 // For A2A, this is the full method spec including inputs/outputs.
-func (r *A2AResolver) Fault(ref CapRef) (Capability, error) {
-	if ref.Kind != CapKindA2AAgent {
-		return Capability{}, ErrKindMismatch
+func (r *A2AResolver) Fault(ref capindex.CapRef) (capindex.Capability, error) {
+	if ref.Kind != capindex.CapKindA2AAgent {
+		return capindex.Capability{}, capindex.ErrKindMismatch
 	}
 
 	// Look up the method by name
@@ -69,7 +70,7 @@ func (r *A2AResolver) Fault(ref CapRef) (Capability, error) {
 			body, _ := json.Marshal(spec)
 			digest := simpleDigest(spec.Name + ":" + spec.Scope)
 
-			return Capability{
+			return capindex.Capability{
 				Ref:    ref,
 				Digest: digest,
 				Body:   body,
@@ -79,5 +80,5 @@ func (r *A2AResolver) Fault(ref CapRef) (Capability, error) {
 		}
 	}
 
-	return Capability{}, ErrNotFound
+	return capindex.Capability{}, capindex.ErrNotFound
 }

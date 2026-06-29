@@ -1,13 +1,14 @@
-package capindex
+package capindexgw
 
 import (
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/capindex"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 // TestC5ProtocolBlindLoader proves that the MCP and A2A resolvers
-// use the same abi.Capability type, demonstrating the loader is
+// use the same capindex.Capability type, demonstrating the loader is
 // protocol-blind (issue #1108, C5).
 func TestC5ProtocolBlindLoader(t *testing.T) {
 	// Create MCP resolver
@@ -28,9 +29,9 @@ func TestC5ProtocolBlindLoader(t *testing.T) {
 
 	// Verify MCP cards have the correct kind
 	for _, card := range mcpCards {
-		if card.Ref.Kind != CapKindMCPTool {
+		if card.Ref.Kind != capindex.CapKindMCPTool {
 			t.Errorf("MCP card %s has wrong kind: got %v, want %v",
-				card.Ref.Name, card.Ref.Kind, CapKindMCPTool)
+				card.Ref.Name, card.Ref.Kind, capindex.CapKindMCPTool)
 		}
 		// Verify the card structure is the same across protocols
 		if card.Digest == "" {
@@ -46,9 +47,9 @@ func TestC5ProtocolBlindLoader(t *testing.T) {
 
 	// Verify A2A cards have the correct kind
 	for _, card := range a2aCards {
-		if card.Ref.Kind != CapKindA2AAgent {
+		if card.Ref.Kind != capindex.CapKindA2AAgent {
 			t.Errorf("A2A card %s has wrong kind: got %v, want %v",
-				card.Ref.Name, card.Ref.Kind, CapKindA2AAgent)
+				card.Ref.Name, card.Ref.Kind, capindex.CapKindA2AAgent)
 		}
 		// Verify the card structure is the same across protocols
 		if card.Digest == "" {
@@ -63,12 +64,12 @@ func TestC5ProtocolBlindLoader(t *testing.T) {
 	}
 
 	// PROVE the loader is protocol-blind: both Capability types
-	// use the same abi.Capability field, proving they're not protocol-specific
-	var mcpCap, a2aCap Capability
+	// use the same capindex.Capability field, proving they're not protocol-specific
+	var mcpCap, a2aCap capindex.Capability
 	_ = mcpCap.Caps // Both have the same Caps field type: []abi.Capability
 	_ = a2aCap.Caps
 
-	t.Logf("PROOF: Both MCP and A2A use the same Capability struct with abi.Capability field")
+	t.Logf("PROOF: Both MCP and A2A use the same capindex.Capability struct with abi.Capability field")
 	t.Logf("  MCP cards: %d, A2A cards: %d", len(mcpCards), len(a2aCards))
 	t.Logf("  Example MCP card: %s", mcpCards[0].Ref.Name)
 	t.Logf("  Example A2A card: %s", a2aCards[0].Ref.Name)
@@ -140,3 +141,9 @@ func TestA2AResolverFoldingProvesFolded(t *testing.T) {
 	t.Logf("PROOF: A2A resolver folds gateway/a2a.go (A2AMethodRegistryForResolver)")
 	t.Logf("  Folded %d methods from gateway/a2a.go", len(cards))
 }
+
+// Compile-time proof that both adapters satisfy the protocol-blind seam.
+var (
+	_ capindex.Resolver = (*MCPResolver)(nil)
+	_ capindex.Resolver = (*A2AResolver)(nil)
+)

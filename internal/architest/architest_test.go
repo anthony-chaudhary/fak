@@ -56,7 +56,7 @@ var tier = map[string]int{
 	"callavoid":        1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"accounts":         1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
-	"bgloop": 1, "cachewitness": 1, "cmdutil": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newmodel": 1, "numfmt": 1,
+	"bgloop": 1, "binstamp": 1, "cachewitness": 1, "covmatrix": 1, "defaultvaluescore": 1, "dojocal": 1, "experiments": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1,
 	"modelladder":     2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":        2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
 	"skillenv":        4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
@@ -79,20 +79,17 @@ var tier = map[string]int{
 	"harvest": 2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
 	"journal": 2, "gitgate": 2, "safecommit": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
+	"capindex": 2, // protocol-blind capability keystone (#1104 C1): CapRef/Capability/Index/Resolver + skill resolver, imports only abi(0). The gateway-backed MCP/A2A resolvers live in capindexgw(4) so the core stays importable by the tier-3 skill-loader (ctxresidency/ctxmmu, #1106).
 
 	"ifc": 3, "normgate": 3, "secretgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3, "toolsandbox": 3, "terminalbench": 3,
 	"browseraction": 3,                // browser/computer-use action-mediation harness: composes webbench actions with policy/adjudicator, off the live request path.
 	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
-	// capindex is tier-4 ONLY because its mcp/a2a resolvers import gateway(4) (#1104 C1).
-	// DEBT: the core CapRef/Capability/Index/skill-resolver want tier-1/2 so the tier-3 skill-loader
-	// (ctxresidency/ctxmmu, #1106) can import them — invert the resolvers through a registration seam,
-	// then drop this to its honest low tier. Until then, tier-3 dependents key on a local CapKey mirror.
-	"capindex":  4,
-	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
-	"agenttest": 4, // public agent-workflow TEST harness (#238, D-008): deterministic fixtures + tool-call assertion library + mock tool responses + reproduce-from-transcript replay; imports agent(4), off the hot path.
-	"ablate":    4, // the N-arm self-ablation sweep: a bench sibling; imports bench(4)+registrations(4)+metrics(1), off the hot path.
+	"capindexgw": 4, // gateway-backed capindex resolvers (MCP tools / A2A methods): the adapter that couples capindex(2) to gateway(4). It lives at the higher tier so the capindex keystone itself stays tier-2 and importable by the tier-3 skill-loader.
+	"tracesink":  4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
+	"agenttest":  4, // public agent-workflow TEST harness (#238, D-008): deterministic fixtures + tool-call assertion library + mock tool responses + reproduce-from-transcript replay; imports agent(4), off the hot path.
+	"ablate":     4, // the N-arm self-ablation sweep: a bench sibling; imports bench(4)+registrations(4)+metrics(1), off the hot path.
 
 	"tokenizer":       1,
 	"answershape":     1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
@@ -134,6 +131,7 @@ var tier = map[string]int{
 	"leaseref":        1, // cross-machine lease VISIBILITY substrate (#825): persists a lease record under refs/fak/locks/<id> so lease state rides ordinary git fetch/push between clones. Distribution, NOT atomic acquisition. stdlib-only, shells to git off the hot path through one Runner seam, imports nothing internal.
 	"guard":           1, // agent-spawn containment seam (#824): the Linux Landlock read-only-.git/hooks hook-floor for the child `fak guard` spawns, via a re-exec trampoline. Pure spec/resolution core + raw-syscall linux impl + no-op twin; opt-in, off by default, fails open; imports only stdlib (syscall/unsafe on linux), nothing internal.
 	"pythongate":      2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
+	"treedoctor":      2, // tree-hygiene doctor over safecommit's lock seam plus git worktree reads; mechanism/tool leaf, off the hot path.
 	"gardenbundle":    3, // the garden bundle: a read-only fold-over-folds that runs the grandfathered Python gardening passes (scorecard control pane + fresh status, +loop-audit under --deep), reads each control-pane payload, and folds one schema/ok/verdict/finding envelope. Composer: composes other tools' outputs (shelling out off the hot path), imports nothing internal.
 	"savingsvector":   1, // pure four-account saving-decomposition lens over a turnbench Report's already-measured fields (local_cpu/gpu_prefill/context_window/wall_clock, labeled per axis); stdlib-only, imports nothing internal, off the hot path.
 	"swebenchsota":    2, // SWE-bench SOTA leaderboard snapshot: a tool-shaped leaf that extracts the embedded leaderboard JSON (regex+unescape), folds the per-group SOTA, and emits a versioned snapshot. net/http fetch off the hot path; imports nothing internal.
@@ -403,16 +401,17 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 
 // chatEndpointRole names every internal package allowed to reference the OpenAI
 // chat-completions endpoint path in its NON-TEST source, each paired with the role
-// that earns it. The kernel must have exactly ONE outbound chat client: a second
-// copy is the TICKETS-T4 regression — a degenerate `engine.HTTPEngine` once
-// duplicated the live planner (spoke a bespoke `tool=X args=Y` prompt, never wired,
-// never spoke real tool-calling) and the seam *entrenched* over time before it was
-// deleted. `agent` owns the client (`HTTPPlanner`); `gateway` is the inbound SERVER
-// of that route (the adjudication proxy), not a client, so it legitimately names the
-// path too. cmd/fak's help text also names it but lives outside internal/, so it is
+// that earns it. The kernel must not grow accidental duplicate chat clients: a
+// degenerate `engine.HTTPEngine` once duplicated the live planner (spoke a bespoke
+// `tool=X args=Y` prompt, never wired, never spoke real tool-calling) and the seam
+// *entrenched* over time before it was deleted. `agent` owns the general outbound
+// planner (`HTTPPlanner`); `engine` owns the narrow vLLM EngineDriver adapter; and
+// `gateway` is the inbound SERVER of that route (the adjudication proxy), not a
+// client. cmd/fak's help text also names it but lives outside internal/, so it is
 // not scanned.
 var chatEndpointRole = map[string]string{
 	"agent":      "the single outbound chat-completions client (HTTPPlanner)",
+	"engine":     "the vLLM EngineDriver adapter's OpenAI-compatible upstream route",
 	"gateway":    "the inbound /v1/chat/completions server route (adjudication proxy)",
 	"webbench":   "the off-path serving-parity benchmark client (not a live planner)",
 	"guardtrace": "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
@@ -894,25 +893,25 @@ func TestFoldSitesOrderByFoldRank(t *testing.T) {
 	}
 }
 
-// defaultBuildContext is the build context of a plain `go build ./cmd/fak` — the
-// binary the fleet actually ships and runs on a live tool-call decision. It honors
-// //go:build constraints (CgoEnabled true so a cgo file that PASSES its constraints
-// is surfaced, not silently ignored) but sets NO opt-in tags: the GPU backends are
-// behind `cuda` / `darwin && metal` / `vulkan && windows` / `fakmetal`, none of
-// which a default build carries, so their cgo files are constraint-excluded. The
-// context is constructed explicitly (rather than reading the host's CGO_ENABLED /
-// GOOS / GOARCH) so the gate's verdict is the same on every node — a Mac, a GPU server,
-// and this Windows box all judge the SAME default-tag closure.
+// defaultBuildContext is the portable pure-Go artifact's build context. It honors
+// //go:build constraints (CgoEnabled true so an untagged cgo file is surfaced, not
+// silently ignored) but pins a non-Apple-Silicon target and sets NO opt-in tags: CUDA,
+// Vulkan, and Apple-Silicon Metal cgo files are constraint-excluded. The context is
+// constructed explicitly (rather than reading the host's CGO_ENABLED / GOOS / GOARCH)
+// so the gate's verdict is the same on every node — a Mac, a GPU server, and this
+// Windows box all judge the SAME pure-Go closure.
 func defaultBuildContext() build.Context {
 	ctx := build.Default
 	ctx.CgoEnabled = true // surface a tag-passing cgo file in CgoFiles; do not drop it
-	ctx.BuildTags = nil   // no cuda/metal/vulkan/fakmetal — the default `go build` tag set
+	ctx.GOOS = "linux"
+	ctx.GOARCH = "amd64"
+	ctx.BuildTags = nil // no cuda/vulkan tags; Apple-Silicon Metal requires darwin/arm64+cgo
 	return ctx
 }
 
 // TestRequestPathDefaultBuildIsCgoFree is DIRECTION.md's static-binary thesis turned
-// into a gate (the architest gap-(a) knife): the default `go build ./cmd/fak` — the
-// binary that adjudicates a live tool call — must link NO cgo. A cgo import pulls a C
+// into a gate (the architest gap-(a) knife): the portable pure-Go artifact — the
+// binary that adjudicates a live tool call without a device runtime — must link NO cgo. A cgo import pulls a C
 // toolchain and a dynamically-linked C runtime onto the decision path, voiding the
 // "one static Go binary, no external runtime" property the whole direction rests on
 // (the same thesis TestRequestPathInterpreterFree enforces for a script interpreter;
@@ -938,12 +937,12 @@ func defaultBuildContext() build.Context {
 // tag-passing cgo file into CgoFiles; a tag-gated one into IgnoredGoFiles. So
 // len(CgoFiles)>0 on the closure is exactly "the default build links cgo."
 //
-// Seeded GREEN (2026-06-20): the five cgo files in the module — compute/{cuda,metal,
-// vulkan}.go, metalgemm/metalgemm.go, model/awq_cuda.go — are ALL behind opt-in tags,
-// so under defaultBuildContext every request-path package reports zero CgoFiles
-// (verified: model/compute/metalgemm land their cgo files in IgnoredGoFiles). Adding
-// an untagged import "C" to any in-closure package turns the gate RED — exactly the
-// "cgo crept onto the default request path" regression it exists to catch. Like every
+// Seeded GREEN (2026-06-20, updated for #62): the cgo files in the module —
+// compute/{cuda,metal,vulkan}.go, metalgemm/metalgemm.go, model/awq_cuda.go — are
+// all behind either explicit device tags or Apple-Silicon+cgo constraints, so under
+// defaultBuildContext every request-path package reports zero CgoFiles. Adding an
+// untagged import "C" to any in-closure package turns the gate RED — exactly the
+// "cgo crept onto the pure-Go request path" regression it exists to catch. Like every
 // architest gate it is tightened over time, never loosened to admit a new violation.
 func TestRequestPathDefaultBuildIsCgoFree(t *testing.T) {
 	internal := internalDir(t)
@@ -974,8 +973,8 @@ func TestRequestPathDefaultBuildIsCgoFree(t *testing.T) {
 				"the default tag set satisfies. A cgo import puts a C toolchain + dynamically-linked "+
 				"C runtime on the live tool-call decision path, voiding the single-static-Go-binary "+
 				"property DIRECTION.md rests on. Put the cgo file behind an opt-in //go:build tag "+
-				"(as compute/cuda.go uses `cuda`, compute/metal.go uses `darwin && metal && cgo`, "+
-				"metalgemm uses `darwin && cgo && fakmetal`), or move it to an off-path package not "+
+				"(as compute/cuda.go uses `cuda`, compute/metal.go and metalgemm use "+
+				"`darwin && arm64 && cgo`), or move it to an off-path package not "+
 				"reachable from internal/registrations.", pkg, bp.CgoFiles)
 		}
 	}
@@ -1729,6 +1728,7 @@ var engineDriverRole = map[string]map[string]string{
 	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
 	"localtools": {"agent": "the local tool-call engine wired by cmd/fak"},
 	"mock":       {"engine": "the routing/mock engine behind the engine.route capability"},
+	"vllm":       {"engine": "the vLLM V1 public HTTP/KV-events/metrics adapter"},
 }
 
 // resolveEngineIDArg returns the engine-id string a RegisterEngine call's first argument
