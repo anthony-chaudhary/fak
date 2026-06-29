@@ -203,6 +203,18 @@ type gatewayMetrics struct {
 	vcacheMu           sync.Mutex
 	vcacheTurns        []vcacheobserve.Turn
 	vcacheTurnsDropped bool
+
+	// denyAllMu guards the deny-all stop family: a served turn whose EVERY proposed tool
+	// call the capability floor refused (kept==0). The wire MUST report such a turn as
+	// end_turn (else the client hangs hunting for the dropped tool_use block — the v0.15.0
+	// fix), but end_turn halts the agent loop though the model wanted to ACT — a STOP the
+	// agent did not choose. These two numbers make that otherwise-invisible "fak ended the
+	// turn" legible, and the consecutive gauge is the bounded signal the guard
+	// `--deny-all-continue` Stop-hook polls to auto-continue the agent past it. Kept off the
+	// locks above — a one-fold-per-served-turn path with no coupling to the cache families.
+	denyAllMu          sync.Mutex
+	denyAllStops       uint64 // cumulative deny-all turns this session
+	denyAllConsecutive uint64 // consecutive deny-all turns ending the most recent served turn (reset by any non-deny-all turn)
 }
 
 type inflightEntry struct {
@@ -512,6 +524,54 @@ func (m *gatewayMetrics) recordResetShadow(d ResetDecision) {
 	m.resetShadowMu.Unlock()
 }
 
+// recordAdjudicationOutcome folds one served turn's adjudication SHAPE into the deny-all
+// stop family. denyAll is true iff the model proposed >=1 tool call this turn and the
+// capability floor refused EVERY one (no survivor) — the case the wire reports as end_turn,
+// halting the agent though it wanted to act. A non-deny-all turn (at least one surviving
+// call, or a pure-text turn) RESETS the consecutive run, so the gauge reads the live "are we
+// stuck refusing?" depth a bounded auto-continue can act on. Called once per served
+// Anthropic turn on both wire paths. A no-op for a nil metrics.
+func (m *gatewayMetrics) recordAdjudicationOutcome(denyAll bool) {
+	if m == nil {
+		return
+	}
+	m.denyAllMu.Lock()
+	if denyAll {
+		m.denyAllStops++
+		m.denyAllConsecutive++
+	} else {
+		m.denyAllConsecutive = 0
+	}
+	m.denyAllMu.Unlock()
+}
+
+// denyAllSnapshot reads the deny-all accumulators under their lock. Pure read — the exit
+// summary, the Prometheus surface, and the guard Stop-hook gauge all fold the same two
+// numbers, so the views can never disagree.
+func (m *gatewayMetrics) denyAllSnapshot() (stops, consecutive uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	m.denyAllMu.Lock()
+	defer m.denyAllMu.Unlock()
+	return m.denyAllStops, m.denyAllConsecutive
+}
+
+// writeDenyAllMetrics renders the deny-all stop family: the cumulative count of turns the
+// floor refused entirely (forcing an unchosen end_turn) and the live consecutive-run gauge
+// the guard Stop-hook polls. Both are 0 on a healthy session, so the surface stays quiet
+// until the floor actually refuses a whole turn.
+func (m *gatewayMetrics) writeDenyAllMetrics(b *strings.Builder) {
+	stops, consec := m.denyAllSnapshot()
+	writeCounter(b, "fak_guard_deny_all_stops_total",
+		"Served turns whose EVERY proposed tool call the capability floor refused, forcing the wire to report end_turn (a stop the agent did not choose; the v0.15.0 contract that keeps the client from hanging on a dropped tool_use block). The guard --deny-all-continue Stop-hook reads the consecutive gauge below to auto-continue the agent past these.",
+		int64(stops))
+	writeHelpType(b, "fak_guard_deny_all_consecutive",
+		"Consecutive deny-all turns ending the most recent served turn (reset to 0 by any turn with a surviving or no tool call). The bounded signal the guard --deny-all-continue Stop-hook polls: 1..MAX continues the agent, above MAX it gives up and lets the turn end.",
+		"gauge")
+	fmt.Fprintf(b, "fak_guard_deny_all_consecutive %d\n", consec)
+}
+
 func (m *gatewayMetrics) observeHTTP(route, method string, status int, dur time.Duration) {
 	if m == nil {
 		return
@@ -633,6 +693,13 @@ type AdjudicationSummary struct {
 	// could not see before, since the prune result was discarded with no metric.
 	ToolPruneTurns uint64 `json:"tool_prune_turns"`
 	ToolPruneCount uint64 `json:"tool_prune_count"`
+
+	// DenyAllStops is how many served turns this session had EVERY proposed tool call
+	// refused by the floor, which the wire reports as end_turn — a STOP the agent did not
+	// choose (it wanted to act, the floor blocked all of it). Surfaced in the guard exit
+	// summary so the operator SEES how often fak ended a turn, the otherwise-invisible
+	// false-stop the --deny-all-continue Stop-hook auto-resumes the agent past.
+	DenyAllStops uint64 `json:"deny_all_stops"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -662,6 +729,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	// snapshot already copied it under compactMu); only attach a non-empty map so a clean
 	// session keeps the JSON field absent (omitempty).
 	sum.ToolPruneTurns, sum.ToolPruneCount = m.inboundToolPruneSnapshot()
+	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	if len(comp.bailReasons) > 0 {
 		sum.CompactionBailReasons = comp.bailReasons
 	}
@@ -1191,6 +1259,7 @@ func (s *Server) renderMetrics() string {
 	s.writeInKernelPressureTrimMetrics(&b)
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
+	m.writeDenyAllMetrics(&b)
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
 	m.writeRoutingMetrics(&b)         // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)
 	s.resumeProj.writeMetrics(&b)     // #941: resume projected-vs-observed residual (self-contained family)

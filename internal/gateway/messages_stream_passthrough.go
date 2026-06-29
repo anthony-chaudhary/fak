@@ -251,6 +251,12 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			p.flushedTools = true
 			p.flushHeldTools()
 		}
+		// Fold this turn's adjudication SHAPE into the deny-all stop family BEFORE relaying the
+		// (possibly end_turn-rewritten) message_delta: a deny-all (tools proposed, every one
+		// refused) is exactly the case relayMessageDelta rewrites to end_turn, the unchosen stop
+		// the guard Stop-hook resumes. A survivor — or a pure-text turn (no held tools) — resets
+		// the consecutive run. Once per turn (message_delta is terminal).
+		p.s.metrics.recordAdjudicationOutcome(len(p.toolOrder) > 0 && p.keptTools == 0)
 		p.complTok, p.finishReason = relayMessageDelta(p.send, ev.Data, p.complTok, len(p.toolOrder) > 0, p.keptTools)
 
 	case "message_stop":

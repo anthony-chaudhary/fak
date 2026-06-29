@@ -195,6 +195,43 @@ request boundary. Pass the trace id, the wrapper's observed `context_tokens`, an
 messages to distill; fak debits the budget, accepts only a budget-drained session, and
 returns `seed_messages` plus the fresh continuation trace for the new Claude window.
 
+### Deny-all auto-continue (no false stops)
+
+When the capability floor refuses **every** tool call in a turn (a single `rm -rf`, an
+unknown tool, or a whole batch all denied), the gateway must report `stop_reason: end_turn`
+to the client — if it reported `tool_use` with no `tool_use` block, Claude Code would hang
+hunting for a tool that was dropped. But `end_turn` tells the harness the assistant is
+**done**, so the agent loop **stops** and yields to you — even though the model wanted to
+act and was simply blocked. In an autonomous or `-p` run that is a **false stop**: the task
+is abandoned at the first refusal, and the model never gets to read fak's own
+`[fak] refused … choose an allowed alternative` note (it lands on a turn that already ended).
+
+`fak guard` fixes this in two layers — the wire stays correct, the harness keeps moving:
+
+1. **It's counted.** Every deny-all turn increments `fak_guard_deny_all_stops_total` and the
+   live `fak_guard_deny_all_consecutive` gauge on `/metrics`, and the exit summary prints a
+   `deny-all stops — N turn(s) …` line. So the otherwise-invisible "fak ended the turn" is
+   legible whether or not you act on it.
+2. **It's auto-resumed.** guard installs a Claude Code **`Stop` hook** that reads that gauge
+   and, when the last turn was a deny-all, **blocks the stop and re-prompts the agent** with
+   *"pick an allowed alternative and continue"* — so the loop keeps going instead of halting.
+   It is **on by default** (`--deny-all-continue=enforce`) and **bounded**
+   (`--deny-all-max`, default 3 consecutive continues) so a model that keeps re-proposing a
+   refused call cannot loop forever; once the model does something allowed, the counter
+   resets and the next real completion stops normally.
+
+```bash
+fak guard -- claude                          # auto-continue ON (enforce), max 3
+fak guard --deny-all-continue=shadow -- claude   # log the would-continue, still stop (observe first)
+fak guard --deny-all-continue=off -- claude      # restore the bare end_turn stop
+fak guard --deny-all-max 5 -- claude             # allow up to 5 consecutive auto-continues
+```
+
+The Stop hook is merged into the **same** `--settings` file as the PreCompact hook (a single
+`--settings` carries both), is fail-open (an unreachable gateway never wedges the agent), and
+applies to **Claude children only**. Caveat: it hooks the **main** agent's `Stop` event; a
+deny-all inside a `Task` subagent ends on `SubagentStop`, which is not yet auto-resumed.
+
 ### OpenCode
 
 [OpenCode](https://opencode.ai) speaks the OpenAI-compatible wire, so guard fronts it the

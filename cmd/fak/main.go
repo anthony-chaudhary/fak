@@ -156,6 +156,11 @@ func main() {
 	case "guard-precompact":
 		// Hidden: Claude Code PreCompact hook actuator installed by `fak guard`.
 		cmdGuardPreCompact(os.Args[2:])
+	case "guard-stophook":
+		// Hidden: Claude Code Stop hook actuator installed by `fak guard`. Reads the
+		// gateway's deny-all consecutive gauge and, in enforce mode, blocks an unchosen
+		// end_turn so the agent auto-continues past a fully-refused turn (bounded).
+		cmdGuardStopHook(os.Args[2:])
 	case guard.TrampolineVerb:
 		// Hidden: the Landlock hook-floor re-exec trampoline (Linux). `fak guard
 		// --landlock-hooks` re-execs itself into this verb, which applies the
@@ -205,6 +210,8 @@ func main() {
 		cmdGarden(os.Args[2:])
 	case "cadence":
 		cmdCadence(os.Args[2:])
+	case "rollup":
+		cmdRollup(os.Args[2:])
 	case "nightrun":
 		cmdNightrun(os.Args[2:])
 	case "sessions":
@@ -257,6 +264,8 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "learning-debt-dispatch":
+		cmdLearningDebtDispatch(os.Args[2:])
 	case "stopfailure":
 		cmdStopFailure(os.Args[2:])
 	case "cluster":

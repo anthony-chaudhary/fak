@@ -640,6 +640,11 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// per-turn fak-turn debug line, the buffered-wire twin of the streaming flushHeldTools call.
 	// resultAdmissions came from admitInboundResults on the SAME reqTrace earlier in this turn.
 	s.recordTurnSafety(reqTrace, adjs, resultAdmissions)
+	// Fold this turn's adjudication SHAPE into the deny-all stop family: a deny-all (the model
+	// proposed tools and the floor refused every one) is the turn the wire reports as end_turn
+	// below (AnthropicStopReason with no surviving call), the unchosen stop the guard Stop-hook
+	// resumes. A surviving call — or a pure-text turn (no adjs) — resets the consecutive run.
+	s.metrics.recordAdjudicationOutcome(len(adjs) > 0 && len(kept) == 0)
 
 	blocks := agent.AnthropicResponseBlocks(asst)
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)
