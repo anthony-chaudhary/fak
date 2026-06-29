@@ -162,6 +162,49 @@ def _detached_spawn(command: Sequence[str], workspace: Path) -> int | None:
     return proc.pid
 
 
+def slack_event(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The actionable Slack event for one tick, or None when nothing changed.
+
+    Pure: a respawn (or a dry-run "would respawn") is the only state worth a channel
+    post — a ``noop_alive`` tick (the steady state, every 2 min) is silent so the
+    watchdog never spams. Returns {title, detail, level} for slack_post.event."""
+    action = payload.get("action")
+    if action == "respawn":
+        return {"title": "dispatch supervisor respawned",
+                "detail": f"was DOWN; relaunched `dos loop --enact` "
+                          f"(target {payload.get('target')}) pid={payload.get('spawned_pid')}",
+                "level": "warn"}
+    if action == "would_respawn":
+        return {"title": "dispatch supervisor DOWN (dry-run)",
+                "detail": f"would relaunch `dos loop --enact` (target {payload.get('target')}); "
+                          f"set --live / FAK_DISPATCH_ENABLE=1 to respawn",
+                "level": "warn"}
+    return None  # noop_alive -> the steady state, no post
+
+
+def _slack_enabled(args_slack: bool) -> bool:
+    """Post events iff --slack OR the cron opt-in env FAK_DISPATCH_SLACK=1."""
+    return bool(args_slack) or os.environ.get("FAK_DISPATCH_SLACK") == "1"
+
+
+def maybe_post_slack(payload: dict[str, Any], *, enabled: bool, dry_run: bool = False,
+                     channel: str = "", transport: Any | None = None) -> dict[str, Any] | None:
+    """Post the tick's actionable event to Slack when enabled and the tick changed
+    state. Never raises — a missing poster or a Slack failure becomes a logged verdict.
+    Returns the slack_post verdict, or None when there was nothing to post / disabled."""
+    if not enabled:
+        return None
+    ev = slack_event(payload)
+    if ev is None:
+        return None
+    try:
+        import slack_post  # sibling module in tools/
+    except Exception as exc:  # noqa: BLE001
+        return {"posted": False, "error": f"slack_post unavailable: {exc}"}
+    return slack_post.event(ev["title"], ev["detail"], level=ev["level"],
+                            channel=channel, dry_run=dry_run, transport=transport)
+
+
 def render(payload: dict[str, Any]) -> str:
     return (
         f"dispatch-watchdog: action={payload['action']} alive={payload['alive']} "
@@ -178,6 +221,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--target", type=int, default=DEFAULT_TARGET, help="desired worker population")
     ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL, help="supervisor tick interval seconds")
     ap.add_argument("--live", action="store_true", help="actually respawn (else dry-run); FAK_DISPATCH_ENABLE=1 also enables")
+    ap.add_argument("--slack", action="store_true",
+                    help="post a Slack event on a respawn/state-change (FAK_DISPATCH_SLACK=1 also enables); "
+                         "a steady noop_alive tick stays silent")
+    ap.add_argument("--slack-dry-run", action="store_true",
+                    help="with --slack: report what WOULD be posted without sending")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -188,7 +236,20 @@ def main(argv: list[str] | None = None) -> int:
         workspace=ws, target=args.target, interval=args.interval, live=live,
         cmdlines=list_process_cmdlines(), dos_exe=dos_exe, spawn=_detached_spawn,
     )
+    slack_verdict = maybe_post_slack(payload, enabled=_slack_enabled(args.slack),
+                                     dry_run=args.slack_dry_run)
+    if slack_verdict is not None:
+        payload["slack"] = slack_verdict
     print(json.dumps(payload, indent=2) if args.json else render(payload))
+    if slack_verdict is not None and not args.json:
+        if slack_verdict.get("posted"):
+            print(f"slack: posted event to {slack_verdict.get('channel')}")
+        elif slack_verdict.get("dry_run"):
+            print(f"slack (dry-run): would post to {slack_verdict.get('channel') or '(unset)'}")
+        elif slack_verdict.get("skipped"):
+            print(f"slack: skipped — {slack_verdict.get('skipped')}")
+        else:
+            print(f"slack: FAILED — {slack_verdict.get('error')}")
     return 0
 
 

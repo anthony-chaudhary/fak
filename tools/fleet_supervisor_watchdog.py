@@ -39,6 +39,11 @@ JOB_DIR = os.environ.get("FAK_JOB_DIR", os.path.expanduser("~/Documents/GitHub/j
 TARGET = int(os.environ.get("FAK_SUPERVISOR_TARGET", "4"))
 ENABLED = _env_flag("FAK_SUPERVISOR_ENABLE")
 LOG_DIR = os.environ.get("FAK_WATCHDOG_LOG_DIR", os.path.join(HERE, "_watchdog"))
+# Post the RESPAWN event to Slack when --slack is passed OR the cron opt-in
+# FAK_DISPATCH_SLACK=1 is set. A respawn is the only thing this watchdog toasts, so
+# Slack carries exactly the "supervisor was down and I brought it back" events.
+SLACK = ("--slack" in sys.argv) or _env_flag("FAK_DISPATCH_SLACK")
+SLACK_DRY = "--slack-dry-run" in sys.argv
 
 
 def now_iso() -> str:
@@ -53,6 +58,25 @@ def note(msg: str) -> None:
     print(line)
 
 
+def post_slack_event(title: str, message: str, *, enabled: bool, dry_run: bool = False,
+                     transport=None):
+    """Post the respawn event to Slack via tools/slack_post when ``enabled``. Best-effort
+    and gated, exactly like the macOS toast — never raises, returns the slack_post verdict
+    or None when disabled. ``enabled`` is a parameter (not the import-time flag) so it is
+    testable in isolation."""
+    if not enabled:
+        return None
+    try:
+        import slack_post  # sibling module in tools/
+    except Exception as exc:  # noqa: BLE001
+        return {"posted": False, "error": f"slack_post unavailable: {exc}"}
+    try:
+        return slack_post.event(title, message, level="warn", dry_run=dry_run,
+                                transport=transport)
+    except Exception as exc:  # noqa: BLE001 — a Slack failure must never kill a tick
+        return {"posted": False, "error": str(exc)}
+
+
 def toast(title: str, message: str) -> None:
     try:
         subprocess.run(
@@ -62,6 +86,7 @@ def toast(title: str, message: str) -> None:
         )
     except Exception:
         pass
+    post_slack_event(title, message, enabled=SLACK, dry_run=SLACK_DRY)
 
 
 def supervisor_alive() -> list[int]:

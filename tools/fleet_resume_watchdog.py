@@ -52,6 +52,11 @@ def _env_flag(name: str) -> bool:
 
 
 LIVE = ("--live" in sys.argv) or _env_flag("FAK_LIVE")
+# Post actionable events (a real resume, an account that needs re-login) to Slack when
+# --slack is passed OR the cron opt-in FAK_DISPATCH_SLACK=1 is set. Dry-run resumes
+# never toast, so Slack only ever carries real resumes + auth walls (no dry-run noise).
+SLACK = ("--slack" in sys.argv) or _env_flag("FAK_DISPATCH_SLACK")
+SLACK_DRY = "--slack-dry-run" in sys.argv
 WINDOW_H = float(os.environ.get("FAK_WINDOW_H", "6"))
 MAX_PER_TICK = int(os.environ.get("FAK_MAX_PER_TICK", "2"))
 # How many times a session may be auto-resumed before the gate gives up and leaves
@@ -131,8 +136,32 @@ def note(msg: str) -> None:
     print(line)
 
 
+def post_slack_event(title: str, message: str, level: str = "info", *,
+                     enabled: bool, dry_run: bool = False, transport=None):
+    """Post one actionable resume event (a real resume, an auth wall) to Slack via
+    tools/slack_post when ``enabled``. Best-effort and gated, exactly like the macOS
+    toast — never raises, returns the slack_post verdict or None when disabled. ``enabled``
+    is a parameter (not a read of the import-time flag) so it is testable in isolation."""
+    if not enabled:
+        return None
+    try:
+        import slack_post  # sibling module in tools/
+    except Exception as exc:  # noqa: BLE001
+        return {"posted": False, "error": f"slack_post unavailable: {exc}"}
+    lvl = "warn" if level == "warn" else "resume"
+    try:
+        return slack_post.event(title, message, level=lvl, dry_run=dry_run,
+                                transport=transport)
+    except Exception as exc:  # noqa: BLE001 — a Slack failure must never kill a tick
+        return {"posted": False, "error": str(exc)}
+
+
 def toast(title: str, message: str, level: str = "info") -> None:
-    """macOS Notification Center + a durable notifications.log (best-effort)."""
+    """macOS Notification Center + a durable notifications.log + Slack (all best-effort).
+
+    This is the watchdog's single "tell the operator something happened" seam, so routing
+    Slack through here means every real resume and every auth wall lands in the channel
+    without sprinkling post calls across main()."""
     os.makedirs(LOG_DIR, exist_ok=True)
     with open(os.path.join(LOG_DIR, "notifications.log"), "a") as fh:
         fh.write(f"{now_iso()}  [{level}] {title} -- {message}\n")
@@ -150,6 +179,7 @@ def toast(title: str, message: str, level: str = "info") -> None:
         )
     except Exception:
         pass
+    post_slack_event(title, message, level, enabled=SLACK, dry_run=SLACK_DRY)
 
 
 def load_json(path: str, default):

@@ -137,5 +137,55 @@ class IsLiveEnabledTest(_EnvTestCase):
         self.assertIs(wd.is_live_enabled(False), True)
 
 
+class SlackEventTest(_EnvTestCase):
+    """slack_event is pure (post only on a state change); maybe_post_slack gates on
+    enabled and posts via the injected transport — no network, no real token/channel."""
+
+    def _payload(self, action: str) -> dict:
+        return {"schema": wd.SCHEMA, "alive": action == "noop_alive", "live": True,
+                "action": action, "workspace": "C:/work/fak", "target": 4,
+                "interval": 120, "command": ["dos", "loop", "--enact"],
+                "spawned_pid": 4242}
+
+    def test_slack_event_only_on_state_change(self) -> None:
+        self.assertIsNone(wd.slack_event(self._payload("noop_alive")))
+        respawn = wd.slack_event(self._payload("respawn"))
+        self.assertIsNotNone(respawn)
+        self.assertEqual(respawn["level"], "warn")
+        self.assertIn("respawned", respawn["title"])
+        would = wd.slack_event(self._payload("would_respawn"))
+        self.assertIsNotNone(would)
+        self.assertIn("dry-run", would["title"])
+
+    def test_maybe_post_slack_disabled_is_noop(self) -> None:
+        called: list = []
+        verdict = wd.maybe_post_slack(self._payload("respawn"), enabled=False,
+                                      transport=lambda *a: called.append(1))
+        self.assertIsNone(verdict)
+        self.assertEqual(called, [])
+
+    def test_maybe_post_slack_posts_on_respawn(self) -> None:
+        import json as _json
+        self.set_env("FAK_SCOREBOARD_TOKEN", "xoxb-test")
+        self.set_env("FAK_DISPATCH_CHANNEL", "C0WD")
+        calls: list = []
+
+        def transport(url, body, headers, timeout):
+            calls.append(_json.loads(body.decode("utf-8")))
+            return 200, _json.dumps({"ok": True, "ts": "1.1", "channel": "C0WD"})
+
+        verdict = wd.maybe_post_slack(self._payload("respawn"), enabled=True,
+                                      transport=transport)
+        self.assertTrue(verdict["posted"])
+        self.assertIn("respawned", calls[0]["text"])
+
+    def test_maybe_post_slack_noop_alive_posts_nothing(self) -> None:
+        calls: list = []
+        verdict = wd.maybe_post_slack(self._payload("noop_alive"), enabled=True,
+                                      transport=lambda *a: calls.append(1))
+        self.assertIsNone(verdict)
+        self.assertEqual(calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

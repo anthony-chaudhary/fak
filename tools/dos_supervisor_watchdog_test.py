@@ -495,5 +495,58 @@ class RunWatchdogLeaseGateWiringTest(unittest.TestCase):
         self.assertEqual(got["action"], "refuse")
 
 
+class SlackEventTest(unittest.TestCase):
+    """slack_event is pure (post only on an actionable tick); maybe_post_slack gates on
+    enabled and posts via the injected transport — no network, no real token/channel."""
+
+    def test_slack_event_only_on_actionable_action(self):
+        mod = load()
+        self.assertIsNone(mod.slack_event({"action": "noop", "reason": "at target"}))
+        self.assertIsNone(mod.slack_event({"action": "would_enact", "reason": "dry"}))
+        enacted = mod.slack_event({"action": "enacted", "reason": "canary on adjudicator"})
+        self.assertEqual(enacted["level"], "info")
+        self.assertIn("launched", enacted["title"])
+        failed = mod.slack_event({"action": "enact_failed", "reason": "nonzero",
+                                  "result": {"returncode": 9}})
+        self.assertEqual(failed["level"], "crit")
+        self.assertIn("rc=9", failed["detail"])
+        refused = mod.slack_event({"action": "refuse", "reason": "peer holds release"})
+        self.assertEqual(refused["level"], "warn")
+
+    def test_maybe_post_slack_disabled_is_noop(self):
+        mod = load()
+        called = []
+        verdict = mod.maybe_post_slack({"action": "enacted", "reason": "x"}, enabled=False,
+                                       transport=lambda *a: called.append(1))
+        self.assertIsNone(verdict)
+        self.assertEqual(called, [])
+
+    def test_maybe_post_slack_posts_on_enacted(self):
+        import json as _json
+        import os
+        mod = load()
+        saved = {k: os.environ.pop(k, None) for k in
+                 ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN")}
+        os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test"
+        os.environ["FAK_DISPATCH_CHANNEL"] = "C0SUP"
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append(_json.loads(body.decode("utf-8")))
+            return 200, _json.dumps({"ok": True, "ts": "1.1", "channel": "C0SUP"})
+
+        try:
+            verdict = mod.maybe_post_slack({"action": "enacted", "reason": "canary"},
+                                           enabled=True, transport=transport)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertTrue(verdict["posted"])
+        self.assertIn("launched", calls[0]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()

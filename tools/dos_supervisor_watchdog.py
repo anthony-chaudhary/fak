@@ -618,6 +618,52 @@ def route_defect_stop(workspace: Path, plan: dict[str, Any]) -> dict[str, Any] |
         return None  # fail-open: routing must never kill the supervisor loop
 
 
+def slack_event(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The actionable Slack event for one canary tick, or None when nothing happened.
+
+    Pure: only a launched canary (``enacted``), a failed launch (``enact_failed``), or a
+    refused launch (``refuse``) is worth a channel post — a ``noop`` / ``would_enact``
+    dry tick is the quiet steady state and stays silent so the gate never spams. Returns
+    {title, detail, level} for slack_post.event."""
+    action = payload.get("action")
+    reason = payload.get("reason") or ""
+    if action == "enacted":
+        return {"title": "DOS supervisor canary launched",
+                "detail": reason or "bounded canary worker dispatched", "level": "info"}
+    if action == "enact_failed":
+        rc = (payload.get("result") or {}).get("returncode")
+        return {"title": "DOS supervisor canary FAILED",
+                "detail": f"{reason} (rc={rc})", "level": "crit"}
+    if action == "refuse":
+        return {"title": "DOS supervisor canary refused",
+                "detail": reason or "a safety / cross-node lease gate blocked the launch",
+                "level": "warn"}
+    return None  # noop / would_enact -> quiet steady state
+
+
+def _slack_enabled(args_slack: bool) -> bool:
+    """Post events iff --slack OR the cron opt-in env FAK_DISPATCH_SLACK=1."""
+    return bool(args_slack) or os.environ.get("FAK_DISPATCH_SLACK") == "1"
+
+
+def maybe_post_slack(payload: dict[str, Any], *, enabled: bool, dry_run: bool = False,
+                     channel: str = "", transport: Any | None = None) -> dict[str, Any] | None:
+    """Post the canary tick's actionable event to Slack when enabled and the tick is
+    actionable. Never raises — a missing poster or Slack failure becomes a logged
+    verdict. Returns the slack_post verdict, or None when nothing to post / disabled."""
+    if not enabled:
+        return None
+    ev = slack_event(payload)
+    if ev is None:
+        return None
+    try:
+        import slack_post  # sibling module in tools/
+    except Exception as exc:  # noqa: BLE001
+        return {"posted": False, "error": f"slack_post unavailable: {exc}"}
+    return slack_post.event(ev["title"], ev["detail"], level=ev["level"],
+                            channel=channel, dry_run=dry_run, transport=transport)
+
+
 def render(payload: dict[str, Any]) -> str:
     command = " ".join(payload.get("command") or [])
     lines = [
@@ -646,6 +692,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--live", action="store_true", help="actually run the worker dispatch")
     ap.add_argument("--allow-dirty", action="store_true", help="permit --live from a dirty worktree")
     ap.add_argument("--allow-stale", action="store_true", help="permit --live when the workspace is behind or diverged from upstream")
+    ap.add_argument("--slack", action="store_true",
+                    help="post a Slack event on a launched/failed/refused canary "
+                         "(FAK_DISPATCH_SLACK=1 also enables); a noop tick stays silent")
+    ap.add_argument("--slack-dry-run", action="store_true",
+                    help="with --slack: report what WOULD be posted without sending")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -662,10 +713,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.live and payload.get("action") == "enact_failed":
         # Defect STOP: self-route a pickable findings-queue row before we exit (#381).
         route_defect_stop(workspace, payload)
+    slack_verdict = maybe_post_slack(payload, enabled=_slack_enabled(args.slack),
+                                     dry_run=args.slack_dry_run)
+    if slack_verdict is not None:
+        payload["slack"] = slack_verdict
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
         print(render(payload))
+        if slack_verdict is not None:
+            if slack_verdict.get("posted"):
+                print(f"slack: posted event to {slack_verdict.get('channel')}")
+            elif slack_verdict.get("dry_run"):
+                print(f"slack (dry-run): would post to {slack_verdict.get('channel') or '(unset)'}")
+            elif slack_verdict.get("skipped"):
+                print(f"slack: skipped — {slack_verdict.get('skipped')}")
+            else:
+                print(f"slack: FAILED — {slack_verdict.get('error')}")
     if payload.get("action") == "enact_failed":
         result = payload.get("result") or {}
         return int(result.get("returncode") or 1)

@@ -232,6 +232,34 @@ def wrap_code(text: str) -> str:
     return "```\n" + text.rstrip("\n") + "\n```"
 
 
+# Level glyphs for one-line watchdog events (a respawn, an auth wall, a failed canary).
+# The watchdogs post a single actionable line, not a card, so a glyph + bold title reads
+# at a glance in the channel and in a mobile push preview.
+EVENT_GLYPH = {"info": "🟢", "resume": "♻️", "warn": "⚠️", "crit": "🔴"}
+
+
+def event_text(title: str, detail: str = "", *, level: str = "info") -> str:
+    """Format one actionable watchdog event: ``{glyph} *title* — detail``. Pure; the
+    watchdogs share it so a respawn/auth-wall/failed-canary line reads the same way
+    whichever loop emitted it."""
+    glyph = EVENT_GLYPH.get(level, "•")
+    line = f"{glyph} *{title}*"
+    if detail:
+        line += f" — {detail}"
+    return line
+
+
+def event(title: str, detail: str = "", *, level: str = "info",
+          **send_kwargs: Any) -> dict[str, Any]:
+    """Post one actionable watchdog event (a respawn, an auth wall, a failed canary).
+
+    A thin wrapper over ``send`` that formats a single glyph-prefixed line — the
+    watchdogs call this on a STATE CHANGE only (never every tick), so the channel
+    carries exactly the events an operator would act on. All ``send`` keyword args
+    (channel, dry_run, transport, …) pass through; returns the same typed verdict."""
+    return send(event_text(title, detail, level=level), **send_kwargs)
+
+
 def send(
     text: str,
     *,

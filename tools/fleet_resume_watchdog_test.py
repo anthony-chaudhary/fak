@@ -262,6 +262,62 @@ def test_rehome_default_shadow_does_not_copy_memory(tmp_path):
         restore()
 
 
+# ---- Slack event posting (--slack / FAK_DISPATCH_SLACK) ------------------------
+
+def test_post_slack_event_disabled_is_noop():
+    wd = _reload({})
+    calls = []
+    out = wd.post_slack_event("Resumed", "sid", "info", enabled=False,
+                              transport=lambda *a: calls.append(1))
+    assert out is None
+    assert calls == []
+
+
+def test_post_slack_event_posts_when_enabled(monkeypatch):
+    import json as _json
+    wd = _reload({})
+    # env beats the repo .env.slack.local, so the resolution is hermetic.
+    for k in ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("FAK_SCOREBOARD_TOKEN", "xoxb-test")
+    monkeypatch.setenv("FAK_DISPATCH_CHANNEL", "C0RES")
+    calls = []
+
+    def transport(url, body, headers, timeout):
+        calls.append(_json.loads(body.decode("utf-8")))
+        return 200, _json.dumps({"ok": True, "ts": "1.1", "channel": "C0RES"})
+
+    out = wd.post_slack_event("Resumed dead session", "abcd1234 (acct/proj)", "info",
+                              enabled=True, transport=transport)
+    assert out["posted"] is True
+    assert "Resumed dead session" in calls[0]["text"]
+    # an auth wall uses the warn glyph, a resume the ♻️ glyph
+    assert calls[0]["text"].startswith("♻️")
+
+
+def test_toast_routes_to_slack_when_module_flag_set(monkeypatch, tmp_path):
+    wd = _reload({})
+    monkeypatch.setattr(wd, "SLACK", True)
+    monkeypatch.setattr(wd, "SLACK_DRY", False)
+    monkeypatch.setattr(wd, "LOG_DIR", str(tmp_path))
+    for k in ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("FAK_SCOREBOARD_TOKEN", "xoxb-test")
+    monkeypatch.setenv("FAK_DISPATCH_CHANNEL", "C0RES")
+    posted = {}
+    import slack_post
+
+    def fake_event(title, detail="", *, level="info", **kw):
+        posted["title"] = title
+        posted["level"] = level
+        return {"posted": True}
+
+    monkeypatch.setattr(slack_post, "event", fake_event)
+    wd.toast("Account needs re-login", "alpha : run /login", "warn")
+    assert posted["title"] == "Account needs re-login"
+    assert posted["level"] == "warn"
+
+
 if __name__ == "__main__":
     import pytest
 

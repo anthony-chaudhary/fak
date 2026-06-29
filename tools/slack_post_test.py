@@ -194,6 +194,27 @@ class SendTests(unittest.TestCase):
             self.assertIn("non-JSON", res["error"])
 
 
+class EventTests(unittest.TestCase):
+    """event_text formats one actionable line; event posts it through send."""
+
+    def test_event_text_glyph_and_bold_title(self):
+        self.assertEqual(sp.event_text("respawned", "pid=9", level="warn"),
+                         "⚠️ *respawned* — pid=9")
+        self.assertEqual(sp.event_text("ok"), "🟢 *ok*")  # default level, no detail
+        self.assertTrue(sp.event_text("x", level="crit").startswith("🔴"))
+        self.assertTrue(sp.event_text("x", level="resume").startswith("♻️"))
+
+    def test_event_posts_formatted_line(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t", "FAK_DISPATCH_CHANNEL=C0X"])
+            rec = _Recorder()
+            res = sp.event("supervisor respawned", "pid=42", level="warn",
+                           transport=rec, start=root)
+            self.assertTrue(res["posted"])
+            self.assertEqual(rec.calls[0]["body"]["text"], "⚠️ *supervisor respawned* — pid=42")
+
+
 class RedactTests(unittest.TestCase):
     def test_redact_keeps_only_last_four(self):
         self.assertEqual(sp.redact_token("xoxb-secret-tail"), "****tail")
