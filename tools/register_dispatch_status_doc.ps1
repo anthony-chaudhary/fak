@@ -30,7 +30,11 @@ param(
   [string]$TaskName    = 'FleetDispatchStatusDoc',
   [string]$Workspace   = $(Split-Path -Parent $PSScriptRoot),
   [string]$DocPath     = '.dispatch-runs\dispatch-status.md',
-  [int]$EveryMinutes   = 30
+  [int]$EveryMinutes   = 30,
+  # Optional path to a fak binary. If unset, the installer probes ./fak.exe, PATH fak,
+  # then falls back to `go run ./cmd/fak` so source-tree installs cannot silently use
+  # a stale binary that lacks `fak loop`.
+  [string]$FakExe = $env:FAK_BIN
 )
 $ErrorActionPreference = 'Stop'
 
@@ -47,6 +51,8 @@ if ($Action -eq 'remove') {
   return
 }
 
+. (Join-Path $PSScriptRoot 'fak_loop_task.ps1')
+
 # install -- resolve python and the doc-render tick.
 $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
@@ -54,17 +60,20 @@ if (-not $py) { throw "python not found on PATH" }
 $tick = Join-Path $Workspace 'tools\dispatch_status.py'
 if (-not (Test-Path $tick)) { throw "dispatch_status.py not found at $tick" }
 
-# Register python.exe DIRECTLY via the ScheduledTasks cmdlets, NOT a
+# Register the tick through `fak loop run` via the ScheduledTasks cmdlets, NOT a
 # `powershell.exe -Command "..."` wrapper (same fix as register_resolve_progress /
 # register_issue_dispatch): a Program-Files python path has a SPACE, and the nested
 # quotes protecting it did not survive the PowerShell -> schtasks /TR handoff -- the
 # stored -Command truncated at "C:\Program", powershell exited 0 without launching
 # python, and the task logged LastResult=0 while the doc was never re-rendered (it
-# went stale while every run reported success). Splitting Execute from Argument
-# sidesteps the quoting; WorkingDirectory anchors the relative --md path, and python's
-# exit code becomes LastTaskResult directly.
-$pyArgs    = "`"$tick`" --workspace `"$Workspace`" --md `"$DocPath`" --json"
-$taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
+# went stale while every run reported success). Splitting Execute (fak/go) from
+# Argument (fak args + child python args) sidesteps the quoting; WorkingDirectory
+# anchors the relative --md path, and the loop ledger records the child exit code and
+# duration so a silently-stale doc is visible in `fak loop status` -- the same wiring
+# the two sibling dispatch tasks (FleetIssueDispatch, FleetResolveProgress) already use.
+$childArgs = @($py, $tick, '--workspace', $Workspace, '--md', $DocPath, '--json')
+$wrapperLoop = 'dispatch-status-doc/task-scheduler'
+$taskAction = New-FakLoopScheduledTaskAction -Workspace $Workspace -FakExe $FakExe -LoopId $wrapperLoop -ChildArgs $childArgs
 $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
                -RepetitionDuration (New-TimeSpan -Days 3650)
@@ -79,4 +88,5 @@ Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger
                -Principal $principal -Settings $settings -Force | Out-Null
 
 Write-Output "installed $TaskName -- every $EveryMinutes min, renders $DocPath (read-only fold; gitignored, never committed)"
+Write-Output "loop ledger:  .fak\loops.jsonl via fak loop run ($wrapperLoop)"
 Write-Output "read the doc:   $Workspace\$DocPath"
