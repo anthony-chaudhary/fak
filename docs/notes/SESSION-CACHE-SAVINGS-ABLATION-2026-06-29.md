@@ -94,8 +94,10 @@ Three levers, none of which touch the headline number:
    action set. The pruner splices *after* the cache breakpoint and re-proves the
    protected prefix is byte-identical, so it never bursts the cache. This saves
    *uncached* tokens: order ~tens of thousands total (≈ 20–66k depending on def
-   size), which is **~0.1% of the 25.5M headline.** It is fak's only genuine
-   token saving here, and it is a rounding error next to the provider cache.
+   size), which is **~0.1% of the 25.5M headline.** It is the only fak token saving
+   the *summary* lets us see fire, and it is a rounding error next to the provider
+   cache. (fak ships more outbound reducers — see the enablement audit below — but
+   they emit no exit-summary line.)
 
 2. **Floor effect (latency axis — the real win).** fak stopped **1,104 bad tool
    calls before they cost a wasted round-trip**: 1,101 repaired in-flight and 3
@@ -114,10 +116,55 @@ not savings.
 
 ## The honest one-liner
 
-> The provider's prompt cache did ~99.9% of the token saving and would have done it
-> without fak. fak's contribution this session was to **price that saving honestly**,
-> trim a sliver of uncached tool-def tokens, and — its real job — **catch 1,104 bad
-> tool calls before they wasted a round-trip.**
+> The provider's prompt cache did ~99.9% of the *visible* token saving and would have
+> done it without fak. fak's contribution this session was to **price that saving
+> honestly**, trim a sliver of uncached tool-def tokens, and — its real job — **catch
+> 1,104 bad tool calls before they wasted a round-trip.**
+
+## Does this mean fak's features aren't turned on? (enablement audit, verified at HEAD)
+
+No. The natural follow-up to "fak didn't move the 25.5M" is *"so are its features
+off?"* They are not. Re-derived from the entrypoint source (`cmd/fak/token_defaults.go`,
+which locks the defaults against regression), **all six token-savers are default-on**
+on the `fak guard -- claude` route:
+
+![fak feature enablement on the guard route](session-feature-enablement-2026-06-29.svg)
+
+| Lever | Default | Operates on | This session | Why it's quiet here |
+|---|---|---|---|---|
+| Provider prompt cache | **ON** (structural) | provider prefix | the 25.5M | Anthropic's; fak keeps it byte-identical |
+| Tool-floor prune | **ON** (structural) | `req.Raw` | fired 131× | ~0.1% of headline |
+| History compaction | **ON** (48k) | `req.Raw` | idle, shed 0 | uncached tail never passed budget |
+| Result elision | **ON** (16k, since 06-26) | `req.Raw` | unmeasured | no exit-summary line |
+| ctxview planned view | **ON** (8k, since 06-28, #927) | `req.Raw` | unmeasured | stubs elided middle turns; cached prefix intact |
+| vDSO dedup | **ON** | tool-side | N/A on proxy | in-kernel amplification axis doesn't apply here |
+| Adjudication floor | **ON** | every call | 1,104 fixed | the real work |
+| Audit journal | **ON** | observe | 171 rows | tamper-evident, not a saver |
+| In-kernel KV / paged-KV / evict | **N/A** | fak's own engine | not in path | only when fak *serves* the model |
+
+Two honest caveats this audit surfaces:
+
+- **My earlier "fak's only token saving is the tool-prune sliver" was the summary's-eye
+  view, not the whole truth.** `ctxview` (the ctxplan O(1) planned view, #927/#555) and
+  oversized-`result` elision are *also* default-on, *also* rewrite `req.Raw`, and *also*
+  cut **uncached** tokens (ctxview even stubs elided middle turns while keeping the cached
+  prefix byte-identical). Neither prints an exit-summary line, so their effect this
+  session is **unmeasured from the summary alone** — it lives only on `/metrics`. They
+  flipped default-on on **2026-06-28** and **2026-06-26**, days before this session; a
+  binary built earlier had them off. (This corrects the older note that outbound rewrites
+  were dead on passthrough — #555 was closed by #927.)
+
+- **Why all these on-by-default reducers still find little to do here is structural, not a
+  misconfiguration.** Claude Code places its cache breakpoint near the *end* of the
+  request, so the cached prefix is almost the entire prompt. fak deliberately refuses to
+  rewrite that prefix — doing so would burst Anthropic's cache and cost *more* — so every
+  fak byte-lever is confined to the small uncached tail. The provider cache already
+  captured the big win; fak stays out of its way. That is the design (a disinterested
+  referee), not a dark switch.
+
+If you *want* fak to reclaim more on this route, the knob is to tighten the budgets, e.g.
+`fak guard --compact-history-budget 8000 -- claude` (vs the ~48k default), at the cost of
+a larger blast radius on the uncached tail. The defaults are deliberately conservative.
 
 ## Reproduce / verify
 
@@ -130,6 +177,9 @@ fak vcache observe   # → fak_vcache_saved_token_equiv, matches the live gatewa
 
 # raw provider counters live on the gateway
 curl -s localhost:<port>/metrics | grep -E 'cache_read|cache_creation|saved_token_equiv'
+
+# which token-savers are actually default-on (re-derived from the entrypoint source)
+fak token-defaults-scorecard          # all six locked on; ctxview/elide effect on /metrics
 ```
 
 ## See also
