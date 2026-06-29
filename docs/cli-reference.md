@@ -362,15 +362,16 @@ attaches through a registry.
    SmolLM2-135M (Llama family) and first-token parity for Qwen3.6-27B (Gated-DeltaNet). The CUDA backend takes
   it onto the GPU and reaches **decode parity with llama.cpp Q8_0 (≈120 tok/s on an RTX 4070;
   `GPU.md` §3b)** — so GPU throughput is **not** out of scope. What *is* still future work is
-  production *serving* (continuous batching, paged attention, multi-tenant scheduling); the
+  production *serving* beyond the native in-kernel lifecycle scheduler (paged attention,
+  multi-tenant SLA scheduling); the
   live `fak agent` / `fak serve` lanes drive an external OpenAI-compatible engine for that
   today.
 - **NOT** zero-copy KV co-residence with an external engine: that remains the
   addressable-`Ref` seam wired to a **copy** backend (a backend swap later, behind
   capability `zerocopy`). The in-kernel model owns *its own* KV cache; sharing one KV
   arena with a separate serving process is the unbuilt stub.
-- **NOT** GPU-dependent: continuous-batching / token-per-watt / metrics-service
-  KV-residency are read-only **SIMULATED** telemetry (no GPU on the box).
+- **NOT** GPU-dependent for the shipped pure-Go binary: token-per-watt / metrics-service
+  KV-residency are read-only **SIMULATED** telemetry (no watt source on the box).
 - **NOT** a fine-tuned *syscall/adjudication* model: the typed `LabelRow`/`VerdictKind`
   training targets exist (and `internal/harvest` now folds the live verdict stream into a
   corpus of them), but the model that would emit Verdicts from them is not trained — the

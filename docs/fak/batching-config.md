@@ -116,6 +116,10 @@ sources in [`docs/model-engine-env.md`](../model-engine-env.md); the batching-re
 | `FAK_SAXPY3_SIMD_MINPOS` | `1` | Minimum context positions at which SIMD `saxpy3` engages. |
 | `FAK_Q_FAST_SWIGLU` | on | Fast quantized SwiGLU. Turn off to A/B against the reference. |
 | `FAK_QGEMM_GROUP_MAXP` | `1024` | Max prompt-panel batch width that still groups. |
+| `FAK_NATIVE_MAX_RUNNING` | unset (unbounded) | Caps the registered `inkernel` native scheduler's running set; extra admitted requests wait FIFO and join between decode steps. |
+| `FAK_NATIVE_KV_MAX_BLOCKS` | unset (off) | Enables the native scheduler's KV pressure path and sets the live paged-KV block budget. |
+| `FAK_NATIVE_KV_BLOCK_TOKENS` | `16` | Tokens per block for the scheduler's KV budget estimator and swap pool. |
+| `FAK_NATIVE_KV_PREEMPT_MODE` | `swap` | Selects scheduler preemption recovery: `swap`/`swap-to-host` or `recompute`. |
 | `FAK_QPROFILE` | off | Print coarse phase timing (quantize / GEMM / attention) for batched-Q and Metal prefill. |
 
 All are off-by-tuning safe: they change kernel *scheduling*, never the numerics (the batched
@@ -132,14 +136,14 @@ B-008's acceptance has four bars. Their honest on-disk status (see the Track-B t
 |---|---|
 | **Padding overhead ≤ 10%** | ✅ **Shipped + witnessed** — the composition's closed-form invariant (§3), `TestBatchPaddingOverheadInvariant`. |
 | **Configuration guide** | ✅ **This document.** |
-| **Near-linear throughput scaling (1.8× on 2× requests)** | 🟡 **Deferred** — a wall-clock measurement that needs the production continuous-batching scheduler (paged KV, preemption, admission) wired into the live serve path on real serving hardware. The decode primitive that makes it *possible* is shipped and bit-exact (`StepBatch`); the scheduler is the deferred sibling serving work. |
+| **Near-linear throughput scaling (1.8× on 2× requests)** | 🟠 **Partial + witnessed** — #401 wires the registered `inkernel` lifecycle path through the native scheduler and commits a synthetic CPU benchmark: B1 1.13×, B2 1.34×, B4 1.51×, B8 1.54× req/s vs the legacy per-request lifecycle (`experiments/modelengine/native-continuous-batching-20260629.json`). This proves improved native batching throughput and no B1 regression in that witness, but it does **not** promote B-008's stricter B2≥1.8× serving bar. |
 | **Latency p99 within 1.5× of single-request** | 🟡 **Deferred** — same gate: needs the SLA-aware admission scheduler + a wall-clock bench. |
 
-The batching **kernel** (decode + ragged idle-lane elimination) and the **composition
-policy** (dynamic size + padding minimization) are host-tractable and shipped. The two
-wall-clock bars depend on the production scheduler that `internal/modelengine/nativesched.go`
-is explicitly **not** (it is a shape proof: no paged KV, no preemption, no fairness/admission)
-— tracked by the sibling serving issues, not by this issue.
+The batching **kernel** (decode + ragged idle-lane elimination), the **composition
+policy** (dynamic size + padding minimization), and the native in-kernel lifecycle
+iteration scheduler are host-tractable and shipped. The remaining B-008 wall-clock
+bars are the production serving layer: paged attention, admission/fairness, and
+p99/SLA measurement on serving hardware.
 
 ---
 

@@ -187,9 +187,12 @@ hardware justify it.
     with no step/stream/cancel; the unified lifecycle is future work (#46), and the
     `Admit`/`Evict` symbols in `registry.go` are on *other* interfaces. The seam and the
     primitive exist and are reused by static batching; the *lifecycle* is what S1/S5 build.
-- **No paged KV.** Flat `[]float32` + memmove-compacting `Evict`
-  ([`kvcache.go:11`,`:92`](../../internal/model/kvcache.go)). No BlockManager / block table /
-  COW prefix share. The #33 gate (Evict survives paging) is unproven.
+- **Production paged KV is still not the default live path.** The default session cache is still
+  the flat `[]float32` + memmove-compacting `Evict`
+  ([`kvcache.go:11`,`:92`](../../internal/model/kvcache.go)). The #33 design/prototype gate is
+  now proven by `paged_evict.go` + `TestPagedEvictBitIdenticalToContiguous`: exact-span Evict
+  survives a block-paged layout when the blocks carry f32 `Kraw` and COW-split before re-RoPE.
+  The remaining gap is #34: carrying that proof into the production allocator/serve path.
 - **Streaming is synthesized post-adjudication** — TTFT == whole-turn until S1.
 - **`KVBackend.Prefill` is synchronous-dense `[]float32`**
   ([`registry.go:635`](../../internal/abi/registry.go), inherited from

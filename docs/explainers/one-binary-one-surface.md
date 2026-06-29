@@ -145,8 +145,9 @@ smuggle in claims the rest of the repo is careful not to make:
 - **`fak` is not a faster (or production) token engine.** It owns the governance +
   gateway surface and *fronts* a real engine (Tier 1). Its own in-binary model (Tier 2)
   is a correctness *reference* forward pass (proven bit-exact against HuggingFace), not a
-  production serving engine: no continuous batching, paged attention, or multi-tenant
-  scheduling. For chat-quality serving, front vLLM / SGLang / llama.cpp / Ollama / a cloud
+  production serving engine: it now has native continuous batching on the in-kernel
+  lifecycle path, but no paged attention or multi-tenant SLA scheduler. For chat-quality
+  serving, front vLLM / SGLang / llama.cpp / Ollama / a cloud
   provider. See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) and the
   [getting-started caveat](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#4-tier-2--run-the-fused-in-kernel-model).
 - **The cache-reuse win is self-host only**, and a few-fold vs a tuned warm-cache stack
