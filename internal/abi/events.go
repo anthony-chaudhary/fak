@@ -5,17 +5,17 @@
 package abi
 
 const (
-	EvSubmit     EventKind = iota // a call entered the kernel
-	EvDecide                      // the adjudicator chain resolved a verdict
-	EvDeny                        // a call was refused (verdict carries the reason)
-	EvDispatch                    // an allowed call was dispatched to the engine
-	EvComplete                    // an engine produced a result (Result is set)
-	EvQuarantine                  // a result was held out of context by the MMU
-	EvVDSOHit                     // a call was served locally by the vDSO
-	EvResultDeny                  // a produced result was hard-refused by the result-admit stack
-	EvCapFault                    // a capability was faulted in (paged from cold storage)
-	EvCapEvict                    // a capability was evicted from residency
-	EvCapVersionBind              // a capability version was bound (page-table remap)
+	EvSubmit         EventKind = iota // a call entered the kernel
+	EvDecide                          // the adjudicator chain resolved a verdict
+	EvDeny                            // a call was refused (verdict carries the reason)
+	EvDispatch                        // an allowed call was dispatched to the engine
+	EvComplete                        // an engine produced a result (Result is set)
+	EvQuarantine                      // a result was held out of context by the MMU
+	EvVDSOHit                         // a call was served locally by the vDSO
+	EvResultDeny                      // a produced result was hard-refused by the result-admit stack
+	EvCapFault                        // a capability was faulted in (paged from cold storage)
+	EvCapEvict                        // a capability was evicted from residency
+	EvCapVersionBind                  // a capability version was bound (page-table remap)
 	// EvRungLabel lives in the EventsLabel block (>=128): a typed LabelRow rode the
 	// event (the pre-flight self-labeling signal).
 	EvRungLabel EventKind = 128
