@@ -75,20 +75,17 @@ concurrent = [
   # internal/modelreg/** edits. Tree = internal/modelreg/** only; its cmd/fak shim stays
   # in the `cmd` lane, keeping every leaf tree pairwise-disjoint per the header invariant.
   "modelreg",
+  # reconciled 2026-06-28 (dos lint --strict CONCURRENT_LANES_OVERLAP): a2achan, rungobs,
+  # vcachechain, dropin, comm, cohort, agenttopo, promptmmu and vcacheobserve were each listed
+  # TWICE in this concurrent roster (once in the 2026-06-23 block above, once interleaved here)
+  # -- a self-overlap that made the arbiter's roster spawn-order-sensitive for those lanes. The
+  # duplicate second occurrences are removed; each lane stays declared exactly once above.
   "sessionimage",
-  "a2achan",
   "snapshot",
-  "rungobs",
   "sharedtask",
   "vcachegov", # vCache M5 Governor (#720): steady-state pin/lazy/evict + warm-budget + affinity policy over cachemeta
-  "vcachechain",
   "vcachewarm",
   "taskmgr",
-  "dropin",
-  "comm",
-  "cohort",
-  "agenttopo",
-  "promptmmu",
   # reconciled 2026-06-25 (#756, Pillar 2 / #748): internal/session is a real committed
   # leaf (the per-session DRIVE state) that had NO declared lane; declared here per #756's
   # fence so a `(fak session)` ship-stamp binds and the arbiter detects same-tree collisions.
@@ -99,7 +96,6 @@ concurrent = [
   # bind and the arbiter could not detect a same-tree collision. Declared per #763's fence.
   "loopmgr",
   "fakrpc",
-  "vcacheobserve",
   # reconciled 2026-06-26 (#825): internal/leaseref is a real committed leaf (the
   # cross-machine lease VISIBILITY substrate, refs/fak/locks/*) that landed by hand in
   # f0cf3f6 with NO declared lane -> a `(fak leaseref)` ship-stamp bound to a phantom unit
@@ -121,6 +117,19 @@ concurrent = [
   # on internal/ailuminate/** edits; its cmd/fak/ailuminate.go shim stays in the `cmd`
   # lane, keeping every leaf tree pairwise-disjoint per the header invariant.
   "ailuminate",
+  # reconciled 2026-06-28: internal/marketing is a new leaf, code not yet committed (the completion-driven
+  # marketing subsystem — witnessed-ship -> artifact, the AEO/AgentEO refresh, the auto loop).
+  # Declared so a `(fak marketing)` ship-stamp binds and the arbiter detects a same-tree
+  # collision on internal/marketing/** edits; any cmd/fak shim will live in the `cmd`
+  # lane, keeping every leaf tree pairwise-disjoint per the header invariant.
+  "marketing",
+  # reconciled 2026-06-28 (dos lint --strict AUTOPICK_LANE_UNDECLARED): internal/dojo (#951) and
+  # internal/nightrun are real committed leaves already in [lanes].autopick and [lanes.trees], but
+  # were absent from this concurrent roster -- so the autopick walk SILENTLY SKIPPED them and a
+  # `(fak dojo)` / `(fak nightrun)` ship-stamp could not bind to a concurrent lane. Declared here
+  # so the walk reaches them and the arbiter protects internal/dojo/** & internal/nightrun/** edits.
+  "dojo",
+  "nightrun",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -171,6 +180,7 @@ autopick = [
   "nightrun", # internal/nightrun leaf (the run-it-all-night data-collection door), see [lanes].concurrent note
   "scoreboard", # #1000: internal/scoreboard leaf (the fak scoreboard Slack publisher), see [lanes].concurrent note
   "ailuminate", # #1070: internal/ailuminate leaf (the AILuminate benchmark-entry scoping contract), see [lanes].concurrent note
+  "marketing", # internal/marketing leaf (completion-driven marketing subsystem), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -279,6 +289,11 @@ polymodel = ["internal/polymodel/**"]
 storedrv = ["internal/storedrv/**"]
 advmodel = ["internal/advmodel/**"]
 modelroute = ["internal/modelroute/**"]
+# reconciled 2026-06-28 (dos lint --strict LANE_WITHOUT_TREE): #1029 added the modelreg lane to
+# [lanes].concurrent/autopick but never declared its tree here, so the lane could NOT be arbitrated
+# (the disjointness algebra had no region to compare) -- the very same-tree collision protection
+# #1029 set out to add was inert. Tree = internal/modelreg/** only; its cmd/fak shim stays in `cmd`.
+modelreg = ["internal/modelreg/**"]
 sessionimage = ["internal/sessionimage/**"]
 a2achan = ["internal/a2achan/**"]
 snapshot = ["internal/snapshot/**"]
@@ -300,6 +315,7 @@ vcacheobserve = ["internal/vcacheobserve/**"]
 leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY substrate (refs/fak/locks/*)
 dojo = ["internal/dojo/**"] # #951: prediction-vs-reality gym (predict -> run -> measure -> eval -> calibrate)
 scoreboard = ["internal/scoreboard/**"] # #1000: fak scoreboard Slack scorecard publisher (cmd/fak/scoreboard.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
+marketing = ["internal/marketing/**"] # completion-driven marketing subsystem (any cmd/fak shim lives in the `cmd` lane to keep leaf trees pairwise-disjoint)
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
