@@ -181,15 +181,7 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 				continue
 			}
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
-				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-				if err != nil {
-					return nil, err
-				}
-				raw, _, err := s.TensorBytes(info.Name)
-				if err != nil {
-					return nil, err
-				}
-				data, err := dequantF32(info, raw)
+				shape, data, err := s.dequantGGUFShapeF32(info)
 				if err != nil {
 					return nil, err
 				}
@@ -211,15 +203,7 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		// usual). Handled before CanonicalTensorNameArch, which leaves these unmapped.
 		if cfg.ModelType == "glm_moe_dsa" {
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
-				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-				if err != nil {
-					return nil, err
-				}
-				raw, _, err := s.TensorBytes(info.Name)
-				if err != nil {
-					return nil, err
-				}
-				data, err := dequantF32(info, raw)
+				shape, data, err := s.dequantGGUFShapeF32(info)
 				if err != nil {
 					return nil, err
 				}
@@ -348,11 +332,7 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 				continue
 			}
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
-				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-				if err != nil {
-					return model.Config{}, nil, err
-				}
-				data, _, err := s.TensorF32(info.Name)
+				shape, data, err := s.shapeAndTensorF32(info)
 				if err != nil {
 					return model.Config{}, nil, err
 				}
@@ -365,11 +345,7 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 			}
 			// MLA KV-b: buffer attn_k_b/attn_v_b and emit the combined kv_b_proj when both arrive.
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
-				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-				if err != nil {
-					return model.Config{}, nil, err
-				}
-				data, _, err := s.TensorF32(info.Name)
+				shape, data, err := s.shapeAndTensorF32(info)
 				if err != nil {
 					return model.Config{}, nil, err
 				}
@@ -391,11 +367,7 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 		if !ok {
 			return model.Config{}, nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
 		}
-		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-		if err != nil {
-			return model.Config{}, nil, err
-		}
-		data, _, err := s.TensorF32(info.Name)
+		shape, data, err := s.shapeAndTensorF32(info)
 		if err != nil {
 			return model.Config{}, nil, err
 		}
@@ -409,4 +381,37 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 		return model.Config{}, nil, err
 	}
 	return cfg, tensors, nil
+}
+
+// dequantGGUFShapeF32 returns a GGUF tensor's model shape and its dequantized f32 payload,
+// reading the still-quantized bytes via TensorBytes and dequantizing them. It is the shared
+// shape+read+dequant prelude of QuantModelProfile's glm_moe_dsa split paths.
+func (s *WeightSource) dequantGGUFShapeF32(info TensorInfo) ([]int, []float32, error) {
+	shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, _, err := s.TensorBytes(info.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := dequantF32(info, raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	return shape, data, nil
+}
+
+// shapeAndTensorF32 returns a GGUF tensor's model shape and its dequantized f32 payload via
+// the TensorF32 path. It is the shared shape+TensorF32 prelude of F32Tensors' tensor handlers.
+func (s *WeightSource) shapeAndTensorF32(info TensorInfo) ([]int, []float32, error) {
+	shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, _, err := s.TensorF32(info.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return shape, data, nil
 }
