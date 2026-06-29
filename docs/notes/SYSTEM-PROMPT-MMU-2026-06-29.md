@@ -317,6 +317,134 @@ Numbered so the keystone lands first and each rung holds all five invariants.
 - Not a replacement for #751/#1103/#1217 — it is the authorship layer that sits
   on their machinery and gives the skill-loader keystone its first live caller.
 
+## Rung 3 — queried harness overlay: the first live keystone caller (pinned contract, #1261)
+
+Rung 3 ([#1261](https://github.com/anthony-chaudhary/fak/issues/1261)) is the
+*first-live-caller* rung — the queried harness overlay that drives the
+skill-loader keystone (`contextq.QueryCapabilities` / `capindex.Catalog`) from the
+turn's intent under a token budget, **appends** the winners after the Rung-2
+breakpoint, and **masks, never mutates** the resident set. The keystone is built
+and tested but **request-path-dead** today: nothing on a live serve turn calls it.
+This section does for Rung 3 what §R5 does for Rung 5 — fix the contract's shape
+(the query→overlay pipeline, the #1144 `CapRef` reconciliation, the
+HIT-on-reinvocation record) so the eventual code build is **wiring against a fixed
+contract** — and fence honestly what blocks the live caller today: Rungs 1/2 are
+unbuilt (there is no `internal/syspromptmmu` package and no Rung-2 breakpoint to
+append after yet). This is a *docs-lane* increment: it pins the contract; it does
+**not** itself satisfy the acceptance tests, which are a named code follow-on
+(§R3.5).
+
+### R3.1 The substrate (the inputs, each with its current build state)
+
+The honest accounting: the *query primitive*, the *ranked-fault loop*, the *fault
+ledger*, and the *HIT-on-reinvocation record* are built and tested today — Rung 3
+is **the live turn-path caller on top of them**, not greenfield in those parts —
+but the tier the overlay appends into and the breakpoint it appends after are not
+yet in-tree.
+
+| Input | Source (current) | What it contributes to Rung 3 | Build state |
+|---|---|---|---|
+| the query primitive (intent+budget → rank → fault winners) | `internal/contextq` `QueryCapabilities(resolvers, CapQueryRequest, ledger)` (`contextq.go`) | the MCP-Zero active-discovery move the overlay is filled by | **BUILT**, request-path-dead (no live serve caller) |
+| the 0→∞ overlay index (harness items as at-rest cards) | `internal/capindex` `CapCard` / `Capability` / `Resolver` / `Catalog.Query(intent)` + SHA-256 `Diff` (`capindex.go`, `catalog.go`, `index.go`) | the queryable card catalog; bodies faulted only for winners (invariant 4) | **BUILT** (tier-2 keystone, #1104) |
+| the fault ledger (every page-in witnessed) | `internal/contextq` `CapabilityLedger.RecordFault` / `EvictColdest` (`contextq.go`) | the residency + eviction-cost read over the overlay set (mask, don't mutate) | **BUILT** |
+| the HIT-on-reinvocation record | `internal/contextq` `SkillContextRecord` keyed on `InvocationDigest` (`skillmemory.go`) | an identical-digest re-invocation is a HIT, not a re-fault (AC2) | **BUILT** |
+| the tier the overlay appends into | `internal/syspromptmmu` segment plan (Rung 1, [#1259](https://github.com/anthony-chaudhary/fak/issues/1259)) | the `SegStable` spine / policy floor / **overlay** tier the cards append to | OPEN ([#1259](https://github.com/anthony-chaudhary/fak/issues/1259)) — **blocker** (no package yet) |
+| the breakpoint the overlay appends *after* | Rung-2 splice adapter ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260)) + `internal/promptmmu` `bytes.Equal(prefix)` floor | where the queried cards land (after the breakpoint, append-free, cache-safe) | OPEN ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260)) — **blocker** |
+
+### R3.2 The query→overlay assembly contract (the pipeline)
+
+Each live turn fills the overlay by **query, not menu** — a fixed five-step
+pipeline over the substrate above:
+
+1. **Intent + budget in.** The turn emits a `contextq.CapQueryRequest{Intent,
+   BudgetBytes, K}` from the turn's intent and a token budget — MCP-Zero active
+   discovery, not a static menu dump.
+2. **Rank the cards.** `QueryCapabilities` ranks every resolver's at-rest
+   `CapCard`s by intent overlap (`rankByIntent`) — O(1)-per-card metadata only,
+   no bodies touched.
+3. **Fault winners up to budget.** Winners are faulted (`Resolver.Fault`) in rank
+   order until `BudgetBytes` is exhausted; the rest become `Omitted` and
+   `BudgetHit` is set. Every fault lands in the `CapabilityLedger` (`RecordFault`).
+4. **Append after the breakpoint.** The faulted winners are appended to the
+   **overlay** tier *after* the Rung-2 cache breakpoint — never spliced into the
+   resident spine/policy bytes ahead of it (invariant 1; the breakpoint does not
+   move).
+5. **Mask, don't mutate.** Availability changes by masking the overlay set (the
+   ledger's evict/hold states), not by editing the resident array (invariant 2).
+   The at-rest base holds **no** bodies — only cards and a query verb (invariant
+   4); the resident descriptor index is itself bounded and paged once it grows.
+
+### R3.3 The #1144 `CapRef` reconciliation (one canonical type)
+
+Rung 3 folds in the #1144 reconciliation: the keystone today defines the
+capability-reference type **twice**, and the duplicate must collapse onto the
+`capindex` canonical before a live caller binds to it.
+
+| | Canonical (keep) | Duplicate (collapse) |
+|---|---|---|
+| Type | `capindex.CapRef{Kind, Name, Version}` (`capindex.go`) | `contextq.CapRef{Name, Source, Card, IsQuery}` (`contextq.go`) |
+| Siblings that also duplicate | — | `contextq.Capability` / `CapCard` / `Resolver` / `CapKind` shadow the `capindex` originals |
+
+The collapse direction is **contextq → capindex**, and it is tier-legal:
+`capindex` is tier 2 and `contextq` is tier 3 (`internal/architest`), so `contextq`
+importing `capindex` is a legal higher→lower edge — the reverse would invert the
+DAG. One `capindex.CapRef`, not two, is what a live caller and the
+`SkillContextRecord` digest key bind to (AC3).
+
+### R3.4 The HIT-on-reinvocation contract (AC2)
+
+A re-invocation whose query digest is identical to a prior turn's is a **HIT** via
+`contextq.SkillContextRecord` — the winners are served from the record, **not**
+re-faulted. The record keys on `InvocationDigest`, so an identical intent+budget
+that ranks the same winners re-renders nothing; a changed catalog that re-ranks
+faults afresh. This is the overlay's cache-coherence floor: the fault ledger
+witnesses the first page-in, the record serves every identical re-ask.
+
+### R3.5 Acceptance, and what blocks it today
+
+The issue's four acceptance clauses, each tied to the witness that proves it:
+
+- **AC1 — a turn with intent X faults in only the cards X needs; the at-rest base
+  holds no bodies (0-for-∞).** Proven by a serve-path test that asserts the
+  resident base-context token count is **flat** as the `capindex` catalog grows
+  (only cards resident; bodies faulted on demand) — invariant 4.
+- **AC2 — re-invocation with an identical digest is a HIT (no re-fault).** Proven
+  by a `SkillContextRecord` test: two identical `CapQueryRequest`s, the second
+  served from the record (`Built == false`) with zero new `RecordFault` rows
+  (§R3.4).
+- **AC3 — folds in the #1144 reconciliation: one `capindex.CapRef`.** Proven by
+  the duplicate `contextq.CapRef`/`Capability`/`CapCard`/`Resolver` collapsing onto
+  the `capindex` canonical, the live caller binding to `capindex.CapRef`, and the
+  tier gate (`internal/architest`) staying green over the new import edge (§R3.3).
+- **AC4 — the breakpoint does not move when the overlay changes.** Proven by the
+  Rung-2 `bytes.Equal(prefix)` assertion staying green across an overlay swap: the
+  queried cards append *after* the breakpoint, so the cached prefix is
+  byte-identical regardless of which winners faulted in (invariants 1–2).
+- **Blocked-on (the honest fence).** AC1 and AC4 are blocked on **Rung 1
+  ([#1259](https://github.com/anthony-chaudhary/fak/issues/1259), OPEN)** — the
+  overlay tier the cards append into does not exist (`internal/syspromptmmu` is
+  unbuilt) — and **Rung 2 ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260),
+  OPEN)** — the splice adapter that places the breakpoint the overlay appends
+  after. The query primitive, the fault ledger, the `SkillContextRecord`, and the
+  `capindex` catalog are **built**, so once Rungs 1/2 land Rung 3 is **wiring
+  against this fixed contract**: drive `QueryCapabilities` from the turn's
+  intent+budget, append the winners into the Rung-1 overlay tier after the Rung-2
+  breakpoint, do the #1144 collapse, and bind the `SkillContextRecord` HIT path.
+- **Lane for the build:** the live caller is `gateway`/`serve` (the turn-path
+  wiring) plus `internal/contextq` + `internal/capindex` (the #1144 collapse) —
+  **not** `docs`. This docs increment pins the contract only; it does not itself
+  satisfy AC1–AC4.
+
+### R3.6 Reproduce (the contract today; the live caller once Rungs 1/2 land)
+
+Today the contract is checkable as text: the five-step pipeline (§R3.2), the
+canonical `capindex.CapRef` (§R3.3), and the HIT record (§R3.4) are fixed, and the
+keystone they bind to is already green (`go test ./internal/contextq/...
+./internal/capindex/...`). Once Rung 1's overlay tier and Rung 2's breakpoint land,
+a turn with intent X driving `QueryCapabilities` under a byte budget reproduces AC1
+(only X's cards faulted, resident base flat as the catalog grows) and AC2 (an
+identical re-ask served from the `SkillContextRecord` with no re-fault).
+
 ## Rung 5 — witness-gated runtime modification: the live base (pinned contract, #1263)
 
 Rung 5 ([#1263](https://github.com/anthony-chaudhary/fak/issues/1263)) is the
