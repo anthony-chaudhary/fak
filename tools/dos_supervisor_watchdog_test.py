@@ -11,6 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "dos_supervisor_watchdog.py"
 
+sys.path.insert(0, str(SCRIPT.parent))
+import dos_fleet_lease as fl  # noqa: E402 - the cross-node lease primitives under test
+
+T0 = 1_750_000_000.0  # fixed injected "now" (epoch seconds), mirrors dos_fleet_lease_test
+
 
 def load():
     sys.path.insert(0, str(SCRIPT.parent))
@@ -293,6 +298,175 @@ class RouteDefectStopTest(unittest.TestCase):
             verdict = mod.route_defect_stop(root, {})
             self.assertIsNotNone(verdict)
             self.assertTrue(verdict.get("routed"))  # routes a 'default'-lane row
+
+
+class FleetLeaseGateTest(unittest.TestCase):
+    """Issue #21: the cross-node global-lane gate the live watchdog runs before launch.
+
+    Exercises the REAL dos_fleet_lease publish/materialize/collision primitives through a
+    tempfile LocalDirStore + injected kernel `live` seam — no git, no `dos` subprocess.
+    """
+
+    def _store(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return fl.LocalDirStore(Path(tmp.name))
+
+    def test_non_global_lane_proceeds(self):
+        mod = load()
+        self.assertIsNone(mod.fleet_lease_gate("adjudicator", workspace=ROOT, env={}))
+
+    def test_global_lane_default_backend_is_noop(self):
+        # Un-opted node (no FAK_FLEET_LEASE_STORE, no injected store): zero-network no-op.
+        mod = load()
+        self.assertIsNone(mod.fleet_lease_gate("release", workspace=ROOT, env={}))
+
+    def test_global_lane_proceeds_when_no_foreign_holder(self):
+        mod = load()
+        store = self._store()
+        got = mod.fleet_lease_gate(
+            "release", workspace=ROOT, env={}, store=store,
+            live=lambda _ws: [], now=T0,
+        )
+        self.assertIsNone(got)
+
+    def test_global_lane_refuses_when_foreign_peer_holds(self):
+        mod = load()
+        store = self._store()
+        # Node B has published a LIVE `release` lease (heartbeat at T0).
+        peer = fl.build_snapshot(
+            host="B",
+            leases=[{"lane": "release", "host_id": "B", "mode": "exclusive", "holder": "b-loop"}],
+            now=T0, prev_epoch=None,
+        )
+        store.compare_and_swap("B", None, peer)
+        got = mod.fleet_lease_gate(
+            "release", workspace=ROOT, env={}, store=store,
+            live=lambda _ws: [], now=T0,
+        )
+        self.assertIsNotNone(got)
+        self.assertEqual(got["reason"], fl.REASON_HELD_REMOTE)
+        self.assertEqual(got["host_id"], "B")
+        self.assertIn("release", got["detail"])
+
+    def test_git_backend_publish_failure_fails_closed(self):
+        mod = load()
+
+        class FailPublish:
+            def read_fleet(self):
+                return {}
+
+            def compare_and_swap(self, host, expected, snapshot):
+                return False, None  # publish lost / store unreachable
+
+        got = mod.fleet_lease_gate(
+            "release", workspace=ROOT, env={"FAK_FLEET_LEASE_STORE": "git"},
+            store=FailPublish(), live=lambda _ws: [], now=T0,
+        )
+        self.assertIsNotNone(got)  # the git floor refuses rather than silently double-grant
+        self.assertIn("release", got["detail"])
+
+    def test_git_backend_store_exception_fails_closed(self):
+        mod = load()
+
+        class BoomStore:
+            def read_fleet(self):
+                raise RuntimeError("remote down")
+
+            def compare_and_swap(self, *a, **k):
+                raise RuntimeError("remote down")
+
+        got = mod.fleet_lease_gate(
+            "release", workspace=ROOT, env={"FAK_FLEET_LEASE_STORE": "git"},
+            store=BoomStore(), live=lambda _ws: [], now=T0,
+        )
+        self.assertIsNotNone(got)
+        self.assertIn("unavailable", got["detail"])
+
+
+class BuildPlanAllowlistTest(unittest.TestCase):
+    """Issue #21: FLEET_LANE_ALLOWLIST is advisory steering at build_plan, not a floor."""
+
+    def test_no_allowlist_keeps_first_proposed_lane(self):
+        mod = load()
+        plan = mod.build_plan(
+            readiness(spawn=["docs", "release"]),
+            workspace=ROOT, target=1, max_ticks=1, live=False, safety=clean_safety(), env={},
+        )
+        self.assertEqual(mod._command_lane(plan["command"]), "docs")
+
+    def test_allowlist_narrows_to_allowed_lane(self):
+        mod = load()
+        plan = mod.build_plan(
+            readiness(spawn=["docs", "release"]),
+            workspace=ROOT, target=1, max_ticks=1, live=False, safety=clean_safety(),
+            env={"FLEET_LANE_ALLOWLIST": "release"},
+        )
+        self.assertEqual(plan["action"], "would_enact")
+        self.assertEqual(mod._command_lane(plan["command"]), "release")
+
+    def test_allowlist_refuses_when_all_off_list(self):
+        mod = load()
+        plan = mod.build_plan(
+            readiness(spawn=["docs"]),
+            workspace=ROOT, target=1, max_ticks=1, live=False, safety=clean_safety(),
+            env={"FLEET_LANE_ALLOWLIST": "release, abi"},
+        )
+        self.assertEqual(plan["action"], "refuse")
+        self.assertFalse(plan["ok"])
+        self.assertIn("allowlist", plan["reason"].lower())
+
+
+class RunWatchdogLeaseGateWiringTest(unittest.TestCase):
+    """The gate is consulted on a live enact, sees the steered lane, and can block it."""
+
+    def test_gate_refusal_blocks_live_launch(self):
+        mod = load()
+
+        def fail_runner(_cmd, _cwd, _timeout_s):
+            raise AssertionError("a gate-refused launch must not call the runner")
+
+        got = mod.run_watchdog(
+            workspace=ROOT, target=1, max_ticks=1, live=True, timeout_s=120,
+            readiness=readiness(spawn=["release"]), runner=fail_runner, safety=clean_safety(),
+            lease_gate=lambda lane, **kw: {"detail": "global lane 'release' held by peer B", "host_id": "B"},
+        )
+        self.assertFalse(got["ok"])
+        self.assertEqual(got["action"], "refuse")
+        self.assertIn("release", got["reason"])
+        self.assertEqual(got["fleet_lease"]["host_id"], "B")
+
+    def test_gate_proceed_runs_worker_once(self):
+        mod = load()
+        calls = []
+
+        got = mod.run_watchdog(
+            workspace=ROOT, target=1, max_ticks=1, live=True, timeout_s=120,
+            readiness=readiness(spawn=["release"]), safety=clean_safety(),
+            runner=lambda cmd, cwd, t: calls.append(cmd) or {"returncode": 0, "stdout": "{}", "stderr": ""},
+            lease_gate=lambda lane, **kw: None,
+        )
+        self.assertEqual(got["action"], "enacted")
+        self.assertEqual(len(calls), 1)
+
+    def test_gate_receives_allowlist_steered_lane(self):
+        mod = load()
+        seen = {}
+
+        def recording_gate(lane, **kw):
+            seen["lane"] = lane
+            return {"detail": "blocked for assertion"}  # block so the runner is never reached
+
+        got = mod.run_watchdog(
+            workspace=ROOT, target=1, max_ticks=1, live=True, timeout_s=120,
+            readiness=readiness(spawn=["docs", "release"]), safety=clean_safety(),
+            runner=lambda *a: {"returncode": 0},
+            env={"FLEET_LANE_ALLOWLIST": "release"},
+            lease_gate=recording_gate,
+        )
+        # build_plan steered docs->release; the gate must see the lane that will launch.
+        self.assertEqual(seen["lane"], "release")
+        self.assertEqual(got["action"], "refuse")
 
 
 if __name__ == "__main__":

@@ -12,11 +12,35 @@ to python3-only nodes) -- instead of routing through ``dos loop --enact``. The
 --enact/--max-ticks flags still exist on ``dos loop`` (that continuous population
 supervisor is kept alive separately by fleet_dos_dispatch_watchdog.{py,ps1}); this
 is a launch-shape choice, not a claim that the flags were removed.
+
+## Cross-node lane serialization (issue #21)
+
+This is the live fleet-code seam where the GitRefStore cross-node lease is ACTIVATED.
+Before a ``--live`` canary launches a worker on one of the 3 global exclusive lanes
+(abi/release/global), ``fleet_lease_gate`` publishes this node's held set and
+materializes the fleet-wide union through the configured fleet store, then REFUSES the
+launch if a live FOREIGN peer already holds the lane. It is a NON-mutating cross-node
+check, not a kernel pre-acquire: the launched worker still does its own ``dos`` lane
+acquire, so the gate never holds a kernel lease that would wedge the worker. The store
+backend is the existing opt-in (``FAK_FLEET_LEASE_STORE=git`` -> the cross-node floor);
+an un-opted node stays on the same-box fast path (the kernel WAL already serializes one
+box's sessions), so the gate is a zero-network no-op there and never blocks dispatch.
+The git floor fails CLOSED (a store it cannot consult refuses, never silently
+double-grants); the same-box default fails OPEN.
+
+``FLEET_LANE_ALLOWLIST`` is DECIDED here as ADVISORY steering, NOT a serialization
+floor: the dos kernel's bare-autopick ladder (``arbiter.py`` reads ``cfg.lanes.autopick``)
+exposes no per-node override, so a fleet allowlist can only filter what the supervisor
+*proposes* (``build_plan``), never bind what the kernel *picks*. The floor for the global
+lanes is the GitRefStore gate above; the allowlist only steers/refuses the canary lane
+this layer chooses, and a real per-node allowlist waits on a dos-kernel autopick-override
+seam.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,13 +48,131 @@ from typing import Any, Callable
 
 import dos_supervisor_status as status
 
+try:  # The cross-node lease transport (issue #21). Guarded: a node missing it fails open.
+    import dos_fleet_lease
+except Exception:  # noqa: BLE001 - import is best-effort; the gate degrades to a no-op
+    dos_fleet_lease = None  # type: ignore[assignment]
+
 SCHEMA = "fleet-dos-supervisor-watchdog/1"
 
 ENACTABLE_VERDICTS = {"READY_TO_CANARY"}
 NOOP_VERDICTS = {"AT_TARGET", "READY"}
 
+# The 3 exclusive lanes that need fleet-wide consensus (mirrors dos_fleet_lease.GLOBAL_LANES).
+GLOBAL_LANES = ("abi", "release", "global")
+
 
 Runner = Callable[[list[str], Path, int], dict[str, Any]]
+
+# A lease gate returns None to PROCEED or a refusal dict to BLOCK a live launch.
+LeaseGate = Callable[..., "dict[str, Any] | None"]
+
+
+def lane_allowlist(env: dict[str, str] | None = None) -> set[str] | None:
+    """Parse ``FLEET_LANE_ALLOWLIST`` (comma/space separated) into a set, or None.
+
+    ADVISORY ONLY (issue #21): this filters the lanes the supervisor PROPOSES for a
+    canary; it is NOT a serialization floor. The dos kernel's bare-autopick ladder reads
+    ``cfg.lanes.autopick`` with no fleet override, so a worker that bare-autopicks can
+    still land off-allowlist — the real cross-node floor is the GitRefStore lease
+    (``FAK_FLEET_LEASE_STORE=git``), not this list. None = no allowlist (all lanes pass).
+    """
+    raw = (env if env is not None else os.environ).get("FLEET_LANE_ALLOWLIST")
+    if not raw or not raw.strip():
+        return None
+    return {tok for tok in raw.replace(",", " ").split() if tok}
+
+
+def _command_lane(command: list[str]) -> str | None:
+    """The ``--lane`` value in an enact command (the lane that will actually launch)."""
+    for i, tok in enumerate(command):
+        if tok == "--lane" and i + 1 < len(command):
+            return command[i + 1]
+    return None
+
+
+def fleet_lease_store(workspace: Path, env: dict[str, str]) -> Any:
+    """Select the cross-node lease store for the live gate (issue #21).
+
+    ``FAK_FLEET_LEASE_STORE=git`` -> the GitRefStore cross-node floor; a path -> a
+    LocalDirStore there; unset -> the same-box registry LocalDirStore. Kept independent
+    of ``dos_fleet_lease._store_for`` so this leaf never couples to that CLI helper's
+    signature.
+    """
+    backend = (env.get("FAK_FLEET_LEASE_STORE") or "").strip()
+    if backend == "git":
+        return dos_fleet_lease.GitRefStore(workspace)
+    if backend:
+        return dos_fleet_lease.LocalDirStore(Path(backend))
+    return dos_fleet_lease.LocalDirStore(Path(workspace) / "tools" / "_registry" / "fleet-leases")
+
+
+def fleet_lease_gate(
+    lane: str | None,
+    *,
+    workspace: Path,
+    env: dict[str, str] | None = None,
+    store: Any | None = None,
+    live: Callable[[Path], list[dict[str, Any]]] | None = None,
+    now: float | None = None,
+) -> dict[str, Any] | None:
+    """Serialize a GLOBAL lane across nodes BEFORE a live launch (issue #21 activation).
+
+    Returns None to PROCEED (the lane is not global, the node has not opted into the git
+    floor, or no live fleet peer holds the lane), or a refusal dict to BLOCK the launch.
+
+    For a global lane on a git-opted node it (1) publishes this node's held lease set so
+    a peer's tick can observe it, (2) materializes the global union through the store, and
+    (3) refuses if a live FOREIGN peer already holds the lane. NON-mutating w.r.t. the
+    kernel WAL: the launched worker still does its own ``dos`` lane acquire. The git floor
+    fails CLOSED (could not publish/consult -> refuse); the same-box default is a
+    zero-network no-op (already serialized by the kernel WAL), so it never blocks dispatch.
+
+    Honest residual (per dos_fleet_lease): publish and a peer's materialize are one tick
+    apart, so a freshly-acquired peer lane is visible only on the NEXT peer tick — the
+    overlay NARROWS, it does not close, the cross-node double-grant.
+    """
+    if not lane or dos_fleet_lease is None or not dos_fleet_lease.is_global_lane(lane):
+        return None
+    e = env if env is not None else os.environ
+    backend = (e.get("FAK_FLEET_LEASE_STORE") or "").strip()
+    # Only the git floor engages the live gate; an un-opted node is already serialized
+    # same-box by the kernel WAL, so skip the network entirely (unless a test injects one).
+    if store is None and backend != "git":
+        return None
+    host = dos_fleet_lease.host_id()
+    now = dos_fleet_lease.now_s() if now is None else now
+    live = live or dos_fleet_lease.kernel_live
+    try:
+        st = store if store is not None else fleet_lease_store(workspace, e)
+        pub, _ = dos_fleet_lease.do_publish(workspace, st, host=host, now=now, live=live)
+        if backend == "git" and not pub.get("ok"):
+            # Could not stake this node's claim in the cross-node store -> do not launch.
+            return {
+                "reason": dos_fleet_lease.REASON_STALE_RECORD,
+                "detail": f"could not publish lease set to the cross-node store for {lane!r}; refusing launch",
+            }
+        mat, _ = dos_fleet_lease.do_materialize(workspace, st, scope="global", host=host, now=now, live=live)
+        foreign = [
+            r for r in mat["leases"]
+            if r.get("lane") == lane and r.get("host_id") and r.get("host_id") != host
+        ]
+    except Exception as exc:  # noqa: BLE001 - report; never crash the supervisor tick
+        if backend == "git":
+            return {
+                "reason": dos_fleet_lease.REASON_STALE_RECORD,
+                "detail": f"cross-node lease store unavailable for global lane {lane!r}: {exc!r}",
+            }
+        return None  # same-box default fails open so dispatch is never wedged
+    hit = dos_fleet_lease.would_collide(lane, [f"{lane}/**"], foreign)
+    if hit.get("collides"):
+        return {
+            "reason": hit.get("reason") or dos_fleet_lease.REASON_HELD_REMOTE,
+            "detail": f"global lane {lane!r} held by live fleet peer {hit.get('host_id')!r}",
+            "holder": hit.get("holder"),
+            "host_id": hit.get("host_id"),
+        }
+    return None
 
 
 def go_worker_binary(workspace: Path) -> Path | None:
@@ -94,12 +236,40 @@ def build_plan(
     max_ticks: int,
     live: bool,
     safety: dict[str, Any] | None = None,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     verdict = str(readiness.get("verdict") or "")
     supervise = readiness.get("supervise") or {}
     spawn = [str(lane) for lane in supervise.get("spawn") or []]
 
-    # Build the command with the first available spawn lane
+    # FLEET_LANE_ALLOWLIST advisory steer (issue #21): narrow the proposed spawn lanes to
+    # the allowlist before picking one. This is best-effort steering, NOT a floor — see the
+    # module docstring. When EVERY proposed lane is off-allowlist and the state would
+    # otherwise enact, refuse with the steer reason; non-enactable states fall through.
+    allow = lane_allowlist(env)
+    if allow is not None and spawn:
+        allowed = [ln for ln in spawn if ln in allow]
+        if not allowed:
+            if readiness.get("ok") and verdict in ENACTABLE_VERDICTS:
+                return _plan(
+                    readiness=readiness,
+                    workspace=workspace,
+                    target=target,
+                    max_ticks=max_ticks,
+                    live=live,
+                    action="refuse",
+                    ok=False,
+                    reason=(
+                        f"FLEET_LANE_ALLOWLIST advisory steer refused launch: proposed lane(s) "
+                        f"{spawn} not in allowlist {sorted(allow)}"
+                    ),
+                    command=enact_command(workspace, target, max_ticks, lane=spawn[0]),
+                    safety=safety,
+                )
+        else:
+            spawn = allowed
+
+    # Build the command with the first available (allowlist-steered) spawn lane
     lane = spawn[0] if spawn else None
     command = enact_command(workspace, target, max_ticks, lane=lane)
 
@@ -207,6 +377,8 @@ def run_watchdog(
     safety: dict[str, Any] | None = None,
     allow_dirty: bool = False,
     allow_stale: bool = False,
+    env: dict[str, str] | None = None,
+    lease_gate: LeaseGate | None = None,
 ) -> dict[str, Any]:
     root = workspace.resolve()
     payload = readiness if readiness is not None else status.collect(root)
@@ -219,6 +391,7 @@ def run_watchdog(
         max_ticks=max_ticks,
         live=live,
         safety=safety_payload,
+        env=env,
     )
     if plan["action"] != "enact":
         return plan
@@ -228,6 +401,18 @@ def run_watchdog(
         plan["ok"] = False
         plan["action"] = "refuse"
         plan["reason"] = safety_refusal
+        return plan
+
+    # Cross-node lane serialization (issue #21): for a global lane, refuse the launch if a
+    # live fleet peer already holds it. A no-op for non-global lanes / un-opted nodes.
+    gate = lease_gate if lease_gate is not None else fleet_lease_gate
+    gate_lane = _command_lane(plan.get("command") or [])
+    refusal = gate(gate_lane, workspace=root, env=env)
+    if refusal:
+        plan["ok"] = False
+        plan["action"] = "refuse"
+        plan["reason"] = refusal.get("detail") or "cross-node fleet lease refused the launch"
+        plan["fleet_lease"] = refusal
         return plan
 
     runner = runner or run_command
