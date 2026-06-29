@@ -93,9 +93,11 @@ try {
   $principalKind = 'S4U (session 0)'
 } catch {
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-  Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
+  $headlessArgs = "--headless `"$($taskAction.Execute)`" $($taskAction.Arguments)"
+  $headlessAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $Workspace
+  Register-ScheduledTask -TaskName $TaskName -Action $headlessAction -Trigger $trigger `
                -Principal $principal -Settings $settings -Force | Out-Null
-  $principalKind = 'Interactive (non-elevated)'
+  $principalKind = 'Interactive (non-elevated; conhost --headless)'
 }
 
 $runMode = if ($Live) { 'LIVE (posts to #grafana)' } else { 'DRY-RUN (resolves channel/token, renders, sends nothing)' }

@@ -90,11 +90,12 @@ try {
   $principalKind = 'S4U (session 0)'
 } catch {
   $exe = if (Test-Path $pyw) { $pyw } else { $py }   # windowless if pythonw is present
-  $taskAction = New-ScheduledTaskAction -Execute $exe -Argument $pyArgs -WorkingDirectory $Workspace
+  $headlessArgs = "--headless `"$exe`" $pyArgs"
+  $taskAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $Workspace
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
   $reg = Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
                -Principal $principal -Settings $settings -Force
-  $principalKind = "Interactive (non-elevated; $(Split-Path -Leaf $exe))"
+  $principalKind = "Interactive (non-elevated; conhost --headless $(Split-Path -Leaf $exe))"
 }
 
 $runMode = if ($Live) { 'LIVE (posts to Slack)' } else { 'DRY-RUN (resolves channel/token, sends nothing)' }

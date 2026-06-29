@@ -107,8 +107,11 @@ try {
   $exe = if ($pyw) { $pyw } else { $py }
   try {
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-    Register-Guard $exe $principal
-    $wl = if ($pyw) { 'pythonw, windowless' } else { 'python -- console may flash; install pythonw to silence' }
+    $headlessArgs = "--headless `"$exe`" $guardArgs"
+    $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $RepoRoot
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+      -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+    $wl = if ($pyw) { 'pythonw via conhost --headless' } else { 'python via conhost --headless' }
     $modeNote = "Interactive as $env:USERNAME (runs while logged on; $wl). S4U skipped: $s4uErr"
   } catch {
     throw "register failed. S4U: $s4uErr ; Interactive: $($_.Exception.Message). Try an elevated shell for the S4U daemon."

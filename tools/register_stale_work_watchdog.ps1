@@ -83,9 +83,11 @@ try {
                  -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
 } catch {
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
-  Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
+  $headlessArgs = "--headless `"$pwsh`" $psArgs"
+  $headlessAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $RepoRoot
+  Register-ScheduledTask -TaskName $TaskName -Action $headlessAction -Trigger $trigger `
                  -Principal $principal -Settings $settings -Force | Out-Null
-  $principalMode = 'Interactive (unelevated fallback)'
+  $principalMode = 'Interactive (unelevated fallback; conhost --headless)'
 }
 $mode = if ($Live) { "LIVE (GCs ephemera > $MaxAgeDays d)" } else { 'DRY-RUN (reports only)' }
 Write-Output "installed $TaskName - every $EveryHours h, $mode, $principalMode, restart-durable"
