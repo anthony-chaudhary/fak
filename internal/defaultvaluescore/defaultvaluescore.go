@@ -95,13 +95,19 @@ var valueFlagTokens = []string{
 // not an excuse for a dead feature -- the same discipline conflationscore's qualifier
 // tables apply to provenance prose. Keyed by the flag name as it appears in fs.<T>("..").
 var offWithReason = map[string]string{
-	// Rewrites in-flight turn history; gated until a wrapped session has been watched.
-	"ctx-view-budget": "rewrites in-flight turn history -- gated behind operator opt-in until a wrapped session is watched (it is the planned-view lever, default 0 leaves the path byte-identical)",
+	// NOTE: --ctx-view-budget is NOT listed here: it ships default-ON at 8000 (the
+	// planned-view lever; enforced for both front doors by cmd/fak/token_defaults_test.go).
+	// A default-ON flag never reaches the offWithReason check in kpiValueFlagDefaultOn (it
+	// continues at the `on++` branch), so an entry here would be dead and misleading. See
+	// cmd/fak/servewiring.go for the authoritative DEFAULT-ON description.
 	// Context-budget seed: a hard budget that returns reset directives is an operator
 	// policy, not a silent default -- forcing it on would surprise an unwitting session.
 	"context-budget-tokens": "seeds a hard context budget that returns reset directives -- an operator policy, not a silent default (0 = off keeps today's path)",
 	// vCache cuda-graph: a measured no-win on small models; witness tok/s before relying.
 	"cuda-graph": "a measured no-win on small-model/L4 decode (launch overhead already small) -- requires a per-node tok/s witness before it pays, so default-off avoids a vacuous claim",
+	// Proxy-filled vDSO changes cross-turn cache residency and is only sound in a
+	// proxy-closed world where the principal is named and writes route through fak.
+	"vdso-proxy-fill": "warms vDSO from admitted inbound proxy tool_result blocks -- opt-in until the principal is named and writes touching the same resource reach fak (proxy-closed world)",
 	// Self-hosted serving-engine cache-reset family: every knob needs an external engine +
 	// its control URL/admin key, so none can default on without a configured engine. The
 	// whole family is gated behind --engine-cache-engine being set.
