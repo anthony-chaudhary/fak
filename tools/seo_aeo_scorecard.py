@@ -1242,6 +1242,9 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
     corpus = {
         "n_pages": n,
         "overall_score": overall,
+        # Corpus-level letter on the shared 90/80/70/60 ladder (#1269) so the
+        # control pane reads the real grade, not a score-derived inference.
+        "grade": grade_letter(overall),
         "page_mean_score": mean_score,
         "site_score": site["score"],
         "site_checks_ok": f"{site['n_ok']}/{site['n_total']}",

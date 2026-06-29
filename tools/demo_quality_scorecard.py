@@ -671,6 +671,9 @@ def build_payload(*, workspace: str, demos: list[dict[str, Any]],
     corpus = {
         "n_demos": n,
         "mean_score": mean_score,
+        # Corpus-level letter on the shared 90/80/70/60 ladder (#1269) so the
+        # control pane reads the real grade, not a score-derived inference.
+        "grade": grade_letter(mean_score),
         "median_score": round(statistics.median(scores), 1) if scores else 0.0,
         "min_score": round(min(scores), 1) if scores else 0.0,
         "max_score": round(max(scores), 1) if scores else 0.0,

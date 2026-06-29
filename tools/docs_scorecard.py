@@ -609,6 +609,10 @@ def build_payload(*, workspace: str, docs: list[dict[str, Any]],
     corpus = {
         "n_docs": n,
         "mean_score": mean_score,
+        # Corpus-level letter on the shared 90/80/70/60 ladder (#1269): the
+        # control pane reads this directly instead of inferring a grade from the
+        # corpus score or the occurrence-count debt.
+        "grade": grade_letter(mean_score),
         "median_score": round(sorted(scores)[n // 2], 1) if n else 0.0,
         "min_score": round(min(scores), 1) if scores else 0.0,
         "max_score": round(max(scores), 1) if scores else 0.0,
