@@ -49,6 +49,7 @@ var tier = map[string]int{
 	"agenticbench":     1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":       1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"benchcatalog":     1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"benchlineagegate": 1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"cachevalueledger": 1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
 	"benchcli":         1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
 	"benchids":         1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
@@ -59,7 +60,7 @@ var tier = map[string]int{
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; imports scoreboard(1)+stdlib, off the hot path.
 	"supportmaturityscore": 1,                // pure scorecard over internal/covmatrix; off the hot path.
-	"supportmaturity":      1,                // the closed M0â€“M7 support-maturity ladder vocabulary (#1244); lowers covmatrix(1)+ggufload(1)+compute(1) onto one ordered enum, off the hot path.
+	"supportmaturity":      2,                // support-maturity ladder + shipgate-gated promotion/drop rules (#1244/#1245); imports tier-1 support facts and shipgate(2), off the hot path.
 	"releasestale":         1,                // pure publish-staleness verdict (latest tag vs HEAD, in commits+days) + a thin git Gather shell; the publish-axis dual of binstamp's source-axis freshness. Stdlib-only, imports nothing internal, off the hot path.
 	"affectedtests":        1,                // pure reverse-dependency closure for the `fak affected` fast test gate: changed packages + every package that (transitively, test imports included) imports one; stdlib-only, imports nothing internal, off the hot path.
 	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
