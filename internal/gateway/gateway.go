@@ -331,6 +331,14 @@ type Config struct {
 	// NativeMaxTurns caps the owned loop's model round-trips per served request when Native
 	// is set. <= 0 falls back to DefaultNativeMaxTurns. Inert when Native is false.
 	NativeMaxTurns int
+	// VDSOProxyFill, when true, warms the vDSO tier-2 cache from ADMITTED inbound
+	// tool_result blocks on the proxy path: an ALLOWED, read-only-shaped result the
+	// client sends back fills (tool,args)->result so a LATER re-proposed identical read
+	// is served inline (adjudicateProposedServed) with no client re-execution. Default
+	// OFF — it is sound only when the principal is named and writes that touch the same
+	// resource reach fak (proxy-closed world), so it is an explicit operator opt-in.
+	// Set by `fak serve --vdso-proxy-fill`. Inert (zero behavior change) when false.
+	VDSOProxyFill bool
 }
 
 // DefaultNativeMaxTurns bounds the native serve loop's model round-trips per request
@@ -698,6 +706,9 @@ type Server struct {
 	// loop's model round-trips per request. See Config.Native / native_serve.go.
 	native         bool
 	nativeMaxTurns int
+	// vdsoProxyFill opts the proxy path into warming the vDSO from admitted inbound
+	// tool_result blocks (Config.VDSOProxyFill). Default false. See admitInboundResults.
+	vdsoProxyFill bool
 
 	// fleet is the host-injected live worker membership/health/drain/failover loop
 	// (fleet_membership.go) — the live fleet view the router reads. The metrics surface
@@ -898,6 +909,7 @@ func New(cfg Config) (*Server, error) {
 		route:                      newRouteLive(cfg.RouteManifest),
 		native:                     cfg.Native,
 		nativeMaxTurns:             nativeMaxTurnsOr(cfg.NativeMaxTurns),
+		vdsoProxyFill:              cfg.VDSOProxyFill,
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}
@@ -1848,6 +1860,22 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 	for i := range messages {
 		origContent[i] = messages[i].Content
 	}
+	// Pair each inbound tool_result to its originating call's (tool, args): the result
+	// block carries only ToolCallID + Content, but the args live on the prior assistant
+	// tool_use whose ID == ToolCallID (decoded into Message.ToolCalls). Build the join
+	// index once, only when the proxy-fill warm path is enabled (otherwise it is dead work).
+	var callByID map[string]agent.ToolCall
+	if s.vdsoProxyFill {
+		callByID = make(map[string]agent.ToolCall)
+		for _, m := range messages {
+			if m.Role != agent.RoleAssistant {
+				continue
+			}
+			for _, tcc := range m.ToolCalls {
+				callByID[tcc.ID] = tcc
+			}
+		}
+	}
 	var admissions []ResultAdmission
 	var quarantinedIdx []int
 	for i := range messages {
@@ -1881,6 +1909,15 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		if wv.Kind == "QUARANTINE" {
 			quarantinedIdx = append(quarantinedIdx, i)
 		}
+		// Warm the vDSO from this ADMITTED result (opt-in, default off): only a plain
+		// Allow (never QUARANTINE/TRANSFORM/DENY), paired to its originating read-only
+		// call, fills (tool,args)->result so a later identical read is served inline.
+		// All the soundness/security guards live in fillVDSOFromResult.
+		if s.vdsoProxyFill && wv.Kind == "ALLOW" {
+			if orig, ok := callByID[messages[i].ToolCallID]; ok {
+				s.fillVDSOFromResult(ctx, orig, messages[i].Content, traceID)
+			}
+		}
 		admissions = append(admissions, ResultAdmission{
 			ToolCallID: messages[i].ToolCallID,
 			Tool:       messages[i].Name,
@@ -1896,6 +1933,74 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		return admissions, err
 	}
 	return admissions, nil
+}
+
+// fillVDSOFromResult warms the vDSO tier-2 cache from one ADMITTED inbound tool_result
+// (the opt-in proxy-fill path) so a LATER re-proposed identical read is served inline
+// instead of bounced back to the client. The caller has already confirmed the result's
+// admission verdict was a plain Allow; this function applies the remaining soundness +
+// security guards that the generic vdso.Emit fill gate (built for fak-authored
+// completions) does not enforce against a client-supplied producer:
+//
+//   - read-only-shaped tool ONLY (readOnlyPrefix); IsWriteShaped is the un-bypassable
+//     backstop. A write tool's result must never become a cached "answer".
+//   - NAMED principal ONLY: an empty principal lands the entry in the shared global
+//     slice, letting one client seed bytes an unrelated tenant reads. A client fill must
+//     be attributable to the principal that produced it.
+//   - never a Shareable tool: a Shareable entry drops the principal dimension (shared
+//     across all tenants), so a client fill into one would be a cross-tenant poison.
+//
+// On a hit the LATER read serves these bytes; ctxmmu.ScreenBytes on the serve side
+// (adjudicateProposedServed) remains the backstop, but a quarantined result never
+// reaches here because the caller gates on wv.Kind=="ALLOW". The fill is built via the
+// SAME buildCall(readOnly=true) the served probe uses, so the key matches exactly.
+func (s *Server) fillVDSOFromResult(ctx context.Context, orig agent.ToolCall, result, traceID string) {
+	tool := orig.Function.Name
+	// Trust the assistant-side tool NAME (the result block drops it on the Anthropic
+	// wire). Eligibility mirrors the served probe; IsWriteShaped is the hard backstop.
+	if !readOnlyPrefix(tool) || vdso.IsWriteShaped(tool) {
+		return
+	}
+	// A client fill must be principal-attributed (empty principal => shared global slice).
+	if principalFromContext(ctx) == "" {
+		return
+	}
+	args := orig.Function.Arguments
+	if strings.TrimSpace(args) == "" {
+		args = "{}"
+	}
+	// Build the call the SAME way the served probe does (readOnly=true => readOnlyHint+
+	// idempotentHint, principal scoping), so the fill key == the later Lookup key.
+	c, err := s.buildCall(ctx, tool, args, true /*readOnly*/, "" /*witness*/, traceID)
+	if err != nil {
+		return
+	}
+	ref, err := abi.ActiveResolver().Put(ctx, []byte(result))
+	if err != nil {
+		return
+	}
+	// Meta must NOT carry served_by=vdso (vdso.Emit refuses to re-store an already-served
+	// entry). Emit ONLY to the registered vDSO observers — NOT every EvComplete emitter,
+	// which would feed a phantom completion to the journal/rungobs counters. In production
+	// and in tests the wired *vdso.VDSO is the same instance the served probe reads via
+	// abi.FastPaths(), so the fill lands where a later Lookup will find it. vdso.Emit's own
+	// gates (Status OK, !destructive, both hints, resourceMisnamed) are the final backstop.
+	r := &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK, Meta: map[string]string{}}
+	ev := abi.Event{Kind: abi.EvComplete, Call: c, Result: r}
+	for _, em := range abi.EmittersFor(abi.EvComplete) {
+		v, ok := em.(*vdso.VDSO)
+		if !ok {
+			continue
+		}
+		// Per-instance Shareable guard: a Shareable entry drops the principal dimension
+		// (shared across all tenants), so a client-supplied result must never fill one —
+		// that would let one client poison every tenant. Checked on the SAME instance the
+		// fill targets (Shareable is registered per-vDSO), not a global default.
+		if v.Shareable(tool) {
+			continue
+		}
+		v.Emit(ev)
+	}
 }
 
 // evictInKernelPoison drives the in-kernel poison eviction when the chat backend is the

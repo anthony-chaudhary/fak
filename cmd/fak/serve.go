@@ -119,6 +119,7 @@ func cmdServe(argv []string) {
 	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	native := fs.Bool("native", false, "NATIVE HARNESS (#1316): drive fak's OWN agent loop (agent.RunArm) for a non-streaming /v1/messages turn instead of the single-shot proxy turn — fak owns dispatch, the in-kernel syscall boundary is the sole tool path, and the per-turn session gate + per-call routing + operator steer bus run on the served loop. The loop is seeded with the request's last user message and drives the kernel-owned tool catalog to a final answer; the per-turn ArmMetrics ride back on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged). A streaming request falls through to the proxy path.")
 	nativeMaxTurns := fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
+	vdsoProxyFill := fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
@@ -384,6 +385,7 @@ func cmdServe(argv []string) {
 		// /v1/messages turn. Off by default — the proxy path is byte-for-byte unchanged.
 		Native:         *native,
 		NativeMaxTurns: *nativeMaxTurns,
+		VDSOProxyFill:  *vdsoProxyFill,
 	})
 	must(err)
 	srv.SetModelLoadProfile(loadProfile)
