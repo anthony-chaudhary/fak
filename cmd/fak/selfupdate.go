@@ -32,6 +32,7 @@ func cmdSelfUpdate(argv []string) {
 	check := fs.Bool("check", false, "report whether this binary is stale vs HEAD and exit (no build)")
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
 	root := fs.String("root", "", "repo root to build from (default: discover from cwd)")
+	target := fs.String("target", "", "binary path to replace (default: this binary's own path). Lets a scheduler update the FLEET binary regardless of which fak it invokes.")
 	_ = fs.Parse(argv)
 
 	repoRoot := strings.TrimSpace(*root)
@@ -76,10 +77,14 @@ func cmdSelfUpdate(argv []string) {
 		return
 	}
 
-	target, err := os.Executable()
-	if err != nil || strings.TrimSpace(target) == "" {
-		fmt.Fprintln(os.Stderr, "self-update: cannot resolve this binary's own path:", err)
-		os.Exit(1)
+	installTarget := strings.TrimSpace(*target)
+	if installTarget == "" {
+		exe, err := os.Executable()
+		if err != nil || strings.TrimSpace(exe) == "" {
+			fmt.Fprintln(os.Stderr, "self-update: cannot resolve this binary's own path (pass --target):", err)
+			os.Exit(1)
+		}
+		installTarget = exe
 	}
 
 	// Build from a PRISTINE detached origin/main checkout, never the live (peer-dirty)
@@ -97,10 +102,10 @@ func cmdSelfUpdate(argv []string) {
 	}
 	defer cleanup()
 
-	fmt.Printf("self-update: building origin/main + gating, then swapping %s …\n", target)
+	fmt.Printf("self-update: building origin/main + gating, then swapping %s …\n", installTarget)
 	res := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
 		RepoRoot: buildDir,
-		Target:   target,
+		Target:   installTarget,
 	})
 	fmt.Println(selfinstall.FormatResult(res))
 	if !res.Installed {
