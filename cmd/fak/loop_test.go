@@ -358,6 +358,64 @@ func TestLoopStatusForkedLedgerSurvives(t *testing.T) {
 	}
 }
 
+func TestLoopRepairForkedLedgerArchivesTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	appendLoopTestEvent(t, path, loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventFire})
+	appendLoopTestEvent(t, path, loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventWitness, RunID: "run-1", Status: loopmgr.StatusWitnessedDone})
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	forked := []byte(string(body) + lines[len(lines)-1] + "\n")
+	if err := os.WriteFile(path, forked, 0o644); err != nil {
+		t.Fatalf("write forked ledger: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"repair", "--ledger", path})
+	if code != 2 {
+		t.Fatalf("repair without confirm code=%d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if _, err := loopmgr.Load(path); err == nil {
+		t.Fatalf("repair without confirm mutated or accepted the forked ledger")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runLoop(&stdout, &stderr, []string{"repair", "--ledger", path, "--confirm", "--json"})
+	if code != 0 {
+		t.Fatalf("repair code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var rep loopRepairReport
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("unmarshal repair report: %v\n%s", err, stdout.String())
+	}
+	if !rep.Repaired || rep.ArchivePath == "" || rep.RecoveredEvents != 2 || rep.ArchivedEvents != 1 {
+		t.Fatalf("repair report = %+v, want repaired with 2 recovered and 1 archived", rep)
+	}
+
+	events, err := loopmgr.Load(path)
+	if err != nil {
+		t.Fatalf("strict Load after repair: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("strict Load after repair got %d events, want 2", len(events))
+	}
+	repaired, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read repaired ledger: %v", err)
+	}
+	archived, err := os.ReadFile(rep.ArchivePath)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	if !bytes.Equal(append(append([]byte(nil), repaired...), archived...), forked) {
+		t.Fatalf("repaired ledger + archive did not preserve original forked bytes\nrepaired=%q\narchive=%q\noriginal=%q", repaired, archived, forked)
+	}
+}
+
 func TestLoopHealthListsLearningDocsDebtAndDarkLoop(t *testing.T) {
 	oldLearningDebt := loopLearningDebt
 	loopLearningDebt = func(root string) (int64, bool) { return 34, true }

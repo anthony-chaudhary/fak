@@ -46,6 +46,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopAdmit(stdout, stderr, argv[1:])
 	case "recover":
 		return runLoopRecover(stdout, stderr, argv[1:])
+	case "repair":
+		return runLoopRepair(stdout, stderr, argv[1:])
 	case "drive":
 		return runLoopDrive(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -437,6 +439,143 @@ func runLoopStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderLoopStatus(stdout, st)
 	return 0
+}
+
+type loopRepairReport struct {
+	Schema          string            `json:"schema"`
+	LedgerPath      string            `json:"ledger_path"`
+	ArchivePath     string            `json:"archive_path,omitempty"`
+	Repaired        bool              `json:"repaired"`
+	RecoveredEvents int               `json:"recovered_events"`
+	ArchivedEvents  int               `json:"archived_events,omitempty"`
+	Integrity       loopmgr.Integrity `json:"integrity"`
+}
+
+func runLoopRepair(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("loop repair", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
+	confirm := fs.Bool("confirm", false, "confirm rewriting the ledger to its recovered valid prefix and archiving the broken tail")
+	asJSON := fs.Bool("json", false, "emit the repair report as JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak loop repair: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	if !*confirm {
+		fmt.Fprintln(stderr, "fak loop repair: refusing to mutate the audit ledger without --confirm")
+		return 2
+	}
+
+	rep, err := repairLoopLedger(*ledger)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop repair: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, rep, "fak loop repair")
+	}
+	if !rep.Repaired {
+		fmt.Fprintf(stdout, "loop repair: ledger %s is already strict-clean (%d event(s))\n",
+			rep.LedgerPath, rep.RecoveredEvents)
+		return 0
+	}
+	fmt.Fprintf(stdout, "loop repair: repaired ledger=%s recovered=%d archived=%d archive=%s\n",
+		rep.LedgerPath, rep.RecoveredEvents, rep.ArchivedEvents, rep.ArchivePath)
+	return 0
+}
+
+func repairLoopLedger(path string) (loopRepairReport, error) {
+	events, integ, err := loopmgr.LoadPrefix(path)
+	if err != nil {
+		return loopRepairReport{}, err
+	}
+	rep := loopRepairReport{
+		Schema:          "fak.loop-repair.v1",
+		LedgerPath:      path,
+		RecoveredEvents: len(events),
+		Integrity:       integ,
+	}
+	if !integ.Broken {
+		return rep, nil
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return loopRepairReport{}, err
+	}
+	prefix, tail, archived, err := splitLoopLedgerAtRecovered(raw, len(events))
+	if err != nil {
+		return loopRepairReport{}, err
+	}
+	if archived == 0 {
+		return loopRepairReport{}, fmt.Errorf("integrity break reported at line %d but no broken tail was found", integ.AtLine)
+	}
+
+	archive := loopRepairArchivePath(path, integ)
+	if err := writeFileExclusive(archive, tail, 0o644); err != nil {
+		return loopRepairReport{}, fmt.Errorf("archive broken tail: %w", err)
+	}
+	if err := os.WriteFile(path, prefix, 0o644); err != nil {
+		return loopRepairReport{}, fmt.Errorf("rewrite recovered prefix: %w", err)
+	}
+	rep.ArchivePath = archive
+	rep.Repaired = true
+	rep.ArchivedEvents = archived
+	return rep, nil
+}
+
+func splitLoopLedgerAtRecovered(raw []byte, recovered int) (prefix []byte, tail []byte, archivedEvents int, err error) {
+	if recovered < 0 {
+		return nil, nil, 0, fmt.Errorf("recovered event count %d is invalid", recovered)
+	}
+	seen := 0
+	for _, chunk := range bytes.SplitAfter(raw, []byte("\n")) {
+		if len(chunk) == 0 {
+			continue
+		}
+		if seen < recovered {
+			prefix = append(prefix, chunk...)
+			if len(bytes.TrimSpace(chunk)) > 0 {
+				seen++
+			}
+			continue
+		}
+		tail = append(tail, chunk...)
+		if len(bytes.TrimSpace(chunk)) > 0 {
+			archivedEvents++
+		}
+	}
+	if seen != recovered {
+		return nil, nil, 0, fmt.Errorf("ledger contains %d valid event line(s), want recovered prefix %d", seen, recovered)
+	}
+	return prefix, tail, archivedEvents, nil
+}
+
+func loopRepairArchivePath(path string, integ loopmgr.Integrity) string {
+	n := integ.AtSeq
+	if n == 0 {
+		n = uint64(integ.AtLine)
+	}
+	return fmt.Sprintf("%s.broken-%d", path, n)
+}
+
+func writeFileExclusive(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	n, err := f.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func runLoopHealth(stdout, stderr io.Writer, argv []string) int {
@@ -1220,6 +1359,7 @@ func loopUsage(w io.Writer) {
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
   fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
+  fak loop repair [--ledger FILE] --confirm [--json]
   fak loop drive [--loop ID] [--goal GOAL.md] [--ledger FILE] [--policy FILE]
                   [--max-iters N] [--max-tokens N] [--deadline RFC3339|DUR]
                   [--review-model M] -- CMD [ARG...]
@@ -1242,8 +1382,10 @@ prints admit/refuse per loop — exit 3 when any evaluated loop is refused, so a
 scheduler line can gate work on it. Recover folds the ledger into the cross-run
 RECOVERY worklist: the dispatched runs that started but were never finished
 (orphaned) or never witnessed (unwitnessed) — the work to re-dispatch or re-verify.
-The ledger records events; admission, scheduler authority, and completion witnesses
-live in producers.
+Repair is the explicit operator mutation: it archives a broken ledger tail and
+rewrites only the valid prefix; readers never invoke it automatically. The ledger
+records events; admission, scheduler authority, and completion witnesses live in
+producers.
 Drive reads a GOAL.md goal-spec fresh before every turn, gates each turn through
 the loop admission policy, appends fire/admit/start/end/witness events to this ledger,
 and re-spawns CMD until the configured DOS witness reports witnessed_done or a
