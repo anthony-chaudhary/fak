@@ -11,6 +11,8 @@ package main
 //	fak affected --list          print the affected import paths and exit (no tests run)
 //	fak affected --json          print the selection plan as JSON and exit
 //	fak affected --base origin/main   select everything changed since a base ref
+//	fak affected --budget 30s --report .fak/verify-loop-affected.json
+//	fak affected --file internal/foo/foo.go   test a representative one-file change
 //	fak affected --short -- -run TestX   pass-through flags to go test (after --)
 //
 // It is the impure shell over internal/affectedtests: it gathers the changed files
@@ -30,11 +32,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 )
 
 func cmdAffected(argv []string) { os.Exit(runAffected(os.Stdout, os.Stderr, argv)) }
+
+var (
+	affectedChangedFiles = gitChangedFiles
+	affectedListGraph    = goListGraph
+	affectedRunGoTest    = runAffectedGoTest
+	affectedNow          = time.Now
+)
 
 // affectedPlan is the JSON view (-json): the deterministic selection the shell derived
 // before running any test, so a peer can reproduce it from the same tree.
@@ -46,10 +56,27 @@ type affectedPlan struct {
 	TotalPackages    int      `json:"total_packages"`
 }
 
+type affectedRunReport struct {
+	Schema           string   `json:"schema"`
+	Mode             string   `json:"mode"`
+	Base             string   `json:"base,omitempty"`
+	ChangedFiles     []string `json:"changed_files"`
+	ChangedPackages  []string `json:"changed_packages"`
+	SelectedPackages []string `json:"selected_packages"`
+	TotalPackages    int      `json:"total_packages"`
+	Command          []string `json:"command,omitempty"`
+	BudgetMS         int64    `json:"budget_ms,omitempty"`
+	ElapsedMS        int64    `json:"elapsed_ms"`
+	Verdict          string   `json:"verdict"`
+	Reason           string   `json:"reason,omitempty"`
+}
+
 func runAffected(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak affected", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	base := fs.String("base", "", "git ref to diff against (default: working tree vs HEAD). e.g. --base origin/main selects everything changed since the base")
+	var explicitFiles pathList
+	fs.Var(&explicitFiles, "file", "repo-relative changed file to test as the representative change (repeatable; bypasses git diff)")
 	list := fs.Bool("list", false, "print the affected package import paths and exit without running tests")
 	asJSON := fs.Bool("json", false, "print the selection plan as JSON and exit without running tests")
 	short := fs.Bool("short", false, "pass -short to go test")
@@ -57,20 +84,35 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	run := fs.String("run", "", "pass -run <regexp> to go test")
 	count := fs.Int("count", 0, "pass -count <n> to go test (0 = omit; -count=1 bypasses the test cache)")
 	timeout := fs.String("timeout", "", "pass -timeout <dur> to go test (e.g. 120s)")
+	budget := fs.Duration("budget", 0, "fail with GATE_LATENCY_REGRESSION if the affected go test run exceeds this duration (e.g. 30s)")
+	reportPath := fs.String("report", "", "write a measured verify-loop report JSON after running tests")
 	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *budget < 0 {
+		fmt.Fprintln(stderr, "fak affected: --budget must be non-negative")
 		return 2
 	}
 	passthrough := fs.Args() // anything after -- (flag stops at the first non-flag/--)
 
 	root := repoRoot()
+	start := affectedNow()
 
-	changedFiles, err := gitChangedFiles(root, *base)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak affected: discovering changed files: %v\n", err)
-		return 1
+	changedFiles := append([]string(nil), explicitFiles...)
+	if len(changedFiles) == 0 {
+		var err error
+		changedFiles, err = affectedChangedFiles(root, *base)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak affected: discovering changed files: %v\n", err)
+			return 1
+		}
 	}
+	for i := range changedFiles {
+		changedFiles[i] = repoSlash(changedFiles[i])
+	}
+	sort.Strings(changedFiles)
 
-	fileToPkg, edges, total, err := goListGraph(root)
+	fileToPkg, edges, total, err := affectedListGraph(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak affected: %v\n", err)
 		return 1
@@ -100,6 +142,13 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 
 	if len(selected) == 0 {
 		fmt.Fprintf(stderr, "fak affected: no Go packages affected by the change (%d changed file(s)) -- nothing to test\n", len(changedFiles))
+		if *reportPath != "" {
+			rep := newAffectedRunReport(*base, changedFiles, changedPkgs, selected, total, nil, *budget, affectedNow().Sub(start), "NOOP", "no Go packages affected")
+			if err := writeAffectedRunReport(*reportPath, rep); err != nil {
+				fmt.Fprintf(stderr, "fak affected: write report: %v\n", err)
+				return 1
+			}
+		}
 		return 0
 	}
 
@@ -125,18 +174,97 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	args = append(args, passthrough...)
 	args = append(args, selected...)
 
+	code, runErr := affectedRunGoTest(root, args, stdout, stderr)
+	elapsed := affectedNow().Sub(start)
+	verdict := "OK"
+	reason := ""
+	if runErr != nil {
+		verdict = "TEST_RUN_ERROR"
+		reason = runErr.Error()
+	} else if code != 0 {
+		verdict = "TEST_FAILED"
+		reason = fmt.Sprintf("go test exited %d", code)
+	} else if *budget > 0 && elapsed > *budget {
+		verdict = "GATE_LATENCY_REGRESSION"
+		reason = fmt.Sprintf("elapsed %s exceeded budget %s", roundDuration(elapsed), *budget)
+	}
+	if *reportPath != "" {
+		rep := newAffectedRunReport(*base, changedFiles, changedPkgs, selected, total, append([]string{"go"}, args...), *budget, elapsed, verdict, reason)
+		if err := writeAffectedRunReport(*reportPath, rep); err != nil {
+			fmt.Fprintf(stderr, "fak affected: write report: %v\n", err)
+			return 1
+		}
+	}
+	if runErr != nil {
+		fmt.Fprintf(stderr, "fak affected: running go test: %v\n", runErr)
+		return 1
+	}
+	if code != 0 {
+		return code
+	}
+	if verdict == "GATE_LATENCY_REGRESSION" {
+		fmt.Fprintf(stderr, "GATE_LATENCY_REGRESSION: affected test run took %s over budget %s\n", roundDuration(elapsed), *budget)
+		return 1
+	}
+	return 0
+}
+
+func runAffectedGoTest(root string, args []string, stdout, stderr io.Writer) (int, error) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode()
+			return ee.ExitCode(), nil
 		}
-		fmt.Fprintf(stderr, "fak affected: running go test: %v\n", err)
-		return 1
+		return 1, err
 	}
-	return 0
+	return 0, nil
+}
+
+func newAffectedRunReport(base string, changedFiles, changedPkgs, selected []string, total int, command []string, budget, elapsed time.Duration, verdict, reason string) affectedRunReport {
+	rep := affectedRunReport{
+		Schema:           "fak.verify_loop.v1",
+		Mode:             "incremental",
+		Base:             base,
+		ChangedFiles:     append([]string(nil), changedFiles...),
+		ChangedPackages:  append([]string(nil), changedPkgs...),
+		SelectedPackages: append([]string(nil), selected...),
+		TotalPackages:    total,
+		Command:          append([]string(nil), command...),
+		ElapsedMS:        elapsed.Milliseconds(),
+		Verdict:          verdict,
+		Reason:           reason,
+	}
+	if budget > 0 {
+		rep.BudgetMS = budget.Milliseconds()
+	}
+	return rep
+}
+
+func writeAffectedRunReport(path string, rep affectedRunReport) error {
+	var b bytes.Buffer
+	if err := writeIndentedJSONNoEscape(&b, rep); err != nil {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, b.Bytes(), 0o644)
+}
+
+func roundDuration(d time.Duration) time.Duration {
+	if d < time.Millisecond {
+		return d
+	}
+	return d.Round(time.Millisecond)
+}
+
+func repoSlash(path string) string {
+	return strings.ReplaceAll(filepath.ToSlash(path), "\\", "/")
 }
 
 func baseNote(base string) string {

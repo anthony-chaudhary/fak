@@ -36,13 +36,16 @@ func usageCoreVerbs() {
                  refute -> REVIEW_REFUTED; unreachable reviewer -> logged fail-open.
                  Refuses OFF_TRUNK / MERGE_IN_PROGRESS / NOTHING_STAGED up front.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
-  fak affected  [--base REF] [--list] [--json] [--short] [--run RE] [--] [go test args]
+  fak affected  [--base REF] [--file P] [--budget DUR] [--report FILE]
+                [--list] [--json] [--short] [--run RE] [--] [go test args]
                 (the FAST INNER LOOP: run go test for only the packages your
                  working-tree change can affect  -  the changed packages plus every
                  package that (transitively, test imports included) imports one  -  not
                  the whole go test ./... suite. Seconds, not minutes, for a one-leaf edit,
                  so you verify the REAL oracle (not -short) on every change. --list prints
-                 the selected packages; --base REF selects everything changed since a ref.
+                 the selected packages; --base REF selects everything changed since a ref;
+                 --budget reds on a latency regression after tests pass; --report writes the
+                 measured verify-loop JSON; --file supplies a representative changed path.
                  make ci still runs the full suite as the authoritative gate.)
   fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
                 (the COMMIT-BOUNDARY GATES in ONE process — the Go port of the

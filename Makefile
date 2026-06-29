@@ -2,6 +2,8 @@
 # use scripts/ci.ps1, which this mirrors.
 .PHONY: ci build vet test test-fast test-affected bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
+VERIFY_LOOP_BUDGET ?= 30s
+
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
 # GH does, instead of a developer only discovering a gofmt/hygiene break after the push.
@@ -55,8 +57,8 @@ test-fast: build vet
 # (not -short) on every change. The full `test` target stays the authoritative gate; this
 # never DROPS coverage on what you changed, it only skips packages your change can't reach.
 test-affected: build
-	go run ./cmd/fak affected
-	@echo "test-affected OK (affected packages only; run 'make test' for the full oracle)"
+	go run ./cmd/fak affected --budget $(VERIFY_LOOP_BUDGET) --report .fak/verify-loop-affected.json
+	@echo "test-affected OK (affected packages only, budget $(VERIFY_LOOP_BUDGET); run 'make test' for the full oracle)"
 
 bench:
 	go build -o fak ./cmd/fak && ./fak bench --suite tau2-smoke --out report.json
