@@ -1,0 +1,13 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": ["search_web"],
+  "deny": {
+    "fix_my_args":      "MISROUTE",
+    "rate_limited_call": "RATE_LIMITED",
+    "lease_held_call":   "LEASE_HELD",
+    "write_kernel":      "SELF_MODIFY",
+    "leak_to_attacker":  "TRUST_VIOLATION",
+    "delete_account":    "POLICY_BLOCK"
+  }
+}
