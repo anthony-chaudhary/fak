@@ -11,11 +11,11 @@ import (
 // so an operator tool can DIAGNOSE a wedged lock (a dead PID still owning the file)
 // before deciding to reap it.
 type LockProbe struct {
-	Path    string // the lockfile path probed
-	Exists  bool   // the file is present and readable
-	HolderPID int  // the PID recorded in the file (0 if absent/unparseable)
-	Alive   bool   // the recorded holder is a currently-running process
-	Stale   bool   // Exists && HolderPID>0 && !Alive — safe to reap
+	Path      string // the lockfile path probed
+	Exists    bool   // the file is present and readable
+	HolderPID int    // the PID recorded in the file (0 if absent/unparseable)
+	Alive     bool   // the recorded holder is a currently-running process
+	Stale     bool   // Exists && HolderPID>0 && !Alive — safe to reap
 }
 
 // ProcessAlive reports whether a process with the given pid is currently running. It is

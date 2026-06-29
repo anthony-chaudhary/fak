@@ -142,6 +142,7 @@ func withLeasePublish(inner func()) func() {
 //     (we never delete a lock a live committer holds);
 //   - a remove failure is ignored — Acquire's bounded wait/timeout is the backstop, so the
 //     worst case is the pre-reap regression (wait it out), never a corrupted lock.
+//
 // This is the in-code form of the manual `rm .git/fak-commit.lock` that unblocked a wedged
 // 56-minute commit stall in the field, made automatic and PID-guarded so it is safe to run
 // on every acquire.
