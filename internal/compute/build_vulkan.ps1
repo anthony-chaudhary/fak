@@ -4,6 +4,7 @@
 # Windows Vulkan loader, so unlike the rest of fak's suite this lane does NOT run in WSL.
 #
 #   usage:  pwsh internal/compute/build_vulkan.ps1 [shaders|lib|build|test]   (default: test)
+#           pwsh internal/compute/build_vulkan.ps1 binary <pkg> <out>
 #
 # Requires (installed via winget; see memory fak-vulkan-toolchain):
 #   - Vulkan SDK at $env:VULKAN_SDK (default C:\VulkanSDK\1.4.350.0): glslc, headers, vulkan-1.lib
@@ -11,7 +12,11 @@
 #   - a Windows C++ standard-library environment (MSVC Build Tools / Developer PowerShell)
 #   - for build/test: a Go-compatible Windows cgo toolchain (MinGW-w64/MSYS2 gcc + g++)
 [CmdletBinding()]
-param([string]$cmd = "test")
+param(
+    [string]$cmd = "test",
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Rest = @()
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -174,6 +179,21 @@ switch ($cmd) {
             Write-Host "[vulkan] OK build"
         } finally { Pop-Location }
     }
+    "binary" {
+        if ($Rest.Count -ne 2) {
+            throw "usage: build_vulkan.ps1 binary <pkg> <out>"
+        }
+        Set-CgoEnv; Build-Shaders; Build-Lib
+        Push-Location $modDir
+        try {
+            $pkg = $Rest[0]
+            $out = $Rest[1]
+            Write-Host "[vulkan] go build -tags vulkan -o $out $pkg"
+            & go build -tags vulkan -o $out $pkg
+            if ($LASTEXITCODE -ne 0) { throw "go build -tags vulkan failed" }
+            Write-Host "[vulkan] OK binary $out"
+        } finally { Pop-Location }
+    }
     "test" {
         Set-CgoEnv; Build-Shaders; Build-Lib
         Push-Location $modDir
@@ -183,5 +203,5 @@ switch ($cmd) {
             if ($LASTEXITCODE -ne 0) { throw "go test -tags vulkan failed" }
         } finally { Pop-Location }
     }
-    default { throw "unknown subcommand: $cmd (use shaders|lib|build|test)" }
+    default { throw "unknown subcommand: $cmd (use shaders|lib|build|binary|test)" }
 }
