@@ -18,11 +18,11 @@ import (
 // It is the durable answer to "the running fak/guard is stale": instead of waiting for a
 // crash-and-relaunch (which on its own changes nothing, because relaunch re-execs the SAME
 // stale file), a watchdog tick — or an operator — runs this. It:
-//   1. reads the repo HEAD and compares it to THIS binary's embedded VCS revision
-//      (binstamp): nothing to do unless the binary is provably Stale;
-//   2. rebuilds fak, then GATES the candidate (vet + a `version` smoke run) and only then
-//      atomically swaps it over this binary's path (selfinstall). A tree that is not green
-//      is never installed.
+//  1. reads the repo HEAD and compares it to THIS binary's embedded VCS revision
+//     (binstamp): nothing to do unless the binary is provably Stale;
+//  2. rebuilds fak, then GATES the candidate (vet + a `version` smoke run) and only then
+//     atomically swaps it over this binary's path (selfinstall). A tree that is not green
+//     is never installed.
 //
 // --check reports the freshness verdict and exits without building. --force installs even
 // when freshness is Unknown/Fresh (e.g. to pick up an uncommitted local build) but STILL
@@ -49,26 +49,55 @@ func cmdSelfUpdate(argv []string) {
 	// line we actually want guards converged on.
 	_, _ = selfinstall.RealRunner(context.Background(), repoRoot, "git", "fetch", "origin", "--quiet")
 	headRev := repoRevOf(repoRoot, "origin/main")
-	self := binstamp.Self()
-	verdict := binstamp.Compare(self, headRev)
 
-	selfRev := self.Revision
-	if selfRev == "" {
-		selfRev = "(unstamped)"
-	} else if len(selfRev) > 12 {
-		selfRev = selfRev[:12]
+	// Whose freshness are we judging? When --target names a DIFFERENT binary (the scheduler
+	// case: a dev fak invokes self-update to converge the FLEET binary), read the TARGET's
+	// embedded stamp — not this invoking binary's. Otherwise the dirty dev binary's "Unknown"
+	// would short-circuit the update and the stale fleet binary would never get replaced.
+	stamp := binstamp.Self()
+	subject := "running"
+	fleetTarget := false // --target names a DIFFERENT binary (the scheduler/fleet case)
+	if t := strings.TrimSpace(*target); t != "" && !sameBinary(t) {
+		subject = "target"
+		fleetTarget = true
+		if ts, ok := stampOfBinary(t); ok {
+			stamp = ts
+		}
+		// If the target can't self-report, stamp stays as Self() but fleetTarget forces the
+		// build below regardless — a fleet binary we cannot prove current gets refreshed.
+	}
+	verdict := binstamp.Compare(stamp, headRev)
+
+	stampRev := stamp.Revision
+	if stampRev == "" {
+		stampRev = "(unstamped)"
+	} else if len(stampRev) > 12 {
+		stampRev = stampRev[:12]
 	}
 	head := headRev
 	if len(head) > 12 {
 		head = head[:12]
 	}
-	fmt.Printf("running: %s%s   HEAD: %s   => %s\n",
-		selfRev, dirtyMark(self.Dirty), head, verdict)
+	fmt.Printf("%s: %s%s   origin/main: %s   => %s\n",
+		subject, stampRev, dirtyMark(stamp.Dirty), head, verdict)
 
 	if *check {
 		return
 	}
-	if verdict != binstamp.Stale && !*force {
+	// Decide whether to build. The asymmetry is deliberate:
+	//   - FLEET mode (--target a different binary): proceed unless the target is provably
+	//     Fresh. We rebuild from gated origin/main whenever we cannot PROVE the fleet binary
+	//     is already current — a cheap atomic swap is the right default for a binary the guard
+	//     fleet runs, and the build gate makes "rebuild" always safe.
+	//   - SELF mode (updating our own binary): proceed only on a provable Stale (or --force).
+	//     A bare Unknown on our own dirty dev binary must NOT restart a developer's build.
+	proceed := *force
+	if fleetTarget {
+		proceed = proceed || verdict != binstamp.Fresh
+	} else {
+		proceed = proceed || verdict == binstamp.Stale
+	}
+	if !proceed {
 		if verdict == binstamp.Unknown {
 			fmt.Println("self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
 		} else {
@@ -111,6 +140,49 @@ func cmdSelfUpdate(argv []string) {
 	if !res.Installed {
 		os.Exit(1)
 	}
+}
+
+// sameBinary reports whether path refers to this running executable (so --target pointing
+// at ourselves falls back to the in-process binstamp.Self()).
+func sameBinary(path string) bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	a, _ := filepath.Abs(filepath.Clean(path))
+	b, _ := filepath.Abs(filepath.Clean(exe))
+	return strings.EqualFold(a, b)
+}
+
+// stampOfBinary reads another fak binary's embedded VCS stamp by running `<bin> version` and
+// parsing the "build: <rev>[ +uncommitted]" line cmdVersion prints. A binary too old to have
+// that line (or that errors) yields ok=false; the caller treats that as "cannot prove fresh"
+// which, in --target mode, correctly lets the update proceed (a fak that cannot self-report
+// its build is by definition not the current one).
+func stampOfBinary(path string) (binstamp.Stamp, bool) {
+	out, ok := selfinstall.RealRunner(context.Background(), "", path, "version")
+	if !ok {
+		return binstamp.Stamp{}, false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "build:") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "build:"))
+		dirty := strings.Contains(rest, "+uncommitted")
+		// the rev is the first whitespace-delimited token after "build:"
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			return binstamp.Stamp{}, false
+		}
+		rev := fields[0]
+		if rev == "" || rev == "module" || rev == "(no" {
+			return binstamp.Stamp{}, false // "module vX" or "(no VCS stamp …)" — no comparable rev
+		}
+		return binstamp.Stamp{Revision: rev, Dirty: dirty, HasVCS: true}, true
+	}
+	return binstamp.Stamp{}, false
 }
 
 // repoRevOf returns the full SHA a ref resolves to in the repo at root, or "" on error.
