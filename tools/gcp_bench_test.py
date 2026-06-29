@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -167,6 +169,65 @@ class ProvisionerLogicTest(unittest.TestCase):
         flat = " ".join(r.calls[0])
         self.assertNotIn("--max-run-duration", flat)
         self.assertNotIn("--instance-termination-action", flat)
+
+    def test_startup_warns_about_preexisting_bench_instances(self):
+        class LeakedRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.dry_run = False
+
+            def run(self, args, *, capture=False, timeout=600, check=True):
+                self.calls.append(args)
+                rows = [{
+                    "name": "fak-bench-g2-l4-20260620t000000z",
+                    "zone": "https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-a",
+                    "status": "RUNNING",
+                    "creationTimestamp": "2026-06-20T00:00:00.000-07:00",
+                }]
+                return SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
+
+        import json
+        r = LeakedRunner()
+        r.exe = "gcloud"
+        out = StringIO()
+        with redirect_stdout(out):
+            gcp_bench.warn_preexisting_bench_instances(r)
+        flat = " ".join(r.calls[0])
+        self.assertIn("instances list", flat)
+        self.assertIn("--filter=name~^fak-bench-", flat)
+        text = out.getvalue()
+        self.assertIn("fak-bench-g2-l4-20260620t000000z", text)
+        self.assertIn(
+            "gcloud --project p --account a compute instances delete "
+            "fak-bench-g2-l4-20260620t000000z --zone=us-central1-a --quiet",
+            text,
+        )
+
+    def test_main_runs_preexisting_bench_sweep_at_startup(self):
+        class LeakedRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.dry_run = False
+
+            def run(self, args, *, capture=False, timeout=600, check=True):
+                self.calls.append(args)
+                if "instances" in args and "list" in args:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout='[{"name":"fak-bench-old","zone":"zones/us-central1-a"}]',
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        r = LeakedRunner()
+        out = StringIO()
+        with mock.patch.object(gcp_bench, "Runner", lambda dry_run, project, account: r), \
+                mock.patch.object(gcp_bench, "resolve_tier", lambda args, runner: None), \
+                redirect_stdout(out):
+            rc = gcp_bench.main(["--tier", "g2-l4"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(r.calls[0][0:3], ["compute", "instances", "list"])
+        self.assertIn("fak-bench-old", out.getvalue())
 
     def test_readback_retries_then_succeeds_on_transient_flake(self):
         # The benchmark already burned GPU minutes and teardown follows the read, so a

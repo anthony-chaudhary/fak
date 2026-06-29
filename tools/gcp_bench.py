@@ -646,6 +646,61 @@ def machine_id_for(tier: gcp_accel.AccelTier) -> str:
     return f"gcp-{tier.slug}"
 
 
+def _zone_name(zone: str) -> str:
+    return (zone or "").rstrip("/").split("/")[-1]
+
+
+def _delete_instance_command(runner: Runner, name: str, zone: str) -> str:
+    cmd = runner._base() + [
+        "compute", "instances", "delete", name, f"--zone={zone}", "--quiet",
+    ]
+    return " ".join(shlex.quote(c) for c in cmd)
+
+
+def warn_preexisting_bench_instances(runner: Runner) -> None:
+    """Surface fak-bench-* VMs leaked by prior launchers before creating a new one."""
+    proc = runner.run(
+        [
+            "compute", "instances", "list",
+            "--filter=name~^fak-bench-",
+            "--format=json(name,zone,status,creationTimestamp)",
+        ],
+        capture=True, timeout=120, check=False,
+    )
+    if runner.dry_run:
+        return
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or "").strip()
+        suffix = f": {msg}" if msg else ""
+        log(f"WARNING: could not check for pre-existing fak-bench-* VMs{suffix}")
+        return
+    out = (proc.stdout or "").strip()
+    if not out:
+        return
+    try:
+        rows = json.loads(out)
+    except json.JSONDecodeError:
+        log("WARNING: could not parse pre-existing fak-bench-* VM list")
+        return
+    if not isinstance(rows, list):
+        log("WARNING: unexpected pre-existing fak-bench-* VM list shape")
+        return
+    leaked = [r for r in rows if str(r.get("name", "")).startswith("fak-bench-")]
+    if not leaked:
+        return
+    log(f"WARNING: found {len(leaked)} pre-existing fak-bench-* VM(s) before launch:")
+    for row in leaked:
+        name = str(row.get("name") or "")
+        zone = _zone_name(str(row.get("zone") or ""))
+        status = row.get("status") or "UNKNOWN"
+        created = row.get("creationTimestamp") or "unknown-created"
+        log(f"  {name} zone={zone} status={status} created={created}")
+        if zone:
+            log(f"    delete: {_delete_instance_command(runner, name, zone)}")
+        else:
+            log("    delete: re-run `gcloud compute instances list` to resolve its zone")
+
+
 def resolve_tier(args, runner: Runner) -> Optional[gcp_accel.AccelTier]:
     """Pick the tier to launch: explicit pin, proof, or probe the ladder."""
     if args.proof:
@@ -922,6 +977,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     runner = Runner(args.dry_run, args.project, args.account)
+    warn_preexisting_bench_instances(runner)
 
     tier = resolve_tier(args, runner)
     if not tier:
