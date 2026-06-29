@@ -131,6 +131,8 @@ func main() {
 		cmdCodelint(os.Args[2:])
 	case "answer-shape":
 		cmdAnswerShape(os.Args[2:])
+	case "claim-check":
+		cmdClaimCheck(os.Args[2:])
 	case "doctor":
 		cmdDoctor(os.Args[2:])
 	case "tree-doctor":
