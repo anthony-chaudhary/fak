@@ -27,6 +27,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -435,6 +436,35 @@ def fetch_issues(workspace: Path, *, limit: int = 1000) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
+def load_injected_issues(source: str) -> list[dict[str, Any]]:
+    """Read the open-issue set from a ``gh issue list --json`` array instead of the
+    built-in gh fetch — ``source`` is a file path, or ``-`` for stdin.
+
+    This is what lets a NAMED VIEW drive routing: pipe
+    ``issue_views.py show --view <slug> --json --fields number,title,labels,body``
+    into ``--issues -`` and the view IS the backlog the router folds, rather than
+    every tool re-fetching the whole open set (issue-views is the default
+    selection surface; this makes it the literal one for the router too).
+
+    Field-tolerant: the router only reads number/title/labels/body, and any field a
+    view omits degrades gracefully — an absent ``body`` merely weakens the
+    path-grep rung (scope/label/keyword routing still fire), so pass
+    ``--fields …,body`` upstream when full path-confirmation fidelity matters.
+    Raises ValueError on non-array / invalid JSON.
+    """
+    raw = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+    text = raw.strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"--issues input is not valid JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError("--issues input must be a JSON array of gh issue objects")
+    return data
+
+
 def build_payload(
     *,
     workspace: str,
@@ -555,12 +585,26 @@ def collect(
     scope_alias: dict[str, str] | None = None,
     label_alias: dict[str, str] | None = None,
     keyword_alias: dict[str, str] | None = None,
+    injected: bool = False,
 ) -> dict[str, Any]:
     root = workspace.resolve()
     concurrent, trees = lane_taxonomy(root)
     fetch = fetcher or (lambda ws: fetch_issues(ws, limit=issue_limit))
     issues = fetch(root)
-    coverage = compute_coverage(issues_fetched=len(issues), issue_limit=issue_limit)
+    if injected:
+        # The issue set was supplied explicitly (a named-view slice piped in via
+        # --issues), not fetched from gh — so the silent-truncation guard does not
+        # apply: the slice IS the intended backlog, complete by construction. (A
+        # view deliberately narrows the open set; flagging it "truncated" and
+        # advising "raise --issue-limit" would misfire.)
+        coverage = {
+            "complete": True, "truncated": False, "injected": True,
+            "issues_fetched": len(issues), "issue_limit": issue_limit,
+            "notes": ["issues injected via --issues (a named-view slice); coverage "
+                      "reflects the provided slice, not a full gh fetch"],
+        }
+    else:
+        coverage = compute_coverage(issues_fetched=len(issues), issue_limit=issue_limit)
     # Drop non-dispatchable issues (human/external-blocked AND epic parents) from the
     # candidate set — the one chokepoint both lanes read — but surface them so the skip
     # is never silent. Epics stay visible to humans and still close when their children do.
@@ -569,7 +613,7 @@ def collect(
     fetch_error = None
     if not concurrent:
         fetch_error = "dos doctor returned no lanes — run from the repo root (not fak/)"
-    elif not issues:
+    elif not issues and not injected:
         fetch_error = "gh returned no open issues (auth/network?)"
     routes = [
         route_issue(i, concurrent, trees, scope_alias=scope_alias, label_alias=label_alias,
@@ -651,6 +695,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="ACTION verdict when UNROUTED fraction exceeds this")
     ap.add_argument("--config", default="", help="JSON file overriding scope_alias / label_alias")
     ap.add_argument("--md", default="", help="write a dated markdown report to this path")
+    ap.add_argument("--issues", default="", metavar="PATH|-",
+                    help="route a gh-issue-list JSON array read from a file or '-' "
+                         "(stdin) instead of fetching via gh — lets a named view drive "
+                         "routing, e.g. `python tools/issue_views.py show --view "
+                         "ready-leaves --json --fields number,title,labels,body | "
+                         "python tools/issue_lane_router.py --issues - --json`")
     args = ap.parse_args(argv)
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
@@ -662,8 +712,20 @@ def main(argv: list[str] | None = None) -> int:
         label_alias = cfg.get("label_alias")
         keyword_alias = cfg.get("keyword_alias")
 
+    fetcher: IssueFetcher | None = None
+    injected = False
+    if args.issues:
+        try:
+            _injected_rows = load_injected_issues(args.issues)
+        except (ValueError, OSError) as exc:
+            print(f"ERROR: --issues: {exc}", file=sys.stderr)
+            return 2
+        fetcher = lambda ws: _injected_rows  # noqa: E731
+        injected = True
+
     payload = collect(
         workspace, issue_limit=args.issue_limit, max_unrouted_frac=args.max_unrouted_frac,
+        fetcher=fetcher, injected=injected,
         scope_alias=scope_alias, label_alias=label_alias,
         keyword_alias=keyword_alias,
     )

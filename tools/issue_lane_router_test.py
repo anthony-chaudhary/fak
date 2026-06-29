@@ -382,5 +382,69 @@ class DispatchabilityTest(unittest.TestCase):
         self.assertEqual(p["counts"]["skipped_human_blocked"], 1)
 
 
+class InjectedIssuesTest(unittest.TestCase):
+    """`--issues PATH|-` lets a named view (issue_views.py show --json) drive
+    routing instead of the built-in gh fetch — the documented composition."""
+
+    def _stdin(self, text: str):
+        import io
+        from unittest import mock
+        return mock.patch.object(m.sys, "stdin", io.StringIO(text))
+
+    def test_load_from_file(self):
+        import json
+        import tempfile
+        rows = [{"number": 7, "title": "fix(tools): x", "labels": [], "body": ""}]
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "view.json"
+            p.write_text(json.dumps(rows), encoding="utf-8")
+            self.assertEqual(m.load_injected_issues(str(p)), rows)
+
+    def test_load_from_stdin(self):
+        import json
+        rows = [{"number": 8, "title": "t", "labels": [], "body": ""}]
+        with self._stdin(json.dumps(rows)):
+            self.assertEqual(m.load_injected_issues("-"), rows)
+
+    def test_empty_input_is_empty_list(self):
+        with self._stdin("   \n"):
+            self.assertEqual(m.load_injected_issues("-"), [])
+
+    def test_non_array_rejected(self):
+        with self._stdin('{"number": 1}'):
+            with self.assertRaises(ValueError):
+                m.load_injected_issues("-")
+
+    def test_invalid_json_rejected(self):
+        with self._stdin("not json at all"):
+            with self.assertRaises(ValueError):
+                m.load_injected_issues("-")
+
+    def test_injected_collect_routes_and_marks_coverage(self):
+        # A view slice flows straight into routing; coverage is "complete" (the slice
+        # IS the intended backlog), never the silent-truncation ACTION verdict.
+        orig = m.lane_taxonomy
+        m.lane_taxonomy = lambda root: (LANES, TREES)
+        try:
+            rows = [issue(30, "fix(gateway): x"), issue(31, "fix(tools): y")]
+            p = m.collect(Path("."), fetcher=lambda ws: rows, injected=True)
+        finally:
+            m.lane_taxonomy = orig
+        self.assertTrue(p["coverage"]["injected"])
+        self.assertTrue(p["coverage"]["complete"])
+        self.assertIn("gateway", p["lanes"])
+        self.assertIn("tools", p["lanes"])
+
+    def test_injected_empty_is_not_a_fetch_error(self):
+        orig = m.lane_taxonomy
+        m.lane_taxonomy = lambda root: (LANES, TREES)
+        try:
+            p = m.collect(Path("."), fetcher=lambda ws: [], injected=True)
+        finally:
+            m.lane_taxonomy = orig
+        # An empty view slice is a legit "0 issues match", not a gh auth/network error.
+        self.assertNotEqual(p.get("finding"), "fetch_error")
+
+
 if __name__ == "__main__":
     unittest.main()
