@@ -5,10 +5,50 @@
 # a GCP GPU VM (Deep-Learning-VM image, CUDA at /usr/local/cuda). The default
 # `go build` (no tags) needs none of this and stays pure-Go.
 #
-#   usage:  bash internal/compute/build_cuda.sh [build|test|bench]   (default: test)
+#   usage:  bash internal/compute/build_cuda.sh [check|build|test|bench]   (default: test)
 #   env:    FAK_CUDA_ARCH=sm_89|sm_90|sm_100  (default sm_89; "89" also accepted)
 #           CUDA_HOME=/usr/local/cuda          (default ~/cudaenv, else system nvcc)
 set -euo pipefail
+
+# locate the module root (dir containing go.mod) from this script's location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PKG_DIR="$SCRIPT_DIR"                 # internal/compute
+MOD_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"   # fak/
+
+cmd="${1:-test}"
+if [ "$cmd" = "check" ]; then
+  PY="${PYTHON:-}"
+  if [ -z "$PY" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      PY="$(command -v python3)"
+    elif command -v python >/dev/null 2>&1; then
+      PY="$(command -v python)"
+    else
+      echo "no python3/python on PATH — cannot run tools/cuda_abi_parity.py"; exit 1
+    fi
+  fi
+
+  echo "[cuda] GPU-free ABI/header portability check ..."
+  ( cd "$MOD_DIR" && "$PY" tools/cuda_abi_parity.py --check )
+
+  HEADER_CC="${CC:-}"
+  if [ -z "$HEADER_CC" ]; then
+    for cand in gcc clang cc; do
+      if command -v "$cand" >/dev/null 2>&1; then
+        HEADER_CC="$(command -v "$cand")"
+        break
+      fi
+    done
+  fi
+  if [ -n "$HEADER_CC" ]; then
+    echo "[cuda] strict standalone parse cuda_backend.h ($HEADER_CC) ..."
+    "$HEADER_CC" -x c -std=c11 -fsyntax-only -Wall -Werror "$PKG_DIR/cuda_backend.h"
+  else
+    echo "[cuda] strict standalone parse skipped: no C compiler on PATH; explicit header deps checked"
+  fi
+  echo "[cuda] OK check"
+  exit 0
+fi
 
 # CUDA toolchain location. Default is the WSL user-space micromamba env (~/cudaenv,
 # no sudo). On a datacenter image (GCP DLVM, DGX) CUDA lives at /usr/local/cuda and
@@ -27,11 +67,6 @@ if [ ! -x "$NVCC" ]; then
     echo "no nvcc at $NVCC and none on PATH — run the CUDA-toolchain setup first"; exit 1
   fi
 fi
-
-# locate the module root (dir containing go.mod) from this script's location
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PKG_DIR="$SCRIPT_DIR"                 # internal/compute
-MOD_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"   # fak/
 
 # Build -I / -L / -rpath from whichever CUDA include/lib dirs actually exist: the
 # micromamba env uses include + lib + targets/x86_64-linux/{include,lib}; a
@@ -69,7 +104,6 @@ export CGO_CFLAGS="$INC"
 export CGO_LDFLAGS="$LIB $RPATH"
 export LD_LIBRARY_PATH="${LDPATH:+$LDPATH:}${LD_LIBRARY_PATH:-}"
 
-cmd="${1:-test}"
 cd "$MOD_DIR"
 case "$cmd" in
   build)
