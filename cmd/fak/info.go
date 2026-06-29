@@ -1,0 +1,267 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// `fak info` — the live fak-info overlay. It polls a running `fak guard` / `fak serve`
+// gateway's /debug/vars and prints ONE compact, payload-free line per tick with the turn
+// economy an operator running `fak guard -- claude` actually wants visible next to the
+// session:
+//
+//   - the OBSERVED provider-cache economy (net saved-token-equiv, the cache multiplier,
+//     hit rate, and the PROVEN/REFUTED status from vcachegov) — the cache savings that
+//     otherwise only surface in the per-turn --debug-stats line Claude's alt-screen buries;
+//   - the SAFETY half: how many tool calls the kernel floor BLOCKED, REPAIRED, or
+//     QUARANTINED this session — so a refused `rm -rf` or a held-out hostile result is
+//     visible at a glance, not only in the exit summary;
+//   - liveness: turns served, in-flight requests, and gateway uptime.
+//
+// It is the 20% pane `fak guard --split` opens beside the 80% interactive agent pane, but
+// it is a first-class command in its own right: run it by hand in a second pane against any
+// fak gateway — `fak info --gateway-url http://127.0.0.1:PORT`. It NEVER launches an agent
+// and writes nothing; it is a read-only poll. On loopback /debug/vars is auth-exempt, so the
+// local guard gateway needs no bearer; pass --gateway-key-env for an off-box gateway behind
+// --require-key.
+
+// guardInfoVars is the subset of the gateway's /debug/vars JSON the overlay renders. The
+// field/JSON-tag names mirror internal/gateway/debug.go (debugVarsResponse); JSON decode
+// tolerates the many extra fields we do not surface. VCache is a pointer because the gateway
+// OMITS the block until a turn carries provider cache activity (vcacheVarsFromSnapshot
+// returns nil), so "no cache yet" is distinguishable from "cache proved zero saving".
+type guardInfoVars struct {
+	Gateway struct {
+		UptimeSeconds    float64 `json:"uptime_seconds"`
+		InflightRequests int64   `json:"inflight_requests"`
+		VDSO             bool    `json:"vdso"`
+	} `json:"gateway"`
+	Kernel struct {
+		Submits      int64 `json:"submits"`
+		Admitted     int64 `json:"admitted"`
+		Denies       int64 `json:"denies"`
+		Transforms   int64 `json:"transforms"`
+		Quarantines  int64 `json:"quarantines"`
+		ResultDenies int64 `json:"result_denies"`
+	} `json:"kernel"`
+	Inference struct {
+		Turns int64 `json:"turns"`
+	} `json:"inference"`
+	VCache *struct {
+		CacheReadTokens int64   `json:"cache_read_tokens"`
+		SavedTokenEquiv float64 `json:"saved_token_equiv"`
+		HitRate         float64 `json:"hit_rate"`
+		Multiplier      float64 `json:"multiplier"`
+		Status          string  `json:"status"`
+	} `json:"vcache"`
+}
+
+func cmdInfo(argv []string) {
+	os.Exit(runInfo(os.Stdout, os.Stderr, argv))
+}
+
+func runInfo(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("info", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	gatewayURL := fs.String("gateway-url", envOrDefault("FAK_GATEWAY_URL", "http://127.0.0.1:8080"), "fak guard/serve gateway to poll (the loopback URL fak guard prints as 'gateway')")
+	keyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the gateway bearer; loopback /debug/vars is auth-exempt so a local guard gateway needs none")
+	interval := fs.Duration("interval", 2*time.Second, "refresh interval")
+	once := fs.Bool("once", false, "print one snapshot line and exit (no watch loop)")
+	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *interval <= 0 {
+		fmt.Fprintln(stderr, "fak info: --interval must be positive")
+		return 2
+	}
+	base, err := normalizeTUIAgentGatewayURL(*gatewayURL)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak info: %v\n", err)
+		return 2
+	}
+	// Reuse the claude-mac debug client's authenticated one-shot GET machinery (it is a
+	// generic base+bearer reader); only the decoded shape and the rendered line differ.
+	c := &claudeMacDebugClient{
+		base: base,
+		key:  strings.TrimSpace(os.Getenv(strings.TrimSpace(*keyEnv))),
+		hc:   &http.Client{Timeout: 10 * time.Second},
+	}
+
+	if *asJSON {
+		var v guardInfoVars
+		if err := c.get("/debug/vars", &v); err != nil {
+			fmt.Fprintf(stderr, "fak info: %v\n", err)
+			return 1
+		}
+		return encodeJSONOrFail(stdout, stderr, v, "fak info")
+	}
+	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once)
+}
+
+// runGuardInfoOverlay polls /debug/vars and prints one live line per tick until Ctrl-C — the
+// second-pane companion to an interactive `fak guard` session. It mirrors the poll-loop shape
+// of runClaudeMacOverlay (signal.NotifyContext + ticker) and never launches an agent. A
+// transient fetch error prints a one-line note and keeps polling; once the gateway HAS been
+// seen healthy, a sustained run of misses means the guarded session ended and its in-process
+// gateway was torn down — so the overlay prints a closing line and exits 0, which lets the
+// pane close itself rather than spin forever on a dead port.
+func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once bool) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	fmt.Fprintf(stdout, "fak info · %s  (every %s, Ctrl-C to stop)\n", c.base, interval)
+	fmt.Fprint(stdout, guardInfoLegend())
+
+	sawHealthy := false
+	misses := 0
+	// emit fetches + renders once. ok is true when a line was rendered; stop is true when the
+	// watch loop should END — the gateway was healthy and has now been unreachable for a few
+	// ticks, i.e. the guarded session exited and tore its in-process gateway down.
+	emit := func() (ok, stop bool) {
+		var v guardInfoVars
+		if err := c.get("/debug/vars", &v); err != nil {
+			misses++
+			if sawHealthy && misses >= 3 {
+				fmt.Fprintln(stdout, "fak info: gateway closed — guarded session ended")
+				return false, true
+			}
+			fmt.Fprintf(stderr, "fak info: %v\n", err)
+			return false, false
+		}
+		sawHealthy = true
+		misses = 0
+		fmt.Fprintf(stdout, "  %s\n", renderGuardInfoLine(v))
+		return true, false
+	}
+
+	// --once is a scripted one-shot: a failed fetch is an error exit, not a silent 0.
+	if once {
+		if ok, _ := emit(); !ok {
+			return 1
+		}
+		return 0
+	}
+	if _, stop := emit(); stop {
+		return 0
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-ticker.C:
+			if _, stop := emit(); stop {
+				return 0
+			}
+		}
+	}
+}
+
+// renderGuardInfoLine renders one compact live line. It leads with the cache economy (the
+// headline for the default `fak guard -- claude` passthrough, where the kernel decode/serve
+// counters stay 0 because Anthropic generates the tokens), then the floor safety counters,
+// then liveness. Every value is the gateway's OBSERVED total, not a local estimate.
+func renderGuardInfoLine(v guardInfoVars) string {
+	cache := "cache —" // until a turn carries provider cache activity
+	if v.VCache != nil {
+		cache = fmt.Sprintf("cache %s ×%.2f  saved %s tok  hit %.0f%%",
+			vcacheStatusGlyph(v.VCache.Status), v.VCache.Multiplier,
+			signedTokens(v.VCache.SavedTokenEquiv), v.VCache.HitRate*100)
+	}
+	return fmt.Sprintf("%s · %s · turns %d · inflight %d · up %s",
+		cache,
+		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
+		v.Inference.Turns, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
+}
+
+// guardFloorSafetyWord summarizes what the kernel floor DID this session: blocked tool calls
+// (Denies), repaired/rewritten calls (Transforms), and quarantined results (Quarantines plus
+// result-admission denials). A clean session reads "floor clean" so the absence of refusals
+// is itself visible, not a blank.
+func guardFloorSafetyWord(denies, transforms, quarantines, resultDenies int64) string {
+	quar := quarantines + resultDenies
+	if denies == 0 && transforms == 0 && quar == 0 {
+		return "floor clean"
+	}
+	var parts []string
+	if denies > 0 {
+		parts = append(parts, fmt.Sprintf("blocked %d", denies))
+	}
+	if transforms > 0 {
+		parts = append(parts, fmt.Sprintf("repaired %d", transforms))
+	}
+	if quar > 0 {
+		parts = append(parts, fmt.Sprintf("quarantined %d", quar))
+	}
+	return "floor " + strings.Join(parts, " ")
+}
+
+// vcacheStatusGlyph renders the vcachegov PROVEN/REFUTED status compactly. PROVEN means the
+// session's cumulative read rebate has repaid the cache-write premium (net positive saving);
+// REFUTED means it has not (yet). Any other/empty value renders as the raw status.
+func vcacheStatusGlyph(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "PROVEN":
+		return "PROVEN"
+	case "REFUTED":
+		return "REFUTED"
+	case "":
+		return "?"
+	default:
+		return strings.TrimSpace(status)
+	}
+}
+
+// signedTokens renders a net saved-token-equiv with an explicit sign, because the value is
+// NEGATIVE until cache reads repay the cache-creation premium — a "-1,234" reads correctly as
+// "still in the red", where a bare "1234" would look like a saving.
+func signedTokens(v float64) string {
+	n := int64(v)
+	if n < 0 {
+		return "-" + groupThousands(-n)
+	}
+	return "+" + groupThousands(n)
+}
+
+// groupThousands formats a non-negative integer with comma separators (12345 -> "12,345").
+func groupThousands(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	if len(s) <= 3 {
+		return s
+	}
+	var b strings.Builder
+	pre := len(s) % 3
+	if pre > 0 {
+		b.WriteString(s[:pre])
+		if len(s) > pre {
+			b.WriteByte(',')
+		}
+	}
+	for i := pre; i < len(s); i += 3 {
+		b.WriteString(s[i : i+3])
+		if i+3 < len(s) {
+			b.WriteByte(',')
+		}
+	}
+	return b.String()
+}
+
+// guardInfoLegend expands the terms on the info line, printed once in the header so a watcher
+// in a second pane can read the line without leaving the terminal.
+func guardInfoLegend() string {
+	var b strings.Builder
+	fmt.Fprintln(&b, "legend:")
+	fmt.Fprintln(&b, "  cache = OBSERVED provider-cache economy: PROVEN/REFUTED (reads repaid the write premium?) · ×N multiplier · net saved-token-equiv · hit rate")
+	fmt.Fprintln(&b, "  floor = what the kernel did this session: blocked (refused tool calls) · repaired (rewritten) · quarantined (held-out results)")
+	fmt.Fprintln(&b, "  turns = model turns served · inflight = requests running now · up = gateway uptime · '—' = no cache activity yet")
+	return b.String()
+}

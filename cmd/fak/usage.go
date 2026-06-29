@@ -12,7 +12,7 @@ import (
 
 // usage prints the full `fak` help banner. The verb list is long enough to be a
 // god-function on its own, so the body is split into three contiguous raw-string
-// sections (core verbs / ops verbs / scorecards + aliases) printed back-to-back —
+// sections (core verbs / ops verbs / scorecards + aliases) printed back-to-back â€”
 // the output is byte-identical to the single block it replaced.
 func usage() {
 	fmt.Fprintf(os.Stderr, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
@@ -38,11 +38,11 @@ func usageCoreVerbs() {
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
   fak sweep     [--dir DIR] [--json] | --apply --lane L -m "SUBJECT" [--path P ...] [--push]
                 (DRIVE A DIRTY MULTI-SESSION TREE TOWARD ZERO: the layer above fak commit.
-                 Default mode REPORTS the working tree grouped by lane — every stampable
+                 Default mode REPORTS the working tree grouped by lane â€” every stampable
                  change under the (fak <leaf>) trailer its paths imply (the SAME dos.toml
                  path->lane engine the pre-commit lint binds to), plus the residual a sweep
                  must NOT silently commit: stray scratch/log junk, and root-level files with
-                 no inferable lane. It never invents a subject — with --apply --lane L -m S it
+                 no inferable lane. It never invents a subject â€” with --apply --lane L -m S it
                  commits exactly lane L's dirty paths (narrow with --path) through the safe
                  commit path (appends the (fak L) stamp, pre-lints, refuses OFF_TRUNK / a
                  pathspec race / an off-lane stamp). --json feeds a drive-to-zero loop.
@@ -59,21 +59,21 @@ func usageCoreVerbs() {
                  measured verify-loop JSON; --file supplies a representative changed path.
                  make ci still runs the full suite as the authoritative gate.)
   fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
-                (the COMMIT-BOUNDARY GATES in ONE process — the Go port of the
+                (the COMMIT-BOUNDARY GATES in ONE process â€” the Go port of the
                  tools/check_*.py git-hook checkers. pre-commit runs all 7 staged-diff
                  gates (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/
                  INDEX_SYNC/PROVENANCE_LABEL) over ONE staged-diff read instead of spawning
                  7 Python interpreters (~10.7s -> ~0.3s measured). Honors each gate
                  FLEET_<NAME>_GUARD block|warn|off + one-shot escape env. Exit 0 clean,
                  1 a block gate fired, 2 could-not-run (the shell hook then falls back to
-                 the Python checkers — fail-open). The shell hooks prefer this.)
+                 the Python checkers â€” fail-open). The shell hooks prefer this.)
   fak hygiene   [--root DIR] [--json] [--gates A,B,...]
-                (the WHOLE-TREE hygiene gates in ONE process — the --audit-tree twin of
+                (the WHOLE-TREE hygiene gates in ONE process â€” the --audit-tree twin of
                  fak hooks. Runs the ported make-hygiene checkers (DOC_PLACEMENT/BROKEN_LINK/
                  FILE_ADMISSION/SECRET_SHAPE/PROVENANCE_LABEL/INDEX_SYNC) over ONE
                  git-ls-files read instead of spawning a Python interpreter per checker.
                  Exit 0 clean, 1 a gate fired, 2 could-not-run (make/CI then falls back to
-                 the Python path — fail-open). make hygiene / make index-sync prefer this.)
+                 the Python path â€” fail-open). make hygiene / make index-sync prefer this.)
   fak preflight --tool NAME --args JSON [--policy FILE]
   fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)
                 (prove the NETWORK-EGRESS floor on one destination: the cloud-metadata /
@@ -259,8 +259,8 @@ func usageOpsVerbs() {
                  --debug-stats is ON by default: one compact per-turn line leading
                  with a verdict (ok/warming/degraded/cold) + the NET write-premium-
                  aware token saving, then cache health + compaction. Token-saving
-                 defaults — compact-history-
-                 budget and elide-result-bytes — are passed explicitly so they
+                 defaults â€” compact-history-
+                 budget and elide-result-bytes â€” are passed explicitly so they
                  appear in --dry-run output. 'fak c' is the canonical shortcut)
   fak console   issues [--epic N] [--issues-json FILE] [--json] |
                 loops [--ledger FILE] [--json] | sessions [--sessions-json FILE] [--json] |
@@ -277,6 +277,14 @@ func usageOpsVerbs() {
                  FAK_GATEWAY_KEY is empty, and opens interactive Claude Code
                  through the existing fak console agent launcher. --probe runs
                  a one-shot JSON check)
+  fak info      [--gateway-url URL] [--interval DUR] [--once] [--json]
+                (the live fak-info overlay: poll a fak guard/serve gateway's
+                 /debug/vars and print ONE compact line per tick — the OBSERVED
+                 cache economy (saved-token-equiv, multiplier, hit, PROVEN/REFUTED),
+                 the floor SAFETY counters (blocked/repaired/quarantined), and
+                 liveness. The 20% pane 'fak guard --split' opens beside the agent;
+                 also runnable by hand in a second pane. Read-only; loopback needs
+                 no bearer)
   fak loop      append | run -- CMD | status | admit
                 (the DURABLE LONG-RUNNING-LOOP ledger: hash-chained fire/admit/start/
                  end/witness events, an OS-scheduler wrapper, a read fold, and the
@@ -335,7 +343,8 @@ func usageScorecardVerbs() {
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
                 [--restart-limit N] [--restart-seed-dir DIR]
-                [--api-key-env VAR] [--env VAR] [--audit FILE|off] [--no-audit] [--dump-policy] [--quiet] -- <agent command...>
+                [--api-key-env VAR] [--env VAR] [--audit FILE|off] [--no-audit] [--dump-policy] [--quiet]
+                [--split auto|on|off] [--split-where bottom|right] -- <agent command...>
                 (RUN YOUR REAL AGENT THROUGH THE KERNEL: the one-command front door.
                  Starts the gateway in-process on a private loopback port, injects its
                  URL into the CHILD only (never your shell), execs the agent, and on
@@ -346,7 +355,9 @@ func usageScorecardVerbs() {
                  appended to a durable, tamper-evident DECISION JOURNAL by default
                  (--audit FILE to relocate, --no-audit to turn off; replay with
                  'fak audit verify'). --dump-policy prints the built-in floor to edit;
-                 --policy FILE enforces your own)
+                 --policy FILE enforces your own. --split (auto) opens a 20% 'fak info'
+                 pane beside the agent in a multiplexer terminal so the live cache
+                 economy + floor safety stay visible during the session)
   fak guard-verdict-rsi fold|run|--check
                 (the GUARD VERDICT RSI loop: folds the real guard decision journal,
                  scores verdict-quality, and keeps only on rows + strict gain + witness)
