@@ -22,12 +22,19 @@ ALL of which must pass:
                      default), so a throttled/auth-blocked account can't silently
                      eat the dispatch
   3. under_cap       live worker count < cap, where
-                     cap = min(dos [supervise].target, --max-workers) when the
-                     target is POSITIVE (dos throttles the fleet down), else
-                     --max-workers when the target is zero/unset (the emit-only
-                     `dos loop` manages no standing loop, so the cron-armed
-                     self-spawner's own ceiling governs — a zero target is not a
-                     spawn kill switch) and
+                     cap = min(host_cap, dos [supervise].target, --max-workers)
+                     when the target is POSITIVE (dos throttles the fleet down),
+                     else min(host_cap, --max-workers) when the target is
+                     zero/unset (the emit-only `dos loop` manages no standing loop,
+                     so the cron-armed self-spawner's own ceiling governs — a zero
+                     target is not a spawn kill switch). host_cap is the
+                     host-derived ADAPTIVE ceiling (#1337): cores, free RAM, and the
+                     live OS-thread total proc_resource_guard polices, turned into
+                     the largest worker population the box can sustain right now — so
+                     a request for "up to --max-workers" auto-throttles on a loaded
+                     box and rises again as load clears, instead of admitting to a
+                     magic number. (host_safe above stays the HARD stop on a true
+                     runaway; host_cap is the soft gradient that bites first.) and
                      live = max(kernel's `dos loop` alive, an OS process scan for
                      live `dos-dispatch-loop` claudes) — the MAX so neither a
                      stale lease nor an unleased orphan can hide capacity
@@ -71,8 +78,9 @@ SCHEMA = "fleet-dispatch-preflight/1"
 
 OK_VERDICT = "SPAWN_OK"
 REFUSE_HOST = "REFUSE_HOST"          # host resource guard flagged a runaway/orphan
-REFUSE_NO_ACCOUNT = "REFUSE_NO_ACCOUNT"  # switcher has no available worker account
-REFUSE_AT_CAP = "REFUSE_AT_CAP"      # live workers already at/over the cap
+REFUSE_NO_ACCOUNT = "REFUSE_NO_ACCOUNT"  # switcher has no available worker account (throttle/auth)
+REFUSE_NO_SEAT = "REFUSE_NO_SEAT"    # seat pool depleted: every seat leased to a live worker
+REFUSE_AT_CAP = "REFUSE_AT_CAP"      # live workers already at/over the operator/dos cap
 REFUSE_INSPECT = "REFUSE_INSPECT"    # a check could not run (fail-safe → refuse)
 
 # Default ceiling on simultaneous live dispatch workers. Intentionally small: the
@@ -202,6 +210,33 @@ def account_check(root: Path, *, work_kind: str, product: str) -> dict[str, Any]
             "tier": doc.get("selected_tier"), "model": acct.get("model"),
             "reason": doc.get("reason"),
             "blocked": [b.get("tag") for b in (doc.get("blocked_target_accounts") or [])]}
+
+
+def seat_check(root: Path, *, product: str) -> dict[str, Any]:
+    """fleet_accounts.py seats ⇒ the explicit seat-pool size for this product.
+
+    A SEAT is one distinct routable worker POOL (one Anthropic account / rate limit);
+    the seat count M is the real binding constraint on concurrency, so it folds into the
+    cap below as another min() term and a depleted pool yields a typed REFUSE_NO_SEAT —
+    distinct from REFUSE_NO_ACCOUNT (a throttled/auth tier). Returns
+    ``{total, free, leased, depleted}``. ``total`` is None when the pool view could not
+    run OR the product has no switcher roster (codex's ambient login), in which case the
+    seat fold is SKIPPED and the existing host/account/cap gates govern unchanged —
+    fail-OPEN on the seat shaping (the cap still bounds the fleet), never fail-closed on a
+    missing view."""
+    if product == "codex":
+        return {"total": None, "skipped": "codex uses ambient login (no seat pool)"}
+    sw = root / "tools" / "fleet_accounts.py"
+    if not sw.exists():
+        return {"total": None, "error": f"switcher not found: {sw}"}
+    cmd = [_py(), str(sw), "seats", "--product", product, "--json"]
+    doc = run_json(cmd, root, timeout=45, ok_codes={0, 1})
+    if doc.get("_error") and "total_seats" not in doc:
+        return {"total": None, "error": doc["_error"]}
+    return {"total": _int(doc.get("total_seats")),
+            "free": _int(doc.get("free_seats")),
+            "leased": _int(doc.get("leased_seats")),
+            "depleted": bool(doc.get("depleted"))}
 
 
 def kernel_alive(root: Path) -> dict[str, Any]:
@@ -646,11 +681,136 @@ def _int(value: Any, default: int | None = None) -> int | None:
         return default
 
 
+# --- Host-derived adaptive cap (#1337) -------------------------------------- #
+# The boolean host_safe gate (REFUSE_HOST) is a HARD stop on a runaway; it never
+# derived a NUMBER, so "up to --max-workers" was governed by a static config value,
+# not by what the box can actually sustain. host_capacity() closes that: it turns
+# the box's CURRENT headroom — cores, free RAM, and the live OS-thread total that
+# proc_resource_guard.py polices — into the largest worker population the host can
+# carry right now, folded via min into the cap below so a loaded box auto-throttles
+# and recovers as load clears. A worker is not free: it is one claude/opencode
+# session that fans out a tree of per-tool DOS hook subprocesses, so each is charged
+# a slice of every resource. These per-worker budgets are deliberately conservative
+# (the safe default is "barely grow"); the operator's --max-workers is still the
+# outer ceiling.
+HOST_CORES_PER_WORKER = 2       # cores a worker + its hook subprocess tree occupies
+HOST_RAM_MB_PER_WORKER = 1500   # resident MB across that subprocess tree
+HOST_THREADS_PER_CORE = 400     # host-wide OS-thread budget, scaled by core count
+HOST_THREADS_PER_WORKER = 200   # OS threads a worker + its hooks add to the box
+HOST_CAP_FLOOR = 1              # never throttle below one worker — the hard stop on
+                                # a genuine runaway stays the host_safe gate, not this
+
+
+def host_capacity(*, cores: Any, free_ram_mb: Any, total_threads: Any,
+                  cores_per_worker: int = HOST_CORES_PER_WORKER,
+                  ram_mb_per_worker: int = HOST_RAM_MB_PER_WORKER,
+                  host_threads_per_core: int = HOST_THREADS_PER_CORE,
+                  threads_per_worker: int = HOST_THREADS_PER_WORKER,
+                  floor: int = HOST_CAP_FLOOR) -> dict[str, Any]:
+    """Largest sustainable worker population from the host's CURRENT headroom (#1337).
+
+    Pure — every input is a measured scalar — so it is hermetically testable. Each
+    live worker is charged a slice of three host resources; host_cap is the SCARCEST
+    slice, floored at ``floor`` so a momentarily-slammed box still makes progress
+    (the hard stop on a true runaway is the boolean host_safe gate, not this
+    gradient). A dimension whose reading is unknown (``None``) is skipped — a missing
+    probe never fabricates capacity nor falsely throttles; the thread dimension also
+    needs the core count (its budget scales with cores). When every dimension is
+    unknown the result is ``host_cap=None`` (no host bound available, so the static
+    --max-workers/target govern the cap alone)."""
+    components: dict[str, int] = {}
+    cores_n = _int(cores)
+    if cores_n is not None and cores_n > 0 and cores_per_worker > 0:
+        components["cores"] = cores_n // cores_per_worker
+    ram_n = _int(free_ram_mb)
+    if ram_n is not None and ram_n >= 0 and ram_mb_per_worker > 0:
+        components["ram"] = ram_n // ram_mb_per_worker
+    threads_n = _int(total_threads)
+    if (threads_n is not None and threads_n >= 0 and cores_n is not None
+            and cores_n > 0 and host_threads_per_core > 0 and threads_per_worker > 0):
+        free_threads = max(0, cores_n * host_threads_per_core - threads_n)
+        components["threads"] = free_threads // threads_per_worker
+    info: dict[str, Any] = {"cores": cores_n, "free_ram_mb": ram_n,
+                            "total_threads": threads_n, "components": components}
+    if not components:
+        info.update(host_cap=None, binding=None)
+        return info
+    # The binding dimension (the scarcest, reported BEFORE the floor is applied) tells
+    # the operator WHICH resource is throttling the fleet right now.
+    info.update(host_cap=max(floor, min(components.values())),
+                binding=min(components, key=lambda k: components[k]))
+    return info
+
+
+def _ram_and_threads_windows() -> tuple[int | None, int | None]:
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         "$os = Get-CimInstance Win32_OperatingSystem; "
+         "$t = (Get-Process -ErrorAction SilentlyContinue | "
+         "ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum; "
+         "[pscustomobject]@{ free_kb = [int64]$os.FreePhysicalMemory; threads = [int]$t } | "
+         "ConvertTo-Json -Compress"],
+        capture_output=True, text=True, timeout=45,
+        creationflags=_no_window_creationflags(), check=False)
+    doc = _last_json(out.stdout)
+    free_kb = _int(doc.get("free_kb"))
+    threads = _int(doc.get("threads"))
+    return (free_kb // 1024 if free_kb is not None else None), threads
+
+
+def _ram_and_threads_posix() -> tuple[int | None, int | None]:
+    free_ram_mb: int | None = None
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):  # kB the kernel can hand out now
+                    kb = _int(line.split()[1])
+                    free_ram_mb = kb // 1024 if kb is not None else None
+                    break
+    except OSError:
+        free_ram_mb = None
+    total_threads: int | None = None
+    try:
+        out = subprocess.run(["ps", "-eo", "nlwp="], capture_output=True,
+                             text=True, timeout=20, check=False)
+        total = 0
+        seen = False
+        for tok in out.stdout.split():
+            n = _int(tok)
+            if n is not None:
+                total += n
+                seen = True
+        total_threads = total if seen else None
+    except (OSError, subprocess.SubprocessError):
+        total_threads = None
+    return free_ram_mb, total_threads
+
+
+def host_resources() -> dict[str, Any]:
+    """Probe cores + available RAM (MB) + total live OS threads for host_capacity().
+    Best effort and read-only: any dimension the platform won't yield comes back
+    None so host_capacity() simply skips it. One lightweight platform call (the
+    supported CIM API on Windows, ``ps``/``/proc`` on POSIX); no third-party deps.
+    Patched out in the hermetic preflight tests, like the other shelling checks."""
+    cores = os.cpu_count()
+    try:
+        if os.name == "nt":
+            free_ram_mb, total_threads = _ram_and_threads_windows()
+        else:
+            free_ram_mb, total_threads = _ram_and_threads_posix()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        free_ram_mb, total_threads = None, None
+    return {"cores": cores, "free_ram_mb": free_ram_mb, "total_threads": total_threads}
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
              max_threads: int | None = None) -> dict[str, Any]:
     host = host_check(root, max_threads=max_threads)
     acct = account_check(root, work_kind=work_kind, product=product)
     kern = kernel_alive(root)
+    seat = seat_check(root, product=product)
+    host_cap_info = host_capacity(**host_resources())
+    host_cap = host_cap_info.get("host_cap")
 
     target = kern.get("target")
     # `dos [supervise].target` is the kernel's STANDING-LOOP population — the
@@ -665,6 +825,25 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     # weekly-cap gate, to actually freeze spawning. (Before this, target=0 silently
     # pinned cap to 0 and wedged the live issue-closer for ~12h after the #517 fix.)
     cap = min(max_workers, target) if target else max_workers
+    # Fold the host-derived recommended cap (#1337): even when dos target is 0/unset
+    # (the emit-only standing loop in this repo), the live host headroom still
+    # throttles the operator's --max-workers down to what the box can carry right
+    # now, so a request for "up to 100" auto-adapts to load. host_cap is None only
+    # when no host dimension could be read, in which case the static caps govern.
+    if host_cap is not None:
+        cap = min(cap, host_cap)
+    cap = max(0, cap)
+    # The pre-seat cap (operator/dos/host). Fold the EXPLICIT seat pool in next: M
+    # distinct routable worker seats back at most M live workers, so the seat count is
+    # another hard min() term on concurrency (#1336 "the effective cap becomes
+    # number_of_free_seats"). A None/absent total — the seat view could not run, or the
+    # product has no roster (codex ambient) — SKIPS the fold so the gate never
+    # fail-closes on a missing seat view; the static/host caps still bound the fleet.
+    cap_pre_seat = cap
+    seats_total = seat.get("total")
+    fold_seats = isinstance(seats_total, int) and seats_total > 0
+    if fold_seats:
+        cap = min(cap, seats_total)
     cap = max(0, cap)
     alive_kernel = kern.get("alive")
     # When dos target is zero/unset, `dos loop` is emit-only in this repo and its
@@ -686,10 +865,22 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     # Fail-safe ordering, evaluated top to bottom:
     #   1. an un-runnable host/kernel safety check  -> REFUSE_INSPECT (never assume safe)
     #   2. a flagged host                            -> REFUSE_HOST
-    #   3. at/over the worker cap                    -> REFUSE_AT_CAP
-    #   4. no available account (incl. switcher err) -> REFUSE_NO_ACCOUNT
+    #   3. a depleted seat pool (seats are binding)  -> REFUSE_NO_SEAT
+    #   4. at/over the worker cap                    -> REFUSE_AT_CAP
+    #   5. no available account (incl. switcher err) -> REFUSE_NO_ACCOUNT
     # An account check that merely errored is just "no account available", which
-    # branch 4 already reports — it does not need to pre-empt host/cap.
+    # branch 5 already reports — it does not need to pre-empt host/cap.
+    # A depleted seat pool (every routable seat already leased to a live worker) is its
+    # own typed refusal (#1336): there is NO free seat to hand out, so spawning would
+    # double-book a busy seat — refuse with REFUSE_NO_SEAT, distinct from the generic
+    # operator/dos/host ceiling. It is raised only when the seat count is the BINDING cap
+    # term (``seats_total <= cap_pre_seat``); when a tighter operator/host cap bit first,
+    # REFUSE_AT_CAP stays the honest reason. The depleted signal is authoritative even if
+    # the live-worker scan under-counts, so the N>M-wave remainder always gets a structured
+    # "no seat", never a silent double-book.
+    seats_deplete = bool(
+        fold_seats and seat.get("depleted") and seats_total <= cap_pre_seat
+        and (seat.get("leased") or 0) > 0)
     if host.get("error") or kern.get("error"):
         verdict = REFUSE_INSPECT
         reason = (host.get("error") or kern.get("error")
@@ -699,11 +890,17 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         reason = (f"host resource guard flagged {host['flagged']} process(es): "
                   f"{', '.join(host.get('flagged_names') or []) or 'see proc_resource_guard'}"
                   " — reap/inspect before growing the fleet")
+    elif seats_deplete:
+        verdict = REFUSE_NO_SEAT
+        reason = (f"seat pool depleted: 0 of {seats_total} routable seat(s) free "
+                  f"({seat.get('leased')} leased to live worker(s), live={live}); a seat "
+                  "frees when a worker exits — refusing rather than double-book a busy seat")
     elif live >= cap:
         verdict = REFUSE_AT_CAP
         reason = (f"live workers {live} >= cap {cap} "
                   f"(kernel alive={alive_kernel}, os procs={alive_proc}, "
-                  f"dos target={target}, max-workers={max_workers})")
+                  f"dos target={target}, host_cap={host_cap}, "
+                  f"max-workers={max_workers})")
     elif not acct["available"]:
         verdict = REFUSE_NO_ACCOUNT
         blocked = ", ".join(b for b in (acct.get("blocked") or []) if b)
@@ -726,6 +923,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         "live": live,
         "headroom": headroom,
         "max_workers": max_workers,
+        "host_cap": host_cap,
+        "host_capacity": host_cap_info,
+        "seat": seat,
         "host": host,
         "account": {k: acct.get(k) for k in ("available", "tag", "dir", "tier", "model")},
         "kernel": kern,
@@ -735,12 +935,17 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
 
 def render(p: dict[str, Any]) -> str:
     a = p.get("account") or {}
+    hc = p.get("host_capacity") or {}
+    host_cap = p.get("host_cap")
+    host_cap_str = (f"host_cap={host_cap}"
+                    + (f" (bound by {hc.get('binding')})" if hc.get("binding") else "")
+                    if host_cap is not None else "host_cap=n/a")
     return "\n".join([
         f"dispatch preflight: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})",
         f"  reason: {p.get('reason')}",
         f"  live={p.get('live')}/{p.get('cap')} (headroom {p.get('headroom')})  "
         f"host={'clean' if (p.get('host') or {}).get('safe') else 'FLAGGED'}  "
-        f"account={a.get('tag') or '-'} (t{a.get('tier')})",
+        f"account={a.get('tag') or '-'} (t{a.get('tier')})  {host_cap_str}",
     ])
 
 
@@ -750,9 +955,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS,
                     help=f"hard ceiling on live workers (default: {DEFAULT_MAX_WORKERS}); "
-                         "effective cap is min(this, dos [supervise].target) when that "
-                         "target is positive, else this (a zero/unset target lets the "
-                         "cron-armed self-spawner use its own ceiling)")
+                         "effective cap is min(host_cap, dos [supervise].target, this) "
+                         "when that target is positive, else min(host_cap, this) (a "
+                         "zero/unset target lets the cron-armed self-spawner use its own "
+                         "ceiling). host_cap is the host-derived adaptive bound (#1337) "
+                         "from cores, free RAM, and the live OS-thread total")
     ap.add_argument("--work-kind", default="engineering",
                     help="work kind for the switcher route (engineering→t1, gardening→t2)")
     ap.add_argument("--product", default="claude", help="worker product (default: claude)")

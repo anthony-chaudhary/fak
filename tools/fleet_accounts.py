@@ -58,6 +58,12 @@ CLI:
                                               # ultracode wave); --explain prints the headroom
                                               # multiplier (distinct_pools vs the naive 1).
                                               # Omit --count for every distinct pool free now.
+    python tools/fleet_accounts.py seats --product claude    # the EXPLICIT seat pool: M
+                                              # distinct routable seats x tier with the
+                                              # seat->worker binding for live workers (from
+                                              # each live worker's .account lease sidecar).
+                                              # free_seats is the concurrency headroom;
+                                              # depleted == every seat leased. --json for machines.
 """
 from __future__ import annotations
 
@@ -69,6 +75,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover - Python <3.9 fallback
@@ -1715,6 +1722,161 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
     }
 
 
+# Each live issue-resolution worker stamps the switcher account it leased into a
+# `.account` sidecar next to its `.pid` (issue_resolve_dispatch.write_account_sidecar).
+# That sidecar IS the seat lease: a live worker whose `.account` names a seat holds it.
+# Kept as a literal (a stable on-disk contract) so this module need not import the
+# heavier issue_resolve_dispatch to read its own seat bindings.
+ACCOUNT_SIDECAR_SUFFIX = ".account"
+SEAT_POOL_SCHEMA = "fleet-seat-pool/1"
+
+
+def _lease_matches_seat(lease: dict, row: dict) -> bool:
+    """Does a live-worker lease record (parsed from its ``.account`` sidecar) bind to
+    this seat row? Match on the account DIR first (the precise key the sidecar stamps),
+    then fall back to the short TAG. A lease names the dir/tag the worker launched on;
+    the seat carries the same on its roster row."""
+    ldir = str(lease.get("dir") or "")
+    rdir = str(row.get("dir") or "")
+    if ldir and (
+        (rdir and ldir == rdir)
+        or os.path.basename(ldir.rstrip("/\\")) == str(row.get("account") or "")
+    ):
+        return True
+    ltag = str(lease.get("tag") or "").lower()
+    return bool(ltag) and ltag == str(row.get("tag") or "").lower()
+
+
+def seat_pool(rows: list[dict], leases: list[dict] | None = None,
+              *, product: str | None = None) -> dict:
+    """The explicit multi-seat account pool: M distinct routable worker pools (SEATS)
+    x tier, with the seat->worker binding for the live workers leasing them.
+
+    A SEAT is one distinct rate-limit POOL among the routable workers -- keyed by
+    ``_pool_key`` (the Anthropic accountUuid for a logged-in Claude dir, else the dir
+    basename), so two dirs on ONE Anthropic account are ONE seat, never two. That is
+    the same no-double-hand principle ``allocate_wave`` enforces for a burst, lifted
+    here into an explicit, enumerable pool. The seat count M is the real binding
+    constraint on concurrency: M seats back at most M live workers; handing a busy
+    seat to a second worker only collides on one rate limit.
+
+    ``leases`` is the list of live-worker lease records (``{worker, tag, dir, ...}``,
+    parsed from each live worker's ``.account`` sidecar -- see ``live_seat_leases``).
+    Each is matched to its seat; the seat is then classified:
+      leased   bound to >=1 live worker (its tag/dir named by a live lease)
+      free     available now (roster) AND not leased -> offerable headroom
+      blocked  a real seat that is throttled/auth-blocked now (not offerable)
+    ``free_seats`` is the effective concurrency headroom and ``depleted`` is
+    ``free_seats == 0``. A seat named by >1 live lease is a DOUBLE-BOOKING, surfaced in
+    ``double_booked`` so the invariant 'no seat to two live workers' is OBSERVABLE
+    rather than silently assumed. A lease matching no routable seat is an
+    ``unbound_lease`` (a live worker on an account no longer in the pool). Because the
+    binding is derived from LIVE workers, a worker that exits frees its seat on the
+    next read -- there is no separate release step to forget."""
+    leases = list(leases or [])
+    wanted = (product or "").lower()
+    seats: list[dict] = []
+    double_booked: list[dict] = []
+    matched: set[int] = set()
+    total = free = leased = blocked = 0
+    for row in rows:
+        if not routable_worker(row):  # excludes duplicate-identity dirs -> one seat per pool
+            continue
+        if wanted and str(row.get("product") or "").lower() != wanted:
+            continue
+        bound = [i for i, ls in enumerate(leases) if _lease_matches_seat(ls, row)]
+        matched.update(bound)
+        workers = [str(leases[i].get("worker") or leases[i].get("pid") or "?")
+                   for i in bound]
+        available = bool(row.get("available"))
+        if workers:
+            state, leased = "leased", leased + 1
+        elif available:
+            state, free = "free", free + 1
+        else:
+            state, blocked = "blocked", blocked + 1
+        total += 1
+        seat = {
+            "seat": _pool_key(row),
+            "tag": row.get("tag"),
+            "account": row.get("account"),
+            "product": row.get("product"),
+            "model": row.get("model"),
+            "model_tier": row.get("model_tier"),
+            "available": available,
+            "state": state,
+            "workers": workers,
+        }
+        seats.append(seat)
+        if len(workers) > 1:
+            double_booked.append({"seat": seat["seat"], "tag": seat["tag"],
+                                  "workers": workers})
+    unbound = [
+        {"worker": str(ls.get("worker") or ls.get("pid") or "?"),
+         "tag": ls.get("tag"), "dir": ls.get("dir")}
+        for i, ls in enumerate(leases) if i not in matched
+    ]
+    seats.sort(key=lambda s: (s["state"] != "leased", s["state"] != "free",
+                              str(s.get("product") or ""), str(s.get("tag") or "")))
+    return {
+        "schema": SEAT_POOL_SCHEMA,
+        "product": wanted or "all",
+        "total_seats": total,
+        "free_seats": free,
+        "leased_seats": leased,
+        "blocked_seats": blocked,
+        "depleted": free == 0,
+        "double_booked": double_booked,
+        "unbound_leases": unbound,
+        "seats": seats,
+    }
+
+
+def live_seat_leases(runs_dir: str | None = None, *,
+                     alive: set | None = None, probe=None) -> list[dict]:
+    """Lease records for the LIVE issue-resolution workers: one ``{worker, pid, tag,
+    dir}`` per worker whose ``.pid`` sidecar still passes the identity-gated liveness
+    check, read from its sibling ``.account`` sidecar.
+
+    This is the seat->worker BINDING source ``seat_pool`` consumes: a seat is leased iff
+    a live worker's ``.account`` names it. Because the binding is derived from LIVE pids
+    (the SAME ``dispatch_preflight`` liveness gate the spawn cap uses), a worker that
+    exits frees its seat on the very next read -- its sidecar is no longer live -- with
+    no separate release step. Best effort: a missing runs dir or unreadable sidecar
+    contributes nothing. ``alive``/``probe`` are injectable for hermetic tests (the same
+    shape ``dispatch_preflight.resolve_sidecar_pid_is_live`` accepts)."""
+    try:
+        import dispatch_preflight  # lazy: no import-time coupling (it shells out to us)
+    except ImportError:
+        return []
+    if runs_dir is None:
+        runs_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            dispatch_preflight.RUNS_DIRNAME)
+    rd = Path(runs_dir)
+    if not rd.is_dir():
+        return []
+    leases: list[dict] = []
+    for pid_file in sorted(rd.glob("resolve-*.pid")):
+        if not dispatch_preflight.resolve_sidecar_pid_is_live(
+                pid_file, alive=alive, probe=probe):
+            continue
+        rec: dict = {}
+        try:
+            parsed = json.loads(
+                pid_file.with_suffix(ACCOUNT_SIDECAR_SUFFIX).read_text(encoding="utf-8"))
+            rec = parsed if isinstance(parsed, dict) else {}
+        except (OSError, ValueError):
+            rec = {}
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            pid = None
+        leases.append({"worker": pid_file.stem, "pid": pid,
+                       "tag": str(rec.get("tag") or ""), "dir": str(rec.get("dir") or "")})
+    return leases
+
+
 def is_worker(account: str, home: str = USER, policy: dict | None = None) -> bool:
     """True iff ``account`` (a config-dir basename, any product) classifies as a worker.
 
@@ -1789,6 +1951,27 @@ def _cli_list(rows: list[dict]) -> None:
     else:
         pol_src = "(built-in defaults)"
     print(f"\npolicy: {pol_src}")
+
+
+def _cli_seats(pool: dict) -> None:
+    """Human view of the explicit seat pool + the seat->worker binding for live workers."""
+    print(f"seat pool [{pool.get('product')}]: {pool.get('total_seats')} seat(s)  "
+          f"free={pool.get('free_seats')} leased={pool.get('leased_seats')} "
+          f"blocked={pool.get('blocked_seats')}"
+          + ("  DEPLETED" if pool.get("depleted") else ""))
+    for s in pool.get("seats", []):
+        workers = ", ".join(s.get("workers") or []) or "-"
+        tier = f"t{s.get('model_tier', '?')}"
+        print(f"  [{str(s.get('state') or ''):<7}] {str(s.get('tag') or ''):<16} "
+              f"{str(s.get('account') or ''):<28} {tier:<3} -> {workers}")
+    if pool.get("double_booked"):
+        print("\nDOUBLE-BOOKED (one seat, >1 live worker -- INVARIANT VIOLATION):")
+        for d in pool["double_booked"]:
+            print(f"  {d.get('tag')}: {', '.join(d.get('workers') or [])}")
+    if pool.get("unbound_leases"):
+        print("\nUNBOUND LEASES (live worker on an account not in the pool):")
+        for u in pool["unbound_leases"]:
+            print(f"  {u.get('worker')}: tag={u.get('tag')} dir={u.get('dir')}")
 
 
 def _arg_value(argv: list[str], names: tuple[str, ...], default: str = "") -> str:
@@ -1919,6 +2102,18 @@ def main(argv: list[str]) -> int:
             }
         print(json.dumps(doc, indent=1))
         return 0 if doc.get("ok") else 1
+    elif mode == "seats":
+        # The explicit multi-seat account pool: M distinct routable worker pools (seats)
+        # x tier, with the seat->worker binding for live workers. Reads each live worker's
+        # `.account` sidecar (its seat lease) so a depleted pool is visible and an exited
+        # worker's seat frees on the next read. --product scopes the pool; --json for machines.
+        product = _arg_value(argv, ("--product",), "").strip().lower() or None
+        pool = seat_pool(rows, live_seat_leases(), product=product)
+        if _has_arg(argv, ("--json",)):
+            print(json.dumps(pool, indent=1))
+        else:
+            _cli_seats(pool)
+        return 0
     elif mode == "probe":
         # ACTIVE probe: get ground truth now (vs the passive roster above), and show
         # where the live verdict CORRECTS the stale roster. Delegates to account_probe

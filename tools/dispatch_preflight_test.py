@@ -29,17 +29,49 @@ def load():
     return mod
 
 
-def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0):
-    """Replace the four shelling-out checks with constant synthetic results."""
+def load_fleet_accounts():
+    """Import tools/fleet_accounts.py the same hermetic way — the explicit seat pool
+    (#1336: ``seat_pool`` / ``live_seat_leases``) lives there, so the SeatPool and
+    LiveSeatLeases tests load and exercise it directly."""
+    fa = ROOT / "tools" / "fleet_accounts.py"
+    sys.path.insert(0, str(fa.parent))
+    spec = importlib.util.spec_from_file_location("fleet_accounts", fa)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res=None,
+                 seat=None):
+    """Replace the shelling-out checks with constant synthetic results.
+
+    ``host_res`` stubs the host-resource probe (#1337); the default is a roomy box
+    (64 cores, 128 GB free, 1k threads) whose derived host_cap (32) sits well above
+    every small cap the verdict tests assert, so it never perturbs them — a test
+    that wants host_cap to BIND passes a scarce host_res of its own.
+
+    ``seat`` stubs the explicit seat-pool view (#1336); the default ``{"total": None}``
+    means "no seat view" so the seat fold is SKIPPED and the cap is governed by the
+    static/host caps alone — exactly the pre-seat behavior the other verdict tests
+    assert. A test exercising the seat pool passes an explicit ``{total, free, leased,
+    depleted}`` of its own. Stubbing this keeps evaluate() hermetic: without it the
+    seat fold would shell out to fleet_accounts.py and leak the real box's seat count
+    into every test."""
     host = host if host is not None else {"safe": True, "flagged": 0, "flagged_names": []}
     account = account if account is not None else {
         "available": True, "tag": "worker-a", "dir": "/acct/a", "tier": 1,
         "model": "claude", "reason": "free", "blocked": []}
     kernel = kernel if kernel is not None else {"alive": 0, "target": 3, "verdict": "FILLING"}
+    host_res = host_res if host_res is not None else {
+        "cores": 64, "free_ram_mb": 128_000, "total_threads": 1000}
+    seat = seat if seat is not None else {"total": None}
     mod.host_check = lambda root, **kw: host
     mod.account_check = lambda root, **kw: account
     mod.kernel_alive = lambda root: kernel
     mod.proc_worker_count = lambda root=None, *, product=None: procs
+    mod.host_resources = lambda: host_res
+    mod.seat_check = lambda root, *, product=None: seat
 
 
 def run_eval(mod, **kw):
@@ -201,6 +233,105 @@ class EvaluateVerdictTest(unittest.TestCase):
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
 
+class HostCapacityPureTest(unittest.TestCase):
+    """The pure host-derived cap (#1337): cores, free RAM, and live OS-thread total
+    turned into the largest sustainable worker population. No I/O."""
+
+    def test_roomy_box_is_bound_by_cores(self) -> None:
+        mod = load()
+        info = mod.host_capacity(cores=64, free_ram_mb=128_000, total_threads=1000)
+        # cores 64//2=32, ram 128000//1500=85, threads (64*400-1000)//200=123 -> min 32.
+        self.assertEqual(info["host_cap"], 32)
+        self.assertEqual(info["binding"], "cores")
+
+    def test_thread_saturation_drops_cap_to_the_floor(self) -> None:
+        # The exact failure mode this subsystem exists for: the box's live thread
+        # total has blown past its budget, so the host can sustain ~no new worker.
+        mod = load()
+        info = mod.host_capacity(cores=8, free_ram_mb=64_000, total_threads=200_000)
+        self.assertEqual(info["host_cap"], 1)        # floored, not 0
+        self.assertEqual(info["binding"], "threads")
+        self.assertEqual(info["components"]["threads"], 0)
+
+    def test_low_free_ram_binds_the_cap(self) -> None:
+        mod = load()
+        info = mod.host_capacity(cores=32, free_ram_mb=3000, total_threads=2000)
+        self.assertEqual(info["host_cap"], 2)        # 3000//1500
+        self.assertEqual(info["binding"], "ram")
+
+    def test_all_dimensions_unknown_yields_no_bound(self) -> None:
+        mod = load()
+        info = mod.host_capacity(cores=None, free_ram_mb=None, total_threads=None)
+        self.assertIsNone(info["host_cap"])
+        self.assertEqual(info["components"], {})
+
+    def test_missing_ram_dimension_is_skipped_not_a_breach(self) -> None:
+        # macOS-style host where free RAM could not be read: cores+threads still bound.
+        mod = load()
+        info = mod.host_capacity(cores=8, free_ram_mb=None, total_threads=500)
+        self.assertEqual(info["host_cap"], 4)        # cores 8//2, threads big
+        self.assertNotIn("ram", info["components"])
+
+    def test_thread_dimension_needs_cores_for_its_budget(self) -> None:
+        mod = load()
+        info = mod.host_capacity(cores=None, free_ram_mb=6000, total_threads=100)
+        self.assertEqual(info["host_cap"], 4)        # ram alone (6000//1500)
+        self.assertEqual(list(info["components"].keys()), ["ram"])
+
+
+class HostCapFoldTest(unittest.TestCase):
+    """host_cap folds into the cap via min, the adaptive throttle (#1337)."""
+
+    def test_host_cap_binds_below_the_static_cap(self) -> None:
+        mod = load()
+        # cores 2//2=1, ram 1000//1500=0 -> host_cap floored to 1.
+        patch_checks(mod, kernel={"alive": 0, "target": 3, "verdict": "X"}, procs=0,
+                     host_res={"cores": 2, "free_ram_mb": 1000, "total_threads": 100})
+        p = run_eval(mod, max_workers=5)
+        self.assertEqual(p["host_cap"], 1)
+        self.assertEqual(p["cap"], 1)               # min(min(5,3)=3, host_cap=1)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+    def test_host_cap_throttles_even_when_dos_target_is_zero(self) -> None:
+        # The adaptive promise: target=0 (emit-only loop) no longer means "fill to
+        # --max-workers" — the live host headroom still throttles the spawn count.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0,
+                     host_res={"cores": 4, "free_ram_mb": 3000, "total_threads": 1000})
+        p = run_eval(mod, max_workers=5)
+        self.assertEqual(p["host_cap"], 2)          # cores 2, ram 2 -> min 2
+        self.assertEqual(p["cap"], 2)               # host_cap throttles 5 -> 2
+
+    def test_host_cap_above_static_cap_does_not_raise_it(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 3, "verdict": "X"}, procs=0)
+        p = run_eval(mod, max_workers=2)            # roomy default host_res -> host_cap 32
+        self.assertEqual(p["host_cap"], 32)
+        self.assertEqual(p["cap"], 2)               # min(2, 3, 32) = the static cap
+
+    def test_unreadable_host_probe_leaves_static_cap_intact(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 3, "verdict": "X"}, procs=0,
+                     host_res={"cores": None, "free_ram_mb": None, "total_threads": None})
+        p = run_eval(mod, max_workers=5)
+        self.assertIsNone(p["host_cap"])
+        self.assertEqual(p["cap"], 3)               # min(5, target 3); no host bound
+
+    def test_loaded_box_spawns_fewer_than_a_roomy_box(self) -> None:
+        # The done-condition behavior in one assertion: same request (max_workers=10,
+        # target unset), but a loaded box derives a smaller cap than a roomy one.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000})
+        roomy = run_eval(mod, max_workers=10)
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     host_res={"cores": 8, "free_ram_mb": 64_000, "total_threads": 200_000})
+        loaded = run_eval(mod, max_workers=10)
+        self.assertEqual(roomy["cap"], 10)          # roomy: host_cap(32) does not bind
+        self.assertEqual(loaded["cap"], 1)          # loaded: host_cap(1) throttles hard
+        self.assertLess(loaded["cap"], roomy["cap"])
+
+
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_evaluate_output(self) -> None:
         mod = load()
@@ -208,6 +339,13 @@ class RenderTest(unittest.TestCase):
         text = mod.render(run_eval(mod))
         self.assertIn("dispatch preflight", text)
         self.assertIn("SPAWN_OK", text)
+
+    def test_render_shows_host_cap(self) -> None:
+        mod = load()
+        patch_checks(mod)
+        text = mod.render(run_eval(mod))
+        self.assertIn("host_cap=32", text)
+        self.assertIn("bound by cores", text)
 
 
 class WorkerCountTest(unittest.TestCase):
@@ -391,6 +529,184 @@ class WorkerCountTest(unittest.TestCase):
                 mod.live_resolve_worker_pids(runs, product="opencode", probe=probe), {702})
             self.assertEqual(
                 mod.live_resolve_worker_pids(runs, probe=probe), {701, 702})
+
+
+def _seat_row(tag, *, uuid="", available=True, product="claude", role="", dir_=None):
+    """A synthetic roster row in the shape ``seat_pool`` consumes: a routable worker
+    (``kind == worker`` and not a duplicate identity) carrying the pool-key inputs
+    (``account_uuid`` / ``account`` / ``dir``) and the display fields."""
+    return {
+        "kind": "worker", "identity_role": role, "tag": tag,
+        "account": (f".claude-{tag}-acct" if product == "claude" else f"opencode-{tag}"),
+        "dir": dir_ or f"/home/u/{tag}", "available": available,
+        "account_uuid": uuid, "product": product, "model": "m", "model_tier": 1,
+    }
+
+
+class SeatPoolTest(unittest.TestCase):
+    """The explicit multi-seat account pool (#1336): seat -> live-worker binding,
+    depletion, double-booking, and the no-double-hand (one seat per rate-limit pool)."""
+
+    def test_free_pool_has_full_headroom_and_is_not_depleted(self) -> None:
+        fa = load_fleet_accounts()
+        pool = fa.seat_pool([_seat_row("a"), _seat_row("b"), _seat_row("c")], [])
+        self.assertEqual(pool["total_seats"], 3)
+        self.assertEqual(pool["free_seats"], 3)
+        self.assertEqual(pool["leased_seats"], 0)
+        self.assertFalse(pool["depleted"])
+        self.assertEqual(pool["double_booked"], [])
+
+    def test_a_live_lease_binds_its_seat(self) -> None:
+        fa = load_fleet_accounts()
+        leases = [{"worker": "resolve-101", "pid": 101, "tag": "a", "dir": "/home/u/a"}]
+        pool = fa.seat_pool([_seat_row("a"), _seat_row("b")], leases)
+        self.assertEqual(pool["leased_seats"], 1)
+        self.assertEqual(pool["free_seats"], 1)
+        leased = [s for s in pool["seats"] if s["state"] == "leased"]
+        self.assertEqual(len(leased), 1)
+        self.assertEqual(leased[0]["tag"], "a")
+        self.assertEqual(leased[0]["workers"], ["resolve-101"])
+
+    def test_pool_depleted_when_every_seat_leased(self) -> None:
+        fa = load_fleet_accounts()
+        leases = [{"worker": "w1", "tag": "a", "dir": "/home/u/a"},
+                  {"worker": "w2", "tag": "b", "dir": "/home/u/b"}]
+        pool = fa.seat_pool([_seat_row("a"), _seat_row("b")], leases)
+        self.assertEqual(pool["leased_seats"], 2)
+        self.assertEqual(pool["free_seats"], 0)
+        self.assertTrue(pool["depleted"])
+
+    def test_double_booking_one_seat_two_live_workers_is_surfaced(self) -> None:
+        # The invariant the issue forbids — two live workers on ONE seat — must be
+        # OBSERVABLE, not silently assumed away.
+        fa = load_fleet_accounts()
+        leases = [{"worker": "w1", "tag": "a", "dir": "/home/u/a"},
+                  {"worker": "w2", "tag": "a", "dir": "/home/u/a"}]
+        pool = fa.seat_pool([_seat_row("a")], leases)
+        self.assertEqual(len(pool["double_booked"]), 1)
+        self.assertEqual(sorted(pool["double_booked"][0]["workers"]), ["w1", "w2"])
+
+    def test_lease_on_account_not_in_pool_is_unbound(self) -> None:
+        fa = load_fleet_accounts()
+        leases = [{"worker": "ghost", "tag": "gone", "dir": "/home/u/gone"}]
+        pool = fa.seat_pool([_seat_row("a")], leases)
+        self.assertEqual(pool["leased_seats"], 0)
+        self.assertEqual(len(pool["unbound_leases"]), 1)
+        self.assertEqual(pool["unbound_leases"][0]["worker"], "ghost")
+
+    def test_two_dirs_on_one_account_are_one_seat(self) -> None:
+        # The no-double-hand core: two dirs sharing one Anthropic account (a duplicate
+        # identity) collapse to ONE seat, so the pool never double-counts a rate limit.
+        fa = load_fleet_accounts()
+        rows = [_seat_row("canon", uuid="U1"),
+                _seat_row("copy", uuid="U1", role="duplicate")]
+        pool = fa.seat_pool(rows, [])
+        self.assertEqual(pool["total_seats"], 1)
+        self.assertEqual(pool["seats"][0]["tag"], "canon")
+
+    def test_product_scope_filters_the_pool(self) -> None:
+        fa = load_fleet_accounts()
+        rows = [_seat_row("a", product="claude"), _seat_row("g", product="opencode")]
+        self.assertEqual(fa.seat_pool(rows, [], product="claude")["total_seats"], 1)
+        self.assertEqual(fa.seat_pool(rows, [], product="opencode")["total_seats"], 1)
+
+
+class LiveSeatLeasesTest(unittest.TestCase):
+    """The seat -> worker binding is derived from LIVE worker pids, so an exited worker
+    frees its seat on the next read with no separate release step (#1336)."""
+
+    def _live_probe(self, now):
+        return lambda pid: {"alive": True, "create_time": now - 1,
+                            "name": "claude.exe", "cmdline": ""}
+
+    def test_live_worker_account_sidecar_becomes_a_seat_lease(self) -> None:
+        fa = load_fleet_accounts()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            pid_file = runs / "resolve-101-20260625-062210.pid"
+            pid_file.write_text("101", encoding="utf-8")
+            pid_file.with_suffix(".account").write_text(
+                '{"tag": "worker-a", "dir": "/home/u/worker-a"}', encoding="utf-8")
+            os.utime(pid_file, (now, now))
+            leases = fa.live_seat_leases(str(runs), alive={101}, probe=self._live_probe(now))
+            self.assertEqual(len(leases), 1)
+            self.assertEqual(leases[0]["tag"], "worker-a")
+            self.assertEqual(leases[0]["pid"], 101)
+
+    def test_exited_worker_frees_its_seat(self) -> None:
+        fa = load_fleet_accounts()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            pid_file = runs / "resolve-102-20260625-062210.pid"
+            pid_file.write_text("102", encoding="utf-8")
+            pid_file.with_suffix(".account").write_text(
+                '{"tag": "worker-a", "dir": "/home/u/worker-a"}', encoding="utf-8")
+            os.utime(pid_file, (now, now))
+            # Worker 102 is no longer alive -> its sidecar yields NO lease, so the seat
+            # it held is free again on this very read.
+            leases = fa.live_seat_leases(str(runs), alive=set(), probe=self._live_probe(now))
+            self.assertEqual(leases, [])
+            pool = fa.seat_pool([_seat_row("worker-a")], leases)
+            self.assertEqual(pool["free_seats"], 1)
+            self.assertFalse(pool["depleted"])
+
+
+class SeatRefusalTest(unittest.TestCase):
+    """Preflight folds the seat pool into the cap and emits the typed REFUSE_NO_SEAT
+    on depletion (#1336): N>M wave -> exactly M, remainder structurally refused."""
+
+    def test_seat_count_is_the_effective_cap(self) -> None:
+        # An N>M ask (max_workers=100) with a free pool of M=4 caps at 4, not 100 —
+        # the effective concurrency cap becomes the seat count.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     seat={"total": 4, "free": 4, "leased": 0, "depleted": False})
+        p = run_eval(mod, max_workers=100)
+        self.assertEqual(p["cap"], 4)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+    def test_depleted_seat_pool_refuses_the_remainder_with_no_seat(self) -> None:
+        # M=4 seats, all leased to 4 live workers: the 5th preflight in an N>M wave
+        # gets the typed REFUSE_NO_SEAT, never a silent double-book.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=4,
+                     seat={"total": 4, "free": 0, "leased": 4, "depleted": True})
+        p = run_eval(mod, max_workers=100)
+        self.assertEqual(p["cap"], 4)
+        self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
+        self.assertFalse(p["ok"])
+
+    def test_free_seat_admits(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=1,
+                     seat={"total": 3, "free": 2, "leased": 1, "depleted": False})
+        p = run_eval(mod, max_workers=10)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+    def test_all_blocked_pool_is_no_account_not_no_seat(self) -> None:
+        # A pool with no free seat because every seat is THROTTLED (none leased) is a
+        # REFUSE_NO_ACCOUNT, not a REFUSE_NO_SEAT — depletion-by-lease and
+        # depletion-by-block are distinct typed refusals.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     account={"available": False, "tag": None, "dir": None, "tier": None,
+                              "model": None, "reason": "throttled", "blocked": ["a", "b"]},
+                     seat={"total": 2, "free": 0, "leased": 0, "depleted": True})
+        p = run_eval(mod, max_workers=10)
+        self.assertEqual(p["verdict"], mod.REFUSE_NO_ACCOUNT)
+
+    def test_missing_seat_view_skips_the_fold(self) -> None:
+        # total=None (the seat view could not run, or codex's ambient login) -> the
+        # fold is SKIPPED and the static/host caps govern; never a fail-closed refusal.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 3, "verdict": "X"}, procs=0,
+                     seat={"total": None})
+        p = run_eval(mod, max_workers=2)
+        self.assertEqual(p["cap"], 2)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+        self.assertIn("seat", p)
 
 
 if __name__ == "__main__":
