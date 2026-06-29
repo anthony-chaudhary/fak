@@ -186,6 +186,13 @@ const offTrunkBranchLaw = "off-trunk refused: `git checkout -b` / `git switch -c
 // of forbidden act as a force-push or an interactive rebase, just applied wholesale.
 const historyRewriteLaw = "history-rewrite refused: `git filter-branch` / `git filter-repo` rewrites shared history — forbidden on the trunk (AGENTS.md: never rewrite or force-push shared history). Make a new commit instead."
 
+// configHooksLaw fires on a PERSISTENT `git config core.hooksPath ...` write — the
+// durable sibling of the `git -c core.hooksPath=` per-invocation override the global
+// scan already catches. Relocating the hooks directory disables the commit/push
+// guards for every subsequent git op, not just one. A read (--get/--list) or an
+// --unset (which RESTORES the default hooks) is safe and stays deferred.
+const configHooksLaw = "skip-hooks refused: `git config core.hooksPath ...` persistently redirects the hooks directory, disabling the commit/push guards for every later git op (the durable sibling of `git -c core.hooksPath=`). Do not relocate hooks; reach the goal with the guards enabled."
+
 // ToolCollectiveCommit is the synthetic tool name for the collective-commit
 // barrier. It never shells out; its args are a CollectiveCommitPlan JSON object.
 const ToolCollectiveCommit = "gitgate.collective_commit"
@@ -564,6 +571,25 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 	// `git filter-branch` / `git filter-repo` rewrite the whole shared history.
 	if sub == "filter-branch" || sub == "filter-repo" {
 		return historyRewriteLaw, true
+	}
+
+	// `git config core.hooksPath ...` persistently relocates the hooks dir, disabling
+	// the guards. Refuse the SET form; a read (--get*/--list/-l) or --unset (which
+	// restores the default hooks) is safe and falls through to defer.
+	if sub == "config" {
+		hasHooksPath, isReadOrUnset := false, false
+		for _, t := range rest {
+			if strings.Contains(strings.ToLower(t), "core.hookspath") {
+				hasHooksPath = true
+			}
+			switch t {
+			case "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--unset", "--unset-all":
+				isReadOrUnset = true
+			}
+		}
+		if hasHooksPath && !isReadOrUnset {
+			return configHooksLaw, true
+		}
 	}
 
 	for _, t := range rest {

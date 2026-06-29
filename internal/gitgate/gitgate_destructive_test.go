@@ -62,6 +62,14 @@ func TestClassifyDestructiveAndOffTrunk(t *testing.T) {
 		{"filter-repo", "git filter-repo --path secret --invert-paths", true, "history-rewrite"},
 		{"clone mirror OK", "git clone --mirror https://example.com/x.git", false, ""},
 
+		// ---- persistent hook-disable via config -----------------------------
+		{"config hooksPath set", "git config core.hooksPath /dev/null", true, "skip-hooks"},
+		{"config hooksPath global", "git config --global core.hooksPath /tmp/h", true, "skip-hooks"},
+		{"config hooksPath case", "git config core.hookspath .nohooks", true, "skip-hooks"},
+		{"config hooksPath get OK", "git config --get core.hooksPath", false, ""},
+		{"config hooksPath unset OK", "git config --unset core.hooksPath", false, ""},
+		{"config unrelated OK", "git config user.name Alice", false, ""},
+
 		// ---- laundering: the unwrap pass must still see these ---------------
 		{"reset hard via bash -c", `bash -c "git reset --hard"`, true, "reset-hard"},
 		{"clean via pipe", "echo go | git clean -fd", true, "clean-force"},
