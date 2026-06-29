@@ -5,6 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/marketing"
@@ -26,11 +29,107 @@ import (
 // channel is never a hard-coded default — a marketing post never silently lands in
 // #scoreboard).
 func cmdMarketing(argv []string) {
-	dispatchSubcommands("marketing", "generate | post | tick", argv,
+	dispatchSubcommands("marketing", "generate | post | tick | aeo", argv,
 		subcommand{"generate", runMarketingGenerate},
 		subcommand{"post", runMarketingPost},
 		subcommand{"tick", runMarketingTick},
+		subcommand{"aeo", runMarketingAEO},
 	)
+}
+
+// runMarketingAEO handles `fak marketing aeo --refresh`: regenerate the AEO/AgentEO recency
+// surface from the witnessed ships — docs/marketing/updates.json (a schema.org ItemList answer
+// engines ingest) and llms-updates.txt (the plain feed agents poll). With --inject it then
+// runs tools/gen_structured_data.py to fence a bounded "What's new" block into llms.txt + keep
+// the FAQ/SoftwareApplication JSON-LD in sync (Go produces the data; Python owns the in-place
+// doc injection, so hand-written prose is never clobbered). With --score it runs the SEO/AEO
+// and agent-readiness scorecards as a freshness REPORT (not a hard gate in v1).
+func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak marketing aeo", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	since := fs.String("since", "HEAD~50", "gather ships since this ref (<ref>..HEAD)")
+	rangeFlag := fs.String("range", "", "gather ships in this rev-range; wins over --since")
+	root := fs.String("root", ".", "repo root to read git/CLAIMS.md and write the feed under")
+	refresh := fs.Bool("refresh", true, "write docs/marketing/updates.json + llms-updates.txt")
+	inject := fs.Bool("inject", false, "after refresh, run tools/gen_structured_data.py to fence the What's-new block into llms.txt")
+	score := fs.Bool("score", false, "after refresh, run the SEO/AEO + agent-readiness scorecards as a freshness report")
+	dryRun := fs.Bool("dry-run", false, "print what would be written; do not touch any file")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+
+	col, err := marketing.Gather(*root, marketingRange(*rangeFlag, *since))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak marketing aeo: %v\n", err)
+		return 1
+	}
+	now := time.Now()
+	feed, err := marketing.UpdatesFeed(col.Ships, now)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak marketing aeo: render feed: %v\n", err)
+		return 1
+	}
+	updatesTxt := marketing.LlmsUpdatesText(col.Ships, now)
+
+	feedPath := filepath.Join(*root, "docs", "marketing", "updates.json")
+	txtPath := filepath.Join(*root, "llms-updates.txt")
+
+	if *dryRun || !*refresh {
+		fmt.Fprintf(stdout, "would write %s (%d witnessed ships) and %s\n", feedPath, len(col.Ships), txtPath)
+		if *dryRun {
+			fmt.Fprintln(stdout, string(feed))
+			return 0
+		}
+	}
+	if *refresh {
+		if err := os.MkdirAll(filepath.Dir(feedPath), 0o755); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(feedPath, append(feed, '\n'), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: write feed: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(txtPath, []byte(updatesTxt), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: write llms-updates.txt: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "wrote %s (%d witnessed ships)\nwrote %s\n", feedPath, len(col.Ships), txtPath)
+	}
+
+	if *inject {
+		if rc := runPyTool(stdout, stderr, *root, "tools/gen_structured_data.py"); rc != 0 {
+			return rc
+		}
+	}
+	if *score {
+		// Freshness REPORT, not a gate (v1): print the scorecards' verdict lines so a human
+		// sees whether the refresh moved AEO/agent debt. A non-zero scorecard exit is its
+		// ACTION verdict, not a tool failure, so it never fails this command.
+		_ = runPyTool(stdout, stderr, *root, "tools/seo_aeo_scorecard.py")
+		_ = runPyTool(stdout, stderr, *root, "tools/agent_readiness_scorecard.py")
+	}
+	return 0
+}
+
+// runPyTool runs a project python tool (python then python3) from root, streaming its output.
+// A non-zero exit is reported but not treated as fatal by the caller for scorecards (their
+// exit code is a verdict); for the generator a non-zero exit IS a real failure.
+func runPyTool(stdout, stderr io.Writer, root, tool string) int {
+	for _, bin := range []string{"python", "python3"} {
+		cmd := exec.CommandContext(ctx(), bin, tool)
+		cmd.Dir = root
+		cmd.Stdout, cmd.Stderr = stdout, stderr
+		if err := cmd.Run(); err != nil {
+			if _, ok := err.(*exec.ExitError); ok {
+				return 1 // ran but exited non-zero (the caller decides if that's fatal)
+			}
+			continue // interpreter not found — try the next
+		}
+		return 0
+	}
+	fmt.Fprintf(stderr, "fak marketing aeo: could not run %s (no python/python3)\n", tool)
+	return 1
 }
 
 // marketingPoster adapts the scoreboard chat.postMessage client to the marketing.Poster
