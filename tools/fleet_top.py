@@ -368,6 +368,40 @@ def _footer(snap: dict[str, Any], interval: float | None) -> str:
     return f"{win} · refresh {interval:g}s · Ctrl-C to quit"
 
 
+# ----- slack -----------------------------------------------------------------
+
+def slack_text(snap: dict[str, Any]) -> str:
+    """The Slack body for a fleet-top snapshot: a one-line headline (sessions /
+    usable accounts / attention count, so the channel preview carries the state)
+    above the plain (color-off) frame in a code fence for monospace alignment."""
+    import slack_post  # sibling module in tools/
+
+    sess = snap.get("sessions") or {}
+    acc = snap.get("accounts") or {}
+    attn = snap.get("attention") or []
+    crit = sum(1 for a in attn if a.get("level") == "crit")
+    headline = (f"*fleet status:* {sess.get('total', 0)} session(s), "
+                f"{acc.get('usable', 0)}/{acc.get('total', 0)} accounts usable, "
+                f"{len(attn)} attention" + (f" ({crit} critical)" if crit else ""))
+    frame = render_frame(snap, color=False, interval=None)
+    return headline + "\n" + slack_post.wrap_code(frame)
+
+
+def post_to_slack(snap: dict[str, Any], *, channel: str = "",
+                  dry_run: bool = False, transport: Any | None = None) -> dict[str, Any]:
+    """Post the session/account-health snapshot to Slack via tools/slack_post. Never
+    raises — a missing poster or a Slack failure becomes a typed verdict the caller logs.
+    Channel/token resolve through slack_post ($FAK_DISPATCH_CHANNEL / the shared
+    scoreboard token) unless ``channel`` is set, so fleet status lands in the same ops
+    channel as the dispatch card."""
+    try:
+        import slack_post  # sibling module in tools/
+    except Exception as exc:  # noqa: BLE001
+        return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
+    return slack_post.send(slack_text(snap), channel=channel, dry_run=dry_run,
+                           transport=transport)
+
+
 # ----- runtime ---------------------------------------------------------------
 
 def _enable_vt() -> None:
@@ -415,6 +449,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--interval", type=float, default=5.0, help="live-refresh cadence seconds")
     ap.add_argument("--window", type=float, default=10.0, help="session lookback window hours")
     ap.add_argument("--no-color", action="store_true", help="disable ANSI color")
+    ap.add_argument("--slack", nargs="?", const="__env__", default=None, metavar="CHANNEL",
+                    help="post one snapshot to Slack and exit (optional channel id; "
+                         "default: $FAK_DISPATCH_CHANNEL via tools/slack_post)")
+    ap.add_argument("--slack-dry-run", action="store_true",
+                    help="with --slack: resolve the channel/token and report what WOULD "
+                         "be posted without sending")
     args = ap.parse_args(argv)
 
     try:
@@ -427,6 +467,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(snapshot(root, args.window), indent=2))
         return 0
+
+    if args.slack is not None:
+        # A Slack post is a one-shot snapshot, never the 5s live loop.
+        snap = snapshot(root, args.window)
+        channel = "" if args.slack == "__env__" else args.slack
+        verdict = post_to_slack(snap, channel=channel, dry_run=args.slack_dry_run)
+        if verdict.get("posted"):
+            print(f"slack: posted fleet status to {verdict.get('channel')} "
+                  f"(ts={verdict.get('ts')})")
+            return 0
+        if verdict.get("dry_run"):
+            print(f"slack (dry-run): would post to {verdict.get('channel') or '(unset)'} "
+                  f"[{verdict.get('channel_source')}]")
+            return 0
+        if verdict.get("skipped"):
+            print(f"slack: skipped — {verdict.get('skipped')}")
+            return 1
+        print(f"slack: FAILED — {verdict.get('error')}")
+        return 1
 
     color = _want_color(args)
     if args.once:

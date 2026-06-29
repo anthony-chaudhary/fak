@@ -173,5 +173,74 @@ class EdgeCaseTest(unittest.TestCase):
         self.assertIn("fleet is quiet", frame)
 
 
+class SlackPostTest(unittest.TestCase):
+    """The --slack wiring: slack_text is pure; post_to_slack resolves + posts via the
+    injected transport (no network, no real token/channel)."""
+
+    SLACK_KEYS = ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN")
+
+    def _clear_env(self):
+        import os
+        saved = {k: os.environ.pop(k, None) for k in self.SLACK_KEYS}
+        self.addCleanup(self._restore_env, saved)
+
+    def _restore_env(self, saved):
+        import os
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_slack_text_headline_and_fenced_frame(self):
+        snap = fleet_top.build_snapshot(
+            _doc(), workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z")
+        text = fleet_top.slack_text(snap)
+        self.assertIn("*fleet status:*", text)
+        self.assertIn("session(s)", text)
+        self.assertIn("accounts usable", text)
+        self.assertIn("```", text)                # fenced for monospace
+        self.assertIn("ATTENTION", text)          # the frame body is included
+
+    def test_post_to_slack_via_injected_transport(self):
+        import json as _json
+        import os
+        self._clear_env()
+        os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test-tok"
+        os.environ["FAK_DISPATCH_CHANNEL"] = "C0FLEET"
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append({"body": _json.loads(body.decode("utf-8")),
+                          "auth": headers.get("Authorization")})
+            return 200, _json.dumps({"ok": True, "ts": "1.2", "channel": "C0FLEET"})
+
+        snap = fleet_top.build_snapshot(
+            _doc(), workspace="C:/work/fak", window_h=10.0, now="now")
+        verdict = fleet_top.post_to_slack(snap, transport=transport)
+        self.assertTrue(verdict["posted"])
+        self.assertEqual(verdict["channel"], "C0FLEET")
+        self.assertEqual(calls[0]["auth"], "Bearer xoxb-test-tok")
+        self.assertIn("fleet status", calls[0]["body"]["text"])
+
+    def test_post_to_slack_dry_run_does_not_call_transport(self):
+        import os
+        self._clear_env()
+        os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test-tok"
+        os.environ["FAK_DISPATCH_CHANNEL"] = "C0FLEET"
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append(1)
+            return 200, "{}"
+
+        snap = fleet_top.build_snapshot(
+            _doc(), workspace="C:/work/fak", window_h=10.0, now="now")
+        verdict = fleet_top.post_to_slack(snap, dry_run=True, transport=transport)
+        self.assertFalse(verdict["posted"])
+        self.assertEqual(verdict["skipped"], "dry-run")
+        self.assertEqual(calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
