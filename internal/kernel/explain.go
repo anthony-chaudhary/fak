@@ -56,6 +56,7 @@ type Decision struct {
 	Tool        string        `json:"tool"`
 	ArgsDigest  string        `json:"args_digest,omitempty"` // sha256[:12] of the args bytes — never the raw args
 	ArgsBytes   int           `json:"args_bytes"`            // size of the args payload
+	Consistency string        `json:"consistency"`           // the call's declared consistency level (#1317): STRICT (the default) / BOUNDED_STALE / BEST_EFFORT / SPECULATIVE — recorded verbatim so the relaxation contract is an audit field, not a hidden mode
 	Verdict     string        `json:"verdict"`               // final verdict kind name
 	Reason      string        `json:"reason,omitempty"`      // final reason name (omitted when NONE)
 	By          string        `json:"by,omitempty"`          // winning rung's By (or synthesized: empty-policy/all-defer)
@@ -157,6 +158,11 @@ func FoldExplain(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) 
 // populate fills the final-verdict summary fields and the human explanation from
 // the resolved verdict v.
 func (d *Decision) populate(ctx context.Context, c *abi.ToolCall, v abi.Verdict) {
+	// Record the call's declared consistency level (#1317) verbatim. ConsistencyOf
+	// applies the STRICT default for an unset/unknown value, so the journal always
+	// carries a concrete level — the relaxation contract is an audit field, never
+	// inferred. This is forensic surplus only: it never feeds the verdict v.
+	d.Consistency = abi.ConsistencyOf(c).String()
 	d.Verdict = kindName(v.Kind)
 	d.Reason = reasonOrEmpty(v.Reason)
 	d.By = v.By
