@@ -1,0 +1,109 @@
+name: slack-beat
+
+# The Slack LIVENESS BEAT (#1426, epic #1425) — the heartbeat that makes "the channel is
+# quiet" mean "alive", never "the poster died." The cadence feeders post a card on CHANGE
+# (daily), and slack-watchdog.yml files a once-a-day issue on a non-OK fold. Neither tells an
+# operator scrolling the channel that everything is FINE on a quiet day. This job does: a few
+# times a day it folds `fak slack health` and posts ONE compact line — green when every
+# surface is alive, ⚠️/🔴 naming the down surfaces when one is not. A missing beat is itself
+# the alarm (the scheduler died).
+#
+# Sub-daily ON PURPOSE: a heartbeat at daily grain cannot distinguish "alive" from "died
+# yesterday." Four ticks/day (every 6h) bounds the silence window to ~6h.
+#
+# Fails OPEN like the feeders: without FAK_SCOREBOARD_TOKEN the beat renders to the step
+# summary and posts nothing (a secret-less fork is not an alarm). Exit-coded so a real
+# misconfiguration (no channel resolves, a live post fails) turns the job red.
+#
+# OPERATOR STEP (one-time): add the repo secret FAK_SCOREBOARD_TOKEN (the scoreboard-workspace
+# bot token) and the per-surface FAK_*_CHANNEL repo variables — the SAME keys the feeders and
+# slack-watchdog.yml read — under Settings -> Secrets and variables -> Actions.
+on:
+  schedule:
+    # Every 6 hours at :29 (off-the-hour, clear of the daily feeders that cluster 06:00-11:00):
+    # 00:29, 06:29, 12:29, 18:29 UTC. Four pulses/day caps the "is it alive?" uncertainty at 6h.
+    - cron: "29 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Fold health and render the beat, but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slack-beat
+  cancel-in-progress: false
+
+jobs:
+  slack-beat:
+    name: liveness pulse -> status channel
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      # Tokens are secrets; channel ids are repo variables — the same keys the feeders read, so
+      # the health fold inside the beat sees the same surfaces CI would post to.
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_SCOREBOARD_CHANNEL: ${{ vars.FAK_SCOREBOARD_CHANNEL }}
+      FAK_DISPATCH_TOKEN: ${{ secrets.FAK_DISPATCH_TOKEN }}
+      FAK_DISPATCH_CHANNEL: ${{ vars.FAK_DISPATCH_CHANNEL }}
+      FAK_PRODUCT_CHANNEL: ${{ vars.FAK_PRODUCT_CHANNEL }}
+      FAK_GRAFANA_TOKEN: ${{ secrets.FAK_GRAFANA_TOKEN }}
+      FAK_GRAFANA_CHANNEL: ${{ vars.FAK_GRAFANA_CHANNEL }}
+      FAK_BLOCKERS_TOKEN: ${{ secrets.FAK_BLOCKERS_TOKEN }}
+      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL }}
+      FAK_CACHEVALUE_TOKEN: ${{ secrets.FAK_CACHEVALUE_TOKEN }}
+      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL }}
+      FAK_BENCH_TOKEN: ${{ secrets.FAK_BENCH_TOKEN }}
+      FAK_BENCH_CHANNEL: ${{ vars.FAK_BENCH_CHANNEL }}
+      FAK_DOJO_TOKEN: ${{ secrets.FAK_DOJO_TOKEN }}
+      FAK_DOJO_CHANNEL: ${{ vars.FAK_DOJO_CHANNEL }}
+      FAK_MARKETING_TOKEN: ${{ secrets.FAK_MARKETING_TOKEN }}
+      FAK_MARKETING_CHANNEL: ${{ vars.FAK_MARKETING_CHANNEL }}
+      FAK_NODE_USAGE_TOKEN: ${{ secrets.FAK_NODE_USAGE_TOKEN }}
+      FAK_NODE_USAGE_CHANNEL: ${{ vars.FAK_NODE_USAGE_CHANNEL }}
+      FAK_STEERING_CHANNEL: ${{ vars.FAK_STEERING_CHANNEL }}
+      FAK_CHATRELAY_TOKEN: ${{ secrets.FAK_CHATRELAY_TOKEN }}
+      FAK_CHATRELAY_CHANNEL: ${{ vars.FAK_CHATRELAY_CHANNEL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Always render the beat to the step summary (dry-run) so the run is auditable even when
+      # nothing posts (missing secret / manual dry-run / fork).
+      - name: render beat (dry-run)
+        run: |
+          go run ./cmd/fak slack beat --dry-run | tee slack-beat.txt
+          {
+            echo "## slack-beat — liveness pulse"
+            echo '```'
+            cat slack-beat.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST the beat — only when the token secret is present. A manual dry_run also skips. The
+      # beat exits non-zero on a real misconfiguration (no channel, failed post), turning the
+      # job red so a broken liveness path is itself loud.
+      - name: post beat
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: go run ./cmd/fak slack beat
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set — rendered the beat in dry-run; nothing posted. Add the secret to enable the heartbeat." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload beat artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slack-beat
+          path: slack-beat.txt
+          if-no-files-found: ignore
