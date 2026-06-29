@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 )
 
@@ -135,10 +135,22 @@ func cmdSelfUpdate(argv []string) {
 	// tree: that gives a clean VCS stamp on the installed binary and guarantees we install
 	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
 	ctx := context.Background()
+
+	// Self-heal first: reap build worktrees leaked by PRIOR self-update ticks that were
+	// killed (saturated box / wall-clock timeout) before their deferred cleanup could run.
+	// We hold the single-flight lock, so every fak-selfupdate-build-* worktree on disk
+	// belongs to a process that is no longer building; ReapStaleBuilds removes only those
+	// whose owning PID is provably dead. Without this, killed ticks accumulate worktrees
+	// forever (one prior run leaked dozens) because nothing else ever prunes them.
+	if reaped := selfinstall.ReapStaleBuilds(ctx, selfinstall.RealRunner, repoRoot, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
+		fmt.Printf("self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", len(reaped))
+	}
+
 	// The build worktree must live OUTSIDE .git (git refuses `worktree add` to a path
 	// inside the git dir) and outside the live tree (so it never shows up as peer churn).
-	// A per-invocation temp dir under the OS temp root satisfies both.
-	buildDir := filepath.Join(os.TempDir(), "fak-selfupdate-build-"+strconv.Itoa(os.Getpid()))
+	// A per-invocation temp dir under the OS temp root satisfies both. BuildDirName encodes
+	// our PID so a future run's reaper can tell a live build from a leaked corpse.
+	buildDir := filepath.Join(os.TempDir(), selfinstall.BuildDirName(os.Getpid()))
 	_, cleanup, perr := selfinstall.PrepareOrigin(ctx, selfinstall.RealRunner, repoRoot, "origin/main", buildDir)
 	if perr != nil {
 		fmt.Fprintln(os.Stderr, "self-update:", perr)
