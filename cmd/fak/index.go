@@ -114,28 +114,39 @@ func indexLane(stdout, stderr io.Writer, cat *devindex.Catalog, paths []string, 
 	return flushTab(tw, stderr, "fak index lane")
 }
 
-func indexLeaf(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
-	hits := capLeaves(cat.SearchLeaves(joinArgs(args)), limit)
+// indexRenderHits is the shared post-search rendering for the index subcommands (leaf,
+// claims, docs): emit JSON when asked, the "no matching ..." line when the result set is
+// empty, else a tab-aligned table whose rows renderRow writes. cmdLabel labels the
+// JSON-encode/flush errors; emptyMsg is the no-results line.
+func indexRenderHits[T any](stdout, stderr io.Writer, hits []T, asJSON bool, cmdLabel, emptyMsg string, renderRow func(tw *tabwriter.Writer, row T)) int {
 	if asJSON {
-		return encodeJSONOrFail(stdout, stderr, hits, "fak index leaf")
+		return encodeJSONOrFail(stdout, stderr, hits, cmdLabel)
 	}
 	if len(hits) == 0 {
-		fmt.Fprintln(stdout, "no matching leaf")
+		fmt.Fprintln(stdout, emptyMsg)
 		return 0
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	for _, l := range hits {
-		mark := "ok"
-		if !l.Exists {
-			mark = "MISSING"
-		}
-		desc := l.Desc
-		if desc == "" {
-			desc = l.Tree
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", l.Name, mark, statusBadge(l.Status), desc)
+	for _, row := range hits {
+		renderRow(tw, row)
 	}
-	return flushTab(tw, stderr, "fak index leaf")
+	return flushTab(tw, stderr, cmdLabel)
+}
+
+func indexLeaf(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
+	hits := capLeaves(cat.SearchLeaves(joinArgs(args)), limit)
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index leaf", "no matching leaf",
+		func(tw *tabwriter.Writer, l devindex.Leaf) {
+			mark := "ok"
+			if !l.Exists {
+				mark = "MISSING"
+			}
+			desc := l.Desc
+			if desc == "" {
+				desc = l.Tree
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", l.Name, mark, statusBadge(l.Status), desc)
+		})
 }
 
 // statusBadge renders a leaf's CLAIMS.md maturity rollup as a compact, model- and
@@ -164,22 +175,14 @@ func indexClaims(stdout, stderr io.Writer, cat *devindex.Catalog, args []string,
 		return 2
 	}
 	hits := capClaims(cat.SearchClaims(joinArgs(args)), limit)
-	if asJSON {
-		return encodeJSONOrFail(stdout, stderr, hits, "fak index claims")
-	}
-	if len(hits) == 0 {
-		fmt.Fprintln(stdout, "no matching claim")
-		return 0
-	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	for _, cl := range hits {
-		lanes := strings.Join(cl.Lanes, ",")
-		if lanes == "" {
-			lanes = "-"
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", cl.Tag, lanes, truncRunes(cl.Text, 96))
-	}
-	return flushTab(tw, stderr, "fak index claims")
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index claims", "no matching claim",
+		func(tw *tabwriter.Writer, cl devindex.Claim) {
+			lanes := strings.Join(cl.Lanes, ",")
+			if lanes == "" {
+				lanes = "-"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", cl.Tag, lanes, truncRunes(cl.Text, 96))
+		})
 }
 
 func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
@@ -188,18 +191,10 @@ func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 		return 2
 	}
 	hits := capDocs(cat.SearchDocs(joinArgs(args)), limit)
-	if asJSON {
-		return encodeJSONOrFail(stdout, stderr, hits, "fak index docs")
-	}
-	if len(hits) == 0 {
-		fmt.Fprintln(stdout, "no matching doc")
-		return 0
-	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	for _, d := range hits {
-		fmt.Fprintf(tw, "%s\t%s\n", d.Path, d.Title)
-	}
-	return flushTab(tw, stderr, "fak index docs")
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index docs", "no matching doc",
+		func(tw *tabwriter.Writer, d devindex.Doc) {
+			fmt.Fprintf(tw, "%s\t%s\n", d.Path, d.Title)
+		})
 }
 
 func writeIndexUsage(w io.Writer) {
