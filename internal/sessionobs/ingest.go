@@ -45,6 +45,7 @@ type Evidence struct {
 	Interrupts int      // assistant turns the user/harness interrupted
 	GoalEvents int      // /goal directives the session ran under
 	StopMarks  int      // goal-block / stop-hook system-reminders (a blocked Stop)
+	ToolErrors int      // is_error tool_result blocks (a tool call that failed)
 }
 
 // committed reports whether the session landed at least one commit.
@@ -177,6 +178,7 @@ func FoldTranscript(r io.Reader, meta FoldMeta) (Record, Evidence) {
 	rec.Signals.Interrupts = ev.Interrupts
 	rec.Signals.GoalEvents = ev.GoalEvents
 	rec.Signals.StopEvents = ev.StopMarks
+	rec.Signals.ToolErrors = ev.ToolErrors
 	return rec, ev
 }
 
@@ -225,6 +227,9 @@ func foldUserContent(raw json.RawMessage, ev *Evidence, shaSet map[string]bool) 
 	for _, b := range blocks {
 		if b.Type != "tool_result" {
 			continue
+		}
+		if b.IsError {
+			ev.ToolErrors++ // a tool call that failed -- the friction signal the contrast ranks
 		}
 		text := blockText(b.Content)
 		for _, m := range commitMarker.FindAllStringSubmatch(text, -1) {

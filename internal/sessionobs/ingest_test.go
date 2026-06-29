@@ -110,6 +110,22 @@ func TestFoldTranscriptUnknownWhenMutatedNoSignal(t *testing.T) {
 	}
 }
 
+func TestFoldCountsToolErrors(t *testing.T) {
+	tr := jsonl(
+		`{"type":"assistant","message":{"id":"a","usage":{"output_tokens":10},"content":[{"type":"tool_use","name":"Bash","input":{}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"command failed: exit 1","is_error":true}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok","is_error":false}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"another failure","is_error":true}]}}`,
+	)
+	rec, ev := FoldTranscript(strings.NewReader(tr), FoldMeta{SessionID: "te"})
+	if ev.ToolErrors != 2 {
+		t.Errorf("ToolErrors want 2 (two is_error results) got %d", ev.ToolErrors)
+	}
+	if rec.Signals.ToolErrors != 2 {
+		t.Errorf("Signals.ToolErrors must be promoted from evidence, want 2 got %d", rec.Signals.ToolErrors)
+	}
+}
+
 func TestFoldExtractsMultipleSortedSHAs(t *testing.T) {
 	tr := jsonl(
 		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"[main ffff111] one"}]}}`,
