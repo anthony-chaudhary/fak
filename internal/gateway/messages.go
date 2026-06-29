@@ -636,6 +636,10 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	asst.Role = agent.RoleAssistant
 	kept, adjs, dropped := s.adjudicateProposed(ctx, asst.ToolCalls, reqTrace)
 	asst.ToolCalls = kept
+	// Stash this turn's SAFETY delta (blocked/repaired calls + quarantined inbound results) for the
+	// per-turn fak-turn debug line, the buffered-wire twin of the streaming flushHeldTools call.
+	// resultAdmissions came from admitInboundResults on the SAME reqTrace earlier in this turn.
+	s.recordTurnSafety(reqTrace, adjs, resultAdmissions)
 
 	blocks := agent.AnthropicResponseBlocks(asst)
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)

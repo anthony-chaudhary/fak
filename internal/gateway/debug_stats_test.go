@@ -94,6 +94,116 @@ func TestFormatTurnDebugStats_FieldsAreFlattenedSingleLine(t *testing.T) {
 	}
 }
 
+func TestFoldTurnSafety_CountsBlockedRepairedQuarantined(t *testing.T) {
+	// Two proposed calls: one DENY (POLICY_BLOCK, not admitted), one TRANSFORM (repaired); plus one
+	// inbound result QUARANTINE. The fold is the single source the live line reads, so it must match
+	// the in-band [fak] note's own accounting exactly.
+	adjs := []ToolAdjudication{
+		{Tool: "shell_rm_rf", Admitted: false, Verdict: WireVerdict{Kind: "DENY", Reason: "POLICY_BLOCK"}},
+		{Tool: "write_file", Admitted: true, Verdict: WireVerdict{Kind: "TRANSFORM"}},
+		{Tool: "search_kb", Admitted: true, Verdict: WireVerdict{Kind: "ALLOW"}},
+	}
+	results := []ResultAdmission{
+		{Tool: "read_secret", Verdict: WireVerdict{Kind: "QUARANTINE", Reason: "SECRET_SHAPED"}},
+	}
+	d := foldTurnSafety(adjs, results)
+	if d.blocked != 1 || d.repaired != 1 || d.quarantined != 1 {
+		t.Fatalf("fold = blocked:%d repaired:%d quarantined:%d, want 1/1/1", d.blocked, d.repaired, d.quarantined)
+	}
+	// topReason prefers the first blocked call's reason — the most action-relevant.
+	if d.topReason != "POLICY_BLOCK" {
+		t.Fatalf("topReason = %q, want POLICY_BLOCK", d.topReason)
+	}
+	if !d.any() {
+		t.Fatal("a delta with a block/repair/quarantine must report any()=true")
+	}
+}
+
+func TestFoldTurnSafety_CleanTurnIsEmpty(t *testing.T) {
+	// A turn where every call was a clean ALLOW and every result admitted has nothing to report;
+	// any() must be false so the live line stays byte-identical to a value-only turn.
+	adjs := []ToolAdjudication{{Tool: "search_kb", Admitted: true, Verdict: WireVerdict{Kind: "ALLOW"}}}
+	results := []ResultAdmission{{Tool: "search_kb", Verdict: WireVerdict{Kind: "ALLOW"}}}
+	if foldTurnSafety(adjs, results).any() {
+		t.Fatal("a clean ALLOW-everything turn must produce an empty safety delta")
+	}
+}
+
+func TestFormatTurnDebugStats_AppendsSafetyOnlyWhenNonzero(t *testing.T) {
+	// With a safety delta, the line names what the kernel refused this turn — the felt-safety moment
+	// a fresh user came for. The token-value half is unchanged.
+	safety := turnSafetyDelta{blocked: 1, repaired: 0, quarantined: 1, topReason: "POLICY_BLOCK"}
+	line := formatTurnDebugStats("t1", "anthropic_messages", true, "end_turn", 20, 5, 80, 0, true,
+		ResetDecision{Reason: ResetReasonHealthy}, true, safety)
+	for _, want := range []string{"blocked:1", "quarantined:1", "POLICY_BLOCK"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("safety half missing %q in: %s", want, line)
+		}
+	}
+	// The value half is still present and correct.
+	if !strings.Contains(line, "cache=healthy_cache") {
+		t.Fatalf("the safety half must not displace the cache/value half: %s", line)
+	}
+
+	// A clean turn (empty delta) must be byte-identical to the no-safety overload — no blocked=,
+	// no repaired=, no quarantined=, no reason= anywhere on the line.
+	clean := formatTurnDebugStats("t1", "anthropic_messages", true, "end_turn", 20, 5, 80, 0, true,
+		ResetDecision{Reason: ResetReasonHealthy}, true)
+	cleanWithZero := formatTurnDebugStats("t1", "anthropic_messages", true, "end_turn", 20, 5, 80, 0, true,
+		ResetDecision{Reason: ResetReasonHealthy}, true, turnSafetyDelta{})
+	if clean != cleanWithZero {
+		t.Fatalf("a zero safety delta must render identically to no delta:\n  %s\n  %s", clean, cleanWithZero)
+	}
+	for _, gone := range []string{"blocked:", "repaired:", "quarantined:", "reason="} {
+		if strings.Contains(clean, gone) {
+			t.Fatalf("a clean turn must not carry the safety half (%q): %s", gone, clean)
+		}
+	}
+}
+
+func TestFormatTurnDebugStats_SafetyReasonStaysOneLine(t *testing.T) {
+	// A reason token is kernel-minted, but flatten defensively so the line can never split.
+	line := formatTurnDebugStats("t1", "w", true, "end_turn", 1, 1, 1, 0, true,
+		ResetDecision{Reason: ResetReasonHealthy}, true, turnSafetyDelta{blocked: 1, topReason: "POLICY BLOCK"})
+	if strings.ContainsAny(line, "\n\t") {
+		t.Fatalf("the safety half must stay a single flat row: %q", line)
+	}
+}
+
+func TestRecordTurnSafety_IsPerTurnNotCumulative(t *testing.T) {
+	// The stash must clear on read so each rendered line carries THIS turn's delta. Two successive
+	// deny turns on the same trace each render blocked=1 — never 1 then 2.
+	s := newResetShadowServer()
+	var lines []string
+	s.debugStatsf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	denyAdjs := []ToolAdjudication{{Tool: "shell_rm_rf", Admitted: false, Verdict: WireVerdict{Kind: "DENY", Reason: "POLICY_BLOCK"}}}
+
+	// Turn 1: a deny is recorded, then the turn renders.
+	s.recordTurnSafety("t1", denyAdjs, nil)
+	s.logInferenceTurn("t1", "anthropic_messages", true, agent.Usage{PromptTokens: 20, CacheReadInputTokens: 80}, "end_turn", time.Millisecond, false)
+	// Turn 2: another deny on the SAME trace, render again.
+	s.recordTurnSafety("t1", denyAdjs, nil)
+	s.logInferenceTurn("t1", "anthropic_messages", true, agent.Usage{PromptTokens: 20, CacheReadInputTokens: 80}, "end_turn", time.Millisecond, false)
+	// Turn 3: NO deny recorded; the line must carry no safety half (the stash was cleared on read).
+	s.logInferenceTurn("t1", "anthropic_messages", true, agent.Usage{PromptTokens: 20, CacheReadInputTokens: 80}, "end_turn", time.Millisecond, false)
+
+	if len(lines) != 3 {
+		t.Fatalf("want 3 rendered turns, got %d", len(lines))
+	}
+	for i := 0; i < 2; i++ {
+		if !strings.Contains(lines[i], "blocked:1") {
+			t.Fatalf("turn %d must show its own blocked:1 (per-turn, not cumulative): %s", i+1, lines[i])
+		}
+		if strings.Contains(lines[i], "blocked:2") {
+			t.Fatalf("turn %d shows a CUMULATIVE count — the stash did not clear on read: %s", i+1, lines[i])
+		}
+	}
+	if strings.Contains(lines[2], "blocked:") {
+		t.Fatalf("a turn with no recorded safety action must carry no safety half: %s", lines[2])
+	}
+}
+
 func TestRenderTurnDebugStats_GatedOffWhenSinkNil(t *testing.T) {
 	s := newResetShadowServer() // debugStatsf nil, logf nil
 	// Must be a byte-identical no-op: no panic, nothing emitted, no state minted.

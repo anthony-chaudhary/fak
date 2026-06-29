@@ -165,7 +165,7 @@ type Config struct {
 	// forward (GPU prefill + GPU-resident Q8 decode) on the CPU session. Set by
 	// `fak serve --metal` (or FAK_METAL). It is the CPU-session seam (the session keeps
 	// s.Backend nil and gets s.Metal=true), so it is MUTUALLY EXCLUSIVE with Backend —
-	// serve rejects --metal together with --backend. A no-op on non-fakmetal builds
+	// serve rejects --metal together with --backend. A no-op on non-Metal builds
 	// (the metalgemm stub makes the decode/prefill dispatch fall back to CPU), and the
 	// resident decode self-declines anything but a dense Qwen-class Q8 model.
 	Metal bool
@@ -590,6 +590,18 @@ type Server struct {
 	// resetHealthMu. SHADOW-only: nothing here ever resets a session.
 	resetHealthMu sync.Mutex
 	resetHealth   map[string]*sessionResetHealth
+
+	// turnSafetyMu guards turnSafety, the per-trace stash of the LAST turn's adjudication
+	// SAFETY delta (calls blocked / repaired this turn, results quarantined this turn). The
+	// per-turn fak-turn debug line (debug_stats.go) already shows the turn's cache/token
+	// VALUE; this carries its SAFETY half so a blocked rm -rf or a quarantined secret is
+	// VISIBLE the moment it happens — not only in the exit summary. Written where the turn
+	// adjudicates (recordTurnSafety, on both the buffered and streaming proxy paths) and
+	// read-and-cleared by the render (takeTurnSafety), so each line reports THIS turn's
+	// delta, never a running cumulative. Bounded by maxResetHealthSessions (same reaper as
+	// resetHealth). SHADOW-only: an observability surface, never on the request path.
+	turnSafetyMu sync.Mutex
+	turnSafety   map[string]turnSafetyDelta
 
 	// resumeProj holds the resume PROJECTED-vs-OBSERVED RESIDUAL accumulators (#941), a
 	// self-contained metric family (resume_projection.go) the host's opt-in resume hook folds one
@@ -1198,7 +1210,16 @@ func (s *Server) sessionPlannerFor(trace string) *agent.SessionPlanner {
 // every served turn on either wire. On a planner error nothing is recorded (a turn
 // that produced no tokens is not a generation); the error is returned untouched so
 // the caller's existing error handling is unchanged.
-func (s *Server) complete(ctx context.Context, trace string, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+func (s *Server) complete(ctx context.Context, trace string, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if evictErr, ok := recoverRecurrentEvictUnsupported(r); ok {
+				comp, err = nil, evictErr
+				return
+			}
+			panic(r)
+		}
+	}()
 	// Re-plan the turn history into an O(1) resident view before the model sees it —
 	// the "replace append+compact with a planned view" rung (issue #555). Inert (an
 	// identity) unless CtxViewBudget > 0, so the default path is unchanged. The trace keys
@@ -1219,7 +1240,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// req.Raw there).
 	messages = s.maybeElideMessages(messages)
 	start := time.Now()
-	comp, err := s.planner.Complete(ctx, messages, tools, opts...)
+	comp, err = s.planner.Complete(ctx, messages, tools, opts...)
 	dur := time.Since(start)
 	if err != nil {
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
@@ -1237,12 +1258,30 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	return comp, nil
 }
 
+func recurrentEvictUnsupported(err error) bool {
+	var evictErr *model.RecurrentEvictUnsupportedError
+	return errors.As(err, &evictErr)
+}
+
+func recoverRecurrentEvictUnsupported(r any) (error, bool) {
+	err, ok := r.(error)
+	if !ok || !recurrentEvictUnsupported(err) {
+		return nil, false
+	}
+	return err, true
+}
+
 // completeServed is complete plus the served-session usage debit. The request
 // boundary has already called beginServedSessionTurn (and therefore Decide); after a
 // successful planner response the provider usage is finally known, so debit the
 // output/context budgets here. Planner errors keep the old behavior: no usage was
 // reported, so there is nothing to debit beyond the turn admission already taken.
 func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	lease, err := s.beginServedAdmission(ctx, turn, messages, tools, sampleMaxTokens(opts))
+	if err != nil {
+		return nil, err
+	}
+	defer lease.Release()
 	comp, err := s.complete(ctx, turn.traceID, messages, tools, opts...)
 	if err != nil {
 		return nil, err

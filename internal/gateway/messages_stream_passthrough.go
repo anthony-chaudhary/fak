@@ -127,6 +127,11 @@ func (p *anthropicPassthrough) flushHeldTools() {
 	}
 	kept, adjs, dropped := p.s.adjudicateProposed(p.r.Context(), calls, p.reqTrace)
 	p.keptTools = len(kept)
+	// Stash this turn's SAFETY delta (blocked/repaired calls + quarantined inbound results) so the
+	// per-turn fak-turn debug line, rendered just after the terminal inference observation, shows
+	// what the kernel refused the MOMENT it happened — not only in the exit summary. p.resultAdms
+	// was set at message_start; together they are the whole turn's adjudication outcome.
+	p.s.recordTurnSafety(p.reqTrace, adjs, p.resultAdms)
 	// Render survivors through the SAME helper the buffered path uses, so the tool_use
 	// blocks (id preserved, input as a normalized object) are byte-shaped identically —
 	// only the framing differs.

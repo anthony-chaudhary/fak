@@ -35,6 +35,98 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
+// turnSafetyDelta is ONE turn's adjudication SAFETY outcome — the calls the kernel BLOCKED and
+// REPAIRED, and the inbound results it QUARANTINED, on that turn alone. It is the safety half of
+// the per-turn fak-turn debug line, the counterpart to the cache/token VALUE the line already
+// shows. topReason carries the dominant deny/quarantine reason (a closed-vocabulary token, e.g.
+// POLICY_BLOCK) so the glanceable line can say WHY, not just how many. It is a per-turn delta, not
+// a cumulative — recordTurnSafety stores exactly this turn's counts and takeTurnSafety clears them
+// on read, so two deny turns each render blocked=1, never 1 then 2.
+type turnSafetyDelta struct {
+	blocked     int
+	repaired    int
+	quarantined int
+	topReason   string
+}
+
+// any reports whether the delta has anything worth rendering — a clean ALLOW-everything turn has
+// none of the three, so the fak-turn line stays byte-identical to a value-only turn.
+func (d turnSafetyDelta) any() bool { return d.blocked > 0 || d.repaired > 0 || d.quarantined > 0 }
+
+// foldTurnSafety derives a turn's safety delta from the SAME per-turn slices the proxy already
+// computes — the proposed-call adjudications (adjs) and the inbound result admissions (results) —
+// so the live line can never disagree with the in-band [fak] note or the /metrics counters that
+// read the same verdicts. A non-admitted call is a BLOCK; a TRANSFORM is a REPAIR; a QUARANTINE
+// verdict on an inbound result is a quarantine. topReason is the first blocked call's reason, else
+// the first quarantine's, so the glanceable line names the most action-relevant cause.
+func foldTurnSafety(adjs []ToolAdjudication, results []ResultAdmission) turnSafetyDelta {
+	var d turnSafetyDelta
+	for _, a := range adjs {
+		switch {
+		case !a.Admitted:
+			d.blocked++
+			if d.topReason == "" && a.Verdict.Reason != "" {
+				d.topReason = a.Verdict.Reason
+			}
+		case a.Verdict.Kind == "TRANSFORM":
+			d.repaired++
+		}
+	}
+	for _, r := range results {
+		if r.Verdict.Kind == "QUARANTINE" {
+			d.quarantined++
+			if d.topReason == "" && r.Verdict.Reason != "" {
+				d.topReason = r.Verdict.Reason
+			}
+		}
+	}
+	return d
+}
+
+// recordTurnSafety stashes a turn's safety delta under its trace so the per-turn debug render can
+// fold it into the same line that already carries the cache/token value. It is a no-op for an
+// empty delta (a clean turn leaves no stash, so the render finds nothing and the line stays
+// value-only) and bounds the map with the same reaper resetHealth uses, so an unbounded stream of
+// distinct traces cannot grow it without limit. Called on both proxy paths right after the turn's
+// calls/results are adjudicated, BEFORE the terminal inference observation that triggers the render.
+func (s *Server) recordTurnSafety(trace string, adjs []ToolAdjudication, results []ResultAdmission) {
+	if s == nil || trace == "" {
+		return
+	}
+	d := foldTurnSafety(adjs, results)
+	if !d.any() {
+		return
+	}
+	s.turnSafetyMu.Lock()
+	if s.turnSafety == nil {
+		s.turnSafety = map[string]turnSafetyDelta{}
+	}
+	if len(s.turnSafety) >= maxResetHealthSessions {
+		// Bound the stash: drop an arbitrary stale entry. The render clears on read, so this only
+		// trips when many traces blocked something without a following rendered turn — a corner.
+		for k := range s.turnSafety {
+			delete(s.turnSafety, k)
+			break
+		}
+	}
+	s.turnSafety[trace] = d
+	s.turnSafetyMu.Unlock()
+}
+
+// takeTurnSafety returns and CLEARS a trace's stashed safety delta. Clearing on read is what makes
+// the rendered line a per-turn delta: the next turn starts from nothing, so a one-off block shows
+// on exactly one line. The zero delta (any()==false) means this turn had no safety action.
+func (s *Server) takeTurnSafety(trace string) turnSafetyDelta {
+	if s == nil || trace == "" {
+		return turnSafetyDelta{}
+	}
+	s.turnSafetyMu.Lock()
+	d := s.turnSafety[trace]
+	delete(s.turnSafety, trace)
+	s.turnSafetyMu.Unlock()
+	return d
+}
+
 // peekResetHealth scores a session's CURRENT rolling compaction-health WITHOUT mutating it or
 // minting a record. ok is false when the session has no rolling health yet (it has never been
 // compacted), so the debug render reports health=n/a rather than a phantom unknown_provider.
@@ -61,7 +153,10 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 		return
 	}
 	d, have := s.peekResetHealth(trace)
-	s.debugStatsf("%s", formatTurnDebugStats(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, d, have))
+	// Take (and clear) this turn's safety delta so the line carries the blocked/repaired/
+	// quarantined half alongside the cache/token value. Clearing keeps it per-turn.
+	safety := s.takeTurnSafety(trace)
+	s.debugStatsf("%s", formatTurnDebugStats(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, d, have, safety))
 }
 
 // renderTurnDebugError emits one per-turn debug line on a FAILED turn — the missing half of the
@@ -129,9 +224,13 @@ func formatTurnDebugError(trace, wire, reason string, elapsed time.Duration) str
 //
 // wire/stream/completion are retained in the signature (the JSON --log and callers carry them)
 // but are intentionally not rendered on this glanceable line.
-func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt, completion, cacheRead, cacheCreate int, compacted bool, d ResetDecision, have bool) string {
+func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt, completion, cacheRead, cacheCreate int, compacted bool, d ResetDecision, have bool, safetyOpt ...turnSafetyDelta) string {
 	if finish == "" {
 		finish = "unknown"
+	}
+	var safety turnSafetyDelta
+	if len(safetyOpt) > 0 {
+		safety = safetyOpt[0]
 	}
 	compact := "none"
 	if compacted {
@@ -158,6 +257,12 @@ func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt
 		b.WriteString(" saved=0 tok")
 	}
 	fmt.Fprintf(&b, " cache=%s compact=%s finish=%s", health, compact, debugField(finish))
+	if safety.any() {
+		fmt.Fprintf(&b, " safety=blocked:%d repaired:%d quarantined:%d", safety.blocked, safety.repaired, safety.quarantined)
+		if safety.topReason != "" {
+			fmt.Fprintf(&b, " reason=%s", debugField(safety.topReason))
+		}
+	}
 	return b.String()
 }
 
