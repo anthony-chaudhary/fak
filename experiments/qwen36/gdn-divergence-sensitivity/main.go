@@ -449,30 +449,7 @@ func readout(od, st, kn, qn, delta []float32, mode scanMode) {
 	}
 }
 
-// runStack runs the L-GDN-layer residual stack over P tokens with the given scan mode and
-// returns the final post-stack hidden [P,H] (no final norm / head — we compare hidden states).
-// Layer weights and the embedding input are seeded-deterministic so the two runs differ ONLY in
-// `mode`.
-func runStack(P, layers int, mode scanMode) []float32 {
-	eps := float32(1e-6)
-	// Deterministic "embedding" input, shared across modes.
-	X := make([]float32, P*H)
-	r := rand.New(rand.NewSource(0xC0FFEE))
-	for i := range X {
-		X[i] = float32(r.NormFloat64())
-	}
-	lw := newLayerWeights()
-	for l := 0; l < layers; l++ {
-		lw.fill(l)
-		o := gdnLayer(lw, X, P, mode, eps)
-		for i := range X {
-			X[i] += o[i]
-		}
-	}
-	return X
-}
-
-// runStackTraced is runStack but records the relative divergence of the last token's hidden
+// runStackTraced records the relative divergence of the last token's hidden
 // state against a reference run after EACH layer (the compounding curve). It runs the reference
 // (forward) and the test (mode) in lockstep so per-layer snapshots align.
 func runStackTraced(P, layers int, mode scanMode) (perLayerRho []float64, finalRho float64) {
