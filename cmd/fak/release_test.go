@@ -57,6 +57,25 @@ func TestReleaseDispatchesKnownHelper(t *testing.T) {
 	}
 }
 
+func TestReleaseDispatchesShipHelper(t *testing.T) {
+	old := releaseRunShip
+	defer func() { releaseRunShip = old }()
+
+	var gotArgs []string
+	releaseRunShip = func(stdout, stderr io.Writer, args []string) int {
+		gotArgs = append([]string(nil), args...)
+		return 9
+	}
+
+	rc := runRelease(io.Discard, io.Discard, []string{"ship", "--execute", "--json"})
+	if rc != 9 {
+		t.Fatalf("exit = %d, want 9", rc)
+	}
+	if !reflect.DeepEqual(gotArgs, []string{"--execute", "--json"}) {
+		t.Fatalf("args = %#v", gotArgs)
+	}
+}
+
 func TestReleaseDispatchesStableHelper(t *testing.T) {
 	old := releaseRunScript
 	defer func() { releaseRunScript = old }()
@@ -119,6 +138,7 @@ func TestReleaseUsageSurfacesCanonicalPath(t *testing.T) {
 		"release_tag",
 		"release_publish",
 		"release-artifacts verification",
+		"ship --execute",
 		"staleness",
 		"stable|stable-context",
 	} {

@@ -16,6 +16,7 @@ import (
 type releaseScriptRunner func(root, script string, args []string, stdout, stderr io.Writer) int
 
 var releaseRunScript releaseScriptRunner = runReleaseScript
+var releaseRunShip = runReleaseShip
 
 var releaseScripts = map[string]string{
 	"status":         "release_status.py",
@@ -51,6 +52,9 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 		key := strings.ToLower(strings.TrimSpace(argv[0]))
 		if key == "staleness" {
 			return runReleaseStaleness(stdout, stderr, argv[1:])
+		}
+		if key == "ship" || key == "auto" {
+			return releaseRunShip(stdout, stderr, argv[1:])
 		}
 		if _, ok := releaseScripts[key]; !ok {
 			fmt.Fprintf(stderr, "fak release: unknown subcommand %q\n", argv[0])
@@ -116,11 +120,13 @@ func releaseUsage(w io.Writer) {
 
 usage:
   fak release [status flags...]
+  fak release ship [--execute] [--json] [ship flags...]
   fak release status|staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness [helper flags...]
   fak release stable|stable-context [helper flags...]
 
 examples:
   fak release --json
+  fak release ship --execute --json
   fak release staleness --json
   fak release decide --json --require-ci-green
   fak release cut --json
@@ -131,12 +137,18 @@ examples:
   fak release stable --codename 2026-06-bedrock
 
 Canonical order:
-  release_decide -> release_lock -> release_cut -> push main -> release_tag
-  -> release_publish -> release-artifacts verification
+  fak release ship --execute
+
+Helper order underneath:
+  detached worktree at origin/main -> release_decide -> release_lock -> release_cut
+  -> push main -> release_tag -> release_publish -> release-artifacts verification
 
 The underlying helpers live in tools/release_*.py / tools/stable_release_*.py and
 remain the release contract. The staleness subcommand is the native
 fak release-staleness signal.
+The ship subcommand is the default hot-tree path: it leaves this checkout's
+unrelated modified/untracked files alone by cutting in a transient detached
+worktree, while sharing the same single-writer release lock.
 When cut/tag are executed through this front door, --skip-dry-run is added unless
 you supplied it already; the real witness is the green trunk plus the post-tag
 release-substrate suite.
