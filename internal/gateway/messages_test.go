@@ -260,6 +260,51 @@ func TestAnthropicMessagesCleanAllowNoNote(t *testing.T) {
 	}
 }
 
+func TestAnthropicMessagesLoopBodyWitnessRefusesUnwitnessedEditClaim(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "I edited README.md already.",
+			ToolCalls: []agent.ToolCall{
+				{ID: "toolu_read", Type: "function", Function: agent.Func{Name: "allow_read_file", Arguments: `{"path":"README.md"}`}},
+			},
+		},
+		FinishReason: "tool_calls",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var resp anthropicMessageResponse
+	postJSON(t, ts.URL+"/v1/messages", json.RawMessage(`{"messages":[{"role":"user","content":"edit README.md"}]}`), &resp)
+	if resp.StopReason != "end_turn" {
+		t.Fatalf("stop_reason = %q, want end_turn after residual refusal", resp.StopReason)
+	}
+	for _, b := range resp.Content {
+		if b.Type == "tool_use" {
+			t.Fatalf("body-witness-refused call reached the harness: %+v", b)
+		}
+		if strings.Contains(b.Text, "I edited README.md already") {
+			t.Fatalf("false completed-edit claim crossed the harness boundary: %+v", resp.Content)
+		}
+	}
+	if len(resp.Content) != 1 || resp.Content[0].Type != "text" {
+		t.Fatalf("residual refusal should render one in-band note, got %+v", resp.Content)
+	}
+	note := resp.Content[0].Text
+	if !strings.Contains(note, "allow_read_file") || !strings.Contains(note, ReasonLoopBodyUnwitnessed) {
+		t.Fatalf("residual note = %q, want tool and %s", note, ReasonLoopBodyUnwitnessed)
+	}
+	if resp.Fak == nil || len(resp.Fak.Adjudications) != 1 {
+		t.Fatalf("fak extension = %+v, want one body-witness adjudication", resp.Fak)
+	}
+	adj := resp.Fak.Adjudications[0]
+	if adj.Admitted || adj.Tool != "allow_read_file" || adj.Verdict.Kind != "RESIDUAL" ||
+		adj.Verdict.Reason != ReasonLoopBodyUnwitnessed || adj.Verdict.By != "loop-body-witness" {
+		t.Fatalf("adjudication = %+v, want RESIDUAL/%s from loop-body-witness", adj, ReasonLoopBodyUnwitnessed)
+	}
+}
+
 func TestAnthropicMessagesSSE(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = threeCallPlanner()
