@@ -1,0 +1,34 @@
+{
+  "_comment": "A plan-CFI allow-list: the LEGAL plan shapes for an airline-booking agent. plancfi keys a Plan to a TraceID via internal/plancfi.Ledger.Declare; this JSON is the human-readable rendering of those Go Plan{Tools, Mode} values (see README — the kernel reads the Go Plan, not this file). Each entry is one approved call graph.",
+  "plans": [
+    {
+      "name": "airline-booking",
+      "mode": "AllowedSet",
+      "_mode_note": "AllowedSet: every call's tool must be in this set, order-free (robust to the retries/re-reads a real agent loop makes).",
+      "tools": [
+        "get_user_details",
+        "search_flights",
+        "read_refund_policy",
+        "book_reservation"
+      ]
+    },
+    {
+      "name": "refund-lookup",
+      "mode": "AllowedSet",
+      "tools": [
+        "get_user_details",
+        "read_refund_policy"
+      ]
+    },
+    {
+      "name": "ordered-checkout",
+      "mode": "Sequence",
+      "_mode_note": "Sequence: calls must follow this order; a repeat of the current or any prior step is fine, a jump AHEAD or an unlisted tool deviates.",
+      "tools": [
+        "get_user_details",
+        "search_flights",
+        "book_reservation"
+      ]
+    }
+  ]
+}
