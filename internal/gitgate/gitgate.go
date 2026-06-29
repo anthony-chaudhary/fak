@@ -3,7 +3,8 @@
 // `command` string, recognizes the `git` invocation inside it, and PROVABLY
 // REFUSES the structurally-decidable git hazards BEFORE the command runs. It turns
 // a doomed git command (force-push, commit --amend, add -A, --no-verify, tag -f,
-// rebase -i) from "the process runs, a git hook rejects it, the agent re-plans"
+// rebase -i, reset --hard, clean -f, checkout ., a branch/worktree open) from
+// "the process runs, a git hook rejects it, the agent re-plans"
 // into a deny-as-value AT THE CALL BOUNDARY carrying a repairable, law-citing
 // reason the agent loop consumes.
 //
@@ -137,6 +138,17 @@ var defaultHazards = []hazard{
 	// tree and leaving a dangling `autostash` stash (CLAUDE.md / [[fak-shared-tree-high-churn-commit]]).
 	{sub: "rebase", long: "--autostash", law: "autostash refused: never `rebase --autostash` in the shared tree — an abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first (stash explicit paths or commit your work), THEN `git rebase` with no autostash."},
 	{sub: "pull", long: "--autostash", law: "autostash refused: never `pull --rebase --autostash` in the shared tree — a conflict abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first, then `git fetch` + `git rebase origin/main` with no autostash."},
+	// Never destroy the shared working tree: `reset --hard` discards tracked-file
+	// changes and `clean -f` deletes untracked files — both sweep a peer's WIP
+	// (AGENTS.md destructive-op list). A `--soft`/`--mixed` reset and a `clean -n`
+	// dry-run are non-destructive and do not match.
+	{sub: "reset", long: "--hard", law: "reset-hard refused: `git reset --hard` discards every working-tree change to tracked files — incl. a peer's unstaged WIP in the shared tree (AGENTS.md destructive-op list). Reconcile in place, or scope your undo: `git restore -- <your-paths>`."},
+	{sub: "clean", long: "--force", short: 'f', law: "clean-force refused: `git clean -f` deletes untracked files — incl. a peer's new files and your own uncommitted work in the shared tree (AGENTS.md). Remove specific files explicitly; never whole-tree clean a shared checkout."},
+	// Never open a feature branch — the argv-decidable half of OFF_TRUNK (AGENTS.md).
+	{sub: "checkout", short: 'b', law: offTrunkBranchLaw},
+	{sub: "checkout", short: 'B', law: offTrunkBranchLaw},
+	{sub: "switch", short: 'c', law: offTrunkBranchLaw},
+	{sub: "switch", short: 'C', law: offTrunkBranchLaw},
 }
 
 const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (AGENTS.md). Add explicit paths instead."
@@ -150,6 +162,21 @@ const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (A
 // them, scope the stash to YOUR paths: `git stash push -- <your-paths>`
 // (CLAUDE.md / [[fak-shared-tree-high-churn-commit]]).
 const unscopedStashLaw = "unscoped-stash refused: a bare `git stash`/`git stash push`/`save` snapshots the WHOLE shared tree, sweeping a peer's in-flight WIP into a stash that never gets popped (CLAUDE.md). To reach a clean tree, commit your files by explicit path, or scope the stash to your own paths: `git stash push -- <your-paths>`."
+
+// wholeTreeDiscardLaw fires on `git checkout .` / `git restore .` — a whole-tree
+// working-tree discard. With a `.` operand (with or without a leading `--`) the op
+// reverts EVERY working-tree change in the shared checkout (or, with --staged,
+// unstages the shared index), sweeping a peer's in-flight WIP. A SPECIFIC-path
+// revert (`git checkout -- <file>`) is left alone — only the whole-tree `.` form is
+// refused, the same shape as the `git add .` law.
+const wholeTreeDiscardLaw = "whole-tree-discard refused: `git checkout .` / `git restore .` operates on the WHOLE shared tree — discarding every working-tree change (or unstaging the shared index), sweeping a peer's in-flight WIP (AGENTS.md). Scope your undo to your own paths: `git restore -- <your-paths>`."
+
+// offTrunkBranchLaw fires on a branch/worktree CREATE — the argv-decidable shape of
+// the OFF_TRUNK escape (`git checkout -b`, `git switch -c`, `git worktree add`). The
+// trunk guard refuses off-trunk commits after the fact; this catches the branch open
+// at the call boundary. Switching to an EXISTING branch needs repo state (is the
+// target main?) and stays deferred — only the unconditional CREATE forms fire here.
+const offTrunkBranchLaw = "off-trunk refused: `git checkout -b` / `git switch -c` / `git worktree add` opens a feature branch or worktree — work directly on the trunk (`main`); never branch or spin a worktree in this repo (AGENTS.md OFF_TRUNK)."
 
 // ToolCollectiveCommit is the synthetic tool name for the collective-commit
 // barrier. It never shells out; its args are a CollectiveCommitPlan JSON object.
@@ -508,6 +535,24 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 	if sub == "stash" && isUnscopedStashCreate(rest) {
 		return unscopedStashLaw, true
 	}
+
+	// `git checkout .` / `git restore .` discards the WHOLE working tree (the `.`
+	// operand may follow a `--`), the same shape as `git add .`. A specific-path
+	// revert (`git checkout -- <file>`) is left alone — only `.` fires.
+	if sub == "checkout" || sub == "restore" {
+		for _, t := range rest {
+			if t == "." {
+				return wholeTreeDiscardLaw, true
+			}
+		}
+	}
+
+	// `git worktree add ...` opens a new worktree — the OFF_TRUNK escape (AGENTS.md).
+	// Other worktree subcommands (list/remove/prune/move/lock) do not open one.
+	if sub == "worktree" && len(rest) > 0 && rest[0] == "add" {
+		return offTrunkBranchLaw, true
+	}
+
 	for _, t := range rest {
 		if t == "--" {
 			break // end of options; the remainder are pathspecs/operands, not flags
