@@ -11,10 +11,18 @@ or `python -m pytest tools/learning_scorecard_test.py -q`.
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import learning_scorecard as lsc  # noqa: E402
+
+
+def _write(root: Path, rel: str, text: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 # --- doc-type classifier ---------------------------------------------------
@@ -164,6 +172,156 @@ def test_freshness_flags_app_version_build_arg() -> None:
     assert any("0.30.0" in d for d in c["defects"]), c
 
 
+# --- generated scorecard stamp freshness ----------------------------------
+
+def test_snapshot_stamp_parses_generated_comment() -> None:
+    text = "<!-- learning-scorecard: 2026-06-29 · process: tools/learning_scorecard.py -->"
+    assert lsc.snapshot_stamp(text) == "2026-06-29"
+
+
+def test_stamp_freshness_flags_stale_stamp_after_corpus_drift() -> None:
+    c = lsc.stamp_freshness_from_dates(
+        stamp="2026-06-01",
+        reference_date=date(2026, 6, 4),
+        last_corpus_change_date=date(2026, 6, 3),
+        cadence_days=1,
+    )
+    assert c["stamp_age_days"] == 3, c
+    assert c["corpus_changed_since_stamp"], c
+    assert c["stale_stamp"] and c["flag"] == "stale-stamp", c
+
+
+def test_stamp_freshness_requires_corpus_drift() -> None:
+    c = lsc.stamp_freshness_from_dates(
+        stamp="2026-06-01",
+        reference_date=date(2026, 6, 4),
+        last_corpus_change_date=date(2026, 6, 1),
+        cadence_days=1,
+    )
+    assert c["stamp_age_days"] == 3, c
+    assert not c["corpus_changed_since_stamp"], c
+    assert not c["stale_stamp"], c
+
+
+def test_build_payload_counts_stale_stamp_debt() -> None:
+    payload = lsc.build_payload(
+        workspace=".",
+        docs=[],
+        cov={"overall_pct": 100.0, "defects": []},
+        importance={},
+        stamp={"stale_stamp": True, "reason": "stale-stamp"},
+    )
+    assert payload["corpus"]["learning_debt"] == 1, payload
+    assert payload["corpus"]["learning_debt_in_stamp"] == 1, payload
+    assert not payload["ok"], payload
+
+
+def test_detect_latency_bench_is_net_true_after_cost() -> None:
+    payload = lsc.detect_latency_bench_from_cost(0.25)
+    assert payload["schema"] == lsc.DETECT_LATENCY_SCHEMA
+    assert payload["stamp_witness"]["stamp_age_days"] == 3, payload
+    assert payload["stamp_witness"]["flag"] == "stale-stamp", payload
+    assert payload["loop"]["detect_latency_days"] == 1.0, payload
+    assert payload["manual"]["detect_latency_days"] == 5.0, payload
+    assert payload["net"]["days_saved"] > 3.99, payload
+    assert payload["ok"] and payload["verdict"] == "net-true", payload
+
+
+# --- shipped-surface coverage ---------------------------------------------
+
+def test_added_on_or_after_stamp_excludes_same_day_stamp() -> None:
+    original = lsc._git_first_added_date
+    try:
+        lsc._git_first_added_date = lambda root, rel: date(2026, 6, 29)
+        same_day = lsc._added_on_or_after_stamp(
+            Path("."), "cmd/fak/example.go", date(2026, 6, 29),
+            require_git_date=True,
+        )
+        lsc._git_first_added_date = lambda root, rel: date(2026, 6, 30)
+        next_day = lsc._added_on_or_after_stamp(
+            Path("."), "cmd/fak/example.go", date(2026, 6, 29),
+            require_git_date=True,
+        )
+    finally:
+        lsc._git_first_added_date = original
+
+    assert not same_day
+    assert next_day
+
+
+def _seed_surface_fixture(root: Path) -> list[str]:
+    _write(root, "docs/LEARNING-SCORECARD.md",
+           "<!-- learning-scorecard: 2026-06-29 - process: tools/learning_scorecard.py -->\n")
+    _write(root, "dos.toml", 'faklesson = ["internal/faklesson/**"]\n')
+    _write(root, "internal/faklesson/doc.go",
+           "// Package faklesson is a teachable fixture leaf.\npackage faklesson\n")
+    _write(root, "cmd/fak/main.go", """package main
+
+func main() {
+    switch "x" {
+    case "faklesson":
+        cmdFakLesson(nil)
+    }
+}
+""")
+    _write(root, "cmd/fak/faklesson.go",
+           "package main\n\nfunc cmdFakLesson(argv []string) {}\n")
+    return ["internal/faklesson/doc.go", "cmd/fak/faklesson.go"]
+
+
+def test_shipped_surface_without_course_reference_counts_coverage_debt() -> None:
+    with TemporaryDirectory() as td:
+        root = Path(td)
+        added = _seed_surface_fixture(root)
+        _write(root, "LEARNING-PATH.md", "# Learning path\n\nNo new course here.\n")
+
+        cov = lsc.coverage(root, ["LEARNING-PATH.md"], added_paths=added,
+                           require_git_dates=False)
+        assert "internal/faklesson" in cov["missing_shipped_surfaces"], cov
+        assert "fak faklesson" in cov["missing_shipped_surfaces"], cov
+        surface_defects = [d for d in cov["defects"] if "shipped-but-untaught" in d]
+        assert len(surface_defects) == 2, cov
+
+        payload = lsc.build_payload(
+            workspace=str(root), docs=[],
+            cov={"overall_pct": 100.0, "defects": surface_defects},
+            importance={},
+        )
+        assert payload["corpus"]["learning_debt_in_coverage"] == 2, payload
+
+
+def test_shipped_surface_reference_in_learning_path_greens() -> None:
+    with TemporaryDirectory() as td:
+        root = Path(td)
+        added = _seed_surface_fixture(root)
+        course = ("# Learning path\n\n"
+                  "**Read:** the `faklesson` course.\n\n"
+                  "Lab: `go run ./cmd/fak faklesson` and "
+                  "`go test ./internal/faklesson`.\n")
+        _write(root, "LEARNING-PATH.md", course)
+
+        cov = lsc.coverage(root, ["LEARNING-PATH.md"], added_paths=added,
+                           require_git_dates=False)
+        assert "internal/faklesson" in cov["covered_shipped_surfaces"], cov
+        assert "fak faklesson" in cov["covered_shipped_surfaces"], cov
+        assert not cov["missing_shipped_surfaces"], cov
+        assert not [d for d in cov["defects"] if "shipped-but-untaught" in d], cov
+
+
+def test_internal_plumbing_surface_is_not_teachable_coverage_spam() -> None:
+    with TemporaryDirectory() as td:
+        root = Path(td)
+        _write(root, "dos.toml", 'cmdutil = ["internal/cmdutil/**"]\n')
+        _write(root, "internal/cmdutil/doc.go",
+               "// Package cmdutil is fixture plumbing.\npackage cmdutil\n")
+        surfaces = lsc.derive_teachable_surfaces(
+            root, ["internal/cmdutil/doc.go"],
+            stamp_date=date(2026, 6, 29),
+            require_git_dates=False,
+        )
+        assert surfaces == [], surfaces
+
+
 # --- doc-type-aware fold + importance --------------------------------------
 
 def test_score_doc_shape() -> None:
@@ -197,6 +355,56 @@ def test_collect_live_smoke() -> None:
     # every per-doc record carries the seven KPIs and a type
     for d in payload["docs"]:
         assert d.get("type") in {"curriculum", "tutorial", "howto", "explainer", "reference"}
+
+
+# --- the --check learning-debt ratchet (#1280) -----------------------------
+# The keep-bit witness every #1278 child reads: a synthetic debt regression must
+# RED, a clean corpus must GREEN, and --baseline N pins the allowed ceiling.
+
+def _clean_payload() -> dict:
+    """A corpus with zero learning-debt."""
+    return lsc.build_payload(workspace=".", docs=[],
+                             cov={"overall_pct": 100.0, "defects": []},
+                             importance={}, stamp=None)
+
+
+def _debt_payload(n: int) -> dict:
+    """A corpus carrying exactly ``n`` units of learning-debt (uncovered topics)."""
+    return lsc.build_payload(workspace=".", docs=[],
+                             cov={"overall_pct": 0.0, "defects": [f"d{i}" for i in range(n)]},
+                             importance={}, stamp=None)
+
+
+def test_check_gate_greens_clean_corpus() -> None:
+    code, msg = lsc.check_gate(_clean_payload(), baseline=0)
+    assert code == 0, msg
+    assert "OK" in msg, msg
+
+
+def test_check_gate_reds_debt_over_baseline() -> None:
+    payload = _debt_payload(3)
+    assert payload["corpus"]["learning_debt"] == 3, payload
+    code, msg = lsc.check_gate(payload, baseline=0)
+    assert code != 0, msg
+    assert "3" in msg, msg
+
+
+def test_check_gate_baseline_pins_ceiling() -> None:
+    # debt at-or-below the ceiling holds green; above it reds.
+    assert lsc.check_gate(_debt_payload(5), baseline=5)[0] == 0
+    assert lsc.check_gate(_debt_payload(6), baseline=5)[0] != 0
+
+
+def test_check_cli_exit_codes() -> None:
+    saved = lsc.collect
+    try:
+        lsc.collect = lambda ws: _debt_payload(2)
+        assert lsc.main(["--check"]) != 0                      # debt 2 > default 0 -> red
+        assert lsc.main(["--check", "--baseline", "2"]) == 0   # ceiling pinned -> green
+        lsc.collect = lambda ws: _clean_payload()
+        assert lsc.main(["--check"]) == 0                      # clean corpus -> green
+    finally:
+        lsc.collect = saved
 
 
 def _run_all() -> int:

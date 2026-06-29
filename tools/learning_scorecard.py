@@ -73,8 +73,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
+import time
 from collections import deque
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -82,9 +85,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import docs_scorecard as dsc  # noqa: E402  reuse the hygiene scorer's pure helpers
 
 SCHEMA = "fleet-learning-scorecard/1"
+DETECT_LATENCY_SCHEMA = "fleet-learning-scorecard.detect-latency-bench/1"
 
 VERSION_REL = "VERSION"
 AUTHORITY_REL = "fak/BENCHMARK-AUTHORITY.md"
+GENERATED_SNAPSHOT_REL = "docs/LEARNING-SCORECARD.md"
+STAMP_CADENCE_DAYS = 1
+MANUAL_DETECT_BASELINE_DAYS = 5.0
+MANUAL_DETECT_BASELINE_DEFECTS = 34
+MANUAL_DETECT_BASELINE_COMMIT = "cf1deba4"
 
 # Front doors a learner could plausibly enter through. A learning doc reachable
 # from none of them is an orphan lesson (present but un-findable). The doors
@@ -144,6 +153,17 @@ EXPECTED_TOPICS: list[tuple[str, list[str]]] = [
     ("concepts", ["docs/concepts-and-story.md"]),
     ("migration", ["docs/fak/migration-guide.md"]),
 ]
+
+# Dynamic coverage catches a different class of debt: a shipped surface that
+# landed after the generated scorecard stamp but never entered the course.
+_INTERNAL_PLUMBING_RE = re.compile(
+    r"(?:cmdutil|demoutil|pathutil|maputil|mathx|intlist|numfmt|test|fixture)$"
+)
+_CMD_DIR_PLUMBING_RE = re.compile(r"(?:demo|bench)$")
+_HIDDEN_FAK_VERBS = {
+    "-h", "--help", "help", "-v", "--version",
+    "guard-precompact",
+}
 
 # Per-KPI weights. orientation + runnable weigh most: a learner who can't tell
 # where to start or has no command to run never reaches the rest. The three
@@ -251,6 +271,362 @@ def kpi_freshness(text: str, version: str | None) -> dict[str, Any]:
         "detail": ("no stale pin or placeholder" if not defects
                    else f"{len(defects)} freshness defect(s)"),
         "defects": defects, "soft": [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Generated scorecard stamp freshness. The generated docs/LEARNING-SCORECARD.md
+# is itself a teaching artifact: if the corpus moved after its stamp and the
+# stamp missed the loop cadence, that stale stamp is one unit of learning debt.
+# ---------------------------------------------------------------------------
+
+_SNAPSHOT_STAMP_RE = re.compile(
+    r"learning-scorecard:\s*(?P<stamp>\d{4}-\d{2}-\d{2})"
+)
+
+
+def snapshot_stamp(text: str) -> str:
+    m = _SNAPSHOT_STAMP_RE.search(text)
+    return m.group("stamp").strip() if m else ""
+
+
+def _parse_date(raw: str) -> date | None:
+    try:
+        return date.fromisoformat(raw.strip()[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_git_date(raw: str) -> date | None:
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+    except ValueError:
+        return _parse_date(raw)
+
+
+def _git_line(args: list[str], root: Path) -> str:
+    try:
+        proc = subprocess.run(["git", *args], cwd=str(root), capture_output=True,
+                              text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def _git_head_date(root: Path) -> date | None:
+    return _parse_git_date(_git_line(["show", "-s", "--format=%cI", "HEAD"], root))
+
+
+def _latest_corpus_change_date(root: Path, corpus: list[str]) -> date | None:
+    existing = [p for p in corpus if (root / p).exists()]
+    if not existing:
+        return None
+    out = _git_line(["log", "-1", "--format=%cI", "--", *existing], root)
+    return _parse_git_date(out.splitlines()[0] if out else "")
+
+
+def _dirty_corpus_paths(root: Path, corpus: list[str]) -> list[str]:
+    existing = [p for p in corpus if (root / p).exists()]
+    if not existing:
+        return []
+    out = _git_line(["status", "--porcelain", "--", *existing], root)
+    dirty: list[str] = []
+    for line in out.splitlines():
+        if len(line) < 4:
+            continue
+        dirty.append(line[3:].strip().replace("\\", "/"))
+    return sorted(dirty)
+
+
+def stamp_freshness_from_dates(*, stamp: str, reference_date: date,
+                               last_corpus_change_date: date | None,
+                               dirty_paths: list[str] | None = None,
+                               cadence_days: int = STAMP_CADENCE_DAYS,
+                               doc: str = GENERATED_SNAPSHOT_REL) -> dict[str, Any]:
+    cadence = max(1, int(cadence_days))
+    dirty = sorted({p.replace("\\", "/") for p in (dirty_paths or [])})
+    stamp_date = _parse_date(stamp)
+    if stamp_date is None:
+        return {
+            "doc": doc,
+            "stamp": stamp or None,
+            "stamp_age_days": None,
+            "cadence_days": cadence,
+            "last_corpus_change": (last_corpus_change_date.isoformat()
+                                   if last_corpus_change_date else None),
+            "dirty_corpus_count": len(dirty),
+            "dirty_corpus_paths": dirty[:20],
+            "corpus_changed_since_stamp": bool(dirty),
+            "stale_stamp": False,
+            "flag": "",
+            "reason": f"{doc} has no parseable learning-scorecard stamp",
+        }
+
+    age = max(0, (reference_date - stamp_date).days)
+    committed_drift = bool(last_corpus_change_date and last_corpus_change_date > stamp_date)
+    corpus_changed = committed_drift or bool(dirty)
+    stale = age >= cadence and corpus_changed
+    if stale:
+        reason = (f"stale-stamp: {doc} stamp {stamp_date.isoformat()} is {age}d old "
+                  f"(cadence {cadence}d) and the learning corpus changed since")
+    elif corpus_changed:
+        reason = (f"stamp {stamp_date.isoformat()} is {age}d old; corpus changed, "
+                  f"but still inside the {cadence}d cadence")
+    else:
+        reason = f"stamp {stamp_date.isoformat()} is {age}d old; no corpus drift since stamp"
+    return {
+        "doc": doc,
+        "stamp": stamp_date.isoformat(),
+        "stamp_age_days": age,
+        "cadence_days": cadence,
+        "last_corpus_change": (last_corpus_change_date.isoformat()
+                               if last_corpus_change_date else None),
+        "dirty_corpus_count": len(dirty),
+        "dirty_corpus_paths": dirty[:20],
+        "corpus_changed_since_stamp": corpus_changed,
+        "stale_stamp": stale,
+        "flag": "stale-stamp" if stale else "",
+        "reason": reason,
+    }
+
+
+def stamp_freshness(root: Path, corpus: list[str],
+                    cadence_days: int = STAMP_CADENCE_DAYS) -> dict[str, Any]:
+    doc_path = root / GENERATED_SNAPSHOT_REL
+    try:
+        doc_text = doc_path.read_text(encoding="utf-8")
+    except OSError:
+        doc_text = ""
+    reference = _git_head_date(root) or datetime.now(timezone.utc).date()
+    return stamp_freshness_from_dates(
+        stamp=snapshot_stamp(doc_text),
+        reference_date=reference,
+        last_corpus_change_date=_latest_corpus_change_date(root, corpus),
+        dirty_paths=_dirty_corpus_paths(root, corpus),
+        cadence_days=cadence_days,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shipped-surface coverage. Static EXPECTED_TOPICS catches durable curriculum
+# holes; this fold catches new surfaces that shipped after the generated
+# scorecard stamp and have not entered the course.
+# ---------------------------------------------------------------------------
+
+def _rel(path: str) -> str:
+    return path.strip().replace("\\", "/").lstrip("./")
+
+
+def _git_added_paths_since_stamp(root: Path, stamp: str) -> list[str]:
+    stamp_date = _parse_date(stamp)
+    if stamp_date is None:
+        return []
+    # The generated stamp is day-granular, not a timestamp. Same-day additions
+    # are still inside that stamp's freshness window, so only count later dates.
+    since = (stamp_date + timedelta(days=1)).isoformat()
+    out = _git_line([
+        "log", "--diff-filter=A", "--name-only", "--format=",
+        f"--since={since}T00:00:00",
+        "--",
+        "internal", "cmd/fak", "cmd",
+    ], root)
+    return sorted({_rel(line) for line in out.splitlines() if line.strip()})
+
+
+def _git_first_added_date(root: Path, rel: str) -> date | None:
+    out = _git_line([
+        "log", "--diff-filter=A", "--reverse", "--format=%cI",
+        "--", _rel(rel),
+    ], root)
+    return _parse_git_date(out.splitlines()[0] if out else "")
+
+
+def _added_on_or_after_stamp(root: Path, rel: str, stamp_date: date | None,
+                             *, require_git_date: bool) -> bool:
+    if stamp_date is None:
+        return True
+    first = _git_first_added_date(root, rel)
+    if first is None:
+        return not require_git_date
+    return first > stamp_date
+
+
+def _internal_lane_allowlist(root: Path) -> set[str] | None:
+    text = dsc._safe_read(root / "dos.toml")
+    if not text:
+        return None
+    names = {
+        m.group(1)
+        for m in re.finditer(r"^([a-z][a-z0-9]*)\s*=\s*\[\s*\"internal/\1/\*\*\"\s*\]",
+                             text, re.MULTILINE)
+    }
+    return names or None
+
+
+def _has_nontest_go(root: Path, rel_dir: str) -> bool:
+    base = root / rel_dir
+    if not base.is_dir():
+        return False
+    return any(p.suffix == ".go" and not p.name.endswith("_test.go")
+               for p in base.glob("*.go"))
+
+
+def _fak_verb_handlers(main_text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    lines = main_text.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("case ") or ":" not in stripped:
+            continue
+        labels = [s for s in re.findall(r'"([^"]+)"', stripped.split(":", 1)[0])
+                  if s not in _HIDDEN_FAK_VERBS and not s.startswith("-")]
+        if not labels:
+            continue
+        handler = ""
+        for look in lines[i + 1:i + 8]:
+            m = re.search(r"\b(cmd[A-Z][A-Za-z0-9_]*)\s*\(", look)
+            if m:
+                handler = m.group(1)
+                break
+        if not handler:
+            continue
+        for label in labels:
+            out[label] = handler
+    return out
+
+
+def _cmd_fak_handler_files(root: Path) -> dict[str, str]:
+    base = root / "cmd" / "fak"
+    out: dict[str, str] = {}
+    if not base.is_dir():
+        return out
+    for path in sorted(base.glob("*.go")):
+        if path.name.endswith("_test.go"):
+            continue
+        rel = path.relative_to(root).as_posix()
+        text = dsc._safe_read(path)
+        for m in re.finditer(r"^func\s+(cmd[A-Z][A-Za-z0-9_]*)\s*\(", text,
+                             re.MULTILINE):
+            out[m.group(1)] = rel
+    return out
+
+
+def _surface(kind: str, name: str, ref: str, source_paths: list[str]) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "name": name,
+        "ref": ref,
+        "source_paths": sorted({_rel(p) for p in source_paths}),
+    }
+
+
+def derive_teachable_surfaces(root: Path, added_paths: list[str], *,
+                              stamp_date: date | None = None,
+                              require_git_dates: bool = False) -> list[dict[str, Any]]:
+    added = sorted({_rel(p) for p in added_paths})
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+
+    allow_internal = _internal_lane_allowlist(root)
+    internal_paths: dict[str, list[str]] = {}
+    cmd_dirs: dict[str, list[str]] = {}
+    for rel in added:
+        m = re.match(r"^internal/([a-z][a-z0-9]*)/[^/]+\.go$", rel)
+        if m and not rel.endswith("_test.go"):
+            pkg = m.group(1)
+            if (allow_internal is None or pkg in allow_internal) \
+                    and not _INTERNAL_PLUMBING_RE.search(pkg):
+                internal_paths.setdefault(pkg, []).append(rel)
+            continue
+        m = re.match(r"^cmd/([^/]+)/[^/]+\.go$", rel)
+        if m and not rel.endswith("_test.go"):
+            name = m.group(1)
+            if name != "fak" and not _CMD_DIR_PLUMBING_RE.search(name):
+                cmd_dirs.setdefault(name, []).append(rel)
+
+    for pkg, paths in internal_paths.items():
+        ref = f"internal/{pkg}"
+        if _has_nontest_go(root, ref) and _added_on_or_after_stamp(
+                root, ref, stamp_date, require_git_date=require_git_dates):
+            by_key[("internal", pkg)] = _surface("internal", pkg, ref, paths)
+
+    main_text = dsc._safe_read(root / "cmd" / "fak" / "main.go")
+    verb_to_handler = _fak_verb_handlers(main_text)
+    handler_to_file = _cmd_fak_handler_files(root)
+    added_set = set(added)
+    for verb, handler in verb_to_handler.items():
+        rel = handler_to_file.get(handler, "")
+        if rel and rel in added_set and _added_on_or_after_stamp(
+                root, rel, stamp_date, require_git_date=require_git_dates):
+            by_key[("cmd/fak", verb)] = _surface("cmd/fak", verb, f"fak {verb}", [rel])
+
+    for name, paths in cmd_dirs.items():
+        ref = f"cmd/{name}"
+        if _has_nontest_go(root, ref) and _added_on_or_after_stamp(
+                root, ref, stamp_date, require_git_date=require_git_dates):
+            by_key[("cmd", name)] = _surface("cmd", name, ref, paths)
+
+    return [by_key[k] for k in sorted(by_key)]
+
+
+def surface_taught_by_course(surface: dict[str, Any], course_text: str) -> bool:
+    name = re.escape(str(surface.get("name", "")))
+    kind = surface.get("kind")
+    patterns: list[str]
+    if kind == "internal":
+        patterns = [
+            rf"(?<![\w/-])internal/{name}(?:/|\b)",
+            rf"`{name}`",
+            rf"(?<![\w-]){name}(?![\w-])",
+        ]
+    elif kind == "cmd/fak":
+        patterns = [
+            rf"(?<![\w-])fak\s+{name}(?:\s|`|$)",
+            rf"cmd/fak\s+{name}(?:\s|`|$)",
+            rf"go\s+run\s+\./cmd/fak\s+{name}(?:\s|`|$)",
+        ]
+    else:
+        patterns = [
+            rf"(?<![\w/-])cmd/{name}(?:/|\b)",
+            rf"go\s+run\s+\./cmd/{name}(?:\s|`|$)",
+            rf"`{name}`",
+        ]
+    return any(re.search(p, course_text, re.IGNORECASE) for p in patterns)
+
+
+def shipped_surface_coverage(root: Path, *, stamp: str,
+                             added_paths: list[str] | None = None,
+                             course_text: str | None = None,
+                             require_git_dates: bool = True) -> dict[str, Any]:
+    stamp_date = _parse_date(stamp)
+    added = (_git_added_paths_since_stamp(root, stamp)
+             if added_paths is None else sorted({_rel(p) for p in added_paths}))
+    surfaces = derive_teachable_surfaces(
+        root, added, stamp_date=stamp_date, require_git_dates=require_git_dates,
+    )
+    course = dsc._safe_read(root / "LEARNING-PATH.md") if course_text is None else course_text
+    rows: list[dict[str, Any]] = []
+    for s in surfaces:
+        row = dict(s)
+        row["taught"] = surface_taught_by_course(s, course)
+        rows.append(row)
+    covered = [r for r in rows if r["taught"]]
+    missing = [r for r in rows if not r["taught"]]
+    return {
+        "stamp": stamp or None,
+        "added_paths": added,
+        "surfaces": rows,
+        "covered": covered,
+        "missing": missing,
+        "defects": [
+            f"shipped-but-untaught surface: {r['ref']} "
+            f"(added since learning-scorecard stamp {stamp or 'unknown'})"
+            for r in missing
+        ],
     }
 
 
@@ -539,7 +915,9 @@ def importance_scores(root: Path, corpus: list[str]) -> dict[str, float]:
     return out
 
 
-def coverage(root: Path, corpus: list[str]) -> dict[str, Any]:
+def coverage(root: Path, corpus: list[str], *, added_paths: list[str] | None = None,
+             course_text: str | None = None,
+             require_git_dates: bool = True) -> dict[str, Any]:
     reachable = dsc.reachable_md(root, FRONT_DOORS)
     existing = [d for d in corpus if (root / d).exists() and d not in FRONT_DOOR_EXEMPT]
     orphans = sorted(d for d in existing if d not in reachable)
@@ -550,13 +928,26 @@ def coverage(root: Path, corpus: list[str]) -> dict[str, Any]:
     for topic, candidates in EXPECTED_TOPICS:
         ok = any((root / c).exists() and dsc._nonstub(root / c) for c in candidates)
         (covered if ok else missing_topics).append(topic)
-    topic_pct = round(100 * len(covered) / max(1, len(EXPECTED_TOPICS)), 1)
+    scorecard_text = dsc._safe_read(root / GENERATED_SNAPSHOT_REL)
+    surface_cov = shipped_surface_coverage(
+        root, stamp=snapshot_stamp(scorecard_text), added_paths=added_paths,
+        course_text=course_text, require_git_dates=require_git_dates,
+    )
+    covered_surfaces = [s["ref"] for s in surface_cov["covered"]]
+    missing_surfaces = [s["ref"] for s in surface_cov["missing"]]
+    topic_total = len(EXPECTED_TOPICS) + len(surface_cov["surfaces"])
+    topic_covered = len(covered) + len(covered_surfaces)
+    topic_pct = round(100 * topic_covered / max(1, topic_total), 1)
     overall = round((reach_pct + topic_pct) / 2, 1)
     cov_defects = [f"orphan lesson (unreachable from any front door): {o}" for o in orphans] \
-        + [f"uncovered learning topic: {t}" for t in missing_topics]
+        + [f"uncovered learning topic: {t}" for t in missing_topics] \
+        + list(surface_cov["defects"])
     return {
         "reachability_pct": reach_pct, "topic_pct": topic_pct, "overall_pct": overall,
         "orphans": orphans, "missing_topics": missing_topics, "covered_topics": covered,
+        "shipped_surface_coverage": surface_cov,
+        "missing_shipped_surfaces": missing_surfaces,
+        "covered_shipped_surfaces": covered_surfaces,
         "defects": cov_defects,
     }
 
@@ -566,11 +957,14 @@ def coverage(root: Path, corpus: list[str]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def build_payload(*, workspace: str, docs: list[dict[str, Any]],
-                  cov: dict[str, Any], importance: dict[str, float]) -> dict[str, Any]:
+                  cov: dict[str, Any], importance: dict[str, float],
+                  stamp: dict[str, Any] | None = None) -> dict[str, Any]:
     n = len(docs)
     scores = [d["score"] for d in docs]
     doc_defects = sum(d["n_defects"] for d in docs)
-    total_defects = doc_defects + len(cov.get("defects", []))
+    stamp = stamp or {}
+    stamp_defects = 1 if stamp.get("stale_stamp") else 0
+    total_defects = doc_defects + len(cov.get("defects", [])) + stamp_defects
     mean_score = round(sum(scores) / max(1, n), 1)
     grades = {g: 0 for g in "ABCDF"}
     for d in docs:
@@ -597,6 +991,7 @@ def build_payload(*, workspace: str, docs: list[dict[str, Any]],
         "learning_debt": total_defects,
         "learning_debt_in_docs": doc_defects,
         "learning_debt_in_coverage": len(cov.get("defects", [])),
+        "learning_debt_in_stamp": stamp_defects,
         "soft_signals": sum(len(d["soft"]) for d in docs),
         "worst": [{"path": d["path"], "score": d["score"], "grade": d["grade"],
                    "n_defects": d["n_defects"]} for d in worst],
@@ -613,7 +1008,8 @@ def build_payload(*, workspace: str, docs: list[dict[str, Any]],
     else:
         ok, verdict, finding = False, "ACTION", "learning_debt"
         reason = (f"{total_defects} unit(s) of learning-debt across {n} learning docs "
-                  f"({doc_defects} in-doc + {len(cov.get('defects', []))} coverage); "
+                  f"({doc_defects} in-doc + {len(cov.get('defects', []))} coverage "
+                  f"+ {stamp_defects} stamp); "
                   f"mean {mean_score}/100, coverage {cov['overall_pct']}%")
         next_action = ("retire learning-debt by importance×debt (see corpus.priorities): add the "
                        "missing orientation signpost, runnable command, worked example, or honesty "
@@ -622,7 +1018,7 @@ def build_payload(*, workspace: str, docs: list[dict[str, Any]],
     return {
         "schema": SCHEMA, "ok": ok, "verdict": verdict, "finding": finding,
         "reason": reason, "next_action": next_action, "workspace": workspace,
-        "corpus": corpus, "coverage": cov, "docs": docs,
+        "corpus": corpus, "coverage": cov, "stamp_freshness": stamp, "docs": docs,
     }
 
 
@@ -647,7 +1043,100 @@ def collect(workspace: Path) -> dict[str, Any]:
         docs.append(score_doc(text, rel, root, version=version, authority=authority))
     cov = coverage(root, corpus)
     importance = importance_scores(root, corpus)
-    return build_payload(workspace=str(root), docs=docs, cov=cov, importance=importance)
+    stamp = stamp_freshness(root, corpus)
+    return build_payload(workspace=str(root), docs=docs, cov=cov, importance=importance,
+                         stamp=stamp)
+
+
+# ---------------------------------------------------------------------------
+# Net-true detect-latency bench
+# ---------------------------------------------------------------------------
+
+def detect_latency_bench_from_cost(cost_seconds: float,
+                                   cadence_days: int = STAMP_CADENCE_DAYS) -> dict[str, Any]:
+    """Fixture-backed net-true bench for "catches drift sooner than a human".
+
+    The fixture encodes the issue's manual baseline: a human process left a
+    5-day, 34-defect gap (cf1deba4). The loop detects a stale generated
+    scorecard on the first daily run after a corpus change, then charges the
+    measured scorecard runtime as cost.
+    """
+    stamp_date = date(2026, 6, 1)
+    corpus_change = date(2026, 6, 3)
+    loop_run = date(2026, 6, 4)
+    witness = stamp_freshness_from_dates(
+        stamp=stamp_date.isoformat(),
+        reference_date=loop_run,
+        last_corpus_change_date=corpus_change,
+        cadence_days=cadence_days,
+    )
+    loop_detect_days = float((loop_run - corpus_change).days)
+    cost_days = max(0.0, float(cost_seconds)) / 86400.0
+    net_loop_days = loop_detect_days + cost_days
+    days_saved = MANUAL_DETECT_BASELINE_DAYS - net_loop_days
+    verdict = "net-true" if witness.get("stale_stamp") and days_saved > 0 else "not-yet"
+    return {
+        "schema": DETECT_LATENCY_SCHEMA,
+        "verdict": verdict,
+        "ok": verdict == "net-true",
+        "fixture": {
+            "manual_baseline_commit": MANUAL_DETECT_BASELINE_COMMIT,
+            "manual_detect_latency_days": MANUAL_DETECT_BASELINE_DAYS,
+            "manual_gap_defects": MANUAL_DETECT_BASELINE_DEFECTS,
+            "stamp": stamp_date.isoformat(),
+            "corpus_changed": corpus_change.isoformat(),
+            "loop_run": loop_run.isoformat(),
+            "cadence_days": max(1, int(cadence_days)),
+        },
+        "stamp_witness": witness,
+        "loop": {
+            "detect_latency_days": loop_detect_days,
+            "scorecard_cost_seconds": round(float(cost_seconds), 6),
+            "scorecard_cost_days": cost_days,
+            "net_detect_latency_days": net_loop_days,
+        },
+        "manual": {
+            "detect_latency_days": MANUAL_DETECT_BASELINE_DAYS,
+            "defects": MANUAL_DETECT_BASELINE_DEFECTS,
+            "source_commit": MANUAL_DETECT_BASELINE_COMMIT,
+        },
+        "net": {
+            "days_saved": days_saved,
+            "manual_minus_loop_days": MANUAL_DETECT_BASELINE_DAYS - loop_detect_days,
+            "cost_seconds_charged": round(float(cost_seconds), 6),
+            "claim": ("loop catches drift sooner than the manual baseline"
+                      if days_saved > 0 else "loop has not beaten the manual baseline net of cost"),
+        },
+    }
+
+
+def detect_latency_bench(root: Path) -> dict[str, Any]:
+    start = time.perf_counter()
+    collect(root)
+    cost_seconds = time.perf_counter() - start
+    return detect_latency_bench_from_cost(cost_seconds)
+
+
+def render_detect_latency_bench(payload: dict[str, Any]) -> str:
+    fx = payload.get("fixture") or {}
+    loop = payload.get("loop") or {}
+    manual = payload.get("manual") or {}
+    net = payload.get("net") or {}
+    witness = payload.get("stamp_witness") or {}
+    return "\n".join([
+        f"learning-scorecard detect-latency bench: {payload.get('verdict')}",
+        (f"  fixture: stamp {fx.get('stamp')} · corpus changed {fx.get('corpus_changed')} "
+         f"· loop run {fx.get('loop_run')} · cadence {fx.get('cadence_days')}d"),
+        (f"  stamp witness: stamp_age_days={witness.get('stamp_age_days')} "
+         f"flag={witness.get('flag') or 'none'}"),
+        (f"  loop: detects in {loop.get('detect_latency_days')}d + "
+         f"{loop.get('scorecard_cost_seconds')}s scorecard cost "
+         f"= {loop.get('net_detect_latency_days'):.6f}d net"),
+        (f"  manual: detects in {manual.get('detect_latency_days')}d "
+         f"with {manual.get('defects')} defects ({manual.get('source_commit')})"),
+        (f"  net: saves {net.get('days_saved'):.6f}d after cost; "
+         f"{net.get('claim')}"),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +1146,8 @@ def collect(workspace: Path) -> dict[str, Any]:
 def render(payload: dict[str, Any]) -> str:
     c = payload.get("corpus") or {}
     cov = payload.get("coverage") or {}
+    stamp = payload.get("stamp_freshness") or {}
+    stamp_flag = f" · {stamp.get('flag')}" if stamp.get("flag") else ""
     lines = [
         f"learning-scorecard: {payload.get('verdict')} ({payload.get('finding')})",
         f"  {payload.get('reason')}",
@@ -668,6 +1159,9 @@ def render(payload: dict[str, Any]) -> str:
                                 for g in "ABCDF")),
         (f"coverage: {cov.get('overall_pct', 0)}% "
          f"(reach {cov.get('reachability_pct', 0)}% · topics {cov.get('topic_pct', 0)}%)"),
+        (f"stamp: age {stamp.get('stamp_age_days')}d / cadence "
+         f"{stamp.get('cadence_days', STAMP_CADENCE_DAYS)}d"
+         f"{stamp_flag} · {stamp.get('reason', 'no stamp witness')}"),
         f"next: {payload.get('next_action')}",
         "",
         "priorities (most important × most broken, fix first):",
@@ -693,12 +1187,16 @@ def render(payload: dict[str, Any]) -> str:
         lines.append("  coverage:")
         for it in cov["defects"]:
             lines.append(f"      - {it}")
+    if stamp.get("stale_stamp"):
+        lines.append("  stamp:")
+        lines.append(f"      - {stamp.get('reason')}")
     return "\n".join(lines)
 
 
 def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str:
     c = payload.get("corpus") or {}
     cov = payload.get("coverage") or {}
+    freshness = payload.get("stamp_freshness") or {}
     gd = c.get("grade_distribution", {})
     out: list[str] = [
         "---",
@@ -733,7 +1231,9 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
         "|---|---|",
         f"| Learning docs scored | {c.get('n_docs', 0)} |",
         f"| **Learning-debt (total HARD defects)** | **{c.get('learning_debt', 0)}** "
-        f"({c.get('learning_debt_in_docs', 0)} in-doc + {c.get('learning_debt_in_coverage', 0)} coverage) |",
+        f"({c.get('learning_debt_in_docs', 0)} in-doc + "
+        f"{c.get('learning_debt_in_coverage', 0)} coverage + "
+        f"{c.get('learning_debt_in_stamp', 0)} stamp) |",
         f"| Soft signals (judgment calls) | {c.get('soft_signals', 0)} |",
         f"| Mean score | {c.get('mean_score', 0)}/100 |",
         f"| Median / min / max | {c.get('median_score', 0)} / {c.get('min_score', 0)} / {c.get('max_score', 0)} |",
@@ -741,6 +1241,9 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
         f"| Coverage (overall) | {cov.get('overall_pct', 0)}% |",
         f"| — reachable from a front door | {cov.get('reachability_pct', 0)}% |",
         f"| — expected learning topics covered | {cov.get('topic_pct', 0)}% |",
+        f"| Stamp freshness | age {freshness.get('stamp_age_days')}d / "
+        f"cadence {freshness.get('cadence_days', STAMP_CADENCE_DAYS)}d"
+        f"{' — **stale-stamp**' if freshness.get('stale_stamp') else ''} |",
         "",
         "## Priorities — fix the most-important, most-broken first",
         "",
@@ -783,10 +1286,38 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
         for it in cov["defects"]:
             out.append(f"- {it}")
         out.append("")
+    if freshness.get("stale_stamp"):
+        any_defect = True
+        out.append("### stamp freshness")
+        out.append(f"- {freshness.get('reason')}")
+        out.append("")
     if not any_defect:
         out += ["No learning-debt: every learning doc clears the HARD bar. 🎉", "",
                 "Remaining work is soft-signal polish on the priority docs above.", ""]
     return "\n".join(out)
+
+
+def check_gate(payload: dict[str, Any], baseline: int = 0) -> tuple[int, str]:
+    """The CI ratchet decision over a learning payload (pure: exit code + message).
+
+    learning-debt is an integer the corpus drives toward zero. The default exit
+    code is green only at ZERO debt; this gate is GREEN while the corpus holds
+    at-or-below the pinned ``baseline`` ceiling (0 by default) and RED only when
+    debt *regresses* above it — the same shape as ``scorecard_control_pane.py
+    --check``. It is the **keep-bit witness** every #1278 child reads: without it
+    the tool had ``--json`` / ``--markdown`` / ``--stamp`` and no gate, which is
+    why the corpus drifted 34 defects deep before a human noticed (cf1deba4).
+
+      exit 0  held       — learning-debt at-or-below the pinned baseline
+      exit 1  regressed  — learning-debt rose above the baseline ceiling
+    """
+    debt = int(payload.get("corpus", {}).get("learning_debt", 0))
+    if debt > baseline:
+        return 1, (f"LEARNING-DEBT RATCHET RED: {debt} unit(s) of learning-debt "
+                   f"exceed the pinned ceiling of {baseline}; retire worst-first "
+                   f"(see corpus.priorities), then re-run")
+    return 0, (f"LEARNING-DEBT RATCHET OK: {debt} unit(s) held at-or-below the "
+               f"pinned ceiling of {baseline}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -795,6 +1326,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--markdown", action="store_true", help="emit the LEARNING-SCORECARD.md body")
     ap.add_argument("--stamp", default="", help="date stamp for the markdown header")
+    ap.add_argument("--check", action="store_true",
+                    help="CI ratchet gate: exit non-zero only if learning-debt exceeds --baseline (#1280)")
+    ap.add_argument("--baseline", type=int, default=0,
+                    help="allowed learning-debt ceiling for --check (default: 0)")
+    ap.add_argument("--detect-latency-bench", action="store_true",
+                    help="measure stale-stamp detect latency vs the 5-day manual baseline")
     args = ap.parse_args(argv)
 
     try:
@@ -803,7 +1340,35 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     workspace = Path(args.workspace).resolve() if args.workspace else dsc.repo_root()
+    if args.detect_latency_bench:
+        bench = detect_latency_bench(workspace)
+        if args.json:
+            print(json.dumps(bench, indent=2))
+        else:
+            print(render_detect_latency_bench(bench))
+        return 0 if bench.get("ok") else 1
+
     payload = collect(workspace)
+
+    if args.check:
+        code, message = check_gate(payload, args.baseline)
+        if args.json:
+            # Under --check the tool's contract IS the ratchet, not the raw fold:
+            # ok/verdict reflect "did learning-debt hold at-or-below baseline?"
+            # (green even with residual debt), not "is debt zero?". gate_exit /
+            # gate_message carry the literal CI verdict for a loop runner. #1280.
+            gated = {
+                **payload,
+                "ok": code == 0,
+                "verdict": "OK" if code == 0 else "ACTION",
+                "gate_exit": code,
+                "gate_message": message,
+                "gate_baseline": args.baseline,
+            }
+            print(json.dumps(gated, indent=2))
+        else:
+            print(message)
+        return code
 
     if args.json:
         print(json.dumps(payload, indent=2))
