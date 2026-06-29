@@ -140,6 +140,7 @@ concurrent = [
   "dispatchorder",
   "devindex",
   "learningdebt",
+  "opttarget",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -196,6 +197,7 @@ autopick = [
   "dispatchorder",
   "devindex",
   "learningdebt",
+  "opttarget",
   # new-leaf:lane
 ]
 
@@ -336,6 +338,7 @@ loopgate = ["internal/loopgate/**"]
 dispatchorder = ["internal/dispatchorder/**"]
 devindex = ["internal/devindex/**"]
 learningdebt = ["internal/learningdebt/**"]
+opttarget = ["internal/opttarget/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

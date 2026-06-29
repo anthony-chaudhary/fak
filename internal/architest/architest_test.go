@@ -180,6 +180,7 @@ var tier = map[string]int{
 	"syspromptmmu":    2, // system-prompt MMU: Rung 1 (#1259) emits fak's ordered base-context plan (SegStable spine + versioned policy floor as []cachemeta.PromptSegment, each content-witnessed); Rung 2 (#1260) is the cache-safe system-block splicer (BuildSystemValue + SpliceSystemOverlay, bytes.Equal(prefix) proven, fail-safe identity). Pure authorship/decision layer: imports cachemeta(1)+promptmmu(1)+stdlib, off the hot path.
 	"devindex":        1,
 	"execrollup":      1, // executive activity roll-up: pure fold-over-folds turning the agentic-fleet plane payloads (dispatch closure-honesty + throughput, dark loops, cadence ship-stamp rate, fleet box liveness) into one GREEN/WATCH/RED control-pane envelope + a ranked what-needs-you list with provenance labels; stdlib-only, imports nothing internal, off the hot path.
+	"opttarget":       4, // declarative target layer of the RSI optimization fuser (epic #1279): Compile lowers an OptTarget (data) into a rsiloop.Harness, so it imports rsiloop(4) and is forced to the integrator layer. Off the hot path.
 	// new-leaf:tier â€” `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
