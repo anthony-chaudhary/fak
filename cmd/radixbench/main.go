@@ -182,6 +182,62 @@ func agents(vocab, P, step, C, T int) Workload {
 	}
 }
 
+// ---- workload loading (an operator's OWN token-id prompt set, #322) ----
+
+// workloadJSON is the on-disk shape of a bundled / operator-supplied workload: a named
+// set of requests, each request a flat list of token ids. Shared prefixes ARE literally
+// the same leading ids — that is what the radix tree discovers and reuses. Unlike the
+// synthetic generators above (which the harness ships for the verified SGLang benchmark
+// shapes), this lets an operator sweep the four shapes against THEIR OWN prompts.
+type workloadJSON struct {
+	Name     string  `json:"name"`
+	Desc     string  `json:"desc"`
+	Params   string  `json:"params"`
+	SGLang   string  `json:"sglang_published"`
+	Requests [][]int `json:"requests"`
+}
+
+// loadWorkload reads one workload JSON file into a Workload. Token ids are taken
+// verbatim (the cache-hit metric is a function of the ids + matching algorithm only);
+// the name defaults to the file's base name when the JSON omits one.
+func loadWorkload(path string) (Workload, error) {
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		return Workload{}, err
+	}
+	var f workloadJSON
+	if err := json.Unmarshal(blob, &f); err != nil {
+		return Workload{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if len(f.Requests) == 0 {
+		return Workload{}, fmt.Errorf("%s: workload has no requests", path)
+	}
+	name := f.Name
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	return Workload{
+		Name: name, Desc: f.Desc, Params: f.Params,
+		Requests: f.Requests, SGLang: f.SGLang,
+	}, nil
+}
+
+// maxTokenID is the largest token id across every request — used to check a loaded
+// workload fits the synthetic model's vocab before the live arm tries to embed it.
+func maxTokenID(ws []Workload) int {
+	m := -1
+	for _, w := range ws {
+		for _, r := range w.Requests {
+			for _, id := range r {
+				if id > m {
+					m = id
+				}
+			}
+		}
+	}
+	return m
+}
+
 // ---- accounting (model-independent: the apples-to-apples-with-SGLang metric) ----
 
 func totalTokens(reqs [][]int) int {
@@ -449,6 +505,7 @@ func main() {
 	live := flag.Bool("live", true, "run the live wall-clock arm (a real kernel prefill per request)")
 	reps := flag.Int("reps", 3, "live-timing reps; the min over reps is reported (damps shared-box variance)")
 	only := flag.String("only", "", "run only workloads whose name contains this substring (e.g. few-shot); empty = all")
+	workload := flag.String("workload", "", "comma-separated JSON workload files (each: {name,desc,sglang_published,requests:[[ids]...]}) to sweep INSTEAD of the synthetic shapes — your OWN prompt set (#322)")
 	scale := flag.Int("scale", 1, "token-size multiplier for the workloads (1 = quick synthetic; larger for real models)")
 	out := flag.String("out", "", "write JSON report here (default stdout)")
 	flag.Parse()
@@ -497,16 +554,44 @@ func main() {
 	}
 
 	s := *scale
-	all := []Workload{
-		fewShot(vocab, 256*s, 16*s, 16),
-		multiTurn(vocab, 64*s, 32*s, 8),
-		treeOfThought(vocab, 64*s, 16*s, 3, 3),
-		agents(vocab, 128*s, 24*s, 5, 6),
+	var all []Workload
+	if *workload != "" {
+		for _, p := range strings.Split(*workload, ",") {
+			p = strings.TrimSpace(pathutil.ExpandTilde(p))
+			if p == "" {
+				continue
+			}
+			w, err := loadWorkload(p)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "workload load: %v\n", err)
+				os.Exit(1)
+			}
+			all = append(all, w)
+		}
+	} else {
+		all = []Workload{
+			fewShot(vocab, 256*s, 16*s, 16),
+			multiTurn(vocab, 64*s, 32*s, 8),
+			treeOfThought(vocab, 64*s, 16*s, 3, 3),
+			agents(vocab, 128*s, 24*s, 5, 6),
+		}
 	}
 	var workloads []Workload
 	for _, w := range all {
 		if *only == "" || strings.Contains(w.Name, *only) {
 			workloads = append(workloads, w)
+		}
+	}
+
+	// A loaded workload carries its own token ids; the default synthetic model only
+	// embeds ids < vocab. If an operator's ids exceed it, disable the live arm (a real
+	// synthetic prefill would index out of range) — the hit-rate accounting is
+	// model-independent, so the headline still stands. Pass -hf/-dir for live timing.
+	if *workload != "" && *dir == "" && *hf == "" && *live {
+		if mx := maxTokenID(workloads); mx >= vocab {
+			fmt.Fprintf(os.Stderr, "note: workload token id %d >= synthetic vocab %d; live timing disabled "+
+				"(hit-rate accounting is model-independent). Pass -hf/-dir for live timing on your own tokens.\n", mx, vocab)
+			*live = false
 		}
 	}
 

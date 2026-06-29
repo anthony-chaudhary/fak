@@ -5,7 +5,11 @@
 // expected values below are computed by hand from the request token streams.
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestLongestCommonPrefix(t *testing.T) {
 	tests := []struct {
@@ -88,6 +92,74 @@ func TestLexLess(t *testing.T) {
 				t.Errorf("lexLess(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLoadWorkload is the witness for the #322 adoption path: an operator's own
+// token-id prompt set, loaded from JSON, becomes a Workload the same accounting runs
+// over. It writes a temp file, loads it, and checks the requests + metadata + the
+// name-from-filename fallback survive the round trip — no model, file, or network.
+func TestLoadWorkload(t *testing.T) {
+	dir := t.TempDir()
+
+	// A workload with explicit metadata and a shared 3-token prefix.
+	named := filepath.Join(dir, "few-shot.json")
+	if err := os.WriteFile(named, []byte(
+		`{"name":"few-shot","desc":"shared preamble","sglang_published":"50-99% band",`+
+			`"requests":[[1,2,3,10],[1,2,3,11],[1,2,3,12]]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w, err := loadWorkload(named)
+	if err != nil {
+		t.Fatalf("loadWorkload: %v", err)
+	}
+	if w.Name != "few-shot" || w.Desc != "shared preamble" || w.SGLang != "50-99% band" {
+		t.Errorf("metadata not preserved: %+v", w)
+	}
+	if len(w.Requests) != 3 || totalTokens(w.Requests) != 12 {
+		t.Errorf("requests not loaded verbatim: %v", w.Requests)
+	}
+	// The shared [1,2,3] prefix must be discoverable by the same radix accounting.
+	if matched, _, _ := radixMatched(w.Requests, 0); matched != 6 { // 3 reused by reqs 2 and 3
+		t.Errorf("radix reuse over loaded workload = %d, want 6", matched)
+	}
+
+	// Name defaults to the base filename when the JSON omits one.
+	noName := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(noName, []byte(`{"requests":[[7,8],[7,9]]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w2, err := loadWorkload(noName)
+	if err != nil {
+		t.Fatalf("loadWorkload (no name): %v", err)
+	}
+	if w2.Name != "agents" {
+		t.Errorf("name fallback = %q, want %q", w2.Name, "agents")
+	}
+
+	// An empty / malformed workload is a clear error, not a silent zero-request run.
+	empty := filepath.Join(dir, "empty.json")
+	if err := os.WriteFile(empty, []byte(`{"requests":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadWorkload(empty); err == nil {
+		t.Error("loadWorkload accepted a zero-request workload, want error")
+	}
+	if _, err := loadWorkload(filepath.Join(dir, "missing.json")); err == nil {
+		t.Error("loadWorkload accepted a missing file, want error")
+	}
+}
+
+func TestMaxTokenID(t *testing.T) {
+	ws := []Workload{
+		{Requests: [][]int{{1, 2}, {3, 255}}},
+		{Requests: [][]int{{4}, {300, 5}}},
+	}
+	if got := maxTokenID(ws); got != 300 {
+		t.Errorf("maxTokenID = %d, want 300", got)
+	}
+	if got := maxTokenID(nil); got != -1 {
+		t.Errorf("maxTokenID(nil) = %d, want -1 (no ids)", got)
 	}
 }
 
