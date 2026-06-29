@@ -1,0 +1,12 @@
+{
+  "name": "few-shot",
+  "desc": "5 questions share one few-shot preamble (MMLU 5-shot shape). The shared preamble is literally the same leading token ids; each request appends a short distinct question.",
+  "sglang_published": "single-level prefix reuse; hit rate within the 50-99% band",
+  "requests": [
+    [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 100, 101],
+    [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 110, 111],
+    [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 120, 121],
+    [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 130, 131],
+    [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 140, 141]
+  ]
+}

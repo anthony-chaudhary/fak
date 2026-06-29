@@ -1,0 +1,16 @@
+{
+  "name": "agents",
+  "desc": "3 concurrent agents share a system prefix (tool schemas), each running 3 steps that append a step segment. Requests are listed turn-major (A0,A1,A2 step0; then step1; ...) so arrivals INTERLEAVE - the ReAct shape that makes a bounded cache thrash under FCFS and that cache-aware (longest-shared-prefix-first) scheduling fixes. Two-level sharing: the system prefix across agents + each agent's own growing chain.",
+  "sglang_published": "two-level reuse (shared system + per-agent chain); cache-aware scheduling recovers the hit rate under interleaving",
+  "requests": [
+    [200, 201, 202, 203, 204, 205, 206, 207, 10],
+    [200, 201, 202, 203, 204, 205, 206, 207, 40],
+    [200, 201, 202, 203, 204, 205, 206, 207, 70],
+    [200, 201, 202, 203, 204, 205, 206, 207, 10, 11],
+    [200, 201, 202, 203, 204, 205, 206, 207, 40, 41],
+    [200, 201, 202, 203, 204, 205, 206, 207, 70, 71],
+    [200, 201, 202, 203, 204, 205, 206, 207, 10, 11, 12],
+    [200, 201, 202, 203, 204, 205, 206, 207, 40, 41, 42],
+    [200, 201, 202, 203, 204, 205, 206, 207, 70, 71, 72]
+  ]
+}

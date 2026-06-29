@@ -1,0 +1,11 @@
+{
+  "name": "tree-of-thought",
+  "desc": "A branching reasoning tree (ToT / GSM-8K shape): a root prompt that branches 2 ways at each of 2 levels; every node appends a thought segment; the requests are the 4 root-to-leaf paths. Siblings share every ancestor, so reuse is MULTI-LEVEL - the case a single declared prefix cannot capture.",
+  "sglang_published": "multi-level branch reuse; within the 50-99% band",
+  "requests": [
+    [70, 71, 72, 73, 80, 81, 82, 90, 91],
+    [70, 71, 72, 73, 80, 81, 82, 95, 96],
+    [70, 71, 72, 73, 85, 86, 87, 90, 91],
+    [70, 71, 72, 73, 85, 86, 87, 95, 96]
+  ]
+}

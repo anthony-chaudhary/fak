@@ -1,0 +1,11 @@
+{
+  "name": "multi-turn-chat",
+  "desc": "One 4-turn conversation; each turn's request is the whole history so far plus a new user message. Each later turn reuses the ENTIRE previous context as its prefix (the chat case where reuse grows toward 100% on the prefix).",
+  "sglang_published": "history reuse; large speedup for short outputs (paper Sec 6.2)",
+  "requests": [
+    [30, 31, 32, 33],
+    [30, 31, 32, 33, 40, 41, 42],
+    [30, 31, 32, 33, 40, 41, 42, 50, 51, 52],
+    [30, 31, 32, 33, 40, 41, 42, 50, 51, 52, 60, 61, 62]
+  ]
+}
