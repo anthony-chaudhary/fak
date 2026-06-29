@@ -59,15 +59,33 @@ decode)"*. Decode was stable across two runs (16.0, 16.4 tok/s).
 So for the dense-Q8 parity-class backend, **decode is essentially at parity (0.95×)** and
 Metal f16 prefill is ~6× faster than the old CPU prefill (0.083× → 0.49×).
 
-> **Honesty flag — do NOT overwrite the authority on this run alone.** The committed
-> `QWEN25-7B-RESULTS.md` / `BENCHMARK-AUTHORITY.md` figure is fak **CPU-Q8 decode 8.7 tok/s
-> (0.50×)**. This session's 16.4 tok/s is ~**1.9×** higher on the *same* CPU-Q8 decode path
-> (engine label confirms decode is CPU, not GPU-resident). The most likely cause is the
-> parallel Q8-decode workers (this run: 6 workers, GOMAXPROCS=12) vs the older measurement,
-> but that is **not reconciled here** — until it is (re-measure at workers=1; confirm the
-> older artifact's config), the conservative committed 0.50× stands and 0.95× is a
-> *pending, unratified* datum. This is the BENCHMARK-AUTHORITY discipline: a single
-> favorable run does not move the number of record.
+### Reconciliation of the 16.4 vs the committed 8.7 (decode)
+
+The committed `QWEN25-7B-RESULTS.md` / `BENCHMARK-AUTHORITY.md` figure is fak **CPU-Q8 decode
+8.7 tok/s (0.50×)** (`go_threads: GOMAXPROCS=12, matmul workers=12`, no q8-decode-worker
+field — i.e. pre-parallel-decode). I ran the decomposition this session:
+
+| config | decode tok/s | note |
+|---|---:|---|
+| committed authority (stale) | 8.7 | pre-parallel-decode artifact |
+| **pure-CPU now** (`-lean -quant`, no `-metal`) | **11.7** | current pure-Go Q8 kernel — already **1.35× the stale 8.7** |
+| `-metal` mode, GOMAXPROCS=2 (2 decode workers) | 15.7 | |
+| `-metal` mode, 6 decode workers | 16.0 / 16.4 | |
+| `-metal` mode, 12 decode workers | 15.4 | decode is bandwidth-saturated past ~2 workers |
+
+Two findings, both reproducible: (1) the **committed 8.7 is stale** — the current pure-CPU
+Q8 decode is **11.7 tok/s**, so 0.50× is no longer the number of record; (2) **`-metal`
+mode reaches ~16 tok/s** (stable across four runs) — a further ~1.37× over pure-CPU from the
+f16 weight-store layout + warm GPU-prefill state. The worker-count hypothesis is **refuted**
+(2 workers already saturates at 15.7).
+
+> **Honest verdict, kept within BENCHMARK-AUTHORITY discipline.** fak dense-7B-Q8 decode in
+> Metal mode measures **0.95× of the llama.cpp-Metal 17.27 bar** — *near parity*,
+> reproducibly. But a clean **authority update needs a controlled methodology** (matched
+> prompt length / decode steps / cold-vs-warm / thermal), not these exploratory runs: the
+> residual 11.7-vs-8.7 gap on the pure path is not fully accounted for here. So: the stale
+> 0.50× is retired (current floor ≥ 11.7/17.27 = 0.68×), the **0.95× near-parity is real and
+> measured**, and ratifying a new *number of record* is a controlled-bench follow-up.
 
 ## 3. #62 build-tag retirement — confirmed on-device
 
