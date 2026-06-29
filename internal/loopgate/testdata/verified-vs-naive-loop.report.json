@@ -1,0 +1,41 @@
+{
+  "benchmark": "verified-vs-naive-loop",
+  "provenance": "SIMULATED",
+  "corpus": "loopgate.DefaultBenchCorpus (hand-authored episode traces)",
+  "naive": {
+    "policy": "naive-self-report",
+    "episodes": 6,
+    "accepted_done": 6,
+    "false_done": 3,
+    "false_done_rate": 0.5,
+    "witnessed_done_reached": 3,
+    "slop_shipped": 34,
+    "iters_to_accepted_done": 9,
+    "wasted_iterations": 6,
+    "rework_tokens": 5100,
+    "gate_cost_tokens": 0
+  },
+  "gated": {
+    "policy": "gated-witnessed",
+    "episodes": 6,
+    "accepted_done": 6,
+    "false_done": 0,
+    "false_done_rate": 0,
+    "witnessed_done_reached": 6,
+    "slop_shipped": 15,
+    "iters_to_accepted_done": 15,
+    "wasted_iterations": 0,
+    "rework_tokens": 0,
+    "gate_cost_tokens": 1200
+  },
+  "false_done_rate_delta": 0.5,
+  "slop_shipped_delta": 19,
+  "net_true": {
+    "rework_tokens_avoided": 5100,
+    "gate_cost_tokens": 1200,
+    "net_tokens": 3900,
+    "gate_earns_keep": true
+  },
+  "finding": "gated loop cuts the false-done rate from 0.50 to 0.00 and removes 19 slop units; net of 1200 gate-cost tokens it still avoids 5100 rework tokens (net +3900)",
+  "not_yet": "live-agent run over a real dojo episode corpus (host/agent-gated); the SIMULATED fixture proves the gate's mechanism, not a wall-clock tok/s"
+}
