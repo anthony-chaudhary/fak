@@ -123,7 +123,8 @@ func fetchMetrics(url string, timeout time.Duration) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

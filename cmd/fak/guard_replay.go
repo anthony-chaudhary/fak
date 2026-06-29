@@ -129,8 +129,9 @@ func runGuardReplay(fixturePath, wire, policyPath string, out io.Writer) int {
 		jseq0, _, _ = j.Stats()
 	}
 
+	client := &http.Client{Timeout: 120 * time.Second}
 	for ti, turn := range f.Turns {
-		raw, _, perr := guardtrace.PostTurn(http.DefaultClient, gwURL, "X-Trace-Id", trace, provider, model, turn)
+		raw, _, perr := guardtrace.PostTurn(client, gwURL, "X-Trace-Id", trace, provider, model, turn)
 		if perr != nil {
 			fmt.Fprintf(out, "turn %d: gateway error: %v\n", ti+1, perr)
 			failures++
