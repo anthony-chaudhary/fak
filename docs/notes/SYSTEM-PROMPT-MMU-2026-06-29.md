@@ -29,8 +29,13 @@ Two end-states define "done":
 - **(b) The live base.** The system prompt itself becomes a first-class object
   fak can rewrite at runtime — add a rule, promote a skill from paged to
   resident, swap a v1 instruction block for v2 — **without rebuilding the whole
-  prompt and without busting the provider's prefix cache**, under a witness gate
-  so a self-authored edit cannot silently corrupt the spine.
+  prompt**, under a witness gate so a self-authored edit cannot silently corrupt
+  the spine. On the provider path (regime A) the edit lands at the next prefix
+  rebuild so the warm prefix is never busted; when fak owns the engine (regime
+  B), the edit can land sooner because fak can evict the changed span bit-exactly
+  and re-pin the survivors. (The honest bound on what fak can do to a live KV
+  cache is in "Transcending append-only" below — span *deletion*, not relocated
+  span *reuse*.)
 
 This is not "another prompt builder." It is the application of fak's own MMU
 doctrine — page, pin, evict, witness — to the one region of the context window
@@ -60,23 +65,30 @@ cache-safe **splicer** that realizes a segment plan into wire bytes without
 moving the prefix boundary. This epic produces the plan; #751's machinery
 executes it. They compose; neither subsumes the other.
 
-## The hard constraint (this is what makes it engineering, not a wish)
+## The hard constraint — and where it stops being hard (regime-scoped)
 
 The system prompt is the **head** of the context window. Two independent bodies
-of evidence say the same thing about the head, and together they *are* the
-design:
+of evidence bear on the head:
 
-1. **The cache prefix is byte-immutable or it is cold.** A KV / provider prefix
-   cache reuses a contiguous run from token 0 up to the first byte that differs;
-   change anything ahead of the stable part and everything after it re-prefills.
-   Manus reports a measured ~10× gap between cached and uncached input — so
-   "dynamically modifiable head" and "warm prefix cache" are in direct tension,
-   and the *only* resolution the field endorses is **append-and-mask, never
-   edit-in-place** (Anthropic context-engineering; Manus, *Lessons from Building
-   Manus*). fak already models this exactly: `cachemeta.SegStable` is literally
-   commented *"system prompt, static instructions — should be byte-identical
-   every turn,"* and `promptmmu`'s floor is `bytes.Equal(raw[:prefixEnd],
-   out[:prefixEnd])` or fail-safe identity.
+1. **In a prefix cache, the prefix is byte-immutable or it is cold.** A
+   radix-tree / provider prefix cache reuses a contiguous run from token 0 up to
+   the first byte that differs; change anything ahead of the stable part and
+   everything after it re-prefills. Manus reports a measured ~10× gap between
+   cached and uncached input. **But this is a property of *radix-tree-keyed
+   prefix caching*, not of caching as such** — the radix tree can only find a
+   match that starts at token 0, so it *defines* reuse as a byte-identical
+   prefix. That is the cache mechanism the field's "append-and-mask, never
+   edit-in-place" rule is really about (Anthropic context-engineering; Manus,
+   *Lessons from Building Manus*).
+
+   The crucial disambiguation: **fak runs in three regimes, and that rule is a
+   HARD law in only two of them** — the two where fak does *not* own the cache.
+   When fak owns the engine, the cache is not a radix tree it must placate; it is
+   a kernel object fak can address. (Regime table below; the honest WITNESSED /
+   PLANNED accounting of *what fak can actually do* to the head in the
+   fak-owned regime is in "Transcending append-only" further down — the short
+   version: fak ships bit-exact span *deletion*, not span *reuse under a changed
+   head*.)
 
 2. **The head is where attention concentrates.** Attention-sink work
    (StreamingLLM) shows the first few tokens absorb persistent attention mass
@@ -84,8 +96,11 @@ design:
    position (best at head and tail, weakest in the middle); heavy-hitter work
    (H2O/SnapKV) shows the tail query predicts which earlier positions matter.
 
-These resolve into one physical layout — and, crucially, **fak-first ordering
-is also the cache-stable, attention-optimal ordering**:
+The attention geometry (2) is regime-independent, and it *alone* already makes
+**fak-first ordering the attention-optimal ordering**. The cache argument (1)
+*adds* a cache-stability reason in the two provider-uncontrolled regimes. So the
+layout below is correct everywhere; it is merely *more strictly forced* on the
+passthrough path:
 
 ```
 [ fak spine ]      immutable, always resident — the attention sink + heavy-hitter
@@ -101,25 +116,100 @@ is also the cache-stable, attention-optimal ordering**:
 ```
 
 The fak-first inversion the goal asks for is not a stylistic preference — it is
-forced by the cache and the attention geometry. The thing that must never move
-(the spine) goes at the head; the thing that changes per turn (the overlay) goes
-after a breakpoint where appending it is free; modification happens by
-**page-in + mask**, never by rewriting the spine.
+forced by the attention geometry everywhere, and *additionally* by the cache on
+the passthrough path. The thing that must never move (the spine) goes at the
+head; the thing that changes per turn (the overlay) goes after a breakpoint where
+appending it is free; modification happens by **page-in + mask** on the
+passthrough path, or by a fak-owned span operation when fak owns the engine.
+
+## The three regimes (who owns the cache decides the rule)
+
+The cache-prefix constraint is not one law; it depends on who owns the KV cache.
+fak operates in three regimes, and "append-and-mask, never edit-in-place" is a
+**hard law in only the two where fak does not own the cache**:
+
+| | **A — provider passthrough** (`guard -- claude`; `serve --base-url anthropic\|openai\|…`) | **C — proxy to a local OpenAI-wire engine** (`--local`, vLLM/SGLang/Ollama/llama.cpp) | **B — fak's OWN in-kernel engine** (`--gguf`/`--metal`/`--backend cuda`, engine `inkernel`) |
+|---|---|---|---|
+| KV cache owner | remote provider | third-party serving engine | **fak itself** (`model.KVCache` / `radixkv.Tree` / `PagedKV`) |
+| fak can address a span? | no — forwards wire bytes verbatim | no — observes KV-events → `PrefixResidencyIndex`; at most a **whole-prefix** reset | **yes** — `Clone` / `Evict` / re-RoPE over a kernel-owned cache |
+| head-mutation cost | **cold prefix** | **cold prefix** (`--engine-cache-require-exact-span` *fails closed* rather than fake a span evict) | **survivors stay reusable** for *deletion* (renumber + re-RoPE bit-exact); *reuse under a changed prefix* still faults to recompute |
+| `fak_controls_cache` | **false** | **false** | **true** |
+| "append-and-mask" is… | a **HARD law** (physics of a byte-prefix cache) | a **HARD law** (third party owns the tree) | a **SOFT default** fak can transcend, but only for *deletion*, within proven bounds |
+
+The boundary is drawn mechanically in the code, not rhetorically:
+`cachemeta/external_invalidation.go:66` deliberately *skips* the provider plane
+("cost-only metadata, not an engine-owned reusable K/V handle"), and the
+exact-span path *fails closed* on an engine that only supports whole-prefix reset
+(`serve.go --engine-cache-require-exact-span`).
+
+## Transcending append-only — what fak can actually do to the head (WITNESSED vs PLANNED)
+
+This is the moat, stated honestly. In the fak-controlled regime (B) fak owns the
+radix tree and keeps the **pre-RoPE key plane (`Kraw`)**, so it can re-derive a
+shifted survivor's positional key in one rotation — something a provider /
+vLLM / SGLang cache *cannot* do, because they store post-RoPE keys only. But the
+capability that ships is narrower than "modify the head freely," and the note
+must not overclaim it:
+
+- **WITNESSED (shipped + tested):** **bit-exact span *eviction* with re-RoPE
+  survivor relocation** — `model.KVCache.Evict` / `PagedKV.Evict`, re-deriving
+  each shifted survivor from the `Kraw` plane, proven byte-identical to a run
+  that *never saw* the span (`TestKVQuarantineEqualsNeverSaw`, `max|Δ|=0`). This
+  is the genuine escape from append-only: fak can **delete** a middle/head span
+  and keep everything else reusable. **But it is wired live only behind
+  `FAK_INKERNEL_KVMMU` (off by default)** — the live `fak agent` HTTP loop
+  quarantines at the byte layer today. Byte-identical *prefix* reuse
+  (`radixkv` / `SessionFromPrefix` / paged `Fork`/`Clone`) is also shipped, but
+  that is ordinary prefix caching — it does not survive a changed head.
+
+- **PLANNED (do NOT state as shipped):** **reusing a relocated, non-prefix span
+  as a cache HIT under a changed head.** fak's own audit
+  (`nonprefix_kvreuse_audit_test.go`) **proves this unsound** and forces it to
+  fault to **selective recompute** — re-prefill the changed span and everything
+  causally downstream. `MaterializeVerdict` and the `kvmmu` ledger are the
+  *refusal* machinery that enforces this (a span whose position regime differs is
+  barred from being served as a hit). So the honest one-liner:
+
+  > **fak's escape from append-only is bit-exact span *deletion* (witnessed on
+  > the synthetic engine, flag-gated on the live loop) plus *selective recompute*
+  > for changed-prefix spans — it is NOT head-mutation-surviving span *reuse*,
+  > which no regime ships.**
+
+What this buys the epic is still decisive: in regime B a spine/policy edit need
+not force a cold prefix the way it does on a provider — fak can evict the changed
+span bit-exactly and re-pin the survivors. But because the epic's flagship target
+is the `guard -- claude` passthrough (regime A), the strict byte-identical form
+is what the invariants below assert *there*, with the regime-B relaxation called
+out explicitly.
 
 ## Load-bearing invariants (every rung holds all five)
 
 Stated as the promptmmu epic states its five, because the discipline is the
 same and a rung that breaks one is not shippable.
 
-1. **The spine is byte-identical every turn — proven, not hoped.** The fak spine
+1. **The spine is byte-identical through the cached prefix — proven, not
+   hoped — on the provider-uncontrolled path (regimes A and C).** The fak spine
    + policy floor re-serialize to the same bytes through the last
    `cache_control`-bearing element; realized through `promptmmu`'s existing
-   `bytes.Equal(prefix)` guard. Any drift ⇒ fail-safe to the prior prompt.
-2. **Append-and-mask, never edit-in-place.** A new or changed overlay item is
-   paged in *after* the breakpoint and gated by masking; the resident array is
-   never mutated mid-session. Modification of a *resident* block is a
-   versioned swap that takes effect at the next prefix rebuild (session
-   start / `--reset-on-budget`), never mid-prefix.
+   `bytes.Equal(prefix)` guard. Any drift ⇒ fail-safe to the prior prompt. This
+   is *forced* by the provider's byte-prefix cache. **In the fak-owned regime
+   (B) the same warm-prefix guarantee is achievable by bit-exact span eviction +
+   re-RoPE rather than by immutability** — fak can change the spine and re-pin
+   the survivors — so there byte-identity is a default, not a necessity. The
+   epic's flagship target is regime A, so the strict form is what the rungs
+   below assert.
+2. **Append-and-mask, never edit-in-place — in the provider-uncontrolled
+   regime.** Whenever fak does not own the cache (A and C), a new or changed
+   overlay item is paged in *after* the breakpoint and gated by masking; the
+   resident array is never mutated mid-session, and modification of a *resident*
+   block is a versioned swap that takes effect at the next prefix rebuild
+   (session start / `--reset-on-budget`), never mid-prefix. **In the fak-owned
+   regime (B), edit-in-place of a resident block is replaced by bit-exact span
+   *eviction* + re-RoPE — the one mechanism that mutates the head and keeps
+   survivors reusable — gated to deletion (not arbitrary reuse) and currently
+   behind `FAK_INKERNEL_KVMMU`.** Reuse of a relocated span under a changed head
+   is *not* a permitted shortcut: it faults to selective recompute (it is
+   unsound, and the audit proves it).
 3. **Safety-critical instructions are always resident, never paged.** The
    dominant failure mode of self-paging on weaker models is *silent
    under-retrieval* (MemGPT degrades on GPT-3.5; the agent thinks it has the
@@ -159,6 +249,7 @@ The biggest lever is to wire what exists into a real base-context assembler.
 | `internal/contextq` (tier 3) | `QueryCapabilities` (MCP-Zero active discovery), `CapabilityLedger`, `SkillContextRecord` HIT-on-reinvocation | the **query primitive** for the overlay |
 | `internal/ctxmmu` (tier 2) | page-in/out, CAS-pinned eviction, witness-clear gate, `PageOutBody` | the **pager** for an evictable overlay body |
 | `internal/ctxresidency` (tier 3) | resident/evictable/held + `MeasureBlastRadius` + `EvictColdest` | the **residency + eviction-cost** read |
+| `internal/model` + `internal/radixkv` + `internal/kvmmu` (regime B only) | `KVCache.Evict` / `PagedKV.Evict` bit-exact span deletion + re-RoPE from the `Kraw` plane (`max\|Δ\|=0`); `radixkv.Tree` prefix reuse; `kvmmu` span ledger | the **fak-owned-engine escape from append-only** — span *deletion* (witnessed; live behind `FAK_INKERNEL_KVMMU`), not relocated-span reuse |
 | `internal/architest` | layered-DAG tier gate | the **layering contract** new packages obey |
 | `internal/sessionreset` | `Contributor` registry folds a drained transcript into a fresh seed | where a **base-context rebuild** re-pins the spine |
 
@@ -213,8 +304,10 @@ Numbered so the keystone lands first and each rung holds all five invariants.
 
 ## What this epic is *not*
 
-- Not a per-turn prompt *rewriter* — the spine is immutable; only the
-  after-breakpoint overlay changes per turn, by append+mask.
+- Not a per-turn prompt *rewriter* — on the passthrough path (regime A) the
+  spine is immutable and only the after-breakpoint overlay changes per turn, by
+  append+mask. (In the fak-owned regime the spine *can* change via bit-exact
+  span eviction, but the epic does not rely on that to ship.)
 - Not prompt *compression* of the base — the fak spine is never run through a
   lossy compressor (page, don't compress; compression is reserved for verbose
   overlay examples, never the canonical fak definition).
@@ -373,3 +466,24 @@ Head-attention geometry — StreamingLLM (2309.17453), Lost in the Middle
 (2307.03172), H2O (2306.14048) / SnapKV (2404.14469). Witness-gated runtime
 self-modification — Voyager (2305.16291), Agentic Context Engineering /
 ACE (2510.04618), *Your Agent May Misevolve* (2509.26354).
+
+Regime disambiguation + the fak-owned-engine escape from append-only — fak's
+own substrate, audited 2026-06-29 (adversarial verification of every
+head-mutation claim): the byte-prefix-cache limitation
+([`docs/explainers/addressable-kv-cache.md`](../explainers/addressable-kv-cache.md),
+[`kv-cache-agentic-context.md`](../explainers/kv-cache-agentic-context.md)); the
+three-regime boundary drawn in code (`internal/cachemeta/external_invalidation.go`
+provider-plane skip + exact-span fail-closed; `internal/engine/vllm.go`
+whole-prefix-only honesty boundary); the witnessed bit-exact span eviction +
+re-RoPE (`internal/model` `KVCache.Evict`/`PagedKV.Evict` with the `Kraw` plane,
+`TestKVQuarantineEqualsNeverSaw` `max|Δ|=0`); the **refusal** of relocated-span
+reuse (`internal/model/nonprefix_kvreuse_audit_test.go` → RECOMPUTE;
+`internal/cachemeta` `MaterializeVerdict`; `internal/kvmmu`); and the live-wiring
+fence (the span-evict bridge in `internal/agent/inkernel_planner.go` is gated
+behind `FAK_INKERNEL_KVMMU`, off by default — the live HTTP loop quarantines at
+the byte layer). The provider-regime levers fak still pulls — request-order /
+layout shaping to hit a warm provider prefix, break-at-the-earliest-stale-span,
+and O(1)+lossless-store reconstruction — are in
+[`VCACHE-VIRTUAL-API-CACHE-2026-06-24.md`](VCACHE-VIRTUAL-API-CACHE-2026-06-24.md)
+and [`o1-context-window-economics.md`](../explainers/o1-context-window-economics.md)
+(both labelled PLANNED / off-path where not yet wired).
