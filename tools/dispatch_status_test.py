@@ -588,6 +588,11 @@ class SlackPostTest(unittest.TestCase):
         import os
         saved = {k: os.environ.pop(k, None) for k in self.SLACK_KEYS}
         self.addCleanup(self._restore_env, saved)
+        cwd = os.getcwd()
+        tmp = tempfile.TemporaryDirectory()
+        os.chdir(tmp.name)
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(os.chdir, cwd)
 
     def _restore_env(self, saved):
         import os
@@ -602,8 +607,9 @@ class SlackPostTest(unittest.TestCase):
         p = build(mod, pre=pre("SPAWN_OK"))
         text = mod.slack_text(p)
         self.assertIn("*dispatch status:* `READY_TO_GROW` (ok)", text)
-        self.assertIn("```", text)            # card is fenced for monospace alignment
-        self.assertIn("DISPATCHER", text)     # the rendered card body is included
+        self.assertIn("0/2 live", text)
+        self.assertIn("S/N self-score", text)
+        self.assertNotIn("```", text)         # Slack uses compact mrkdwn, not a terminal box.
 
     def test_post_to_slack_posts_via_injected_transport(self) -> None:
         import json as _json
@@ -626,6 +632,7 @@ class SlackPostTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["auth"], "Bearer xoxb-test-tok")
         self.assertIn("READY_TO_GROW", calls[0]["body"]["text"])
+        self.assertEqual(calls[0]["body"]["text"].count("S/N self-score"), 1)
 
     def test_post_to_slack_dry_run_does_not_call_transport(self) -> None:
         import os
@@ -655,6 +662,103 @@ class SlackPostTest(unittest.TestCase):
         verdict = mod.post_to_slack(p, channel="")
         self.assertFalse(verdict["posted"])
         self.assertIn("no channel", verdict["skipped"])
+
+
+class GuardCoverageScanTest(unittest.TestCase):
+    """guard_coverage() folds the per-session .dispatch-runs/guard-audit/*.jsonl
+    decision journals into a coverage + decision-mix rollup — hermetic over a tmp dir."""
+
+    def _journal(self, audit_dir: Path, name: str, rows: list[str],
+                 *, mtime: float | None = None) -> None:
+        import os
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        jp = audit_dir / name
+        jp.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+        if mtime is not None:
+            os.utime(jp, (mtime, mtime))
+
+    def test_missing_dir_is_zeroed_and_marked_absent(self) -> None:
+        mod = load()
+        out = mod.guard_coverage(Path("does-not-exist-xyz"))
+        self.assertFalse(out["dir_present"])
+        self.assertEqual(out["sessions"], 0)
+        self.assertEqual(out["rows"], 0)
+
+    def test_counts_sessions_rows_and_decision_mix(self) -> None:
+        mod = load()
+        now = 3_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            # Session A: an allow (DECIDE), a deny, a quarantine.
+            self._journal(audit, "gateway-claude-1-aaaa.jsonl", [
+                '{"seq":1,"kind":"DECIDE","verdict":"ALLOW"}',
+                '{"seq":2,"kind":"DENY","verdict":"DENY"}',
+                '{"seq":3,"kind":"QUARANTINE"}',
+            ], mtime=now)
+            # Session B: a result-deny + a vDSO hit (recent).
+            self._journal(audit, "recall-claude-2-bbbb.jsonl", [
+                '{"seq":1,"kind":"RESULT_DENY"}',
+                '{"seq":2,"kind":"VDSO_HIT"}',
+            ], mtime=now)
+            # Session C: empty (booted under guard, no adjudicated call) and OLD.
+            self._journal(audit, "docs-claude-3-cccc.jsonl", [],
+                          mtime=now - 10 * 24 * 3600)
+            out = mod.guard_coverage(Path(d), now_ts=now)
+        self.assertTrue(out["dir_present"])
+        self.assertEqual(out["sessions"], 3)
+        self.assertEqual(out["rows"], 5)
+        self.assertEqual(out["empty_sessions"], 1)
+        self.assertEqual(out["denied"], 2)        # DENY + RESULT_DENY
+        self.assertEqual(out["quarantined"], 1)
+        self.assertEqual(out["by_kind"]["DECIDE"], 1)
+        self.assertEqual(out["by_kind"]["VDSO_HIT"], 1)
+        # Only A and B fall in the recent window; C is 10 days old.
+        self.assertEqual(out["recent_sessions"], 2)
+        self.assertEqual(out["recent_rows"], 5)
+        self.assertIn("gateway-claude-1-aaaa.jsonl", out["evidence"])
+
+    def test_malformed_line_is_bucketed_not_crashing(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            audit = Path(d) / mod.GUARD_AUDIT_DIRNAME
+            self._journal(audit, "x-claude-9-dddd.jsonl",
+                          ['{"kind":"DECIDE"}', 'not json at all'])
+            out = mod.guard_coverage(Path(d))
+        self.assertEqual(out["rows"], 2)
+        self.assertEqual(out["by_kind"].get("MALFORMED"), 1)
+
+
+class GuardCoverageFoldTest(unittest.TestCase):
+    """build_payload + render surface the guard rollup (payload section, reason, card)."""
+
+    def _guard(self, **over) -> dict:
+        g = {"dir_present": True, "sessions": 2, "recent_sessions": 2,
+             "empty_sessions": 0, "rows": 5, "recent_rows": 5,
+             "by_kind": {"DECIDE": 3, "DENY": 1, "QUARANTINE": 1},
+             "denied": 1, "quarantined": 1, "lookback_min": 90,
+             "evidence": ["gateway-claude-1-aaaa.jsonl"]}
+        g.update(over)
+        return g
+
+    def test_guard_section_and_reason_when_decisions_present(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard())
+        self.assertEqual(p["guard"]["sessions"], 2)
+        self.assertTrue(any("fak guard witnessed 5 kernel decision" in r for r in p["reasons"]))
+        self.assertIn("guard", mod.render(p))
+        self.assertIn("DENY=1", mod.render(p))
+
+    def test_empty_sessions_reason_when_no_decisions(self) -> None:
+        mod = load()
+        p = build(mod, guard=self._guard(rows=0, recent_rows=0, empty_sessions=2,
+                                         by_kind={}, denied=0, quarantined=0))
+        self.assertTrue(any("recorded 0 decisions" in r for r in p["reasons"]))
+
+    def test_guard_defaults_to_empty_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)  # build() does not pass guard -> defaults to None -> {}
+        self.assertEqual(p["guard"], {})
+        self.assertFalse(any("fak guard witnessed" in r for r in p["reasons"]))
 
 
 if __name__ == "__main__":

@@ -51,6 +51,15 @@ SCHEMA = "fleet-dispatch-status/1"
 WATCHDOG_TASK = "FleetIssueDispatch"
 
 RUNS_DIRNAME = ".dispatch-runs"
+# Per-session fak-guard decision journals (one file per guarded worker), written by
+# the dispatch worker's guard_wrap (dispatch_worker.py / cmd/dispatchworker). Each
+# non-empty JSONL line is one kernel decision (internal/journal.Row).
+GUARD_AUDIT_DIRNAME = "guard-audit"
+# The decision-row kinds the journal records (internal/journal.rowFromEvent). DENY +
+# RESULT_DENY are the refusals; QUARANTINE is a poisoned-result hold.
+_GUARD_DENY_KINDS = ("DENY", "RESULT_DENY")
+_GUARD_QUARANTINE_KIND = "QUARANTINE"
+_GUARD_RECENT_LOOKBACK_MIN = 90
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
 # The real-turn byte floor: a log at or below this carried no productive turn — it
@@ -473,6 +482,91 @@ def backend_hook_failures(
     return out
 
 
+def guard_coverage(
+    runs_dir: Path,
+    *,
+    lookback_min: int = _GUARD_RECENT_LOOKBACK_MIN,
+    now_ts: float | None = None,
+) -> dict[str, Any]:
+    """Roll up the per-session ``fak guard`` decision journals on the dispatch path.
+
+    The concurrent-dispatch fleet fronts every worker with ``fak guard`` by default
+    (dispatch_worker.py and cmd/dispatchworker), and each guarded session owns a
+    unique hash-chained journal under ``.dispatch-runs/guard-audit/*.jsonl`` whose
+    every non-empty line is one kernel decision (``internal/journal.Row``). This fold
+    is the WITNESS that the dispatch path actually ran THROUGH the kernel — and what
+    the kernel decided (allow / deny / quarantine) — rather than a flag claiming it
+    did. It does NOT invent a coverage percent it cannot ground: it reports the
+    witnessed session + decision counts, which a self-report cannot fake.
+
+    Read-only / best-effort. Returns a payload with:
+
+      * ``sessions`` — guarded worker sessions on record (= journal files)
+      * ``recent_sessions`` — journals touched within ``lookback_min``
+      * ``empty_sessions`` — journals with 0 decision rows (booted under guard but
+        proposed no adjudicated tool call — the silent empty-turn signature)
+      * ``rows`` / ``recent_rows`` — total / recent kernel decisions
+      * ``by_kind`` — the decision mix (DECIDE/DENY/RESULT_DENY/QUARANTINE/VDSO_HIT/…)
+      * ``denied`` / ``quarantined`` — derived refusal counts
+      * ``evidence`` — the most-recent journal filenames
+    """
+    import time
+
+    audit_dir = runs_dir / GUARD_AUDIT_DIRNAME
+    payload: dict[str, Any] = {
+        "dir_present": audit_dir.is_dir(),
+        "sessions": 0,
+        "recent_sessions": 0,
+        "empty_sessions": 0,
+        "rows": 0,
+        "recent_rows": 0,
+        "by_kind": {},
+        "denied": 0,
+        "quarantined": 0,
+        "lookback_min": lookback_min,
+        "evidence": [],
+    }
+    if not audit_dir.is_dir():
+        return payload
+
+    now_ts = time.time() if now_ts is None else now_ts
+    horizon = now_ts - lookback_min * 60
+    by_kind: dict[str, int] = {}
+    files: list[tuple[float, str, int]] = []  # (mtime, name, rows) for evidence/recency
+    for jp in audit_dir.glob("*.jsonl"):
+        try:
+            mtime = jp.stat().st_mtime
+            text = jp.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rows = 0
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rows += 1
+            try:
+                kind = str(json.loads(line).get("kind") or "UNKNOWN")
+            except ValueError:
+                kind = "MALFORMED"
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+        payload["sessions"] += 1
+        payload["rows"] += rows
+        if rows == 0:
+            payload["empty_sessions"] += 1
+        if mtime >= horizon:
+            payload["recent_sessions"] += 1
+            payload["recent_rows"] += rows
+        files.append((mtime, jp.name, rows))
+
+    payload["by_kind"] = dict(sorted(by_kind.items()))
+    payload["denied"] = sum(by_kind.get(k, 0) for k in _GUARD_DENY_KINDS)
+    payload["quarantined"] = by_kind.get(_GUARD_QUARANTINE_KIND, 0)
+    files.sort(key=lambda r: r[0], reverse=True)
+    payload["evidence"] = [name for _, name, _ in files[:5]]
+    return payload
+
+
 def _total_commits(root: Path) -> int | None:
     """Commits reachable from HEAD, or None if git can't answer. Used to size the
     closure-audit window to the repo so it never silently scans a stale slice."""
@@ -527,6 +621,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     backend_health = read_backend_health(root / RUNS_DIRNAME)
     backend_stub_rate = backend_stub_rates(root / RUNS_DIRNAME)
     hook_failures = backend_hook_failures(root / RUNS_DIRNAME)
+    guard = guard_coverage(root / RUNS_DIRNAME)
     run_status = read_run_status_digests(root)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
@@ -534,7 +629,8 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          silent=silent, weekly_cap=weekly_cap, throughput=throughput,
                          backend_health=backend_health,
                          backend_stub_rate=backend_stub_rate,
-                         hook_failures=hook_failures, run_status=run_status)
+                         hook_failures=hook_failures, guard=guard,
+                         run_status=run_status)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -545,6 +641,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   backend_health: list[dict[str, Any]] | None = None,
                   backend_stub_rate: list[dict[str, Any]] | None = None,
                   hook_failures: list[dict[str, Any]] | None = None,
+                  guard: dict[str, Any] | None = None,
                   run_status: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
@@ -650,6 +747,24 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             f"productive but running unhooked; the commit-path/OFF_TRUNK guard is the "
             f"backstop (#1277)")
 
+    # Guard coverage: the witnessed proof the dispatch path ran THROUGH `fak guard`
+    # (per-session decision journals), and the kernel's decision mix. Informational —
+    # it adds a reason but never flips ok. A present-but-empty trail is its own signal
+    # (workers booted under guard but proposed no adjudicated tool call).
+    guard = guard or {}
+    g_sessions = _int(guard.get("sessions"), 0) or 0
+    g_rows = _int(guard.get("rows"), 0) or 0
+    if g_sessions and g_rows:
+        reasons.append(
+            f"fak guard witnessed {g_rows} kernel decision(s) across {g_sessions} "
+            f"dispatch session(s) ({guard.get('denied', 0)} denied, "
+            f"{guard.get('quarantined', 0)} quarantined)")
+    elif g_sessions:
+        reasons.append(
+            f"fak guard ran {g_sessions} dispatch session(s) but recorded 0 decisions "
+            f"({guard.get('empty_sessions', 0)} empty) — workers booted under guard "
+            f"but proposed no adjudicated tool call")
+
     if not tp_na:
         tp_verdict = throughput.get("verdict")
         tp_rate = throughput.get("completed_rate_per_hour")
@@ -737,6 +852,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "unhooked_count": len(unhooked),
             "by_backend": hook_failures,
         },
+        "guard": guard,
         "run_status": {
             "source": "dos status",
             "count": len(run_status),
@@ -809,6 +925,12 @@ def render(p: dict[str, Any]) -> str:
                          f" ({int(float(r.get('failure_session_rate') or 0) * 100)}%)"
                          for r in unhooked_rows[:4])
         lines.append(f"║ hooks     : guard layer UNBOUND [{bits}] (#1277)")
+    gd = p.get("guard") or {}
+    if gd.get("sessions"):
+        lines.append(
+            f"║ guard     : {gd.get('sessions')} session(s) ({gd.get('recent_sessions', 0)} recent), "
+            f"{gd.get('rows', 0)} decision(s) [DENY={gd.get('denied', 0)} "
+            f"QUAR={gd.get('quarantined', 0)}]  empty={gd.get('empty_sessions', 0)}")
     rs = p.get("run_status") or {}
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
@@ -1015,6 +1137,42 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| {row.get('product')} | {row.get('lookback_min')}m | "
                        f"{row.get('sessions')} | {row.get('sessions_with_hook_failures')} | "
                        f"{rate} | {row.get('hook_failures')} | {verdict} | {evidence} |")
+
+    gd = payload.get("guard") or {}
+    out += ["", "## Guard coverage (kernel decisions on the dispatch path)", ""]
+    if not gd.get("dir_present"):
+        out.append(
+            "_No `.dispatch-runs/guard-audit/` journal yet — no guarded worker has run "
+            "on this host. The dispatch worker fronts every session with `fak guard` by "
+            "default (opt out `FLEET_DOGFOOD_GUARD=0`); the trail appears once one runs._")
+    elif not gd.get("sessions"):
+        out.append(
+            "_The guard-audit directory exists but holds no journals — the guard wire is "
+            "configured but never exercised by a launched worker._")
+    else:
+        by_kind = gd.get("by_kind") or {}
+        out += [
+            f"`fak guard` recorded **{gd.get('rows', 0)}** kernel decision(s) across "
+            f"**{gd.get('sessions', 0)}** guarded dispatch session(s) "
+            f"(**{gd.get('recent_sessions', 0)}** within {gd.get('lookback_min')}m) — the "
+            "WITNESS that the concurrent-dispatch path ran THROUGH the kernel, not just "
+            "got configured to. Each session owns a unique hash-chained journal "
+            "(`fak audit verify <file>`); the decision mix is the kernel's verdict tally.",
+            "",
+            f"- **denied** (DENY + RESULT_DENY): {gd.get('denied', 0)}",
+            f"- **quarantined**: {gd.get('quarantined', 0)}",
+            f"- **empty sessions** (booted under guard, no adjudicated tool call): "
+            f"{gd.get('empty_sessions', 0)}",
+            "",
+            "| decision kind | count |",
+            "|---|---:|",
+        ]
+        for kind, n in sorted(by_kind.items(), key=lambda kv: (-kv[1], kv[0])):
+            out.append(f"| {kind} | {n} |")
+        evidence = gd.get("evidence") or []
+        if evidence:
+            out += ["", "Recent journals: "
+                    + ", ".join(f"`{name}`" for name in evidence) + "."]
 
     sc = w.get("silent_count") or 0
     out += ["", "## Workers that produced nothing", ""]
