@@ -44,6 +44,31 @@ func TestBuildLaunchArgv(t *testing.T) {
 			opts: launchOpts{command: "claude", useGuard: false, skipPermissions: false},
 			want: []string{"claude"},
 		},
+		{
+			// Codex gets ITS bypass flag, not Claude's --dangerously-skip-permissions (which
+			// Codex rejects as an unexpected argument). This is the bug that made
+			// `fak accounts launch --command codex` fail before the agent ever started.
+			name: "codex guard on, skip-perms on -> codex bypass flag, not the claude flag",
+			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: true},
+			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox"},
+		},
+		{
+			name: "codex with passthrough keeps order after the bypass flag",
+			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: true, passthrough: []string{"exec", "do x"}},
+			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox", "exec", "do x"},
+		},
+		{
+			name: "codex skip-perms off gets no bypass flag (codex prompts)",
+			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: false},
+			want: []string{fakBin, "guard", "--", "codex"},
+		},
+		{
+			// An agent fak has no known bypass flag for must NOT be handed the claude flag;
+			// the kernel floor under guard still adjudicates every call.
+			name: "unknown agent skip-perms on gets no flag, not the claude flag",
+			opts: launchOpts{command: "opencode", useGuard: true, skipPermissions: true},
+			want: []string{fakBin, "guard", "--", "opencode"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,6 +77,34 @@ func TestBuildLaunchArgv(t *testing.T) {
 				t.Fatalf("buildLaunchArgv = %#v, want %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLaunchSkipPermsFlag pins the per-agent mapping of the "kernel is the permission system"
+// flag — the fix for the launcher feeding every agent Claude's flag. The codex value mirrors
+// the flag the repo's own codex dispatch (tools/issue_resolve_dispatch.py) uses; an unknown
+// agent yields "" so it is never handed a wrong flag. Matching normalizes paths/suffixes/case
+// via guardAgentBaseName.
+func TestLaunchSkipPermsFlag(t *testing.T) {
+	cases := []struct {
+		command string
+		want    string
+	}{
+		{"claude", "--dangerously-skip-permissions"},
+		{"claude-code", "--dangerously-skip-permissions"},
+		{"/usr/local/bin/claude", "--dangerously-skip-permissions"}, // absolute path normalized
+		{"codex", "--dangerously-bypass-approvals-and-sandbox"},
+		{"Codex", "--dangerously-bypass-approvals-and-sandbox"},     // case-insensitive
+		{"codex.exe", "--dangerously-bypass-approvals-and-sandbox"}, // Windows launcher suffix
+		{`C:\tools\codex.exe`, "--dangerously-bypass-approvals-and-sandbox"},
+		{"opencode", ""}, // known agent, but no bypass-flag mapping -> none, not the claude flag
+		{"aider", ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := launchSkipPermsFlag(tc.command); got != tc.want {
+			t.Errorf("launchSkipPermsFlag(%q) = %q, want %q", tc.command, got, tc.want)
+		}
 	}
 }
 

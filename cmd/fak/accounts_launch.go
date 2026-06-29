@@ -38,17 +38,45 @@ type launchOpts struct {
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
 
+// launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
+// fak's capability floor — i.e. suppresses the agent's OWN per-call approval prompts, because
+// under `fak guard` the kernel is the permission system. The flag is agent-specific, so a
+// hardcoded value is a footgun: Claude Code's `--dangerously-skip-permissions` is an
+// "unexpected argument" to Codex, which is why `fak accounts launch --command codex` used to
+// fail before it ever started. The mappings match the flags the repo's own non-interactive
+// codex dispatch already uses (tools/issue_resolve_dispatch.py): Claude Code takes
+// `--dangerously-skip-permissions`; the Codex CLI takes `--dangerously-bypass-approvals-and-sandbox`
+// (a root-level global flag, so it composes with the guard `-c` provider overrides
+// installGuardCodexConfig prepends). An agent fak doesn't know the flag for returns "" — the
+// kernel floor still adjudicates every call under guard, that agent just keeps its own
+// prompting rather than being handed a wrong flag. Matching reuses guardAgentBaseName, so a
+// path, a Windows launcher suffix, or odd casing still resolves.
+func launchSkipPermsFlag(command string) string {
+	switch guardAgentBaseName(command) {
+	case "claude", "claude-code":
+		return "--dangerously-skip-permissions"
+	case "codex":
+		return "--dangerously-bypass-approvals-and-sandbox"
+	default:
+		return ""
+	}
+}
+
 // buildLaunchArgv constructs the process argv for an account-switched launch. With useGuard
 // the agent runs UNDER `fak guard` (this same binary), so the kernel adjudicates every tool
 // call and the prompt-cache/compaction (vCache) layer is on; the agent itself is started with
-// --dangerously-skip-permissions (when skipPermissions) so fak's capability floor — not
-// Claude's own prompts — is the permission system. fakBin is the path to this binary
-// (os.Executable), used only for the guard wrap. It is pure (no I/O) so the wiring is
-// unit-tested without spawning anything.
+// its permission-bypass flag (when skipPermissions) so fak's capability floor — not the
+// agent's own prompts — is the permission system. The flag is resolved PER AGENT
+// (launchSkipPermsFlag), so a Claude launch gets --dangerously-skip-permissions while a Codex
+// launch gets --dangerously-bypass-approvals-and-sandbox; an agent with no known flag simply
+// gets none. fakBin is the path to this binary (os.Executable), used only for the guard wrap.
+// It is pure (no I/O) so the wiring is unit-tested without spawning anything.
 func buildLaunchArgv(fakBin string, o launchOpts) []string {
 	agentCmd := []string{o.command}
 	if o.skipPermissions {
-		agentCmd = append(agentCmd, "--dangerously-skip-permissions")
+		if flag := launchSkipPermsFlag(o.command); flag != "" {
+			agentCmd = append(agentCmd, flag)
+		}
 	}
 	agentCmd = append(agentCmd, o.passthrough...)
 	if !o.useGuard {
@@ -161,9 +189,13 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	if p.useGuard {
 		guardWord = "on (fak guard — kernel adjudicates every tool call; prompt-cache/compaction vCache layer on)"
 	}
-	permWord := "claude prompts per tool (--skip-permissions=false)"
+	permWord := command + " prompts per tool (--skip-permissions=false)"
 	if p.skipPerms {
-		permWord = "fak floor is the permission system (--dangerously-skip-permissions passed to claude)"
+		if flag := launchSkipPermsFlag(command); flag != "" {
+			permWord = fmt.Sprintf("fak floor is the permission system (%s passed to %s)", flag, command)
+		} else {
+			permWord = fmt.Sprintf("fak floor is the permission system; %s keeps its own prompts (no known kernel-bypass flag)", command)
+		}
 	}
 	fmt.Fprintf(stderr, "fak accounts launch — seat %q\n", home.Name)
 	fmt.Fprintf(stderr, "  CLAUDE_CONFIG_DIR = %s\n", home.Dir)
