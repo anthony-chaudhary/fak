@@ -45,6 +45,45 @@ gate refuses it (see [the boundary doc](dgx-slack-boundary.md)). Public `fak` ke
    files** — the public scrub must stay intact, so never commit them. The commit gate
    (`tools/check_committed_files.py`) refuses any `cmd|internal/*dgx*` path as a backstop.
 
+## Operating recipe (the part that bites — read this)
+
+Once the bridge is built (`dgxbridge` from the private snapshot), these are the rules that
+separate "it works" from "I wrongly concluded the bridge is dead." They carry **no private
+values** — the host/channel/token resolve from the gitignored env file in `fak-private`.
+
+**The bridge is usually LIVE but SLOW.** It is a Slack round-trip through a hub transcript,
+not SSH. A short probe is the single biggest trap: `dgxbridge status -probe` with the default
+`-probe-wait` (or a sub-minute `-timeout`) routinely returns `STALE (no control reply within
+timeout)` / "an operator must restart the bridge" when the shell is **actually fine**. That is
+a **false negative**, not a dead bridge.
+
+The recipe that works — probe patiently, run a real command, and do it in the background so a
+2-minute foreground cap can't truncate the round-trip into a false negative:
+
+```sh
+# Confirm a live session AND pick it, in one cheap real command:
+dgxbridge -probe -probe-wait 90s -settle 12s -timeout 5m run 'echo BRIDGE_OK_$(hostname)'
+#   dgxbridge: picked running session default-NN ...
+#   BRIDGE_OK_<box>
+```
+
+- **Patient flags:** `-probe-wait 90s -settle 12s -timeout 5m`. The default 15s probe-wait is
+  too short for a busy box.
+- **Run it backgrounded** (your harness's background mode) so the slow round-trip completes
+  off the foreground clock.
+- **Prefer a real command over a bare `status`** — `run 'echo … $(hostname)'` both proves
+  liveness and prints which session it picked.
+- **Multi-line output** from a single `run` can lose the async transcript tail. For anything
+  beyond a line or two, wrap the output in a **nonce sentinel** (`echo NONCE_X; …; echo
+  NONCE_END_X`) and read between the sentinels, or use `bg <script> <tag>` → `poll <tag>` for
+  a long job that writes `/tmp/fakgpu/<tag>.log` + `.done`.
+- **Per-box channel** is selected with `-channel <id>` (the ids live in `fak-private`'s
+  node→channel map); omitting it uses the default control channel.
+
+If `-probe` genuinely finds only STALE banners after a patient wait, *then* an operator must
+(re)start the remote control shell — a bare `default` login shell exits before delayed stdin,
+so the box needs a persistent/tmux control session.
+
 ## See also
 
 - [GPU-server / Slack boundary](dgx-slack-boundary.md) — the source of truth for *what is

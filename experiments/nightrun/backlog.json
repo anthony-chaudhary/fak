@@ -11,5 +11,18 @@
     "recheck_days": 30,
     "timeout_sec": 7200,
     "doc": "docs/notes/GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md"
+  },
+  {
+    "id": "witness-qwen36-27b-metal-decode",
+    "title": "Qwen3.6-27B Q4_K_M single-stream decode tok/s in fak's OWN Apple-Silicon Metal kernel (engine=inkernel, --metal), NOT coder14b/llama.cpp. The decode-length curve (16/32/64/128 tok) traces the prefill-amortization asymptote. The 36GB Mac needs --context-budget-tokens to bound KV (the full native window is 192GiB -> FitTooBig).",
+    "source": "overlay",
+    "value": "frontier",
+    "requires": ["metal", "weights"],
+    "manual": true,
+    "run": "On the Mac metal node (a -tags fakmetal fak build): FAK_Q4K=1 FAK_GATEWAY_KEY=$(cat ~/.fak-gateway-key) fak serve --metal --gguf <mac>/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf --model qwen3.6-27b --addr $FAK_MAC_GATEWAY --require-key-env FAK_GATEWAY_KEY --context-budget-tokens 8192  then curl /v1/chat/completions max_tokens={16,32,64,128} and record completion_tokens/time_total. WARM the serve first (discard the cold 16-tok point). Real mac host/user resolve from the gitignored fak-mac.local.ps1 (see docs/fak/scrubbing-real-values.md).",
+    "acceptance": "a recorded warm single-stream decode tok/s curve for Qwen3.6-27B Q4_K_M on the Mac Metal node, labelled WITNESSED (fak own kernel); the cold first-request point flagged separately",
+    "recheck_days": 14,
+    "timeout_sec": 1800,
+    "doc": "docs/nightrun/MAC-OVERNIGHT-PLAN-2026-06-28.md"
   }
 ]
