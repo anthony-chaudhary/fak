@@ -36,6 +36,17 @@ func usageCoreVerbs() {
                  refute -> REVIEW_REFUTED; unreachable reviewer -> logged fail-open.
                  Refuses OFF_TRUNK / MERGE_IN_PROGRESS / NOTHING_STAGED up front.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
+  fak sweep     [--dir DIR] [--json] | --apply --lane L -m "SUBJECT" [--path P ...] [--push]
+                (DRIVE A DIRTY MULTI-SESSION TREE TOWARD ZERO: the layer above fak commit.
+                 Default mode REPORTS the working tree grouped by lane — every stampable
+                 change under the (fak <leaf>) trailer its paths imply (the SAME dos.toml
+                 path->lane engine the pre-commit lint binds to), plus the residual a sweep
+                 must NOT silently commit: stray scratch/log junk, and root-level files with
+                 no inferable lane. It never invents a subject — with --apply --lane L -m S it
+                 commits exactly lane L's dirty paths (narrow with --path) through the safe
+                 commit path (appends the (fak L) stamp, pre-lints, refuses OFF_TRUNK / a
+                 pathspec race / an off-lane stamp). --json feeds a drive-to-zero loop.
+                 Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/failed commit)
   fak affected  [--base REF] [--file P] [--budget DUR] [--report FILE]
                 [--list] [--json] [--short] [--run RE] [--] [go test args]
                 (the FAST INNER LOOP: run go test for only the packages your
