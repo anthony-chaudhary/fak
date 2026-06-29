@@ -60,6 +60,7 @@ How any change is built, tested, partitioned across parallel sessions, and shipp
 |---|---|
 | [`AGENTS.md`](../AGENTS.md), [`CLAUDE.md`](../CLAUDE.md) | Orientation plus the working contract: build/test/run, the repo layout, and the hard rules enforced below the agent layer (trunk-only, commit-by-path, ship-stamp grammar). |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | How to land a change: the full contributor contract. |
+| [Developer tooling](dev-tooling.md) | The hands-on practitioner layer: the commands you run *inside* the loop — the test runner (`make test*` + WSL), the debuggers (`fak debug` / `fak doctor`), profiling (Go pprof + the benchmark verbs), and the commit-and-ship loop. Honest about which capabilities are dedicated `fak` verbs today and which (`fak profile` / `fak test`) are planned. |
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`PARTITION.md`](../PARTITION.md) | The structure: the registry seams, the frozen additive-only ABI (`internal/abi`), and the star-of-disjoint-leaf-trees model a feature attaches to. |
 | [`dos.toml`](../dos.toml) `[lanes]` | The mechanism that makes parallel dev safe: one lane per leaf across the 115-tree `[lanes.trees]` roster, so two sessions editing disjoint leaves never collide. `internal/architest` fails the build on an upward or cross-tier import. |
 
