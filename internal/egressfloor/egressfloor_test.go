@@ -7,15 +7,15 @@ import "testing"
 // box's cloud credentials is denied by host alone.
 func TestClassifyHostBlocks(t *testing.T) {
 	blocked := []string{
-		"169.254.169.254",         // AWS/GCP/Azure/DO/Oracle/OpenStack IMDS
-		"169.254.170.2",           // AWS ECS task metadata
-		"169.254.0.1",             // any other link-local /16 host
+		"169.254.169.254",          // AWS/GCP/Azure/DO/Oracle/OpenStack IMDS
+		"169.254.170.2",            // AWS ECS task metadata
+		"169.254.0.1",              // any other link-local /16 host
 		"metadata.google.internal", // GCP metadata by name
 		"METADATA.GOOGLE.INTERNAL", // case-insensitive
-		"metadata",                // short metadata name
-		"100.100.100.100",         // Alibaba Cloud metadata
-		"fd00:ec2::254",           // AWS IMDSv6
-		"fe80::1",                 // IPv6 link-local
+		"metadata",                 // short metadata name
+		"100.100.100.100",          // Alibaba Cloud metadata
+		"fd00:ec2::254",            // AWS IMDSv6
+		"fe80::1",                  // IPv6 link-local
 	}
 	for _, h := range blocked {
 		if ok, lbl := ClassifyHost(h); !ok {
@@ -37,9 +37,9 @@ func TestClassifyHostAllows(t *testing.T) {
 		"8.8.8.8",
 		"1.1.1.1",
 		"example.com",
-		"localhost",     // loopback is the gateway's own bind; not a metadata target
+		"localhost", // loopback is the gateway's own bind; not a metadata target
 		"127.0.0.1",
-		"10.0.0.5",      // RFC1918 private, but not link-local/metadata
+		"10.0.0.5", // RFC1918 private, but not link-local/metadata
 		"192.168.1.1",
 		"",
 	}
