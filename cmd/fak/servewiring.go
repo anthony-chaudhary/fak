@@ -73,9 +73,12 @@ var servewiringData = []wiringRow{
 	{"inkernelchat", "--gguf / --tokenizer", "InKernelModel", verdictWired, "internal/gateway/gateway.go:861", "with model+tokenizer and no --base-url, /v1/chat/completions and /v1/messages serve the in-kernel model"},
 	{"replica", "--replica-base-url", "ReplicaBaseURLs", verdictWired, "internal/gateway/gateway.go:715", "2+ endpoints -> ReplicaRouter round-robin"},
 	{"vdso", "--vdso / --invalidation", "VDSO", verdictWired, "internal/kernel/kernel.go:348", "dedup fast path + tier-2 invalidation granularity"},
+	{"vdsoproxyfill", "--vdso-proxy-fill", "VDSOProxyFill", verdictOffByDefault, "internal/gateway/gateway.go:1868", "warms the vDSO tier-2 cache from admitted inbound tool_result blocks; off by default"},
 	{"toolfloor", "(adjudicator.Default.NeverAdmits)", "ToolFloorDenies", verdictWired, "internal/gateway/messages.go:392", "prunes provably-unreachable tool defs from the Anthropic passthrough; default-on, fail-safe"},
 	{"decidesession", "(host func, default-on)", "DecideSession", verdictWired, "internal/gateway/session_admit.go:57", "run-state refusal + TurnsLeft debit + budget + pace, before the model turn"},
 	{"debitsession", "(host func, default-on)", "DebitSession", verdictWired, "internal/gateway/session_admit.go:157", "debits TokensLeft + context budget after the planner returns"},
+	{"nativeserve", "--native", "Native", verdictOffByDefault, "internal/gateway/messages.go:153", "routes non-streaming /v1/messages through fak's owned agent.RunArm loop; off by default"},
+	{"nativeserveturns", "--native-max-turns", "NativeMaxTurns", verdictOffByDefault, "internal/gateway/native_serve.go:33", "caps the owned native serve loop's model round-trips per request when --native is enabled"},
 	{"routemanifest", "--route-manifest", "RouteManifest", verdictWired, "internal/gateway/gateway.go:1127", "binds ToolCall.Engine before Submit; flag wired (was DEAD_WIRED before this pass)"},
 	{"ctxview", "--ctx-view-budget", "CtxViewBudget", verdictWired, "internal/gateway/gateway.go:788", "re-materializes history as an O(1) planned ctxplan view under the budget; DEFAULT-ON at 8000 resident tokens (fail-open, Anthropic cache prefix byte-identical), pass 0 to disable"},
 	{"compacthistory", "--compact-history-budget", "CompactHistoryBudget", verdictWired, "internal/gateway/messages.go:365", "compacts old turns in the Anthropic outbound body once it sprawls past the budget, cache prefix byte-identical; DEFAULT-ON at ~48k (gateway.DefaultCompactHistoryBudget), pass 0 to disable"},
@@ -88,6 +91,7 @@ var servewiringData = []wiringRow{
 	{"backend", "--backend", "Backend", verdictOffByDefault, "internal/agent/inkernel_planner.go:271", "decodes the in-kernel chat through the compute HAL device; off when name empty"},
 	{"cpuoffloadexperts", "--cpu-offload-experts", "CPUOffloadExperts", verdictOffByDefault, "internal/agent/inkernel_planner.go:282", "with --gguf --backend, keeps MoE expert GEMMs on host RAM while dense/router/attention run on the device; off by default"},
 	{"metal", "--metal", "Metal", verdictWired, "internal/agent/inkernel_planner.go:1067", "with --gguf (no --backend), auto-selects the Apple-Silicon metalgemm GPU when Apple-Silicon+cgo+a device are available; --metal/FAK_METAL=1 requires that path fail-loud; dense-Qwen Q8 only; CPU fallback on non-Metal builds or unavailable devices"},
+	{"expertparallel", "--expert-parallel", "ExpertParallelRanks", verdictOffByDefault, "internal/gateway/gateway.go:817", "sets expert-parallel MoE ranks on the in-kernel model before planner construction; 0/1 leave the monolith path unchanged"},
 	{"steersession", "(host func, default-on)", "SteerSession", verdictPartial, "internal/gateway/http.go:951", "POST /session/{id}/steer sends onto a2achan; the running-session TryRecv splice is deferred (#760)"},
 }
 
