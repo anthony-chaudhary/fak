@@ -35,12 +35,15 @@
 // observes them through the table instead of re-deriving from a process scan.
 //
 // This package is a foundation leaf: stdlib-only (container/list + sync) plus the
-// shared internal/lifecycle vocabulary leaf, off the request path, registers
-// nothing. The zero Table is not usable — construct with NewTable /
-// NewTableWithLimit.
+// shared internal/lifecycle vocabulary leaf and the internal/dormancy clock (both
+// tier-1 foundation leaves), off the request path, registers nothing. The zero Table
+// is not usable — construct with NewTable / NewTableWithLimit.
 package session
 
-import "github.com/anthony-chaudhary/fak/internal/lifecycle"
+import (
+	"github.com/anthony-chaudhary/fak/internal/dormancy"
+	"github.com/anthony-chaudhary/fak/internal/lifecycle"
+)
 
 // RunState is a served session's lifecycle position — a small, total state machine.
 // The transitions are the control verbs the design names: throttle/pause/resume
@@ -224,7 +227,17 @@ type State struct {
 	// reads it, no decision gates on it. The zero ring is the safe "no cost history yet"
 	// default and, via omitzero, marshals byte-identically to a pre-ring State.
 	Cost CostRing `json:"cost,omitempty,omitzero"`
-	Rev  uint64   `json:"rev"`
+	// LastActive is the durable dormancy clock (issue #1179, the random-time-horizons
+	// epic #1178): a monotonic LastActiveAt stamp from which a session's dormancy band
+	// (warm/cool/cold/frozen/ancient) is derivable without I/O via
+	// LastActive.HorizonAt(now). It is the session's home for the "how long has this
+	// been off?" measurement the rehydration rungs (#1181-#1186) will scale revalidation
+	// to. ADVISORY / no-behavior-change in Phase 1: zero readers gate on it, and the zero
+	// (never-stamped) Stamp marshals away via omitzero, so a pre-clock State is wire-
+	// identical. A consumer that promotes it to a live field (resume's idle figure, the
+	// scheduler's dormant-vs-stuck split #1180) lands in a later phase.
+	LastActive dormancy.Stamp `json:"last_active,omitempty,omitzero"`
+	Rev        uint64         `json:"rev"`
 }
 
 // Goal is the structural root descriptor carried on State (issue #849). It names the

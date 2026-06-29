@@ -50,6 +50,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/dormancy"
 )
 
 // refPrefix is the dedicated ref namespace every fak side ref lives under. Unlike
@@ -94,6 +96,18 @@ func (r Record) Expired(now time.Time) bool {
 
 // Ref returns the full ref path this record is stored at.
 func (r Record) Ref() string { return refPrefix + r.ID }
+
+// LastActive exposes the lease's dormancy clock (issue #1179, epic #1178): the durable
+// LastActiveAt stamp derived from AcquiredAt (unix seconds), from which the lease's
+// dormancy band (warm/cool/cold/frozen/ancient) is derivable without I/O via
+// r.LastActive().HorizonAt(now). A holder that went dormant past its TTL and returns is
+// the worst-case stale writer (#906 §3.3); this is the measured "how long has this lease
+// been held without a refresh?" the Phase-2 lease-fence rung (#1182) keys halt-and-
+// reacquire on. Pure: it reads only the recorded AcquiredAt, adds no field, and writes
+// no ref. A zero AcquiredAt yields the zero (unknown) Stamp, which buckets to Ancient.
+func (r Record) LastActive() dormancy.Stamp {
+	return dormancy.FromUnix(r.AcquiredAt)
+}
 
 // Store reads and writes lease records under refs/fak/locks/* through the ONE Runner
 // seam. Construct with New (real git) or NewWithRunner (injected evidence). dir is the

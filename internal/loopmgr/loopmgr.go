@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 )
@@ -378,6 +379,17 @@ type LoopSnapshot struct {
 	WitnessUnavailable  uint64       `json:"witness_unavailable"`
 	Notifications       uint64       `json:"notifications"`
 	LastRun             *RunSnapshot `json:"last_run,omitempty"`
+}
+
+// LastActive exposes the loop's dormancy clock (issue #1179, epic #1178): the durable
+// LastActiveAt stamp derived from the last ledger-event timestamp the fold already
+// carries. From it a loop's dormancy band (warm/cool/cold/frozen/ancient) is derivable
+// without I/O via snap.LastActive().HorizonAt(now) — the input the #1180 dormant-vs-stuck
+// split and the Phase-3 durable-wake rungs (#1188) key on. A loop with no events yet
+// yields the zero (unknown) Stamp, which buckets to Ancient. Pure: it reads only the
+// already-recorded LastEventUnixNano, adds no field, and changes no ledger byte.
+func (s LoopSnapshot) LastActive() dormancy.Stamp {
+	return dormancy.FromUnixNano(s.LastEventUnixNano)
 }
 
 type RunSnapshot struct {
