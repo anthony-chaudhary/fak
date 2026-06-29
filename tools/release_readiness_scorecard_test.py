@@ -26,6 +26,7 @@ def _all_met_facts() -> dict:
         "llms_release": True,
         "cadence_dry_run_only": False,
         "cadence_auto_cut": True,
+        "cadence_auto_cut_default_on": True,
         "staleness_wired": True,
         "latest_tag": "v9.9.9",
         "commits_behind": 1,

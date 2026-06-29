@@ -143,19 +143,20 @@ def gather(root: Path) -> dict:
 
     # --- AUTOMATE ---
     cadence = _read(root, ".github/workflows/release-cadence.yml")
-    # The defang line: scheduled/default runs "stop after the plan". An auto-cut mode
-    # is present when an execute step is reachable on a schedule event (not gated to
-    # workflow_dispatch + dry_run==false only). We detect the opt-in marker the
-    # auto-cut fix introduces (FAK_AUTO_RELEASE) OR a schedule-reachable execute.
-    f["cadence_dry_run_only"] = "stop after the plan" in cadence.lower()
-    # Auto-cut is present only when an EXPLICIT opt-in (FAK_AUTO_RELEASE) or a named
-    # auto-cut step exists. We do NOT infer it from a cross-line regex: lines 130 and
-    # 140 of the dry-run-only cadence are different steps (a "stop after plan" guard
-    # and a dispatch-only execute), and a DOTALL match across them falsely credits a
-    # capability that isn't wired. The detector must agree with the dry-run-only fact.
     cl = cadence.lower()
+    # Auto-cut is WIRED when the cadence references the FAK_AUTO_RELEASE switch / a
+    # named auto-cut path AND it is not a pure dry-run-only cadence. We do NOT infer
+    # it from a cross-line regex (a "stop after plan" guard and a dispatch-only execute
+    # are different steps; a DOTALL match across them falsely credits the capability).
     f["cadence_auto_cut"] = ("fak_auto_release" in cl or "auto-cut" in cl) and not (
         "stop after the plan" in cl and "fak_auto_release" not in cl and "auto-cut" not in cl
+    )
+    # Auto-cut is DEFAULT-ON (the strong posture) when a scheduled tick executes
+    # UNLESS the kill switch is set — i.e. the cadence says auto-cut is default-on and
+    # the arm logic tests `!= "0"` rather than `== "1"`. This is what "releases go
+    # green automatically when the gates pass" means, with a kill switch not an arm.
+    f["cadence_auto_cut_default_on"] = f["cadence_auto_cut"] and (
+        "default-on" in cl and '!= "0"' in cadence
     )
 
     # staleness wired: a make target or any workflow references release-staleness.
@@ -296,8 +297,10 @@ KPIS = [
     ("staleness_verb", "discover", 1, lambda f: f["staleness_verb"],
      "`fak release-staleness` exists", "Keep the staleness verb dispatched"),
 
-    ("cadence_auto_cut", "automate", 4, lambda f: f["cadence_auto_cut"],
+    ("cadence_auto_cut", "automate", 3, lambda f: f["cadence_auto_cut"],
      "cadence can cut on a scheduled tick", "Add guarded auto-cut to release-cadence.yml (#1355)"),
+    ("cadence_auto_cut_default_on", "automate", 2, lambda f: f["cadence_auto_cut_default_on"],
+     "scheduled auto-cut is DEFAULT-ON (kill switch, not arm)", "Make auto-cut default-on with a FAK_AUTO_RELEASE=0 kill switch (#1355)"),
     ("staleness_wired", "automate", 2, lambda f: f["staleness_wired"],
      "staleness signal wired into make/CI", "Wire `fak release-staleness --check` into a target/CI (#1367)"),
     ("not_very_stale", "automate", 2, lambda f: f["staleness_verdict"] not in ("VERY_STALE",) and f["staleness_verdict"] != "UNKNOWN",
