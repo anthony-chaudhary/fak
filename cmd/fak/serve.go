@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
@@ -70,6 +71,13 @@ func debugStatsSink(on bool) func(string, ...any) {
 	return func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, format+"\n", args...)
 	}
+}
+
+func configureServeToolEngines() {
+	// Serve exposes fak_read over MCP even when it is not running the demo agent loop.
+	// Register only the confined read miss engine; agent.Configure would also install
+	// the demo airline tool policy and is intentionally not part of serve startup.
+	agent.RegisterReadEngine("")
 }
 
 func cmdServe(argv []string) {
@@ -181,6 +189,7 @@ func cmdServe(argv []string) {
 		{Name: "flag-parse", Dur: parseDur},
 		{Name: "policy-load", Dur: time.Since(tPolicy)},
 	}
+	configureServeToolEngines()
 
 	// Resolve the optional in-kernel chat decode backend BEFORE eager model loading, so
 	// a known device can refuse an oversize GGUF from its header instead of OOMing during

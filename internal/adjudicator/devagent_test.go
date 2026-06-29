@@ -54,6 +54,17 @@ func TestDevAgentAllowsShipReleaseAtFloor(t *testing.T) {
 	}
 }
 
+// The Codex-visible fak_read MCP helper lowers to the host-style `Read` tool name
+// before dispatch. The dev-agent floor must allow that exact name, not only read_*
+// prefixes, or the advertised read helper terminal-denies every file read.
+func TestDevAgentAllowsHostReadForFakReadMCP(t *testing.T) {
+	a := New(DevAgentPolicy())
+	v := a.Adjudicate(context.Background(), inlineCall("Read", `{"file_path":"AGENTS.md"}`))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("Read at the floor: got %v/%s, want Allow", v.Kind, abi.ReasonName(v.Reason))
+	}
+}
+
 // An ordinary write OUTSIDE the spine is not a self-modify (it falls through to the
 // fail-closed default-deny, not a SELF_MODIFY escalation) — the floor bounds writes
 // to the spine specifically, it does not blanket-deny every write as self-modify.

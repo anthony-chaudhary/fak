@@ -23,6 +23,34 @@ func TestServeWiringCheckPassesOnRealTree(t *testing.T) {
 	}
 }
 
+func TestServeRegistersFakReadEngineBeforeGatewayNew(t *testing.T) {
+	root := repoRootFromTest(t)
+	servePath := filepath.Join(root, "cmd", "fak", "serve.go")
+	body, err := os.ReadFile(servePath)
+	if err != nil {
+		t.Fatalf("read serve.go: %v", err)
+	}
+	src := string(body)
+	for _, want := range []string{
+		`"github.com/anthony-chaudhary/fak/internal/agent"`,
+		"func configureServeToolEngines()",
+		`agent.RegisterReadEngine("")`,
+		"configureServeToolEngines()",
+		"srv, err := gateway.New",
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("serve.go missing %q", want)
+		}
+	}
+	call := "\n\tconfigureServeToolEngines()\n"
+	if !strings.Contains(src, call) {
+		t.Fatalf("serve.go missing startup call %q", strings.TrimSpace(call))
+	}
+	if strings.Index(src, call) > strings.Index(src, "srv, err := gateway.New") {
+		t.Fatal("serve must register fak_read's engine before gateway.New")
+	}
+}
+
 // TestServeWiringDetectsDroppedField proves the drift guard fires: a serve.go that stops
 // setting a Config field flips its row to dead-wired and reds --check. This is the dead-wiring
 // regression the verb exists to catch.

@@ -1,6 +1,7 @@
 {
   "version": "fak-policy/v1",
   "allow": [
+    "Read",
     "git_diff",
     "git_log",
     "git_status",
