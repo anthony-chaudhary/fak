@@ -18,6 +18,11 @@
 # — the arm64 NEON Q8 path is the same one Apple-silicon ships — so this is a published
 # binary, not a new build (the gap the mobile/edge strategy note flagged highest-leverage).
 # See docs/explainers/cross-platform-spine.md.
+#
+# After the aggregate checksum asset lands, the announce job renders a release status
+# card for the scoreboard workspace's #releases channel. Posting is gated on BOTH the
+# FAK_SCOREBOARD_TOKEN secret and the FAK_RELEASES_CHANNEL repo variable; without either
+# it dry-runs into GITHUB_STEP_SUMMARY so forks and unprovisioned repos stay green.
 name: release-artifacts
 
 on:
@@ -166,3 +171,82 @@ jobs:
           echo "== SHA256SUMS =="
           cat "$tmp/SHA256SUMS"
           gh release upload "$TAG" "$tmp/SHA256SUMS" --clobber
+
+  announce:
+    name: announce release to #releases
+    needs: checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: render release card (dry-run)
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          NOTES_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_RELEASES_CHANNEL" \
+            --kpi release \
+            --value "$TAG" \
+            --grade A \
+            --verdict OK \
+            --detail "$NOTES_URL" \
+            --source ci \
+            --dry-run | tee release-card.txt
+          {
+            echo "## release-artifacts — ${TAG}"
+            echo '```'
+            cat release-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: post to #releases
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_RELEASES_CHANNEL != '' }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          NOTES_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_RELEASES_CHANNEL" \
+            --kpi release \
+            --value "$TAG" \
+            --grade A \
+            --verdict OK \
+            --detail "$NOTES_URL" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_RELEASES_CHANNEL == '' }}
+        run: |
+          {
+            echo "Release announcement SKIPPED — ran in dry-run, nothing posted."
+            if [ -z "${{ env.FAK_SCOREBOARD_TOKEN }}" ]; then
+              echo "- FAK_SCOREBOARD_TOKEN secret not set (add it under Settings -> Secrets and variables -> Actions -> Secrets)."
+            fi
+            if [ -z "${{ env.FAK_RELEASES_CHANNEL }}" ]; then
+              echo "- FAK_RELEASES_CHANNEL repo variable not set (#releases has no default channel; create #releases and add its channel id under Variables)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-card
+          path: release-card.txt
+          if-no-files-found: ignore

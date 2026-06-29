@@ -84,6 +84,27 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn("permissions:\n  contents: read", self.text)
         self.assertIn("contents: write", self.text)
 
+    def test_announces_release_after_assets_land(self) -> None:
+        self.assertIn("announce:", self.text)
+        self.assertIn("needs: checksums", self.text)
+        self.assertIn("announce release to #releases", self.text)
+        self.assertIn("FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}", self.text)
+        self.assertIn("FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL }}", self.text)
+        self.assertIn("go run ./cmd/fak scoreboard post", self.text)
+        self.assertIn("--kpi release", self.text)
+        self.assertIn('--value "$TAG"', self.text)
+        self.assertIn('--detail "$NOTES_URL"', self.text)
+        self.assertIn('NOTES_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"', self.text)
+
+    def test_release_announce_dry_runs_without_secret_or_channel(self) -> None:
+        self.assertIn("render release card (dry-run)", self.text)
+        self.assertIn("--dry-run | tee release-card.txt", self.text)
+        self.assertIn("GITHUB_STEP_SUMMARY", self.text)
+        self.assertIn("post to #releases", self.text)
+        self.assertIn("env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_RELEASES_CHANNEL != ''", self.text)
+        self.assertIn("Release announcement SKIPPED", self.text)
+        self.assertIn("FAK_RELEASES_CHANNEL repo variable not set", self.text)
+
     def test_wired_into_ci(self) -> None:
         ci = CI_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("python tools/release_artifacts_workflow_test.py", ci)
