@@ -47,7 +47,8 @@ func (g *Gate) Caps() []abi.Capability { return nil }
 // retrievable (the reversible-compression / CCR promise). It returns Allow
 // (admit-as-is — the ResultAdmitter fold identity) whenever it must not act:
 // compression is off (noop selected), the bytes screen as poison (left for the
-// security gates), the result is empty, or the compressor found no saving.
+// security gates), the result is empty, the compressor found no saving, or the
+// saving is real but not worth the indirection (the worth-it floor in policy.go).
 func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
 	if r == nil {
 		return admitAsIs()
@@ -75,6 +76,13 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 		Bytes: body,
 	})
 	if err != nil || !out.Compressed || len(out.Bytes) == 0 || len(out.Bytes) >= len(body) {
+		return admitAsIs()
+	}
+	// The "when to compress" floor: a real but marginal saving on a small result is
+	// not worth the preserve-write + the codec annotation the model must read, so
+	// leave it raw (the model gets the verbatim bytes, nothing is spent). See
+	// policy.go — this is fak deciding WHEN compression pays, not just HOW.
+	if !worthCompressing(len(body), len(out.Bytes)) {
 		return admitAsIs()
 	}
 

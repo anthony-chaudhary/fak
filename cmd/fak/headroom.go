@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -41,6 +42,8 @@ func runHeadroom(stdout, stderr io.Writer, argv []string) int {
 		return runHeadroomStatus(stdout, argv[1:])
 	case "compress":
 		return runHeadroomCompress(stdout, stderr, argv[1:])
+	case "bench":
+		return runHeadroomBench(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		headroomUsage(stdout)
 		return 0
@@ -56,6 +59,11 @@ func headroomUsage(w io.Writer) {
   fak headroom list                          list compressor plugins (* = selected)
   fak headroom status                        selected plugin, headroom proxy URL + reachability, KPI
   fak headroom compress [flags] [FILE|-]     compress a blob and print the savings (proof)
+  fak headroom bench [--via NAME] [--json]   replay a built-in corpus and report realized savings
+
+bench flags:
+  --via NAME    compressor plugin to bench (default: native)
+  --json        emit the report as JSON
 
 compress flags:
   --via NAME    use a specific plugin (default: selected / FAK_COMPRESSOR)
@@ -143,6 +151,37 @@ func runHeadroomCompress(stdout, stderr io.Writer, argv []string) int {
 	if out.Retrieval != "" {
 		fmt.Fprintf(stdout, "ccr:        %s\n", out.Retrieval)
 	}
+	return 0
+}
+
+// runHeadroomBench replays the built-in representative corpus through a compressor
+// (native by default) and reports the realized per-sample + aggregate savings — the
+// no-model, deterministic witness that the context-savings transforms actually pay
+// off on the tool-output shapes an agent streams into context.
+func runHeadroomBench(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("headroom bench", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	via := fs.String("via", headroom.NativeName, "compressor plugin to bench (default: native)")
+	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+	comp, ok := headroom.Lookup(*via)
+	if !ok {
+		fmt.Fprintf(stderr, "fak headroom: unknown plugin %q (have %s)\n", *via, strings.Join(headroom.Names(), ", "))
+		return 2
+	}
+	report := headroom.RunBench(comp, headroom.BenchCorpus())
+	if *asJSON {
+		b, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "fak headroom: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(b))
+		return 0
+	}
+	fmt.Fprint(stdout, report.Render())
 	return 0
 }
 
