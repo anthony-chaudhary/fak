@@ -126,13 +126,14 @@ type gatewayMetrics struct {
 	//   - OBSERVED (provider-reported, relayed): compactCacheReads / compactLastCacheRd are the
 	//     upstream's cache_read_input_tokens. fak attributes nothing to itself from them.
 	// Kept off inferenceMu — different hot path, no lock coupling.
-	compactMu          sync.Mutex
-	compactAttempts    map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
-	compactBailReasons map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
-	compactDropped     uint64            // WITNESSED: whole messages stubbed out across all fires
-	compactShed        uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
-	compactCacheReads  uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
-	compactLastCacheRd float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
+	compactMu            sync.Mutex
+	compactAttempts      map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
+	compactBailReasons   map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
+	compactDropped       uint64            // WITNESSED: whole messages stubbed out across all fires
+	compactShed          uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
+	compactCacheReads    uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
+	compactLastCacheRd   float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
+	compactAnchorStarved uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
 
 	// toolPruneMu guards the INBOUND tool-definition prune accumulators (the twin of
 	// the compaction family above, for the tools[] axis). maybeCompactInboundTools drops
@@ -477,6 +478,11 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 	default:
 		m.compactAttempts["bailed"]++
 		m.compactBailReasons[out.Reason]++
+		if out.AnchorStarved {
+			// A subset of under_budget: the anchor protected a prefix larger than the budget, so
+			// the lever could not fire. Counted apart so "idle" can be proven NOT a short session.
+			m.compactAnchorStarved++
+		}
 	}
 }
 
@@ -718,6 +724,13 @@ type AdjudicationSummary struct {
 	// Already surfaced on /metrics + /debug/vars; folded here so the guard exit summary can
 	// render it the same way ByReason renders deny reasons.
 	CompactionBailReasons map[string]uint64 `json:"compaction_bail_reasons,omitempty"`
+	// CompactionAnchorStarved is the count of under_budget bails whose protected prefix ALREADY
+	// exceeded the budget — the cache_control anchor swallowed the conversation, so compaction
+	// structurally cannot fire no matter how long the session grows. It is a SUBSET of
+	// CompactionBailReasons["under_budget"], broken out because the two are operationally opposite:
+	// a plain under_budget is a benign short session (nothing to shed), an anchor-starved one is the
+	// dormant-on-real-Claude-Code-traffic pathology (#1407) that no budget tightening can fix.
+	CompactionAnchorStarved uint64 `json:"compaction_anchor_starved"`
 	// CompactionBudget is the resident-token threshold the history rewrite fires past
 	// (Config.CompactHistoryBudget; 0 means the lever is OFF, body forwarded byte-for-byte).
 	// Surfaced so the exit line can say whether compaction is ENABLED and merely idle
@@ -767,6 +780,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CompactionShedTokens = comp.shed
 	sum.CompactionCacheReadTokens = comp.cacheReads
 	sum.LastCompactionCacheRead = comp.lastCacheRd
+	sum.CompactionAnchorStarved = comp.anchorStarved
 	// Carry the per-reason bail breakdown so the banner can explain the bailed lump (the
 	// snapshot already copied it under compactMu); only attach a non-empty map so a clean
 	// session keeps the JSON field absent (omitempty).
@@ -1823,12 +1837,13 @@ type inferenceSnapshot struct {
 }
 
 type compactionSnapshot struct {
-	attempts    map[string]uint64
-	bailReasons map[string]uint64
-	dropped     uint64
-	shed        uint64
-	cacheReads  uint64
-	lastCacheRd float64
+	attempts      map[string]uint64
+	bailReasons   map[string]uint64
+	dropped       uint64
+	shed          uint64
+	cacheReads    uint64
+	lastCacheRd   float64
+	anchorStarved uint64
 }
 
 type requestMemoryAggregateSnapshot struct {
@@ -1922,12 +1937,13 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		bailReasons[k] = v
 	}
 	return compactionSnapshot{
-		attempts:    attempts,
-		bailReasons: bailReasons,
-		dropped:     m.compactDropped,
-		shed:        m.compactShed,
-		cacheReads:  m.compactCacheReads,
-		lastCacheRd: m.compactLastCacheRd,
+		attempts:      attempts,
+		bailReasons:   bailReasons,
+		dropped:       m.compactDropped,
+		shed:          m.compactShed,
+		cacheReads:    m.compactCacheReads,
+		lastCacheRd:   m.compactLastCacheRd,
+		anchorStarved: m.compactAnchorStarved,
 	}
 }
 
@@ -2338,6 +2354,7 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_gateway_compaction_bail_reason_total{reason=%q} %d\n", promQuote(r), snap.bailReasons[r])
 	}
 
+	writeCounter(b, "fak_gateway_compaction_anchor_starved_total", "WITNESSED (fak authored): under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation, so compaction structurally cannot fire no matter how long the session grows. A SUBSET of bail_reason{reason=\"under_budget\"}, broken out because the two are opposite: plain under_budget is a benign short session, anchor-starved is the dormant-on-real-Claude-Code-traffic pathology (issue #1407) that no budget tightening fixes.", int64(snap.anchorStarved))
 	writeCounter(b, "fak_gateway_compaction_dropped_turns_total", "WITNESSED (fak authored): whole messages stubbed out across all fires.", int64(snap.dropped))
 	writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "WITNESSED (fak authored): estimated tokens fak removed from the outbound body across all fires (same ~4ch/token currency as the budget and provider input_tokens). What fak SENT — not a claim about what the provider billed.", int64(snap.shed))
 	writeCounter(b, "fak_gateway_compaction_cache_read_tokens_total", "OBSERVED (provider-reported, relayed verbatim): cumulative cache_read_input_tokens on compacted turns. Pair with shed_tokens to see the net effect; attribute nothing to fak from it alone — fak only guarantees the prefix it shipped was byte-identical (see attempts{fired} with prefix_mismatch=0).", int64(snap.cacheReads))
