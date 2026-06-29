@@ -1,0 +1,13 @@
+# fak — what shipped (recent, witnessed)
+
+> A machine-readable feed of fak's most recent shipped changes. Every line cites the
+> commit that witnesses it. Regenerated on each completion by `fak marketing aeo`.
+>
+> Updated: 2026-06-29T04:19:50Z
+
+- **2026-06-29** — New: add destructive-op and off-trunk branch/worktree refusals to the git-shape prefilter ([`03861ba6`](https://github.com/anthony-chaudhary/fak/commit/03861ba6))
+- **2026-06-29** — New: record a night-loop warm Mac point under memory pressure (0.72 tok/s) ([`097910db`](https://github.com/anthony-chaudhary/fak/commit/097910db))
+- **2026-06-29** — Fixed: add in-dashboard first-run explanations for the panels empty until their subsystem is exercised (#309) ([`0b56cc9a`](https://github.com/anthony-chaudhary/fak/commit/0b56cc9a))
+- **2026-06-29** — Fixed: add a passed/degraded outcome enum + RecordRow + ValidateLedger so bridge-folded witnesses go through the typed ledger schema (#1140) ([`7f6e2491`](https://github.com/anthony-chaudhary/fak/commit/7f6e2491))
+- **2026-06-29** — Shipped: pin visual provenance lanes (#1225) ([`7002c5f8`](https://github.com/anthony-chaudhary/fak/commit/7002c5f8))
+- **2026-06-29** — New: add the AUTO marketing bgloop on serve ([`a18b7cf0`](https://github.com/anthony-chaudhary/fak/commit/a18b7cf0))

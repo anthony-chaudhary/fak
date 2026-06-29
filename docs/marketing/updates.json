@@ -1,0 +1,74 @@
+{
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  "name": "fak — what shipped",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "New: add destructive-op and off-trunk branch/worktree refusals to the git-shape prefilter",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/03861ba6",
+        "dateModified": "2026-06-29",
+        "keywords": "gitgate"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "New: record a night-loop warm Mac point under memory pressure (0.72 tok/s)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/097910db",
+        "dateModified": "2026-06-29",
+        "keywords": "nightrun"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Fixed: add in-dashboard first-run explanations for the panels empty until their subsystem is exercised (#309)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/0b56cc9a",
+        "dateModified": "2026-06-29",
+        "keywords": "tools"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 4,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Fixed: add a passed/degraded outcome enum + RecordRow + ValidateLedger so bridge-folded witnesses go through the typed ledger schema (#1140)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/7f6e2491",
+        "dateModified": "2026-06-29",
+        "keywords": "nightrun"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 5,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: pin visual provenance lanes (#1225)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/7002c5f8",
+        "dateModified": "2026-06-29",
+        "keywords": "cachewitness"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 6,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "New: add the AUTO marketing bgloop on serve",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a18b7cf0",
+        "dateModified": "2026-06-29",
+        "keywords": "gateway"
+      }
+    }
+  ],
+  "dateModified": "2026-06-29T04:19:50Z"
+}

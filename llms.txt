@@ -1,5 +1,18 @@
 # fak — the Fused Agent Kernel (agent kernel)
 
+<!-- WHATS-NEW:BEGIN (generated from docs/marketing/updates.json by `fak marketing aeo` — do not edit by hand) -->
+
+## What's new
+
+- **2026-06-29** — New: add destructive-op and off-trunk branch/worktree refusals to the git-shape prefilter ([`03861ba6`](https://github.com/anthony-chaudhary/fak/commit/03861ba6))
+- **2026-06-29** — New: record a night-loop warm Mac point under memory pressure (0.72 tok/s) ([`097910db`](https://github.com/anthony-chaudhary/fak/commit/097910db))
+- **2026-06-29** — Fixed: add in-dashboard first-run explanations for the panels empty until their subsystem is exercised (#309) ([`0b56cc9a`](https://github.com/anthony-chaudhary/fak/commit/0b56cc9a))
+- **2026-06-29** — Fixed: add a passed/degraded outcome enum + RecordRow + ValidateLedger so bridge-folded witnesses go through the typed ledger schema (#1140) ([`7f6e2491`](https://github.com/anthony-chaudhary/fak/commit/7f6e2491))
+- **2026-06-29** — Shipped: pin visual provenance lanes (#1225) ([`7002c5f8`](https://github.com/anthony-chaudhary/fak/commit/7002c5f8))
+- **2026-06-29** — New: add the AUTO marketing bgloop on serve ([`a18b7cf0`](https://github.com/anthony-chaudhary/fak/commit/a18b7cf0))
+
+<!-- WHATS-NEW:END -->
+
 > **Put `fak` in front of the agent you already run — cheaper long sessions, the right model per call, and a verdict on every tool call — by treating the tool call like a syscall: the model proposes, the kernel disposes.**
 
 > `fak` is an **agent kernel** (also described as an *agent tool firewall*): one
@@ -130,6 +143,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 
 - [Claims ledger](CLAIMS.md): every capability with one machine-checked tag (shipped / simulated / stub).
 - [Net-true value standard](docs/standards/net-true-value.md): the lens fak judges any efficiency/perf gain by — measured against the real alternative (not a strawman), net of its own cost, scope stated, provenance-labeled, reproducible, and on by default — used both on fak's own claims and on the daily "5×" / "save 90% tokens" intake. Each rubric question maps to a stick the repo already runs.
+- [Observer-effect standard](docs/standards/observer-effect.md): the cost-side companion to net-true-value — how fak reports its OWN overhead honestly. States the perf-floor/security-floor duality (a good call can't silently slip below its budget, the dual of a bad call that can't get through), requires WITNESSED/OBSERVED/MODELED/SIMULATED on every overhead number, and pins the meter's own cost (the shipped decode `AcceptanceMeter` is bounded at 0 allocations/sample by a green test). The honesty contract for the self-tax plane (#1147).
 - [Status](STATUS.md): what is shipped and on the critical path.
 - [Architecture](ARCHITECTURE.md): the registry seams and the frozen ABI.
 - [Extending fak](EXTENDING.md): plug in an optimization → prove it correct → prove it faster → ship.
