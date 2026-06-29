@@ -15,11 +15,15 @@
 // after-breakpoint overlay while copying the resident spine+policy prefix verbatim
 // (SpliceSystemOverlay) — proving bytes.Equal(prefix) e2e (invariants 1+2), fail-safe
 // identity on a mutated spine. It is the system-block twin of promptmmu.CompactInboundTools
-// and anchors on the same cached-prefix boundary via promptmmu.ArraySplicePoints. The
-// queried harness overlay (Rung 3, #1261) fills the overlay; the spine/policy
-// non-evictable flags are the substrate Rung 4 (#1262) enforces.
+// and anchors on the same cached-prefix boundary via promptmmu.ArraySplicePoints. Rung 3
+// (overlay.go, #1261) fills the overlay by QUERY — the first live caller of the
+// skill-loader keystone (capindex.Catalog): SelectOverlay ranks the at-rest cards for a
+// turn intent, faults winners up to a token budget, and emits the overlay segments the
+// splice consumes; OverlayCache serves a HIT on an unchanged rank digest with no
+// re-fault. The spine/policy non-evictable flags are the substrate Rung 4 (#1262) enforces.
 //
 // Tier: mechanism (2) — see internal/architest. This package may import only packages
-// whose tier is <= 2; it imports cachemeta(1) + promptmmu(1) + stdlib. An upward import
-// fails the architest gate. See AGENTS.md and internal/architest for the layering contract.
+// whose tier is <= 2; it imports cachemeta(1) + promptmmu(1) + capindex(2) + stdlib
+// (capindex is a permitted same-tier edge). An upward import fails the architest gate.
+// See AGENTS.md and internal/architest for the layering contract.
 package syspromptmmu

@@ -82,12 +82,16 @@ func (c *Catalog) Query(intent string) (Capability, error) {
 	return c.Lookup(card.Ref)
 }
 
-// bestCard returns the single highest-scoring card for an intent (cards only —
-// no body paged), and whether any card scored above zero.
-func (c *Catalog) bestCard(intent string) (CapCard, bool) {
+// RankCards returns every at-rest card scoring above zero for an intent, in
+// descending score order (ties broken by name for determinism) — CARDS ONLY, no body
+// paged. It is the multi-select form of bestCard: the system-prompt MMU's queried
+// overlay (syspromptmmu Rung 3, #1261) faults the top-ranked winners up to a token
+// budget instead of taking just the single best. An empty intent, an empty index, or
+// no positive match returns nil.
+func (c *Catalog) RankCards(intent string) []CapCard {
 	terms := tokenize(intent)
 	if len(terms) == 0 {
-		return CapCard{}, false
+		return nil
 	}
 
 	type scored struct {
@@ -97,22 +101,34 @@ func (c *Catalog) bestCard(intent string) (CapCard, bool) {
 	var ranked []scored
 	for ref := range c.index.cards {
 		card := c.index.cards[ref]
-		s := scoreCard(card, terms)
-		if s > 0 {
+		if s := scoreCard(card, terms); s > 0 {
 			ranked = append(ranked, scored{card: card, score: s})
 		}
 	}
 	if len(ranked) == 0 {
-		return CapCard{}, false
+		return nil
 	}
-
 	sort.Slice(ranked, func(i, j int) bool {
 		if ranked[i].score != ranked[j].score {
 			return ranked[i].score > ranked[j].score
 		}
 		return ranked[i].card.Ref.Name < ranked[j].card.Ref.Name // deterministic tiebreak
 	})
-	return ranked[0].card, true
+	out := make([]CapCard, len(ranked))
+	for i, r := range ranked {
+		out[i] = r.card
+	}
+	return out
+}
+
+// bestCard returns the single highest-scoring card for an intent (cards only —
+// no body paged), and whether any card scored above zero.
+func (c *Catalog) bestCard(intent string) (CapCard, bool) {
+	ranked := c.RankCards(intent)
+	if len(ranked) == 0 {
+		return CapCard{}, false
+	}
+	return ranked[0], true
 }
 
 // scoreCard is the cheap at-rest relevance score: how many intent terms appear
