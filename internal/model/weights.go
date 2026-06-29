@@ -268,6 +268,15 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 	if err := materializeMixtralBlockSparseTensors(cfg, man); err != nil {
 		return nil, err
 	}
+	// #934: refuse an unrecognized Gated-DeltaNet/SSM hybrid (fused attn_qkv +
+	// per-layer linear_attn/ssm_* core, no self_attn.q_proj) with a typed,
+	// named load-time error instead of letting the standard forward panic on a
+	// missing self_attn.q_proj.weight mid-request. Must run before
+	// splitFusedProjections so the operator gets the arch refusal rather than a
+	// misleading fused-tensor row-count mismatch from the GDN in_proj.
+	if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
+		return nil, err
+	}
 	if err := splitFusedProjections(cfg, man); err != nil {
 		return nil, err
 	}
