@@ -172,6 +172,86 @@ jobs:
           cat "$tmp/SHA256SUMS"
           gh release upload "$TAG" "$tmp/SHA256SUMS" --clobber
 
+  verify-release:
+    # Post-publish verification (#1369, epic #1354). A release that "succeeded" (tag +
+    # page + assets present) can still be unusable — a corrupt archive, a binary that
+    # prints the wrong version, or an `@latest` that won't resolve. At agentic cadence
+    # we cut more often, so an unverified publish ships breakage that costs far more to
+    # recover than the speed it bought. This job proves the published release is good
+    # against ground truth: re-download every asset, verify its sha256, extract, and
+    # run the binary to assert it reports the tag's version. It runs the PUBLISHED
+    # artifact (not the source tree) on purpose — that is what a consumer gets.
+    name: verify published artifacts
+    needs: checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: re-download, checksum, and run the published binaries
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          gh release download "$TAG" --clobber
+          echo "== verifying sha256 sidecars =="
+          fail=0
+          for sum in *.sha256; do
+            # each sidecar is "<hash>  <archive>" — verify the named archive.
+            if sha256sum -c "$sum"; then
+              echo "ok: $sum"
+            else
+              echo "::error::checksum mismatch for $sum"; fail=1
+            fi
+          done
+          # Verify the linux/amd64 binary actually runs and reports the right version.
+          lin="fak_${VERSION}_linux_amd64.tar.gz"
+          if [ -f "$lin" ]; then
+            tar -xzf "$lin"
+            got="$(./fak version 2>/dev/null | head -1 || true)"
+            echo "linux_amd64 fak version -> $got"
+            case "$got" in
+              *"$VERSION"*) echo "ok: binary reports $VERSION" ;;
+              *) echo "::error::published linux_amd64 binary version mismatch: got '$got', want '$VERSION'"; fail=1 ;;
+            esac
+          else
+            echo "::error::expected asset $lin not found on release $TAG"; fail=1
+          fi
+          {
+            echo "## verify published artifacts — ${TAG}"
+            echo "Assets present: $(ls *.tar.gz *.zip 2>/dev/null | wc -l) archives; checksum + binary-version verification ran."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$fail"
+
+      - name: verify go install resolves the tag
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # A clean module cache so this proves the public resolution path, not a
+          # cached copy. Non-fatal on a proxy lag (the tag can take minutes to appear
+          # on proxy.golang.org); the asset checks above are the hard gate.
+          export GOFLAGS=-mod=mod GOBIN="$(mktemp -d)"
+          if go install "github.com/anthony-chaudhary/fak/cmd/fak@${TAG}"; then
+            echo "ok: go install ...@${TAG} resolved and built"
+            "$GOBIN/fak" version || true
+          else
+            echo "::warning::go install ...@${TAG} did not resolve yet (module proxy lag is expected for minutes after a tag push)"
+          fi
+
   announce:
     name: announce release to #releases
     needs: checksums

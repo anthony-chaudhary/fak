@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet architest-gate test test-fast test-affected test-race bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet architest-gate test test-fast test-affected test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
 ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$$
@@ -110,6 +110,25 @@ status:
 
 status-check:
 	@python3 tools/fresh_status.py --check
+
+# release-staleness: the PUBLISH-freshness gate — is the version
+# `go install ...@latest` resolves actually current, or has the trunk moved far past
+# it? `fak release-staleness` answers it as a gateable number (commits + days behind
+# the latest tag) with a control-pane envelope. Wiring it into a target makes the
+# VERY_STALE signal LIVE instead of a verb nobody runs (#1367 / epic #1354): a loop or
+# operator runs `make release-staleness` to see the lag, `make release-staleness-check`
+# to gate on it. Read-only. The release-readiness scorecard credits this wiring.
+release-staleness:
+	@go run ./cmd/fak release-staleness --json
+
+release-staleness-check:
+	@go run ./cmd/fak release-staleness --check
+
+# release-readiness: the deterministic release-debt scorecard — can fak cut, validate,
+# publish, and roll back a release at agentic speed? Re-derived from git + the tracked
+# tree + live release signals; folds into the scorecard control pane. Pure-stdlib.
+release-readiness:
+	@python3 tools/release_readiness_scorecard.py
 
 # garden: the default-on gardening bundle — ONE read-only fold over the repo's
 # self-maintenance passes (the scorecard control pane + fresh status), so "run the

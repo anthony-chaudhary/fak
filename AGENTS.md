@@ -32,6 +32,7 @@ the shared setup work once, not every turn).
 ```bash
 go build ./cmd/fak        # -> ./fak  (fak.exe on Windows).
 make test-fast            # ~2s smoke gate: build + vet + `go test -short ./...`
+make test-race            # fast LOCAL race gate (#1311): WSL `go test -short -race ./...`, cgo-preflighted
 make test                 # full suite incl. the weight-backed model witnesses
 make ci                   # the full gate: build + vet + test + claims-lint  (Windows: scripts/ci.ps1)
 ```
@@ -195,7 +196,7 @@ route around the guard (that just trips the next one).
 | `STALE_BASE_DELETION` | a pathspec commit would silently drop a peer-added block because the working-tree copy is stale relative to `origin/<trunk>` | fetch and merge/rebase `origin/<trunk>` in place so the working tree includes the peer block, then re-commit by explicit path |
 | `ARCH_LAYER_VIOLATION` | an upward/cross-tier import, or a new leaf with no declared tier | invert the dependency through a registration seam, or push the shared type down a layer; declare a new leaf's tier (`python tools/new_leaf.py`). Floor: `internal/architest` |
 | `OUT_OF_DIRECTION` | request-path logic in an untyped language, or a non-Go package blank-imported into the kernel | keep the request path Go-only; a non-Go seam stays off-path behind a typed, re-validated boundary. Floor: architest `TestHotPathHasNoExec` |
-| `FILE_ADMISSION` | a staged path is private-only content, regenerable junk, or an oversized blob | move private-only code to `fak-private`; drop or gitignore junk; put real data under `experiments/` or `testdata/` |
+| `FILE_ADMISSION` | a staged path is private-only content, a **noisy one-off operational artifact** (GPU reserve/availability status, dispatch telemetry, scratch dump — by the `fak:operator-private` marker or the loose-ops-doc name backstop), regenerable junk, or an oversized blob | move private-only code + operator-only status to `fak-private`; mark a one-off ops doc `fak:operator-private` (or gitignore it); a genuine curated note goes under `docs/notes/` in scrubbed language; drop or gitignore junk; put real data under `experiments/` or `testdata/`. See [`docs/dgx-slack-boundary.md`](docs/dgx-slack-boundary.md) |
 | `PUBLIC_LEAK` | staged content matches a redact-needle | remove or redact the needle before committing; `FLEET_ALLOW_LEAK=1` overrides once, only for an intentional adversarial fixture |
 | `OUT_OF_TREE_WRITE` | a write op escaped the repo into a sibling tree | operate inside the workspace; send scratch to a temp dir, never `..`. Soften with `FAK_REPO_GUARD=warn`. See [`docs/repo-guard.md`](docs/repo-guard.md) |
 | `STALE_RECALL` | a loop is about to act on recalled status/plan memory whose witness is stale relative to git or the loop ledger | refresh from the source witness (`dos status`, `dos verify`, `dos commit-audit`, or current git ref), discard the stale recall, then retry |
@@ -207,6 +208,36 @@ route around the guard (that just trips the next one).
 
 Check your setup first: `python tools/extend_preflight.py`. Full contributor contract:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Releasing (cut, publish, roll back)
+
+The version source-of-truth is the bare `VERSION` file; the shipped history is the
+`vX.Y.Z` git tags; release notes live under [`docs/releases/`](docs/releases/).
+`@latest` (what `go install …/cmd/fak@latest` resolves) is the newest tag, so if no
+tag is cut as work lands, `@latest` rots behind HEAD — check the lag any time with
+`make release-staleness` (`fak release-staleness --json`), and the whole release
+posture with `make release-readiness` (the deterministic release-debt scorecard).
+
+To cut one, run the **`/release` skill** — it drives the mechanical helpers under
+[`tools/`](tools/) in the right order (`release_decide` → `release_cut` →
+`release_tag` → `release_publish`) and explains the ordering gotchas they enforce by
+refusing. The short version:
+
+1. **Decide** — `python tools/release_decide.py --json`. `decision: "hold"` names a
+   blocker (`CI_BASE_RED`, `VERSION_DRIFT`, `NOTHING_TO_SHIP`); don't cut through it.
+2. **Lock** (multi-session tree) — `python tools/release_lock.py acquire --ttl 1800`
+   so a second `/release` session can't race `VERSION`/the tag.
+3. **Cut** — bump `VERSION` + draft the note + commit, by explicit path only (never
+   `git add -A` — the lock's `guard` verb catches a sweep that grabbed a peer's file).
+4. **Push then tag** — push the release commit to `main` *first* (the tag check reads
+   local `main`), then `release_tag`; then `release_publish` creates the GitHub release
+   page (the `release-artifacts.yml` workflow decorates it with the cross-platform
+   binaries + checksums — it fails `release not found` if the page doesn't exist yet).
+
+Same trunk rules as everything else: commit on `main`, by path, `-s` for DCO; on a
+**hot tree** cut in a detached worktree at `origin/main` rather than stashing peers'
+work. Stable rollback anchors are a separate, slower channel — see
+[`docs/stable-releases/`](docs/stable-releases/).
 
 ## Where to go next
 

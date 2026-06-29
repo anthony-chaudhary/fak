@@ -204,6 +204,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak support-maturity-scorecard --json", "label": "support-maturity"},
     {"key": "claim_repro", "debt": "claim_repro_debt", "script": "claim_repro_scorecard.py", "label": "claim-repro"},
+    {"key": "release", "debt": "release_debt", "script": "release_readiness_scorecard.py", "label": "release-readiness"},
     # Folded #1270: these emit a control-pane-compatible payload (corpus.*_debt +
     # mostly corpus.grade) and several explicitly say "folds into the control
     # pane" in their docstrings, but were never registered — an unfolded surface
