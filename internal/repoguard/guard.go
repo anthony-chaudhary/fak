@@ -14,7 +14,7 @@
 // ~/.claude state tree, and the workspace's <ws>-private companion). Pure: no
 // filesystem access in the classification core (only the context helpers stat),
 // so it is hermetically testable.
-package main
+package repoguard
 
 import (
 	"os"
@@ -25,6 +25,11 @@ import (
 const (
 	guardSchema = "fak-repo-guard/1"
 	guardReason = "OUT_OF_TREE_WRITE"
+
+	// Schema is the JSON protocol version emitted by the repo-guard check surface.
+	Schema = guardSchema
+	// Reason is the structured refusal token for out-of-workspace effects.
+	Reason = guardReason
 )
 
 // Verb classes — kept identical to tools/repo_guard.py.
@@ -412,6 +417,11 @@ func classifyCommand(command, workspaceRoot string, safeRoots []string) []Violat
 	return violations
 }
 
+// ClassifyCommand returns out-of-tree write/delete violations for a shell command.
+func ClassifyCommand(command, workspaceRoot string, safeRoots []string) []Violation {
+	return classifyCommand(command, workspaceRoot, safeRoots)
+}
+
 // classifyWritePath is the same idea for a Write/Edit/NotebookEdit file_path.
 func classifyWritePath(filePath, workspaceRoot string, safeRoots []string) []Violation {
 	ws := normalize(workspaceRoot)
@@ -434,6 +444,11 @@ func classifyWritePath(filePath, workspaceRoot string, safeRoots []string) []Vio
 		}
 	}
 	return []Violation{violation("write", filePath, absTarget, whyOutside(absTarget, ws))}
+}
+
+// ClassifyWritePath returns out-of-tree violations for a direct Write/Edit file path.
+func ClassifyWritePath(filePath, workspaceRoot string, safeRoots []string) []Violation {
+	return classifyWritePath(filePath, workspaceRoot, safeRoots)
 }
 
 func underAny(absTarget string, roots []string) bool {
@@ -493,6 +508,11 @@ func findRepoRoot(start string) string {
 	return cur
 }
 
+// FindRepoRoot walks up from start to the nearest directory containing .git.
+func FindRepoRoot(start string) string {
+	return findRepoRoot(start)
+}
+
 // posixParents yields the ancestors of p the way PurePosixPath(p).parents does
 // (including a trailing "." for a relative/drive path).
 func posixParents(p string) []string {
@@ -540,6 +560,11 @@ func agentStateRoots(home string, entries []string) []string {
 	return dedup(roots)
 }
 
+// AgentStateRoots returns the agent-owned state roots under home.
+func AgentStateRoots(home string, entries []string) []string {
+	return agentStateRoots(home, entries)
+}
+
 // privateCompanionRoots returns the workspace's OWN private companion repo — the
 // same-named <ws>-private sibling (fak -> fak-private). Bounded ON PURPOSE: only
 // the same-named "-private" sibling is admitted, never an arbitrary sibling
@@ -558,6 +583,11 @@ func privateCompanionRoots(workspaceRoot string) []string {
 	return []string{ws + "-private"}
 }
 
+// PrivateCompanionRoots returns the same-named private companion root, if any.
+func PrivateCompanionRoots(workspaceRoot string) []string {
+	return privateCompanionRoots(workspaceRoot)
+}
+
 // defaultSafeRoots is the scratch allow-list: the OS temp dirs, ~/.cache,
 // ~/Downloads, and the agent's own state tree(s). The <ws>-private companion is
 // added at the call sites that know the workspace root.
@@ -571,6 +601,16 @@ func defaultSafeRoots() []string {
 		}
 	}
 	return dedup(roots)
+}
+
+// DefaultSafeRoots returns the standard scratch and agent-state roots.
+func DefaultSafeRoots() []string {
+	return defaultSafeRoots()
+}
+
+// SafeRootsForWorkspace returns the standard safe roots plus the workspace companion.
+func SafeRootsForWorkspace(workspaceRoot string) []string {
+	return append(defaultSafeRoots(), privateCompanionRoots(workspaceRoot)...)
 }
 
 func userHome() string {
@@ -610,6 +650,11 @@ func evaluate(toolName string, toolInput map[string]any, workspaceRoot string, s
 	return nil
 }
 
+// Evaluate classifies one tool call using the repo-guard structural rules.
+func Evaluate(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string) []Violation {
+	return evaluate(toolName, toolInput, workspaceRoot, safeRoots)
+}
+
 func stringField(m map[string]any, key string) string {
 	if m == nil {
 		return ""
@@ -629,4 +674,9 @@ func renderReason(violations []Violation) string {
 		strings.Join(parts, "; ") +
 		". Operate inside the workspace, or write scratch to a temp dir. " +
 		"If this is intentional, re-run with FAK_REPO_GUARD=warn (advisory) or off."
+}
+
+// RenderReason formats the human-readable denial message for violations.
+func RenderReason(violations []Violation) string {
+	return renderReason(violations)
 }

@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/repoguard"
 )
 
 func TestLoopStatusJSON(t *testing.T) {
@@ -110,6 +113,7 @@ func TestLoopRunRecordsSuccess(t *testing.T) {
 		"--loop", "scheduler/test",
 		"--source", "cron",
 		"--run", "run-success",
+		"--no-guard",
 		"--",
 		os.Args[0], "-test.run=TestLoopRunHelper",
 	})
@@ -130,6 +134,12 @@ func TestLoopRunRecordsSuccess(t *testing.T) {
 	if !strings.Contains(stdout.String(), "loop helper success") {
 		t.Fatalf("stdout missing child output: %q", stdout.String())
 	}
+	if !strings.Contains(stderr.String(), "--no-guard disables fak guard containment") {
+		t.Fatalf("stderr missing no-guard warning: %q", stderr.String())
+	}
+	if events[1].Reason != "GUARD_DISABLED" || events[1].Metrics["guard_enabled"] != 0 {
+		t.Fatalf("admit event did not record no-guard opt-out: %+v", events[1])
+	}
 }
 
 func TestLoopRunPropagatesFailureAndRecordsEnd(t *testing.T) {
@@ -142,6 +152,7 @@ func TestLoopRunPropagatesFailureAndRecordsEnd(t *testing.T) {
 		"--loop", "scheduler/test",
 		"--source", "task-scheduler",
 		"--run", "run-fail",
+		"--no-guard",
 		"--",
 		os.Args[0], "-test.run=TestLoopRunHelper",
 	})
@@ -159,6 +170,129 @@ func TestLoopRunPropagatesFailureAndRecordsEnd(t *testing.T) {
 	if end.Status != loopmgr.StatusFailed || end.Reason != "EXIT_NONZERO" || end.Metrics["exit_code"] != 7 {
 		t.Fatalf("end = %+v", end)
 	}
+}
+
+func TestLoopRunUsesFakGuardByDefault(t *testing.T) {
+	oldExecutable := loopExecutable
+	oldNewCommand := loopNewCommand
+	defer func() {
+		loopExecutable = oldExecutable
+		loopNewCommand = oldNewCommand
+	}()
+
+	loopExecutable = func() (string, error) { return "C:/tools/fak.exe", nil }
+	var captured []string
+	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+		captured = append([]string(nil), argv...)
+		return &fakeLoopCommand{pid: 4242}
+	}
+
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{
+		"run",
+		"--ledger", path,
+		"--loop", "scheduler/test",
+		"--source", "cron",
+		"--run", "run-guarded",
+		"--",
+		"echo", "ok",
+	})
+	if code != 0 {
+		t.Fatalf("runLoop code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	want := []string{"C:/tools/fak.exe", "guard", "--", "echo", "ok"}
+	if !reflect.DeepEqual(captured, want) {
+		t.Fatalf("child argv = %v, want %v", captured, want)
+	}
+	events, err := loopmgr.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if gotKinds(events) != "fire,admit,start,end" {
+		t.Fatalf("kinds = %s events=%+v", gotKinds(events), events)
+	}
+	if events[1].Reason != "GUARD_ADMITTED" || events[1].Metrics["guard_enabled"] != 1 {
+		t.Fatalf("admit event did not record default guard: %+v", events[1])
+	}
+	if events[2].Metrics["pid"] != 4242 {
+		t.Fatalf("start pid = %d, want fake pid", events[2].Metrics["pid"])
+	}
+}
+
+func TestLoopRunGuardRefusesOutOfTreeEffect(t *testing.T) {
+	oldNewCommand := loopNewCommand
+	defer func() { loopNewCommand = oldNewCommand }()
+	spawned := false
+	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+		spawned = true
+		return &fakeLoopCommand{pid: 1}
+	}
+
+	parent, err := os.MkdirTemp(".", ".loop-containment-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(parent) })
+	repo := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	target := filepath.Join(parent, "victim.txt")
+
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{
+		"run",
+		"--ledger", path,
+		"--loop", "scheduler/test",
+		"--source", "cron",
+		"--run", "run-refused",
+		"--",
+		"bash", "--norc", "-c", "echo bad > ../victim.txt",
+	})
+	if code != 3 {
+		t.Fatalf("runLoop code=%d, want 3 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if spawned {
+		t.Fatal("refused containment command must not spawn the child")
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("out-of-tree target was touched: stat err=%v", err)
+	}
+	events, err := loopmgr.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if gotKinds(events) != "fire,admit" {
+		t.Fatalf("kinds = %s events=%+v", gotKinds(events), events)
+	}
+	refusal := events[1]
+	if refusal.Status != loopmgr.StatusRefused || refusal.Reason != repoguard.Reason {
+		t.Fatalf("refusal event = %+v", refusal)
+	}
+	if refusal.Metrics["violations"] != 1 || refusal.Metrics["guard_enabled"] != 1 {
+		t.Fatalf("refusal metrics = %+v", refusal.Metrics)
+	}
+	if !strings.Contains(stderr.String(), repoguard.Reason) {
+		t.Fatalf("stderr missing structured reason %s: %q", repoguard.Reason, stderr.String())
+	}
+}
+
+type fakeLoopCommand struct {
+	pid      int
+	startErr error
+	waitErr  error
+	killed   bool
+}
+
+func (c *fakeLoopCommand) Start() error { return c.startErr }
+func (c *fakeLoopCommand) Wait() error  { return c.waitErr }
+func (c *fakeLoopCommand) PID() int     { return c.pid }
+func (c *fakeLoopCommand) Kill() error {
+	c.killed = true
+	return nil
 }
 
 func TestLoopRunRejectsMissingCommand(t *testing.T) {

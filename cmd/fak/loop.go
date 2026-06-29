@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/repoguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
@@ -48,6 +49,41 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		loopUsage(stderr)
 		return 2
 	}
+}
+
+type loopCommand interface {
+	Start() error
+	Wait() error
+	PID() int
+	Kill() error
+}
+
+type execLoopCommand struct {
+	cmd *exec.Cmd
+}
+
+func (c execLoopCommand) Start() error { return c.cmd.Start() }
+func (c execLoopCommand) Wait() error  { return c.cmd.Wait() }
+func (c execLoopCommand) PID() int {
+	if c.cmd == nil || c.cmd.Process == nil {
+		return 0
+	}
+	return c.cmd.Process.Pid
+}
+func (c execLoopCommand) Kill() error {
+	if c.cmd == nil || c.cmd.Process == nil {
+		return nil
+	}
+	return c.cmd.Process.Kill()
+}
+
+var loopExecutable = os.Executable
+
+var loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	return execLoopCommand{cmd: cmd}
 }
 
 func runLoopAppend(stdout, stderr io.Writer, argv []string) int {
@@ -130,6 +166,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	notifySlack := fs.Bool("notify-slack", false, "post a witnessed dispatch-result card to the dispatch Slack channel when the run ends")
 	dispatchChannel := fs.String("dispatch-channel", "", "override dispatch channel id (default: $FAK_DISPATCH_CHANNEL / .env.slack.local)")
 	dispatchToken := fs.String("dispatch-token", "", "override dispatch bot token (default: $FAK_DISPATCH_TOKEN, then scoreboard token)")
+	noGuard := fs.Bool("no-guard", false, "explicitly disable the default fak guard containment wrapper for this run (logged in the loop ledger)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -150,8 +187,15 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	// (HeadBefore..HeadAfter), not trust the child's self-report. "" if not a git repo.
 	headBefore := dispatchpost.HeadSHA(ctx(), "")
 
+	guardEnabled := !*noGuard
 	baseEvidence := []loopmgr.EvidenceRef{{Kind: "command", Ref: filepath.Base(cmdArgs[0])}}
 	baseMetrics := map[string]int64{"argc": int64(len(cmdArgs))}
+	if guardEnabled {
+		baseEvidence = append(baseEvidence, loopmgr.EvidenceRef{Kind: "guard", Ref: "fak guard"})
+		baseMetrics["guard_enabled"] = 1
+	} else {
+		baseMetrics["guard_enabled"] = 0
+	}
 	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
 		LoopID:       *loopID,
 		RunID:        *runID,
@@ -165,6 +209,73 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
 		return 1
 	}
+
+	childArgv := append([]string(nil), cmdArgs...)
+	admitReason := "GUARD_ADMITTED"
+	admitSummary := "loop wrapper admitted command under fak guard"
+	if guardEnabled {
+		if violations := loopContainmentViolations(cmdArgs); len(violations) > 0 {
+			m := cloneLoopMetrics(baseMetrics)
+			m["violations"] = int64(len(violations))
+			summary := repoguard.RenderReason(violations)
+			if err := appendLoopRunEvent(*ledger, loopmgr.Event{
+				LoopID:       *loopID,
+				RunID:        *runID,
+				Kind:         loopmgr.EventAdmit,
+				Source:       *source,
+				Principal:    *principal,
+				Status:       loopmgr.StatusRefused,
+				Reason:       repoguard.Reason,
+				Summary:      summary,
+				EvidenceRefs: baseEvidence,
+				Metrics:      m,
+			}); err != nil {
+				fmt.Fprintf(stderr, "fak loop run: %v\n", err)
+				return 1
+			}
+			fmt.Fprintf(stderr, "fak loop run: containment refused command: %s\n", summary)
+			if *asJSON {
+				rep := map[string]any{
+					"schema":      "fak.loop-run-report.v1",
+					"ledger_path": *ledger,
+					"loop_id":     *loopID,
+					"run_id":      *runID,
+					"status":      "refused",
+					"reason":      repoguard.Reason,
+					"exit_code":   3,
+				}
+				if err := writeIndentedJSON(stdout, rep); err != nil {
+					fmt.Fprintf(stderr, "fak loop run: encode json: %v\n", err)
+					return 1
+				}
+			}
+			return 3
+		}
+		fakBin, err := loopExecutable()
+		if err != nil {
+			m := cloneLoopMetrics(baseMetrics)
+			m["exit_code"] = 127
+			_ = appendLoopRunEvent(*ledger, loopmgr.Event{
+				LoopID:       *loopID,
+				RunID:        *runID,
+				Kind:         loopmgr.EventEnd,
+				Source:       *source,
+				Principal:    *principal,
+				Status:       loopmgr.StatusFailed,
+				Reason:       "GUARD_UNAVAILABLE",
+				Summary:      err.Error(),
+				EvidenceRefs: baseEvidence,
+				Metrics:      m,
+			})
+			fmt.Fprintf(stderr, "fak loop run: resolve fak guard binary: %v\n", err)
+			return 127
+		}
+		childArgv = loopGuardArgv(fakBin, cmdArgs)
+	} else {
+		admitReason = "GUARD_DISABLED"
+		admitSummary = "--no-guard disabled fak guard containment"
+		fmt.Fprintln(stderr, "fak loop run: WARNING --no-guard disables fak guard containment for this run")
+	}
 	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
 		LoopID:       *loopID,
 		RunID:        *runID,
@@ -172,8 +283,8 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		Source:       *source,
 		Principal:    *principal,
 		Status:       loopmgr.StatusAdmitted,
-		Reason:       "WRAPPER_ADMITTED",
-		Summary:      "loop wrapper admitted command",
+		Reason:       admitReason,
+		Summary:      admitSummary,
 		EvidenceRefs: baseEvidence,
 		Metrics:      cloneLoopMetrics(baseMetrics),
 	}); err != nil {
@@ -181,9 +292,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	cmd := loopNewCommand(childArgv, stdout, stderr)
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		m := cloneLoopMetrics(baseMetrics)
@@ -204,7 +313,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		return 127
 	}
 	mStart := cloneLoopMetrics(baseMetrics)
-	mStart["pid"] = int64(cmd.Process.Pid)
+	mStart["pid"] = int64(cmd.PID())
 	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
 		LoopID:       *loopID,
 		RunID:        *runID,
@@ -217,7 +326,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		EvidenceRefs: baseEvidence,
 		Metrics:      mStart,
 	}); err != nil {
-		_ = cmd.Process.Kill()
+		_ = cmd.Kill()
 		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
 		return 1
 	}
@@ -238,7 +347,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	mEnd := cloneLoopMetrics(baseMetrics)
-	mEnd["pid"] = int64(cmd.Process.Pid)
+	mEnd["pid"] = int64(cmd.PID())
 	mEnd["exit_code"] = int64(exitCode)
 	mEnd["duration_ms"] = durationMS
 	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
@@ -729,6 +838,73 @@ func defaultLoopRunID(loopID string) string {
 	return fmt.Sprintf("%s-%s-%d", name, time.Now().UTC().Format("20060102T150405Z"), os.Getpid())
 }
 
+func loopGuardArgv(fakBin string, cmdArgs []string) []string {
+	out := []string{fakBin, "guard", "--"}
+	out = append(out, cmdArgs...)
+	return out
+}
+
+func loopContainmentViolations(cmdArgs []string) []repoguard.Violation {
+	command := loopRepoguardCommand(cmdArgs)
+	if strings.TrimSpace(command) == "" {
+		return nil
+	}
+	cwd, _ := os.Getwd()
+	workspaceRoot := repoguard.FindRepoRoot(cwd)
+	return repoguard.ClassifyCommand(command, workspaceRoot, repoguard.SafeRootsForWorkspace(workspaceRoot))
+}
+
+func loopRepoguardCommand(cmdArgs []string) string {
+	if len(cmdArgs) == 0 {
+		return ""
+	}
+	if command, ok := loopShellCCommand(cmdArgs); ok {
+		return command
+	}
+	parts := make([]string, 0, len(cmdArgs))
+	for _, arg := range cmdArgs {
+		parts = append(parts, loopShellQuote(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func loopShellCCommand(cmdArgs []string) (string, bool) {
+	if len(cmdArgs) < 3 {
+		return "", false
+	}
+	base := strings.ToLower(strings.TrimSuffix(filepath.Base(cmdArgs[0]), ".exe"))
+	switch base {
+	case "bash", "sh", "zsh", "dash", "ksh":
+	default:
+		return "", false
+	}
+	for i := 1; i < len(cmdArgs)-1; i++ {
+		arg := cmdArgs[i]
+		if arg == "--" {
+			return "", false
+		}
+		if strings.HasPrefix(arg, "--") {
+			continue
+		}
+		if arg == "-c" || (strings.HasPrefix(arg, "-") && strings.Contains(arg[1:], "c")) {
+			return cmdArgs[i+1], true
+		}
+	}
+	return "", false
+}
+
+func loopShellQuote(arg string) string {
+	if arg == "" {
+		return "''"
+	}
+	if strings.IndexFunc(arg, func(r rune) bool {
+		return r <= ' ' || strings.ContainsRune(`'"$`+"\\"+`;|&<>(){}[]*?~!`, r)
+	}) < 0 {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+}
+
 type loopKVList []string
 
 func (l *loopKVList) String() string {
@@ -856,14 +1032,16 @@ func loopUsage(w io.Writer) {
                   [--source NAME] [--principal ID] [--status STATUS]
                   [--reason CODE] [--summary TEXT] [--evidence KIND=REF]
                   [--metric NAME=INT64] [--json]
-  fak loop run --loop ID [--ledger FILE] [--source cron|launchd|task-scheduler] [--notify-slack] -- CMD [ARG...]
+  fak loop run --loop ID [--ledger FILE] [--source cron|launchd|task-scheduler] [--notify-slack] [--no-guard] -- CMD [ARG...]
   fak loop status [--ledger FILE] [--json]
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
   fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
 
 Append records one scheduler/script/control event in the canonical hash-chained
-ledger. Run wraps an OS scheduler command and records fire/admit/start/end around it.
+ledger. Run wraps an OS scheduler command under fak guard by default and records
+fire/admit/start/end around it; a direct out-of-tree write/delete is refused before
+spawn with OUT_OF_TREE_WRITE, and --no-guard is an explicit logged opt-out.
 Status folds that ledger into the current loop/run view. Rollup folds MANY nodes'
 ledgers into one fleet-wide "how often did every loop run" view — per-loop run
 counts, cadence, and last-run — reusing the fak ps table format; it is a read-only

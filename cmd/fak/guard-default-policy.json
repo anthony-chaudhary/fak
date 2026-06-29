@@ -95,6 +95,7 @@
     { "tool": "Bash", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": "-o\\s+\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" },
     { "tool": "Bash", "arg": "command", "deny_regex": ">>?\\s*\\.\\.[\\\\/]", "reason": "POLICY_BLOCK" },
@@ -103,7 +104,8 @@
     { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bRemove-Item\\b[^|;\\n]*-(Recurse|Force)\\b", "reason": "POLICY_BLOCK" },
     { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\b(Format-Volume|Clear-Disk|Initialize-Disk|Clear-Content)\\b", "reason": "POLICY_BLOCK" },
     { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\\b[^|]*\\|[^|]*\\b(iex|Invoke-Expression)\\b", "reason": "POLICY_BLOCK" },
-    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK" }
+    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bStart-Process\\b[^|;\\n]*-Verb\\s+RunAs\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)\\bterraform(?:\\.exe)?\\b[^|;&\\n]*\\bdestroy\\b", "reason": "POLICY_BLOCK" }
   ],
 
   "self_modify_globs": [

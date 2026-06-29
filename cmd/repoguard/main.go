@@ -21,6 +21,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/repoguard"
 )
 
 func main() {
@@ -73,7 +75,7 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	if mode == "off" {
 		return 0
 	}
-	violations, err := func() ([]Violation, error) {
+	violations, err := func() ([]repoguard.Violation, error) {
 		raw, err := io.ReadAll(stdin)
 		if err != nil {
 			return nil, err
@@ -89,9 +91,9 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 		if cwd == "" {
 			cwd, _ = os.Getwd()
 		}
-		workspaceRoot := findRepoRoot(cwd)
-		safeRoots := append(defaultSafeRoots(), privateCompanionRoots(workspaceRoot)...)
-		return evaluate(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots), nil
+		workspaceRoot := repoguard.FindRepoRoot(cwd)
+		safeRoots := repoguard.SafeRootsForWorkspace(workspaceRoot)
+		return repoguard.Evaluate(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots), nil
 	}()
 	if err != nil {
 		fmt.Fprintf(stderr, "repo_guard: internal error, allowing (%v)\n", err)
@@ -100,7 +102,7 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(violations) == 0 {
 		return 0
 	}
-	reason := renderReason(violations)
+	reason := repoguard.RenderReason(violations)
 	if mode == "warn" {
 		fmt.Fprintf(stderr, "repo_guard (advisory): %s\n", reason)
 		return 0
@@ -121,25 +123,25 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 // runCheck classifies a single Bash command and reports. Mirrors the --check arm
 // of repo_guard.main: exit 1 iff there is at least one out-of-tree violation.
 func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
-	ws := findRepoRoot(orCwd(workspace))
-	safeRoots := append(defaultSafeRoots(), privateCompanionRoots(ws)...)
-	violations := classifyCommand(command, ws, safeRoots)
+	ws := repoguard.FindRepoRoot(orCwd(workspace))
+	safeRoots := repoguard.SafeRootsForWorkspace(ws)
+	violations := repoguard.ClassifyCommand(command, ws, safeRoots)
 	if violations == nil {
-		violations = []Violation{} // marshal as [] (matches the Python --json shape), never null
+		violations = []repoguard.Violation{} // marshal as [] (matches the Python --json shape), never null
 	}
 	if asJSON {
 		payload := struct {
-			Schema     string      `json:"schema"`
-			OK         bool        `json:"ok"`
-			Workspace  string      `json:"workspace"`
-			Violations []Violation `json:"violations"`
-		}{guardSchema, len(violations) == 0, ws, violations}
+			Schema     string                `json:"schema"`
+			OK         bool                  `json:"ok"`
+			Workspace  string                `json:"workspace"`
+			Violations []repoguard.Violation `json:"violations"`
+		}{repoguard.Schema, len(violations) == 0, ws, violations}
 		enc := json.NewEncoder(stdout)
 		enc.SetEscapeHTML(false)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(payload)
 	} else if len(violations) > 0 {
-		fmt.Fprintf(stdout, "DENY  %s\n", renderReason(violations))
+		fmt.Fprintf(stdout, "DENY  %s\n", repoguard.RenderReason(violations))
 	} else {
 		fmt.Fprintf(stdout, "ALLOW  no out-of-tree write in: %s\n", command)
 	}
@@ -165,8 +167,8 @@ func runSelftest(stdout io.Writer) int {
 	const ws = "C:/Users/u/work/fak"
 	const home = "C:/Users/u"
 	safe := []string{"/tmp", "/var/tmp", "C:/Users/u/.cache", "C:/Users/u/Downloads"}
-	safe = append(safe, agentStateRoots(home, []string{".claude", ".claude-gem8-netra", ".claudex", "Documents"})...)
-	safe = append(safe, privateCompanionRoots(ws)...)
+	safe = append(safe, repoguard.AgentStateRoots(home, []string{".claude", ".claude-gem8-netra", ".claudex", "Documents"})...)
+	safe = append(safe, repoguard.PrivateCompanionRoots(ws)...)
 
 	type tc struct {
 		tool  string
@@ -210,13 +212,13 @@ func runSelftest(stdout io.Writer) int {
 
 	fails := 0
 	for _, c := range deny {
-		if len(evaluate(c.tool, c.input, ws, safe)) == 0 {
+		if len(repoguard.Evaluate(c.tool, c.input, ws, safe)) == 0 {
 			fmt.Fprintf(stdout, "  FAIL (expected DENY, got allow): %s %v\n", c.tool, c.input)
 			fails++
 		}
 	}
 	for _, c := range allow {
-		if v := evaluate(c.tool, c.input, ws, safe); len(v) > 0 {
+		if v := repoguard.Evaluate(c.tool, c.input, ws, safe); len(v) > 0 {
 			fmt.Fprintf(stdout, "  FAIL (expected ALLOW, got %v): %s %v\n", v, c.tool, c.input)
 			fails++
 		}
