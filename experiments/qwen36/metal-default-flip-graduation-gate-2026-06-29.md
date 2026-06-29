@@ -15,7 +15,7 @@ byte-unchanged either way (DIRECTION.md rule 1).
 | Half | What it means | State |
 |---|---|---|
 | **Build-tag opt-in** | drop the extra `-tags fakmetal`; gate Metal on `darwin && arm64 && cgo` | **RETIRED + committed** (`881b7daf`) |
-| **Runtime auto-select** | on a Metal-capable build, pick the GPU without `--metal`/`FAK_METAL` | **coded, uncommitted, blocked** (see below) |
+| **Runtime auto-select** | on a Metal-capable build, pick the GPU without `--metal`/`FAK_METAL` | **SHIPPED** (`dfe9de9b`, de-entangled from the #35 sibling) |
 
 ### Build-tag half — done
 
@@ -28,7 +28,7 @@ links Metal with **no special tag**, while `CGO_ENABLED=0` falls to the determin
 stubs (`*_off.go` / `metalgemm_stub.go`) — the pure-Go artifact is unchanged. The
 `-tags fakmetal` opt-in is gone from the build.
 
-### Runtime auto-select half — coded but not cleanly committable
+### Runtime auto-select half — shipped (`dfe9de9b`)
 
 `cmd/fak/serve.go:resolveServeMetal` is rewritten so Metal **auto-selects whenever
 `metalgemm.Available()`** (a linked backend + a usable device), and `--metal`/`FAK_METAL=1`
@@ -38,14 +38,13 @@ fallback to fail-loud. `cmd/fak/serve_test.go` (`TestResolveServeMetal`,
 `verdictWired`) accompany it. The resolver tests are pure-Go (they exercise the
 `metalgemm` stub), so they gate on non-Metal CI too.
 
-**Blocker (why it is not shipped here):** these edits sit uncommitted in a shared
-multi-session tree, and the working-tree copies are *entangled* with unrelated in-flight
-work — `serve.go` also carries a `#35` admission-controller hunk
-(`SetAdmissionController(NewAdmissionController(...))`) and `cmd/modelbench/main.go`
-carries an unrelated metal-residency-bench feature. A whole-file `git commit -- <path>`
-would sweep that sibling WIP under a `#62` subject, which the trunk discipline forbids;
-partial-hunk staging is not safe on this tree. The de-entangled commit is the smallest
-next step (below).
+**Shipped de-entangled (2026-06-29, `dfe9de9b`).** The trio landed by staging only the
+three `#62` hunks of `serve.go` via `git apply --cached --recount` — the sibling `#35`
+admission-controller hunk (`SetAdmissionController(NewAdmissionController(...))`) and the
+`cmd/modelbench/main.go` residency-bench feature were left uncommitted in the worktree, so
+no sibling WIP was swept under the `#62` subject (the "land siblings first" step turned out
+unnecessary). Verified GPU-free on the win32 box: `go build`/`go vet ./cmd/fak` clean,
+`go test ./cmd/fak -run 'ResolveServeMetal|ServeMetalFlag'` both PASS.
 
 ## Graduation verdict — per backend (the parity half)
 
@@ -75,18 +74,18 @@ Bar provenance: the llama.cpp-Metal numbers (7.29 decode / 51.55 prefill) are
 relayed, not a fak witness. See `metal-perf-gate-arm-2026-06-26.md` and
 `qwen36-perf-gate-metal-20260626.md`.
 
-## Smallest next step to close #62
+## Status (2026-06-29) and the remaining residual
 
-1. Land the entangled siblings first (`#35` admission wiring in `serve.go`; the
-   residency-bench feature in `modelbench/main.go`) so the #62 hunks stand alone.
-2. Commit the de-entangled trio by explicit path —
-   `cmd/fak/serve.go` (resolveServeMetal auto-select), `cmd/fak/serve_test.go`,
-   `cmd/fak/servewiring.go` — as `feat(serve): auto-enable Metal on darwin/arm64 (#62) (fak cmd)`.
-   The leaf is `cmd` (the code lives under `cmd/`), not `experiments`.
-3. Gate: `go test ./cmd/fak -run 'ResolveServeMetal|ServeMetalFlag' -count=1` (pure-Go,
-   passes on non-Metal CI); on the M3 Pro node, `CGO_ENABLED=1 go test ./cmd/fak` plus a
-   `fak serve --gguf <dense-7B-Q8>` smoke confirming the GPU engages with no `--metal`.
+Both halves of #62's **wiring** are now on trunk: the build-tag flip in `881b7daf` and the
+runtime auto-select in `dfe9de9b` (de-entangled via partial-hunk staging, so the `#35`
+admission and `modelbench` siblings were *not* swept). What remains before the opt-in is
+fully retired is the **parity gate**, not more code:
 
-The parity-gate half (q4_k) remains hardware-gated on the Metal verify node and is tracked
-by #64/#67/#69/#70/#71 — it does not block the dense-Q8 auto-select wiring, only the claim
-that Metal is at SOTA parity for the 27B q4_k headline.
+1. On the M3 Pro node, record the on-device witness — `CGO_ENABLED=1 go test ./cmd/fak`
+   plus a `fak serve --gguf <dense-7B-Q8>` smoke confirming the GPU engages with no
+   `--metal` (the host-independent `ResolveServeMetal|ServeMetalFlag` already PASS GPU-free).
+2. Close the parity half (the 27B q4_k decode/prefill SOTA gap) via #64/#67/#69/#70/#71;
+   until that gate is green, Metal-as-default is honestly claimed only for dense 7B Q8
+   decode (#67, ~0.99× of bar). The q4_k parity remains hardware-gated on the Metal verify
+   node — it does not block the auto-select wiring (now shipped), only the claim that Metal
+   is at SOTA parity for the 27B q4_k headline.
