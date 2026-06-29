@@ -14,7 +14,8 @@ import (
 // sequences and bare control bytes, lossless to the model), carriage-return redraw
 // collapse (a progress bar reduced to its final frame), JSON minification
 // (lossless), consecutive duplicate-line collapse with an explicit elision count,
-// blank-run collapse, and trailing-whitespace trim. It is NOT Headroom's ML
+// global (non-consecutive) duplicate-line folding, blank-run collapse, and
+// trailing-whitespace trim. It is NOT Headroom's ML
 // compression (no SmartCrusher, no Kompress model); it is the honest local baseline
 // that always works offline. The original bytes are preserved in the shared CAS by
 // the gate, so even the lossy line-collapse stays reversible (the CCR promise).
@@ -59,6 +60,12 @@ func (nativeCompressor) Compress(_ context.Context, in Input) (Output, error) {
 		var lineCodecs []string
 		body, lineCodecs = normalizeLines(work)
 		codecs = append(codecs, lineCodecs...)
+		// Global (non-consecutive) duplicate folding: the dual of the consecutive
+		// run-collapse above, for the same line scattered across the blob.
+		if folded, did := foldGlobalDuplicates(body); did {
+			body = folded
+			codecs = append(codecs, "line-fold")
+		}
 	}
 
 	if len(codecs) == 0 || len(body) >= len(orig) {
