@@ -71,11 +71,11 @@ type LockState struct {
 type WorktreeState struct {
 	Path     string
 	Head     string
-	IsMain   bool // the RepoRoot itself — never a prune candidate
-	Merged   bool // HEAD is an ancestor of Trunk (commits already on the trunk)
-	Live     bool // touched within LiveWindow — an active session, keep
-	DirtyN   int  // count of uncommitted entries (informational)
-	Prunable bool // Merged && !Live && !IsMain — safe to remove
+	IsMain   bool   // the RepoRoot itself — never a prune candidate
+	Merged   bool   // HEAD is an ancestor of Trunk (commits already on the trunk)
+	Live     bool   // touched within LiveWindow — an active session, keep
+	DirtyN   int    // count of uncommitted entries (informational)
+	Prunable bool   // Merged && !Live && !IsMain — safe to remove
 	Keep     string // human reason it is kept ("" when Prunable)
 }
 

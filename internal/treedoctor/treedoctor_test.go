@@ -48,8 +48,8 @@ func listPorcelain(entries ...[2]string) string {
 
 func TestDiagnoseClassifiesWorktrees(t *testing.T) {
 	main := t.TempDir()
-	mergedDir := filepath.Join(main, "wt-merged")   // merged, not live => prunable
-	liveDir := filepath.Join(main, "wt-live")       // merged but freshly touched => keep
+	mergedDir := filepath.Join(main, "wt-merged")     // merged, not live => prunable
+	liveDir := filepath.Join(main, "wt-live")         // merged but freshly touched => keep
 	unmergedDir := filepath.Join(main, "wt-unmerged") // not merged => keep
 	for _, d := range []string{mergedDir, liveDir, unmergedDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
