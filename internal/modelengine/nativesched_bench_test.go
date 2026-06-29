@@ -46,16 +46,13 @@ func benchCalls(n int) []*abi.ToolCall {
 
 func benchLegacyLifecycle(b *testing.B, m *model.Model, calls []*abi.ToolCall) {
 	ctx := context.Background()
-	prompts := make([][]int, len(calls))
-	for i, c := range calls {
-		prompts[i] = tokenize(c.Tool, refBytes(ctx, c.Args), m.Cfg.VocabSize)
-	}
 	b.ResetTimer()
 	start := time.Now()
 	for i := 0; i < b.N; i++ {
 		reqs := make([]*legacyBenchRequest, len(calls))
-		for j, prompt := range prompts {
-			reqs[j] = startLegacyBenchRequest(ctx, m, calls[j].Tool, prompt)
+		for j, c := range calls {
+			prompt := tokenize(c.Tool, refBytes(ctx, c.Args), m.Cfg.VocabSize)
+			reqs[j] = startLegacyBenchRequest(ctx, m, c.Tool, prompt)
 		}
 		drainLegacyBenchRequests(b, reqs)
 		for j, r := range reqs {
@@ -108,6 +105,7 @@ func reportTokensPerSecond(b *testing.B, lanes int, start time.Time) {
 	if elapsed <= 0 {
 		return
 	}
+	b.ReportMetric(float64(b.N*lanes)/elapsed.Seconds(), "req/s")
 	b.ReportMetric(float64(b.N*lanes*genTokens)/elapsed.Seconds(), "tok/s")
 }
 
