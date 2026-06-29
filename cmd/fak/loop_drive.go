@@ -687,6 +687,11 @@ func loopDriveDOSGateCriterion(fields []string) (loopgate.Criterion, error) {
 			return loopgate.Criterion{}, fmt.Errorf("dos test-witness criterion requires baseline and candidate outcomes")
 		}
 		return loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: fields[1], Candidate: fields[2]}, nil
+	case "citation-resolve":
+		if len(fields) < 2 {
+			return loopgate.Criterion{}, fmt.Errorf("dos citation-resolve criterion requires a subject citation")
+		}
+		return loopgate.Criterion{Kind: loopgate.CriterionCitationResolve, Subject: strings.Join(fields[1:], " ")}, nil
 	case "witness":
 		if len(fields) < 3 {
 			return loopgate.Criterion{}, fmt.Errorf("dos witness criterion requires source and subject")

@@ -163,7 +163,7 @@ func GenericWitnessResultFromJSON(data []byte) (WitnessResult, error) {
 		return WitnessResult{
 			Outcome:    OutcomeNotYet,
 			Reason:     firstNonEmpty(stringField(row, "verdict"), stringField(facts, "stance"), "REFUTED"),
-			Detail:     firstNonEmpty(stringField(row, "reason"), stringField(belief, "reason"), stringField(facts, "detail"), "generic witness refuted the effect"),
+			Detail:     firstNonEmpty(stringField(row, "reason"), stringField(facts, "detail"), stringField(belief, "reason"), "generic witness refuted the effect"),
 			RawVerdict: firstNonEmpty(stringField(row, "verdict"), stringField(facts, "stance")),
 			Rung:       rung,
 		}, nil

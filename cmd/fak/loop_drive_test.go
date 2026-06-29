@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/loopdrive"
+	"github.com/anthony-chaudhary/fak/internal/loopgate"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
@@ -212,6 +213,16 @@ func TestLoopDriveTemplate(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("template missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestLoopDriveParsesDOSCitationResolveCriterion(t *testing.T) {
+	c, err := loopDriveGateCriterion("dos citation-resolve 999 F.999 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Kind != loopgate.CriterionCitationResolve || c.Subject != "999 F.999 1" {
+		t.Fatalf("criterion = %+v, want citation-resolve subject", c)
 	}
 }
 

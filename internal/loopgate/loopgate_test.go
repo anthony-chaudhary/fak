@@ -70,6 +70,52 @@ func TestAdjudicateVerifyPlanPhase(t *testing.T) {
 	}
 }
 
+func TestAdjudicateTestWitnessVacuousRearms(t *testing.T) {
+	var gotReq Request
+	dec := Adjudicate(context.Background(), Turn{
+		ClaimedDone: true,
+		Claim:       "added a test",
+		Criterion: Criterion{
+			Kind:      CriterionTestWitness,
+			Baseline:  "pass",
+			Candidate: "pass",
+		},
+	}, func(_ context.Context, req Request) (WitnessResult, error) {
+		gotReq = req
+		return TestWitnessResultFromJSON([]byte(`{"verdict":"VACUOUS","witnesses":false,"reason":"pass/pass witnesses nothing","evidence":{"rung":"OS_RECORDED"}}`))
+	})
+	if dec.Verdict != VerdictNotYet || dec.Reason != ReasonDoneUnwitnessed {
+		t.Fatalf("decision = %+v, want NOT_YET/%s", dec, ReasonDoneUnwitnessed)
+	}
+	if got := strings.Join(gotReq.Argv(), " "); got != "test-witness --json --baseline pass --candidate pass" {
+		t.Fatalf("argv = %q", got)
+	}
+	if !strings.Contains(dec.Summary, "witnesses nothing") {
+		t.Fatalf("summary = %q, want vacuity reason", dec.Summary)
+	}
+}
+
+func TestAdjudicateCitationResolveRefutesFabricatedCitation(t *testing.T) {
+	var gotReq Request
+	dec := Adjudicate(context.Background(), Turn{
+		ClaimedDone: true,
+		Claim:       "relied on a cited case",
+		Criterion:   Criterion{Kind: CriterionCitationResolve, Subject: "999 F.999 1"},
+	}, func(_ context.Context, req Request) (WitnessResult, error) {
+		gotReq = req
+		return GenericWitnessResultFromJSON([]byte(`{"facts":{"source_name":"citation_resolve","accountability":"THIRD_PARTY","stance":"REFUTED","detail":"no reporter cluster carries citation"},"belief":{"believe":false,"refuted":true,"reason":"refuted by citation_resolve"}}`))
+	})
+	if dec.Verdict != VerdictNotYet || dec.Reason != ReasonDoneUnwitnessed {
+		t.Fatalf("decision = %+v, want NOT_YET/%s", dec, ReasonDoneUnwitnessed)
+	}
+	if got := strings.Join(gotReq.Argv(), " "); got != "witness --json citation_resolve 999 F.999 1" {
+		t.Fatalf("argv = %q", got)
+	}
+	if !strings.Contains(dec.Summary, "no reporter cluster") {
+		t.Fatalf("summary = %q, want resolver detail", dec.Summary)
+	}
+}
+
 func TestAdjudicateNoDoneClaimDoesNotCallWitness(t *testing.T) {
 	called := false
 	dec := Adjudicate(context.Background(), Turn{ClaimedDone: false}, func(_ context.Context, req Request) (WitnessResult, error) {

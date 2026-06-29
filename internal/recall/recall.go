@@ -307,6 +307,8 @@ type Session struct {
 	cas      map[string][]byte
 	cleared  map[string]bool
 	gate     *ctxmmu.MMU // a fresh gate for the rung-4 re-screen on page-in
+
+	artifactVerifier ArtifactVerifier // read-time reverify for concrete artifact claims (#1158)
 }
 
 // Load reads a persisted core image and verifies every CAS entry against its digest
@@ -365,11 +367,17 @@ func (s *Session) Resolve(ctx context.Context, step int) ([]byte, error) {
 			return nil, fmt.Errorf("%w: page %d cleared by witness but the content re-screen RE-QUARANTINED it (%s) — clearance does not launder poison",
 				ErrSealed, step, abi.ReasonName(v.Reason))
 		}
+		if err := s.verifyArtifacts(ctx, p, body); err != nil {
+			return nil, err
+		}
 		return append([]byte(nil), body...), nil
 	}
 	if v := s.reScreen(ctx, p.Role, body); v.Kind == abi.VerdictQuarantine {
 		return nil, fmt.Errorf("%w: page %d was benign at write time but a tightened gate now flags it (%s)",
 			ErrSealed, step, abi.ReasonName(v.Reason))
+	}
+	if err := s.verifyArtifacts(ctx, p, body); err != nil {
+		return nil, err
 	}
 	return append([]byte(nil), body...), nil
 }

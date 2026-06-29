@@ -15,6 +15,10 @@ import (
 // executor can label the refusal without the coupling.
 var ErrSealed = errors.New("memq: cell sealed by the trust gate")
 
+// ErrStale is returned by a Backend.Materialize that refuses a page-in because
+// recall re-verified a concrete artifact claim at read time and found it stale.
+var ErrStale = errors.New("memq: recall artifact stale")
+
 // Backend supplies cells and trust-gated byte access. The two required methods are
 // reads; the optional Tombstoner/Pruner add the durable mutations a backend chooses
 // to support. A backend that implements neither is read/propose-only — the safe floor.
@@ -262,6 +266,8 @@ func pageIn(ctx context.Context, b Backend, res *Result, c Cell) (body []byte, o
 		reason := "page_in_refused"
 		if errors.Is(err, ErrSealed) {
 			reason = "sealed_by_trust_gate"
+		} else if errors.Is(err, ErrStale) {
+			reason = "stale_recall_artifact"
 		}
 		res.Refused = append(res.Refused, Refusal{ID: c.ID, Step: c.Step, Role: c.Role, Reason: reason})
 		return nil, false

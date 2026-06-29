@@ -19,7 +19,9 @@ import (
 // (its own CAS + gate, no dependency on this process's memory) and demonstrates the
 // rung-0 / rung-4 guarantees: a benign slice round-trips byte-identical; the
 // poisoned slice is REFUSED across the process boundary without a witness, and a
-// clearance alone does not launder it. Fully offline + deterministic.
+// clearance alone does not launder it. At READ-TIME, Resolve also reverify-checks
+// concrete artifact claims (SHA/path/flag) against the current checkout before bytes
+// can enter context (#1158). Fully offline + deterministic.
 func cmdRecall(argv []string) {
 	fs := flag.NewFlagSet("recall", flag.ExitOnError)
 	dir := fs.String("dir", "recall-image", "directory for the persisted core image")
@@ -92,15 +94,16 @@ func cmdRecall(argv []string) {
 	}
 
 	report := map[string]any{
-		"app_version":   appversion.Current(),
-		"demo":          "session-recall: a quarantine that survives the process boundary",
-		"image_dir":     *dir,
-		"session":       s.Stats(),
-		"query":         *query,
-		"working_set":   working,
-		"poison_in_set": leaked,
-		"demos":         demos,
-		"witness":       "benign round-trips byte-identical; poison REFUSED without a witness AND after a clear (content re-screen); poison never in the recalled working set",
+		"app_version":        appversion.Current(),
+		"demo":               "session-recall: a quarantine that survives the process boundary",
+		"image_dir":          *dir,
+		"session":            s.Stats(),
+		"query":              *query,
+		"working_set":        working,
+		"poison_in_set":      leaked,
+		"demos":              demos,
+		"read_time_reverify": "default-on: concrete SHA/path/flag claims are re-checked against git + working tree before recall bytes enter context",
+		"witness":            "benign round-trips byte-identical; poison REFUSED without a witness AND after a clear (content re-screen); poison never in the recalled working set",
 	}
 	must(os.WriteFile(*out, jsonIndent(report), 0o644))
 

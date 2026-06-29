@@ -67,6 +67,9 @@ func (r *RecallBackend) Materialize(ctx context.Context, id string) ([]byte, err
 	}
 	b, err := r.s.Resolve(ctx, step)
 	if err != nil {
+		if errors.Is(err, recall.ErrStale) {
+			return nil, fmt.Errorf("%w: %v", ErrStale, err)
+		}
 		if errors.Is(err, recall.ErrSealed) || errors.Is(err, recall.ErrTombstoned) {
 			return nil, fmt.Errorf("%w: %v", ErrSealed, err)
 		}
