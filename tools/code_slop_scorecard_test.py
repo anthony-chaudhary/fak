@@ -864,6 +864,41 @@ def test_fix7_unmarked_dead_symbol_still_caught():
     assert len(cs.kpi_dead_code(files, {})["defects"]) >= 1
 
 
+def test_asm_referenced_symbol_is_not_dead_1392():
+    # FP (#1392): an unexported Go symbol whose ONLY reference lives in a hand-written
+    # sibling `.s` file — the func body IS the asm (`TEXT <dot>sym(SB)`) or asm reads a Go
+    # gate flag (`CMPB <dot>sym(SB)`) — is LIVE, not dead. The `.go` scan alone never sees
+    # it, so without the asm union it reads as "defined, never referenced" and an agent
+    # retiring worst-first would delete a SIMD kernel. `<dot>` is the asm package-path
+    # separator U+00B7.
+    dot = "·"
+    files = {"internal/model/quant_amd64.go": (
+        "package model\n"
+        "func qdot8gemv512(a, b []int8) int32\n"   # asm-bodied: declared, no Go body
+        "var q5kUseVNNI bool\n")}                   # asm-read gate flag
+    asm = {"internal/model/quant_amd64.s": (
+        f"TEXT {dot}qdot8gemv512(SB), NOSPLIT, $0-56\n"
+        "\tVMOVDQU8 (AX), Z0\n"
+        f"\tCMPB {dot}q5kUseVNNI(SB), $1\n"
+        "\tRET\n")}
+    k = cs.kpi_dead_code(files, {}, asm)
+    names = " ".join(k["defects"])
+    assert "qdot8gemv512" not in names, names
+    assert "q5kUseVNNI" not in names, names
+
+
+def test_dead_symbol_with_no_go_or_asm_ref_still_flagged_1392():
+    # RECALL (#1392): the asm union must not blanket-exempt. A genuinely unreferenced
+    # symbol — no `.go` caller and its name absent from the `.s` corpus — is still dead,
+    # so the detector stays honest even with an asm file present.
+    dot = "·"
+    files = {"internal/model/quant_amd64.go":
+             "package model\nfunc trulyDead() int { return 1 }\n"}
+    asm = {"internal/model/quant_amd64.s": f"TEXT {dot}other(SB), NOSPLIT, $0\n\tRET\n"}
+    k = cs.kpi_dead_code(files, {}, asm)
+    assert any("trulyDead" in d for d in k["defects"]), k["defects"]
+
+
 def test_claude_worktree_go_files_excluded_from_gather():
     # A peer's `.claude/worktrees/<wt>/` is a full repo CHECKOUT; walking it counts every
     # copied .go as a phantom clone of the real tree (a peer worktree once inflated

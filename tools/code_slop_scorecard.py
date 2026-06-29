@@ -180,6 +180,13 @@ _TYPE_DECL_RE = re.compile(r"^type\s+([A-Za-z_]\w*)\b")
 _VARCONST_DECL_RE = re.compile(r"^(?:var|const)\s+([A-Za-z_]\w*)\b")
 # An identifier token, for the dead-code reference scan.
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
+# Go<->assembly linkage. A Go symbol whose only caller lives in a hand-written `.s` file
+# (the func body IS the asm, `TEXT <dot>name(SB)`, or asm reads a Go gate flag,
+# `CMPB <dot>name(SB)`) is NOT dead, but a scan of the `.go` corpus alone never sees the
+# reference. Go asm names the symbol with the middle-dot package-path separator U+00B7;
+# this regex lifts that dotted form out so the dead-code scan counts the symbol live. The
+# file is UTF-8 (it already carries em-dashes), so the literal middle-dot below is safe.
+_ASM_SYM_RE = re.compile("·(\\w+)")
 # A `//` comment that is actually a SHELL/CLI usage example, not commented-out Go —
 # common in package doc comments (`// go run ./cmd/x`, `// $ fak serve`, `// make ci`).
 # These must NOT count as commented-out code.
@@ -927,11 +934,17 @@ def kpi_vacuous_tests(test_files: dict[str, str]) -> dict[str, Any]:
 _SLOP_KEEP_RE = re.compile(r"^\s*//\s*slop:keep\b")
 
 
-def kpi_dead_code(files: dict[str, str], test_files: dict[str, str]) -> dict[str, Any]:
+def kpi_dead_code(files: dict[str, str], test_files: dict[str, str],
+                  asm_files: dict[str, str] | None = None) -> dict[str, Any]:
     """An UNEXPORTED top-level symbol defined but referenced nowhere else in the
     first-party module (its identifier appears exactly once across all .go — its own
     definition). Exported symbols are part of the package API and not graded here
-    (a static scan can't see external callers). Capped per file."""
+    (a static scan can't see external callers). Capped per file.
+
+    A symbol whose only reference lives in a hand-written `.s` assembly file (the func
+    body IS the asm, or asm reads a Go gate flag — `TEXT/CMPB ·name(SB)`) is live, not
+    dead: its identifier is unioned in from the `.s` corpus so a SIMD kernel is never
+    mis-flagged as retirable."""
     # token frequency across the WHOLE module (code + tests), code-only so a token
     # inside a string/comment is not a phantom reference.
     freq: dict[str, int] = {}
@@ -940,6 +953,16 @@ def kpi_dead_code(files: dict[str, str], test_files: dict[str, str]) -> dict[str
         for c in code_lines_of(all_text[rel]):
             for tok in _IDENT_RE.findall(c):
                 freq[tok] = freq.get(tok, 0) + 1
+    # Assembly references the Go symbol via the middle-dot form `·name(SB)`; the plain
+    # ident scan catches the bare `name` and `_ASM_SYM_RE` catches the dotted form. The
+    # whole `.s` text is scanned (no code/comment split — asm comments are `//`/`#` and
+    # over-counting an identifier can only mark a symbol LIVE, never wrongly dead).
+    for rel in (asm_files or {}):
+        text = (asm_files or {})[rel]
+        for tok in _IDENT_RE.findall(text):
+            freq[tok] = freq.get(tok, 0) + 1
+        for tok in _ASM_SYM_RE.findall(text):
+            freq[tok] = freq.get(tok, 0) + 1
 
     defects: list[str] = []
     per_file: dict[str, int] = {}
@@ -1371,6 +1394,19 @@ def gather_go(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     return files, test_files
 
 
+def gather_asm(root: Path) -> dict[str, str]:
+    """rel-path -> source text for first-party `.s` assembly, dropping the same scratch
+    trees `gather_go` excludes. Used only to mark Go symbols referenced from hand-written
+    asm (`·name(SB)`) as live so the dead-code scan never retires a SIMD kernel."""
+    asm: dict[str, str] = {}
+    for p in root.rglob("*.s"):
+        rel = p.relative_to(root).as_posix()
+        if _excluded_go(rel):
+            continue
+        asm[rel] = _safe_read(p)
+    return asm
+
+
 def git_churn(root: Path, rev_range: str) -> tuple[int, int, int]:
     """(added, removed, n_commits) of .go files over rev_range, via a read-only
     `git log --diff-filter`. Fail-open to (0,0,0) when git/range is unavailable."""
@@ -1399,6 +1435,7 @@ def collect(workspace: Path, *, run_churn: bool = True,
             churn_range: str = "HEAD~20..HEAD") -> dict[str, Any]:
     try:
         files, test_files = gather_go(workspace)
+        asm_files = gather_asm(workspace)
     except OSError as exc:
         return build_payload(workspace=str(workspace), kpis=[],
                              error=f"failed to read .go files: {exc}")
@@ -1415,7 +1452,7 @@ def collect(workspace: Path, *, run_churn: bool = True,
 
     kpis = [
         kpi_duplication(files),
-        kpi_dead_code(files, test_files),
+        kpi_dead_code(files, test_files, asm_files),
         kpi_comment_slop(files),
         kpi_vacuous_tests(test_files),
         kpi_stub_masquerade(files, claims_text, version_text),
