@@ -324,6 +324,22 @@ func (r *Registry) migrate() {
 // rehome target, or a rehome cycle is an error — never a silent fallback to an
 // arbitrary seat.
 func (r Registry) Resolve(name string) (Home, []string, error) {
+	return r.walkRehome(name, Home.Active, func(h Home) (string, error) {
+		if h.RehomeTo == "" {
+			return "", fmt.Errorf("accounts: home %q is tombstoned with no rehome_to", h.Name)
+		}
+		return h.RehomeTo, nil
+	})
+}
+
+// walkRehome is the shared rehome-chain walk behind Resolve and Serve. Starting at
+// name, it follows the chain until stop(h) is true (the seat that serves), returning that
+// seat and the ordered list of tombstoned names hopped through. It is fail-loud the same
+// way for both callers: an unknown name, an unknown rehome target, or a cycle is an error
+// — never a silent fallback. The two callers differ only in stop (Active vs serveable)
+// and in next, which yields the next name to walk to (or an error when there is nowhere
+// to fall forward); next is consulted only after the current seat is recorded in chain.
+func (r Registry) walkRehome(name string, stop func(Home) bool, next func(Home) (string, error)) (Home, []string, error) {
 	var chain []string
 	seen := make(map[string]bool)
 	cur := name
@@ -335,7 +351,7 @@ func (r Registry) Resolve(name string) (Home, []string, error) {
 			}
 			return Home{}, chain, fmt.Errorf("accounts: %q rehomes to %q, which is not in the registry", chain[len(chain)-1], cur)
 		}
-		if h.Active() {
+		if stop(h) {
 			return h, chain, nil
 		}
 		if seen[cur] {
@@ -343,10 +359,11 @@ func (r Registry) Resolve(name string) (Home, []string, error) {
 		}
 		seen[cur] = true
 		chain = append(chain, cur)
-		if h.RehomeTo == "" {
-			return Home{}, chain, fmt.Errorf("accounts: home %q is tombstoned with no rehome_to", cur)
+		nxt, err := next(h)
+		if err != nil {
+			return Home{}, chain, err
 		}
-		cur = h.RehomeTo
+		cur = nxt
 	}
 }
 
@@ -368,39 +385,21 @@ func (r Registry) serveable(h Home) bool {
 // you truly need to PIN to an exact seat. Serve reads disk-derived Identity, so Refresh
 // first; an unknown name is still fail-loud (a typo must not silently rehome).
 func (r Registry) Serve(name string) (Home, []string, error) {
-	var chain []string
-	seen := make(map[string]bool)
-	cur := name
-	for {
-		h, ok := r.home(cur)
-		if !ok {
-			if len(chain) == 0 {
-				return Home{}, nil, fmt.Errorf("accounts: no home named %q", name)
-			}
-			return Home{}, chain, fmt.Errorf("accounts: %q rehomes to %q, which is not in the registry", chain[len(chain)-1], cur)
-		}
-		if r.serveable(h) {
-			return h, chain, nil
-		}
-		if seen[cur] {
-			return Home{}, chain, fmt.Errorf("accounts: rehome cycle through %q", cur)
-		}
-		seen[cur] = true
-		chain = append(chain, cur)
+	return r.walkRehome(name, r.serveable, func(h Home) (string, error) {
 		next := h.RehomeTo
 		if next == "" {
 			// No explicit rehome target: fall forward to a ROLE seat. Prefer the anchor (its
 			// whole job is to be the always-available fall-forward); if no anchor is set, the
 			// active seat is the next-best stable target. A role pointing back at the seat we
 			// just failed on can't help, so skip it.
-			fb, ok := r.fallbackSeat(cur)
+			fb, ok := r.fallbackSeat(h.Name)
 			if !ok {
-				return Home{}, chain, fmt.Errorf("accounts: %q cannot serve and has no rehome_to, anchor, or active seat to fall forward to", cur)
+				return "", fmt.Errorf("accounts: %q cannot serve and has no rehome_to, anchor, or active seat to fall forward to", h.Name)
 			}
 			next = fb
 		}
-		cur = next
-	}
+		return next, nil
+	})
 }
 
 // fallbackSeat returns the role seat to fall forward onto when the seat named avoid can't
