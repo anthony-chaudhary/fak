@@ -7,6 +7,7 @@ package main
 //	fak index leaf [<query>]   the lane taxonomy, filtered by name/tree/description
 //	fak index docs <query>     the curated doc map, ranked by relevance
 //	fak index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
+//	fak index verbs [<query>]  the structured CLI-verb catalog (name/lane/synopsis)
 //
 // It is a thin shell over internal/devindex, which reads the facts live from the
 // files that already own them (dos.toml's [lanes.trees], the curated INDEX.md, the
@@ -83,6 +84,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexDocs(stdout, stderr, cat, args, *asJSON, *limit)
 	case "claims", "claim":
 		return indexClaims(stdout, stderr, cat, args, *asJSON, *limit)
+	case "verbs", "verb":
+		return indexVerbs(stdout, stderr, cat, args, *asJSON, *limit)
 	default:
 		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
@@ -185,6 +188,21 @@ func indexClaims(stdout, stderr io.Writer, cat *devindex.Catalog, args []string,
 		})
 }
 
+// indexVerbs answers `fak index verbs [<query>]` from the structured C3 verb manifest
+// (#1290) — the parseable replacement for grepping usage.go's freeform prose. An empty
+// query lists the whole catalog (the SearchVerbs convention), matching `fak index leaf`.
+func indexVerbs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
+	hits := capVerbs(cat.SearchVerbs(joinArgs(args)), limit)
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index verbs", "no matching verb",
+		func(tw *tabwriter.Writer, v devindex.Verb) {
+			lane := v.Lane
+			if lane == "" {
+				lane = "-"
+			}
+			fmt.Fprintf(tw, "fak %s\t%s\t%s\n", v.Name, lane, v.Synopsis)
+		})
+}
+
 func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "fak index docs: needs a search query")
@@ -203,6 +221,7 @@ func writeIndexUsage(w io.Writer) {
   fak index leaf [<query>]    the lane taxonomy (+ shipped/sim/stub rollup), filtered by name/tree/desc
   fak index docs <query>      the curated doc map (INDEX.md), ranked by relevance
   fak index claims <query>    the CLAIMS.md honesty ledger, ranked by relevance (shipped/simulated/stub)
+  fak index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
   flags: --json  --limit N  --root DIR
 `)
 }
@@ -237,6 +256,13 @@ func capClaims(cs []devindex.Claim, limit int) []devindex.Claim {
 		return cs[:limit]
 	}
 	return cs
+}
+
+func capVerbs(vs []devindex.Verb, limit int) []devindex.Verb {
+	if limit > 0 && len(vs) > limit {
+		return vs[:limit]
+	}
+	return vs
 }
 
 // truncRunes shortens s to at most n runes (UTF-8-safe — a claim line carries em
