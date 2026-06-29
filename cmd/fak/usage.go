@@ -36,6 +36,14 @@ func usageCoreVerbs() {
                  refute -> REVIEW_REFUTED; unreachable reviewer -> logged fail-open.
                  Refuses OFF_TRUNK / MERGE_IN_PROGRESS / NOTHING_STAGED up front.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
+  fak affected  [--base REF] [--list] [--json] [--short] [--run RE] [--] [go test args]
+                (the FAST INNER LOOP: run go test for only the packages your
+                 working-tree change can affect  -  the changed packages plus every
+                 package that (transitively, test imports included) imports one  -  not
+                 the whole go test ./... suite. Seconds, not minutes, for a one-leaf edit,
+                 so you verify the REAL oracle (not -short) on every change. --list prints
+                 the selected packages; --base REF selects everything changed since a ref.
+                 make ci still runs the full suite as the authoritative gate.)
   fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
                 (the COMMIT-BOUNDARY GATES in ONE process — the Go port of the
                  tools/check_*.py git-hook checkers. pre-commit runs all 7 staged-diff
@@ -364,6 +372,15 @@ func usageScorecardVerbs() {
                  Same workspace as #scoreboard but resolves FAK_NODE_USAGE_CHANNEL --
                  never falls back to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN
                  (node-usage token fallback), not the lab token)
+  fak slack     check [--auth] [--json] | send --channel ID --text MSG [--token T] [--dry-run]
+                (DEBUG + USE the whole Slack surface from one place. 'check' reports, for
+                 every surface (scoreboard/blockers/bench/dispatch/dojo/marketing/
+                 node-usage/product/steering/chatrelay), the bot token + channel it would
+                 use and WHERE each resolved from (env / .env.slack.local / fallback /
+                 default); --auth runs Slack auth.test per distinct token to prove it
+                 actually works (exit 1 on any failure, so it gates CI); --json for tooling.
+                 'send' posts an ad-hoc message to ANY channel (token defaults to
+                 FAK_SCOREBOARD_TOKEN), --text - reads the body from stdin, --dry-run previews)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
                 (the CONSOLIDATED regular-cadence report: folds the three dimensions
                  an operator tracks  -  SCORES (scorecard control pane), WORK-DONE
