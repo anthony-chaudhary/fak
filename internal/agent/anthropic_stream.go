@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -42,7 +43,12 @@ type AnthropicSSEEvent struct {
 // passthrough in Complete: same raw-body + credential + beta pass-through, but the
 // upstream delivers an SSE token stream instead of one buffered JSON body.
 //
-// A connection or non-200 status failure surfaces BEFORE any onEvent call, so the
+// A transient transport error or a retryable status (429 rate-limit, 503/529 overload,
+// 408/5xx transient) is RETRIED here with backoff+jitter+Retry-After — BEFORE any onEvent
+// call, where the retry is invisible to the client — exactly as Complete/CompleteStream
+// do, so a real Anthropic 429/529 window no longer collapses the flagship stream to the
+// slower buffered fallback on the first hit. A connection or non-retryable status failure
+// (or a retryable one that survived every attempt) surfaces BEFORE any onEvent call, so the
 // caller can still fall back to the buffered path having sent the client nothing AND
 // without a second generation having been billed (a non-200 produced no tokens). Once
 // events have flowed, a read error is returned as-is for the caller to terminate the
@@ -68,16 +74,42 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	if apiKey != "" {
 		key = apiKey
 	}
-	// A 401 here is recoverable ONCE on the pinned/rotating subscription path (the inbound
-	// client supplied no key of its own AND the planner holds a live APIKeyFunc): the
-	// on-disk OAuth token may have rotated or been briefly torn between resolve and send, so
-	// we re-read it fresh and retry. The status is checked BEFORE any SSE byte reaches the
-	// client (resp.Body is only parsed past this block), so a pre-stream retry can never
-	// corrupt an already-started response. triedAuthRefresh caps it at one extra attempt.
+	// Retry a transient transport error OR a retryable status (429 rate-limit, 503/529
+	// overload, 408/5xx transient) with the SAME backoff+jitter+Retry-After policy as
+	// Complete/CompleteStream — but ONLY here, before the first SSE byte reaches the client,
+	// where a retry is invisible and the caller can still choose an HTTP status. Until now
+	// this flagship `fak guard -- claude` passthrough retried ONLY a 401; a real Anthropic
+	// 429/529 collapsed the live stream to the slower buffered fallback on the very first
+	// one. A fleet sharing one upstream account rides out a long overload window far better
+	// when the streaming path itself backs off and retries (plannerMaxAttempts, default 8),
+	// instead of giving up after a single hit. A deterministic dial failure still fails fast
+	// (no backoff). A 401 on the rotating-subscription path self-heals ONCE: the on-disk
+	// OAuth token may have rotated or been briefly torn between resolve and send, so we
+	// re-read it fresh and re-send immediately (uncounted). Every other status is a request
+	// error a retry cannot fix and is returned as-is. Each non-200 body is drained+closed in
+	// the loop; only the successful 200 escapes to the SSE reader below.
 	authRefreshable := apiKey == "" && p.APIKeyFunc != nil
 	triedAuthRefresh := false
+	maxAttempts := plannerMaxAttempts()
+	var lastErr error
+	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
+	lastRetryAfter := "" // the triggering response's Retry-After, honored as the next wait
 	var resp *http.Response
-	for {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook
+			// the buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry`
+			// line and retry counter fire for the streaming passthrough too), then wait —
+			// honoring a named Retry-After, else the jittered exponential schedule. A
+			// cancelled context aborts the wait promptly rather than sleeping it out.
+			wait := retryWait(attempt, lastRetryAfter)
+			if p.RetryNotify != nil {
+				p.RetryNotify(attempt, lastStatus, wait)
+			}
+			if err := sleepCtx(ctx, wait); err != nil {
+				return err
+			}
+		}
 		req, err := http.NewRequestWithContext(ctx, "POST", adapter.Endpoint(p.BaseURL, p.ModelID), bytes.NewReader(body))
 		if err != nil {
 			return err
@@ -93,30 +125,49 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		req.Header.Set("Accept", "text/event-stream")
 
-		var derr error
-		resp, derr = p.Client.Do(req)
+		r, derr := p.Client.Do(req)
 		if derr != nil {
+			// A deterministic dial failure (refused/NXDOMAIN/TLS) cannot be retried away —
+			// fail fast and tagged. A transient transport error (timeout, mid-flight reset)
+			// gets the same backoff as a retryable status.
 			if deterministicTransportError(derr) {
 				return &UpstreamUnreachableError{Err: derr}
 			}
-			return derr
+			lastErr = derr
+			lastStatus = 0
+			lastRetryAfter = ""
+			continue
 		}
-		if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && authRefreshable {
+		if r.StatusCode == http.StatusOK {
+			resp = r
+			break
+		}
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		r.Body.Close()
+		if retryableStatus(r.StatusCode) {
+			ra := r.Header.Get("Retry-After")
+			lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
+			lastStatus = r.StatusCode
+			lastRetryAfter = ra
+			continue
+		}
+		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
+		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring
+		// Complete/CompleteStream. A no-op (func gone, empty, or the SAME token) falls through.
+		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && authRefreshable {
 			if fresh := p.effectiveAPIKey(); fresh != "" && fresh != key {
-				io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-				resp.Body.Close()
 				key = fresh
 				triedAuthRefresh = true
+				attempt--
 				continue
 			}
 		}
-		break
+		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
+	}
+	if resp == nil {
+		return fmt.Errorf("planner: streaming failed after %d attempts: %w", maxAttempts, lastErr)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
-	}
 	// The gateway only takes this path against the real Anthropic API, but guard anyway:
 	// an upstream that ignores stream and replies with one buffered JSON body cannot be
 	// framed as SSE, so surface that as unsupported BEFORE any event (the caller falls
