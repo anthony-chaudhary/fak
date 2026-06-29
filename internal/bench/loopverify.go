@@ -26,12 +26,12 @@
 //     docs/standards/net-true-value.md).
 //
 // PROVENANCE (net-true criterion 4): the corpus here is a SIMULATED fixture, not
-// a live agent run — the kernel-native loop DRIVER (#1173 #S1) does not exist
-// yet, so a live naive-vs-gated wall-clock is honestly `not yet`. What this bench
-// proves today is the MEASUREMENT: a re-runnable command that computes the four
-// metrics deterministically over a comparable corpus and shows the gated loop's
-// false-done rate is strictly lower. When the live driver lands, the same report
-// shape is fed real turn records instead of the fixture; nothing else changes.
+// a live agent run. The kernel-native loop driver (#1173 #S1) is now shipped, but
+// this report still does not claim a live naive-vs-gated wall-clock. What this
+// bench proves today is the MEASUREMENT: a re-runnable command that computes the
+// four metrics deterministically over a comparable corpus and shows the gated
+// loop's false-done rate is strictly lower. Live driver records can feed the same
+// report shape instead of the fixture; nothing else changes.
 //
 // Re-run: `go test ./internal/bench/ -run TestLoopVerifyBench` (the report is
 // also regenerable into testdata/loopverify_report.json with UPDATE_GOLDEN=1).
@@ -257,7 +257,7 @@ type EpisodePair struct {
 
 // Provenance labels the report per the net-true doctrine.
 type Provenance struct {
-	Kind        string `json:"kind"`    // SIMULATED until the live driver (#1173 #S1) lands
+	Kind        string `json:"kind"`    // SIMULATED fixture unless fed live driver records
 	Command     string `json:"command"` // re-runnable witness
 	GeneratedBy string `json:"generated_by"`
 	Note        string `json:"note"`
@@ -331,9 +331,9 @@ func BuildLoopVerifyReportFor(corpus []Episode) LoopVerifyReport {
 			Command:     "go test ./internal/bench/ -run TestLoopVerifyBench",
 			GeneratedBy: "fak/internal/bench.BuildLoopVerifyReport",
 			Note: "Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) " +
-				"is not built yet, so a live naive-vs-gated wall-clock is `not yet`. This " +
+				"is shipped, but this report is not a live naive-vs-gated wall-clock. This " +
 				"witnesses the MEASUREMENT and the metric definitions; live turn records " +
-				"feed the same report shape once the driver lands.",
+				"can feed the same report shape.",
 		},
 		CorpusEpisodes: len(corpus),
 		CorpusTurns:    turns,

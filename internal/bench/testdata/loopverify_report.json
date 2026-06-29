@@ -4,7 +4,7 @@
     "kind": "SIMULATED",
     "command": "go test ./internal/bench/ -run TestLoopVerifyBench",
     "generated_by": "fak/internal/bench.BuildLoopVerifyReport",
-    "note": "Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) is not built yet, so a live naive-vs-gated wall-clock is `not yet`. This witnesses the MEASUREMENT and the metric definitions; live turn records feed the same report shape once the driver lands."
+    "note": "Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) is shipped, but this report is not a live naive-vs-gated wall-clock. This witnesses the MEASUREMENT and the metric definitions; live turn records can feed the same report shape."
   },
   "corpus_episodes": 4,
   "corpus_turns": 11,

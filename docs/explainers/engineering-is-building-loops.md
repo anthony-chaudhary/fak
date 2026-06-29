@@ -196,7 +196,7 @@ The five nested loops are one axis: scale, or how much of the stack lives in one
    SCALE         /witness /econ  /durab  /feedbk  /govern
    -----------   ------   ----   ------  -------  -----
    ecosystem  =  [CONCEPTUAL: frozen ABI + fak-certified mark]
-   meta-RSI   =  [CONCEPTUAL: enforce-tune; ESCALATE breaker is shipped]
+   meta-RSI   =  [SHIPPED: bounded propose fold; autonomous apply remains gated]
    RSI        =  keep-bit  ->  ->  ->  ->  ->   (shipgate.Evaluate)
    fleet      =  per-SHA   ->  ->  ->  ->  ->   (dos commit-audit)
    session    =  sealed    ->  ->  ->  ->  ->   (internal/recall)
@@ -246,12 +246,12 @@ Here is the canon mapped onto the rings this doc already built:
 | external verification exit-gate | "done" judged by an oracle, not the model | the **RSI** ring's non-forgeable keep-bit (`shipgate.Evaluate`), the **fleet** ring's per-SHA `dos commit-audit`, and the per-turn DOS exit-gate (`internal/loopgate`, #1174) — all shipped. |
 | state on disk, not context | the plan-file is memory | the **Session** ring: a finished session is a durable core-dump over a content-addressed swap (`internal/recall`), and a first-class [`GOAL.md` goal-spec](../goal-spec.md) stores the active loop objective, witness, plan, and scratch state (#1176). |
 | meta-agent search / DGM / SICA | agents searching agent design space | the evidence-gated variant archive in `internal/rsiloop`: prompt/tool/iteration-policy variants are scored against a fixed spec-oracle task set, kept through `shipgate`, and archived only with DOS evidence (#1177). |
-| meta-RSI (tune the improver) | retune the keep-policy itself | the ladder's labeled-conceptual apex: the `ESCALATE` breaker (`shipgate.Gate`) is shipped; feeding that judgment back to retune the keep-gate is not. |
-| cross-model review | a peer model refutes before ship | a scout review rung — tracked in #1185. |
-| repo-contained safety | no irreversible out-of-repo effects | `fak guard` containment — default-deny adjudication on every tool call plus the network-egress floor (`fak egress`) — is shipped; the loop-facing containment contract is tracked in #1187. |
+| meta-RSI (tune the improver) | retune the keep-policy itself | the **propose rung ships**: `rsiloop.Fold` reads clustered `ESCALATE` history, emits a bounded keep-policy proposal, and witnesses it through `shipgate.Evaluate` (#1195). Autonomous closed apply remains human-gated. |
+| cross-model review | a peer model refutes before ship | the scout review rung is shipped and optional: `fak loop drive --review-model ...` exports review settings and a refute blocks the turn's commit path before the dos exit-gate still adjudicates done (#1185). |
+| repo-contained safety | no irreversible out-of-repo effects | `fak loop run`/drive commands run under guard containment by default, record an explicit `--no-guard` opt-out, and refuse out-of-tree write/delete attempts with `OUT_OF_TREE_WRITE` before spawn (#1187). |
 | spec-anchor not metric (Kitchen Loop) | converge to a spec, avoid goodhart | the dos witness criterion: a change is kept on a witness derived against the spec, never a metric the agent can move (#1174/#1177). |
 
-Read the third column honestly. The witnessed exit-gate is shipped today — the RSI keep-bit (`shipgate.Evaluate`), the fleet's per-SHA `dos commit-audit`, and the per-turn loop gate are real, non-forgeable adjudications the rest of this doc traces; the durable loop ledger (`fak loop run`), `fak loop drive`, the `GOAL.md` goal-spec, `fak guard` containment, and the evidence-gated variant archive (#1177) are shipped too. The remaining tracked work under the verified-loop epic (#1173) is the cross-model scout review rung (#1185) and the loop-facing guard-containment contract (#1187). The mapping is the bridge; the issues are the build-out.
+Read the third column honestly. The witnessed exit-gate is shipped today — the RSI keep-bit (`shipgate.Evaluate`), the fleet's per-SHA `dos commit-audit`, and the per-turn loop gate are real, non-forgeable adjudications the rest of this doc traces. The durable loop ledger (`fak loop run`), `fak loop drive`, the `GOAL.md` goal-spec, guard containment, scout review, the evidence-gated variant archive (#1177), and the meta-RSI bounded-proposal fold (#1195) are shipped too. The remaining reach is not another named child in #1173: it is closing the human-gated apply loop for meta-RSI and feeding the simulated verified-vs-naive bench shape with live driver records.
 
 ### Why "verified" is the whole point
 
