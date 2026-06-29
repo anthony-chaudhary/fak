@@ -1,0 +1,4 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "read_file",

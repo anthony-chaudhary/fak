@@ -1,0 +1,9 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "read_file"
+  ],
+  "deny": {
+    "exfiltrate": "TOTALLY_MADE_UP_REASON"
+  }
+}
