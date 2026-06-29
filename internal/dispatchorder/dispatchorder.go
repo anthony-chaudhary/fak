@@ -112,6 +112,16 @@ func (c Candidate) recency() int64 {
 	return c.CreatedUnix
 }
 
+// ageStamp is the unit's age key for oldest-first ordering: its creation time, falling
+// back to recency when creation is unknown (0). Smaller == older == picked first under
+// Input.PreferOldest.
+func (c Candidate) ageStamp() int64 {
+	if c.CreatedUnix > 0 {
+		return c.CreatedUnix
+	}
+	return c.recency()
+}
+
 // Ranked is one candidate with the planner's verdict attached.
 type Ranked struct {
 	Candidate
@@ -137,6 +147,12 @@ type Input struct {
 	// CooldownSeconds is the attempt-cooldown window (0 => DefaultCooldownSeconds). Negative
 	// disables the cooldown (no unit is ever held for it).
 	CooldownSeconds int64 `json:"cooldown_seconds"`
+	// PreferOldest orders the distinct kept units OLDEST-first (by creation, then recency,
+	// then ID) instead of the default freshest-first, so a worker drains the longest-waiting
+	// backlog item first. It changes only the dispatch ORDER among survivors: the same-key
+	// supersede collapse still keeps the FRESHEST duplicate (the most recent update of one
+	// target), and the live/cooldown/collision skips are unchanged.
+	PreferOldest bool `json:"prefer_oldest,omitempty"`
 }
 
 // Result is the full deterministic verdict: every candidate's disposition plus the freshest-
@@ -195,7 +211,8 @@ func (r Result) Pick() string {
 //  3. Disposition per unit, by precedence: a live unit is DispLive; a non-winner (with a Key)
 //     is DispSuperseded by the winner; the winner is DispCooling if it was attempted within the
 //     cooldown window, else DispKeep.
-//  4. DispKeep units are ordered freshest-first and assigned a rank; Keep lists their IDs.
+//  4. DispKeep units are ordered freshest-first (oldest-first when Input.PreferOldest) and
+//     assigned a rank; Keep lists their IDs.
 //
 // A group whose winner is live or cooling yields NO keep this tick (the dispatcher waits for the
 // freshest rather than running a stale duplicate) — the deliberate v1 posture; a max-backoff
@@ -235,6 +252,9 @@ func Plan(in Input) Result {
 		ki, kj := ranked[i].Disposition == DispKeep, ranked[j].Disposition == DispKeep
 		if ki != kj {
 			return ki // kept units sort ahead of skipped ones
+		}
+		if in.PreferOldest {
+			return olderFirst(ranked[i], ranked[j]) // drain the longest-waiting backlog first
 		}
 		return moreRecent(ranked[i], ranked[j])
 	})
@@ -297,6 +317,19 @@ func beats(a, b Candidate) bool {
 
 // moreRecent is beats lifted to Ranked, for the final ordering of equally-disposed units.
 func moreRecent(a, b Ranked) bool { return beats(a.Candidate, b.Candidate) }
+
+// olderFirst is the oldest-first total order over Ranked: smaller age (creation, then
+// recency), then smaller ID — deterministic with no ties. The inverse of moreRecent, used
+// for the final ordering when Input.PreferOldest drains the longest-waiting backlog first.
+func olderFirst(a, b Ranked) bool {
+	if as, bs := a.ageStamp(), b.ageStamp(); as != bs {
+		return as < bs
+	}
+	if a.recency() != b.recency() {
+		return a.recency() < b.recency()
+	}
+	return a.ID < b.ID
+}
 
 // priceFanout builds the collision graph over the otherwise-kept candidates. Legacy order-only
 // callers that provide no lane/tree/mode facts keep the pre-existing behavior; as soon as any

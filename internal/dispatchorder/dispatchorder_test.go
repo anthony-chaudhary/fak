@@ -71,6 +71,45 @@ func TestDistinctKeysAllKeptFreshestFirst(t *testing.T) {
 	}
 }
 
+// TestPreferOldestOrdersDistinctKeysOldestFirst: with PreferOldest, distinct kept units are
+// ordered OLDEST-first by creation, even when the oldest ticket has the FRESHEST update — the
+// backlog-draining policy that makes the dispatcher pick the longest-waiting ticket first.
+func TestPreferOldestOrdersDistinctKeysOldestFirst(t *testing.T) {
+	r := Plan(Input{NowUnix: base, PreferOldest: true, Candidates: []Candidate{
+		{ID: "new", Key: "A", CreatedUnix: base - 100, UpdatedUnix: base - 10},
+		{ID: "old", Key: "B", CreatedUnix: base - 900, UpdatedUnix: base - 5}, // oldest created, freshest update
+		{ID: "mid", Key: "C", CreatedUnix: base - 500, UpdatedUnix: base - 50},
+	}})
+	if r.KeepCount != 3 {
+		t.Fatalf("keep = %d, want 3 (distinct keys never supersede)", r.KeepCount)
+	}
+	want := []string{"old", "mid", "new"} // oldest-created first, regardless of update recency
+	for i, id := range want {
+		if r.Keep[i] != id {
+			t.Errorf("keep[%d] = %q, want %q (oldest-first)", i, r.Keep[i], id)
+		}
+	}
+	if r.Pick() != "old" {
+		t.Errorf("pick = %q, want old (oldest ticket, even though it has the freshest update)", r.Pick())
+	}
+}
+
+// TestPreferOldestStillKeepsFreshestWithinKey: PreferOldest changes only the ORDER of distinct
+// survivors; within ONE supersede key the freshest duplicate still wins (the others are
+// superseded), so the de-dup contract is preserved.
+func TestPreferOldestStillKeepsFreshestWithinKey(t *testing.T) {
+	r := Plan(Input{NowUnix: base, PreferOldest: true, Candidates: []Candidate{
+		{ID: "dup-old", Key: "X", CreatedUnix: base - 900, UpdatedUnix: base - 500},
+		{ID: "dup-new", Key: "X", CreatedUnix: base - 100, UpdatedUnix: base - 50}, // freshest update of target X
+	}})
+	if r.Pick() != "dup-new" {
+		t.Errorf("pick = %q, want dup-new (freshest within the key, even under PreferOldest)", r.Pick())
+	}
+	if dispoOf(r, "dup-old") != DispSuperseded {
+		t.Errorf("dup-old disposition = %q, want superseded", dispoOf(r, "dup-old"))
+	}
+}
+
 func TestCollisionPricedFanoutSerializesExclusiveOverlapBeforeLaunch(t *testing.T) {
 	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
 		{ID: "gateway-old", Key: "A", Lane: "gateway", Tree: []string{"internal/gateway/**"}, UpdatedUnix: base - 300},
