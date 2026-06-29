@@ -70,6 +70,17 @@ type CompactOutcome struct {
 	Reason     string
 	Dropped    int
 	ShedTokens int
+	// Diagnostic split, populated on the under_budget bail (the silent common case). The
+	// protected prefix is everything THROUGH the cache_control anchor; the suffix is the
+	// compactible span after it. AnchorStarved is true when the lever bailed under_budget
+	// DESPITE a protected prefix that already exceeds the budget — i.e. the anchor swallowed
+	// the conversation, so compaction structurally cannot fire no matter how long the session
+	// grows. That is the signal that distinguishes a BENIGN idle (a genuinely short session)
+	// from the anchored-near-the-end dormancy on real Claude Code traffic (#1407), which the
+	// bare under_budget reason cannot tell apart. Zero/false on every other outcome.
+	ProtectedPrefixTokens int
+	SuffixTokens          int
+	AnchorStarved         bool
 }
 
 // CompactAnthropicHistory rewrites an outbound Anthropic /v1/messages body so the byte range
@@ -135,13 +146,29 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 	// every message is compactible. Otherwise it ends at the FIRST breakpoint message (the
 	// cached head); everything after it up to the recent kept window is compactible middle.
 
-	// 2. Is the compactible suffix already under budget? Then there is nothing to do.
+	// 2. Is the compactible suffix already under budget? Then there is nothing to do — but record
+	//    the token split so the caller can tell a BENIGN idle (a short session) from an
+	//    ANCHOR-STARVED one. On real Claude Code traffic the only message breakpoint is a RECENT
+	//    one, so pfxEnd lands near the end, the protected prefix swallows ~the whole conversation,
+	//    and this suffix is structurally tiny no matter how long the session grows — the lever can
+	//    never fire (#1407). AnchorStarved flags exactly that: under_budget WITH a protected prefix
+	//    already past the budget. pfxEnd<0 (system-only anchor) makes the whole array compactible,
+	//    so prefixTokens is 0 and under_budget there is genuinely benign.
 	suffixTokens := 0
 	for i := pfxEnd + 1; i < len(elems); i++ {
 		suffixTokens += len(elems[i]) / 4
 	}
 	if suffixTokens <= budget {
-		return raw, CompactOutcome{Reason: CompactReasonUnderBudget}
+		prefixTokens := 0
+		for i := 0; i <= pfxEnd && i < len(elems); i++ {
+			prefixTokens += len(elems[i]) / 4
+		}
+		return raw, CompactOutcome{
+			Reason:                CompactReasonUnderBudget,
+			ProtectedPrefixTokens: prefixTokens,
+			SuffixTokens:          suffixTokens,
+			AnchorStarved:         prefixTokens > budget,
+		}
 	}
 
 	// 3. Choose the kept recent window: walk from the END accumulating tokens until the

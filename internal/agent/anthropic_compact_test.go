@@ -395,6 +395,91 @@ func TestCompactRefusesToBurstFullyCachedHistory(t *testing.T) {
 	}
 }
 
+// recentOnlyBreakpointBody models the ACTUAL Claude Code layout the 2026-06-29 ablation note
+// observed: the ONLY messages[] cache_control sits on a RECENT turn (recentBpBack from the end),
+// with NO breakpoint on msg 0. firstBreakpointMessage therefore anchors near the end, the
+// protected prefix swallows ~the whole conversation, and the compactible suffix is structurally
+// tiny — the dormant-on-real-traffic shape (#1407). Contrast claudeCodeShapedBody, which ALSO
+// marks msg 0 and so (artificially) lets compaction fire.
+func recentOnlyBreakpointBody(t *testing.T, nMsgs, recentBpBack int) []byte {
+	t.Helper()
+	type block map[string]any
+	recentBpIdx := nMsgs - 1 - recentBpBack
+	msgs := make([]map[string]any, 0, nMsgs)
+	for i := 0; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		blk := block{"type": "text", "text": strings.Repeat("conversation turn body words. ", 12) + itoa(i)}
+		if i == recentBpIdx {
+			blk["cache_control"] = map[string]any{"type": "ephemeral"}
+		}
+		msgs = append(msgs, map[string]any{"role": role, "content": []block{blk}})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024,
+		"system":   []block{{"type": "text", "text": "You are a coding agent.", "cache_control": map[string]any{"type": "ephemeral"}}},
+		"messages": msgs,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+// TestCompactAnchorStarvedDiagnostic is the witness for #1409: on the real Claude Code layout (a
+// recent-only message breakpoint), compaction bails under_budget AND flags AnchorStarved, because
+// the protected prefix already exceeds the budget — the signal that distinguishes this structural
+// dormancy from a benign short-session idle. A short session and a system-only breakpoint are NOT
+// starved.
+func TestCompactAnchorStarvedDiagnostic(t *testing.T) {
+	// 1. Recent-only breakpoint, long conversation: anchor near the end → prefix >> budget.
+	raw := recentOnlyBreakpointBody(t, 120, 2)
+	out, outcome := CompactAnthropicHistoryWithOutcome(raw, 1200)
+	if !bytes.Equal(out, raw) {
+		t.Fatalf("expected identity (under_budget) on a recent-only-breakpoint body, body changed")
+	}
+	if outcome.Reason != CompactReasonUnderBudget {
+		t.Fatalf("Reason=%q, want %q", outcome.Reason, CompactReasonUnderBudget)
+	}
+	if !outcome.AnchorStarved {
+		t.Fatalf("expected AnchorStarved=true (prefix %d tok > budget 1200, suffix %d tok) — the anchor swallowed the conversation",
+			outcome.ProtectedPrefixTokens, outcome.SuffixTokens)
+	}
+	if outcome.ProtectedPrefixTokens <= 1200 {
+		t.Fatalf("the protected prefix must exceed the budget to be starved, got %d", outcome.ProtectedPrefixTokens)
+	}
+
+	// 2. Genuinely short session (prefix small, well under a huge budget): benign idle, NOT starved.
+	short := claudeCodeShapedBody(t, 6, 1)
+	if _, shortOut := CompactAnthropicHistoryWithOutcome(short, 1<<20); shortOut.AnchorStarved {
+		t.Fatalf("a genuinely short session must NOT be anchor-starved (prefix %d, huge budget)", shortOut.ProtectedPrefixTokens)
+	}
+
+	// 3. System-only breakpoint (pfxEnd = -1): the whole array is compactible, so an under_budget
+	//    there is genuinely benign — prefix tokens are 0, never starved.
+	sysMsgs := make([]map[string]any, 0, 6)
+	for i := 0; i < 6; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		sysMsgs = append(sysMsgs, map[string]any{"role": role, "content": []map[string]any{{"type": "text", "text": strings.Repeat("body ", 25)}}})
+	}
+	sysOnly, err := json.Marshal(map[string]any{
+		"model": "claude", "max_tokens": 512,
+		"system":   []map[string]any{{"type": "text", "text": "sys", "cache_control": map[string]any{"type": "ephemeral"}}},
+		"messages": sysMsgs,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if _, sysOut := CompactAnthropicHistoryWithOutcome(sysOnly, 1<<20); sysOut.AnchorStarved {
+		t.Fatalf("a system-only breakpoint (pfxEnd=-1) must never be anchor-starved")
+	}
+}
+
 func TestCacheBurstBreakEvenTurns(t *testing.T) {
 	// Dropping 20k cache-hot tokens saves only their discounted read cost each future
 	// turn. If the edit invalidates 40k warm suffix tokens, Anthropic-like 1h write/read
