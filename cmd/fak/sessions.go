@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/sessionobs"
 )
 
@@ -46,6 +47,8 @@ func runSessions(stdout, stderr io.Writer, argv []string) int {
 		return sessionsDiscover(stdout, stderr, rest)
 	case "score":
 		return sessionsScore(stdout, stderr, rest)
+	case "learn":
+		return sessionsLearn(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		sessionsUsage(stdout)
 		return 0
@@ -62,11 +65,16 @@ func sessionsUsage(w io.Writer) {
 usage:
   fak sessions discover [--project SUB] [--root DIR ...] [--since-days N]
   fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
+  fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
 
 Start here:
   fak sessions score        fold THIS host's fak sessions, witness their commits, and
                             print how far up the capture->structure->link->aggregate->learn
                             ladder the corpus has climbed (sessionobs_debt).
+  fak sessions learn        the LEARN rung: contrast value-side (shipped) against
+                            waste-side (stopped) sessions and surface which behaviors
+                            separate them. Reads a committed corpus with --corpus, else
+                            folds this host's sessions live.
 `)
 }
 
@@ -89,6 +97,11 @@ func parseSessionsFlags(name string, fs *flag.FlagSet, argv []string) (*sessions
 		fs.IntVar(&f.max, "max", 0, "cap the number of transcripts folded (0 = all; newest first)")
 		fs.StringVar(&f.corpus, "corpus", "", "write the scrubbed Record corpus as JSONL to this path (default: write nothing)")
 		fs.BoolVar(&f.asJSON, "json", false, "emit the machine-readable score envelope")
+	}
+	if name == "learn" {
+		fs.IntVar(&f.max, "max", 0, "cap the number of transcripts folded when reading live (0 = all; newest first)")
+		fs.StringVar(&f.corpus, "corpus", "", "read a pre-folded scrubbed corpus JSONL from this path instead of folding this host's transcripts live")
+		fs.BoolVar(&f.asJSON, "json", false, "emit the machine-readable control-pane envelope")
 	}
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
@@ -234,15 +247,52 @@ func sessionsScore(stdout, stderr io.Writer, argv []string) int {
 	if err != nil {
 		return 2
 	}
-	refs, err := discoverTranscripts(f)
+	corpus, err := foldLiveCorpus(f)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak sessions score: %v\n", err)
 		return 1
 	}
+
+	if f.corpus != "" {
+		if err := writeCorpus(f.corpus, corpus); err != nil {
+			fmt.Fprintf(stderr, "fak sessions score: writing corpus: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "wrote %d records to %s\n", len(corpus), f.corpus)
+	}
+
+	root := repoRoot()
+	pipe := sessionobs.Pipeline{
+		CorpusCommitted: corpusIsCommitted(root),
+		// LoopConsumes is true once a REGISTERED loop reads the committed corpus -- the
+		// `sessions_learn` garden member (gardenbundle.Members). This is checked, not
+		// asserted: remove the member and the rung honestly fails again.
+		LoopConsumes: sessionsLearnRegistered(),
+		// Registered tracks the sessionobs SCORECARD folding into the scorecard control
+		// pane ratchet (a Python-side wiring); not done yet. SOFT, so it costs score, not debt.
+		Registered: false,
+	}
+	rep := sessionobs.Score(corpus, pipe)
+	if f.asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, rep)
+		return 0
+	}
+	sessionobs.Render(stdout, rep)
+	return 0
+}
+
+// foldLiveCorpus discovers this host's transcripts (honoring the project/root/since/max
+// filters), folds each into a scrubbed Record, and witnesses its commits against git
+// history to classify the outcome. It is the shared engine behind `score` and a live
+// `learn`. Read-only and off any hot path.
+func foldLiveCorpus(f *sessionsFlags) ([]sessionobs.Record, error) {
+	refs, err := discoverTranscripts(f)
+	if err != nil {
+		return nil, err
+	}
 	if f.max > 0 && len(refs) > f.max {
 		refs = refs[:f.max]
 	}
-
 	root := repoRoot()
 	wit := newGitWitness(root)
 	corpus := make([]sessionobs.Record, 0, len(refs))
@@ -260,27 +310,137 @@ func sessionsScore(stdout, stderr io.Writer, argv []string) int {
 		rec.Outcome = sessionobs.Classify(ev, wit.anySurvived(ev.CommitSHAs))
 		corpus = append(corpus, rec)
 	}
+	return corpus, nil
+}
 
+// learnSchema is the control-pane schema for the `learn --json` envelope.
+const learnSchema = "fak.sessionobs.learn.v1"
+
+// learnEnvelope wraps the pure ContrastReport in the standard control-pane fields a
+// garden member reads (ok/verdict/finding/reason/next_action), so the learn pass can
+// join the garden bundle as a registered member.
+type learnEnvelope struct {
+	Schema     string                    `json:"schema"`
+	OK         bool                      `json:"ok"`
+	Verdict    string                    `json:"verdict"`
+	Finding    string                    `json:"finding"`
+	Reason     string                    `json:"reason"`
+	NextAction string                    `json:"next_action"`
+	Source     string                    `json:"source"`
+	Contrast   sessionobs.ContrastReport `json:"contrast"`
+}
+
+// sessionsLearn is the LEARN-rung consumer: it builds the corpus (from a committed
+// JSONL via --corpus, else by folding this host's sessions live), runs the pure
+// value-vs-waste Contrast, and renders the ranked discriminators + the one headline
+// finding. With --json it emits a control-pane envelope so the garden bundle can run it.
+func sessionsLearn(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("sessions learn", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	f, err := parseSessionsFlags("learn", fs, argv)
+	if err != nil {
+		return 2
+	}
+
+	var corpus []sessionobs.Record
+	source := "live"
 	if f.corpus != "" {
-		if err := writeCorpus(f.corpus, corpus); err != nil {
-			fmt.Fprintf(stderr, "fak sessions score: writing corpus: %v\n", err)
+		source = f.corpus
+		recs, rerr := readCorpus(f.corpus)
+		if rerr != nil {
+			// A missing/unreadable committed corpus is a SURFACED condition, never a
+			// crash: under --json emit a well-formed advisory envelope (exit 0) so a
+			// garden member treats it as advisory, not an errored member that reds the gate.
+			if f.asJSON {
+				_ = writeIndentedJSONNoEscape(stdout, learnEnvelope{
+					Schema: learnSchema, OK: false, Verdict: "ACTION",
+					Finding:    "sessionobs_corpus_missing",
+					Reason:     fmt.Sprintf("corpus %s unreadable: %v", f.corpus, rerr),
+					NextAction: "regenerate the committed corpus: fak sessions score --corpus " + f.corpus,
+					Source:     source,
+					Contrast:   sessionobs.Contrast(nil),
+				})
+				return 0
+			}
+			fmt.Fprintf(stderr, "fak sessions learn: reading corpus %s: %v\n", f.corpus, rerr)
 			return 1
 		}
-		fmt.Fprintf(stderr, "wrote %d records to %s\n", len(corpus), f.corpus)
+		corpus = recs
+	} else {
+		recs, ferr := foldLiveCorpus(f)
+		if ferr != nil {
+			fmt.Fprintf(stderr, "fak sessions learn: %v\n", ferr)
+			return 1
+		}
+		corpus = recs
 	}
 
-	pipe := sessionobs.Pipeline{
-		CorpusCommitted: corpusIsCommitted(root),
-		LoopConsumes:    false, // no loop consumes the corpus yet (increment 3)
-		Registered:      false, // not in the control-pane ratchet yet (increment 3)
-	}
-	rep := sessionobs.Score(corpus, pipe)
+	rep := sessionobs.Contrast(corpus)
 	if f.asJSON {
-		_ = writeIndentedJSONNoEscape(stdout, rep)
+		_ = writeIndentedJSONNoEscape(stdout, buildLearnEnvelope(rep, source))
 		return 0
 	}
-	sessionobs.Render(stdout, rep)
+	sessionobs.RenderContrast(stdout, rep)
 	return 0
+}
+
+// buildLearnEnvelope shapes a successful contrast into the control-pane envelope. A
+// pass that read the corpus is OK even when it finds no discriminator yet -- surfacing
+// "insufficient" or "flat" is the loop WORKING, not a failure (mirroring guard_route).
+func buildLearnEnvelope(rep sessionobs.ContrastReport, source string) learnEnvelope {
+	env := learnEnvelope{
+		Schema: learnSchema, OK: true, Verdict: "OK",
+		Reason: rep.Headline, NextAction: rep.NextAction, Source: source, Contrast: rep,
+	}
+	switch {
+	case !rep.Separable:
+		env.Finding = "sessionobs_learn_insufficient"
+	case rep.TopFeature == "":
+		env.Finding = "sessionobs_learn_flat"
+	default:
+		env.Finding = "sessionobs_learn"
+	}
+	return env
+}
+
+// readCorpus reads a scrubbed Record corpus JSONL (the inverse of writeCorpus). A torn
+// line is skipped, never fatal; a missing file is an error the caller surfaces.
+func readCorpus(path string) ([]sessionobs.Record, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	var out []sessionobs.Record
+	sc := bufio.NewScanner(fh)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var r sessionobs.Record
+		if json.Unmarshal([]byte(line), &r) != nil {
+			continue
+		}
+		out = append(out, r)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// sessionsLearnRegistered reports whether the `sessions_learn` loop is registered in the
+// garden bundle -- the honest witness for the sessionobs `loop_consumes` rung. It reads
+// the live member registry, so the rung tracks reality: drop the member and it fails again.
+func sessionsLearnRegistered() bool {
+	for _, m := range gardenbundle.Members {
+		if m.Key == "sessions_learn" {
+			return true
+		}
+	}
+	return false
 }
 
 // gitWitness answers "did this short SHA survive into HEAD's history?" by shelling

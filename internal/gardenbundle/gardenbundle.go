@@ -85,6 +85,18 @@ var Members = []Member{
 		Kind:  "envelope",
 		Exec:  "command",
 	},
+	{
+		// The learn rung for session observability (#1161): consume the committed
+		// scrubbed corpus and surface the value-vs-waste behavior contrast. Missing
+		// corpus is advisory ACTION, not a red garden, because the member itself still
+		// measured and reported the missing feed.
+		Key:   "sessions_learn",
+		Label: "sessions learn",
+		Argv:  []string{"fak", "sessions", "learn", "--corpus", "experiments/sessionobs/corpus.jsonl", "--json"},
+		Gates: false,
+		Kind:  "envelope",
+		Exec:  "command",
+	},
 }
 
 // DeepMember is the opt-in deep member (added by --deep). Non-gating advisory.
