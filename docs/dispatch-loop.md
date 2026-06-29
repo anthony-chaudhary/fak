@@ -116,12 +116,13 @@ default**; `-Live` opts into the side effect.
 | `FleetResolveProgress` | [`register_resolve_progress.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_resolve_progress.ps1) | 15 min | CLOSE / harvest — snapshot the curve and close `OPEN_WITNESSED` issues. DoS-free (no worker spawned). |
 | `FleetDispatchStatusDoc` | [`register_dispatch_status_doc.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_dispatch_status_doc.ps1) | 30 min | DOC — render the gitignored, operator-local `.dispatch-runs/dispatch-status.md`. Read-only fold; never committed. |
 
-`FleetIssueDispatch` and `FleetResolveProgress` are installed through `fak loop run`,
-not directly through Python. The Task Scheduler fire/start/end wrapper rows land in
-`.fak/loops.jsonl` under `issue-resolve-dispatch/task-scheduler/<backend>` and
-`issue-resolve-progress/task-scheduler`; the Python producers then record their own
+All three tasks are installed through `fak loop run`, not directly through Python. The
+Task Scheduler fire/start/end wrapper rows land in `.fak/loops.jsonl` under
+`issue-resolve-dispatch/task-scheduler/<backend>`, `issue-resolve-progress/task-scheduler`,
+and `dispatch-status-doc/task-scheduler`; the Python producers then record their own
 admission/spawn/progress/witness rows under `issue-resolve-dispatch/<backend>` and
-`issue-resolve-progress`.
+`issue-resolve-progress`. (`FleetDispatchStatusDoc` is a read-only render, so it adds only
+the wrapper run rows — enough to see in `fak loop status` that the doc actually refreshed.)
 
 ```powershell
 # install all three live (bounded autonomous spawn + close + doc refresh)

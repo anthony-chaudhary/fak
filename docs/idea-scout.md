@@ -86,6 +86,11 @@ so there is no worker-cap DoS surface to bound, just the per-run issue cap.
 |---|---|---|---|
 | `FleetIdeaScout` | [`register_idea_scout.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_idea_scout.ps1) | daily (`-At`, default 09:00) | FILE — up to `-MaxIssues` triage-ready issues (`-Live` only). |
 
+The task is installed through `fak loop run` (not python directly), so each daily fire
+records `fire`/`start`/`end` wrapper rows in `.fak/loops.jsonl` under
+`idea-scout/task-scheduler` — `fak loop status` then shows whether the scout actually ran,
+not just that Task Scheduler logged `LastResult=0`.
+
 ```powershell
 # install dry-run (logs the plan daily, files nothing)
 .\tools\register_idea_scout.ps1 -Workspace C:\work\fak
