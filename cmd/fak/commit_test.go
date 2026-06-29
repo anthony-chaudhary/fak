@@ -5,9 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
@@ -131,6 +135,139 @@ func TestRunCommit_messageFromStdin(t *testing.T) {
 	}
 	if !strings.Contains(gotMsg, "from stdin") {
 		t.Fatalf("message should come from stdin, got %q", gotMsg)
+	}
+}
+
+func TestRunCommit_reviewModelWiresSafecommitReview(t *testing.T) {
+	var got safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		got = o
+		return safecommit.Result{Committed: true, Verified: true, Paths: o.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--path", "a.go",
+		"-m", "feat(loop): add review (#1185) (fak cmd)",
+		"--review-model", "cheap-scout",
+		"--review-objective", "ship issue 1185",
+	})
+	if code != 0 {
+		t.Fatalf("want 0, got %d stderr=%q", code, errb.String())
+	}
+	if got.Review == nil {
+		t.Fatal("--review-model did not wire safecommit Review")
+	}
+	if got.Review.Model != "cheap-scout" || got.Review.Objective != "ship issue 1185" {
+		t.Fatalf("review options = %+v", got.Review)
+	}
+}
+
+func TestParseCommitReviewScoutLabelAcceptsFencedJSON(t *testing.T) {
+	label, err := parseCommitReviewScoutLabel("```json\n{\"verdict\":\"refute\",\"reason\":\"missing test\"}\n```")
+	if err != nil {
+		t.Fatalf("parseCommitReviewScoutLabel: %v", err)
+	}
+	if label.Labels["verdict"] != "refute" || label.Labels["reason"] != "missing test" {
+		t.Fatalf("label = %+v", label)
+	}
+}
+
+func TestRunCommitReviewRefuteRecordsLoopEvidenceAndGoalScratch(t *testing.T) {
+	tmp := t.TempDir()
+	ledger := filepath.Join(tmp, "loops.jsonl")
+	goal := filepath.Join(tmp, "GOAL.md")
+	if err := os.WriteFile(goal, []byte(`---
+loop: issue-1185
+witness: commit-audit
+---
+# Objective
+Ship the review rung.
+
+# Plan
+- [ ] wire review
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_GOAL_LOOP", "issue-1185")
+	t.Setenv("FAK_GOAL_ITER", "2")
+	t.Setenv("FAK_GOAL_SPEC", goal)
+	t.Setenv("FAK_LOOP_LEDGER", ledger)
+
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{
+			Paths:  o.Paths,
+			Reason: safecommit.ReasonReviewRefuted,
+			Detail: "missing regression test",
+			Review: &modelroute.ReviewResult{
+				Model:      "cheap-scout",
+				Verdict:    modelroute.ReviewRefute,
+				Reason:     "missing regression test",
+				DiffSHA256: "abc123",
+				ScoutCalls: 1,
+			},
+		}, nil
+	})
+
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "feat(loop): add review (#1185) (fak cmd)", "--review-model", "cheap-scout"})
+	if code != 3 {
+		t.Fatalf("review refute should exit 3, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		t.Fatalf("load ledger: %v", err)
+	}
+	if len(events) != 1 || events[0].Kind != loopmgr.EventHeartbeat || events[0].Reason != "REVIEW_REFUTED" {
+		t.Fatalf("review event = %+v", events)
+	}
+	if len(events[0].EvidenceRefs) != 1 || events[0].EvidenceRefs[0].Kind != "review" || events[0].EvidenceRefs[0].Ref != "refute" {
+		t.Fatalf("review evidence = %+v", events[0].EvidenceRefs)
+	}
+	if events[0].EvidenceRefs[0].SHA256 != "abc123" || events[0].Metrics["scout_calls"] != 1 {
+		t.Fatalf("review evidence lost digest/metrics: %+v", events[0])
+	}
+	raw, err := os.ReadFile(goal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "NOT_YET review refuted") || !strings.Contains(string(raw), "missing regression test") {
+		t.Fatalf("goal scratch missing critique:\n%s", string(raw))
+	}
+}
+
+func TestRunCommitReviewPassRecordsLoopEvidence(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	t.Setenv("FAK_GOAL_LOOP", "issue-1185")
+	t.Setenv("FAK_GOAL_RUN", "run-1")
+	t.Setenv("FAK_LOOP_LEDGER", ledger)
+
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{
+			Committed: true,
+			Verified:  true,
+			SHA:       "abc",
+			Paths:     o.Paths,
+			Review: &modelroute.ReviewResult{
+				Model:      "cheap-scout",
+				Verdict:    modelroute.ReviewPass,
+				Reason:     "diff matches objective",
+				DiffSHA256: "def456",
+				ScoutCalls: 1,
+			},
+		}, nil
+	})
+
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "feat(loop): add review (#1185) (fak cmd)"})
+	if code != 0 {
+		t.Fatalf("review pass should exit 0, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		t.Fatalf("load ledger: %v", err)
+	}
+	if len(events) != 1 || events[0].Reason != "REVIEW_PASS" || events[0].EvidenceRefs[0].Ref != "pass" {
+		t.Fatalf("review event = %+v", events)
 	}
 }
 

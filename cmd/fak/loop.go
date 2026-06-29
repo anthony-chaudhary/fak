@@ -41,6 +41,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopAdmit(stdout, stderr, argv[1:])
 	case "recover":
 		return runLoopRecover(stdout, stderr, argv[1:])
+	case "drive":
+		return runLoopDrive(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		loopUsage(stdout)
 		return 0
@@ -1037,6 +1039,8 @@ func loopUsage(w io.Writer) {
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
   fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
+  fak loop drive [--goal GOAL.md] [--max-iters N] [--review-model M] -- CMD [ARG...]
+  fak loop drive --template [--loop ID]
 
 Append records one scheduler/script/control event in the canonical hash-chained
 ledger. Run wraps an OS scheduler command under fak guard by default and records
@@ -1053,5 +1057,12 @@ RECOVERY worklist: the dispatched runs that started but were never finished
 (orphaned) or never witnessed (unwitnessed) — the work to re-dispatch or re-verify.
 The ledger records events; admission, scheduler authority, and completion witnesses
 live in producers.
+Drive reads a GOAL.md goal-spec fresh before every turn, exports the objective,
+witness, and next unchecked plan item through FAK_GOAL_* environment variables,
+runs one command turn, and repeats until the plan is checked off or the budget is
+exhausted. With --review-model it also exports FAK_REVIEW_* so fak commit asks a
+scout reviewer to pass/refute the turn diff before committing; review verdicts
+are recorded as loop-ledger evidence. A failed turn appends its NOT_YET reason
+under Scratch so a re-armed fresh-context turn sees the prior refusal.
 `)
 }

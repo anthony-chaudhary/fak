@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -44,6 +45,9 @@ func keyFor(args []string) string {
 		// "merge-base HEAD origin/main"
 		return strings.Join(args, " ")
 	case "diff":
+		if len(args) > 1 && args[1] == "--no-ext-diff" {
+			return "diff-review"
+		}
 		// The stale-base guard issues two diffs that must be distinguishable:
 		//   "diff <mb> origin/main -- P"  (peer-added since the fork)  -> "--" at index 3
 		//   "diff origin/main -- P"       (origin vs working tree)     -> "--" at index 2
@@ -53,7 +57,7 @@ func keyFor(args []string) string {
 			return "diff-wt"
 		}
 		return "diff-peer"
-	case "symbolic-ref", "status", "diff-tree", "commit", "push":
+	case "symbolic-ref", "status", "diff-tree", "commit", "push", "ls-files":
 		return args[0]
 	default:
 		return args[0]
@@ -115,6 +119,8 @@ func onTrunkBase() map[string]reply {
 		"rev-parse HEAD":                   {out: "abc123\n", code: 0},
 		"commit":                           {out: "", code: 0},
 		"diff-tree":                        {out: "internal/foo/bar.go\n", code: 0},
+		"diff-review":                      {out: "diff --git a/internal/foo/bar.go b/internal/foo/bar.go\n+change\n", code: 0},
+		"ls-files":                         {out: "", code: 0},
 		"push":                             {out: "", code: 0},
 	}
 }
@@ -342,6 +348,75 @@ func TestHookRefused_surfacesTheMessage(t *testing.T) {
 	}
 	if !strings.Contains(res.Detail, "PUBLIC_LEAK") {
 		t.Fatalf("detail should carry the hook message, got %q", res.Detail)
+	}
+}
+
+func TestReviewRefuteBlocksBeforeCommit(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	locked := false
+	opts := baseOpts()
+	opts.Review = &ReviewOptions{
+		Model:     "cheap-scout",
+		Objective: "keep the loop honest",
+		Reviewer: func(_ context.Context, req modelroute.ReviewRequest) (modelroute.ReviewResult, error) {
+			if !strings.Contains(req.Diff, "+change") {
+				t.Fatalf("reviewer did not receive diff: %q", req.Diff)
+			}
+			if req.Objective != "keep the loop honest" {
+				t.Fatalf("objective = %q", req.Objective)
+			}
+			return modelroute.ReviewResult{
+				Model:   req.Model,
+				Verdict: modelroute.ReviewRefute,
+				Reason:  "missing a regression test",
+			}, nil
+		},
+	}
+	lock := func(LockOptions) (func(), error) {
+		locked = true
+		return func() {}, nil
+	}
+
+	res, err := CommitWith(context.Background(), g.run, lock, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Reason != ReasonReviewRefuted {
+		t.Fatalf("reason = %q, want %q", res.Reason, ReasonReviewRefuted)
+	}
+	if res.Review == nil || res.Review.Verdict != modelroute.ReviewRefute {
+		t.Fatalf("review result not recorded: %+v", res.Review)
+	}
+	if g.sawSubcommand("commit") || locked {
+		t.Fatalf("refuted review must stop before lock/commit; locked=%v calls=%v", locked, g.calls)
+	}
+}
+
+func TestReviewUnavailableFailsOpenAndRecords(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	opts.Review = &ReviewOptions{
+		Model: "cheap-scout",
+		Reviewer: func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error) {
+			return modelroute.ReviewResult{}, errors.New("review endpoint refused connection")
+		},
+	}
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Verified || res.Reason != "" {
+		t.Fatalf("unavailable reviewer must fail open to a verified commit, got %+v", res)
+	}
+	if res.Review == nil || res.Review.Verdict != modelroute.ReviewUnavailable {
+		t.Fatalf("unavailable review was not recorded: %+v", res.Review)
+	}
+	if !strings.Contains(res.Review.Reason, "refused connection") {
+		t.Fatalf("review reason lost connection error: %+v", res.Review)
+	}
+	if !g.sawSubcommand("commit") {
+		t.Fatalf("fail-open review should still commit; calls=%v", g.calls)
 	}
 }
 

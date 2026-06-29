@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -83,6 +84,15 @@ type Options struct {
 	Lock     LockOptions       // advisory same-host lock
 	Recorder *witness.Recorder // optional decisions-note sink for post-commit assertions
 	Window   *Window           // optional adaptive process-local writer window
+	Review   *ReviewOptions    // optional pre-commit cross-model review rung
+}
+
+type ReviewFunc func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error)
+
+type ReviewOptions struct {
+	Model     string
+	Objective string
+	Reviewer  ReviewFunc
 }
 
 // DefaultTrunk is the branch fak commits land on when Options.Trunk is empty.
@@ -105,6 +115,7 @@ const (
 	ReasonPathspecRace    = "PATHSPEC_RACE"     // a peer swept extra files into the commit — the headline guard
 	ReasonSymlinkEscape   = "SYMLINK_ESCAPE"    // a landed path resolves (through a symlink) to a target outside the lease
 	ReasonPushRejected    = "PUSH_REJECTED"     // git push refused (e.g. non-fast-forward)
+	ReasonReviewRefuted   = "REVIEW_REFUTED"    // opt-in scout review refuted the diff before commit
 	// ReasonStaleBaseDeletion ("STALE_BASE_DELETION") is part of this closed vocabulary too;
 	// it lives in stalebase.go with the content-level merge-base guard that emits it.
 )
@@ -113,15 +124,16 @@ const (
 // has Committed && Verified && Reason == "". RacedExtra lists the committed files that NO
 // requested path covers — the evidence of a raced commit.
 type Result struct {
-	Committed  bool     `json:"committed"`
-	SHA        string   `json:"committed_sha,omitempty"`
-	Paths      []string `json:"paths"`
-	Verified   bool     `json:"verified"`
-	Pushed     bool     `json:"pushed"`
-	Reason     string   `json:"reason,omitempty"`
-	Detail     string   `json:"detail,omitempty"`
-	RacedExtra []string `json:"raced_extra_paths,omitempty"`
-	HeadBefore string   `json:"head_before,omitempty"`
+	Committed  bool                     `json:"committed"`
+	SHA        string                   `json:"committed_sha,omitempty"`
+	Paths      []string                 `json:"paths"`
+	Verified   bool                     `json:"verified"`
+	Pushed     bool                     `json:"pushed"`
+	Reason     string                   `json:"reason,omitempty"`
+	Detail     string                   `json:"detail,omitempty"`
+	RacedExtra []string                 `json:"raced_extra_paths,omitempty"`
+	HeadBefore string                   `json:"head_before,omitempty"`
+	Review     *modelroute.ReviewResult `json:"review,omitempty"`
 }
 
 // Commit runs the safe-commit algorithm against the real git binary and a real advisory
@@ -235,6 +247,16 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 				res.Detail = detail
 				return res, nil
 			}
+		}
+	}
+
+	if reviewEnabled(opts.Review) {
+		review := runPreCommitReview(ctx, run, opts.Dir, paths, opts.Review)
+		res.Review = &review
+		if review.Verdict == modelroute.ReviewRefute {
+			res.Reason = ReasonReviewRefuted
+			res.Detail = review.Reason
+			return res, nil
 		}
 	}
 
@@ -368,6 +390,114 @@ func recordPathspecAssertion(ctx context.Context, opts Options, res Result, verd
 		PathspecAssertion: assertion,
 	}
 	_ = opts.Recorder.AppendDecision(ctx, res.SHA, d)
+}
+
+func reviewEnabled(r *ReviewOptions) bool {
+	return r != nil && strings.TrimSpace(r.Model) != ""
+}
+
+func runPreCommitReview(ctx context.Context, run Runner, dir string, paths []string, opts *ReviewOptions) modelroute.ReviewResult {
+	model := strings.TrimSpace(opts.Model)
+	diff, err := collectReviewDiff(ctx, run, dir, paths)
+	if err != nil {
+		return unavailableReview(model, "", fmt.Sprintf("collect diff: %v", err))
+	}
+	if opts.Reviewer == nil {
+		return unavailableReview(model, diff, "no reviewer bound")
+	}
+	req := modelroute.ReviewRequest{
+		Model:     model,
+		Objective: opts.Objective,
+		Diff:      diff,
+	}
+	res, err := opts.Reviewer(ctx, req)
+	if err != nil {
+		return unavailableReview(model, diff, err.Error())
+	}
+	if strings.TrimSpace(res.Model) == "" {
+		res.Model = model
+	}
+	if strings.TrimSpace(res.DiffSHA256) == "" {
+		res.DiffSHA256 = modelroute.DiffSHA256(diff)
+	}
+	if res.Verdict != modelroute.ReviewPass && res.Verdict != modelroute.ReviewRefute {
+		return unavailableReview(model, diff, fmt.Sprintf("reviewer returned verdict %q", res.Verdict))
+	}
+	return res
+}
+
+func unavailableReview(model, diff, reason string) modelroute.ReviewResult {
+	return modelroute.ReviewResult{
+		Model:      strings.TrimSpace(model),
+		Verdict:    modelroute.ReviewUnavailable,
+		Reason:     strings.TrimSpace(reason),
+		DiffSHA256: modelroute.DiffSHA256(diff),
+	}
+}
+
+func collectReviewDiff(ctx context.Context, run Runner, dir string, paths []string) (string, error) {
+	diffArgs := append([]string{"diff", "--no-ext-diff", "--binary", "HEAD", "--"}, paths...)
+	out, code, err := run(ctx, dir, diffArgs...)
+	if err != nil {
+		return "", fmt.Errorf("git not executable: %w", err)
+	}
+	if code != 0 {
+		return "", fmt.Errorf("git diff exited %d: %s", code, trimDetail(out))
+	}
+
+	var b strings.Builder
+	b.WriteString(out)
+	otherArgs := append([]string{"ls-files", "--others", "--exclude-standard", "--"}, paths...)
+	others, code, err := run(ctx, dir, otherArgs...)
+	if err != nil || code != 0 {
+		return b.String(), nil
+	}
+	for _, p := range strings.Split(others, "\n") {
+		p, ok := gitgate.CleanRepoPath(p)
+		if !ok {
+			continue
+		}
+		appendUntrackedReviewDiff(&b, dir, p)
+	}
+	return b.String(), nil
+}
+
+func appendUntrackedReviewDiff(b *strings.Builder, dir, p string) {
+	if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+		b.WriteByte('\n')
+	}
+	b.WriteString("diff --git a/")
+	b.WriteString(p)
+	b.WriteString(" b/")
+	b.WriteString(p)
+	b.WriteString("\nnew file mode 100644\n--- /dev/null\n+++ b/")
+	b.WriteString(p)
+	b.WriteByte('\n')
+	path := p
+	if dir != "" {
+		path = filepath.Join(dir, filepath.FromSlash(p))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.WriteString("+[untracked file unreadable: ")
+		b.WriteString(err.Error())
+		b.WriteString("]\n")
+		return
+	}
+	if strings.ContainsRune(string(data), '\x00') {
+		b.WriteString("+[binary file omitted]\n")
+		return
+	}
+	for _, line := range strings.SplitAfter(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		b.WriteByte('+')
+		b.WriteString(line)
+		if !strings.HasSuffix(line, "\n") {
+			b.WriteByte('\n')
+		}
+	}
 }
 
 // normalizePaths runs each raw pathspec through gitgate's exported repo-path rule, drops

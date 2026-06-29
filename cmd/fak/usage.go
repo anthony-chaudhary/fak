@@ -24,7 +24,7 @@ func usage() {
 func usageCoreVerbs() {
 	fmt.Fprint(os.Stderr, `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
-  fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--json]
+  fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
                 (the SAFE SHARED-TRUNK COMMIT: commit by EXPLICIT pathspec on a
                  multi-session trunk and refuse to report success unless ONLY those
                  paths landed. Lock-guards the commit, writes the message to a file
@@ -32,6 +32,8 @@ func usageCoreVerbs() {
                  pathspec), runs the real hooks (never --no-verify), then asserts the
                  committed file set == the requested paths. If a peer raced extra files
                  in -> PATHSPEC_RACE, commit left intact, never pushed/force-pushed.
+                 With --review-model, a scout model reviews the diff before commit:
+                 refute -> REVIEW_REFUTED; unreachable reviewer -> logged fail-open.
                  Refuses OFF_TRUNK / MERGE_IN_PROGRESS / NOTHING_STAGED up front.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
   fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
@@ -364,6 +366,12 @@ func usageScorecardVerbs() {
                  records a dated row in docs/cadence/history.jsonl so the trend accrues
                  across weeks; --check is advisory (non-zero only if a dimension could
                  not be measured; the scorecard ratchet owns debt regressions))
+  fak release-staleness [--json] [--check] [--stale-commits N] [--stale-days N]
+                (the PUBLISH-freshness signal: how far the latest published vX.Y.Z tag
+                 -  what 'go install ...@latest' resolves to  -  lags HEAD, in commits AND
+                 days. The dual of 'fak self-update' (which converges a built-from-source
+                 binary on origin/main): this catches @latest rotting when no tag is cut
+                 as work lands. --check exits non-zero when @latest is stale/very-stale)
   fak dojo      run --corpus DIR [--ttl 5m|1h] [--lever a,b] [--json] [--check]
                     [--append-history] [--ledger FILE] | list [--json]
                 (the prediction-vs-reality gym: scores each calibration lever's CLAIMED
