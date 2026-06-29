@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,13 @@ func runGuardE2E(t *testing.T, args string, env map[string]string) (exitCode int
 	return -1, out, false
 }
 
+func guardE2EExitZeroCommand() string {
+	if runtime.GOOS == "windows" {
+		return "cmd /c exit 0"
+	}
+	return "sh -c true"
+}
+
 // TestGuardHeadlessNoTokenFailsLoudNotHang is the symptom witness: with NO subscription token
 // anywhere, NO ANTHROPIC_API_KEY, and a non-TTY stdin (the headless/automation shape), real
 // `fak guard -- claude` must EXIT with the setup guidance — never block on a login the wrapped
@@ -120,7 +128,7 @@ func TestGuardHeadlessNoTokenFailsLoudNotHang(t *testing.T) {
 func TestGuardHeadlessWithAPIKeySpawnsNotRefused(t *testing.T) {
 	emptyCfg := t.TempDir()
 	code, out, timedOut := runGuardE2E(t,
-		"--provider anthropic --quiet -- printf done",
+		"--provider anthropic --quiet -- "+guardE2EExitZeroCommand(),
 		map[string]string{
 			"CLAUDE_CONFIG_DIR":       emptyCfg,
 			"ANTHROPIC_API_KEY":       "sk-ant-api03-e2e-test",

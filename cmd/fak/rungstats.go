@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 )
@@ -63,10 +64,11 @@ func runRungStats(w io.Writer, argv []string) int {
 
 	// The observer is a global Emitter: kernel.Decide fans its EvDecide/EvDeny events
 	// out through the process registry, so it must be registered before the probes run.
-	obs := rungobs.New()
+	chain := []abi.Adjudicator{adjudicator.New(adjudicator.DefaultPolicy())}
+	obs := rungobs.NewWithAdjudicators(chain)
 	abi.RegisterEmitter(obs)
 
-	k := kernel.New("inkernel")
+	k := kernel.New("inkernel", kernel.WithAdjudicators(chain))
 	res := abi.ActiveResolver()
 	for _, p := range rungStatsProbes {
 		ref, err := res.Put(ctx(), []byte(p.args))

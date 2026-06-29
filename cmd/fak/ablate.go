@@ -44,6 +44,14 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		return rc
 	}
 
+	features := splitCommaList(*sweep)
+	for _, f := range features {
+		if f != ablate.FeatureVDSO {
+			fmt.Fprintf(stderr, "fak ablate: unknown runtime feature %q (this in-process rung can sweep only %s)\n", f, ablate.FeatureVDSO)
+			return 2
+		}
+	}
+
 	path := *tracePath
 	if path == "" {
 		path = resolveSuite(traceDir(), *suite)
@@ -54,7 +62,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	configs, err := ablate.BuildSweep(splitCommaList(*sweep))
+	configs, err := ablate.BuildSweep(features)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak ablate:", err)
 		return 2

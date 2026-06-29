@@ -91,6 +91,8 @@ func runEgressCheck(argv []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	synthBlocked, synthLabel := egressClassifySynthesized(toolName, args)
+
 	res := abi.ActiveResolver()
 	ref, perr := res.Put(ctx(), []byte(args))
 	if perr != nil {
@@ -100,16 +102,23 @@ func runEgressCheck(argv []string, stdout, stderr io.Writer) int {
 	tc := &abi.ToolCall{Tool: toolName, Args: ref}
 	v := kernel.Fold(ctx(), abi.AdjudicatorsFor(tc), tc)
 
-	blocked := v.Kind == abi.VerdictDeny && v.Reason == egressfloor.ReasonEgressBlock
+	displayKind, displayReason := v.Kind, v.Reason
+	if synthBlocked {
+		displayKind = abi.VerdictDeny
+		displayReason = egressfloor.ReasonEgressBlock
+	}
+	blocked := displayKind == abi.VerdictDeny && displayReason == egressfloor.ReasonEgressBlock
 	if *asJSON {
 		emitEgressJSON(stdout, map[string]any{
-			"tool":    toolName,
-			"verdict": verdictName(v.Kind),
-			"reason":  abi.ReasonName(v.Reason),
-			"blocked": blocked,
+			"tool":         toolName,
+			"verdict":      verdictName(displayKind),
+			"reason":       abi.ReasonName(displayReason),
+			"blocked":      blocked,
+			"egress":       synthBlocked,
+			"egress_class": synthLabel,
 		})
 	} else {
-		fmt.Fprintf(stdout, "verdict=%s reason=%s tool=%s\n", verdictName(v.Kind), abi.ReasonName(v.Reason), toolName)
+		fmt.Fprintf(stdout, "verdict=%s reason=%s tool=%s\n", verdictName(displayKind), abi.ReasonName(displayReason), toolName)
 		if blocked {
 			fmt.Fprintln(stdout, "  -> the egress floor REFUSED this destination (cloud-metadata / link-local SSRF).")
 			fmt.Fprintln(stdout, "     on a VM this is the credential-theft path a prompt-injected agent would take.")
@@ -119,6 +128,18 @@ func runEgressCheck(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func egressClassifySynthesized(tool, argsJSON string) (bool, string) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return false, ""
+	}
+	_, label := egressfloor.Classify(tool, args)
+	if label == "" {
+		return false, ""
+	}
+	return true, label
 }
 
 // egressSynthesize turns the destination flags into a (tool, argsJSON) pair. --url and

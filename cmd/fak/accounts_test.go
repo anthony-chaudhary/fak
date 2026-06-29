@@ -215,11 +215,12 @@ func TestRunAccountsRemoveArchive(t *testing.T) {
 	t.Setenv("FAK_DOS_ROSTER", "")
 	home := t.TempDir()
 	seat := mkHome(t, home, ".claude-old-seat", "old@example.test", true)
-	anchor := mkHome(t, home, ".claude-anchor-seat", "anchor@example.test", true)
+	anchorName := "anchor-seat-" + strings.ReplaceAll(t.Name(), "/", "-")
+	anchor := mkHome(t, home, ".claude-"+anchorName, "anchor@example.test", true)
 
 	reg := `{"version":"fak-config-homes/v1","homes":[` +
 		`{"name":"old-seat","dir":"` + jsonPath(seat) + `"},` +
-		`{"name":"anchor-seat","dir":"` + jsonPath(anchor) + `","default":true}` +
+		`{"name":"` + anchorName + `","dir":"` + jsonPath(anchor) + `","default":true}` +
 		`]}`
 	regPath := filepath.Join(home, "registry.json")
 	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
@@ -278,9 +279,9 @@ func TestRunAccountsRemoveArchive(t *testing.T) {
 		if rel, err := filepath.Rel(home, realDosView); err == nil && !strings.HasPrefix(rel, "..") {
 			t.Skipf("real home is inside the temp dir (unexpected); skipping leak assertion")
 		}
-		// The regenerated view names this test's `anchor-seat`; a real roster must NOT.
-		if data, err := os.ReadFile(realDosView); err == nil && strings.Contains(string(data), "anchor-seat") {
-			t.Fatalf("test leaked its temp-dir roster into the REAL dos view %s (contains 'anchor-seat')", realDosView)
+		// The regenerated view names this test's unique anchor; a real roster must NOT.
+		if data, err := os.ReadFile(realDosView); err == nil && strings.Contains(string(data), anchorName) {
+			t.Fatalf("test leaked its temp-dir roster into the REAL dos view %s (contains %q)", realDosView, anchorName)
 		}
 	}
 }
