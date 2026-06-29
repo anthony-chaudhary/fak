@@ -154,6 +154,40 @@ rule, unchanged by this work:
   union or stays unconstrained to preserve the model's decline option; over-
   constraining `auto` trades a malformed-call error for a worse wrong-action error.
 
+## House rule: schema shape for an agent's own find → propose → verify pass
+
+The guided decoding above is the *engine* making one candidate well-formed. The
+dual discipline lives a layer up, in how an agent **designs its own
+StructuredOutput schema** when it runs a find → propose → verify pass (e.g. a
+`Workflow` fan-out). The rule, learned by hitting the wall live:
+
+> **find/propose/verify → flat schema + separate stages, never one nested schema.**
+
+The failure mode is a single heavy schema — `claims[] + proposedIssues[] +
+adversarial`, each item carrying its own proposed issue and its own adversarial
+verdict. One call cannot populate all three concerns well: the model spends its
+output on the envelope and the result either fails validation or degrades into
+shallow findings, stub proposals, and rubber-stamp verdicts. The recovery that
+works is to **ground inline** — flatten to shallow top-level fields and split the
+concerns across separate calls / pipeline stages:
+
+- **Schema depth ≤ 2.** A finding is `{title, file, evidence}` — flat, with no
+  sub-objects the same call must also populate.
+- **One concern per call.** Finding, proposing, and verifying are *different*
+  calls, not *fields* of one schema.
+- **Verify is adversarial and separate** — a `{isReal, reason}` verdict call per
+  finding, run as its own `parallel()` / `pipeline()` stage.
+- **Prefer `pipeline()` over a barrier'd mega-schema.** Item A can verify while
+  item B is still being found; a single deep schema serializes all of it into one
+  fragile call.
+
+It is the same upstream-constrain-then-adjudicate split as the gateway path, turned
+on the agent's own output: keep each call's shape simple enough to satisfy by
+construction, then reconcile the pieces in a later stage instead of demanding one
+call get everything right at once. The code sibling is **#1339** (split the heavy
+`claims[]+proposedIssues[]+adversarial` StructuredOutput); this note is the **#1340**
+house-rule home.
+
 ## Cross-links
 
 - **#469** — upstream-constraint vs downstream-repair research; the `oneOf`
@@ -164,6 +198,9 @@ rule, unchanged by this work:
 - **#338 / #313** — grammar / repair demos.
 - **#929** — the native sampler implementation issue, shipped (logit-bias first,
   schema mask flagged behind `FAK_NATIVE_GUIDED_DECODE`, bit-exact-off).
+- **#1340 / #1339** — the find/propose/verify schema house rule (the section
+  above) and its code sibling: flatten + stage the heavy nested StructuredOutput
+  rather than nesting `claims[]+proposedIssues[]+adversarial` into one call.
 
 ## References (code)
 
