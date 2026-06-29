@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agenttopo"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/comm"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 
@@ -118,7 +119,7 @@ func main() {
 		rep.NamedTopology = &named
 	}
 
-	if err := os.WriteFile(*out, rep.JSON(), 0o644); err != nil {
+	if err := benchcli.WriteReport(*out, rep.JSON()); err != nil {
 		fmt.Fprintln(os.Stderr, "topobench:", err)
 		os.Exit(1)
 	}

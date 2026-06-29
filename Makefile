@@ -240,6 +240,7 @@ hygiene:
 	@python3 tools/guard_mcp_status_audit.py
 	@go test ./internal/pythongate -run TestNoNewPythonTools
 	@go test ./internal/windowgate -run TestTrackedTreeHasNoPopups
+	@go test ./internal/benchlineagegate -run TestEveryBenchEmitterStampsLineage
 	@echo "hygiene OK"
 
 # demo-audit: full local demo health gate. Static checks are network-free; dynamic checks

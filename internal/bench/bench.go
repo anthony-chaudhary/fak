@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
-	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
@@ -197,16 +197,20 @@ func Run(ctx context.Context, t *Trace, opt Options) (*metrics.Report, error) {
 		return nil, err
 	}
 
+	lin := benchcli.Stamp()
 	rep := &metrics.Report{
 		Provenance: metrics.Provenance{
-			AppVersion:   appversion.Current(),
+			AppVersion:   lin.AppVersion,
 			Command:      "fak bench --suite " + t.SliceID,
 			EngineModel:  opt.EngineModel,
 			SliceID:      t.SliceID,
 			WorkloadHash: t.WorkloadHash(),
-			GoVersion:    runtime.Version(),
+			GoVersion:    lin.GoVersion,
 			OS:           runtime.GOOS,
 			GeneratedBy:  "fak/internal/bench",
+			GitCommit:    lin.GitCommit,
+			UTC:          lin.UTC,
+			Hostname:     lin.Node,
 		},
 		On:  on,
 		Off: off,

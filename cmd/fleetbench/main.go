@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 
@@ -107,7 +108,7 @@ func main() {
 
 	sw := turnbench.RunFleetSweep(context.Background(), p, turnGrid, agentGrid, *trials, *seed, cm, progress)
 
-	if err := os.WriteFile(*out, sw.JSON(), 0o644); err != nil {
+	if err := benchcli.WriteReport(*out, sw.JSON()); err != nil {
 		fmt.Fprintln(os.Stderr, "fleetbench:", err)
 		os.Exit(1)
 	}

@@ -22,7 +22,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
@@ -1188,7 +1187,7 @@ func parsePositiveInts(csv string) ([]int, error) {
 }
 
 func writeReport(out string, report map[string]any) {
-	b, _ := json.MarshalIndent(report, "", "  ")
+	b, _ := benchcli.MarshalReport(report)
 	if out != "" {
 		if err := os.WriteFile(out, b, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write:", err)

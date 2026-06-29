@@ -43,7 +43,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -54,6 +53,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/cdb"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/recall"
@@ -122,12 +122,12 @@ func main() {
 
 	if *out != "" {
 		agg := aggregate(results)
-		b, _ := json.MarshalIndent(map[string]any{
+		b, _ := benchcli.MarshalReport(map[string]any{
 			"budget":   *budget,
 			"window":   *window,
 			"sessions": results,
 			"total":    agg,
-		}, "", "  ")
+		})
 		if err := os.WriteFile(*out, b, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write report:", err)
 			os.Exit(1)

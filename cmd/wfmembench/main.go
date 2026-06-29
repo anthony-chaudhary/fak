@@ -7,7 +7,8 @@
 //
 // It prints the comparison as JSON and, with -out DIR, writes wfmembench.json plus
 // a markdown summary under DIR. The workload is model-free and deterministic, so the
-// emitted artifacts are byte-stable and reproducible.
+// emitted comparison is byte-stable and reproducible — only the stamped lineage
+// block (utc/git_commit/node, #9) varies between runs.
 //
 // Usage:
 //
@@ -17,12 +18,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/cdb"
 	"github.com/anthony-chaudhary/fak/internal/contextq"
 	"github.com/anthony-chaudhary/fak/internal/recall"
@@ -55,7 +56,7 @@ func main() {
 
 	cmp := Compare(ctx, im, benchRequest(), reproCommand)
 
-	js, err := json.MarshalIndent(cmp, "", "  ")
+	js, err := benchcli.MarshalReport(cmp)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "marshal:", err)
 		os.Exit(1)

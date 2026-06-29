@@ -29,6 +29,7 @@ import (
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -346,7 +347,7 @@ func main() {
 			"beats_hf_f32":           beatsHFf32,
 		},
 	}
-	jb, _ := json.MarshalIndent(report, "", "  ")
+	jb, _ := benchcli.MarshalReport(report)
 	if *out != "" {
 		if err := os.WriteFile(*out, jb, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write:", err)

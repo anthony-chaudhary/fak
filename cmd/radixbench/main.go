@@ -651,7 +651,7 @@ func main() {
 			"prefill per request, bit-identical to recompute (proven in internal/radixkv). Cache-aware order = lexicographic " +
 			"(== DFS == longest-shared-prefix-first), reproducing the paper's optimal-hit-rate-at-budget>=maxlen result.",
 	}
-	blob, _ := json.MarshalIndent(report, "", "  ")
+	blob, _ := benchcli.MarshalReport(report)
 	if *out != "" {
 		if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "mkdir: %v\n", err)

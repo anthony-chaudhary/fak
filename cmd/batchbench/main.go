@@ -18,7 +18,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -297,7 +296,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "[batchbench %s] PEAK B=%d: %.0f tok/s = %.1fx vs batch-1, %.1fx vs naive f32 serial\n",
 		precision, peak.Batch, peak.AggTokPerSec, peak.SpeedupVsB1, peak.SpeedupVsNaive)
 
-	b, _ := json.MarshalIndent(report, "", "  ")
+	b, _ := benchcli.MarshalReport(report)
 	if *out != "" {
 		if err := os.WriteFile(*out, b, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write:", err)

@@ -49,13 +49,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
@@ -71,7 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 	if *out != "" {
-		b, _ := json.MarshalIndent(rec, "", "  ")
+		b, _ := benchcli.MarshalReport(rec)
 		if werr := os.WriteFile(*out, b, 0o644); werr != nil {
 			fmt.Fprintf(os.Stderr, "FAIL: write %s: %v\n", *out, werr)
 			os.Exit(1)

@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -83,7 +82,7 @@ func main() {
 			FakOutputDir:         *fakOutput,
 			FakGateway:           *fakGateway,
 		})
-		b, err := json.MarshalIndent(contract, "", "  ")
+		b, err := benchcli.MarshalReport(contract)
 		if err != nil {
 			fatal(err)
 		}
@@ -146,7 +145,7 @@ func main() {
 			SubmissionPacket: *submissionPacket,
 			CandidateTaskIDs: suiteTaskIDs(suite),
 		})
-		b, err := json.MarshalIndent(preflight, "", "  ")
+		b, err := benchcli.MarshalReport(preflight)
 		if err != nil {
 			fatal(err)
 		}
@@ -186,7 +185,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	b, err := json.MarshalIndent(report, "", "  ")
+	b, err := benchcli.MarshalReport(report)
 	if err != nil {
 		fatal(err)
 	}

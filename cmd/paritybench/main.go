@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 )
 
@@ -75,7 +76,7 @@ func main() {
 
 	rep := turnbench.BuildParityReport(*task, *reference, cards)
 
-	must(os.WriteFile(*outJSON, rep.JSON(), 0o644))
+	must(benchcli.WriteReport(*outJSON, rep.JSON()))
 	must(os.WriteFile(*outMD, []byte(rep.Markdown()), 0o644))
 
 	// Echo the Markdown to stdout  -  the operator's at-a-glance view.

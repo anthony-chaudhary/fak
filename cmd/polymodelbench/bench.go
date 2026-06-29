@@ -28,10 +28,10 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
@@ -318,7 +318,7 @@ func measureResidency(quiet bool, ok *bool) ResidencyBench {
 
 // writeJSON writes the report as indented JSON — the reproducible artifact for -out.
 func writeJSON(path string, r BenchReport) error {
-	b, err := json.MarshalIndent(r, "", "  ")
+	b, err := benchcli.MarshalReport(r)
 	if err != nil {
 		return err
 	}

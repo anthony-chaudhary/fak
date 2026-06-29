@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 // Task represents a single web agent task.
@@ -643,7 +645,7 @@ func writeResults(summary *RunSummary, path string) error {
 		}
 	}
 
-	data, err := json.MarshalIndent(summary, "", "  ")
+	data, err := benchcli.MarshalReport(summary)
 	if err != nil {
 		return fmt.Errorf("marshal results: %w", err)
 	}

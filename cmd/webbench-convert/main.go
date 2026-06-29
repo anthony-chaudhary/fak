@@ -171,7 +171,10 @@ func main() {
 			Domain:          extractDomain(wvTask.Web),
 		}
 
-		// Marshal to JSON.
+		// Marshal to JSON. lineage:exempt — this emits a JSONL stream of converted
+		// WebVoyager task fixtures (benchmark INPUT, one task object per line), not a
+		// single benchmark RESULT artifact; a per-line lineage block would corrupt the
+		// task schema. The lineage lives on the result emitters that consume these (#9).
 		jsonBytes, err := json.Marshal(wbTask)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error marshaling task: %v\n", err)

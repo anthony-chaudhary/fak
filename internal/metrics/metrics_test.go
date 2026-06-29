@@ -192,7 +192,9 @@ func TestReportJSONAndTokenDelta(t *testing.T) {
 	if !ok {
 		t.Fatalf("provenance object missing from JSON")
 	}
-	for _, k := range []string{"command", "slice_id", "workload_hash"} {
+	// The lineage triple (git_commit/utc/hostname) is the #9 convergence — every
+	// bench artifact now carries the same four traceability axes.
+	for _, k := range []string{"command", "slice_id", "workload_hash", "git_commit", "utc", "hostname"} {
 		if _, present := prov[k]; !present {
 			t.Errorf("provenance JSON missing field %q", k)
 		}

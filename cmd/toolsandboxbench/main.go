@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -67,7 +66,7 @@ func main() {
 			FakOutputDir:         *fakOutput,
 			FakGateway:           *fakGateway,
 		})
-		b, err := json.MarshalIndent(contract, "", "  ")
+		b, err := benchcli.MarshalReport(contract)
 		if err != nil {
 			fatal(err)
 		}
@@ -102,7 +101,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	b, err := json.MarshalIndent(report, "", "  ")
+	b, err := benchcli.MarshalReport(report)
 	if err != nil {
 		fatal(err)
 	}

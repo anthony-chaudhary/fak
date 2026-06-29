@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
@@ -162,7 +163,7 @@ func main() {
 
 	sw := turnbench.RunFanoutPrefixSweep(context.Background(), p, agentGrid, subTurnGrid, prefixGrid, *trials, *seed, cm, progress)
 
-	if err := os.WriteFile(*out, sw.JSON(), 0o644); err != nil {
+	if err := benchcli.WriteReport(*out, sw.JSON()); err != nil {
 		fmt.Fprintln(os.Stderr, "fanbench:", err)
 		os.Exit(1)
 	}
@@ -184,7 +185,7 @@ func runScale(grid []int, subTurns, trials int, seed int64, prof turnbench.Fanou
 	rep := bench.RunFanScale(context.Background(), bench.FanScaleOptions{
 		Profile: prof, Cost: cm, Grid: grid, SubTurns: subTurns, Trials: trials, Seed: seed,
 	})
-	b, err := json.MarshalIndent(rep, "", "  ")
+	b, err := benchcli.MarshalReport(rep)
 	if err != nil {
 		return err
 	}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the blob PageOut/Resolver backend
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
@@ -359,7 +360,7 @@ func main() {
 				"by_verdict": callByVerdict, "rows": crows,
 			},
 		}
-		b, _ := json.MarshalIndent(report, "", "  ")
+		b, _ := benchcli.MarshalReport(report)
 		_ = os.WriteFile(*out, b, 0644)
 		fmt.Printf("\nwrote %s\n", *out)
 	}

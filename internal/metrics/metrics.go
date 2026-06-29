@@ -122,7 +122,12 @@ type Baseline struct {
 	SpawnModel string `json:"spawn_model"`
 }
 
-// Provenance pins what produced the report (unit 80).
+// Provenance pins what produced the report (unit 80). The lineage triple
+// (GitCommit / UTC / Hostname) is the #9 convergence: every bench emitter now
+// carries the same four traceability axes, sourced from benchcli.Stamp() so there
+// is a single derivation. AppVersion + GoVersion already overlapped the lineage
+// schema; the three new fields close the gap (no commit, no wall-clock, no machine
+// were recorded before).
 type Provenance struct {
 	AppVersion   string `json:"app_version"`
 	Command      string `json:"command"`
@@ -132,6 +137,9 @@ type Provenance struct {
 	GoVersion    string `json:"go_version"`
 	OS           string `json:"os"`
 	GeneratedBy  string `json:"generated_by"`
+	GitCommit    string `json:"git_commit"`
+	UTC          string `json:"utc"`
+	Hostname     string `json:"hostname"`
 }
 
 // KPIs is the five-counter KPI set (unit 77).

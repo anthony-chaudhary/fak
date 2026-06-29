@@ -47,7 +47,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"math"
@@ -604,7 +603,7 @@ func main() {
 }
 
 func writeSessionReport(report map[string]any, out string) {
-	blob, _ := json.MarshalIndent(report, "", "  ")
+	blob, _ := benchcli.MarshalReport(report)
 	if out != "" {
 		if err := os.WriteFile(out, blob, 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "write %s: %v\n", out, err)

@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 )
@@ -106,7 +107,7 @@ func main() {
 	fmt.Fprintln(os.Stderr, "\nA/C is vs NAIVE re-prefill (worst-case REFERENCE, not a serving baseline);"+
 		" B/C is vs a WARM per-agent KV cache (the serving baseline). WORK floor — no wall-clock.")
 
-	blob := rep.JSON()
+	blob, _ := benchcli.MarshalReport(rep.JSON())
 	if *out != "" {
 		if err := os.WriteFile(*out, blob, 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "write %s: %v\n", *out, err)

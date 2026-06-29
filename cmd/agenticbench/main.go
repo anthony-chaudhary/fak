@@ -3,7 +3,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -27,7 +26,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	b, err := json.MarshalIndent(report, "", "  ")
+	b, err := benchcli.MarshalReport(report)
 	if err != nil {
 		fatal(err)
 	}
