@@ -132,6 +132,7 @@ var tier = map[string]int{
 	"stopfailure":     1, // pure StopFailure marker planner/settler over JSON files and transcript existence; stdlib-only, off the hot path.
 	"dogfoodscore":    1, // pure dogfood-loop scorecard over transcripts/markers; imports stopfailure, off the hot path.
 	"conceptusage":    1, // pure concept-usage scorecard: folds git log + .dos journals into a dogfooding score; stdlib-only, off the hot path.
+	"loopscore":       1, // pure loop scorecard: folds the loopmgr ledger + job registry into a durability/self-report/dogfood score for the agentic background loops; imports loopmgr(1), off the hot path.
 	"dropin":          1,
 	"comm":            2,
 	"cohort":          2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
