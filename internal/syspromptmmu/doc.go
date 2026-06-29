@@ -21,6 +21,11 @@
 // turn intent, faults winners up to a token budget, and emits the overlay segments the
 // splice consumes; OverlayCache serves a HIT on an unchanged rank digest with no
 // re-fault. The spine/policy non-evictable flags are the substrate Rung 4 (#1262) enforces.
+// Rung 6 (audit.go, #1264) is the observability witness: AuditRealizedPrefix re-derives a
+// wire body's resident prefix and proves it equals the planned spine — divergence is a
+// loud alarm (an accidental head mutation caught before a cache miss), a harness-authored
+// body is a neutral AuditAbsent. It consumes the context-safety doctrine (#1217); it does
+// not mint parallel numbers.
 //
 // Tier: mechanism (2) — see internal/architest. This package may import only packages
 // whose tier is <= 2; it imports cachemeta(1) + promptmmu(1) + capindex(2) + stdlib
