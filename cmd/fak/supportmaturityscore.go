@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/supportmaturityscore"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -20,12 +21,24 @@ func runSupportMaturityScorecard(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
+	matrixMD := fs.Bool("matrix-md", false, "emit the generated support-maturity matrix block for docs/HARDWARE-MATRIX.md")
+	writeDoc := fs.Bool("write-doc", false, "regenerate the support-maturity matrix block in docs/HARDWARE-MATRIX.md in place")
+	checkDoc := fs.Bool("check-doc", false, "CI gate: red when the committed docs/HARDWARE-MATRIX.md matrix block is stale vs the live grid")
+	workspace := fs.String("workspace", "", "workspace root (default: repo root) for --write-doc / --check-doc")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak support-maturity-scorecard: unexpected argument %q\n", fs.Arg(0))
 		return 2
+	}
+
+	if *matrixMD {
+		fmt.Fprintln(stdout, supportmaturityscore.MatrixBlock())
+		return 0
+	}
+	if *writeDoc || *checkDoc {
+		return runSupportMaturityMatrixDoc(stdout, stderr, *workspace, *writeDoc)
 	}
 
 	payload := supportmaturityscore.Build()
@@ -58,4 +71,54 @@ func runSupportMaturityScorecard(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintln(stdout, scorecard.Render(payload, supportmaturityscore.DebtKey))
 	return okExit(payload.OK)
+}
+
+// runSupportMaturityMatrixDoc regenerates (--write-doc) or freshness-checks (--check-doc)
+// the generated support-maturity matrix block inside docs/HARDWARE-MATRIX.md. The witness
+// for #1255: the doc regenerates deterministically from the committed grid, and a stale
+// cell reds --check-doc (and the cmd/fak freshness test that drives it).
+func runSupportMaturityMatrixDoc(stdout, stderr io.Writer, workspace string, write bool) int {
+	root := workspace
+	if root == "" {
+		root = repoRoot()
+	} else if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	docPath := filepath.Join(root, "docs", "HARDWARE-MATRIX.md")
+	raw, err := os.ReadFile(docPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak support-maturity-scorecard: read %s: %v\n", docPath, err)
+		return 1
+	}
+	doc := string(raw)
+
+	if write {
+		next, err := supportmaturityscore.SpliceMatrixBlock(doc)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak support-maturity-scorecard --write-doc: %v\n", err)
+			return 1
+		}
+		if next == doc {
+			fmt.Fprintln(stdout, "docs/HARDWARE-MATRIX.md support-maturity matrix block already fresh; no change")
+			return 0
+		}
+		if err := os.WriteFile(docPath, []byte(next), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak support-maturity-scorecard --write-doc: write %s: %v\n", docPath, err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "wrote docs/HARDWARE-MATRIX.md support-maturity matrix block")
+		return 0
+	}
+
+	got, ok := supportmaturityscore.ExtractMatrixBlock(doc)
+	if !ok {
+		fmt.Fprintln(stdout, "STALE  docs/HARDWARE-MATRIX.md: support-maturity matrix markers not found; run `fak support-maturity-scorecard --write-doc`")
+		return 1
+	}
+	if got != supportmaturityscore.MatrixBlock() {
+		fmt.Fprintln(stdout, "STALE  docs/HARDWARE-MATRIX.md: support-maturity matrix block drifted from the live grid; run `fak support-maturity-scorecard --write-doc`")
+		return 1
+	}
+	fmt.Fprintln(stdout, "OK  docs/HARDWARE-MATRIX.md support-maturity matrix block is fresh")
+	return 0
 }

@@ -335,8 +335,11 @@ func usageScorecardVerbs() {
                 (native provenance-honesty control-pane payload: every reported number/status
                  labels its provenance -- WITNESSED vs OBSERVED -- folded into conflation_debt)
   fak support-maturity-scorecard [--json] [--markdown] [--compare FILE]
+                [--matrix-md] [--write-doc] [--check-doc] [--workspace DIR]
                 (native support-maturity payload: fold the generated model x backend coverage
-                 matrix into support_maturity_debt, coverage percentage, and an A-F grade)
+                 matrix into support_maturity_debt, coverage percentage, and an A-F grade.
+                 --matrix-md emits the generated matrix block; --write-doc regenerates it in
+                 docs/HARDWARE-MATRIX.md; --check-doc reds when a committed cell is stale)
   fak steering  status | report | alert [--index-delta N] [--pin] | pin
                 [--channel ID] [--scorecard-json FILE] [--dry-run]
                 (the STEERABILITY Slack surface for #steering-guard: status posts the
