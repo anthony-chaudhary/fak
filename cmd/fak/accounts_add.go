@@ -14,6 +14,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
+// saveAccountsRegistry persists reg to path, printing the shared "fak accounts: %v"
+// error on failure. It returns false (the caller should then `return 1`) when the save
+// failed — the save-and-report step repeated by every accounts mutation verb.
+func saveAccountsRegistry(stderr io.Writer, path string, reg accounts.Registry) bool {
+	if err := accounts.SaveRegistry(path, reg); err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return false
+	}
+	return true
+}
+
 // addParams carries the resolved flags for `fak accounts add` from the dispatcher.
 type addParams struct {
 	name     string
@@ -146,8 +157,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		Identity:      accounts.DeriveIdentity(dir),
 	}
 	reg.Homes = append(reg.Homes, home)
-	if err := accounts.SaveRegistry(p.registryPath, reg); err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: added %s -> %s\n", rosterName, dir)
@@ -289,8 +299,7 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		}
 	}
 
-	if err := accounts.SaveRegistry(p.registryPath, reg); err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: tombstoned %s -> rehome %s\n", p.name, rehome)
@@ -355,8 +364,7 @@ func runAccountsSetRole(stdout, stderr io.Writer, p setRoleParams) int {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
-	if err := accounts.SaveRegistry(p.registryPath, reg); err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: role %s -> %s\n", p.role, p.name)
