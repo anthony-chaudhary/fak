@@ -3,11 +3,11 @@ package model
 // metal_prefill_hybrid_core.go — the backend-agnostic core of the Qwen3.6 hybrid (Gated-DeltaNet)
 // batched prefill. It is built in EVERY configuration (no build tag, no cgo): the projection /
 // MLP GEMMs are abstracted behind an injected `hybridGemmFn`, so the same recurrence + attention +
-// norm body runs against ANY matmul backend. The Metal twin (metal_prefill.go, -tags fakmetal)
-// passes a GPU f16 GEMM; the parity test (metal_prefill_hybrid_core_test.go) passes a CPU Q8 GEMM
-// that reproduces the proven prefillQwen35HybridQHidden path bit-for-bit (up to the documented
-// grouped-vs-ungrouped float-order drift), which is what makes the twin's CPU-side logic
-// witnessable host-independently — without a Mac or `-tags fakmetal` (#71).
+// norm body runs against ANY matmul backend. The Metal twin (metal_prefill_hybrid.go on Apple
+// Silicon+cgo) passes a GPU f16 GEMM; the parity test (metal_prefill_hybrid_core_test.go) passes a
+// CPU Q8 GEMM that reproduces the proven prefillQwen35HybridQHidden path bit-for-bit (up to the
+// documented grouped-vs-ungrouped float-order drift), which is what makes the twin's CPU-side logic
+// witnessable host-independently — without a Mac Metal runtime (#71).
 //
 // This file is a structural copy of the Q8 CPU template prefillQwen35HybridQHidden /
 // prefillQwen35LinearLayerQ / prefillQwen35FullAttnLayerQ (qwen35_prefill.go): every elementwise
@@ -18,7 +18,12 @@ package model
 // while the GDN scan is ~0.5% (FAK_QPROFILE; #65, #977), so moving the projections to a FLOP-rich
 // backend and keeping the recurrence on the CPU is the whole win (#71).
 
-import "math"
+import (
+	"fmt"
+	"math"
+	"os"
+	"time"
+)
 
 // hybridGemmFn computes Y[P,out] = X[P,in] * W[name]^T into a fresh row-major buffer, where `in`
 // is inferred from len(X)/P. It is the one substitution between the CPU template (Q8 qGemm8) and
@@ -34,6 +39,21 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 	P := len(ids)
 	if P == 0 {
 		return nil
+	}
+	profile := os.Getenv("FAK_QPROFILE") != ""
+	var start time.Time
+	if profile {
+		start = time.Now()
+	}
+	var gemmTime time.Duration
+	timedMM := mm
+	if profile {
+		timedMM = func(name string, X []float32, out int) []float32 {
+			t0 := time.Now()
+			Y := mm(name, X, out)
+			gemmTime += time.Since(t0)
+			return Y
+		}
 	}
 	base := s.Cache.Len()
 	eps := float32(cfg.RMSNormEps)
@@ -61,9 +81,9 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 
 		var o []float32
 		if cfg.isLinearAttnLayer(l) {
-			o = s.prefillQwen35LinearLayerMM(l, Xn, P, mm)
+			o = s.prefillQwen35LinearLayerMM(l, Xn, P, timedMM)
 		} else {
-			o = s.prefillQwen35FullAttnLayerMM(l, Xn, P, base, mm)
+			o = s.prefillQwen35FullAttnLayerMM(l, Xn, P, base, timedMM)
 		}
 		parFor(len(X), numWorkers, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
@@ -83,8 +103,8 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 			}
 		})
 		I := cfg.IntermediateSize
-		G := mm(lp("mlp.gate_proj.weight"), Xn2, I)
-		U := mm(lp("mlp.up_proj.weight"), Xn2, I)
+		G := timedMM(lp("mlp.gate_proj.weight"), Xn2, I)
+		U := timedMM(lp("mlp.up_proj.weight"), Xn2, I)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
 			m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
@@ -94,7 +114,7 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 				G[i] = act(G[i], cfg) * U[i]
 			}
 		})
-		Down := mm(lp("mlp.down_proj.weight"), G, H)
+		Down := timedMM(lp("mlp.down_proj.weight"), G, H)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
 		}
@@ -108,7 +128,18 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 	for t := 0; t < P; t++ {
 		s.Cache.pos = append(s.Cache.pos, base+t)
 	}
-	return rmsnormCfg(X[(P-1)*H:P*H], m.tensor("model.norm.weight"), eps, cfg)
+	out := rmsnormCfg(X[(P-1)*H:P*H], m.tensor("model.norm.weight"), eps, cfg)
+	if profile {
+		total := time.Since(start)
+		rest := total - gemmTime
+		if rest < 0 {
+			rest = 0
+		}
+		ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
+		fmt.Fprintf(os.Stderr, "[metalprof-hybrid P=%d] total=%.1f  gemm+roundtrip=%.1f  rest(recurrence/attn/norm)=%.1f ms\n",
+			P, ms(total), ms(gemmTime), ms(rest))
+	}
+	return out
 }
 
 // prefillQwen35LinearLayerMM is the backend-agnostic twin of prefillQwen35LinearLayerQ: the five

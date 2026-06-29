@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package model
 
