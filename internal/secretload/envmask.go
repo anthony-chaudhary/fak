@@ -56,26 +56,10 @@ func SandboxEnvWithLoader(loader *Loader, environ []string, explicit ...string) 
 	}
 
 	explicitKeys := envKeySet(explicit)
-	out := make([]string, 0, len(allow)+len(explicit))
-	seen := map[string]struct{}{}
-	for _, kv := range environ {
-		k, ok := envKey(kv)
-		if !ok {
-			continue
-		}
-		if _, keep := allow[envMapKey(k)]; !keep {
-			continue
-		}
-		if _, overridden := explicitKeys[k]; overridden {
-			continue
-		}
-		if _, dup := seen[k]; dup {
-			continue
-		}
-		out = append(out, kv)
-		seen[k] = struct{}{}
-	}
-	return append(out, explicit...)
+	return dedupeKeep(environ, explicit, explicitKeys, func(mapKey string) bool {
+		_, ok := allow[mapKey]
+		return ok
+	})
 }
 
 func inheritAllSandboxEnv(loader *Loader) bool {
@@ -92,12 +76,23 @@ func inheritAllSandboxEnv(loader *Loader) bool {
 }
 
 func mergeExplicit(environ []string, explicit []string) []string {
-	explicitKeys := envKeySet(explicit)
+	return dedupeKeep(environ, explicit, envKeySet(explicit), nil)
+}
+
+// dedupeKeep walks environ, keeping each KEY=VALUE entry whose key passes keep,
+// is not shadowed by an explicit override, and was not already kept (first
+// occurrence wins), then appends the explicit entries. A nil keep keeps every
+// key. Shared by SandboxEnvWithLoader (allow-list gate) and mergeExplicit
+// (inherit-all, no gate); keep receives the canonical map key (envMapKey).
+func dedupeKeep(environ, explicit []string, explicitKeys map[string]struct{}, keep func(mapKey string) bool) []string {
 	out := make([]string, 0, len(environ)+len(explicit))
 	seen := map[string]struct{}{}
 	for _, kv := range environ {
 		k, ok := envKey(kv)
 		if !ok {
+			continue
+		}
+		if keep != nil && !keep(envMapKey(k)) {
 			continue
 		}
 		if _, overridden := explicitKeys[k]; overridden {
