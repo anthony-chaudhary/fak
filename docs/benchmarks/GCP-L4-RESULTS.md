@@ -12,6 +12,9 @@ the f32 device path. The successful rerun uses the same single NVIDIA L4 GPU cla
 on `g2-standard-32` (32 vCPU, 128 GB RAM), so the host-memory gate is removed
 without switching to Hopper.
 
+Closure gate for #18: the committed artifact below has `fak-cuda.ok=true`,
+backend `selected: "cuda"`, tier `sm_89`, and nonzero prefill/decode tok/s.
+
 ## Run
 
 | | |
