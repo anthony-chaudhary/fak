@@ -130,6 +130,7 @@ concurrent = [
   # so the walk reaches them and the arbiter protects internal/dojo/** & internal/nightrun/** edits.
   "dojo",
   "nightrun",
+  "loopgate",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -181,6 +182,7 @@ autopick = [
   "scoreboard", # #1000: internal/scoreboard leaf (the fak scoreboard Slack publisher), see [lanes].concurrent note
   "ailuminate", # #1070: internal/ailuminate leaf (the AILuminate benchmark-entry scoping contract), see [lanes].concurrent note
   "marketing", # internal/marketing leaf (completion-driven marketing subsystem), see [lanes].concurrent note
+  "loopgate", # internal/loopgate leaf (the witnessed loop exit gate), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -316,6 +318,7 @@ leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY subst
 dojo = ["internal/dojo/**"] # #951: prediction-vs-reality gym (predict -> run -> measure -> eval -> calibrate)
 scoreboard = ["internal/scoreboard/**"] # #1000: fak scoreboard Slack scorecard publisher (cmd/fak/scoreboard.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 marketing = ["internal/marketing/**"] # completion-driven marketing subsystem (any cmd/fak shim lives in the `cmd` lane to keep leaf trees pairwise-disjoint)
+loopgate = ["internal/loopgate/**"] # witnessed loop exit gate; pure leaf, no cmd shim
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -417,6 +420,13 @@ worker_launch_template = 'tools/.bin/dispatchworker --lane {lane}'
 # typed-core direction is refusable with a structured, citable reason from a closed
 # set, not free-text -- the same discipline fak imposes on tool results. The floor
 # under each is the architest gate (`go test ./internal/architest`).
+[reasons.LOOP_DONE_UNWITNESSED]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "A loop turn claimed done, but the configured external witness did not corroborate the done effect from non-agent-authored evidence."
+fix      = "Re-arm the loop with this reason as feedback, make the next turn satisfy the goal's witness criterion (commit-audit, verify, test-witness, or a registered witness), then re-check the gate."
+see_also = ["internal/loopgate", "dos commit-audit", "dos verify", "dos test-witness", "dos witness"]
+
 [reasons.ARCH_LAYER_VIOLATION]
 category = "OPERATOR_GATE"
 refusal  = true
