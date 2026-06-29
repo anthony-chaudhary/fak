@@ -1,0 +1,5 @@
+{
+  "value_taint": "tainted",
+  "boundary": "sink",
+  "sink_class": "network"
+}

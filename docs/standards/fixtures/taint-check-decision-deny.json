@@ -1,0 +1,12 @@
+{
+  "_comment": "The REVIEW artifact: the Decision produced by checking taint-check-crossing-deny.json with NO model and NO fak engine in the loop. A tainted value into a sensitive (egress) sink, no explicit authorization => Deny(TAINTED_TO_SINK). Same crossing shape => this same decision, every time. The witness discloses only the two labels, never the value.",
+  "crossing": {
+    "version": "fak-taint/v1",
+    "value_taint": "tainted",
+    "boundary": "sink",
+    "sink_class": "egress"
+  },
+  "decision": "deny",
+  "reason": "TAINTED_TO_SINK",
+  "witness": "EGRESS sink fed tainted data"
+}

@@ -1,0 +1,6 @@
+{
+  "value_taint": "tainted",
+  "boundary": "sink",
+  "sink_class": "egress",
+  "domain": "oops"
+}

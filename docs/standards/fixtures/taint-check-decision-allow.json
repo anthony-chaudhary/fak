@@ -1,0 +1,10 @@
+{
+  "_comment": "The REVIEW artifact for the clean case: a trusted value into the SAME egress sink passes. Same boundary, same sink class as the deny fixture — only the kernel-stamped taint differs, which is the whole point: the verdict turns on PROVENANCE, not on the value's content. An allow carries no reason.",
+  "crossing": {
+    "version": "fak-taint/v1",
+    "value_taint": "trusted",
+    "boundary": "sink",
+    "sink_class": "egress"
+  },
+  "decision": "allow"
+}

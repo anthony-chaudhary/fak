@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/taint-check-schema.json",
+  "title": "Taint-check schema (fak-taint/v1)",
+  "description": "A portable, engine-free admission check: does a value's KERNEL-AUTHORED taint forbid it crossing a boundary into a sink (the IFC safety lens) or being reused across an agent boundary (the cross-agent-reuse lens)? Author a Crossing (the root) against this with any JSON Schema validator; no fak engine is required. $defs/Decision is the Allow|Deny(reason) the `dos taint-check` verb returns. The taint lattice, the boundary set, the sink-class set, and the deny-reason set are CLOSED enums — an out-of-set token is rejected at the authoring boundary, never admitted silently. The check is fail-closed: a sink crossing must classify its sink; a share crossing must name its target scope.",
+  "$ref": "#/$defs/Crossing",
+  "$defs": {
+    "Taint": {
+      "description": "A value's KERNEL-AUTHORED taint label — the closed, additive abi.Ref.Taint lattice (trusted < tainted < quarantined). It is the OUTPUT of internal/provenance, derived from result state + host-registered source class; it is NOT a caller/model self-report. An out-of-lattice token is rejected here; a runtime that receives an unrecognized label treats it as tainted (fail-closed). CLOSED enum.",
+      "type": "string",
+      "enum": ["trusted", "tainted", "quarantined"]
+    },
+    "Boundary": {
+      "description": "Which kind of crossing is being checked — the two lenses. 'sink': a control-plane effect boundary (does this value reach a sensitive sink?). 'share': a cross-agent-reuse boundary (may this span be reused beyond the producing agent?). CLOSED enum; an out-of-set boundary is UNKNOWN_BOUNDARY, refused conservatively.",
+      "type": "string",
+      "enum": ["sink", "share"]
+    },
+    "SinkClass": {
+      "description": "The sensitivity of the effect a 'sink' crossing would have — the closed ifc.SinkClass. 'none' is not a sensitive sink (reads/lookups). 'egress' sends data to an external destination; 'exec' executes code/shell; 'destructive' irreversibly mutates state. CLOSED enum; an out-of-set value is UNCLASSIFIED_SINK, denied fail-closed.",
+      "type": "string",
+      "enum": ["none", "egress", "exec", "destructive"]
+    },
+    "ShareScope": {
+      "description": "The trust boundary a 'share' crossing targets — the closed abi.ShareScope (agent < fleet < tenant by reach). 'agent' is private to the producing agent (never crosses); 'fleet' / 'tenant' reach other agents. CLOSED enum; an out-of-set value is INDETERMINATE_TARGET, denied fail-closed.",
+      "type": "string",
+      "enum": ["agent", "fleet", "tenant"]
+    },
+    "DenyReason": {
+      "description": "The closed deny vocabulary the check returns. Every token maps to a kernel-witnessed refusal (all fold to abi.ReasonTrustViolation / TRUST_VIOLATION at the floor). A new reason is a new enum value + a decision arm, never free text.",
+      "type": "string",
+      "enum": [
+        "TAINTED_TO_SINK",
+        "TAINTED_SPAN_UNSHAREABLE",
+        "UNKNOWN_TAINT",
+        "UNCLASSIFIED_SINK",
+        "UNKNOWN_BOUNDARY",
+        "INDETERMINATE_TARGET"
+      ]
+    },
+    "Crossing": {
+      "description": "The INPUT `dos taint-check` takes: a value's taint, the boundary it would cross, and the boundary's qualifier. The three core nouns are value_taint + boundary + (sink_class | target_scope). authorized is the optional CaMeL explicit-authorization escape (default false). Closed object — an unknown field is rejected, never silently ignored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value_taint", "boundary"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^fak-taint/v1",
+          "description": "Schema tag. Omitted => current version. A different MAJOR is refused; a newer MINOR is forward-accepted (additive-only discipline)."
+        },
+        "value_taint": { "$ref": "#/$defs/Taint" },
+        "boundary": { "$ref": "#/$defs/Boundary" },
+        "sink_class": { "$ref": "#/$defs/SinkClass" },
+        "target_scope": { "$ref": "#/$defs/ShareScope" },
+        "authorized": {
+          "type": "boolean",
+          "description": "The explicit-authorization escape (ifc.Policy.Authorize): a human-approved or policy-permitted flow releases a tainted->sink deny. Default false => no escape (fail-closed)."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "boundary": { "const": "sink" } }, "required": ["boundary"] },
+          "then": { "required": ["value_taint", "sink_class"] }
+        },
+        {
+          "if": { "properties": { "boundary": { "const": "share" } }, "required": ["boundary"] },
+          "then": { "required": ["value_taint", "target_scope"] }
+        }
+      ]
+    },
+    "Decision": {
+      "description": "The OUTPUT `dos taint-check` returns: the echoed crossing, the allow/deny verdict, and — on a deny — the closed reason. Reviewable as data, no narration. An OUTPUT shape (not an authored policy), so a richer implementation MAY add fields — additionalProperties is open here. A deny MUST carry a reason from the closed DenyReason set.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["decision"],
+      "properties": {
+        "crossing": { "$ref": "#/$defs/Crossing" },
+        "decision": { "type": "string", "enum": ["allow", "deny"] },
+        "reason": { "$ref": "#/$defs/DenyReason" },
+        "witness": { "type": "string", "description": "A bounded, payload-free note (the kernel discloses the two labels, never the value)." }
+      },
+      "if": { "properties": { "decision": { "const": "deny" } }, "required": ["decision"] },
+      "then": { "required": ["decision", "reason"] }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "value_taint": "secret",
+  "boundary": "sink",
+  "sink_class": "egress"
+}
