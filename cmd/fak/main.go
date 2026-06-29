@@ -65,6 +65,8 @@ func main() {
 		cmdRunTrace(os.Args[2:])
 	case "commit":
 		cmdCommit(os.Args[2:])
+	case "affected":
+		cmdAffected(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "attest":

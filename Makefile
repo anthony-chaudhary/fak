@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet test test-fast test-affected bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -47,6 +47,16 @@ test:
 test-fast: build vet
 	go test -short ./...
 	@echo "test-fast OK (smoke tier; run 'make test' for the weight-backed witnesses)"
+
+# test-affected: the fast INNER loop. `fak affected` runs `go test` for only the
+# packages your working-tree change can affect (the changed packages + every package that
+# transitively imports one, test imports included) instead of the whole `go test ./...`.
+# For a one-leaf edit that is seconds, not minutes — so you can verify the REAL oracle
+# (not -short) on every change. The full `test` target stays the authoritative gate; this
+# never DROPS coverage on what you changed, it only skips packages your change can't reach.
+test-affected: build
+	go run ./cmd/fak affected
+	@echo "test-affected OK (affected packages only; run 'make test' for the full oracle)"
 
 bench:
 	go build -o fak ./cmd/fak && ./fak bench --suite tau2-smoke --out report.json
