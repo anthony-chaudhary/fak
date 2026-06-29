@@ -76,6 +76,18 @@ RUNS_DIRNAME = ".dispatch-runs"
 # .pid/.backend sidecars so an auditor enumerates a wave straight from disk.
 WAVE_SIDECAR_SUFFIX = ".wave"
 ACCOUNT_SIDECAR_SUFFIX = ".account"
+# Fenced lane-lease (residual of #1310): the dispatcher ATOMICALLY acquires
+# refs/fak/locks/resolve-<lane> via `fak leaseref acquire` before launching, so a
+# tick on ANOTHER machine (and a same-host TOCTOU race the log-scan can't close)
+# refuses the collision instead of co-editing the leaf tree. The same-host log
+# scan (live_resolution_lanes) stays the fast path UNDER this lease. The lease id
+# is one safe ref segment; fak's lane names are already that shape.
+LEASE_ID_PREFIX = "resolve-"
+# A held lease outlives its worker by this margin past the wall-clock worker
+# timeout, so a crashed worker that never releases is reaped by `fak leaseref
+# reap` on a later tick rather than wedging the lane forever. Generous: the TTL is
+# a backstop, not the primary release (that is the witnessed release on exit).
+LEASE_TTL_MARGIN_S = 600
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
 # The `lane=<L>` field of the `# fak-spawn` header `spawn_issue_worker` flushes as
 # the first line of every worker log (used by the pre-spawn lane-lease gate, #1310).
@@ -1101,6 +1113,165 @@ def fak_loop_cmd(root: Path) -> list[str]:
     return ["go", "run", "./cmd/fak"]
 
 
+# --- Fenced lane-lease gate (residual of #1310) ------------------------------
+# The same-host log-scan gate (live_resolution_lanes) serializes two ticks ON ONE
+# HOST run sequentially, but it is blind across machines and has a TOCTOU window
+# (the lane= header is written near the END of a tick; two evaluate() processes
+# racing both read "lane free"). These helpers close both gaps by holding the
+# fenced refs/fak/locks/resolve-<lane> lease via `fak leaseref acquire` — an
+# atomic update-ref compare-and-swap that rides ordinary git fetch/push, so a peer
+# on another clone SEES the lease after a fetch. The log scan stays the fast path;
+# this is the authoritative pre-spawn admission. EVERYTHING here is FAIL-OPEN: any
+# error (no fak binary, a broken store, an unparseable verdict) resolves to "not
+# held / acquired" so a lease-layer fault can only ever DROP the extra protection,
+# never wedge the loop — the same discipline as check_weekly_cap.
+
+# A structured fence refusal (LEASE_HELD / LEASE_CONTENDED / STALE_LEASE /
+# NO_LEASE) exits 3 from `fak leaseref` (cmd/fak/leaseref.go: leaserefRefused); 0
+# is acquired, 1 a git/store failure, 2 a usage error. We fence-refuse (fail
+# CLOSED) only on 3, and fail OPEN on everything else.
+LEASE_REFUSED_RC = 3
+
+
+def _fak_bin(root: Path) -> list[str] | None:
+    """The on-disk `fak` argv for a lease subprocess, or None when only the
+    `go run ./cmd/fak` fallback is available. We DELIBERATELY refuse the go-run
+    fallback for the lease path: building cmd/fak on a peer-dirty shared trunk
+    routinely fails (the cmd-lane-undispatchable law), and a lease gate that
+    shells a 30s flaky `go run` every tick would be worse than no gate. With no
+    FAK_BIN the gate fails open (the same-host log scan still applies)."""
+    configured = os.environ.get("FAK_BIN")
+    if configured:
+        return shlex.split(configured)
+    exe = shutil.which("fak")
+    return [exe] if exe else None
+
+
+def lease_holder() -> str:
+    """A holder identity stable across this session's separate dispatcher ticks.
+    Mirrors dos_fleet_lease.default_owner: the harness sets CLAUDE_CODE_SESSION_ID
+    once per session; fall back to host:pid so two unrelated sessions never share a
+    holder (a shared holder would let one RENEW the other's lease)."""
+    sid = os.environ.get("FAK_LEASE_OWNER") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if sid:
+        return sid.strip()
+    host = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "host"
+    return f"{host}:{os.getpid()}"
+
+
+def lease_id_for_lane(lane: str) -> str:
+    return f"{LEASE_ID_PREFIX}{lane}"
+
+
+def _run_lease(root: Path, args: list[str], *, timeout: int = 30) -> dict[str, Any]:
+    """Run one `fak leaseref` subcommand, returning {rc, stdout, verdict}. Never
+    raises: an exec failure is reported as rc 127 so the caller fails open."""
+    bin_argv = _fak_bin(root)
+    if not bin_argv:
+        return {"rc": 127, "stdout": "", "verdict": None, "skipped": "no fak binary"}
+    cmd = [*bin_argv, "leaseref", *args]
+    kwargs: dict[str, Any] = {
+        "cwd": str(root), "capture_output": True, "text": True,
+        "encoding": "utf-8", "errors": "replace", "timeout": timeout,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = no_window_creationflags()
+    try:
+        proc = subprocess.run(cmd, **kwargs)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"rc": 127, "stdout": "", "verdict": None, "error": str(exc)}
+    out = (proc.stdout or "").strip()
+    doc: Any = None
+    try:
+        doc = json.loads(out) if out else None
+    except ValueError:
+        doc = None
+    return {"rc": proc.returncode, "stdout": out, "verdict": doc}
+
+
+def acquire_lane_lease(root: Path, lane: str, *, tree: list[str], ttl_s: int,
+                       holder: str | None = None,
+                       runner: Any | None = None) -> dict[str, Any]:
+    """ATOMICALLY take the fenced refs/fak/locks/resolve-<lane> lease before a
+    spawn. Returns {"acquired": bool, "refused": bool, "id", "holder", ...}.
+
+    - acquired=True  -> exit 0: we hold the lease; carry the id+holder so the
+                        worker-exit path can RELEASE it.
+    - refused=True   -> exit 3: a LIVE peer (this host OR another clone after a
+                        fetch) holds the lane; the caller refuses LANE_LEASE_HELD.
+    - acquired=False, refused=False -> FAIL OPEN: no fak binary / a git-store
+                        failure / an unparseable verdict; the caller proceeds on
+                        the same-host log scan alone, exactly as before the lease.
+    """
+    run = runner or _run_lease
+    holder = holder or lease_holder()
+    lease_id = lease_id_for_lane(lane)
+    args = ["acquire", "--id", lease_id, "--holder", holder, "--ttl", str(int(ttl_s))]
+    for t in tree:
+        args += ["--tree", t]
+    res = run(root, args)
+    rc = res.get("rc")
+    verdict = res.get("verdict") or {}
+    if rc == 0:
+        rec = verdict.get("record") if isinstance(verdict, dict) else None
+        return {"acquired": True, "refused": False, "id": lease_id, "holder": holder,
+                "generation": (rec or {}).get("generation") if isinstance(rec, dict) else None,
+                "tree": tree}
+    if rc == LEASE_REFUSED_RC:
+        v = verdict.get("verdict") if isinstance(verdict, dict) else None
+        return {"acquired": False, "refused": True, "id": lease_id, "holder": holder,
+                "reason": (v or {}).get("reason") if isinstance(v, dict) else None,
+                "fence_verdict": v, "tree": tree}
+    # rc in {1,2,127} or unparseable -> fail open (no protection added, loop never wedges).
+    return {"acquired": False, "refused": False, "id": lease_id, "holder": holder,
+            "fail_open": True, "rc": rc, "detail": res.get("error") or res.get("skipped"),
+            "tree": tree}
+
+
+def reap_expired_leases(root: Path, *, runner: Any | None = None) -> dict[str, Any]:
+    """Delete expired (reapable) refs/fak/locks/* leases — the crashed-holder
+    backstop. A worker (or a same-tick spawn that died at exec) that never gets to
+    drop its lane lease has it swept here once the TTL lapses, so a crash can't
+    wedge a lane forever. Fail-open: a reap failure is reported, never raised.
+
+    NOTE: there is deliberately no early-release helper here. `fak leaseref` exposes
+    only acquire/reap (no delete-one-live-lease verb), so a held lane is freed by
+    TTL+reap, not an explicit release. Binding the release to a worker's
+    diff-witness (proposal #2 of #1324) is a separate increment that first needs
+    that release verb and per-worker commit-sha tracking — see the issue residual."""
+    run = runner or _run_lease
+    res = run(root, ["reap"])
+    return {"ok": res.get("rc") == 0, "rc": res.get("rc"), "stdout": res.get("stdout")}
+
+
+# A per-process cache of the dos.toml lane->trees map so a tick that probes several
+# lanes shells `dos doctor` at most once. Keyed by workspace string.
+_LANE_TREE_CACHE: dict[str, dict[str, list[str]]] = {}
+
+
+def lane_tree(root: Path, lane: str) -> list[str]:
+    """The repo-relative file-tree globs the fenced lease should cover for `lane`,
+    from dos.toml's [lanes.trees] (reused via issue_lane_router.lane_taxonomy), with
+    an `internal/<lane>/**` fallback. The lease tree only matters for the arbiter's
+    disjointness reasoning; the lease id (resolve-<lane>) is what actually
+    serializes. Fail-open: a `dos doctor` failure falls back to the convention so
+    the gate still acquires SOMETHING rather than refusing to protect."""
+    key = str(root)
+    trees = _LANE_TREE_CACHE.get(key)
+    if trees is None:
+        trees = {}
+        try:
+            import issue_lane_router  # noqa: PLC0415  (lazy: keep the import optional)
+            _concurrent, trees = issue_lane_router.lane_taxonomy(root)
+        except Exception:  # noqa: BLE001  (fail-open: any failure -> convention fallback)
+            trees = {}
+        _LANE_TREE_CACHE[key] = trees
+    globs = trees.get(lane)
+    if globs:
+        return list(globs)
+    return [f"internal/{lane}/**"]
+
+
 def is_dos_run_id(run_id: object) -> bool:
     return bool(_RID_RE.fullmatch(str(run_id or "")))
 
@@ -1293,7 +1464,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               spawn_probe_s: float = DEFAULT_SPAWN_PROBE_S,
               realloc_ceiling: int = DEFAULT_REALLOC_CEILING,
               record_loop: bool = False,
-              loop_ledger: Path | None = None) -> dict[str, Any]:
+              loop_ledger: Path | None = None,
+              lease_runner: Any | None = None) -> dict[str, Any]:
+    # lease_runner is the injectable `fak leaseref` seam (default: a real
+    # subprocess). Tests pass a canned runner returning {rc, verdict} so the whole
+    # acquire/refuse/release path runs with no real git and no real fak binary.
     def finish(payload: dict[str, Any]) -> dict[str, Any]:
         if record_loop:
             payload["loop_ledger"] = record_loop_tick(root, payload, ledger=loop_ledger)
@@ -1309,6 +1484,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # capacity — otherwise stale `.pid` files accumulate and a recycled PID landing
     # in one's spawn window is miscounted as a live worker, pinning the cap.
     pruned = prune_dead_sidecars(runs_dir, live=live)
+    # Sweep EXPIRED fenced lane leases (residual of #1310) — the crashed-holder
+    # backstop. A worker that died without releasing its refs/fak/locks/resolve-<lane>
+    # lease has it deleted here once its TTL lapses, so a crash can't wedge a lane
+    # forever. Live ticks only (a dry-run never mutates lease state); fail-open.
+    leases_reaped = reap_expired_leases(root, runner=lease_runner) if live else {"skipped": True}
 
     # Backend-health reallocation (the cross-read half). A HEALTHY backend claims the
     # budget + lane a DEAD sibling abandoned: it raises its effective cap by one slot
@@ -1415,6 +1595,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # common (no dead sibling) path's payload is byte-identical to before.
         **({"reallocation": {"effective_max_workers": eff_max_workers, **realloc}}
            if realloc["bonus"] or realloc["claimed_lanes"] else {}),
+        # Surface the lease reap only on a live tick where it ran, so a dry-run
+        # payload stays byte-identical to before the lease gate.
+        **({"leases_reaped": leases_reaped} if live else {}),
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                       "cap": pre.get("cap"), "live": pre.get("live")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
@@ -1468,6 +1651,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"{acct.get('model') or backend})")})
         return finish(payload)
 
+    # Fenced lane-lease ACQUIRE (residual of #1310) — the authoritative pre-spawn
+    # admission, layered atop the same-host log scan above. ATOMICALLY take
+    # refs/fak/locks/resolve-<lane> before launching; a structured fence refusal
+    # (a live peer holds the lane, on THIS host or another clone after a fetch)
+    # returns LANE_LEASE_HELD instead of racing a second worker onto the leaf tree.
+    # Fail-open: a missing fak binary / broken store proceeds on the log scan
+    # alone (lease.acquired False, lease.refused False) so the loop never wedges.
+    ttl_s = int((worker_timeout_s or DEFAULT_WORKER_TIMEOUT_S) + LEASE_TTL_MARGIN_S)
+    lease = acquire_lane_lease(root, chosen_lane, tree=lane_tree(root, chosen_lane),
+                               ttl_s=ttl_s, runner=lease_runner)
+    payload["lease"] = lease
+    if lease.get("refused"):
+        payload.update({"ok": False, "action": "lane_leased", "verdict": "LANE_LEASE_HELD",
+                        "reason": (f"lane '{chosen_lane}' lease is held by a live peer "
+                                   f"(fence {lease.get('reason') or lease.get('fence_verdict') or '?'}); "
+                                   f"refusing COLLISION_RISK — the fenced "
+                                   f"refs/fak/locks/{lease.get('id')} lease serializes "
+                                   f"this lane across machines, not just this host")})
+        _record(runs_dir, payload)
+        return finish(payload)
+
     if backend == "claude":
         env = issue_dispatch.worker_env(acct.get("dir"), chosen_lane, root)
     elif backend == "codex":
@@ -1480,6 +1684,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                  account=acct, spawn_probe_s=spawn_probe_s)
     early = spawned.get("early_exit") or {}
     if early.get("checked") and not early.get("alive") and early.get("silent"):
+        # The spawn died immediately, so the lane lease we just took now guards a
+        # worker that never ran. There is no early-release verb yet (`fak leaseref`
+        # exposes only acquire/reap, not a delete-one-live-lease), so the lane is
+        # freed the way the issue sanctions for a crashed holder: the lease TTL
+        # lapses and a later tick's `reap` sweeps it (reap_expired_leases above).
+        # Surface the held lease so the SPAWN_FAILED record is honest about it.
+        if lease.get("acquired"):
+            payload["lease_held_until_ttl"] = {"id": lease.get("id"),
+                                               "holder": lease.get("holder")}
         payload.update({"ok": False, "action": "spawn_failed",
                         "verdict": "SPAWN_FAILED",
                         "spawned": spawned,

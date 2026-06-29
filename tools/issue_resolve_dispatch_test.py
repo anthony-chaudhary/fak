@@ -437,6 +437,16 @@ class EvaluateTest(unittest.TestCase):
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
             "candidates": [], "reaped": [], "would_reap": []}
+        # Hermetic lease layer (#1310 residual): neutralize the fenced-lease helpers
+        # so a live tick never shells a real `fak leaseref` / `dos` (which would touch
+        # real git refs and leak a refs/fak/locks lease into the repo). The default is
+        # ACQUIRE (the lane is free) so the live path proceeds to spawn exactly as
+        # before; a test that wants the held-lane path overrides acquire_lane_lease.
+        mod.acquire_lane_lease = lambda root, lane, **k: {
+            "acquired": True, "refused": False, "id": f"resolve-{lane}",
+            "holder": "test", "tree": k.get("tree") or []}
+        mod.reap_expired_leases = lambda root, **k: {"ok": True, "rc": 0}
+        mod.lane_tree = lambda root, lane: [f"internal/{lane}/**"]
 
         def boom(*a, **k):
             raise AssertionError("dry-run must never spawn")
@@ -1389,6 +1399,188 @@ class BackendHealthTest(unittest.TestCase):
         mod = load()
         out = mod.check_backend_health(Path("/no/such/dir/xyz"), product="opencode")
         self.assertEqual(out["state"], "healthy")  # never wedges the loop
+
+
+class LaneLeaseHelperTest(unittest.TestCase):
+    """The fenced-lease helpers (residual of #1310): acquire maps the three
+    `fak leaseref` exit codes (0 acquired / 3 refused / else fail-open) and never
+    raises, so the gate can add protection but never wedge the loop."""
+
+    def test_acquire_exit0_is_acquired(self) -> None:
+        mod = load()
+        def runner(root, args, **k):
+            self.assertEqual(args[0], "acquire")
+            self.assertIn("--id", args)
+            self.assertIn("resolve-gateway", args)
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-gateway", "generation": 2}}}
+        out = mod.acquire_lane_lease(ROOT, "gateway", tree=["internal/gateway/**"],
+                                     ttl_s=900, runner=runner)
+        self.assertTrue(out["acquired"])
+        self.assertFalse(out["refused"])
+        self.assertEqual(out["id"], "resolve-gateway")
+        self.assertEqual(out["generation"], 2)
+
+    def test_acquire_exit3_is_refused(self) -> None:
+        mod = load()
+        runner = lambda root, args, **k: {
+            "rc": 3, "verdict": {"verdict": {"ok": False, "reason": "LEASE_HELD"}}}
+        out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"], ttl_s=900, runner=runner)
+        self.assertTrue(out["refused"])
+        self.assertFalse(out["acquired"])
+        self.assertEqual(out["reason"], "LEASE_HELD")
+
+    def test_acquire_other_exit_fails_open(self) -> None:
+        mod = load()
+        for rc in (1, 2, 127):
+            runner = lambda root, args, _rc=rc, **k: {"rc": _rc, "verdict": None}
+            out = mod.acquire_lane_lease(ROOT, "gateway", tree=["internal/gateway/**"],
+                                         ttl_s=900, runner=runner)
+            self.assertFalse(out["acquired"], rc)
+            self.assertFalse(out["refused"], rc)
+            self.assertTrue(out["fail_open"], rc)
+
+    def test_no_fak_binary_fails_open(self) -> None:
+        # With no FAK_BIN and no `fak` on PATH, the default runner reports rc 127 and
+        # the gate fails open. Exercise the real _run_lease via a patched _fak_bin.
+        mod = load()
+        mod._fak_bin = lambda root: None
+        out = mod.acquire_lane_lease(ROOT, "gateway", tree=["internal/gateway/**"], ttl_s=900)
+        self.assertTrue(out["fail_open"])
+        self.assertEqual(out["rc"], 127)
+
+    def test_lane_tree_falls_back_to_convention(self) -> None:
+        # A dos doctor failure (no taxonomy) -> the internal/<lane>/** convention.
+        mod = load()
+        mod._LANE_TREE_CACHE.clear()
+        import types
+        mod_router = types.SimpleNamespace(
+            lane_taxonomy=lambda root: (_ for _ in ()).throw(RuntimeError("no dos")))
+        sys.modules["issue_lane_router"] = mod_router
+        try:
+            self.assertEqual(mod.lane_tree(ROOT, "gateway"), ["internal/gateway/**"])
+        finally:
+            sys.modules.pop("issue_lane_router", None)
+            mod._LANE_TREE_CACHE.clear()
+
+
+class EvaluateLeaseGateTest(unittest.TestCase):
+    """evaluate()-level wiring of the fenced lane-lease gate on the LIVE path. The
+    gate sits AFTER the dry-run return, so it only fires on live=True. Uses an
+    injected lease_runner so the real acquire_lane_lease/release run with no git."""
+
+    SPAWN_OK = {
+        "verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+        "account": {"tag": "worker-a", "tier": 1, "model": "opus", "dir": "/acct/a"},
+    }
+
+    def _stub(self, mod, *, spawn, lane="gateway", numbers=(467,)):
+        mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
+        mod.issue_dispatch.preflight = lambda root, **kw: self.SPAWN_OK
+        mod.issue_dispatch.worker_env = lambda d, lane, root: {}
+        mod.lane_issue_numbers = lambda root, lane, exclude=None: {
+            "lane": lane, "numbers": list(numbers), "by_lane_count": {lane: len(numbers)}}
+        mod.live_resolution_issues = lambda runs_dir: set()
+        mod.live_resolution_lanes = lambda runs_dir: set()  # same-host scan: free
+        mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
+        mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
+        mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
+        mod.read_dead_backends = lambda runs_dir, **k: []
+        mod.reap_timed_out_workers = lambda runs_dir, **k: {
+            "candidates": [], "reaped": [], "would_reap": []}
+        mod.prune_dead_sidecars = lambda runs_dir, **k: {"pruned": []}
+        mod.lane_tree = lambda root, lane: [f"internal/{lane}/**"]
+        mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
+            "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}"}
+        mod.spawn_issue_worker = spawn
+
+    def test_free_lane_acquires_then_spawns(self) -> None:
+        mod = load()
+        spawned_flag = {"did": False}
+        def spawn(*a, **k):
+            spawned_flag["did"] = True
+            return {"pid": 9, "log": "resolve-467.log", "issue": 467,
+                    "lane": "gateway", "backend": "claude"}
+        self._stub(mod, spawn=spawn)
+        calls = []
+        def lease_runner(root, args, **k):
+            calls.append(args[0])
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-gateway", "generation": 1}}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=True, lease_runner=lease_runner)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "SPAWNED")
+        self.assertTrue(spawned_flag["did"])
+        self.assertTrue(p["lease"]["acquired"])
+        self.assertIn("acquire", calls)        # the gate took the lease before spawning
+        self.assertIn("reap", calls)           # and reaped expired leases this tick
+
+    def test_held_lease_refuses_lane_lease_held(self) -> None:
+        mod = load()
+        def boom(*a, **k):
+            raise AssertionError("a held lease must short-circuit before the spawn")
+        self._stub(mod, spawn=boom)
+        lease_runner = lambda root, args, **k: (
+            {"rc": 0, "verdict": None} if args[0] == "reap" else
+            {"rc": 3, "verdict": {"verdict": {"ok": False, "reason": "LEASE_HELD"}}})
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=True, lease_runner=lease_runner)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "LANE_LEASE_HELD")
+        self.assertEqual(p["action"], "lane_leased")
+        self.assertTrue(p["lease"]["refused"])
+        self.assertIn("gateway", p["reason"])
+
+    def test_fail_open_lease_still_spawns(self) -> None:
+        # A broken lease store (rc 1) must NOT block the loop — the same-host log scan
+        # already passed, so the tick proceeds to spawn (fail-open).
+        mod = load()
+        did = {"spawn": False}
+        def spawn(*a, **k):
+            did["spawn"] = True
+            return {"pid": 9, "log": "resolve-467.log", "issue": 467,
+                    "lane": "gateway", "backend": "claude"}
+        self._stub(mod, spawn=spawn)
+        lease_runner = lambda root, args, **k: {"rc": 1, "verdict": None}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=True, lease_runner=lease_runner)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "SPAWNED")
+        self.assertTrue(did["spawn"])
+        self.assertTrue(p["lease"].get("fail_open"))
+
+    def test_spawn_failure_surfaces_lease_held_until_ttl(self) -> None:
+        # `fak leaseref` has no delete-one-live verb, so a worker that died at exec
+        # leaves its lane lease held until the TTL lapses and a later tick's `reap`
+        # sweeps it. The SPAWN_FAILED record must be honest about that held lease.
+        mod = load()
+        def spawn(*a, **k):
+            return {"pid": 9, "log": "resolve-467.log", "issue": 467, "lane": "gateway",
+                    "backend": "claude",
+                    "early_exit": {"checked": True, "alive": False, "wait_s": 5.0,
+                                   "silent": True, "returncode": 0, "log_bytes": 0}}
+        self._stub(mod, spawn=spawn)
+        lease_runner = lambda root, args, **k: (
+            {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                  "record": {"id": "resolve-gateway", "generation": 1}}}
+            if args[0] == "acquire" else {"rc": 0, "verdict": None})
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=True, spawn_probe_s=5.0, lease_runner=lease_runner)
+        self.assertEqual(p["verdict"], "SPAWN_FAILED")
+        self.assertEqual(p["lease_held_until_ttl"]["id"], "resolve-gateway")
+
+    def test_dry_run_never_touches_the_lease(self) -> None:
+        # The gate is AFTER the dry-run return, so a dry-run plans without holding a
+        # lease at all (lease_runner must never be called).
+        mod = load()
+        def boom_runner(root, args, **k):
+            raise AssertionError("dry-run must never touch the lease")
+        self._stub(mod, spawn=lambda *a, **k: None)
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=False, lease_runner=boom_runner)
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertNotIn("lease", p)
 
 
 if __name__ == "__main__":
