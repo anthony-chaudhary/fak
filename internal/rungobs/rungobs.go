@@ -47,12 +47,13 @@ type bucketCost struct {
 // It is safe for concurrent use: every mutation goes through mu. The dedup window
 // (seen + ring), the counts map, and the per-bucket cost are all guarded by it.
 type Observer struct {
-	mu     sync.Mutex
-	counts map[decKey]int64
-	cost   map[decKey]bucketCost // #1149: per-bucket adjudication-ns + token-delta
-	seen   map[uint64]struct{}   // calls already counted (SeqNo > 0 only)
-	ring   []uint64              // FIFO eviction order for `seen`
-	rhead  int                   // next slot to overwrite in `ring`
+	mu           sync.Mutex
+	counts       map[decKey]int64
+	cost         map[decKey]bucketCost // #1149: per-bucket adjudication-ns + token-delta
+	seen         map[uint64]struct{}   // calls already counted (SeqNo > 0 only)
+	ring         []uint64              // FIFO eviction order for `seen`
+	rhead        int                   // next slot to overwrite in `ring`
+	adjudicators []abi.Adjudicator
 }
 
 // New returns an empty, ready-to-register Observer.
@@ -63,6 +64,17 @@ func New() *Observer {
 		seen:   map[uint64]struct{}{},
 		ring:   make([]uint64, dedupCap),
 	}
+}
+
+// NewWithAdjudicators returns an observer that attributes winning rungs against the
+// same explicit chain a caller injected into kernel.WithAdjudicators. New keeps the
+// historical process-global attribution path.
+func NewWithAdjudicators(chain []abi.Adjudicator) *Observer {
+	o := New()
+	if len(chain) > 0 {
+		o.adjudicators = append([]abi.Adjudicator(nil), chain...)
+	}
+	return o
 }
 
 // Subscriptions scopes the observer to EvDecide/EvDeny/EvVDSOHit (EventSubscriber).
@@ -189,7 +201,11 @@ func (o *Observer) bump(rung, kind, reason string, adjNs, tokDelta int64) {
 // the honesty boundary. kind/reason are read from the canonical Decision so the
 // bucket labels agree with `fak preflight --explain` for the same call.
 func (o *Observer) attribute(call *abi.ToolCall, verdict *abi.Verdict, adjNs, tokDelta int64) {
-	_, d := kernel.FoldExplain(context.Background(), abi.AdjudicatorsFor(call), call)
+	chain := abi.AdjudicatorsFor(call)
+	if len(o.adjudicators) > 0 {
+		chain = abi.ScopedFor(o.adjudicators, call)
+	}
+	_, d := kernel.FoldExplain(context.Background(), chain, call)
 	kind, reason := d.Verdict, d.Reason
 	if verdict != nil {
 		kind = kindOf(verdict.Kind)
