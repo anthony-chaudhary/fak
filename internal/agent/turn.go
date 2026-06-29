@@ -98,6 +98,10 @@ type specState struct {
 	spec    *abi.Speculator
 	k       *kernel.Kernel
 	pending *Turn
+	// barred is set when the last resolved speculation SQUASHED: the immediately
+	// following write-shaped call is a dependent write behind an unconfirmed speculative
+	// read, so the before-consumption write barrier (#1319) blocks it from the engine.
+	barred bool
 }
 
 // newSpecState builds the driver for a fak-arm run with a wired speculator. k is the
@@ -120,10 +124,41 @@ func (s *specState) resolve(ctx context.Context, authoritative *abi.ToolCall, m 
 	switch outcome {
 	case abi.OutcomeCommitted:
 		m.SpecCommitted++
+		s.barred = false // the speculative read was confirmed; a dependent write may commit
 	case abi.OutcomeSquashed:
 		m.SpecSquashed++
+		s.barred = true // mispredict: the dependent follow-on write must NOT reach the engine
 	}
 	s.pending = nil
+}
+
+// barWrite reports whether a write-shaped call must be BARRED from dispatch — the
+// before-consumption write barrier (#1319). A write that follows a SQUASHED speculation
+// (a write behind an unconfirmed speculative read) is not committed: it never reaches the
+// engine, so a mispredicted read can never leak a dependent durable effect. The barrier
+// fires once (it clears after barring), and only for a write-shaped tool — a follow-on
+// READ after a squash is harmless and proceeds. A nil driver or an unarmed barrier
+// returns false (the call dispatches normally), so the historical loop is unchanged.
+func (s *specState) barWrite(tool string, m *ArmMetrics) bool {
+	if s == nil || !s.barred {
+		return false
+	}
+	if !abi.IsWriteShaped(tool) {
+		return false
+	}
+	s.barred = false
+	m.WritesBarred++
+	return true
+}
+
+// disarm clears any armed write barrier at a turn boundary so it never leaks into a later
+// turn: the barrier gates only the writes in the SAME turn the squash resolved in. A
+// follow-on read after a squash leaves the barrier armed (a read is harmless); disarm
+// retires it once the turn's calls are processed. Nil-safe.
+func (s *specState) disarm() {
+	if s != nil {
+		s.barred = false
+	}
 }
 
 // speculate issues a speculation for the NEXT call after turn `turnIdx`'s tool calls ran:
@@ -142,16 +177,16 @@ func (s *specState) speculate(ctx context.Context, turnIdx int, sig string, prio
 		return // nothing to speculate (default-deny on effects, no matching pattern, …)
 	}
 	m.SpecIssued++
-	// Run the predicted, provably effect-free call ahead of the model through the SAME
-	// syscall boundary every real call uses. The result is provisional until the next
-	// authoritative call promotes or squashes it.
-	r, _ := s.k.Syscall(ctx, predicted)
-	var eff abi.Ref
-	if r != nil {
-		eff = r.Payload
-	}
+	// Before-consumption serve (#1319): a SPECULATIVE effect-free read is served from the
+	// PREDICTION — its symbolically-derived result — WITHOUT engine dispatch. We do NOT
+	// k.Syscall it (that would dispatch and bump EngineCalls); the derived args ARE the
+	// provisional result, staged under the speculative epoch until the next authoritative
+	// call promotes or squashes it. A live vDSO hit would serve it identically; the
+	// prediction is the dispatch-free fallback. This is what makes the read provisional
+	// and gives the write barrier something to gate on.
+	m.SpecServed++
 	turn := NewTurn(turnIdx)
-	turn.Suspend(predicted, eff)
+	turn.Suspend(predicted, predicted.Args)
 	s.pending = turn
 }
 

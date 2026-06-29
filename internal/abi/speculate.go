@@ -401,3 +401,11 @@ func specWriteShaped(tool string) bool {
 	}
 	return false
 }
+
+// IsWriteShaped is the EXPORTED write-shape check — the same name-substring
+// over-approximation specWriteShaped / vdso.writeShapeNeedles use, surfaced so a
+// consumer (the before-consumption write barrier in internal/agent, #1319) can ask "is
+// this call write-shaped?" without re-deriving the needle list. A write-shaped call is
+// never speculated AND, under the barrier, is never committed behind an unconfirmed
+// speculative read.
+func IsWriteShaped(tool string) bool { return specWriteShaped(tool) }

@@ -48,6 +48,14 @@ type ArmMetrics struct {
 	SpecIssued    int `json:"spec_issued,omitempty"`
 	SpecCommitted int `json:"spec_committed,omitempty"`
 	SpecSquashed  int `json:"spec_squashed,omitempty"`
+	// SpecServed is how many speculative effect-free reads were served from the
+	// prediction WITHOUT engine dispatch (#1319, the before-consumption serve) — it does
+	// NOT bump EngineCalls. WritesBarred is how many write-shaped calls the
+	// before-consumption write barrier blocked from reaching the engine because the
+	// speculation they followed was squashed (a mispredicted read never commits a
+	// dependent write).
+	SpecServed   int `json:"spec_served,omitempty"`
+	WritesBarred int `json:"writes_barred,omitempty"`
 
 	// StoppedBySession is the session-control stop reason when a wired session.Table
 	// ended this arm before maxTurns / a final answer (a closed token: PAUSED,
@@ -341,12 +349,22 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 			rawArgs := tc.Function.Arguments
 			var content string
 			ev := traceEvent{Turn: turn + 1, Arm: m.Arm, Tool: tool, RawArgs: rawArgs}
-			if fak {
+			switch {
+			case sp.barWrite(tool, &m):
+				// Before-consumption write barrier (#1319): this write follows a squashed
+				// speculation (a write behind an unconfirmed speculative read), so it is
+				// BLOCKED from the engine — never dispatched, no durable effect. The model
+				// sees a structured barred result and can re-issue once the read is real.
+				content = `{"error":"write barred: held behind an unconfirmed speculative read (squashed); re-issue after the authoritative read"}`
+				ev.Verdict = "BARRED"
+				ev.By = "write-barrier"
+				ev.Note = "BARRED by the before-consumption write barrier (dependent speculation squashed)"
+			case fak:
 				// Per-tool-call model routing (opt-in #598): classify this call and bind the
 				// chosen engine PRE-Syscall. No manifest => "" => the kernel default, so the
 				// historical loop is unchanged.
 				content, ev = execViaKernel(ctx, k, tool, rawArgs, cfg.routeToolEngine(tool), ev)
-			} else {
+			default:
 				content, ev = execNaive(tool, rawArgs, &m, ev)
 			}
 			if log != nil {
@@ -369,6 +387,9 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 				})
 			}
 		}
+		// Retire any armed write barrier at the turn boundary — it gates only this turn's
+		// writes, never a later turn's (#1319).
+		sp.disarm()
 		// SUSPEND edge (#1318): predict the model's NEXT call from this turn's signature +
 		// prior outputs, run it effect-free ahead of the model, and suspend it for the next
 		// turn boundary to resolve. A no-op when no speculator is wired or nothing is
