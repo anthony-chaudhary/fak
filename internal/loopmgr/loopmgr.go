@@ -504,10 +504,10 @@ func SnapshotFilePartial(path string, now time.Time) (Status, Integrity, error) 
 	return st, integ, nil
 }
 
-func validateNewEvent(ev Event) error {
-	if ev.Schema != "" && ev.Schema != SchemaEvent {
-		return fmt.Errorf("schema = %q, want %q", ev.Schema, SchemaEvent)
-	}
+// validateEventCore checks the fields every loop event must satisfy regardless of
+// whether it is newly minted or loaded from the ledger: a non-empty loop id and a
+// known kind. Shared by validateNewEvent and validateLoadedEvent.
+func validateEventCore(ev Event) error {
 	if strings.TrimSpace(ev.LoopID) == "" {
 		return errors.New("loop_id is required")
 	}
@@ -515,6 +515,13 @@ func validateNewEvent(ev Event) error {
 		return fmt.Errorf("unknown loop event kind %q", ev.Kind)
 	}
 	return nil
+}
+
+func validateNewEvent(ev Event) error {
+	if ev.Schema != "" && ev.Schema != SchemaEvent {
+		return fmt.Errorf("schema = %q, want %q", ev.Schema, SchemaEvent)
+	}
+	return validateEventCore(ev)
 }
 
 func validateLoadedEvent(ev Event, wantSeq uint64, wantPrev string) error {
@@ -527,11 +534,8 @@ func validateLoadedEvent(ev Event, wantSeq uint64, wantPrev string) error {
 	if ev.PrevHash != wantPrev {
 		return fmt.Errorf("prev_hash = %q, want %q", ev.PrevHash, wantPrev)
 	}
-	if strings.TrimSpace(ev.LoopID) == "" {
-		return errors.New("loop_id is required")
-	}
-	if !validKind(ev.Kind) {
-		return fmt.Errorf("unknown loop event kind %q", ev.Kind)
+	if err := validateEventCore(ev); err != nil {
+		return err
 	}
 	if ev.Hash == "" {
 		return errors.New("hash is required")
