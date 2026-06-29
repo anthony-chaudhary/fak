@@ -1641,7 +1641,7 @@ def commit_plan(
     changed_selected = sorted({e["path"] for e in status_before})
     commands = [
         ["git", "add", "--", *selected],
-        ["git", "commit", "-m", message.strip()],
+        ["git", "commit", "-s", "-m", message.strip()],
     ]
     base: dict[str, Any] = {
         "schema": COMMIT_SCHEMA,
@@ -1701,7 +1701,7 @@ def commit_plan(
         }
     if not after_staged:
         return {**base, "reason": "selected paths produced no staged changes"}
-    commit_proc = git(["commit", "-m", message.strip()], root)
+    commit_proc = git(["commit", "-s", "-m", message.strip()], root)
     if commit_proc.returncode != 0:
         return {
             **base,
