@@ -117,6 +117,8 @@ func cmdServe(argv []string) {
 	notifySlack := fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
 	debugStats := fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
 	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
+	native := fs.Bool("native", false, "NATIVE HARNESS (#1316): drive fak's OWN agent loop (agent.RunArm) for a non-streaming /v1/messages turn instead of the single-shot proxy turn — fak owns dispatch, the in-kernel syscall boundary is the sole tool path, and the per-turn session gate + per-call routing + operator steer bus run on the served loop. The loop is seeded with the request's last user message and drives the kernel-owned tool catalog to a final answer; the per-turn ArmMetrics ride back on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged). A streaming request falls through to the proxy path.")
+	nativeMaxTurns := fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
@@ -378,9 +380,16 @@ func cmdServe(argv []string) {
 		// path. When set, each fak_syscall call is classified and a PICK plan binds the
 		// chosen model before Submit so the residency PDP adjudicates the real route.
 		RouteManifest: routeMan,
+		// Native-harness keystone (#1316): drive agent.RunArm for a non-streaming
+		// /v1/messages turn. Off by default — the proxy path is byte-for-byte unchanged.
+		Native:         *native,
+		NativeMaxTurns: *nativeMaxTurns,
 	})
 	must(err)
 	srv.SetModelLoadProfile(loadProfile)
+	if inKernelModel != nil && inKernelTok != nil && strings.TrimSpace(*baseURL) == "" && len(replicaBaseURLs.Values()) == 0 {
+		srv.SetAdmissionController(gateway.NewAdmissionController(gateway.DefaultAdmissionPolicy()))
+	}
 
 	// Slot-freed -> KV-free serve-path attach (#1095): with FAK_INKERNEL_KVMMU on, a
 	// session.Scheduler is attached over the live serve table and the gateway's KV-reclaim edge

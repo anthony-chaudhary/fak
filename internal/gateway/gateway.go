@@ -317,7 +317,26 @@ type Config struct {
 	// manifest and fails loud on a malformed one (a mis-routed model is a security
 	// boundary, never a silent default). Set by `fak serve --route-manifest` (#601).
 	RouteManifest *modelroute.Manifest
+	// Native, when true, makes a NON-streaming /v1/messages turn drive fak's OWN agent
+	// loop (agent.RunArm) instead of the single-shot proxy turn: fak owns dispatch, the
+	// in-kernel syscall boundary is the sole tool path, and no external harness owns the
+	// turn loop. This is the native-harness keystone (#1316) — it gives the owned loop its
+	// first live, non-test serve-path caller and wires the WithSessionGate / WithRouteManifest
+	// / steer options that otherwise have zero live callers. The loop is seeded with the
+	// request's last user message and drives the kernel-owned tool catalog to a final answer;
+	// the per-turn agent.ArmMetrics ride back on the response `fak.native_arm` extension.
+	// nil/false (the default) leaves /v1/messages on the byte-for-byte proxy path. Set by
+	// `fak serve --native`.
+	Native bool
+	// NativeMaxTurns caps the owned loop's model round-trips per served request when Native
+	// is set. <= 0 falls back to DefaultNativeMaxTurns. Inert when Native is false.
+	NativeMaxTurns int
 }
+
+// DefaultNativeMaxTurns bounds the native serve loop's model round-trips per request
+// when Config.NativeMaxTurns is unset — enough headroom for a multi-step tool flow
+// while still terminating a runaway loop.
+const DefaultNativeMaxTurns = 16
 
 // PolicyReloadFunc is injected by the host CLI so the gateway can expose a reload
 // route without importing policy/adjudicator/ifc internals.
@@ -661,6 +680,12 @@ type Server struct {
 	// classification sees either the whole old manifest or the whole new one.
 	route *modelroute.Live
 
+	// native, when true, routes a non-streaming /v1/messages turn through fak's OWN agent
+	// loop (agent.RunArm) — the native-harness keystone (#1316). nativeMaxTurns bounds the
+	// loop's model round-trips per request. See Config.Native / native_serve.go.
+	native         bool
+	nativeMaxTurns int
+
 	// fleet is the host-injected live worker membership/health/drain/failover loop
 	// (fleet_membership.go) — the live fleet view the router reads. The metrics surface
 	// DRAINS its transition log onto /metrics with a per-worker label (#42) via the
@@ -858,6 +883,8 @@ func New(cfg Config) (*Server, error) {
 		sessionFeed:                newSessionFeed(0),
 		metrics:                    newGatewayMetrics(time.Now()),
 		route:                      newRouteLive(cfg.RouteManifest),
+		native:                     cfg.Native,
+		nativeMaxTurns:             nativeMaxTurnsOr(cfg.NativeMaxTurns),
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}

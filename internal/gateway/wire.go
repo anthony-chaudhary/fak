@@ -19,7 +19,7 @@ import (
 // Disposition is the actionable deny-loopback class — it is what lets a refusal
 // cost a non-Go agent zero extra model turns.
 type WireVerdict struct {
-	Kind        string            `json:"kind"`                  // ALLOW|DENY|TRANSFORM|QUARANTINE|REQUIRE_WITNESS|DEFER|KIND_<n>
+	Kind        string            `json:"kind"`                  // ALLOW|DENY|TRANSFORM|QUARANTINE|REQUIRE_WITNESS|DEFER|RESIDUAL|KIND_<n>
 	Reason      string            `json:"reason,omitempty"`      // closed refusal vocabulary, e.g. POLICY_BLOCK
 	By          string            `json:"by,omitempty"`          // which adjudicator decided (forensics)
 	Disposition string            `json:"disposition,omitempty"` // RETRYABLE|WAIT|ESCALATE|TERMINAL
@@ -477,6 +477,13 @@ type FakExt struct {
 	// CAS handle to the byte-exact original. Present only on the non-passthrough
 	// re-marshal path (the OpenAI-compatible proxy) where redaction actually runs.
 	Redactions []WireRedaction `json:"redactions,omitempty"`
+	// NativeArm is the per-turn ArmMetrics of fak's OWNED agent loop (agent.RunArm),
+	// present only on a `fak serve --native` response (#1316). It is the witness that the
+	// native loop — not an external harness — drove this turn: Turns is the model
+	// round-trip count, VDSOHits/Repairs/Quarantines/Denies are the kernel's own tallies
+	// over the served loop, and StoppedBySession names the session boundary if one ended
+	// the loop early. nil on the proxy path.
+	NativeArm *agent.ArmMetrics `json:"native_arm,omitempty"`
 }
 
 // WireRedaction is the response view of one agent.TranscriptRedaction: enough to
