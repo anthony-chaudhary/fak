@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/callavoid"
@@ -926,22 +928,24 @@ func guardSubscriptionLoginPresent(tokenEnv string) bool {
 	return false
 }
 
-// cmdGuardStdinInteractive reports whether the guard process's stdin is an interactive
-// terminal (a character device), as opposed to a pipe, file, or /dev/null (headless). The
-// headless no-token fail-loud gate uses this so an attended user who CAN complete an
-// interactive login is never blocked, while an automated/headless run — where a blocked
-// login is unrecoverable — fails loud with guidance instead of hanging. A Stat error is
-// treated as non-interactive (fail safe toward the loud error, not a silent hang).
+// cmdGuardStdinInteractive reports whether the guard process's stdin is a real interactive
+// terminal where a user could complete an OAuth /login. The headless no-token fail-loud gate
+// uses this so an attended user is never blocked, while an automated/headless run — where a
+// blocked login is unrecoverable — fails loud with guidance instead of hanging.
+//
+// It uses term.IsTerminal, NOT the stdlib os.ModeCharDevice test: on Windows a redirected
+// stdin (`NUL` / `< /dev/null`) reports AS a character device, so a FileMode check treats the
+// exact headless-automation case as interactive and the gate never fires (caught by field
+// test, not the unit test). term.IsTerminal calls GetConsoleMode on Windows / isatty on Unix,
+// which distinguishes a console from a redirected handle.
 func cmdGuardStdinInteractive() bool {
-	fi, err := os.Stdin.Stat()
-	return err == nil && guardModeInteractive(fi.Mode())
+	return guardFdIsTerminal(int(os.Stdin.Fd()))
 }
 
-// guardModeInteractive is the pure half of cmdGuardStdinInteractive (the FileMode test),
-// split out so it can be unit-tested without a real terminal. A character device is a TTY;
-// a pipe (ModeNamedPipe) or a regular file is not.
-func guardModeInteractive(mode os.FileMode) bool {
-	return mode&os.ModeCharDevice != 0
+// guardFdIsTerminal is the seam over term.IsTerminal, named so the gate can be reasoned about
+// (and the real os.Stdin fd swapped in tests) without depending on the test's own stdin.
+func guardFdIsTerminal(fd int) bool {
+	return term.IsTerminal(fd)
 }
 
 // guardClaudeConfigDir resolves the directory that holds Claude Code's per-account

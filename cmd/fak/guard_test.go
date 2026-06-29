@@ -1145,21 +1145,26 @@ func TestGuardNoTokenAnywhereFlagsHeadlessHardExit(t *testing.T) {
 	}
 }
 
-// TestGuardModeInteractive proves the pure half of the headless gate: a character device is an
-// interactive terminal (login completable; keep today's spawn), while a pipe or a regular file
-// is not (a blocked login is unrecoverable; fail loud).
-func TestGuardModeInteractive(t *testing.T) {
-	if !guardModeInteractive(os.ModeCharDevice) {
-		t.Fatal("a character device must be reported interactive")
+// TestGuardStdinInteractiveHeadlessUnderTest proves the headless gate's real contract: under
+// `go test` (and any CI / fleet-dispatch run) stdin is NOT a real terminal, so
+// cmdGuardStdinInteractive reports false and the no-token fail-loud gate WOULD fire instead of
+// spawning a child that hangs at a login. This is the exact automation context the gate exists
+// for. It uses term.IsTerminal (not os.ModeCharDevice) precisely because on Windows a redirected
+// stdin reports as a char device — a FileMode check would wrongly call this interactive and let
+// the headless run hang. A genuine attended terminal (no override) is the only place the gate is
+// skipped; that path is exercised by hand, not in a non-TTY test harness.
+func TestGuardStdinInteractiveHeadlessUnderTest(t *testing.T) {
+	if cmdGuardStdinInteractive() {
+		t.Fatal("stdin under `go test` must report NON-interactive so the headless fail-loud gate can fire; got interactive")
 	}
-	if !guardModeInteractive(os.ModeCharDevice | os.ModeDevice) {
-		t.Fatal("a char+device mode must be reported interactive")
+	// A regular file fd is never a terminal (the redirected-stdin / piped-input shape).
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if guardModeInteractive(os.ModeNamedPipe) {
-		t.Fatal("a pipe must NOT be reported interactive (headless)")
-	}
-	if guardModeInteractive(0) {
-		t.Fatal("a regular file must NOT be reported interactive (headless)")
+	defer f.Close()
+	if guardFdIsTerminal(int(f.Fd())) {
+		t.Fatal("a regular file fd must NOT be reported a terminal (headless)")
 	}
 }
 
