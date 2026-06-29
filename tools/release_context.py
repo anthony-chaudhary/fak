@@ -366,6 +366,9 @@ def fold_latest_trunk_ci(latest_trunk: object) -> tuple[str, dict | None, str | 
             "conclusion": conclusion,
             "head_sha": (str(row.get("headSha") or "")[:7] or None),
             "updated_at": row.get("updatedAt"),
+            "attempt": row.get("attempt"),
+            "database_id": row.get("databaseId"),
+            "url": row.get("url"),
             "indecisive_runs_since": indecisive,
         }
         if conclusion == "success":
@@ -383,7 +386,7 @@ def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
     if head:
         got = _run_gh_json([
             "run", "list", "--workflow", "ci.yml", "--commit", head,
-            "--limit", "10", "--json", "workflowName,status,conclusion",
+            "--limit", "10", "--json", "workflowName,status,conclusion,attempt,databaseId,url",
         ])
         if isinstance(got, list):
             runs_on_head = [
@@ -391,6 +394,9 @@ def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
                     "workflow": row.get("workflowName"),
                     "status": row.get("status"),
                     "conclusion": row.get("conclusion") or None,
+                    "attempt": row.get("attempt"),
+                    "database_id": row.get("databaseId"),
+                    "url": row.get("url"),
                 }
                 for row in got if isinstance(row, dict)
             ]
@@ -398,7 +404,7 @@ def ci_on_head(default_branch: str = DEFAULT_BRANCH) -> dict:
     latest_trunk = _run_gh_json([
         "run", "list", "--workflow", "ci.yml", "--branch", default_branch,
         "--status", "completed", "--limit", "30",
-        "--json", "conclusion,headSha,updatedAt",
+        "--json", "conclusion,headSha,updatedAt,attempt,databaseId,url",
     ])
     status, latest, note = fold_latest_trunk_ci(latest_trunk)
     return {

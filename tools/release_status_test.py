@@ -279,6 +279,10 @@ class ReleaseStatusTest(unittest.TestCase):
             "fix_ci",
         )
         self.assertEqual(
+            rs.next_action({"decision": "hold", "blockers": ["CI_RETRY_TO_GREEN"]}, {})["kind"],
+            "pause_auto_release",
+        )
+        self.assertEqual(
             rs.next_action({"decision": "release", "next_version": "0.3.0"}, {}, unrelated_dirty)["kind"],
             "clean_worktree",
         )

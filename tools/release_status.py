@@ -721,6 +721,14 @@ def next_action(
                 "detail": str(ci_diagnosis.get("detail")),
             }
         return {"kind": "fix_ci", "detail": "fix current main ci.yml failure before cutting a release"}
+    if "CI_RETRY_TO_GREEN" in blockers:
+        return {
+            "kind": "pause_auto_release",
+            "detail": (
+                "latest green ci.yml run was a retry; set FAK_AUTO_RELEASE=0 or "
+                "confirm a fresh green run before cutting a release"
+            ),
+        }
     if "CI_BASE_NONE" in blockers or "CI_STATE_UNKNOWN" in blockers:
         return {"kind": "confirm_ci", "detail": "restore or confirm a green main ci.yml signal"}
     if "WORKFLOW_UNPARSEABLE" in blockers:

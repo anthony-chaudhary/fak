@@ -123,6 +123,16 @@ class ReleaseDecideTest(unittest.TestCase):
         self.assertEqual(strict["decision"], "hold")
         self.assertIn("CI_STATE_UNKNOWN", strict["blockers"])
 
+    def test_retry_to_green_ci_blocks_auto_cut(self) -> None:
+        rd = load()
+        verdict = rd.decide(payload(ci_on_head={
+            "status": "green",
+            "latest_trunk_ci": {"conclusion": "success", "attempt": 2},
+        }))
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("CI_RETRY_TO_GREEN", verdict["blockers"])
+        self.assertIn("FAK_AUTO_RELEASE=0", verdict["reason"])
+
     def test_cli_contract_on_live_repo(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(DECIDE), "--json"],

@@ -111,6 +111,14 @@ def highest_base(*versions: str | None) -> tuple[int, int, int]:
     return max(parsed) if parsed else (0, 0, 0)
 
 
+def _ci_attempt(ci_on_head: dict) -> int | None:
+    latest = ci_on_head.get("latest_trunk_ci") or {}
+    try:
+        return int(latest.get("attempt"))
+    except (TypeError, ValueError):
+        return None
+
+
 def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
            require_ci_green: bool = False) -> dict:
     commits = payload.get("commits_since_tag") or []
@@ -135,13 +143,18 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
     if tag_drift.get("source_behind_reachable_tag"):
         blockers.append("VERSION_BEHIND_REACHABLE_TAG")
 
-    ci_status = (payload.get("ci_on_head") or {}).get("status")
+    ci_on_head = payload.get("ci_on_head") or {}
+    ci_status = ci_on_head.get("status")
     if ci_status == "red":
         blockers.append("CI_BASE_RED")
     elif ci_status == "none":
         blockers.append("CI_BASE_NONE")
     elif ci_status == "unknown" and require_ci_green:
         blockers.append("CI_STATE_UNKNOWN")
+    elif ci_status == "green":
+        attempt = _ci_attempt(ci_on_head)
+        if attempt is not None and attempt > 1:
+            blockers.append("CI_RETRY_TO_GREEN")
 
     workflows = payload.get("workflows_parse_ok") or {}
     if workflows.get("ok") is False:
@@ -196,6 +209,10 @@ def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
         "CI_BASE_RED": "latest decisive main ci.yml run is red",
         "CI_BASE_NONE": "no decisive completed main ci.yml run is available",
         "CI_STATE_UNKNOWN": "CI state is unknown and --require-ci-green was set",
+        "CI_RETRY_TO_GREEN": (
+            "latest decisive main ci.yml run is green only after a retry; pause auto-cut "
+            "with FAK_AUTO_RELEASE=0 or confirm a fresh green run before releasing"
+        ),
         "WORKFLOW_UNPARSEABLE": "a GitHub workflow file is not parseable",
     }
     return reasons.get(blocker, blocker)

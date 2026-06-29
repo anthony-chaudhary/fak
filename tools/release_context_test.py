@@ -105,7 +105,26 @@ class ReleaseContextTest(unittest.TestCase):
         self.assertEqual(status, "green")
         self.assertIsNone(note)
         self.assertEqual(latest["head_sha"], "abcdef1")
+        self.assertIsNone(latest["attempt"])
         self.assertEqual(latest["indecisive_runs_since"], 1)
+
+    def test_fold_latest_trunk_ci_carries_attempt_metadata(self) -> None:
+        rc = load()
+        status, latest, note = rc.fold_latest_trunk_ci([
+            {
+                "conclusion": "success",
+                "headSha": "abcdef123456",
+                "updatedAt": "2026-06-19T00:00:00Z",
+                "attempt": 2,
+                "databaseId": 123,
+                "url": "https://example.test/runs/123",
+            },
+        ])
+        self.assertEqual(status, "green")
+        self.assertIsNone(note)
+        self.assertEqual(latest["attempt"], 2)
+        self.assertEqual(latest["database_id"], 123)
+        self.assertEqual(latest["url"], "https://example.test/runs/123")
 
     def test_fold_latest_trunk_ci_flags_red_and_unknown(self) -> None:
         rc = load()
