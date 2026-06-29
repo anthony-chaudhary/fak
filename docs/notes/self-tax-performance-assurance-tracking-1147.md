@@ -444,3 +444,141 @@ not a live witness today — `fak perf` and the `fak_self_tax_*` family do not e
 T3/T5/T6 close. Pinning the shape here is the docs-lane increment of L5; the executable
 golden-tested verb and the live metric family are the named follow-on in the `cmd` /
 `gateway`/`metrics` lanes.
+
+## 11. L4 — the model-as-judge slow tier (pinned contract)
+
+T10 ([#1166](https://github.com/anthony-chaudhary/fak/issues/1166)) is the *quality* dual of the
+speed ladder: the fast tier (T9, [#1165](https://github.com/anthony-chaudhary/fak/issues/1165))
+proves an intervention didn't **drop** a legit result (a deterministic, run-on-every-gate
+bit-identity / benign-control check); the slow tier proves an intervention didn't **degrade** the
+answer it let through — a thing no bit-check can see, because the answer still parses and still
+passes the security floor, it is just *worse*. The acceptance is code: *a planted degradation is
+caught; the human-correlation check runs and is recorded.* This section upgrades T10 from a
+one-line ticket to a **pinned contract** — the judge seam it reuses, the pairwise/debias
+protocol, the human-correlation gate, and the planted-degradation witness — so the eventual build
+is **wiring against a fixed contract**, the same move §9/§10 made for T13/T11.
+
+The load-bearing reuse, and the honesty fence on it: the substrate already exists. The grader is
+**not** new judge machinery — it is `internal/modelroute`'s `Scorer` seam (`judge.go`: the
+`Scorer` interface, `ScorerFunc`, and `ScoreVotes`/`ScorePlanVotes`). That seam's whole design is
+the boundary this tier needs: the *non-deterministic* model call crosses as a bound closure, and
+the *deterministic* fold (`Combine(ReduceBestOf, …)`) is kept strictly separate. The slow tier
+inherits that split unchanged — the judge call is non-bit-exact, the **aggregation** of its
+verdicts (win-rate, the swap-consistency reconciliation, the correlation coefficient) is pure and
+golden-testable. So "reuse `modelroute.Judge`" means: bind one more `Scorer` — the quality judge
+— and add a deterministic *pairwise* aggregator beside the existing best-of `Combine`, never a
+second engine in the leaf.
+
+### 11.1 What the slow tier grades (the pair, not the absolute)
+
+The judged unit is a **pair**, never a lone answer: `(un-intervened answer A, intervened answer
+B)` produced from the **same prompt** by the **same model**, differing only in whether fak's
+mediation (repair / quarantine / recall-injection / compaction) touched the path. The judge is
+asked the relative question — *which answer better serves the prompt?* — not an absolute score,
+because an absolute scale drifts run-to-run (the `judge.go` doc already fences this: "the absolute
+scale is the judge's own … internally consistent, not calibrated"). The relative question is what
+a win-rate needs and what position-swap can debias.
+
+| Field of a judged pair | Source | Why |
+|---|---|---|
+| `prompt` | the gated turn's input | the fixed control — both arms answer it |
+| `answer_unintervened` | the same model, mediation **off** (the `ablate` `--vdso=off` / gate-bypass path) | the baseline arm |
+| `answer_intervened` | the same model, mediation **on** (the live gated path) | the treatment arm |
+| `verdict` | the bound quality `Scorer`, asked pairwise | A-wins / B-wins / tie |
+| `swap_verdict` | the **same** judge, arms presented in swapped order | the debias probe (§11.2) |
+
+### 11.2 The protocol — pairwise win-rate + position-swap debias
+
+A single judgment is noisy and position-biased (LLM judges favor the first-presented answer). The
+contract pins the two standard corrections:
+
+- **Pairwise win-rate**, not a mean score. Over a periodic batch of N pairs, the metric is the
+  fraction of pairs where the **intervened** answer is judged at least as good:
+  `win_rate = (#B-wins + ½·#ties) / N`. A healthy mediation sits near 0.5 (no quality cost); a
+  **planted degradation drives it down** (the intervened arm loses), which is the acceptance
+  signal. The number is denominated as a win-rate, never as the judge's raw scale.
+- **Position-swap debias.** Every pair is judged **twice** — `(A,B)` and `(B,A)`. A verdict that
+  *flips* with position is position-bias, not quality signal: it is reconciled to a **tie** before
+  the win-rate is folded. The retained signal is only the **swap-consistent** verdicts; the
+  `swap_inconsistency_rate` is reported alongside as the judge's own noise floor. This
+  reconciliation is the **deterministic** half — pure over the two raw verdicts — so it
+  golden-tests the way `Combine` does.
+
+Both folds live beside `ScoreVotes` as a new pure aggregator (proposed `PairwiseWinRate(pairs)
+→ QualityReport`); only the per-arm `Scorer.Score` call is non-deterministic, exactly the
+`judge.go` boundary.
+
+### 11.3 The human-correlation gate (Spearman ≥ 0.7 or flag untrustworthy)
+
+A judge you don't validate is a number you can't trust — so the metric **gates itself** on
+agreement with human labels. Against a small committed fixture of human-labeled pairs (the
+`testdata` golden pattern), compute the **Spearman rank correlation** between the judge's
+pairwise verdicts and the human ranking:
+
+- **ρ ≥ 0.7** → the win-rate is reported as **trustworthy** (`judge_trust: ok`).
+- **ρ < 0.7** → the win-rate is still emitted but **flagged `judge_trust: untrustworthy`** — the
+  metric does not silently present a poorly-correlated judge as authority. This is the same
+  fail-loud-but-don't-fabricate discipline as a MODELED label: the number is shown with its
+  provenance, never suppressed and never over-claimed.
+
+The correlation check is **recorded** (a `QualityReport.human_corr` row with `rho`, `n_labeled`,
+`judge_trust`), satisfying the acceptance clause "the human-correlation check runs and is
+recorded." Spearman (rank, not Pearson) because the judge scale is ordinal/own-scale — rank
+agreement is the honest question, matching the `judge.go` "internally consistent, not calibrated"
+fence.
+
+### 11.4 The read-out (golden-testable) and where it folds
+
+A stable report — schema `fak.quality-judge.v1` — so a frozen fixture of pairs + human labels
+round-trips deterministically (the win-rate and ρ are pure given fixed judge verdicts):
+
+| Field | Meaning | Verdict |
+|---|---|---|
+| `n_pairs` | judged pairs this batch | — |
+| `win_rate` | §11.2 intervened-arm win-rate (swap-reconciled) | `≈0.5` healthy / `↓` degradation |
+| `swap_inconsistency_rate` | fraction of pairs whose verdict flipped on swap | the judge's noise floor |
+| `human_corr.rho` | §11.3 Spearman vs human labels | — |
+| `human_corr.judge_trust` | `ok` (ρ≥0.7) / `untrustworthy` (ρ<0.7) | gate |
+| `degradation_flagged` | `win_rate` below a committed floor **and** `judge_trust==ok` | the regression signal |
+
+It folds into the §10.2 `fak perf` read-out as a sixth fold (`quality_judge`) and surfaces one
+`/metrics` member, `fak_self_tax_quality_win_rate{judge_trust}` — net-true-labeled **MODELED**
+(it is a model's judgment, not a witnessed count), so it is never collapsed with the WITNESSED
+reuse counters of §10.3.
+
+### 11.5 Acceptance, and what blocks it today
+
+- **AC1 — a planted degradation is caught.** A fixture pair whose `answer_intervened` is a
+  deliberately-degraded variant drives `win_rate` below the floor with `judge_trust==ok`, so
+  `degradation_flagged==true`; a benign control pair (mediation that didn't hurt) does **not**
+  flag. This is the §6 DoD item 6 witness, on the slow tier.
+- **AC2 — the human-correlation check runs and is recorded.** The §11.3 Spearman ρ over the
+  committed human-labeled fixture is computed and written to `human_corr`, with `judge_trust` set
+  by the 0.7 threshold — both the trustworthy and the untrustworthy branch exercised by fixtures.
+- **Periodic, not per-turn.** Unlike T9's every-gate fast check, the slow tier runs on a cadence
+  (a model call per arm per pair is expensive) — it is the §5 "L3/L4 deep periodic" tier, not the
+  "L1 cheap continuous" one.
+- **Blocked-on (the honest fence).** AC1/AC2 are **buildable today** — the `Scorer` seam, the
+  `Vote`/`Combine` fold, and the `testdata` golden pattern all exist; the missing pieces are the
+  pure `PairwiseWinRate` aggregator, the Spearman helper, and the committed pair+label fixtures.
+  No unbuilt dep gates this (unlike §10's T3/T5/T6 block) — the build is additive in
+  `internal/modelroute` (the aggregator + report, beside `judge.go`) plus a periodic caller.
+  **Lane for the build:** `modelroute` (the pure aggregator + `fak.quality-judge.v1` report) and
+  `cmd`/`gateway` (the periodic driver that binds the real judge `Scorer` and emits the metric) —
+  **not** `docs`. This docs increment pins the contract only; it does not itself satisfy AC1/AC2.
+
+### 11.6 Reproduce (the contract check, once the aggregator + fixtures land)
+
+```sh
+fak quality-judge --json | jq '.schema, .win_rate, .human_corr.rho, .human_corr.judge_trust'
+# AC1: a planted-degradation fixture → .degradation_flagged == true (with judge_trust=="ok")
+# AC2: .human_corr.rho computed over the committed human-labeled pairs; judge_trust set by ρ≥0.7
+```
+
+Stated plainly, like §9.4 / §10.5: this is the **contract** the follow-on build verifies, not a
+live witness today — `PairwiseWinRate`, the Spearman gate, and the `fak.quality-judge.v1` report
+do not exist until the `modelroute` aggregator + the human-labeled fixtures land. The reused half
+— `modelroute`'s `Scorer` seam and its deterministic-fold boundary — **is** built. Pinning the
+protocol here (pairwise win-rate, position-swap reconciliation, the ρ≥0.7 trust gate, the
+planted-degradation witness) is the docs-lane increment of L4; the executable aggregator and the
+periodic judge driver are the named follow-on in the `modelroute` / `cmd` / `gateway` lanes.
