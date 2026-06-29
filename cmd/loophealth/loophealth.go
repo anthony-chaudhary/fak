@@ -28,6 +28,8 @@
 //	go run ./cmd/loophealth --json          # the {closure_rate, regression_rate, window, baseline} fold
 //	go run ./cmd/loophealth --window 50     # over the most-recent 50 journal rows
 //	go run ./cmd/loophealth --gate          # exit 3 if worse than baseline (for a control-pane loop)
+//	go run ./cmd/loophealth --fleet         # the cross-loop fold: every loop's last-tick/keep/dark? (see fleet.go)
+//	go run ./cmd/loophealth --fleet --json  # the fleet scorecard; exit 3 when any loop is dark
 package main
 
 import (
