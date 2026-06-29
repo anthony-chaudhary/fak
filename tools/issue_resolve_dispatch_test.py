@@ -584,6 +584,28 @@ class SpawnProbeTest(unittest.TestCase):
         self.assertTrue(out["silent"])
         self.assertEqual(out["log_bytes"], 0)
 
+    def test_spawn_writes_preexec_header_under_stub_floor(self) -> None:
+        """A spawned worker's log opens with a flushed spawn header, so a later
+        0-byte log means 'died before exec' (not 'exec'd then silent'). The header
+        must stay under the stub floor and be banner-free so it never trips the
+        stub/cap-banner classifiers."""
+        import tempfile, sys
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # A trivially-exiting real process (no output of its own).
+            res = mod.spawn_issue_worker([sys.executable, "-c", "pass"], env={},
+                                         cwd=Path(d), log_dir=runs, issue=42,
+                                         lane="docs", backend="claude",
+                                         spawn_probe_s=2.0)
+            log = Path(res["log"])
+            body = log.read_text(encoding="utf-8")
+        self.assertTrue(body.startswith("# fak-spawn "))
+        self.assertIn("issue=42", body)
+        self.assertIn("lane=docs", body)
+        self.assertLess(len(body), mod._STUB_LOG_MAX_BYTES)   # header alone stays a stub
+        self.assertIsNone(mod._CAP_BANNER_RE.search(body))    # never a false cap banner
+
 
 class BackendRoutingTest(unittest.TestCase):
     SPAWN_OK_OC = {

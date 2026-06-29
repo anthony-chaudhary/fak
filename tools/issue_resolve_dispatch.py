@@ -581,6 +581,14 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
         kwargs["start_new_session"] = True
     fh = open(out_log, "w", encoding="utf-8")
     try:
+        # Flush a one-line spawn header BEFORE exec so a later 0-byte log means
+        # "died before exec" (the OS never ran the child) — distinguishable from
+        # "spawned, exec'd, then wrote nothing". The child inherits this fd and
+        # appends after the header. Kept short (well under _STUB_LOG_MAX_BYTES) and
+        # banner-free so it never trips the stub/cap-banner classifiers.
+        fh.write("# fak-spawn %s issue=%s lane=%s backend=%s argv0=%s\n" % (
+            stamp, issue, lane, backend, os.path.basename(exe)))
+        fh.flush()
         proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                                 stdout=fh, stderr=subprocess.STDOUT, **kwargs)
     finally:
