@@ -125,11 +125,9 @@ func (t *Tree) MatchLen(tokens []int) int {
 
 // split inserts an intermediate node between parent and child at offset oi into child.key,
 // so a node boundary exists exactly at the matched prefix length (parent.plen+oi). The
-// intermediate node's KV is the child's cache TRUNCATED to that length — via Clone+Evict
-// of the tail, which (because nothing is cached after the evicted span) re-RoPEs no
-// survivor and is therefore a bit-exact prefix. This is the move that lets RadixAttention
-// reuse a prefix that diverges in the middle of a run, which fak's declare-the-prefix path
-// could not.
+// intermediate node's KV is the child's cache TRUNCATED to that length when the model
+// supports span eviction. This is the move that lets RadixAttention reuse a prefix that
+// diverges in the middle of a run, which fak's declare-the-prefix path could not.
 func (t *Tree) split(parent, child *node, oi int) *node {
 	first := child.key[0]
 	mid := &node{
@@ -353,14 +351,16 @@ func subtreeTokens(n *node) int {
 }
 
 // truncatePrefix returns a clone of c covering only its first L positions, bit-identical
-// to a prefill that stopped at L. It uses the PROVEN model.KVCache.Evict of the tail span
-// [L, Len): because no position is cached after the evicted tail, Evict renumbers and
-// re-RoPEs no survivor, so the result is an exact prefix (not a re-derivation). This is the
-// only KV math radixkv does, and it is borrowed whole from the verified core.
+// to a prefill that stopped at L. It uses model.KVCache.TryEvict of the tail span [L, Len):
+// because no position is cached after the evicted tail, Evict renumbers and re-RoPEs no
+// survivor, so the result is an exact prefix. Recurrent caches that cannot be truncated
+// return nil so the split remains a structural boundary and callers recompute.
 func truncatePrefix(c *model.KVCache, L int) *model.KVCache {
 	cp := c.Clone()
 	if L < cp.Len() {
-		cp.Evict(L, cp.Len()-L)
+		if _, err := cp.TryEvict(L, cp.Len()-L); err != nil {
+			return nil
+		}
 	}
 	return cp
 }

@@ -70,6 +70,31 @@ func tinyCfg() model.Config {
 	}
 }
 
+func tinyHybridCfg() model.Config {
+	return model.Config{
+		HiddenSize:            32,
+		NumLayers:             4,
+		NumHeads:              4,
+		NumKVHeads:            2,
+		HeadDim:               8,
+		IntermediateSize:      64,
+		VocabSize:             97,
+		RMSNormEps:            1e-5,
+		RopeTheta:             10000,
+		TieWordEmbeddings:     true,
+		EOSTokenID:            -1,
+		LayerTypes:            []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
+		LinearConvKernelDim:   3,
+		LinearKeyHeadDim:      8,
+		LinearNumKeyHeads:     2,
+		LinearValueHeadDim:    8,
+		LinearNumValueHeads:   4,
+		AttnOutputGate:        true,
+		FullAttentionInterval: 4,
+		NormGain1p:            true,
+	}
+}
+
 // decode runs one turn through generateReused, collecting the generated token ids (via the
 // emit seam) and returning them alongside the reused-prefix length. No token-id stops are
 // passed, so decode always runs the full maxNew — a deterministic, comparable trace.
@@ -156,6 +181,26 @@ func TestInKernelReuseMatchesFullPrefill(t *testing.T) {
 			}
 			t.Logf("PARITY[%s]: reuse-through-split (%d/%d reused) == full re-prefill, %d tokens identical", name, matched, len(turn2), len(gotON))
 		})
+	}
+}
+
+func TestInKernelReuseHybridSplitFallsBackInsteadOfPanicking(t *testing.T) {
+	cfg := tinyHybridCfg()
+	p := reusePlanner(true, false, cfg)
+	sys := synthIDs(cfg.VocabSize, 24, 1143)
+	turn1 := append(append([]int{}, sys...), synthIDs(cfg.VocabSize, 6, 1144)...)
+	turn2 := append(append([]int{}, sys...), synthIDs(cfg.VocabSize, 7, 1145)...)
+
+	decode(p, turn1, 1)
+	gen, matched := decode(p, turn2, 1)
+	if matched != 0 {
+		t.Fatalf("hybrid split reused %d tokens, want fallback re-prefill because GDN state cannot be truncated", matched)
+	}
+	if len(gen) != 1 {
+		t.Fatalf("hybrid fallback generated %d tokens, want 1", len(gen))
+	}
+	if got := p.cachedPrefixLen(turn2); got != len(turn2) {
+		t.Fatalf("hybrid turn not cached after fallback: %d/%d", got, len(turn2))
 	}
 }
 

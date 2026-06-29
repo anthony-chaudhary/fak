@@ -49,7 +49,7 @@ type InKernelPlanner struct {
 	q4k               bool            // resident-Q4_K load: decode runs Session.Q4K (SDOT int8 GEMV)
 	quant             bool            // Q8_0 decode/prefill path (the served default); tests flip it to exercise the proven f32 reuse path
 	backend           compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
-	metal             bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-fakmetal builds.
+	metal             bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-Metal builds.
 	cpuOffloadExperts bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
 	maxNew            int
 	temp              float64
@@ -433,7 +433,7 @@ type inKernelGenerateResult struct {
 	stopped                 bool
 }
 
-func (p *InKernelPlanner) generateReusedRecovering(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
+func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {
@@ -443,7 +443,10 @@ func (p *InKernelPlanner) generateReusedRecovering(ids []int, maxNew int, temp, 
 			panic(r)
 		}
 	}()
-	gen, promptTok, matched, prefillS, decodeS, stopped := p.generateReused(ids, maxNew, temp, topP, topK, stops, emit)
+	gen, promptTok, matched, prefillS, decodeS, stopped, err := p.generateReusedContext(ctx, ids, maxNew, temp, topP, topK, stops, emit)
+	if err != nil {
+		return inKernelGenerateResult{}, err
+	}
 	return inKernelGenerateResult{
 		gen:       gen,
 		promptTok: promptTok,
@@ -454,10 +457,13 @@ func (p *InKernelPlanner) generateReusedRecovering(ids []int, maxNew int, temp, 
 	}, nil
 }
 
-func (p *InKernelPlanner) generateReusedWithOOMRetry(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
-	res, err := p.generateReusedRecovering(ids, maxNew, temp, topP, topK, stops, emit)
+func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
+	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, stops, emit)
 	if err == nil {
 		return res, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return inKernelGenerateResult{}, ctxErr
 	}
 	if !p.prepareDeviceOOMRetry(err) {
 		return inKernelGenerateResult{}, err
@@ -465,7 +471,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ids []int, maxNew int, temp
 	if onRetry != nil {
 		onRetry()
 	}
-	retryRes, retryErr := p.generateReusedRecovering(ids, maxNew, temp, topP, topK, stops, emit)
+	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, stops, emit)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
 	return retryRes, retryErr
 }
@@ -546,7 +552,7 @@ func inKernelOOMRetryTrigger(err error) (class string, bytes uint64, site string
 	return class, bytes, site
 }
 
-func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
+func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	// An in-kernel device-allocation failure (e.g. OOM on a small GPU under a large Claude
 	// Code system prompt) panics deep below a CGO boundary with no error channel. Recover it
 	// HERE — the narrowest Go frame that wraps the whole device decode (generateReused's
@@ -622,7 +628,7 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 			return nil, err
 		}
 	}
-	genRes, err := p.generateReusedWithOOMRetry(ids, maxNew, temp, topP, topK, stops, emit, func() {
+	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, stops, emit, func() {
 		sb.Reset()
 	})
 	if err != nil {
@@ -1011,8 +1017,16 @@ func primaryDemandClass(plan compute.MemoryPlan, scope compute.MemoryScope) comp
 // length, the reused-prefix length, prefill/decode seconds, and whether a stop (not maxNew)
 // ended the turn.
 func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool) {
+	gen, promptTok, matched, prefillS, decodeS, stopped, _ = p.generateReusedContext(context.Background(), ids, maxNew, temp, topP, topK, stops, emit)
+	return
+}
+
+func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
+		return
+	}
+	if err = ctx.Err(); err != nil {
 		return
 	}
 	reuse := p.tree != nil && p.backend == nil
@@ -1058,7 +1072,7 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 	// prefill + GPU-resident Q8 decode on the CPU session. Guarded to backend==nil — Metal
 	// is the CPU-session seam (s.Backend stays nil), and setting s.Metal on a device session
 	// is incoherent; serve also rejects --metal with --backend up front. s.MetalQ4K mirrors
-	// cmd/fakchat (s.MetalQ4K = q4k && metal). Inert on non-fakmetal builds (the model
+	// cmd/fakchat (s.MetalQ4K = q4k && metal). Inert on non-Metal builds (the model
 	// package's metal dispatch falls back to CPU) and the resident decode self-declines any
 	// non-dense-Qwen-Q8 model, so this never forces an unsupported GPU path.
 	if p.backend == nil && p.metal {
@@ -1070,6 +1084,9 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 	tp := time.Now()
 	logits := s.Prefill(ids[matched:])
 	prefillS = time.Since(tp).Seconds()
+	if err = ctx.Err(); err != nil {
+		return
+	}
 
 	// 3) Snapshot the full-prompt KV (before decode mutates s.Cache) and cache it under a
 	// fresh Lookup→Insert→Done. The snapshot covers the FULL ids prefix, so it is a valid
@@ -1087,6 +1104,9 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 	rng := rand.New(rand.NewSource(p.seed))
 	td := time.Now()
 	for gen = 0; gen < maxNew; gen++ {
+		if err = ctx.Err(); err != nil {
+			break
+		}
 		next := sampleLogits(logits, temp, topP, topK, rng)
 		if next < 0 || stops[next] {
 			stopped = true
@@ -1096,6 +1116,12 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 			gen++ // this token WAS generated; count it before exiting the loop
 			stopped = true
 			break
+		}
+		if emit != nil {
+			if err = ctx.Err(); err != nil {
+				gen++ // this token was emitted before cancellation became visible
+				break
+			}
 		}
 		logits = s.Step(next)
 	}
