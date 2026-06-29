@@ -25,16 +25,17 @@ const f16One = 0x3C00
 // parallelism) is arithmetically identical to a dequant-then-dot.
 func refKQuantMatRows(qt *kQuantTensor, x []float32) []float32 {
 	bb := qt.kind.blockBytes()
+	blockWeights := qt.kind.blockWeights()
 	y := make([]float32, qt.out)
-	buf := make([]float32, qkK)
+	buf := make([]float32, blockWeights)
 	for o := 0; o < qt.out; o++ {
 		row := qt.raw[o*qt.rowBytes():]
 		var acc float32
 		for b := 0; b < qt.nblk; b++ {
 			kQuantDequantSuperBlock(buf, row[b*bb:(b+1)*bb], qt.kind)
-			xs := x[b*qkK:]
+			xs := x[b*blockWeights:]
 			var s0, s1, s2, s3 float32
-			for i := 0; i < qkK; i += 4 {
+			for i := 0; i < blockWeights; i += 4 {
 				s0 += buf[i] * xs[i]
 				s1 += buf[i+1] * xs[i+1]
 				s2 += buf[i+2] * xs[i+2]
@@ -58,27 +59,16 @@ func TestKQuantMatRowsMatchesDequantRef(t *testing.T) {
 		out = 9   // odd, to exercise the parallel row split's tail
 		in  = 512 // 2 super-blocks per row
 	)
-	nblk := in / qkK
 	for _, tc := range []struct {
 		name string
 		kind kQuantKind
-	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}} {
+	}{{"Q5_K", kindQ5K}, {"Q6_K", kindQ6K}, {"IQ3_XXS", kindIQ3XXS}, {"IQ4_XS", kindIQ4XS}, {"Q8_0", kindQ8_0}} {
 		t.Run(tc.name, func(t *testing.T) {
+			nblk := in / tc.kind.blockWeights()
 			bb := tc.kind.blockBytes()
 			raw := make([]byte, out*nblk*bb)
 			lcgBytes(raw, 0x9e3779b97f4a7c15)
-			// Pin each super-block's f16 scale field to 1.0 so decoded weights stay finite.
-			for o := 0; o < out; o++ {
-				for b := 0; b < nblk; b++ {
-					blk := raw[(o*nblk+b)*bb:]
-					if tc.kind == kindQ6K {
-						binary.LittleEndian.PutUint16(blk[q6kBlockBytes-2:], f16One) // d
-					} else {
-						binary.LittleEndian.PutUint16(blk[0:], f16One) // d
-						binary.LittleEndian.PutUint16(blk[2:], 0)      // min = 0
-					}
-				}
-			}
+			pinResidentQuantScales(raw, out, nblk, tc.kind)
 			qt := quantizeKQuantFromRaw(raw, out, in, tc.kind)
 			x := make([]float32, in)
 			for i := range x {
@@ -95,6 +85,24 @@ func TestKQuantMatRowsMatchesDequantRef(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func pinResidentQuantScales(raw []byte, out, nblk int, kind kQuantKind) {
+	bb := kind.blockBytes()
+	for o := 0; o < out; o++ {
+		for b := 0; b < nblk; b++ {
+			blk := raw[(o*nblk+b)*bb:]
+			switch kind {
+			case kindQ6K:
+				binary.LittleEndian.PutUint16(blk[q6kBlockBytes-2:], f16One)
+			default:
+				binary.LittleEndian.PutUint16(blk[0:], f16One)
+				if kind == kindQ5K {
+					binary.LittleEndian.PutUint16(blk[2:], 0) // min = 0
+				}
+			}
+		}
 	}
 }
 
@@ -143,6 +151,56 @@ func TestKQuantDequantGolden(t *testing.T) {
 			}
 		}
 	})
+	t.Run("Q8_0", func(t *testing.T) {
+		blk := make([]byte, q8_0BlockBytes)
+		binary.LittleEndian.PutUint16(blk[0:], f16Two()) // d=2
+		for i := 0; i < q8_0BlockWeights; i++ {
+			blk[2+i] = byte(int8(i%5) - 2)
+		}
+		dst := make([]float32, q8_0BlockWeights)
+		q8_0DequantBlock(dst, blk)
+		for i := 0; i < q8_0BlockWeights; i++ {
+			want := float32(int8(i%5)-2) * 2
+			if dst[i] != want {
+				t.Fatalf("Q8_0[%d]=%v, want %v (d=2, signed code)", i, dst[i], want)
+			}
+		}
+	})
+	t.Run("IQ4_XS", func(t *testing.T) {
+		blk := make([]byte, iq4xsBlockBytes)
+		binary.LittleEndian.PutUint16(blk[0:], f16One) // d=1
+		binary.LittleEndian.PutUint16(blk[2:], 0xAAAA) // high scale bits = 2
+		for ib := 0; ib < qkK/32; ib++ {
+			blk[4+ib/2] |= 1 << (4 * uint(ib%2)) // low scale bits = 1
+			for j := 0; j < 16; j++ {
+				blk[4+qkK/64+ib*16+j] = 0x98 // low code 8, high code 9
+			}
+		}
+		dst := make([]float32, qkK)
+		iq4xsDequantSuperBlock(dst, blk)
+		for ib := 0; ib < qkK/32; ib++ {
+			off := ib * 32
+			for j := 0; j < 16; j++ {
+				if dst[off+j] != 1 {
+					t.Fatalf("IQ4_XS[%d]=%v, want 1 (ls=33, code=8)", off+j, dst[off+j])
+				}
+				if dst[off+j+16] != 13 {
+					t.Fatalf("IQ4_XS[%d]=%v, want 13 (ls=33, code=9)", off+j+16, dst[off+j+16])
+				}
+			}
+		}
+	})
+	t.Run("IQ3_XXS", func(t *testing.T) {
+		blk := make([]byte, iq3xxsBlockBytes)
+		binary.LittleEndian.PutUint16(blk[0:], f16One) // d=1; zero aux => db=0.25
+		dst := make([]float32, qkK)
+		iq3xxsDequantSuperBlock(dst, blk)
+		for i, v := range dst {
+			if v != 1 {
+				t.Fatalf("IQ3_XXS[%d]=%v, want 1 (grid[0]=4, positive signs, db=0.25)", i, v)
+			}
+		}
+	})
 }
 
 // f16Two returns the IEEE-754 half encoding of 2.0 (0x4000).
@@ -185,5 +243,47 @@ func TestResidentMatRowsDispatchesKQuant(t *testing.T) {
 	}
 	if !m.hasKQuant(name) || m.KQuantCount() != 1 {
 		t.Fatalf("hasKQuant=%v count=%d, want true/1", m.hasKQuant(name), m.KQuantCount())
+	}
+}
+
+func TestResidentMatRowsDispatchesIQAndQ8RawExperts(t *testing.T) {
+	const out, in = 4, 256
+	name := "model.layers.3.mlp.experts.1.gate_proj.weight"
+	for _, tc := range []struct {
+		name string
+		kind kQuantKind
+		add  func(*QuantBuilder, string, []int, []byte) error
+	}{
+		{"IQ3_XXS", kindIQ3XXS, (*QuantBuilder).AddResidentIQ3XXS},
+		{"IQ4_XS", kindIQ4XS, (*QuantBuilder).AddResidentIQ4XS},
+		{"Q8_0", kindQ8_0, (*QuantBuilder).AddResidentQ8_0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nblk := in / tc.kind.blockWeights()
+			raw := make([]byte, out*nblk*tc.kind.blockBytes())
+			lcgBytes(raw, 0xbead1234)
+			pinResidentQuantScales(raw, out, nblk, tc.kind)
+
+			b := NewQuantBuilder(Config{}, false)
+			if err := tc.add(b, name, []int{out, in}, raw); err != nil {
+				t.Fatalf("AddResident%s: %v", tc.name, err)
+			}
+			if b.m.kqw[name] == nil || b.m.kqw[name].kind != tc.kind {
+				t.Fatalf("AddResident%s did not store %q as %s", tc.name, name, tc.kind)
+			}
+
+			m := &Model{kqw: map[string]*kQuantTensor{name: quantizeKQuantFromRaw(raw, out, in, tc.kind)}}
+			x := make([]float32, in)
+			for i := range x {
+				x[i] = float32(i%7) - 3
+			}
+			got := m.residentMatRows(name, x, out, in)
+			want := kQuantMatRows(m.kqw[name], x)
+			for o := 0; o < out; o++ {
+				if got[o] != want[o] {
+					t.Fatalf("row %d: residentMatRows=%v, kQuantMatRows=%v (dispatch mismatch)", o, got[o], want[o])
+				}
+			}
+		})
 	}
 }

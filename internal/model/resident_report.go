@@ -14,8 +14,8 @@ type ResidentReport struct {
 	Q8Tensors  int   `json:"q8_tensors"`  // matmul weights held as Q8_0 (normalize-sensitive + Q6_K)
 	Q8Bytes    int64 `json:"q8_bytes"`    // their resident bytes
 	Q8Params   int64 `json:"q8_params"`
-	// KQuantTensors are MoE experts held as RAW Q5_K/Q6_K (the mixed-quant bulk that no longer
-	// pays the f32 round-trip; quant_kquant.go). For GLM-5.2 these are the 417 GB expert weights.
+	// KQuantTensors are MoE experts held as raw non-Q4_K GGUF quant blocks (the mixed-quant bulk
+	// that no longer pays the f32 round-trip; quant_kquant.go).
 	KQuantTensors int   `json:"kquant_tensors"`
 	KQuantBytes   int64 `json:"kquant_bytes"`
 	KQuantParams  int64 `json:"kquant_params"`
@@ -56,8 +56,7 @@ func (m *Model) ResidentReport() *ResidentReport {
 	for _, qt := range m.kqw {
 		r.KQuantTensors++
 		r.KQuantBytes += int64(len(qt.raw))
-		// Each super-block (176 B Q5_K / 210 B Q6_K) encodes 256 weights.
-		r.KQuantParams += int64(len(qt.raw) / qt.kind.blockBytes() * qkK)
+		r.KQuantParams += int64(len(qt.raw) / qt.kind.blockBytes() * qt.kind.blockWeights())
 	}
 	for _, meta := range m.manifest {
 		r.F32Tensors++
@@ -90,7 +89,7 @@ func (r *ResidentReport) DecodeTokSCeiling(memBWGBps float64) float64 {
 func FormatResidentReport(r *ResidentReport) string {
 	mib := func(b int64) float64 { return float64(b) / (1 << 20) }
 	return "resident: Q4_K=" + itoa(r.Q4KTensors) + " tensors/" + fmtFloat(mib(r.Q4KBytes)) + "MiB" +
-		"  Q5/6_K=" + itoa(r.KQuantTensors) + "/" + fmtFloat(mib(r.KQuantBytes)) + "MiB" +
+		"  rawExpertQuant=" + itoa(r.KQuantTensors) + "/" + fmtFloat(mib(r.KQuantBytes)) + "MiB" +
 		"  Q8=" + itoa(r.Q8Tensors) + "/" + fmtFloat(mib(r.Q8Bytes)) + "MiB" +
 		"  f32=" + itoa(r.F32Tensors) + "/" + fmtFloat(mib(r.F32Bytes)) + "MiB" +
 		"  total=" + fmtFloat(mib(r.TotalResidentBytes)) + "MiB" +

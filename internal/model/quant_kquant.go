@@ -1,14 +1,10 @@
 package model
 
-// quant_kquant.go — resident Q5_K / Q6_K (k-quant super-block) weight path, the load-time
-// lever for GLM-5.2's MIXED-quant MoE experts. unsloth's UD-Q4_K_M is a dynamic mixed quant:
-// the routed-expert tensors (GLM-5.2's 417 GB bulk) are a mix of Q4_K AND Q6_K/Q5_K. The
-// Q4_K experts already load RESIDENT (raw bytes, dequant fused into the GEMV; quant_q4k.go),
-// but Q6_K/Q5_K experts had no resident store, so they fell back to the f32 dequant→Q8
-// round-trip — a multi-GB transient + re-quant per blob that both burned CPU and thrashed GC,
-// the dominant cost in the ~100-min load (docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md,
-// the "S2" lever). Holding these experts RESIDENT too makes the whole expert bulk a raw-byte
-// copy at load — I/O-bound, not dequant-bound.
+// quant_kquant.go — resident raw expert-quant weight path, the load-time lever for GLM-5.2's
+// MIXED-quant MoE experts. unsloth's UD checkpoints can store the routed-expert bulk as Q4_K,
+// Q5_K/Q6_K, IQ3_XXS/IQ4_XS, or Q8_0. Q4_K has its own resident store (quant_q4k.go); this file
+// covers the remaining host-only expert formats so they load as raw bytes instead of taking the
+// f32 dequant→Q8 round-trip.
 //
 // SCOPE: these resident k-quant tensors are EXPERT weights, which the GLM serve runs on the
 // HOST CPU under --cpu-offload-experts (the experts dwarf VRAM). So only a CPU dequant-fused
@@ -16,11 +12,10 @@ package model
 // Dense Q6_K weights keep their existing dequant→Q8 path (they are small and some route to the
 // device HAL, which has no Q5_K/Q6_K kernel).
 //
-// CORRECTNESS: q{5,6}kDequantSuperBlock are ggufload.dequant{Q5,Q6}K factored to one
-// super-block, so the resident dequant is arithmetically identical to the f32 reference the
-// loader would otherwise have produced; kQuantMatRows uses the SAME fixed-order 4-accumulator
-// dot as q4kMatRowsRange. Pinned by TestKQuantMatRowsMatchesDequantRef (bit-exact vs the
-// dequant-then-dot reference).
+// CORRECTNESS: each per-block dequant is ggufload's matching dequant factored to one block, so
+// the resident dequant is arithmetically identical to the f32 reference the loader would otherwise
+// have produced; kQuantMatRows uses the SAME fixed-order 4-accumulator dot as q4kMatRowsRange.
+// Pinned by TestKQuantMatRowsMatchesDequantRef (bit-exact vs the dequant-then-dot reference).
 
 import (
 	"encoding/binary"
@@ -33,35 +28,68 @@ type kQuantKind uint8
 const (
 	kindQ5K kQuantKind = iota
 	kindQ6K
+	kindIQ3XXS
+	kindIQ4XS
+	kindQ8_0
 )
 
 // Resident k-quant super-block byte sizes per 256 weights (== ggufload.blockQ{5,6}KBytes):
 //
-//	Q5_K = d(f16,2) + min(f16,2) + scales(12) + qh(32) + ql(128) = 176
-//	Q6_K = ql(128) + qh(64) + scales(16) + d(f16,2)             = 210
+//	Q5_K     = d(f16,2) + min(f16,2) + scales(12) + qh(32) + ql(128) = 176
+//	Q6_K     = ql(128) + qh(64) + scales(16) + d(f16,2)             = 210
+//	IQ3_XXS  = d(f16,2) + qs(64) + scales/signs(32)                 = 98
+//	IQ4_XS   = d(f16,2) + scales_h(2) + scales_l(4) + qs(128)       = 136
+//	Q8_0     = d(f16,2) + qs(32)                                    = 34
 const (
-	q5kBlockBytes = 2 + 2 + 12 + qkK/8 + qkK/2
-	q6kBlockBytes = qkK/2 + qkK/4 + qkK/16 + 2
+	q5kBlockBytes    = 2 + 2 + 12 + qkK/8 + qkK/2
+	q6kBlockBytes    = qkK/2 + qkK/4 + qkK/16 + 2
+	iq3xxsBlockBytes = 2 + 3*qkK/8
+	iq4xsBlockBytes  = 2 + 2 + qkK/64 + qkK/2
+	q8_0BlockWeights = 32
+	q8_0BlockBytes   = 2 + q8_0BlockWeights
 )
 
 func (k kQuantKind) blockBytes() int {
-	if k == kindQ6K {
+	switch k {
+	case kindQ6K:
 		return q6kBlockBytes
+	case kindIQ3XXS:
+		return iq3xxsBlockBytes
+	case kindIQ4XS:
+		return iq4xsBlockBytes
+	case kindQ8_0:
+		return q8_0BlockBytes
+	default:
+		return q5kBlockBytes
 	}
-	return q5kBlockBytes
+}
+
+func (k kQuantKind) blockWeights() int {
+	if k == kindQ8_0 {
+		return q8_0BlockWeights
+	}
+	return qkK
 }
 
 func (k kQuantKind) String() string {
-	if k == kindQ6K {
+	switch k {
+	case kindQ6K:
 		return "Q6_K"
+	case kindIQ3XXS:
+		return "IQ3_XXS"
+	case kindIQ4XS:
+		return "IQ4_XS"
+	case kindQ8_0:
+		return "Q8_0"
+	default:
+		return "Q5_K"
 	}
-	return "Q5_K"
 }
 
-// kQuantTensor is a resident Q5_K/Q6_K weight matrix [out, in], in == nblk*qkK. raw holds the
-// GGUF super-block bytes verbatim (no f32), row-major: row o occupies raw[o*rowBytes:], where
-// rowBytes = nblk*blockBytes. This is the exact byte stream the GGUF stores, so the loader
-// copies a tensor's payload in with no transform.
+// kQuantTensor is a resident raw expert-quant weight matrix [out, in]. raw holds the GGUF
+// block bytes verbatim (no f32), row-major: row o occupies raw[o*rowBytes:], where rowBytes =
+// nblk*blockBytes. This is the exact byte stream the GGUF stores, so the loader copies a tensor's
+// payload in with no transform.
 type kQuantTensor struct {
 	out, in, nblk int
 	kind          kQuantKind
@@ -134,11 +162,18 @@ func q6kDequantSuperBlock(dst []float32, blk []byte) {
 }
 
 func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
-	if kind == kindQ6K {
+	switch kind {
+	case kindQ6K:
 		q6kDequantSuperBlock(dst, blk)
-		return
+	case kindIQ3XXS:
+		iq3xxsDequantSuperBlock(dst, blk)
+	case kindIQ4XS:
+		iq4xsDequantSuperBlock(dst, blk)
+	case kindQ8_0:
+		q8_0DequantBlock(dst, blk)
+	default:
+		q5kDequantSuperBlock(dst, blk)
 	}
-	q5kDequantSuperBlock(dst, blk)
 }
 
 // kQuantMatRows is the resident Q5_K/Q6_K decode GEMV: y[o] = dot(weight row o, x). Like
@@ -181,7 +216,8 @@ func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 // super-block order as q4kMatRowsRange, so the resident k-quant GEMV is deterministic and
 // arithmetically identical to a dequant-then-dot over the same f32 weights.
 func kQuantMatRowsRange(qt *kQuantTensor, x, y []float32, lo, hi int) {
-	buf := make([]float32, qkK) // 256 f32, reused per super-block; L1/L2-resident
+	blockWeights := qt.kind.blockWeights()
+	buf := make([]float32, blockWeights) // reused per block; L1/L2-resident
 	rowBytes := qt.rowBytes()
 	bb := qt.kind.blockBytes()
 	for o := lo; o < hi; o++ {
@@ -189,9 +225,9 @@ func kQuantMatRowsRange(qt *kQuantTensor, x, y []float32, lo, hi int) {
 		var acc float32
 		for b := 0; b < qt.nblk; b++ {
 			kQuantDequantSuperBlock(buf, row[b*bb:(b+1)*bb], qt.kind)
-			xs := x[b*qkK:]
+			xs := x[b*blockWeights:]
 			var s0, s1, s2, s3 float32
-			for i := 0; i < qkK; i += 4 {
+			for i := 0; i < blockWeights; i += 4 {
 				s0 += buf[i] * xs[i]
 				s1 += buf[i+1] * xs[i+1]
 				s2 += buf[i+2] * xs[i+2]
@@ -203,46 +239,59 @@ func kQuantMatRowsRange(qt *kQuantTensor, x, y []float32, lo, hi int) {
 	}
 }
 
-// quantizeKQuantFromRaw wraps a raw GGUF Q5_K/Q6_K payload (row-major, in == nblk*qkK) as a
-// resident kQuantTensor with NO transform — the bytes ARE the GGUF bytes. The raw-byte twin of
-// quantizeQ4KFromRaw for the mixed-quant expert bulk.
+// quantizeKQuantFromRaw wraps a raw GGUF expert-quant payload as a resident kQuantTensor with NO
+// transform — the bytes ARE the GGUF bytes. The raw-byte twin of quantizeQ4KFromRaw for the
+// mixed-quant expert bulk.
 func quantizeKQuantFromRaw(raw []byte, out, in int, kind kQuantKind) *kQuantTensor {
-	if in%qkK != 0 {
-		panic("model: k-quant reduction dim not a multiple of 256")
+	blockWeights := kind.blockWeights()
+	if in%blockWeights != 0 {
+		panic("model: resident expert quant reduction dim not a multiple of block size")
 	}
-	nblk := in / qkK
+	nblk := in / blockWeights
 	want := out * nblk * kind.blockBytes()
 	if len(raw) != want {
-		panic("model: k-quant payload size mismatch")
+		panic("model: resident expert quant payload size mismatch")
 	}
 	return &kQuantTensor{out: out, in: in, nblk: nblk, kind: kind, raw: raw}
 }
 
-// hasKQuant reports whether a resident Q5_K/Q6_K copy is available for a name.
+// hasKQuant reports whether a resident raw expert-quant copy is available for a name.
 func (m *Model) hasKQuant(name string) bool { return m.kqw != nil && m.kqw[name] != nil }
 
-// KQuantCount returns how many tensors hold a resident raw Q5_K/Q6_K copy (loader diagnostic).
+// KQuantCount returns how many tensors hold a resident raw expert-quant copy (loader diagnostic).
 func (m *Model) KQuantCount() int { return len(m.kqw) }
 
-// ResidentKQuantEligible reports whether a canonical tensor name should be held as resident
-// raw Q5_K/Q6_K. It is the same identity-normalization gate as ResidentQ4KEligible (a matmul
-// weight that normalizeCanonicalTensorData does NOT transform), so a transformed tensor's raw
-// bytes are never stored. The loader additionally restricts this to EXPERT weights (the
-// CPU-offloaded bulk), since dense Q6_K may route to the device HAL which has no k-quant kernel.
+// ResidentKQuantEligible reports whether a canonical tensor name should be held as resident raw
+// expert quant. It is the same identity-normalization gate as ResidentQ4KEligible (a matmul weight
+// that normalizeCanonicalTensorData does NOT transform), so a transformed tensor's raw bytes are
+// never stored. The loader additionally restricts this to EXPERT weights (the CPU-offloaded bulk),
+// since dense non-Q4_K raw formats may route to the device HAL which has no kernel for them.
 func ResidentKQuantEligible(cfg Config, canon string) bool {
 	return ResidentQ4KEligible(cfg, canon)
 }
 
-// AddResidentQ6K / AddResidentQ5K store a raw Q6_K/Q5_K payload as a resident kQuantTensor
-// under the canonical name, skipping the f32/Q8 round-trip. shape is the model [out, in]
-// convention (in a multiple of 256). Idempotent for non-eligible names (returns nil without
-// storing) so the loader can call them unconditionally on a matching-type expert tensor.
+// AddResident* store a raw expert quant payload as a resident kQuantTensor under the canonical
+// name, skipping the f32/Q8 round-trip. shape is the model [out, in] convention. Idempotent for
+// non-eligible names (returns nil without storing) so the loader can call them unconditionally on
+// a matching-type expert tensor.
 func (b *QuantBuilder) AddResidentQ6K(canon string, shape []int, raw []byte) error {
 	return b.addResidentKQuant(canon, shape, raw, kindQ6K)
 }
 
 func (b *QuantBuilder) AddResidentQ5K(canon string, shape []int, raw []byte) error {
 	return b.addResidentKQuant(canon, shape, raw, kindQ5K)
+}
+
+func (b *QuantBuilder) AddResidentIQ3XXS(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindIQ3XXS)
+}
+
+func (b *QuantBuilder) AddResidentIQ4XS(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindIQ4XS)
+}
+
+func (b *QuantBuilder) AddResidentQ8_0(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindQ8_0)
 }
 
 func (b *QuantBuilder) addResidentKQuant(canon string, shape []int, raw []byte, kind kQuantKind) error {
