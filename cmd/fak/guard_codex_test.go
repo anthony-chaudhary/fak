@@ -90,8 +90,9 @@ func TestGuardCodexEnvKey(t *testing.T) {
 // provider in Codex's config. The provider id is used bare in model_provider= (Codex reads
 // it as the id), while name/base_url/wire_api/env_key are TOML string literals carrying
 // their own double quotes (guard execs the child directly, so Codex's TOML parser — not a
-// shell — consumes the quotes). wire_api MUST be "responses" (the sole value the modern
-// Codex CLI supports). This test pins the exact emitted sequence.
+// shell — consumes the quotes). wire_api MUST be "responses" for the first-class guard
+// path because the current Codex docs prefer Responses while Chat Completions is
+// deprecated for future removal. This test pins the exact emitted sequence.
 func TestGuardCodexConfigArgs(t *testing.T) {
 	got := guardCodexConfigArgs("http://127.0.0.1:8137", "")
 	want := []string{
@@ -120,7 +121,7 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 		t.Errorf("guardCodexConfigArgs did not keep the /v1 base undoubled: %v", gotKey)
 	}
 
-	// wire_api is responses on every code path — the sole value modern Codex supports.
+	// wire_api is responses on every code path for the first-class guard route.
 	if !containsArg(got, `model_providers.fak.wire_api="responses"`) {
 		t.Errorf("guardCodexConfigArgs must pin wire_api=\"responses\": %v", got)
 	}
@@ -131,7 +132,7 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 // any subcommand (`exec`) or user args, because Codex's global `-c` flag must precede the
 // subcommand. It must be inert for a non-codex agent, inert when disabled, inert on an empty
 // command, and it must report what it did in the guardCodexInstall struct for the banner.
-func TestInstallGuardCodexConfig(t *testing.T) {
+func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 	const gw = "http://127.0.0.1:8137"
 
 	t.Run("codex enabled rewrites argv with overrides before the subcommand", func(t *testing.T) {

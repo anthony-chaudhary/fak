@@ -43,13 +43,36 @@ func resolveGuardProvider(flagValue, command string) (provider string, autodetec
 // a base URL it ignores. Matching is on the executable's base name, lowercased, with any
 // directory and a Windows .exe/.cmd/.bat/.ps1/.com launcher suffix stripped, so an
 // absolute path or a wrapped launcher still matches.
+//
+// Codex is special: current Codex docs prefer the OpenAI **Responses API** and deprecate
+// Chat Completions for future removal, so it autodetects to the `openai-responses` wire
+// rather than the plain chat-completions `openai`. That selects fak's Responses adapter
+// for the UPSTREAM proxy hop, so current Codex models round-trip on the recommended wire.
+// The inbound side already accepts Codex's `/v1/responses` (#925); installGuardCodexConfig
+// does the matching repoint, since Codex reads its provider base from config.toml, not the
+// OPENAI_BASE_URL env var guard injects for the other OpenAI-wire agents.
 func guardDetectProvider(command string) (provider string, recognized bool) {
+	switch guardAgentBaseName(command) {
+	case "claude", "claude-code":
+		return "anthropic", true
+	case "codex":
+		return "openai-responses", true
+	case "opencode", "aider", "hermes":
+		return "openai", true
+	default:
+		return "", false
+	}
+}
+
+// guardAgentBaseName normalizes a wrapped-agent command to its lowercased executable base
+// name: any directory component is stripped handling BOTH path separators regardless of
+// the host OS (filepath.Base is host-specific — on the Linux CI runner it does not split a
+// Windows backslash path, so a launcher like `C:\…\codex.exe` would fail to match there
+// even though it works on a Windows dev box; LastIndexAny over `/` and `\` makes the match
+// cross-platform), and a Windows .exe/.cmd/.bat/.ps1/.com launcher suffix is removed. It is
+// the one place the agent-name match lives, so guardDetectProvider and guardIsCodex agree.
+func guardAgentBaseName(command string) string {
 	base := strings.ToLower(strings.TrimSpace(command))
-	// Strip any directory component handling BOTH path separators regardless of the
-	// host OS. filepath.Base is host-specific — on the Linux CI runner it does not
-	// split a Windows backslash path, so a launcher like `C:\…\claude.exe` would
-	// fail to match there even though it works on a Windows dev box. LastIndexAny
-	// over `/` and `\` makes the match cross-platform.
 	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
 		base = base[i+1:]
 	}
@@ -57,14 +80,7 @@ func guardDetectProvider(command string) (provider string, recognized bool) {
 	case ".exe", ".cmd", ".bat", ".ps1", ".com":
 		base = strings.TrimSuffix(base, filepath.Ext(base))
 	}
-	switch base {
-	case "claude", "claude-code":
-		return "anthropic", true
-	case "codex", "opencode", "aider":
-		return "openai", true
-	default:
-		return "", false
-	}
+	return base
 }
 
 // guardDefaultBaseURL maps a provider to its public API base URL. The anthropic host
@@ -76,7 +92,11 @@ func guardDefaultBaseURL(provider string) string {
 	switch provider {
 	case "anthropic":
 		return "https://api.anthropic.com"
-	case "openai":
+	case "openai", "openai-responses":
+		// Both OpenAI wires share the public base ending in /v1: the chat adapter appends
+		// "/chat/completions" and the Responses adapter appends "/responses", so the same
+		// https://api.openai.com/v1 root serves `fak guard -- codex` (Responses) and the
+		// plain chat-completions agents alike.
 		return "https://api.openai.com/v1"
 	default:
 		return ""
