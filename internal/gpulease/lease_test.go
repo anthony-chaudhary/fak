@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,65 @@ func TestReleaseOnProcessExit(t *testing.T) {
 		t.Fatalf("lease not released on child process exit: %v", err)
 	}
 	l.Release()
+}
+
+// deadPID returns a pid that is (almost certainly) not a live process, by spawning a
+// trivial child and waiting for it to exit. The kernel will not have recycled the
+// number by the time the test reads it microseconds later.
+func deadPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=NoSuchTestZZZ")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("spawn helper: %v", err)
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Wait() // reap; the pid is now dead
+	return pid
+}
+
+// TestStealStaleHolder proves the field-bug fix: a lockfile that records a DEAD holder
+// pid but carries no live OS lock (the Windows abnormal-exit orphan state) must be
+// stolen by the next Acquire instead of wedging it forever. Before the steal, this
+// configuration left a NoWait Acquire returning ErrBusy on Windows for as long as the
+// orphaned LockFileEx region survived (~56 min in the field); after it, Acquire breaks
+// the stale lock and succeeds.
+func TestStealStaleHolder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+
+	// Seed a stale lockfile: a dead pid, no flock held (file exists, unlocked).
+	if err := os.WriteFile(path, []byte(strconv.Itoa(deadPID(t))+"\n"), 0o644); err != nil {
+		t.Fatalf("seed stale lockfile: %v", err)
+	}
+
+	l, err := Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("stale lock not stolen: %v", err)
+	}
+	defer l.Release()
+
+	// And the steal recorded OUR pid, so a later waiter names us, not the dead holder.
+	got, _ := os.ReadFile(path)
+	if want := strconv.Itoa(os.Getpid()); strings.TrimSpace(string(got)) != want {
+		t.Fatalf("after steal, lockfile pid = %q, want %q", strings.TrimSpace(string(got)), want)
+	}
+}
+
+// TestNoStealFromLiveHolder proves the steal's safety gate: while a LIVE process (this
+// one) genuinely holds the lock, a second NoWait Acquire must still be refused — the
+// stale-holder steal must NEVER break a lock whose recorded pid is alive, or two
+// concurrent GPU jobs would stack and reproduce the jetsam cascade the lease prevents.
+func TestNoStealFromLiveHolder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+
+	held, err := Acquire(Options{Path: path}) // records THIS live pid, holds the flock
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	defer held.Release()
+
+	if _, err := Acquire(Options{Path: path, NoWait: true}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("second acquire while a LIVE holder owns the lock: got %v, want ErrBusy", err)
+	}
 }
 
 // TestReleaseIdempotent guards the double-Release / nil paths.
