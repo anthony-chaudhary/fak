@@ -1,0 +1,21 @@
+{
+  "_comment": "The REVIEW artifact for a FABRICATION: the SAME declared view as context-view-resident.json EXCEPT body_digest is a value that is NOT the re-fold of the source. The span is resident (source_digest_now == source.digest) and the source re-folds to refold_digest, but body_digest != refold_digest — what the reader SEES is not a witnessed sub-slice of the current source. A lossless 'snippet' that does not re-fold is a fabrication => deny(UNWITNESSED_FOLD), whatever the body claims. This is the safety lens: a laundered or invented body cannot pass as a fold of the append-only log. The witness discloses only the two digests' disagreement, never the bytes.",
+  "view": {
+    "version": "fak-context/v1",
+    "view_kind": "snippet",
+    "producer": "snippet-extract@v1",
+    "source": {
+      "digest": "acaffd21fc4a26fa8dda9163fddc2194fbc66a30005be6a00361ad9ab7305629",
+      "offset": 67,
+      "length": 16
+    },
+    "source_taint": "trusted",
+    "invalidation": "digest",
+    "body_digest": "0f3b83d6aa3d23cb06f1401f83f99723f3e9a152afea7e298941e2efe9975ec6",
+    "source_digest_now": "acaffd21fc4a26fa8dda9163fddc2194fbc66a30005be6a00361ad9ab7305629",
+    "refold_digest": "8856d95af719b48e2145a89a3eac78a6349f0cc6f66fe2bd2e7314bc413a8aa0"
+  },
+  "decision": "deny",
+  "reason": "UNWITNESSED_FOLD",
+  "witness": "body digest != re-fold of the current source: a fabrication, refused"
+}

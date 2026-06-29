@@ -1,0 +1,21 @@
+{
+  "_comment": "The REVIEW artifact for a REFUTED view: the source was edited after the view was folded, so its CURRENT digest (source_digest_now) no longer equals the digest the view was bound to (source.digest). The digest invalidation contract fires => deny(STALE_SOURCE), whatever the view's body still says. The view is not served stale and is not silently refreshed; the caller re-folds against the new source. Note the source is resident (source_digest_now present) — so this is a refutation, NOT a page fault.",
+  "view": {
+    "version": "fak-context/v1",
+    "view_kind": "snippet",
+    "producer": "snippet-extract@v1",
+    "source": {
+      "digest": "acaffd21fc4a26fa8dda9163fddc2194fbc66a30005be6a00361ad9ab7305629",
+      "offset": 67,
+      "length": 16
+    },
+    "source_taint": "trusted",
+    "invalidation": "digest",
+    "body_digest": "8856d95af719b48e2145a89a3eac78a6349f0cc6f66fe2bd2e7314bc413a8aa0",
+    "source_digest_now": "142cfbd819c5c9e4125e292faae2c832623b0b9fb937cdfbdd5d1e1b91df0c1e",
+    "refold_digest": "8856d95af719b48e2145a89a3eac78a6349f0cc6f66fe2bd2e7314bc413a8aa0"
+  },
+  "decision": "deny",
+  "reason": "STALE_SOURCE",
+  "witness": "source digest changed since the fold: refuted, re-fold"
+}

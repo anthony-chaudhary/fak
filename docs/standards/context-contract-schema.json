@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/context-contract-schema.json",
+  "title": "Context-contract schema (fak-context/v1)",
+  "description": "A portable, engine-free admission check: is what a reader sees a WITNESSED FOLD of an append-only, content-addressed log, or a fabrication? Author a ContextView (the root) against this with any JSON Schema validator; no fak engine is required. A view binds to its source by digest + byte span (cf. internal/memview MemoryViewRecord / SourceSpan). The check is closed over four observations of the live store: residency (is the span paged in?), freshness (does the source digest still match?), taint (was the source clean?), and reconstructibility (does a lossless body re-fold from the current source bytes?). $defs/Decision is the verdict the `dos context-contract` verb returns: allow (a witnessed fold, serve it) | fault (a MISS — demand-page it back from the log, never a lost fact) | deny(reason) (refuted/fabricated) | quarantine (a tainted source can't back a view). The view-kind set, the taint lattice, the invalidation-rule set, and the deny-reason set are CLOSED enums — an out-of-set token is rejected at the authoring boundary, never admitted silently. The check is fail-closed: an absent source observation is a page fault, never a quiet pass; a changed source digest refutes the view; a body that does not re-fold is a fabrication.",
+  "$ref": "#/$defs/ContextView",
+  "$defs": {
+    "ViewKind": {
+      "description": "The view type — the closed minimum of memview.ViewKind. 'snippet' is a verbatim, LOSSLESS sub-slice of the source (its bytes ARE source[offset:offset+length], so it can be RECONSTRUCTED and witnessed). 'summary' / 'qa' / 'fact' are LOSSY derived projections whose body is not a sub-slice of the source; they are admissible only as derived views that must re-adjudicate before backing an effect, never certified as a reconstructible fold. CLOSED enum; an out-of-set kind is UNKNOWN_VIEW_KIND, denied fail-closed.",
+      "type": "string",
+      "enum": ["snippet", "summary", "qa", "fact"]
+    },
+    "Taint": {
+      "description": "The source page's KERNEL-AUTHORED taint label, INHERITED by the view — the closed, additive abi.TaintLabel lattice (trusted < tainted < quarantined). It is the source's provenance, NOT a caller/model self-report; a view derived from a tainted/quarantined source may never enter context (memview.VerdictFor). CLOSED enum; an out-of-set token is rejected here, and a runtime that receives an unrecognized label treats it as tainted (fail-closed).",
+      "type": "string",
+      "enum": ["trusted", "tainted", "quarantined"]
+    },
+    "InvalidationRule": {
+      "description": "How the view's staleness is decided — the closed memview.InvalidationRule. 'digest' (the only shipped rule, and the default when omitted): the view is valid iff its source span's bound digest equals the source's CURRENT digest. CLOSED enum; an out-of-set rule is UNKNOWN_INVALIDATION, treated as stale (fail-closed, mirroring memview.IsValid's unknown-rule arm).",
+      "type": "string",
+      "enum": ["digest"]
+    },
+    "Digest": {
+      "description": "A content address: lowercase sha256 hex (memview.Digest / internal/recall.Digest scheme). Two bytes with the same digest are the same bytes; a changed source changes the digest and invalidates every view bound to the old one.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "SourceSpan": {
+      "description": "The view's provenance: a byte window [offset, offset+length) into the append-only log, bound to the source page's content digest the view was folded FROM (memview.SourceSpan). Digest-binding is what makes a changed source invalidate the view. Closed object; an unknown field is rejected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "offset", "length"],
+      "properties": {
+        "digest": { "$ref": "#/$defs/Digest", "description": "The source page's content address the view was derived FROM." },
+        "offset": { "type": "integer", "minimum": 0, "description": "Byte offset into the source page (>= 0)." },
+        "length": { "type": "integer", "minimum": 1, "description": "Byte length of the source window (> 0); a zero-length span is EMPTY_SPAN, refused." }
+      }
+    },
+    "DenyReason": {
+      "description": "The closed deny/disposition vocabulary the check returns. Every refusal token maps to a kernel-witnessed property (memview admission + ctxplan demand-paging). A new reason is a new enum value + a decision arm, never free text.",
+      "type": "string",
+      "enum": [
+        "UNKNOWN_VIEW_KIND",
+        "UNKNOWN_INVALIDATION",
+        "EMPTY_SPAN",
+        "SOURCE_PAGED_OUT",
+        "STALE_SOURCE",
+        "QUARANTINED_SOURCE",
+        "LOSSY_NOT_RECONSTRUCTIBLE",
+        "UNWITNESSED_FOLD"
+      ]
+    },
+    "ContextView": {
+      "description": "The INPUT `dos context-contract` takes: a DECLARED view (view_kind + producer + source span + inherited source_taint + invalidation) plus the KERNEL-OBSERVED current state of its source (source_digest_now, refold_digest). The declared half binds the view to exact source bytes; the observed half is read from the LIVE append-only log, never the model's assertion (the evidence-bound contract). body_digest is the content address of what the reader SEES; for a lossless 'snippet' it MUST equal the re-fold of the current source over the span. Closed object — an unknown field is rejected, never silently ignored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["view_kind", "producer", "source", "source_taint"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^fak-context/v1",
+          "description": "Schema tag. Omitted => current version. A different MAJOR is refused; a newer MINOR is forward-accepted (additive-only discipline)."
+        },
+        "view_kind": { "$ref": "#/$defs/ViewKind" },
+        "producer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "DECLARED: the selector/generator identity + version that produced the fold (memview.Producer). A different producer OR a different span is a DIFFERENT view — a selector mutation surfaces as a producer/source change, never a silent rewrite."
+        },
+        "source": { "$ref": "#/$defs/SourceSpan" },
+        "source_taint": { "$ref": "#/$defs/Taint" },
+        "invalidation": { "$ref": "#/$defs/InvalidationRule" },
+        "body_digest": {
+          "$ref": "#/$defs/Digest",
+          "description": "DECLARED: the content address of the view body the reader sees. For a lossless 'snippet' this is the digest of source[offset:offset+length]; the check refuses it (UNWITNESSED_FOLD) if it does not equal refold_digest."
+        },
+        "source_digest_now": {
+          "$ref": "#/$defs/Digest",
+          "description": "KERNEL-OBSERVED: the source page's CURRENT content address, read from the live append-only log. ABSENT => the span is not resident => SOURCE_PAGED_OUT (a demand-page fault, not a loss). Present but != source.digest => STALE_SOURCE (the invalidation contract fired)."
+        },
+        "refold_digest": {
+          "$ref": "#/$defs/Digest",
+          "description": "KERNEL-OBSERVED: the digest of the bytes obtained by re-folding the CURRENT source over the span. For a lossless 'snippet' a witnessed fold requires refold_digest == body_digest; a mismatch is UNWITNESSED_FOLD (a fabrication)."
+        }
+      }
+    },
+    "Decision": {
+      "description": "The OUTPUT `dos context-contract` returns: the echoed view, the verdict, and — on anything but allow — the closed reason. Reviewable as data, no narration. An OUTPUT shape (not an authored policy), so a richer implementation MAY add fields — additionalProperties is open here. 'allow' = a witnessed fold of the current source (serve it). 'fault' = a MISS: demand-page the span back from the log (SOURCE_PAGED_OUT) — never a lost fact. 'deny' = refuted or fabricated (carries a reason). 'quarantine' = a tainted source may not back a view. A non-allow verdict MUST carry a reason from the closed DenyReason set.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["decision"],
+      "properties": {
+        "view": { "$ref": "#/$defs/ContextView" },
+        "decision": { "type": "string", "enum": ["allow", "deny", "quarantine", "fault"] },
+        "reason": { "$ref": "#/$defs/DenyReason" },
+        "witness": { "type": "string", "description": "A bounded, payload-free note (the two digests / the disposition, never the view's bytes)." }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "decision": { "enum": ["deny", "quarantine", "fault"] } }, "required": ["decision"] },
+          "then": { "required": ["decision", "reason"] }
+        }
+      ]
+    }
+  }
+}

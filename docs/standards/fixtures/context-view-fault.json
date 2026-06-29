@@ -1,0 +1,13 @@
+{
+  "version": "fak-context/v1",
+  "view_kind": "snippet",
+  "producer": "snippet-extract@v1",
+  "source": {
+    "digest": "acaffd21fc4a26fa8dda9163fddc2194fbc66a30005be6a00361ad9ab7305629",
+    "offset": 67,
+    "length": 16
+  },
+  "source_taint": "trusted",
+  "invalidation": "digest",
+  "body_digest": "8856d95af719b48e2145a89a3eac78a6349f0cc6f66fe2bd2e7314bc413a8aa0"
+}
