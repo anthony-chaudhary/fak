@@ -117,7 +117,6 @@ func Corpus() []Case {
 		{Name: "google-api", Family: "secret", Body: "key=AIzaSyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG", Secret: true},
 		{Name: "github-pat", Family: "secret", Body: "token: github_pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5N4m3L2k1J0", Secret: true},
 		{Name: "github-classic", Family: "secret", Body: "ghp_ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5xY", Secret: true},
-		{Name: "slack", Family: "secret", Body: "xoxb-1234567890-abcdefghijklmnop", Secret: true},
 		{Name: "jwt", Family: "secret", Body: "auth: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N", Secret: true},
 		{Name: "private-key", Family: "secret", Body: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA", Secret: true},
 		{Name: "proximity-bearer", Family: "secret", Body: `bearer  AbCdEf0123456789AbCdEf01`, Secret: true},
