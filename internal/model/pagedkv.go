@@ -42,8 +42,9 @@ package model
 // allocates no new backing memory.
 type PagedKVPool struct {
 	blockTokens int         // page size: tokens per physical block
-	stride      int         // float32 per token, per (K or V), per layer = NumKVHeads*HeadDim
+	stride      int         // float32 per token, per plane, per layer = NumKVHeads*HeadDim
 	nLayers     int         //
+	planes      int         // planes per token per layer: 2 = {K,V}; 3 = {K,V,Kraw} (see paged_evict.go)
 	blocks      [][]float32 // physical storage, indexed by block id (len == blockFloats())
 	ref         []int       // reference count per block id; 0 == free
 	free        []int       // free list of reusable block ids
@@ -64,17 +65,18 @@ func NewPagedKVPool(cfg Config, blockTokens int) *PagedKVPool {
 	if nLayers < 0 {
 		nLayers = 0
 	}
-	return &PagedKVPool{blockTokens: blockTokens, stride: stride, nLayers: nLayers}
+	return &PagedKVPool{blockTokens: blockTokens, stride: stride, nLayers: nLayers, planes: 2}
 }
 
-// blockFloats is the float32 length of one physical block: K and V, every layer, every
-// token-slot in the block.
-func (p *PagedKVPool) blockFloats() int { return p.nLayers * 2 * p.blockTokens * p.stride }
+// blockFloats is the float32 length of one physical block: every plane (K, V, and Kraw on a
+// 3-plane pool), every layer, every token-slot in the block.
+func (p *PagedKVPool) blockFloats() int { return p.nLayers * p.planes * p.blockTokens * p.stride }
 
-// slot is the float32 offset of (layer, isV, tokenInBlock) within a block. isV is 0 for K,
-// 1 for V. The slice [slot : slot+stride] is that token's K (or V) for that layer.
-func (p *PagedKVPool) slot(layer, isV, tok int) int {
-	return ((layer*2+isV)*p.blockTokens + tok) * p.stride
+// slot is the float32 offset of (layer, plane, tokenInBlock) within a block. plane is
+// planeK (0), planeV (1), or planeKraw (2) on a 3-plane pool. The slice [slot : slot+stride]
+// is that token's K (or V, or pre-RoPE Kraw) for that layer.
+func (p *PagedKVPool) slot(layer, plane, tok int) int {
+	return ((layer*p.planes+plane)*p.blockTokens + tok) * p.stride
 }
 
 // alloc returns an owned (ref==1) block id, reusing a freed block if one is available and
@@ -159,6 +161,15 @@ func (s *PagedKV) ensureOwned(li int) {
 // block is made owned (copy-on-write) before the in-place write. Rows shorter than stride
 // are written as far as they go; extra is ignored.
 func (s *PagedKV) Append(k, v [][]float32) {
+	s.appendPlanes([][][]float32{k, v})
+}
+
+// appendPlanes writes one token's per-plane, per-layer rows into the sequence tail. planes[i]
+// is plane i's per-layer rows (plane 0 = K, 1 = V, 2 = Kraw); planes beyond the pool's plane
+// count, or layers beyond nLayers, are ignored, and rows shorter than stride are written as
+// far as they go. It is the single tail-write Append and AppendRaw share, so the
+// block-allocation / copy-on-write boundary lives in exactly one place.
+func (s *PagedKV) appendPlanes(planes [][][]float32) {
 	p := s.pool
 	li := s.nTokens / p.blockTokens
 	off := s.nTokens % p.blockTokens
@@ -168,12 +179,13 @@ func (s *PagedKV) Append(k, v [][]float32) {
 		s.ensureOwned(li)
 	}
 	blk := p.blocks[s.table[li]]
-	for l := 0; l < p.nLayers; l++ {
-		if l < len(k) {
-			copy(blk[p.slot(l, 0, off):p.slot(l, 0, off)+p.stride], k[l])
+	for plane, rows := range planes {
+		if plane >= p.planes {
+			break
 		}
-		if l < len(v) {
-			copy(blk[p.slot(l, 1, off):p.slot(l, 1, off)+p.stride], v[l])
+		for l := 0; l < p.nLayers && l < len(rows); l++ {
+			dst := p.slot(l, plane, off)
+			copy(blk[dst:dst+p.stride], rows[l])
 		}
 	}
 	s.nTokens++
