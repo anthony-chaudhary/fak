@@ -1,0 +1,181 @@
+name: backlog-feed
+
+# Publish fak's BACKLOG-TRIAGE surface to Slack #backlog (the scoreboard
+# workspace T0BDEJF1HGB). Backlog STATE is produced by the issue-triage
+# classifier (tools/issue_triage.py) — orphaned P0/P1, stale, dormant questions,
+# likely-duplicates, and the deterministic "do next" order — but today only the
+# coarsest signal, the raw open-issue COUNT, reaches a channel (capacity-feed.yml
+# -> #capacity). This job posts the triage DETAIL: a weekly digest folded from
+# `tools/issue_triage.py --json`. (#1005)
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), the dual of
+# steering-guard.yml / capacity-feed.yml — NOT an issue feeder like
+# score-/bench-/gate-signal.yml (those turn a regression into a GitHub issue for
+# the dispatch loop and post nothing to Slack). It has `contents: read` +
+# `issues: read` only: it posts to Slack, it never opens or edits an issue.
+#
+# Posting is GATED on BOTH the FAK_SCOREBOARD_TOKEN secret AND the
+# FAK_BACKLOG_CHANNEL repo variable being present. Without either (forks,
+# secret-less runs, or before the operator provisions the channel) the job runs
+# in --dry-run and writes the card to the step summary, so it never hard-fails —
+# it just shows what WOULD post. Same convention as steering-guard.yml.
+#
+# OPERATOR STEP (one-time, the #1005 blocker): provision a `#backlog` channel in
+# the scoreboard workspace, then add the repo variable FAK_BACKLOG_CHANNEL (its
+# channel id, e.g. C0XXXXXXXXX) under Settings -> Secrets and variables ->
+# Actions -> Variables, and the repo secret FAK_SCOREBOARD_TOKEN (the
+# scoreboard-workspace bot token — the same value in the gitignored
+# .env.slack.local) under Secrets. Until both exist the feeder runs dry-run only.
+on:
+  schedule:
+    # Weekly Monday 09:11 UTC — triage is a cadence signal, not a per-commit one.
+    # An off-the-hour minute clear of the daily jobs (09:07 product, 09:37 ...)
+    # and the other weekly jobs (08:17 / 06:17 / 09:23 on Mondays).
+    - cron: "11 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: backlog-feed
+  cancel-in-progress: false
+
+jobs:
+  backlog-feed:
+    name: backlog-triage -> #backlog
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_BACKLOG_CHANNEL: ${{ vars.FAK_BACKLOG_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The triage classifier is the single source of the digest. It fetches the
+      # open backlog via `gh` (built-in GITHUB_TOKEN), classifies + ranks, and
+      # emits the full model as JSON. Pure-stdlib, read-only — it never edits an
+      # issue. Generate once so the post step and the dry-run summary read the
+      # SAME snapshot.
+      - name: generate triage digest
+        id: digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python tools/issue_triage.py --json > triage.json
+          test -s triage.json || { echo "issue triage produced no JSON"; exit 1; }
+          orphan=$(jq -r '.counts.orphan' triage.json)
+          stale=$(jq -r '.counts.stale' triage.json)
+          dormantq=$(jq -r '.counts.dormant_question' triage.json)
+          likelydup=$(jq -r '.counts.likely_dup' triage.json)
+          needspri=$(jq -r '.counts.needs_priority' triage.json)
+          open=$(jq -r '.counts.open' triage.json)
+          # The ranked "do next" order: rows are pre-sorted by score desc, so the
+          # head is the highest-attention work. Name the top 3.
+          donext=$(jq -r '[.rows[:3][] | "#\(.number)"] | join(" ")' triage.json)
+          # Guard each integer so the grade step's `-lt` test is safe even if a
+          # field is missing (older classifier, empty backlog).
+          for v in orphan stale dormantq likelydup needspri open; do
+            eval "n=\$$v"
+            case "$n" in ''|*[!0-9]*) eval "$v=0" ;; esac
+          done
+          {
+            echo "orphan=$orphan"
+            echo "stale=$stale"
+            echo "dormantq=$dormantq"
+            echo "likelydup=$likelydup"
+            echo "needspri=$needspri"
+            echo "open=$open"
+            echo "donext=${donext:-none}"
+          } >> "$GITHUB_OUTPUT"
+          echo "orphan=$orphan stale=$stale dormant-Q=$dormantq likely-dup=$likelydup needs-priority=$needspri open=$open do-next=$donext"
+
+      # Orphaned P0/P1 (high-priority work with no claimant) is the most expensive
+      # backlog rot, per the triage skill — make it the headline KPI value and
+      # grade on a small fixed-threshold ladder. The full breakdown rides --detail.
+      - name: grade backlog triage
+        id: grade
+        run: |
+          n="${{ steps.digest.outputs.orphan }}"
+          if   [ "$n" -lt 1 ];  then g=A; v=OK;
+          elif [ "$n" -lt 5 ];  then g=B; v=ACTION;
+          elif [ "$n" -lt 20 ]; then g=C; v=ACTION;
+          else                       g=D; v=ACTION;
+          fi
+          echo "grade=$g" >> "$GITHUB_OUTPUT"
+          echo "verdict=$v" >> "$GITHUB_OUTPUT"
+          echo "grade=$g verdict=$v"
+
+      # Always render the card to the step summary (and as the artifact) so the run
+      # is auditable even when nothing posts (missing secret/channel, manual
+      # dry-run, fork).
+      - name: render card (dry-run)
+        run: |
+          go run ./cmd/fak scoreboard post \
+            --channel "${FAK_BACKLOG_CHANNEL:-pending}" \
+            --kpi backlog-triage \
+            --value "${{ steps.digest.outputs.orphan }}" \
+            --grade "${{ steps.grade.outputs.grade }}" \
+            --verdict "${{ steps.grade.outputs.verdict }}" \
+            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · likely-dup ${{ steps.digest.outputs.likelydup }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
+            --source ci \
+            --dry-run | tee backlog-card.txt
+          {
+            echo "## backlog-feed — backlog-triage"
+            echo '```'
+            cat backlog-card.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST — only when BOTH the token secret and the channel variable are
+      # present. A manual dry_run also skips. Until the operator provisions
+      # #backlog and sets FAK_BACKLOG_CHANNEL, this step is skipped and the job
+      # stays a clean dry-run.
+      - name: post to #backlog
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BACKLOG_CHANNEL != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_BACKLOG_CHANNEL" \
+            --kpi backlog-triage \
+            --value "${{ steps.digest.outputs.orphan }}" \
+            --grade "${{ steps.grade.outputs.grade }}" \
+            --verdict "${{ steps.grade.outputs.verdict }}" \
+            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · likely-dup ${{ steps.digest.outputs.likelydup }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' || env.FAK_BACKLOG_CHANNEL == '' }}
+        run: |
+          if [ -z "$FAK_BACKLOG_CHANNEL" ]; then
+            echo "FAK_BACKLOG_CHANNEL not set — provision the #backlog channel and add its id as a repo variable (the #1005 blocker). Ran in dry-run; nothing posted." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "FAK_SCOREBOARD_TOKEN not set — ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backlog-card
+          path: |
+            backlog-card.txt
+            triage.json
+          if-no-files-found: ignore
