@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700" viewBox="0 0 1000 700" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+<rect x="0.0" y="0.0" width="1000.0" height="700.0" rx="0" fill="#ffffff" />
+<text x="40.0" y="46.0" font-size="26" fill="#0b1f3a" text-anchor="start" font-weight="700">How cache savings worked this session</text>
+<text x="40.0" y="72.0" font-size="13.5" fill="#5b6b82" text-anchor="start" font-weight="normal">fak guard • 122 cached turns • resumed c6723f7c — the 25.5M is Anthropic’s prompt cache, which fak PRICES (does not author)</text>
+<rect x="40.0" y="100.0" width="560.0" height="510.0" rx="10" fill="#f7f9fc" stroke="#d8dee8"/>
+<text x="60.0" y="132.0" font-size="17" fill="#14233b" text-anchor="start" font-weight="700">Prompt-cache token axis</text>
+<text x="60.0" y="152.0" font-size="12.5" fill="#5b6b82" text-anchor="start" font-weight="normal">cumulative input-token-equivalents, NET of the write premium</text>
+<rect x="246.0" y="190.0" width="284.0" height="292.4" rx="4" fill="#d98c00" fill-opacity="0.12"/>
+<line x1="100" y1="190.0" x2="530" y2="190.0" stroke="#d98c00" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="388.0" y="330.2" font-size="17" fill="#a86a00" text-anchor="middle" font-weight="700">saved 25.5M  (86%)</text>
+<text x="388.0" y="350.2" font-size="12.5" fill="#5b6b82" text-anchor="middle" font-weight="normal">Anthropic prompt cache</text>
+<text x="388.0" y="366.2" font-size="12.5" fill="#5b6b82" text-anchor="middle" font-weight="normal">fak leaves these bytes untouched</text>
+<rect x="100.0" y="190.0" width="96.0" height="340.0" rx="3" fill="#c0392b" />
+<text x="148.0" y="181.0" font-size="16" fill="#14233b" text-anchor="middle" font-weight="700">29.7M</text>
+<text x="148.0" y="552.0" font-size="13.5" fill="#14233b" text-anchor="middle" font-weight="700">No cache</text>
+<text x="148.0" y="569.0" font-size="11.5" fill="#5b6b82" text-anchor="middle" font-weight="normal" font-style="italic">projected</text>
+<rect x="260.0" y="482.4" width="96.0" height="47.6" rx="3" fill="#3b6fb0" />
+<text x="308.0" y="473.4" font-size="16" fill="#14233b" text-anchor="middle" font-weight="700">4.2M</text>
+<text x="308.0" y="552.0" font-size="13.5" fill="#14233b" text-anchor="middle" font-weight="700">Normal cache</text>
+<text x="308.0" y="569.0" font-size="11.5" fill="#5b6b82" text-anchor="middle" font-weight="normal" font-style="italic">plain claude</text>
+<rect x="420.0" y="482.4" width="96.0" height="47.6" rx="3" fill="#1f9d74" />
+<text x="468.0" y="473.4" font-size="16" fill="#14233b" text-anchor="middle" font-weight="700">4.2M</text>
+<text x="468.0" y="552.0" font-size="13.5" fill="#14233b" text-anchor="middle" font-weight="700">fak guard</text>
+<text x="468.0" y="569.0" font-size="11.5" fill="#5b6b82" text-anchor="middle" font-weight="normal" font-style="italic">cache + floor</text>
+<line x1="60" y1="530" x2="580" y2="530" stroke="#5b6b82" stroke-width="1"/>
+<path d="M 308.0 586 L 308.0 595 L 468.0 595 L 468.0 586" fill="none" stroke="#1f9d74" stroke-width="1.5"/>
+<text x="388.0" y="613.0" font-size="11.5" fill="#1f9d74" text-anchor="middle" font-weight="600">identical — req.Raw forwarded verbatim, cache prefix byte-identical</text>
+<rect x="620.0" y="100.0" width="340.0" height="510.0" rx="10" fill="#f7f9fc" stroke="#d8dee8"/>
+<text x="640.0" y="132.0" font-size="17" fill="#14233b" text-anchor="start" font-weight="700">What fak itself changed</text>
+<text x="640.0" y="152.0" font-size="12.5" fill="#5b6b82" text-anchor="start" font-weight="normal">the marginal delta vs plain claude</text>
+<text x="640.0" y="192.0" font-size="13.5" fill="#14233b" text-anchor="start" font-weight="700">1 • Tool-floor prune  (token axis)</text>
+<text x="640.0" y="211.0" font-size="12" fill="#5b6b82" text-anchor="start" font-weight="normal">131 unreachable tool defs dropped / 131 turns</text>
+<rect x="640.0" y="222.0" width="300.0" height="14.0" rx="3" fill="#e6ebf2" />
+<rect x="640.0" y="222.0" width="2.0" height="14.0" rx="3" fill="#1f9d74" />
+<text x="640.0" y="254.0" font-size="12.5" fill="#1f9d74" text-anchor="start" font-weight="600">≈ 20–66k uncached tok  —  ~0.1% of headline</text>
+<text x="640.0" y="272.0" font-size="11" fill="#5b6b82" text-anchor="start" font-weight="normal">splices AFTER the cache breakpoint, so the</text>
+<text x="640.0" y="286.0" font-size="11" fill="#5b6b82" text-anchor="start" font-weight="normal">prefix stays byte-identical (never bursts cache)</text>
+<line x1="640" y1="306" x2="940" y2="306" stroke="#d8dee8"/>
+<text x="640.0" y="342.0" font-size="13.5" fill="#14233b" text-anchor="start" font-weight="700">2 • Wasted round-trips avoided</text>
+<text x="640.0" y="360.0" font-size="12" fill="#5b6b82" text-anchor="start" font-weight="normal" font-style="italic">latency axis — not tokens</text>
+<text x="640.0" y="404.0" font-size="40" fill="#1f9d74" text-anchor="start" font-weight="800">1,104</text>
+<text x="775.0" y="392.0" font-size="12.5" fill="#14233b" text-anchor="start" font-weight="normal">bad calls stopped before</text>
+<text x="775.0" y="411.0" font-size="12.5" fill="#14233b" text-anchor="start" font-weight="normal">a wasted round-trip</text>
+<text x="640.0" y="438.0" font-size="12" fill="#5b6b82" text-anchor="start" font-weight="normal">1,101 repaired in-flight + 3 denied</text>
+<text x="640.0" y="456.0" font-size="12" fill="#5b6b82" text-anchor="start" font-weight="normal">= 87% of the 1,272 proposed calls</text>
+<line x1="640" y1="472" x2="940" y2="472" stroke="#d8dee8"/>
+<text x="640.0" y="498.0" font-size="13" fill="#14233b" text-anchor="start" font-weight="600">3 • Compaction: ENABLED, idle</text>
+<text x="640.0" y="516.0" font-size="12" fill="#5b6b82" text-anchor="start" font-weight="normal">0 fired — nothing sprawled past the 48k cut</text>
+<text x="40.0" y="678.0" font-size="11.5" fill="#5b6b82" text-anchor="start" font-weight="normal">saved = 0.9·read − 0.25·creation   •   baseline = input + read + creation   •   OBSERVED (provider) priced, never WITNESSED (fak)</text>
+</svg>
