@@ -29,6 +29,10 @@ import (
 // scorecard) can pin the shape it folds.
 const HealthSchema = "fak.loop-health.v1"
 
+// MetricLearningDebt is the loop metric key the learning-docs freshness loop
+// records when it measures the current docs scorecard debt.
+const MetricLearningDebt = "learning_debt"
+
 // HealthState is the derived per-loop health verdict. It is a CLOSED set with no
 // zero-value default in the rendered row: every row carries an explicit state so a
 // reader never has to guess what an empty string means. A DARK loop — one that is
@@ -150,6 +154,11 @@ type HealthRow struct {
 	// LastState is the loop's last folded state string (the ledger's word on what it
 	// was doing), carried for context. Not the health verdict — that is State.
 	LastState string `json:"last_state,omitempty"`
+
+	// LearningDebt is the latest learning_debt metric recorded by the loop ledger.
+	// Nil means the loop has not measured that metric yet; 0 is a real debt-free
+	// measurement and must still be rendered.
+	LearningDebt *int64 `json:"learning_debt,omitempty"`
 }
 
 // HealthRollup is the fleet-wide summary across all rows: how many loops, and how
@@ -241,6 +250,10 @@ func healthRow(id string, snap LoopSnapshot, ledgered bool, job Job, registered 
 		Runs:             snap.Ended,
 		Witnessed:        snap.Witnessed,
 		LastState:        snap.State,
+	}
+	if v, ok := snap.Metrics[MetricLearningDebt]; ok {
+		vv := v
+		row.LearningDebt = &vv
 	}
 
 	// Keep rate: witnessed / ended runs. -1 (no rate) on an empty denominator so a

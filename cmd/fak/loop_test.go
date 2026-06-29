@@ -326,6 +326,156 @@ func TestLoopStatusHumanOutput(t *testing.T) {
 	}
 }
 
+func TestLoopStatusForkedLedgerSurvives(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	appendLoopTestEvent(t, path, loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventFire})
+	appendLoopTestEvent(t, path, loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventWitness, RunID: "run-1", Status: loopmgr.StatusWitnessedDone})
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	if err := os.WriteFile(path, []byte(string(body)+lines[len(lines)-1]+"\n"), 0o644); err != nil {
+		t.Fatalf("write forked ledger: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"status", "--ledger", path})
+	if code != 0 {
+		t.Fatalf("forked status code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"loop ledger=", "issue-dispatch/default", "witnessed=1", "run-1:witnessed_done"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("forked status output missing %q:\n%s", want, out)
+		}
+	}
+	for _, want := range []string{"ledger integrity break", "recovered 2 event(s)"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("forked status stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestLoopHealthListsLearningDocsDebtAndDarkLoop(t *testing.T) {
+	oldLearningDebt := loopLearningDebt
+	loopLearningDebt = func(root string) (int64, bool) { return 34, true }
+	t.Cleanup(func() { loopLearningDebt = oldLearningDebt })
+
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "loops.jsonl")
+	registry := filepath.Join(dir, "loop-registry.json")
+
+	appendLoopTestEventAt(t, ledger, loopmgr.Event{
+		LoopID: "learning-docs-freshness",
+		Kind:   loopmgr.EventFire,
+	}, int64(time.Second))
+
+	reg := loopmgr.Registry{Jobs: map[string]loopmgr.Job{}}
+	if err := reg.Put(loopmgr.Job{
+		Schedule: loopmgr.Schedule{
+			JobID:           "learning-docs-freshness",
+			IntervalSeconds: 24 * 60 * 60,
+			MissedRun:       loopmgr.MissedCatchUp,
+			JitterSeconds:   900,
+		},
+		State: loopmgr.JobArmed,
+	}, time.Unix(0, 0).UTC()); err != nil {
+		t.Fatalf("Put registry job: %v", err)
+	}
+	if err := loopmgr.SaveRegistry(registry, reg); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"health", "--ledger", ledger, "--registry", registry})
+	if code != 0 {
+		t.Fatalf("health code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"learning-docs-freshness",
+		"dark-loop",
+		"1970-01-01T00:00:01Z",
+		"34",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("health output missing %q:\n%s", want, out)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runLoop(&stdout, &stderr, []string{"health", "--ledger", ledger, "--registry", registry, "--json"})
+	if code != 0 {
+		t.Fatalf("health --json code=%d stderr=%s", code, stderr.String())
+	}
+	var rep loopmgr.HealthReport
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("unmarshal health: %v\n%s", err, stdout.String())
+	}
+	if len(rep.Rows) != 1 {
+		t.Fatalf("health rows = %+v, want one docs-freshness row", rep.Rows)
+	}
+	row := rep.Rows[0]
+	if row.State != loopmgr.HealthDark || !row.Dark {
+		t.Fatalf("row state = %q dark=%v, want dark/true", row.State, row.Dark)
+	}
+	if row.LearningDebt == nil || *row.LearningDebt != 34 {
+		t.Fatalf("learning debt = %v, want 34", row.LearningDebt)
+	}
+}
+
+func TestLoopRegistryRegistersLearningDocsFreshness(t *testing.T) {
+	reg, err := loopmgr.LoadRegistry(filepath.Join("..", "..", "tools", "loop-registry.json"))
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	job, ok := reg.Get("learning-docs-freshness")
+	if !ok {
+		t.Fatalf("learning-docs-freshness missing from tools/loop-registry.json")
+	}
+	if job.State != loopmgr.JobArmed {
+		t.Fatalf("learning-docs-freshness state = %q, want armed", job.State)
+	}
+	if job.Schedule.IntervalSeconds != 24*60*60 {
+		t.Fatalf("learning-docs-freshness interval = %d, want daily", job.Schedule.IntervalSeconds)
+	}
+	if job.Schedule.MissedRun != loopmgr.MissedCatchUp {
+		t.Fatalf("learning-docs-freshness missed_run = %q, want catch-up", job.Schedule.MissedRun)
+	}
+	if job.Schedule.JitterSeconds <= 0 {
+		t.Fatalf("learning-docs-freshness jitter = %d, want >0", job.Schedule.JitterSeconds)
+	}
+}
+
+func TestLearningDocsFreshnessInstallerWiresDurableLoop(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "tools", "register_learning_docs_freshness.ps1"))
+	if err != nil {
+		t.Fatalf("read installer: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"learning-docs-freshness",
+		"learning_scorecard.py",
+		"New-FakLoopScheduledTaskAction",
+		"-LogonType S4U",
+		"fak loop health",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("installer missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestLearningDocsDebtFromJSONParsesNonzeroDebt(t *testing.T) {
+	debt, ok := learningDocsDebtFromJSON([]byte(`{"corpus":{"learning_debt":2}}`))
+	if !ok || debt != 2 {
+		t.Fatalf("learningDocsDebtFromJSON = %d,%v; want 2,true", debt, ok)
+	}
+}
+
 // loopHelperPlan is the pure decision the re-exec child enacts: given a mode it
 // returns what to print and the exit code. Extracting it lets the contract be
 // asserted in-process (TestLoopHelperPlan) instead of only observed through a

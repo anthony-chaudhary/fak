@@ -35,7 +35,7 @@ func TestFoldHealth_PerLoopRowsAndRates(t *testing.T) {
 		tick("active", EventStart, StatusRunning, secAgo(20)),
 		tick("active", EventEnd, StatusClaimedDone, secAgo(12)),
 		tick("active", EventWitness, StatusWitnessRefused, secAgo(11)),
-		tick("active", EventFire, "", secAgo(10)),
+		{LoopID: "active", Kind: EventFire, TSUnixNano: secAgo(10), Metrics: map[string]int64{MetricLearningDebt: 7}},
 		tick("dark-ledger", EventStart, StatusRunning, secAgo(10_050)),
 		tick("dark-ledger", EventEnd, StatusClaimedDone, secAgo(10_000)),
 	}
@@ -106,6 +106,9 @@ func TestFoldHealth_PerLoopRowsAndRates(t *testing.T) {
 	}
 	if a.AgeSeconds != 10 {
 		t.Errorf("active.AgeSeconds = %d, want 10 (last tick 10s ago)", a.AgeSeconds)
+	}
+	if a.LearningDebt == nil || *a.LearningDebt != 7 {
+		t.Errorf("active.LearningDebt = %v, want 7", a.LearningDebt)
 	}
 
 	// --- dark-ledger: has a ledger entry but stale far past horizon -> DARK.
@@ -264,6 +267,12 @@ func deepCopyStatus(s Status) Status {
 		if s.Loops[i].LastRun != nil {
 			lr := *s.Loops[i].LastRun
 			out.Loops[i].LastRun = &lr
+		}
+		if s.Loops[i].Metrics != nil {
+			out.Loops[i].Metrics = map[string]int64{}
+			for k, v := range s.Loops[i].Metrics {
+				out.Loops[i].Metrics[k] = v
+			}
 		}
 	}
 	return out

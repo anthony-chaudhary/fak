@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -35,6 +38,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopRun(stdout, stderr, argv[1:])
 	case "status":
 		return runLoopStatus(stdout, stderr, argv[1:])
+	case "health":
+		return runLoopHealth(stdout, stderr, argv[1:])
 	case "rollup":
 		return runLoopRollup(stdout, stderr, argv[1:])
 	case "admit":
@@ -418,16 +423,130 @@ func runLoopStatus(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	st, err := loopmgr.SnapshotFile(*ledger, time.Now())
+	st, integ, err := loopmgr.SnapshotFilePartial(*ledger, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak loop status: %v\n", err)
 		return 1
+	}
+	if integ.Broken {
+		fmt.Fprintf(stderr, "fak loop status: ledger integrity break at line %d: %s (recovered %d event(s))\n",
+			integ.AtLine, integ.Reason, integ.Recovered)
 	}
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, st, "fak loop status")
 	}
 	renderLoopStatus(stdout, st)
 	return 0
+}
+
+func runLoopHealth(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("loop health", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
+	registryPath := fs.String("registry", defaultLoopRegistry(), "loop registry JSON path")
+	asJSON := fs.Bool("json", false, "emit the loop-health report as JSON")
+	check := fs.Bool("check", false, "exit 3 when any loop is dark")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak loop health: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+
+	now := time.Now()
+	st, integ, err := loopmgr.SnapshotFilePartial(*ledger, now)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop health: %v\n", err)
+		return 1
+	}
+	if integ.Broken {
+		fmt.Fprintf(stderr, "fak loop health: ledger integrity break at line %d: %s (recovered %d event(s))\n",
+			integ.AtLine, integ.Reason, integ.Recovered)
+	}
+	reg, err := loopmgr.LoadRegistry(*registryPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop health: %v\n", err)
+		return 2
+	}
+	rep := loopmgr.FoldHealth(st, reg, now, loopmgr.HealthThresholds{})
+	attachLearningDocsDebt(&rep)
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, rep); err != nil {
+			fmt.Fprintf(stderr, "fak loop health: encode json: %v\n", err)
+			return 1
+		}
+	} else {
+		renderLoopHealth(stdout, rep, *ledger, *registryPath)
+	}
+	if *check && rep.Rollup.Dark > 0 {
+		return 3
+	}
+	return 0
+}
+
+var loopLearningDebt = learningDocsDebtFromScorecard
+
+func attachLearningDocsDebt(rep *loopmgr.HealthReport) {
+	idx := -1
+	for i := range rep.Rows {
+		if rep.Rows[i].LoopID == "learning-docs-freshness" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	debt, ok := loopLearningDebt(repoRoot())
+	if !ok {
+		return
+	}
+	v := debt
+	rep.Rows[idx].LearningDebt = &v
+}
+
+func learningDocsDebtFromScorecard(root string) (int64, bool) {
+	py, ok := loopPython()
+	if !ok {
+		return 0, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, py, filepath.Join(root, "tools", "learning_scorecard.py"), "--json")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil && len(bytes.TrimSpace(out)) == 0 {
+		return 0, false
+	}
+	return learningDocsDebtFromJSON(out)
+}
+
+func learningDocsDebtFromJSON(out []byte) (int64, bool) {
+	var payload struct {
+		Corpus struct {
+			LearningDebt int64 `json:"learning_debt"`
+		} `json:"corpus"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return 0, false
+	}
+	return payload.Corpus.LearningDebt, true
+}
+
+func loopPython() (string, bool) {
+	if v := strings.TrimSpace(os.Getenv("FAK_PYTHON")); v != "" {
+		if p, err := exec.LookPath(v); err == nil {
+			return p, true
+		}
+	}
+	for _, name := range []string{"python3", "python"} {
+		if p, err := exec.LookPath(name); err == nil {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // runLoopRollup is the cross-node read-only fold (#769, Pillar 7): it ingests N
@@ -818,6 +937,13 @@ func defaultLoopPolicy() string {
 	return filepath.Join(".fak", "loop-policy.json")
 }
 
+func defaultLoopRegistry() string {
+	if v := os.Getenv("FAK_LOOP_REGISTRY"); v != "" {
+		return v
+	}
+	return filepath.Join("tools", "loop-registry.json")
+}
+
 func appendLoopRunEvent(ledger string, ev loopmgr.Event) error {
 	_, err := loopmgr.Append(ledger, ev)
 	return err
@@ -972,6 +1098,60 @@ func renderLoopStatus(w io.Writer, st loopmgr.Status) {
 	}
 }
 
+func renderLoopHealth(w io.Writer, rep loopmgr.HealthReport, ledger, registry string) {
+	if len(rep.Rows) == 0 {
+		fmt.Fprintf(w, "no loops found (ledger %s registry %s)\n", ledger, registry)
+		return
+	}
+	fmt.Fprintf(w, "fak loop health: loops=%d live=%d stale=%d dark=%d unknown=%d registered=%d ledgered=%d\n\n",
+		rep.Rollup.Loops, rep.Rollup.Live, rep.Rollup.Stale, rep.Rollup.Dark,
+		rep.Rollup.Unknown, rep.Rollup.Registered, rep.Rollup.Ledgered)
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "LOOP\tSTATE\tLAST\tAGE\tCADENCE\tRUNS\tWITNESSED\tKEEP\tDEBT")
+	for _, row := range rep.Rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
+			row.LoopID,
+			loopHealthState(row),
+			formatLoopTime(row.LastTickUnixNano),
+			loopHealthAge(row),
+			humanCadence(float64(row.CadenceSeconds)),
+			row.Runs,
+			row.Witnessed,
+			loopHealthKeepRate(row.KeepRate),
+			loopHealthDebt(row.LearningDebt),
+		)
+	}
+	_ = tw.Flush()
+}
+
+func loopHealthState(row loopmgr.HealthRow) string {
+	if row.Dark {
+		return "dark-loop"
+	}
+	return string(row.State)
+}
+
+func loopHealthAge(row loopmgr.HealthRow) string {
+	if row.LastTickUnixNano == 0 {
+		return "-"
+	}
+	return humanCadence(float64(row.AgeSeconds))
+}
+
+func loopHealthKeepRate(rate float64) string {
+	if rate < 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.3f", rate)
+}
+
+func loopHealthDebt(debt *int64) string {
+	if debt == nil {
+		return "-"
+	}
+	return strconv.FormatInt(*debt, 10)
+}
+
 func formatLoopTime(ts int64) string {
 	if ts == 0 {
 		return "-"
@@ -1036,6 +1216,7 @@ func loopUsage(w io.Writer) {
                   [--metric NAME=INT64] [--json]
   fak loop run --loop ID [--ledger FILE] [--source cron|launchd|task-scheduler] [--notify-slack] [--no-guard] -- CMD [ARG...]
   fak loop status [--ledger FILE] [--json]
+  fak loop health [--ledger FILE] [--registry FILE] [--check] [--json]
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
   fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
@@ -1048,10 +1229,13 @@ Append records one scheduler/script/control event in the canonical hash-chained
 ledger. Run wraps an OS scheduler command under fak guard by default and records
 fire/admit/start/end around it; a direct out-of-tree write/delete is refused before
 spawn with OUT_OF_TREE_WRITE, and --no-guard is an explicit logged opt-out.
-Status folds that ledger into the current loop/run view. Rollup folds MANY nodes'
-ledgers into one fleet-wide "how often did every loop run" view — per-loop run
-counts, cadence, and last-run — reusing the fak ps table format; it is a read-only
-aggregation that ingests journals and writes nothing. Admit applies the tunable
+Status folds that ledger into the current loop/run view. Health joins the ledger
+with the durable registry and renders live/stale/dark-loop state plus current
+learning_debt for the docs-freshness loop. Rollup folds MANY nodes' ledgers into
+one fleet-wide "how often did every loop run" view — per-loop run counts,
+cadence, and last-run —
+reusing the fak ps table format; it is a read-only aggregation that ingests
+journals and writes nothing. Admit applies the tunable
 admission policy (default .fak/loop-policy.json, FAK_LOOP_POLICY) to the fold and
 prints admit/refuse per loop — exit 3 when any evaluated loop is refused, so a
 scheduler line can gate work on it. Recover folds the ledger into the cross-run

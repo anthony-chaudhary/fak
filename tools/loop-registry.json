@@ -11,6 +11,17 @@
       "state": "armed",
       "created_unix_nano": 1719475200000000000,
       "updated_unix_nano": 1719475200000000000
+    },
+    "learning-docs-freshness": {
+      "schedule": {
+        "job_id": "learning-docs-freshness",
+        "interval_seconds": 86400,
+        "missed_run": "catch-up",
+        "jitter_seconds": 900
+      },
+      "state": "armed",
+      "created_unix_nano": 1782691200000000000,
+      "updated_unix_nano": 1782691200000000000
     }
   }
 }
