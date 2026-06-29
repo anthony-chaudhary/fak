@@ -179,7 +179,9 @@ fak guard --compact-history-budget 8000 -- claude   # tighter than the ~48k defa
 How and why, with the metrics:
 [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md).
 The kernel also reports live prefill vs decode tok/s on `/metrics`, so a slow first request
-gets an answer instead of a shrug.
+gets an answer instead of a shrug. Want the trend - is the cache method actually paying off
+over time? [docs/cache-value-rollup.md](docs/cache-value-rollup.md) explains the dogfooded
+ledger roll-up and the shipped Track-1 witness (`fak nightrun score --json`).
 
 ## More ways to run it
 
@@ -351,6 +353,7 @@ substrate).
 | Codex | [docs/integrations/openai-codex.md](docs/integrations/openai-codex.md) |
 | MCP examples | [examples/mcp](examples/mcp) |
 | Long sessions / cache | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) |
+| Is the cache paying off? (trend) | [docs/cache-value-rollup.md](docs/cache-value-rollup.md) |
 | Capability floor (policy) | [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) |
 | CLI verbs | [docs/cli-reference.md](docs/cli-reference.md) |
 | Security model | [docs/fak/security.md](docs/fak/security.md) |
