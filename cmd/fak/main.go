@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/grammar"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
@@ -99,6 +101,8 @@ func main() {
 		cmdTUI(os.Args[2:])
 	case "tui":
 		cmdTUI(os.Args[2:])
+	case "chatrelay":
+		cmdChatRelay(os.Args[2:])
 	case "claude-mac-fak":
 		cmdClaudeMacFak(os.Args[2:])
 	case "loop":
@@ -216,6 +220,8 @@ func main() {
 		cmdBlockers(os.Args[2:])
 	case "product":
 		cmdProduct(os.Args[2:])
+	case "marketing":
+		cmdMarketing(os.Args[2:])
 	case "nodeusage":
 		cmdNodeUsage(os.Args[2:])
 	case "callavoid":
@@ -310,6 +316,8 @@ func cmdPreflight(argv []string) {
 	tool := fs.String("tool", "", "tool name")
 	args := fs.String("args", "{}", "tool args as JSON")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	grammarSchema := fs.String("grammar-schema", "", "load a JSON Schema grammar for --tool before adjudication (demo/debug witness)")
+	showDispatchedArgs := fs.Bool("show-dispatched-args", false, "print post-transform args that would be dispatched (may include raw arg values; demo/debug only)")
 	explain := fs.Bool("explain", false, "print the full decision trace: every rung folded, what each returned, which won, and why")
 	asJSON := fs.Bool("json", false, "emit the decision trace as JSON (safe to log: args digest only, never raw args)")
 	_ = fs.Parse(argv)
@@ -317,6 +325,11 @@ func cmdPreflight(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak preflight: --tool is required")
 		os.Exit(2)
 	}
+	if *asJSON && *showDispatchedArgs {
+		fmt.Fprintln(os.Stderr, "fak preflight: --json cannot be combined with --show-dispatched-args")
+		os.Exit(2)
+	}
+	must(loadPreflightGrammar(*tool, *grammarSchema))
 	applyPolicy(*policyPath)
 	res := abi.ActiveResolver()
 	ref, err := res.Put(ctx(), []byte(*args))
@@ -326,16 +339,63 @@ func cmdPreflight(argv []string) {
 	// surface the per-rung Decision trace (the eight rungs preflight actually folds
 	// are invisible in the default one-liner). Default output is unchanged.
 	if *explain || *asJSON {
-		_, d := kernel.FoldExplain(ctx(), abi.AdjudicatorsFor(tc), tc)
+		v, d := kernel.FoldExplain(ctx(), abi.AdjudicatorsFor(tc), tc)
 		if *asJSON {
 			fmt.Println(d.JSON())
 		} else {
 			fmt.Print(d.Text())
+			if *showDispatchedArgs {
+				printDispatchedArgs(ctx(), v)
+			}
 		}
 		return
 	}
 	v := kernel.Fold(ctx(), abi.AdjudicatorsFor(tc), tc)
 	fmt.Printf("verdict=%s reason=%s by=%s\n", verdictName(v.Kind), abi.ReasonName(v.Reason), v.By)
+	if *showDispatchedArgs {
+		printDispatchedArgs(ctx(), v)
+	}
+}
+
+func loadPreflightGrammar(tool, schemaPath string) error {
+	if strings.TrimSpace(schemaPath) == "" {
+		return nil
+	}
+	b, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return fmt.Errorf("load grammar schema: %w", err)
+	}
+	if err := grammar.Default.LoadFromJSONSchema(tool, b); err != nil {
+		return fmt.Errorf("load grammar schema: %w", err)
+	}
+	return nil
+}
+
+func printDispatchedArgs(ctx context.Context, v abi.Verdict) {
+	line, ok, err := dispatchedArgsLine(ctx, v)
+	must(err)
+	if ok {
+		fmt.Println(line)
+	}
+}
+
+func dispatchedArgsLine(ctx context.Context, v abi.Verdict) (string, bool, error) {
+	if v.Kind != abi.VerdictTransform {
+		return "", false, nil
+	}
+	tp, ok := v.Payload.(abi.TransformPayload)
+	if !ok {
+		return "", false, fmt.Errorf("transform payload type %T, want abi.TransformPayload", v.Payload)
+	}
+	b, err := abi.ActiveResolver().Resolve(ctx, tp.NewArgs)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve transformed args: %w", err)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, b); err == nil {
+		b = compact.Bytes()
+	}
+	return "dispatched_args=" + string(b), true, nil
 }
 
 // fak bench  -  A/B ablate the vDSO over a frozen trace.
