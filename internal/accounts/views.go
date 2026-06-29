@@ -74,6 +74,13 @@ func (r Registry) tombstonedHomes() []Home {
 	return out
 }
 
+// writeNameDirRow appends the `  - name: …` / `    config_dir: …` pair that opens
+// every account roster row (the shared head of the dos/job active + tombstoned loops).
+func writeNameDirRow(b *strings.Builder, h Home) {
+	b.WriteString("  - name: " + yamlScalar(h.Name) + "\n")
+	b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
+}
+
 // renderDos emits the dos roster: `accounts:` rows of name+config_dir for every active home,
 // the active-default seat + the full role map (so a launcher/watchdog can pick the right seat
 // without re-reading the registry), then the view's config blocks (rotation/defaults).
@@ -82,8 +89,7 @@ func (r Registry) renderDos() string {
 	b.WriteString(generatedHeader)
 	b.WriteString("accounts:\n")
 	for _, h := range r.activeHomes() {
-		b.WriteString("  - name: " + yamlScalar(h.Name) + "\n")
-		b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
+		writeNameDirRow(&b, h)
 	}
 	// active_default: the name+config_dir of the ACTIVE-role seat — the account a bare launch /
 	// watchdog should use. Emitted as a top-level scalar so the existing flat `accounts:`
@@ -117,8 +123,7 @@ func (r Registry) renderJob() string {
 	b.WriteString(generatedHeader)
 	b.WriteString("accounts:\n")
 	for _, h := range r.activeHomes() {
-		b.WriteString("  - name: " + yamlScalar(h.Name) + "\n")
-		b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
+		writeNameDirRow(&b, h)
 		b.WriteString("    chrome_profile: " + yamlScalar(h.ChromeProfile) + "\n")
 		b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
 		b.WriteString("    enabled: " + strconv.FormatBool(h.EnabledOrDefault()) + "\n")
@@ -129,8 +134,7 @@ func (r Registry) renderJob() string {
 	if tomb := r.tombstonedHomes(); len(tomb) > 0 {
 		b.WriteString("\ntombstoned_accounts:\n")
 		for _, h := range tomb {
-			b.WriteString("  - name: " + yamlScalar(h.Name) + "\n")
-			b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
+			writeNameDirRow(&b, h)
 			b.WriteString("    chrome_profile: " + yamlScalar(h.ChromeProfile) + "\n")
 			b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
 			b.WriteString("    enabled: false\n")
