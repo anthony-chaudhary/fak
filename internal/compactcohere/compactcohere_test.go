@@ -1,6 +1,8 @@
 package compactcohere
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -216,14 +218,23 @@ func TestPreCompactExitCode(t *testing.T) {
 // prompt content, only the enum/flag fields. (Compile-time shape check — if a Content field
 // is ever added this test is where the reviewer re-justifies it.)
 func TestObserveIsContentFree(t *testing.T) {
+	const sentinel = "PROMPT-CONTENT-SENTINEL-9173"
 	c := New(0)
-	d := c.Observe(TurnObservation{InboundPrefixDigest: "A"})
-	_ = d.Event
-	_ = d.Action
-	_ = d.HarnessPosture
-	_ = d.QuarantineAtRisk
-	_ = d.BurstObserved
-	_ = d.Reason
+	d := c.Observe(TurnObservation{InboundPrefixDigest: sentinel})
+	// A Decision is shadow-loggable only because it carries enum/flag fields and no prompt
+	// content. Reflect over every field and fail if any string echoes the inbound digest —
+	// the regression this guard-rail exists to catch (a future Content field, or Observe
+	// copying the digest into Reason/Event).
+	v := reflect.ValueOf(d)
+	for i := 0; i < v.NumField(); i++ {
+		if f := v.Field(i); f.Kind() == reflect.String && strings.Contains(f.String(), sentinel) {
+			t.Fatalf("Decision.%s leaked inbound content: %q", v.Type().Field(i).Name, f.String())
+		}
+	}
+	// Event is always an attributed enum constant, never empty — the shape a shadow log reads.
+	if d.Event == "" {
+		t.Fatal("Observe returned an empty Event for a digest-only observation")
+	}
 }
 
 func digestN(i int) string { return "digest-" + time.Duration(i).String() }
