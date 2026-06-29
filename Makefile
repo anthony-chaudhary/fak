@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet architest-gate test test-fast test-affected bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet architest-gate test test-fast test-affected test-race bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
 ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$$
@@ -63,6 +63,35 @@ test-fast: build vet architest-gate
 test-affected: build
 	go run ./cmd/fak affected --budget $(VERIFY_LOOP_BUDGET) --report .fak/verify-loop-affected.json
 	@echo "test-affected OK (affected packages only, budget $(VERIFY_LOOP_BUDGET); run 'make test' for the full oracle)"
+
+# test-race (#1311): the fast LOCAL correctness gate for the inner loop — the
+# data-race signal CI has (the separate `race detector` job in .github/workflows/ci.yml)
+# but the local `make test-fast` / `make ci` chain LACKS (both run `go test` WITHOUT
+# -race; CLAIMS.md notes -race needs cgo+gcc, absent natively on the Windows dev box).
+# Without this the inner loop verifies only build+vet+test locally and learns of a data
+# race minutes later, out-of-band, in CI — the gap #1311 names against #1148's
+# "loop velocity x witnessed error-correction" goal. ONE command: `go test -short -race
+# ./...`, run directly like the `test` / `test-fast` targets above (so it inherits their
+# "run under WSL — native `go test` is OS-blocked on this host" contract; see AGENTS.md
+# and the AVOID-TESTING note). It mirrors CI's race job: forces CGO_ENABLED=1 and
+# cgo-PREFLIGHTS a working C compiler first, REFUSING (exit 2) rather than letting -race
+# silently build a race-BLIND binary + a false green on a cgo-less toolchain. `-short`
+# skips the slow weight-backed model oracle so it stays a seconds-to-minutes pre-commit
+# gate; the full no-`-short` `go test -race ./...` stays authoritative in CI (and
+# tools/race_test.sh wraps the full run on a nested-module checkout). Kept a SEPARATE
+# target (not folded into `make ci`) to mirror CI's own separate-job architecture — the
+# ~2-10x -race slowdown never gates the fast build/vet/test feedback, and a cgo-less box
+# is refused, not wedged. Pair with `make test-affected` for the REAL (no -short) oracle
+# on the packages your change can reach: race everywhere (short) + oracle on what you
+# touched, without the CI round-trip. See docs/testing/race-detector.md.
+test-race:
+	@command -v cc >/dev/null 2>&1 && cc --version >/dev/null 2>&1 || { \
+		echo "test-race: BLOCKED -- no working C compiler (cc); the Go race detector needs cgo (CGO_ENABLED=1)." >&2; \
+		echo "  Running -race without it silently builds a race-BLIND binary + a false green. Run on a cgo-capable" >&2; \
+		echo "  box (WSL/Linux/macOS) -- see docs/testing/race-detector.md." >&2; \
+		exit 2; }
+	CGO_ENABLED=1 go test -short -race -count=1 -timeout=25m ./...
+	@echo "test-race OK (-short -race ./...; full no--short -race stays authoritative in CI -- pair with 'make test-affected' for the oracle)"
 
 bench:
 	go build -o fak ./cmd/fak && ./fak bench --suite tau2-smoke --out report.json
