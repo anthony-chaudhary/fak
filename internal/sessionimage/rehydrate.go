@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/recall"
+	"github.com/anthony-chaudhary/fak/internal/rehydrate"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
@@ -32,7 +34,12 @@ import (
 // different from the image's recorded Model / Host, record a Migration — the model swap
 // or re-home is made explicit. WriteBack persists the updated Meta (with the new
 // migration and Model/Host) back to image.json, so the next dump carries the lineage.
-// Now is an injected unix clock for deterministic migration stamps (0 = wall time).
+// Now is an injected unix clock for deterministic migration stamps AND the dormancy gap
+// (0 = wall time). Gate, when non-nil, is the horizon-gated re-entry gate (internal/rehydrate,
+// #1181): after the image is restored, Rehydrate computes the dormancy band from how long
+// the image has been dormant (now − Meta.UpdatedUnix) and runs the staged gate before the
+// resumed handle is admitted for its first post-wake action — a longer gap runs strictly
+// more revalidation. A nil Gate is today's behavior: resume verbatim, admitted unconditionally.
 type RehydrateOptions struct {
 	Table     *session.Table
 	ToModel   string
@@ -40,6 +47,7 @@ type RehydrateOptions struct {
 	Reason    string
 	WriteBack bool
 	Now       int64
+	Gate      *rehydrate.Gate
 }
 
 // Resumed is the live session after a Rehydrate: the (possibly migrated) Meta, the drive
@@ -54,7 +62,21 @@ type Resumed struct {
 	Index    *ctxplan.Index
 	Witness  []WitnessEntry
 	Migrated bool
+
+	// Gated is true when a staged rehydration Gate ran (RehydrateOptions.Gate was set).
+	// When false, no staging was configured and the resume is admitted unconditionally
+	// (today's verbatim resume).
+	Gated bool
+	// Admission is the staged-gate verdict, meaningful only when Gated. A refused Admission
+	// (Admission.Admitted false) means the caller must NOT fire the first post-wake action
+	// until the rung named by Admission.RefusedBy clears — the CRaC afterRestore gate.
+	Admission rehydrate.Admission
 }
+
+// Admitted reports whether the resumed session may fire its first post-wake action. With no
+// staged gate configured it is always true (unconditional resume); with a gate it is the
+// gate's verdict (every applicable rung cleared).
+func (r *Resumed) Admitted() bool { return !r.Gated || r.Admission.Admitted }
 
 // Rehydrate resumes the image in this process. It restores the drive into opt.Table (if
 // given), loads the recall core image and its index (if the image carries content), and
@@ -63,6 +85,11 @@ type Resumed struct {
 // (session.Table.Decide) and pages content through its Session's gate.
 func (img *Image) Rehydrate(ctx context.Context, opt RehydrateOptions) (*Resumed, error) {
 	out := &Resumed{Meta: img.Meta, Drive: img.Drive}
+
+	// Dormancy is measured from when the image was last persisted (Meta.UpdatedUnix) to now —
+	// the gap the staged gate (step 4) keys on. Captured up front because a write-back
+	// migration below re-stamps UpdatedUnix to "now", which would erase the gap.
+	dormantStamp := dormancy.FromUnix(img.Meta.UpdatedUnix)
 
 	// (1) Re-attach the drive verbatim — the §5 persistence rung. A terminal session
 	// restores terminal; Rev is preserved (a load is not a mutation).
@@ -114,6 +141,19 @@ func (img *Image) Rehydrate(ctx context.Context, opt RehydrateOptions) (*Resumed
 				return nil, err
 			}
 		}
+	}
+
+	// (4) Horizon-gated admission (#1181): the longer the image was dormant, the more rungs
+	// must clear before the resumed handle may fire its first post-wake action (the CRaC
+	// afterRestore analog). A nil Gate skips this — resume verbatim, admitted unconditionally
+	// (today's behavior). The dormancy band comes from the image's pre-migration UpdatedUnix.
+	if opt.Gate != nil {
+		now := time.Now()
+		if opt.Now != 0 {
+			now = time.Unix(opt.Now, 0)
+		}
+		out.Gated = true
+		out.Admission = opt.Gate.Admit(ctx, dormantStamp.HorizonAt(now))
 	}
 	return out, nil
 }
