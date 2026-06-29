@@ -362,7 +362,7 @@ func appendCommitReviewRefusalToGoal(res safecommit.Result) error {
 	if goalPath == "" {
 		return nil
 	}
-	return appendCommitGoalScratch(goalPath, "NOT_YET review refuted: "+commitReviewSummary(*res.Review))
+	return appendGoalScratch(goalPath, "NOT_YET review refuted: "+commitReviewSummary(*res.Review))
 }
 
 func commitReviewReason(v modelroute.ReviewVerdict) string {
@@ -401,7 +401,10 @@ func commitReviewRunID() string {
 	return loopID + "-turn-" + iter
 }
 
-func appendCommitGoalScratch(path, line string) error {
+// appendGoalScratch appends a refusal/scratch line to the session goal file, opening a
+// "# Scratch / last-refusal" section the first time. Shared by the commit gate and the
+// loop driver (both record a NOT_YET reason against the same goal file).
+func appendGoalScratch(path, line string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -410,14 +413,14 @@ func appendCommitGoalScratch(path, line string) error {
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
-	if !commitGoalHasScratch(text) {
+	if !goalHasScratch(text) {
 		text += "\n# Scratch / last-refusal\n"
 	}
 	text += "- " + strings.TrimSpace(line) + "\n"
 	return os.WriteFile(path, []byte(text), 0o644)
 }
 
-func commitGoalHasScratch(text string) bool {
+func goalHasScratch(text string) bool {
 	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		line = strings.ToLower(strings.TrimSpace(line))
 		if strings.HasPrefix(line, "#") && strings.HasPrefix(strings.TrimSpace(strings.TrimLeft(line, "#")), "scratch") {

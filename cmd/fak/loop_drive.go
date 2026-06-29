@@ -280,7 +280,7 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 		}
 		if timedOut {
 			scratch := fmt.Sprintf("NOT_YET %s turn=%d deadline spent", loopdrive.ReasonBudgetSpent, turn)
-			if scratchErr := appendLoopGoalScratch(goalPath, scratch); scratchErr != nil {
+			if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
 				fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
 				return 1
 			}
@@ -292,7 +292,7 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 			if err != nil {
 				scratch += " reason=" + err.Error()
 			}
-			if scratchErr := appendLoopGoalScratch(goalPath, scratch); scratchErr != nil {
+			if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
 				fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
 				return 1
 			}
@@ -322,7 +322,7 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 			return 0
 		}
 		scratch := fmt.Sprintf("NOT_YET turn=%d witness=%s reason=%s %s", turn, witness.Status, witness.Reason, witness.Summary)
-		if scratchErr := appendLoopGoalScratch(goalPath, scratch); scratchErr != nil {
+		if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
 			fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
 			return 1
 		}
@@ -352,7 +352,7 @@ func stopLoopDriveBudget(stderr io.Writer, opt loopDriveOptions, goalPath string
 		fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
 		return 1
 	}
-	if err := appendLoopGoalScratch(goalPath, reason); err != nil {
+	if err := appendGoalScratch(goalPath, reason); err != nil {
 		fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", err)
 		return 1
 	}
@@ -827,28 +827,4 @@ func lastLoopGoalScratchLine(s string) string {
 	return ""
 }
 
-func appendLoopGoalScratch(path, line string) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	text := string(b)
-	if !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
-	if !loopGoalHasScratch(text) {
-		text += "\n# Scratch / last-refusal\n"
-	}
-	text += "- " + strings.TrimSpace(line) + "\n"
-	return os.WriteFile(path, []byte(text), 0o644)
-}
-
-func loopGoalHasScratch(text string) bool {
-	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
-		line = strings.ToLower(strings.TrimSpace(line))
-		if strings.HasPrefix(line, "#") && strings.HasPrefix(strings.TrimSpace(strings.TrimLeft(line, "#")), "scratch") {
-			return true
-		}
-	}
-	return false
-}
+// appendGoalScratch / goalHasScratch are shared with the commit gate (see commit.go).
