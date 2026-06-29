@@ -13,9 +13,10 @@ task to the right front door) and the verb-by-verb [CLI reference](cli-reference
 commands and the hard rules; this page is the "now I'm in the loop, what do I run?"
 layer.
 
-> **Honest scope.** fak does not yet ship dedicated `fak profile` / `fak test`
-> verbs. The capabilities they would wrap already exist as the Go toolchain plus a
-> few `fak`/`make` verbs, and this guide shows the real commands. The
+> **Honest scope.** `fak test` ships (a host-aware runner over `go test`); a
+> dedicated `fak profile` verb does not yet. The capabilities each wraps already
+> exist as the Go toolchain plus a few `fak`/`make` verbs, and this guide shows the
+> real commands. The
 > [What ships vs. what's planned](#what-ships-vs-whats-planned) table at the end is
 > explicit about which is which, so you never reach for a verb that isn't there.
 
@@ -34,8 +35,16 @@ The 60-second, no-key/no-model/no-GPU proof is the canonical first run — see
 
 ## The test runner
 
-There is no `fak test` verb; the runner is the `make` target set over `go test`,
-with one host caveat that bites on Windows.
+`fak test` is the host-aware runner: it resolves the right `go test` invocation for
+the tier you ask for and, on Windows, routes it through `test.ps1` (WSL) automatically
+so you never hit the OS-policy block below. The `make` target set is the authoritative
+gate it sits over; `fak test --list` prints the tiers, and `fak test -n <tier>` prints
+the resolved command without running it.
+
+| `fak test [fast\|full\|race\|<pkg>]` | the host-aware wrapper over `go test`; default tier is `fast`; routes to WSL on Windows | the one-verb inner loop — `fak test fast -- -run TestX` to pass flags through |
+
+The underlying `make` targets remain the canonical gates, with one host caveat that
+bites on Windows.
 
 | Command | What it runs | When |
 |---|---|---|
@@ -169,11 +178,11 @@ So you never reach for a verb that isn't there:
 |---|---|---|
 | Enhanced debugging | `fak debug` (context/session core-dump debugger) + `fak doctor` (answer-shape diagnostic) + [integrations/debugging.md](integrations/debugging.md) | shipped |
 | Built-in profiling | Go pprof (`go test -cpuprofile/-memprofile -bench`) + `fak benchmarks` / `fak bench` / `fak ablate` | a `fak profile` wrapper is **planned**, not shipped |
-| Test runner | `make test-fast` / `make test` / `make test-affected` / `make test-race` / `make ci`, `fak affected`, `./test.ps1` (WSL) | a `fak test` wrapper is **planned**, not shipped |
+| Test runner | `fak test` (host-aware runner: routes `go test` to WSL on Windows), over `make test-fast` / `make test` / `make test-affected` / `make test-race` / `make ci`, `fak affected`, `./test.ps1` (WSL) | shipped |
 | Dev workflow guide | this page, plus [`AGENTS.md`](../AGENTS.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md), [Work map](WORK-MAP.md) | shipped |
 
-The two planned wrappers (`fak profile`, `fak test`) would be thin convenience verbs
-over the commands above — most useful for encoding the host knowledge this guide
-carries (e.g. routing `go test` to WSL on Windows automatically). They are tracked
-under the developer-tooling epic; until they land, the commands here are the supported
-path.
+`fak test` is the first of these convenience verbs to land — it encodes the host
+knowledge this guide carries (routing `go test` to WSL on Windows automatically) over
+the same `make`/`go test` gates. The remaining planned wrapper, `fak profile`, would
+be a thin verb over Go pprof; it is tracked under the developer-tooling epic, and until
+it lands the profiling commands above are the supported path.
