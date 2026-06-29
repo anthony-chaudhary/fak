@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -113,6 +114,11 @@ type VDSO struct {
 	regMu           sync.RWMutex
 	cacheSink       func(CacheEvent)
 	witnessAdapters map[string]WitnessFunc
+
+	// now is the clock the tier-2 fill timestamp + hit-age are read from. nil => time.Now
+	// (production). A test sets it to a controllable clock so age assertions never depend
+	// on wall-clock. Read via v.clock().
+	now func() time.Time
 
 	lookups int64
 	hits    int64
@@ -205,7 +211,16 @@ func (v *VDSO) MissReasons() map[string]uint64 {
 type entry struct {
 	key     string
 	ref     abi.Ref
-	witness string // external world-state witness this entry was admitted under ("" = none)
+	witness string    // external world-state witness this entry was admitted under ("" = none)
+	filledAt time.Time // when this tier-2 entry was stored — surfaced as age_ms on a hit so the model can judge staleness
+}
+
+// clock reads the vDSO's time source (injectable for tests; time.Now in production).
+func (v *VDSO) clock() time.Time {
+	if v.now != nil {
+		return v.now()
+	}
+	return time.Now()
 }
 
 // New builds a vDSO with the given tier-2 capacity.
@@ -420,13 +435,22 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			v.lru.MoveToFront(el)
 			ref := e.ref
 			hk, href, hwit := e.key, e.ref, e.witness
+			filledAt := e.filledAt
 			v.mu.Unlock()
 			atomic.AddInt64(&v.hits, 1)
 			// §2.5 consumer tracking: a HIT names the agent/turn that reused the entry
 			// (consumerOpt is nil for an anonymous call, so no empty consumer is recorded).
 			v.emitCache(CacheHit, hk, href, hwit, consumerOpt(c))
+			// age_ms lets a consumer (the served-inline renderer) tell the model how stale
+			// this cached read is, so the model can force a fresh read if it matters. Computed
+			// once at hit time off the injectable clock; clamped at 0 against a backwards clock.
+			ageMs := v.clock().Sub(filledAt).Milliseconds()
+			if ageMs < 0 {
+				ageMs = 0
+			}
 			return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK,
-				Meta: map[string]string{"served_by": "vdso", "tier": "2"}}, true
+				Meta: map[string]string{"served_by": "vdso", "tier": "2",
+					"age_ms": strconv.FormatInt(ageMs, 10)}}, true
 		}
 		v.mu.Unlock()
 	}
@@ -542,7 +566,7 @@ func (v *VDSO) Emit(ev abi.Event) {
 		if _, ok := v.cache[key]; ok {
 			return nil, nil
 		}
-		el := v.lru.PushFront(&entry{key: key, ref: r.Payload, witness: wit})
+		el := v.lru.PushFront(&entry{key: key, ref: r.Payload, witness: wit, filledAt: v.clock()})
 		v.cache[key] = el
 		atomic.AddInt64(&v.fills, 1)
 		// Pin the CAS bytes UNDER v.mu, before the entry is reachable to any Lookup,

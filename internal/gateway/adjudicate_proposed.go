@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -57,6 +59,16 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 			pass = append(pass, tc)
 			continue
 		}
+		// Force-fresh escape hatch: a re-proposed read carrying the advertised _fak_fresh
+		// marker skips the cache probe and passes through to the client to actually run.
+		// Sound: this only ever turns a would-be served hit into a normal tool_use —
+		// byte-identical to a cache MISS, the already-tested fall-through. It can never
+		// create an effect or relax a gate; it only declines the optimization. The model
+		// reaches for this when the served age (below) says the cached read is too stale.
+		if callRequestsFresh(tc.Function.Arguments) {
+			pass = append(pass, tc)
+			continue
+		}
 		c2, err := s.buildCall(ctx, tool, tc.Function.Arguments, true, "", reqTrace)
 		if err != nil {
 			pass = append(pass, tc)
@@ -79,7 +91,7 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 			pass = append(pass, tc)
 			continue
 		}
-		served = append(served, servedToolLine(tool, body))
+		served = append(served, servedToolLine(tool, body, res.Meta))
 		servedHits++
 		adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, Admitted: true,
 			Verdict: WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: "vdso"}})
@@ -92,12 +104,65 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 	return kept, adjs, dropped, servedText, servedHits
 }
 
+// fakFreshMarker is the reserved arg key the served-cache line tells the model to set
+// to force a fresh read. It is namespaced under "_fak_" so it cannot collide with a real
+// tool argument (no real tool defines a leading-underscore _fak_-prefixed param).
+const fakFreshMarker = "_fak_fresh"
+
 // servedToolLine renders one vDSO-served tool result as an assistant-text line — the
 // only wire-valid surface for a locally-served answer (a tool_result block is a
 // user-turn block, illegal in an assistant response). The model's next turn reads it
-// as the assistant's own statement of the tool's result.
-func servedToolLine(tool string, body []byte) string {
-	return "[fak] " + tool + " (served from cache): " + strings.TrimSpace(string(body))
+// as the assistant's own statement of the tool's result. When the hit carries an age
+// (tier-2 only), the line names how stale the read is AND how to force a fresh one, so
+// the model can decide for itself whether the cached value is good enough.
+func servedToolLine(tool string, body []byte, meta map[string]string) string {
+	suffix := "served from cache"
+	if age, ok := cacheAgeLabel(meta); ok {
+		suffix += ", ~" + age + " old; to force a fresh read, re-call with \"" + fakFreshMarker + "\": true"
+	}
+	return "[fak] " + tool + " (" + suffix + "): " + strings.TrimSpace(string(body))
+}
+
+// cacheAgeLabel turns a tier-2 hit's age_ms into a coarse human/model label ("3m", "45s").
+// ok=false when no age_ms is present (tier-1 pure / tier-3 static hits, or a non-vdso
+// caller), so the line renders WITHOUT an age clause — byte-identical to the pre-age text.
+func cacheAgeLabel(meta map[string]string) (string, bool) {
+	if meta == nil {
+		return "", false
+	}
+	ms, err := strconv.ParseInt(meta["age_ms"], 10, 64)
+	if err != nil || ms < 0 {
+		return "", false
+	}
+	d := time.Duration(ms) * time.Millisecond
+	switch {
+	case d < time.Minute:
+		return strconv.Itoa(int(d.Seconds())) + "s", true
+	case d < time.Hour:
+		return strconv.Itoa(int(d.Minutes())) + "m", true
+	default:
+		return strconv.Itoa(int(d.Hours())) + "h", true
+	}
+}
+
+// callRequestsFresh reports whether the proposed call's JSON args set _fak_fresh truthy —
+// the model's signal to bypass the served-inline cache and run the tool for real. A
+// non-JSON or unparseable args blob is treated as NO marker (today's behavior), so a model
+// that ignores the affordance gets exactly today's served-inline path.
+func callRequestsFresh(args string) bool {
+	if !strings.Contains(args, fakFreshMarker) {
+		return false // fast reject: no substring, no parse
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(args), &m); err != nil {
+		return false
+	}
+	raw, ok := m[fakFreshMarker]
+	if !ok {
+		return false
+	}
+	var b bool
+	return json.Unmarshal(raw, &b) == nil && b
 }
 
 func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall, reqTrace string) ([]agent.ToolCall, []ToolAdjudication, int) {
