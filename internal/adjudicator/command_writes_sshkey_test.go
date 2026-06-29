@@ -13,8 +13,8 @@ var guardCredentialGlobs = []string{".git/", ".env", ".aws/", ".npmrc", ".netrc"
 func TestSSHIdentityReadIsNotSelfModify(t *testing.T) {
 	allowed := []string{
 		// ssh remote build with a write verb in the REMOTE command (cp/mv) + an -i key.
-		"ssh -i ~/.ssh/id_rsa anthony@node 'cd ~/fak && cp build/out /tmp/x && go test -tags fakmetal ./internal/metalgemm'",
-		"ssh -i ~/.ssh/id_ed25519 anthony@node 'go build -tags fakmetal ./... && mv a b'",
+		"ssh -i ~/.ssh/id_rsa anthony@node 'cd ~/fak && cp build/out /tmp/x && go test ./internal/metalgemm'",
+		"ssh -i ~/.ssh/id_ed25519 anthony@node 'go build ./... && mv a b'",
 		// scp itself: `scp ` contains the `cp ` write verb, and the key is the -i operand.
 		"scp -i ~/.ssh/id_ed25519 ./fak anthony@node:~/",
 		"scp -i ~/.ssh/id_rsa anthony@node:~/result.json ./",
