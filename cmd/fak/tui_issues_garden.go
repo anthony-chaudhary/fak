@@ -718,9 +718,13 @@ func renderTUIGarden(report tuiGardenReport, width int) string {
 		if detail != "" {
 			tags += "  " + detail
 		}
-		fmt.Fprintf(&b, "%9d %-25s %-8s %-4s %-4d %-7s %s\n",
-			row.Attention, trimTUI(row.Label, 25), trimTUI(row.State, 8), gate, row.ExitCode,
-			trimTUI(row.Verdict, 7), trimTUI(tags, maxTUI(14, width-66)))
+		fmt.Fprintf(&b, "%9d %s %s %-4s %-4d %s %s\n",
+			row.Attention,
+			padRightTUI(trimTUI(row.Label, 25), 25),
+			padRightTUI(trimTUI(row.State, 8), 8),
+			gate, row.ExitCode,
+			padRightTUI(trimTUI(row.Verdict, 7), 7),
+			trimTUI(tags, maxTUI(14, width-66)))
 	}
 	return b.String()
 }

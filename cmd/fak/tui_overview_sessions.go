@@ -362,8 +362,9 @@ func renderTUIOverview(report tuiOverviewReport, width int) string {
 	fmt.Fprintln(&b, "\nPanes")
 	fmt.Fprintln(&b, "attention pane       status   tags                 summary")
 	for _, card := range report.Cards {
-		fmt.Fprintf(&b, "%9d %-10s %-8s %-20s %s\n",
-			card.Attention, card.Pane, card.Status, trimTUI(displayTUITags(card.Tags, 3), 20),
+		fmt.Fprintf(&b, "%9d %-10s %-8s %s %s\n",
+			card.Attention, card.Pane, card.Status,
+			padRightTUI(trimTUI(displayTUITags(card.Tags, 3), 20), 20),
 			trimTUI(card.Summary, maxTUI(20, width-53)))
 	}
 	if len(report.Actions) > 0 {
@@ -579,9 +580,14 @@ func renderTUISessionRows(b *strings.Builder, rows []tuiSessionRow, limit, width
 			budgetAxis(row.TurnsLeft), budgetAxis(row.TokensLeft), contextBudgetAxis(row.ContextTokensLeft))
 		pace := fmt.Sprintf("max=%d gap=%d", row.MaxTokensPerTurn, row.MinTurnGapMs)
 		summary := displayTUITags(row.Tags, 3)
-		fmt.Fprintf(b, "%9d %-26s %-10s %4d %-3d %-30s %-13s %s\n",
-			row.Attention, trimTUI(row.TraceID, 26), trimTUI(row.Run, 10), row.Priority, row.Rev,
-			trimTUI(budget, 30), trimTUI(pace, 13), trimTUI(summary, maxTUI(14, width-95)))
+		fmt.Fprintf(b, "%9d %s %s %4d %-3d %s %s %s\n",
+			row.Attention,
+			padRightTUI(trimTUI(row.TraceID, 26), 26),
+			padRightTUI(trimTUI(row.Run, 10), 10),
+			row.Priority, row.Rev,
+			padRightTUI(trimTUI(budget, 30), 30),
+			padRightTUI(trimTUI(pace, 13), 13),
+			trimTUI(summary, maxTUI(14, width-95)))
 	}
 }
 

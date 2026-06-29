@@ -897,9 +897,14 @@ func renderTUIGuard(report tuiGuardReport, width int) string {
 		if row.Detail != "" {
 			tags += "  " + row.Detail
 		}
-		fmt.Fprintf(&b, "%9d %-24s %-20s %-16s %-7s %-14s %-5s %s\n",
-			row.Attention, trimTUI(row.Artifact, 24), trimTUI(row.Kind, 20), trimTUI(row.Tool, 16),
-			trimTUI(row.Verdict, 7), trimTUI(row.Reason, 14), count, trimTUI(tags, maxTUI(12, width-91)))
+		fmt.Fprintf(&b, "%9d %s %s %s %s %s %-5s %s\n",
+			row.Attention,
+			padRightTUI(trimTUI(row.Artifact, 24), 24),
+			padRightTUI(trimTUI(row.Kind, 20), 20),
+			padRightTUI(trimTUI(row.Tool, 16), 16),
+			padRightTUI(trimTUI(row.Verdict, 7), 7),
+			padRightTUI(trimTUI(row.Reason, 14), 14),
+			count, trimTUI(tags, maxTUI(12, width-91)))
 	}
 	return b.String()
 }
