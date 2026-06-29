@@ -32,19 +32,25 @@ const (
 // and owner separate from the payload (§2.2: "residency tier and owner recorded
 // separately from payload").
 type KVTransfer struct {
-	Direction    KVTransferDirection
-	SpanDigest   string // identity of the KV span being moved/restored/routed
-	Tokens       int64  // span length in positions
-	ModelID      string
-	TokenizerID  string
-	PositionMode PositionMode
-	FromTier     ResidencyTier
-	ToTier       ResidencyTier
-	Owner        string
-	Lease        string
-	Outcome      KVTransferOutcome
-	FaultReason  string // free-text when Outcome == fault
-	BytesMoved   int64
+	Direction        KVTransferDirection
+	SpanDigest       string // identity of the KV span being moved/restored/routed
+	Tokens           int64  // span length in positions
+	ModelID          string
+	TokenizerID      string
+	SerializerID     string
+	PositionMode     PositionMode
+	FromTier         ResidencyTier
+	ToTier           ResidencyTier
+	Owner            string
+	Lease            string
+	SecuritySet      bool
+	Taint            abi.TaintLabel
+	Scope            abi.ShareScope
+	AdmissionVerdict AdmissionVerdict
+	AdmittedBy       string
+	Outcome          KVTransferOutcome
+	FaultReason      string // free-text when Outcome == fault
+	BytesMoved       int64
 }
 
 // FromKVTransfer normalizes a live-engine KV residency event into a cache entry on
@@ -84,6 +90,7 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 			Producer:     owner,
 			ModelID:      t.ModelID,
 			TokenizerID:  t.TokenizerID,
+			SerializerID: t.SerializerID,
 			PositionMode: pm,
 		},
 		Security: Security{
@@ -101,6 +108,18 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 			"direction": string(t.Direction),
 			"outcome":   string(outcome),
 		},
+	}
+	if t.SecuritySet {
+		admittedBy := t.AdmittedBy
+		if admittedBy == "" {
+			admittedBy = owner
+		}
+		e.Security = Security{
+			Taint:            t.Taint,
+			Scope:            t.Scope,
+			AdmissionVerdict: t.AdmissionVerdict,
+			AdmittedBy:       admittedBy,
+		}
 	}
 	if t.FromTier != "" {
 		e.Labels["from_tier"] = string(t.FromTier)

@@ -1,6 +1,10 @@
 package cachemeta
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+)
 
 func TestFromKVTransferRecordsResidencyTransition(t *testing.T) {
 	e := FromKVTransfer(KVTransfer{
@@ -29,6 +33,34 @@ func TestFromKVTransferRecordsResidencyTransition(t *testing.T) {
 	}
 	if v := KVTransferVerdict(e); v.Kind != LookupHit {
 		t.Fatalf("ok transfer should be a HIT, got %s", v.Kind)
+	}
+}
+
+func TestFromKVTransferCarriesTrustDescriptor(t *testing.T) {
+	e := FromKVTransfer(KVTransfer{
+		Direction:        KVMigrate,
+		SpanDigest:       "span-trust",
+		Tokens:           4,
+		SerializerID:     "fak-paged-kv-f32-v1",
+		ToTier:           TierRemote,
+		Lease:            "lease-1",
+		SecuritySet:      true,
+		Taint:            abi.TaintQuarantined,
+		Scope:            abi.ScopeAgent,
+		AdmissionVerdict: AdmissionQuarantine,
+		AdmittedBy:       "admission-gate",
+	})
+	if e.Derivation.SerializerID != "fak-paged-kv-f32-v1" {
+		t.Fatalf("serializer id = %q", e.Derivation.SerializerID)
+	}
+	if e.Security.Taint != abi.TaintQuarantined ||
+		e.Security.Scope != abi.ScopeAgent ||
+		e.Security.AdmissionVerdict != AdmissionQuarantine ||
+		e.Security.AdmittedBy != "admission-gate" {
+		t.Fatalf("trust descriptor not carried: %+v", e.Security)
+	}
+	if e.Residency.Lease != "lease-1" {
+		t.Fatalf("lease not carried: %+v", e.Residency)
 	}
 }
 
