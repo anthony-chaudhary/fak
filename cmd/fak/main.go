@@ -149,6 +149,9 @@ func main() {
 		cmdServeWiring(os.Args[2:])
 	case "guard":
 		cmdGuard(os.Args[2:])
+	case "guard-precompact":
+		// Hidden: Claude Code PreCompact hook actuator installed by `fak guard`.
+		cmdGuardPreCompact(os.Args[2:])
 	case guard.TrampolineVerb:
 		// Hidden: the Landlock hook-floor re-exec trampoline (Linux). `fak guard
 		// --landlock-hooks` re-execs itself into this verb, which applies the

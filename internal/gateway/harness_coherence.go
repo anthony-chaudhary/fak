@@ -280,7 +280,7 @@ func (h *harnessCoherenceMetrics) writeHarnessCoherenceMetrics(b *strings.Builde
 		"WITNESSED (fak authored): turns that (will) cost a provider cache_creation burst — a harness rewrite or a cold-TTL rebuild. Lets an operator read the provider-cache cost of the two managers colliding.", int64(snap.burstsObserved))
 
 	writeHelpType(b, "fak_harness_coherence_posture",
-		"The CURRENT standing PreCompact posture the actuator (#1133, rung C) would enforce: 1 = block (exit 2 — suppress the harness's auto-compaction while fak's cache-preserving compaction is coping; the default), 0 = allow (exit 0 — fak's compaction has bailed for a sustained streak, so the harness is the only context net left). A decision surface only until rung C wires the hook.", "gauge")
+		"The CURRENT standing PreCompact posture the actuator (#1133, rung C) enforces when `fak guard` installs the Claude Code hook: 1 = block (exit 2 — suppress the harness's auto-compaction while fak's cache-preserving compaction is coping; the default), 0 = allow (exit 0 — fak's compaction has bailed for a sustained streak, so the harness is the only context net left).", "gauge")
 	fmt.Fprintf(b, "fak_harness_coherence_posture %d\n", postureGauge(snap.posture))
 }
 
