@@ -124,7 +124,7 @@ func TestAccountFromObservationsNoUnwitnessedCredit(t *testing.T) {
 func TestAccountFromObservationsNoUnmeasuredCredit(t *testing.T) {
 	obs := []ClassObservation{
 		{Class: "Read", ReuseAttempts: 100, Invalidations: 1},   // stable -> admit
-		{Class: "Write", ReuseAttempts: 100, Invalidations: 95}, // write-churned -> measured decline
+		{Class: "Write", ReuseAttempts: 100, Invalidations: 99}, // write-churned -> measured decline (m=0.99 makes per-reuse gain negative; 95/100 still narrowly pays the cheap v+c defaults)
 		{Class: "Glob"}, // no reuse attempts -> abstain (unmeasured)
 	}
 	rep := AccountFromObservations(SessionInput{
