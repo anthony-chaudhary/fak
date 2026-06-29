@@ -142,7 +142,7 @@ func TestGuardDetectProvider(t *testing.T) {
 		{"/usr/local/bin/claude", "anthropic", true},              // absolute path
 		{`C:\Program Files\claude\claude.exe`, "anthropic", true}, // Windows launcher
 		{"Claude", "anthropic", true},                             // case-insensitive
-		{"codex", "openai", true},
+		{"codex", "openai-responses", true},
 		{"opencode", "openai", true},
 		{"opencode.cmd", "openai", true}, // the Windows .cmd worker
 		{"aider", "openai", true},        // reads OPENAI_API_BASE, which guard now injects alongside OPENAI_BASE_URL
@@ -166,7 +166,7 @@ func TestResolveGuardProvider(t *testing.T) {
 	}{
 		{"openai", "claude", "openai", false},          // explicit flag wins over the name
 		{"  Anthropic ", "codex", "anthropic", false},  // explicit flag is normalized, still wins
-		{"", "codex", "openai", true},                  // empty flag -> inferred
+		{"", "codex", "openai-responses", true},        // empty flag -> inferred
 		{"", "claude", "anthropic", true},              // empty flag -> inferred (the common case)
 		{"", "some-unknown-agent", "anthropic", false}, // unrecognized -> anthropic fallback, NOT flagged as detected
 	}
@@ -188,7 +188,8 @@ func TestGuardInjectedEnv(t *testing.T) {
 
 	// OpenAI wire with no --env: BOTH conventional base-URL vars, each carrying /v1, so a
 	// client that reads OPENAI_API_BASE (Aider, LiteLLM) connects as well as one reading
-	// OPENAI_BASE_URL (Codex, OpenCode, the OpenAI SDK).
+	// OPENAI_BASE_URL (OpenCode, the OpenAI SDK). Codex also gets per-run -c provider
+	// overrides because it does not reliably honor OPENAI_BASE_URL for custom providers.
 	want := [][2]string{{"OPENAI_BASE_URL", gw + "/v1"}, {"OPENAI_API_BASE", gw + "/v1"}}
 	for _, p := range []string{"openai", "gemini", "xai", "other"} {
 		got := guardInjectedEnv(p, "", gw)

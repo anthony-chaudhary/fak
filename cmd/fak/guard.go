@@ -150,6 +150,7 @@ func cmdGuard(argv []string) {
 	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
 	replayTrace := fs.String("replay-trace", "", "DON'T wrap a live agent — instead REPLAY a recorded trace fixture through the real guard end to end and watch the floor fire. Stands up the gateway against a built-in fake upstream that emits the fixture's tool_use + token-usage turns, posts each turn through the SAME adjudication path `fak guard -- claude` uses, and prints per-turn what was allowed vs denied (with the deny reason), the turn's token/cache economy, and the journal rows recorded — then the exit summary + the verify command. No API key, no GPU, no child process. Use it to understand exactly what the guard does to a trace that leads to token work, and to demo the floor. See internal/gateway/testdata/guard-trace-e2e.json for the fixture shape.")
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
+	codexConfig := fs.Bool("codex-config", true, "when wrapping Codex, inject per-run -c model_provider/model_providers.fak overrides so Codex talks to the in-process gateway over the Responses wire. Codex-only; pass --codex-config=false if you already configured the fak provider yourself.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
@@ -170,6 +171,7 @@ func cmdGuard(argv []string) {
 		fmt.Fprint(os.Stdout, out)
 		os.Exit(code)
 	}
+
 	// The --landlock-hooks flag and FAK_GUARD_LANDLOCK env are equivalent; normalize the
 	// flag into the env so buildGuardChild (called from two paths) consults one source.
 	if *landlockHooks {
@@ -231,18 +233,6 @@ func cmdGuard(argv []string) {
 	if len(command) == 0 {
 		fs.Usage()
 		os.Exit(2)
-	}
-
-	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
-	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
-	// Code gets an actionable next step instead of a raw exec error after the gateway
-	// already started (issue #835, failure 1). A command given as an explicit path is left
-	// to exec to resolve.
-	if !strings.ContainsAny(command[0], "/\\") {
-		if _, lookErr := exec.LookPath(command[0]); lookErr != nil {
-			fmt.Fprintf(os.Stderr, "fak guard: %q is not on your PATH. Install it (Claude Code: https://claude.com/claude-code), or pass the full path / a different agent after `--`.\n", command[0])
-			os.Exit(2)
-		}
 	}
 
 	// Observability sink for the gateway's structured per-request + per-verdict logs
@@ -425,6 +415,20 @@ func cmdGuard(argv []string) {
 				}
 				return tok
 			}
+		}
+	}
+
+	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
+	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
+	// Code gets an actionable next step instead of a raw exec error after the gateway
+	// already started (issue #835, failure 1). Keep this after the headless no-token gate:
+	// in automation, the credential refusal is the actionable failure even on hosts whose
+	// test image does not have the wrapped binary installed. A command given as an explicit
+	// path is left to exec to resolve.
+	if !strings.ContainsAny(command[0], "/\\") {
+		if _, lookErr := exec.LookPath(command[0]); lookErr != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: %q is not on your PATH. Install it (Claude Code: https://claude.com/claude-code), or pass the full path / a different agent after `--`.\n", command[0])
+			os.Exit(2)
 		}
 	}
 
@@ -658,6 +662,10 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	injected = append(injected, stopHookEnv...)
+	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
+	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
+	// Claude-specific hook installers have had a chance to no-op.
+	command, codexInstall := installGuardCodexConfig(command, *codexConfig, gwURL, *apiKeyEnv)
 	child := buildGuardChild(command, injected, pinUpstream)
 
 	if !*quiet {
@@ -679,6 +687,7 @@ func cmdGuard(argv []string) {
 		if stopHookInstall.Applied {
 			fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook (deny-all auto-continue): %s — graduated nudge→warn(%d)→final(%d)→give-up(>%d consecutive); a floor-refused-everything turn is reported as end_turn and this resumes the agent past it with escalating guidance, the give-up logged (--deny-all-continue off to disable)\n", stopHookInstall.Mode, stopHookInstall.WarnAt, stopHookInstall.FinalAt, stopHookInstall.Max)
 		}
+		printGuardCodexNote(os.Stderr, codexInstall)
 		if *debugStats {
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
 		}
@@ -1194,6 +1203,13 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 			status = "DISABLED (budget 0; body forwarded byte-for-byte)"
 		} else if sum.CompactionFired == 0 && sum.CompactionShedTokens == 0 {
 			status = fmt.Sprintf("ENABLED but idle, budget %d tok — nothing sprawled past the cut", sum.CompactionBudget)
+			// An idle that is NOT a short session: the cache_control anchor protected a prefix
+			// larger than the budget, so the lever could not fire no matter the session length.
+			// This is the dormant-on-real-Claude-Code-traffic pathology (#1407), the opposite of
+			// "nothing sprawled" — call it out so a tighter budget isn't misread as the fix.
+			if sum.CompactionAnchorStarved > 0 {
+				status = fmt.Sprintf("ENABLED but ANCHOR-STARVED, budget %d tok — the cache_control anchor protects MORE than the budget so it cannot fire (NOT a short session; #1407)", sum.CompactionBudget)
+			}
 		}
 		fmt.Fprintf(&b, "fak guard: compaction [%s] — %d fired, %d bailed, %d off; shed %d token(s)\n",
 			status,
@@ -1218,6 +1234,14 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 				}
 				fmt.Fprintf(&b, "  bailed: %-16s x%d%s\n", r, sum.CompactionBailReasons[r], note)
 			}
+		}
+		// Anchor-starved is a SUBSET of the under_budget bails above, surfaced apart because it is
+		// operationally opposite: a plain under_budget is a benign short session, an anchor-starved
+		// one means the anchor swallowed the conversation so no budget tightening can ever make it
+		// fire — only a re-anchor (#1407 / opt-in head-anchored firing #1408) can.
+		if sum.CompactionAnchorStarved > 0 {
+			fmt.Fprintf(&b, "  ⚠ anchor-starved x%d — protected prefix exceeds the %d-tok budget; compaction cannot fire on this traffic regardless of session length (re-anchor needed, not a tighter budget — #1407)\n",
+				sum.CompactionAnchorStarved, sum.CompactionBudget)
 		}
 	}
 	// Tool-floor prune (the INBOUND tools[] lever): how many unreachable tool DEFINITIONS fak
