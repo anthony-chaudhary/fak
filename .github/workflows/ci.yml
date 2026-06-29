@@ -488,10 +488,11 @@ jobs:
           python tools/stability_scorecard_test.py
           # guard-RSI: the RSI loop for `fak guard` scored against reality (the verdict
           # loop closes on the real decision journal; the latency loop's hardware gate is
-          # honestly disclosed). The live smoke pins the verdict loop's presence + the
-          # honesty gate that refuses an unwitnessed / empty-journal keep.
-          python tools/guard_verdict_rsi_test.py
-          python tools/guard_rsi_scorecard_test.py
+          # honestly disclosed). The verdict-loop + scorecard Python tools were ported to Go
+          # (internal/guardrsi) and deleted in 6d288b9a; this runs the Go port's tests, which
+          # pin the verdict loop's presence + the honesty gate that refuses an unwitnessed /
+          # empty-journal keep.
+          go test ./internal/guardrsi/
 
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
