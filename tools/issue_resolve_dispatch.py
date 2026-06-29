@@ -76,6 +76,13 @@ RUNS_DIRNAME = ".dispatch-runs"
 # .pid/.backend sidecars so an auditor enumerates a wave straight from disk.
 WAVE_SIDECAR_SUFFIX = ".wave"
 ACCOUNT_SIDECAR_SUFFIX = ".account"
+# Commit-time diff-witness binding (residual of #1310/#1324, proposal #2). The
+# dispatcher stamps repo HEAD into a .basesha sidecar at launch (per-worker
+# commit-sha tracking) so a later tick can re-audit the commit THIS worker landed,
+# and records the slot's witness verdict in a .witness sidecar so a bare `exit 0`
+# never SILENTLY counts as productive. See the witness sweep below.
+BASE_SHA_SIDECAR_SUFFIX = ".basesha"
+WITNESS_SIDECAR_SUFFIX = ".witness"
 # Fenced lane-lease (residual of #1310): the dispatcher ATOMICALLY acquires
 # refs/fak/locks/resolve-<lane> via `fak leaseref acquire` before launching, so a
 # tick on ANOTHER machine (and a same-host TOCTOU race the log-scan can't close)
@@ -116,6 +123,23 @@ def repo_root() -> Path:
 
 def _py() -> str:
     return sys.executable or "python"
+
+
+def _git_capture(root: Path, args: list[str], *, timeout: int = 30) -> tuple[int, str]:
+    """Run one ``git`` subcommand under ``root``; return ``(rc, stdout)``. Never
+    raises: an exec failure is reported as rc 127 so every caller fails open. Used
+    by the per-worker commit-witness binding (#1324 proposal #2)."""
+    kwargs: dict[str, Any] = {
+        "cwd": str(root), "capture_output": True, "text": True,
+        "encoding": "utf-8", "errors": "replace", "timeout": timeout,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = no_window_creationflags()
+    try:
+        proc = subprocess.run(["git", *args], **kwargs)
+    except (OSError, subprocess.SubprocessError):
+        return 127, ""
+    return proc.returncode, proc.stdout or ""
 
 
 def lane_issue_numbers(root: Path, explicit_lane: str | None,
@@ -377,7 +401,8 @@ def prune_dead_sidecars(
     would_prune: list[str] = []
     if not runs_dir.is_dir():
         return {"live": live, "pruned": pruned, "would_prune": would_prune}
-    sibling_suffixes = (".log", ".backend", ".wave", ".account")
+    sibling_suffixes = (".log", ".backend", ".wave", ".account",
+                        BASE_SHA_SIDECAR_SUFFIX, WITNESS_SIDECAR_SUFFIX)
     for pid_file in sorted(runs_dir.glob("resolve-*.pid")):
         if not _LOG_ISSUE_RE.search(pid_file.name):
             continue
@@ -634,6 +659,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        backend: str,
                        membership: dict[str, Any] | None = None,
                        account: dict[str, Any] | None = None,
+                       base_sha: str | None = None,
                        spawn_probe_s: float = 0.0) -> dict[str, Any]:
     """Launch a detached worker (claude or opencode) on one issue; record pid.
 
@@ -675,6 +701,13 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     # Per-worker backend sidecar: makes each run's backend traceable from disk,
     # independent of the (multi-task, last-writer) tick record.
     (out_log.with_suffix(".backend")).write_text(backend, encoding="utf-8")
+    # Per-worker base SHA (#1324 proposal #2): record repo HEAD at launch so a later
+    # tick re-audits the commit THIS worker lands (the newest commit in base..HEAD
+    # citing its #issue), not whatever a sibling pushed to HEAD. Optional + best
+    # effort: a None/empty base simply omits the sidecar and the witness falls back
+    # to recent history.
+    if base_sha:
+        (out_log.with_suffix(BASE_SHA_SIDECAR_SUFFIX)).write_text(base_sha, encoding="utf-8")
     result: dict[str, Any] = {"pid": proc.pid, "log": str(out_log), "issue": issue,
                               "lane": lane, "backend": backend}
     acct = write_account_sidecar(out_log, account)
@@ -1238,9 +1271,13 @@ def reap_expired_leases(root: Path, *, runner: Any | None = None) -> dict[str, A
 
     NOTE: there is deliberately no early-release helper here. `fak leaseref` exposes
     only acquire/reap (no delete-one-live-lease verb), so a held lane is freed by
-    TTL+reap, not an explicit release. Binding the release to a worker's
-    diff-witness (proposal #2 of #1324) is a separate increment that first needs
-    that release verb and per-worker commit-sha tracking — see the issue residual."""
+    TTL+reap, not an explicit release. The commit-time diff-witness binding of
+    proposal #2 (#1324) is now wired — :func:`witness_exited_workers` records each
+    finished worker's slot as CLAIM_WITNESSED / CLAIM_UNWITNESSED / CLAIM_NO_COMMIT
+    via `dos commit-audit`, so a slot no longer silently counts as productive on a
+    bare exit. The ONLY remaining residual is the WITNESSED-EARLY-RELEASE of the lane
+    lease, which still needs that delete-one-live verb; until it lands the lease is
+    freed by TTL+reap, exactly as the issue sanctions for a crashed holder."""
     run = runner or _run_lease
     res = run(root, ["reap"])
     return {"ok": res.get("rc") == 0, "rc": res.get("rc"), "stdout": res.get("stdout")}
@@ -1272,6 +1309,175 @@ def lane_tree(root: Path, lane: str) -> list[str]:
     if globs:
         return list(globs)
     return [f"internal/{lane}/**"]
+
+
+# --- Commit-time diff-witness binding (residual of #1310/#1324, proposal #2) ---
+# The fenced lane-lease above is the UPSTREAM half of the verified loop: it denies a
+# colliding spawn before it starts. This is the DOWNSTREAM half: a worker's slot only
+# counts as PRODUCTIVE once the commit it actually landed passes `dos commit-audit`
+# (diff-witnessed). Before this, the slot counted as productive on a bare worker
+# `exit 0` / a non-empty log, so an unwitnessed — or wrong-issue — commit silently
+# claimed the slot. Here each finished worker's commit is re-audited through the same
+# non-forgeable witness rung the close arm already uses (issue_resolve_witnessed
+# .reverify), pulled forward to the dispatch slot, and the verdict is RECORDED:
+# CLAIM_WITNESSED / CLAIM_UNWITNESSED / CLAIM_NO_COMMIT.
+#
+# Per-worker commit-sha tracking: the .basesha sidecar stamped at launch scopes the
+# re-audit to the commit THIS worker landed (base..HEAD citing its #issue), not
+# whatever a sibling pushed to HEAD. EVERYTHING here is FAIL-OPEN and DEAD-PID gated
+# (a live worker may not have committed yet — never mis-blame it), the same discipline
+# as prune_dead_sidecars and the backend-health classifier, so it can only ever ADD a
+# recorded verdict, never wedge the loop. The lane lease is still freed by TTL+reap
+# (`fak leaseref` exposes only acquire/reap, no early-release verb yet), so this binds
+# the slot witness without a deadlock — the increment the issue residual scopes.
+CLAIM_WITNESSED = "CLAIM_WITNESSED"
+CLAIM_UNWITNESSED = "CLAIM_UNWITNESSED"
+CLAIM_NO_COMMIT = "CLAIM_NO_COMMIT"
+# The DOS witness rung a "truly resolved" commit must clear — the same non-forgeable
+# keep-bit issue_closure_audit / issue_resolve_witnessed grade against.
+_WITNESS_OK = "diff-witnessed"
+
+
+def _subject_cites_issue(subject: str, issue: int) -> bool:
+    """True when a commit ``subject`` names ``#<issue>`` at a word boundary — the
+    same binding key issue_closure_audit uses. A subject that does not name the
+    worker's issue is not this worker's resolving commit (the "wrong-issue commit"
+    the slot must not claim). The leading boundary keeps ``#1324`` from matching a
+    glued ``...#1324`` token while still matching a normal ``(#1324)``."""
+    return re.search(rf"(?<![\w-])#{int(issue)}\b", subject or "") is not None
+
+
+def worker_resolving_sha(root: Path, issue: int, *, base_sha: str | None = None,
+                         git: Any | None = None, scan_limit: int = 300) -> str | None:
+    """The newest commit whose SUBJECT cites ``#<issue>`` — the commit THIS worker
+    landed for its assigned issue. Scoped to ``base_sha..HEAD`` (the per-worker
+    window recorded at spawn) when the base is known, else the most recent
+    ``scan_limit`` commits. Returns None when no such commit exists — the worker
+    landed nothing for its issue, or committed a wrong-issue subject — so the slot
+    claims nothing. Fail-open: any git error yields None."""
+    git = git or _git_capture
+    rev_args = ["log", "--no-color", "--pretty=format:%H\x1f%s"]
+    if base_sha:
+        rev_args.append(f"{base_sha}..HEAD")
+    else:
+        rev_args += ["-n", str(int(scan_limit))]
+    rc, out = git(root, rev_args)
+    if rc != 0 or not out:
+        return None
+    for line in out.splitlines():
+        sha, _sep, subject = line.partition("\x1f")
+        if sha and _subject_cites_issue(subject, issue):
+            return sha.strip()
+    return None
+
+
+def _run_commit_audit(root: Path, sha: str, *, timeout: int = 60) -> dict[str, Any]:
+    """Default ``dos commit-audit <sha> --json`` runner -> the row for ``sha`` (the
+    command emits a JSON array, one row per audited sha). Never raises; an exec/parse
+    failure yields ``{}`` so the caller fails open to "not witnessed"."""
+    kwargs: dict[str, Any] = {
+        "cwd": str(root), "capture_output": True, "text": True,
+        "encoding": "utf-8", "errors": "replace", "timeout": timeout,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = no_window_creationflags()
+    try:
+        proc = subprocess.run(["dos", "commit-audit", sha, "--workspace", str(root),
+                               "--json"], **kwargs)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    out = (proc.stdout or "").strip()
+    try:
+        parsed = json.loads(out) if out else []
+    except ValueError:
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        for row in parsed:
+            if isinstance(row, dict) and row.get("sha") and str(sha).startswith(str(row["sha"])):
+                return row
+        if parsed and isinstance(parsed[0], dict):
+            return parsed[0]
+    return {}
+
+
+def audit_commit_witness(root: Path, sha: str, *, runner: Any | None = None) -> dict[str, Any]:
+    """Grade ``sha`` through the DOS witness rung: ``{witnessed, verdict, witness}``.
+    ``witnessed`` is True only on verdict OK AND a diff-witness — the same keep-bit
+    issue_resolve_witnessed.reverify uses at close time, applied here at the dispatch
+    slot. Fail-open: a missing/empty audit -> witnessed False (the conservative slot
+    verdict, never a silent productive claim)."""
+    run = runner or _run_commit_audit
+    doc = run(root, sha) or {}
+    verdict = str(doc.get("verdict") or "")
+    witness = str(doc.get("witness") or "")
+    witnessed = verdict.upper() == "OK" and witness == _WITNESS_OK
+    return {"witnessed": witnessed, "verdict": verdict or None, "witness": witness or None}
+
+
+def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
+                           alive: set[int] | None = None, probe: Any | None = None,
+                           git: Any | None = None,
+                           audit_runner: Any | None = None) -> dict[str, Any]:
+    """Bind each FINISHED worker's slot to a `dos commit-audit` witness (#1324
+    proposal #2). For every ``resolve-<N>-<stamp>.log`` whose pid is provably DEAD and
+    not yet witnessed (no ``.witness`` sidecar), find the commit it landed for its
+    issue (:func:`worker_resolving_sha`) and grade it: a diff-witnessed commit ->
+    CLAIM_WITNESSED (the slot was productive); an unwitnessed or wrong-issue commit ->
+    CLAIM_UNWITNESSED; no resolving commit at all -> CLAIM_NO_COMMIT. The verdict is
+    recorded in a ``.witness`` sidecar on live ticks so a bare ``exit 0`` / non-empty
+    log never SILENTLY counts as productive.
+
+    Dead-pid gated (a still-running worker may not have committed yet — never
+    mis-blame it) and FAIL-OPEN throughout, exactly like :func:`prune_dead_sidecars`."""
+    out: dict[str, Any] = {"live": live, "audited": [], "witnessed": [],
+                           "unwitnessed": [], "no_commit": []}
+    if not runs_dir.is_dir():
+        return out
+    if alive is None and probe is None:
+        try:
+            import psutil  # type: ignore
+            alive = {p.pid for p in psutil.process_iter()}
+        except ImportError:
+            alive = None
+    bucket_of = {CLAIM_WITNESSED: "witnessed", CLAIM_UNWITNESSED: "unwitnessed",
+                 CLAIM_NO_COMMIT: "no_commit"}
+    for log in sorted(runs_dir.glob("resolve-*.log")):
+        m = _LOG_ISSUE_RE.search(log.name)
+        if not m:
+            continue
+        if log.with_suffix(WITNESS_SIDECAR_SUFFIX).exists():
+            continue  # audited once; a commit's diff (so its verdict) is immutable
+        pid_file = log.with_suffix(".pid")
+        if not pid_file.exists():
+            continue  # no pid -> cannot prove the worker finished -> not yet auditable
+        if dispatch_preflight.resolve_sidecar_pid_is_live(pid_file, alive=alive, probe=probe):
+            continue  # still running -> it may not have committed yet
+        issue = int(m.group(1))
+        try:
+            base = log.with_suffix(BASE_SHA_SIDECAR_SUFFIX).read_text(
+                encoding="utf-8").strip() or None
+        except OSError:
+            base = None
+        sha = worker_resolving_sha(root, issue, base_sha=base, git=git)
+        if not sha:
+            rec = {"issue": issue, "log": log.name, "sha": None,
+                   "claim": CLAIM_NO_COMMIT, "verdict": None, "witness": None}
+        else:
+            w = audit_commit_witness(root, sha, runner=audit_runner)
+            rec = {"issue": issue, "log": log.name, "sha": sha,
+                   "claim": CLAIM_WITNESSED if w["witnessed"] else CLAIM_UNWITNESSED,
+                   "verdict": w["verdict"], "witness": w["witness"]}
+        out["audited"].append(rec)
+        out[bucket_of[rec["claim"]]].append(rec)
+        if live:
+            try:
+                log.with_suffix(WITNESS_SIDECAR_SUFFIX).write_text(
+                    json.dumps(rec, sort_keys=True), encoding="utf-8")
+            except OSError:
+                pass
+    return out
 
 
 def is_dos_run_id(run_id: object) -> bool:
@@ -1482,6 +1688,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     runs_dir = root / RUNS_DIRNAME
     reg = issue_dispatch.refresh_registry(root) if refresh else {"skipped": True}
     reaped = reap_timed_out_workers(runs_dir, timeout_s=worker_timeout_s, live=live)
+    # Commit-time diff-witness binding (#1324 proposal #2) — BEFORE the corpse sweep
+    # below, which would delete a finished worker's log/sidecars before it could be
+    # audited. Each dead-pid worker's slot is graded through `dos commit-audit`: an
+    # unwitnessed / wrong-issue commit is recorded CLAIM_UNWITNESSED instead of
+    # silently counting as productive. Live ticks only (the audit + the .witness
+    # sidecar write are the side effects); fail-open.
+    witnessed = (witness_exited_workers(runs_dir, root, live=live) if live
+                 else {"skipped": True})
     # Sweep the dead sidecars the reaper leaves behind, BEFORE preflight counts
     # capacity — otherwise stale `.pid` files accumulate and a recycled PID landing
     # in one's spawn window is miscounted as a live worker, pinning the cap.
@@ -1600,6 +1814,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # Surface the lease reap only on a live tick where it ran, so a dry-run
         # payload stays byte-identical to before the lease gate.
         **({"leases_reaped": leases_reaped} if live else {}),
+        # Surface the commit-time witness verdicts (#1324 proposal #2) only on a live
+        # tick where the sweep ran, so a dry-run payload stays byte-identical.
+        **({"witnessed_slots": witnessed} if live else {}),
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                       "cap": pre.get("cap"), "live": pre.get("live")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
@@ -1682,8 +1899,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         env = opencode_worker_env(acct.get("dir"), chosen_lane, root, runs_dir)
     env["FLEET_RESOLVE_ISSUE"] = str(target)
     command = build_worker_command(backend, rec["prompt"], model)
+    # Per-worker commit-sha tracking (#1324 proposal #2): stamp repo HEAD now, before
+    # the worker can commit, so a later tick re-audits the commit THIS worker lands
+    # (base..HEAD citing #target). Fail-open: a git error -> no base, and the witness
+    # falls back to recent history.
+    rc_head, head_out = _git_capture(root, ["rev-parse", "HEAD"])
+    base_sha = head_out.strip() if rc_head == 0 and head_out.strip() else None
     spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend,
-                                 account=acct, spawn_probe_s=spawn_probe_s)
+                                 account=acct, base_sha=base_sha, spawn_probe_s=spawn_probe_s)
     early = spawned.get("early_exit") or {}
     if early.get("checked") and not early.get("alive") and early.get("silent"):
         # The spawn died immediately, so the lane lease we just took now guards a
@@ -1755,6 +1978,11 @@ def render(p: dict[str, Any]) -> str:
         lines.append(f"  reaped timed-out workers: {len(reaped)}")
     elif would_reap:
         lines.append(f"  would reap timed-out workers: {len(would_reap)}")
+    ws = p.get("witnessed_slots") or {}
+    if ws.get("audited"):
+        lines.append(f"  witnessed slots: {len(ws.get('witnessed') or [])} witnessed, "
+                     f"{len(ws.get('unwitnessed') or [])} CLAIM_UNWITNESSED, "
+                     f"{len(ws.get('no_commit') or [])} no-commit")
     if not p.get("live") and p.get("action") == "would_spawn":
         lines.append("  DRY-RUN — re-run with --live to spawn the issue worker")
     return "\n".join(lines)

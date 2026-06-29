@@ -1515,6 +1515,12 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "candidates": [], "reaped": [], "would_reap": []}
         mod.prune_dead_sidecars = lambda runs_dir, **k: {"pruned": []}
+        # Keep the commit-witness sweep + base-sha capture hermetic: no real git/dos
+        # subprocess runs in the lease-gate wiring tests.
+        mod.witness_exited_workers = lambda runs_dir, root, **k: {
+            "live": True, "audited": [], "witnessed": [], "unwitnessed": [],
+            "no_commit": []}
+        mod._git_capture = lambda root, args, **k: (0, "basesha0\n")
         mod.lane_tree = lambda root, lane: [f"internal/{lane}/**"]
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}"}
@@ -1607,6 +1613,241 @@ class EvaluateLeaseGateTest(unittest.TestCase):
                          live=False, lease_runner=boom_runner)
         self.assertEqual(p["verdict"], "WOULD_SPAWN")
         self.assertNotIn("lease", p)
+        # The commit-witness sweep is live-only too, so a dry-run payload omits it.
+        self.assertNotIn("witnessed_slots", p)
+
+    def test_live_surfaces_witnessed_slots(self) -> None:
+        # The commit-time witness verdicts (#1324 proposal #2) are surfaced on a live
+        # tick so a CLAIM_UNWITNESSED slot is visible in the tick record, not silent.
+        mod = load()
+        spawn = lambda *a, **k: {"pid": 9, "log": "resolve-467.log", "issue": 467,
+                                 "lane": "gateway", "backend": "claude"}
+        self._stub(mod, spawn=spawn)
+        mod.witness_exited_workers = lambda runs_dir, root, **k: {
+            "live": True, "audited": [{"issue": 470, "claim": "CLAIM_UNWITNESSED"}],
+            "witnessed": [], "unwitnessed": [{"issue": 470, "claim": "CLAIM_UNWITNESSED"}],
+            "no_commit": []}
+        lease_runner = lambda root, args, **k: {
+            "rc": 0, "verdict": {"verdict": {"ok": True},
+                                 "record": {"id": "resolve-gateway", "generation": 1}}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=True, lease_runner=lease_runner)
+        self.assertEqual(p["verdict"], "SPAWNED")
+        self.assertIn("witnessed_slots", p)
+        self.assertEqual(p["witnessed_slots"]["unwitnessed"][0]["claim"], "CLAIM_UNWITNESSED")
+
+
+class SubjectCitesIssueTest(unittest.TestCase):
+    """The per-worker commit binding key (#1324 proposal #2): a subject is THIS
+    worker's commit only when it names the worker's #issue at a word boundary —
+    never a numeric prefix/suffix or a glued token."""
+
+    def test_word_boundary_binding(self) -> None:
+        mod = load()
+        self.assertTrue(mod._subject_cites_issue("fix(tools): bind slot (#1324) (fak tools)", 1324))
+        self.assertTrue(mod._subject_cites_issue("resolve #1324 now", 1324))
+        # a longer number that merely CONTAINS the digits is not a match
+        self.assertFalse(mod._subject_cites_issue("fix #13240 thing", 1324))
+        self.assertFalse(mod._subject_cites_issue("fix #132 thing", 1324))
+        # a glued token (leading word char) is not a binding reference
+        self.assertFalse(mod._subject_cites_issue("xoxb-secret#1324", 1324))
+        self.assertFalse(mod._subject_cites_issue("no reference here", 1324))
+
+
+class WorkerResolvingShaTest(unittest.TestCase):
+    """worker_resolving_sha picks the NEWEST commit citing the worker's issue, scoped
+    to the per-worker base..HEAD window when known, and yields None (claims nothing)
+    when no resolving commit exists — the wrong-issue / no-commit slot."""
+
+    def test_picks_newest_matching_subject(self) -> None:
+        mod = load()
+        # git log is newest-first; only the second line cites #1324.
+        log = "deadbeef\x1fchore: bump (#99)\ncafef00d\x1ffix: bind (#1324) (fak tools)\n"
+        out = mod.worker_resolving_sha(ROOT, 1324, git=lambda root, args: (0, log))
+        self.assertEqual(out, "cafef00d")
+
+    def test_wrong_issue_only_yields_none(self) -> None:
+        mod = load()
+        log = "deadbeef\x1fchore: bump (#99)\ncafef00d\x1ffix: other (#42)\n"
+        self.assertIsNone(mod.worker_resolving_sha(ROOT, 1324, git=lambda root, args: (0, log)))
+
+    def test_base_sha_scopes_the_range(self) -> None:
+        mod = load()
+        seen: dict = {}
+        def git(root, args):
+            seen["args"] = list(args)
+            return (0, "cafef00d\x1ffix: bind (#1324)\n")
+        mod.worker_resolving_sha(ROOT, 1324, base_sha="base000", git=git)
+        self.assertIn("base000..HEAD", seen["args"])
+
+    def test_no_base_falls_back_to_recent_window(self) -> None:
+        mod = load()
+        seen: dict = {}
+        def git(root, args):
+            seen["args"] = list(args)
+            return (0, "")
+        mod.worker_resolving_sha(ROOT, 1324, git=git, scan_limit=42)
+        self.assertIn("-n", seen["args"])
+        self.assertIn("42", seen["args"])
+
+    def test_git_error_fails_open_to_none(self) -> None:
+        mod = load()
+        self.assertIsNone(mod.worker_resolving_sha(ROOT, 1324, git=lambda root, args: (127, "")))
+
+
+class AuditCommitWitnessTest(unittest.TestCase):
+    """audit_commit_witness grades a sha through the DOS witness rung: witnessed only
+    on verdict OK AND a diff-witness; everything else (ABSTAIN, subject-only, an empty
+    audit) is the conservative not-witnessed verdict."""
+
+    def test_ok_diff_witnessed_is_witnessed(self) -> None:
+        mod = load()
+        out = mod.audit_commit_witness(
+            ROOT, "abc", runner=lambda root, sha: {"verdict": "OK", "witness": "diff-witnessed"})
+        self.assertTrue(out["witnessed"])
+        self.assertEqual(out["verdict"], "OK")
+
+    def test_abstain_is_not_witnessed(self) -> None:
+        mod = load()
+        out = mod.audit_commit_witness(
+            ROOT, "abc", runner=lambda root, sha: {"verdict": "ABSTAIN", "witness": "abstain"})
+        self.assertFalse(out["witnessed"])
+
+    def test_subject_only_is_not_witnessed(self) -> None:
+        mod = load()
+        out = mod.audit_commit_witness(
+            ROOT, "abc", runner=lambda root, sha: {"verdict": "OK", "witness": "subject-only"})
+        self.assertFalse(out["witnessed"])
+
+    def test_empty_audit_fails_open_to_not_witnessed(self) -> None:
+        mod = load()
+        out = mod.audit_commit_witness(ROOT, "abc", runner=lambda root, sha: {})
+        self.assertFalse(out["witnessed"])
+
+
+class WitnessExitedWorkersTest(unittest.TestCase):
+    """The commit-time witness sweep (#1324 proposal #2): each FINISHED (dead-pid)
+    worker's slot is graded via dos commit-audit and recorded CLAIM_WITNESSED /
+    CLAIM_UNWITNESSED / CLAIM_NO_COMMIT — never a silent productive claim. Dead-pid
+    gated and write-on-live, exactly like prune_dead_sidecars."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, pid: int,
+            base: str | None = "base000") -> Path:
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text("worker output here", encoding="utf-8")
+        log.with_suffix(".pid").write_text(str(pid), encoding="utf-8")
+        if base is not None:
+            log.with_suffix(".basesha").write_text(base, encoding="utf-8")
+        return log
+
+    @staticmethod
+    def _dead(pid):
+        return {"alive": False}
+
+    def test_unwitnessed_commit_is_recorded_not_silently_productive(self) -> None:
+        # The issue's acceptance witness #2: a worker that exits with an unwitnessed
+        # commit is recorded CLAIM_UNWITNESSED, and a .witness sidecar persists it.
+        import json
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = self._mk(runs, 1324, "20260629-120000", pid=4242)
+            git = lambda root, args: (0, "cafef00d\x1ffix: bind (#1324)\n")
+            audit = lambda root, sha: {"verdict": "ABSTAIN", "witness": "abstain"}
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=git, audit_runner=audit)
+            self.assertEqual(len(out["unwitnessed"]), 1)
+            self.assertEqual(out["unwitnessed"][0]["claim"], "CLAIM_UNWITNESSED")
+            self.assertEqual(out["unwitnessed"][0]["sha"], "cafef00d")
+            side = log.with_suffix(".witness")
+            self.assertTrue(side.exists())
+            self.assertEqual(json.loads(side.read_text(encoding="utf-8"))["claim"],
+                             "CLAIM_UNWITNESSED")
+
+    def test_diff_witnessed_commit_claims_the_slot(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1324, "20260629-120100", pid=4243)
+            git = lambda root, args: (0, "cafef00d\x1ffix: bind (#1324)\n")
+            audit = lambda root, sha: {"verdict": "OK", "witness": "diff-witnessed"}
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=git, audit_runner=audit)
+            self.assertEqual(len(out["witnessed"]), 1)
+            self.assertEqual(out["witnessed"][0]["claim"], "CLAIM_WITNESSED")
+
+    def test_no_resolving_commit_is_claim_no_commit(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1324, "20260629-120200", pid=4244)
+            # git finds nothing citing #1324 -> the worker landed no resolving commit.
+            git = lambda root, args: (0, "deadbeef\x1fchore: unrelated (#5)\n")
+            boom = lambda root, sha: (_ for _ in ()).throw(AssertionError("no audit without a sha"))
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=git, audit_runner=boom)
+            self.assertEqual(len(out["no_commit"]), 1)
+            self.assertEqual(out["no_commit"][0]["claim"], "CLAIM_NO_COMMIT")
+            self.assertIsNone(out["no_commit"][0]["sha"])
+
+    def test_live_worker_is_not_audited(self) -> None:
+        # A still-running worker may not have committed yet — never mis-blame it.
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 1324, "20260629-120300", pid=4245)
+            alive_probe = lambda pid: {"alive": True, "create_time": 0.0,
+                                       "name": "claude.exe",
+                                       "cmdline": "claude -p resolve GitHub issue #1324"}
+            boom_git = lambda root, args: (_ for _ in ()).throw(
+                AssertionError("a live worker must not be audited"))
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=alive_probe,
+                                             git=boom_git)
+            self.assertEqual(out["audited"], [])
+
+    def test_already_witnessed_is_skipped(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = self._mk(runs, 1324, "20260629-120400", pid=4246)
+            log.with_suffix(".witness").write_text('{"claim": "CLAIM_WITNESSED"}',
+                                                   encoding="utf-8")
+            boom_git = lambda root, args: (_ for _ in ()).throw(
+                AssertionError("an already-witnessed worker must not be re-audited"))
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=boom_git)
+            self.assertEqual(out["audited"], [])
+
+    def test_dry_run_audits_but_writes_no_sidecar(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = self._mk(runs, 1324, "20260629-120500", pid=4247)
+            git = lambda root, args: (0, "cafef00d\x1ffix: bind (#1324)\n")
+            audit = lambda root, sha: {"verdict": "ABSTAIN", "witness": "abstain"}
+            out = mod.witness_exited_workers(runs, ROOT, live=False, probe=self._dead,
+                                             git=git, audit_runner=audit)
+            self.assertEqual(out["unwitnessed"][0]["claim"], "CLAIM_UNWITNESSED")
+            self.assertFalse(log.with_suffix(".witness").exists())
+
+    def test_no_pid_sidecar_is_not_auditable(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # a log with no .pid sidecar: we cannot prove it finished.
+            (runs / "resolve-1324-20260629-120600.log").write_text("x", encoding="utf-8")
+            boom_git = lambda root, args: (_ for _ in ()).throw(
+                AssertionError("a worker we cannot prove finished must not be audited"))
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=boom_git)
+            self.assertEqual(out["audited"], [])
 
 
 if __name__ == "__main__":
