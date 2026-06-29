@@ -1,0 +1,111 @@
+name: cachevalue-feed
+
+# Publish fak's cache-value P&L roll-up to the cache-value Slack channel
+# (C0BDSB81XDZ, scoreboard workspace T0BDEJF1HGB). The feed folds the dogfooded
+# kernel cache-value ledger (docs/nightrun/cache-value.jsonl), appends one local
+# feed-history row (docs/cachevalue/history.jsonl), and renders the same card a
+# live post would send.
+#
+# This is a SLACK STATUS feeder (cadence -> channel post), not an issue feeder.
+# Scheduled ticks are dry-run-first: they always render the card to the step
+# summary and upload artifacts; a live Slack post happens only when the shared
+# scoreboard bot token secret is configured.
+#
+# OPERATOR STEP (one-time): add FAK_SCOREBOARD_TOKEN under Settings -> Secrets
+# and variables -> Actions. The cache-value channel defaults to C0BDSB81XDZ;
+# override with the FAK_CACHEVALUE_CHANNEL repo variable if needed.
+on:
+  schedule:
+    # Daily 09:37 UTC - an off-the-hour minute clear of the other scheduled jobs
+    # (garden 06:23, dogfood 06:41, dogfood-coverage 07:13, steering-guard 07:33,
+    # score-signal 07:41, gate-signal 07:53, bench-signal 08:03,
+    # scoreboard-feed/cadence 08:17, bench-feed 08:27, dojo-feed 08:37,
+    # capacity-feed 08:47, node-usage-feed 08:57, blockers-feed 09:07).
+    - cron: "37 9 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render the card but do NOT post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cachevalue-feed
+  cancel-in-progress: false
+
+jobs:
+  cachevalue-feed:
+    name: cache-value trend -> #cache-value
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_CACHEVALUE_CHANNEL: ${{ vars.FAK_CACHEVALUE_CHANNEL || 'C0BDSB81XDZ' }}
+      FAK_SCOREBOARD_SOURCE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: cachevalue feed self-test
+        run: |
+          go test ./internal/cachevaluereport ./internal/cachevaluepost
+          go test ./cmd/fak -run TestCachevalue
+
+      # Always render the card to the step summary (and as the artifact) so the run is
+      # auditable even when nothing posts (missing secret / manual dry-run / fork).
+      # --append-history records this feed tick locally, matching cadence.yml's
+      # dry-run-first history posture without pushing from a scheduled job.
+      - name: render card (dry-run)
+        run: |
+          history_path="docs/cachevalue/history.jsonl"
+          go run ./cmd/fak cachevalue feed \
+            --channel "$FAK_CACHEVALUE_CHANNEL" \
+            --source ci \
+            --append-history \
+            --history-ledger "$history_path" \
+            --dry-run | tee cachevalue-card.txt
+          {
+            echo "## cachevalue-feed - Track 1 trend"
+            echo '```'
+            cat cachevalue-card.txt
+            echo '```'
+            echo
+            echo '<details><summary>feed-history row</summary>'
+            echo
+            echo '```json'
+            tail -n 1 "$history_path" 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # POST - only when the token secret is present. A manual dry_run also skips.
+      - name: post to #cache-value
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: |
+          go run ./cmd/fak cachevalue feed \
+            --channel "$FAK_CACHEVALUE_CHANNEL" \
+            --source ci
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set - ran in dry-run; nothing posted. Add the secret to enable posting." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cachevalue-card
+          path: |
+            cachevalue-card.txt
+            docs/cachevalue/history.jsonl
+            docs/nightrun/cache-value.jsonl
+          if-no-files-found: ignore
