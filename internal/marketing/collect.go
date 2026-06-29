@@ -36,3 +36,18 @@ func Gather(root, revRange string) (Collected, error) {
 func (c Collected) DigestFrom(when time.Time) Artifact {
 	return WeeklyDigest(c.Ships, c.Activity, c.Excluded, when)
 }
+
+// EpicFrom builds an epic-blurb Artifact from a gathered range — the ships that closed an
+// epic, grouped under its title. The caller supplies the epicTitle (e.g. the GitHub issue
+// title) and the range it scoped (the gh-poll / issue-close integration is the caller's job,
+// keeping the tier-1 core free of a gh dependency).
+func (c Collected) EpicFrom(epicTitle string) Artifact {
+	return EpicBlurb(epicTitle, c.Ships, c.Excluded)
+}
+
+// ReleaseFrom builds a release-highlight Artifact from a gathered range — the ships in a
+// release. version is the tag (e.g. "v0.18.0"); notesLead is an optional one-line summary the
+// caller pulls from docs/releases/v*.md.
+func (c Collected) ReleaseFrom(version, notesLead string) Artifact {
+	return ReleaseHighlight(version, notesLead, c.Ships, c.Excluded)
+}
