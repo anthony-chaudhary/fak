@@ -287,6 +287,9 @@ One-command setup to run fak as a local model backend for the Claude Code CLI. S
 ### `tools/agent_walltime.py`
 
 Analyzes Claude Code session transcripts to measure where agent time goes (model vs tools vs idle).
+When quoting Bash buckets from its fleet rollups, treat them as total Bash-tool
+wall-clock; git-bash per-call startup tax is an inferred component, not the
+measured bucket itself.
 
 **Usage:**
 ```bash
