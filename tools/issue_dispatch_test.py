@@ -11,6 +11,7 @@ config-dir pin / token-scrub branches run without any network.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -299,6 +300,163 @@ class RefreshRegistryTest(unittest.TestCase):
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False, refresh=False)
         self.assertTrue(p["registry_refresh"].get("skipped"))
+
+
+def _seat(i: int) -> dict:
+    """A synthetic distinct-pool seat record, shaped like fleet_accounts.allocate_wave
+    lanes (config_dir / tag / model_tier / pool)."""
+    return {"tag": f"acct-{i}", "model_tier": 1, "pool": f"pool-{i}",
+            "config_dir": f"/acct/{i}"}
+
+
+def _disjoint_arbitrate(root, lane, tree, leases):
+    """Stub of dos arbitrate's admission: a lane is admitted iff its tree shares no
+    glob with any lease already in ``leases``. Proves both that the accumulator
+    threads through every spawn AND that a colliding lane is refused pre-launch."""
+    held = {t for L in leases for t in (L.get("tree") or [])}
+    collides = any(t in held for t in tree)
+    return {"admitted": not collides, "outcome": "acquire",
+            "got": lane if not collides else "redirected",
+            "auto_picked": collides, "tree": list(tree), "reason": "stub-arbitrate"}
+
+
+class WaveTest(unittest.TestCase):
+    """The #1335 wave tick: K disjoint-lane workers in one tick, priced + arbitrated +
+    capped. Every shelling-out piece (registry refresh, seats, router, preflight,
+    arbitrate, spawn) is stubbed on the module — nothing live is invoked."""
+
+    SPAWN_OK = {"verdict": "SPAWN_OK", "reason": None, "cap": 10, "live": 0,
+                "account": {"tag": "acct-0", "tier": 1, "dir": "/acct/0"}}
+
+    def _wire(self, mod, *, seats, candidates, pre=None, arbitrate=None,
+              no_spawn=True) -> None:
+        mod.refresh_registry = lambda root: {"ok": True, "stubbed": True}
+        mod.allocate_seats = lambda root, mw, wk: {
+            "granted": len(seats), "requested": 99, "shortfall": 0,
+            "wave_id": "wave-test", "lanes": seats}
+        mod.lane_candidates = lambda root: {"candidates": candidates,
+                                            "router_error": None}
+        mod.preflight = (pre if callable(pre)
+                         else (lambda root, **kw: pre or self.SPAWN_OK))
+        mod.arbitrate_lane = arbitrate or _disjoint_arbitrate
+        if no_spawn:
+            def boom(*a, **k):
+                raise AssertionError("dry-run must never spawn a wave worker")
+            mod._spawn_wave_member = boom
+
+    def test_fills_disjoint_lanes_each_on_its_own_seat(self) -> None:
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "docs", "issues": 7, "tree": ["docs/**"]},
+                 {"lane": "model", "issues": 5, "tree": ["internal/model/**"]},
+                 {"lane": "ci", "issues": 3, "tree": [".github/**"]}]
+        self._wire(mod, seats=[_seat(i) for i in range(4)], candidates=cands)
+        p = mod.evaluate_wave(ROOT, max_workers=4, work_kind="engineering", live=False)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_WAVE")
+        self.assertEqual(p["size"], 4)
+        self.assertEqual(p["lanes"], ["tools", "docs", "model", "ci"])
+        # each admitted lane drew a DISTINCT seat, ranked in order.
+        self.assertEqual(p["seats_used"], ["acct-0", "acct-1", "acct-2", "acct-3"])
+        self.assertEqual([m["rank"] for m in p["members"]], [0, 1, 2, 3])
+
+    def test_colliding_lane_is_skipped_before_launch(self) -> None:
+        mod = load()
+        # 'tools2' shares tools/** with 'tools' -> the priced partition refuses it,
+        # and the wave moves on to the next disjoint lane instead of spawning it.
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "tools2", "issues": 8, "tree": ["tools/**"]},
+                 {"lane": "docs", "issues": 7, "tree": ["docs/**"]}]
+        self._wire(mod, seats=[_seat(i) for i in range(4)], candidates=cands)
+        p = mod.evaluate_wave(ROOT, max_workers=4, work_kind="engineering", live=False)
+        self.assertEqual(p["size"], 2)
+        self.assertEqual(p["lanes"], ["tools", "docs"])   # tools2 skipped
+        self.assertEqual(p["seats_used"], ["acct-0", "acct-1"])
+
+    def test_cap_recheck_bounds_the_wave_below_seats_and_lanes(self) -> None:
+        mod = load()
+        # 4 seats, 4 disjoint lanes, K=4 — but the preflight cap is 2, re-checked per
+        # spawn. The live population must never exceed the cap, so size == 2.
+        cands = [{"lane": L, "issues": 9 - i, "tree": [f"{L}/**"]}
+                 for i, L in enumerate(["tools", "docs", "model", "ci"])]
+        pre = {"verdict": "SPAWN_OK", "reason": None, "cap": 2, "live": 0,
+               "account": {}}
+        calls = {"n": 0}
+
+        def counting_pre(root, **kw):
+            calls["n"] += 1
+            return pre
+        self._wire(mod, seats=[_seat(i) for i in range(4)], candidates=cands,
+                   pre=counting_pre)
+        p = mod.evaluate_wave(ROOT, max_workers=4, work_kind="engineering", live=False)
+        self.assertEqual(p["size"], 2)
+        self.assertEqual(p["cap"], 2)
+        self.assertEqual(p["refusal"], "REFUSE_AT_CAP")
+        # preflight was re-checked per spawn: 2 admits + 1 that hit the cap = 3 calls.
+        self.assertEqual(calls["n"], 3)
+
+    def test_preflight_refusal_stops_the_wave_with_zero_workers(self) -> None:
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]}]
+        pre = {"verdict": "REFUSE_AT_CAP", "reason": "2/2 live", "cap": 2,
+               "live": 2, "account": {}}
+        self._wire(mod, seats=[_seat(0), _seat(1)], candidates=cands, pre=pre)
+        p = mod.evaluate_wave(ROOT, max_workers=2, work_kind="engineering", live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["size"], 0)
+        self.assertEqual(p["verdict"], "REFUSE_AT_CAP")
+
+    def test_seats_bound_the_wave_below_lanes(self) -> None:
+        mod = load()
+        cands = [{"lane": L, "issues": 9 - i, "tree": [f"{L}/**"]}
+                 for i, L in enumerate(["tools", "docs", "model", "ci"])]
+        self._wire(mod, seats=[_seat(0)], candidates=cands)   # only ONE seat
+        p = mod.evaluate_wave(ROOT, max_workers=4, work_kind="engineering", live=False)
+        self.assertEqual(p["size"], 1)
+        self.assertEqual(p["lanes"], ["tools"])
+        self.assertEqual(p["refusal"], "SEATS_EXHAUSTED")
+
+    def test_no_candidate_lanes_yields_no_lane(self) -> None:
+        mod = load()
+        self._wire(mod, seats=[_seat(0)], candidates=[])
+        p = mod.evaluate_wave(ROOT, max_workers=4, work_kind="engineering", live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "WAVE_NO_LANE")
+        self.assertEqual(p["size"], 0)
+
+    def test_no_seats_yields_no_seats(self) -> None:
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]}]
+        self._wire(mod, seats=[], candidates=cands)
+        p = mod.evaluate_wave(ROOT, max_workers=4, work_kind="engineering", live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "WAVE_NO_SEATS")
+
+    def test_live_wave_writes_the_wave_sidecar(self) -> None:
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "docs", "issues": 7, "tree": ["docs/**"]}]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._wire(mod, seats=[_seat(0), _seat(1)], candidates=cands,
+                       no_spawn=False)
+            # stub the actual launch so nothing real spawns; record the call.
+            spawned: list[str] = []
+            mod._spawn_wave_member = lambda root, lane, *a, **k: (
+                spawned.append(lane) or {"pid": 1000 + len(spawned), "log": "x.log"})
+            p = mod.evaluate_wave(root, max_workers=2, work_kind="engineering",
+                                  live=True)
+            self.assertEqual(p["verdict"], "WAVED")
+            self.assertEqual(p["size"], 2)
+            self.assertEqual(spawned, ["tools", "docs"])
+            # the wave-level sidecar the done-condition names: {wave_id,size,lanes,seats}
+            side = root / mod.RUNS_DIRNAME / "dispatch-wave-wave-test.json"
+            self.assertTrue(side.exists(), "wave sidecar must be written on a live wave")
+            rec = json.loads(side.read_text(encoding="utf-8"))
+            self.assertEqual(rec["wave_id"], "wave-test")
+            self.assertEqual(rec["size"], 2)
+            self.assertEqual(rec["lanes"], ["tools", "docs"])
+            self.assertEqual(rec["seats"], ["acct-0", "acct-1"])
 
 
 if __name__ == "__main__":

@@ -26,6 +26,16 @@ operator's rule for this loop — and is named in the tick record for the worker
 
     python tools/issue_dispatch.py                 # plan one safe tick (dry-run)
     python tools/issue_dispatch.py --max-workers 2 --live   # spawn one worker
+
+``--wave`` (#1335) fans this out: in ONE tick it spawns up to ``--max-workers``
+workers across pairwise TREE-DISJOINT lanes, each on its own seat. The partition is
+PRICED — every lane is arbitrated (``dos arbitrate``) against the wave's already
+admitted leases, so a colliding set is caught BEFORE any agent launches, not when a
+lease is refused mid-wave — and the same preflight gate is re-checked per spawn, so
+the live population still never exceeds the cap.
+
+    python tools/issue_dispatch.py --wave --max-workers 4         # plan a wave (dry)
+    python tools/issue_dispatch.py --wave --max-workers 4 --live  # spawn the wave
 """
 from __future__ import annotations
 
@@ -49,6 +59,7 @@ import dispatch_worker  # noqa: E402  (sibling tool: build_command/child_env)
 import fleet_accounts  # noqa: E402  (the switcher: optional setup-token read)
 
 SCHEMA = "fleet-issue-dispatch/1"
+WAVE_SCHEMA = "fleet-issue-dispatch-wave/1"
 RUNS_DIRNAME = ".dispatch-runs"
 USE_SETUP_TOKEN_ENV = "FLEET_CLAUDE_USE_OAUTH_TOKEN"
 
@@ -193,6 +204,23 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     return {"pid": proc.pid, "log": str(out_log)}
 
 
+def _build_launch(root: Path, lane: str | None) -> tuple[list[str], list[str], bool]:
+    """The raw agent argv + the (kernel-fronted) launch argv for one lane.
+
+    Dogfood: front the worker with the kernel (``fak guard``) so every tool call it
+    proposes crosses the capability floor and lands in a durable, hash-chained
+    decision journal. ``command`` stays the raw agent argv (the logical worker
+    command); ``launch_command`` is what actually spawns (kernel-fronted when a fak
+    binary resolves and FLEET_DOGFOOD_GUARD!=0; unchanged otherwise -- fail open).
+    Shared by the single-tick and wave spawn paths so both front the same kernel."""
+    command = dispatch_worker.build_command(lane, "claude") if lane else []
+    launch_command, guarded = (
+        dispatch_worker.guarded_launch_command(command, lane, "claude", root)
+        if command else ([], False)
+    )
+    return command, launch_command, guarded
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
              live: bool, refresh: bool = True) -> dict[str, Any]:
     # Refresh the account registry from live sessions FIRST, so the switcher routes
@@ -205,16 +233,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     acct = pre.get("account") or {}
     lane_pick = pick_lane(root, lane)
     chosen = lane_pick.get("lane")
-    command = dispatch_worker.build_command(chosen, "claude") if chosen else []
-    # Dogfood: front the worker with the kernel (``fak guard``) so every tool call it
-    # proposes crosses the capability floor and lands in a durable, hash-chained
-    # decision journal. ``command`` stays the raw agent argv (the logical worker
-    # command); ``launch_command`` is what actually spawns (kernel-fronted when a fak
-    # binary resolves and FLEET_DOGFOOD_GUARD!=0; unchanged otherwise -- fail open).
-    launch_command, guarded = (
-        dispatch_worker.guarded_launch_command(command, chosen, "claude", root)
-        if command else ([], False)
-    )
+    command, launch_command, guarded = _build_launch(root, chosen)
 
     payload: dict[str, Any] = {
         "schema": SCHEMA,
@@ -298,6 +317,271 @@ def render(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# --- WAVE: spawn K disjoint-lane workers in one tick (#1335) ----------------
+# The single tick above picks ONE lane and spawns ONE worker. A wave fans that out
+# to K workers per tick across pairwise TREE-DISJOINT lanes so they neither collide
+# nor serialize on a shared lane lease — the "best effort up to K" shape (#1333). It
+# adds two guarantees the single tick does not: the partition is PRICED (each lane
+# arbitrated against the wave's already-admitted leases, so a colliding set is caught
+# BEFORE any agent launches, not when a lease is refused mid-wave) and seated (each
+# worker draws its own distinct account pool). The DoS bound is unchanged: the same
+# dispatch_preflight gate is re-checked per spawn, so the live population still never
+# exceeds the cap.
+
+
+def _dos_cmd() -> list[str]:
+    """The ``dos`` kernel CLI as an argv prefix: the installed console script when on
+    PATH, else the module form so a venv without the script still arbitrates."""
+    exe = shutil.which("dos")
+    return [exe] if exe else [_py(), "-m", "dos.cli"]
+
+
+def lane_candidates(root: Path) -> dict[str, Any]:
+    """Candidate lanes for a wave: every lane the router reports with at least one
+    open issue, ordered by open-issue count (richest first, lane name as tiebreak),
+    each carrying its canonical file ``tree`` so the partition can be priced for
+    disjointness."""
+    router = run_json([_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
+                      root, timeout=130)
+    lanes = router.get("lanes") or {}
+    cands: list[dict[str, Any]] = []
+    for ln, info in lanes.items():
+        if isinstance(info, dict):
+            iss, tree = info.get("issues"), info.get("tree") or []
+        else:
+            iss, tree = info, []
+        n = len(iss) if hasattr(iss, "__len__") else 0
+        if n <= 0:
+            continue
+        cands.append({"lane": ln, "issues": n, "tree": list(tree)})
+    cands.sort(key=lambda c: (-c["issues"], c["lane"]))
+    return {"candidates": cands, "router_error": router.get("_error")}
+
+
+def arbitrate_lane(root: Path, lane: str, tree: list[str],
+                   leases: list[dict[str, Any]]) -> dict[str, Any]:
+    """Price ONE lane against the wave's already-admitted leases via ``dos
+    arbitrate``. The kernel ACQUIRES a lane iff its file tree is disjoint from every
+    lease in ``leases``; when the requested tree collides it AUTO-PICKS a different
+    free lane instead of refusing, so a redirect (``auto_picked`` set, or a returned
+    lane != the requested one) is the collision signal. Admitted == the kernel
+    granted the REQUESTED lane. Read-only: a decision, not a held lease — the spawned
+    worker materializes its own lane lease on start (the dos-dispatch-loop skill),
+    while this priced partition guarantees the K trees are pairwise-disjoint."""
+    cmd = [*_dos_cmd(), "arbitrate", "--workspace", str(root), "--lane", lane,
+           "--kind", "cluster", "--leases", json.dumps(leases), "--output", "json"]
+    if tree:
+        cmd += ["--tree", *tree]
+    doc = run_json(cmd, root, timeout=90)
+    got = doc.get("lane")
+    admitted = (doc.get("outcome") == "acquire" and not doc.get("auto_picked")
+                and got == lane)
+    return {"admitted": admitted, "outcome": doc.get("outcome"), "got": got,
+            "auto_picked": bool(doc.get("auto_picked")),
+            "tree": doc.get("tree") or list(tree),
+            "reason": doc.get("reason"), "error": doc.get("_error")}
+
+
+def allocate_seats(root: Path, max_workers: int, work_kind: str) -> dict[str, Any]:
+    """The seat budget for a wave: up to ``max_workers`` DISTINCT account pools, so
+    each worker draws on its own rate-limit pool instead of re-serializing on one.
+    Delegates to fleet_accounts.allocate_wave (the shipped wave-allocation
+    primitive); a granted lane carries config_dir/tag/pool + a rank-stamped
+    membership. Fail-open: a seat-allocation failure resolves to zero seats (the wave
+    refuses), never an exception that wedges the tick."""
+    try:
+        return fleet_accounts.allocate_wave(max_workers, work_kind=work_kind,
+                                            product="claude")
+    except Exception as exc:  # noqa: BLE001 — fail-open boundary: no seats, never fatal
+        return {"ok": False, "granted": 0, "lanes": [], "wave_id": None,
+                "error": str(exc)}
+
+
+def _wave_env(rank: int, wave_id: str, size: int, shortfall: int) -> dict[str, str]:
+    """Stamp a worker's place in its wave (rank/id/size/shortfall) — the same
+    ``FLEET_WAVE_*`` convention issue_resolve_dispatch writes, so an auditor reads one
+    grammar across both spawn paths. Labels an independent detached worker; grants no
+    collective (no barrier/gather) — a wave stays N lanes whose only shared fabric is
+    git + the dos arbitrate lease."""
+    return {"FLEET_WAVE_ID": str(wave_id), "FLEET_WAVE_RANK": str(int(rank)),
+            "FLEET_WAVE_SIZE": str(int(size)),
+            "FLEET_WAVE_SHORTFALL": str(int(shortfall))}
+
+
+def _spawn_wave_member(root: Path, lane: str, seat: dict[str, Any], wave_id: str,
+                       rank: int, size: int, shortfall: int) -> dict[str, Any]:
+    """Launch one wave worker on its seat, stamped with its wave membership. Writes a
+    per-worker ``.wave`` sidecar next to the log so the whole wave is enumerable from
+    disk, never from a worker's self-report."""
+    command, launch_command, guarded = _build_launch(root, lane)
+    if not launch_command:
+        return {"error": f"no command for lane '{lane}'"}
+    env = worker_env(seat.get("config_dir"), lane, root)
+    env.update(_wave_env(rank, wave_id, size, shortfall))
+    if guarded:
+        dispatch_worker.guard_env_augment(env)
+    spawned = spawn_detached(launch_command, env, root, root / RUNS_DIRNAME, lane)
+    spawned["guarded"] = guarded
+    try:
+        Path(spawned["log"]).with_suffix(".wave").write_text(
+            json.dumps({"wave_id": wave_id, "rank": rank, "size": size,
+                        "shortfall": shortfall}, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+    return spawned
+
+
+def _write_wave_artifacts(runs_dir: Path, payload: dict[str, Any]) -> None:
+    """Write the wave-level sidecar the done-condition names — ``{wave_id, size,
+    lanes, seats}`` — plus a full ``last-wave.json`` for inspection. The sidecar is
+    the contract artifact: one record per tick enumerable from disk alongside the
+    per-worker ``.wave`` membership stamps."""
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        sidecar = {"wave_id": payload.get("wave_id"), "size": payload.get("size"),
+                   "lanes": payload.get("lanes"), "seats": payload.get("seats_used")}
+        (runs_dir / f"dispatch-wave-{payload.get('wave_id')}.json").write_text(
+            json.dumps(sidecar, indent=2), encoding="utf-8")
+        (runs_dir / "last-wave.json").write_text(
+            json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
+                  refresh: bool = True) -> dict[str, Any]:
+    """One WAVE tick: spawn up to ``max_workers`` workers across pairwise
+    tree-disjoint lanes in a single tick, each on its own seat, never exceeding the
+    dispatch_preflight cap.
+
+    The wave size is ``min(free_seats, free_lanes, preflight_headroom)`` discovered
+    ONLINE: candidate lanes are taken richest-first; each is PRICED against the wave's
+    already-admitted leases via ``dos arbitrate`` (a colliding lane is skipped BEFORE
+    any agent launches); each admitted lane draws the next distinct seat; and
+    ``dispatch_preflight`` is re-checked per spawn so the live population provably
+    never exceeds the cap. A wave sidecar records ``{wave_id, size, lanes, seats}``."""
+    reg = refresh_registry(root) if refresh else {"ok": None, "skipped": True}
+    seats = allocate_seats(root, max_workers, work_kind)
+    seat_lanes = seats.get("lanes") or []
+    free_seats = len(seat_lanes)
+    wave_id = seats.get("wave_id") or "wave-unallocated"
+
+    cand = lane_candidates(root)
+    candidates = cand.get("candidates") or []
+
+    leases: list[dict[str, Any]] = []   # accumulating disjoint-tree leases (priced)
+    members: list[dict[str, Any]] = []
+    baseline_live: int | None = None
+    cap_seen: int | None = None
+    refusal: str | None = None
+
+    payload: dict[str, Any] = {
+        "schema": WAVE_SCHEMA,
+        "workspace": str(root),
+        "live": live,
+        "max_workers": max_workers,
+        "wave_id": wave_id,
+        "registry_refresh": reg,
+        "free_seats": free_seats,
+        "seats": {"granted": seats.get("granted"), "requested": seats.get("requested"),
+                  "shortfall": seats.get("shortfall"), "wave_id": seats.get("wave_id"),
+                  "tags": [s.get("tag") for s in seat_lanes], "error": seats.get("error")},
+        "candidate_lanes": [c["lane"] for c in candidates],
+        "router_error": cand.get("router_error"),
+    }
+
+    for c in candidates:
+        if len(members) >= max_workers:
+            break
+        if len(members) >= free_seats:
+            refusal = refusal or "SEATS_EXHAUSTED"
+            break
+        # Per-spawn preflight re-check: the live population must never exceed the cap.
+        pre = preflight(root, max_workers=max_workers, work_kind=work_kind)
+        if pre.get("verdict") != "SPAWN_OK":
+            refusal = pre.get("verdict") or "REFUSE"
+            break
+        cap = pre.get("cap")
+        cap_seen = cap if isinstance(cap, int) else cap_seen
+        live_now = pre.get("live") if isinstance(pre.get("live"), int) else 0
+        if baseline_live is None:
+            baseline_live = live_now
+        # Defeat OS-scan lag: count our own in-tick spawns even before the scan sees
+        # them, so the bound holds WITHIN the tick. effective = max(scan, base+spawned).
+        effective_live = max(live_now, baseline_live + len(members))
+        if isinstance(cap, int) and effective_live >= cap:
+            refusal = "REFUSE_AT_CAP"
+            break
+        # Price this lane against the wave's already-admitted leases.
+        dec = arbitrate_lane(root, c["lane"], c["tree"], leases)
+        if not dec.get("admitted"):
+            continue   # collides with an admitted lane (or kernel error) -> skip
+        rank = len(members)
+        seat = seat_lanes[rank]
+        member: dict[str, Any] = {
+            "lane": c["lane"], "tree": dec["tree"], "issues": c["issues"], "rank": rank,
+            "account": {"tag": seat.get("tag"), "tier": seat.get("model_tier"),
+                        "pool": seat.get("pool"), "dir": seat.get("config_dir")},
+            "arbitrate": dec.get("reason"),
+        }
+        if live:
+            member["spawned"] = _spawn_wave_member(
+                root, c["lane"], seat, wave_id, rank, free_seats,
+                int(seats.get("shortfall") or 0))
+        members.append(member)
+        leases.append({"lane": c["lane"], "lane_kind": "cluster", "tree": dec["tree"]})
+
+    size = len(members)
+    lanes_used = [m["lane"] for m in members]
+    seats_used = [(m["account"] or {}).get("tag") for m in members]
+    payload.update({"size": size, "lanes": lanes_used, "members": members,
+                    "seats_used": seats_used, "cap": cap_seen, "refusal": refusal})
+
+    if size > 0:
+        payload.update({
+            "ok": True,
+            "verdict": "WAVED" if live else "WOULD_WAVE",
+            "action": "waved" if live else "would_wave",
+            "reason": (f"{'spawned' if live else 'would spawn'} {size} worker(s) across "
+                       f"pairwise-disjoint lanes {lanes_used} (wave {wave_id})"
+                       + (f"; stopped on {refusal}" if refusal else ""))})
+        if live:
+            _write_wave_artifacts(root / RUNS_DIRNAME, payload)
+    elif not candidates:
+        payload.update({"ok": False, "verdict": "WAVE_NO_LANE", "action": "no_lane",
+                        "reason": "no lane has open issues (router empty/error)"})
+    elif free_seats == 0:
+        payload.update({"ok": False, "verdict": "WAVE_NO_SEATS", "action": "no_seats",
+                        "reason": (f"no free seats for a wave "
+                                   f"({seats.get('reason') or seats.get('error')})")})
+    else:
+        payload.update({"ok": False, "verdict": refusal or "WAVE_EMPTY",
+                        "action": "refused",
+                        "reason": (f"no worker spawned (stopped on {refusal})" if refusal
+                                   else "no candidate lane was admissible (all collided)")})
+    return payload
+
+
+def render_wave(p: dict[str, Any]) -> str:
+    seats = (p.get("seats") or {}).get("tags") or []
+    lines = [
+        f"issue-dispatch WAVE: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})  live={p.get('live')}",
+        f"  wave_id   : {p.get('wave_id')}  size={p.get('size')}  cap={p.get('cap')}",
+        f"  seats     : {p.get('free_seats')} free  ({', '.join(t for t in seats if t) or '-'})",
+        f"  candidates: {len(p.get('candidate_lanes') or [])} lane(s) with open issues",
+    ]
+    for m in p.get("members") or []:
+        sp = m.get("spawned") or {}
+        tag = (m.get("account") or {}).get("tag") or "-"
+        pid = f" pid={sp.get('pid')}" if sp.get("pid") else ""
+        lines.append(f"    [{m.get('rank')}] {str(m.get('lane') or '-'):<12} "
+                     f"{m.get('issues')} issues  seat={tag}{pid}")
+    if p.get("refusal"):
+        lines.append(f"  stopped   : {p.get('refusal')}")
+    lines.append(f"  -> {p.get('reason')}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="One guarded, switcher-routed, bounded dispatch tick (dry-run by default).")
@@ -308,6 +592,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="switcher work kind (engineering->t1, gardening->t2)")
     ap.add_argument("--lane", default=None,
                     help="explicit lane (default: the lane with the most open issues)")
+    ap.add_argument("--wave", action="store_true",
+                    help="WAVE mode (#1335): spawn up to --max-workers workers in ONE "
+                         "tick across pairwise tree-disjoint lanes (priced + arbitrated), "
+                         "each on its own seat; preflight re-checked per spawn")
     ap.add_argument("--live", action="store_true",
                     help="actually spawn the worker (default: dry-run / plan only)")
     ap.add_argument("--no-refresh", action="store_true",
@@ -317,6 +605,12 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    if args.wave:
+        payload = evaluate_wave(root, max_workers=args.max_workers,
+                                work_kind=args.work_kind, live=args.live,
+                                refresh=not args.no_refresh)
+        print(json.dumps(payload, indent=2) if args.json else render_wave(payload))
+        return 0 if payload.get("ok") else 1
     payload = evaluate(root, max_workers=args.max_workers, work_kind=args.work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh)
     print(json.dumps(payload, indent=2) if args.json else render(payload))
