@@ -109,19 +109,12 @@ func TestQ4KGemmMatchesMatRows(t *testing.T) {
 	}
 }
 
-// TestQ4KGemmInt8MatchesMatRowsInt8 pins the int8 SDOT batched GEMM to the int8 decode GEMV:
-// for every (output row o, token t), q4kGemm[t*out+o] (SDOT path) is BIT-IDENTICAL to
-// q4kMatRowsRangeInt8(qt, quantizeVecQ8(X[t]))[o]. Both run the identical q4kReduceRow integer
-// reduction + shared q4kCombineRow float combine on the SAME per-token int8 activation
-// (quantizeVecQ8 is deterministic), differing only in loop nesting (the weight row reused
-// across P tokens). This is the P3 prefill correctness contract for the int8 path — the same
-// int8 stream the decode runs, so prefill and decode agree by construction; a dispatch/packing
-// bug blows it up by orders of magnitude. Skips where the int8 path is not selected (so the
-// f32-only arches/FAK_QKERNEL=scalar take the f32 contract above instead).
-func TestQ4KGemmInt8MatchesMatRowsInt8(t *testing.T) {
-	if !q4kSDOTEnabled() {
-		t.Skip("int8 SDOT path not selected on this arch/config")
-	}
+// TestQ4KGemmInt8ExtractOnceMatchesMatRowsInt8 pins the extract-once int8 batched GEMM to the
+// per-token int8 decode GEMV within reduction-order tolerance. The new path (#60) lowers Q4_K
+// nibbles to a temporary Q8-shaped tensor and runs qGemm8, whose deferred-reduction order differs
+// from q4kMatRowsRangeInt8's q4kCombineRow order. A real packing, scale, or affine-min bug still
+// blows this relative error up by orders of magnitude.
+func TestQ4KGemmInt8ExtractOnceMatchesMatRowsInt8(t *testing.T) {
 	const out, in, P = 32, 768, 8 // in = 3 super-blocks/row; P prompt tokens
 	nblk := in / qkK
 	rng := rand.New(rand.NewSource(13))
@@ -137,19 +130,33 @@ func TestQ4KGemmInt8MatchesMatRowsInt8(t *testing.T) {
 	for i := range X {
 		X[i] = float32(rng.NormFloat64())
 	}
-	Y := q4kGemm(qt, X, P) // SDOT enabled → int8 batched path
+	qp := quantizeBatchPanel(X, P, in)
+	Y := make([]float32, P*out)
+	q4kGemmExtractOnceInt8Into(qt, qp, Y)
 
 	yRef := make([]float32, out)
+	var sumSq, maxRel float64
 	for tr := 0; tr < P; tr++ {
 		// int8 decode GEMV reference: quantize this token's activation exactly as q4kGemm does.
 		qv := quantizeVecQ8(X[tr*in : (tr+1)*in])
 		q4kMatRowsRangeInt8(qt, qv, yRef, 0, out)
 		for o := 0; o < out; o++ {
-			if got, want := Y[tr*out+o], yRef[o]; math.Float32bits(got) != math.Float32bits(want) {
-				t.Fatalf("token %d row %d: q4kGemm int8 %v != q4kMatRowsInt8 %v (NOT bit-identical)", tr, o, got, want)
+			want := yRef[o]
+			got := Y[tr*out+o]
+			sumSq += float64(want) * float64(want)
+			if rel := math.Abs(float64(got - want)); rel > maxRel {
+				maxRel = rel
 			}
 		}
 	}
+	rms := math.Sqrt(sumSq / float64(P*out))
+	if rms < 1e-9 {
+		t.Fatalf("int8 reference RMS ~0; bad test data")
+	}
+	if maxRel/rms > 1e-4 {
+		t.Fatalf("q4kGemm extract-once int8 max-abs/RMS %.3e > 1e-4 (abs=%.3e rms=%.3e)", maxRel/rms, maxRel, rms)
+	}
+	t.Logf("q4kGemm extract-once int8 max-abs/RMS = %.3e", maxRel/rms)
 }
 
 // TestPrefillBatchedQ4KMatchesSerial proves the resident-Q4_K batched prefill

@@ -28,6 +28,14 @@ func q4kSDOTEnabled() bool {
 	return q4kInt8Default
 }
 
+func q4kExtractOnceGemmEnabled() bool {
+	return false
+}
+
+func q4kGemmExtractOnceInt8IntoArch(qt *q4kTensor, qp *q8Panel, Y []float32) bool {
+	return false
+}
+
 func q4kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {
 	q4kReduceRowScalar(row, nblk, qx, IS, SS)
 }

@@ -48,3 +48,40 @@ func BenchmarkQ4KF32GEMV(b *testing.B) {
 		q4kMatRowsRange(qt, x, y, 0, qt.out)
 	}
 }
+
+func benchQ4KGemmFixture(b *testing.B, out, in, P int) (*q4kTensor, []q8Vec, *q8Panel) {
+	b.Helper()
+	qt, x := benchQ4KFixture(b, out, in)
+	X := make([]float32, P*in)
+	for t := 0; t < P; t++ {
+		copy(X[t*in:(t+1)*in], x)
+	}
+	qvs := make([]q8Vec, P)
+	for t := 0; t < P; t++ {
+		qvs[t] = quantizeVecQ8(X[t*in : (t+1)*in])
+	}
+	qp := quantizeBatchPanel(X, P, in)
+	return qt, qvs, qp
+}
+
+func BenchmarkQ4KGemmInt8LegacyReducePerToken(b *testing.B) {
+	const out, in, P = 17408, 5120, 22 // Qwen3.6 q4_k_m MLP gate/up shape.
+	qt, qvs, _ := benchQ4KGemmFixture(b, out, in, P)
+	Y := make([]float32, P*out)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q4kGemmRangeInt8(qt, qvs, P, Y, 0, out)
+	}
+}
+
+func BenchmarkQ4KGemmInt8ExtractOnce(b *testing.B) {
+	const out, in, P = 17408, 5120, 22 // Qwen3.6 q4_k_m MLP gate/up shape.
+	qt, _, qp := benchQ4KGemmFixture(b, out, in, P)
+	Y := make([]float32, P*out)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q4kGemmExtractOnceInt8Into(qt, qp, Y)
+	}
+}

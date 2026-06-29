@@ -70,6 +70,14 @@ func q4kSDOTEnabled() bool {
 	return q4kInt8Default
 }
 
+func q4kExtractOnceGemmEnabled() bool {
+	return false
+}
+
+func q4kGemmExtractOnceInt8IntoArch(qt *q4kTensor, qp *q8Panel, Y []float32) bool {
+	return false
+}
+
 // q4kReduceRow dispatches the integer reduction to the AVX2 kernel when the resolved tier has it,
 // else the scalar reference. IS/SS are sized nblk*8 (one I_s/S_s per sub-block across all super-blocks).
 func q4kReduceRow(row []byte, nblk int, qx []int8, IS, SS []int32) {

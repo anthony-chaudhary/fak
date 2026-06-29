@@ -200,16 +200,21 @@ func q4kGemmInto(qt *q4kTensor, X []float32, P int, Y []float32) {
 	out := qt.out
 	Y = Y[:P*out]
 	if q4kSDOTEnabled() {
-		// int8 SDOT batched GEMM (plan P3): the batched twin of q4kMatRowsInt8, and the prefill
-		// analog of the decode kernel q4kMatRowsInto already dispatches to. The f32 q4kGemmRange
-		// below amortizes the per-super-block DEQUANT across the P tokens but still pays a 256-wide
-		// f32 dot per (o,t) — which the M3 Pro phase profile showed is the prefill compute wall
-		// (mlp q4kGemm = 63% of Qwen3.6 prefill; experiments/qwen36/mac-hybrid-prefill-20260620).
-		// This path instead quantizes each of the P activation rows to int8 ONCE and runs the
-		// compact int8 reduction (q4kReduceRow, NEON SDOT on arm64) per (o,t) — the same ~6.2x
-		// lever P2 gave decode. Y[t*out+o] is BIT-IDENTICAL to q4kMatRowsRangeInt8(qt, qvs[t])[o]
-		// (same reduce + shared combine, only the loop nesting differs), so prefill now matches
-		// the int8 decode it feeds. The f32 path stays selectable (FAK_QKERNEL=scalar).
+		if q4kExtractOnceGemmEnabled() {
+			// Extract-once int8 Q4_K GEMM (#60): lower the Q4_K nibbles into a temporary
+			// Q8-shaped weight tensor once per GEMM, run the register-blocked qGemm8 kernel for
+			// the d*scale*nibble term, then subtract the affine min term from precomputed
+			// activation block sums. The previous int8 GEMM called q4kReduceRow once per
+			// (output row, token), re-reading and unpacking the same Q4_K row P times; this path
+			// pays that extract cost once and lets qGemm8 reuse the int8 row across token tiles.
+			// Numerics follow qGemm8's deferred-reduction order rather than q4kCombineRow's
+			// per-token GEMV order, so this path is covered by the Q4_K int8 tolerance/oracle
+			// gates, not bit-identity with q4kMatRowsRangeInt8. The f32 path stays selectable
+			// with FAK_QKERNEL=scalar.
+			qp := quantizeBatchPanel(X, P, qt.in)
+			q4kGemmExtractOnceInt8Into(qt, qp, Y)
+			return
+		}
 		qvs := make([]q8Vec, P)
 		for t := 0; t < P; t++ {
 			qvs[t] = quantizeVecQ8(X[t*qt.in : (t+1)*qt.in])
@@ -228,12 +233,145 @@ func q4kGemmInto(qt *q4kTensor, X []float32, P int, Y []float32) {
 	parFor(out, numWorkers, func(lo, hi int) { q4kGemmRange(qt, X, P, Y, lo, hi) })
 }
 
-// q4kGemmRangeInt8 is the int8 SDOT batched-GEMM row loop — the batched twin of
-// q4kMatRowsRangeInt8 (the decode GEMV). For each output row in [lo,hi) it runs the
-// arch-dispatched integer reduction q4kReduceRow against EACH of the P pre-quantized activation
-// rows (qvs[t]) followed by the shared float combine, so Y[t*out+o] == q4kMatRowsRangeInt8(qt,
-// qvs[t])[o] bit-for-bit. The weight row stays cache-resident across all P tokens (the prefill
-// amortization), and the per-worker IS/SS int32 scratch is reused across every (o,t).
+type q4kExtractedGemm struct {
+	qt       *q8Tensor
+	minScale []float32
+}
+
+// q4kGemmExtractOnceInt8Into is the active int8 Q4_K prefill GEMM. On arm64 the hot path
+// streams small extracted row tiles through the Q8 GEMM micro-kernel to avoid materializing a
+// full Q8-sized copy of the weight. The portable fallback below represents the positive nibble
+// term as a temporary Q8-shaped tensor:
+//
+//	first[t,o] = sum_s (d_o,s*scale_o,s) * dx_t,s * sum_i nibble_o,s,i*qx_t,s,i
+//
+// and computes it with qGemm8. Q4_K's affine min term cannot be represented as a Q8 dot, so it is
+// applied afterwards from block sums of the already-quantized activation panel:
+//
+//	min[t,o] = sum_s (min_o,s*m_o,s) * dx_t,s * sum_i qx_t,s,i
+func q4kGemmExtractOnceInt8Into(qt *q4kTensor, qp *q8Panel, Y []float32) {
+	if q4kGemmExtractOnceInt8IntoArch(qt, qp, Y) {
+		return
+	}
+	ex := q4kExtractGemmWeights(qt)
+	qGemm8Into(ex.qt, qp, Y)
+	sums := q8PanelBlockSums(qp)
+	q4kSubtractGemmMinTerm(ex.minScale, sums, qp.d, qp.P, qt.out, ex.qt.nblk, Y)
+}
+
+func q4kExtractGemmWeights(qt *q4kTensor) q4kExtractedGemm {
+	nblk := qt.nblk * 8
+	out, in := qt.out, qt.in
+	q8 := &q8Tensor{
+		out:  out,
+		in:   in,
+		nblk: nblk,
+		q:    make([]int8, out*in),
+		d:    make([]float32, out*nblk),
+	}
+	minScale := make([]float32, out*nblk)
+	rowBytes := qt.q4kRowBytes()
+	body := func(lo, hi int) {
+		for o := lo; o < hi; o++ {
+			q4kExtractGemmRow(
+				qt.raw[o*rowBytes:(o+1)*rowBytes],
+				q8.q[o*in:(o+1)*in],
+				q8.d[o*nblk:(o+1)*nblk],
+				minScale[o*nblk:(o+1)*nblk],
+				qt.nblk,
+			)
+		}
+	}
+	if out*in < parThreshold {
+		body(0, out)
+	} else {
+		parFor(out, numWorkers, body)
+	}
+	return q4kExtractedGemm{qt: q8, minScale: minScale}
+}
+
+func q4kExtractGemmRow(row []byte, qdst []int8, ddst, mdst []float32, nblk int) {
+	for b := 0; b < nblk; b++ {
+		blk := row[b*q4kBlockBytes : (b+1)*q4kBlockBytes]
+		d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+		min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
+		scales := blk[4 : 4+12]
+		q := blk[4+12 : q4kBlockBytes]
+		qBase := b * qkK
+		scaleBase := b * 8
+		qi := 0
+		for k := 0; k < 4; k++ {
+			loBlock := 2 * k
+			sc, m := GetScaleMinK4(loBlock, scales)
+			ddst[scaleBase+loBlock] = d * float32(sc)
+			mdst[scaleBase+loBlock] = min * float32(m)
+			for l := 0; l < qBlk; l++ {
+				qdst[qBase+loBlock*qBlk+l] = int8(q[qi+l] & 0x0f)
+			}
+
+			hiBlock := loBlock + 1
+			sc, m = GetScaleMinK4(hiBlock, scales)
+			ddst[scaleBase+hiBlock] = d * float32(sc)
+			mdst[scaleBase+hiBlock] = min * float32(m)
+			for l := 0; l < qBlk; l++ {
+				qdst[qBase+hiBlock*qBlk+l] = int8(q[qi+l] >> 4)
+			}
+			qi += qBlk
+		}
+	}
+}
+
+func q8PanelBlockSums(qp *q8Panel) []int32 {
+	sums := make([]int32, qp.P*qp.nblk)
+	body := func(lo, hi int) {
+		for t := lo; t < hi; t++ {
+			qrow := qp.q[t*qp.in : (t+1)*qp.in]
+			srow := sums[t*qp.nblk : (t+1)*qp.nblk]
+			for b := 0; b < qp.nblk; b++ {
+				qb := qrow[b*qBlk : b*qBlk+qBlk]
+				var s int32
+				for i := 0; i < qBlk; i++ {
+					s += int32(qb[i])
+				}
+				srow[b] = s
+			}
+		}
+	}
+	if qp.P*qp.in < parThreshold {
+		body(0, qp.P)
+	} else {
+		parFor(qp.P, numWorkers, body)
+	}
+	return sums
+}
+
+func q4kSubtractGemmMinTerm(minScale []float32, sums []int32, dx []float32, P, out, nblk int, Y []float32) {
+	body := func(lo, hi int) {
+		for o := lo; o < hi; o++ {
+			ms := minScale[o*nblk : (o+1)*nblk]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] -= q4kGemmMinTerm(ms, sums[t*nblk:(t+1)*nblk], dx[t*nblk:(t+1)*nblk], nblk)
+			}
+		}
+	}
+	if out*P*nblk < parThreshold {
+		body(0, out)
+	} else {
+		parFor(out, numWorkers, body)
+	}
+}
+
+func q4kGemmMinTerm(minScale []float32, sums []int32, dx []float32, nblk int) float32 {
+	var sub float32
+	for b := 0; b < nblk; b++ {
+		sub += float32(sums[b]) * minScale[b] * dx[b]
+	}
+	return sub
+}
+
+// q4kGemmRangeInt8 is the legacy int8 SDOT batched-GEMM row loop. It is kept as a focused
+// reference/benchmark for the pre-#60 path: for each output row it runs q4kReduceRow against
+// every activation row, so it re-reads and unpacks the same Q4_K row P times.
 func q4kGemmRangeInt8(qt *q4kTensor, qvs []q8Vec, P int, Y []float32, lo, hi int) {
 	nblk := qt.nblk
 	out := qt.out
