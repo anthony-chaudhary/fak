@@ -103,7 +103,7 @@ func Template(loopID string) []byte {
 	return []byte(fmt.Sprintf(`---
 loop: %s
 witness: commit-audit
-	budget: { max_iters: 20 }
+budget: { max_iters: 20 }
 ---
 # Objective
 State one unit of work the loop should complete.

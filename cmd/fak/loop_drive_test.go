@@ -10,16 +10,25 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/loopdrive"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
 func TestLoopDriveReadsGoalFreshEachTurn(t *testing.T) {
 	oldNewCommand := loopDriveNewCommand
-	defer func() { loopDriveNewCommand = oldNewCommand }()
+	oldWitness := loopDriveRunWitness
+	defer func() {
+		loopDriveNewCommand = oldNewCommand
+		loopDriveRunWitness = oldWitness
+	}()
 
 	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	writeLoopDriveGoal(t, goal, false, false)
 
 	var nextItems []string
+	witnessCalls := 0
 	loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
 		next := loopDriveEnvValue(env, "FAK_GOAL_NEXT")
 		nextItems = append(nextItems, next)
@@ -35,9 +44,16 @@ func TestLoopDriveReadsGoalFreshEachTurn(t *testing.T) {
 			return nil
 		}}
 	}
+	loopDriveRunWitness = func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+		witnessCalls++
+		if witnessCalls == 1 {
+			return loopDriveWitnessResult{Status: loopmgr.StatusWitnessRefused, Reason: "NOT_YET", Summary: "first turn not done", ExitCode: 1}
+		}
+		return loopDriveWitnessResult{Status: loopmgr.StatusWitnessedDone, Reason: "WITNESS_OK", Summary: "done", ExitCode: 0}
+	}
 
 	var stdout, stderr bytes.Buffer
-	code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--max-iters", "3", "--", "worker"})
+	code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--ledger", ledger, "--max-iters", "3", "--", "worker"})
 	if code != 0 {
 		t.Fatalf("drive code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -45,8 +61,62 @@ func TestLoopDriveReadsGoalFreshEachTurn(t *testing.T) {
 	if !reflect.DeepEqual(nextItems, want) {
 		t.Fatalf("next items = %v, want %v", nextItems, want)
 	}
-	if !strings.Contains(stdout.String(), "loop drive done") {
-		t.Fatalf("stdout missing done line: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "loop drive witnessed done") {
+		t.Fatalf("stdout missing witnessed done line: %s", stdout.String())
+	}
+	var statusOut, statusErr bytes.Buffer
+	if statusCode := runLoop(&statusOut, &statusErr, []string{"status", "--ledger", ledger}); statusCode != 0 {
+		t.Fatalf("status code=%d stderr=%s", statusCode, statusErr.String())
+	}
+	for _, want := range []string{"issue-1175", "fires=2", "witnessed=1", "last_run=", "witnessed_done"} {
+		if !strings.Contains(statusOut.String(), want) {
+			t.Fatalf("status missing %q:\n%s", want, statusOut.String())
+		}
+	}
+}
+
+func TestLoopDriveBudgetExhaustionRecordsStructuredReason(t *testing.T) {
+	oldNewCommand := loopDriveNewCommand
+	oldWitness := loopDriveRunWitness
+	defer func() {
+		loopDriveNewCommand = oldNewCommand
+		loopDriveRunWitness = oldWitness
+	}()
+
+	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	writeLoopDriveGoal(t, goal, false, false)
+	loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
+		return &loopDriveFakeCommand{wait: func() error { return nil }}
+	}
+	loopDriveRunWitness = func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+		return loopDriveWitnessResult{Status: loopmgr.StatusWitnessRefused, Reason: "NOT_YET", Summary: "still open", ExitCode: 1}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--ledger", ledger, "--max-iters", "1", "--", "worker"})
+	if code != 3 {
+		t.Fatalf("drive code=%d, want 3 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBudget := false
+	for _, ev := range events {
+		if ev.Kind == loopmgr.EventAdmit && ev.Status == loopmgr.StatusRefused && ev.Reason == loopdrive.ReasonBudgetSpent {
+			foundBudget = true
+		}
+	}
+	if !foundBudget {
+		t.Fatalf("ledger missing refused admit with %s: %+v", loopdrive.ReasonBudgetSpent, events)
+	}
+	raw, err := os.ReadFile(goal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), loopdrive.ReasonBudgetSpent) {
+		t.Fatalf("goal scratch missing %s:\n%s", loopdrive.ReasonBudgetSpent, raw)
 	}
 }
 
@@ -55,13 +125,14 @@ func TestLoopDriveAppendsScratchOnFailure(t *testing.T) {
 	defer func() { loopDriveNewCommand = oldNewCommand }()
 
 	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	writeLoopDriveGoal(t, goal, false, false)
 	loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
 		return &loopDriveFakeCommand{wait: func() error { return errors.New("not yet") }}
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--", "worker"})
+	code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--ledger", ledger, "--", "worker"})
 	if code != 1 {
 		t.Fatalf("drive code=%d, want 1 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -79,7 +150,11 @@ func TestLoopDriveAppendsScratchOnFailure(t *testing.T) {
 
 func TestLoopDriveReviewModelExportsCommitReviewEnv(t *testing.T) {
 	oldNewCommand := loopDriveNewCommand
-	defer func() { loopDriveNewCommand = oldNewCommand }()
+	oldWitness := loopDriveRunWitness
+	defer func() {
+		loopDriveNewCommand = oldNewCommand
+		loopDriveRunWitness = oldWitness
+	}()
 
 	goal := filepath.Join(t.TempDir(), "GOAL.md")
 	writeLoopDriveGoal(t, goal, false, true)
@@ -92,6 +167,9 @@ func TestLoopDriveReviewModelExportsCommitReviewEnv(t *testing.T) {
 			writeLoopDriveGoal(t, goal, true, true)
 			return nil
 		}}
+	}
+	loopDriveRunWitness = func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+		return loopDriveWitnessResult{Status: loopmgr.StatusWitnessedDone, Reason: "WITNESS_OK", Summary: "done", ExitCode: 0}
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -114,7 +192,7 @@ func TestLoopDriveReviewModelExportsCommitReviewEnv(t *testing.T) {
 		"FAK_REVIEW_ENDPOINT":    "http://reviewer/v1",
 		"FAK_REVIEW_API_KEY_ENV": "SCOUT_KEY",
 		"FAK_LOOP_LEDGER":        ledger,
-		"FAK_GOAL_RUN":           "issue-1176-turn-1",
+		"FAK_GOAL_RUN":           "issue-1175-turn-1",
 	}
 	for key, want := range checks {
 		if got := loopDriveEnvValue(sawEnv, key); got != want {
@@ -125,12 +203,12 @@ func TestLoopDriveReviewModelExportsCommitReviewEnv(t *testing.T) {
 
 func TestLoopDriveTemplate(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runLoop(&stdout, &stderr, []string{"drive", "--template", "--loop", "issue-1176"})
+	code := runLoop(&stdout, &stderr, []string{"drive", "--template", "--loop", "issue-1175"})
 	if code != 0 {
 		t.Fatalf("template code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"loop: issue-1176", "witness: commit-audit", "# Objective", "# Plan"} {
+	for _, want := range []string{"loop: issue-1175", "witness: commit-audit", "# Objective", "# Plan"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("template missing %q:\n%s", want, out)
 		}
@@ -160,7 +238,7 @@ func writeLoopDriveGoal(t *testing.T, path string, firstDone, secondDone bool) {
 		return " "
 	}
 	body := fmt.Sprintf(`---
-loop: issue-1176
+loop: issue-1175
 witness: commit-audit
 budget: { max_iters: 5 }
 ---
