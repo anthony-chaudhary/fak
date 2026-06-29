@@ -56,6 +56,7 @@ type capState struct {
 	tokens     int      // the body's resident cost — the measured blast-radius base.
 	dependents []CapKey // capabilities this one invalidates if dropped (MEASURED, not guessed).
 	pinned     bool     // CAS-pinned: an in-flight invocation holds it; NEVER evicted.
+	tier       Tier     // base-context layout tier (Rung 4, #1262); spine/policy are NEVER paged.
 	lastUse    int64    // monotonic access seq; the smallest is the COLDEST.
 	state      State    // resident (has dependents) | evictable (none) | held (evicted).
 	pageID     string   // ctxmmu held id once paged out (re-fault pages in through it).
@@ -151,15 +152,21 @@ func (cr *CapResidency) Unpin(key CapKey) {
 
 // classify is the per-capability residency rule, the capability analogue of the
 // span-level resident/evictable/held split in Query. A paged-out (evicted) body
-// is HELD; a pinned (in-flight) capability or one with live dependents is
-// RESIDENT (held in residence — an eviction would invalidate something); a
-// clean, unpinned, dependent-free capability is EVICTABLE. The caller holds the
-// lock.
+// is HELD; a block in a never-paged layout tier (spine/policy — Rung 4, #1262), a
+// pinned (in-flight) capability, or one with live dependents is RESIDENT (held in
+// residence — an eviction would invalidate something, or the tier forbids paging
+// it); a clean, unpinned, dependent-free OVERLAY capability is EVICTABLE.
+//
+// The spine/policy guard is the by-construction exclusion invariant 3 asks for: a
+// safety/identity-load-bearing block resolves (via ClassifyTier) to a never-paged
+// tier, so it can never reach StateEvictable regardless of how cold it gets —
+// silent under-retrieval cannot drop it because no eviction path selects it. The
+// caller holds the lock.
 func classify(st *capState) State {
 	if st.pageID != "" {
 		return StateHeld
 	}
-	if st.pinned || len(st.dependents) > 0 {
+	if st.tier.AlwaysResident() || st.pinned || len(st.dependents) > 0 {
 		return StateResident
 	}
 	return StateEvictable
@@ -303,6 +310,7 @@ type CapRow struct {
 	Key              CapKey
 	Digest           string
 	State            State
+	Tier             Tier // base-context layout tier (spine/policy = never paged; overlay = pageable).
 	Pinned           bool
 	LastUse          int64
 	EvictBlastRadius BlastRadius // measured cost of dropping it (zero once held).
@@ -319,7 +327,7 @@ func (cr *CapResidency) Snapshot() CapSnapshot {
 	out := CapSnapshot{Caps: make([]CapRow, 0, len(cr.caps))}
 	for _, st := range cr.caps {
 		row := CapRow{
-			Key: st.key, Digest: st.digest, State: st.state,
+			Key: st.key, Digest: st.digest, State: st.state, Tier: st.tier,
 			Pinned: st.pinned, LastUse: st.lastUse, PageID: st.pageID,
 		}
 		if st.state != StateHeld {
