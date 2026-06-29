@@ -49,6 +49,11 @@ import "fmt"
 // on cpu-ref. A real cross-DEVICE reduction needs the NCCL/RCCL compute.CollectiveBackend
 // rung (hardware-gated, native-753b-track-staged-plan.md P3) — only with that may a
 // multi-GPU EP serve be CLAIMED. This file de-risks everything above that device line.
+//
+// It shards the STANDARD SwiGLU expert (GLM-5.2 / Mixtral / Qwen3-MoE). It FAILS CLOSED on
+// gptoss (whose experts use the distinct expertGPTOSS form), and the GLM full-FFN wrapper
+// fails closed on the qwen3.5 singular gated shared expert — refusing rather than silently
+// serving the wrong arithmetic, mirroring forwardTPSupported's fail-closed-on-unsupported-arch.
 
 // ExpertParallelPlan tiles the experts [0,numExperts) across `ranks` near-even contiguous
 // bands — the expert-parallel placement plan. It is NewTPPlan specialized and named for the
@@ -83,6 +88,13 @@ func (m *Model) expertParallelPartials(layer int, xn any, mat matKernel, picks [
 	}
 	if plan.Dim != m.Cfg.NumExperts {
 		return nil, fmt.Errorf("model: expertParallelPartials plan.Dim = %d, want NumExperts = %d", plan.Dim, m.Cfg.NumExperts)
+	}
+	// Fail closed on gptoss: its experts use the expertGPTOSS form (clamped gate/up, (up+1)*glu)
+	// which moeFFN dispatches but this path does not — using expertSwiGLU here would silently
+	// mis-compute. EP targets the standard SwiGLU expert (GLM-5.2 / Mixtral / Qwen3-MoE); a
+	// gptoss EP path is a separate sub-lever, so refuse rather than serve the wrong arithmetic.
+	if m.Cfg.isGPTOSS() {
+		return nil, fmt.Errorf("model: expert-parallel does not shard gptoss experts (they use the expertGPTOSS form, not expertSwiGLU — a separate sub-lever)")
 	}
 	H := m.Cfg.HiddenSize
 	parts := make([][]float32, len(plan.Shards))
@@ -140,6 +152,13 @@ func (m *Model) expertParallelReference(layer int, xn any, mat matKernel, picks 
 // routed loop, and the shared add is the identical glmSharedExperts call in the identical
 // (routed-then-shared) order. A nil collective defaults to LocalCollective.
 func (m *Model) expertParallelGLMMoEDelta(layer int, xn any, mat matKernel, picks []routePick, plan TPPlan, coll Collective) ([]float32, error) {
+	// This wrapper handles only the GLM plural shared expert (mlp.shared_experts.*). A qwen3.5
+	// model carries a DIFFERENT singular gated shared expert (mlp.shared_expert.* +
+	// mlp.shared_expert_gate.weight) that moeFFN adds and this wrapper does not — fail closed so
+	// it never silently drops that term (the routed ExpertParallelDelta alone stays correct).
+	if m.has(qwen35SharedExpertName(layer, "gate.weight")) {
+		return nil, fmt.Errorf("model: expertParallelGLMMoEDelta is the glmMoeFFN twin and does not add the qwen3.5 singular gated shared expert; use ExpertParallelDelta for the routed part")
+	}
 	delta, err := m.ExpertParallelDelta(layer, xn, mat, picks, plan, coll)
 	if err != nil {
 		return nil, err

@@ -237,6 +237,26 @@ func TestExpertParallelFailsClosed(t *testing.T) {
 	}
 }
 
+// TestExpertParallelFailsClosedGPTOSS pins the arch-fidelity guard surfaced by the EP
+// correctness audit: gptoss experts use the expertGPTOSS form (clamped gate/up, (up+1)*glu),
+// which moeFFN dispatches but the EP path does not. EP uses expertSwiGLU, so it must REFUSE a
+// gptoss config rather than silently serve the wrong expert arithmetic. The guard fires on the
+// config alone (before any weight access), so a bare gptoss-arch model triggers it.
+func TestExpertParallelFailsClosedGPTOSS(t *testing.T) {
+	m := epGenMoeModel(8, 4)
+	m.Cfg.Architectures = []string{"GptOssForCausalLM"} // -> archFamilyKey contains "gptoss"
+	if !m.Cfg.isGPTOSS() {
+		t.Fatalf("test setup: cfg should report isGPTOSS()==true")
+	}
+	mat := f32Kernel{m}
+	xn := make([]float32, m.Cfg.HiddenSize)
+	picks := []routePick{{expert: 0, weight: 1}}
+	plan, _ := ExpertParallelPlan(m.Cfg.NumExperts, 2)
+	if _, err := m.ExpertParallelDelta(0, xn, mat, picks, plan, nil); err == nil {
+		t.Fatalf("ExpertParallelDelta on a gptoss config should fail closed (experts use expertGPTOSS, not expertSwiGLU)")
+	}
+}
+
 // TestExpertParallelGLMSharedExpert pins the GLM-specific wrapper (expertParallelGLMMoEDelta):
 // on a real glm_moe_dsa fixture WITH a shared expert, the EP delta (routed reduce + the
 // replicated shared-expert term added once) equals the glmMoeFFN monolith — bit-exact at
