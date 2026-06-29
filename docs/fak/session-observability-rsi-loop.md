@@ -5,6 +5,8 @@ description: "Why our coding-session transcripts are an under-observed RSI data 
 
 # Session-observability for RSI
 
+> **Audience.** Anyone turning the fleet's session transcripts into an RSI signal — by the end you'll know the capture->structure->link->aggregate->learn ladder and which rung `fak sessions` and the sessionobs scorecard have reached.
+
 The fleet runs thousands of Claude Code coding sessions a day. Every one leaves a
 transcript JSONL on the host that produced it. That is a large, continuously
 growing record of *how agents actually do the work* in this repo, and it is the
@@ -77,6 +79,14 @@ climbed to rung 5 has RSI. Every HARD rung above is now built — a fold of ~185
 host sessions scores `sessionobs_debt=0` (linked 90%, value 600 / waste 295). What
 remains is productionization, not unbuilt rungs: a committed fleet-wide corpus and
 folding the scorecard into the control-pane ratchet (the one SOFT rung still open).
+
+## Run it
+
+```bash
+fak sessions score                  # link each transcript to its witnessed outcome
+fak sessions learn                  # run the value-vs-waste contrast over the corpus
+python tools/session_audit.py audit # the cost side: tokens, tool mix, cache reuse
+```
 
 ## The scorecard
 

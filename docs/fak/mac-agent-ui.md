@@ -5,6 +5,8 @@ description: "Repeatable operator steps for launching Claude Code from fak conso
 
 # Mac Agent UI
 
+> **Audience.** Operators launching Claude Code from the fak console against an already-running Mac `fak serve` gateway. By the end you can open interactive Claude Code against `node-macos-a` with one command.
+
 Use this when `node-macos-a` is already running the always-on Qwen3.6 stack:
 
 ```text

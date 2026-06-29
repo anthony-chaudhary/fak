@@ -12,6 +12,8 @@ keywords:
 
 # Context signal-to-noise: the number cache-hit % can't give you
 
+> **Audience.** Anyone judging agent context quality by cache-hit % — by the end you'll see why that number rises with length alone and what token-weighted signal-to-noise ratio replaces it.
+
 Cache-hit percentage is the metric everyone reaches for, and it is the wrong one for
 judging context quality. Here is the trap, the math, and the metric that replaces it.
 

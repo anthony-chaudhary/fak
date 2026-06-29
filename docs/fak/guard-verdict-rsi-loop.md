@@ -6,6 +6,8 @@ journal — with no hardware gate. The hardware-free sibling of the latency loop
 
 # fak guard verdict-pattern RSI loop
 
+> **Audience.** Anyone wiring or auditing the `fak guard` self-improvement loop — by the end you'll know which of the two guard RSI loops closes on a normal box and how its keep-bit stays non-forgeable.
+
 `fak guard -- <agent>` fronts a coding agent with the kernel adjudicating every tool call,
 and writes a **default-on, hash-chained decision journal** (`guard-audit.jsonl`) of every
 verdict it reaches. That journal is the self-improvement signal our own workflow produces.
@@ -129,3 +131,9 @@ python tools/findings_route.py status                    # show the routed findi
 The loop's maturity + realized value is scored by `fak guard-rsi-scorecard` (the
 `guard_rsi_debt` member of the control-pane ratchet) and driven on a `/loop` cadence by the
 `guard-rsi-score` skill.
+
+## Read next
+
+- [The five-rung RSI loop](../rsi-loop.md) — the keep/revert discipline this loop instantiates.
+- [The dojo RSI loop](dojo-rsi-loop.md) — the same keep-bit machine pointed at the calibration ledger.
+- [Engineering is building loops](../explainers/engineering-is-building-loops.md) — the loops doctrine behind it.

@@ -79,3 +79,7 @@ placeholder.
 4. `git log -S "<real value>"` is empty; `tools/leak_scan.py` is clean.
 5. Never restore a real value into the tracked default to "fix" a resolve error —
    point the user at the override instead.
+
+## Read next
+
+- [mac-agent-ui.md](mac-agent-ui.md) — the `claude-mac-fak` worked example whose placeholder defaults this convention protects.

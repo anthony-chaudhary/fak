@@ -159,3 +159,7 @@ This is exactly what edge gateway, industrial IoT, and automotive buyers need:
 - **POLICY.md**: the deployable capability floor (allow-list tools, deny everything else)
 - **docs/notes/MOBILE-EDGE-IOT-STRATEGY-2026-06-24.md**: the complete edge go-to-market strategy
 - **docs/proofs/journal.md**: the formal proof of the hash-chain tamper-evidence property
+
+## Read next
+
+- [deployment-guide.md](deployment-guide.md) — take the same gateway from this offline demo to a production Docker/Kubernetes/bare-metal deploy.

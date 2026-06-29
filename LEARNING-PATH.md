@@ -1,6 +1,6 @@
 ---
 title: "The fak Learning Path — a prerequisite-ordered course"
-description: "A linear, prerequisite-based curriculum across every fak concept: 98 courses in six levels, from \"what is fak\" to landing an optimization in the kernel. Join at the level that matches your background and walk straight through."
+description: "A linear, prerequisite-based curriculum across every fak concept: 99 courses in six levels, from \"what is fak\" to landing an optimization in the kernel. Join at the level that matches your background and walk straight through."
 ---
 
 # The fak learning path
@@ -19,7 +19,7 @@ at that course, and walk forward. The catalog is a strict prerequisite order —
 course's *hard* prerequisites are lower-numbered courses — so reading top-to-bottom never
 lands you on a concept whose prerequisite you have not met yet.
 
-98 courses, six levels (100 → 600), from "what is fak" to landing an optimization into
+99 courses, six levels (100 → 600), from "what is fak" to landing an optimization into
 the kernel. The readings are the docs you would read anyway; the path is what stops you
 reading them in the wrong order.
 
@@ -65,7 +65,7 @@ so you can join mid-catalog without hitting a wall. Anyone can also just start a
 | ML-systems / kernel hacker who wants the in-kernel model and compute HAL | **FAK 201** | FAK 201 → FAK 205 → FAK 207 → FAK 210 → FAK 401 → FAK 521 → FAK 522 → FAK 523 → FAK 524 → FAK 525 → FAK 526 → FAK 404 → FAK 405 → FAK 406 → FAK 527 → FAK 528 → FAK 529 → FAK 530 → FAK 532 |
 | Memory / RAG engineer focused on what fak persists, forgets, and reuses | **FAK 202** | FAK 202 → FAK 203 → FAK 201 → FAK 205 → FAK 207 → FAK 301 → FAK 303 → FAK 310 → FAK 316 → FAK 307 → FAK 407 → FAK 409 → FAK 402 → FAK 401 → FAK 412 → FAK 413 → FAK 414 |
 | Compliance / audit / governance engineer (journal, provenance, deletion, honesty discipline) | **FAK 105** | FAK 105 → FAK 207 → FAK 103 → FAK 301 → FAK 303 → FAK 310 → FAK 311 → FAK 312 → FAK 313 → FAK 314 → FAK 315 → FAK 317 → FAK 404 → FAK 405 → FAK 406 → FAK 411 → FAK 601 → FAK 602 → FAK 606 → FAK 614 → FAK 307 → FAK 616 |
-| Contributor / autonomous agent landing an optimization into the kernel | **FAK 207** | FAK 207 → FAK 208 → FAK 209 → FAK 210 → FAK 614 → FAK 615 |
+| Contributor / autonomous agent landing an optimization into the kernel | **FAK 207** | FAK 207 → FAK 208 → FAK 209 → FAK 210 → FAK 614 → FAK 615 → FAK 616 → FAK 617 |
 
 > The **Route** is the *hard-dependency* path. You can read the context prerequisites
 > noted on each course later (or never) without breaking a lab.
@@ -1226,7 +1226,7 @@ FAK_PLANNER_TIMEOUT_S=600 FAK_HTTP_WRITE_TIMEOUT_S=600 fak serve --addr 127.0.0.
 
 **Lab:**
 ```bash
-docker build -t fak:0.30.0 . ; docker run --rm -p 8080:8080 -e FAK_GATEWAY_KEY="$(openssl rand -hex 32)" fak:0.30.0 serve --addr 0.0.0.0:8080 --base-url http://host.docker.internal:11434/v1 --model qwen2.5:1.5b
+docker build -t fak:0.34.0 . ; docker run --rm -p 8080:8080 -e FAK_GATEWAY_KEY="$(openssl rand -hex 32)" fak:0.34.0 serve --addr 0.0.0.0:8080 --base-url http://host.docker.internal:11434/v1 --model qwen2.5:1.5b
 ```
 
 **Checkpoint:** Walk the production-readiness checklist and justify each item; explain why /healthz is a valid readiness probe and why readOnlyRootFilesystem is safe for fak.
@@ -1659,7 +1659,7 @@ go test -run 'MatMul|Reduction|Q8|Correctness|Registry|Device' ./internal/comput
 
 **Lab:**
 ```bash
-CGO_ENABLED=1 go test -tags fakmetal -run 'MatMul|Reset' ./internal/metalgemm/ -count=1 -v   # (Apple Silicon only; default build: go build ./internal/metalgemm/)
+CGO_ENABLED=1 go test -run 'MatMul|Reset' ./internal/metalgemm/ -count=1 -v   # (Apple Silicon only; default build links Metal when cgo is enabled)
 ```
 
 **Checkpoint:** Explain why the Metal witness is err/scale<1% and logit-cosine=1.0 rather than a bit-compare, and how the mutually-exclusive build tags guarantee the stub introduces no numerical drift.
@@ -1764,6 +1764,7 @@ go test -run 'Verdict|Adjud|HTTPSyscall|DefaultDeny|DenyIsValue|FailsClosed' ./i
 | **FAK 614** — The RSI Ship-Gate: The Non-Forgeable Keep-Bit and the Self-Measured Loop | **FAK 207**, **FAK 210** |
 | **FAK 615** — Extending fak: The Three-Gate Leaf Pattern | **FAK 209**, **FAK 210**, **FAK 614** |
 | **FAK 616** — The Witness-Gated Issue-Dispatch Loop | **FAK 614**, **FAK 307** |
+| **FAK 617** — Loops All the Way Down: The Durable Verified Loop, Loop Health, and Session Net-True | **FAK 614**, **FAK 616** |
 
 ### FAK 601 — The Claims Ledger: SHIPPED/SIMULATED/STUB and the 0/29-Novel Posture
 
@@ -2060,11 +2061,29 @@ commit omits #N can never be witnessed-closed, how the loop guarantees the
 live-worker population can never exceed its cap, and why an identical skill
 invocation can be served as procedural-memory HIT rather than re-rendered.
 
+### FAK 617 — Loops All the Way Down: The Durable Verified Loop, Loop Health, and Session Net-True
+
+**Prerequisites:** **FAK 614**, **FAK 616**
+
+**You'll be able to:**
+- Place every fak mechanism on the five-ring loop ladder (tool-call → turn → session → fleet → RSI) and name the witness primitive each ring carries, plus the five orthogonal threads (trust, cost, memory, observability, governance)
+- Distinguish the durable loop ledger (`fak loop run -- CMD`, which records a hash-chained `HeadBefore..HeadAfter` witness) and the verified driver (`fak loop drive`) from the hand-fed one-shot `rsicycle`, and say what a `dark-loop` state means in `fak loop health`
+- Read a session's net-true verdict (HELPED / WASH / HURT) and explain why cost data alone (tokens, dollars) cannot grade whether a session *achieved* anything
+
+**Read:** [`docs/explainers/engineering-is-building-loops.md`](docs/explainers/engineering-is-building-loops.md), [`docs/rsi-loop.md`](docs/rsi-loop.md), [`docs/fak/session-observability-rsi-loop.md`](docs/fak/session-observability-rsi-loop.md)
+
+**Lab:**
+```bash
+go test ./internal/loopmgr/ ./internal/rsiloop/ ./internal/sessionobs/ -count=1 -timeout 120s
+```
+
+**Checkpoint:** Draw the five-ring ladder and name the witness primitive each ring carries (the adjudicator's provable refusal, ctxmmu's Clear+rescreen, recall's sealed page, the fleet's per-SHA `dos commit-audit`, the RSI keep-bit). Then explain why a `fak loop drive` turn that the model calls "done" still re-arms unless a dos witness agrees, and why a session that burned 200 turns and hit a STOP must grade HURT, not WASH, even though both spent tokens.
+
 ---
 
 ## You've finished the path
 
-If you can pass the checkpoints through **FAK 616**, you can: stand up and harden the
+If you can pass the checkpoints through **FAK 617**, you can: stand up and harden the
 gateway in front of any OpenAI- or Anthropic-compatible model; author and review a
 capability floor; explain the write-time quarantine and the IFC taint lattice; read the
 in-kernel model's forward pass and its oracle-parity ledger; tell an honest benchmark

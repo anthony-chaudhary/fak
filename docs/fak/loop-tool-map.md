@@ -8,7 +8,7 @@ description: "The loop-stage to tool map (#1153): at each stage of the agentic-c
 <!-- loop-tool-map - process: this doc is the human view of `fak loop-map`; the data lives in internal/loopmap -->
 
 The agentic-coding loop is **orient -> plan -> act -> verify -> ship -> learn**
-(the six stages owned by the [loop-index scorecard](loop-index-scorecard.md)). At each
+(the six stages of the loop doctrine in [engineering is building loops](../explainers/engineering-is-building-loops.md)). At each
 stage there is a *right* verb to reach for, but that knowledge is tribal: it is scattered
 across `AGENTS.md`, agent memory, and the kernel's tool surface, so a mid-tier agent
 guesses and reaches for the wrong tool, or none. This map makes the right verb **one ask

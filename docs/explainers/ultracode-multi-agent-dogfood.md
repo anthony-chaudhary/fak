@@ -5,6 +5,8 @@ description: "Defines 'ultracode mode' — orchestrating N independent coding ag
 
 # Ultracode: a concurrent agent fleet as an operational mode
 
+> **Audience.** Anyone orchestrating or auditing a concurrent agent fleet on one trunk — by the end you'll know what "ultracode mode" composes, how its concurrency factor is defined so it can't be gamed, and why it must never be blended with fak's inference 5-10x.
+
 This is the **framing and metric-definition** doc. It defines what "ultracode mode" is,
 which shipped pieces it composes, and — the load-bearing part — the **value metric** by
 which an ultracode run may claim a dogfood multiple, defined so it cannot be gamed. It
@@ -113,9 +115,9 @@ A deliverable counts toward the factor only if it is **both**:
 
 1. **Independently reviewable** — a concrete artifact (a file, a code change, a proof) that
    an auditor can open and read on its own, without trusting the agent's narration.
-2. **Correct and complete, not a stub** — it does what it claims. A placeholder, a TODO, a
-   doc that asserts a test exists when the diff added none (`dos commit-audit`'s
-   `subject-only` failure), or a half-done lane does **not** count.
+2. **Correct and complete, not a stub** — it does what it claims. A placeholder, an
+   unfinished stub, a doc that asserts a test exists when the diff added none
+   (`dos commit-audit`'s `subject-only` failure), or a half-done lane does **not** count.
 
 This is the anti-gaming clause: the factor measures *reviewed output*, so an orchestrator
 cannot pump N by spawning more agents that each emit a stub.

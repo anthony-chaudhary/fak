@@ -5,6 +5,8 @@ description: "How fak is listed in the Model Context Protocol registry (modelcon
 
 # Publishing fak to the Official MCP Registry
 
+> **Audience.** A fak maintainer publishing the server to the Official MCP Registry. By the end you'll know what is already wired in the repo and the one interactive publish step a human has to run.
+
 The [Official MCP Registry](https://github.com/modelcontextprotocol/registry) is the
 canonical index MCP clients query to discover servers. fak is listed there as an **OCI
 package** — the same container the [deployment guide](deployment-guide.md) describes,

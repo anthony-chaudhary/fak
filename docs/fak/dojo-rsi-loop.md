@@ -8,6 +8,8 @@ auto-erase the floors the dojo exists to defend."
 
 # fak dojo RSI loop — the gym's missing 5th rung
 
+> **Audience.** Anyone designing the dojo's autonomous fifth rung — by the end you'll understand why the loop optimises `FoldCalibrable` (not raw `MeanCalibErr`) so it can never auto-erase the floors the gym defends.
+
 The [dojo](dojo.md) is fak's prediction-vs-reality gym. It already closes four of the five
 RSI rungs:
 

@@ -5,6 +5,8 @@ description: "Run and develop fak on a remote lab GPU, driven from Slack: the ke
 
 # Lab dev loop — develop fak ON a lab box, drive it from Slack
 
+> **Audience.** Operators who develop fak on remote lab compute and drive it out-of-band from Slack. By the end you'll understand the four-piece loop and the public/private split that keeps it safe to ship.
+
 This is the end-to-end loop for **running and developing fak on lab compute you choose**,
 driven out-of-band so you can start it from anywhere (a phone, a laptop) while every byte
 of the actual work runs on the box. It ties together four pieces that already exist: a
@@ -54,7 +56,7 @@ FAK_Q4K=1 fak serve \
   --engine inkernel --backend cuda \
   --addr 0.0.0.0:8080
 
-# Apple-Silicon box (a -tags fakmetal build) — GPU prefill + resident Q8 decode on a
+# Apple-Silicon box (darwin/arm64+cgo) — GPU prefill + resident Q8 decode on a
 # dense Qwen-class Q8 GGUF. --metal is the Metal seam, mutually exclusive with --backend:
 fak serve \
   --gguf /srv/models/qwen2.5-coder-7b-instruct-q8_0.gguf \

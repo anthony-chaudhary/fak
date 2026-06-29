@@ -5,6 +5,8 @@ description: "One-command runbook to serve Qwen3.6-27B through fak's OWN in-kern
 
 # Qwen3.6-27B on one GCP datacenter GPU → Claude Code, via the pure fak kernel
 
+> **Audience.** Operators who need a coding fallback for Claude Code on a single GCP GPU. By the end you can serve a model through fak's own in-kernel CUDA forward and route Claude Code on your machine to it, and you'll know which checkpoint actually runs on that forward today.
+
 When your subscription account is unavailable, this stands up **Qwen3.6-27B on a single
 GCP A100** through fak's **own** in-kernel CUDA forward (the pure fak kernel — not vLLM,
 SGLang, or llama.cpp) and points **Claude Code on this machine** at it. Every turn decodes

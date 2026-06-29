@@ -442,3 +442,20 @@ IS and what it is NOT. The concept-disambiguation scorecard positions both halve
 - **effect refusal** (`memq.Refusal`) - a cell an effect declined to touch (sealed /
   tombstoned / page-in refused), recorded with a reason. *Not* `ctxplan.Refusal` (a planner
   span the gate declined to page in).
+
+---
+
+## See the distinctions in action
+
+The kernel **Decision** (the tool-call verdict explanation trace) and the **guard**
+(the adjudication system) above are both visible in a single offline run — replay a
+tool-call trace and read the per-call verdict table:
+
+```bash
+go run ./cmd/fak run --trace testdata/tau2/tau2-smoke.json
+```
+
+## Read next
+
+- [edge-quickstart.md](edge-quickstart.md) — runs the same adjudication path end to end.
+- [deployment-guide.md](deployment-guide.md) — how the guard, gateway, and engine wire together in production.

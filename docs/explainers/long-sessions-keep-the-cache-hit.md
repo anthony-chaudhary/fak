@@ -5,6 +5,8 @@ description: "Why a long Claude Code session gets expensive, why the obvious fix
 
 # Long sessions: shed history, keep the cache hit
 
+> **Audience.** Anyone running a long Claude Code (or similar) session and watching the cost climb. By the end you'll know the one `fak guard` flag that stops a growing session from getting more expensive every turn, and exactly what it does and does not promise.
+
 > The sibling explainers ([addressable KV cache](addressable-kv-cache.md),
 > [the frozen-trajectory cache cliff](frozen-trajectory-cache-cliff.md)) cover the
 > theory of cache reuse. This one is the practical version: the one flag on

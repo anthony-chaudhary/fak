@@ -5,6 +5,8 @@ description: "One preset command points the real Claude Code CLI at GLM-5.2 serv
 
 # `claude-glm-gcp` — GLM-5.2 from the GCP kernel setup
 
+> **Audience.** Operators standing up GLM-5.2 on a GCP GPU node and pointing Claude Code at it through the fak kernel. By the end you can run the `claude-glm-gcp` preset and know what is proven on any host versus what needs the live node.
+
 One preset command runs the real Claude Code CLI on **GLM-5.2 served on GCP**, with the
 fak kernel in front adjudicating every tool call. It is the `dogfood-claude` openai
 backend pointed at a GLM `/v1` on a GCP GPU node — the same wire as

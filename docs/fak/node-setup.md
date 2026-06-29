@@ -5,6 +5,8 @@ description: "One-command lifecycle for an always-on fak serve gateway: install 
 
 # `fak node` — set up and connect to a node
 
+> **Audience.** Operators installing an always-on `fak serve` gateway and connecting clients to it. By the end you can install, point a client at, run against, check, and tear down a node — from a single home box to a Tailscale-routed fleet.
+
 `fak node` is the durable, one-command lifecycle for an always-on `fak serve` gateway. It
 replaces the per-platform shell scripts (`tools/install-mac-node.sh` and friends) with a
 single Go verb that installs the gateway as a real system service, points a client at a

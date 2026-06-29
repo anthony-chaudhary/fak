@@ -38,13 +38,30 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Always-on dogfood gateway and guarded fleet | [always-on-dogfood-server.md](always-on-dogfood-server.md) |
 | Develop fak on a lab box, drive it from Slack | [lab-dev-loop.md](lab-dev-loop.md) |
 | Activate the Tier-1 Mac dogfood node | [node-macos-a-activation.md](node-macos-a-activation.md) |
+| Drive the always-on Mac gateway from the fak UI | [mac-agent-ui.md](mac-agent-ui.md) |
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](gcp-tier2-control-vm.md) |
-| Plan guard-hop RSI tuning | [guard-hop-rsi-loop.md](guard-hop-rsi-loop.md) |
+| Bring up Qwen3.6-27B on one GCP datacenter GPU (a Claude Code coding fallback) | [qwen36-a100-gcp.md](qwen36-a100-gcp.md) |
+| Run fully offline on an edge / air-gapped node (audited, compliant) | [edge-quickstart.md](edge-quickstart.md) |
+| Guard the opencode/GLM dispatch lane | [opencode-glm-guard.md](opencode-glm-guard.md) |
+| Use GLM-5.2 from the GCP kernel setup (the `claude-glm-gcp` preset) | [claude-glm-gcp.md](claude-glm-gcp.md) |
+
+## Loops, dogfooding, and self-improvement
+
+`fak` runs the agent itself as a set of nested loops, and several docs cover how those loops
+are wired, measured, and kept honest. The doctrine behind all of them is
+[engineering-is-building-loops.md](../explainers/engineering-is-building-loops.md).
+
+| Topic | Doc |
+|---|---|
+| The loops doctrine — the five-ring ladder and the witness threads | [`engineering-is-building-loops.md`](../explainers/engineering-is-building-loops.md) |
+| Find the right `fak` verb at every loop stage | [loop-tool-map.md](loop-tool-map.md) |
+| Plan guard-hop RSI tuning (latency loop) | [guard-hop-rsi-loop.md](guard-hop-rsi-loop.md) |
 | Close the guard verdict-quality RSI loop on our own journal | [guard-verdict-rsi-loop.md](guard-verdict-rsi-loop.md) |
 | Score token-saving levers against billed reality (the prediction-vs-reality gym) | [dojo.md](dojo.md) |
 | Make the dojo self-improving — the gym's autonomous RSI loop | [dojo-rsi-loop.md](dojo-rsi-loop.md) |
-| Guard the opencode/GLM dispatch lane | [opencode-glm-guard.md](opencode-glm-guard.md) |
-| Use GLM-5.2 from the GCP kernel setup (the `claude-glm-gcp` preset) | [claude-glm-gcp.md](claude-glm-gcp.md) |
+| Grade how honestly a launched dogfood session reports itself | [dogfood-loop-scorecard.md](dogfood-loop-scorecard.md) |
+| Turn coding-session transcripts into RSI value-data (HELPED/WASH/HURT) | [session-observability-rsi-loop.md](session-observability-rsi-loop.md) |
+| The incremental verify-loop gate and its latency budget (`fak affected`) | [green-gate-budget.md](green-gate-budget.md) |
 
 ## Author and harden the policy
 
@@ -64,6 +81,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Migrate an existing stack (OpenAI API, LangChain, AutoGen, llama.cpp) onto `fak` | [migration-guide.md](migration-guide.md) |
 | Claude Code + Anthropic API setup | [`docs/integrations/claude.md`](../integrations/claude.md) |
 | OpenAI Codex / OpenAI-compatible clients | [`docs/integrations/openai-codex.md`](../integrations/openai-codex.md) |
+| Publish `fak` to the official MCP registry | [mcp-registry.md](mcp-registry.md) |
 | Related work + prior art | [related-items.md](related-items.md) |
 | Where the paid layer is heading — hosted multi-tenant policy + audit plane (RFC, not built) | [hosted-control-plane.md](hosted-control-plane.md) |
 
@@ -77,5 +95,5 @@ any remaining polish is tracked in [documentation-roadmap.md](documentation-road
 
 > Every command and output block in [tutorial.md](tutorial.md), [policy-guide.md](policy-guide.md),
 > [observability.md](observability.md), and [security.md](security.md) was captured from a
-> clean build of `fak` v0.30.0. If a command prints something different for you, that's a
+> clean build of `fak` v0.34.0. If a command prints something different for you, that's a
 > doc bug — please [open an issue](https://github.com/anthony-chaudhary/fak/issues).

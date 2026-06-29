@@ -5,6 +5,8 @@ description: "How well the launched-session dogfooding loop is wired and how hon
 
 # fak dogfood loop scorecard
 
+> **Audience.** Anyone running or reading the dogfooding loop's honesty grade — by the end you'll know what the scorecard scores (a witnessed success narrated over an observed Stop-hook error) and how to run it.
+
 **dogfood_debt: 4**; composite **60/100 (D)**; wiring 100/100; honesty 33/100; 3 conflation turn(s)
 
 > dogfood loop carries 4 debt (wiring 100/100, honesty 33/100, composite 60 D): no_narration_conflation, stop_hook_healthy
@@ -29,5 +31,17 @@ The law: a launched session must not narrate a WITNESSED success over an OBSERVE
 | no | no recent session is wedged on a consecutive Stop-hook failure | 67 of 471 recent session(s) wedged (consecutive>0); 568 total marker(s), max consecutive 10 |
 | yes | the dogfood scorecard is registered in the control-pane ratchet | scorecard_control_pane carries a dogfood row + the baseline pins dogfood_debt |
 | yes | a paired test proves the conflation scan + the clean-tree floor | internal/dogfoodscore/dogfoodscore_test.go proves a conflation transcript reds and a clean one greens |
+
+## Run it
+
+```bash
+go run ./cmd/fak dogfood-score      # score this host's launched-session transcripts
+go test ./internal/dogfoodscore/... # prove the conflation scan reds and a clean tree greens
+```
+
+## Read next
+
+- [session-observability-rsi-loop.md](session-observability-rsi-loop.md) — the sibling loop that turns those same transcripts into HELPED/WASH/HURT value-data.
+- [engineering-is-building-loops.md](../explainers/engineering-is-building-loops.md) — where this dogfood loop sits on the five-ring ladder.
 
 **Next:** retire worst-first: no_narration_conflation — 3 turn(s) claimed success in the same turn the harness reported a Stop-hook error — the model narrated a WITNESSED success over an OBSERVED hook failure

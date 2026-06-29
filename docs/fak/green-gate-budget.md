@@ -1,5 +1,7 @@
 # Green-Gate Budget
 
+> **Audience.** Anyone tuning the incremental verify loop — by the end you'll know the tracked time budgets, how `fak affected` enforces them, and how to override a budget for one run.
+
 `fak affected` is the incremental verify-loop gate for a path-scoped change. It runs
 `go test` on the changed package plus every package that imports it, then compares the
 measured wall time with a tracked budget. A run that passes tests but exceeds the budget
@@ -45,3 +47,8 @@ This is a net-true inner-loop win only within its scope: it reruns the import-gr
 closure for the changed Go files and does not replace `make ci`. Non-Go runtime data
 dependencies, build-tag-specific behavior, and cross-repo services still ride the full
 gate.
+
+## Read next
+
+- [loop-tool-map](loop-tool-map.md) — which verb to reach for at the verify stage this gate sits in.
+- [Engineering is building loops](../explainers/engineering-is-building-loops.md) — the loops doctrine behind a tracked inner loop.
