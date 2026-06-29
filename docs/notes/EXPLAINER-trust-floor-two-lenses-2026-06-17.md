@@ -46,7 +46,7 @@ below maps each lens to its sub-decision and resolves the overloaded word *durab
 | `abi.Ref{Taint}` content-addressed handle | **taint label** that travels with the data | a **zero-copy handle** (Merkle/CAS address = identity) |
 | `recall` persist → reload, re-screen on `Resolve` | **durable taint** + **TOCTOU-closing re-check** on re-admit | **demand paging** from a frozen **core dump** (CRIU/`gdb`-attach analogy) |
 | CAS digest integrity check at `Load` | **tamper-evidence** (content addressing = a Merkle check) | a **checksum on the swap device**, fail-closed |
-| `vdso` tier-1/2 local serve | n/a (a perf path) | a **vDSO**: answer a read-only call locally, no engine round-trip |
+| `vdso` three-tier (pure/cache/static) local serve | n/a (a perf path) | a **vDSO**: answer a read-only call locally, no engine round-trip |
 
 ---
 
