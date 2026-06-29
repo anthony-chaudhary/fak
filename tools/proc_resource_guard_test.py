@@ -531,5 +531,110 @@ class RelationsParserTests(unittest.TestCase):
         self.assertEqual(self.mod._child_counts(rows), {0: 1, 1: 2})
 
 
+class CpuReapConfirmTests(unittest.TestCase):
+    """Cross-tick confirmation: a CPU-ONLY pin is auto-reaped only after it persists
+    across N consecutive runs, keyed by (pid+start) so a recycled pid cannot inherit a
+    dead process's streak. The safety proofs for the standing auto-killer."""
+
+    def setUp(self):
+        self.mod = load()
+
+    def _kpayload(self, rows, *, confirm, prev, orphan_rows=None):
+        killed = []
+        payload = self.mod.build_payload(
+            rows, max_threads=2000, max_handles=0, max_ws_mb=0, max_cpu_pct=90,
+            cpu_reap_confirm=confirm, cpu_streaks_prev=prev,
+            protected_pids=frozenset(), allow_names=frozenset(),
+            enact=True, killer=lambda pid: (killed.append(pid), (True, "SIGKILL sent"))[1],
+            orphan_rows=orphan_rows,
+        )
+        return killed, payload
+
+    def test_streak_key_includes_start(self):
+        self.assertEqual(self.mod.cpu_streak_key(100, "2026-01-01T00:00:00Z"), "100:2026-01-01T00:00:00Z")
+        self.assertEqual(self.mod.cpu_streak_key(100, None), "100:")
+        self.assertEqual(self.mod.cpu_streak_key(100, ""), "100:")
+
+    def test_bump_streaks_increments_and_drops(self):
+        prev = {"10:A": 2, "11:A": 5}
+        out = self.mod._bump_cpu_streaks(prev, ["10:A", "12:A"])
+        self.assertEqual(out, {"10:A": 3, "12:A": 1})  # 10 bumped, 12 new, 11 dropped
+
+    def test_cpu_only_unconfirmed_is_not_killed(self):
+        rows = [{"pid": 50, "name": "spin", "threads": 1, "handles": 9, "ws_mb": 12, "cpu_pct": 99.0, "start": "S1"}]
+        killed, payload = self._kpayload(rows, confirm=2, prev={})  # streak -> 1 < 2
+        self.assertEqual(killed, [])
+        row = payload["flagged"][0]
+        self.assertEqual(row["action"], "cpu-unconfirmed")
+        self.assertEqual(row["cpu_streak"], 1)
+        self.assertFalse(payload["ok"])  # still ACTION -- a pin is present
+        self.assertEqual(payload["cpu_streaks"], {"50:S1": 1})
+
+    def test_cpu_only_confirmed_is_killed(self):
+        rows = [{"pid": 50, "name": "spin", "threads": 1, "handles": 9, "ws_mb": 12, "cpu_pct": 99.0, "start": "S1"}]
+        killed, payload = self._kpayload(rows, confirm=2, prev={"50:S1": 1})  # streak -> 2 >= 2
+        self.assertEqual(killed, [50])
+        self.assertEqual(payload["flagged"][0]["action"], "killed")
+
+    def test_pid_reuse_does_not_inherit_streak(self):
+        # pid 50 was confirmed (streak 1) for a process started at S1; it died and pid 50
+        # is reused by a NEW process started at S2. The new process must NOT inherit the
+        # old streak -- it gets a fresh key "50:S2" -> streak 1 < 2 -> NOT killed.
+        rows = [{"pid": 50, "name": "spin", "threads": 1, "handles": 9, "ws_mb": 12, "cpu_pct": 99.0, "start": "S2"}]
+        killed, payload = self._kpayload(rows, confirm=2, prev={"50:S1": 1})
+        self.assertEqual(killed, [])
+        self.assertEqual(payload["flagged"][0]["action"], "cpu-unconfirmed")
+        self.assertEqual(payload["cpu_streaks"], {"50:S2": 1})  # old "50:S1" dropped
+
+    def test_cpu_plus_thread_breach_reaps_immediately(self):
+        # CPU *and* a thread runaway is unambiguous -> killed now, even with high confirm
+        # and no prior streak (not cpu-only).
+        rows = [{"pid": 51, "name": "bad", "threads": 9000, "handles": 9, "ws_mb": 12, "cpu_pct": 150.0, "start": "S"}]
+        killed, payload = self._kpayload(rows, confirm=99, prev={})
+        self.assertEqual(killed, [51])
+        self.assertEqual(payload["flagged"][0]["action"], "killed")
+
+    def test_orphan_reaps_immediately_regardless_of_confirm(self):
+        orphan = self.mod.classify_orphans(
+            [{"pid": 36252, "name": "python", "ppid": 999, "cmdline": "python -m dos_mcp.server", "age_sec": 9}],
+            live_pids=frozenset(), orphan_patterns=("dos_mcp.server",),
+        )
+        killed, payload = self._kpayload([], confirm=99, prev={}, orphan_rows=orphan)
+        self.assertEqual(killed, [36252])  # orphan is unambiguous -> not gated by confirm
+
+    def test_protected_cpu_pin_never_killed_even_confirmed(self):
+        rows = [{"pid": 4, "name": "System", "threads": 1, "handles": 1, "ws_mb": 1, "cpu_pct": 300.0, "start": "S"}]
+        killed, payload = self._kpayload(rows, confirm=1, prev={"4:S": 9})
+        self.assertEqual(killed, [])
+        self.assertEqual(payload["flagged"][0]["action"], "protected-skip")
+
+    def test_confirm_default_one_kills_on_first_detection(self):
+        rows = [{"pid": 52, "name": "spin", "threads": 1, "handles": 1, "ws_mb": 1, "cpu_pct": 99.0, "start": "S"}]
+        killed, _ = self._kpayload(rows, confirm=1, prev={})
+        self.assertEqual(killed, [52])  # confirm=1 == legacy first-detection reap
+
+    def test_report_mode_annotates_streak_without_killing(self):
+        rows = [{"pid": 53, "name": "spin", "threads": 1, "handles": 1, "ws_mb": 1, "cpu_pct": 99.0, "start": "S"}]
+        payload = self.mod.build_payload(
+            rows, max_threads=2000, max_handles=0, max_ws_mb=0, max_cpu_pct=90,
+            cpu_reap_confirm=2, cpu_streaks_prev={"53:S": 4},
+            protected_pids=frozenset(), allow_names=frozenset(),
+            enact=False, killer=lambda pid: (True, ""),
+        )
+        self.assertEqual(payload["flagged"][0]["action"], "report")
+        self.assertEqual(payload["flagged"][0]["cpu_streak"], 5)
+
+    def test_ledger_round_trip_and_corruption_safe(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            self.assertEqual(self.mod.load_cpu_streaks(p), {})  # absent -> empty
+            self.mod.save_cpu_streaks(p, {"7:S": 3})
+            self.assertEqual(self.mod.load_cpu_streaks(p), {"7:S": 3})
+            (p / self.mod.CPU_STREAK_LEDGER).write_text("{not json", encoding="utf-8")
+            self.assertEqual(self.mod.load_cpu_streaks(p), {})  # corrupt -> empty, no raise
+
+
 if __name__ == "__main__":
     unittest.main()

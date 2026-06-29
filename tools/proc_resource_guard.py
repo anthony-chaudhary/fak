@@ -36,8 +36,12 @@ normal thread/handle count, so the only witness is rate-of-CPU: the guard takes 
 (or more) cumulative-CPU-seconds samples ``--cpu-window`` apart and flags a process
 whose *sustained* per-core CPU (the minimum across consecutive windows, so a brief
 legitimate burst that ends mid-measurement is not mistaken for a pin) stays over the
-threshold. Cross-platform via the platform's own tools (PowerShell on Windows, ``ps``
-on Linux); no third-party deps.
+threshold. Because even a multi-second window cannot tell a legitimate minutes-long
+CPU job from a wedged loop, *auto-reaping* a CPU-only pin is additionally gated on
+``--cpu-reap-confirm`` consecutive runs (a tiny start-time-keyed pid streak ledger): a
+standing reaper only kills a core-pin that has persisted across scheduled ticks, while
+thread/handle runaways and orphans still reap immediately. Cross-platform via the
+platform's own tools (PowerShell on Windows, ``ps`` on Linux); no third-party deps.
 
 Exit code: 0 == clean / disabled (no runaway) ; 1 == a runaway is flagged
 (ACTION). With ``--enact`` the kills are reported in the JSON ``enacted`` list.
@@ -71,6 +75,17 @@ DEFAULT_MAX_WS_MB = 0    # 0 == dimension disabled
 DEFAULT_MAX_CPU_PCT = 0.0      # 0 == dimension disabled (default)
 DEFAULT_CPU_WINDOW_SEC = 3.0   # seconds between consecutive CPU samples
 DEFAULT_CPU_SAMPLES = 2        # 2 == one window; >2 requires the pin to hold every window
+
+# Cross-tick reap confirmation for the CPU dimension. A within-one-run sustained
+# window (cpu_pct_sustained) tells a burst from a pin over a few SECONDS; it cannot
+# tell a 6-second legit compile from a 6-hour wedged process. Duration is the only
+# honest separator, and the only honest way to measure MINUTES is across consecutive
+# scheduled runs. So a CPU-ONLY pin is reaped (--enact) only after it has been flagged
+# in this many consecutive guard runs (1 == reap on first detection, the default for a
+# one-shot manual run; a standing reaper should set >=2). Thread/handle runaways and
+# orphans are unambiguous and always reap immediately, regardless of this.
+DEFAULT_CPU_REAP_CONFIRM = 1
+CPU_STREAK_LEDGER = "cpu_pin_streak.json"
 
 # Orphan-sprawl reaping (opt-in via --reap-orphans / --reap-idle-shells). An
 # "orphaned helper" is an ephemeral stdio child still resident after its owner
@@ -160,6 +175,7 @@ def classify(
                 "handles": handles,
                 "ws_mb": ws_mb,
                 "cpu_pct": cpu_pct,
+                "start": proc.get("start"),
                 "reasons": reasons,
                 "protected": protected,
             }
@@ -296,6 +312,8 @@ def build_payload(
     allow_names: frozenset[str],
     enact: bool,
     max_cpu_pct: float = DEFAULT_MAX_CPU_PCT,
+    cpu_reap_confirm: int = DEFAULT_CPU_REAP_CONFIRM,
+    cpu_streaks_prev: dict[str, int] | None = None,
     killer: Any = None,
     collect_error: str = "",
     orphan_rows: list[dict[str, Any]] | None = None,
@@ -312,18 +330,45 @@ def build_payload(
         ),
         orphan_rows or [],
     )
+
+    # Cross-tick streak ledger: bump every (pid+start) key CPU-flagged THIS run, drop
+    # the rest. Keyed by start time too, so a recycled pid cannot inherit a streak.
+    cpu_keys = [
+        cpu_streak_key(r["pid"], r.get("start"))
+        for r in flagged
+        if any(_is_cpu_reason(x) for x in (r.get("reasons") or []))
+    ]
+    cpu_streaks = _bump_cpu_streaks(cpu_streaks_prev or {}, cpu_keys)
+
+    def _cpu_only(row: dict[str, Any]) -> bool:
+        # Flagged ONLY for CPU (no thread/handle/ws level breach, not an orphan/idle
+        # shell). Those other classes are unambiguous and reap immediately; a CPU-only
+        # pin is the one that must clear the cross-tick confirmation first.
+        reasons = row.get("reasons") or []
+        return bool(reasons) and all(_is_cpu_reason(x) for x in reasons) and not row.get("kind")
+
     enacted: list[dict[str, Any]] = []
-    if enact and killer is not None:
-        for row in flagged:
-            if row["protected"]:
-                row["action"] = "protected-skip"
-                continue
-            ok, detail = killer(row["pid"])
-            row["action"] = "killed" if ok else "kill-failed"
-            enacted.append({"pid": row["pid"], "name": row["name"], "ok": ok, "detail": detail})
-    else:
-        for row in flagged:
+    confirm = max(1, cpu_reap_confirm)
+    for row in flagged:
+        is_cpu = any(_is_cpu_reason(x) for x in (row.get("reasons") or []))
+        streak = cpu_streaks.get(cpu_streak_key(row["pid"], row.get("start")), 0) if is_cpu else 0
+        if is_cpu:
+            row["cpu_streak"] = streak
+        if not (enact and killer is not None):
             row["action"] = "report"
+            continue
+        if row["protected"]:
+            row["action"] = "protected-skip"
+            continue
+        if _cpu_only(row) and streak < confirm:
+            # A core-pin not yet confirmed across enough runs -- surfaced (still
+            # ACTION), but NOT killed: this is the gate that keeps a legitimate
+            # minutes-long CPU job from being reaped as if it were a wedged loop.
+            row["action"] = "cpu-unconfirmed"
+            continue
+        ok, detail = killer(row["pid"])
+        row["action"] = "killed" if ok else "kill-failed"
+        enacted.append({"pid": row["pid"], "name": row["name"], "ok": ok, "detail": detail})
 
     # ACTION (ok:false) iff a collector failed (we cannot prove the host is
     # clean) OR a NON-PROTECTED process is flagged. A protected breach -- e.g.
@@ -345,6 +390,8 @@ def build_payload(
             "max_ws_mb": max_ws_mb,
             "max_cpu_pct": max_cpu_pct,
         },
+        "cpu_reap_confirm": confirm,
+        "cpu_streaks": cpu_streaks,
         "scanned": len(procs),
         "flagged_count": len(flagged),
         "actionable_flagged_count": len(actionable_flagged),
@@ -363,7 +410,16 @@ def _next_action(flagged: list[dict[str, Any]], enact: bool, collect_error: str)
         return "no runaway or orphaned process; no action"
     names = ", ".join(sorted({f"{r['name']}(pid {r['pid']})" for r in flagged}))
     if enact:
-        return f"reaped flagged process(es): {names} (protected ones skipped)"
+        killed = sorted({f"{r['name']}(pid {r['pid']})" for r in flagged if r.get("action") == "killed"})
+        deferred = sorted({f"{r['name']}(pid {r['pid']})" for r in flagged if r.get("action") == "cpu-unconfirmed"})
+        parts: list[str] = []
+        if killed:
+            parts.append(f"reaped: {', '.join(killed)}")
+        if deferred:
+            parts.append(f"CPU pin watched (not yet confirmed across runs, NOT reaped): {', '.join(deferred)}")
+        if not parts:
+            return f"flagged: {names}; nothing reaped (protected or unconfirmed)"
+        return "; ".join(parts) + " (protected ones skipped)"
     kinds = {r.get("kind") or "runaway" for r in flagged}
     if kinds <= {"orphan-helper", "idle-shell"}:
         hint = "orphaned sprawl serving no live session; re-run with --enact to reap."
@@ -440,6 +496,34 @@ def cpu_pct_sustained(samples: list[dict[Any, Any]], dt: float) -> dict[Any, flo
     return out
 
 
+def _is_cpu_reason(reason: Any) -> bool:
+    return isinstance(reason, str) and reason.startswith("cpu ")
+
+
+def cpu_streak_key(pid: Any, start: Any) -> str:
+    """Stable cross-run identity for a process: pid PLUS its start time. Keying the
+    streak on the pair (not the pid alone) is what makes cross-run confirmation
+    reuse-safe -- a recycled pid carries a different start time, so it gets a FRESH
+    streak instead of inheriting a dead process's confirmation count. When the start
+    time is unavailable (POSIX basic scan, or an access-denied Windows process) the
+    key degrades to pid-only; the live reaper target is Windows, where start is read."""
+    return f"{pid}:{start if start not in (None, '') else ''}"
+
+
+def _bump_cpu_streaks(prev: dict[str, int], cpu_keys: Iterable[str]) -> dict[str, int]:
+    """Increment the consecutive-run streak for each currently CPU-flagged process key
+    and DROP every key not flagged this run, so a streak survives only while THAT exact
+    process (pid+start) keeps pinning run-to-run. A recycled pid is a different key and
+    starts from zero; a within-run counter reset already prevents a false pin score
+    (see cpu_pct_delta). Net: a missed reap under reuse, never a wrong one."""
+    out: dict[str, int] = {}
+    for key in cpu_keys:
+        if key is None:
+            continue
+        out[key] = prev.get(key, 0) + 1
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Platform collectors (I/O)
 # --------------------------------------------------------------------------- #
@@ -484,9 +568,10 @@ def collect_processes_cpu(
 def _collect_windows() -> list[dict[str, Any]]:
     script = (
         "Get-Process -ErrorAction SilentlyContinue | ForEach-Object { "
-        "try { [pscustomobject]@{ pid=$_.Id; name=$_.ProcessName; "
+        "try { $st=''; try { $st=$_.StartTime.ToUniversalTime().ToString('o') } catch {}; "
+        "[pscustomobject]@{ pid=$_.Id; name=$_.ProcessName; "
         "threads=$_.Threads.Count; handles=$_.HandleCount; ws=[int64]$_.WorkingSet64; "
-        "cpu=$_.CPU } } catch {} "
+        "cpu=$_.CPU; start=$st } } catch {} "
         "} | ConvertTo-Json -Compress"
     )
     proc = subprocess.run(
@@ -518,6 +603,7 @@ def _parse_windows_json(text: str) -> list[dict[str, Any]]:
                 "handles": _as_int(row.get("handles")),
                 "ws_mb": (ws // (1024 * 1024)) if ws is not None else None,
                 "cpu_s": _as_float(row.get("cpu")),
+                "start": (str(row.get("start")) if row.get("start") else None),
             }
         )
     return out
@@ -675,6 +761,27 @@ def kill_pid(pid: int | None) -> tuple[bool, str]:
 # --------------------------------------------------------------------------- #
 # Logging + rendering
 # --------------------------------------------------------------------------- #
+def load_cpu_streaks(log_dir: Path) -> dict[str, int]:
+    """Read the cross-tick CPU-pin streak ledger. Any error (absent / corrupt) yields
+    an empty ledger -- a lost ledger means a pin must simply re-accumulate its streak,
+    which is the safe direction (a missed reap, never a wrong one)."""
+    try:
+        raw = json.loads((log_dir / CPU_STREAK_LEDGER).read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return {str(k): int(v) for k, v in raw.items() if _as_int(v) is not None}
+    except (OSError, ValueError, TypeError):
+        pass
+    return {}
+
+
+def save_cpu_streaks(log_dir: Path, streaks: dict[str, int]) -> None:
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / CPU_STREAK_LEDGER).write_text(json.dumps(streaks), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def note(payload: dict[str, Any], log_dir: Path) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     flagged = payload.get("flagged") or []
@@ -700,7 +807,12 @@ def render(payload: dict[str, Any]) -> str:
         tag = "PROTECTED" if row.get("protected") else (row.get("action") or "report")
         kind = f"{row.get('kind')} " if row.get("kind") else ""
         cpu = row.get("cpu_pct")
-        cpu_str = f"cpu={cpu:.0f}%/core " if cpu is not None else ""
+        if cpu is not None:
+            streak = row.get("cpu_streak")
+            sfx = f" streak={streak}" if streak is not None else ""
+            cpu_str = f"cpu={cpu:.0f}%/core{sfx} "
+        else:
+            cpu_str = ""
         lines.append(
             f"  [{tag}] {kind}pid={row.get('pid')} {row.get('name')} "
             f"{cpu_str}threads={row.get('threads')} handles={row.get('handles')} "
@@ -783,9 +895,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="DESTRUCTIVE: kill flagged non-protected processes (default: report only)",
     )
+    ap.add_argument(
+        "--cpu-reap-confirm",
+        type=int,
+        default=DEFAULT_CPU_REAP_CONFIRM,
+        metavar="N",
+        help="reap a CPU-ONLY pin (with --enact) only after it is flagged in N consecutive "
+        "runs (default 1 = reap on first detection). A standing reaper should set >=2 so a "
+        "pin must persist across scheduled ticks (minutes), not just one 6s window, before it "
+        "is killed -- this is what keeps a legit minutes-long CPU job from being reaped. "
+        "Thread/handle runaways and orphans always reap immediately regardless of this.",
+    )
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--log-dir", default="", help="watchdog log dir (default: tools/_watchdog)")
     args = ap.parse_args(argv)
+
+    log_dir = Path(args.log_dir) if args.log_dir else (repo_root() / "tools" / "_watchdog")
+    # Cross-tick streak ledger: load before the scan, persist the updated streaks after.
+    cpu_streaks_prev = load_cpu_streaks(log_dir) if args.max_cpu_pct > 0 else {}
 
     # The CPU dimension needs two+ samples; every other dimension is single-shot.
     if args.max_cpu_pct > 0:
@@ -825,6 +952,8 @@ def main(argv: list[str] | None = None) -> int:
         max_handles=args.max_handles,
         max_ws_mb=args.max_ws_mb,
         max_cpu_pct=args.max_cpu_pct,
+        cpu_reap_confirm=args.cpu_reap_confirm,
+        cpu_streaks_prev=cpu_streaks_prev,
         protected_pids=protected_pids,
         allow_names=frozenset(args.allow),
         enact=args.enact,
@@ -833,7 +962,8 @@ def main(argv: list[str] | None = None) -> int:
         orphan_rows=orphan_rows,
     )
 
-    log_dir = Path(args.log_dir) if args.log_dir else (repo_root() / "tools" / "_watchdog")
+    if args.max_cpu_pct > 0:
+        save_cpu_streaks(log_dir, payload.get("cpu_streaks") or {})
     try:
         note(payload, log_dir)
     except OSError:

@@ -90,19 +90,36 @@ with **no external state to persist**.
 # report any process pinning >90% of one core, sustained over two 2s windows (4s)
 python tools/proc_resource_guard.py --max-cpu-pct 90 --cpu-window 2 --cpu-samples 3
 
-# the safe enacting shape: must hold >90%/core across three 2s windows (6s) first
-python tools/proc_resource_guard.py --max-cpu-pct 90 --cpu-window 2 --cpu-samples 4 --enact
+# the safe enacting shape: must hold >90%/core across three 2s windows (6s) within a
+# run AND be flagged in 2 consecutive runs before it is killed
+python tools/proc_resource_guard.py --max-cpu-pct 90 --cpu-window 2 --cpu-samples 4 \
+    --cpu-reap-confirm 2 --enact
 ```
+
+**Two-level confirmation — burst vs. pin, then seconds vs. minutes.** The within-run
+`--cpu-samples` min-over-windows tells a *burst* from a *pin* over a few **seconds**.
+It cannot tell a legitimate minutes-long CPU job (a big single-threaded link, a CPU
+inference, a heavy scorecard) from a wedged loop — duration is the only honest
+separator, and the only honest way to measure **minutes** is across consecutive
+scheduled runs. So auto-reaping a **CPU-only** pin (its only breach is CPU) is gated a
+second time on **`--cpu-reap-confirm N`**: the guard keeps a tiny start-time-keyed
+streak ledger (`tools/_watchdog/cpu_pin_streak.json`) and only kills a pin flagged in N
+consecutive runs. Keying on `(pid, start-time)` makes it reuse-safe: a recycled pid
+carries a different start time, so it gets a fresh streak instead of inheriting a dead
+process's count. Thread/handle runaways and orphaned helpers are unambiguous and
+**always reap immediately**, ungated. A pin that has not yet reached the count is
+surfaced as `cpu-unconfirmed` (still ACTION) but not killed.
 
 **Threshold guidance.** A single-threaded runaway pins ≈100%/core, so a reaping
 threshold of **90** (a near-full core) sits safely above almost all legitimate
-bursty work while still catching the wedge. Reaping a CPU pin should always use a
-longer sustained window (`--cpu-samples 4 --cpu-window 2` ⇒ 6 s) than a bare report,
-and never reaps a protected OS process or the guard's own tree. On POSIX `cputimes`
-is integer-second, so use a window ≥ a few seconds there. Witnessed on this host: a
-single-threaded `code_slop_scorecard.py` worker sustaining 66%/core for 4 s was
-*reported* at `--max-cpu-pct 40` and, being report-only by default, correctly **not
-killed** — exactly the legitimate transient a 90%/6 s reaping bar excludes.
+bursty work while still catching the wedge. A standing reaper should pair it with
+`--cpu-reap-confirm 2` (so a kill needs the pin to survive across scheduled ticks —
+minutes, not one 6 s window) and never reaps a protected OS process or the guard's
+own tree. On POSIX `cputimes` is integer-second, so use a window ≥ a few seconds.
+Witnessed on this host: a single-threaded `code_slop_scorecard.py` worker sustaining
+66%/core for 4 s was *reported* at `--max-cpu-pct 40` and, being report-only by
+default, correctly **not killed** — exactly the legitimate transient that both the
+90%/6 s bar and the cross-run confirmation exclude.
 
 ### Root-cause hygiene for inference launchers
 
@@ -168,8 +185,9 @@ reaper's `register_runaway_reaper.ps1`:
 # install REPORT-ONLY (safe default): logs every scan, kills nothing
 .\tools\register_proc_resource_guard.ps1
 
-# flip to ENACTING: reaps runaways + orphans, and a CPU pin only after it holds
-# >90%/core across 4x2s = 6s sustained (a legit compile/test burst is never killed)
+# flip to ENACTING: reaps runaways + orphans immediately, and a CPU pin only after it
+# holds >90%/core across 4x2s = 6s sustained AND persists across 2 consecutive runs
+# (--cpu-reap-confirm 2) -- a legit compile/test burst or minutes-long job is never killed
 .\tools\register_proc_resource_guard.ps1 -Enact
 
 .\tools\register_proc_resource_guard.ps1 -Action status   # mode + last run
