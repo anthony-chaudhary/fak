@@ -446,5 +446,46 @@ class InjectedIssuesTest(unittest.TestCase):
         self.assertNotEqual(p.get("finding"), "fetch_error")
 
 
+class ViewFetchFailSoft(unittest.TestCase):
+    """`fetch_view_issues` resolves a named issue-view to a gh search and parses the
+    rows; it RAISES on a bad view / gh failure so the --view caller can fail-soft to
+    the full open backlog (the unattended tick must never starve on a mis-pointed view)."""
+
+    def test_view_resolves_to_milestone_search_and_parses_rows(self):
+        seen = {}
+
+        def fake_run_text(cmd, cwd, *, timeout=60):
+            seen["cmd"] = cmd
+            return {"stdout": '[{"number":1,"title":"x","labels":[],"body":""}]',
+                    "returncode": 0}
+
+        orig = m.run_text
+        m.run_text = fake_run_text
+        try:
+            rows = m.fetch_view_issues(Path("."), "m2-kv-cache")
+        finally:
+            m.run_text = orig
+        self.assertEqual(len(rows), 1)
+        # the view's query is milestone-scoped, so the resolved gh argv carries it
+        self.assertTrue(any("milestone:" in str(a) for a in seen["cmd"]),
+                        f"resolved gh argv not milestone-scoped: {seen.get('cmd')}")
+
+    def test_gh_error_raises_for_failsoft(self):
+        def fake_run_text(cmd, cwd, *, timeout=60):
+            return {"stdout": "", "stderr": "boom", "returncode": 1}
+
+        orig = m.run_text
+        m.run_text = fake_run_text
+        try:
+            with self.assertRaises(RuntimeError):
+                m.fetch_view_issues(Path("."), "m2-kv-cache")
+        finally:
+            m.run_text = orig
+
+    def test_unknown_view_raises_keyerror(self):
+        with self.assertRaises(KeyError):
+            m.fetch_view_issues(Path("."), "no-such-view-zzz")
+
+
 if __name__ == "__main__":
     unittest.main()

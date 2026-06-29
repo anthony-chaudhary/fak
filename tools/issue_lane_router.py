@@ -465,6 +465,33 @@ def load_injected_issues(source: str) -> list[dict[str, Any]]:
     return data
 
 
+def fetch_view_issues(workspace: Path, slug: str, *, limit: int = 1000) -> list[dict[str, Any]]:
+    """Fetch the open-issue backlog for a NAMED issue-view (``.github/issue-views.json``)
+    by resolving it through the sibling ``issue_views`` tool, so e.g. ``--view current``
+    routes exactly the slice the issue-views selection surface defines.
+
+    Raises on a missing/invalid config or a gh failure — the caller fail-softs to the
+    full open backlog so an unattended dispatch tick never starves on a bad view.
+    """
+    tools_dir = str(Path(__file__).resolve().parent)
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    import issue_views as iv  # sibling tool; resolves a view slug -> gh search argv
+
+    cfg_root = iv.repo_root(workspace)
+    cfg = iv.load_config(iv.default_config_path(cfg_root))
+    view = iv.resolve_view(cfg, slug)
+    args = iv.build_gh_args(cfg, view, limit=limit, json_fields="number,title,labels,body")
+    res = run_text(args, workspace, timeout=90)
+    if res.get("returncode"):
+        raise RuntimeError(res.get("stderr") or f"gh exited {res.get('returncode')}")
+    text = (res.get("stdout") or "").strip()
+    if not text:
+        return []
+    data = json.loads(text)
+    return data if isinstance(data, list) else []
+
+
 def build_payload(
     *,
     workspace: str,
@@ -701,6 +728,12 @@ def main(argv: list[str] | None = None) -> int:
                          "routing, e.g. `python tools/issue_views.py show --view "
                          "ready-leaves --json --fields number,title,labels,body | "
                          "python tools/issue_lane_router.py --issues - --json`")
+    ap.add_argument("--view", default="", metavar="SLUG",
+                    help="scope candidates to a named issue-view from "
+                         ".github/issue-views.json (e.g. 'current', 'm2-kv-cache') "
+                         "instead of the full open backlog. FAIL-SOFT: an empty or "
+                         "unresolved view falls through to the full backlog so an "
+                         "unattended tick never starves. Ignored when --issues is set.")
     args = ap.parse_args(argv)
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
@@ -722,6 +755,19 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         fetcher = lambda ws: _injected_rows  # noqa: E731
         injected = True
+    elif args.view:
+        try:
+            _view_rows = fetch_view_issues(workspace, args.view, limit=args.issue_limit)
+        except Exception as exc:  # noqa: BLE001 — fail-soft: the tick must never starve
+            print(f"WARN: --view {args.view!r}: {exc}; using full open backlog",
+                  file=sys.stderr)
+            _view_rows = None
+        if _view_rows and any(is_dispatchable(r) for r in _view_rows):
+            fetcher = lambda ws: _view_rows  # noqa: E731
+            injected = True
+        elif _view_rows is not None:
+            print(f"WARN: --view {args.view!r}: no dispatchable issues; "
+                  "using full open backlog", file=sys.stderr)
 
     payload = collect(
         workspace, issue_limit=args.issue_limit, max_unrouted_frac=args.max_unrouted_frac,

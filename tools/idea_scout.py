@@ -142,6 +142,9 @@ DEFAULTS = {
     "min_stars": 25,      # GitHub repos under this many stars are dropped pre-score
     "dup_jaccard": 0.55,  # title token-overlap to call a near-duplicate
     "issue_scan_limit": 800,  # existing issues fetched for the dedup index
+    "milestone": "",      # assign filed issues to this milestone title (empty = none)
+    "project": "",        # ProjectsV2 number to add filed issues to (empty = none)
+    "project_owner": "",  # owner login for --project (empty = repo owner / viewer)
 }
 
 # Term-hit weights for the transparent relevance score.
@@ -496,17 +499,43 @@ def ensure_scout_label() -> None:
               file=sys.stderr)
 
 
-def create_issue(issue: dict[str, Any]) -> str:
-    """`gh issue create` → the new issue URL."""
+def create_issue(issue: dict[str, Any], *, milestone: str = "") -> str:
+    """`gh issue create` → the new issue URL.
+
+    When ``milestone`` is set, file the issue straight into it so scouted work joins
+    the milestone backlog the dispatch fleet selects from (the milestone must already
+    exist — gh errors otherwise). Empty leaves the issue milestone-less.
+    """
     args = ["issue", "create", "--title", issue["title"], "--body", issue["body"]]
     for lab in issue["labels"]:
         args += ["--label", lab]
+    if milestone:
+        args += ["--milestone", milestone]
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
                           encoding="utf-8")
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue create -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
     return proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+
+
+def add_to_project(url: str, number: str, owner: str = "") -> None:
+    """Best-effort: add a freshly-filed issue to a ProjectsV2 board.
+
+    Warn-don't-die (mirrors ``ensure_scout_label``): a board/scope failure must never
+    lose the created issue or skip the seen-cache write. Needs the gh ``project`` write
+    scope and the integer project number — both operator prerequisites — so this is
+    opt-in: an empty ``number`` skips it entirely.
+    """
+    if not number:
+        return
+    cmd = ["gh", "project", "item-add", str(number), "--url", url]
+    if owner:
+        cmd += ["--owner", owner]
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    if proc.returncode != 0:
+        print(f"warn: gh project item-add {number} (issue filed but not on the board): "
+              f"{proc.stderr.strip()[:200]}", file=sys.stderr)
 
 
 # ============================================================================
@@ -600,6 +629,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--live", action="store_true",
                     help="actually create issues + record them (default: dry-run).")
     ap.add_argument("--json", action="store_true", help="machine-readable output.")
+    ap.add_argument("--milestone", default=None,
+                    help="assign filed issues to this milestone title (default: none; "
+                         "the milestone must already exist).")
+    ap.add_argument("--project", default=None,
+                    help="ProjectsV2 number to add filed issues to (default: none; "
+                         "needs the gh `project` write scope). Best-effort.")
+    ap.add_argument("--project-owner", default=None,
+                    help="owner login for --project (default: repo owner / viewer).")
     args = ap.parse_args(argv)
 
     workspace = Path(args.workspace).resolve()
@@ -615,6 +652,12 @@ def main(argv: list[str] | None = None) -> int:
         cfg["max_issues"] = args.max_issues
     if args.min_score is not None:
         cfg["min_score"] = args.min_score
+    if args.milestone is not None:
+        cfg["milestone"] = args.milestone
+    if args.project is not None:
+        cfg["project"] = args.project
+    if args.project_owner is not None:
+        cfg["project_owner"] = args.project_owner
     topics_by_key = {t.get("key", f"t{i}"): t for i, t in enumerate(topics)}
 
     errors: list[str] = []
@@ -649,10 +692,12 @@ def main(argv: list[str] | None = None) -> int:
         ensure_scout_label()
         for issue in to_file:
             try:
-                url = create_issue(issue)
+                url = create_issue(issue, milestone=cfg.get("milestone", ""))
             except Exception as e:  # noqa: BLE001
                 errors.append(f"create[{issue['source_id']}]: {e}")
                 continue
+            if cfg.get("project"):
+                add_to_project(url, cfg["project"], cfg.get("project_owner", ""))
             seen[issue["source_id"]] = {
                 "filed_at": today, "issue_url": url, "score": issue["score"],
                 "topic": issue["topic"]}

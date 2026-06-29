@@ -64,6 +64,78 @@
       "title": "GPU / compute",
       "query": "is:open label:gpu,compute,multi-gpu,metal -label:epic",
       "note": "Area cluster (OR over gpu/compute/multi-gpu/metal): the GPU-backend and kernel work. Often gated on a physical device witness."
+    },
+    {
+      "slug": "current",
+      "title": "Current focus (operator-marked)",
+      "query": "is:open label:current -label:epic no:assignee",
+      "note": "The fleet's DEFAULT dispatch focus (`fak dispatch tick` passes --view current). GitHub milestones cannot carry a label, so 'current' is marked TWO ways: (1) slap the `current` label on specific issues (fine-grained) — they surface here; (2) to make a WHOLE milestone current, edit this query to `is:open milestone:\"<title>\" -label:epic no:assignee`. Empty by default, so the tick fail-softs to the full open backlog until you mark something."
+    },
+    {
+      "slug": "m1-durable-sessions",
+      "title": "M1 · Durable sessions",
+      "query": "is:open milestone:\"Durable sessions survive 429s, overload & process death\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M1."
+    },
+    {
+      "slug": "m2-kv-cache",
+      "title": "M2 · KV cache owned/observed/2x",
+      "query": "is:open milestone:\"The KV cache value is owned, observed & 2x\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M2."
+    },
+    {
+      "slug": "m3-serving",
+      "title": "M3 · Disaggregated serving",
+      "query": "is:open milestone:\"Disaggregated serving at throughput parity on one spine\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M3."
+    },
+    {
+      "slug": "m4-decode",
+      "title": "M4 · Decode parity",
+      "query": "is:open milestone:\"Decode parity across every backend (GPU/Metal/CPU)\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M4."
+    },
+    {
+      "slug": "m5-benchmarks",
+      "title": "M5 · Win the benchmarks",
+      "query": "is:open milestone:\"Win the benchmarks we enter (Terminal-Bench #1 + portfolio)\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M5."
+    },
+    {
+      "slug": "m6-agentic-loop",
+      "title": "M6 · 10x agentic loop",
+      "query": "is:open milestone:\"10x agentic coding loop with witnessed self-correction\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M6."
+    },
+    {
+      "slug": "m7-release",
+      "title": "M7 · Auto-release on green trunk",
+      "query": "is:open milestone:\"Ship releases automatically on a green trunk\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M7."
+    },
+    {
+      "slug": "m8-observability",
+      "title": "M8 · Fleet observability",
+      "query": "is:open milestone:\"Fleet observability you can trust\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M8."
+    },
+    {
+      "slug": "m9-dispatch-fleet",
+      "title": "M9 · Dispatch fleet to 100 workers",
+      "query": "is:open milestone:\"Scale the dispatch fleet to 100 workers\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M9."
+    },
+    {
+      "slug": "m10-model-support",
+      "title": "M10 · Model support & routing",
+      "query": "is:open milestone:\"Model support & routing parity (Ornith + ensembles)\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M10."
+    },
+    {
+      "slug": "m11-substrate",
+      "title": "M11 · Substrate / grammar / interop",
+      "query": "is:open milestone:\"Substrate, grammar & interop foundation\" -label:epic no:assignee",
+      "note": "Dispatchable leaves of milestone M11."
     }
   ]
 }

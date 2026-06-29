@@ -339,8 +339,8 @@ class MainHermeticTest(unittest.TestCase):
         M.ensure_scout_label = lambda: None
         calls: list = []
 
-        def _create(issue):
-            calls.append(issue)
+        def _create(issue, *, milestone=""):
+            calls.append({**issue, "_milestone": milestone})
             return (created_urls or {}).get(
                 issue["source_id"], "https://github.com/x/y/issues/1")
         M.create_issue = _create
@@ -371,6 +371,18 @@ class MainHermeticTest(unittest.TestCase):
             # the on-topic prompt-injection paper is the one that clears min-score
             self.assertIn("arxiv:2606.01234", seen)
             self.assertNotIn("arxiv:2512.99999", seen)  # off-topic, below min-score
+
+    def test_live_assigns_milestone_when_set(self) -> None:
+        # --milestone threads through to create_issue so scouted work joins the
+        # milestone backlog the dispatch fleet selects from.
+        calls = self._stub(arxiv=ARXIV_FIXTURE)
+        with tempfile.TemporaryDirectory() as d:
+            rc, _ = self._run(["--workspace", d, "--live", "--milestone",
+                               "Fleet observability you can trust"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(calls)
+            self.assertTrue(all(c["_milestone"] == "Fleet observability you can trust"
+                                for c in calls))
 
     def test_live_respects_cap(self) -> None:
         # three distinct, well-starred, on-topic repos; cap of 1 → exactly 1 filed
