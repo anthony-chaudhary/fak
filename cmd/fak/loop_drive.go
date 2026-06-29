@@ -619,36 +619,10 @@ func loopDriveGateCriterion(raw string) (loopgate.Criterion, error) {
 	if len(fields) == 0 {
 		return loopgate.Criterion{}, fmt.Errorf("goal witness criterion is empty")
 	}
+	if c, handled, err := parseSharedGateCriterion(fields, ""); handled {
+		return c, err
+	}
 	switch fields[0] {
-	case "commit-audit":
-		if len(fields) > 2 {
-			return loopgate.Criterion{}, fmt.Errorf("commit-audit witness must be: commit-audit [REF]")
-		}
-		c := loopgate.Criterion{Kind: loopgate.CriterionCommitAudit}
-		if len(fields) == 2 {
-			c.Ref = fields[1]
-		}
-		return c, nil
-	case "verify":
-		if len(fields) != 3 {
-			return loopgate.Criterion{}, fmt.Errorf("verify witness must be: verify PLAN PHASE")
-		}
-		return loopgate.Criterion{Kind: loopgate.CriterionVerify, Plan: fields[1], Phase: fields[2]}, nil
-	case "test-witness":
-		if len(fields) != 3 {
-			return loopgate.Criterion{}, fmt.Errorf("test-witness criterion requires baseline and candidate outcomes")
-		}
-		return loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: fields[1], Candidate: fields[2]}, nil
-	case "citation-resolve":
-		if len(fields) < 2 {
-			return loopgate.Criterion{}, fmt.Errorf("citation-resolve criterion requires a subject citation")
-		}
-		return loopgate.Criterion{Kind: loopgate.CriterionCitationResolve, Subject: strings.Join(fields[1:], " ")}, nil
-	case "witness":
-		if len(fields) < 3 {
-			return loopgate.Criterion{}, fmt.Errorf("witness criterion requires source and subject")
-		}
-		return loopgate.Criterion{Kind: loopgate.CriterionWitness, Source: fields[1], Subject: strings.Join(fields[2:], " ")}, nil
 	case "metric":
 		if len(fields) < 2 {
 			return loopgate.Criterion{}, fmt.Errorf("metric criterion requires a subject")
@@ -667,38 +641,51 @@ func loopDriveDOSGateCriterion(fields []string) (loopgate.Criterion, error) {
 	if len(fields) == 0 {
 		return loopgate.Criterion{}, fmt.Errorf("dos witness must include a dos subcommand")
 	}
+	if c, handled, err := parseSharedGateCriterion(fields, "dos "); handled {
+		return c, err
+	}
+	return loopgate.Criterion{}, fmt.Errorf("unsupported dos witness subcommand: %s", strings.Join(fields, " "))
+}
+
+// parseSharedGateCriterion parses the witness-criterion kinds common to both the bare
+// and the `dos`-prefixed forms (commit-audit / verify / test-witness / citation-resolve
+// / witness). msgPrefix is prepended to each shape error ("" for the bare form, "dos "
+// for the dos form) so the messages are byte-identical to the hand-written originals.
+// handled is false when fields[0] is not one of these shared kinds, leaving the caller
+// to fall through to its own extra cases (metric/none/dos for the bare form).
+func parseSharedGateCriterion(fields []string, msgPrefix string) (loopgate.Criterion, bool, error) {
 	switch fields[0] {
 	case "commit-audit":
 		if len(fields) > 2 {
-			return loopgate.Criterion{}, fmt.Errorf("dos commit-audit witness must be: dos commit-audit [REF]")
+			return loopgate.Criterion{}, true, fmt.Errorf("%[1]scommit-audit witness must be: %[1]scommit-audit [REF]", msgPrefix)
 		}
 		c := loopgate.Criterion{Kind: loopgate.CriterionCommitAudit}
 		if len(fields) == 2 {
 			c.Ref = fields[1]
 		}
-		return c, nil
+		return c, true, nil
 	case "verify":
 		if len(fields) != 3 {
-			return loopgate.Criterion{}, fmt.Errorf("dos verify witness must be: dos verify PLAN PHASE")
+			return loopgate.Criterion{}, true, fmt.Errorf("%[1]sverify witness must be: %[1]sverify PLAN PHASE", msgPrefix)
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionVerify, Plan: fields[1], Phase: fields[2]}, nil
+		return loopgate.Criterion{Kind: loopgate.CriterionVerify, Plan: fields[1], Phase: fields[2]}, true, nil
 	case "test-witness":
 		if len(fields) != 3 {
-			return loopgate.Criterion{}, fmt.Errorf("dos test-witness criterion requires baseline and candidate outcomes")
+			return loopgate.Criterion{}, true, fmt.Errorf("%stest-witness criterion requires baseline and candidate outcomes", msgPrefix)
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: fields[1], Candidate: fields[2]}, nil
+		return loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: fields[1], Candidate: fields[2]}, true, nil
 	case "citation-resolve":
 		if len(fields) < 2 {
-			return loopgate.Criterion{}, fmt.Errorf("dos citation-resolve criterion requires a subject citation")
+			return loopgate.Criterion{}, true, fmt.Errorf("%scitation-resolve criterion requires a subject citation", msgPrefix)
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionCitationResolve, Subject: strings.Join(fields[1:], " ")}, nil
+		return loopgate.Criterion{Kind: loopgate.CriterionCitationResolve, Subject: strings.Join(fields[1:], " ")}, true, nil
 	case "witness":
 		if len(fields) < 3 {
-			return loopgate.Criterion{}, fmt.Errorf("dos witness criterion requires source and subject")
+			return loopgate.Criterion{}, true, fmt.Errorf("%switness criterion requires source and subject", msgPrefix)
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionWitness, Source: fields[1], Subject: strings.Join(fields[2:], " ")}, nil
+		return loopgate.Criterion{Kind: loopgate.CriterionWitness, Source: fields[1], Subject: strings.Join(fields[2:], " ")}, true, nil
 	default:
-		return loopgate.Criterion{}, fmt.Errorf("unsupported dos witness subcommand: %s", strings.Join(fields, " "))
+		return loopgate.Criterion{}, false, nil
 	}
 }
 
