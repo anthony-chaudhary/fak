@@ -19,11 +19,13 @@ package rsiloop
 // way down, every turtle witnessed. This is the FoldCalibrable / IntentionalFloor
 // lesson from #1021 — a fence that cannot be won by checking less.
 //
-// LANDING IS STILL GATED. Fold never mutates anything; Apply with allow=false (the
-// default) is a logged no-op. A real loop applies a KEPT proposal in an isolated
-// worktree (shipgate.ApplyInWorktree), re-measures the journal under the new policy,
-// and only then lands it — exactly the propose -> measure -> keep/revert discipline
-// rsiloop.Run already runs one rung down.
+// LANDING IS EXPLICITLY GATED. Fold never mutates anything; Apply with allow=false
+// (the default) is a logged no-op. ApplyProposalWithWitness closes the loop by
+// deriving the proposed policy, re-measuring the downstream journal in a caller-
+// supplied witness environment, and reusing EvaluateProposal's keep-bit. It lands
+// only when the witness says KEEP and allow=true; otherwise the audit record shows
+// a propose-only KEEP or a REVERT. Production callers should supply an isolated
+// worktree witness (shipgate.ApplyInWorktree or equivalent).
 
 import (
 	"bufio"
@@ -31,6 +33,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
@@ -224,6 +227,29 @@ type ApplyRecord struct {
 	Log      string
 }
 
+// PolicyJournalWitness measures the downstream rsiloop journal under a candidate
+// keep policy in a non-author witness environment: in production this is an
+// isolated worktree run; in tests it is an injected fixture. The runner below
+// never trusts the proposal itself to say whether it improved.
+type PolicyJournalWitness func(KeepPolicy) ([]Row, error)
+
+// ApplyRunRecord is the auditable result of the closed meta-RSI apply runner:
+// the witnessed keep/revert decision, the explicit witness environment, and
+// whether the human gate allowed the kept policy to take effect.
+type ApplyRunRecord struct {
+	Proposal   Proposal
+	Decision   shipgate.Decision
+	Witness    shipgate.Witness
+	WitnessRef string
+	Applied    bool
+	Policy     KeepPolicy
+	BeforeRows int
+	AfterRows  int
+	BeforeRate float64
+	AfterRate  float64
+	Log        string
+}
+
 // Apply gates a proposal behind an explicit allow flag (the CLI's --apply). With
 // allow=false (the DEFAULT) it is a logged no-op: propose-only. With allow=true it
 // returns the adjusted policy and a record naming the change, so every applied
@@ -252,6 +278,54 @@ func Apply(cur KeepPolicy, p Proposal, allow bool) ApplyRecord {
 		Policy:   next,
 		Log:      fmt.Sprintf("APPLIED %s: %.3g->%.3g (%s)", p.Knob, p.Before, p.After, p.Rationale),
 	}
+}
+
+// ApplyProposalWithWitness closes the meta-RSI apply loop without letting the
+// improver grade itself. It first derives the proposed policy, asks a caller-
+// supplied non-author witness environment to re-measure the downstream journal
+// under that policy, and folds before/after through EvaluateProposal. The policy
+// is applied only when BOTH conditions hold: the keep-bit says KEEP and allow is
+// explicit. With allow=false (the default) a witnessed KEEP remains propose-only
+// and auditable.
+func ApplyProposalWithWitness(cur KeepPolicy, before []Row, p Proposal, allow bool, witnessRef string, measure PolicyJournalWitness) (ApplyRunRecord, error) {
+	witnessRef = strings.TrimSpace(witnessRef)
+	if witnessRef == "" {
+		return ApplyRunRecord{}, fmt.Errorf("meta-rsi apply requires a witness environment ref")
+	}
+	if measure == nil {
+		return ApplyRunRecord{}, fmt.Errorf("meta-rsi apply requires a policy journal witness")
+	}
+
+	proposed := Apply(cur, p, true).Policy
+	after, err := measure(proposed)
+	if err != nil {
+		return ApplyRunRecord{}, err
+	}
+	decision, witness := EvaluateProposal(before, after)
+	rec := ApplyRunRecord{
+		Proposal:   p,
+		Decision:   decision,
+		Witness:    witness,
+		WitnessRef: witnessRef,
+		Applied:    false,
+		Policy:     cur,
+		BeforeRows: len(before),
+		AfterRows:  len(after),
+		BeforeRate: witness.Before,
+		AfterRate:  witness.After,
+	}
+	if decision != shipgate.KEEP {
+		rec.Log = fmt.Sprintf("REVERT %s %.3g->%.3g after witness %s: %s %.3g->%.3g suite=%v truth=%v",
+			p.Knob, p.Before, p.After, witnessRef, witness.Metric, witness.Before, witness.After, witness.SuiteGreen, witness.TruthClean)
+		return rec, nil
+	}
+
+	applied := Apply(cur, p, allow)
+	rec.Applied = applied.Applied
+	rec.Policy = applied.Policy
+	rec.Log = fmt.Sprintf("KEEP witnessed by %s: %s %.3g->%.3g; %s",
+		witnessRef, witness.Metric, witness.Before, witness.After, applied.Log)
+	return rec, nil
 }
 
 // ReadJournal loads an rsiloop JSONL journal into rows for the fold. It is CORRUPTION-

@@ -3,6 +3,7 @@ package rsiloop
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
@@ -174,6 +175,127 @@ func TestMetaApply_ProposeOnlyByDefault_ApplyExplicitAndLogged(t *testing.T) {
 	// Apply must not mutate the caller's policy value.
 	if cur.GainThreshold != 0.10 {
 		t.Errorf("Apply mutated the caller's policy: %v", cur.GainThreshold)
+	}
+}
+
+func TestMetaApplyRunner_KeepIsProposeOnlyByDefault(t *testing.T) {
+	cur := KeepPolicy{GainThreshold: 0.10, BreakerK: 3, Throttle: 4}
+	p := Proposal{Knob: KnobGainThreshold, Before: 0.10, After: 0.15, Rationale: "test"}
+	before := []Row{
+		improveRow("KEEP", true, true, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, true, true),
+	}
+	after := []Row{
+		improveRow("KEEP", true, true, true),
+		improveRow("KEEP", true, true, true),
+		improveRow("REVERT", false, true, true),
+	}
+	var measured KeepPolicy
+	rec, err := ApplyProposalWithWitness(cur, before, p, false, "worktree:/tmp/meta-rsi", func(pol KeepPolicy) ([]Row, error) {
+		measured = pol
+		return after, nil
+	})
+	if err != nil {
+		t.Fatalf("ApplyProposalWithWitness: %v", err)
+	}
+	if measured.GainThreshold != p.After {
+		t.Fatalf("witness measured policy gain=%v, want proposal after=%v", measured.GainThreshold, p.After)
+	}
+	if rec.Decision != shipgate.KEEP || !rec.Witness.Kept() {
+		t.Fatalf("witnessed decision = %s kept=%v, want KEEP", rec.Decision, rec.Witness.Kept())
+	}
+	if rec.Applied {
+		t.Fatal("allow=false applied a kept proposal; default must remain propose-only")
+	}
+	if rec.Policy != cur {
+		t.Fatalf("propose-only policy = %+v, want unchanged %+v", rec.Policy, cur)
+	}
+	if rec.WitnessRef != "worktree:/tmp/meta-rsi" || !strings.Contains(rec.Log, "propose-only") {
+		t.Fatalf("audit record missing witness/propose-only detail: %+v", rec)
+	}
+}
+
+func TestMetaApplyRunner_ExplicitApplyAfterWitnessKeep(t *testing.T) {
+	cur := KeepPolicy{GainThreshold: 0.10, BreakerK: 3, Throttle: 4}
+	p := Proposal{Knob: KnobGainThreshold, Before: 0.10, After: 0.15, Rationale: "test"}
+	before := []Row{
+		improveRow("KEEP", true, true, true),
+		improveRow("REVERT", false, true, true),
+	}
+	after := []Row{
+		improveRow("KEEP", true, true, true),
+		improveRow("KEEP", true, true, true),
+	}
+	rec, err := ApplyProposalWithWitness(cur, before, p, true, "worktree:/tmp/meta-rsi", func(KeepPolicy) ([]Row, error) {
+		return after, nil
+	})
+	if err != nil {
+		t.Fatalf("ApplyProposalWithWitness: %v", err)
+	}
+	if rec.Decision != shipgate.KEEP || !rec.Applied {
+		t.Fatalf("explicit apply decision/applied = %s/%v, want KEEP/true", rec.Decision, rec.Applied)
+	}
+	if rec.Policy.GainThreshold != p.After {
+		t.Fatalf("applied policy gain=%v, want %v", rec.Policy.GainThreshold, p.After)
+	}
+	if !strings.Contains(rec.Log, "APPLIED") {
+		t.Fatalf("apply log missing APPLIED: %q", rec.Log)
+	}
+}
+
+func TestMetaApplyRunner_RevertsLooseningEvenWhenAllowed(t *testing.T) {
+	cur := KeepPolicy{GainThreshold: 0.10, BreakerK: 3, Throttle: 4}
+	p := Proposal{Knob: KnobGainThreshold, Before: 0.10, After: 0.15, Rationale: "test"}
+	before := []Row{
+		improveRow("KEEP", true, true, true),
+		improveRow("KEEP", true, true, true),
+		improveRow("KEEP", true, true, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, false, true),
+		improveRow("REVERT", false, false, true),
+	}
+	loosened := []Row{
+		improveRow("KEEP", true, true, true),
+		improveRow("KEEP", true, true, true),
+		improveRow("KEEP", true, true, true),
+		improveRow("KEEP", true, false, true),
+		improveRow("KEEP", true, false, true),
+		improveRow("KEEP", true, false, true),
+		improveRow("KEEP", true, false, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, true, true),
+		improveRow("REVERT", false, true, true),
+	}
+	rec, err := ApplyProposalWithWitness(cur, before, p, true, "worktree:/tmp/meta-rsi", func(KeepPolicy) ([]Row, error) {
+		return loosened, nil
+	})
+	if err != nil {
+		t.Fatalf("ApplyProposalWithWitness: %v", err)
+	}
+	if rec.Decision != shipgate.REVERT || rec.Applied {
+		t.Fatalf("truth-dirty loosening decision/applied = %s/%v, want REVERT/false", rec.Decision, rec.Applied)
+	}
+	if rec.Policy != cur {
+		t.Fatalf("reverted policy = %+v, want unchanged %+v", rec.Policy, cur)
+	}
+	if !strings.Contains(rec.Log, "REVERT") {
+		t.Fatalf("revert log missing REVERT: %q", rec.Log)
+	}
+}
+
+func TestMetaApplyRunnerRequiresWitnessEnvironment(t *testing.T) {
+	cur := KeepPolicy{GainThreshold: 0.10}
+	p := Proposal{Knob: KnobGainThreshold, Before: 0.10, After: 0.15}
+	if _, err := ApplyProposalWithWitness(cur, nil, p, true, "", func(KeepPolicy) ([]Row, error) { return nil, nil }); err == nil {
+		t.Fatal("empty witness ref succeeded")
+	}
+	if _, err := ApplyProposalWithWitness(cur, nil, p, true, "worktree:/tmp/meta-rsi", nil); err == nil {
+		t.Fatal("nil witness function succeeded")
 	}
 }
 
