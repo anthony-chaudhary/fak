@@ -69,21 +69,30 @@ always paired with an explicit `--limit` because `gh` defaults to 30.
 When selecting work, start from a view instead of inventing a `--label` query:
 
 ```bash
-# what's dispatchable right now (the default view)
+# the default "what's dispatchable now" surface
 python tools/issue_views.py show --view ready-leaves
 
-# feed a view straight into the existing dispatch family
-python tools/issue_views.py show --view ready-leaves --json \
-  | python tools/issue_lane_router.py --issues -    # route → lanes
-
-# scope a triage pass to the auto-filed queue
-python tools/issue_views.py show --view needs-triage --json
+# any named view, e.g. the prioritized leaves (oldest-first)
+python tools/issue_views.py show --view p0-p1
 ```
 
 The `--json` output is the raw `gh issue list --json
-number,title,labels,updatedAt,assignees,url` array — the same shape
-`issue_lane_router` / `issue_triage` already fold, so a view drops in wherever a
-hand-built query was.
+number,title,labels,updatedAt,assignees,url` array, so a view feeds any tool
+that consumes that canonical payload — for example the CI blockers roll-up
+(`cmd/fak/blockers.go` reads `--issues -` from stdin):
+
+```bash
+python tools/issue_views.py show --view p0-p1 --json | fak blockers feed --issues -
+```
+
+> Note: `fak blockers feed` posts the roll-up to a Slack channel — run it only
+> when you mean to publish, not as a casual check.
+
+**Honest integration limit:** `issue_lane_router` and `issue_triage` fetch their
+*own* backlog internally — they take no injected-issue stdin — so for those a
+view is the conceptual slice you're working (read its `--counts` to know what a
+pass will cover), not a literal pipe. Wiring an `--issues -` injection into those
+two so a view can scope them directly is the named follow-on.
 
 ## Honest boundary — what is NOT yet wired
 

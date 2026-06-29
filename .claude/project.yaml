@@ -44,8 +44,10 @@ helpers:
   # The named-issue-view selection surface — the default "what should I work on"
   # entry. Resolves a view from .github/issue-views.json into a `gh issue list`
   # query (the API-readable mirror of the GitHub saved views, which aren't
-  # reachable through gh/REST/GraphQL). Read-only; pipe `show --json` into
-  # issue_triage / issue_lane_router instead of hand-built --label queries.
+  # reachable through gh/REST/GraphQL). Read-only. `show --json` emits the
+  # canonical `gh issue list --json` array for payload-consumers (e.g. `fak
+  # blockers feed --issues -`); for issue_triage / issue_lane_router (which
+  # fetch their own backlog) a view is the conceptual slice, not a stdin pipe.
   issue_views: tools/issue_views.py
   # /bottleneck-map — read-mostly system + backlog limiter map. It consumes the
   # fleet registry/dashboard lens plus issue_triage to decide which durable loop
