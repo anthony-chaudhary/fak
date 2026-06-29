@@ -4,9 +4,11 @@ package promptmmu
 // mode the host flag selects, and the legible drop record the gateway logs out of
 // band. It mirrors the co-travel / reset-on-budget gate convention: a closed mode
 // vocabulary with a SAFE default, a shadow rung that computes the plan without
-// mutating the body, and an off rung. The cmd/fak flag string + the gateway log
-// emission are the deferred cross-lane halves; the mode semantics live here so the
-// spine and its host agree on the same closed set.
+// mutating the body, and an off rung. Curate is the single mode-gated host branch
+// (off/shadow/on over a REAL body); the cmd/fak flag string + the gateway log
+// emission are the deferred cross-lane halves; the mode semantics + the
+// shadow-never-mutates guard live here so the spine and its host agree on one closed
+// set and the host cannot re-implement the guard wrongly.
 
 // Mode is the closed curate-mode vocabulary the host flag resolves to. The DEFAULT
 // is on (curate out of the box, epic posture); shadow is the safe dogfood rung that
@@ -113,4 +115,42 @@ func Observe(mode Mode, res PruneResult) Observation {
 		}
 		return obs
 	}
+}
+
+// Curate is the single mode-gated host branch: given the curate Mode, the outbound
+// request bytes, the spine plan, and the spine's decode callback, it returns the body
+// the host MUST forward upstream plus the legible Observation to log out of band. It
+// is the one place the off/shadow/on decision over a REAL body lives, so the cmd/fak
+// flag wiring (the deferred cross-lane half) only resolves a flag string to a Mode and
+// then calls this — it never re-implements the shadow guard and so cannot get it wrong.
+//
+// The load-bearing safety invariant (epic #751 invariant 3 + the rung-4 shadow rung)
+// is enforced HERE, in code, not left as a prose contract on the caller:
+//
+//   - ModeOff   ⇒ the spine never runs; the returned body IS raw (same backing slice).
+//   - ModeShadow ⇒ the spine runs to learn what WOULD prune, but the returned body IS
+//     raw (same backing slice) — the body is NEVER mutated, only the Observation logs
+//     the withheld drop. This is the safe dogfood rung.
+//   - ModeOn    ⇒ the spine runs and its result body is forwarded; on a real prune the
+//     body is the spliced (shorter) bytes, on a spine identity it is raw.
+//
+// Only ModeOn can return a body whose bytes differ from raw, and only when the spine
+// itself proved the splice cache-safe. The caller can detect "did anything change?"
+// via the returned Observation.Applied (true only on a ModeOn change). decode is the
+// spine's re-decode proof callback (nil skips only the parse re-check; see
+// CompactInboundTools); it is unused in ModeOff (the spine never runs).
+func Curate(mode Mode, raw []byte, plan ToolPlan, decode func([]byte) error) (body []byte, obs Observation) {
+	if !mode.Computes() {
+		// ModeOff: short-circuit. The spine never runs and raw is forwarded verbatim.
+		return raw, Observe(mode, PruneResult{})
+	}
+	res := CompactInboundTools(raw, plan, decode)
+	obs = Observe(mode, res)
+	if mode.Applies() {
+		// ModeOn: forward the spine's (possibly spliced) body.
+		return res.Body, obs
+	}
+	// ModeShadow: the spine ran to populate the Observation, but the body is NEVER
+	// swapped — forward the original bytes unchanged (the shadow-never-mutates guard).
+	return raw, obs
 }

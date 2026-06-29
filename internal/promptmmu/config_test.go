@@ -1,6 +1,9 @@
 package promptmmu
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 // TestParseMode_DefaultOn proves the epic posture: an unset flag resolves to the
 // default-on curate, and every recognized value round-trips.
@@ -117,5 +120,123 @@ func TestObserve_OnIdentityCarriesReason(t *testing.T) {
 	}
 	if obs.SkipReason != SkipNoBreakpoint {
 		t.Fatalf("SkipReason = %q, want %q", obs.SkipReason, SkipNoBreakpoint)
+	}
+}
+
+// curatableBody builds a real, well-formed /v1/messages body whose tools[] has a
+// cache_control breakpoint on tool[0] and a plan-droppable tool ("denied") strictly
+// after it — so the spine genuinely prunes in ModeOn. Returned with the matching plan.
+func curatableBody(tb testing.TB) ([]byte, ToolPlan) {
+	tb.Helper()
+	raw := body(tb, []map[string]any{tool("read_file", true), tool("keep", false), tool("denied", false)}, false)
+	return raw, drop("denied")
+}
+
+// TestCurate_ShadowNeverMutatesButComputesSamePlanAsOn is the load-bearing rung-4
+// invariant: over ONE real body, ModeOn curates (req.Raw mutated, the drop named in
+// the Observation), ModeShadow computes the SAME plan but the forwarded body is
+// BYTE-FOR-BYTE the original (only logged, never mutated), and ModeOff does nothing.
+// The shadow-never-mutates assertion (invariant 3, the safe dogfood rung) is the one
+// this test exists to defend — a regression that let shadow swap in the spliced body
+// would fail HERE on real bytes, not on a hand-built PruneResult.
+func TestCurate_ShadowNeverMutatesButComputesSamePlanAsOn(t *testing.T) {
+	raw, plan := curatableBody(t)
+	// A defensive copy of the ORIGINAL bytes: any in-place mutation of raw by a buggy
+	// shadow path would diverge from this snapshot even if the returned slice aliased raw.
+	orig := append([]byte(nil), raw...)
+
+	// --- ModeOn: the body IS mutated; the prune is real and named. ---
+	onBody, onObs := Curate(ModeOn, raw, plan, okDecode)
+	if !onObs.Applied {
+		t.Fatalf("ModeOn over a prunable body must report Applied, obs=%+v", onObs)
+	}
+	if len(onObs.WouldPrune) != 1 || onObs.WouldPrune[0] != "denied" {
+		t.Fatalf("ModeOn WouldPrune = %v, want [denied]", onObs.WouldPrune)
+	}
+	if bytes.Equal(onBody, orig) {
+		t.Fatalf("ModeOn must MUTATE the forwarded body (drop the denied tool); it was byte-identical to the input")
+	}
+	if len(onBody) >= len(orig) {
+		t.Fatalf("ModeOn prune must SHRINK the body: in=%d out=%d", len(orig), len(onBody))
+	}
+	if contains(toolNamesIn(t, onBody), "denied") {
+		t.Fatalf("ModeOn forwarded body still advertises the denied tool: %v", toolNamesIn(t, onBody))
+	}
+
+	// --- ModeShadow: SAME plan computed, but the body is NEVER mutated. ---
+	shadowBody, shadowObs := Curate(ModeShadow, raw, plan, okDecode)
+	if shadowObs.Applied {
+		t.Fatalf("ModeShadow must NEVER report Applied, obs=%+v", shadowObs)
+	}
+	// It computed the SAME plan ModeOn applied — the audit value of the shadow rung.
+	if len(shadowObs.WouldPrune) != 1 || shadowObs.WouldPrune[0] != "denied" {
+		t.Fatalf("ModeShadow must compute the same WouldPrune as ModeOn, got %v want [denied]", shadowObs.WouldPrune)
+	}
+	if !eqStrs(shadowObs.WouldPrune, onObs.WouldPrune) {
+		t.Fatalf("shadow plan %v differs from on plan %v — shadow must compute the IDENTICAL drop", shadowObs.WouldPrune, onObs.WouldPrune)
+	}
+	// THE load-bearing assertion: the forwarded body is byte-for-byte the original.
+	if !bytes.Equal(shadowBody, orig) {
+		t.Fatalf("SHADOW MUTATED THE BODY: forwarded body is not byte-identical to the input (shadow must only LOG, never mutate)")
+	}
+	// And raw itself was not mutated in place by any path above.
+	if !bytes.Equal(raw, orig) {
+		t.Fatalf("the original request bytes were mutated in place (a curate path is writing through raw)")
+	}
+
+	// --- ModeOff: no plan, no prune, the original body forwarded verbatim. ---
+	offBody, offObs := Curate(ModeOff, raw, plan, okDecode)
+	if offObs.Applied {
+		t.Fatalf("ModeOff must never apply, obs=%+v", offObs)
+	}
+	if len(offObs.WouldPrune) != 0 {
+		t.Fatalf("ModeOff computes nothing; WouldPrune must be empty, got %v", offObs.WouldPrune)
+	}
+	if offObs.SkipReason != string(ModeOff) {
+		t.Fatalf("ModeOff SkipReason = %q, want %q", offObs.SkipReason, ModeOff)
+	}
+	if !bytes.Equal(offBody, orig) {
+		t.Fatalf("ModeOff must forward the body byte-identical to the input")
+	}
+}
+
+// TestCurate_OffDoesNotRunSpine proves ModeOff short-circuits BEFORE the spine: even a
+// decode callback that always errors (which would force the spine to an identity with a
+// different SkipReason) is never invoked, and the body is forwarded verbatim.
+func TestCurate_OffDoesNotRunSpine(t *testing.T) {
+	raw, plan := curatableBody(t)
+	called := false
+	spyDecode := func(b []byte) error { called = true; return errAlways }
+
+	body, obs := Curate(ModeOff, raw, plan, spyDecode)
+	if called {
+		t.Fatalf("ModeOff must NOT run the spine (decode was invoked)")
+	}
+	if obs.SkipReason != string(ModeOff) {
+		t.Fatalf("ModeOff SkipReason = %q, want %q", obs.SkipReason, ModeOff)
+	}
+	if !bytes.Equal(body, raw) {
+		t.Fatalf("ModeOff body must be the input verbatim")
+	}
+}
+
+// TestCurate_ShadowSurfacesSpineIdentityReason: when the spine returns identity in
+// shadow (e.g. a pre-breakpoint drop refused mid-session), shadow forwards the body
+// unchanged AND surfaces the spine's NAMED reason — no silent nothing.
+func TestCurate_ShadowSurfacesSpineIdentityReason(t *testing.T) {
+	// breakpoint on the LAST tool: nothing is strictly after it, so the spine refuses.
+	raw := body(t, []map[string]any{tool("alpha", false), tool("beta", false), tool("gamma", true)}, false)
+	orig := append([]byte(nil), raw...)
+	plan := drop("alpha", "beta") // pre-breakpoint ⇒ SkipNothingAfter
+
+	got, obs := Curate(ModeShadow, raw, plan, okDecode)
+	if obs.Applied || len(obs.WouldPrune) != 0 {
+		t.Fatalf("shadow over a spine identity must not apply or name a prune, obs=%+v", obs)
+	}
+	if obs.SkipReason != SkipNothingAfter {
+		t.Fatalf("shadow must surface the spine's named identity reason, got %q want %q", obs.SkipReason, SkipNothingAfter)
+	}
+	if !bytes.Equal(got, orig) {
+		t.Fatalf("shadow on identity must forward the body byte-identical to the input")
 	}
 }
