@@ -34,6 +34,13 @@ const (
 	// min is generous for a real lane yet bounds a runaway; opt out with 0.
 	defaultTimeoutS = 1800
 
+	// launchWaitDelay is the portable backstop on top of the process-tree kill
+	// (configureProcTree): after the deadline fires and the group/tree is signalled,
+	// Go waits this long for a straggler to drain, then force-closes the inherited
+	// pipes so launch is guaranteed to return rather than hang on a lingering
+	// grandchild. Mirrors internal/nightrun's 10s WaitDelay.
+	launchWaitDelay = 10 * time.Second
+
 	// Invoke the BARE project-skill form (`/dos-dispatch-loop`), not the namespaced
 	// plugin form (`/dos-kernel:dos-dispatch-loop`). The skill is git-tracked at
 	// `.claude/skills/dos-dispatch-loop/SKILL.md`, so a worker launched from the
@@ -179,12 +186,7 @@ func launch(command []string, cwd string, env map[string]string, runner runnerFu
 	}
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, resolved[0], resolved[1:]...)
-	cmd.Dir = cwd
-	cmd.Env = envSlice(env)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := newLaunchCmd(ctx, resolved, cwd, env)
 	err := cmd.Run()
 	if bounded && ctx.Err() == context.DeadlineExceeded {
 		return launchResult{ReturnCode: 124, Timeout: true, Stderr: "timeout"}
@@ -197,6 +199,30 @@ func launch(command []string, cwd string, env map[string]string, runner runnerFu
 		return launchResult{ReturnCode: cmd.ProcessState.ExitCode()}
 	}
 	return launchResult{ReturnCode: 0}
+}
+
+// newLaunchCmd builds the *exec.Cmd for one real worker launch with the
+// process-tree kill and WaitDelay backstop wired in. Splitting it out of launch
+// keeps the OS-touching construction in one place AND lets a hermetic test witness
+// that the tree-kill hook (configureProcTree) and the WaitDelay are actually set,
+// without spawning a process. resolved[0] is the already-PATH-resolved exe; stdio
+// is streamed to the parent so the supervisor sees worker output inline.
+func newLaunchCmd(ctx context.Context, resolved []string, cwd string, env map[string]string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, resolved[0], resolved[1:]...)
+	cmd.Dir = cwd
+	cmd.Env = envSlice(env)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	// Assertive runaway containment: on the bounded path the deadline cancels ctx,
+	// and configureProcTree's Cancel reaps the worker's ENTIRE descendant tree (not
+	// just the backend shim) so a wedged session can't leave grandchildren holding
+	// the box / commit lock / GPU lease and block the rest of the fleet. WaitDelay is
+	// the portable backstop that force-closes the inherited pipes if a straggler
+	// lingers. Both are harmless on the unbounded path (ctx never cancels).
+	configureProcTree(cmd)
+	cmd.WaitDelay = launchWaitDelay
+	return cmd
 }
 
 func envSlice(env map[string]string) []string {

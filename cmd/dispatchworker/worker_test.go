@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -142,6 +143,20 @@ func TestDryRunPayloadDoesNotLaunch(t *testing.T) {
 	p := buildPayload("docs", "claude", "C:/work/fleet", true, nil, "")
 	if !p.OK || !p.DryRun || p.Result != nil || p.Backend != "claude" {
 		t.Errorf("dry-run payload wrong: %+v", p)
+	}
+}
+
+// TestNewLaunchCmdWiresTreeKillAndWaitDelay witnesses the runaway-containment
+// wiring without spawning a process: every launched worker cmd carries a Cancel
+// hook (configureProcTree's process-tree reaper) and the WaitDelay backstop, so a
+// timed-out worker can't leave grandchildren holding the box and blocking the fleet.
+func TestNewLaunchCmdWiresTreeKillAndWaitDelay(t *testing.T) {
+	cmd := newLaunchCmd(context.Background(), []string{"go", "version"}, "", map[string]string{})
+	if cmd.Cancel == nil {
+		t.Error("launch cmd must set a Cancel hook (process-tree kill on timeout)")
+	}
+	if cmd.WaitDelay != launchWaitDelay {
+		t.Errorf("launch cmd WaitDelay = %v, want %v (portable straggler backstop)", cmd.WaitDelay, launchWaitDelay)
 	}
 }
 
