@@ -1,0 +1,164 @@
+{
+  "schema": "fak-openai-wire-seat-live-witness/1",
+  "captured_at": "2026-06-29T19:08:58.080274Z",
+  "github_issue": 1329,
+  "status": "PASS",
+  "seat": {
+    "requested": "Hermes Agent OpenAI-wire seat",
+    "witnessed_with": "opencode run (same OpenAI Chat Completions child wire accepted by issue #1329 fallback)",
+    "why_not_hermes": "hermes CLI was not installed on this Windows host; opencode was installed and uses /v1/chat/completions with the same guard provider=openai path.",
+    "opencode_launcher": "C:\\Users\\USER\\AppData\\Roaming\\npm\\opencode.cmd"
+  },
+  "fak_binary": {
+    "path": "C:\\work\\fak\\fak.exe",
+    "sha256": "469fee4799bfda3ba2ad0e858fd3bf7b1085b3177aaaabf5896257de86010b40",
+    "version_stdout": [
+      "0.34.0",
+      "build: 7a541bc9a933 +uncommitted  (committed 2026-06-29T19:03:43Z)",
+      "go: go1.26.3  windows/amd64"
+    ]
+  },
+  "command": {
+    "guard": "fak guard --provider openai --base-url <local-upstream>/v1 --api-key-env FAK_1329_UPSTREAM_KEY --log <gateway.log> -- opencode run <prompt> -m fakwitness/fak-1329 --format json --dangerously-skip-permissions --pure",
+    "prompt": "Use one shell command to print exactly fak-1329-tool-ok",
+    "env": {
+      "OPENAI_API_KEY": "fak-1329-child-placeholder",
+      "FAK_1329_UPSTREAM_KEY": "fak-1329-real-upstream-key",
+      "FAK_AUDIT_JOURNAL": "<temp>/fak-audit.jsonl",
+      "OPENCODE_CONFIG_CONTENT": "process-local custom @ai-sdk/openai-compatible provider using {env:OPENAI_BASE_URL}/{env:OPENAI_API_KEY}"
+    }
+  },
+  "checks": {
+    "real_result_returned_through_guard": {
+      "pass": true,
+      "child_exit_code": 0,
+      "opencode_error_events": 0,
+      "stdout_sha256": "3ef9e67abff1251114b1d82b4c0518538d25b778c1914f7209a16f135855e0f0",
+      "stderr_sha256": "e923a7415a8cd32a8daf3b351a72cdbc894d3d4a8764f3c28200cc6514cf41c5"
+    },
+    "request_transited_gateway": {
+      "pass": true,
+      "route": "/v1/chat/completions",
+      "gateway_200_count": 3,
+      "sample": [
+        {
+          "bytes": 671,
+          "duration_ms": 2.284,
+          "event": "gateway_http_request",
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "route": "/v1/chat/completions",
+          "status": 200,
+          "trace_id": "guard",
+          "user_agent": "opencode/1.17.9 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+        },
+        {
+          "bytes": 956,
+          "duration_ms": 4.806,
+          "event": "gateway_http_request",
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "route": "/v1/chat/completions",
+          "status": 200,
+          "trace_id": "guard",
+          "user_agent": "opencode/1.17.9 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+        }
+      ],
+      "gateway_log_sha256": "18a7016785706e860b89cbc4fa1f2f56bf481608381a6d0e9a9e2800e91694ab"
+    },
+    "no_bypass_credential_swap": {
+      "pass": true,
+      "direct_placeholder_status": 401,
+      "direct_placeholder_body_prefix": "{\"error\":{\"message\":\"bad auth for witness upstream\"}}",
+      "child_presented_to_guard": "Authorization: Bearer fak-1329-child-placeholder",
+      "upstream_accepts_only": "Authorization: Bearer fak-1329-real-upstream-key",
+      "upstream_events": [
+        {
+          "n": 1,
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "auth": "Bearer fak-1329-child-placeholder",
+          "status": 401,
+          "model": "fak-1329",
+          "tool_count": 0,
+          "message_roles_tail": [
+            "user"
+          ]
+        },
+        {
+          "n": 2,
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "auth": "Bearer fak-1329-real-upstream-key",
+          "status": 200,
+          "model": "fak-1329",
+          "tool_count": 0,
+          "message_roles_tail": [
+            "system",
+            "user",
+            "user"
+          ]
+        },
+        {
+          "n": 3,
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "auth": "Bearer fak-1329-real-upstream-key",
+          "status": 200,
+          "model": "fak-1329",
+          "tool_count": 22,
+          "message_roles_tail": [
+            "system",
+            "user"
+          ]
+        },
+        {
+          "n": 4,
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "auth": "Bearer fak-1329-real-upstream-key",
+          "status": 200,
+          "model": "fak-1329",
+          "tool_count": 22,
+          "message_roles_tail": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ]
+        }
+      ]
+    },
+    "tool_call_adjudicated_and_recorded": {
+      "pass": true,
+      "audit_verify_exit_code": 0,
+      "audit_verify_stdout": "fak audit verify: <temp>/fak-audit.jsonl - OK: 1 hash-chained row(s), chain intact (no edit since written)",
+      "audit_verify_stderr": "",
+      "decide_rows": [
+        {
+          "seq": 1,
+          "ts_unix_nano": 1782760137313136800,
+          "kind": "DECIDE",
+          "tool": "bash",
+          "trace_id": "guard",
+          "verdict": "ALLOW",
+          "reason": "NONE",
+          "by": "monitor",
+          "args_digest": "646eebece781d16579d01e36b13f227534474e7000a79e11176062e4e8a6a902",
+          "prev_hash": "",
+          "hash": "dd4fcea4cb8db172ab5b82da1dbe7b4375738b1d894c1710aed12427fb5c8b18"
+        }
+      ],
+      "audit_sha256": "0862a097f12560801affce77d8981a396587b117f0b11a0f6550a7bc9708ab3a"
+    }
+  },
+  "raw_capture": {
+    "temp_dir": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak1329-qdghj1al",
+    "files": {
+      "gateway.log": "18a7016785706e860b89cbc4fa1f2f56bf481608381a6d0e9a9e2800e91694ab",
+      "fak-audit.jsonl": "0862a097f12560801affce77d8981a396587b117f0b11a0f6550a7bc9708ab3a",
+      "guard-stdout.jsonl": "3ef9e67abff1251114b1d82b4c0518538d25b778c1914f7209a16f135855e0f0",
+      "guard-stderr.txt": "e923a7415a8cd32a8daf3b351a72cdbc894d3d4a8764f3c28200cc6514cf41c5"
+    }
+  }
+}
