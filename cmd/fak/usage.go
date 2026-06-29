@@ -342,6 +342,12 @@ func usageScorecardVerbs() {
   fak conflation-scorecard [--json] [--markdown] [--compare FILE]
                 (native provenance-honesty control-pane payload: every reported number/status
                  labels its provenance -- WITNESSED vs OBSERVED -- folded into conflation_debt)
+  fak claim-check --self-test | --file claim.json | --statement S --baseline real|strawman|none
+                  [--net] --scope S --provenance WITNESSED|OBSERVED|MODELED|SIMULATED --witness S
+                  [--realized=false --gate-reason R] [--json]
+                (the named NET-TRUE follow-on (#1171): grade an efficiency/perf claim against
+                 the six-question net-true-value rubric -> net-true (0) / strawman (3) / not-yet
+                 (3). --self-test grades the built-in honest+strawman corpus. docs/standards/net-true-value.md)
   fak support-maturity-scorecard [--json] [--markdown] [--compare FILE]
                 [--matrix-md] [--write-doc] [--check-doc] [--workspace DIR]
                 (native support-maturity payload: fold the generated model x backend coverage
