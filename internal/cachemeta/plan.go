@@ -109,12 +109,7 @@ func PlanTemplateLookup(req PlanCacheRequest, tpl PlanTemplate) LookupVerdict {
 	if req.StateWitness == "" {
 		return Revalidate(e, ReasonStale)
 	}
-	v := Hit(e)
-	if v.Meta == nil {
-		v.Meta = map[string]string{}
-	}
-	v.Meta["must_reenter_plancfi"] = "true"
-	return v
+	return hitWithMeta(e, "must_reenter_plancfi", "true")
 }
 
 // DigestPlanTemplate is the deterministic identity over a plan template's binding
@@ -221,11 +216,18 @@ func IntentKeyLookup(req IntentCacheRequest, k IntentKey) LookupVerdict {
 	if k.Precision < k.PrecisionThreshold {
 		return Miss(ReasonApproxFault)
 	}
+	return hitWithMeta(e, "advisory_only", "true")
+}
+
+// hitWithMeta returns a Hit verdict for e carrying a single advisory meta key,
+// lazily allocating the Meta map. Shared by the lookups that annotate a hit
+// (PlanTemplateLookup, IntentKeyLookup).
+func hitWithMeta(e Entry, key, value string) LookupVerdict {
 	v := Hit(e)
 	if v.Meta == nil {
 		v.Meta = map[string]string{}
 	}
-	v.Meta["advisory_only"] = "true"
+	v.Meta[key] = value
 	return v
 }
 
