@@ -107,6 +107,55 @@ def test_support_maturity_scorecard_registered() -> None:
     }
 
 
+# Every tools/*_scorecard.py on disk must be registered in the fold OR named in a
+# documented exclusion list — the breadth invariant (#1270). Without this an
+# unfolded surface can regress freely and never trip the ratchet, the gap that
+# left 7 scorecards (incl. tooling_quality F/debt 66) out of the "universal" rank.
+# A *_scorecard.py whose metric is folded under a DIFFERENT script name (the go
+# native scorecards) or is intentionally standalone goes here with a reason.
+EXCLUDED_SCORECARDS: dict[str, str] = {
+    # The conflation/token-defaults/guard-rsi/dogfood/growth/support-maturity
+    # metrics ARE folded, but via `go run ./cmd/fak ...` (no python script); their
+    # python test/helper files (if any) are not the fold entry point.
+    "vcache_scorecard_gate.py": "a CI gate wrapper, not a portfolio debt scorecard",
+}
+
+
+def _registered_scripts() -> set[str]:
+    return {c["script"] for c in scp.SCORECARDS if c.get("script")}
+
+
+def test_every_scorecard_is_registered_or_excluded() -> None:
+    """Breadth invariant: no tools/*_scorecard.py is silently left out of the fold."""
+    import glob, os
+    on_disk = {
+        os.path.basename(p)
+        for p in glob.glob(str(scp.repo_root() / "tools" / "*_scorecard.py"))
+        if not p.endswith("_test.py")
+    }
+    registered = _registered_scripts()
+    unaccounted = sorted(on_disk - registered - set(EXCLUDED_SCORECARDS))
+    assert not unaccounted, (
+        "scorecard(s) neither registered in SCORECARDS nor in EXCLUDED_SCORECARDS — "
+        f"an unfolded surface escapes the universal ranking: {unaccounted}. "
+        "Wire it into SCORECARDS or add it to EXCLUDED_SCORECARDS with a reason."
+    )
+
+
+def test_newly_wired_scorecards_registered() -> None:
+    # the 7 folded under #1270 — each present with its real debt key.
+    want = {
+        "observability": "observability_debt", "learning": "learning_debt",
+        "rsi_maturity": "rsi_debt", "tooling_quality": "py_debt",
+        "bench_dx": "bench_dx_debt", "cuda_dev": "process_debt",
+        "persona_fit": "persona_fit_debt",
+    }
+    by_key = {c["key"]: c for c in scp.SCORECARDS}
+    for key, debt in want.items():
+        assert key in by_key, f"{key} not registered"
+        assert by_key[key]["debt"] == debt
+
+
 # --- fold: portfolio sum + verdict ladder ----------------------------------
 
 def test_fold_sums_portfolio_debt() -> None:

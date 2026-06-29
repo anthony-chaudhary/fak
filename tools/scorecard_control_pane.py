@@ -112,6 +112,7 @@ SCORE_KEYS: dict[str, str] = {
     "seo": "overall_score",
     "demo": "mean_score",
     "robustness": "mean_score",
+    "learning": "mean_score",
 }
 
 
@@ -203,6 +204,20 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak support-maturity-scorecard --json", "label": "support-maturity"},
     {"key": "claim_repro", "debt": "claim_repro_debt", "script": "claim_repro_scorecard.py", "label": "claim-repro"},
+    # Folded #1270: these emit a control-pane-compatible payload (corpus.*_debt +
+    # mostly corpus.grade) and several explicitly say "folds into the control
+    # pane" in their docstrings, but were never registered — an unfolded surface
+    # can regress freely and never trip the ratchet. cuda_dev/bench_dx grade the
+    # tree STATICALLY (no GPU needed) and degrade gracefully to grade A on a
+    # GPU-less box. persona_fit is orthogonal to the wired persona_readiness
+    # (matrix-integrity debt vs entry-path-gate debt — no persona double-count).
+    {"key": "observability", "debt": "observability_debt", "script": "observability_scorecard.py", "label": "observability"},
+    {"key": "learning", "debt": "learning_debt", "script": "learning_scorecard.py", "label": "learning"},
+    {"key": "rsi_maturity", "debt": "rsi_debt", "script": "rsi_maturity_scorecard.py", "label": "rsi-maturity"},
+    {"key": "tooling_quality", "debt": "py_debt", "script": "tooling_quality_scorecard.py", "label": "tooling-quality"},
+    {"key": "bench_dx", "debt": "bench_dx_debt", "script": "bench_dx_scorecard.py", "label": "bench-dx"},
+    {"key": "cuda_dev", "debt": "process_debt", "script": "cuda_dev_scorecard.py", "label": "cuda-dev"},
+    {"key": "persona_fit", "debt": "persona_fit_debt", "script": "persona_fit_scorecard.py", "label": "persona-fit"},
 ]
 
 
