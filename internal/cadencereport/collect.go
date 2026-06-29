@@ -6,6 +6,7 @@ package cadencereport
 // unit-testable without a process or a repo.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/releasestale"
 )
 
 // ScoresArgv is the scorecard-control-pane fold, emitting the portfolio debt +
@@ -41,7 +43,19 @@ func Collect(root, python string, timeout time.Duration, windowDays int) (Scores
 	releasesPayload, releasesErr := RunPyEnvelope(root, ReleasesArgv, python, timeout)
 	return InterpretScores(scoresPayload, scoresErr),
 		WorkFromGit(root, windowDays),
-		InterpretReleases(releasesPayload, releasesErr)
+		withPublishStaleness(root, InterpretReleases(releasesPayload, releasesErr))
+}
+
+// withPublishStaleness layers the Go-native @latest-vs-HEAD lag onto a Releases
+// dimension via the releasestale signal. It is the impure half (git is read here, off
+// the hot path); the projection itself is the pure WithPublishStaleness. A no-tag /
+// unreadable repo yields an Unknown verdict with zero lag, never a false "stale".
+func withPublishStaleness(root string, r Releases) Releases {
+	// versionFile is only used by releasestale to detect an untagged cut (not surfaced
+	// in the cadence line), so passing "" here is fine — the lag itself is git-derived.
+	f := releasestale.Gather(context.Background(), releasestale.RealRunner, root, "")
+	p := releasestale.Compute(f, releasestale.DefaultThresholds(), root)
+	return WithPublishStaleness(r, p.CommitsBehind, p.DaysBehind, p.Verdict)
 }
 
 // InterpretScoresFromFile reads a scorecard-control-pane JSON payload from path
@@ -81,7 +95,7 @@ func CollectWithScores(root, python string, scores Scores, timeout time.Duration
 		python = defaultPython()
 	}
 	releasesPayload, releasesErr := RunPyEnvelope(root, ReleasesArgv, python, timeout)
-	return scores, WorkFromGit(root, windowDays), InterpretReleases(releasesPayload, releasesErr)
+	return scores, WorkFromGit(root, windowDays), withPublishStaleness(root, InterpretReleases(releasesPayload, releasesErr))
 }
 
 // RunPyEnvelope runs a Python control-pane member and parses its JSON stdout. It

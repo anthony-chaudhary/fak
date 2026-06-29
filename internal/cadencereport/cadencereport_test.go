@@ -124,6 +124,36 @@ func TestInterpretReleases(t *testing.T) {
 	}
 }
 
+func TestWithPublishStalenessIsInformationalAndSurfaced(t *testing.T) {
+	// The projection layers the lag on without flipping OK (informational, never gating).
+	base := Releases{Version: "v0.34.0", ActionKind: "cut_release", Verdict: "ACTION", OK: false}
+	r := WithPublishStaleness(base, 1602, 3.4, "very_stale")
+	if r.CommitsBehind != 1602 || r.DaysBehind != 3.4 || r.PublishVerdict != "very_stale" {
+		t.Fatalf("staleness not layered on: %+v", r)
+	}
+	if r.OK != base.OK {
+		t.Fatalf("WithPublishStaleness must not change OK")
+	}
+
+	// A fresh @latest (0 behind) is rendered without a lag suffix and trends as 0.
+	fresh := WithPublishStaleness(Releases{Version: "v9.9.9", ActionKind: "wait", OK: true}, 0, 0, "fresh")
+	if publishLagSuffix(fresh) != "" {
+		t.Fatalf("fresh @latest must render no lag suffix, got %q", publishLagSuffix(fresh))
+	}
+
+	// The lag appears in the fold summary (reason) and the human render, and trends in the row.
+	rep := Fold(okScores(), okWork(), r, foldOpts())
+	if !strings.Contains(rep.Reason, "1602 behind") {
+		t.Fatalf("fold reason should surface the lag, got %q", rep.Reason)
+	}
+	if !strings.Contains(Render(rep), "1602 behind") {
+		t.Fatalf("render should surface the lag")
+	}
+	if RowFromReport(rep).ReleaseCommitsBehind != 1602 {
+		t.Fatalf("ledger row should carry the lag for trending")
+	}
+}
+
 func okScores() Scores {
 	return Scores{Debt: 40, Measured: 13, TrendDirection: "improved", TrendSummary: "improved -4", OK: true}
 }

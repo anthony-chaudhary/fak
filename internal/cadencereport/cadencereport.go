@@ -51,14 +51,37 @@ type Work struct {
 	Err        string         `json:"err,omitempty"`
 }
 
-// Releases is the RELEASES dimension, distilled from the release-status fold.
+// Releases is the RELEASES dimension, distilled from the release-status fold and
+// (for the publish-staleness fields) the Go-native releasestale signal.
 type Releases struct {
 	Version      string `json:"version"`
 	ActionKind   string `json:"action_kind"`
 	ActionDetail string `json:"action_detail"`
 	Verdict      string `json:"verdict"`
 	OK           bool   `json:"ok"`
-	Err          string `json:"err,omitempty"`
+	// Publish-staleness: how far the latest published vX.Y.Z tag — what
+	// `go install ...@latest` resolves to — lags HEAD. Layered on by
+	// WithPublishStaleness from the releasestale signal; informational, never gating.
+	CommitsBehind  int     `json:"commits_behind,omitempty"`
+	DaysBehind     float64 `json:"days_behind,omitempty"`
+	PublishVerdict string  `json:"publish_verdict,omitempty"`
+	Err            string  `json:"err,omitempty"`
+}
+
+// WithPublishStaleness layers the Go-native publish-staleness verdict onto a Releases
+// dimension: how far the latest published tag lags HEAD, in commits AND days, plus the
+// fresh/stale/very_stale/unknown verdict. The git gathering lives in collect.go (the
+// impure shell); this projection is pure so the render/ledger wiring stays testable.
+//
+// It is INFORMATIONAL: it never flips Releases.OK or the cadence verdict. The cadence
+// report gates only on UN-MEASURED dimensions (it must not double-gate), and `fak
+// release-staleness --check` is the dedicated gate for the lag itself. This just makes
+// the lag visible in the fold the fleet already runs and trendable in the ledger.
+func WithPublishStaleness(r Releases, commitsBehind int, daysBehind float64, verdict string) Releases {
+	r.CommitsBehind = commitsBehind
+	r.DaysBehind = daysBehind
+	r.PublishVerdict = verdict
+	return r
 }
 
 // Trend is the per-tick delta vs the previous ledger row (the durable history's
@@ -114,8 +137,9 @@ type LedgerRow struct {
 	WorkWindowDays int    `json:"work_window_days"`
 	WorkCommits    int    `json:"work_commits"`
 	WorkShips      int    `json:"work_ships"`
-	ReleaseVersion string `json:"release_version"`
-	ReleaseAction  string `json:"release_action"`
+	ReleaseVersion       string `json:"release_version"`
+	ReleaseAction        string `json:"release_action"`
+	ReleaseCommitsBehind int    `json:"release_commits_behind,omitempty"`
 }
 
 // --- pure interpretation of the sub-tool payloads --------------------------
@@ -216,6 +240,13 @@ func Fold(scores Scores, work Work, releases Releases, opts FoldOpts) Report {
 	scoreLine := fmt.Sprintf("scores: debt %d (%s)", scores.Debt, scores.TrendDirection)
 	workLine := fmt.Sprintf("work: %d commit(s)/%d ship(s) in %dd", work.Commits, work.Ships, work.WindowDays)
 	relLine := fmt.Sprintf("releases: %s -> %s", releases.Version, releases.ActionKind)
+	if releases.CommitsBehind > 0 {
+		relLine += fmt.Sprintf(" (@latest %d behind", releases.CommitsBehind)
+		if releases.PublishVerdict != "" {
+			relLine += ", " + releases.PublishVerdict
+		}
+		relLine += ")"
+	}
 	summary := strings.Join([]string{scoreLine, workLine, relLine}, "; ")
 
 	switch {
@@ -256,8 +287,9 @@ func RowFromReport(r Report) LedgerRow {
 		WorkWindowDays: r.Work.WindowDays,
 		WorkCommits:    r.Work.Commits,
 		WorkShips:      r.Work.Ships,
-		ReleaseVersion: r.Releases.Version,
-		ReleaseAction:  r.Releases.ActionKind,
+		ReleaseVersion:       r.Releases.Version,
+		ReleaseAction:        r.Releases.ActionKind,
+		ReleaseCommitsBehind: r.Releases.CommitsBehind,
 	}
 }
 
@@ -400,8 +432,8 @@ func Render(r Report) string {
 			mark(r.Scores.OK, r.Scores.Err), r.Scores.Debt, r.Scores.Measured, dashIfEmpty(r.Scores.TrendSummary)),
 		fmt.Sprintf("  %s work        %d commit(s) / %d ship(s) in the last %dd",
 			mark(r.Work.Err == "", r.Work.Err), r.Work.Commits, r.Work.Ships, r.Work.WindowDays),
-		fmt.Sprintf("  %s releases    %s; next: %s — %s",
-			mark(r.Releases.OK, r.Releases.Err), r.Releases.Version, dashIfEmpty(r.Releases.ActionKind), dashIfEmpty(r.Releases.ActionDetail)),
+		fmt.Sprintf("  %s releases    %s%s; next: %s — %s",
+			mark(r.Releases.OK, r.Releases.Err), r.Releases.Version, publishLagSuffix(r.Releases), dashIfEmpty(r.Releases.ActionKind), dashIfEmpty(r.Releases.ActionDetail)),
 	}
 	if len(r.Work.ByLane) > 0 {
 		leaves := make([]string, 0, len(r.Work.ByLane))
@@ -420,6 +452,19 @@ func Render(r Report) string {
 	}
 	lines = append(lines, "", "  -> "+r.NextAction)
 	return strings.Join(lines, "\n")
+}
+
+// publishLagSuffix renders the @latest-vs-HEAD lag for the releases render line, or ""
+// when @latest is current (or the lag was not measured). Kept tiny + pure.
+func publishLagSuffix(r Releases) string {
+	if r.CommitsBehind <= 0 {
+		return ""
+	}
+	suffix := fmt.Sprintf("  [@latest %d behind", r.CommitsBehind)
+	if r.PublishVerdict != "" {
+		suffix += ", " + r.PublishVerdict
+	}
+	return suffix + "]"
 }
 
 // CheckGate is the advisory CI gate over a folded report (pure: exit code +
