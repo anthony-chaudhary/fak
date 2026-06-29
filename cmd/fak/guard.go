@@ -30,6 +30,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
+	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
@@ -101,6 +102,14 @@ var guardDefaultPolicyJSON []byte
 // later replay with `fak audit verify`. fak is the disinterested referee, and the
 // journal is the verifiable record of what it allowed vs blocked — a self-report is
 // not a witness. Point it with --audit PATH, or turn it off with --no-audit.
+// compressActivates reports whether the --compress flag should turn the native
+// context-compressor on for this guard process. The flag only fills an UNSET
+// FAK_COMPRESSOR, so an explicit env value (including `noop` to opt out) always
+// wins — the same flag-defers-to-explicit-env rule as --landlock-hooks.
+func compressActivates(flag bool, env string) bool {
+	return flag && strings.TrimSpace(env) == ""
+}
+
 func cmdGuard(argv []string) {
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
@@ -138,6 +147,7 @@ func cmdGuard(argv []string) {
 	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
 	replayTrace := fs.String("replay-trace", "", "DON'T wrap a live agent — instead REPLAY a recorded trace fixture through the real guard end to end and watch the floor fire. Stands up the gateway against a built-in fake upstream that emits the fixture's tool_use + token-usage turns, posts each turn through the SAME adjudication path `fak guard -- claude` uses, and prints per-turn what was allowed vs denied (with the deny reason), the turn's token/cache economy, and the journal rows recorded — then the exit summary + the verify command. No API key, no GPU, no child process. Use it to understand exactly what the guard does to a trace that leads to token work, and to demo the floor. See internal/gateway/testdata/guard-trace-e2e.json for the fixture shape.")
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
+	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
 		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
@@ -151,6 +161,17 @@ func cmdGuard(argv []string) {
 	// flag into the env so buildGuardChild (called from two paths) consults one source.
 	if *landlockHooks {
 		_ = os.Setenv(guard.EnvOptIn, "1")
+	}
+
+	// --compress activates the native context-compressor for THIS guard process: the
+	// result-admit gate (already registered, but no-op while noop is selected) starts
+	// shrinking benign tool results before they enter model context. The gate keeps
+	// its own "when not" discipline — never compress poison, only past the worth-it
+	// floor, original preserved in the CAS — so activation is safe and reversible. An
+	// explicit FAK_COMPRESSOR (incl. =noop to opt out) always wins; the flag only
+	// fills an unset default, mirroring the --landlock-hooks/env normalization above.
+	if compressActivates(*compress, os.Getenv("FAK_COMPRESSOR")) {
+		headroom.Select(headroom.NativeName)
 	}
 
 	// Expand a leading ~ in the --gguf / --tokenizer paths up front (PowerShell and most
