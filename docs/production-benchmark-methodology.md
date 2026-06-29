@@ -89,9 +89,13 @@ python tools/fak_phase0_gate.py fak/experiments/fleet-nodes/<host> --clean-node
 `--clean-node` is a provenance assertion: use it only for an artifact directory
 captured on a node that was not running the live multi-session fleet load. The
 checker validates the raw artifact set, uncapped workload replay, full batch
-curve, and the 45x batched-decode threshold. (For speedup figures: 45× = Phase-0
-batched-decode gate currently failing at 40.98×; ~60× = headline session wall-time
-vs naive stateless; ~1.5–4× = realistic gain vs tuned warm-cache stack.)
+curve, and the 45x batched-decode threshold. The 45x bar is the executable
+Phase 0 default `--min-speedup` in [`tools/fak_phase0_gate.py`](../tools/fak_phase0_gate.py);
+it gates `batchbench-q8.json`'s peak `speedup_vs_naive_serial` field, which is
+the batched aggregate decode throughput divided by the naive serial decode
+baseline. (For speedup figures: 45× = Phase-0 batched-decode gate currently
+failing at 40.98×; ~60× = headline session wall-time vs naive stateless;
+~1.5–4× = realistic gain vs tuned warm-cache stack.)
 
 The repo-local `--short` run proves only that the harness works end to end.
 
