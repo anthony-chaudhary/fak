@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,11 +61,13 @@ func headroomUsage(w io.Writer) {
   fak headroom list                          list compressor plugins (* = selected)
   fak headroom status                        selected plugin, headroom proxy URL + reachability, KPI
   fak headroom compress [flags] [FILE|-]     compress a blob and print the savings (proof)
-  fak headroom bench [--via NAME] [--json]   replay a built-in corpus and report realized savings
+  fak headroom bench [flags] [FILE...]       measure savings on a corpus (built-in, or REAL files via --dir/FILE)
 
 bench flags:
   --via NAME    compressor plugin to bench (default: native)
   --json        emit the report as JSON
+  --dir DIR     measure REAL captured files in DIR (top-level) — the dogfood path; point it at your saved tool outputs
+  --max-bytes N skip a corpus file larger than N bytes (default 4 MiB)
 
 compress flags:
   --via NAME    use a specific plugin (default: selected / FAK_COMPRESSOR)
@@ -166,6 +170,8 @@ func runHeadroomBench(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	via := fs.String("via", headroom.NativeName, "compressor plugin to bench (default: native)")
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	dir := fs.String("dir", "", "measure REAL captured files in this directory (top-level) instead of the built-in corpus — point it at your own saved tool outputs to get the dogfood savings on real traffic")
+	maxBytes := fs.Int("max-bytes", 4<<20, "skip a corpus file larger than this many bytes")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -174,7 +180,27 @@ func runHeadroomBench(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak headroom: unknown plugin %q (have %s)\n", *via, strings.Join(headroom.Names(), ", "))
 		return 2
 	}
-	report := headroom.RunBench(comp, headroom.BenchCorpus())
+
+	// Corpus selection: --dir or trailing file args read REAL captured bytes (the
+	// dogfood path — measure on your own traffic); otherwise the built-in
+	// representative corpus (the no-input demo).
+	var inputs []headroom.BenchInput
+	if *dir != "" || len(fs.Args()) > 0 {
+		var err error
+		inputs, err = benchInputsFromPaths(*dir, fs.Args(), *maxBytes)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak headroom: %v\n", err)
+			return 2
+		}
+		if len(inputs) == 0 {
+			fmt.Fprintf(stderr, "fak headroom: no readable corpus files found\n")
+			return 2
+		}
+	} else {
+		inputs = headroom.BenchCorpus()
+	}
+
+	report := headroom.RunBench(comp, inputs)
 	if *asJSON {
 		b, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -186,6 +212,46 @@ func runHeadroomBench(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprint(stdout, report.Render())
 	return 0
+}
+
+// benchInputsFromPaths builds a real-corpus bench input set from a directory's
+// top-level files plus any explicit file args. It reads regular files (skipping
+// subdirs, unreadable files, and any file larger than maxBytes), names each by its
+// base name, and sorts by path so the report is deterministic. This is the dogfood
+// path: point it at your own saved tool outputs to measure compression on real
+// traffic instead of the built-in synthetic corpus.
+func benchInputsFromPaths(dir string, args []string, maxBytes int) ([]headroom.BenchInput, error) {
+	var paths []string
+	if dir != "" {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, fmt.Errorf("read dir %q: %w", dir, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				paths = append(paths, filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	paths = append(paths, args...)
+	sort.Strings(paths)
+
+	var inputs []headroom.BenchInput
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		if maxBytes > 0 && fi.Size() > int64(maxBytes) {
+			continue
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		inputs = append(inputs, headroom.BenchInput{Name: filepath.Base(p), Bytes: b})
+	}
+	return inputs, nil
 }
 
 // readBlob reads the compress input: the named file, or stdin when the arg is "-"
