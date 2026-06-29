@@ -20,6 +20,15 @@ type Scored struct {
 	Novelty       float64 `json:"novelty"`                  // component scores, for transparency
 	ValueWeight   float64 `json:"value_weight"`
 	Staleness     float64 `json:"staleness"`
+	// Saturated is true when this feasible, auto-runnable datum has already been
+	// collected on this box AND has not aged past its re-check window (Staleness==0)
+	// — i.e. re-running it tonight would just re-measure a settled number, gathering
+	// no new information. It is the per-task input to the run loop's SATURATED stop
+	// verdict: when EVERY feasible task is saturated, the only genuinely-new data the
+	// box could gather is blocked on a capability it does not have yet, so the loop
+	// should back off rather than re-fire a fresh measurement. A never-collected, an
+	// overdue/aging, a Manual, or an infeasible task is NOT saturated.
+	Saturated bool `json:"saturated,omitempty"`
 }
 
 // selector weights blend the three signals that decide collection priority into a
@@ -102,6 +111,14 @@ func score(t Task, caps Capabilities, ledger []CollectRow, now time.Time) Scored
 	}
 
 	s.Score = wNovelty*s.Novelty + wValue*s.ValueWeight + wStaleness*s.Staleness
+	// Saturated: a feasible, auto-runnable datum that is already collected on this box
+	// and still fresh (Staleness==0) carries no new information if re-run tonight. A
+	// Manual recipe is never an auto-collectable datum, so it is never "saturated"
+	// (the loop skips it for a different reason); an infeasible or never-collected or
+	// aging task is not saturated either.
+	if s.Feasible && s.Task.autoRunnable() && ok && s.Staleness == 0 {
+		s.Saturated = true
+	}
 	s.Reason = reasonFor(s, why)
 	return s
 }

@@ -167,6 +167,16 @@ func stopReason(ranked []Scored, ran int, applied bool) string {
 	if !anyFeasible {
 		return "no feasible task on this box (every candidate needs a missing capability)"
 	}
+	// SATURATED: every feasible, auto-runnable datum is already collected and still
+	// fresh — re-running tonight would only re-measure a settled number. The only
+	// genuinely-new data the box could gather is blocked on a capability it does not
+	// have yet, so name those blockers (the infeasible tasks' "why" strings) and let
+	// the loop back off rather than re-fire a settled measurement. This is the first
+	// machine signal for "the accessible dimensions on this box have saturated"; it
+	// is reported whether the queue was just drained this session or arrived fresh.
+	if reason, ok := saturatedStopReason(ranked); ok {
+		return reason
+	}
 	if ran == 0 {
 		return "nothing to collect"
 	}
@@ -178,6 +188,63 @@ func stopReason(ranked []Scored, ran int, applied bool) string {
 		verb = "attempted"
 	}
 	return fmt.Sprintf("%s the whole feasible queue (%d task(s)) â€” nothing left", verb, ran)
+}
+
+// saturatedStopReason reports the SATURATED stop verdict and true when at least one
+// feasible auto-runnable task exists and EVERY such task is saturated (collected and
+// still fresh). The message names the external conditions the next genuinely-new datum
+// is blocked on — built from the infeasible tasks' Satisfies "why" strings, deduped and
+// in deterministic order. When some feasible auto-runnable task is still gatherable
+// (never-collected or aging), it returns ("", false) so the loop keeps collecting.
+func saturatedStopReason(ranked []Scored) (string, bool) {
+	feasibleAuto := 0
+	saturated := 0
+	for _, s := range ranked {
+		if s.Feasible && s.Task.autoRunnable() {
+			feasibleAuto++
+			if s.Saturated {
+				saturated++
+			}
+		}
+	}
+	if feasibleAuto == 0 || saturated != feasibleAuto {
+		return "", false
+	}
+	blockers := blockedOnNames(ranked)
+	if len(blockers) == 0 {
+		return fmt.Sprintf("saturated — all %d feasible datum(s) fresh; no blocked frontier remains (add a new capability or backlog row to gather more)", feasibleAuto), true
+	}
+	return fmt.Sprintf("saturated — all %d feasible datum(s) fresh; next datum blocked on: %s",
+		feasibleAuto, strings.Join(blockers, "; ")), true
+}
+
+// blockedOnNames collects the distinct "why this is infeasible here" reasons across the
+// infeasible tasks, in first-seen (deterministic, since ranked is deterministic) order.
+// They are the external conditions a new datum on this box waits on (a missing GPU,
+// weights, dataset, credential, or network).
+func blockedOnNames(ranked []Scored) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range ranked {
+		if s.Feasible {
+			continue
+		}
+		why := infeasibleWhy(s)
+		if why == "" || seen[why] {
+			continue
+		}
+		seen[why] = true
+		out = append(out, why)
+	}
+	return out
+}
+
+// infeasibleWhy recovers the bare infeasibility reason for an infeasible Scored by
+// stripping the "not feasible here — " prefix reasonFor adds, so the SATURATED message
+// reads as a list of conditions (e.g. "needs an NVIDIA GPU (box gpu=metal)") rather than
+// repeating the prefix per item.
+func infeasibleWhy(s Scored) string {
+	return strings.TrimPrefix(s.Reason, "not feasible here — ")
 }
 
 // numberRE best-effort-extracts a headline number with a known unit from a run's

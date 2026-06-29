@@ -211,6 +211,35 @@ func witnessTasks() []Task {
 			RecheckDays: 14,
 			Doc:         "docs/proofs/async-addressing.md",
 		},
+		{
+			// The first datum past the current saturation frontier: a CUDA llama.cpp
+			// baseline on the SAME box and GGUF as the fak-kernel GLM-5.2 decode, so the
+			// open fak-GPU-vs-llama.cpp-GPU comparison closes with both numbers measured on
+			// one host. Surfaced the moment a CUDA box WITH weights and net is reachable —
+			// it uses only the existing capability enum (cuda+weights+net), no new prober
+			// (a `cuda-llama-cpp-build` token would be an "unknown requirement"→infeasible,
+			// not a surfaced blocked state; that prober is separate, larger work, #1138).
+			ID:     "witness-glm52-cuda-llamacpp-comparison",
+			Title:  "collect a CUDA llama.cpp GLM-5.2 decode baseline on the same box+GGUF as the fak-kernel run, to close the open fak-GPU vs llama.cpp-GPU decode comparison (the next datum past the current saturation frontier)",
+			Source: SourceWitness,
+			Value:  ValueFrontier,
+			// Loading GLM-5.2 to decode it through llama.cpp needs an NVIDIA GPU, the local
+			// weights, and net (to fetch the llama.cpp build / shards) — ANDed, so a box
+			// missing any one reports it infeasible with the precise reason rather than
+			// feasible-but-failing.
+			Requires:    []Requirement{ReqCUDA, ReqWeights, ReqNet},
+			Run:         "llama.cpp/build/bin/llama-bench -m <glm-5.2.gguf> -ngl 99 -p 512 -n 128   # CUDA build; record prompt+decode tok/s next to the fak-kernel run",
+			Acceptance:  "a recorded llama.cpp CUDA prompt+decode tok/s for GLM-5.2 on the same box/GGUF as the fak-kernel decode, so the comparison row carries two measured numbers",
+			RecheckDays: 30,
+			// A cold GLM-5.2 load + a llama.cpp decode sweep over a 466GB checkpoint needs a
+			// large budget; 1h bounds a wedged run without truncating a healthy sweep.
+			TimeoutSec: 3600,
+			// The Run carries a <glm-5.2.gguf> fill-me-in placeholder and needs an operator
+			// to point at the local llama.cpp CUDA build — authoritative no-auto-run marker
+			// so it is surfaced for a human, never exec'd as prose.
+			Manual: true,
+			Doc:    "docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md",
+		},
 	}
 }
 
