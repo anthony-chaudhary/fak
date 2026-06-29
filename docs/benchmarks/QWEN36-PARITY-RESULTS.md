@@ -56,12 +56,18 @@ what makes the Apple M3 Pro good for local LLM inference."* → model opened a
 | **Metal**, full offload (`-ngl 99`) | **51.55** | **7.29** | ~24.5 GB |
 | **CPU** only (`-ngl 0`, `-t 6`)      | 20.12       | 6.48       | 24.5 GB |
 | **fak in-kernel GGUF->Q8**, cached GDN | 0.5 | 0.1 | 25.8 GB |
+| **fak resident-Q4_K Metal**, warm post-#1085 | 2.6 @P=27 / 7.3 @P=940 (cold first 0.5) | 1.2 (2026-06-26 decode; not remeasured post-#1085) | ~26 GB |
 | Metal speedup                        | **2.56×**   | **1.13×**  | — |
 
 (llama.cpp `common_perf_print`; Metal: load 0.98 s. CPU peak RSS from
-`/usr/bin/time -l`. fak row: `cmd/fakchat --gguf ... --tokenizer ... --prompt "Say OK." --max-new 1`,
+`/usr/bin/time -l`. GGUF->Q8 fak row: `cmd/fakchat --gguf ... --tokenizer ... --prompt "Say OK." --max-new 1`,
 load 75.51 s, prefill 22 tokens in 40.62 s, one cached decode token in 16.25 s,
-peak RSS 25,785,204,736 bytes.)
+peak RSS 25,785,204,736 bytes. Resident-Q4_K Metal fak row:
+owner-witnessed in [#63](https://github.com/anthony-chaudhary/fak/issues/63#issuecomment-4826529218)
+and archived at
+`experiments/qwen36/metal-fak-q4k-post1085-m3pro-20260628.json`; raw prompt strings were
+not present in this checkout, so the artifact records the tokenized prompt lengths rather than
+claiming a byte-for-byte rerun command.)
 
 ## Which fak Qwen3.6-27B decode number is which (reconciliation)
 
@@ -75,7 +81,7 @@ Pro**, and each value is labelled with where it is cited.
 |---|---|---|---|
 | **GGUF→Q8 cached** (CPU) | **0.1** | one cached decode token through the GGUF→Q8 round-trip path | the **Measured results** table above; `BENCHMARK-AUTHORITY.md` ("Qwen3.6-27B Q8 decode"); `docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md` |
 | **resident-q4k microbench** (CPU) | **0.9** | raw q4_k blocks stay resident (no Q8 round-trip), scalar-f32 GEMV — the model-ladder rung-4b refresh | the *fak-native status* bullet below ("decode **0.9 tok/s** … ~9× the Q8 path's 0.1"); artifact `experiments/model-ladder/qwen36-resident-q4k-parity-20260619.json` (`"decode_tok_s": 0.9`); `docs/notes/MACBOOK-SERVE-AND-AGENTIC-BENCH-2026-06-24.md` |
-| **resident-Q4_K Metal** (GPU, `-tags fakmetal FAK_Q4K=1 FAK_METAL=1`) | **1.2** | the int8-SDOT Metal decode GEMV path; bit-correct (GEMV cosine 1.0) but launch-bound (~336 command-buffer GEMVs/token) | `BENCHMARK-AUTHORITY.md` ("Qwen3.6-27B fak **Metal Q4_K**"); `docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md` |
+| **resident-Q4_K Metal** (GPU, `-tags fakmetal FAK_Q4K=1 FAK_METAL=1`) | **1.2** | the int8-SDOT Metal decode GEMV path; bit-correct (GEMV cosine 1.0) but launch-bound (~336 command-buffer GEMVs/token). Prefill on the same lane refreshed post-#1085 to **2.6 tok/s @P=27** and **7.3 tok/s @P=940** warm; decode is carried forward until #67 remeasures resident-forward decode. | `BENCHMARK-AUTHORITY.md` ("Qwen3.6-27B fak **Metal Q4_K**"); `experiments/qwen36/metal-fak-q4k-post1085-m3pro-20260628.json`; `docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md` |
 
 So **"fak Qwen3.6-27B decode" is 0.1 → 0.9 → 1.2 tok/s** along the GGUF→Q8-cached →
 resident-q4k-CPU → resident-Q4_K-Metal progression — one M3 Pro, all single-stream.
@@ -150,6 +156,13 @@ the witnessed single-stream figures are the three rows above.
   `experiments/model-ladder/qwen36-resident-q4k-parity-20260619.json`. Resident-q4k
   perf at this rung: load 36 s, decode **0.9 tok/s** (~9× the Q8 path's 0.1, ~2×
   faster load) — real progress, still ~8× under the 7.29 tok/s bar.
+- **Metal Q4_K prefill refresh (2026-06-28, #63):** after the post-#1085 q4_k GPU
+  path fix, the M3 Pro run witnessed warm prefill at **2.6 tok/s @P=27** and
+  **7.3 tok/s @P=940** (cold first prefill 0.5), with the GPU q4_k GEMM engaged
+  for all 184 resident weights and the greedy first token still matching the CPU path.
+  This is a measured Metal progression, not a pass: it remains ~7× under the
+  51.55 tok/s llama.cpp-Metal prefill bar at the long prompt point. Artifact:
+  `experiments/qwen36/metal-fak-q4k-post1085-m3pro-20260628.json`.
 - **Optimization tickets**: #95 tracks load time/page churn, #96 tracks native q4/q6
   residency, and #97 tracks first-token phase profiling before the #92 kernel work.
 - **Reproduce**:

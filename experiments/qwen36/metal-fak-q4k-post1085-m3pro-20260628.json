@@ -1,0 +1,80 @@
+{
+  "schema": "fak.qwen36-metal-fak-post1085.v1",
+  "captured_at": "2026-06-28T15:19:02Z",
+  "source": {
+    "kind": "github_issue_owner_comment",
+    "issue": 63,
+    "comment_url": "https://github.com/anthony-chaudhary/fak/issues/63#issuecomment-4826529218",
+    "author": "anthony-chaudhary",
+    "provenance": "WITNESSED by the issue owner on the M3 Pro. This artifact archives the reported numbers because the raw run log and prompt text were not present in this checkout."
+  },
+  "machine": {
+    "name": "node-macos-a",
+    "spec": "Apple M3 Pro / Mac15,7, 18 GPU core, 36 GB unified, macOS 26.5, Metal 4"
+  },
+  "model": {
+    "name": "Qwen3.6-27B",
+    "precision": "Q4_K_M",
+    "artifact": "Qwen3.6-27B.q4_k_m.gguf",
+    "arch": "Gated-DeltaNet hybrid"
+  },
+  "build_context": {
+    "description": "post-#1085 fakmetal Q4_K prefill path",
+    "mps_init_decouple_commit": "c8785553",
+    "bulk_q4k_upload_commit": "e2d13e69",
+    "build_tags": ["fakmetal"]
+  },
+  "env": {
+    "FAK_Q4K": "1",
+    "FAK_METAL": "1"
+  },
+  "reproduce": {
+    "command_template": "FAK_Q4K=1 FAK_METAL=1 FAK_QPROFILE=1 go run -tags fakmetal ./cmd/fakchat -gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf -tok ~/.cache/fak-models/tokenizers/qwen3.6 -p <prompt> -n 1 -quiet",
+    "prompt_lengths_tokens": [27, 940],
+    "note": "The issue comment reports tokenized prompt lengths P=27 and P=940, but does not include the raw prompt strings. Reproduction requires prompts tokenizing to those lengths."
+  },
+  "baselines": {
+    "llama_cpp_metal_prefill_tok_per_sec": 51.55,
+    "llama_cpp_metal_decode_tok_per_sec": 7.29,
+    "source": "docs/benchmarks/QWEN36-PARITY-RESULTS.md and experiments/qwen36/llamacpp-metal-qwen36-bar-20260626.json"
+  },
+  "fak_metal": {
+    "prefill": [
+      {
+        "label": "warm P=27",
+        "tokens": 27,
+        "state": "warm",
+        "tok_per_sec": 2.6,
+        "ratio_vs_llama_metal_prefill": 0.050436
+      },
+      {
+        "label": "warm P=940",
+        "tokens": 940,
+        "state": "warm",
+        "tok_per_sec": 7.3,
+        "ratio_vs_llama_metal_prefill": 0.14161
+      },
+      {
+        "label": "cold first prefill",
+        "state": "cold",
+        "tok_per_sec": 0.5,
+        "ratio_vs_llama_metal_prefill": 0.009699
+      }
+    ],
+    "decode": {
+      "tok_per_sec": 1.2,
+      "ratio_vs_llama_metal_decode": 0.164609,
+      "source": "experiments/benchmark/runs/by-machine/node-macos-a/20260626T055239Z-q4k-metal-decode-27b/score.json",
+      "note": "Carried forward from the 2026-06-26 clean Metal Q4_K run; the 2026-06-28 issue comment reports prefill refreshes, not a new decode remeasure."
+    }
+  },
+  "correctness": {
+    "first_token": "greedy first token remains <think>, matching the CPU path",
+    "gpu_path": "GPU q4k GEMM confirmed running for all 184 resident weights"
+  },
+  "interpretation": {
+    "claim": "Measured fak-Metal Q4_K prefill progression on M3 Pro after #1085; decode remains the prior witnessed 1.2 tok/s until #67 remeasures the resident-forward delta.",
+    "verdict": "trails llama.cpp Metal; no pass claimed",
+    "remaining_gap": "The issue comment attributes the remaining prefill gap to one-time 8.33 GB weight upload plus per-call GPU round-trip/waitUntilCompleted and result memcpy, tracked in #1113 and #69."
+  }
+}
