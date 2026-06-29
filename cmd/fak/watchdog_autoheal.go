@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
 const watchdogAutohealSchema = "fak.watchdog-autoheal.v1"
@@ -24,10 +26,10 @@ const (
 	watchdogReasonWarnOnly     = "WATCHDOG_AUTOHEAL_WARN_ONLY"
 	watchdogReasonRestarted    = "WATCHDOG_RESTARTED"
 	watchdogReasonFailed       = "WATCHDOG_RESTART_FAILED"
-	watchdogReasonScheduled    = "WATCHDOG_RESTART_SCHEDULED"
-	watchdogReasonDebounced    = "WATCHDOG_RESTART_DEBOUNCED"
-	watchdogReasonExhausted    = "WATCHDOG_RESTART_EXHAUSTED"
-	watchdogReasonPolicyBad    = "WATCHDOG_RESTART_POLICY_INVALID"
+	watchdogReasonScheduled    = loopmgr.ReasonRestartScheduled
+	watchdogReasonDebounced    = loopmgr.ReasonRestartDebounced
+	watchdogReasonExhausted    = loopmgr.ReasonRestartExhausted
+	watchdogReasonPolicyBad    = loopmgr.ReasonRestartPolicyInvalid
 )
 
 type watchdogAutohealMode int
@@ -103,21 +105,7 @@ type watchdogLease struct {
 
 type watchdogCommandRunner func(context.Context, string, ...string) (string, error)
 
-type watchdogRestartPolicy struct {
-	MaxAttempts uint64
-	BaseDelay   time.Duration
-	MaxDelay    time.Duration
-	ResetAfter  time.Duration
-}
-
-type watchdogRestartDecision struct {
-	Restart bool
-	GiveUp  bool
-	Reason  string
-	Summary string
-	Attempt uint64
-	After   time.Duration
-}
+type watchdogRestartPolicy = loopmgr.RestartPolicy
 
 func watchdogAutohealOnStart(verb string) {
 	mode := parseWatchdogAutohealMode(os.Getenv("FAK_WATCHDOG_AUTOHEAL"))
@@ -358,7 +346,7 @@ func restartWatchdogWithPolicy(ctx context.Context, opts watchdogAutohealOptions
 	}
 
 	for {
-		decision := opts.RestartPolicy.Decide(attempts, lastFailure, now)
+		decision := opts.RestartPolicy.Decide(attempts, lastFailure, now, nil)
 		if decision.GiveUp {
 			st.ID = spec.ID
 			st.Schema = watchdogAutohealSchema
@@ -415,92 +403,6 @@ func resetWatchdogAttemptsOnAlive(st watchdogHealState, id string, policy watchd
 		}
 	}
 	return st
-}
-
-func (p watchdogRestartPolicy) Decide(attempts uint64, lastFailure, now time.Time) watchdogRestartDecision {
-	if err := p.Validate(); err != nil {
-		return watchdogRestartDecision{GiveUp: true, Reason: watchdogReasonPolicyBad, Attempt: attempts, Summary: "invalid restart policy: " + err.Error()}
-	}
-	if attempts >= p.MaxAttempts {
-		return watchdogRestartDecision{
-			GiveUp:  true,
-			Reason:  watchdogReasonExhausted,
-			Attempt: attempts,
-			Summary: fmt.Sprintf("restart attempts exhausted (%d/%d)", attempts, p.MaxAttempts),
-		}
-	}
-	lastFailure = lastFailure.UTC()
-	now = now.UTC()
-	if lastFailure.IsZero() {
-		lastFailure = now
-	}
-	delay := p.backoffDelay(attempts)
-	restartAt := lastFailure.Add(delay)
-	after := restartAt.Sub(now)
-	if after < 0 {
-		after = 0
-	}
-	reason := watchdogReasonScheduled
-	if now.After(lastFailure) && now.Before(restartAt) {
-		reason = watchdogReasonDebounced
-	}
-	attempt := attempts + 1
-	return watchdogRestartDecision{
-		Restart: true,
-		Reason:  reason,
-		Attempt: attempt,
-		After:   after,
-		Summary: fmt.Sprintf("restart attempt %d/%d scheduled after %s", attempt, p.MaxAttempts, after),
-	}
-}
-
-func (p watchdogRestartPolicy) Validate() error {
-	if p.MaxAttempts == 0 {
-		return fmt.Errorf("max_attempts must be > 0")
-	}
-	if p.BaseDelay <= 0 {
-		return fmt.Errorf("base_delay must be > 0")
-	}
-	if p.MaxDelay <= 0 {
-		return fmt.Errorf("max_delay must be > 0")
-	}
-	if p.MaxDelay < p.BaseDelay {
-		return fmt.Errorf("max_delay %s is below base_delay %s", p.MaxDelay, p.BaseDelay)
-	}
-	if p.ResetAfter < 0 {
-		return fmt.Errorf("reset_after must be >= 0")
-	}
-	return nil
-}
-
-func (p watchdogRestartPolicy) AttemptsAfterSuccess(attempts uint64, started, ended time.Time) uint64 {
-	if attempts == 0 {
-		return 0
-	}
-	if ended.Before(started) {
-		return attempts
-	}
-	if p.ResetAfter <= 0 || ended.Sub(started) >= p.ResetAfter {
-		return 0
-	}
-	return attempts
-}
-
-func (p watchdogRestartPolicy) backoffDelay(attempts uint64) time.Duration {
-	delay := p.BaseDelay
-	for i := uint64(0); i < attempts; i++ {
-		if delay >= p.MaxDelay {
-			return p.MaxDelay
-		}
-		if delay > p.MaxDelay/2 {
-			return p.MaxDelay
-		}
-		delay *= 2
-	}
-	if delay > p.MaxDelay {
-		return p.MaxDelay
-	}
-	return delay
 }
 
 func readWatchdogHealState(dir, id string) (watchdogHealState, error) {
