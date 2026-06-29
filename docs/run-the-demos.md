@@ -54,6 +54,7 @@ Headless witnesses by track:
 | **poisonedmcpdemo** | `go run ./cmd/poisonedmcpdemo` | security | poisoned MCP results are quarantined and unwired tools are denied by structure |
 | **causalbench** | `go run ./cmd/causalbench -selfcheck` | research/science | an external write evicts exactly the dependent cached read, keeps siblings warm, and refuses stale re-admission |
 | **deletioncert** | `go run ./cmd/deletioncert -selfcheck` | research/science | a selected KV span is evicted to `max|Delta|=0`, bound into a certificate, and tamper-rejected |
+| **agentbenchdemo** | `go run ./cmd/agentbenchdemo` | performance | the kernel's per-tool-call adjudication cost (the "self-tax") is microseconds — orders of magnitude under one LLM round-trip |
 
 `guarddemo`, `turntaxdemo`, `tokendemo`, `dropindemo`, and `unseedemo` are the
 lowest-common-denominator demos: no model, no GPU, no download, no provider key, no network.
@@ -179,6 +180,8 @@ go run ./cmd/causalbench -selfcheck
 go run ./cmd/causalbench -selfcheck -out causalbench-witness.json
 go run ./cmd/deletioncert -selfcheck
 go run ./cmd/deletioncert -selfcheck -out deletioncert.json
+go run ./cmd/agentbenchdemo
+go run ./cmd/agentbenchdemo -selfcheck
 ```
 
 Or play all four in one shot — **fak in 30 seconds**, then a built-in acceptance check

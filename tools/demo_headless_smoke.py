@@ -148,6 +148,9 @@ WITNESSES: tuple[Witness, ...] = (
         ("seed: 42",),
         doc_command="go run ./cmd/deletioncert -isolation-bench -seed 42",
     ),
+    Witness("agentbenchdemo", ("go", "run", "./cmd/agentbenchdemo"), ("the self-tax", "adjudicated tool calls")),
+    Witness("agentbenchdemo-selfcheck", ("go", "run", "./cmd/agentbenchdemo", "-selfcheck"), ("the self-tax invariants hold",)),
+    Witness("agentbenchdemo-json", ("go", "run", "./cmd/agentbenchdemo", "-json"), ('"iterations"', '"calls"')),
 )
 
 
