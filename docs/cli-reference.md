@@ -144,6 +144,7 @@ fak turntax   --suite turntax-airline                  # price the extra error-c
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
 fak task      sample [--json] [--done N --total N]     # process-local task-manager snapshot: hardware/runtime sample + task/step/concept progress and ETA
+fak task      handoff --file HANDOFF.json [--json] [--live] [--repo owner/repo]  # verified completion handoff: require StateDone + VerifiedDone + current state, then plan/sync 1-2 follow-up issues
 fak console agent --account claude-seat --dry-run -- -p "task"  # native launch-plan for real Claude Code through fak guard, using a selected Claude config home
 fak c <target>|--target NAME|--auto|--list-targets      # pick a named compute backend (mac/gcp/local/anthropic + ~/.fak/targets.json); --auto ranks by health then cheapest/most-local (cost local<mac<gcp<anthropic), fails over past a DOWN target. quota is a [stub] (not a live fak accounts read) and never excludes
 fak snapshot  kinds | demo | info | dump-fleet | restore-fleet   # dump/restore any primitive (turn|tool|session|fleet|RSI loop) to a portable sha256-integrity bundle
@@ -287,10 +288,22 @@ last_post_age_s, budget_s, verdict}` per surface. The unattended arm is
 `.github/workflows/slack-watchdog.yml` (daily 10:19 UTC, fails open without the token): on a
 non-OK verdict it files ONE deduped GitHub issue so the dispatch loop picks it up.
 
+`fak slack beat` is the **liveness pulse** — the third leg. The feeders post on change; the
+health verb folds a verdict but only exits a code (or files a once-a-day issue). The gap: a
+QUIET channel looks identical to a DEAD feeder. `fak slack beat` runs the same health fold and
+posts ONE compact line to a status channel UNCONDITIONALLY on its cadence — `✅ slack surfaces
+alive — 7/12 OK · freshest feeder post 1h ago` on a healthy day, `⚠️/🔴 … _down:_ <surface
+MODE …>` when one is broken. A green beat means alive; a missing beat means the scheduler
+itself died. It posts through the same transport as `fak slack send` and resolves the channel
+(default `$FAK_DISPATCH_CHANNEL`, then `$FAK_SCOREBOARD_CHANNEL`) the same env-then-file way;
+`--dry-run` renders fork-safe, exit-coded so a scheduled tick flags a misconfiguration.
+
 ```bash
 fak slack check --auth   # resolution + does each token work? (offline-by-default)
 fak slack health         # + did a post actually land inside each feeder's cadence?
 fak slack health --json  # machine-readable verdict for the watchdog / a dashboard
+fak slack beat           # post a one-line liveness pulse even when nothing else posted
+fak slack beat --dry-run # render the pulse, resolve channel/token, post nothing (fork-safe)
 ```
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor

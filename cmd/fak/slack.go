@@ -35,6 +35,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/grafanapost"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
 // scoreboardTokenKey is the shared workspace bot token every non-scoreboard surface falls
@@ -116,15 +117,16 @@ type authReport struct {
 
 // surfaceReport is one row of `fak slack check`, JSON-serializable for --json.
 type surfaceReport struct {
-	Name          string      `json:"name"`
-	Purpose       string      `json:"purpose"`
-	TokenSet      bool        `json:"token_set"`
-	Token         string      `json:"token,omitempty"`          // redacted
-	TokenSource   string      `json:"token_source,omitempty"`   //
-	Channel       string      `json:"channel,omitempty"`        //
-	ChannelSource string      `json:"channel_source,omitempty"` //
-	Ready         bool        `json:"ready"`                    // token AND channel resolved
-	Auth          *authReport `json:"auth,omitempty"`           //
+	Name          string          `json:"name"`
+	Purpose       string          `json:"purpose"`
+	TokenSet      bool            `json:"token_set"`
+	Token         string          `json:"token,omitempty"`          // redacted
+	TokenSource   string          `json:"token_source,omitempty"`   //
+	Channel       string          `json:"channel,omitempty"`        //
+	ChannelSource string          `json:"channel_source,omitempty"` //
+	Ready         bool            `json:"ready"`                    // token AND channel resolved
+	Auth          *authReport     `json:"auth,omitempty"`           //
+	SignalNoise   slackmeta.Score `json:"signal_noise"`             // S/N meta self-score
 
 	tokenValue string // raw token, for the auth probe; never serialized
 }
@@ -135,9 +137,10 @@ func cmdSlack(argv []string) {
 	if len(argv) == 0 {
 		os.Exit(runSlackCheck(os.Stdout, os.Stderr, nil))
 	}
-	dispatchSubcommands("slack", "check | health | send", argv,
+	dispatchSubcommands("slack", "check | health | beat | send", argv,
 		subcommand{"check", runSlackCheck},
 		subcommand{"health", runSlackHealth},
+		subcommand{"beat", runSlackBeat},
 		subcommand{"send", runSlackSend},
 	)
 }
@@ -158,6 +161,9 @@ func runSlackCheck(stdout, stderr io.Writer, argv []string) int {
 	reports := buildSurfaceReports()
 	if *doAuth {
 		runAuthChecks(reports, *apiBase)
+		for _, r := range reports {
+			r.refreshSignalNoise()
+		}
 	}
 
 	if *asJSON {
@@ -192,9 +198,29 @@ func buildSurfaceReports() []*surfaceReport {
 			rep.Token = redactToken(tok.Value)
 			rep.TokenSource = tok.Source
 		}
+		rep.refreshSignalNoise()
 		out = append(out, rep)
 	}
 	return out
+}
+
+func (r *surfaceReport) refreshSignalNoise() {
+	signal := 1 + slackmeta.NonEmpty(r.Purpose, r.TokenSource, r.Channel, r.ChannelSource)
+	noise := 1
+	if !r.TokenSet {
+		noise++
+	}
+	if r.Channel == "" {
+		noise++
+	}
+	if r.Auth != nil {
+		if r.Auth.OK {
+			signal++
+		} else {
+			noise++
+		}
+	}
+	r.SignalNoise = slackmeta.New(signal, noise, "resolved Slack surface wiring vs missing config/auth failures")
 }
 
 // runAuthChecks calls auth.test once per DISTINCT resolved token (many surfaces share the
@@ -276,6 +302,7 @@ func renderSurfaceReports(w io.Writer, reports []*surfaceReport, auth bool) {
 				fmt.Fprintf(w, "    auth    FAIL — %s\n", r.Auth.Err)
 			}
 		}
+		fmt.Fprintf(w, "    S/N     %s\n", r.SignalNoise.Line())
 	}
 }
 
