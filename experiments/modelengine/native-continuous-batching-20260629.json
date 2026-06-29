@@ -1,0 +1,104 @@
+{
+  "schema": "fak.modelengine.native_continuous_batching.v1",
+  "date": "2026-06-29",
+  "issue": 401,
+  "package": "github.com/anthony-chaudhary/fak/internal/modelengine",
+  "command": ".\\test.ps1 -run '^$' -bench BenchmarkEngineContinuousBatching -benchmem -benchtime=50x ./internal/modelengine",
+  "goos": "linux",
+  "goarch": "amd64",
+  "go": "go1.26.0",
+  "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+  "model": {
+    "kind": "synthetic",
+    "hidden_size": 192,
+    "num_layers": 4,
+    "num_heads": 6,
+    "num_kv_heads": 3,
+    "head_dim": 32,
+    "intermediate_size": 512,
+    "vocab_size": 512,
+    "max_new_tokens_per_request": 16
+  },
+  "baseline": {
+    "name": "legacy per-request lifecycle",
+    "description": "One goroutine per request, one model.Session per request, serial Session.Step decode, same synthetic model and prompt set."
+  },
+  "candidate": {
+    "name": "native continuous batching",
+    "description": "Registered inkernel Engine.Admit delegates to NativeScheduler; the scheduler dynamically promotes admitted lanes between decode steps and uses model.BatchSession.StepBatch for multi-lane decode."
+  },
+  "results": [
+    {
+      "batch": 1,
+      "legacy_ns_per_op": 9071159,
+      "native_ns_per_op": 7999578,
+      "legacy_req_per_s": 110.2,
+      "native_req_per_s": 125.0,
+      "req_per_s_ratio": 1.1343,
+      "legacy_tok_per_s": 1764,
+      "native_tok_per_s": 2000,
+      "tok_per_s_ratio": 1.1338,
+      "legacy_bytes_per_op": 3606624,
+      "native_bytes_per_op": 3490294,
+      "legacy_allocs_per_op": 4911,
+      "native_allocs_per_op": 4688
+    },
+    {
+      "batch": 2,
+      "legacy_ns_per_op": 16370370,
+      "native_ns_per_op": 12182726,
+      "legacy_req_per_s": 122.2,
+      "native_req_per_s": 164.2,
+      "req_per_s_ratio": 1.3437,
+      "legacy_tok_per_s": 1955,
+      "native_tok_per_s": 2627,
+      "tok_per_s_ratio": 1.3437,
+      "legacy_bytes_per_op": 7213380,
+      "native_bytes_per_op": 5549015,
+      "legacy_allocs_per_op": 9822,
+      "native_allocs_per_op": 5502
+    },
+    {
+      "batch": 4,
+      "legacy_ns_per_op": 31388164,
+      "native_ns_per_op": 20836486,
+      "legacy_req_per_s": 127.4,
+      "native_req_per_s": 192.0,
+      "req_per_s_ratio": 1.5071,
+      "legacy_tok_per_s": 2039,
+      "native_tok_per_s": 3072,
+      "tok_per_s_ratio": 1.5066,
+      "legacy_bytes_per_op": 14427471,
+      "native_bytes_per_op": 10635413,
+      "legacy_allocs_per_op": 19646,
+      "native_allocs_per_op": 8824
+    },
+    {
+      "batch": 8,
+      "legacy_ns_per_op": 63228933,
+      "native_ns_per_op": 40958297,
+      "legacy_req_per_s": 126.5,
+      "native_req_per_s": 195.3,
+      "req_per_s_ratio": 1.5439,
+      "legacy_tok_per_s": 2024,
+      "native_tok_per_s": 3125,
+      "tok_per_s_ratio": 1.5440,
+      "legacy_bytes_per_op": 28854356,
+      "native_bytes_per_op": 20757570,
+      "legacy_allocs_per_op": 39291,
+      "native_allocs_per_op": 15366
+    }
+  ],
+  "verdict": {
+    "single_request_latency_regression": false,
+    "single_request_req_per_s_ratio": 1.1343,
+    "peak_req_per_s_ratio": 1.5439,
+    "peak_batch": 8,
+    "improved_throughput": true
+  },
+  "honest_scope": [
+    "Synthetic CPU benchmark over the in-kernel lifecycle scheduler; it is not a production vLLM/SGLang serving benchmark.",
+    "The registered inkernel engine now uses the native scheduler by default; paged attention and multi-tenant SLA policy remain separate gateway/model leaves.",
+    "Resident Q4_K lanes preserve correctness by falling back to per-lane Session.Step because BatchSession does not yet implement Q4_K dispatch."
+  ]
+}
