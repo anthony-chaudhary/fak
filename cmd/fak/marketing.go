@@ -29,12 +29,88 @@ import (
 // channel is never a hard-coded default — a marketing post never silently lands in
 // #scoreboard).
 func cmdMarketing(argv []string) {
-	dispatchSubcommands("marketing", "generate | post | tick | aeo", argv,
+	dispatchSubcommands("marketing", "generate | post | tick | aeo | epic | release", argv,
 		subcommand{"generate", runMarketingGenerate},
 		subcommand{"post", runMarketingPost},
 		subcommand{"tick", runMarketingTick},
 		subcommand{"aeo", runMarketingAEO},
+		subcommand{"epic", runMarketingEpic},
+		subcommand{"release", runMarketingRelease},
 	)
+}
+
+// runMarketingEpic handles `fak marketing epic`: announce the ships that closed an epic,
+// grouped under its title. The caller supplies the title and the range it scoped (the
+// gh-poll / issue-close integration lives in the caller, keeping the tier-1 core gh-free).
+func runMarketingEpic(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak marketing epic", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	title := fs.String("title", "", "the epic's human title (e.g. the GitHub issue title)")
+	since := fs.String("since", "", "gather the epic's ships since this ref (<ref>..HEAD)")
+	rangeFlag := fs.String("range", "", "gather the epic's ships in this rev-range; wins over --since")
+	root := fs.String("root", ".", "repo root")
+	source := fs.String("source", "", "who is posting (default: $FAK_SCOREBOARD_SOURCE or hostname)")
+	channel := fs.String("channel", "", "override target channel id (default: $FAK_MARKETING_CHANNEL)")
+	token := fs.String("token", "", "override bot token (default: $FAK_MARKETING_TOKEN, then scoreboard token)")
+	dryRun := fs.Bool("dry-run", false, "render and print; do not post")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	col, err := marketing.Gather(*root, marketingRange(*rangeFlag, *since))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak marketing epic: %v\n", err)
+		return 1
+	}
+	art := col.EpicFrom(*title)
+	art.Source = resolveMarketingSource(*source)
+	return slackPostTail(stdout, stderr, marketingPostSpec(art, *channel, *token, *dryRun, "fak marketing epic"))
+}
+
+// runMarketingRelease handles `fak marketing release`: announce the ships in a release. The
+// caller supplies the version tag and an optional one-line lead (pulled from docs/releases/
+// v*.md), and the range the release spanned.
+func runMarketingRelease(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak marketing release", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	version := fs.String("version", "", "the release tag (e.g. v0.18.0)")
+	lead := fs.String("lead", "", "an optional one-line summary (e.g. from docs/releases/v*.md)")
+	since := fs.String("since", "", "gather the release's ships since this ref (<ref>..HEAD)")
+	rangeFlag := fs.String("range", "", "gather the release's ships in this rev-range; wins over --since")
+	root := fs.String("root", ".", "repo root")
+	source := fs.String("source", "", "who is posting (default: $FAK_SCOREBOARD_SOURCE or hostname)")
+	channel := fs.String("channel", "", "override target channel id (default: $FAK_MARKETING_CHANNEL)")
+	token := fs.String("token", "", "override bot token (default: $FAK_MARKETING_TOKEN, then scoreboard token)")
+	dryRun := fs.Bool("dry-run", false, "render and print; do not post")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *version == "" {
+		fmt.Fprintln(stderr, "fak marketing release: --version is required (e.g. --version v0.18.0)")
+		return 2
+	}
+	col, err := marketing.Gather(*root, marketingRange(*rangeFlag, *since))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak marketing release: %v\n", err)
+		return 1
+	}
+	art := col.ReleaseFrom(*version, *lead)
+	art.Source = resolveMarketingSource(*source)
+	return slackPostTail(stdout, stderr, marketingPostSpec(art, *channel, *token, *dryRun, "fak marketing release"))
+}
+
+// marketingPostSpec builds the shared slackPostSpec for the epic/release post paths (the
+// generate/post paths build it inline; this folds the common channel/token/resolver wiring).
+func marketingPostSpec(art marketing.Artifact, channel, token string, dryRun bool, label string) slackPostSpec {
+	return slackPostSpec{
+		card:           art,
+		channel:        channel,
+		token:          token,
+		dryRun:         dryRun,
+		label:          label,
+		chanEnv:        "FAK_MARKETING_CHANNEL",
+		resolveChannel: marketing.ResolveChannel,
+		resolveToken:   marketing.ResolveToken,
+	}
 }
 
 // runMarketingAEO handles `fak marketing aeo --refresh`: regenerate the AEO/AgentEO recency
