@@ -62,10 +62,11 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # The pure-text ABI cross-check (header <-> kernels <-> cgo binding) — no toolchain at
-      # all, the highest signal-per-millisecond check in the lane.
-      - name: CUDA ABI parity (tools/cuda_abi_parity.py --check)
-        run: python3 tools/cuda_abi_parity.py --check
+      # The offline preflight (header <-> kernels <-> cgo binding, plus standalone
+      # cuda_backend.h portability). No CUDA toolkit, no GPU; on hosted Ubuntu it also runs
+      # the strict `gcc -fsyntax-only` parse of the header alone.
+      - name: CUDA ABI/header preflight (build_cuda.sh check)
+        run: bash internal/compute/build_cuda.sh check
 
       # DIRECTION reviewer check 3: the DEFAULT build must stay pure-Go and pull ZERO cgo
       # files, so the shipped artifact is one pure-Go binary. Today this guard lives only in

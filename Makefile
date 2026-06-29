@@ -18,8 +18,8 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # demo-smoke builds and serves every browser demo under a reverse-proxy-style base
 # path, proving the local pages and lightweight APIs still come up. demo-headless-smoke
 # runs the model-free terminal witnesses from run-the-demos.md.
-# cuda-check is the GPU-free CUDA ABI parity gate — deterministic, no toolchain, so it joins
-# the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
+# cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
+# so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
 ci: build gofmt-check vet test claims-lint salience index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
@@ -289,13 +289,15 @@ gated-tests:
 	@python3 tools/gated_tool_tests.py --run
 
 # ---- CUDA dev loop (see docs/cuda-dev.md) ------------------------------------------------
-# cuda-check: the GPU-FREE local CUDA gate. Pure-text ABI parity (header <-> kernels <-> cgo
-# binding) — no nvcc, no GPU, no cgo — so it runs ANYWHERE, including the no-toolchain Windows
-# host (scripts/ci.ps1 mirrors it) and inside `make ci`. The local twin of cuda-build.yml's
-# `static` job. A GPU host adds `go vet -tags cuda` for the cgo type-check.
+# cuda-check: the GPU-FREE local CUDA gate. ABI parity plus standalone cuda_backend.h
+# portability — no nvcc, no GPU, no cgo — so it runs anywhere with bash/python; when a
+# host C compiler exists, build_cuda.sh check also runs a strict header-only parse. The
+# no-toolchain Windows host keeps the python mirror in scripts/ci.ps1, and this remains
+# the local twin of cuda-build.yml's `static` job. A GPU host adds `go vet -tags cuda`
+# for the cgo type-check.
 cuda-check:
-	@python3 tools/cuda_abi_parity.py --check
-	@echo "cuda-check OK (ABI parity; run 'make cuda-build' on a CUDA host for the nvcc build)"
+	@bash internal/compute/build_cuda.sh check
+	@echo "cuda-check OK (ABI/header preflight; run 'make cuda-build' on a CUDA host for the nvcc build)"
 
 # cuda-build / cuda-test: the REAL -tags cuda build + Approx witness — REQUIRES a CUDA
 # toolchain (nvcc + cuBLAS). Delegates to internal/compute/build_cuda.sh; Linux/WSL/GPU node

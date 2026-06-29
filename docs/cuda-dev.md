@@ -61,15 +61,17 @@ Edit the kernel in `cuda_kernels.cu`, its prototype in `cuda_backend.h`, and the
 in `cuda.go`. Then run the local gate **before** you push to a GPU node:
 
 ```
-make cuda-check                 # wraps: python tools/cuda_abi_parity.py --check
+make cuda-check                 # wraps: bash internal/compute/build_cuda.sh check
 ```
 
-This runs [`tools/cuda_abi_parity.py`](../tools/cuda_abi_parity.py) — a pure-text cross-check
-that every `fcuda_*` prototype in the header is defined in the `.cu` and declared for every
-`C.fcuda_*` call in `cuda.go`. It needs no nvcc, no GPU, and no cgo, so it catches the most
-common real break — a signature changed in one file but not the others — in milliseconds,
-locally, instead of on a multi-host round trip. It runs on the no-toolchain Windows host too
-(it is mirrored into [`scripts/ci.ps1`](../scripts/ci.ps1) and is part of `make ci`).
+This runs [`build_cuda.sh check`](../internal/compute/build_cuda.sh): first the pure-text
+[`tools/cuda_abi_parity.py`](../tools/cuda_abi_parity.py) cross-check that every `fcuda_*`
+prototype in the header is defined in the `.cu` and declared for every `C.fcuda_*` call in
+`cuda.go`, then a standalone `cuda_backend.h` parse with a strict host C compiler when one is
+available. It needs no nvcc, no GPU, and no cgo, so it catches both signature drift and
+`uint8_t`-class missing-header portability bugs locally instead of on a paid GPU VM. The
+no-toolchain Windows host keeps the Python mirror in [`scripts/ci.ps1`](../scripts/ci.ps1),
+and the same check is part of `make ci`.
 
 On a node that *has* a C compiler, add the cgo type-check (no CUDA toolkit needed — the header
 is deliberately toolkit-free): `go vet -tags cuda ./internal/compute/`.
@@ -135,7 +137,7 @@ likely to forget (a missing prototype or a missing binding):
 
 - [`.github/workflows/cuda-build.yml`](../.github/workflows/cuda-build.yml) runs
   **automatically** on every CUDA-touching push/PR, on plain GitHub-hosted runners with **no
-  GPU**: the ABI parity check, the pure-Go cgo-leak guard (the default build must stay
+  GPU**: the ABI/header preflight, the pure-Go cgo-leak guard (the default build must stay
   pure-Go), `go vet -tags cuda` (no toolkit), and — in an `nvidia/cuda:12.6.2-devel` container
   — an `nvcc` compile of the kernels plus `go build -tags cuda` (which *links* against the
   image's cudart/cublas stub libs but never *runs*, so no device is needed). This buys "a peer

@@ -117,11 +117,11 @@ if ($null -ne $py) {
     & $py "tools/gated_tool_tests.py" --check
     if ($LASTEXITCODE -ne 0) { exit 1 }
 
-    # cuda-check: the GPU-free CUDA ABI parity gate (header <-> kernels <-> cgo binding). Pure
-    # text, no nvcc / no GPU / no cgo, so it runs on the canonical Windows dev host (CGO_ENABLED=0,
-    # no CUDA toolkit) — the local mirror of cuda-build.yml's `static` job and `make ci`'s
-    # cuda-check. See docs/cuda-dev.md.
-    Write-Host "== cuda ABI parity (header <-> kernels <-> cgo binding) =="
+    # cuda-check: the GPU-free CUDA ABI/header-portability gate. Pure text, no nvcc / no GPU /
+    # no cgo, so it runs on the canonical Windows dev host (CGO_ENABLED=0, no CUDA toolkit) —
+    # the local mirror of cuda-build.yml's `static` job and `make ci`'s cuda-check. See
+    # docs/cuda-dev.md.
+    Write-Host "== cuda ABI parity + header portability =="
     & $py "tools/cuda_abi_parity.py" --check
     if ($LASTEXITCODE -ne 0) { exit 1 }
 } else {

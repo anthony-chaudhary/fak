@@ -73,6 +73,28 @@ class TestSymbolExtraction(unittest.TestCase):
         self.assertEqual(m.binding_calls(go), {"fcuda_matmul_f32", "fcuda_argmax_f32"})
 
 
+class TestHeaderPortability(unittest.TestCase):
+    def test_uint8_t_requires_direct_stdint_include(self):
+        hdr = "#include <stddef.h>\nvoid fcuda_q4k(const uint8_t *p, size_t n);\n"
+        p = m.build_payload(workspace="/x", decls={"fcuda_q4k"}, defs={"fcuda_q4k"},
+                            calls={"fcuda_q4k"}, header_text=hdr)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["corpus"]["header_portability"]["missing_includes"],
+                         {"stdint.h": ["uint8_t"]})
+        self.assertIn("standalone header parse would fail", p["corpus"]["hard"][0])
+
+    def test_current_fixed_header_shape_passes_portability(self):
+        hdr = (
+            "#include <stddef.h>\n"
+            "#include <stdint.h>\n"
+            "void fcuda_q4k(const uint8_t *p, size_t n);\n"
+        )
+        p = m.build_payload(workspace="/x", decls={"fcuda_q4k"}, defs={"fcuda_q4k"},
+                            calls={"fcuda_q4k"}, header_text=hdr)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["corpus"]["header_portability"]["missing_includes"], {})
+
+
 class TestParity(unittest.TestCase):
     def test_clean_tree_is_ok(self):
         p = m.parity({"fcuda_a", "fcuda_b"}, {"fcuda_a", "fcuda_b"}, {"fcuda_a", "fcuda_b"})

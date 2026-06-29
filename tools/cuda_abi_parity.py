@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CUDA ABI parity — the GPU-free, toolchain-free static cross-check of the CUDA seam.
+"""CUDA ABI parity — the GPU-free static cross-check of the CUDA seam.
 
 The CUDA backend is three files that have to agree on one flat C ABI:
 
@@ -20,11 +20,17 @@ caught in milliseconds, locally, before the push. It is the local feedback loop 
 remote-GPU dev process was missing — and a regression sentinel so the seam can't silently
 drift as the kernel set grows.
 
+It also checks the header as if it were parsed standalone by a strict host compiler:
+portable fixed-width / size types must bring their own standard header in
+cuda_backend.h, not arrive accidentally through nvcc or a platform-specific transitive
+include. That is the cheap sentinel for the uint8_t-class CUDA portability bug.
+
 Defect classes:
   HARD (a real build/link break the checker promotes to a local failure):
     - prototype with no definition   — declared in the header, never defined in the .cu
     - call with no prototype         — `C.fcuda_x` in cuda.go the header never declares
     - definition with no prototype   — `extern "C" … fcuda_x` in the .cu the header omits
+    - header uses a standard type without including its defining header
   SOFT (dead/standby ABI surface — informational, never fails a gate):
     - prototype defined but never called from cuda.go (a utility kept for a future path
       or a test-only entry; listed with a reason in UNCALLED_OK so it stays honest)
@@ -68,6 +74,22 @@ _DECL_RE = re.compile(rf"\b({SYM})\s*\(")
 _DEF_RE = re.compile(rf'extern\s+"C"\s+[^;{{}}]*?\b({SYM})\s*\(', re.DOTALL)
 # A cgo CALL: `C.fcuda_name(` in cuda.go.
 _CALL_RE = re.compile(rf"\bC\.({SYM})\b")
+_INCLUDE_RE = re.compile(r'(?m)^\s*#\s*include\s*[<"]([^>"]+)[>"]')
+
+# The tiny standalone-header portability floor this checker enforces without needing a
+# compiler. It deliberately covers only C standard types used by cuda_backend.h today:
+# adding broader semantic lint here would turn a zero-false-positive gate into style lint.
+HEADER_TYPE_INCLUDES: dict[str, str] = {
+    "size_t": "stddef.h",
+    "int8_t": "stdint.h",
+    "uint8_t": "stdint.h",
+    "int16_t": "stdint.h",
+    "uint16_t": "stdint.h",
+    "int32_t": "stdint.h",
+    "uint32_t": "stdint.h",
+    "int64_t": "stdint.h",
+    "uint64_t": "stdint.h",
+}
 
 # Prototypes intentionally not called from cuda.go today — each with a reason, so an
 # uncalled symbol is an honest documented standby, never silent dead weight. Keeps the
@@ -145,6 +167,45 @@ def binding_calls(text: str) -> set[str]:
     return {m.group(1) for m in _CALL_RE.finditer(strip_comments(text))}
 
 
+def header_includes(text: str) -> set[str]:
+    """The direct includes named by the header, comments stripped."""
+    return {m.group(1) for m in _INCLUDE_RE.finditer(strip_comments(text))}
+
+
+def header_portability(text: str) -> dict[str, Any]:
+    """Check that standard C types used by the header include their own standard header.
+
+    This is the deterministic form of "parse cuda_backend.h alone": if the header names
+    `uint8_t`, `int8_t`, or `size_t`, it must directly include the header that defines
+    that type. A transitive include from WSL's nvcc, libc, or another source file cannot
+    satisfy this check, so the datacenter-toolchain portability failure is caught before
+    a GPU VM is provisioned.
+    """
+    stripped = strip_comments(text)
+    includes = header_includes(stripped)
+    used: dict[str, list[str]] = {}
+    for typ, header in HEADER_TYPE_INCLUDES.items():
+        if re.search(rf"\b{re.escape(typ)}\b", stripped):
+            used.setdefault(header, []).append(typ)
+
+    missing = {
+        header: sorted(types)
+        for header, types in sorted(used.items())
+        if header not in includes
+    }
+    hard = [
+        f"standalone header parse would fail: {HEADER} uses {', '.join(types)} but does "
+        f"not include <{header}> directly — do not rely on nvcc/platform transitive includes"
+        for header, types in missing.items()
+    ]
+    return {
+        "includes": sorted(includes),
+        "required": {header: sorted(types) for header, types in sorted(used.items())},
+        "missing_includes": missing,
+        "hard": hard,
+    }
+
+
 def parity(decls: set[str], defs: set[str], calls: set[str]) -> dict[str, Any]:
     """Cross the three symbol sets into HARD mismatches + SOFT standby notes.
 
@@ -186,13 +247,17 @@ def parity(decls: set[str], defs: set[str], calls: set[str]) -> dict[str, Any]:
     }
 
 
-def build_payload(*, workspace: str, decls: set[str], defs: set[str],
-                  calls: set[str], error: str | None = None) -> dict[str, Any]:
+def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set[str],
+                  header_text: str | None = None, error: str | None = None) -> dict[str, Any]:
     if error:
         return {"schema": SCHEMA, "ok": False, "verdict": "AUDIT_ERROR",
                 "reason": error, "workspace": workspace, "corpus": {}}
     p = parity(decls, defs, calls)
-    n_hard = len(p["hard"])
+    hp = header_portability(header_text) if header_text is not None else {
+        "includes": [], "required": {}, "missing_includes": {}, "hard": [],
+    }
+    hard = list(p["hard"]) + list(hp["hard"])
+    n_hard = len(hard)
     n_soft = len([s for s in p["soft"] if " — OK: " not in s])  # documented-OK don't count as advisory
     corpus = {
         "n_symbols": len(decls | defs | calls),
@@ -201,22 +266,24 @@ def build_payload(*, workspace: str, decls: set[str], defs: set[str],
         "n_called": len(calls),
         "hard_mismatches": n_hard,
         "soft_signals": n_soft,
+        "header_portability": hp,
         "undefined": p["undefined"],
         "undeclared_calls": p["undeclared_calls"],
         "undeclared_defs": p["undeclared_defs"],
         "uncalled": p["uncalled"],
-        "hard": p["hard"],
+        "hard": hard,
         "soft": p["soft"],
     }
     ok = n_hard == 0
     if ok:
         verdict, reason = "OK", (
-            f"CUDA ABI in parity: {len(decls)} prototypes, all defined in {KERNELS} and "
-            f"declared for every C.fcuda_* call in cuda.go ({n_soft} standby symbol(s) advisory)")
+            f"CUDA header is standalone-portable and ABI is in parity: {len(decls)} prototypes, "
+            f"all defined in {KERNELS} and declared for every C.fcuda_* call in cuda.go "
+            f"({n_soft} standby symbol(s) advisory)")
     else:
         verdict, reason = "ACTION", (
-            f"{n_hard} CUDA ABI mismatch(es) — the header / kernels / cgo binding disagree; "
-            "this would break the nvcc link or the cgo build on a GPU node")
+            f"{n_hard} CUDA seam issue(s) — the header / kernels / cgo binding disagree, or "
+            "cuda_backend.h is not standalone-portable under a strict host compiler")
     return {"schema": SCHEMA, "ok": ok, "verdict": verdict, "reason": reason,
             "workspace": workspace, "corpus": corpus}
 
@@ -245,7 +312,8 @@ def collect(root: Path) -> dict[str, Any]:
                              error=f"cannot read CUDA seam file(s): {', '.join(missing)} "
                                    "(run from the repo ROOT)")
     return build_payload(workspace=str(root), decls=header_decls(htext),
-                         defs=kernel_defs(ktext), calls=binding_calls(gtext))
+                         defs=kernel_defs(ktext), calls=binding_calls(gtext),
+                         header_text=htext)
 
 
 def render(payload: dict[str, Any]) -> str:
@@ -260,7 +328,7 @@ def render(payload: dict[str, Any]) -> str:
     ]
     if c.get("hard"):
         lines.append("")
-        lines.append("HARD mismatches (would break the GPU build):")
+        lines.append("HARD mismatches (would break the GPU build / strict header parse):")
         for h in c["hard"]:
             lines.append(f"  x {h}")
     if c.get("soft"):
