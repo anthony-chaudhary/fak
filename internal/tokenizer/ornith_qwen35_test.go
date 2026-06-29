@@ -57,6 +57,11 @@ func TestOrnithQwen35GGMLVocabAndTwoEOS(t *testing.T) {
 	tokens[72] = "H"
 	tokens[73] = "i"
 	tokens[74] = "Hi"
+	tokens[75] = "u"
+	tokens[76] = "s"
+	tokens[77] = "e"
+	tokens[78] = "r"
+	tokens[79] = "Ċ"
 	// The three Ornith control tokens at their real ids, typed CONTROL so they are
 	// recognized as special from the MODEL's token_type, not a "<|...|>" string guess.
 	tokens[ornithEndOfText] = "<|endoftext|>"

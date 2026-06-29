@@ -1,6 +1,11 @@
 package model
 
-import "math"
+import (
+	"fmt"
+	"math"
+	"os"
+	"time"
+)
 
 // qwen35_prefill_q4k.go is the resident-Q4_K twin of qwen35_prefill.go (the Q8 hybrid
 // Gated-DeltaNet fresh-prefill path). It exists for the same reason prefillBatchedQ4K
@@ -68,6 +73,12 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	if P == 0 {
 		return nil
 	}
+	profile := os.Getenv("FAK_QPROFILE") != ""
+	var start time.Time
+	if profile {
+		start = time.Now()
+	}
+	var gemmTime time.Duration
 	base := s.Cache.Len()
 	eps := float32(cfg.RMSNormEps)
 
@@ -88,6 +99,15 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			return s.q4kGemmDispatch(name, qt, Xf, P)
 		}
 		return qGemm8(m.q8(name), Xq)
+	}
+	if profile {
+		rawProj := proj
+		proj = func(name string, Xf []float32, Xq *q8Panel) []float32 {
+			t0 := time.Now()
+			Y := rawProj(name, Xf, Xq)
+			gemmTime += time.Since(t0)
+			return Y
+		}
 	}
 
 	t := s.phaseStart()
@@ -192,6 +212,16 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	t = s.phaseStart()
 	xf := rmsnormCfg(X[(P-1)*H:P*H], m.tensor("model.norm.weight"), eps, cfg)
 	s.phaseEnd("final_norm", t)
+	if profile {
+		total := time.Since(start)
+		rest := total - gemmTime
+		if rest < 0 {
+			rest = 0
+		}
+		ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
+		fmt.Fprintf(os.Stderr, "[metalprof-hybrid P=%d] total=%.1f  gemm+roundtrip=%.1f  rest(recurrence/attn/norm)=%.1f ms path=q4k\n",
+			P, ms(total), ms(gemmTime), ms(rest))
+	}
 	return xf
 }
 
