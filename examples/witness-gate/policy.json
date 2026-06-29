@@ -1,0 +1,11 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "deploy"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "list_"
+  ]
+}
