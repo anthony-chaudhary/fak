@@ -62,6 +62,25 @@ tools/_walltime.*
 # artifacts. Regenerated per operator session.
 .dogfood/
 
+# Scratch / temp leaks that occasionally land in the tree when a tool writes to a relative
+# path instead of an absolute temp dir (e.g. a flattened C...scratchpad...json at the repo
+# root, or a *tmp working dir). Private-by-default so they can never be `git add`-ed; the
+# FILE_ADMISSION gate is the commit-time backstop for anything that slips past these globs.
+*scratchpad*
+**/rmverifytmp/
+**/*verifytmp/
+
+# Regen / run-artifact leaks that accumulate in the shared dogfood tree. None of these are
+# inputs to a build — they are per-session scratch (.regen-scratch/ holds regenerated copies
+# of the top-level docs), DOS run telemetry (dos.runs/*.json), a one-off lane-isolation
+# helper, or the .run.{err,out,log} sidecars that `fak sweep` already classifies as junk.
+.regen-scratch/
+dos.runs/
+/.split_reconstruct.py
+*.run.err
+*.run.out
+*.run.log
+
 # Mermaid render toolchain for the visuals deck (regenerate via visuals/render.sh)
 visuals/node_modules/
 visuals/.render-scratch/
@@ -470,6 +489,7 @@ memqdemo-report.json
 /audit-sessions.json
 /trajectory-audit-*.json
 /trajectory-audit-*.md
+/.verify1259
 
 # learning-debt dispatch seen-cache - node-local {source_id: record} of every
 # learning-scorecard HARD defect already filed as a triage issue; its durable
