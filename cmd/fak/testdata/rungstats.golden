@@ -1,10 +1,13 @@
-fak rungstats — passive rung-decision distribution (6 probes, real fold, no gateway)
+fak rungstats — passive rung-decision distribution (7 probes, real fold, no gateway)
 
-RUNG                     KIND   REASON        COUNT
-adjudicator.Adjudicator  ALLOW  -             3
-adjudicator.Adjudicator  DENY   DEFAULT_DENY  1
-adjudicator.Adjudicator  DENY   POLICY_BLOCK  1
-adjudicator.Adjudicator  DENY   SECRET_EXFIL  1
-                                TOTAL         6
+RUNG                     KIND       REASON        COUNT  TOK_DELTA
+adjudicator.Adjudicator  ALLOW      -             3      +0
+adjudicator.Adjudicator  DENY       DEFAULT_DENY  1      +0
+adjudicator.Adjudicator  DENY       POLICY_BLOCK  1      +0
+adjudicator.Adjudicator  DENY       SECRET_EXFIL  1      +0
+adjudicator.Adjudicator  TRANSFORM  -             1      +9
+                                    TOTAL         7      +9
 
+TOK_DELTA: tokens added (transform/quarantine) vs saved (vdso/radix); per-rung ns is the
+live twin fak_gateway_operation_duration_seconds{adjudicator-rung}.
 drill down on one call with: fak preflight --tool <name> --explain

@@ -32,23 +32,34 @@ type decKey struct {
 	reason string
 }
 
+// bucketCost is the per-bucket COST fold (#1149): the summed EvSubmit->EvDecide
+// adjudication tax (elapsed-ns) and the signed token-delta (tokens ADDED by a
+// transform vs SAVED by a vDSO hit) the kernel stamped on abi.Event.Fields. It rides
+// beside the verdict count so the offline read-out folds cost, not just verdict.
+type bucketCost struct {
+	adjNanos   int64
+	tokenDelta int64
+}
+
 // Observer is the passive rung-decision distribution counter. Construct it with
 // New and register it with abi.RegisterEmitter; read the histogram with Snapshot.
 //
 // It is safe for concurrent use: every mutation goes through mu. The dedup window
-// (seen + ring) and the counts map are both guarded by it.
+// (seen + ring), the counts map, and the per-bucket cost are all guarded by it.
 type Observer struct {
 	mu     sync.Mutex
 	counts map[decKey]int64
-	seen   map[uint64]struct{} // calls already counted (SeqNo > 0 only)
-	ring   []uint64            // FIFO eviction order for `seen`
-	rhead  int                 // next slot to overwrite in `ring`
+	cost   map[decKey]bucketCost // #1149: per-bucket adjudication-ns + token-delta
+	seen   map[uint64]struct{}   // calls already counted (SeqNo > 0 only)
+	ring   []uint64              // FIFO eviction order for `seen`
+	rhead  int                   // next slot to overwrite in `ring`
 }
 
 // New returns an empty, ready-to-register Observer.
 func New() *Observer {
 	return &Observer{
 		counts: map[decKey]int64{},
+		cost:   map[decKey]bucketCost{},
 		seen:   map[uint64]struct{}{},
 		ring:   make([]uint64, dedupCap),
 	}
@@ -72,6 +83,7 @@ func (o *Observer) Subscriptions() []abi.EventKind { return subs }
 // EvDecide for a non-deny verdict is the single counting point for allow/transform.
 // The observer never mutates the event, the call, the verdict, or any kernel state.
 func (o *Observer) Emit(ev abi.Event) {
+	adjNs, tokDelta := costOf(ev)
 	if ev.Kind == abi.EvVDSOHit {
 		// No adjudication ran; the verdict is always an allow by the vDSO. Bucket it
 		// distinctly so a vDSO hit can never be misattributed to a structural rung.
@@ -80,7 +92,7 @@ func (o *Observer) Emit(ev abi.Event) {
 			kind = kindOf(ev.Verdict.Kind)
 			reason = reasonOf(ev.Verdict.Reason)
 		}
-		o.bump("vdso", kind, reason)
+		o.bump("vdso", kind, reason, adjNs, tokDelta)
 		return
 	}
 	if ev.Verdict == nil || ev.Call == nil {
@@ -105,13 +117,30 @@ func (o *Observer) Emit(ev abi.Event) {
 		if !o.claim(ev.Call.SeqNo) {
 			return
 		}
-		o.attribute(ev.Call, ev.Verdict)
+		o.attribute(ev.Call, ev.Verdict, adjNs, tokDelta)
 	case abi.EvDeny:
 		if !o.claim(ev.Call.SeqNo) {
 			return
 		}
-		o.attribute(ev.Call, ev.Verdict)
+		o.attribute(ev.Call, ev.Verdict, adjNs, tokDelta)
 	}
+}
+
+// costOf reads the per-span COST the kernel stamped on the OPEN Event.Fields channel
+// (#1149): the EvSubmit->EvDecide adjudication-ns and the signed token-delta. A missing
+// or wrong-typed field reads as 0, so an event from a producer that does not stamp cost
+// (or a pre-#1149 stream) folds as a zero-cost decision, never a panic.
+func costOf(ev abi.Event) (adjNs, tokDelta int64) {
+	if ev.Fields == nil {
+		return 0, 0
+	}
+	if v, ok := ev.Fields[kernel.FieldElapsedNanos].(int64); ok {
+		adjNs = v
+	}
+	if v, ok := ev.Fields[kernel.FieldTokenDelta].(int64); ok {
+		tokDelta = v
+	}
+	return adjNs, tokDelta
 }
 
 // claim records that SeqNo's call as counted and reports whether this is the FIRST
@@ -140,10 +169,17 @@ func (o *Observer) claim(seq uint64) bool {
 	return true
 }
 
-// bump increments one (rung, kind, reason) bucket.
-func (o *Observer) bump(rung, kind, reason string) {
+// bump increments one (rung, kind, reason) bucket's count and folds its span cost
+// (#1149): the adjudication-ns and signed token-delta sum into the bucket beside the
+// verdict tally.
+func (o *Observer) bump(rung, kind, reason string, adjNs, tokDelta int64) {
+	k := decKey{rung, kind, reason}
 	o.mu.Lock()
-	o.counts[decKey{rung, kind, reason}]++
+	o.counts[k]++
+	c := o.cost[k]
+	c.adjNanos += adjNs
+	c.tokenDelta += tokDelta
+	o.cost[k] = c
 	o.mu.Unlock()
 }
 
@@ -152,14 +188,14 @@ func (o *Observer) bump(rung, kind, reason string) {
 // same process-global registry chain (abi.AdjudicatorsFor); see the package doc for
 // the honesty boundary. kind/reason are read from the canonical Decision so the
 // bucket labels agree with `fak preflight --explain` for the same call.
-func (o *Observer) attribute(call *abi.ToolCall, verdict *abi.Verdict) {
+func (o *Observer) attribute(call *abi.ToolCall, verdict *abi.Verdict, adjNs, tokDelta int64) {
 	_, d := kernel.FoldExplain(context.Background(), abi.AdjudicatorsFor(call), call)
 	kind, reason := d.Verdict, d.Reason
 	if verdict != nil {
 		kind = kindOf(verdict.Kind)
 		reason = reasonOf(verdict.Reason)
 	}
-	o.bump(winnerRung(d), kind, reason)
+	o.bump(winnerRung(d), kind, reason, adjNs, tokDelta)
 }
 
 // winnerRung is the winning rung's concrete adjudicator type (the answer to "which
@@ -179,21 +215,31 @@ func winnerRung(d kernel.Decision) string {
 }
 
 // DecisionRow is one (rung, kind, reason) bucket and its count — the labeled
-// prometheus counter row renderMetrics emits as fak_kernel_decisions_total.
+// prometheus counter row renderMetrics emits as fak_kernel_decisions_total. AdjNanos
+// and TokenDelta carry the folded span COST (#1149): the summed EvSubmit->EvDecide
+// adjudication tax (ns) and the signed token-delta (+added by transform/quarantine,
+// -saved by vDSO/radix) for the bucket. AdjNanos is wall-clock and so NOT
+// byte-stable — it is the offline twin of the live
+// fak_gateway_operation_duration_seconds{adjudicator-rung}; TokenDelta is
+// deterministic.
 type DecisionRow struct {
-	Rung   string
-	Kind   string
-	Reason string
-	Count  int64
+	Rung       string
+	Kind       string
+	Reason     string
+	Count      int64
+	AdjNanos   int64
+	TokenDelta int64
 }
 
-// Snapshot returns the per-(rung,kind,reason) counts, sorted by (rung, kind, reason)
-// for stable /metrics output. The slice is a fresh copy; callers may mutate it.
+// Snapshot returns the per-(rung,kind,reason) counts and folded cost, sorted by
+// (rung, kind, reason) for stable /metrics output. The slice is a fresh copy; callers
+// may mutate it.
 func (o *Observer) Snapshot() []DecisionRow {
 	o.mu.Lock()
 	rows := make([]DecisionRow, 0, len(o.counts))
 	for k, c := range o.counts {
-		rows = append(rows, DecisionRow{Rung: k.rung, Kind: k.kind, Reason: k.reason, Count: c})
+		bc := o.cost[k]
+		rows = append(rows, DecisionRow{Rung: k.rung, Kind: k.kind, Reason: k.reason, Count: c, AdjNanos: bc.adjNanos, TokenDelta: bc.tokenDelta})
 	}
 	o.mu.Unlock()
 	sort.Slice(rows, func(i, j int) bool {

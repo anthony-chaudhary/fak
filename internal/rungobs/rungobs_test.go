@@ -277,6 +277,45 @@ func TestObserverIsPassive(t *testing.T) {
 	}
 }
 
+// TestRungObsFoldsCostIntoBuckets — the #1149 fold witness at the observer layer: the
+// span cost the kernel stamps on Event.Fields lands in the RIGHT (rung,kind,reason)
+// bucket and nowhere else. The transform's token-delta is deterministic — mixedAdj
+// rewrites `{}` (2 bytes) to `{"redacted":true}` (17 bytes), so the TRANSFORM bucket
+// carries exactly +15 and every other bucket carries 0; the adjudication tax folds as
+// a non-negative wall-clock sum on every adjudicated bucket.
+func TestRungObsFoldsCostIntoBuckets(t *testing.T) {
+	registerChain()
+	obs := New()
+	abi.RegisterEmitter(obs)
+
+	k := kernel.New("e")
+	for _, tool := range []string{"allow_it", "deny_it", "transform_it"} {
+		k.Syscall(context.Background(), call(tool))
+	}
+
+	const wantTransformDelta = int64(len(`{"redacted":true}`) - len(`{}`)) // = 15
+	sawTransform := false
+	for _, r := range obs.Snapshot() {
+		switch r.Kind {
+		case "TRANSFORM":
+			sawTransform = true
+			if r.TokenDelta != wantTransformDelta {
+				t.Errorf("TRANSFORM bucket TokenDelta = %d, want %d (added by the re-emit)", r.TokenDelta, wantTransformDelta)
+			}
+		default:
+			if r.TokenDelta != 0 {
+				t.Errorf("%s/%s bucket carries TokenDelta %d, want 0 (no token cost on a pure allow/deny)", r.Rung, r.Kind, r.TokenDelta)
+			}
+		}
+		if r.AdjNanos < 0 {
+			t.Errorf("%s/%s bucket AdjNanos = %d, want >= 0", r.Rung, r.Kind, r.AdjNanos)
+		}
+	}
+	if !sawTransform {
+		t.Fatal("no TRANSFORM bucket folded; transform_it cost was dropped")
+	}
+}
+
 func runSeq(k *kernel.Kernel, seq []string) (kernel.Counters, []abi.Verdict) {
 	vers := make([]abi.Verdict, 0, len(seq))
 	for _, tool := range seq {

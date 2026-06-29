@@ -12,20 +12,31 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 )
 
+// rungProbe is one fixed probe: a tool name and the JSON args it folds with. Most
+// probes carry empty args ("{}"); the transform probe carries a redactable field so
+// the fold yields a deterministic VerdictTransform whose token-delta is a non-zero,
+// reproducible cost.
+type rungProbe struct {
+	tool string
+	args string
+}
+
 // rungStatsProbes is the FIXED probe set `fak rungstats` folds through the real
 // adjudicator chain. Each tool's verdict under the built-in DefaultPolicy is stable:
-// three affirmatively-allowed tools, then one tool per distinct deny reason
-// (POLICY_BLOCK / SECRET_EXFIL / DEFAULT_DENY). So the printed distribution exercises
-// the ALLOW bucket and all three structural-deny buckets deterministically, with no
-// gateway and no engine. It is the offline counterpart of the live /metrics row
+// three affirmatively-allowed tools, one tool per distinct deny reason
+// (POLICY_BLOCK / SECRET_EXFIL / DEFAULT_DENY), and one redact-transform. So the
+// printed distribution exercises the ALLOW bucket, all three structural-deny buckets,
+// and the TRANSFORM bucket deterministically, with no gateway and no engine. It is the
+// offline counterpart of the live /metrics row
 // fak_kernel_decisions_total{rung,kind,reason} (internal/gateway/metrics.go).
-var rungStatsProbes = []string{
-	"get_user_details", // exact allow
-	"read_config",      // read_ prefix allow
-	"calculate",        // exact allow
-	"shell_rm_rf",      // deny: POLICY_BLOCK
-	"exfiltrate",       // deny: SECRET_EXFIL
-	"frobnicate_xyz",   // deny: DEFAULT_DENY (unknown tool)
+var rungStatsProbes = []rungProbe{
+	{"get_user_details", "{}"},               // exact allow
+	{"read_config", "{}"},                    // read_ prefix allow
+	{"calculate", "{}"},                      // exact allow
+	{"shell_rm_rf", "{}"},                    // deny: POLICY_BLOCK
+	{"exfiltrate", "{}"},                     // deny: SECRET_EXFIL
+	{"frobnicate_xyz", "{}"},                 // deny: DEFAULT_DENY (unknown tool)
+	{"book_reservation", `{"password":"x"}`}, // transform: REDACT a secret-shaped field (token-delta cost)
 }
 
 // cmdRungStats is the os.Exit-wrapping entry point dispatched by main. The exit code
@@ -57,15 +68,15 @@ func runRungStats(w io.Writer, argv []string) int {
 
 	k := kernel.New("inkernel")
 	res := abi.ActiveResolver()
-	for _, tool := range rungStatsProbes {
-		ref, err := res.Put(ctx(), []byte("{}"))
+	for _, p := range rungStatsProbes {
+		ref, err := res.Put(ctx(), []byte(p.args))
 		if err != nil {
 			fmt.Fprintln(w, "fak rungstats:", err)
 			return 1
 		}
 		// Decide folds ONLY the adjudicator chain and emits the decision the observer
 		// folds — no engine dispatch, so the read-out is fully offline and deterministic.
-		k.Decide(ctx(), &abi.ToolCall{Tool: tool, Args: ref})
+		k.Decide(ctx(), &abi.ToolCall{Tool: p.tool, Args: ref})
 	}
 
 	printRungStats(w, obs.Snapshot(), obs.Total(), len(rungStatsProbes))
@@ -74,19 +85,27 @@ func runRungStats(w io.Writer, argv []string) int {
 
 // printRungStats renders the rung-decision distribution as an aligned table. Rows
 // arrive already sorted by (rung, kind, reason) from Snapshot; an empty reason (an
-// allow carries none) renders as "-" so the column never collapses.
+// allow carries none) renders as "-" so the column never collapses. The TOK_DELTA
+// column is the folded per-bucket token cost (#1149): tokens ADDED by a transform
+// re-emit (positive) vs SAVED by a vDSO/radix hit (negative). It is deterministic;
+// the per-rung elapsed-ns is wall-clock and so lives in the live histogram twin
+// fak_gateway_operation_duration_seconds{adjudicator-rung}, not this offline table.
 func printRungStats(w io.Writer, rows []rungobs.DecisionRow, total int64, probes int) {
 	fmt.Fprintf(w, "fak rungstats — passive rung-decision distribution (%d probes, real fold, no gateway)\n\n", probes)
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUNG\tKIND\tREASON\tCOUNT")
+	fmt.Fprintln(tw, "RUNG\tKIND\tREASON\tCOUNT\tTOK_DELTA")
+	var totalDelta int64
 	for _, r := range rows {
 		reason := r.Reason
 		if reason == "" {
 			reason = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", r.Rung, r.Kind, reason, r.Count)
+		totalDelta += r.TokenDelta
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%+d\n", r.Rung, r.Kind, reason, r.Count, r.TokenDelta)
 	}
-	fmt.Fprintf(tw, "\t\tTOTAL\t%d\n", total)
+	fmt.Fprintf(tw, "\t\tTOTAL\t%d\t%+d\n", total, totalDelta)
 	_ = tw.Flush()
-	fmt.Fprintln(w, "\ndrill down on one call with: fak preflight --tool <name> --explain")
+	fmt.Fprintln(w, "\nTOK_DELTA: tokens added (transform/quarantine) vs saved (vdso/radix); per-rung ns is the")
+	fmt.Fprintln(w, "live twin fak_gateway_operation_duration_seconds{adjudicator-rung}.")
+	fmt.Fprintln(w, "drill down on one call with: fak preflight --tool <name> --explain")
 }

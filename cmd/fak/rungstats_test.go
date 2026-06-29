@@ -27,6 +27,13 @@ func TestCmdRungStatsTable(t *testing.T) {
 		t.Fatalf("runRungStats rc=%d, want 0; output:\n%s", rc, out.String())
 	}
 
+	// Regenerate after an intentional column/probe change with UPDATE_GOLDEN=1.
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.WriteFile("testdata/rungstats.golden", out.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	want, err := os.ReadFile("testdata/rungstats.golden")
 	if err != nil {
 		t.Fatalf("read golden: %v", err)

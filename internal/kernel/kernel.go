@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -129,10 +130,15 @@ func (k *Kernel) Counters() Counters {
 // adjudication path the benchmark times against a spawned hook. Exported so the
 // `fak hook` spawned-baseline mode and BenchmarkDecide share one code path.
 func (k *Kernel) Decide(ctx context.Context, c *abi.ToolCall) abi.Verdict {
+	t0 := time.Now()
 	v := k.decide(ctx, c)
-	emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v})
+	// L0 self-tax (#1149): stamp the EvSubmit->EvDecide adjudication tax (elapsed-ns)
+	// and any transform token-delta on the events rungobs folds — EvDecide for an
+	// allow/transform, EvDeny for a deny.
+	fields := costFields(time.Since(t0).Nanoseconds(), transformTokenDelta(v, c.Args))
+	emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v, Fields: fields})
 	if v.Kind == abi.VerdictDeny {
-		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v})
+		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v, Fields: fields})
 	}
 	return v
 }
@@ -352,14 +358,21 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 			atomic.AddInt64(&k.ctr.VDSOHits, 1)
 			v := abi.Verdict{Kind: abi.VerdictAllow, By: "vdso"}
 			k.store(seq, &pendingCall{call: c, verdict: v, ready: r})
-			emit(abi.Event{Kind: abi.EvVDSOHit, Call: c, Verdict: &v, Result: r})
+			// A vDSO hit ran no adjudication (0 ns of tax) and SAVED the engine
+			// round-trip: the token-delta is negative, the local result's tokens the
+			// kernel did not have to generate (#1149).
+			emit(abi.Event{Kind: abi.EvVDSOHit, Call: c, Verdict: &v, Result: r, Fields: costFields(0, -refLen(r.Payload))})
 			return h, v
 		}
 	}
 
-	// Adjudicate.
+	// Adjudicate. Time the fold so the EvSubmit->EvDecide adjudication tax (#1149)
+	// rides every decision event rungobs folds; the transform token-delta is read
+	// off the ORIGINAL args, before the Transform arm rewrites c.Args below.
+	t0 := time.Now()
 	v := k.decide(ctx, c)
-	emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v})
+	adjNs := time.Since(t0).Nanoseconds()
+	emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v, Fields: costFields(adjNs, transformTokenDelta(v, c.Args))})
 	switch v.Kind {
 	case abi.VerdictRequireWitness:
 		// Resolve the require-witness gate against independent evidence (the witness
@@ -369,17 +382,17 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 		v = k.resolveWitness(ctx, c, v)
 		if v.Kind == abi.VerdictAllow {
 			k.store(seq, &pendingCall{call: c, verdict: v})
-			emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v})
+			emit(abi.Event{Kind: abi.EvDecide, Call: c, Verdict: &v, Fields: costFields(adjNs, 0)})
 			return h, v
 		}
 		atomic.AddInt64(&k.ctr.Denies, 1)
 		k.store(seq, &pendingCall{call: c, verdict: v, denied: true})
-		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v})
+		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v, Fields: costFields(adjNs, 0)})
 		return h, v
 	case abi.VerdictDeny:
 		atomic.AddInt64(&k.ctr.Denies, 1)
 		k.store(seq, &pendingCall{call: c, verdict: v, denied: true})
-		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v})
+		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v, Fields: costFields(adjNs, 0)})
 		return h, v
 	case abi.VerdictTransform:
 		atomic.AddInt64(&k.ctr.Transforms, 1)
@@ -402,7 +415,7 @@ func (k *Kernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.SubmissionHan
 		// for an additive driver and never changes the Allow/Deny/Transform paths.
 		atomic.AddInt64(&k.ctr.Denies, 1)
 		k.store(seq, &pendingCall{call: c, verdict: v, denied: true})
-		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v})
+		emit(abi.Event{Kind: abi.EvDeny, Call: c, Verdict: &v, Fields: costFields(adjNs, 0)})
 		return h, v
 	}
 }
@@ -525,7 +538,12 @@ func (k *Kernel) Reap(ctx context.Context, h abi.SubmissionHandle) (*abi.Result,
 	}
 	atomic.AddInt64(&k.ctr.EngineCalls, 1)
 	emit(abi.Event{Kind: abi.EvDispatch, Call: p.call, Verdict: &p.verdict})
+	// Time the EvDispatch->EvComplete engine span (#1149): the engine cost, stamped
+	// on the completion event so a cost observer can separate engine time from the
+	// adjudication tax EvDecide already carries.
+	t0 := time.Now()
 	r, err := eng.Complete(ctx, p.call)
+	engNs := time.Since(t0).Nanoseconds()
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +551,7 @@ func (k *Kernel) Reap(ctx context.Context, h abi.SubmissionHandle) (*abi.Result,
 		r.Call = p.call
 	}
 	k.admitResult(ctx, p.call, r)
-	emit(abi.Event{Kind: abi.EvComplete, Call: p.call, Result: r})
+	emit(abi.Event{Kind: abi.EvComplete, Call: p.call, Result: r, Fields: costFields(engNs, 0)})
 	return r, nil
 }
 
