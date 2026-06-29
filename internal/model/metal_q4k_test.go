@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package model
 
@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
@@ -60,6 +62,14 @@ func randomVecF(n int, seed int64) []float32 {
 	return x
 }
 
+func alignedBytes(n int) []byte {
+	page := os.Getpagesize()
+	backing := make([]byte, n+page)
+	base := uintptr(unsafe.Pointer(&backing[0]))
+	off := int((uintptr(page) - base%uintptr(page)) % uintptr(page))
+	return backing[off : off+n]
+}
+
 // cosineAndMaxRel reports cosine similarity and the max relative error over the larger
 // magnitudes (the small-magnitude entries are dominated by float noise and ignored).
 func cosineAndMaxRel(a, b []float32) (cos float64, maxRel float64) {
@@ -84,6 +94,39 @@ func cosineAndMaxRel(a, b []float32) (cos float64, maxRel float64) {
 		}
 	}
 	return cos, maxRel
+}
+
+func TestMetalQ4KUploadUsesNoCopyUnifiedMemory(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	const out, in = 1024, 256
+	raw := alignedBytes(out * (in / qkK) * q4kBlockBytes)
+	if uintptr(unsafe.Pointer(&raw[0]))%uintptr(os.Getpagesize()) != 0 {
+		t.Fatal("test fixture did not produce page-aligned source bytes")
+	}
+	// Row 0, block 0: d=1, dmin=0, scale[0]=1, min[0]=0, q[0]=0. With x[0]=1,
+	// changing q[0]'s low nibble to 15 should move y[0] by roughly 15 if Metal aliases raw.
+	raw[1] = 0x3c
+	raw[4] = 1
+	w := metalgemm.UploadQ4K(raw, out, in)
+	if w == nil {
+		t.Fatalf("UploadQ4K(%d,%d) returned nil", out, in)
+	}
+	if !w.NoCopy() {
+		t.Fatal("UploadQ4K fell back to copied residency; #69 requires no-copy unified-memory weights")
+	}
+	x := make([]float32, in)
+	x[0] = 1
+	before := make([]float32, out)
+	w.GEMV(x, before)
+	raw[16] = 0x0f
+	after := make([]float32, out)
+	w.GEMV(x, after)
+	if delta := after[0] - before[0]; delta < 14 || delta > 16 {
+		t.Fatalf("Metal q4_k buffer did not observe resident raw-byte mutation: before=%g after=%g delta=%g", before[0], after[0], delta)
+	}
 }
 
 func TestMetalQ4KGemvMatchesCPU(t *testing.T) {

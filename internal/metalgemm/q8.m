@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // q8.m — the Metal Q8_0 dequant-GEMV. The Q8 twin of q4k.m, and the missing primitive for the
 // GPU-resident GDN decode forward (issue #67). The q4_k GPU kernels alone CANNOT move the

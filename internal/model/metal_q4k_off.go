@@ -1,10 +1,10 @@
-//go:build !(darwin && cgo && fakmetal)
+//go:build !(darwin && arm64 && cgo)
 
 package model
 
 // metal_q4k_off.go — the default (pure-Go) q4_k prefill GEMM dispatch: always the CPU
-// q4kGemm. The Metal q4_k path lives in metal_q4k_on.go behind -tags fakmetal, so the shipped
-// binary stays one pure-Go artifact (s.MetalQ4K is simply ignored here).
+// q4kGemm. The Metal q4_k path lives in metal_q4k_on.go on Apple Silicon+cgo, so non-Metal
+// builds stay pure-Go (s.MetalQ4K is simply ignored here).
 
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
 	return q4kGemm(qt, Xf, P)
@@ -16,13 +16,13 @@ func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) [
 }
 
 // q4kGroupDispatch always declines in the pure-Go build (no Metal) so mulGroup loops the per-call
-// CPU path. The Metal one-command-buffer group path lives in metal_q4k_on.go behind -tags fakmetal.
+// CPU path. The Metal one-command-buffer group path lives in metal_q4k_on.go on Apple Silicon+cgo.
 func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][]float32 {
 	return nil
 }
 
 // q4kFusedMLP always declines in the pure-Go build; the fused on-GPU SwiGLU MLP lives in
-// metal_q4k_on.go behind -tags fakmetal. The caller (denseSwiGLU.apply) uses the per-matmul path.
+// metal_q4k_on.go on Apple Silicon+cgo. The caller (denseSwiGLU.apply) uses the per-matmul path.
 func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []float32 {
 	return nil
 }

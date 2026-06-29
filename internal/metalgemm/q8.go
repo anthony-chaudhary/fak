@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // q8.go — Go side of the Metal Q8_0 dequant-GEMV (q8.m). The Q8 twin of q4k.go. It exists
 // because the Gated-DeltaNet token mixer's projections (every linear_attn.* weight, plus the

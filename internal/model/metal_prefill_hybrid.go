@@ -1,9 +1,9 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package model
 
 // metal_prefill_hybrid.go — the Metal GPU twin of the Qwen3.6 hybrid (Gated-DeltaNet) prefill.
-// Built ONLY under `-tags fakmetal`. It is deliberately thin: the entire prefill body — both
+// Built by default on Apple Silicon with cgo. It is deliberately thin: the entire prefill body — both
 // RMSNorms, the conv1d+SiLU mixer, the q/k L2-norm, the per-head delta-rule recurrent scan, the
 // gated RMSNorm readout, the full-attention RoPE/GQA/output-gate, and every residual — lives in
 // the backend-agnostic core prefillQwen35HybridViaMM (metal_prefill_hybrid_core.go), proven

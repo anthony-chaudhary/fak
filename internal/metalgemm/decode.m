@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // decode.m — the GPU-resident Q8 decode forward (issue #67). The DECODE twin of forward.m's
 // mg_prefill: per token (P=1), the f16 activation stays on-device across every layer's seven

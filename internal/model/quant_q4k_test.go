@@ -1,10 +1,13 @@
 package model
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
+	"unsafe"
 )
 
 // randQ4KBlock fills blk with random bytes but constrains the d/min f16 scales (bytes 0-3)
@@ -183,6 +186,46 @@ func TestQ4KKernelMatchesQ4KMatRows(t *testing.T) {
 		if yK[i] != yD[i] {
 			t.Fatalf("kernel vs direct mismatch at %d: %v != %v", i, yK[i], yD[i])
 		}
+	}
+}
+
+func TestQ4KFromRawAlignsResidentBytesForMetalNoCopy(t *testing.T) {
+	page := os.Getpagesize()
+	if page <= 1 {
+		t.Skip("page size unavailable")
+	}
+	const out, in = 257, 256
+	n := out * (in / qkK) * q4kBlockBytes
+	backing := make([]byte, n+page)
+	base := uintptr(unsafe.Pointer(&backing[0]))
+	off := 1
+	if (base+uintptr(off))%uintptr(page) == 0 {
+		off++
+	}
+	raw := backing[off : off+n]
+	if uintptr(unsafe.Pointer(&raw[0]))%uintptr(page) == 0 {
+		t.Fatal("test fixture unexpectedly produced aligned source bytes")
+	}
+	for i := range raw {
+		raw[i] = byte(i * 17)
+	}
+
+	qt := quantizeQ4KFromRaw(raw, out, in)
+	if len(qt.raw) != len(raw) {
+		t.Fatalf("resident raw len=%d want %d", len(qt.raw), len(raw))
+	}
+	if !bytes.Equal(qt.raw, raw) {
+		t.Fatal("resident raw bytes changed during alignment")
+	}
+	if uintptr(unsafe.Pointer(&qt.raw[0]))%uintptr(page) != 0 {
+		t.Fatalf("resident raw is not page-aligned for Metal no-copy upload")
+	}
+	rounded := pageRoundResidentLen(len(qt.raw), page)
+	if len(qt.raw) == rounded {
+		t.Fatalf("test fixture unexpectedly produced page-rounded logical bytes")
+	}
+	if cap(qt.raw) < rounded {
+		t.Fatalf("resident raw cap=%d, want at least page-rounded len %d", cap(qt.raw), rounded)
 	}
 }
 

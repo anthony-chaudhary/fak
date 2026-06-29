@@ -5,12 +5,12 @@
 //	  ->  greedy/temperature sampling  ->  internal/tokenizer (detok)  ->  stream
 //
 // On Apple Silicon it runs the documented hybrid split: PREFILL on the Metal GPU
-// (-metal, requires `-tags fakmetal`) and DECODE on the CPU Q8 (NEON) path, since
+// (-metal, on Apple Silicon+cgo) and DECODE on the CPU Q8 (NEON) path, since
 // prefill is compute-bound and decode is bandwidth-bound (see QWEN36-PARITY-RESULTS.md).
 //
 // Example:
 //
-//	go build -tags fakmetal -o fakchat ./cmd/fakchat
+//	go build -o fakchat ./cmd/fakchat
 //	./fakchat --hf ~/.cache/fak-models/qwen2.5-1.5b-instruct \
 //	          --tokenizer ~/.cache/fak-models/tokenizers/qwen2.5 --metal \
 //	          --prompt "Explain unified memory in one sentence."
@@ -128,7 +128,7 @@ func parseFlags() *cliFlags {
 		sys:    flag.String("sys", "You are a helpful assistant.", "system prompt"),
 		prompt: flag.String("prompt", "", "user prompt — REQUIRED"),
 		maxNew: flag.Int("max-new", 256, "max new tokens to generate"),
-		metal:  flag.Bool("metal", false, "run prefill on the Metal GPU (requires -tags fakmetal; decode stays CPU Q8)"),
+		metal:  flag.Bool("metal", false, "run prefill on the Metal GPU (requires Apple Silicon+cgo; decode stays CPU Q8)"),
 		temp:   flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)"),
 		seed:   flag.Int64("seed", 1, "RNG seed for temperature sampling"),
 		quiet:  flag.Bool("quiet", false, "suppress the hardware line and the load/prefill spinners (the model=… banner + token stream are unaffected)"),
@@ -157,7 +157,7 @@ func resolveMetal(metal, hybrid bool) bool {
 		if metalgemm.Compiled() {
 			fmt.Fprintln(os.Stderr, "metal: no usable device; falling back to CPU Q8 prefill")
 		} else {
-			fmt.Fprintln(os.Stderr, "metal: not compiled in (rebuild with -tags fakmetal); falling back to CPU Q8 prefill")
+			fmt.Fprintln(os.Stderr, "metal: not compiled in (requires darwin/arm64 with cgo); falling back to CPU Q8 prefill")
 		}
 	}
 	return useMetal
@@ -312,9 +312,12 @@ func runHybrid(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.To
 	s.Q4 = q4
 	s.Q4K = q4k
 	// FAK_METAL routes the resident-Q4_K hybrid PREFILL's q4_k-majority GEMMs to the Metal
-	// q4_k dequant-GEMM (needs -tags fakmetal; a no-op flag on the pure-Go build). Decode
+	// q4_k dequant-GEMM (needs Apple Silicon+cgo; a no-op flag on the pure-Go build). Decode
 	// stays CPU. See QWEN36-NATIVE-PERF-PLAN P5.
 	s.MetalQ4K = q4k && os.Getenv("FAK_METAL") != ""
+	if s.MetalQ4K {
+		m.PrepareMetalResidency(true)
+	}
 	var pp *model.PhaseProfiler
 	if os.Getenv("FAK_QPROFILE") != "" {
 		pp = model.NewPhaseProfiler()
@@ -356,6 +359,9 @@ func runStandard(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.
 	s := m.NewSession()
 	s.Quant = true
 	s.Metal = useMetal
+	if useMetal {
+		m.PrepareMetalResidency(false)
+	}
 
 	backend := "CPU Q8 (NEON) prefill + decode"
 	if useMetal {

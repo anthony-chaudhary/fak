@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package model
 
@@ -20,8 +20,9 @@ import (
 )
 
 var (
-	metalDecMu    sync.Mutex
-	metalDecReady = map[*Model]bool{} // models whose decode topology is registered + uploaded
+	metalDecMu     sync.Mutex
+	metalDecReady  = map[*Model]bool{} // models whose decode topology is registered + uploaded
+	metalDecFailed = map[*Model]bool{} // models whose decode topology upload/config declined
 	// The GPU holds ONE sequence's KV resident at a time (decode.m's gKVk). metalKVSession/metalKVLen
 	// track whose it is and how long: a step APPENDS (no context re-upload, no Go concat) only when
 	// it matches this session at exactly L rows, else it SEEDS (uploads the cache context). A
@@ -51,12 +52,21 @@ func (m *Model) metalDecodeConfig() bool {
 	if metalDecReady[m] {
 		return true
 	}
+	if metalDecFailed[m] {
+		return false
+	}
+	fail := func(cache bool) bool {
+		if cache {
+			metalDecFailed[m] = true
+		}
+		return false
+	}
 	cfg := m.Cfg
 	if cfg.IsQwen35Hybrid() || cfg.IsMoE() || cfg.QKNorm {
-		return false // resident decode forward v0 is the dense, no-QK-norm architecture only
+		return fail(true) // resident decode forward v0 is the dense, no-QK-norm architecture only
 	}
 	if m.q8layers == nil {
-		return false // Q8 layer cache not built (Quantize not run / not a Q8 session)
+		return fail(false) // Q8 layer cache not built (Quantize not run / not a Q8 session)
 	}
 	up := func(qt *q8Tensor) int {
 		w := metalgemm.UploadQ8(qt.q, qt.d, qt.out, qt.in)
@@ -73,7 +83,7 @@ func (m *Model) metalDecodeConfig() bool {
 		qid, kid, vid, oid := up(ql.qProj), up(ql.kProj), up(ql.vProj), up(ql.oProj)
 		gid, uid, did := up(ql.gateProj), up(ql.upProj), up(ql.downProj)
 		if qid < 0 || kid < 0 || vid < 0 || oid < 0 || gid < 0 || uid < 0 || did < 0 {
-			return false
+			return fail(true)
 		}
 		inN := metalgemm.UploadVec(ql.inputNorm)
 		postN := metalgemm.UploadVec(ql.postNorm)
@@ -90,7 +100,7 @@ func (m *Model) metalDecodeConfig() bool {
 	finalNorm := metalgemm.UploadVec(m.tensor("model.norm.weight"))
 	headWid := up(m.q8Head())
 	if finalNorm < 0 || headWid < 0 {
-		return false
+		return fail(true)
 	}
 	metalgemm.DecodeHead(finalNorm, headWid, cfg.VocabSize)
 	metalDecReady[m] = true

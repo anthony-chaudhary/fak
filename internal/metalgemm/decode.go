@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // decode.go — Go side of the GPU-resident Q8 decode forward (decode.m, issue #67). The decode
 // twin of the Prefill binding in metalgemm.go: DecodeConfig/DecodeLayer register the model once

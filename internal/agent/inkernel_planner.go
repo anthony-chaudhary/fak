@@ -155,6 +155,9 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		temp:              envFloat("FAK_INKERNEL_TEMP", 0),
 		seed:              int64(envInt("FAK_INKERNEL_SEED", 0)),
 	}
+	if backend == nil && metal {
+		m.PrepareMetalResidency(q4k)
+	}
 	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off disables it
 	// (the A/B "tree OFF" arm). The reuse clone is a CPU session, so it only engages when
 	// no device backend is wired — the device path keeps its current full-prefill behavior.

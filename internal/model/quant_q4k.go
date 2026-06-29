@@ -35,7 +35,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"strings"
+	"unsafe"
 )
 
 // qkK is the Q4_K super-block size: 256 weights share one (d, min, scales, q) block. This
@@ -53,7 +55,9 @@ const q4kBlockBytes = 2 + 2 + 12 + qkK/2
 // super-block bytes verbatim (no f32), row-major: row o occupies raw[o*rowBytes:], where
 // rowBytes = nblk*q4kBlockBytes, and super-block b within a row sits at +b*q4kBlockBytes.
 // This is the exact byte stream the GGUF stores and llama.cpp reads, so the loader copies a
-// tensor's payload in with no transform.
+// tensor's payload in with no transform. The Metal path can wrap these bytes with a no-copy
+// buffer when the resident slice is page-aligned; quantizeQ4KFromRaw preserves the payload while
+// moving unaligned loader copies into aligned backing storage.
 type q4kTensor struct {
 	out, in, nblk int
 	raw           []byte
@@ -351,7 +355,44 @@ func quantizeQ4KFromRaw(raw []byte, out, in int) *q4kTensor {
 	if len(raw) != want {
 		panic("model: Q4_K payload size mismatch")
 	}
+	raw = pageAlignResidentBytes(raw)
 	return &q4kTensor{out: out, in: in, nblk: nblk, raw: raw}
+}
+
+func pageAlignResidentBytes(raw []byte) []byte {
+	if len(raw) == 0 {
+		return raw
+	}
+	page := os.Getpagesize()
+	if page <= 1 {
+		return raw
+	}
+	rounded := pageRoundResidentLen(len(raw), page)
+	ptrAligned := uintptr(unsafe.Pointer(&raw[0]))%uintptr(page) == 0
+	if ptrAligned && len(raw) == rounded {
+		return raw
+	}
+	backing := make([]byte, rounded+page)
+	base := uintptr(unsafe.Pointer(&backing[0]))
+	off := int((uintptr(page) - base%uintptr(page)) % uintptr(page))
+	out := backing[off : off+len(raw)]
+	copy(out, raw)
+	return out
+}
+
+func pageRoundResidentLen(n, page int) int {
+	if n <= 0 || page <= 1 {
+		return n
+	}
+	rem := n % page
+	if rem == 0 {
+		return n
+	}
+	pad := page - rem
+	if n > math.MaxInt-pad {
+		return n
+	}
+	return n + pad
 }
 
 // q4k returns the prebuilt resident Q4_K tensor for a name (QuantizeQ4K must have run).

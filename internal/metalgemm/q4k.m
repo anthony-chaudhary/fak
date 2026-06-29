@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // q4k.m — the Metal q4_k dequant-GEMV/GEMM. This is the lever that the f16/MPS path
 // (metal.m) cannot be: a 27B model is ~54 GB in f16, which does NOT fit the 36 GB unified
@@ -22,6 +22,7 @@
 #import <Metal/Metal.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
+#include <unistd.h>
 
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
@@ -250,6 +251,15 @@ typedef struct {
 static Q4KW gQ4[MG_MAX_Q4];
 static int gNQ4 = 0;
 
+static int q4k_register_buffer(id<MTLBuffer> b, int out, int in, int nblk) {
+    int id = gNQ4++;
+    gQ4[id].buf = CFBridgingRetain(b);
+    gQ4[id].out = out;
+    gQ4[id].in = in;
+    gQ4[id].nblk = nblk;
+    return id;
+}
+
 // Reused f32 scratch for the activation (X) and result (Y) of the current q4_k op, grown on
 // demand (sized in elements). The weight buffers are persistent; only the per-call X/Y move.
 static id<MTLBuffer> gQXBuf = nil; static long gQXCap = 0;
@@ -342,10 +352,7 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
     }
 }
 
-// mg_q4k_upload copies a row-major q4_k payload (out rows, in == nblk*256) verbatim into a
-// resident device buffer and returns an integer handle (>=0), or -1 on failure. The bytes ARE
-// the GGUF bytes (no transform), so the kernel dequants the same super-blocks llama.cpp does.
-int mg_q4k_upload(const unsigned char* raw, int out, int in) {
+static int q4k_upload_preflight(int out, int in, int* nblk, long* bytes) {
     if (gDev == nil) return -1;
     if (!q4k_init()) return -1;
     if (in % 256 != 0) return -1;
@@ -354,20 +361,57 @@ int mg_q4k_upload(const unsigned char* raw, int out, int in) {
         if (!capWarned) { capWarned = 1; NSLog(@"mg_q4k_upload: q4_k weight table full (%d)", MG_MAX_Q4); }
         return -1;
     }
-    int nblk = in / 256;
-    long bytes = (long)out * nblk * 144;
+    *nblk = in / 256;
+    *bytes = (long)out * *nblk * 144;
+    return 0;
+}
+
+static long q4k_page_round(long bytes) {
+    long page = sysconf(_SC_PAGESIZE);
+    if (page <= 1) return bytes;
+    long rem = bytes % page;
+    if (rem == 0) return bytes;
+    return bytes + (page - rem);
+}
+
+// mg_q4k_upload_nocopy wraps a row-major q4_k payload (out rows, in == nblk*256) as a shared
+// Metal buffer without copying. The caller owns and pins raw until mg_q4k_reset releases the
+// retained buffer. This is the Apple-unified-memory residency path: the GPU reads the same
+// GGUF bytes already held by the model, so the first prefill does not pay an 8+ GB memcpy.
+int mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in) {
+    if (raw == NULL) return -1;
+    int nblk = 0;
+    long bytes = 0;
+    if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0) return -1;
+    id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:(void*)raw
+                                              length:(NSUInteger)q4k_page_round(bytes)
+                                             options:MTLResourceStorageModeShared
+                                         deallocator:nil];
+    if (b == nil) {
+        static int noCopyWarned = 0;
+        if (!noCopyWarned) {
+            noCopyWarned = 1;
+            NSLog(@"mg_q4k_upload_nocopy: Metal rejected no-copy shared buffer; falling back to copy upload");
+        }
+        return -1;
+    }
+    return q4k_register_buffer(b, out, in, nblk);
+}
+
+// mg_q4k_upload copies a row-major q4_k payload (out rows, in == nblk*256) verbatim into a
+// resident device buffer and returns an integer handle (>=0), or -1 on failure. The bytes ARE
+// the GGUF bytes (no transform), so the kernel dequants the same super-blocks llama.cpp does.
+int mg_q4k_upload(const unsigned char* raw, int out, int in) {
+    int nblk = 0;
+    long bytes = 0;
+    if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0) return -1;
     id<MTLBuffer> b = [gDev newBufferWithLength:(NSUInteger)bytes options:MTLResourceStorageModeShared];
     if (b == nil) {
         NSLog(@"mg_q4k_upload: device buffer alloc failed for %.1f MB", (double)bytes / 1e6);
         return -1;
     }
     memcpy(b.contents, raw, (size_t)bytes);
-    int id = gNQ4++;
-    gQ4[id].buf = CFBridgingRetain(b);
-    gQ4[id].out = out;
-    gQ4[id].in = in;
-    gQ4[id].nblk = nblk;
-    return id;
+    return q4k_register_buffer(b, out, in, nblk);
 }
 
 // mg_q4k_gemv computes y[out] = W[wid] · x (one f32 activation row, length in). f32 in/out.

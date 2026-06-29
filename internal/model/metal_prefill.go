@@ -1,8 +1,8 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package model
 
-// metal_prefill.go — the Metal GPU prefill twin. Built ONLY under `-tags fakmetal`. It is a
+// metal_prefill.go — the Metal GPU prefill twin. Built by default on Apple Silicon with cgo. It is a
 // structural copy of prefillBatched (the f32 lane): every elementwise op — RMSNorm, RoPE,
 // the GQA attention over the f32 KV cache, SwiGLU, the residuals — is the identical f32 math,
 // and ONLY the seven per-layer projection GEMMs (q/k/v/o, gate/up/down) are routed to the GPU
@@ -123,6 +123,37 @@ func (m *Model) metalResidentConfig() {
 	}
 	metalgemm.FwdFinalNorm(metalgemm.UploadVec(m.tensor("model.norm.weight")))
 	metalResidentReady[m] = true
+}
+
+// PrepareMetalResidency moves the one-time Metal weight residency work out of the first
+// served request. Dense Q8 models register both the resident prefill topology and the Q8
+// decode topology; Qwen3.5/3.6 hybrids prepare their hybrid prefill weight table; resident
+// Q4_K models upload their q4_k-majority table. The hot Prefill/Step calls then reuse the
+// existing per-model handles instead of paying a first-call upload.
+func (m *Model) PrepareMetalResidency(q4k bool) bool {
+	if !metalgemm.Available() {
+		return false
+	}
+	if q4k {
+		uploaded := m.metalQ4KWeights()
+		if uploaded == nil {
+			return false
+		}
+		ok := false
+		for _, v := range uploaded {
+			if !v {
+				return false
+			}
+			ok = true
+		}
+		return ok
+	}
+	if m.Cfg.IsQwen35Hybrid() {
+		m.metalWeightsQwen35Hybrid()
+		return true
+	}
+	m.metalResidentConfig()
+	return m.metalDecodeConfig()
 }
 
 // prefillMetalResident runs the WHOLE fresh prefill on the GPU (one command buffer, one sync):

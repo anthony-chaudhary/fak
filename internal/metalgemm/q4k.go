@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // q4k.go — Go side of the Metal q4_k dequant-GEMV/GEMM (q4k.m). This is the only resident
 // route that fits a 27B model on the 36 GB unified pool (q4_k_m ≈ 16 GB; f16 ≈ 54 GB does
@@ -12,6 +12,7 @@ package metalgemm
 
 /*
 int  mg_q4k_upload(const unsigned char* raw, int out, int in);
+int  mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in);
 void mg_q4k_gemv(int wid, const float* x, float* y);
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff);
@@ -21,30 +22,62 @@ void mg_q4k_reset(void);
 */
 import "C"
 
-import "unsafe"
+import (
+	"runtime"
+	"sync"
+	"unsafe"
+)
 
 // Q4KWeight is a handle to a raw q4_k weight matrix [Out, In] resident on the GPU. In must be
 // a multiple of 256 (the q4_k super-block size); the resident byte cost is Out*(In/256)*144.
 type Q4KWeight struct {
 	id      C.int
 	Out, In int
+	noCopy  bool
 }
 
-// UploadQ4K copies a row-major q4_k payload (the verbatim GGUF super-block bytes, length
-// out*(in/256)*144) resident onto the GPU and returns a handle, or nil if the backend is
-// unavailable, in is not a multiple of 256, or the payload is short / the table is full. The
-// slice is read only during this call (cgo copies it into the device buffer).
+type q4kPinnedRaw struct {
+	pin *runtime.Pinner
+	raw []byte
+}
+
+var (
+	q4kPinMu sync.Mutex
+	q4kPins  = map[int]q4kPinnedRaw{}
+)
+
+// UploadQ4K makes a row-major q4_k payload (the verbatim GGUF super-block bytes, length
+// out*(in/256)*144) resident for the GPU and returns a handle, or nil if the backend is
+// unavailable, in is not a multiple of 256, or the payload is short / the table is full.
+// On Apple unified memory it first tries newBufferWithBytesNoCopy against the existing resident
+// Go bytes, keeping their backing array pinned until ResetQ4K. If Metal rejects the no-copy
+// buffer, it falls back to the older shared-buffer copy upload.
 func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
 	if !Available() || in <= 0 || in%256 != 0 || out <= 0 {
 		return nil
 	}
-	if len(raw) < out*(in/256)*144 {
+	need := out * (in / 256) * 144
+	if len(raw) < need {
 		return nil
 	}
-	id := C.mg_q4k_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+	raw = raw[:need]
+	q4kPinMu.Lock()
+	defer q4kPinMu.Unlock()
+
+	pin := new(runtime.Pinner)
+	pin.Pin(&raw[0])
+	id := C.mg_q4k_upload_nocopy((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+	if id >= 0 {
+		q4kPins[int(id)] = q4kPinnedRaw{pin: pin, raw: raw}
+		return &Q4KWeight{id: id, Out: out, In: in, noCopy: true}
+	}
+	pin.Unpin()
+
+	id = C.mg_q4k_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
 	if id < 0 {
 		return nil
 	}
+	runtime.KeepAlive(raw)
 	return &Q4KWeight{id: id, Out: out, In: in}
 }
 
@@ -134,6 +167,18 @@ func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) {
 // ID returns the backend handle for this matrix.
 func (w *Q4KWeight) ID() int { return int(w.id) }
 
+// NoCopy reports whether this handle aliases the caller's pinned raw q4_k bytes through
+// newBufferWithBytesNoCopy instead of owning a copied Metal buffer.
+func (w *Q4KWeight) NoCopy() bool { return w != nil && w.noCopy }
+
 // ResetQ4K releases every resident q4_k weight buffer and the reused scratch (the q4_k twin of
 // Reset). Call only when no Q4KWeight handle is still in use — every prior handle is invalidated.
-func ResetQ4K() { C.mg_q4k_reset() }
+func ResetQ4K() {
+	q4kPinMu.Lock()
+	defer q4kPinMu.Unlock()
+	C.mg_q4k_reset()
+	for id, pinned := range q4kPins {
+		pinned.pin.Unpin()
+		delete(q4kPins, id)
+	}
+}

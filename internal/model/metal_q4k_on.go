@@ -1,16 +1,15 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package model
 
-// metal_q4k_on.go — the Metal q4_k prefill GEMM dispatch (built only under -tags fakmetal).
+// metal_q4k_on.go — the Metal q4_k prefill GEMM dispatch (built on Apple Silicon with cgo).
 // When s.MetalQ4K is set and a device is present, the resident-Q4_K hybrid prefill's
 // q4_k-majority projection/MLP GEMMs run on the GPU via internal/metalgemm's q4_k dequant-GEMM
 // (q4k.m) instead of the CPU q4kGemm. Each weight is uploaded once and cached per *Model.
 //
-// Memory caveat: this keeps the CPU q4kw copy resident AND uploads a GPU copy, so the q4_k
-// weight set is held twice (~2× the model's q4 bytes). That fits a small model fine but on the
-// 27B/36 GB box it pressures unified memory — the loader change that hands the bytes straight
-// to the GPU and frees the CPU copy is the tracked follow-up. Hence MetalQ4K is opt-in.
+// On Apple unified memory the q4_k upload path wraps the model's resident raw bytes with a
+// no-copy MTLBuffer when Metal accepts the pointer. If it falls back to a copied Metal buffer,
+// MetalQ4K can still be paired with FAK_Q4K_FREE_CPU=1 once all q4_k matmuls are GPU-routed.
 
 import (
 	"os"
@@ -149,8 +148,6 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	if !metalgemm.Available() {
 		return nil
 	}
-	metalQ4KMu.Lock()
-	defer metalQ4KMu.Unlock()
 	uploaded := map[string]bool{}
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {
@@ -173,10 +170,10 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 }
 
 // metalQ4KWeight returns this model's GPU q4_k handle for `name`, uploading the raw blocks once.
-// On a successful upload it FREES the CPU raw copy (qt.raw = nil): with both decode and prefill
-// q4_k matmuls on the GPU, the weight is resident once (~16 GB for 27B, fits 36 GB) instead of
-// twice (~30 GB → swap). A failed upload keeps the CPU copy so the q4kMatRows/q4kGemm fallback
-// stays valid. Peak overshoot is one weight (its CPU bytes are freed right after its H2D copy).
+// The normal Apple-unified-memory path aliases qt.raw with a no-copy MTLBuffer, so the GPU and
+// CPU fallback read the same resident bytes. If Metal falls back to a copied buffer, the
+// FAK_Q4K_FREE_CPU opt-in may still drop qt.raw after upload for single residency; failed uploads
+// always keep the CPU copy so q4kMatRows/q4kGemm remain valid.
 func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight {
 	metalQ4KMu.Lock()
 	defer metalQ4KMu.Unlock()
@@ -190,13 +187,14 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 	}
 	w := metalgemm.UploadQ4K(qt.raw, qt.out, qt.in)
 	tbl[name] = w // cache nil too, so a failed upload doesn't retry every token
-	if w != nil && freeCPUCopyAfterUpload {
+	if w != nil && freeCPUCopyAfterUpload && !w.NoCopy() {
 		// Drop the CPU copy → single residency (~16 GB for 27B vs ~30 GB doubled). UNSAFE
 		// unless EVERY q4_k matmul for this weight — decode GEMV *and* batched prefill GEMM —
 		// is guaranteed to run on the GPU: the CPU fallbacks q4kGemm/q4kMatRows read qt.raw and
 		// panic on a nil slice (#1067, the multi-K-prompt prefill crash). Gated OFF by default;
 		// FAK_Q4K_FREE_CPU=1 opts back into single residency once the prefill path is fully
-		// GPU-routed and the CPU fallback is provably unreachable.
+		// GPU-routed and the CPU fallback is provably unreachable. A no-copy Metal buffer already
+		// aliases qt.raw, so keeping the slice costs no duplicate storage and preserves fallback.
 		qt.raw = nil
 	}
 	return w
