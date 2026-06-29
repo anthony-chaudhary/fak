@@ -93,6 +93,13 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 			// leading with a verb (cross-session finding: `gate X on Y` earns no diff-witness).
 			r.Notes = append(r.Notes, h)
 		}
+		// A `fix(...)` that touches source but no test may pass commit-audit while the symptom
+		// is still live (#1326); nudge for a red-then-green witness. Advisory only — never blocks.
+		if len(paths) > 0 {
+			if w := fixWantsSymptomWitness(r.Subject, paths); w != "" {
+				r.Notes = append(r.Notes, w)
+			}
+		}
 	}
 
 	// 2. Ship-stamp bindability.
@@ -416,6 +423,63 @@ func suggestTrailer(pathLanes []string) string {
 	default:
 		return "(fak " + pathLanes[0] + ")  [paths span lanes: " + strings.Join(pathLanes, ", ") + " — stamp the primary]"
 	}
+}
+
+// fixWantsSymptomWitness returns a non-empty advisory when a `fix(...)` commit touches Go
+// SOURCE but ships NO Go test — the canonical shape of a fix that may pass `dos commit-audit`
+// (diff-witnessed) while the symptom is still live (#1326). A green commit-audit grades whether
+// the diff did the KIND of thing claimed, NOT whether the bug is gone; the missing artifact is a
+// test that FAILS on the parent and PASSES here (red-then-green). This is the advisory, path-only
+// counterpart of the git-backed `symptom:` witness rung (internal/witness): it never blocks (a
+// Note, not an Issue), so it nudges without refusing — a fix whose nature is genuinely
+// untestable (a doc/config-only fix, or one whose witness lands in a sibling lane) still commits.
+//
+// It fires only when the type is exactly `fix`, at least one Go source file is touched, and no
+// `_test.go` is among the paths; a fix touching only docs/config, or one already carrying a
+// test, earns nothing.
+func fixWantsSymptomWitness(subject string, paths []string) string {
+	m := subjectRE.FindStringSubmatch(subject)
+	if m == nil || m[1] != "fix" {
+		return ""
+	}
+	sawSource, sawTest := false, false
+	for _, p := range paths {
+		switch {
+		case isGoTestPath(p):
+			sawTest = true
+		case isGoSourcePath(p):
+			sawSource = true
+		}
+	}
+	if sawTest || !sawSource {
+		return ""
+	}
+	return "fix(...) touches Go source but ships no test: a fix should carry a symptom witness — " +
+		"a test that FAILS on the parent commit and PASSES here (red-then-green), not just a green " +
+		"`dos commit-audit` (which grades the diff's KIND, not that the bug is gone). See #1326."
+}
+
+// isGoTestPath reports whether a repo path is a Go test file (basename `*_test.go`). It matches
+// the language's own definition of a gating test and deliberately mirrors witness.isGatingTestPath
+// so the two surfaces agree on what counts as a symptom witness.
+func isGoTestPath(p string) bool {
+	return strings.HasSuffix(baseName(normPath(p)), "_test.go")
+}
+
+// isGoSourcePath reports whether a repo path is non-test Go SOURCE — a `.go` file that is not a
+// test and not under a testdata/ tree (testdata is fixtures, not the bug surface). This is the
+// "did the fix touch real code?" half of the symptom-witness heuristic.
+func isGoSourcePath(p string) bool {
+	q := normPath(p)
+	if !strings.HasSuffix(q, ".go") || strings.HasSuffix(baseName(q), "_test.go") {
+		return false
+	}
+	for _, seg := range strings.Split(q, "/") {
+		if seg == "testdata" {
+			return false
+		}
+	}
+	return true
 }
 
 // abstainHazard returns a non-empty advisory when a verb-led subject still tends to earn an

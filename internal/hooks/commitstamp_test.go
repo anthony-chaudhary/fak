@@ -214,6 +214,90 @@ func TestStampOf(t *testing.T) {
 	}
 }
 
+// TestLintCommitMessage_fixNoTestWantsSymptomWitness — a fix touching Go source but no test
+// earns the symptom-witness advisory (#1326), and it is advisory only (OK stays true).
+func TestLintCommitMessage_fixNoTestWantsSymptomWitness(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"fix(gateway): treat same-tick ready as positive (fak gateway)",
+		[]string{"internal/gateway/server.go"},
+		root,
+	)
+	if !r.OK {
+		t.Fatalf("the advisory must NOT block; want OK, got issues=%v", r.Issues)
+	}
+	if !hasNoteContaining(r, "symptom witness") {
+		t.Errorf("want the symptom-witness advisory note, got %v", r.Notes)
+	}
+}
+
+// TestLintCommitMessage_fixWithTestNoSymptomNote — the same fix that ALSO touches a test carries
+// its witness, so no advisory fires.
+func TestLintCommitMessage_fixWithTestNoSymptomNote(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"fix(gateway): treat same-tick ready as positive (fak gateway)",
+		[]string{"internal/gateway/server.go", "internal/gateway/server_test.go"},
+		root,
+	)
+	if hasNoteContaining(r, "symptom witness") {
+		t.Errorf("a fix carrying a test should earn no symptom-witness note, got %v", r.Notes)
+	}
+}
+
+// TestLintCommitMessage_featNoSymptomNote — the heuristic is scoped to `fix(...)`; a feat touching
+// only source is not nudged.
+func TestLintCommitMessage_featNoSymptomNote(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"feat(gateway): add the slot reclaim path (fak gateway)",
+		[]string{"internal/gateway/server.go"},
+		root,
+	)
+	if hasNoteContaining(r, "symptom witness") {
+		t.Errorf("feat must not earn the symptom-witness note, got %v", r.Notes)
+	}
+}
+
+// TestLintCommitMessage_fixDocsOnlyNoSymptomNote — a fix that touches no Go source (docs/config
+// only) has no testable symptom surface, so it is not nudged.
+func TestLintCommitMessage_fixDocsOnlyNoSymptomNote(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"fix(docs): correct the gateway flag name (fak docs)",
+		[]string{"docs/gateway.md"},
+		root,
+	)
+	if hasNoteContaining(r, "symptom witness") {
+		t.Errorf("a docs-only fix should earn no symptom-witness note, got %v", r.Notes)
+	}
+}
+
+// TestFixWantsSymptomWitness_unit drives the helper directly across the path-classification edges
+// (testdata excluded; a bare .go vs a _test.go; non-fix types).
+func TestFixWantsSymptomWitness_unit(t *testing.T) {
+	cases := []struct {
+		name    string
+		subject string
+		paths   []string
+		want    bool // want a non-empty advisory
+	}{
+		{"fix-source-only", "fix(x): repair the off-by-one (fak x)", []string{"internal/x/x.go"}, true},
+		{"fix-with-test", "fix(x): repair (fak x)", []string{"internal/x/x.go", "internal/x/x_test.go"}, false},
+		{"fix-testdata-is-not-source", "fix(x): refresh fixture (fak x)", []string{"internal/x/testdata/in.go"}, false},
+		{"fix-no-go", "fix(x): tweak config (fak x)", []string{"internal/x/config.yaml"}, false},
+		{"feat-source", "feat(x): add (fak x)", []string{"internal/x/x.go"}, false},
+		{"perf-source", "perf(x): speed up (fak x)", []string{"internal/x/x.go"}, false},
+		{"no-paths", "fix(x): repair (fak x)", nil, false},
+	}
+	for _, tc := range cases {
+		got := fixWantsSymptomWitness(tc.subject, tc.paths) != ""
+		if got != tc.want {
+			t.Errorf("%s: fixWantsSymptomWitness=%v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestLaneForPath_conventionFallback(t *testing.T) {
 	var empty laneTaxonomy // not loaded: pure convention
 	cases := map[string]string{
