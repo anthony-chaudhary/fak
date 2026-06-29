@@ -70,17 +70,16 @@ func TestRepeatedStringFlagRejectsEmptyValue(t *testing.T) {
 	}
 }
 
-// TestServeMetalFlagDefaultsOff pins the --metal flag's default-OFF posture: with no flag the
-// serve path is the pure-Go CPU forward, byte-for-byte unchanged; --metal flips it on. This
-// mirrors the live registration in serve.go.
-func TestServeMetalFlagDefaultsOff(t *testing.T) {
+// TestServeMetalFlagDefaultsFalse pins the flag parse contract: --metal defaults false because
+// runtime auto-selection happens in resolveServeMetal, not in the flag package.
+func TestServeMetalFlagDefaultsFalse(t *testing.T) {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	metal := fs.Bool("metal", false, "")
 	if err := fs.Parse(nil); err != nil {
 		t.Fatalf("parse empty: %v", err)
 	}
 	if *metal {
-		t.Fatal("--metal must default to false (CPU forward); the GPU path is opt-in")
+		t.Fatal("--metal must default to false; runtime auto-select happens after parse")
 	}
 	fs2 := flag.NewFlagSet("serve", flag.ContinueOnError)
 	metal2 := fs2.Bool("metal", false, "")
@@ -92,15 +91,18 @@ func TestServeMetalFlagDefaultsOff(t *testing.T) {
 	}
 }
 
-// TestResolveServeMetal exercises the fail-loud decision GPU-free. On this non-fakmetal build
-// metalgemm.Available()/Compiled() are the stub's deterministic false, so a request for Metal
-// (via flag or FAK_METAL) MUST error rather than silently fall back to CPU — serve's posture is
-// fail-loud, mirroring resolveServeChatBackend. The --metal + --backend conflict is rejected
-// regardless of build. The off case (neither requested) returns (false, nil).
+// TestResolveServeMetal exercises auto-select plus explicit fail-loud behavior. With no
+// explicit request, Metal follows runtime availability: Apple-Silicon+cgo with a device uses it,
+// and every other build/device state falls back to CPU. Explicit --metal/FAK_METAL still errors
+// when unavailable, mirroring resolveServeChatBackend.
 func TestResolveServeMetal(t *testing.T) {
-	// Not requested → off, no error, on every build.
-	if use, err := resolveServeMetal(false, false, ""); use || err != nil {
-		t.Fatalf("neither flag nor env: got (%v,%v), want (false,nil)", use, err)
+	// Not requested -> runtime auto-select only when a usable Metal device is present.
+	if use, err := resolveServeMetal(false, false, ""); use != metalgemm.Available() || err != nil {
+		t.Fatalf("neither flag nor env: got (%v,%v), want (%v,nil)", use, err, metalgemm.Available())
+	}
+	// A named compute backend disables Metal auto-select; only an explicit Metal request conflicts.
+	if use, err := resolveServeMetal(false, false, "cuda"); use || err != nil {
+		t.Fatalf("backend without explicit metal: got (%v,%v), want (false,nil)", use, err)
 	}
 	// Requested + a device --backend → conflict error, independent of Metal availability.
 	if _, err := resolveServeMetal(true, false, "cuda"); err == nil {
@@ -109,8 +111,8 @@ func TestResolveServeMetal(t *testing.T) {
 	if _, err := resolveServeMetal(false, true, "cuda"); err == nil {
 		t.Fatal("FAK_METAL with --backend cuda must be rejected as mutually exclusive")
 	}
-	// Requested with no conflicting backend: on a non-fakmetal build this fails loud (no silent
-	// CPU fallback). On a fakmetal build with a device it would succeed — assert by availability
+	// Requested with no conflicting backend: on a non-Metal build this fails loud (no silent
+	// CPU fallback). On an Apple-Silicon+cgo build with a device it would succeed — assert by availability
 	// so the test is correct on BOTH builds.
 	use, err := resolveServeMetal(true, false, "")
 	if metalgemm.Available() {
@@ -124,6 +126,6 @@ func TestResolveServeMetal(t *testing.T) {
 	}
 	// FAK_METAL env is an equivalent trigger to the flag (same code path).
 	if _, err := resolveServeMetal(false, true, ""); !metalgemm.Available() && err == nil {
-		t.Fatal("FAK_METAL on a non-fakmetal build must fail loud, same as --metal")
+		t.Fatal("FAK_METAL on a non-Metal build must fail loud, same as --metal")
 	}
 }

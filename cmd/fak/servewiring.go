@@ -87,7 +87,7 @@ var servewiringData = []wiringRow{
 	{"enginecache", "--engine-cache-engine", "EngineCacheEngine", verdictOffByDefault, "internal/gateway/gateway.go:1480", "resets the serving-engine cache after a quarantined proxy turn; off when engine empty"},
 	{"backend", "--backend", "Backend", verdictOffByDefault, "internal/agent/inkernel_planner.go:271", "decodes the in-kernel chat through the compute HAL device; off when name empty"},
 	{"cpuoffloadexperts", "--cpu-offload-experts", "CPUOffloadExperts", verdictOffByDefault, "internal/agent/inkernel_planner.go:282", "with --gguf --backend, keeps MoE expert GEMMs on host RAM while dense/router/attention run on the device; off by default"},
-	{"metal", "--metal", "Metal", verdictOffByDefault, "internal/agent/inkernel_planner.go:1067", "with --gguf (no --backend), runs the in-kernel chat through the Apple-Silicon metalgemm GPU (prefill + resident Q8 decode) on the CPU session; dense-Qwen Q8 only, fails loud if requested without -tags fakmetal/a device; off by default, a no-op on non-fakmetal builds"},
+	{"metal", "--metal", "Metal", verdictWired, "internal/agent/inkernel_planner.go:1067", "with --gguf (no --backend), auto-selects the Apple-Silicon metalgemm GPU when Apple-Silicon+cgo+a device are available; --metal/FAK_METAL=1 requires that path fail-loud; dense-Qwen Q8 only; CPU fallback on non-Metal builds or unavailable devices"},
 	{"steersession", "(host func, default-on)", "SteerSession", verdictPartial, "internal/gateway/http.go:951", "POST /session/{id}/steer sends onto a2achan; the running-session TryRecv splice is deferred (#760)"},
 }
 
