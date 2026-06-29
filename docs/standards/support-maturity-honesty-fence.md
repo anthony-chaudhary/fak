@@ -94,13 +94,21 @@ count re-derives from the live grid each run.
 
 ## How this is encountered by default
 
-- **Agents** meet it in [`AGENTS.md`](../../AGENTS.md) beside the "every claim carries
-  a tag" rule and the [net-true-value](net-true-value.md) / [observer-effect](observer-effect.md)
-  lenses — the support-side check an agent runs before reporting "this family is now
-  optimized / at parity."
-- **Humans** meet it in the doc map ([`llms.txt`](../../llms.txt),
-  [`INDEX.md`](../../INDEX.md)) beside the two sibling standards, and under epic #1243
-  as its honesty contract (Definition-of-Done item 8).
+The fence is reachable today from [`INDEX.md`](../../INDEX.md), listed directly beside
+its two sibling standards ([net-true-value](net-true-value.md) and
+[observer-effect](observer-effect.md)), and is pinned as epic #1243's honesty contract —
+Definition-of-Done item 8, "the honesty fence holds (no self-reported promotion;
+labels)." Two further placements are the named follow-on; this page does not yet claim
+them as present, because the fence forbids reporting an un-landed placement as attained:
+
+- **Agents** — a pointer in [`AGENTS.md`](../../AGENTS.md) beside the "every claim
+  carries a tag" rule and the [net-true-value](net-true-value.md) /
+  [observer-effect](observer-effect.md) lenses, so the support-side check sits where an
+  agent already reads before reporting "this family is now optimized / at parity."
+- **Humans** — an [`llms.txt`](../../llms.txt) doc-map entry beside the two sibling
+  standards. Deferred because adding one forces a regen of the generated `llms-full.txt`
+  companion (the `gen_llms_full.py --check` drift gate), a separate generated-file step
+  taken off the shared trunk.
 
 ## Rule → stick
 
