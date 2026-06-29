@@ -114,6 +114,15 @@ fak guard --provider openai --api-key-env OPENAI_API_KEY -- hermes
 > its own. Name `--provider openai` explicitly if you prefer to be unambiguous, or to wrap a
 > launcher whose basename is not `hermes`.
 
+### Recorded live witness
+
+The OpenAI-wire guard path has a live gateway-transited witness in
+[`experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json`](../../experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json).
+The run used `opencode` as the issue-approved OpenAI Chat Completions fallback because the
+`hermes` CLI was not installed on that Windows host. It records a real child result, `200`
+rows on `route=/v1/chat/completions` in the guard log, a direct placeholder-key `401`
+against the upstream, and a hash-chained `DECIDE` row in `FAK_AUDIT_JOURNAL`.
+
 ### Local model: no key, no network, one command
 
 Run a local GGUF in-kernel as Hermes Agent's upstream — the whole stack (model + agent +
@@ -260,17 +269,35 @@ Check any single call offline, without launching the agent:
 ## Quarantine for external tool results
 
 Hermes Agent pulls from the web and 16+ messaging platforms — exactly the untrusted inputs a
-prompt-injection rides in on. Enable quarantine so a poisoned or secret-shaped tool result is
-paged out before it re-enters the agent's context:
+prompt-injection rides in on. The kernel contains those results on the **result side**: when a
+tool result comes back poisoned or secret-shaped, the result-admit fold **quarantines** it —
+pages it out before it re-enters the agent's context — so the model never reads it.
 
-```bash
-./fak serve --addr 127.0.0.1:8080 \
-  --provider openai \
-  --base-url http://localhost:11434/v1 \
-  --model qwen2.5-coder:7b \
-  --policy hermes-policy.json \
-  --vdso=true
-```
+This is **automatic, not a flag you flip.** Quarantine is part of the result-admit stack the
+gateway runs on every served turn (the context-MMU secret/poison check plus the IFC taint
+stamp). It is in effect whenever `fak serve` / `fak guard` fronts the agent — there is no
+`--quarantine` switch to set or forget. What you *do* control is **what counts as poisoned**:
+the secret-shaped detector and the `SECRET_EXFIL` arg rules in your capability floor (above)
+decide which results get quarantined. To watch it fire, see
+[`fak_kernel_quarantines_total`](#health-and-metrics) and the `quarantined` count in the guard
+exit summary.
+
+> **`--vdso` is a different mechanism — not the quarantine toggle.** `--vdso` is the **vDSO
+> dedup fast path** (content-addressed caching that speeds repeat turns); it defaults to `true`
+> and drives only `fak_kernel_vdso_hits_total`. It neither enables nor disables quarantine.
+> (An earlier version of this section wired `--vdso=true` into a "turn quarantine on" example —
+> that conflated two unrelated features, and since `--vdso` already defaults on, the example
+> changed nothing.)
+
+### Proxy seat vs. local `--gguf`
+
+On the **proxy** seat — `fak serve` / `fak guard` in front of an upstream model, this guide's
+documented default — the quarantined result is paged out of the agent's context before the
+model reads it, so the poison never enters the turn. The in-kernel **KV poison-evictor**
+(dropping the local KV prefix the result would have populated) is the **`--gguf` local-model
+path** only: on a proxy seat the model lives upstream, so there is no local KV prefix to evict.
+Both seats stop the poisoned result from reaching the model; they differ only in whether
+there is also a local cache to drop.
 
 ---
 
