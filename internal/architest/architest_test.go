@@ -57,20 +57,23 @@ var tier = map[string]int{
 	"accounts":         1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"bgloop": 1, "binstamp": 1, "cachewitness": 1, "covmatrix": 1, "defaultvaluescore": 1, "dojocal": 1, "experiments": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1,
-	"modelladder":     2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
-	"modelreg":        2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
-	"skillenv":        4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
-	"guardroute":      4,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
-	"conflationscore": 1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
-	"scoreboard":      1,                // outbound Slack publisher for scorecard/score/run-event status posts; stdlib-only, off the hot path.
-	"benchpost":       1,                // outbound Slack publisher for bench-channel rollups/run-requests; folds catalog/baseline/plan JSON, reuses scoreboard(1) transport, off the hot path.
-	"blockerpost":     1,                // outbound Slack publisher for the central #blockers channel: severity-driven (background status vs surfaced operator page); reuses scoreboard(1) transport, off the hot path.
-	"dispatchpost":    1,                // outbound Slack publisher for background code-dispatch run RESULTS; reuses scoreboard(1) transport, off the hot path.
-	"dojopost":        1,                // outbound Slack publisher for dojo rollups/trends; folds dojo(1) reports, reuses scoreboard(1) transport, off the hot path.
-	"marketing":       1,                // completion-driven marketing subsystem: witnessed-ship(hooks) -> claim/artifact, CLAIMS.md honesty gate, AEO/AgentEO refresh; imports hooks(1)+scoreboard(1)+stdlib, off the hot path.
-	"fleet":           1,                // fleet-roster snapshot fold for the #node-usage feeder; stdlib-only, imports nothing internal, off the hot path.
-	"nodeusagepost":   1,                // outbound Slack publisher for the #node-usage feeder; folds fleet(1), reuses scoreboard(1) transport, off the hot path.
-	"blobfs":          1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
+	"supportmaturityscore": 1,                // pure scorecard over internal/covmatrix; off the hot path.
+	"supportmaturity":      1,                // the closed M0–M7 support-maturity ladder vocabulary (#1244); lowers covmatrix(1)+ggufload(1)+compute(1) onto one ordered enum, off the hot path.
+	"releasestale":         1,                // pure publish-staleness verdict (latest tag vs HEAD, in commits+days) + a thin git Gather shell; the publish-axis dual of binstamp's source-axis freshness. Stdlib-only, imports nothing internal, off the hot path.
+	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
+	"modelreg":             2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
+	"skillenv":             4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
+	"guardroute":           4,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
+	"conflationscore":      1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
+	"scoreboard":           1,                // outbound Slack publisher for scorecard/score/run-event status posts; stdlib-only, off the hot path.
+	"benchpost":            1,                // outbound Slack publisher for bench-channel rollups/run-requests; folds catalog/baseline/plan JSON, reuses scoreboard(1) transport, off the hot path.
+	"blockerpost":          1,                // outbound Slack publisher for the central #blockers channel: severity-driven (background status vs surfaced operator page); reuses scoreboard(1) transport, off the hot path.
+	"dispatchpost":         1,                // outbound Slack publisher for background code-dispatch run RESULTS; reuses scoreboard(1) transport, off the hot path.
+	"dojopost":             1,                // outbound Slack publisher for dojo rollups/trends; folds dojo(1) reports, reuses scoreboard(1) transport, off the hot path.
+	"marketing":            1,                // completion-driven marketing subsystem: witnessed-ship(hooks) -> claim/artifact, CLAIMS.md honesty gate, AEO/AgentEO refresh; imports hooks(1)+scoreboard(1)+stdlib, off the hot path.
+	"fleet":                1,                // fleet-roster snapshot fold for the #node-usage feeder; stdlib-only, imports nothing internal, off the hot path.
+	"nodeusagepost":        1,                // outbound Slack publisher for the #node-usage feeder; folds fleet(1), reuses scoreboard(1) transport, off the hot path.
+	"blobfs":               1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
 	"xenginekv":  1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
 	"secretload": 1, // first-class secret/config loader (#887/#889): SecretSource priority list + os-env/encrypted-file/.env backends + Require checklist + Redact; imports canon(1)+stdlib, off the hot path.
 	"windowgate": 1, // no-desktop-popup ratchet: scans tracked .ps1 task installers + window-suppressing .py for console-window flashes; stdlib-only, off the hot path.
@@ -130,7 +133,7 @@ var tier = map[string]int{
 	"agenttopo":       2, // declared agent communication DAG over comm.Group + modelroute folds.
 	"promptmmu":       1, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
 	"loopmgr":         1, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing — those stay in the producers.
-	"leaseref":        1, // cross-machine lease VISIBILITY substrate (#825): persists a lease record under refs/fak/locks/<id> so lease state rides ordinary git fetch/push between clones. Distribution, NOT atomic acquisition. stdlib-only, shells to git off the hot path through one Runner seam, imports nothing internal.
+	"leaseref":        1, // cross-machine lease VISIBILITY substrate (#825): persists a lease record under refs/fak/locks/<id> so lease state rides ordinary git fetch/push between clones. Distribution, NOT atomic acquisition. Shells to git off the hot path through one Runner seam; imports only dormancy(1) for the lease's LastActiveAt clock (#1179).
 	"guard":           1, // agent-spawn containment seam (#824): the Linux Landlock read-only-.git/hooks hook-floor for the child `fak guard` spawns, via a re-exec trampoline. Pure spec/resolution core + raw-syscall linux impl + no-op twin; opt-in, off by default, fails open; imports only stdlib (syscall/unsafe on linux), nothing internal.
 	"pythongate":      2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
 	"treedoctor":      2, // tree-hygiene doctor over safecommit's lock seam plus git worktree reads; mechanism/tool leaf, off the hot path.
@@ -160,6 +163,10 @@ var tier = map[string]int{
 	"nightrun":        1, // RUN-IT-ALL-NIGHT local-capability data-collection planner: probes the box + ranks feasible-here collection tasks over the benchmark grid; imports benchcatalog(1)+stdlib, off the hot path.
 	"sessionobs":      1, // SESSION-OBSERVABILITY-for-RSI scorecard: the value-side complement to tools/session_audit.py — grades how far our coding-session data has climbed the capture->structure->link->aggregate->learn ladder, folding the missing rungs into one sessionobs_debt integer. Pure scorer (Record/Outcome/Pipeline/Score), stdlib-only, imports nothing internal, off the hot path.
 	"compactcohere":   1, // fak<->harness context-manager COHERENCE policy (#1131): attributes a served turn's prefix event (stable/fak_cut/fak_world_break/harness_rewrite/cold_ttl) + a standing PreCompact block/allow posture to suppress Claude Code's cache-destroying auto-compaction while fak's cache-preserving compaction copes. Pure sensor+policy, stdlib-only, imports nothing internal, off the hot path.
+	"loopdrive":       1,
+	"loopgate":        1, // pure loop exit gate: maps a claimed-done turn plus a witness criterion to WITNESSED/NOT_YET/REFUSED; witness execution is caller-injected.
+	"slackenv":        1, // the ONE .env.slack.local token/channel resolver every outbound Slack publisher (scoreboard/blockerpost/benchpost/dispatchpost/dojopost/marketing/nodeusagepost) and chatrelay delegates to; pure stdlib, off the hot path.
+	"dormancy":        1, // dormancy clock + horizon bucketer (#1179, epic #1178): a durable monotonic LastActiveAt Stamp + a pure Horizon(gap) -> {warm,cool,cold,frozen,ancient} bucketer (thresholds anchored to the resume cache TTLs); stdlib-only, imports nothing internal, off the hot path. Surfaced on session/loop/lease as the shared "how long dormant" field.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
