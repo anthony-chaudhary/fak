@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Default backoff bounds for a failing loop: the first retry waits backoffMin, then
-// doubles each consecutive failure up to backoffMax. A clean tick resets it.
+// Default backoff bounds for a failing loop: the retry SCHEDULE starts at backoffMin
+// and doubles each consecutive failure up to backoffMax; a clean tick resets it. The
+// realized sleep is equal-jittered around that schedule (see equalJitter) so loops
+// that fail in lockstep — N kernel loops, or a fleet of kernels, hitting the same
+// down dependency at the same instant — do not RETRY in lockstep and hammer it.
 const (
 	defaultBackoffMin = time.Second
 	defaultBackoffMax = time.Minute
@@ -27,6 +31,7 @@ type Supervisor struct {
 	backoffMax time.Duration
 	admit      func(name string) (ok bool, reason string)
 	observer   func(Status)
+	rng        func() float64 // uniform [0,1) source for backoff jitter; New installs the real one
 
 	mu      sync.Mutex
 	loops   []*loopState
@@ -71,6 +76,7 @@ func New(opts ...Option) *Supervisor {
 	s := &Supervisor{
 		backoffMin: defaultBackoffMin,
 		backoffMax: defaultBackoffMax,
+		rng:        rand.Float64, // math/rand/v2: auto-seeded, lock-free, concurrency-safe
 		byName:     map[string]*loopState{},
 	}
 	for _, o := range opts {
@@ -228,7 +234,10 @@ func (s *Supervisor) run(ctx context.Context, ls *loopState) {
 		}
 
 		if err != nil || panicked {
-			wait := backoff
+			// Jitter the realized sleep around the schedule point (backoff), but advance
+			// the SCHEDULE itself by the un-jittered doubling — so the envelope still
+			// climbs to backoffMax while lockstep failures de-correlate their retries.
+			wait := s.jittered(backoff)
 			ls.markBackoff(time.Now().Add(wait))
 			backoff = nextBackoff(backoff, s.backoffMax)
 			if !sleepCtx(ctx, wait) {
@@ -311,6 +320,32 @@ func nextBackoff(cur, max time.Duration) time.Duration {
 		return max
 	}
 	return next
+}
+
+// jittered applies equal jitter to a backoff wait using the supervisor's rng. A
+// zero-value supervisor (no rng installed — New always installs one) falls back to
+// the midpoint, so the helper is total and never panics.
+func (s *Supervisor) jittered(d time.Duration) time.Duration {
+	frac := 0.5
+	if s.rng != nil {
+		frac = s.rng()
+	}
+	return equalJitter(d, frac)
+}
+
+// equalJitter applies AWS-style "equal jitter" to a backoff wait: half the base is
+// fixed and the other half is a uniform random point, so the realized sleep lands in
+// [base/2, base). It DE-SYNCHRONIZES loops (and fleet kernels) that fail against a
+// shared dependency at the same instant — their retries spread out instead of
+// hammering it in lockstep — while the backoff SCHEDULE still climbs (nextBackoff
+// doubles the base); only the realized sleep is perturbed. frac is a uniform sample
+// in [0,1). A non-positive base is returned unchanged.
+func equalJitter(base time.Duration, frac float64) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	half := base / 2
+	return half + time.Duration(frac*float64(base-half))
 }
 
 // pollWait is how long a paused loop holds before re-checking the admit gate: its own

@@ -83,6 +83,61 @@ func TestNextBackoff(t *testing.T) {
 	}
 }
 
+// TestEqualJitter pins the pure jitter math: the realized wait lands in [base/2, base]
+// for any frac in [0,1), is non-decreasing in frac, and a non-positive base passes
+// through unchanged (no panic, no negative sleep).
+func TestEqualJitter(t *testing.T) {
+	const base = 100 * time.Millisecond
+	if got := equalJitter(base, 0); got != base/2 {
+		t.Errorf("frac=0: got %v want %v (base/2 floor)", got, base/2)
+	}
+	if got := equalJitter(base, 0.25); got > equalJitter(base, 0.75) {
+		t.Error("equalJitter must be non-decreasing in frac")
+	}
+	for _, f := range []float64{0, 0.1, 0.33, 0.5, 0.9, 0.9999} {
+		if w := equalJitter(base, f); w < base/2 || w > base {
+			t.Errorf("frac=%v: wait %v out of [%v, %v]", f, w, base/2, base)
+		}
+	}
+	if got := equalJitter(0, 0.5); got != 0 {
+		t.Errorf("base=0: got %v want 0", got)
+	}
+	if got := equalJitter(-time.Second, 0.5); got != -time.Second {
+		t.Errorf("negative base must pass through unchanged: got %v", got)
+	}
+}
+
+// TestBackoffJitterApplied is the differential witness that the realized sleep — not
+// the fixed schedule base — is what jitter perturbs: the same always-failing loop with
+// a deterministic low jitter (wait ~ base/2) must retry strictly more often in the same
+// virtual window than one with a high jitter (wait ~ base). backoffMin==backoffMax pins
+// the schedule, isolating the effect to the jitter fraction.
+func TestBackoffJitterApplied(t *testing.T) {
+	runErrs := func(frac float64) uint64 {
+		var n uint64
+		synctest.Test(t, func(t *testing.T) {
+			s := New(WithBackoff(20*time.Millisecond, 20*time.Millisecond))
+			s.rng = func() float64 { return frac } // white-box: deterministic jitter
+			_ = s.Register(Loop{Name: "errs", Tick: func(context.Context) error { return errTick }})
+			ctx, cancel := context.WithCancel(context.Background())
+			s.Start(ctx)
+			time.Sleep(200 * time.Millisecond)
+			synctest.Wait()
+			st, _ := s.Get("errs")
+			n = st.Errors
+			cancel()
+			synctest.Wait()
+			_ = s.Shutdown(context.Background())
+		})
+		return n
+	}
+	low := runErrs(0)      // wait = 10ms -> ~20 retries in 200ms
+	high := runErrs(0.999) // wait ~ 20ms -> ~10 retries in 200ms
+	if low <= high {
+		t.Errorf("jitter not applied to the sleep: low-jitter errors=%d should exceed high-jitter errors=%d", low, high)
+	}
+}
+
 // --- supervised behavior under virtual time (testing/synctest) ---------------
 
 // TestKeepsProgressing is the PROGRESS witness: while the kernel is up, an interval
