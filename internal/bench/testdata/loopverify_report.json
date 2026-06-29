@@ -1,0 +1,128 @@
+{
+  "schema": "loopverify.v1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench/ -run TestLoopVerifyBench",
+    "generated_by": "fak/internal/bench.BuildLoopVerifyReport",
+    "note": "Corpus is a labeled fixture: the kernel-native loop driver (#1173 #S1) is not built yet, so a live naive-vs-gated wall-clock is `not yet`. This witnesses the MEASUREMENT and the metric definitions; live turn records feed the same report shape once the driver lands."
+  },
+  "corpus_episodes": 4,
+  "corpus_turns": 11,
+  "naive": {
+    "loop": "naive",
+    "episodes": 4,
+    "false_done_episodes": 2,
+    "false_done_rate": 0.5,
+    "mean_iterations_to_accept": 1.5,
+    "slop_shipped_total": 5,
+    "wasted_iterations_total": 5,
+    "gate_cost_units_total": 0,
+    "total_iterations_run": 6
+  },
+  "gated": {
+    "loop": "gated",
+    "episodes": 4,
+    "false_done_episodes": 0,
+    "false_done_rate": 0,
+    "mean_iterations_to_accept": 2.75,
+    "slop_shipped_total": 1,
+    "wasted_iterations_total": 0,
+    "gate_cost_units_total": 11,
+    "total_iterations_run": 11
+  },
+  "delta": {
+    "false_done_rate_reduction": 0.5,
+    "slop_avoided": 4,
+    "wasted_iterations_avoided": 5,
+    "gate_cost_units": 11,
+    "extra_iterations_to_witness": 5,
+    "net_true_finding": "the gate cuts the false-done rate 50%→0%, avoids 4 slop unit(s) and 5 wasted (rework) iteration(s), at a cost of 11 adjudication-run(s) and 5 extra iteration(s) to reach a witnessed done. Per-run adjudication wall-clock is `not yet` (host-gated), but each adjudication is bounded and far cheaper than the agent turn it gates, so the win is net-positive at any plausible per-run cost."
+  },
+  "episodes": [
+    {
+      "name": "fix-gateway-429",
+      "naive": {
+        "episode": "fix-gateway-429",
+        "accepted_turn": 2,
+        "false_done": true,
+        "iterations": 2,
+        "slop_shipped": 3,
+        "wasted_iterations": 2,
+        "gate_cost_units": 0
+      },
+      "gated": {
+        "episode": "fix-gateway-429",
+        "accepted_turn": 4,
+        "false_done": false,
+        "iterations": 4,
+        "slop_shipped": 1,
+        "wasted_iterations": 0,
+        "gate_cost_units": 4
+      }
+    },
+    {
+      "name": "add-metric-row",
+      "naive": {
+        "episode": "add-metric-row",
+        "accepted_turn": 2,
+        "false_done": false,
+        "iterations": 2,
+        "slop_shipped": 0,
+        "wasted_iterations": 0,
+        "gate_cost_units": 0
+      },
+      "gated": {
+        "episode": "add-metric-row",
+        "accepted_turn": 2,
+        "false_done": false,
+        "iterations": 2,
+        "slop_shipped": 0,
+        "wasted_iterations": 0,
+        "gate_cost_units": 2
+      }
+    },
+    {
+      "name": "refactor-evictor",
+      "naive": {
+        "episode": "refactor-evictor",
+        "accepted_turn": 1,
+        "false_done": true,
+        "iterations": 1,
+        "slop_shipped": 2,
+        "wasted_iterations": 3,
+        "gate_cost_units": 0
+      },
+      "gated": {
+        "episode": "refactor-evictor",
+        "accepted_turn": 4,
+        "false_done": false,
+        "iterations": 4,
+        "slop_shipped": 0,
+        "wasted_iterations": 0,
+        "gate_cost_units": 4
+      }
+    },
+    {
+      "name": "doc-link-fix",
+      "naive": {
+        "episode": "doc-link-fix",
+        "accepted_turn": 1,
+        "false_done": false,
+        "iterations": 1,
+        "slop_shipped": 0,
+        "wasted_iterations": 0,
+        "gate_cost_units": 0
+      },
+      "gated": {
+        "episode": "doc-link-fix",
+        "accepted_turn": 1,
+        "false_done": false,
+        "iterations": 1,
+        "slop_shipped": 0,
+        "wasted_iterations": 0,
+        "gate_cost_units": 1
+      }
+    }
+  ],
+  "verdict": "gated_false_done_rate_lower"
+}
