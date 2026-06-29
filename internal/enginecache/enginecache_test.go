@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,17 +18,20 @@ func sampleDirective(provider string) cachemeta.ExternalInvalidationDirective {
 	kv := cachemeta.FromKVPrefix(
 		cachemeta.KVPrefix{Tokens: []int{1, 2, 3}, ModelID: "glm-5.2", TokenizerID: "glm-tokenizer"},
 		cachemeta.WithResidency(cachemeta.TierProvider, provider, "lease-1"),
+		cachemeta.WithAdmission(cachemeta.AdmissionQuarantine, "l3-referee"),
+		cachemeta.WithDeletionCertificate(cachemeta.DeletionCertificate{Schema: "fak.deletioncert/v1", Subject: "span-27", Digest: "cert-27"}),
 		cachemeta.WithLabel("provider", provider),
 		cachemeta.WithLabel("engine", provider),
 	)
 	return cachemeta.ExternalInvalidationDirective{
-		Kind:      cachemeta.ExternalInvalidateKVSpan,
-		Entry:     kv.ID,
-		Plane:     kv.Plane,
-		Residency: kv.Residency,
-		Provider:  provider,
-		Engine:    provider,
-		Reason:    "poisoned_kv",
+		Kind:       cachemeta.ExternalInvalidateKVSpan,
+		Entry:      kv.ID,
+		Plane:      kv.Plane,
+		Residency:  kv.Residency,
+		Provider:   provider,
+		Engine:     provider,
+		Reason:     "poisoned_kv",
+		Governance: cachemeta.GovernanceFromEntry(kv),
 	}
 }
 
@@ -131,6 +135,20 @@ func TestInvalidateExactSpanUnsupportedUsesWholePrefixReset(t *testing.T) {
 	if res.Scope != ScopeWholePrefixCache || res.ExactSpanSupported || res.Directives != 2 {
 		t.Fatalf("exact-span fallback not witnessed: %+v", res)
 	}
+	if !res.Degraded || res.DegradeReason != degradeExactSpanUnsupported {
+		t.Fatalf("whole-prefix fallback did not surface degradation: %+v", res)
+	}
+	if len(res.Attestations) != 2 {
+		t.Fatalf("attestations = %d, want one per directive: %+v", len(res.Attestations), res.Attestations)
+	}
+	if a := res.Attestations[0]; a.Scope != cachemeta.KVEvictionScopeWholePrefixCache ||
+		!a.Degraded ||
+		!a.RefereeAdmitted ||
+		a.Governance.Lease != "lease-1" ||
+		a.Governance.Security.AdmissionVerdict != cachemeta.AdmissionQuarantine ||
+		a.Governance.DeletionCertificate.Digest != "cert-27" {
+		t.Fatalf("degraded attestation lost governance: %+v", a)
+	}
 }
 
 func TestInvalidateExactSpanRequiredFailsBeforeWholeCacheReset(t *testing.T) {
@@ -194,6 +212,14 @@ func TestInvalidateExactSpanEvictsNamedSpansWhenEndpointConfigured(t *testing.T)
 	}
 	if res.Scope != ScopeExactSpan || !res.ExactSpanSupported || res.Directives != 2 || res.StatusCode != http.StatusOK {
 		t.Fatalf("exact-span eviction not witnessed: %+v", res)
+	}
+	if res.Degraded {
+		t.Fatalf("exact-span endpoint must not report degradation: %+v", res)
+	}
+	if len(res.Attestations) != 2 || res.Attestations[0].Scope != cachemeta.KVEvictionScopeExactSpan ||
+		!res.Attestations[0].RefereeAdmitted ||
+		res.Attestations[0].Governance.DeletionCertificate.Digest != "cert-27" {
+		t.Fatalf("exact-span attestation lost governance: %+v", res.Attestations)
 	}
 	if len(gotBody.Spans) != 2 {
 		t.Fatalf("exact-span body carried %d spans, want 2: %+v", len(gotBody.Spans), gotBody)
@@ -302,6 +328,9 @@ func TestInvalidateExactSpanEndpointFallsBackToWholeResetWhenNotRequired(t *test
 	if res.Scope != ScopeWholePrefixCache {
 		t.Fatalf("expected whole-prefix fallback, got %+v", res)
 	}
+	if !res.ExactSpanSupported || !res.Degraded || res.DegradeReason != degradeExactSpanUnnamed {
+		t.Fatalf("fallback did not attest target-missing degradation: %+v", res)
+	}
 }
 
 func TestSupportsExactSpanIsFalseForCurrentPublicEngines(t *testing.T) {
@@ -309,6 +338,43 @@ func TestSupportsExactSpanIsFalseForCurrentPublicEngines(t *testing.T) {
 		if SupportsExactSpan(engine) {
 			t.Fatalf("%s exact-span eviction should stay false until a documented public endpoint exists", engine)
 		}
+	}
+}
+
+func TestInvalidateRefusesUngovernedNamedKVBeforeReset(t *testing.T) {
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		t.Fatal("server must not be called when the K/V governance referee refuses")
+	}))
+	defer ts.Close()
+
+	kv := cachemeta.FromKVPrefix(
+		cachemeta.KVPrefix{Tokens: []int{1, 2, 3}, ModelID: "m"},
+		cachemeta.WithResidency(cachemeta.TierProvider, "sglang", "lease-27"),
+		cachemeta.WithAdmission(cachemeta.AdmissionQuarantine, "l3-referee"),
+	)
+	res, err := Client{Engine: EngineSGLang, BaseURL: ts.URL}.Invalidate(context.Background(), []cachemeta.ExternalInvalidationDirective{{
+		Kind:       cachemeta.ExternalInvalidateKVSpan,
+		Entry:      kv.ID,
+		Residency:  kv.Residency,
+		Provider:   "sglang",
+		Engine:     "sglang",
+		Reason:     "poisoned_kv",
+		Governance: cachemeta.GovernanceFromEntry(kv),
+	}})
+	if err == nil {
+		t.Fatal("expected governance-referee refusal")
+	}
+	if !strings.Contains(err.Error(), string(cachemeta.KVRefereeMissingDeletionCertificate)) {
+		t.Fatalf("error = %q, want missing certificate reason", err)
+	}
+	if calls != 0 {
+		t.Fatalf("server calls = %d, want 0", calls)
+	}
+	if len(res.Attestations) != 1 || res.Attestations[0].RefereeAdmitted ||
+		res.Attestations[0].RefereeReason != cachemeta.KVRefereeMissingDeletionCertificate {
+		t.Fatalf("result did not surface referee refusal: %+v", res)
 	}
 }
 
@@ -322,7 +388,7 @@ func TestInvalidateNoopsWithoutDirectives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invalidate: %v", err)
 	}
-	if res != (Result{}) {
+	if !reflect.DeepEqual(res, Result{}) {
 		t.Fatalf("empty directive set should return zero result, got %+v", res)
 	}
 }

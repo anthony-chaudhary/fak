@@ -24,8 +24,13 @@ const (
 	EngineSGLang Engine = "sglang"
 	EngineVLLM   Engine = "vllm"
 
-	ScopeWholePrefixCache = "whole_prefix_cache"
-	ScopeExactSpan        = "exact_span"
+	ScopeWholePrefixCache = string(cachemeta.KVEvictionScopeWholePrefixCache)
+	ScopeExactSpan        = string(cachemeta.KVEvictionScopeExactSpan)
+)
+
+const (
+	degradeExactSpanUnsupported = "exact_span_unsupported_whole_prefix_flush"
+	degradeExactSpanUnnamed     = "exact_span_target_missing_whole_prefix_flush"
 )
 
 // Client translates cachemeta invalidation directives into remote engine calls.
@@ -62,9 +67,12 @@ type Result struct {
 	Endpoint           string
 	Scope              string
 	ExactSpanSupported bool
+	Degraded           bool
+	DegradeReason      string
 	Directives         int
 	StatusCode         int
 	BodySummary        string
+	Attestations       []cachemeta.KVEvictionAttestation
 }
 
 // Invalidate applies remote invalidation directives. It is a no-op when the
@@ -82,6 +90,15 @@ func (c Client) Invalidate(ctx context.Context, dirs []cachemeta.ExternalInvalid
 	if engine == "" {
 		return res, fmt.Errorf("enginecache: no supported engine in directives")
 	}
+	if v := cachemeta.DefaultKVGovernanceReferee.AdmitInvalidations(dirs); !v.Admitted {
+		return Result{
+			Engine:             engine,
+			Scope:              ScopeWholePrefixCache,
+			ExactSpanSupported: c.exactSpanCapable(engine),
+			Directives:         len(dirs),
+			Attestations:       cachemeta.AttestInvalidations(dirs, cachemeta.KVEvictionScopeWholePrefixCache, c.exactSpanCapable(engine), ""),
+		}, fmt.Errorf("enginecache: KV governance referee denied invalidation: %s", v.Reason)
+	}
 	if err := c.checkRequiredScope(engine, len(dirs)); err != nil {
 		return Result{
 			Engine:             engine,
@@ -93,7 +110,7 @@ func (c Client) Invalidate(ctx context.Context, dirs []cachemeta.ExternalInvalid
 	if c.exactSpanCapable(engine) {
 		return c.invalidateExactSpan(ctx, engine, dirs)
 	}
-	return c.invalidateWholePrefix(ctx, engine, dirs)
+	return c.invalidateWholePrefix(ctx, engine, dirs, "")
 }
 
 // invalidateExactSpan evicts only the named K/V span(s) and their dependent DSA
@@ -114,7 +131,7 @@ func (c Client) invalidateExactSpan(ctx context.Context, engine Engine, dirs []c
 			}, fmt.Errorf("enginecache: exact-span eviction required but no named span in %d directive(s)", len(dirs))
 		}
 		// No span identity to evict precisely; the safe superset is a whole reset.
-		return c.invalidateWholePrefix(ctx, engine, dirs)
+		return c.invalidateWholePrefix(ctx, engine, dirs, degradeExactSpanUnnamed)
 	}
 	endpoint, err := c.exactSpanResolvedEndpoint()
 	if err != nil {
@@ -138,6 +155,7 @@ func (c Client) invalidateExactSpan(ctx context.Context, engine Engine, dirs []c
 		Directives:         len(dirs),
 		StatusCode:         resp.StatusCode,
 		BodySummary:        strings.TrimSpace(string(raw)),
+		Attestations:       cachemeta.AttestInvalidations(dirs, cachemeta.KVEvictionScopeExactSpan, true, ""),
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return res, fmt.Errorf("enginecache: %s exact-span HTTP %d: %s", engine, resp.StatusCode, res.BodySummary)
@@ -148,7 +166,7 @@ func (c Client) invalidateExactSpan(ctx context.Context, engine Engine, dirs []c
 // invalidateWholePrefix collapses any directive set to one documented
 // whole-prefix/radix-cache reset — the safe over-invalidation superset of the
 // named span. A non-2xx control response surfaces as an error.
-func (c Client) invalidateWholePrefix(ctx context.Context, engine Engine, dirs []cachemeta.ExternalInvalidationDirective) (Result, error) {
+func (c Client) invalidateWholePrefix(ctx context.Context, engine Engine, dirs []cachemeta.ExternalInvalidationDirective, degradeReason string) (Result, error) {
 	endpoint, err := c.endpoint(engine)
 	if err != nil {
 		return Result{}, err
@@ -159,14 +177,21 @@ func (c Client) invalidateWholePrefix(ctx context.Context, engine Engine, dirs [
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	exactSpanSupported := c.exactSpanCapable(engine)
+	if degradeReason == "" && !exactSpanSupported && len(cachemeta.ExactSpanTargets(dirs)) > 0 {
+		degradeReason = degradeExactSpanUnsupported
+	}
 	res := Result{
 		Engine:             engine,
 		Endpoint:           endpoint,
 		Scope:              ScopeWholePrefixCache,
-		ExactSpanSupported: SupportsExactSpan(engine),
+		ExactSpanSupported: exactSpanSupported,
+		Degraded:           degradeReason != "",
+		DegradeReason:      degradeReason,
 		Directives:         len(dirs),
 		StatusCode:         resp.StatusCode,
 		BodySummary:        strings.TrimSpace(string(raw)),
+		Attestations:       cachemeta.AttestInvalidations(dirs, cachemeta.KVEvictionScopeWholePrefixCache, exactSpanSupported, degradeReason),
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return res, fmt.Errorf("enginecache: %s HTTP %d: %s", engine, resp.StatusCode, res.BodySummary)
