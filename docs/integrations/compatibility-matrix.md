@@ -1,6 +1,6 @@
 ---
 title: "Compatibility matrix — what speaks a wire fak can sit on"
-description: "A sourced reference of 45 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
+description: "A sourced reference of 46 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
 ---
 
 # Compatibility matrix
@@ -8,7 +8,7 @@ description: "A sourced reference of 45 agent harnesses, frameworks, model backe
 `fak serve` adjudicates over the wires your stack already speaks — OpenAI Chat
 Completions, Anthropic Messages, and MCP. So the practical question for any tool is
 narrow: **does it let you repoint its base URL?** If yes, the gate drops in front with no
-code change. This page answers that question for 45 surveyed targets, with the exact key
+code change. This page answers that question for 46 surveyed targets, with the exact key
 you set and a link to the docs that prove it.
 
 It's a reference, not a tutorial. For the copy-paste recipe, start at the
@@ -24,8 +24,8 @@ var, constructor arg, or config field. A **Partial** or **No** means the repoint
 templated, indirect, or undocumented — the [caveats](#caveats-worth-knowing) below say
 exactly how.
 
-> Surveyed 2026-06-27 across 45 targets (11 harnesses, 14 frameworks, 13 backends, 7
-> protocols). Each row carries a source link; 38 of 45 are high-confidence, the rest
+> Surveyed 2026-06-27 across 46 targets (12 harnesses, 14 frameworks, 13 backends, 7
+> protocols). Each row carries a source link; 39 of 46 are high-confidence, the rest
 > flagged in the caveats. Wires and config keys drift — when a row looks stale, the source
 > link is the ground truth, not this table.
 
@@ -38,6 +38,7 @@ Interactive coding agents and CLIs. Almost all let you set a base URL, so the ga
 | Target | Speaks | Custom base URL | How you repoint it |
 |---|---|---|---|
 | [Aider](https://aider.chat/docs/llms/openai-compat.html) | OpenAI Chat Completions (and others via LiteLLM); also speaks Anthropic Messages for Claude models | Yes | OPENAI_API_BASE env var (or AIDER_OPENAI_API_BASE), CLI flag --openai-api-base, or openai-api-base: in ~/.aider.conf.yml / .env |
+| [Hermes Agent (NousResearch)](https://hermes-agent.nousresearch.com/docs/user-guide/configuration) | OpenAI Chat Completions (custom provider; OpenAI tools[] function-calling) | Yes | OPENAI_BASE_URL + OPENAI_API_KEY env vars; or model.base_url (with provider: custom) in ~/.hermes/config.yaml; or the `hermes model` custom-endpoint wizard |
 | [Cline (VS Code)](https://docs.cline.bot/provider-config/openai-compatible) | OpenAI Chat Completions (OpenAI Compatible provider) and Anthropic Messages (Anthropic provider) | Yes | UI provider settings (gear icon): select 'OpenAI Compatible' provider and fill the 'Base URL' field; for the Anthropic provider check 'Use custom base URL' and enter the URL. Configured via the extension UI, not an env var. |
 | [Roo Code](https://roocodeinc.github.io/Roo-Code/providers/openai-compatible) | OpenAI Chat Completions with OpenAI native tool-calling schema (OpenAI Compatible provider); also supports an Anthropic provider | Yes | UI provider settings panel: select 'OpenAI Compatible' as API Provider and enter the 'Base URL' field (plus API Key, Model). Configured via the VS Code extension UI. |
 | [Continue.dev](https://docs.continue.dev/customize/model-providers/top-level/openai) | OpenAI Chat Completions (provider: openai); also supports an anthropic provider for Claude (Anthropic Messages) | Yes | apiBase field in ~/.continue/config.yaml (provider: openai, apiBase: http://my-endpoint/v1); also supported in deprecated config.json as "apiBase". |
@@ -122,7 +123,7 @@ Where a row says **Partial** or **No**, or the repoint has a sharp edge, here's 
 
 ## Summary
 
-Of the 45 targets, **39 expose a custom base URL outright** and 4 more do so partially —
+Of the 46 targets, **40 expose a custom base URL outright** and 4 more do so partially —
 because the OpenAI-compatible wire has become the field's lingua franca, and `fak serve`
 speaks it. The handful that don't (`llms.txt` is a static file; Windsurf routes through a
 closed backend) aren't runtime boundaries a gateway can sit on in the first place.

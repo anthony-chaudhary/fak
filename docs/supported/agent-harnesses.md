@@ -24,7 +24,7 @@ For the copy-paste recipe and the 60-second offline proof, start at the
 
 ## First-class guides
 
-These four have a dedicated walkthrough. Each guide names the wire, the repoint key, and a
+These five have a dedicated walkthrough. Each guide names the wire, the repoint key, and a
 worked end-to-end setup.
 
 | Harness | Wire | Repoint key | Guide |
@@ -33,6 +33,7 @@ worked end-to-end setup.
 | Cursor | MCP, or OpenAI Chat Completions proxy | MCP server entry, or a custom OpenAI-compatible endpoint | [cursor.md](../integrations/cursor.md) |
 | OpenAI Codex | OpenAI Chat Completions | `OPENAI_BASE_URL` | [openai-codex.md](../integrations/openai-codex.md) |
 | OpenCode | OpenAI Chat Completions | `OPENAI_BASE_URL` (or `fak guard --provider openai -- opencode`) | [claude.md#opencode](../integrations/claude.md#opencode) |
+| Hermes Agent (NousResearch) | OpenAI Chat Completions | `OPENAI_BASE_URL` / `~/.hermes/config.yaml` `model.base_url` (or `fak guard -- hermes`) | [hermes.md](../integrations/hermes.md) |
 
 The one-command front door for Claude Code is `fak guard -- claude`: it starts the gateway
 in-process, injects the base URL into the child only, and proxies the real Anthropic API in
@@ -51,6 +52,7 @@ env var, flag, or config field for every row is in the
 | Harness | Wire | Custom base URL |
 |---|---|---|
 | Aider | OpenAI Chat Completions (and others via LiteLLM); Anthropic Messages for Claude models | Yes |
+| Hermes Agent (NousResearch) | OpenAI Chat Completions (custom provider; OpenAI tools[] function-calling) | Yes |
 | Cline (VS Code) | OpenAI Chat Completions and Anthropic Messages | Yes |
 | Roo Code | OpenAI Chat Completions (OpenAI-native tool-calling); also an Anthropic provider | Yes |
 | Kilo Code | OpenAI Chat Completions (OpenAI Compatible provider) | Yes |

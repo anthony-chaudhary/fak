@@ -64,6 +64,7 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **Zed** (AI-native editor — OpenAI/Anthropic/MCP) | [`zed.md`](zed.md) |
 | **JetBrains IDEs** (IntelliJ/PyCharm/WebStorm/… — OpenAI/Anthropic) | [`jetbrains.md`](jetbrains.md) |
 | **Aider** (CLI pair-programmer, OpenAI wire) | [`aider.md`](aider.md) |
+| **Hermes Agent** (NousResearch self-hosted agent, OpenAI wire) | [`hermes.md`](hermes.md) |
 | **Cline** (VS Code — OpenAI-Compatible provider) | [`cline.md`](cline.md) |
 | **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](continue.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](../../examples/mcp/README.md) |
