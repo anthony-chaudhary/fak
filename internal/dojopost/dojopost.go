@@ -32,10 +32,10 @@ package dojopost
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
+	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
 // ChannelDefault is the dojo channel in the scoreboard Slack workspace (team
@@ -92,33 +92,9 @@ func ResolveChannel() string {
 	return ChannelDefault
 }
 
-// envFileValue walks up from the cwd looking for .env.slack.local and returns the
-// value of the first `KEY=...` line for the given key (an optional `export ` prefix is
-// tolerated). Mirrors the scoreboard/bench resolver so one gitignored file configures
-// every workspace. (scoreboard.envFileValue is unexported, so the walk-up is repeated
-// here rather than exported — it is six lines of file I/O, not logic worth coupling.)
+// envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
+// to internal/slackenv — the single shared, tested resolver now used by every Slack
+// surface (the byte-identical per-package walk-up that used to live here is gone).
 func envFileValue(key string) string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for i := 0; i < 6; i++ {
-		p := filepath.Join(dir, ".env.slack.local")
-		if b, err := os.ReadFile(p); err == nil {
-			for _, ln := range strings.Split(string(b), "\n") {
-				ln = strings.TrimSpace(ln)
-				ln = strings.TrimPrefix(ln, "export ")
-				ln = strings.TrimSpace(ln)
-				if v, ok := strings.CutPrefix(ln, key+"="); ok {
-					return strings.TrimSpace(v)
-				}
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
+	return slackenv.FileValue(key)
 }

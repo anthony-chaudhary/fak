@@ -28,10 +28,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
 const slackAPI = "https://slack.com/api/"
@@ -131,33 +132,11 @@ func ResolveProductChannel() string {
 	return envFileValue("FAK_PRODUCT_CHANNEL")
 }
 
-// envFileValue walks up from the cwd looking for .env.slack.local and returns the value
-// of the first `KEY=...` line for the given key (an optional `export ` prefix is tolerated).
-// This mirrors the bridge's resolver so one gitignored file configures both workspaces.
+// envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
+// to internal/slackenv — the single shared, tested resolver now used by every Slack
+// surface (the byte-identical per-package walk-up that used to live here is gone).
 func envFileValue(key string) string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for i := 0; i < 6; i++ {
-		p := filepath.Join(dir, ".env.slack.local")
-		if b, err := os.ReadFile(p); err == nil {
-			for _, ln := range strings.Split(string(b), "\n") {
-				ln = strings.TrimSpace(ln)
-				ln = strings.TrimPrefix(ln, "export ")
-				ln = strings.TrimSpace(ln)
-				if v, ok := strings.CutPrefix(ln, key+"="); ok {
-					return strings.TrimSpace(v)
-				}
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
+	return slackenv.FileValue(key)
 }
 
 // shouldPost returns true if the update differs from the last posted update
@@ -240,4 +219,61 @@ func (c *Client) PostWithUpdate(ctx context.Context, channel string, up Update, 
 		c.recordLast(up)
 	}
 	return r.TS, nil
+}
+
+// AuthInfo is the identity a bot token resolves to — the subset of auth.test a
+// diagnostic reports, enough to answer "does this token work, and as whom?".
+type AuthInfo struct {
+	URL    string // workspace URL, e.g. https://acme.slack.com/
+	Team   string // workspace name
+	User   string // the authenticating user/bot handle
+	TeamID string // T... team id
+	UserID string // U... user id
+	BotID  string // B... bot id (set when the token is a bot token)
+}
+
+// authTestResp carries the auth.test outcome (Slack returns ok=false in the body).
+type authTestResp struct {
+	OK     bool   `json:"ok"`
+	Error  string `json:"error"`
+	URL    string `json:"url"`
+	Team   string `json:"team"`
+	User   string `json:"user"`
+	TeamID string `json:"team_id"`
+	UserID string `json:"user_id"`
+	BotID  string `json:"bot_id"`
+}
+
+// AuthTest calls auth.test to verify the token is valid and report the identity it
+// resolves to. It is the "does this token actually work" probe behind `fak slack check
+// --auth`: a wrong, revoked, or workspace-mismatched bot token is the most common Slack
+// failure, and it surfaces here as a concrete error (e.g. "invalid_auth") instead of a
+// downstream chat.postMessage rejection with no context.
+func (c *Client) AuthTest(ctx context.Context) (*AuthInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBase+"auth.test", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var r authTestResp
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("auth.test: decode: %w (body=%.200s)", err, string(data))
+	}
+	if !r.OK {
+		return nil, fmt.Errorf("auth.test: %s", r.Error)
+	}
+	return &AuthInfo{
+		URL:    r.URL,
+		Team:   r.Team,
+		User:   r.User,
+		TeamID: r.TeamID,
+		UserID: r.UserID,
+		BotID:  r.BotID,
+	}, nil
 }
