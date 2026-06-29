@@ -203,6 +203,11 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "conceptusage", "debt": "conceptusage_debt", "script": "", "cmd": "go run ./cmd/fak concept-usage-score --json", "label": "concept-usage"},
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak support-maturity-scorecard --json", "label": "support-maturity"},
+    # The agentic-coding loop-index (#1152, dev-ex epic #1148 spine): folds the six
+    # loop stages (orient->plan->act->verify->ship->learn) into one loopindex_debt.
+    # Registered here so a stage UN-WIRING (a regressed default) reds the ratchet —
+    # the spine's "a regression reds the gate" DoD. Go-native, no GPU, deterministic.
+    {"key": "loopindex", "debt": "loopindex_debt", "script": "", "cmd": "go run ./cmd/fak loop-index-scorecard --json", "label": "loop-index"},
     {"key": "claim_repro", "debt": "claim_repro_debt", "script": "claim_repro_scorecard.py", "label": "claim-repro"},
     {"key": "release", "debt": "release_debt", "script": "release_readiness_scorecard.py", "label": "release-readiness"},
     # Folded #1270: these emit a control-pane-compatible payload (corpus.*_debt +
