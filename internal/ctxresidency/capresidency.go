@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/capindex"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
@@ -30,20 +31,11 @@ import (
 // gate (so a capability eviction is as witnessed as a quarantine).
 // ---------------------------------------------------------------------------
 
-// CapKey is the capability identity the residency tracker keys on: the
-// {Kind, Name, Version} triple of capindex.CapRef, mirrored here as a plain
-// value type. It is defined LOCALLY rather than importing capindex on purpose —
-// capindex is an integrator-tier package (it imports internal/gateway via its
-// MCP/A2A resolvers), and ctxresidency is a composer-tier leaf; a direct import
-// would be an upward edge the architest layering gate (TestNoUpwardImports)
-// refuses. A caller holding a capindex.CapRef converts with
-// CapKey{Kind: string(ref.Kind), Name: ref.Name, Version: ref.Version}; the
-// fields are structurally identical, so the key binds the same capability.
-type CapKey struct {
-	Kind    string // skill | mcp-tool | a2a-agent | ...
-	Name    string
-	Version string // empty = latest
-}
+// CapKey is the capability identity the residency tracker keys on. It is an
+// alias for capindex.CapRef now that the protocol-blind capindex core is tier-2
+// and legal for this tier-3 leaf to import; the local mirror that used string
+// Kind fields is gone, while the public ctxresidency spelling remains stable.
+type CapKey = capindex.CapRef
 
 // capState is one resident capability's tracked residency. It is the
 // per-capability analogue of a kvmmu Segment row: its residency class, its

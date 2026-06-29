@@ -9,8 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxresidency"
 )
 
-// skillKey builds a capability key shaped exactly like a capindex.CapRef
-// (Kind/Name/Version), the conversion a real caller does to bind a capability.
+// skillKey builds the capindex.CapRef identity the residency tracker keys on.
 func skillKey(name, version string) ctxresidency.CapKey {
 	return ctxresidency.CapKey{Kind: "skill", Name: name, Version: version}
 }
