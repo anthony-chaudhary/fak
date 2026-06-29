@@ -16,7 +16,7 @@ This is the measuring stick for the learning-2× program: does the *teaching* se
 | Metric | Value |
 |---|---|
 | Learning docs scored | 76 |
-| **Learning-debt (total HARD defects)** | **0** (0 in-doc + 0 coverage) |
+| **Learning-debt (total HARD defects)** | **0** (0 in-doc + 0 coverage + 0 stamp) |
 | Soft signals (judgment calls) | 144 |
 | Mean score | 96.8/100 |
 | Median / min / max | 97.0 / 90.5 / 100.0 |
@@ -24,6 +24,7 @@ This is the measuring stick for the learning-2× program: does the *teaching* se
 | Coverage (overall) | 100.0% |
 | — reachable from a front door | 100.0% |
 | — expected learning topics covered | 100.0% |
+| Stamp freshness | age 0d / cadence 1d |
 
 ## Priorities — fix the most-important, most-broken first
 
