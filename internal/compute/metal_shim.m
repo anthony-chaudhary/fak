@@ -1,4 +1,4 @@
-//go:build darwin && metal && cgo
+//go:build darwin && arm64 && cgo
 
 // metal_shim.m — the Metal / MetalPerformanceShaders hardware seam behind the typed
 // compute.Backend, compiled DIRECTLY by cgo's clang (no offline step, unlike CUDA's nvcc
@@ -8,12 +8,14 @@
 // MPSMatrixMultiplication (a different reduction order than the model's fdot tree) is what
 // makes that distinction real and honest.
 //
-// Memory management is MANUAL (MRC — cgo compiles .m without -fobjc-arc): "new…"/"alloc"
-// objects are +1 owned and released explicitly; each op body is wrapped in an
-// @autoreleasepool so transient descriptors/command buffers don't accumulate. Buffers use
-// MTLResourceStorageModeShared (Apple Silicon unified memory), so host<->device transfers
-// are plain memcpy over [buffer contents]; every op commits+waits synchronously (the
-// async/stream seam is a tracked follow-up), so contents are always coherent on return.
+// The device + command queue are owned by internal/metalgemm (gDev/gQueue): compute's
+// registry backend and the model-engine GEMM/decode lane now share one Metal singleton.
+// Memory management in this file is MANUAL (MRC — cgo compiles .m without -fobjc-arc):
+// "new…"/"alloc" objects are +1 owned and released explicitly; each op body is wrapped
+// in an @autoreleasepool so transient descriptors/command buffers don't accumulate.
+// Buffers use MTLResourceStorageModeShared (Apple Silicon unified memory), so host<->device
+// transfers are plain memcpy over [buffer contents]; every op commits+waits synchronously
+// (the async/stream seam is a tracked follow-up), so contents are always coherent on return.
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -21,8 +23,11 @@
 #include <string.h>
 #include "metal_backend.h"
 
-static id<MTLDevice> g_device;
-static id<MTLCommandQueue> g_queue;
+extern id<MTLDevice> gDev;
+extern id<MTLCommandQueue> gQueue;
+extern int gMPSOK;
+int mg_init(void);
+
 static id<MTLComputePipelineState> g_rmsnorm;
 static id<MTLComputePipelineState> g_rope;
 static id<MTLComputePipelineState> g_swiglu;
@@ -151,7 +156,7 @@ static id<MTLComputePipelineState> make_pso(id<MTLLibrary> lib, const char *fnam
         return nil;
     }
     NSError *err = nil;
-    id<MTLComputePipelineState> pso = [g_device newComputePipelineStateWithFunction:fn error:&err]; // +1
+    id<MTLComputePipelineState> pso = [gDev newComputePipelineStateWithFunction:fn error:&err]; // +1
     [fn release];
     if (!pso) {
         NSLog(@"fak metal: pipeline %s failed: %@", fname, err);
@@ -162,19 +167,13 @@ static id<MTLComputePipelineState> make_pso(id<MTLLibrary> lib, const char *fnam
 
 int fmetal_init(char *name, int namelen) {
     @autoreleasepool {
-        g_device = MTLCreateSystemDefaultDevice();
-        if (!g_device) {
-            return 1; // no Metal device
-        }
-        [g_device retain]; // permanent global (MTLCreateSystemDefaultDevice may autorelease)
-        g_queue = [g_device newCommandQueue]; // +1 owned, survives the pool
-        if (!g_queue) {
+        if (mg_init() != 1 || gDev == nil || gQueue == nil || !gMPSOK) {
             return 1;
         }
         NSError *err = nil;
         NSString *src = [NSString stringWithUTF8String:kShaderSrc];
         MTLCompileOptions *opts = [[MTLCompileOptions alloc] init];
-        id<MTLLibrary> lib = [g_device newLibraryWithSource:src options:opts error:&err]; // +1
+        id<MTLLibrary> lib = [gDev newLibraryWithSource:src options:opts error:&err]; // +1
         [opts release];
         if (!lib) {
             NSLog(@"fak metal: MSL library compile failed: %@", err);
@@ -191,7 +190,7 @@ int fmetal_init(char *name, int namelen) {
         if (!g_rmsnorm || !g_rope || !g_swiglu || !g_add || !g_addbias || !g_attention || !g_argmax) {
             return 1;
         }
-        const char *dn = [[g_device name] UTF8String];
+        const char *dn = [[gDev name] UTF8String];
         if (name && namelen > 0) {
             if (dn) {
                 strncpy(name, dn, (size_t)(namelen - 1));
@@ -210,7 +209,7 @@ void *fmetal_malloc(size_t bytes) {
     if (bytes == 0) {
         bytes = 16;
     }
-    id<MTLBuffer> b = [g_device newBufferWithLength:bytes options:MTLResourceStorageModeShared]; // +1 owned
+    id<MTLBuffer> b = [gDev newBufferWithLength:bytes options:MTLResourceStorageModeShared]; // +1 owned
     return (void *)b;
 }
 
@@ -223,13 +222,13 @@ void fmetal_free(void *buf) {
 }
 
 int fmetal_device_memory_total(unsigned long long *total) {
-    if (!g_device || !total) {
+    if (!gDev || !total) {
         return 1;
     }
-    if (![g_device respondsToSelector:@selector(recommendedMaxWorkingSetSize)]) {
+    if (![gDev respondsToSelector:@selector(recommendedMaxWorkingSetSize)]) {
         return 1;
     }
-    unsigned long long v = (unsigned long long)[g_device recommendedMaxWorkingSetSize];
+    unsigned long long v = (unsigned long long)[gDev recommendedMaxWorkingSetSize];
     if (v == 0) {
         return 1;
     }
@@ -300,7 +299,7 @@ void fmetal_matmul_f32(void *dW, void *dX, void *dY, int out, int in, int P) {
         MPSMatrix *mC = [[MPSMatrix alloc] initWithBuffer:bY descriptor:dC];
         // C[P,out] = A[P,in] * B[out,in]^T  (transposeRight=YES, interiorColumns=in).
         MPSMatrixMultiplication *mul =
-            [[MPSMatrixMultiplication alloc] initWithDevice:g_device
+            [[MPSMatrixMultiplication alloc] initWithDevice:gDev
                                               transposeLeft:NO
                                              transposeRight:YES
                                                  resultRows:(NSUInteger)P
@@ -308,7 +307,7 @@ void fmetal_matmul_f32(void *dW, void *dX, void *dY, int out, int in, int P) {
                                             interiorColumns:(NSUInteger)in
                                                       alpha:1.0
                                                        beta:0.0];
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         [mul encodeToCommandBuffer:cb leftMatrix:mA rightMatrix:mB resultMatrix:mC];
         [cb commit];
         [cb waitUntilCompleted];
@@ -321,7 +320,7 @@ void fmetal_matmul_f32(void *dW, void *dX, void *dY, int out, int in, int P) {
 
 void fmetal_rmsnorm_f32(void *dX, void *dW, void *dY, int rows, int n, float eps) {
     @autoreleasepool {
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:g_rmsnorm];
         [enc setBuffer:(id<MTLBuffer>)dX offset:0 atIndex:0];
@@ -335,7 +334,7 @@ void fmetal_rmsnorm_f32(void *dX, void *dW, void *dY, int rows, int n, float eps
 
 void fmetal_rope_f32(void *dX, int pos, int nHeads, int headDim, float theta) {
     @autoreleasepool {
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:g_rope];
         [enc setBuffer:(id<MTLBuffer>)dX offset:0 atIndex:0];
@@ -349,7 +348,7 @@ void fmetal_rope_f32(void *dX, int pos, int nHeads, int headDim, float theta) {
 
 void fmetal_swiglu_f32(void *dG, void *dU, void *dY, int n) {
     @autoreleasepool {
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:g_swiglu];
         [enc setBuffer:(id<MTLBuffer>)dG offset:0 atIndex:0];
@@ -361,7 +360,7 @@ void fmetal_swiglu_f32(void *dG, void *dU, void *dY, int n) {
 
 void fmetal_add_f32(void *dDst, void *dSrc, int n) {
     @autoreleasepool {
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:g_add];
         [enc setBuffer:(id<MTLBuffer>)dDst offset:0 atIndex:0];
@@ -372,7 +371,7 @@ void fmetal_add_f32(void *dDst, void *dSrc, int n) {
 
 void fmetal_add_bias_f32(void *dDst, void *dBias, int rows, int width) {
     @autoreleasepool {
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:g_addbias];
         [enc setBuffer:(id<MTLBuffer>)dDst offset:0 atIndex:0];
@@ -385,7 +384,7 @@ void fmetal_add_bias_f32(void *dDst, void *dBias, int rows, int width) {
 void fmetal_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
                           int nPos, int nH, int nKV, int hd, float scale) {
     @autoreleasepool {
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:g_attention];
         [enc setBuffer:(id<MTLBuffer>)dQ offset:0 atIndex:0];
@@ -403,9 +402,9 @@ void fmetal_attention_f32(void *dQ, void *dK, void *dV, void *dOut,
 
 int fmetal_argmax_f32(void *dLogits, int n) {
     @autoreleasepool {
-        id<MTLBuffer> rbuf = [g_device newBufferWithLength:sizeof(int)
+        id<MTLBuffer> rbuf = [gDev newBufferWithLength:sizeof(int)
                                                   options:MTLResourceStorageModeShared]; // +1
-        id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
         [enc setComputePipelineState:g_argmax];
         [enc setBuffer:(id<MTLBuffer>)dLogits offset:0 atIndex:0];

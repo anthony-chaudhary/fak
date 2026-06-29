@@ -23,11 +23,12 @@
 extern "C" {
 #endif
 
-/* fmetal_init creates the system default Metal device + a command queue, compiles the
- * embedded MSL compute library into pipeline states (one per elementwise/reduction op),
- * and reports the device name (into name, up to namelen-1 chars, e.g. "Apple M3 Pro").
- * Returns 0 on success, non-zero if no Metal device is reachable or a pipeline fails to
- * build (leaving cpu-ref as the only registered backend). */
+/* fmetal_init binds the compute backend to internal/metalgemm's shared Metal device +
+ * command queue, compiles the embedded MSL compute library into pipeline states (one per
+ * elementwise/reduction op), and reports the device name (into name, up to namelen-1
+ * chars, e.g. "Apple M3 Pro"). Returns 0 on success, non-zero if no shared Metal/MPS
+ * device is reachable or a pipeline fails to build (leaving cpu-ref as the only registered
+ * compute backend). */
 int fmetal_init(char *name, int namelen);
 
 /* device memory (the residency seam). fmetal_malloc returns a shared-storage MTLBuffer

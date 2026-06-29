@@ -1,4 +1,4 @@
-//go:build darwin && metal && cgo
+//go:build darwin && arm64 && cgo
 
 package compute
 
@@ -25,7 +25,7 @@ import "testing"
 //     batched/single-command-buffer-per-forward follow-up; decode throughput is gated on
 //     dispatch amortization, not on the matmul itself.
 // Run with:
-//   CGO_ENABLED=1 go test -tags metal -run '^$' -bench MatMul -benchmem ./internal/compute/
+//   CGO_ENABLED=1 go test -run '^$' -bench MatMul -benchmem ./internal/compute/
 // SetBytes is the weight footprint (out*in*4) so the report reads as weight-GB/s, comparable
 // to q8kernel's cross-ISA GEMV bandwidth column. Pin the machine (close other GPU consumers)
 // for a stable GEMV number.

@@ -992,6 +992,90 @@ func TestRequestPathDefaultBuildIsCgoFree(t *testing.T) {
 	}
 }
 
+// TestMetalComputeSharesMetalgemmDeviceSeam pins issue #61's architecture fix: the
+// compute registry's Metal backend must not create its own MTLDevice/command queue.
+// internal/metalgemm owns the process-wide Metal singleton, and compute/metal_shim.m
+// binds to that singleton before compiling its compute kernels.
+func TestMetalComputeSharesMetalgemmDeviceSeam(t *testing.T) {
+	internal := internalDir(t)
+
+	fset := token.NewFileSet()
+	computeFile, err := parser.ParseFile(fset, filepath.Join(internal, "compute", "metal.go"), nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("parse internal/compute/metal.go: %v", err)
+	}
+	hasMetalgemmImport := false
+	for _, spec := range computeFile.Imports {
+		if strings.Trim(spec.Path.Value, `"`) == modPrefix+"metalgemm" {
+			hasMetalgemmImport = true
+			break
+		}
+	}
+	if !hasMetalgemmImport {
+		t.Fatalf("internal/compute/metal.go must import internal/metalgemm so compute and model Metal paths share one device seam")
+	}
+
+	metalgemmFile, err := parser.ParseFile(fset, filepath.Join(internal, "metalgemm", "metalgemm.go"), nil, 0)
+	if err != nil {
+		t.Fatalf("parse internal/metalgemm/metalgemm.go: %v", err)
+	}
+	funcs := map[string]bool{}
+	for _, decl := range metalgemmFile.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			funcs[fn.Name.Name] = true
+		}
+	}
+	for _, name := range []string{"MPSAvailable", "DeviceName", "DeviceMemoryTotal"} {
+		if !funcs[name] {
+			t.Fatalf("internal/metalgemm must expose %s for the compute Metal backend's shared-device probe", name)
+		}
+	}
+
+	shimBytes, err := os.ReadFile(filepath.Join(internal, "compute", "metal_shim.m"))
+	if err != nil {
+		t.Fatalf("read internal/compute/metal_shim.m: %v", err)
+	}
+	shim := string(shimBytes)
+	for _, want := range []string{
+		"extern id<MTLDevice> gDev;",
+		"extern id<MTLCommandQueue> gQueue;",
+		"int mg_init(void);",
+		"mg_init()",
+	} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("internal/compute/metal_shim.m must bind through metalgemm's shared Metal seam; missing %q", want)
+		}
+	}
+	for _, oldLane := range []string{
+		"MTLCreateSystemDefaultDevice()",
+		"static id<MTLDevice> g_device;",
+		"static id<MTLCommandQueue> g_queue;",
+	} {
+		if strings.Contains(shim, oldLane) {
+			t.Fatalf("internal/compute/metal_shim.m still contains the old independent Metal lane %q", oldLane)
+		}
+	}
+
+	metalBytes, err := os.ReadFile(filepath.Join(internal, "metalgemm", "metal.m"))
+	if err != nil {
+		t.Fatalf("read internal/metalgemm/metal.m: %v", err)
+	}
+	metal := string(metalBytes)
+	for _, want := range []string{
+		"id<MTLDevice>",
+		"gDev = nil",
+		"id<MTLCommandQueue>",
+		"gQueue = nil",
+		"int mg_mps_available(void)",
+		"int mg_device_name(char *name, int namelen)",
+		"int mg_device_memory_total(unsigned long long *total)",
+	} {
+		if !strings.Contains(metal, want) {
+			t.Fatalf("internal/metalgemm/metal.m must own and expose the shared Metal seam; missing %q", want)
+		}
+	}
+}
+
 // regionBackendRole names every internal package allowed to register the singleton
 // Ref/Resolver backend (abi.RegisterRegionBackend) in its NON-TEST source, paired with
 // the role that earns it. Unlike the KEYED registries (RegisterEngine(id,…),

@@ -1,4 +1,4 @@
-//go:build darwin && metal && cgo
+//go:build darwin && arm64 && cgo
 
 package compute
 
@@ -11,7 +11,7 @@ import (
 // metal_test.go — the on-box witness that the Metal backend runs a real forward pass on the
 // Apple-Silicon GPU and matches the cpuref Reference within the Approx gate (argmax-exact +
 // logit-cosine >= threshold), NOT bit-identity (RequireReference keeps the device off the
-// exact rungs). Compiled only under `-tags metal` on darwin; skips cleanly if no Metal
+// exact rungs). Compiled by default on Apple Silicon when cgo is enabled; skips cleanly if no Metal
 // device is registered. Reuses the package test helpers cosine/lcg/randVec/argmaxF32
 // (compute_test.go). The synth harness is mtl-prefixed so it never collides with the
 // cuda-tagged copy in a hypothetical combined-tags build.

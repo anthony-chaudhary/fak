@@ -1,9 +1,9 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // Package metalgemm is the optional Metal GPU GEMM backend for the prefill projections.
-// It is compiled ONLY under `-tags fakmetal` (and only on darwin with cgo), so the default
-// `go build` stays pure-Go — the in-kernel trust posture (one static binary, no FFI) is the
-// default; Metal is an explicitly-opted-in acceleration lane for reaching llama.cpp-Metal
+// It is compiled by default on Apple Silicon when cgo is enabled; `CGO_ENABLED=0` and
+// non-darwin/arm64 builds use the pure-Go stub. Metal remains a runtime-selected
+// acceleration lane for reaching llama.cpp-Metal
 // prefill parity on Apple Silicon, where prefill is compute-bound and the GPU's FLOP
 // advantage is the only way past the hand-tuned-CPU-kernel ceiling.
 //
@@ -16,6 +16,9 @@ package metalgemm
 #cgo LDFLAGS: -framework Metal -framework MetalPerformanceShaders -framework Foundation -framework CoreFoundation -framework Accelerate
 #include <stdlib.h>
 int  mg_init(void);
+int  mg_mps_available(void);
+int  mg_device_name(char *name, int namelen);
+int  mg_device_memory_total(unsigned long long *total);
 int  mg_upload(const float *w, int out, int in);
 void mg_matmul(int wid, const float *x, int P, float *y);
 void mg_free(int wid);
@@ -49,10 +52,47 @@ func Available() bool {
 	return ready
 }
 
-// Compiled reports that this binary was built with the Metal backend linked in (the
-// `fakmetal` tag). The stub returns false. Distinguishes "not built with Metal" from
+// Compiled reports that this binary was built with the Metal backend linked in. The
+// stub returns false. Distinguishes "not built with Metal" from
 // "built with Metal but no usable device".
 func Compiled() bool { return true }
+
+// MPSAvailable reports whether the shared Metal device has also validated
+// MetalPerformanceShaders. Pure-MSL paths need only Available; MPS-backed GEMM paths
+// must require this so headless Apple-Silicon runs fail closed instead of probing MPS
+// from several lanes.
+func MPSAvailable() bool {
+	if !Available() {
+		return false
+	}
+	return C.mg_mps_available() == 1
+}
+
+// DeviceName returns the shared Metal device's own name, or "" when no device was
+// initialized. It is intentionally owned by this package so every Metal lane reports the
+// same hardware identity.
+func DeviceName() string {
+	if !Available() {
+		return ""
+	}
+	var name [256]C.char
+	if C.mg_device_name(&name[0], C.int(len(name))) != 1 {
+		return ""
+	}
+	return C.GoString(&name[0])
+}
+
+// DeviceMemoryTotal returns Metal's recommended working-set size for the shared device.
+func DeviceMemoryTotal() (uint64, bool) {
+	if !Available() {
+		return 0, false
+	}
+	var total C.ulonglong
+	if C.mg_device_memory_total(&total) != 1 || total == 0 {
+		return 0, false
+	}
+	return uint64(total), true
+}
 
 // Weight is a handle to an f16 weight matrix [Out, In] resident on the GPU.
 type Weight struct {

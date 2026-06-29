@@ -1,17 +1,19 @@
-//go:build darwin && metal && cgo
+//go:build darwin && arm64 && cgo
 
 // metal.go — the cgo wrapper that registers a Metal device backend (Apple Silicon) into
-// the compute registry. It is compiled ONLY under `-tags metal` on darwin; the default
-// `go build ./cmd/fak` excludes it entirely, so the shipped artifact stays one pure-Go
-// binary (DIRECTION.md rule 1). When linked, it self-registers an *Approx* backend named
+// the compute registry. It is compiled by default on Apple Silicon when cgo is enabled;
+// `CGO_ENABLED=0` and non-darwin/arm64 builds still exclude it and keep the pure-Go artifact.
+// When linked, it self-registers an *Approx* backend named
 // "metal" that the registry hands out via Pick("metal") / FAK_BACKEND=metal; the Reference
 // (cpu-ref) stays the Default, so nothing silently runs on the GPU.
 //
 // Every method delegates to the flat C ABI in metal_backend.h (implemented by
 // metal_shim.m, compiled in-process by cgo's clang — no offline kernel build, unlike the
-// CUDA/Vulkan backends). The Go side re-validates shapes and owns the Tensor type; the C
-// side carries only opaque MTLBuffer handles + shapes — a seam that carries data, never
-// trust. This is the first landing of issue #300 (Metal Backend [C-001]): MPS GEMM +
+// CUDA/Vulkan backends). metal_shim binds to internal/metalgemm's process-wide Metal
+// device/queue, so the compute registry and model-engine GEMM lane share one hardware seam.
+// The Go side re-validates shapes and owns the Tensor type; the C side carries only opaque
+// MTLBuffer handles + shapes — a seam that carries data, never trust.
+// This is the first landing of issue #300 (Metal Backend [C-001]): MPS GEMM +
 // runtime-compiled MSL compute kernels, full synth-decode parity vs cpuref on this box.
 // Quantized device GEMM, async/stream pipelining, and an on-GPU Evict are tracked
 // follow-ups (the Go MatMul refuses non-F32 weights with a clear message).
@@ -30,6 +32,8 @@ import (
 	"strconv"
 	"sync"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 // metalMu serializes all device ops: the command queue is driven synchronously (encode ->
@@ -40,24 +44,31 @@ var metalMu sync.Mutex
 var metalDev *metalBackend
 
 func init() {
+	if !metalgemm.MPSAvailable() {
+		return // compute's Metal backend uses MPS GEMM; pure-MSL metalgemm paths may still be usable
+	}
 	var name [256]C.char
 	if C.fmetal_init(&name[0], 256) != 0 {
-		return // no reachable Metal device (or a pipeline failed to build) — cpu-ref stays sole backend
+		return // shared Metal device unavailable, MPS disabled, or a compute pipeline failed to build
+	}
+	tier := C.GoString(&name[0])
+	if tier == "" {
+		tier = metalgemm.DeviceName()
 	}
 	metalDev = &metalBackend{
 		name:     "metal",
-		tier:     C.GoString(&name[0]), // e.g. "Apple M3 Pro" (the device's own capability label)
+		tier:     tier, // e.g. "Apple M3 Pro" (the device's own capability label)
 		totalMem: metalDeviceMemoryTotal(),
 	}
 	Register(metalDev)
 }
 
 func metalDeviceMemoryTotal() int64 {
-	var total C.ulonglong
-	if C.fmetal_device_memory_total(&total) != 0 || total == 0 {
+	total, ok := metalgemm.DeviceMemoryTotal()
+	if !ok {
 		return 0
 	}
-	return uint64ToCapInt64(uint64(total))
+	return uint64ToCapInt64(total)
 }
 
 // metalBuf is a device-resident Buffer: an opaque id<MTLBuffer> handle + byte length.

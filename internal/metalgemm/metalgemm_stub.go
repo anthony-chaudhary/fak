@@ -1,15 +1,24 @@
-//go:build !(darwin && cgo && fakmetal)
+//go:build !(darwin && arm64 && cgo)
 
-// Package metalgemm stub — the default (non-fakmetal) build. The Metal backend is not
+// Package metalgemm stub — the non-Apple-Silicon or cgo-disabled build. The Metal backend is not
 // linked, so the whole package degrades to "unavailable" and callers fall back to the
-// pure-Go CPU prefill path. This file is what keeps `go build ./...` cgo-free and portable.
+// pure-Go CPU prefill path. This file is what keeps non-Metal builds cgo-free and portable.
 package metalgemm
 
 // Available always reports false without the Metal backend compiled in.
 func Available() bool { return false }
 
-// Compiled reports false: this binary was not built with `-tags fakmetal`.
+// Compiled reports false: this binary was not built with the Apple-Silicon+cgo Metal backend.
 func Compiled() bool { return false }
+
+// MPSAvailable reports false in the stub build: no Metal device or MPS path is linked.
+func MPSAvailable() bool { return false }
+
+// DeviceName reports no device in the stub build.
+func DeviceName() string { return "" }
+
+// DeviceMemoryTotal reports no known Metal capacity in the stub build.
+func DeviceMemoryTotal() (uint64, bool) { return 0, false }
 
 // Weight is an inert handle in the stub build.
 type Weight struct{ Out, In int }

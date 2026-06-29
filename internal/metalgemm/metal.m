@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // metal.m — the Objective-C side of the Metal GPU GEMM backend. It owns one MTLDevice +
 // command queue, a table of f16 weight matrices resident in unified memory, and runs each
@@ -17,6 +17,7 @@
 #import <Accelerate/Accelerate.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <stdlib.h> // getenv (FAK_METAL_MPS opt-in)
+#include <string.h>
 
 // f32<->f16 bulk conversion via Accelerate's vImage (SIMD): the per-call activation and
 // result round-trip was a single-threaded scalar loop and measured as a large chunk of the
@@ -77,6 +78,32 @@ int mg_init(void) {
     if (getenv("FAK_METAL_MPS") != NULL) {
         gMPSOK = MPSSupportsMTLDevice(gDev) ? 1 : 0;
     }
+    return 1;
+}
+
+int mg_mps_available(void) {
+    if (!mg_init()) return 0;
+    return gMPSOK ? 1 : 0;
+}
+
+int mg_device_name(char *name, int namelen) {
+    if (!mg_init() || name == NULL || namelen <= 0) return 0;
+    const char *dn = [[gDev name] UTF8String];
+    if (dn) {
+        strncpy(name, dn, (size_t)(namelen - 1));
+        name[namelen - 1] = '\0';
+    } else {
+        name[0] = '\0';
+    }
+    return 1;
+}
+
+int mg_device_memory_total(unsigned long long *total) {
+    if (!mg_init() || total == NULL) return 0;
+    if (![gDev respondsToSelector:@selector(recommendedMaxWorkingSetSize)]) return 0;
+    unsigned long long v = (unsigned long long)[gDev recommendedMaxWorkingSetSize];
+    if (v == 0) return 0;
+    *total = v;
     return 1;
 }
 

@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 package metalgemm
 
@@ -26,8 +26,8 @@ func refMatMul(x, w []float32, P, in, out int) []float32 {
 // TestMatMulMatchesReference pins the Metal f16 GEMM against the f32 CPU reference within a
 // half-precision tolerance — proof the device path computes the right matmul, not just fast.
 func TestMatMulMatchesReference(t *testing.T) {
-	if !Available() {
-		t.Skip("no Metal device")
+	if !MPSAvailable() {
+		t.Skip("Metal MPS unavailable")
 	}
 	rng := rand.New(rand.NewSource(7))
 	for _, dims := range [][3]int{{16, 64, 96}, {64, 512, 256}, {256, 1536, 1536}} {
@@ -75,8 +75,8 @@ func TestMatMulMatchesReference(t *testing.T) {
 // exhausts the table. This is the leak fix's contract — a long-lived process reloading
 // models can free the f16 weight set between loads instead of accumulating it.
 func TestResetReclaimsTable(t *testing.T) {
-	if !Available() {
-		t.Skip("no Metal device")
+	if !MPSAvailable() {
+		t.Skip("Metal MPS unavailable")
 	}
 	const out, in, P = 32, 64, 8
 	w := make([]float32, out*in)

@@ -1,9 +1,9 @@
-//go:build !(darwin && cgo && fakmetal)
+//go:build !(darwin && arm64 && cgo)
 
-// Witness tests for OPEN math-proof obligations on package metalgemm — the DEFAULT
-// (stub, non-fakmetal) build. The build tag mirrors metalgemm_stub.go exactly, so these
+// Witness tests for OPEN math-proof obligations on package metalgemm — the stub build
+// (non-Apple-Silicon or cgo-disabled). The build tag mirrors metalgemm_stub.go exactly, so these
 // tests compile and run in precisely the build whose contract they assert and never
-// collide with the fakmetal-gated tests in metalgemm_test.go.
+// collide with the Apple-Silicon Metal tests in metalgemm_test.go.
 //
 // OPEN closed here:
 //
@@ -37,6 +37,9 @@ import (
 var (
 	_ func() bool                                                                            = Available
 	_ func() bool                                                                            = Compiled
+	_ func() bool                                                                            = MPSAvailable
+	_ func() string                                                                          = DeviceName
+	_ func() (uint64, bool)                                                                  = DeviceMemoryTotal
 	_ func([]float32, int, int) *Weight                                                      = Upload
 	_ func([]float32) int                                                                    = UploadVec
 	_ func(int, int, int, int, int, int, float32, float32, bool)                             = FwdConfig
@@ -61,12 +64,27 @@ func TestStubInterfaceParity_CompilesAndScalarContract(t *testing.T) {
 		t.Fatalf("stub Available() must be false (no GPU math in the default build); got true")
 	}
 	if Compiled() {
-		t.Fatalf("stub Compiled() must be false (binary not built with -tags fakmetal); got true")
+		t.Fatalf("stub Compiled() must be false (binary not built with Apple-Silicon+cgo Metal); got true")
+	}
+	if MPSAvailable() {
+		t.Fatalf("stub MPSAvailable() must be false (no Metal/MPS lane linked); got true")
+	}
+	if name := DeviceName(); name != "" {
+		t.Fatalf("stub DeviceName() must be empty; got %q", name)
+	}
+	if total, ok := DeviceMemoryTotal(); ok || total != 0 {
+		t.Fatalf("stub DeviceMemoryTotal() = (%d,%v), want (0,false)", total, ok)
 	}
 	// Idempotent / deterministic: probing twice never changes the verdict.
 	for i := 0; i < 3; i++ {
-		if Available() || Compiled() {
-			t.Fatalf("stub Available()/Compiled() must stay false across calls; flipped on call %d", i)
+		if Available() || Compiled() || MPSAvailable() {
+			t.Fatalf("stub Available()/Compiled()/MPSAvailable() must stay false across calls; flipped on call %d", i)
+		}
+		if DeviceName() != "" {
+			t.Fatalf("stub DeviceName() must stay empty across calls; flipped on call %d", i)
+		}
+		if total, ok := DeviceMemoryTotal(); ok || total != 0 {
+			t.Fatalf("stub DeviceMemoryTotal() must stay (0,false) across calls; got (%d,%v) on call %d", total, ok, i)
 		}
 	}
 }

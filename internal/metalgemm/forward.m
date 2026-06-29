@@ -1,4 +1,4 @@
-//go:build darwin && cgo && fakmetal
+//go:build darwin && arm64 && cgo
 
 // forward.m — the GPU-resident prefill forward. Where metal.m moves only the projection
 // matmuls to the GPU (and pays an f16 round-trip per matmul, leaving RMSNorm/RoPE/attention/
