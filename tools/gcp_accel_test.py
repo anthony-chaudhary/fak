@@ -72,6 +72,17 @@ def test_a100_tiers_rank_below_hopper_above_l4():
     # sits below the Hopper baseline in the preference ladder.
     assert pos["a3-high-h100"] < pos["a2-ultra-a100-80gb"] < pos["g2-l4"]
     assert pos["a2-ultra-a100-80gb"] < pos["a2-high-a100-40gb"]
+    assert pos["g2-l4"] < pos["g2-l4-32"] < pos["n1-t4"]
+
+
+def test_l4_highmem_tier_is_still_one_l4():
+    t = gcp_accel.by_slug("g2-l4-32")
+    assert t is not None
+    assert t.machine_type == "g2-standard-32"
+    assert t.accelerator_type == "nvidia-l4"
+    assert t.gpu_count == 1
+    assert t.host_mem_gb == 128
+    assert t.compute_capability == "89"
 
 
 def test_ladder_is_newest_silicon_first():

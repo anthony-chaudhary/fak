@@ -335,6 +335,33 @@ TIERS: tuple[AccelTier, ...] = (
         ),
     ),
     AccelTier(
+        slug="g2-l4-32",
+        machine_type="g2-standard-32",
+        accelerator_type="nvidia-l4",
+        gpu_label="NVIDIA L4 (Ada)",
+        gpu_count=1,
+        gpu_mem_gb_each=24,
+        vcpus=32,
+        host_mem_gb=128,
+        gen_rank=12,
+        arch="ada",
+        compute_capability="89",
+        approx_usd_per_hour=1.75,
+        common_zones=(
+            "us-central1-a",
+            "us-east4-a",
+            "europe-west4-a",
+            "asia-east1-a",
+        ),
+        blackwell=False,
+        notes=(
+            "Single-L4 Ada tier with enough host RAM for fak-cuda's f32 "
+            "Qwen2.5-3B materialization. Use this when the cheap g2-standard-8 "
+            "proof tier proves the pipeline but SIGKILLs modelbench-cuda during "
+            "the f32 device run."
+        ),
+    ),
+    AccelTier(
         slug="n1-t4",
         machine_type="n1-standard-8",
         # GCP's accelerator string for the T4 is "nvidia-tesla-t4" (the Tesla

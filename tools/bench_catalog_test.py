@@ -39,6 +39,10 @@ class TestPaths(unittest.TestCase):
         self.assertEqual(bc.normalize_run_path("experiments/x"), "experiments/x")
         self.assertEqual(bc.normalize_run_path(""), "")
 
+    def test_extract_gpu_name_accepts_gcp_object_shape(self):
+        specs = {"hardware": {"gpu": {"model": "NVIDIA L4 (Ada)"}}}
+        self.assertEqual(bc.extract_gpu_name(specs), "NVIDIA L4 (Ada)")
+
 
 class TestCommittedCatalog(unittest.TestCase):
     def setUp(self):

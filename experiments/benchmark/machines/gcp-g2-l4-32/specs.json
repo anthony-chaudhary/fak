@@ -1,0 +1,32 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "machine_id": "gcp-g2-l4-32",
+  "hostname": "gcp-g2-standard-32",
+  "registered_at": "2026-06-29T13:29:55.058027Z",
+  "hardware": {
+    "gpu": {
+      "model": "NVIDIA L4 (Ada)",
+      "count": 1,
+      "memory_gb": 24,
+      "compute_capability": "89"
+    },
+    "cpu": {
+      "architecture": "x86_64",
+      "cores_logical": 32
+    },
+    "ram_gb": 128
+  },
+  "os": {
+    "name": "GCP Deep Learning VM (CUDA)"
+  },
+  "cloud": {
+    "provider": "gcp",
+    "machine_type": "g2-standard-32",
+    "zone": "us-central1-b"
+  },
+  "tags": [
+    "ada",
+    "cuda",
+    "gcp"
+  ]
+}

@@ -11,6 +11,7 @@
       "compute_capability": "90"
     },
     "cpu": {
+      "architecture": "x86_64",
       "cores_logical": 26
     },
     "ram_gb": 234

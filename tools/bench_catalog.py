@@ -137,6 +137,8 @@ def scan_machines() -> Dict[str, Dict]:
 def extract_gpu_name(specs: Dict) -> str:
     """Extract GPU model name from specs."""
     gpus = specs.get("hardware", {}).get("gpu", [])
+    if isinstance(gpus, dict):
+        return gpus.get("model", "unknown")
     if gpus and isinstance(gpus, list) and len(gpus) > 0:
         return gpus[0].get("model", "unknown")
     return "none"
