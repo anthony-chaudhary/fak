@@ -105,6 +105,8 @@ func main() {
 		cmdTUI(os.Args[2:])
 	case "tui":
 		cmdTUI(os.Args[2:])
+	case "chat":
+		cmdChat(os.Args[2:])
 	case "chatrelay":
 		cmdChatRelay(os.Args[2:])
 	case "claude-mac-fak":
