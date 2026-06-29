@@ -173,10 +173,9 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 }
 
 // glmMoeDsaFullGGUFTyped is glmMoeDsaFullGGUF with the batched routed-expert blobs
-// (ffn_{gate,up,down}_exps) written in expertType (TensorF32 / TensorQ4_K / TensorQ5_K /
-// TensorQ6_K), so a test can exercise the loader's resident k-quant expert routing. The
-// k-quant payloads are written as all-zero super-blocks (valid: dequant to 0), which keeps the
-// forward finite while letting the loader take the raw-resident split.
+// (ffn_{gate,up,down}_exps) written in expertType, so a test can exercise the loader's resident
+// raw-quant expert routing. The quant payloads are written as all-zero blocks (valid: dequant to
+// 0), which keeps the forward finite while letting the loader take the raw-resident split.
 func glmMoeDsaFullGGUFTyped(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI int, expertType TensorType) []byte {
 	qkHead := qkNope + qkRope
 	type tw struct {
@@ -234,6 +233,12 @@ func glmMoeDsaFullGGUFTyped(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxH
 			return n / 256 * blockQ5KBytes
 		case TensorQ4_K:
 			return n / 256 * blockQ4KBytes
+		case TensorIQ3_XXS:
+			return n / 256 * blockIQ3XXSBytes
+		case TensorIQ4_XS:
+			return n / 256 * blockIQ4XSBytes
+		case TensorQ8_0:
+			return n / 32 * blockQ8_0Bytes
 		default: // TensorF32
 			return n * 4
 		}

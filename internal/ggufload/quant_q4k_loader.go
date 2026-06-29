@@ -95,11 +95,10 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 				tw.pending = []pendingTensor{{isKVBHalf: true, layer: layer, half: half, shape: shape, f32: append([]float32(nil), data...)}}
 				return tw
 			}
-			// Batched routed experts: split the [E,out,in] blob 1->E. A block-aligned Q4_K /
-			// Q5_K / Q6_K blob splits as RAW bytes -> resident (no dequant): the experts are
-			// GLM-5.2's 417 GB bulk and unsloth UD-Q4_K_M is a MIXED quant, so handling all
-			// three k-quants resident (not just Q4_K) is the load-time lever that turns the
-			// whole expert load I/O-bound. Any other type falls to the f32 dequant-split.
+			// Batched routed experts: split the [E,out,in] blob 1->E. A block-aligned raw-quant
+			// blob splits as RAW bytes -> resident (no dequant): the experts are GLM-5.2's bulk
+			// and unsloth UD quants can use IQ3_XXS/IQ4_XS/Q8_0 in addition to the K-quants.
+			// Any other type falls to the f32 dequant-split.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {
@@ -112,8 +111,8 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 					return tw
 				}
 				tw.acctType, tw.acctExpert, tw.acctBytes = info.Type.String(), true, tensorOnDiskBytes(info)
-				if blockBytes, residentable := residentExpertBlockBytes(info.Type); residentable {
-					kqExperts, aligned, err := splitGLMMoeDsaExpertsKQuantRaw(layer, proj, shape, raw, blockBytes)
+				if blockWeights, blockBytes, residentable := residentExpertBlockGeometry(info.Type); residentable {
+					kqExperts, aligned, err := splitGLMMoeDsaExpertsRawQuant(layer, proj, shape, raw, blockWeights, blockBytes)
 					if err != nil {
 						tw.err = err
 						return tw
@@ -214,6 +213,18 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 					}
 				case TensorQ5_K:
 					if err := builder.AddResidentQ5K(pt.name, pt.shape, pt.raw); err != nil {
+						return err
+					}
+				case TensorIQ3_XXS:
+					if err := builder.AddResidentIQ3XXS(pt.name, pt.shape, pt.raw); err != nil {
+						return err
+					}
+				case TensorIQ4_XS:
+					if err := builder.AddResidentIQ4XS(pt.name, pt.shape, pt.raw); err != nil {
+						return err
+					}
+				case TensorQ8_0:
+					if err := builder.AddResidentQ8_0(pt.name, pt.shape, pt.raw); err != nil {
 						return err
 					}
 				default: // TensorQ4_K

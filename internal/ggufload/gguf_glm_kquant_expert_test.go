@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-// TestGLMMoeDsaQ6KExpertsLoadResident is the loader-routing gate for the S2 mixed-quant lever:
-// a complete glm_moe_dsa GGUF whose batched routed experts are Q6_K must load those experts
-// RESIDENT (raw bytes -> kqw, no f32 dequant round-trip), not fall through to the f32 split.
+// TestGLMMoeDsaQ6KExpertsLoadResident is the loader-routing gate for the mixed-quant lever:
+// a complete glm_moe_dsa GGUF whose batched routed experts are raw-residentable must load those
+// experts RESIDENT (raw bytes -> kqw, no f32 dequant round-trip), not fall through to the f32 split.
 // It asserts (a) all E*3 routed-expert tensors land in the resident k-quant store, (b) the
 // forward still runs to finite logits over them, and (c) the load-path breakdown tallies the
-// Q6_K experts as resident — the visibility that proves the slow path was avoided.
+// expert type as resident — the visibility that proves the slow path was avoided.
 func TestGLMMoeDsaQ6KExpertsLoadResident(t *testing.T) {
 	// Expert reduction dims (H, I) must be ÷256 for the resident k-quant row layout (each row
 	// is whole super-blocks), mirroring the real GLM-5.2 constraint.
@@ -26,7 +26,7 @@ func TestGLMMoeDsaQ6KExpertsLoadResident(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		typ  TensorType
-	}{{"Q6_K", TensorQ6_K}, {"Q5_K", TensorQ5_K}} {
+	}{{"Q6_K", TensorQ6_K}, {"Q5_K", TensorQ5_K}, {"IQ3_XXS", TensorIQ3_XXS}, {"IQ4_XS", TensorIQ4_XS}, {"Q8_0", TensorQ8_0}} {
 		t.Run(tc.name, func(t *testing.T) {
 			gguf := glmMoeDsaFullGGUFTyped(H, V, qLora, kvLora, qkNope, qkRope, vHd, nH, idxHeads, idxDim, E, I, sharedI, tc.typ)
 			path := filepath.Join(t.TempDir(), "glm_kq.gguf")

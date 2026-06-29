@@ -64,8 +64,8 @@ func loadWorkers() int {
 // is the order the serial loader emitted them (e.g. expert 0..E-1), so insertion order — and
 // thus the built model — is byte-identical to the serial path.
 type pendingTensor struct {
-	resident     bool       // true -> AddResident{Q4K,Q5K,Q6K}(raw) by residentType; false -> AddF32Tensor(f32)
-	residentType TensorType // which resident k-quant store (Q4_K / Q5_K / Q6_K), when resident
+	resident     bool       // true -> AddResident*(raw) by residentType; false -> AddF32Tensor(f32)
+	residentType TensorType // which resident raw-quant store, when resident
 	isKVBHalf    bool       // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
 	name         string
 	shape        []int
@@ -75,21 +75,34 @@ type pendingTensor struct {
 	half         string
 }
 
-// residentExpertBlockBytes returns the GGUF super-block byte size for a k-quant type that can be
-// held RESIDENT (raw bytes, dequant fused in the GEMV) for the CPU-offloaded MoE experts:
-// Q4_K=144, Q5_K=176, Q6_K=210, each packing 256 weights. ok=false for any other type, which
-// keeps that expert blob on the f32 dequant→Q8 fallback. This is what lets GLM-5.2's MIXED-quant
-// experts (unsloth UD-Q4_K_M) ALL load resident, not just the Q4_K subset.
-func residentExpertBlockBytes(t TensorType) (int, bool) {
+// residentExpertBlockGeometry returns the GGUF block geometry for an expert tensor type that can
+// be held RESIDENT (raw bytes, dequant fused in the GEMV) for the CPU-offloaded GLM MoE experts.
+// ok=false keeps that expert blob on the f32 dequant→Q8 fallback.
+func residentExpertBlockGeometry(t TensorType) (blockWeights, blockBytes int, ok bool) {
 	switch t {
+	case TensorQ8_0:
+		return qk8_0, blockQ8_0Bytes, true
 	case TensorQ4_K:
-		return blockQ4KBytes, true
+		return qkK, blockQ4KBytes, true
 	case TensorQ5_K:
-		return blockQ5KBytes, true
+		return qkK, blockQ5KBytes, true
 	case TensorQ6_K:
-		return blockQ6KBytes, true
+		return qkK, blockQ6KBytes, true
+	case TensorIQ3_XXS:
+		return qkK, blockIQ3XXSBytes, true
+	case TensorIQ4_XS:
+		return qkK, blockIQ4XSBytes, true
 	}
-	return 0, false
+	return 0, 0, false
+}
+
+// residentExpertBlockBytes is the legacy byte-only view used by older split tests.
+func residentExpertBlockBytes(t TensorType) (int, bool) {
+	_, blockBytes, ok := residentExpertBlockGeometry(t)
+	if !ok {
+		return 0, false
+	}
+	return blockBytes, true
 }
 
 // tensorWork is one GGUF tensor's parallel-load result: the progress byte count, the builder
