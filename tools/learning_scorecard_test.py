@@ -308,6 +308,23 @@ def test_shipped_surface_reference_in_learning_path_greens() -> None:
         assert not [d for d in cov["defects"] if "shipped-but-untaught" in d], cov
 
 
+def test_new_fak_verb_counts_even_when_handler_file_is_not_new() -> None:
+    with TemporaryDirectory() as td:
+        root = Path(td)
+        _seed_surface_fixture(root)
+        _write(root, "LEARNING-PATH.md", "# Learning path\n\nNo new course here.\n")
+
+        cov = lsc.coverage(
+            root, ["LEARNING-PATH.md"],
+            added_paths=[],
+            added_fak_verbs=["faklesson"],
+            require_git_dates=False,
+        )
+        assert "fak faklesson" in cov["missing_shipped_surfaces"], cov
+        assert any("shipped-but-untaught surface: fak faklesson" in d
+                   for d in cov["defects"]), cov
+
+
 def test_internal_plumbing_surface_is_not_teachable_coverage_spam() -> None:
     with TemporaryDirectory() as td:
         root = Path(td)

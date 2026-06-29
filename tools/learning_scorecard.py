@@ -162,7 +162,7 @@ _INTERNAL_PLUMBING_RE = re.compile(
 _CMD_DIR_PLUMBING_RE = re.compile(r"(?:demo|bench)$")
 _HIDDEN_FAK_VERBS = {
     "-h", "--help", "help", "-v", "--version",
-    "guard-precompact",
+    "guard-precompact", "guard-stophook",
 }
 
 # Per-KPI weights. orientation + runnable weigh most: a learner who can't tell
@@ -438,6 +438,10 @@ def _git_added_paths_since_stamp(root: Path, stamp: str) -> list[str]:
     return sorted({_rel(line) for line in out.splitlines() if line.strip()})
 
 
+def _git_blob(root: Path, ref: str, rel: str) -> str:
+    return _git_line(["show", f"{ref}:{_rel(rel)}"], root)
+
+
 def _git_first_added_date(root: Path, rel: str) -> date | None:
     out = _git_line([
         "log", "--diff-filter=A", "--reverse", "--format=%cI",
@@ -516,6 +520,21 @@ def _cmd_fak_handler_files(root: Path) -> dict[str, str]:
     return out
 
 
+def _git_added_fak_verbs_since_stamp(root: Path, stamp: str) -> list[str]:
+    stamp_date = _parse_date(stamp)
+    if stamp_date is None:
+        return []
+    baseline = _git_line([
+        "rev-list", "-1", f"--before={stamp_date.isoformat()}T23:59:59",
+        "HEAD", "--", "cmd/fak/main.go",
+    ], root)
+    if not baseline:
+        return []
+    before = set(_fak_verb_handlers(_git_blob(root, baseline, "cmd/fak/main.go")))
+    current = set(_fak_verb_handlers(dsc._safe_read(root / "cmd" / "fak" / "main.go")))
+    return sorted(current - before)
+
+
 def _surface(kind: str, name: str, ref: str, source_paths: list[str]) -> dict[str, Any]:
     return {
         "kind": kind,
@@ -526,9 +545,11 @@ def _surface(kind: str, name: str, ref: str, source_paths: list[str]) -> dict[st
 
 
 def derive_teachable_surfaces(root: Path, added_paths: list[str], *,
+                              added_fak_verbs: list[str] | None = None,
                               stamp_date: date | None = None,
                               require_git_dates: bool = False) -> list[dict[str, Any]]:
     added = sorted({_rel(p) for p in added_paths})
+    added_verbs = {v.strip() for v in (added_fak_verbs or []) if v.strip()}
     by_key: dict[tuple[str, str], dict[str, Any]] = {}
 
     allow_internal = _internal_lane_allowlist(root)
@@ -560,8 +581,13 @@ def derive_teachable_surfaces(root: Path, added_paths: list[str], *,
     added_set = set(added)
     for verb, handler in verb_to_handler.items():
         rel = handler_to_file.get(handler, "")
-        if rel and rel in added_set and _added_on_or_after_stamp(
-                root, rel, stamp_date, require_git_date=require_git_dates):
+        if not rel:
+            continue
+        handler_added = rel in added_set and _added_on_or_after_stamp(
+            root, rel, stamp_date, require_git_date=require_git_dates,
+        )
+        verb_added = verb in added_verbs
+        if handler_added or verb_added:
             by_key[("cmd/fak", verb)] = _surface("cmd/fak", verb, f"fak {verb}", [rel])
 
     for name, paths in cmd_dirs.items():
@@ -600,13 +626,17 @@ def surface_taught_by_course(surface: dict[str, Any], course_text: str) -> bool:
 
 def shipped_surface_coverage(root: Path, *, stamp: str,
                              added_paths: list[str] | None = None,
+                             added_fak_verbs: list[str] | None = None,
                              course_text: str | None = None,
                              require_git_dates: bool = True) -> dict[str, Any]:
     stamp_date = _parse_date(stamp)
     added = (_git_added_paths_since_stamp(root, stamp)
              if added_paths is None else sorted({_rel(p) for p in added_paths}))
+    verbs = (_git_added_fak_verbs_since_stamp(root, stamp)
+             if added_fak_verbs is None else sorted({v for v in added_fak_verbs if v}))
     surfaces = derive_teachable_surfaces(
-        root, added, stamp_date=stamp_date, require_git_dates=require_git_dates,
+        root, added, added_fak_verbs=verbs,
+        stamp_date=stamp_date, require_git_dates=require_git_dates,
     )
     course = dsc._safe_read(root / "LEARNING-PATH.md") if course_text is None else course_text
     rows: list[dict[str, Any]] = []
@@ -619,6 +649,7 @@ def shipped_surface_coverage(root: Path, *, stamp: str,
     return {
         "stamp": stamp or None,
         "added_paths": added,
+        "added_fak_verbs": verbs,
         "surfaces": rows,
         "covered": covered,
         "missing": missing,
@@ -916,6 +947,7 @@ def importance_scores(root: Path, corpus: list[str]) -> dict[str, float]:
 
 
 def coverage(root: Path, corpus: list[str], *, added_paths: list[str] | None = None,
+             added_fak_verbs: list[str] | None = None,
              course_text: str | None = None,
              require_git_dates: bool = True) -> dict[str, Any]:
     reachable = dsc.reachable_md(root, FRONT_DOORS)
@@ -931,6 +963,7 @@ def coverage(root: Path, corpus: list[str], *, added_paths: list[str] | None = N
     scorecard_text = dsc._safe_read(root / GENERATED_SNAPSHOT_REL)
     surface_cov = shipped_surface_coverage(
         root, stamp=snapshot_stamp(scorecard_text), added_paths=added_paths,
+        added_fak_verbs=added_fak_verbs,
         course_text=course_text, require_git_dates=require_git_dates,
     )
     covered_surfaces = [s["ref"] for s in surface_cov["covered"]]
