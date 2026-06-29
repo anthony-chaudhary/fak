@@ -1,0 +1,51 @@
+# Cross-platform build + vet smoke for the fak module — the multi-platform leg of
+# the CI/CD pipeline (#199, G-001 "CI on all platforms"). The authoritative `ci`
+# workflow runs the full build+vet+test+claims-lint gate on ubuntu-latest only,
+# because native-Windows `go test` is blocked by an OS Application-Control policy
+# (see fak/CLAUDE.md / AGENTS.md) and the full suite is therefore Linux-authoritative.
+# This workflow adds the platform coverage `ci` cannot: it compiles (`go build ./...`)
+# and statically checks (`go vet ./...`) the whole module on Linux, macOS, AND Windows,
+# so a change that breaks the build or vet on a non-Linux host is caught in CI rather
+# than by a user on that host. Build+vet (not the full test suite) keeps it fast and
+# sidesteps the Windows test quirk while still proving the module compiles and passes
+# static analysis everywhere fak claims to run.
+name: cross-platform
+
+on:
+  push:
+    branches: [main, master, fak-v0.1]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-vet:
+    name: build · vet (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Report every platform's result — one OS failing must not hide the others.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets `go`
+      # fetch it if the runner's Go is older. Job-level so every step sees it.
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      # The whole module must compile on this OS. Default tags / default CGO — the
+      # same invocation an end user runs after `go install ...@latest`.
+      - name: build (whole module compiles)
+        run: go build ./...
+
+      # Static checks must pass on this OS too (catches platform-specific vet findings
+      # such as bad printf verbs or struct-tag issues that only surface per-GOOS).
+      - name: vet (static checks pass)
+        run: go vet ./...
