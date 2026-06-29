@@ -1062,6 +1062,57 @@ func TestGuardPassthroughFallbackFlag(t *testing.T) {
 	}
 }
 
+// TestGuardPinsOnIntentWhenLoginPresentButTokenUnreadable witnesses the 'stuck on login
+// sometimes' fix. Claude Code rewrites .credentials.json ~hourly and the OAuth access token
+// it holds is short-lived, so a boot-time read can catch the file holding a just-expired
+// token — which resolveAnthropicOAuthToken correctly reports ABSENT (an expired bearer must
+// not be sent). The OLD behavior demoted that transient miss to passthrough, which strips the
+// placeholder ANTHROPIC_API_KEY that keeps the wrapped agent out of its OWN /login, so the
+// agent hung on a login prompt for a session that would have recovered on the first
+// per-request token re-resolve. The fix PINS ON INTENT when a subscription login is present on
+// disk, so the per-request APIKeyFunc recovers the rotated-in token instead.
+func TestGuardPinsOnIntentWhenLoginPresentButTokenUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	const tokenEnv = "FAK_TEST_GUARD_PIN_INTENT"
+	t.Setenv(tokenEnv, "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// A subscription login EXISTS but its token is expired => unreadable this instant. Write a
+	// .credentials.json with a past expiresAt; resolveAnthropicOAuthToken drops it (absent),
+	// yet the login file is present on disk.
+	expired := `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-expired","expiresAt":1}}`
+	if err := os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(expired), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	us := resolveGuardUpstream("anthropic", "claude", "", "", "", false, tokenEnv)
+	if !us.pinUpstream {
+		t.Fatalf("want pinUpstream=true (pin on intent; the per-request APIKeyFunc recovers the rotated token); got %+v", us)
+	}
+	if us.passthroughFallback {
+		t.Fatalf("must NOT demote a transient token miss to passthrough when a login is present; got %+v", us)
+	}
+	if us.apiKey != "" {
+		t.Fatalf("boot apiKey must be empty on the pin-on-intent path (APIKeyFunc resolves per request); got %q", us.apiKey)
+	}
+
+	// The pinned posture must inject the placeholder so the wrapped agent never falls into its
+	// own /login — the actual anti-hang shield.
+	child := buildGuardChild([]string{"claude"}, nil, us.pinUpstream)
+	if !strings.Contains(strings.Join(child.Env, "\n"), "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder") {
+		t.Fatalf("pin-on-intent child must carry the placeholder ANTHROPIC_API_KEY; env=%v", child.Env)
+	}
+
+	// Control: with NO login file present at all, the genuine passthrough fallback still fires.
+	bare := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", bare)
+	us = resolveGuardUpstream("anthropic", "claude", "", "", "", false, tokenEnv)
+	if us.pinUpstream || !us.passthroughFallback {
+		t.Fatalf("with no subscription login present, want passthrough fallback (not a pin); got %+v", us)
+	}
+}
+
 // TestGuardSubscriptionDefaultIgnoresAmbientAPIKey proves the OAuth-by-default change: a
 // bare ANTHROPIC_API_KEY in the environment no longer silently flips guard onto API
 // billing. With a subscription token reachable, guard PINS the OAuth token upstream even

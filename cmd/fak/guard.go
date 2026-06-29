@@ -123,6 +123,8 @@ func cmdGuard(argv []string) {
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
+	denyAllContinue := fs.String("deny-all-continue", guardPreCompactModeEnforce, "Claude Code Stop hook that auto-RESUMES the agent after a deny-all turn (the floor refused EVERY proposed tool call, which the wire reports as end_turn — a stop the agent did not choose): off|shadow|enforce. ENFORCE by default (the false-stop fix), bounded by --deny-all-max consecutive continues; shadow logs the would-continue while letting the turn end; off disables. Claude children only.")
+	denyAllMax := fs.Int("deny-all-max", guardStopHookDefaultMax, "with --deny-all-continue=enforce: the maximum number of CONSECUTIVE deny-all turns to auto-continue past before giving up and letting the turn end, so a model that keeps re-proposing refused calls cannot loop forever.")
 	ctxViewBudget := fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
@@ -598,6 +600,19 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	injected = append(injected, preCompactEnv...)
+	// Install the deny-all auto-continue Stop hook, MERGING it into the SAME --settings file the
+	// PreCompact hook wrote (preCompactInstall.SettingsPath; "" when PreCompact is off, in which
+	// case the Stop hook writes + injects its own). This is the harness half of the deny-all
+	// false-stop fix: it resumes the agent past a turn the floor refused entirely. See guard_stophook.go.
+	var stopHookInstall guardStopHookInstall
+	var stopHookEnv [][2]string
+	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllMax)
+	if err != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook setup failed: %v\n", err)
+		os.Exit(1)
+	}
+	injected = append(injected, stopHookEnv...)
 	child := buildGuardChild(command, injected, pinUpstream)
 
 	if !*quiet {
@@ -615,6 +630,9 @@ func cmdGuard(argv []string) {
 		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, remoteBase != "", localModel, localLabel, command)
 		if preCompactInstall.Applied {
 			fmt.Fprintf(os.Stderr, "fak guard: Claude PreCompact hook: %s (settings %s)\n", preCompactInstall.Mode, preCompactInstall.SettingsPath)
+		}
+		if stopHookInstall.Applied {
+			fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook (deny-all auto-continue): %s, max %d consecutive (the floor-refused-everything turn is reported as end_turn; this resumes the agent past it — --deny-all-continue off to disable)\n", stopHookInstall.Mode, stopHookInstall.Max)
 		}
 		if *debugStats {
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
@@ -869,6 +887,34 @@ func resolveAnthropicOAuthToken(tokenEnv string) (token, source string, err erro
 	return "", "", fmt.Errorf("no Claude subscription OAuth token found (looked in: %s). Log into Claude Code (`claude`), or create a long-lived one with `claude setup-token` and export it as %s", strings.Join(tried, ", "), tokenEnv)
 }
 
+// guardSubscriptionLoginPresent reports whether a Claude subscription login EXISTS on disk,
+// independent of whether its token is readable RIGHT NOW. Claude Code rewrites
+// <claude-config>/.credentials.json roughly hourly and the OAuth access token it holds is
+// short-lived, so a single boot-time read can legitimately catch the file mid-rotation (or
+// holding a just-expired token) and miss — even though a live login is there and the token
+// will rotate back in within seconds. resolveAnthropicOAuthToken correctly returns "absent"
+// in that window (a torn/expired read must NOT be sent as a bearer), but the guard's
+// pin-vs-passthrough boot decision must NOT read that transient miss as "no subscription":
+// demoting to passthrough strips the placeholder that keeps the wrapped agent out of its own
+// /login, so the agent hangs on a login prompt for a session that would have recovered on the
+// first per-request token re-resolve (the 'stuck on login sometimes' race). This is the cheap
+// disk witness that separates "a login is present, the token is just briefly unreadable" (pin
+// on intent; the per-request APIKeyFunc recovers the fresh token) from "no subscription at
+// all" (genuinely fall back to passthrough). The named env override (CLAUDE_CODE_OAUTH_TOKEN)
+// counts as present when set. Existence only — it never reads or validates the token.
+func guardSubscriptionLoginPresent(tokenEnv string) bool {
+	if tokenEnv != "" && strings.TrimSpace(os.Getenv(tokenEnv)) != "" {
+		return true
+	}
+	cfgDir := guardClaudeConfigDir()
+	for _, name := range []string{".credentials.json", ".oauth-token"} {
+		if fi, err := os.Stat(filepath.Join(cfgDir, name)); err == nil && !fi.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 // guardClaudeConfigDir resolves the directory that holds Claude Code's per-account
 // credentials: $CLAUDE_CONFIG_DIR (first path if it is an OS-list) when set, else
 // ~/.claude. A home that cannot be resolved degrades to the literal ".claude".
@@ -1118,6 +1164,16 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 	if sum.ToolPruneCount > 0 {
 		fmt.Fprintf(&b, "fak guard: tool-floor prune — dropped %d unreachable tool def(s) from tools[] across %d turn(s) (uncached-token saving; cache prefix byte-identical)\n",
 			sum.ToolPruneCount, sum.ToolPruneTurns)
+	}
+	// Deny-all stops: turns the floor refused ENTIRELY, which the wire reports to the client as
+	// end_turn so it does not hang hunting for a dropped tool_use block (the v0.15.0 contract).
+	// That end_turn halts the agent though the model wanted to act — a STOP the agent did not
+	// choose, and the false-stop this audit surfaces. Print it only when it happened, and name the
+	// Stop-hook lever that auto-resumes the agent past it, so a session that hit the false stop
+	// tells the operator both that it happened and how to keep the loop moving next time.
+	if sum.DenyAllStops > 0 {
+		fmt.Fprintf(&b, "fak guard: deny-all stops — %d turn(s) had EVERY proposed tool call refused, reported to the client as end_turn (a stop the agent did not choose; the model wanted to act, the floor blocked all of it). Keep the agent moving past these with --deny-all-continue=enforce (auto-resumes the agent with 'choose an allowed alternative', bounded).\n",
+			sum.DenyAllStops)
 	}
 	if len(sum.ByReason) > 0 {
 		reasons := make([]string, 0, len(sum.ByReason))

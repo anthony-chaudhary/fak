@@ -130,10 +130,25 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 			// Explicitly requested but nothing to use — fail loud.
 			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth: %v\n", terr)
 			os.Exit(2)
+		case guardSubscriptionLoginPresent(oauthTokenEnv):
+			// A subscription login EXISTS on disk but its token was unreadable this instant —
+			// Claude Code rewrites .credentials.json ~hourly and the OAuth access token is
+			// short-lived, so a boot read can catch the file mid-rotation (or holding a
+			// just-expired token, which resolveAnthropicOAuthToken correctly drops rather than
+			// send). Demoting to passthrough HERE would strip the placeholder ANTHROPIC_API_KEY
+			// that keeps the wrapped agent from falling into its OWN /login — the 'stuck on
+			// login sometimes' hang. So PIN ON INTENT with an empty boot apiKey: pinUpstream
+			// stays true and the per-request APIKeyFunc (guard.go) re-reads the freshly-rotated
+			// token on the first turn. effectiveAPIKey already tolerates an empty boot key
+			// (func result wins; the 401 path self-heals once), so the first turn waits for the
+			// rotation instead of dropping the agent into a login prompt.
+			pinUpstream = true
+			oauthSource = "subscription login (token rotating; resolved per request)"
 		default:
-			// Auto attempt found no token: fall back to plain passthrough — the wrapped
-			// agent's own credential (a subscription login OR ANTHROPIC_API_KEY) flows
-			// upstream, so a pure API-billing user is unaffected.
+			// Auto attempt found no token AND no subscription login is present at all: fall
+			// back to plain passthrough — the wrapped agent's own credential (a subscription
+			// login OR ANTHROPIC_API_KEY) flows upstream, so a pure API-billing user is
+			// unaffected.
 			passthroughFallback = true
 		}
 	}
