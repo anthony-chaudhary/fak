@@ -1,0 +1,22 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "write_file"
+  ],
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "/etc/",
+    "id_rsa",
+    "internal/adjudicator/",
+    "internal/kernel/"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ]
+}
