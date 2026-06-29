@@ -1288,20 +1288,40 @@ func retryWait(attempt int, retryAfter string) time.Duration {
 	return jitter(backoffDuration(attempt))
 }
 
+// minRetryWait floors the per-attempt wait on the TIME-BUDGET path so a long budget can
+// never degrade into a hammering loop. The exponential-backoff path is already floored
+// (backoffDuration(1) = 600ms), but a server-directed Retry-After of "0" (or any tiny
+// value) bypasses backoff entirely via the honored-Retry-After branch — so an overloaded
+// upstream answering "503 Retry-After: 0" against a multi-hour budget would otherwise spin
+// up to retryAttemptHardCap near-instant requests at the very server that just said it is
+// over capacity. Flooring each wait turns "retry for 4h" into a patient retry, not a 4h
+// flood. It applies only to the budgeted path (retryWaitWithin); the pinned attempt-count
+// path keeps retryWait's exact historical behavior. 250ms × the hard cap is still well
+// within the budget, so the floor never shortens the reachable window.
+const minRetryWait = 250 * time.Millisecond
+
 // retryWaitWithin is retryWait bounded by a deadline: it never returns a wait that would
-// sleep PAST `deadline`, so the total retry window cannot exceed the budget. It returns a
-// negative duration when there is no budget left to even wait (the caller treats that as
-// exhaustion). With a zero deadline (time bound disabled) it is exactly retryWait.
+// sleep PAST `deadline`, so the total retry window cannot exceed the budget. It floors the
+// wait at minRetryWait so a tiny/zero Retry-After cannot turn the budget into a tight spin,
+// and returns a negative duration when there is no budget left to even wait (the caller
+// treats that as exhaustion). With a zero deadline (time bound disabled) it is exactly
+// retryWait.
 func retryWaitWithin(attempt int, retryAfter string, deadline time.Time, now time.Time) time.Duration {
 	w := retryWait(attempt, retryAfter)
 	if deadline.IsZero() {
 		return w
+	}
+	if w < minRetryWait {
+		w = minRetryWait // anti-flood floor: never hammer an overloaded upstream, even on Retry-After: 0
 	}
 	rem := deadline.Sub(now)
 	if rem <= 0 {
 		return -1
 	}
 	if w > rem {
+		// Budget nearly spent: take the remaining sliver, then the next iteration sees
+		// rem<=0 and stops. The floor above cannot reintroduce a spin here because this
+		// branch sleeps the whole remainder and then exhausts.
 		return rem
 	}
 	return w

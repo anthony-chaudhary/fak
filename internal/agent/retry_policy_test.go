@@ -378,11 +378,15 @@ func TestComplete_InterleavedTransportErrorKeepsRealStatus(t *testing.T) {
 // near-instant so the test is fast.
 func TestComplete_TimeBudgetRetriesPastAttemptCap(t *testing.T) {
 	t.Setenv("FAK_PLANNER_MAX_ATTEMPTS", "") // unpinned -> time budget is the limiter
-	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "300ms")
+	// A budget comfortably larger than the old 8-attempt cap × the minRetryWait floor, so the
+	// loop provably retries PAST the historical attempt cap on the strength of the time budget
+	// alone — without relying on a hammering 0-wait spin (see TestRetryWaitWithin_FloorsTinyWait
+	// for the anti-flood floor that makes "Retry-After: 0" safe).
+	t.Setenv("FAK_PLANNER_RETRY_BUDGET", "3s")
 	var n int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&n, 1)
-		w.Header().Set("Retry-After", "0") // zero wait -> the loop spins fast within the budget
+		w.Header().Set("Retry-After", "0") // upstream names "0" — the floor still keeps us civil
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(srv.Close)
@@ -402,7 +406,34 @@ func TestComplete_TimeBudgetRetriesPastAttemptCap(t *testing.T) {
 		t.Fatalf("upstream hit %d times, want > 8 (the time budget must retry past the old attempt cap)", got)
 	}
 	// The total wall time is bounded by the budget (plus a little slack for the final try).
-	if elapsed > 3*time.Second {
-		t.Fatalf("took %s, want ~budget (300ms) + slack — must not overshoot the deadline", elapsed)
+	if elapsed > 6*time.Second {
+		t.Fatalf("took %s, want ~budget (3s) + slack — must not overshoot the deadline", elapsed)
+	}
+}
+
+// TestRetryWaitWithin_FloorsTinyWait pins the anti-flood floor directly: on the budgeted
+// path a server-directed Retry-After of "0" (or any sub-floor value) must NOT yield a
+// near-zero wait, or a multi-hour budget would let an overloaded upstream be hammered up to
+// retryAttemptHardCap times. The pinned/attempt-count path (zero deadline) is unaffected and
+// keeps retryWait's exact behavior.
+func TestRetryWaitWithin_FloorsTinyWait(t *testing.T) {
+	now := time.Now()
+	deadline := now.Add(time.Hour) // plenty of budget left, so the floor (not rem) is what bounds below
+	if got := retryWaitWithin(1, "0", deadline, now); got < minRetryWait {
+		t.Fatalf("retryWaitWithin(Retry-After 0) = %s, want >= floor %s (no hammering)", got, minRetryWait)
+	}
+	if got := retryWaitWithin(1, "1", deadline, now); got < minRetryWait {
+		t.Fatalf("retryWaitWithin(Retry-After 1) = %s, want >= floor %s", got, minRetryWait)
+	}
+	// Zero deadline = time bound disabled (pinned path): NO floor, exact retryWait passthrough,
+	// so a Retry-After of "0" stays 0 exactly as before (the attempt count is the bound there).
+	if got := retryWaitWithin(1, "0", time.Time{}, now); got != 0 {
+		t.Fatalf("retryWaitWithin(Retry-After 0, no deadline) = %s, want 0 (pinned path unfloored)", got)
+	}
+	// Budget nearly spent: the remaining sliver is returned (so the turn still terminates),
+	// even though it is below the floor — the next iteration then sees rem<=0 and stops.
+	tiny := now.Add(50 * time.Millisecond)
+	if got := retryWaitWithin(1, "0", tiny, now); got <= 0 || got > 60*time.Millisecond {
+		t.Fatalf("retryWaitWithin near deadline = %s, want the small positive remainder (terminates cleanly)", got)
 	}
 }
