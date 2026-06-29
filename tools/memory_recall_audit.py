@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""DOS-witnessed agent-memory freshness auditor — the memory mirror's checking layer.
+"""DOS-witnessed agent-memory freshness auditor - the memory store's checking layer.
 
-The committed ``.claude/memory/`` store is an ACCELERATION layer: it ships
-hard-won fleet knowledge to every node and session via git. But a memory is the
-least-trustworthy signal in the stack — a frozen self-report from a past session,
-handed back to a future one wearing the authority of a fact. Nothing re-checked
-those facts against ground truth, so a memory whose named commit fell out of
-history, or whose claimed file/flag no longer exists, would silently re-enter
-context as current truth. ``.claude/rsi-loop-dod.md`` forbids exactly this:
-*every acceleration layer has a matching checking layer*. ``tools/sync_memory.py``
-mirrors the bytes; this auditor checks the CLAIMS.
+The agent-memory store is an ACCELERATION layer: it carries hard-won, per-project
+knowledge forward from past sessions. But a memory is the least-trustworthy signal
+in the stack - a frozen self-report from a past session, handed back to a future
+one wearing the authority of a fact. Nothing re-checked those facts against ground
+truth, so a memory whose named commit fell out of history, or whose claimed
+file/flag no longer exists, would silently re-enter context as current truth.
+``.claude/rsi-loop-dod.md`` forbids exactly this: *every acceleration layer has a
+matching checking layer*. This auditor checks the CLAIMS the store carries.
 
 It is the in-fleet fold of the DOS recall rung (``dos memory verify``): the kernel
 re-probes each memory's checkable claims (a commit SHA via git ancestry, a code
@@ -20,7 +19,7 @@ against ground truth NOW and returns a closed verdict per memory:
   RECALL_STALE        a load-bearing claim no longer holds       (do NOT re-inject)
   RECALL_UNVERIFIABLE names no re-checkable artifact / all abstain (an opinion)
 
-UNVERIFIABLE is the EXPECTED majority — most fleet memories are prose/positioning
+UNVERIFIABLE is the EXPECTED majority - most fleet memories are prose/positioning
 notes with no bindable claim, and that is fine. The actionable signal is STALE.
 So ``memory_freshness_rate = FRESH / (FRESH + STALE)`` ignores the UNVERIFIABLE
 denominator, and the audit is ``ok`` unless at least one memory is STALE.
@@ -29,10 +28,13 @@ Read-only by construction: it NEVER edits, prunes, rewrites, or re-homes a memor
 file (that would be unsafe in the live shared worktree). It only reads the store
 through ``dos memory verify`` and shapes the standard fleet control-pane payload.
 
-IMPORTANT: run from the repo ROOT. ``dos`` resolves its lane taxonomy / store
-layout from the nearest ``dos.toml``; ``collect`` always resolves ``--workspace``
-to the repo root, and points ``--store`` at the committed ``.claude/memory`` mirror
-(not the node-local home store) so every node audits the SAME shipped facts.
+STORE LOCATION: the Claude Code auto-memory store is per-project and
+machine-specific - NOT a repo-relative committed mirror. It lives under the
+home directory at ``~/.claude/projects/<ns>/memory/``, where ``<ns>`` is the
+absolute workspace path with the drive colon and path separators collapsed to
+``-`` (e.g. ``C:\\work\\fak`` -> ``C--work-fak``). ``collect`` resolves this
+default from ``--workspace``; pass ``--store`` to point at any other store. The
+store is NOT shipped via git, so every node audits its OWN local memories.
 """
 from __future__ import annotations
 
@@ -43,9 +45,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 SCHEMA = "fleet-memory-recall-audit/1"
-
-# The committed mirror, repo-root-relative (see .claude/memory/README.md).
-STORE_REL = ".claude/memory"
 
 FRESH = "RECALL_FRESH"
 STALE = "RECALL_STALE"
@@ -58,6 +57,31 @@ _NON_FACT = {"MEMORY", "MEMORY_archive", "README"}
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
     return here.parent.parent
+
+
+def project_namespace(workspace: Path) -> str:
+    """Encode an absolute workspace path as a Claude project namespace.
+
+    The auto-memory store keys each project by its absolute path with the drive
+    colon and every path separator collapsed to ``-`` (e.g. ``C:\\work\\fak`` ->
+    ``C--work-fak``). This mirrors the on-disk ``~/.claude/projects/<ns>`` layout.
+    """
+    abs_path = str(workspace.resolve())
+    out = []
+    for ch in abs_path:
+        out.append("-" if ch in (":", "/", "\\") else ch)
+    return "".join(out)
+
+
+def default_store(workspace: Path) -> Path:
+    """The per-project auto-memory store for ``workspace``.
+
+    Resolves to ``~/.claude/projects/<ns>/memory`` - the real, machine-specific
+    location of the Claude Code auto-memory store. It is NOT a committed,
+    repo-relative mirror: each node has its OWN store under its home directory.
+    """
+    ns = project_namespace(workspace)
+    return Path.home() / ".claude" / "projects" / ns / "memory"
 
 
 def run_text(cmd: list[str], cwd: Path, *, timeout: int = 120) -> dict[str, Any]:
@@ -129,7 +153,7 @@ def _culprit_str(rec: dict[str, Any]) -> str:
         claim = culprit.get("claim") or {}
         raw = claim.get("raw") or claim.get("target_file") or ""
         gt = culprit.get("ground_truth") or culprit.get("status") or ""
-        return f"{raw} — {gt}".strip(" —")
+        return f"{raw} - {gt}".strip(" -")
     if culprit:
         return str(culprit)
     return rec.get("reason") or ""
@@ -171,7 +195,7 @@ def build_payload(*, workspace: str, records: list[dict[str, Any]],
         )
         next_action = (
             "for each STALE memory: refresh the fact to current ground truth, retire it if "
-            "superseded, or correct the named SHA/path/token — then re-mirror with "
+            "superseded, or correct the named SHA/path/token - then re-mirror with "
             "tools/sync_memory.py. NEVER let a STALE memory be surfaced as current fact."
         )
     else:
@@ -210,7 +234,7 @@ def _sort_key(g: dict[str, Any]) -> tuple[int, str]:
 def collect(workspace: Path, *, store: str | None = None,
             verifier: StoreVerifier | None = None) -> dict[str, Any]:
     root = workspace.resolve()
-    store_arg = store or str(root / STORE_REL)
+    store_arg = store or str(default_store(root))
     do_verify = verifier or verify_store
     result = do_verify(root, store_arg)
     if "error" in result:
@@ -242,7 +266,10 @@ def main(argv: list[str] | None = None) -> int:
         description="DOS-witnessed agent-memory freshness auditor (read-only)."
     )
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
-    ap.add_argument("--store", default="", help=f"memory store dir (default: <root>/{STORE_REL})")
+    ap.add_argument(
+        "--store", default="",
+        help="memory store dir (default: ~/.claude/projects/<ns>/memory for the workspace)",
+    )
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
