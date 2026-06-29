@@ -213,6 +213,15 @@ fak's.
 - **KIVI** — tuning-free 2-bit: Keys per-channel, Values per-token. [arXiv:2402.02750](https://arxiv.org/abs/2402.02750). **fak: 🟡** KV precision tiers q8/f32 planner half shipped ([#1047](https://github.com/anthony-chaudhary/fak/issues/1047)); engine GPU-gated.
 - **KVQuant** — per-channel Key (pre-RoPE) + per-token Value, non-uniform levels; ~10M
   ctx. [arXiv:2401.18079](https://arxiv.org/abs/2401.18079). **fak: 🟡** (as above; q8 keeps pre-RoPE K in f32 for exact eviction).
+- **TurboQuant** (Google, ICLR 2026) — random orthogonal rotation per vector + per-coordinate
+  Lloyd-Max scalar quant; training/calibration-free, per-token, with **asymmetric key>value bits**
+  (K4/V2 ≈ 3-bit avg). [github:tonbistudio/turboquant-pytorch](https://github.com/tonbistudio/turboquant-pytorch).
+  **fak: 🟡** candidate quantizer for the lossy #1047 q8 tier — fak already keeps Keys more precise
+  (`f32-Kraw + q8_0-K/V`), the same asymmetry, but for *exactness* (the bit-exact evictor re-rotates
+  survivors from the lossless pre-RoPE `Kraw`), so running it on the key conflicts with the exact
+  path. Its README's own caveat — 99.5%+ attention cosine "does not guarantee working generation,"
+  5x@3-bit shows generation failures — is why fak gates the lossy tier behind a served quality
+  witness. See [triage #1266](notes/RESEARCH-turboquant-kv-quant-triage-1266.md).
 - **INT8 / INT4 KV (engine-native)** — LMDeploy/TensorRT-LLM/vLLM online KV quant. **fak: ➖** engine-side.
 - **FP8 / NVFP4 KV** — hardware-native low-precision KV (Hopper/Blackwell). **fak: ➖** engine-side.
 
