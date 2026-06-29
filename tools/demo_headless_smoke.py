@@ -151,6 +151,14 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("agentbenchdemo", ("go", "run", "./cmd/agentbenchdemo"), ("the self-tax", "adjudicated tool calls")),
     Witness("agentbenchdemo-selfcheck", ("go", "run", "./cmd/agentbenchdemo", "-selfcheck"), ("the self-tax invariants hold",)),
     Witness("agentbenchdemo-json", ("go", "run", "./cmd/agentbenchdemo", "-json"), ('"iterations"', '"calls"')),
+    Witness(
+        "trychatdemo-print",
+        ("go", "run", "./cmd/trychatdemo", "-print"),
+        ("the try-it agentic chat", "It's 11:58"),
+        must_not_contain=("account deleted",),
+    ),
+    Witness("trychatdemo-json", ("go", "run", "./cmd/trychatdemo", "-json"), ('"reply"', '"prompt"')),
+    Witness("trychatdemo-selfcheck", ("go", "run", "./cmd/trychatdemo", "-selfcheck"), ("all messages hold the routing + safety-floor invariants",)),
 )
 
 

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fak · try it: a kernel-gated agentic chat</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
+    --txt:#1f2328; --dim:#6e7781; --dim2:#57606a; --accent:#0969da;
+    --bad:#cf222e; --badbg:#fff0ee; --badln:#ffc1ba;
+    --good:#1a7f37; --goodbg:#eefbf1; --goodln:#aee2bd;
+    --user:#0969da;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--txt);font:13px/1.5 ui-monospace,Menlo,Consolas,"SF Mono",monospace;margin:0;padding:0}
+  h1{font-size:18px;font-weight:600;margin:0}
+  a{color:var(--accent)}
+  .wrap{max-width:760px;margin:0 auto;padding:22px 20px 40px}
+  .top{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .pill{font-size:11px;color:var(--dim2);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:14px;line-height:1.6}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .chat{min-height:200px;display:flex;flex-direction:column;gap:12px;margin-bottom:12px}
+  .msg{max-width:88%;padding:9px 12px;border-radius:12px;white-space:pre-wrap;word-break:break-word}
+  .msg.user{align-self:flex-end;background:var(--user);color:#fff;border-bottom-right-radius:3px}
+  .msg.agent{align-self:flex-start;background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:3px}
+  .tools{align-self:flex-start;max-width:88%;font-size:11px;color:var(--dim2);border:1px dashed var(--line);border-radius:10px;padding:6px 10px;background:#fbfcfd}
+  .tools .tl{display:flex;gap:8px;align-items:baseline;margin:2px 0}
+  .tools .v{font-size:10px;border:1px solid var(--line);border-radius:20px;padding:0 6px}
+  .tools .v.ok{color:var(--good);border-color:var(--goodln)}
+  .tools .v.no{color:var(--bad);border-color:var(--badln)}
+  .tools .tn{font-weight:700}
+  .tools .rs{color:var(--dim)}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+  .chip{font-size:11px;border:1px solid var(--line);border-radius:20px;padding:4px 10px;background:var(--panel2);color:var(--dim2);cursor:pointer}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
+  .chip.danger{border-color:var(--badln);color:var(--bad)}
+  .row{display:flex;gap:8px}
+  input[type=text]{flex:1 1 auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font:inherit;color:var(--txt)}
+  button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.45;cursor:default}
+  .note-foot{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>fak · try it: an agentic chat</h1>
+    <span class="pill">kernel-gated · no model · no key</span>
+    <span class="pill" id="hwPill" title="the compute surface this demo runs on">hardware: …</span>
+  </div>
+  <div class="sub">
+    A <b>try-it agentic chat</b>: type a message and a tiny tool-using agent answers — but every tool
+    call it makes is adjudicated by the <b>real fak kernel</b> first. Ask for the time or the weather and
+    it answers; ask it to <i>delete your account</i> or paste a prompt injection and watch the destructive
+    call get <b>refused at the safety floor</b>, while the safe answer still comes back. The planner is a
+    deterministic keyword router — no model — so this runs anywhere; a latest-model planner is a drop-in upgrade.
+  </div>
+
+  <div class="panel">
+    <div class="chat" id="chat"></div>
+    <div class="chips" id="chips"></div>
+    <div class="row">
+      <input type="text" id="input" placeholder="type a message — e.g. what time is it?" autocomplete="off">
+      <button id="send">Send</button>
+    </div>
+  </div>
+
+  <div class="note-foot">
+    Each tool call is a <b>real verdict from the fak kernel</b> (the same <code>kernel.Fold</code> path
+    <code>fak preflight</code> uses), not a scripted reply: the read-only tools are allowed, a destructive
+    <code>delete_account</code> is an explicit floor deny, and an off-floor <code>wipe_disk</code> falls to
+    fail-closed <code>DEFAULT_DENY</code>. Self-contained, no model weights. Headless self-check:
+    <code>go run ./cmd/trychatdemo -selfcheck</code>.
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>(
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function addUser(text){
+  const d=document.createElement('div'); d.className='msg user';
+  d.textContent=text; $('#chat').appendChild(d); scroll();
+}
+function addAgent(text){
+  const d=document.createElement('div'); d.className='msg agent';
+  d.textContent=text; $('#chat').appendChild(d); scroll();
+}
+function addTools(turns){
+  if(!turns || !turns.length) return;
+  const box=document.createElement('div'); box.className='tools';
+  box.innerHTML = turns.map(t=>{
+    const ok = !!t.allowed;
+    const v = `<span class="v ${ok?'ok':'no'}">${escapeHtml(t.verdict)}</span>`;
+    const detail = ok ? escapeHtml(t.result||'(no result)')
+                      : `refused · ${escapeHtml(t.reason||'DENY')}`;
+    return `<div class="tl">${v}<span class="tn">${escapeHtml(t.tool)}</span>`+
+           `<span class="rs">${detail}</span></div>`;
+  }).join('');
+  $('#chat').appendChild(box); scroll();
+}
+function scroll(){ const c=$('#chat'); c.scrollTop=c.scrollHeight; }
+
+async function send(text){
+  const msg=(text!=null?text:$('#input').value).trim();
+  if(!msg) return;
+  $('#input').value=''; $('#send').disabled=true;
+  addUser(msg);
+  try{
+    const r=await fetch(`api/chat?msg=${encodeURIComponent(msg)}`);
+    if(!r.ok){ addAgent('error: '+await r.text()); return; }
+    const j=await r.json();
+    addTools(j.turns);
+    addAgent(j.reply || j.answer || '(no reply)');
+  } catch(e){ addAgent('error: '+e); }
+  finally{ $('#send').disabled=false; $('#input').focus(); }
+}
+
+async function loadSuggestions(){
+  const r=await fetch('api/suggestions'); const j=await r.json();
+  const chips=$('#chips'); chips.innerHTML='';
+  (j.suggestions||[]).forEach(s=>{
+    const b=document.createElement('button'); b.className='chip';
+    if(/delete|wipe|ignore previous/i.test(s)) b.className+=' danger';
+    b.textContent=s; b.onclick=()=>send(s); chips.appendChild(b);
+  });
+  const hw=j.hardware||{};
+  $('#hwPill').textContent='hardware: '+(hw.summary||'…');
+  if(hw.accelerator){ $('#hwPill').style.borderColor='var(--good)'; $('#hwPill').style.color='var(--good)'; }
+  addAgent("Hi! I'm a tiny tool-using agent. Ask me the time, the weather, or the date, or try one of the suggestions — including the two that probe the safety floor.");
+}
+
+$('#send').onclick=()=>send();
+$('#input').addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
+loadSuggestions();
+</script>
+</body>
+</html>

@@ -218,6 +218,18 @@
       <span class="go">Run the agent loop →</span>
     </a>
 
+    <!-- trychatdemo — local-only, no model weights -->
+    <a class="card" href="run-the-demos.html" rel="noopener">
+      <span class="pill self">local · agentic · no model</span>
+      <h3>Try it — a kernel-gated agentic chat</h3>
+      <p>Type a message and a tiny tool-using agent answers, but every tool call runs through
+      the real <code>kernel.Fold</code> path first. Ask for the time or the weather and it answers;
+      ask it to <code>delete_account</code> or paste a prompt injection and the destructive call is
+      refused at the capability floor. Run <code>go run ./cmd/trychatdemo</code> or open
+      <code>http://127.0.0.1:8157</code>.</p>
+      <span class="go">Open the chat →</span>
+    </a>
+
     <!-- ctxdemo — live model, multi-agent context -->
     <a class="card" href="http://136.111.250.205:8153/" rel="noopener">
       <span class="pill live">hosted · research/science · SmolLM2-135M</span>
@@ -339,6 +351,7 @@ go run ./cmd/dropindemo       # → http://127.0.0.1:8154
 go run ./cmd/tokendemo -print
 go run ./cmd/unseedemo        # → http://127.0.0.1:8156
 go run ./cmd/timewolfdemo     # → http://127.0.0.1:8155
+go run ./cmd/trychatdemo      # → http://127.0.0.1:8157
 go run ./cmd/ctxdemo          # → http://127.0.0.1:8153
 go run ./cmd/demorace         # → http://127.0.0.1:8147
 go run ./cmd/deletioncert -selfcheck
@@ -359,6 +372,7 @@ go run ./cmd/causalbench -selfcheck</code></div>
     <code>go run ./cmd/turntaxdemo</code> · <code>go run ./cmd/dropindemo</code> ·
     <code>go run ./cmd/unseedemo</code> ·
     <code>go run ./cmd/timewolfdemo</code> ·
+    <code>go run ./cmd/trychatdemo</code> ·
     <code>go run ./cmd/ctxdemo</code> · <code>go run ./cmd/demorace</code></p>
   </div>
 </footer>

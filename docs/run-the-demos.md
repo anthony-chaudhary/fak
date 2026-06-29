@@ -38,6 +38,7 @@ Browser demos by track:
 | **turntaxdemo** — turn-tax race (SOTA loop vs fak 1-shot) | `go run ./cmd/turntaxdemo` | efficiency | no — self-contained |
 | **unseedemo** — Un-See It / Lobotomy Cam (poisoned result deleted from KV cache, with bit-exact witness) | `go run ./cmd/unseedemo` | research/science | no — self-contained |
 | **timewolfdemo** — "what time is it, Mr. Wolf?" agent loop, kernel-gated (a smuggled destructive call refused at the floor, inside the loop) | `go run ./cmd/timewolfdemo` | agentic | no — self-contained |
+| **trychatdemo** — "try it" agentic chat: type a message, every tool call is kernel-gated (a destructive request or prompt injection refused at the floor) | `go run ./cmd/trychatdemo` | agentic | no — self-contained |
 | **ctxdemo** — multi-agent context-reuse proof (fak vs a tuned warm-cache SOTA baseline) | `go run ./cmd/ctxdemo` | research/science | optional (live race needs one) |
 | **demorace** — reuse race (fak vs a tuned warm-cache SOTA baseline) + reuse curve | `go run ./cmd/demorace` | live model research | yes (live race) |
 
@@ -98,6 +99,8 @@ go run ./cmd/unseedemo              # → http://127.0.0.1:8156
 #   press Play → watch the poisoned KV span get evicted
 go run ./cmd/timewolfdemo          # → http://127.0.0.1:8155
 #   pick a scenario → "Run the agent"  (the children's game as a kernel-gated agent loop)
+go run ./cmd/trychatdemo           # → http://127.0.0.1:8157
+#   type a message → watch each tool call get adjudicated (an injection refused at the floor)
 
 go run ./cmd/ctxdemo               # → http://127.0.0.1:8153
 go run ./cmd/demorace             # → http://127.0.0.1:8147
@@ -254,6 +257,7 @@ PORT=8150 ./turntaxdemo &
 PORT=8154 ./dropindemo &
 PORT=8156 ./unseedemo &
 PORT=8155 ./timewolfdemo &
+PORT=8157 ./trychatdemo &
 PORT=8153 ./ctxdemo &
 PORT=8147 ./demorace &
 #  3. open YOUR_VM_IP:<port> in the firewall / security group for inbound TCP.
@@ -272,11 +276,12 @@ FAK_DEMO_BASE_PATH=/ctxdemo   PORT=8153 ./ctxdemo
 FAK_DEMO_BASE_PATH=/demorace  PORT=8147 ./demorace
 FAK_DEMO_BASE_PATH=/unsee     PORT=8156 ./unseedemo
 FAK_DEMO_BASE_PATH=/timewolf  PORT=8155 ./timewolfdemo
+FAK_DEMO_BASE_PATH=/trychat   PORT=8157 ./trychatdemo
 ```
 
 That means an HTTPS host can mount `/guarddemo/`, `/turntax/`, `/dropin/`,
 `/ctxdemo/`, and `/demorace/` without HTML rewriting; the same contract also covers
-`/unsee/` and `/timewolf/`. If your proxy strips the prefix before forwarding, the demos also work with
+`/unsee/`, `/timewolf/`, and `/trychat/`. If your proxy strips the prefix before forwarding, the demos also work with
 the default root mount. SSE endpoints (`api/race`, `api/curve`) need
 `proxy_buffering off` and a long `proxy_read_timeout`.
 
@@ -335,6 +340,13 @@ server {
 
     location /timewolf/ {
         proxy_pass http://127.0.0.1:8155;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /trychat/ {
+        proxy_pass http://127.0.0.1:8157;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
