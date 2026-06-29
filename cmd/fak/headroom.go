@@ -102,6 +102,9 @@ func runHeadroomStatus(stdout io.Writer, _ []string) int {
 	fmt.Fprintf(stdout, "considered:   %d\n", st.Considered)
 	fmt.Fprintf(stdout, "compressed:   %d\n", st.Compressed)
 	fmt.Fprintf(stdout, "bytes in/out: %d / %d\n", st.BytesIn, st.BytesOut)
+	// The "when NOT to compress" decision breakdown — the governance, made auditable.
+	fmt.Fprintf(stdout, "skipped:      empty=%d poison=%d no-saving=%d not-worth=%d\n",
+		st.SkippedEmpty, st.SkippedPoison, st.SkippedNoSaving, st.SkippedNotWorth)
 	return 0
 }
 

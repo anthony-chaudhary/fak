@@ -30,6 +30,13 @@ type Gate struct {
 	compressed int64
 	bytesIn    int64
 	bytesOut   int64
+	// The "when NOT to compress" decision breakdown — so the governance is
+	// auditable, not just the savings. Each counts a considered result the gate
+	// declined to compress, by reason.
+	skippedEmpty    int64 // resolved to nothing
+	skippedPoison   int64 // left raw for the security gates (the load-bearing skip)
+	skippedNoSaving int64 // the compressor found no smaller rendering
+	skippedNotWorth int64 // a real saving that did not clear the worth-it floor
 }
 
 // NewGate builds a fresh gate (its counters are independent).
@@ -61,11 +68,13 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 
 	body := resolveBytes(ctx, r.Payload)
 	if len(body) == 0 {
+		atomic.AddInt64(&g.skippedEmpty, 1)
 		return admitAsIs()
 	}
 	// Security FIRST: never compress what the gates would quarantine. A poisoned
 	// result is left raw so ctxmmu/normgate screen the REAL bytes and seal it.
 	if _, poison := ctxmmu.ScreenBytes(body); poison {
+		atomic.AddInt64(&g.skippedPoison, 1)
 		return admitAsIs()
 	}
 
@@ -76,6 +85,7 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 		Bytes: body,
 	})
 	if err != nil || !out.Compressed || len(out.Bytes) == 0 || len(out.Bytes) >= len(body) {
+		atomic.AddInt64(&g.skippedNoSaving, 1)
 		return admitAsIs()
 	}
 	// The "when to compress" floor: a real but marginal saving on a small result is
@@ -83,6 +93,7 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 	// leave it raw (the model gets the verbatim bytes, nothing is spent). See
 	// policy.go — this is fak deciding WHEN compression pays, not just HOW.
 	if !worthCompressing(len(body), len(out.Bytes)) {
+		atomic.AddInt64(&g.skippedNotWorth, 1)
 		return admitAsIs()
 	}
 
@@ -116,21 +127,31 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 	}
 }
 
-// Stats is the gate's lifetime compression KPI.
+// Stats is the gate's lifetime compression KPI, including the "when NOT to
+// compress" decision breakdown — so the governance is auditable, not just the
+// savings (Considered == Compressed + every Skipped* reason).
 type Stats struct {
-	Considered int64
-	Compressed int64
-	BytesIn    int64
-	BytesOut   int64
+	Considered      int64
+	Compressed      int64
+	BytesIn         int64
+	BytesOut        int64
+	SkippedEmpty    int64
+	SkippedPoison   int64
+	SkippedNoSaving int64
+	SkippedNotWorth int64
 }
 
 // Stats snapshots the gate's counters.
 func (g *Gate) Stats() Stats {
 	return Stats{
-		Considered: atomic.LoadInt64(&g.considered),
-		Compressed: atomic.LoadInt64(&g.compressed),
-		BytesIn:    atomic.LoadInt64(&g.bytesIn),
-		BytesOut:   atomic.LoadInt64(&g.bytesOut),
+		Considered:      atomic.LoadInt64(&g.considered),
+		Compressed:      atomic.LoadInt64(&g.compressed),
+		BytesIn:         atomic.LoadInt64(&g.bytesIn),
+		BytesOut:        atomic.LoadInt64(&g.bytesOut),
+		SkippedEmpty:    atomic.LoadInt64(&g.skippedEmpty),
+		SkippedPoison:   atomic.LoadInt64(&g.skippedPoison),
+		SkippedNoSaving: atomic.LoadInt64(&g.skippedNoSaving),
+		SkippedNotWorth: atomic.LoadInt64(&g.skippedNotWorth),
 	}
 }
 
