@@ -32,9 +32,8 @@ package model
 // plane abstraction, so they are plane-count-agnostic: on a 3-plane NewPagedKVPoolWithRaw pool
 // (paged_evict.go) they carry the Kraw plane forward bit-exact for free, with no Kraw-specific
 // code here. Scope (honest): this is the allocator-level reuse primitive set, proven bit-exact
-// on real float32 KV with no GPU (paged_reserve_test.go). It is NOT the live serve-path wiring,
-// the paged-attention gather kernel, or the GLM-DSA paged variant — those remain #34's open
-// work (see the issue's acceptance list and docs/notes/EVICT-ON-PAGED-KV-DESIGN-2026-06-28.md).
+// on real float32 KV with no GPU (paged_reserve_test.go). Live opt-in HAL gather and GLM-DSA's
+// separate paged-row witness live in sibling files; this file only owns reuse semantics.
 
 // blocksForTokens is the number of fixed-size physical blocks a sequence of n tokens occupies:
 // ceil(n / blockTokens). It is the page-table length Reserve grows toward.

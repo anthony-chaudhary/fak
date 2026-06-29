@@ -75,6 +75,58 @@ func TestHALSessionMatchesLegacyCPUReference(t *testing.T) {
 	}
 }
 
+func TestHALPagedKVMatchesLegacyCPUReference(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "1")
+	t.Setenv("FAK_PAGED_KV_BLOCK_TOKENS", "3")
+	cfg := Config{
+		HiddenSize:        32,
+		NumLayers:         2,
+		NumHeads:          4,
+		NumKVHeads:        2,
+		HeadDim:           8,
+		IntermediateSize:  64,
+		VocabSize:         97,
+		RMSNormEps:        1e-5,
+		RopeTheta:         10000,
+		TieWordEmbeddings: true,
+		EOSTokenID:        -1,
+	}
+	m := NewSynthetic(cfg)
+	be := compute.Pick("cpu-ref")
+
+	prompt := []int{3, 17, 5, 23, 41, 2, 19}
+	legacy := m.NewSession()
+	paged := m.NewBackendSession(be)
+	if _, ok := paged.halKV.(*pagedHALKV); !ok {
+		t.Fatalf("FAK_PAGED_KV did not select paged HAL KV store: %T", paged.halKV)
+	}
+	assertSameF32(t, "paged prefill", legacy.Prefill(prompt), paged.Prefill(prompt))
+	if paged.halKV.Len() != len(prompt) {
+		t.Fatalf("paged HAL KV len = %d, want %d", paged.halKV.Len(), len(prompt))
+	}
+	clone := &Session{M: m, Cache: NewKVCache(cfg), Backend: be, halKV: paged.halKV.Clone(), halW: map[string]compute.Tensor{}}
+	cloneLegacy := m.NewSession()
+	cloneLegacy.Prefill(prompt)
+	assertSameF32(t, "paged clone step", cloneLegacy.Step(31), clone.Step(31))
+
+	for i, id := range []int{11, 29, 7} {
+		assertSameF32(t, "paged step "+itoa(i), legacy.Step(id), paged.Step(id))
+	}
+
+	legacyEvict := m.NewSession()
+	pagedEvict := m.NewBackendSession(be)
+	legacyEvict.Prefill(prompt)
+	pagedEvict.Prefill(prompt)
+	const from, n = 2, 3
+	if got := legacyEvict.Cache.Evict(from, n); got != n {
+		t.Fatalf("legacy evict removed %d, want %d", got, n)
+	}
+	if got := pagedEvict.halKV.Evict(from, n); got != n {
+		t.Fatalf("paged HAL evict removed %d, want %d", got, n)
+	}
+	assertSameF32(t, "paged post-evict step", legacyEvict.Step(13), pagedEvict.Step(13))
+}
+
 func TestHALHostUploadsCarryMemoryClass(t *testing.T) {
 	cfg := Config{
 		HiddenSize:        8,

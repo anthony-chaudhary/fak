@@ -24,10 +24,8 @@ package model
 // fresh private blocks — a forked parent keeps its own refs and is left byte-for-byte unchanged
 // (paged_evict_test.go TestPagedEvictCOWLeavesForkedParentUnchanged).
 //
-// Scope: a model-level harness, not the live allocator. It does NOT replace KVCache, is NOT
-// wired onto serve/decode, and models the dense softmax-K/V/Kraw path only (GLM-DSA's separate
-// index/state cache is scoped out — see docs/notes/EVICT-ON-PAGED-KV-DESIGN-2026-06-28.md). It
-// is the proof that gates #34 (the real paged allocator carrying Evict).
+// Scope: the dense softmax-K/V/Kraw PagedKV path. GLM-DSA's separate attention/index cache
+// has different row geometry and is covered by paged_glmdsa.go instead.
 
 // Plane indices within a block (the slot()/appendPlanes() plane argument): K and V are the
 // 2-plane pool's planes; Kraw (pre-RoPE K) is the third plane a NewPagedKVPoolWithRaw pool adds
@@ -61,6 +59,16 @@ func (s *PagedKV) AppendRaw(k, kraw, v [][]float32) {
 		panic("model: PagedKV.AppendRaw requires a NewPagedKVPoolWithRaw pool (no Kraw plane)")
 	}
 	s.appendPlanes([][][]float32{k, v, kraw})
+}
+
+// AppendLayerRaw writes one layer's K, pre-RoPE Kraw, and V for the current token. It is the
+// layer-incremental form of AppendRaw used by the compute HAL, where each transformer layer
+// appends its K/V immediately before running attention for that layer.
+func (s *PagedKV) AppendLayerRaw(layer int, k, kraw, v []float32) {
+	if !s.pool.SupportsRaw() {
+		panic("model: PagedKV.AppendLayerRaw requires a NewPagedKVPoolWithRaw pool (no Kraw plane)")
+	}
+	s.appendLayerPlanes(layer, [][]float32{k, v, kraw})
 }
 
 // GatherKraw reconstructs the contiguous pre-RoPE Kraw run for one layer (paged → contiguous),

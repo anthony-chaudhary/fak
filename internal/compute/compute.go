@@ -288,6 +288,14 @@ type KVStore interface {
 	Clone() KVStore // deep copy for prefix reuse (the vDSO payoff)
 }
 
+// KVGeometry is the optional shape side-channel for KVStore implementations that are not
+// a backend's private concrete type. Attention needs the KV head count and head width to
+// slice q/k/v rows; paged host-backed stores provide that geometry while still satisfying
+// the same KVStore view contract.
+type KVGeometry interface {
+	KVConfig() KVConfig
+}
+
 // ---- WeightSource ---------------------------------------------------------------
 
 // WeightSource is how a backend obtains a weight by name, so weights need not be a

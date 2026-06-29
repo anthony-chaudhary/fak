@@ -33,12 +33,7 @@ func (m *Model) NewBackendSession(be compute.Backend) *Session {
 	if be == nil {
 		panic("model: no compute backend registered")
 	}
-	kv := be.NewKV(compute.KVConfig{
-		NumLayers:  m.Cfg.NumLayers,
-		NumKVHeads: m.Cfg.NumKVHeads,
-		HeadDim:    m.Cfg.HeadDim,
-		RopeTheta:  m.Cfg.RopeTheta,
-	})
+	kv := newHALKVStore(be, m.Cfg)
 	if kv == nil {
 		panic("model: compute backend " + be.Name() + " does not provide KVStore")
 	}

@@ -23,14 +23,15 @@ package model
 //     a shared block copies just THAT block (one page), so a common prefix is shared with
 //     zero byte copies and divergence costs one block, not a whole-prefix clone.
 //
-// Scope (honest, in the paging.go tradition): this is the STANDALONE allocator + page
-// table + COW primitive, proven on real float32 KV bytes. It is NOT a GPU paged-attention
-// kernel (no block-sparse gather kernel here — GatherK/GatherV materialize contiguously on
-// the host), it is NOT yet wired onto the live serve/decode path, and it does NOT replace
-// KVCache or internal/radixkv.Tree. Wiring the COW share into radixkv (so the prefix tree
-// shares blocks instead of cloning a KVCache) and a device-side paged gather are the next
-// steps. What lands here is the data structure those steps build on, with its memory and
-// sharing properties measured (pagedkv_test.go).
+// Scope (honest, in the paging.go tradition): this is the allocator + page table + COW
+// primitive, proven on real float32 KV bytes. It is wired onto the opt-in CPU-reference HAL
+// decode path by FAK_PAGED_KV (paged_hal.go), where compute.Backend.Attention reads K/V via
+// GatherK/GatherV. It is NOT a device-side paged-attention kernel (the host gather
+// materializes contiguously), and it does NOT replace the default direct []float32 Session or
+// internal/radixkv.Tree. Wiring the COW share into radixkv (so the prefix tree shares blocks
+// instead of cloning a KVCache) and a device-native paged gather are follow-ons. What lands
+// here is the data structure those steps build on, with its memory and sharing properties
+// measured (pagedkv_test.go).
 
 // PagedKVPool is a shared pool of fixed-size physical KV blocks. Every PagedKV sequence
 // minted from one pool draws blocks from the same backing store, so a forked sequence can
@@ -189,6 +190,44 @@ func (s *PagedKV) appendPlanes(planes [][][]float32) {
 		}
 	}
 	s.nTokens++
+}
+
+// appendLayerPlanes writes one layer's planes for the current token. layer 0 allocates (or
+// claims a reserved) tail slot and advances Len; later layers fill the same logical token.
+// This is the incremental twin used by the compute.Backend KVStore adapter, whose HAL calls
+// AppendKV once per layer before it immediately attends over that layer.
+func (s *PagedKV) appendLayerPlanes(layer int, planes [][]float32) {
+	p := s.pool
+	if layer < 0 || layer >= p.nLayers {
+		panic("model: PagedKV layer out of range")
+	}
+	var pos int
+	if layer == 0 {
+		pos = s.nTokens
+	} else {
+		if s.nTokens == 0 {
+			panic("model: PagedKV layer append before layer 0")
+		}
+		pos = s.nTokens - 1
+	}
+	li := pos / p.blockTokens
+	off := pos % p.blockTokens
+	if li == len(s.table) {
+		s.table = append(s.table, p.alloc())
+	} else {
+		s.ensureOwned(li)
+	}
+	blk := p.blocks[s.table[li]]
+	for plane, row := range planes {
+		if plane >= p.planes {
+			break
+		}
+		dst := p.slot(layer, plane, off)
+		copy(blk[dst:dst+p.stride], row)
+	}
+	if layer == 0 {
+		s.nTokens++
+	}
 }
 
 // Fork returns a new sequence that SHARES every block of this one by reference count — no

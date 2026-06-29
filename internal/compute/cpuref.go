@@ -245,16 +245,20 @@ func (c *cpuBackend) AddBias(dst, bias Tensor) {
 
 // Attention is the fused causal GQA op: for each query head, score against the cached
 // keys of its KV group (single-accumulator dot · scale — matching tokenHidden), softmax,
-// then the in-order ΣwV. q is one position's [nH*hd]; returns [nH*hd]. It downcasts the
-// KVStore to the reference's own cpuKV (a backend and its KV are a matched pair).
+// then the in-order ΣwV. q is one position's [nH*hd]; returns [nH*hd]. It reads K/V
+// through the KVStore view seam, so the reference path can exercise flat and paged host stores.
 func (c *cpuBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
-	ck := kv.(*cpuKV)
-	hd, nKV := ck.cfg.HeadDim, ck.cfg.NumKVHeads
+	kg, ok := kv.(KVGeometry)
+	if !ok {
+		panic("compute: cpu-ref Attention requires KVGeometry")
+	}
+	cfg := kg.KVConfig()
+	hd, nKV := cfg.HeadDim, cfg.NumKVHeads
 	nH := grp * nKV
 	w := nKV * hd
 	qf := c.f32(q)
-	K := ck.K[layer]
-	V := ck.V[layer]
+	K := c.f32(kv.KeysView(layer))
+	V := c.f32(kv.ValuesView(layer))
 	nPos := len(K) / w
 	out := make([]float32, nH*hd)
 	for h := 0; h < nH; h++ {
@@ -306,6 +310,8 @@ type cpuKV struct {
 }
 
 func (k *cpuKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
+
+func (k *cpuKV) KVConfig() KVConfig { return k.cfg }
 
 func (k *cpuKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	hb := k.be.(*cpuBackend)
