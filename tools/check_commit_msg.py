@@ -70,6 +70,10 @@ VERBS = {
     "print", "lift", "prefer", "generate", "forward", "flip", "drive",
     "locate", "deepen", "pace", "lock", "onboard", "treat", "preserve",
     "quote", "fence", "gofmt",
+    # Advisory-action verbs: a commit that ADDS a lint/gate which advises or nudges (the
+    # commit-gardening surface itself, #1326) names a real, checkable change. The gate was
+    # abstaining on "advise"/"nudge"/"recommend" despite each leading a concrete diff.
+    "advise", "nudge", "recommend", "warn", "remind", "hint",
 }
 SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>.+)$")
 EXEMPT_PREFIXES = ("Merge ", "Revert ", "fixup! ", "squash! ", "amend! ")

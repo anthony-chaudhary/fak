@@ -298,6 +298,23 @@ func TestFixWantsSymptomWitness_unit(t *testing.T) {
 	}
 }
 
+// TestCommitMsgVerdict_advisoryVerbsRecognized — a commit that ADDS an advising lint/gate (the
+// commit-gardening surface, #1326) leads with a real action verb; the gate must grade it, not
+// ABSTAIN as it did on the original "advise a symptom witness" subject.
+func TestCommitMsgVerdict_advisoryVerbsRecognized(t *testing.T) {
+	subjects := []string{
+		"feat(hooks): advise a symptom witness for fix(...) commits (fak hooks)",
+		"feat(hooks): nudge fix commits toward a red-then-green test (fak hooks)",
+		"feat(gate): recommend a bindable issue link on close (fak gate)",
+		"feat(gate): warn on a noun-led subject (fak gate)",
+	}
+	for _, s := range subjects {
+		if ok, why := CommitMsgVerdict(s); !ok {
+			t.Errorf("CommitMsgVerdict(%q) = not-ok (%s), want gradeable", s, why)
+		}
+	}
+}
+
 func TestLaneForPath_conventionFallback(t *testing.T) {
 	var empty laneTaxonomy // not loaded: pure convention
 	cases := map[string]string{
