@@ -232,6 +232,39 @@ The reframe is two sentences. The vertical axis is *how much of the stack is one
 
 This is also the cleanest statement of what makes fak distinctive, and it stays inside the prior-art honesty the repo leads with (0 of 29 primitives novel). Plenty of systems own a deep vertical slice — a serving engine owns decode and the KV cache. Plenty enforce one cross-cutting policy — a guardrail enforces trust. fak is the one substrate present at the most scales while carrying the same trust-and-reuse invariant through all of them. The contribution is the crossing point, not either axis alone.
 
+## The external map: loop engineering, and the one claim fak can own
+
+Outside this repo the same idea now has a name: *loop engineering*. Its core primitive is the **Ralph loop** — Geoffrey Huntley's `while :; do cat PROMPT.md | agent; done`: run a model over and over in fresh context against a plan file until the work is done. The pattern has gone mainstream — OpenAI Codex's `/goal`, Vercel's `ralph-loop-agent`, goose, and Google's ADK each ship a version of it — so any reader evaluating fak now arrives with this frame. It is worth saying exactly where fak sits inside it.
+
+The frame has one load-bearing weakness, and it is the same one this whole doc is about. A Ralph loop has to decide when to stop, and in the basic form the *model* decides: it reads its own output and reports "done." That is the self-assessment trap at the scale of a whole loop — the thing being graded is the grader. fak's thesis (model proposes, kernel disposes) is the answer to precisely that weakness. The one claim fak can own here is narrow and real: **a Ralph loop whose exit-gate is a real adjudication, not a self-report.**
+
+Here is the canon mapped onto the rings this doc already built:
+
+| SOTA primitive | What it is | fak ring / primitive |
+|---|---|---|
+| Ralph loop (`while :; cat PROMPT.md \| agent`) | iterate to verified done in fresh context | the **Turn** ring, driven by the durable loop ledger `fak loop run -- CMD` (hash-chained fire/admit/start, an admission governor gating the always-on loop). A dedicated `fak loop drive` front-end is tracked in #1175. |
+| external verification exit-gate | "done" judged by an oracle, not the model | the **RSI** ring's non-forgeable keep-bit (`shipgate.Evaluate`) and the **fleet** ring's per-SHA `dos commit-audit` — both shipped. Lifting that same gate to a per-turn dos exit-gate is tracked in #1174. |
+| state on disk, not context | the plan-file is memory | the **Session** ring: a finished session is a durable core-dump over a content-addressed swap (`internal/recall`). A first-class `GOAL.md` plan-file is tracked in #1176. |
+| meta-agent search / DGM / SICA | agents searching agent design space | an evidence-gated variant archive — tracked in #1177; today only the demo tunable is wired in `internal/rsiloop`. |
+| meta-RSI (tune the improver) | retune the keep-policy itself | the ladder's labeled-conceptual apex: the `ESCALATE` breaker (`shipgate.Gate`) is shipped; feeding that judgment back to retune the keep-gate is not. |
+| cross-model review | a peer model refutes before ship | a scout review rung — tracked in #1185. |
+| repo-contained safety | no irreversible out-of-repo effects | `fak guard` containment — default-deny adjudication on every tool call plus the network-egress floor (`fak egress`) — is shipped; the loop-facing containment contract is tracked in #1187. |
+| spec-anchor not metric (Kitchen Loop) | converge to a spec, avoid goodhart | the dos witness criterion: a change is kept on a witness derived against the spec, never a metric the agent can move (#1174/#1177). |
+
+Read the third column honestly. The witnessed exit-gate is shipped today — the RSI keep-bit (`shipgate.Evaluate`) and the fleet's per-SHA `dos commit-audit` are the real, non-forgeable adjudications the rest of this doc traces, and the durable loop ledger (`fak loop run`) and `fak guard` containment are shipped too. The rest of the column — a dedicated `fak loop drive` front-end (#1175), a per-turn dos exit-gate (#1174), a first-class `GOAL.md` plan-file (#1176), an evidence-gated variant archive (#1177), a cross-model scout review rung (#1185), and the loop-facing guard-containment contract (#1187) — is tracked work under the verified-loop epic (#1173), not yet shipped. The mapping is the bridge; the issues are the build-out.
+
+### Why "verified" is the whole point
+
+Two failure modes haunt the Ralph loop, and dos refuses both by construction rather than by promise.
+
+The first is the **self-assessment trap**: a model that grades its own work will, often enough, call a half-finished or wrong result "done." dos answers this with a decision no participant can move by narrating a number — a `Deny` cites one reason from a closed twelve-word vocabulary, a kept change sets the keep-bit only on measured gain AND a green suite AND clean truth, and an issue closes only on a per-SHA commit-audit reachable from origin/main. The agent cannot talk its way past any of these.
+
+The second is **goodharting**: optimize against a metric and the loop learns to game the metric instead of doing the work. This is the Kitchen Loop's warning, and the fix is the one fak already uses — anchor the exit-gate to a *spec witness*, not a movable score. The RSI keep-bit is gated on a witness the loop derives from a run it performs itself (a real build, a real `git status`, a real probe), not a number the proposer hands in. A change that games the KPI but fails the suite or dirties the tree is reverted regardless of how good the metric looks (`TestKeepBitNeedsAllThree`).
+
+That is the whole bet, stated against the external names: the Ralph loop is the right primitive, and the missing piece — the part every hand-rolled version re-implements badly — is an exit-gate the model cannot forge. fak is that exit-gate.
+
+**Sources.** The Ralph loop (Geoffrey Huntley); OpenAI Codex `/goal`; Vercel's [`ralph-loop-agent`](https://github.com/vercel-labs/ralph-loop-agent); the [Darwin Gödel Machine](https://arxiv.org/abs/2505.22954) and [SICA](https://github.com/MaximeRobeyns/self_improving_coding_agent) / [ADAS](https://github.com/ShengranHu/ADAS) for meta-agent search; the [Kitchen Loop](https://arxiv.org/pdf/2603.25697) for the spec-anchor / anti-goodhart criterion.
+
 ## Why an engineer should care
 
 You can build all of this yourself. People do. But every one of those loops re-implements the same dangerous, expensive scaffolding, and the failure modes are quiet: an action that should have been refused, a context full of poison, a "kept" change that was never better, a closed issue that was never fixed.
