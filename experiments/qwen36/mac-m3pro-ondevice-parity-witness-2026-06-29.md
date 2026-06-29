@@ -43,6 +43,32 @@ total **24.4 GiB**; decode reads **19.09 GiB/token**. At the device's ~150 GB/s 
 wrong kernel. The closing lever (the one-command-buffer GDN-hybrid resident decode forward)
 is Mac-gated `.m` engineering tracked by #64/#67/#69/#70/#71.
 
+## 2b. Dense Qwen2.5-7B-Q8 — decode at near-parity (measured this session)
+
+`modelbench -gguf qwen2.5-7b-instruct-q8_0 -metal -lean` with **`FAK_METAL_MPS=1`**
+(without it the box reports *"MPS unavailable … the f16 prefill is disabled"* and the full
+prefill bench emits nothing — the f16 GPU GEMM goes through MetalPerformanceShaders, which
+is off by default here). Engine: *"fak-in-kernel Metal prefill (MPS f16 GEMM on GPU; CPU Q8
+decode)"*. Decode was stable across two runs (16.0, 16.4 tok/s).
+
+| phase | fak (this run) | llama.cpp-Metal bar (cited) | ratio |
+|---|---:|---:|---:|
+| decode | **16.4 tok/s** (61.1 ms/token, 48 steps × 5 reps) | 17.27 tok/s | **0.95×** |
+| prefill @P256 | **94.4 tok/s** (2712 ms) | 192.9 tok/s | **0.49×** |
+
+So for the dense-Q8 parity-class backend, **decode is essentially at parity (0.95×)** and
+Metal f16 prefill is ~6× faster than the old CPU prefill (0.083× → 0.49×).
+
+> **Honesty flag — do NOT overwrite the authority on this run alone.** The committed
+> `QWEN25-7B-RESULTS.md` / `BENCHMARK-AUTHORITY.md` figure is fak **CPU-Q8 decode 8.7 tok/s
+> (0.50×)**. This session's 16.4 tok/s is ~**1.9×** higher on the *same* CPU-Q8 decode path
+> (engine label confirms decode is CPU, not GPU-resident). The most likely cause is the
+> parallel Q8-decode workers (this run: 6 workers, GOMAXPROCS=12) vs the older measurement,
+> but that is **not reconciled here** — until it is (re-measure at workers=1; confirm the
+> older artifact's config), the conservative committed 0.50× stands and 0.95× is a
+> *pending, unratified* datum. This is the BENCHMARK-AUTHORITY discipline: a single
+> favorable run does not move the number of record.
+
 ## 3. #62 build-tag retirement — confirmed on-device
 
 `fakchat -metal` help on the freshly built binary reads *"requires Apple Silicon+cgo"*
@@ -58,9 +84,11 @@ auto-select (`dfe9de9b`) are both live in the built tree.
   put 27B q4_k decode well under 0.16× of the bar.
 - The llama.cpp-Metal **7.29 / 51.55** bars are cited (committed reference
   `QWEN36-PARITY-RESULTS.md`), not re-measured here.
-- The **dense Qwen2.5-7B-Q8 resident Metal decode** (#67, the ~0.99× parity-class path) was
-  **not** re-measured: its driver is `fak serve`, and `cmd/fak` does not build from a clean
-  trunk checkout right now — see §5.
+- The dense-7B-Q8 numbers in §2b are the **`modelbench` path** (Metal MPS f16 prefill +
+  **CPU** Q8 decode). The **GPU-resident** Q8 decode (#67, the ~0.99× claim) runs through
+  `fak serve`, which does not build from clean trunk right now (§5) — so the §2b decode is
+  the CPU-Q8 path at 0.95×, not the GPU-resident path. Both are decode of the same weights;
+  the resident-vs-CPU distinction is why the §2b honesty flag matters.
 
 ## 5. Trunk build hole (blocks the fak serve resident-decode path)
 
