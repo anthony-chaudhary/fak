@@ -148,7 +148,9 @@ The epic closes when **all** hold, each with a third-party-rederivable witness:
    output is golden-tested; the metric reads back.
 8. **Improvement is detected**, not only non-degradation — realized reuse surfaces as a
    net-true positive, double-count-guarded. *Witness:* a reuse-favorable trace reports a
-   positive net with provenance and the provider-vs-local split intact.
+   positive net with provenance and the provider-vs-local split intact. *(L6/T13 detector +
+   worked acceptance trace surfaced in [§9](#9-l6--the-improvement-detector-worked-example);
+   the executable `/metrics`-fed verb is the named follow-on.)*
 9. **The honesty fences hold.** Every number passes the six-question net-true rubric;
    `fak claim-check` grades an arbitrary perf claim; the observer-effect doc states the
    perf-floor/security-floor duality and the meter's own cost. *Witness:* `fak claim-check`
@@ -223,10 +225,12 @@ win, and the plane must say so rather than red on the 8% alone.
   committed artifact + reproduce command, like every other authority row.
 
 ### L6 — detect improvement
-- **T13 · improvement detector.** Surface realized reuse wins (`kv_prefix_reused_tokens`,
-  `fak_fleet_value_*`) as a net-true **positive** per session/fleet, double-count-guarded by
-  `cachemeta` (provider vs local reuse). *Witness:* a reuse-favorable trace reports a positive net
-  with the provider-vs-local split intact.
+- **T13 · improvement detector** ([#1170](https://github.com/anthony-chaudhary/fak/issues/1170)).
+  Surface realized reuse wins (`kv_prefix_reused_tokens`, `fak_fleet_value_*`) as a net-true
+  **positive** per session/fleet, double-count-guarded by `cachemeta` (provider vs local reuse).
+  *Witness:* a reuse-favorable trace reports a positive net with the provider-vs-local split
+  intact — surfaced as the worked detector in [§9](#9-l6--the-improvement-detector-worked-example),
+  grounded in the two disjoint live counters and the cachemeta plane split.
 
 ### X — cross-cutting
 - **T14 · `fak claim-check` verb** (the named net-true follow-on). Takes a claim + baseline +
@@ -246,3 +250,81 @@ T14/T15 (cross-cutting) can land anytime after T1. The honest minimum viable sli
 **T1 + T2 + T3 + T6**: cost emitted, budgeted, metered per turn, and gated in CI — the first
 point at which "fak isn't silently degrading performance" stops being a hope and becomes a
 witness.
+
+## 9. L6 — the improvement detector (worked example)
+
+The positive case of [`net-true-value`](../standards/net-true-value.md) Q2: not "fak didn't
+get slower" but "fak made this work *faster*, and here is the realized win, net of its own
+cost, with no token counted twice." T13's ask is to **surface** realized reuse as a net-true
+positive per session/fleet — the two reuse counters already exist; what was missing is the
+single net framing over them and the explicit double-count guard. Both are below.
+
+### 9.1 The two reuse populations are already disjoint
+
+Realized reuse arrives on two structurally separate planes. fak does not have to *compute* a
+de-dup — `internal/cachemeta` already keeps them apart, so summing them cannot count one token
+twice:
+
+| Plane | Live counter | `cachemeta` adapter / verdict | Provenance |
+|---|---|---|---|
+| **local** (fak's own in-kernel RadixAttention KV-prefix match) | `fak_gateway_kv_prefix_reused_tokens_total` (+ `…_reuse_ratio`) | `FromKVPrefix` → `Plane=kv_prefix`, `AdmissionAllow` — serveable local trust | **WITNESSED** (the kernel did the reuse) |
+| **provider** (the upstream model's own prompt cache, `cache_read`) | `fak_gateway_inference_cached_prompt_tokens_total` | `FromProviderCache` → `Plane=provider`, `Residency=provider`, `AdmissionDefer`; `ProviderCacheVerdict` returns `provider_cache: cost_latency_only` (never `CanServe`) | **OBSERVED** (provider-relayed) |
+
+The metric help text states the disjointness in both directions: the local counter is
+"Distinct from the provider's cache_read," and the provider counter is "provider-side reuse —
+distinct from the local … caches — and reads 0 on the in-kernel path (no provider)." The
+separation is also load-bearing for trust, not just accounting: `fak_gateway_provider_cache_local_trust`
+is structurally `0` (#432 acceptance 3), so a provider `cache_read` is never re-served as a
+local hit. **A token is either local-reuse or provider-reuse, never both — that IS the
+double-count guard.**
+
+### 9.2 The net
+
+```
+realized_reuse_tokens = local_reuse + provider_reuse           # disjoint planes — no double count
+                      = kv_prefix_reused_tokens_total           (WITNESSED, in-kernel)
+                      + inference_cached_prompt_tokens_total     (OBSERVED, provider-relayed)
+mediation_tax_tokens  = tokens the kernel ADDED in scope        (transform/quarantine re-emits; MODELED)
+net_tokens            = realized_reuse_tokens − mediation_tax_tokens
+improvement  ⇔  net_tokens > 0
+```
+
+The net is denominated in **prefill tokens not redone, net of tokens added** — never the
+vs-naive `1/(1-reuse)` re-prefill multiple, which the #1066 honesty fence excludes (mirrored
+from `cachevalueledger.PublishableValueFamily`). Per-session uses one PID's counters;
+per-fleet sums the same disjoint counters across the served fleet — the guard holds at both
+scopes because the planes are disjoint per token, not per session.
+
+### 9.3 A reuse-favorable trace reports a positive net
+
+A 6-turn `fak serve` session over a provider with a stable system+tools prefix (illustrative
+numbers, NOT a benchmark claim — the shape is the witness; the live values come from the
+counters above):
+
+| span | value (tokens) | account | provenance |
+|---|---|---|---|
+| local KV-prefix reuse | 9,400 | `fak_gateway_kv_prefix_reused_tokens_total` | WITNESSED (in-kernel RadixAttention) |
+| provider `cache_read` | 3,200 | `fak_gateway_inference_cached_prompt_tokens_total` | OBSERVED (provider-relayed) |
+| **realized reuse (sum)** | **12,600** | local ⊕ provider (disjoint planes) | — |
+| mediation tax (added) | −180 | one `grammar_repair` transform re-emit | MODELED |
+| **net** | **+12,420** | `net_tokens > 0` → improvement | — |
+
+**Positive net: +12,420 tokens. Split intact:** local 9,400 (74.6%) ⊕ provider 3,200 (25.4%),
+reported as two numbers and never collapsed — exactly because `cachemeta` keeps the two on
+disjoint planes. This is the T13 / DoD #8 acceptance, met by construction.
+
+### 9.4 Reproduce
+
+```sh
+curl -s localhost:PORT/metrics | grep -E \
+  'kv_prefix_reused_tokens_total|inference_cached_prompt_tokens_total|turns_saved_total|provider_cache_local_trust'
+# net_tokens = (kv_prefix_reused_tokens_total + inference_cached_prompt_tokens_total) − tokens_added
+# the two reuse counters are disjoint by construction (metric help + cachemeta plane split),
+# so their sum is realized reuse with the provider-vs-local split intact.
+```
+
+**Named follow-on (out of this docs-lane increment):** an executable `fak`-verb / `/metrics`
+fold that emits `net_tokens` and the labeled split directly (rather than a reader summing two
+counters) belongs in the `gateway`/`metrics` lane and is the deeper close of T13's "surface"
+verb — this section pins the detector's definition, guard, and worked acceptance so that build
+is wiring against a fixed contract.
