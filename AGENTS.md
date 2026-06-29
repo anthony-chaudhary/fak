@@ -139,7 +139,10 @@ until it clears.
   alternative (not a strawman), net of the cost it adds, scope stated, provenance-labeled
   (witnessed/observed/modeled), and reproducible — no witness ⇒ `not yet`. Quote the tuned
   baseline as the headline, never the naive one (the `A=naive / B=tuned / C=fak` letters in
-  [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) are the mechanical form).
+  [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) are the mechanical form). Grade a claim
+  mechanically with `fak claim-check` (the verb the standard names): it takes a claim +
+  baseline + witness and returns `net-true` / `strawman` / `not-yet` against the six questions
+  (exit 0 / 3 / 3); `fak claim-check --self-test` grades the built-in honest+strawman corpus.
 - **Add a feature as a leaf, not a core edit.** `python tools/new_leaf.py <name> --tier
   <tier> [--register]` stamps a conforming skeleton; the frozen ABI (`fak/internal/abi`)
   is additive-only and human-owned. `internal/architest` fails the build on a bad import.

@@ -132,10 +132,15 @@ The point of a standard is that nobody has to go looking for it.
 
 ## Honest fences
 
-- This is a **standard plus a lens over existing sticks**, not a single `fak claim-check`
-  verb that grades an arbitrary claim against the six questions. That verb — a Go
-  subcommand that takes a claim + baseline + witness and returns net-true / strawman /
-  `not yet` — is the named follow-on, not built here.
+- This is a **standard plus a lens over existing sticks**. The single grader the standard
+  names — a Go subcommand that takes a claim + baseline + witness and returns net-true /
+  strawman / `not yet` against the six questions — now ships as **`fak claim-check`**
+  (`internal/claimcheck`, the cross-cutting follow-on of epic [#1147](https://github.com/anthony-chaudhary/fak/issues/1147),
+  issue [#1171](https://github.com/anthony-chaudhary/fak/issues/1171)). It is a lens, not an
+  oracle: it grades whether a claim, as **stated**, answers the six questions — silence on any
+  of the first five is `not-yet`, a gain measured against the naive floor is `strawman`. Run
+  `fak claim-check --self-test` to grade the built-in honest+strawman corpus. The lens does
+  not measure anything; it does not replace the sticks below, it folds them into one verdict.
 - Question 2 (net of introduced cost) is the least mechanized: strawman-headline detection
   and the structure checks catch the loud cases, but a claim that quietly omits its own
   cost still relies on review. Closing that gap is the highest-leverage next stick.
