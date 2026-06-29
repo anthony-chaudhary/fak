@@ -1229,11 +1229,12 @@ Append records one scheduler/script/control event in the canonical hash-chained
 ledger. Run wraps an OS scheduler command under fak guard by default and records
 fire/admit/start/end around it; a direct out-of-tree write/delete is refused before
 spawn with OUT_OF_TREE_WRITE, and --no-guard is an explicit logged opt-out.
-Status folds that ledger into the current loop/run view. Health joins the ledger
-with the durable registry and renders live/stale/dark-loop state plus current
-learning_debt for the docs-freshness loop. Rollup folds MANY nodes' ledgers into
-one fleet-wide "how often did every loop run" view — per-loop run counts,
-cadence, and last-run —
+Status folds that ledger into the current loop/run view using the recovered
+valid prefix when the hash chain is forked or corrupt, warning on stderr without
+rewriting the audit log. Health joins the ledger with the durable registry and
+renders live/stale/dark-loop state plus current learning_debt for the
+docs-freshness loop. Rollup folds MANY nodes' ledgers into one fleet-wide "how
+often did every loop run" view — per-loop run counts, cadence, and last-run —
 reusing the fak ps table format; it is a read-only aggregation that ingests
 journals and writes nothing. Admit applies the tunable
 admission policy (default .fak/loop-policy.json, FAK_LOOP_POLICY) to the fold and
