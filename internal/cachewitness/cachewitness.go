@@ -41,6 +41,8 @@ const (
 	Witnessed Provenance = "WITNESSED"
 	// Observed marks a number relayed from an external party (the provider).
 	Observed Provenance = "OBSERVED"
+	// Modeled marks a projected number that has not been measured on the device.
+	Modeled Provenance = "MODELED"
 )
 
 // Record is the provenance-labeled cache-value evidence folded from a gateway's
