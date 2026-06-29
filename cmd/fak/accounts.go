@@ -50,7 +50,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -86,6 +86,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
 	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
+	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
+	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -131,6 +133,17 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 
 	case "resolve":
 		return accountsResolve(stdout, stderr, positional, *registryPath, *homeDir, *pin, *asEnv)
+
+	case "next":
+		// The live ROTATION READ: print the next eligible account in the round-robin — the
+		// next DISTINCT rate-limit bucket after --after (or a leading positional), wrapping.
+		// This is what a launcher/shortcut consults to hop off a walled account instead of
+		// re-handing the same seat. --env prints CLAUDE_CONFIG_DIR=<dir> for eval/wrappers.
+		after := strings.TrimSpace(*afterSeat)
+		if after == "" && len(positional) > 0 {
+			after = strings.TrimSpace(positional[0])
+		}
+		return accountsNext(stdout, stderr, *registryPath, *homeDir, after, *asJSON, *asEnv)
 
 	case "pull":
 		return accountsPull(stdout, stderr, positional, *registryPath, *homeDir, *dryRun)
@@ -231,6 +244,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return runAccountsLaunch(stdout, stderr, launchParams{
 			name:         seat,
 			command:      *launchCommand,
+			rotate:       *rotateFlag,
+			after:        strings.TrimSpace(*afterSeat),
 			useGuard:     *launchGuard,
 			skipPerms:    *launchSkipPerms,
 			dryRun:       *dryRun,
@@ -260,7 +275,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return accountsVersion(stdout, *asJSON)
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|next|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
@@ -271,7 +286,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 // VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
 func accountsVersion(stdout io.Writer, asJSON bool) int {
 	verbs := []string{
-		"add", "remove", "set-role", "set-default", "launch", "list", "resolve", "pull",
+		"add", "remove", "set-role", "set-default", "launch", "next", "list", "resolve", "pull",
 		"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
 	}
 	if asJSON {
@@ -335,6 +350,50 @@ func accountsResolve(stdout, stderr io.Writer, positional []string, registryPath
 		fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", home.Dir)
 	} else {
 		fmt.Fprintln(stdout, home.Dir)
+	}
+	return 0
+}
+
+// accountsNext runs the live rotation read and prints the next eligible account — the next
+// DISTINCT rate-limit bucket after `after` (wrapping). It is the queryable surface a launcher
+// or shell shortcut consults to rotate off a walled seat. With --json it prints the chosen
+// RotationSeat; with --env it prints CLAUDE_CONFIG_DIR=<dir> for eval/wrappers; otherwise a
+// human one-liner. A pool with nothing to rotate to fails loud (rc 1) with the reason, so a
+// caller never silently re-hands the same exhausted account.
+func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string, asJSON, asEnv bool) int {
+	reg, err := loadOrDiscover(registryPath, homeDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	reg = reg.Refresh()
+	seat, ok := reg.NextInRotation(after)
+	if !ok {
+		plan := reg.RotationPlan()
+		if len(plan.Pool) == 0 {
+			fmt.Fprintln(stderr, "fak accounts next: no eligible accounts in rotation "+
+				"(every seat is reserved, disabled, tombstoned, or has no live credentials)")
+		} else {
+			fmt.Fprintf(stderr, "fak accounts next: only one account bucket in rotation (%s) — "+
+				"nowhere else to rotate; enroll another with `fak accounts add`\n", plan.Pool[0].Name)
+		}
+		return 1
+	}
+	switch {
+	case asJSON:
+		stdout.Write(mustJSON(seat))
+		fmt.Fprintln(stdout)
+	case asEnv:
+		fmt.Fprintf(stdout, "CLAUDE_CONFIG_DIR=%s\n", seat.Dir)
+	default:
+		line := "next: " + seat.Name
+		if seat.Dir != "" {
+			line += "  " + seat.Dir
+		}
+		if seat.Email != "" {
+			line += "  (" + seat.Email + ")"
+		}
+		fmt.Fprintln(stdout, line)
 	}
 	return 0
 }

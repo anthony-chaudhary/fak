@@ -62,11 +62,16 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 
 // launchParams are the resolved inputs to runAccountsLaunch.
 type launchParams struct {
-	name         string // seat to launch (empty => the active role / a sensible default)
-	command      string // agent command (default "claude")
-	useGuard     bool   // default true
-	skipPerms    bool   // default true
-	dryRun       bool   // print the plan, do not exec
+	name    string // seat to launch (empty => the active role / a sensible default)
+	command string // agent command (default "claude")
+	// rotate launches the NEXT account in the rotation instead of the active/named seat —
+	// the round-robin that lets an operator hop off a walled account onto a fresh bucket.
+	// after is the anchor it rotates OFF of (empty => the named seat, else the active seat).
+	rotate       bool
+	after        string
+	useGuard     bool // default true
+	skipPerms    bool // default true
+	dryRun       bool // print the plan, do not exec
 	passthrough  []string
 	registryPath string
 	homeDir      string
@@ -90,7 +95,34 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	reg = reg.Refresh()
 
 	name := strings.TrimSpace(p.name)
-	if name == "" {
+	if p.rotate {
+		// Rotate onto the next DISTINCT account bucket after the anchor (an explicit --after,
+		// else the named seat, else the active seat), so a walled account is hopped off of
+		// rather than re-launched. NextInRotation skips the anchor's own bucket and every
+		// reserved/disabled/tombstoned/duplicate seat.
+		anchor := firstNonEmpty(strings.TrimSpace(p.after), name)
+		if anchor == "" {
+			if picked, ok := activeLaunchSeatName(reg); ok {
+				anchor = picked
+			}
+		}
+		seat, ok := reg.NextInRotation(anchor)
+		if !ok {
+			plan := reg.RotationPlan()
+			if len(plan.Pool) == 0 {
+				fmt.Fprintln(stderr, "fak accounts launch --rotate: no eligible accounts in rotation "+
+					"(every seat is reserved, disabled, tombstoned, or has no live credentials)")
+			} else {
+				fmt.Fprintf(stderr, "fak accounts launch --rotate: only one account bucket in rotation (%s) — "+
+					"nowhere else to rotate; enroll another with `fak accounts add`\n", plan.Pool[0].Name)
+			}
+			return 1
+		}
+		if anchor != "" {
+			fmt.Fprintf(stderr, "fak accounts launch: rotating off %q -> %q\n", anchor, seat.Name)
+		}
+		name = seat.Name
+	} else if name == "" {
 		picked, ok := activeLaunchSeatName(reg)
 		if !ok {
 			fmt.Fprintln(stderr, "fak accounts launch: no --name and no active seat to default to — "+
