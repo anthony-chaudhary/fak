@@ -193,6 +193,68 @@ func TestLoadPrefixRecoversBeforeFork(t *testing.T) {
 	}
 }
 
+func TestAppendRepairsDuplicateSeqTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	for i := 0; i < 3; i++ {
+		if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", Principal: "p", RunID: strconv.Itoa(i)}); err != nil {
+			t.Fatalf("seed Append #%d: %v", i, err)
+		}
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	if err := os.WriteFile(path, []byte(string(body)+lines[len(lines)-1]+"\n"), 0o644); err != nil {
+		t.Fatalf("write duplicate tail: %v", err)
+	}
+
+	appended, err := Append(path, Event{LoopID: "l", Kind: EventAdmit, Source: "s", Principal: "p", RunID: "after-repair"})
+	if err != nil {
+		t.Fatalf("Append after duplicate tail: %v", err)
+	}
+	if appended.Seq != 4 {
+		t.Fatalf("appended seq = %d, want 4", appended.Seq)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load repaired ledger: %v", err)
+	}
+	if len(loaded) != 4 {
+		t.Fatalf("loaded %d events, want repaired prefix plus append (4)", len(loaded))
+	}
+	for i, ev := range loaded {
+		if ev.Seq != uint64(i+1) {
+			t.Fatalf("event %d seq = %d, want %d", i, ev.Seq, i+1)
+		}
+	}
+	if loaded[3].RunID != "after-repair" {
+		t.Fatalf("last RunID = %q, want after-repair", loaded[3].RunID)
+	}
+}
+
+func TestAppendDoesNotRepairTamperedHash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loops.jsonl")
+	if _, err := Append(path, Event{LoopID: "l", Kind: EventFire, Source: "s", Principal: "p", RunID: "before"}); err != nil {
+		t.Fatalf("seed Append: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	tampered := strings.Replace(string(body), `"before"`, `"after"`, 1)
+	if err := os.WriteFile(path, []byte(tampered), 0o644); err != nil {
+		t.Fatalf("write tampered: %v", err)
+	}
+
+	if _, err := Append(path, Event{LoopID: "l", Kind: EventAdmit, Source: "s", Principal: "p", RunID: "should-not-append"}); err == nil || !strings.Contains(err.Error(), "hash") {
+		t.Fatalf("Append tampered err = %v, want hash error", err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "hash") {
+		t.Fatalf("Load tampered err = %v, want hash error", err)
+	}
+}
+
 // TestAppendBusyFailsClosed proves the contended-out path never forks: when the append
 // lock cannot be taken in time, Append returns ErrLedgerBusy rather than writing an
 // unserialized line. Holding the sidecar <path>.lock simulates a stuck peer.

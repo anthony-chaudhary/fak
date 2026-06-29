@@ -183,9 +183,17 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 	// acquired within the budget — on timeout we fail (ErrLedgerBusy), never proceed.
 	var out Event
 	err := withLedgerLock(path, appendLockWait, func() error {
-		existing, err := Load(path)
+		existing, integ, err := LoadPrefix(path)
 		if err != nil {
 			return err
+		}
+		if integ.Broken {
+			if !repairableAppendBreak(integ) {
+				return integrityError(integ)
+			}
+			if err := os.Truncate(path, integ.ValidBytes); err != nil {
+				return fmt.Errorf("repair loop ledger tail: %w", err)
+			}
 		}
 
 		ev.Schema = SchemaEvent
@@ -457,11 +465,12 @@ func loadReader(r io.Reader) ([]Event, error) {
 // other read-only consumer can render what was recovered and surface the break,
 // instead of the whole pane going dark on a single forked/corrupt line.
 type Integrity struct {
-	Broken    bool   `json:"broken"`
-	AtLine    int    `json:"at_line,omitempty"`
-	AtSeq     uint64 `json:"at_seq,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Recovered int    `json:"recovered_events"`
+	Broken     bool   `json:"broken"`
+	AtLine     int    `json:"at_line,omitempty"`
+	AtSeq      uint64 `json:"at_seq,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Recovered  int    `json:"recovered_events"`
+	ValidBytes int64  `json:"valid_bytes,omitempty"`
 }
 
 // LoadPrefix is the tolerant sibling of Load: it reads the longest valid chained
@@ -481,32 +490,63 @@ func LoadPrefix(path string) ([]Event, Integrity, error) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	return loadPrefixReader(f)
+}
 
+func loadPrefixReader(r io.Reader) ([]Event, Integrity, error) {
+	reader := bufio.NewReader(r)
 	var out []Event
 	var prev string
+	var offset int64
+	var validBytes int64
 	lineNo := 0
-	for scanner.Scan() {
+	for {
+		raw, err := reader.ReadBytes('\n')
+		if len(raw) == 0 && errors.Is(err, io.EOF) {
+			return out, Integrity{Recovered: len(out), ValidBytes: validBytes}, nil
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return out, Integrity{}, fmt.Errorf("read loop ledger: %w", err)
+		}
+
 		lineNo++
-		line := strings.TrimSpace(scanner.Text())
+		offset += int64(len(raw))
+		line := strings.TrimSpace(string(raw))
 		if line == "" {
+			validBytes = offset
+			if errors.Is(err, io.EOF) {
+				return out, Integrity{Recovered: len(out), ValidBytes: validBytes}, nil
+			}
 			continue
 		}
 		var ev Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			return out, Integrity{Broken: true, AtLine: lineNo, Reason: "decode: " + err.Error(), Recovered: len(out)}, nil
+			return out, Integrity{Broken: true, AtLine: lineNo, Reason: "decode: " + err.Error(), Recovered: len(out), ValidBytes: validBytes}, nil
 		}
 		if verr := validateLoadedEvent(ev, uint64(len(out)+1), prev); verr != nil {
-			return out, Integrity{Broken: true, AtLine: lineNo, AtSeq: ev.Seq, Reason: verr.Error(), Recovered: len(out)}, nil
+			return out, Integrity{Broken: true, AtLine: lineNo, AtSeq: ev.Seq, Reason: verr.Error(), Recovered: len(out), ValidBytes: validBytes}, nil
 		}
 		prev = ev.Hash
 		out = append(out, ev)
+		validBytes = offset
+		if errors.Is(err, io.EOF) {
+			return out, Integrity{Recovered: len(out), ValidBytes: validBytes}, nil
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return out, Integrity{}, fmt.Errorf("read loop ledger: %w", err)
+}
+
+func repairableAppendBreak(integ Integrity) bool {
+	return integ.Broken && integ.Recovered > 0 && strings.HasPrefix(integ.Reason, "seq = ")
+}
+
+func integrityError(integ Integrity) error {
+	if integ.AtLine > 0 {
+		return fmt.Errorf("loop ledger line %d: %s", integ.AtLine, integ.Reason)
 	}
-	return out, Integrity{Recovered: len(out)}, nil
+	if integ.Reason != "" {
+		return errors.New(integ.Reason)
+	}
+	return errors.New("loop ledger integrity break")
 }
 
 // SnapshotFilePartial is the tolerant sibling of SnapshotFile: it Summarizes the
