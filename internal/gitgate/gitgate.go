@@ -149,6 +149,9 @@ var defaultHazards = []hazard{
 	{sub: "checkout", short: 'B', law: offTrunkBranchLaw},
 	{sub: "switch", short: 'c', law: offTrunkBranchLaw},
 	{sub: "switch", short: 'C', law: offTrunkBranchLaw},
+	// `git push --mirror` overwrites EVERY remote ref (and deletes remote refs
+	// absent locally) — catastrophic on a shared remote (a superset of force-push).
+	{sub: "push", long: "--mirror", law: "push-mirror refused: `git push --mirror` overwrites EVERY remote ref and deletes remote refs absent locally — catastrophic on a shared remote. Push specific refs without --mirror."},
 }
 
 const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (AGENTS.md). Add explicit paths instead."
@@ -177,6 +180,11 @@ const wholeTreeDiscardLaw = "whole-tree-discard refused: `git checkout .` / `git
 // at the call boundary. Switching to an EXISTING branch needs repo state (is the
 // target main?) and stays deferred — only the unconditional CREATE forms fire here.
 const offTrunkBranchLaw = "off-trunk refused: `git checkout -b` / `git switch -c` / `git worktree add` opens a feature branch or worktree — work directly on the trunk (`main`); never branch or spin a worktree in this repo (AGENTS.md OFF_TRUNK)."
+
+// historyRewriteLaw fires on a whole-history rewrite subcommand (`git filter-branch`,
+// `git filter-repo`). These rewrite every commit on the shared trunk — the same class
+// of forbidden act as a force-push or an interactive rebase, just applied wholesale.
+const historyRewriteLaw = "history-rewrite refused: `git filter-branch` / `git filter-repo` rewrites shared history — forbidden on the trunk (AGENTS.md: never rewrite or force-push shared history). Make a new commit instead."
 
 // ToolCollectiveCommit is the synthetic tool name for the collective-commit
 // barrier. It never shells out; its args are a CollectiveCommitPlan JSON object.
@@ -551,6 +559,11 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 	// Other worktree subcommands (list/remove/prune/move/lock) do not open one.
 	if sub == "worktree" && len(rest) > 0 && rest[0] == "add" {
 		return offTrunkBranchLaw, true
+	}
+
+	// `git filter-branch` / `git filter-repo` rewrite the whole shared history.
+	if sub == "filter-branch" || sub == "filter-repo" {
+		return historyRewriteLaw, true
 	}
 
 	for _, t := range rest {

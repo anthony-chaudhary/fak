@@ -53,6 +53,12 @@ func TestClassifyDestructiveAndOffTrunk(t *testing.T) {
 		{"worktree list OK", "git worktree list", false, ""},
 		{"worktree remove OK", "git worktree remove ../wt", false, ""},
 
+		// ---- catastrophic remote / history rewrite -------------------------
+		{"push mirror", "git push --mirror origin", true, "push-mirror"},
+		{"filter-branch", "git filter-branch --tree-filter rm HEAD", true, "history-rewrite"},
+		{"filter-repo", "git filter-repo --path secret --invert-paths", true, "history-rewrite"},
+		{"clone mirror OK", "git clone --mirror https://example.com/x.git", false, ""},
+
 		// ---- laundering: the unwrap pass must still see these ---------------
 		{"reset hard via bash -c", `bash -c "git reset --hard"`, true, "reset-hard"},
 		{"clean via pipe", "echo go | git clean -fd", true, "clean-force"},
