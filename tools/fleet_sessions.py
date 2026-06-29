@@ -519,8 +519,15 @@ def merge_known_auth(rows):
     return merged
 
 DEAD = {"DEAD_MIDTOOL", "DEAD_KILLED"}              # crashed/killed mid-work -> resumable
-STOPLIKE = DEAD | {"STOPPED_QUIET", "STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_AUTH",
-                   "INFRA_ORG_DISABLED", "USER_CLOSED", "PARKED_WAIT"}
+# Infra dispositions: the SERVER interrupted the session (rate-limit / transient API
+# error / org-disabled), it did NOT finish. #1353: these are safe to auto-resume
+# REGARDLESS of autonomy -- an interactive chat walled mid-conversation by a transient
+# 529 was interrupted, not abandoned, so the autonomy gate over-reaches if it strands it.
+# (USER_CLOSED / DONE stay excluded -- those ARE intentional human stops; INFRA_AUTH stays
+# excluded -- it needs a human re-login, not a resume.)
+INFRA_RESUMABLE = ("STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_ORG_DISABLED")
+STOPLIKE = DEAD | set(INFRA_RESUMABLE) | {"STOPPED_QUIET", "INFRA_AUTH",
+                   "USER_CLOSED", "PARKED_WAIT"}
 REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_registry"))
 RESUME_PROMPT = ("Resume where you left off; re-establish any /goal or /loop "
                  "and continue toward it.")
@@ -776,12 +783,16 @@ def _ledger_blocked_sids(reg_dir=None):
 
 
 def _resumable_disp(r):
-    """Whether a row's disposition is one the dedup pre-pass might auto-resume (so it
-    is a candidate to be a primary or a deferred duplicate). LIVE/DONE are NOT
-    resumable but participate as task COVER -- handled separately in _dedup_defer."""
-    return r.get("autonomous") and (
-        r["disp"] in DEAD
-        or r["disp"] in ("STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_ORG_DISABLED"))
+    """Whether a row's disposition is one the resume path might auto-resume (so it is a
+    candidate to be a dedup primary or a deferred duplicate). LIVE/DONE are NOT resumable
+    but participate as task COVER -- handled separately in _dedup_defer.
+
+    #1353: infra dispositions (the server interrupted the session) are resumable
+    REGARDLESS of autonomy; the agent-crash (DEAD) path keeps the autonomy gate so an
+    interactive chat the human walked away from after a crash is not relaunched."""
+    if r["disp"] in INFRA_RESUMABLE:
+        return True
+    return bool(r.get("autonomous")) and r["disp"] in DEAD
 
 
 def _dedup_defer(rows, reg_dir=None):
@@ -908,10 +919,12 @@ def decide(rows, throttle, availability=None):
             # 2026-06-24 incident; the throttle map stays authoritative, so an owner that
             # is genuinely throttled still re-homes.
             if (r["account"] not in throttle and r["disp"] == "STOPPED_LIMIT"
-                    and r["autonomous"] and _owner_available(availability, r["account"])):
-                r["action"] = "AUTO_RESUME"         # INFRA: stale limit banner -> resume in place
+                    and _owner_available(availability, r["account"])):
+                r["action"] = "AUTO_RESUME"         # INFRA: stale limit banner -> resume in place (#1353: any autonomy)
             else:
-                resumable = r["autonomous"] and (
+                # #1353: STOPPED_LIMIT / STOPPED_APIERR resume regardless of autonomy
+                # (server-interrupted); the DEAD agent-crash path keeps the autonomy gate.
+                resumable = _resumable_disp(r) and (
                     r["disp"] in DEAD or r["disp"] in ("STOPPED_LIMIT", "STOPPED_APIERR"))
                 # #619: only PROVEN-healthy (probe/passive) targets may take load; a
                 # carried "available" is refused here -> defer until a fresh probe.
@@ -930,7 +943,7 @@ def decide(rows, throttle, availability=None):
             # owner -- but the transcript is portable, so re-home an autonomous session
             # onto a healthy, non-org-disabled account WITH usage (the same machinery as
             # the rate-limit path; _rehome_targets already excludes blocked accounts).
-            resumable = r["autonomous"]
+            resumable = _resumable_disp(r)  # #1353: org-disabled resumes regardless of autonomy
             # #619: same launch-boundary gate -- never route an org-disabled session's
             # workload onto a carried/absence-of-evidence target; require positive evidence.
             targets = _admissible_targets(availability, r["account"], assigned) if resumable else []
@@ -947,12 +960,12 @@ def decide(rows, throttle, availability=None):
                 r["action"] = "DEFER_NO_USAGE"
         elif r["disp"] == "INFRA_AUTH":
             r["action"] = "BLOCKED_AUTH"            # INFRA: needs human re-login; resume won't help
-        elif r["disp"] == "STOPPED_APIERR" and r["autonomous"]:
-            r["action"] = "AUTO_RESUME"             # INFRA: transient API error -> retry
+        elif r["disp"] == "STOPPED_APIERR":
+            r["action"] = "AUTO_RESUME"             # INFRA: transient API error -> retry (#1353: any autonomy; server interrupted it)
         elif r["disp"] in DEAD and r["autonomous"]:
             r["action"] = "AUTO_RESUME"             # AGENT crash, autonomous -> resume
-        elif r["disp"] in DEAD or r["disp"] in ("STOPPED_QUIET", "STOPPED_APIERR"):
-            r["action"] = "SURFACE"                 # dead/transient but interactive -> human
+        elif r["disp"] in DEAD or r["disp"] == "STOPPED_QUIET":
+            r["action"] = "SURFACE"                 # agent crash / quiet stop but interactive -> human
         else:
             r["action"] = "SKIP"
         r["resume_cmd"] = resume_cmd(r) if r["disp"] in STOPLIKE else None

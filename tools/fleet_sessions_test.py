@@ -86,14 +86,19 @@ class RehomeDecisionTest(unittest.TestCase):
         fleet_sessions.decide(rows, throttle, availability)
         self.assertEqual(rows[0]["action"], "DEFER_THROTTLED")
 
-    def test_interactive_throttled_session_does_not_rehome(self) -> None:
-        # non-autonomous sessions are never auto-resumed, re-home included
+    def test_interactive_throttled_session_rehomes(self) -> None:
+        # #1353: a rate-limit (STOPPED_LIMIT) is server-interrupted, not abandoned, so an
+        # INTERACTIVE (autonomous=False) session re-homes onto a healthy account too.
         rows = [_row(".claude-gem8-acct", "STOPPED_LIMIT", autonomous=False)]
         throttle = {".claude-gem8-acct": {"reset": "Jun 24, 8pm"}}
-        availability = [_avail(".claude-jack-barker-claude-acct", available=True)]
+        availability = [
+            _avail(".claude-gem8-acct", available=False),
+            _avail(".claude-jack-barker-claude-acct", available=True),
+        ]
         fleet_sessions.decide(rows, throttle, availability)
-        self.assertEqual(rows[0]["action"], "DEFER_THROTTLED")
-        self.assertFalse(rows[0]["rehomed"])
+        self.assertEqual(rows[0]["action"], "AUTO_RESUME")
+        self.assertTrue(rows[0]["rehomed"])
+        self.assertEqual(rows[0]["resume_account"], ".claude-jack-barker-claude-acct")
 
     def test_dead_session_on_throttled_account_rehomes(self) -> None:
         # account-wide throttle (not this row's own limit banner) still re-homes
@@ -362,12 +367,70 @@ class OrgDisabledRehomeTest(unittest.TestCase):
         self.assertEqual(rows[0]["action"], "BLOCKED_AUTH")
         self.assertFalse(rows[0]["rehomed"])
 
-    def test_interactive_org_disabled_does_not_rehome(self) -> None:
+    def test_interactive_org_disabled_rehomes(self) -> None:
+        # #1353: an org-disabled wall is server-side, not a human stop -> an INTERACTIVE
+        # session re-homes onto a healthy seat too, exactly like the autonomous path.
         rows = [_row(".claude-orgdead-acct", "INFRA_ORG_DISABLED", autonomous=False)]
+        availability = [
+            _avail(".claude-orgdead-acct", available=False),
+            _avail(".claude-good-acct", available=True),
+        ]
+        fleet_sessions.decide(rows, {}, availability)
+        self.assertEqual(rows[0]["action"], "AUTO_RESUME")
+        self.assertTrue(rows[0]["rehomed"])
+        self.assertEqual(rows[0]["resume_account"], ".claude-good-acct")
+
+
+class InfraStrandRegardlessOfAutonomyTest(unittest.TestCase):
+    """#1353: a session the SERVER interrupted (transient 529 / API error / rate-limit /
+    org-disabled) is auto-resumable regardless of autonomy -- an interactive chat walled
+    mid-conversation was interrupted, not abandoned. Intentional human stops (USER_CLOSED)
+    and clean finishes (DONE) stay excluded; an agent crash (DEAD) keeps the autonomy gate."""
+
+    def test_interactive_apierr_resumes_in_place(self) -> None:
+        # the exact symptom: init=user, disp=STOPPED_APIERR on a healthy owner -> AUTO_RESUME
+        # (resume in place, not surfaced to a human and not re-homed).
+        rows = [_row(".claude-good-acct", "STOPPED_APIERR", autonomous=False)]
         availability = [_avail(".claude-good-acct", available=True)]
         fleet_sessions.decide(rows, {}, availability)
-        self.assertEqual(rows[0]["action"], "DEFER_NO_USAGE")
-        self.assertFalse(rows[0]["rehomed"])
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertFalse(r["rehomed"])
+        self.assertEqual(r["resume_account"], r["account"])
+
+    def test_autonomous_apierr_still_resumes(self) -> None:
+        # the agent path (the row that DID enter the plan before) is unchanged.
+        rows = [_row(".claude-good-acct", "STOPPED_APIERR", autonomous=True)]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "AUTO_RESUME")
+
+    def test_interactive_user_closed_still_skips(self) -> None:
+        # Esc/Ctrl-C/`/quit` is an intentional human stop -> never resume.
+        rows = [_row(".claude-good-acct", "USER_CLOSED", autonomous=False)]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "SKIP_USER_CLOSED")
+
+    def test_interactive_done_still_skips(self) -> None:
+        # a clean finish is not an interruption -> never resume.
+        rows = [_row(".claude-good-acct", "DONE", autonomous=False)]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "SKIP_DONE")
+
+    def test_interactive_dead_keeps_autonomy_gate(self) -> None:
+        # an AGENT crash (DEAD) the human walked away from is NOT auto-relaunched; it is
+        # surfaced for a human. Only the infra dispositions drop the autonomy gate.
+        rows = [_row(".claude-good-acct", "DEAD_MIDTOOL", autonomous=False)]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "SURFACE")
+
+    def test_resumable_disp_predicate(self) -> None:
+        # the dedup helper agrees: infra dispositions resumable regardless of autonomy;
+        # DEAD only when autonomous; USER_CLOSED/DONE never.
+        for disp in fleet_sessions.INFRA_RESUMABLE:
+            self.assertTrue(fleet_sessions._resumable_disp(_row("a", disp, autonomous=False)))
+        self.assertTrue(fleet_sessions._resumable_disp(_row("a", "DEAD_MIDTOOL", autonomous=True)))
+        self.assertFalse(fleet_sessions._resumable_disp(_row("a", "DEAD_MIDTOOL", autonomous=False)))
+        self.assertFalse(fleet_sessions._resumable_disp(_row("a", "USER_CLOSED", autonomous=False)))
 
 
 class DedupTaskTest(unittest.TestCase):
