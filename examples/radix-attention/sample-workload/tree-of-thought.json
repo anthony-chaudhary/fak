@@ -1,0 +1,11 @@
+{
+  "name": "tree-of-thought",
+  "desc": "branching reasoning tree (root, fanout 2, depth 2); siblings share every ancestor (ToT/GSM-8K shape)",
+  "sglang_published": "multi-level branch reuse; within 50-99% band",
+  "requests": [
+    [50, 51, 52, 53, 54, 55, 56, 57, 60, 61, 80, 81],
+    [50, 51, 52, 53, 54, 55, 56, 57, 60, 61, 82, 83],
+    [50, 51, 52, 53, 54, 55, 56, 57, 70, 71, 90, 91],
+    [50, 51, 52, 53, 54, 55, 56, 57, 70, 71, 92, 93]
+  ]
+}

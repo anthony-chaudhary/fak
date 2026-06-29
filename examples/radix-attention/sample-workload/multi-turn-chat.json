@@ -1,0 +1,11 @@
+{
+  "name": "multi-turn-chat",
+  "desc": "4-turn conversation; each turn re-sends the full history so far (chat shape)",
+  "sglang_published": "history reuse; large speedup for short outputs (Sec 6.2)",
+  "requests": [
+    [200, 201, 202, 203],
+    [200, 201, 202, 203, 210, 211],
+    [200, 201, 202, 203, 210, 211, 220, 221],
+    [200, 201, 202, 203, 210, 211, 220, 221, 230, 231]
+  ]
+}

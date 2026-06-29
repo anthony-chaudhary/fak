@@ -1,0 +1,11 @@
+{
+  "name": "few-shot",
+  "desc": "4 questions share one 10-token few-shot preamble (MMLU 5-shot shape)",
+  "sglang_published": "single-level prefix reuse; hit rate within 50-99% band",
+  "requests": [
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 101, 102, 103, 104],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 111, 112, 113, 114],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 121, 122, 123, 124],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 131, 132, 133, 134]
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "agents",
+  "desc": "2 concurrent agents share a 6-token system prefix; each grows a private chain, arrivals interleaved (ReAct shape)",
+  "sglang_published": "two-level reuse (shared system + per-agent chain); cache-aware scheduling recovers hit rate under interleaving",
+  "requests": [
+    [1, 2, 3, 4, 5, 6, 150, 151],
+    [1, 2, 3, 4, 5, 6, 160, 161],
+    [1, 2, 3, 4, 5, 6, 150, 151, 152, 153],
+    [1, 2, 3, 4, 5, 6, 160, 161, 162, 163]
+  ]
+}
