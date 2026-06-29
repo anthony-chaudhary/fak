@@ -318,7 +318,8 @@ def aggregate_arm(arm_id, reps):
     # success and never enters the resource means — the gate must not open on it.
     successful = [r for r in reps if r.get("success") and r.get("completed")]
     models = sorted({r.get("model", "unknown") for r in reps})
-    metric = lambda key: mean_ci95([r["tokens"][key] for r in successful]) if successful else mean_ci95([])
+    def metric(key):
+        return mean_ci95([r["tokens"][key] for r in successful]) if successful else mean_ci95([])
     agg = {
         "arm": arm_id,
         "model": _modal([r.get("model", "unknown") for r in reps]),

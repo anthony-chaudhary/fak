@@ -53,7 +53,7 @@ class TestScorers(unittest.TestCase):
         self.assertIsNone(pm._priority_of(["enhancement"]))
 
     def test_importance_rises_with_priority(self):
-        now = dt.datetime(2026, 6, 28, tzinfo=dt.timezone.utc)
+        dt.datetime(2026, 6, 28, tzinfo=dt.timezone.utc)
         p0 = build([issue(1, "fix(x): a", labels=["priority/P0"])])["grid"]["issues"][0]
         p3 = build([issue(2, "fix(y): b", labels=["priority/P3"])])["grid"]["issues"][0]
         self.assertGreater(p0["importance"], p3["importance"])

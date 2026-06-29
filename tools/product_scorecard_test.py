@@ -154,7 +154,8 @@ def test_command_resolves_catches_unrunnable() -> None:
 
 
 def test_witnessed_and_discoverable() -> None:
-    exists = lambda p: p in {"internal/adjudicator", "docs/cli-reference.md"}
+    def exists(p):
+        return p in {"internal/adjudicator", "docs/cli-reference.md"}
     assert ps.kpi_witnessed([row()], exists)["defects"] == []
     assert ps.kpi_witnessed([row(witness_path="internal/ghost")], exists)["defects"]
     assert ps.kpi_witnessed([row(witness_path="")], exists)["defects"]

@@ -42,7 +42,6 @@ import re
 import shutil
 import shlex
 import subprocess
-import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -582,7 +581,7 @@ def grade(arm: str, preds_path: str, run_dir: Path, args, submitted: int) -> dic
     glog = run_dir / f"grade_{arm}.log"
     t0 = time.time()
     cwd = str(Path(preds_path).parent)
-    resolved = total = -1
+    resolved = -1
     grade_rc = None
     grade_error = ""
     try:
@@ -597,10 +596,10 @@ def grade(arm: str, preds_path: str, run_dir: Path, args, submitted: int) -> dic
                     resolved = int(m.group(1))
                 m = re.search(r"Total instances:\s*(\d+)", line)
                 if m:
-                    total = int(m.group(1))
+                    int(m.group(1))
                 m = re.search(r"Resolved\s+(\d+)\s*/\s*(\d+)", line)
                 if m:
-                    resolved, total = int(m.group(1)), int(m.group(2))
+                    resolved, _total = int(m.group(1)), int(m.group(2))
             grade_rc = p.wait(timeout=args.grade_timeout)
     except Exception as e:
         grade_error = repr(e)

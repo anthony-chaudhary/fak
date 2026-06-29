@@ -154,11 +154,13 @@ def discover(roots, since_days=None, ns_prefix=NS_INCLUDE_PREFIX, max_n=None):
                 if cutoff and st.st_mtime < cutoff:
                     continue
                 out.append({"path": path, "ns": ns, "size": st.st_size, "mtime": st.st_mtime})
-    seen = set(); uniq = []
+    seen = set()
+    uniq = []
     for r in sorted(out, key=lambda r: r["size"], reverse=True):
         if r["path"] in seen:
             continue
-        seen.add(r["path"]); uniq.append(r)
+        seen.add(r["path"])
+        uniq.append(r)
     return uniq[:max_n] if max_n else uniq
 
 # --------------------------------------------------------------------------------------
@@ -283,7 +285,8 @@ def parse_window(path):
                         use_input[tid] = nm + " " + json.dumps(b.get("input", {}), separators=(",", ":"))
                         if tid not in use_order:
                             use_order[tid] = ev_order
-                        events.append((ev_order, nm, tp)); ev_order += 1
+                        events.append((ev_order, nm, tp))
+                        ev_order += 1
                     elif bt == "tool_result":
                         tu = b.get("tool_use_id")
                         s = rc_to_str(b.get("content", ""))
@@ -322,16 +325,19 @@ def parse_window(path):
     items = []
     order = 0
     for kind, tool, content in nonresult:
-        items.append(Item(kind, tool, content, order)); order += 1
+        items.append(Item(kind, tool, content, order))
+        order += 1
     # tool_use INPUT mass — one Item per tool_use id (full input, last wins). Carry the
     # file path so a windowed Write/Edit payload is recoverable (the bytes land in the file).
     for tid in use_input:
         nm, p = use.get(tid, ("", ""))
-        items.append(Item("tool_use", nm, use_input[tid], order, path=p)); order += 1
+        items.append(Item("tool_use", nm, use_input[tid], order, path=p))
+        order += 1
     for tu in result_order:
         name, p = use.get(tu, ("?", ""))
         it = Item("result", name, results[tu], order, path=p,
-                  is_error=result_err.get(tu, False)); order += 1
+                  is_error=result_err.get(tu, False))
+        order += 1
         # stale = a Read whose path is written by a LATER tool_use. The result's own event
         # order is its issuing tool_use's order (bound by tool_use_id, NOT a name+path
         # cursor — so a user message carrying several parallel results can't misorder them).
@@ -532,21 +538,26 @@ def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, 
             content = filter_noise(content)
             d = t0 - toks(content)
             if d > 0:
-                rm["noise"] += d; cnt["noise"] += 1
+                rm["noise"] += d
+                cnt["noise"] += 1
                 removed_recoverable += d            # ANSI/whitespace are not information
         t1 = toks(content)
         # tier 1: stale read superseded by a later write -> pointer (results only)
         if profile.stale and it.stale:
             new = _stale_pointer(it)
             d = max(0.0, t1 - toks(new))
-            kept += toks(new); rm["stale"] += d; cnt["stale"] += 1
+            kept += toks(new)
+            rm["stale"] += d
+            cnt["stale"] += 1
             removed_recoverable += d                # the file is re-readable
             continue
         # tier 2: exact duplicate -> pointer (hash the ORIGINAL content for determinism)
         if profile.dedup and it.h in seen_h:
             new = _dedup_pointer(it)
             d = max(0.0, t1 - toks(new))
-            kept += toks(new); rm["dedup"] += d; cnt["dedup"] += 1
+            kept += toks(new)
+            rm["dedup"] += d
+            cnt["dedup"] += 1
             removed_recoverable += d                # redundant: the bytes added no new info
             continue
         seen_h.add(it.h)
@@ -558,7 +569,9 @@ def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, 
             new, recov = collapse_error(it, profile.error_collapse, content=content)
             d = max(0.0, t1 - toks(new))
             if d > 0:                               # never INFLATE a small error
-                kept += toks(new); rm["error"] += d; cnt["error"] += 1
+                kept += toks(new)
+                rm["error"] += d
+                cnt["error"] += 1
                 if recov:
                     removed_recoverable += d
                 continue
@@ -568,7 +581,9 @@ def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, 
         if profile.window and item_budget is not None and t1 > item_budget:
             new = window_content(content, item_budget, it.path, head_frac=profile.head_frac)
             d = max(0.0, t1 - toks(new))
-            kept += toks(new); rm["window"] += d; cnt["window"] += 1
+            kept += toks(new)
+            rm["window"] += d
+            cnt["window"] += 1
             if it.path:                             # file-backed -> middle re-readable
                 removed_recoverable += d
             # else: head+tail survive, but the elided middle of a non-file result is
@@ -623,7 +638,8 @@ def autotune(items, target, min_budget=MIN_BUDGET, profile=None):
         mid = (lo + hi) / 2.0
         r = reduce_window(items, mid, min_budget=mb, profile=profile)
         if r["ratio"] is not None and r["ratio"] >= target:
-            best = r; lo = mid       # afford a larger (less lossy) budget
+            best = r
+            lo = mid       # afford a larger (less lossy) budget
         else:
             hi = mid
     return best, round(lo, 1)
@@ -639,12 +655,15 @@ def cmd_baseline(args):
         print(f"no transcripts found under {roots} (ns_prefix={nsp!r}); try --all or --root", file=sys.stderr)
         return 2
     all_items = []
-    agg_kind = collections.Counter(); agg_tool = collections.Counter()
+    agg_kind = collections.Counter()
+    agg_tool = collections.Counter()
     agg_tool_excess = collections.Counter()   # per-tool windowing headroom over a 700-tok cap
     total = 0.0
-    excess = collections.Counter(); dup = near = stale = noise = 0.0
+    excess = collections.Counter()
+    dup = near = stale = noise = 0.0
     catn = xrepeat = 0.0          # line-level noise: cat-n prefixes; cross-result repeats
-    errmass = 0.0; errn = 0       # error-shaped result mass (the error-collapse tier's prize)
+    errmass = 0.0
+    errn = 0       # error-shaped result mass (the error-collapse tier's prize)
     rq = [0.0, 0.0, 0.0, 0.0]
     for s in sess:
         items, _ = parse_window(s["path"])
@@ -658,13 +677,19 @@ def cmd_baseline(args):
                 agg_tool[it.tool] += it.toks
         sh, snh, seen_lines = set(), set(), set()
         for it in results:
-            if it.h in sh: dup += it.toks
-            else: sh.add(it.h)
-            if it.nh in snh: near += it.toks
-            else: snh.add(it.nh)
-            if it.stale: stale += it.toks
+            if it.h in sh:
+                dup += it.toks
+            else:
+                sh.add(it.h)
+            if it.nh in snh:
+                near += it.toks
+            else:
+                snh.add(it.nh)
+            if it.stale:
+                stale += it.toks
             if looks_like_error(it):
-                errmass += it.toks; errn += 1
+                errmass += it.toks
+                errn += 1
             noise += it.toks - toks(filter_noise(it.content))
             # cat -n line-number prefixes the Read tool prepends ("   123\t"): formatting,
             # not file content (but they ARE Edit-targeting signal — informational only).
@@ -674,13 +699,16 @@ def cmd_baseline(args):
             for ln in it.content.split("\n"):
                 if len(ln) >= 20 and ln.strip():
                     hh = _h(ln)
-                    if hh in seen_lines: xrepeat += len(ln) / CHARS_PER_TOK
-                    else: seen_lines.add(hh)
+                    if hh in seen_lines:
+                        xrepeat += len(ln) / CHARS_PER_TOK
+                    else:
+                        seen_lines.add(hh)
         # windowing excess + recency span the FULL reducible surface (results + tool_use),
         # matching what reduce_window actually touches.
         for it in reducible:
             for b in (2000, 1000, 700, 500):
-                if it.toks > b: excess[b] += it.toks - b
+                if it.toks > b:
+                    excess[b] += it.toks - b
             if it.toks > 700:                       # per-tool windowing headroom over a 700 cap
                 agg_tool_excess[it.tool or "?"] += it.toks - 700
         n = len(reducible) or 1
@@ -864,7 +892,8 @@ def cmd_reduce(args):
         nsp = "" if args.all else NS_INCLUDE_PREFIX
         sess = discover(roots, since_days=args.since_days, ns_prefix=nsp, max_n=args.max)
         if not sess:
-            print("no transcripts found", file=sys.stderr); return 2
+            print("no transcripts found", file=sys.stderr)
+            return 2
         items = []
         for s in sess:
             items.extend(parse_window(s["path"])[0])
@@ -874,11 +903,14 @@ def cmd_reduce(args):
     # budget/target resolution: an explicit --budget wins; else a profile with a fixed budget
     # (aggressive/hyper) uses it unless --target was given; else auto-tune to the profile target.
     if not prof.window:
-        rep = reduce_window(items, 0, profile=prof); budget = None
+        rep = reduce_window(items, 0, profile=prof)
+        budget = None
     elif args.budget:
-        rep = reduce_window(items, args.budget, profile=prof); budget = rep["budget"]
+        rep = reduce_window(items, args.budget, profile=prof)
+        budget = rep["budget"]
     elif prof.budget is not None and args.target is None:
-        rep = reduce_window(items, prof.budget, profile=prof); budget = rep["budget"]
+        rep = reduce_window(items, prof.budget, profile=prof)
+        budget = rep["budget"]
     else:
         rep, budget = autotune(items, args.target if args.target is not None else prof.target, profile=prof)
     rep["scope"] = label
@@ -891,8 +923,10 @@ def cmd_reduce(args):
     exempt = sorted(t for t, v in prof.per_tool.items() if v is None)
     caps = sorted(f"{t}={v}" for t, v in prof.per_tool.items() if v is not None)
     print(f"  profile {prof.name}  ·  window budget {budget} tok/result  ·  error-collapse {prof.error_collapse}")
-    if caps:   print(f"  per-tool caps: {', '.join(caps)}")
-    if exempt: print(f"  exempt tools: {', '.join(exempt)}")
+    if caps:
+        print(f"  per-tool caps: {', '.join(caps)}")
+    if exempt:
+        print(f"  exempt tools: {', '.join(exempt)}")
     print(f"  ── baseline {rep['baseline_tok']:,} tok  →  reduced {rep['reduced_tok']:,} tok")
     if rep["ratio"]:
         print(f"  ── REDUCTION {rep['ratio']}×  (removed {rep['removed_tok']:,} tok; "

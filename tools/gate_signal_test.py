@@ -201,7 +201,6 @@ def test_garden_finding_routes_to_owning_tool_lane():
 
 
 def test_workflow_only_finding_routes_to_ci_lane():
-    import issue_lane_router as router
     # The genuinely NEW case the dotted-root router fix unlocks: a finding whose own
     # source IS the workflow (a scheduled advisory `.yml` gate broke) has a `.github/`
     # owning path, so the rendered ticket path-confirms the `ci` lane — and CLEANLY,

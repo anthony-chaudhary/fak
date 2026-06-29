@@ -1250,7 +1250,7 @@ def kpi_churn_bloat(added: int, removed: int, n_commits: int) -> dict[str, Any]:
     elif added == 0:
         detail = f"no .go files added in {n_commits} commit(s)"
     else:
-        ratio = removed / added if added else 0.0
+        removed / added if added else 0.0
         detail = f"{added} .go added / {removed} removed over {n_commits} commit(s)"
         if added >= 8 and removed == 0:
             soft.append(f"accretion: {added} .go files added, 0 removed over {n_commits} commits "

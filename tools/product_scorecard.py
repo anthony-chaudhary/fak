@@ -420,7 +420,7 @@ def kpi_verdict_consistency(rows: list[dict[str, Any]]) -> dict[str, Any]:
         exp, why = expected_verdict(r)
         if declared != exp:
             defects.append(f"{rid}: claims '{declared}' but evidence implies '{exp}' — {why}")
-    return _kpi("verdict_consistency", defects, f"every verdict matches its evidence",
+    return _kpi("verdict_consistency", defects, "every verdict matches its evidence",
                 bad_detail=f"{len(defects)} verdict overclaim(s)")
 
 
@@ -965,7 +965,7 @@ def _front_matter(title: str, desc: str) -> list[str]:
 def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> str:
     c = payload.get("corpus") or {}
     cov = c.get("coverage") or {}
-    pos = c.get("standing") or {}
+    c.get("standing") or {}
     out = _front_matter(
         "fak product scorecard — which concepts are durable, real, useful-today products",
         "Inward product-concept scorecard: each fak concept positioned on the durable / real / "

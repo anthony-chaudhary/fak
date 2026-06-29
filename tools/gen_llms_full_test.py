@@ -41,7 +41,7 @@ def test_collect_targets_skips_external_and_anchors() -> None:
 
 def test_collect_targets_dedups_and_orders() -> None:
     # Monkeypatch ROOT to a temp dir so isfile resolves local fake docs.
-    import tempfile, os
+    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = g.ROOT
         g.ROOT = td

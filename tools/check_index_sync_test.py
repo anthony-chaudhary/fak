@@ -182,7 +182,8 @@ def test_live_repo_has_no_index_drift() -> None:
     """The real INDEX.md / llms.txt ship no dangling link, and every tracked dated
     note is listed. This is the gate that would have caught #511's drift class."""
     dang = ix.dangling(ROOT, "INDEX.md") + ix.dangling(ROOT, "llms.txt")
-    assert not dang, "dangling links in the curated index:\n" + "\n".join(f"{i}:{l}" for i, l in dang)
+    assert not dang, "dangling links in the curated index:\n" + "\n".join(
+        f"{i}:{line}" for i, line in dang)
     orph = ix.orphans(ROOT)
     assert not orph, "unlisted dated notes:\n" + "\n".join(orph)
 

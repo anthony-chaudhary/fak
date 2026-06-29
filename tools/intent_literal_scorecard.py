@@ -295,10 +295,14 @@ def _clip(s: str, n: int = 70) -> str:
 # ---- fold + render ----------------------------------------------------------------------
 
 def grade_letter(score: float) -> str:
-    if score >= 95: return "A"
-    if score >= 85: return "B"
-    if score >= 75: return "C"
-    if score >= 60: return "D"
+    if score >= 95:
+        return "A"
+    if score >= 85:
+        return "B"
+    if score >= 75:
+        return "C"
+    if score >= 60:
+        return "D"
     return "F"
 
 

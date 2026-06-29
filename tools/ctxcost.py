@@ -535,7 +535,6 @@ def marginal_ledger(turns, budget, stable_prefix=0, evict_frac=0.0, write_mult=M
         else:
             b_new = t.fresh * M_FRESH + t.write * write_mult
             b_rebill = t.read * M_READ
-        b_retr = {"retrieve_tok": 0.0, "retrieve_base_units": 0.0, "source": "n/a"}
         bB = {"new": round(b_new, 1), "rebill": round(b_rebill, 1),
               "retrieve": 0.0, "out": round(out_c, 1)}
 
@@ -567,7 +566,10 @@ def marginal_ledger(turns, budget, stable_prefix=0, evict_frac=0.0, write_mult=M
         mC = bC["new"] + bC["recon"] + bC["retrieve"] + bC["out"]
         mD = bD["new"] + bD["head"] + bD["recon"] + bD["retrieve"] + bD["out"]
         mA = tr["cost_base_units"]["A"]
-        cum["A"] += mA; cum["B"] += mB; cum["C"] += mC; cum["D"] += mD
+        cum["A"] += mA
+        cum["B"] += mB
+        cum["C"] += mC
+        cum["D"] += mD
 
         out_recs.append({
             "turn": i,
@@ -982,7 +984,7 @@ def cmd_trace(args):
     # human view: the summary + the first/last few turns + every truncation event
     print(f"\n  ctxcost · replay trace — {label}")
     print(f"  budget {args.budget} tok/turn · scenario {args.scenario} · {summ['n_turns']} turns\n")
-    print(f"  observability events:")
+    print("  observability events:")
     print(f"    • {summ['turns_window_cannot_hold_new_context']} turns whose NEW content "
           f"({summ['max_new_context_tok']:,} tok max) would not fit the {int(args.budget):,}-tok window"
           f"  (the faithfulness risk, made VISIBLE)")
@@ -1043,8 +1045,8 @@ def cmd_marginal(args):
         return 0
     print(f"\n  ctxcost · MARGINAL (incremental dC/dn) ledger — {label}")
     print(f"  budget {int(args.budget):,} tok/turn · scenario {args.scenario} · {len(turns)} turns")
-    print(f"  marginal cost of turn n = the bill FOR THAT TURN (never the running sum over the "
-          f"re-billed prefix).\n")
+    print("  marginal cost of turn n = the bill FOR THAT TURN (never the running sum over the "
+          "re-billed prefix).\n")
     for ph in p_hits:
         recs = ledgers[ph]
         summ = marginal_summary(recs)
@@ -1072,8 +1074,8 @@ def cmd_marginal(args):
         print(f"  {r['turn']:>5} {r['new_context_tok']:>8,} {r['marginal']['B']['rebill']:>9,.0f} "
               f"{r['marginal']['C']['recon']:>9,.0f} {r['retrieve']['retrieve_base_units']:>9,.0f} "
               f"{r['marginal_bill']['B']:>9,.0f} {r['marginal_bill']['C']:>9,.0f} {r['cost_source']:>9}")
-    print(f"\n  cost_source = which component drove THIS turn's bounded-regime bill. "
-          f"--jsonl OUT emits every turn.\n")
+    print("\n  cost_source = which component drove THIS turn's bounded-regime bill. "
+          "--jsonl OUT emits every turn.\n")
     return 0
 
 

@@ -46,7 +46,6 @@ Companion docs:
 """
 import sys
 import json
-import math
 import argparse
 import datetime
 
@@ -173,7 +172,6 @@ def h_fleet_shortagent(agents, shared_tokens, agent_turns, delta_tokens, concurr
 # --- table builders ------------------------------------------------------------
 def curve_table(turns=200):
     ceiling = h_frozen(turns)
-    rows = []
     # flexibility: edit depth into the prefix
     flex = [(int(d * 100), s_flex(d) * ceiling) for d in (0.0, 0.05, 0.10, 0.25, 0.50, 0.75, 1.0)]
     # tool density (naive single-breakpoint harness — the common case)

@@ -39,7 +39,6 @@ Usage:
 """
 import sys
 import os
-import json
 import argparse
 import hashlib
 
@@ -219,7 +218,7 @@ def cmd_demo(args):
     full = st.full_tok()
     print(f"\n  ctxnav · agent self-exploration — {label}")
     print(f"  {len(st.order)} tool-result nodes · {full:,} tok of full content in the store\n")
-    print(f"  start: every node a TOMBSTONE")
+    print("  start: every node a TOMBSTONE")
     print(f"    resident = {st.resident_tok():,} tok  ({100*st.resident_tok()/max(1,full):.2f}% of full; the store is O(1))\n")
 
     # simulate an agent deciding to drill in: expand the biggest node, then recurse into its

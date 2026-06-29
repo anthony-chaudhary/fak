@@ -762,8 +762,8 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None,
                   f"{len(rows)} rows ({meas['measured']} measured, {meas['gap']} honest gaps; "
                   f"{n_soft}+{n_ind_soft} advisory)")
         next_action = ("hold the line; when the field moves add the new industry dimension to "
-                       f"_taxonomy.json (coverage drops → position it), and when a benchmark "
-                       f"lands turn a no-claim into a measured row; re-run to keep both debts at 0")
+                       "_taxonomy.json (coverage drops → position it), and when a benchmark "
+                       "lands turn a no-claim into a measured row; re-run to keep both debts at 0")
     elif parity_debt == 0 and cov["coverage_debt"] == 0:
         # The map is complete + honestly drawn, but fak's SUBSTANTIVE standing is weak:
         # it leads/parities on few axes and contests little of the field. An honest map
@@ -819,10 +819,12 @@ def _dig(payload: Any, path: str) -> Any:
         ch = path[i]
         if ch == ".":
             if tok:
-                parts.append(tok); tok = ""
+                parts.append(tok)
+                tok = ""
         elif ch == "[":
             if tok:
-                parts.append(tok); tok = ""
+                parts.append(tok)
+                tok = ""
             j = path.index("]", i)
             parts.append(int(path[i + 1:j]))
             i = j
@@ -1219,7 +1221,7 @@ def render_index_page(payload: dict[str, Any], data: dict[str, Any],
     cov = c.get("coverage") or {}
     meas = c.get("measured") or {}
     cat_defs = data.get("categories") or []
-    cat_group = {x.get("id"): x.get("group", "other") for x in cat_defs}
+    {x.get("id"): x.get("group", "other") for x in cat_defs}
     groups = sorted({x.get("group", "other") for x in cat_defs})
     out = _front_matter(
         "fak industry scorecard — where fak stands in the LLM-serving field",
@@ -1335,9 +1337,9 @@ def render_group_page(group: str, payload: dict[str, Any], data: dict[str, Any])
         f"fak's honest position. Generated from tools/industry_scorecard.data/.")
     out.append(f"# {group} — the dimensions that matter, and where fak stands")
     out.append("")
-    out.append(f"[← back to the scorecard index](README.md) · part of the industry-first scorecard. "
-               f"Each dimension is a thing the field competes on; the fak column is honest — mostly "
-               f"`no-claim` gaps for a focused reuse kernel.")
+    out.append("[← back to the scorecard index](README.md) · part of the industry-first scorecard. "
+               "Each dimension is a thing the field competes on; the fak column is honest — mostly "
+               "`no-claim` gaps for a focused reuse kernel.")
     out.append("")
     for cat in cats:
         cdims = [d for d in dims if d.get("category") == cat]
@@ -1426,7 +1428,7 @@ def render_taxonomy_page(data: dict[str, Any]) -> str:
 
 
 def render_update_process_page(payload: dict[str, Any]) -> str:
-    c = payload.get("corpus") or {}
+    payload.get("corpus") or {}
     out = _front_matter(
         "fak industry scorecard — the update process",
         "How the industry scorecard stays current on both cadences: as the industry changes (new "

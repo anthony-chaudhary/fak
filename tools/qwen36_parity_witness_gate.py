@@ -30,7 +30,6 @@ and the tool exits 0 (a plain CPU box legitimately has no Mac witness yet).
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import re
 import sys

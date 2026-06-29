@@ -55,7 +55,6 @@ import argparse
 import collections
 import html
 import json
-import subprocess
 import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -588,7 +587,7 @@ def rsi_tape(path: str, max_rows: int = 0) -> Tape:
     metric_name = next((r.get("metric_name") for r in jr if r.get("metric_name")), "metric")
     lower_better = bool(jr[0].get("lower_better", False))
     # scale to the largest metric magnitude seen (baseline or candidate)
-    vmax = max((max(abs(r.get("candidate_metric", 0.0)), abs(r.get("baseline", 0.0))) for r in jr),
+    max((max(abs(r.get("candidate_metric", 0.0)), abs(r.get("baseline", 0.0))) for r in jr),
                default=1.0) or 1.0
 
     rows: list[Row] = []
@@ -687,7 +686,7 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("tape")
     _add_out_flags(rn)
 
-    lst = sub.add_parser("list", help="list the scenario ids")
+    sub.add_parser("list", help="list the scenario ids")
     args = ap.parse_args(argv)
 
     if args.cmd == "list":

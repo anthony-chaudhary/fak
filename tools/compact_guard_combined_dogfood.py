@@ -17,7 +17,17 @@ with no agent-side change.
 
 Usage:  python combined_dogfood.py --fak ./fak-demo.exe --out evidence.json
 """
-import argparse, json, os, subprocess, time, threading, http.server, socketserver, urllib.request, hashlib, random, sys
+import argparse
+import json
+import subprocess
+import time
+import threading
+import http.server
+import socketserver
+import urllib.request
+import hashlib
+import random
+import sys
 
 class Recorder:
     def __init__(self): self.bodies = []
@@ -31,8 +41,11 @@ def make_handler(rec):
             resp = json.dumps({"id":"msg_x","type":"message","role":"assistant","model":"claude-mock",
                 "content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":None,
                 "usage":{"input_tokens":10,"output_tokens":2}}).encode()
-            self.send_response(200); self.send_header("Content-Type","application/json")
-            self.send_header("Content-Length",str(len(resp))); self.end_headers(); self.wfile.write(resp)
+            self.send_response(200)
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(resp)))
+            self.end_headers()
+            self.wfile.write(resp)
     return H
 
 def start_upstream(rec):
@@ -61,8 +74,10 @@ def wait_ready(port, deadline=20):
     while time.time() < end:
         for p in ("/healthz","/metrics"):
             try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}{p}", timeout=1).read(); return True
-            except Exception: pass
+                urllib.request.urlopen(f"http://127.0.0.1:{port}{p}", timeout=1).read()
+                return True
+            except Exception:
+                pass
         time.sleep(0.2)
     return False
 
@@ -73,11 +88,14 @@ def adjudicate(port, tool, args, read_only=False):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fak", required=True); ap.add_argument("--out", required=True)
-    ap.add_argument("--turns", type=int, default=900); ap.add_argument("--budget", type=int, default=4000)
+    ap.add_argument("--fak", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--turns", type=int, default=900)
+    ap.add_argument("--budget", type=int, default=4000)
     args = ap.parse_args()
 
-    rec = Recorder(); httpd, up_port = start_upstream(rec)
+    rec = Recorder()
+    httpd, up_port = start_upstream(rec)
     fak_port = random.randint(20000, 39000)
     anthropic_hdr = {"Content-Type":"application/json","x-api-key":"test","anthropic-version":"2023-06-01"}
     result = {"schema":"fak-combined-dogfood/1",
@@ -96,7 +114,8 @@ def main():
         post(fak_port, "/v1/messages", body, anthropic_hdr)
         time.sleep(0.3)
         off_fwd = rec.bodies[-1]
-        off_proc.terminate(); off_proc.wait(timeout=5)
+        off_proc.terminate()
+        off_proc.wait(timeout=5)
 
         # Now the ON instance: prove FLOOR (adjudicate) AND LEVER (compact) on one server.
         fak_port2 = random.randint(20000, 39000)
@@ -113,7 +132,8 @@ def main():
         allow = adjudicate(fak_port2, "git_status", {"args":""}, read_only=True)
         def verdict(d):
             for k in ("verdict","decision","status"):
-                if isinstance(d, dict) and k in d: return d[k]
+                if isinstance(d, dict) and k in d:
+                    return d[k]
             v = d.get("result", d)
             return v.get("verdict") if isinstance(v, dict) else d
         deny_v = json.dumps(deny)
@@ -126,11 +146,13 @@ def main():
         post(fak_port2, "/v1/messages", body, anthropic_hdr)
         time.sleep(0.3)
         on_fwd = rec.bodies[-1]
-        on_proc.terminate(); on_proc.wait(timeout=5)
+        on_proc.terminate()
+        on_proc.wait(timeout=5)
     finally:
         httpd.shutdown()
 
-    et = lambda b: len(b)//4
+    def et(b):
+        return len(b)//4
     marker = b'"cache_control"'
     prefix_len = off_fwd.rfind(marker) + len(marker)
     prefix_identical = off_fwd[:prefix_len] == on_fwd[:prefix_len]
@@ -151,7 +173,8 @@ def main():
                   "pass": shed > 0 and prefix_identical and b"[fak] compacted" in on_fwd},
     })
     result["verdict"] = "PASS" if (result["floor"]["pass"] and result["lever"]["pass"]) else "FAIL"
-    with open(args.out, "w") as f: json.dump(result, f, indent=2)
+    with open(args.out, "w") as f:
+        json.dump(result, f, indent=2)
     print(json.dumps(result, indent=2))
     sys.exit(0 if result["verdict"] == "PASS" else 1)
 

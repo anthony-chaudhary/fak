@@ -402,9 +402,10 @@ class DedupTaskTest(unittest.TestCase):
 
     def test_dedup_primary_is_deterministic_across_reorder(self) -> None:
         sids = self._sids(3)
-        mk = lambda order: [
-            _row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[i],
-                 task_sig="SIG", records=r) for i, r in order]
+        def mk(order):
+            return [
+                    _row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[i],
+                         task_sig="SIG", records=r) for i, r in order]
         avail = [_avail(".claude-good-acct", available=True, live=0)]
         rows_a = mk([(0, 10), (1, 30), (2, 20)])
         rows_b = mk([(2, 20), (0, 10), (1, 30)])   # different list order

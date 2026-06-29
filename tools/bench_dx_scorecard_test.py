@@ -69,7 +69,7 @@ def test_compare_renders_2x_verdict() -> None:
 
 def test_spurious_path_kpi_fixture(tmp_path: Path = None) -> None:
     # The doubled-root bug: a cmd/*bench* default flag pointing at fak/experiments.
-    import tempfile, os
+    import tempfile
     d = Path(tempfile.mkdtemp())
     (d / "go.mod").write_text("module x\n", encoding="utf-8")
     bad = d / "cmd" / "paritybench"

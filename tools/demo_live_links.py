@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -226,18 +225,18 @@ def https_alternative(href: str) -> str:
 
 def static_audit(html: str, *, host: str = HOSTED_HOST) -> dict[str, Any]:
     links = extract_links(html)
-    hosted = [l for l in links if is_hosted_link(l.href, host)]
-    hosted_cards = [l for l in hosted if l.is_card]
+    hosted = [link for link in links if is_hosted_link(link.href, host)]
+    hosted_cards = [link for link in hosted if link.is_card]
     defects: list[str] = []
     soft: list[str] = []
 
-    for l in hosted:
-        stale = known_stale_match(l.href)
+    for link in hosted:
+        stale = known_stale_match(link.href)
         if stale:
-            defects.append(f"stale hosted demo link for {stale['demo']}: {l.href}")
+            defects.append(f"stale hosted demo link for {stale['demo']}: {link.href}")
 
     if host == HOSTED_HOST:
-        actual_hrefs = [l.href for l in hosted]
+        actual_hrefs = [link.href for link in hosted]
         actual_set = set(actual_hrefs)
         expected_set = set(EXPECTED_HOSTED_LINKS)
         if len(actual_hrefs) != len(actual_set):
@@ -247,7 +246,7 @@ def static_audit(html: str, *, host: str = HOSTED_HOST) -> dict[str, Any]:
         for href in sorted(actual_set - expected_set):
             defects.append(f"unexpected hosted demo link: {href}")
         for href, want_card in EXPECTED_HOSTED_LINKS.items():
-            roles = [l.is_card for l in hosted if l.href == href]
+            roles = [link.is_card for link in hosted if link.href == href]
             if roles and want_card not in roles:
                 want = "card" if want_card else "non-card link"
                 defects.append(f"hosted demo link role changed: {href} should be a {want}")
@@ -260,26 +259,26 @@ def static_audit(html: str, *, host: str = HOSTED_HOST) -> dict[str, Any]:
             f"want {EXPECTED_HOSTED_CARD_COUNT}; update docs and this audit together"
         )
 
-    if any(urllib.parse.urlparse(l.href).scheme == "http" for l in hosted):
+    if any(urllib.parse.urlparse(link.href).scheme == "http" for link in hosted):
         if "plain HTTP" not in html:
             defects.append("hosted links use http:// but docs/demos.html does not disclose plain HTTP")
         soft.append("hosted demo links are plain HTTP; top-level navigation works, embedding from HTTPS does not")
 
-    https_links = [l.href for l in hosted if urllib.parse.urlparse(l.href).scheme == "https"]
+    https_links = [link.href for link in hosted if urllib.parse.urlparse(link.href).scheme == "https"]
     if https_links:
         defects.append(f"hosted demo link uses https:// for the IP host; verify TLS first: {https_links[0]}")
 
     return {
         "host": host,
-        "links": [link_row(l) for l in hosted],
+        "links": [link_row(link) for link in hosted],
         "hosted_card_count": len(hosted_cards),
         "defects": defects,
         "soft": soft,
     }
 
 
-def link_row(l: Link) -> dict[str, Any]:
-    return {"href": l.href, "text": l.text, "card": l.is_card}
+def link_row(link: Link) -> dict[str, Any]:
+    return {"href": link.href, "text": link.text, "card": link.is_card}
 
 
 def probe_url(url: str, timeout_s: float) -> dict[str, Any]:

@@ -5,7 +5,6 @@ Exercises the ledger path, regression check, and JSONL persistence.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile

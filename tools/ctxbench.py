@@ -215,7 +215,7 @@ def allocate_arms() -> dict:
     Refuses with POOL_COLLISION if the roster cannot back two distinct pools right now."""
     wave = fleet_accounts.allocate_wave(2, work_kind="engineering")
     lanes = wave.get("lanes", [])
-    pools = {l.get("pool") for l in lanes}
+    pools = {lane.get("pool") for lane in lanes}
     if len(lanes) < 2 or len(pools) < 2:
         return {"ok": False, "reason": "POOL_COLLISION",
                 "detail": (f"need 2 distinct rate-limit pools, got {len(lanes)} lane(s) / "
@@ -328,7 +328,7 @@ def runselfcheck() -> int:
             fails.append(f"needle {nonce} asked at/before its plant turn")
 
     # 3. A needle's nonce actually appears in its plant step and its ask step references it.
-    plant_turns = {m["plant_turn"] for m in a["needle_map"].values()}
+    {m["plant_turn"] for m in a["needle_map"].values()}
     planted_in_steps = {s["plants"] for s in a["steps"] if s.get("plants")}
     if planted_in_steps != set(a["needle_map"].keys()):
         fails.append("planted nonces in steps != needle_map keys")

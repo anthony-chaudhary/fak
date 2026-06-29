@@ -159,7 +159,8 @@ def main(argv=None) -> int:
         return 1 if any(r["verdict"] != "RELAUNCHED_OK" for r in rows) else 0
 
     from collections import Counter
-    tag = lambda r: r["verdict"] + (":" + r["kind"] if r["kind"] else "")
+    def tag(r):
+        return r["verdict"] + (":" + r["kind"] if r["kind"] else "")
     counts = Counter(tag(r) for r in audit(ledger=args.ledger, live=args.live))
     print("resume_relaunch_audit  ledger=" + os.path.basename(args.ledger)
           + "  sessions=" + str(sum(counts.values())))

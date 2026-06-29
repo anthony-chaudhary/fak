@@ -39,7 +39,9 @@ HONESTY FENCES
   * absolute wall-clock is a PROJECTION onto the target host's rates; only the work counts and the
     cross-arm ratios are exact. Reproduce live on the target with the printed sessionbench command.
 """
-import argparse, json, sys
+import argparse
+import json
+import sys
 
 # Committed M3 Pro Qwen2.5-7B-Instruct Q8 rate cards (single-stream, short context).
 # Source: docs/benchmarks/QWEN25-7B-RESULTS.md, BENCHMARK-AUTHORITY row "Qwen2.5-7B" (commit 34c74f4),
@@ -101,8 +103,10 @@ def measured_batch_eff(artifact_path, C):
     return raw, min(raw, float(C))
 
 def fmt_dur(s):
-    if s >= 3600: return f"{s/3600:.1f} h"
-    if s >= 60:   return f"{s/60:.1f} min"
+    if s >= 3600:
+        return f"{s/3600:.1f} h"
+    if s >= 60:
+        return f"{s/60:.1f} min"
     return f"{s:.1f} s"
 
 def selftest():
@@ -147,7 +151,7 @@ def main():
         else:
             raw_be, be = measured_batch_eff(args.artifact, C)
 
-    print(f"# fleet 5x200 -> 7B MacBook wall-clock projection")
+    print("# fleet 5x200 -> 7B MacBook wall-clock projection")
     print(f"workload: agents C={C}  turns T={T}  prefix P={P}  decode D={D}/turn  result R={R}/turn")
     print(f"context grows P -> P+T*(D+R) = {P} -> {P + T*(D+R)} tokens/agent")
     if raw_be is not None:

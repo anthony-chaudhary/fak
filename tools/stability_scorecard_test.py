@@ -151,7 +151,7 @@ def test_rollback_runbook_tokens_are_real_anchors_not_prose_theater() -> None:
     junk = "downgrade restore a snapshot --pin pin to v rollback revert state"
     missing = [lbl for lbl, toks in sc.ROLLBACK_RUNBOOK_SECTIONS if not sc._has(junk, *toks)]
     assert missing == [lbl for lbl, _ in sc.ROLLBACK_RUNBOOK_SECTIONS], (
-        f"junk prose satisfied sections {set(l for l,_ in sc.ROLLBACK_RUNBOOK_SECTIONS) - set(missing)} "
+        f"junk prose satisfied sections {set(label for label,_ in sc.ROLLBACK_RUNBOOK_SECTIONS) - set(missing)} "
         "— the tokens are gameable, not real anchors")
     # a real runbook naming the real mechanisms covers every section.
     real = ("git checkout v0.31.0 ... git revert ... fak snapshot restore-fleet ... "

@@ -1038,7 +1038,7 @@ def _front_matter(title: str, desc: str) -> list[str]:
 def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> str:
     c = payload.get("corpus") or {}
     cov = c.get("coverage") or {}
-    pos = c.get("standing") or {}
+    c.get("standing") or {}
     out = _front_matter(
         "fak persona-readiness scorecard — is each top persona served?",
         "Inward persona scorecard: each of fak's top-10 personas (free-tier dev → infra "

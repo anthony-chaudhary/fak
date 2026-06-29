@@ -7,7 +7,6 @@ handles, and validating resolvability against the tracked tree.
 from __future__ import annotations
 
 import json
-import re
 import tempfile
 from pathlib import Path
 

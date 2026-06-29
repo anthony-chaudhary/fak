@@ -241,8 +241,9 @@ class WorkerCountTest(unittest.TestCase):
             # In-window survivor must also LOOK like a worker backend image; a
             # cmdline-less probe with a claude image is the real "OS hid the
             # cmdline of a live claude worker" case the window fallback exists for.
-            probe = lambda pid: {"alive": True, "create_time": now - 1,
-                                 "name": "claude.exe", "cmdline": ""}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                                             "name": "claude.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolve_worker_pids(runs, alive={101}, probe=probe), {101})
 
     def test_live_resolve_worker_pids_rejects_recycled_shell_in_window(self) -> None:
@@ -257,12 +258,13 @@ class WorkerCountTest(unittest.TestCase):
             side = runs / "resolve-825-20260625-213720.pid"
             side.write_text("58752", encoding="utf-8")
             os.utime(side, (now, now))
-            probe = lambda pid: {
-                "alive": True,
-                "create_time": now - 30,  # well inside the 5-min window
-                "name": "cmd.exe",
-                "cmdline": "",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now - 30,  # well inside the 5-min window
+                            "name": "cmd.exe",
+                            "cmdline": "",
+                        }
             self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), set())
 
     def test_live_resolve_worker_pids_rejects_reused_pid_after_sidecar(self) -> None:
@@ -273,12 +275,13 @@ class WorkerCountTest(unittest.TestCase):
             side = runs / "resolve-717-20260625-062210.pid"
             side.write_text("20032", encoding="utf-8")
             os.utime(side, (now, now))
-            probe = lambda pid: {
-                "alive": True,
-                "create_time": now + 60 * 60,
-                "name": "conhost.exe",
-                "cmdline": "",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now + 60 * 60,
+                            "name": "conhost.exe",
+                            "cmdline": "",
+                        }
             self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), set())
 
     def test_live_resolve_worker_pids_rejects_unrelated_old_process(self) -> None:
@@ -289,12 +292,13 @@ class WorkerCountTest(unittest.TestCase):
             side = runs / "resolve-717-20260625-062210.pid"
             side.write_text("29520", encoding="utf-8")
             os.utime(side, (now, now))
-            probe = lambda pid: {
-                "alive": True,
-                "create_time": now - 60 * 60,
-                "name": "chrome.exe",
-                "cmdline": "chrome.exe --type=renderer",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now - 60 * 60,
+                            "name": "chrome.exe",
+                            "cmdline": "chrome.exe --type=renderer",
+                        }
             self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), set())
 
     def test_live_resolve_worker_pids_counts_worker_marker(self) -> None:
@@ -305,11 +309,12 @@ class WorkerCountTest(unittest.TestCase):
             side = runs / "resolve-717-20260625-062210.pid"
             side.write_text("31337", encoding="utf-8")
             os.utime(side, (now, now))
-            probe = lambda pid: {
-                "alive": True,
-                "create_time": now - 60 * 60,
-                "cmdline": "claude -p resolve GitHub issue #717",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now - 60 * 60,
+                            "cmdline": "claude -p resolve GitHub issue #717",
+                        }
             self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), {31337})
 
     def test_proc_worker_count_unions_cmdline_and_sidecar_pids(self) -> None:
@@ -338,7 +343,8 @@ class WorkerCountTest(unittest.TestCase):
 
     def test_account_check_codex_uses_ambient_login(self) -> None:
         # Codex has no switcher roster — its availability is read from ~/.codex.
-        import tempfile, os as _os
+        import tempfile
+        import os as _os
         mod = load()
         with tempfile.TemporaryDirectory() as home:
             old = _os.environ.get("USERPROFILE"), _os.environ.get("HOME")
@@ -376,8 +382,9 @@ class WorkerCountTest(unittest.TestCase):
             oc.with_suffix(".backend").write_text("opencode", encoding="utf-8")
             for f in (cl, oc):
                 os.utime(f, (now, now))
-            probe = lambda pid: {"alive": True, "create_time": now - 1,
-                                 "name": "claude.exe", "cmdline": ""}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                                             "name": "claude.exe", "cmdline": ""}
             self.assertEqual(
                 mod.live_resolve_worker_pids(runs, product="claude", probe=probe), {701})
             self.assertEqual(

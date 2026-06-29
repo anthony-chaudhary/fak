@@ -13,7 +13,6 @@ install.sh ever cites the phantom anchor again, and it fails if the anchor insta
 """
 from __future__ import annotations
 
-import re
 import unittest
 from pathlib import Path
 

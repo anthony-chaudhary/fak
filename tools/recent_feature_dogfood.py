@@ -416,7 +416,10 @@ def summarize_payload(name: str, payload: Any) -> Any:
         base.update({"seq": payload.get("seq"), "kind": payload.get("kind"), "hash": payload.get("hash")})
     elif name == "loop_status":
         loops = payload.get("loops") or []
-        base.update({"loops": len(loops), "loop_ids": [l.get("loop_id") for l in loops[:5] if isinstance(l, dict)]})
+        base.update({
+            "loops": len(loops),
+            "loop_ids": [loop.get("loop_id") for loop in loops[:5] if isinstance(loop, dict)],
+        })
     elif name == "vcache_score":
         base.update({
             "two_x_better": payload.get("two_x_better"),

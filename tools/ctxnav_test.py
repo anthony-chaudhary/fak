@@ -26,8 +26,12 @@ def _store():
 def test_tombstone_resident_is_O1_independent_of_content_size():
     # The resident view of N tombstones must not grow with the stored bytes — that is the
     # whole O(1) claim. Compare a store of small nodes vs huge nodes: resident is ~equal.
-    a = N.Store(); a.add("Read", "x" * 4000); a.add("Read", "y" * 4000)
-    b = N.Store(); b.add("Read", "x" * 4_000_000); b.add("Read", "y" * 4_000_000)
+    a = N.Store()
+    a.add("Read", "x" * 4000)
+    a.add("Read", "y" * 4000)
+    b = N.Store()
+    b.add("Read", "x" * 4_000_000)
+    b.add("Read", "y" * 4_000_000)
     # near-constant: the only dependence on content size is the digit-count of the displayed
     # token total in the marker (logarithmic), never linear in the bytes.
     assert abs(a.resident_tok() - b.resident_tok()) <= 6, (a.resident_tok(), b.resident_tok())

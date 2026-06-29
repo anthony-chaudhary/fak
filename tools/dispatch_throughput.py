@@ -329,13 +329,13 @@ def render(p: dict[str, Any]) -> str:
         g = gw.get(key)
         if not g:
             continue
-        l = lw.get(key) or {}
+        loop_window = lw.get(key) or {}
         lines.append(
             f"  {key:<6} | {g.get('closed'):>6} | {g.get('completed'):>9} | "
-            f"{g.get('completed_rate_per_hour'):>5} | {l.get('loop_closed', '-'):>11} | "
-            f"{l.get('loop_rate_per_hour', '-')}")
+            f"{g.get('completed_rate_per_hour'):>5} | {loop_window.get('loop_closed', '-'):>11} | "
+            f"{loop_window.get('loop_rate_per_hour', '-')}")
     last = (p.get("loop") or {}).get("last_loop_close_age_min")
-    lines.append(f"  loop last attributed close: "
+    lines.append("  loop last attributed close: "
                  + (f"{last}m ago" if last is not None else "none on record"))
     return "\n".join(lines)
 
@@ -360,14 +360,14 @@ def render_md_block(p: dict[str, Any]) -> str:
         g = gw.get(key)
         if not g:
             continue
-        l = lw.get(key) or {}
+        loop_window = lw.get(key) or {}
         out.append(
             f"| {key} | {g.get('closed')} | {g.get('completed')} | "
-            f"{g.get('completed_rate_per_hour')} | {l.get('loop_closed', '-')} | "
-            f"{l.get('loop_rate_per_hour', '-')} |")
+            f"{g.get('completed_rate_per_hour')} | {loop_window.get('loop_closed', '-')} | "
+            f"{loop_window.get('loop_rate_per_hour', '-')} |")
     last = (p.get("loop") or {}).get("last_loop_close_age_min")
     out += ["",
-            f"Loop's last attributed close: "
+            "Loop's last attributed close: "
             + (f"{last} min ago." if last is not None else "**none on record**.")
             + " A gh-rate far above the loop-rate means humans/peers are draining the "
             "backlog, not the dispatcher."]

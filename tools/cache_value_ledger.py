@@ -26,10 +26,9 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 SCHEMA = "fak.cache-value-ledger.v1"
 SCORE_SCHEMA = "fak.vcache.score.v1"

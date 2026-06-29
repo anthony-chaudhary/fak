@@ -894,7 +894,7 @@ def ai_crawlers_ok(robots: str) -> tuple[bool, str]:
     disallow_all = re.compile(r"(?i)^disallow:\s*(?:/\*?|\*)\s*$")
     blocked = sorted(
         ua for ua, lines in groups.items()
-        if (ua in AI_CRAWLER_UAS or ua == "*") and any(disallow_all.match(l) for l in lines))
+        if (ua in AI_CRAWLER_UAS or ua == "*") and any(disallow_all.match(line) for line in lines))
     if blocked:
         return False, (f"robots.txt Disallows answer-engine crawler(s): {', '.join(blocked)} "
                        "(delists the project from that engine's citations)")

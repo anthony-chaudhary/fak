@@ -197,7 +197,7 @@ def test_is_error_flag_captured_from_transcript():
         _user_results([("t2", "fine")]),
     ]
     items, _ = C.parse_window(_write(recs))
-    by_cmd = {it.content[:10]: it for it in items if it.kind == "result"}
+    {it.content[:10]: it for it in items if it.kind == "result"}
     err = [it for it in items if it.kind == "result" and it.is_error]
     assert len(err) == 1 and err[0].tool == "Bash"
     assert C.looks_like_error(err[0]) is True

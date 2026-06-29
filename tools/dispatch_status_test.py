@@ -261,10 +261,11 @@ class SilentWorkersScanTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 465, "20260621-232003", size=0, pid=39688)
-            probe = lambda pid: {
-                "alive": True,
-                "cmdline": "claude -p resolve GitHub issue #465",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "cmdline": "claude -p resolve GitHub issue #465",
+                        }
             out = mod.silent_workers(runs, alive={39688}, probe=probe)  # still running
             self.assertEqual(out, [])
 
@@ -275,11 +276,12 @@ class SilentWorkersScanTest(unittest.TestCase):
             now = 1_000_000.0
             self._mk(runs, 465, "20260621-232003", size=0, pid=39688,
                      sidecar_mtime=now)
-            probe = lambda pid: {
-                "alive": True,
-                "create_time": now + 60 * 60,
-                "cmdline": "chrome.exe --type=renderer",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now + 60 * 60,
+                            "cmdline": "chrome.exe --type=renderer",
+                        }
             out = mod.silent_workers(runs, alive={39688}, probe=probe)
             self.assertEqual([w["issue"] for w in out], [465])
 

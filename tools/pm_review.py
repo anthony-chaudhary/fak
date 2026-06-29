@@ -207,7 +207,7 @@ def _priority_of(labels: list[str]) -> str | None:
 
 
 def _is_epic(issue: dict[str, Any], labels: list[str]) -> bool:
-    if any(l.strip().lower() == "epic" for l in labels):
+    if any(label.strip().lower() == "epic" for label in labels):
         return True
     title = str(issue.get("title") or "").strip().lower()
     return title.startswith("epic(") or title.startswith("epic ") or title == "epic"

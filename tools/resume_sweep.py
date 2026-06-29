@@ -61,7 +61,7 @@ def recently_resumed_sids(window_min: float, now_utc) -> set:
     active resume pass a session's OLD copies still terminate on their pre-resume
     error, so without this the sweep re-flags work already in flight. Reading the
     ledger -- the record of what was actually launched -- is the honest dedup."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     cutoff = now_utc.timestamp() - window_min * 60
     out = set()
     try:

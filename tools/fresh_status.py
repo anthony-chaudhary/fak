@@ -282,7 +282,7 @@ def fold(panes: list[dict[str, Any]], *, workspace: str, commit: str,
     rollup to ACTION; SOFT SKIPs never do. The verdict ladder mirrors
     scorecard_control_pane.fold so a loop runner reads the same envelope.
     """
-    by_key = {p["key"]: p for p in panes}
+    {p["key"]: p for p in panes}
     actionable = [p for p in panes if p.get("verdict") in ("ERROR", "ACTION")]
     skipped = [p for p in panes if p.get("verdict") == "SKIP"]
 

@@ -15,7 +15,17 @@ forwards, sending the same big body with the budget OFF then ON, and diffing.
 
 Usage:  python compact_dogfood.py --fak ./fak-demo.exe --out evidence.json
 """
-import argparse, json, os, subprocess, sys, time, threading, http.server, socketserver, urllib.request, hashlib
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import threading
+import http.server
+import socketserver
+import urllib.request
+import hashlib
 
 # --- mock Anthropic upstream: records the raw body fak forwards, returns a valid message ---
 class Recorder:
@@ -107,7 +117,6 @@ def wait_ready(port, deadline=20):
     return False
 
 def run_case(fak, upstream_port, budget, body):
-    rec_holder = {}
     # Each case gets a FRESH fak serve on its own port so state never leaks between OFF/ON.
     import random
     fak_port = random.randint(20000, 39000)
@@ -121,7 +130,8 @@ def run_case(fak, upstream_port, budget, body):
         if not wait_ready(fak_port):
             out, err = b"", b""
             try:
-                proc.terminate(); out, err = proc.communicate(timeout=5)
+                proc.terminate()
+                out, err = proc.communicate(timeout=5)
             except Exception:
                 pass
             raise RuntimeError(f"fak serve (budget={budget}) not ready on {fak_port}\nSTDERR:\n{err.decode(errors='replace')[:2000]}")
@@ -130,7 +140,8 @@ def run_case(fak, upstream_port, budget, body):
         return resp, fak_port
     finally:
         proc.terminate()
-        try: proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
         except Exception:
             proc.kill()
 

@@ -229,8 +229,8 @@ def record_loop_tick(root: Path, rec: dict[str, Any],
     (GitHub open-count + closure audit), not a worker's self-report.
     """
     ledger = ledger or loop_writer.default_loop_ledger(root)
-    append = append or (lambda r, l, ev: loop_writer.append_loop_event(
-        r, l, ev, source="issue_resolve_progress"))
+    append = append or (lambda record, loop_ledger, event: loop_writer.append_loop_event(
+        record, loop_ledger, event, source="issue_resolve_progress"))
     existing = str(rec.get("run_id") or "")
     minted = None
     if not existing:

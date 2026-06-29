@@ -79,8 +79,9 @@ class LiveResolutionIssuesTest(unittest.TestCase):
             runs = Path(d)
             self._mk(runs, 717, "20260625-062210", pid=101, sidecar_mtime=now)
             # OS hid the cmdline, but the image is a real worker backend → counts.
-            probe = lambda pid: {"alive": True, "create_time": now - 1,
-                                 "name": "claude.exe", "cmdline": ""}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                                             "name": "claude.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolution_issues(runs, probe=probe), {717})
 
     def test_rejects_issue_when_sidecar_pid_was_reused(self) -> None:
@@ -90,12 +91,13 @@ class LiveResolutionIssuesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 718, "20260625-060712", pid=102, sidecar_mtime=now)
-            probe = lambda pid: {
-                "alive": True,
-                "create_time": now + 60 * 60,
-                "name": "chrome.exe",
-                "cmdline": "chrome.exe --type=renderer",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now + 60 * 60,
+                            "name": "chrome.exe",
+                            "cmdline": "chrome.exe --type=renderer",
+                        }
             self.assertEqual(mod.live_resolution_issues(runs, probe=probe), set())
 
 
@@ -118,8 +120,9 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 717, "20260625-062210", pid=101, sidecar_mtime=now - 4000)
-            probe = lambda pid: {"alive": True, "create_time": now - 4001,
-                                 "name": "claude.exe", "cmdline": ""}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 4001,
+                                             "name": "claude.exe", "cmdline": ""}
             out = mod.reap_timed_out_workers(
                 runs, timeout_s=1800, live=False, now_ts=now, probe=probe,
                 killer=lambda pid: killed.append(pid))
@@ -135,8 +138,9 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 718, "20260625-060712", pid=102, sidecar_mtime=now - 4000)
-            probe = lambda pid: {"alive": True, "create_time": now - 4001,
-                                 "name": "claude.exe", "cmdline": ""}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 4001,
+                                             "name": "claude.exe", "cmdline": ""}
             out = mod.reap_timed_out_workers(
                 runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
                 killer=lambda pid: (killed.append(pid) or {"ok": True, "returncode": 0}))
@@ -151,7 +155,8 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 719, "20260625-055209", pid=103, sidecar_mtime=now - 60)
-            probe = lambda pid: {"alive": True, "create_time": now - 61, "cmdline": ""}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 61, "cmdline": ""}
             out = mod.reap_timed_out_workers(
                 runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
                 killer=lambda pid: {"ok": True})
@@ -165,11 +170,12 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 720, "20260625-055210", pid=104, sidecar_mtime=now - 4000)
-            probe = lambda pid: {
-                "alive": True,
-                "create_time": now + 60,
-                "cmdline": "chrome.exe --type=renderer",
-            }
+            def probe(pid):
+                return {
+                            "alive": True,
+                            "create_time": now + 60,
+                            "cmdline": "chrome.exe --type=renderer",
+                        }
             out = mod.reap_timed_out_workers(
                 runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
                 killer=lambda pid: {"ok": True})
@@ -197,7 +203,8 @@ class PruneDeadSidecarsTest(unittest.TestCase):
             runs = Path(d)
             self._mk(runs, 825, "20260625-213720", pid=58752, mtime=now - 4000,
                      siblings=(".log", ".backend", ".wave", ".account"))
-            probe = lambda pid: {"alive": False}
+            def probe(pid):
+                return {"alive": False}
             out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
             self.assertEqual(out["pruned"], ["resolve-825-20260625-213720.pid"])
             self.assertEqual(sorted(p.name for p in runs.glob("resolve-825-*")), [])
@@ -212,8 +219,9 @@ class PruneDeadSidecarsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 825, "20260625-213720", pid=58752, mtime=now - 4000)
-            probe = lambda pid: {"alive": True, "create_time": now - 4030,
-                                 "name": "cmd.exe", "cmdline": ""}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 4030,
+                                             "name": "cmd.exe", "cmdline": ""}
             out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
             self.assertEqual(out["pruned"], ["resolve-825-20260625-213720.pid"])
 
@@ -224,9 +232,10 @@ class PruneDeadSidecarsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 822, "20260625-220538", pid=8416, mtime=now - 4000)
-            probe = lambda pid: {"alive": True, "create_time": now - 4001,
-                                 "name": "claude.exe",
-                                 "cmdline": "claude -p resolve GitHub issue #822"}
+            def probe(pid):
+                return {"alive": True, "create_time": now - 4001,
+                                             "name": "claude.exe",
+                                             "cmdline": "claude -p resolve GitHub issue #822"}
             out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
             self.assertEqual(out["pruned"], [])
             self.assertTrue((runs / "resolve-822-20260625-220538.pid").exists())
@@ -238,7 +247,8 @@ class PruneDeadSidecarsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 830, "20260625-210713", pid=999, mtime=now - 5)
-            probe = lambda pid: {"alive": False}
+            def probe(pid):
+                return {"alive": False}
             out = mod.prune_dead_sidecars(runs, live=True, min_age_s=60.0,
                                           now_ts=now, probe=probe)
             self.assertEqual(out["pruned"], [])
@@ -251,7 +261,8 @@ class PruneDeadSidecarsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             pid_file = self._mk(runs, 831, "20260625-205217", pid=111, mtime=now - 4000)
-            probe = lambda pid: {"alive": False}
+            def probe(pid):
+                return {"alive": False}
             out = mod.prune_dead_sidecars(runs, live=False, now_ts=now, probe=probe)
             self.assertEqual(out["would_prune"], ["resolve-831-20260625-205217.pid"])
             self.assertEqual(out["pruned"], [])
@@ -592,7 +603,8 @@ class SpawnProbeTest(unittest.TestCase):
         0-byte log means 'died before exec' (not 'exec'd then silent'). The header
         must stay under the stub floor and be banner-free so it never trips the
         stub/cap-banner classifiers."""
-        import tempfile, sys
+        import tempfile
+        import sys
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
@@ -856,7 +868,8 @@ class WeeklyCapGateTest(unittest.TestCase):
         # passed today must NOT push the hold to 6:10am TOMORROW. A session hold is
         # bounded to _SESSION_HOLD_MAX_MIN, so the account is free again within ~90m,
         # not ~24h.
-        import tempfile, datetime as dt
+        import tempfile
+        import datetime as dt
         mod = load()
         # now = a time where 6:10am PT has already passed today (e.g. 13:00 UTC = 06:00 PT
         # is before, so use 15:00 UTC = 08:00 PT, well past 06:10 PT).
@@ -877,7 +890,8 @@ class WeeklyCapGateTest(unittest.TestCase):
     def test_weekly_limit_keeps_full_hold(self) -> None:
         # A genuine weekly limit is NOT bounded by the session cap — it holds to its
         # parsed multi-day reset.
-        import tempfile, datetime as dt
+        import tempfile
+        import datetime as dt
         mod = load()
         now_utc = dt.datetime(2026, 6, 23, 8, 0, 0)
         now_ts = (now_utc - dt.datetime(1970, 1, 1)).total_seconds()
@@ -1191,8 +1205,9 @@ class BackendHealthTest(unittest.TestCase):
             for i, iss in enumerate((10, 11, 12)):
                 self._mk(runs, iss, f"20260626-04000{i}", backend="claude",
                          size=0, pid=400 + i, mtime=now - i * 60)
-            live_probe = lambda pid: {"alive": True, "create_time": now - 1,
-                                      "name": "claude.exe", "cmdline": ""}
+            def live_probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                                                  "name": "claude.exe", "cmdline": ""}
             out = mod.check_backend_health(runs, product="claude",
                                            now_ts=now, alive={400, 401, 402},
                                            probe=live_probe)
