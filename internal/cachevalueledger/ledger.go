@@ -3,7 +3,9 @@ package cachevalueledger
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -193,4 +195,141 @@ func ScoreLedger(path string) (ScoreLedgerResult, error) {
 		result.RealizedReuseRatio = float64(result.GateReusedTokens) / float64(result.GatePromptTokens)
 	}
 	return result, nil
+}
+
+// TrendRegressionTolerance is the realized-reuse drop — most-recent (trailing) window minus the
+// earlier baseline window — below which the trend gate stays green. It is a dead-band so ordinary
+// session-to-session wobble in a noisy corpus does not turn CI red; only a drop DEEPER than this
+// over a thick-enough corpus is treated as a real regression and fails. It is the gate-sized
+// sibling of cachevaluereport.reuseEpsilon (0.005, a display dead-band): a CI-failing threshold
+// wants more headroom, so this is 0.05 (five reuse-ratio points).
+const TrendRegressionTolerance = 0.05
+
+// TrendGateResult is the verdict of the trailing-window realized-reuse regression gate — the trend
+// complement to ScoreLedger's single all-time floor (epic #1301 rung H). Where the floor asks "is
+// the all-time realized reuse below an absolute bar?", this asks "did realized reuse DROP from the
+// earlier baseline window to the most-recent window?", catching a real regression even while the
+// number is still above the floor. A thin corpus on EITHER side falls open INSUFFICIENT (OK stays
+// true, CI green), exactly mirroring ScoreLedger's MinGateTurns / HasEnoughData posture: too little
+// evidence is never treated as a regression.
+//
+// #1066 honesty fence: the regression is measured on the WITNESSED realized reuse ratio (and, once
+// a durable provider-$ ledger lands per epic #1301 rungs B/C, net-$ savings), NEVER the forbidden
+// vs-naive 1/(1-reuse) re-prefill multiple — see PublishableValueFamily.
+type TrendGateResult struct {
+	Verdict string `json:"verdict"` // OK | REGRESSED | INSUFFICIENT
+
+	BaselineSessions   int     `json:"baseline_sessions"`
+	BaselineTurns      uint64  `json:"baseline_turns"`
+	BaselineReuseRatio float64 `json:"baseline_reuse_ratio"`
+
+	RecentSessions   int     `json:"recent_sessions"`
+	RecentTurns      uint64  `json:"recent_turns"`
+	RecentReuseRatio float64 `json:"recent_reuse_ratio"`
+
+	DeltaReuseRatio float64 `json:"delta_reuse_ratio"` // recent - baseline; a negative value is a drop
+	Tolerance       float64 `json:"tolerance"`
+
+	// #1066 honesty-fence self-labels — a downstream reader can never mistake the realized reuse
+	// the regression is measured on for the forbidden vs-naive multiple.
+	PublishableValueFamily  string `json:"publishable_value_family"`
+	VsNaiveMultipleExcluded bool   `json:"vs_naive_multiple_excluded"`
+
+	Finding string `json:"finding"`
+	// OK is CI-green: true for OK and INSUFFICIENT, false ONLY for REGRESSED — a thin corpus is
+	// never a failure, matching ScoreLedger's fall-open posture.
+	OK bool `json:"ok"`
+}
+
+// trendWindow accumulates one window's multi-turn gate tokens/turns.
+type trendWindow struct {
+	sessions int
+	turns    uint64
+	prompt   uint64
+	reused   uint64
+}
+
+func (w trendWindow) reuseRatio() float64 {
+	if w.prompt == 0 {
+		return 0
+	}
+	return float64(w.reused) / float64(w.prompt)
+}
+
+// FoldTrendGate runs the trailing-window realized-reuse regression gate over a slice of ledger
+// rows. It is PURE and deterministic — no clock, no I/O. It folds only MULTI-TURN sessions (turns
+// >= 2), exactly as ScoreLedger does (a single-turn cold run has no previous turn to reuse from, so
+// folding it in would manufacture a false regression), orders them by their recorded time, then
+// splits them into the smallest most-recent window carrying >= MinGateTurns multi-turn turns (the
+// TRAILING window) and everything earlier (the BASELINE). When either window is below MinGateTurns
+// the corpus is too thin to trend and the gate falls open INSUFFICIENT.
+func FoldTrendGate(rows []Row) TrendGateResult {
+	res := TrendGateResult{
+		Verdict:                 "INSUFFICIENT",
+		Tolerance:               TrendRegressionTolerance,
+		PublishableValueFamily:  PublishableValueFamily,
+		VsNaiveMultipleExcluded: true,
+		OK:                      true,
+	}
+
+	// Multi-turn rows only, chronological (stable on UnixMillis so equal stamps keep input order).
+	multi := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		if r.Turns >= 2 {
+			multi = append(multi, r)
+		}
+	}
+	sort.SliceStable(multi, func(i, j int) bool { return multi[i].UnixMillis < multi[j].UnixMillis })
+
+	// Build the trailing window from the newest row backward until it carries >= MinGateTurns
+	// multi-turn turns; `cut` is the index of the first (oldest) row in the recent window, so
+	// everything strictly before it is the baseline.
+	var recent, baseline trendWindow
+	cut := len(multi)
+	for i := len(multi) - 1; i >= 0; i-- {
+		if recent.turns >= MinGateTurns {
+			break
+		}
+		r := multi[i]
+		recent.sessions++
+		recent.turns += r.Turns
+		recent.prompt += r.PromptTokens
+		recent.reused += r.ReusedTokens
+		cut = i
+	}
+	for i := 0; i < cut; i++ {
+		r := multi[i]
+		baseline.sessions++
+		baseline.turns += r.Turns
+		baseline.prompt += r.PromptTokens
+		baseline.reused += r.ReusedTokens
+	}
+
+	res.BaselineSessions, res.BaselineTurns, res.BaselineReuseRatio = baseline.sessions, baseline.turns, baseline.reuseRatio()
+	res.RecentSessions, res.RecentTurns, res.RecentReuseRatio = recent.sessions, recent.turns, recent.reuseRatio()
+
+	if recent.turns < MinGateTurns || baseline.turns < MinGateTurns {
+		res.Finding = fmt.Sprintf("INSUFFICIENT — baseline %d / recent %d multi-turn turns (need >= %d each to trend); not gating",
+			baseline.turns, recent.turns, MinGateTurns)
+		return res
+	}
+
+	res.DeltaReuseRatio = res.RecentReuseRatio - res.BaselineReuseRatio
+	if res.DeltaReuseRatio < -TrendRegressionTolerance {
+		res.Verdict = "REGRESSED"
+		res.OK = false
+		res.Finding = fmt.Sprintf("REGRESSED — realized reuse fell %.3f -> %.3f (delta %.3f beyond tolerance %.3f) over the trailing window",
+			res.BaselineReuseRatio, res.RecentReuseRatio, res.DeltaReuseRatio, TrendRegressionTolerance)
+		return res
+	}
+	res.Verdict = "OK"
+	res.Finding = fmt.Sprintf("OK — realized reuse %.3f -> %.3f (delta %.3f within tolerance %.3f)",
+		res.BaselineReuseRatio, res.RecentReuseRatio, res.DeltaReuseRatio, TrendRegressionTolerance)
+	return res
+}
+
+// ScoreTrendGate reads the ledger file and runs the trailing-window regression gate (FoldTrendGate).
+// It is the trend complement to ScoreLedger and shares its #1066 honesty fence.
+func ScoreTrendGate(path string) TrendGateResult {
+	return FoldTrendGate(ReadLedgerFile(path))
 }

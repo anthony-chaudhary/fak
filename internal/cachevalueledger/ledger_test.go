@@ -199,6 +199,131 @@ func TestScoreLedgerThinCorpusIsInsufficient(t *testing.T) {
 	}
 }
 
+// trendRow builds a multi-turn ledger row at an explicit time so a test can control the
+// chronological window split deterministically (Append's wall-clock stamp would collide in a
+// tight loop).
+func trendRow(unixMillis int64, turns, prompt, reused uint64) Row {
+	return Row{
+		Schema:       Schema,
+		Date:         "2026-06-29",
+		SessionType:  "guard",
+		UnixMillis:   unixMillis,
+		Turns:        turns,
+		PromptTokens: prompt,
+		ReusedTokens: reused,
+	}
+}
+
+// The trend gate must turn RED when realized reuse drops from the baseline window to the
+// most-recent (trailing) window by more than the tolerance — the synthetic regression fixture.
+func TestFoldTrendGateRegressed(t *testing.T) {
+	rows := []Row{
+		// Baseline window: two healthy sessions, reuse 1600/2000 = 0.80.
+		trendRow(1000, 5, 1000, 800),
+		trendRow(2000, 5, 1000, 800),
+		// Trailing window (newer): two regressed sessions, reuse 600/2000 = 0.30.
+		trendRow(3000, 5, 1000, 300),
+		trendRow(4000, 5, 1000, 300),
+	}
+	res := FoldTrendGate(rows)
+	if res.Verdict != "REGRESSED" {
+		t.Fatalf("verdict = %q, want REGRESSED (finding: %s)", res.Verdict, res.Finding)
+	}
+	if res.OK {
+		t.Errorf("a real reuse drop must NOT be CI-green (OK should be false)")
+	}
+	if res.BaselineReuseRatio != 0.8 || res.RecentReuseRatio != 0.3 {
+		t.Errorf("windows = baseline %.3f / recent %.3f, want 0.800 / 0.300", res.BaselineReuseRatio, res.RecentReuseRatio)
+	}
+	if res.DeltaReuseRatio >= -TrendRegressionTolerance {
+		t.Errorf("delta %.3f should be below -tolerance %.3f", res.DeltaReuseRatio, TrendRegressionTolerance)
+	}
+	// #1066 fence: the regression is measured on realized reuse, never the forbidden multiple.
+	if !res.VsNaiveMultipleExcluded || res.PublishableValueFamily == "" {
+		t.Errorf("honesty-fence fields not set: excluded=%v family=%q", res.VsNaiveMultipleExcluded, res.PublishableValueFamily)
+	}
+}
+
+// A thin corpus (too few multi-turn turns to form both a baseline and a trailing window) must fall
+// open INSUFFICIENT and stay CI-green — too little evidence is never a regression.
+func TestFoldTrendGateThinCorpusIsInsufficient(t *testing.T) {
+	// One short multi-turn session: no baseline window can be formed.
+	res := FoldTrendGate([]Row{trendRow(1000, 3, 300, 30)})
+	if res.Verdict != "INSUFFICIENT" {
+		t.Fatalf("verdict = %q, want INSUFFICIENT (finding: %s)", res.Verdict, res.Finding)
+	}
+	if !res.OK {
+		t.Errorf("a thin corpus must stay CI-green (OK should be true)")
+	}
+}
+
+// A corpus thick enough to trend but with reuse holding steady (drop within tolerance) passes.
+func TestFoldTrendGateStableIsOK(t *testing.T) {
+	rows := []Row{
+		trendRow(1000, 5, 1000, 800), // baseline 0.80
+		trendRow(2000, 5, 1000, 800),
+		trendRow(3000, 5, 1000, 790), // recent 0.78 — within the 0.05 dead-band
+		trendRow(4000, 5, 1000, 790),
+	}
+	res := FoldTrendGate(rows)
+	if res.Verdict != "OK" || !res.OK {
+		t.Fatalf("verdict = %q OK = %v, want OK/true (finding: %s)", res.Verdict, res.OK, res.Finding)
+	}
+}
+
+// An IMPROVING trend (recent reuse above baseline) is never a regression.
+func TestFoldTrendGateImprovedIsOK(t *testing.T) {
+	rows := []Row{
+		trendRow(1000, 5, 1000, 600), // baseline 0.60
+		trendRow(2000, 5, 1000, 600),
+		trendRow(3000, 5, 1000, 900), // recent 0.90
+		trendRow(4000, 5, 1000, 900),
+	}
+	res := FoldTrendGate(rows)
+	if res.Verdict != "OK" || !res.OK {
+		t.Fatalf("verdict = %q OK = %v, want OK/true (finding: %s)", res.Verdict, res.OK, res.Finding)
+	}
+	if res.DeltaReuseRatio <= 0 {
+		t.Errorf("delta %.3f should be positive for an improving trend", res.DeltaReuseRatio)
+	}
+}
+
+// Single-turn cold runs carry no reuse opportunity and must be excluded from BOTH windows, exactly
+// as ScoreLedger excludes them — folding them in would manufacture a false regression.
+func TestFoldTrendGateExcludesSingleTurnRuns(t *testing.T) {
+	rows := []Row{
+		trendRow(1000, 5, 1000, 800), // baseline 0.80
+		trendRow(2000, 5, 1000, 800),
+		{Schema: Schema, Date: "2026-06-29", SessionType: "run", UnixMillis: 2500, Turns: 1, PromptTokens: 12}, // cold single-turn
+		trendRow(3000, 5, 1000, 790), // recent 0.78
+		trendRow(4000, 5, 1000, 790),
+	}
+	res := FoldTrendGate(rows)
+	if res.BaselineSessions != 2 || res.RecentSessions != 2 {
+		t.Fatalf("session split = baseline %d / recent %d, want 2/2 (single-turn run excluded)", res.BaselineSessions, res.RecentSessions)
+	}
+	if res.Verdict != "OK" {
+		t.Errorf("verdict = %q, want OK (finding: %s)", res.Verdict, res.Finding)
+	}
+}
+
+// ScoreTrendGate is the impure file shell over FoldTrendGate; it must reproduce the same verdict
+// from a ledger on disk.
+func TestScoreTrendGateReadsLedger(t *testing.T) {
+	tmpDir := t.TempDir()
+	ledgerPath := filepath.Join(tmpDir, "trend-ledger.jsonl")
+	for i := 0; i < 2; i++ {
+		Append("guard", "base", ledgerPath, cacheobs.Stats{Turns: 5, PromptTokens: 1000, ReusedTokens: 800})
+	}
+	for i := 0; i < 2; i++ {
+		Append("guard", "recent", ledgerPath, cacheobs.Stats{Turns: 5, PromptTokens: 1000, ReusedTokens: 200})
+	}
+	res := ScoreTrendGate(ledgerPath)
+	if res.Verdict != "REGRESSED" || res.OK {
+		t.Fatalf("verdict = %q OK = %v, want REGRESSED/false (finding: %s)", res.Verdict, res.OK, res.Finding)
+	}
+}
+
 func TestScoreLedgerEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 	ledgerPath := filepath.Join(tmpDir, "empty-ledger.jsonl")
