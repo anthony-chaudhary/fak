@@ -15,9 +15,10 @@ Reach for the cheapest layer that fixes your problem. Most incidents stop at lay
 | Layer | Use when | Command |
 |---|---|---|
 | 1. Revert the commit | a specific bad commit is on the trunk | `git revert <sha>` |
-| 2. Downgrade to a stable tag | the trunk is unstable; you need a known-good build | `git checkout v0.31.0` |
-| 3. Pin a stable version | a fleet should hold a version and not auto-upgrade | `FAK_APP_VERSION=0.31.0` |
-| 4. Revert measured state | a KPI / scorecard regressed | the keep/revert ladder + a re-pin |
+| 2. Quarantine a bad published release | a `vX.Y.Z` release failed post-publish verification | mark the release prerelease + non-latest |
+| 3. Downgrade to a stable tag | the trunk is unstable; you need a known-good build | `git checkout v0.31.0` |
+| 4. Pin a stable version | a fleet should hold a version and not auto-upgrade | `FAK_APP_VERSION=0.31.0` |
+| 5. Revert measured state | a KPI / scorecard regressed | the keep/revert ladder + a re-pin |
 
 ## 1. Revert the commit (the trunk default)
 
@@ -34,7 +35,49 @@ git commit -s               # if the revert paused for a manual resolution
 peer may have already built on. If several commits are bad, revert the range
 (`git revert <oldest>^..<newest>`). This is the first thing to try for almost every incident.
 
-## 2. Downgrade to a stable version (git tags + the VERSION marker)
+## 2. Quarantine a bad autonomous release
+
+The `release-artifacts` workflow runs post-publish verification after it uploads release
+assets. If that verification fails, the workflow patches the GitHub release to
+`prerelease=true` and `make_latest=false` so `/releases/latest` and `install.sh` stop
+serving the bad cut automatically. If you are doing the drill by hand, do the same first:
+
+```bash
+export GH_REPO=anthony-chaudhary/fak
+export TAG=v0.33.0                   # replace with the bad release tag
+RID="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+gh api -X PATCH "repos/${GH_REPO}/releases/${RID}" \
+  -F prerelease=true \
+  -f make_latest=false \
+  --silent
+```
+
+Then verify the public default moved away from the bad tag:
+
+```bash
+gh release view "$TAG" --json isPrerelease --jq .isPrerelease  # true
+gh release view --json tagName --jq .tagName                   # should not be $TAG
+```
+
+If the tag itself must be removed because consumers could still install it explicitly,
+delete the release and tag as the destructive last step:
+
+```bash
+gh release delete "$TAG" --cleanup-tag --yes
+```
+
+For consumers, immediately point both install paths at the last-good tag:
+
+```bash
+go install github.com/anthony-chaudhary/fak/cmd/fak@v0.31.0
+export FAK_VERSION=0.31.0
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
+```
+
+Prefer the latest `stable/<codename>` anchor when one exists; otherwise use the newest
+known-good `vX.Y.Z` tag and promote a new stable anchor once the substrate is healthy.
+
+## 3. Downgrade to a stable version (git tags + the VERSION marker)
 
 Stable versions are git tags of the form `vX.Y.Z`, cut only by the CI-gated release cadence
 (it waits for a green build before it tags), so a tag is a version that passed every gate.
@@ -51,7 +94,7 @@ The single source of truth for "what version is this" is the repo-root `VERSION`
 `VERSION` reflects the tag you checked out, so benchmark artifacts and `fak version` agree.
 To return to the tip, `git checkout main`.
 
-## 3. Pin a stable version (no auto-upgrade)
+## 4. Pin a stable version (no auto-upgrade)
 
 To **pin a stable version** for a fleet — hold it on a known-good build and not move with the
 trunk — set the version explicitly. `internal/appversion.Current()` resolves in this order, so
@@ -65,7 +108,7 @@ The environment pin wins over the `VERSION` file, so a fleet host can run a pinn
 without checking out a different tree. Clearing `FAK_APP_VERSION` lets the `VERSION` file win
 again.
 
-## 4. Revert measured state (baselines + the keep/revert ladder)
+## 5. Revert measured state (baselines + the keep/revert ladder)
 
 Two ratchets defend the trunk against a silent quality regression, and each has a defined way
 back:
@@ -107,7 +150,7 @@ back:
   flapping scheduler from piling up ticks. Remove the tick entirely with
   `tools/register_control_pane_tick.sh remove --mode garden`.
 
-## 5. Restore session / fleet state (`fak snapshot`)
+## 6. Restore session / fleet state (`fak snapshot`)
 
 For live state that the code-level layers above don't reach — a running session, a whole fleet
 of drive states — fak ships a uniform, tamper-evident capture-and-restore seam

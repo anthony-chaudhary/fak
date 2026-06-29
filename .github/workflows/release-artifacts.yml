@@ -201,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write # quarantine a release that fails post-publish verification
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -216,6 +216,7 @@ jobs:
           cache: false
 
       - name: re-download, checksum, and run the published binaries
+        id: verify_published_artifacts
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
@@ -251,6 +252,21 @@ jobs:
             echo "Assets present: $(ls *.tar.gz *.zip 2>/dev/null | wc -l) archives; checksum + binary-version verification ran."
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$fail"
+
+      - name: Quarantine failed release
+        if: ${{ failure() && steps.verify_published_artifacts.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+          gh api -X PATCH "repos/${GH_REPO}/releases/${release_id}" \
+            -F prerelease=true \
+            -f make_latest=false \
+            --silent
+          {
+            echo "## quarantined failed release - ${TAG}"
+            echo "Marked the GitHub release as a prerelease and make_latest=false after post-publish verification failed."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: verify go install resolves the tag
         run: |

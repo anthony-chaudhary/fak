@@ -36,6 +36,8 @@ gate, a signed artifact), not by writing more prose.
     release_tools_tested the release helpers carry unit tests (decide/cut/tag/publish)
     post_publish_verify  something verifies a published release (go install @vX.Y.Z,
                          binary-runs, sha256 match, container oci-tag match)
+    post_publish_quarantine  a failed published-release verification marks the release
+                         prerelease and non-latest automatically
     lock_present         a single-writer release lock serializes concurrent cuts
     gotchas_bounded      the documented chicken-egg gotcha count is small (<=1)
 
@@ -194,6 +196,7 @@ def gather(root: Path) -> dict:
         or (tools_dir / "release_verify.py").is_file()
         or "verify-release" in artifacts_wf.lower()
     )
+    f["post_publish_quarantine"] = detect_post_publish_quarantine(artifacts_wf)
 
     f["lock_present"] = (tools_dir / "release_lock.py").is_file()
 
@@ -219,6 +222,19 @@ def gather(root: Path) -> dict:
     f.update(_artifact_facts(root))
 
     return f
+
+
+def detect_post_publish_quarantine(artifacts_wf: str) -> bool:
+    """Detect the fail-closed path for a bad published release."""
+    lower = artifacts_wf.lower()
+    return (
+        "failure()" in lower
+        and "verify_published_artifacts.outcome == 'failure'" in lower
+        and "gh api" in lower
+        and "releases/${release_id}" in lower
+        and "prerelease=true" in lower
+        and "make_latest=false" in lower
+    )
 
 
 def _staleness_facts(root: Path) -> dict:
@@ -312,6 +328,9 @@ KPIS = [
      "release helpers carry unit tests", "Add tests for decide/cut/tag/publish"),
     ("post_publish_verify", "validate", 3, lambda f: f["post_publish_verify"],
      "a published release is verified", "Add post-publish verification (#1369)"),
+    ("post_publish_quarantine", "validate", 2, lambda f: f["post_publish_quarantine"],
+     "failed published-release verification quarantines the release",
+     "Mark failed releases prerelease + non-latest (#1388)"),
     ("lock_present", "validate", 1, lambda f: f["lock_present"],
      "single-writer release lock present", "Keep release_lock.py"),
     ("gotchas_bounded", "validate", 2, lambda f: f["gotchas_bounded"],

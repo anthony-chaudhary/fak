@@ -35,6 +35,7 @@ def _all_met_facts() -> dict:
         "release_tools_tested_count": 4,
         "release_tools_tested": True,
         "post_publish_verify": True,
+        "post_publish_quarantine": True,
         "lock_present": True,
         "gotcha_count": 0,
         "gotchas_bounded": True,
@@ -99,6 +100,22 @@ def test_cadence_auto_cut_false_positive_guard():
         "stop after the plan" in cl2 and "fak_auto_release" not in cl2 and "auto-cut" not in cl2
     )
     assert auto2 is True, "an FAK_AUTO_RELEASE-armed cadence must be credited"
+
+
+def test_failed_release_quarantine_detector():
+    workflow = """
+      - name: Quarantine failed release
+        if: ${{ failure() && steps.verify_published_artifacts.outcome == 'failure' }}
+        run: |
+          release_id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+          gh api -X PATCH "repos/${GH_REPO}/releases/${release_id}" \
+            -F prerelease=true \
+            -f make_latest=false \
+            --silent
+    """
+    assert rrs.detect_post_publish_quarantine(workflow) is True
+    assert rrs.detect_post_publish_quarantine(workflow.replace("verify_published_artifacts", "checkout")) is False
+    assert rrs.detect_post_publish_quarantine(workflow.replace("make_latest=false", "")) is False
 
 
 def test_payload_envelope_contract():
