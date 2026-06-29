@@ -1,0 +1,63 @@
+{
+  "schema": "fak.mgpu-glm52-fullgpu-serve-witness.v1",
+  "captured_at": "2026-06-29T21:56:28Z",
+  "node": "internal 8-GPU sm_80 datacenter GPU server (identifier redacted)",
+  "goal": "GLM-5.2 running performant on an 8-GPU server, using the full GPUs and RAM",
+  "what_changed": {
+    "from": "the cpu-offload staging sibling pins ALL MoE experts to host RAM (--n-cpu-moe 999); only GPU0 does work; decode is host-expert-GEMM-bound (the #971 wall)",
+    "to": "full model resident across GPUs 1-7 with experts ON GPU HBM (-ngl 999, NO --n-cpu-moe); the whole 434 GiB Q4_K_M checkpoint lives in VRAM",
+    "one_line": "moved the expert GEMM off the host onto 7 GPUs — exactly the #971 mandate"
+  },
+  "serve": {
+    "engine": "llama.cpp",
+    "engine_version": "build 9801 (9d5d882d8)",
+    "binary": "/projects/llama.cpp/build/bin/llama-server",
+    "model_quant": "unsloth/GLM-5.2-GGUF UD-Q4_K_M (11 shards, ~434 GiB / 753.86 B params)",
+    "shard1": "/mnt/sglang_dv3/glm52-q4/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf (NVMe)",
+    "command": "CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 llama-server --model <shard1> --alias glm-5.2 --jinja --n-gpu-layers 999 --host 127.0.0.1 --port 8002 --ctx-size 8192",
+    "key_flag": "NO --n-cpu-moe => experts stay on GPU; default split-mode=layer spreads layers across the 7 visible GPUs",
+    "devices": "GPUs 1-7 (GPU0 left to the peer fak serves on :8000/:8001 — not touched)",
+    "context_length": 8192,
+    "load_seconds_approx": 210,
+    "load_path": "NVMe-staged (~2.9 GB/s) vs /projects NFS (~0.055 GB/s)",
+    "reproducible_tool": "tools/glm52_mgpu_serve.sh"
+  },
+  "vram_resident_mib": {
+    "gpu1": 54245, "gpu2": 64607, "gpu3": 70405, "gpu4": 64607,
+    "gpu5": 70405, "gpu6": 64607, "gpu7": 54987,
+    "sum_mib": 443863,
+    "sum_gib_approx": 433.5,
+    "note": "the ~433 GiB sum matches the on-disk model size: the entire Q4_K_M checkpoint (experts included) is resident in GPU HBM across the 7 GPUs",
+    "gpu0_untouched_mib": 37073
+  },
+  "throughput_witness": {
+    "method": "llama.cpp native /completion endpoint timings (predicted_per_second = decode, prompt_per_second = prefill); two stable runs",
+    "decode_tok_s": {
+      "run_a_64tok": 23.498,
+      "run_b_128tok_steady": 23.349,
+      "warmup_8tok": 25.537
+    },
+    "prefill_tok_s": 53.69,
+    "decode_per_gpu_util_pct": "12-16 (layer-split pipeline: each GPU active ~1/7 of the time)",
+    "label": "OBSERVED (third-party engine, llama.cpp) — not reported as fak's own native throughput"
+  },
+  "comparison_to_baselines": {
+    "cpu_offload_steady_state_tpot_tok_s": 0.2324,
+    "speedup_vs_cpu_offload": "~100x",
+    "pure_cpu_llamacpp_decode_tok_s": 0.89,
+    "speedup_vs_pure_cpu_baseline": "~26x",
+    "baselines_source": "docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md"
+  },
+  "fak_fronting": {
+    "note": "fak's gateway fronts the multi-GPU endpoint and accounts tokens + cache.",
+    "command": "fak serve --provider openai --base-url http://127.0.0.1:8002/v1 --model glm-5.2 --addr 127.0.0.1:8090",
+    "models_endpoint": "{\"data\":[{\"id\":\"glm-5.2\",\"object\":\"model\",\"owned_by\":\"fak\"}]}",
+    "chat_through_fak_usage": {"prompt_tokens": 20, "completion_tokens": 60, "total_tokens": 80, "cached_tokens": 10},
+    "honest_caveat": "this 'dev' fak build leaves message.content empty in the NON-streaming serialization; the real generation is witnessed by completion_tokens=60 + finish_reason=length + the ~2.9 s wall (a mock would be instant) and by the direct :8002 smoke/throughput witness above"
+  },
+  "honesty_boundary": {
+    "engine": "llama.cpp serves the weights; fak fronts/governs them. This is external-engine serving evidence, kept separate from fak's NATIVE in-kernel glm_moe_dsa evidence (the native witness in experiments/glm-gpu-witness/).",
+    "all_8_gpus": "7/8 GPUs used by design — GPU0 carries the peer fak serves on a shared box. A dedicated box can use all 8 via DEVICES=0,1,2,3,4,5,6,7 (the model fits in any 7, so 8 adds KV-cache headroom, not capacity).",
+    "headroom": "single-stream layer-split leaves per-GPU util at ~14%; batched concurrency or --split-mode row could raise aggregate throughput further (not needed to clear 'performant')."
+  }
+}
