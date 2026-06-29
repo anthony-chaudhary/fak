@@ -32,6 +32,7 @@ type runConfig struct {
 	gate  *SessionGate
 	trace string
 	route *modelroute.Manifest
+	spec  *abi.Speculator
 }
 
 // SessionGate is the FUNCTION-shaped per-turn session-control seam — the same gate
@@ -90,6 +91,19 @@ func WithSessionGate(g SessionGate, trace string) RunOption {
 // a caller may pass the option unconditionally.
 func WithRouteManifest(m *modelroute.Manifest) RunOption {
 	return func(c *runConfig) { c.route = m }
+}
+
+// WithSpeculator wires the SEAM-4 predicted-next-path engine (#809) into RunArm so the
+// loop SPECULATES the next tool call ahead of the model: after a turn's tool calls run,
+// the loop predicts the model's next call, runs it effect-free under a speculative epoch,
+// and SUSPENDS it (holds the provisional result in a BufferSink) — then RESUMES when the
+// model's authoritative next call is known, promoting on a match or squashing on a miss,
+// all within the same turn index. This is the live, non-test caller of Speculator.Predict
+// the suspend-and-resume turn primitive needs (#1318). A nil speculator (the default) is
+// accepted and degrades to the historical loop — no prediction, no suspension — so a
+// caller may pass the option unconditionally.
+func WithSpeculator(s *abi.Speculator) RunOption {
+	return func(c *runConfig) { c.spec = s }
 }
 
 // routeToolEngine returns the engine route to bind to abi.ToolCall.Engine for one tool

@@ -39,6 +39,16 @@ type ArmMetrics struct {
 	HitTurnCap          bool   `json:"hit_turn_cap"`
 	FinalAnswer         string `json:"final_answer"`
 
+	// Speculation lifecycle (#1318, SEAM-4) — populated only on the fak arm when a
+	// speculator is wired (WithSpeculator); all zero on the historical loop. SpecIssued
+	// is how many effect-free calls the loop ran AHEAD of the model and suspended;
+	// SpecCommitted/SpecSquashed are how many a matching/mismatching authoritative next
+	// call promoted/squashed. SpecIssued == SpecCommitted+SpecSquashed after a clean run
+	// (every suspended speculation must resolve — a leak is a bug).
+	SpecIssued    int `json:"spec_issued,omitempty"`
+	SpecCommitted int `json:"spec_committed,omitempty"`
+	SpecSquashed  int `json:"spec_squashed,omitempty"`
+
 	// StoppedBySession is the session-control stop reason when a wired session.Table
 	// ended this arm before maxTurns / a final answer (a closed token: PAUSED,
 	// DRAINING, BUDGET_TURNS_EXHAUSTED, ...). "" when the run ended the historical way
@@ -253,6 +263,14 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 		k = kernel.New("localtools")
 		k.SetVDSO(true)
 	}
+	// Suspend-and-resume speculation driver (#1318): non-nil only on the fak arm when a
+	// speculator is wired (WithSpeculator). It predicts the model's next call after each
+	// turn, runs it effect-free ahead of the model, and suspends it for the next turn to
+	// promote (match) or squash (miss). nil => the historical loop, byte-for-byte.
+	var sp *specState
+	if fak && cfg.spec != nil {
+		sp = newSpecState(cfg.spec, k)
+	}
 	messages := []Message{
 		{Role: RoleSystem, Content: SystemPrompt},
 		{Role: RoleUser, Content: task},
@@ -301,12 +319,22 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 		}
 		messages = append(messages, asst)
 		if len(asst.ToolCalls) == 0 {
+			// The model ended the turn with a final answer, not a tool call: any pending
+			// speculation can never be confirmed, so squash it (no authoritative call to
+			// match) — a clean run leaks no provisional effect.
+			sp.resolve(ctx, nil, &m)
 			m.FinalAnswer = asst.Content
 			if fak {
 				finalizeFak(k, &m)
 			}
 			return m, nil
 		}
+		// RESUME edge (#1318): the model's authoritative next call is now known. If a
+		// speculation was suspended after the previous turn, resolve it here — promote on
+		// a match, squash on a miss — WITHIN this turn index (no extra Complete ran). A
+		// no-op when no speculation is pending or no speculator is wired.
+		sp.resolve(ctx, authoritativeCall(asst.ToolCalls[0]), &m)
+		var turnResults []*abi.Result
 		for _, tc := range asst.ToolCalls {
 			m.ToolCalls++
 			tool := tc.Function.Name
@@ -331,9 +359,28 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 				m.TaskCompleted = true // the actual goal (a real booking) succeeded
 			}
 			messages = append(messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: content})
+			// Capture this call's result as a prior output for the next speculation (only
+			// when speculating, so the historical loop allocates nothing extra).
+			if sp != nil {
+				turnResults = append(turnResults, &abi.Result{
+					Call:    &abi.ToolCall{Tool: tool},
+					Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte(content), Len: int64(len(content))},
+					Status:  abi.StatusOK,
+				})
+			}
+		}
+		// SUSPEND edge (#1318): predict the model's NEXT call from this turn's signature +
+		// prior outputs, run it effect-free ahead of the model, and suspend it for the next
+		// turn boundary to resolve. A no-op when no speculator is wired or nothing is
+		// predicted. This is Speculator.Predict's first live, non-test caller.
+		if sp != nil && len(asst.ToolCalls) > 0 {
+			sp.speculate(ctx, turn, asst.ToolCalls[len(asst.ToolCalls)-1].Function.Name, turnResults, &m)
 		}
 	}
 	m.HitTurnCap = true
+	// The loop hit the turn cap with a speculation still pending: squash it (it was never
+	// confirmed by an authoritative call), so no provisional effect leaks past the run.
+	sp.resolve(ctx, nil, &m)
 	if fak {
 		finalizeFak(k, &m)
 	}
