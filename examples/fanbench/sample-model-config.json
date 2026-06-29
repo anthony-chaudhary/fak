@@ -1,0 +1,5 @@
+{
+  "_comment": "A bundled model config so examples/fanbench is self-contained. This is the ONE real file fanbench ingests: `go run ./cmd/fanbench --model-config examples/fanbench/sample-model-config.json --prefixes big` reads max_position_embeddings (else model_max_length) via contextWindowFromConfig (cmd/fanbench/main.go) and sizes the big/max shared-prefix preset to fill this context after reserving the private suffix + decode budget. fanbench is otherwise profile + grid driven (--profile / --agents / --prefix) and does NOT read a prompt workload file. 131072 is the fanbench default model context (Llama-3-class 128k).",
+  "max_position_embeddings": 131072,
+  "model_max_length": 131072
+}

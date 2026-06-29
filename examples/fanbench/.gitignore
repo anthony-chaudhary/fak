@@ -1,0 +1,3 @@
+# run.sh writes these artifacts next to itself; they are regenerable and not committed.
+/fanout.json
+/fanout.csv
