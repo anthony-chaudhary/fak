@@ -57,6 +57,25 @@ type KVCacheEvent struct {
 	Prefix []string
 }
 
+// ExternalKVCacheEventBatch is the field-only shape the Track-A bridge consumes
+// from a serving engine's KV-event stream. vLLM emits BlockStored/BlockRemoved/
+// AllBlocksCleared over block hashes; SGLang exposes the same information as radix
+// segment residency. The gateway treats each block hash as one prefix segment and
+// folds the resulting leading runs into the shared PrefixResidencyIndex.
+type ExternalKVCacheEventBatch struct {
+	Worker string
+	Events []ExternalKVCacheEvent
+}
+
+// ExternalKVCacheEvent is one external-engine KV residency transition. Type uses
+// the public engine event vocabulary ("BlockStored", "BlockRemoved",
+// "AllBlocksCleared"); BlockHashes is the ordered prefix-block run affected by the
+// event.
+type ExternalKVCacheEvent struct {
+	Type        string
+	BlockHashes []string
+}
+
 // ResidentPrefixSource is the native (Track B) emitter seam: anything that can report
 // the resident token-prefixes it currently holds. internal/radixkv (the shipped
 // single-process radix prefix cache) is the native source — a per-worker adapter
@@ -149,6 +168,41 @@ func (w *workerResidency) drop(prefix []string) {
 	}
 }
 
+func (w *workerResidency) dropContaining(segments []string) int {
+	if len(segments) == 0 || len(w.held) == 0 {
+		return 0
+	}
+	remove := make(map[string]struct{}, len(segments))
+	for _, s := range segments {
+		remove[s] = struct{}{}
+	}
+	dropped := 0
+	for k, held := range w.held {
+		if prefixContainsAny(held, remove) {
+			delete(w.held, k)
+			dropped++
+		}
+	}
+	if dropped == 0 {
+		return 0
+	}
+	kept := w.order[:0]
+	for _, k := range w.order {
+		if _, ok := w.held[k]; ok {
+			kept = append(kept, k)
+		}
+	}
+	w.order = kept
+	return dropped
+}
+
+func (w *workerResidency) clear() int {
+	n := len(w.held)
+	w.order = nil
+	w.held = make(map[string][]string, w.capacity)
+	return n
+}
+
 func (w *workerResidency) overlap(prefix []string) int {
 	best := 0
 	for _, seg := range w.held {
@@ -170,6 +224,15 @@ func segmentPrefixLen(a, b []string) int {
 		i++
 	}
 	return i
+}
+
+func prefixContainsAny(prefix []string, segments map[string]struct{}) bool {
+	for _, s := range prefix {
+		if _, ok := segments[s]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // PrefixResidencyIndex is the fleet-level, per-worker prefix-residency index: a map
@@ -214,6 +277,72 @@ func (x *PrefixResidencyIndex) Ingest(ev KVCacheEvent) {
 		return
 	}
 	w.admit(append([]string(nil), ev.Prefix...))
+}
+
+// IngestExternalKVCacheEvents folds one external serving-engine KV-event batch into
+// the same per-worker residency index the router scores against. A BlockStored event
+// with hashes [h1,h2,h3] admits the cumulative prefix runs [h1], [h1,h2],
+// [h1,h2,h3]; a BlockRemoved event drops every held prefix containing the removed
+// block(s), avoiding a false full-prefix hit after an engine eviction.
+func (x *PrefixResidencyIndex) IngestExternalKVCacheEvents(batch ExternalKVCacheEventBatch) int {
+	if x == nil || batch.Worker == "" || len(batch.Events) == 0 {
+		return 0
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	mutated := 0
+	for _, ev := range batch.Events {
+		switch externalKVEventKind(ev.Type) {
+		case "stored":
+			segments := cleanPrefixSegments(ev.BlockHashes)
+			if len(segments) == 0 {
+				continue
+			}
+			w := x.workerLocked(batch.Worker)
+			for i := range segments {
+				w.admit(append([]string(nil), segments[:i+1]...))
+				mutated++
+			}
+		case "removed":
+			segments := cleanPrefixSegments(ev.BlockHashes)
+			if len(segments) == 0 {
+				continue
+			}
+			if w := x.workers[batch.Worker]; w != nil {
+				mutated += w.dropContaining(segments)
+			}
+		case "cleared":
+			if w := x.workers[batch.Worker]; w != nil {
+				mutated += w.clear()
+			}
+		}
+	}
+	return mutated
+}
+
+func externalKVEventKind(typ string) string {
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "blockstored", "stored", "resident", "inserted":
+		return "stored"
+	case "blockremoved", "removed", "evicted", "deleted":
+		return "removed"
+	case "allblockscleared", "cleared", "clear":
+		return "cleared"
+	default:
+		return ""
+	}
+}
+
+func cleanPrefixSegments(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Observe is the convenience emitter both the live scorer (after it homes a request)
