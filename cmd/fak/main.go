@@ -254,6 +254,8 @@ func main() {
 		cmdProduct(os.Args[2:])
 	case "grafana":
 		cmdGrafana(os.Args[2:])
+	case "cachevalue":
+		cmdCachevalue(os.Args[2:])
 	case "marketing":
 		cmdMarketing(os.Args[2:])
 	case "nodeusage":

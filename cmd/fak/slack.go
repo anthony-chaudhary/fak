@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/blockerpost"
+	"github.com/anthony-chaudhary/fak/internal/cachevaluepost"
 	"github.com/anthony-chaudhary/fak/internal/dojopost"
 	"github.com/anthony-chaudhary/fak/internal/grafanapost"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -62,6 +63,7 @@ var slackSurfaces = []slackSurface{
 	{"product", "product direction / persona findings", "", "FAK_PRODUCT_CHANNEL", ""},
 	{"grafana", "grafana snapshots + dashboard/debug links", "FAK_GRAFANA_TOKEN", "FAK_GRAFANA_CHANNEL", grafanapost.ChannelDefault},
 	{"blockers", "fleet blockers (status vs operator page)", "FAK_BLOCKERS_TOKEN", "FAK_BLOCKERS_CHANNEL", blockerpost.ChannelDefault},
+	{"cachevalue", "cache-value P&L roll-up (WITNESSED kernel reuse trend)", "FAK_CACHEVALUE_TOKEN", "FAK_CACHEVALUE_CHANNEL", cachevaluepost.ChannelDefault},
 	{"bench", "benchmark rollups / run-requests", "FAK_BENCH_TOKEN", "FAK_BENCH_CHANNEL", ""},
 	{"dispatch", "background code-dispatch results", "FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", ""},
 	{"dojo", "dojo rollups / trends", "FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL", dojopost.ChannelDefault},
