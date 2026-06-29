@@ -34,6 +34,8 @@ func runDojoRSI(stdout, stderr io.Writer, argv []string) int {
 		return runDojoRSIFold(stdout, stderr, rest)
 	case "propose":
 		return runDojoRSIPropose(stdout, stderr, rest)
+	case "rewrite":
+		return runDojoRSIRewrite(stdout, stderr, rest)
 	case "run":
 		return runDojoRSIRun(stdout, stderr, rest)
 	case "loop":
@@ -56,6 +58,7 @@ func dojoRSIUsage(w io.Writer) {
 usage:
   fak dojo-rsi fold    --report report.json [--json]
   fak dojo-rsi propose --report report.json [--journal FILE] [--json]
+  fak dojo-rsi rewrite --report report.json [--cell lever/metric] [--claims PATH] [--json]
   fak dojo-rsi run     --report report.json [--witness JSON] [--journal FILE] [--json] [--check]
   fak dojo-rsi loop    --report report.json [--ticks N] [--witness JSON] [--journal FILE] [--json]
   fak dojo-rsi trend   [--journal FILE] [--json]
@@ -64,6 +67,11 @@ The loop reads a committed dojo report, picks the next cell by novelty x value x
 staleness, appends docs/dojo/rsi-journal.jsonl, and stops saturated instead of
 thrashing a fresh cell. RECALIBRATE can KEEP; REPROJECT/HARVEST/floor cells route
 to the agent arm and can ESCALATE through the breaker.
+
+rewrite previews the exact one-literal change a RECALIBRATE candidate would make to
+the claim registry (internal/dojo/claims.go) — a DRY RUN that writes nothing, opens
+no worktree, and commits nothing. It is the pure core the Phase-2 worktree arm
+(#1024) applies inside a throwaway worktree before re-measuring FoldCalibrable.
 `)
 }
 
@@ -124,6 +132,159 @@ func runDojoRSIPropose(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderDojoRSIPlan(stdout, env)
 	return 0
+}
+
+// dojoRSIRewritePreview is the --json envelope for `fak dojo-rsi rewrite`: the
+// targeted cell, the old/new claim, and the exact one-line diff an apply would
+// write — DryRun is always true (this verb never writes, never opens a worktree,
+// never commits).
+type dojoRSIRewritePreview struct {
+	Schema       string  `json:"schema"`
+	Lever        string  `json:"lever"`
+	Metric       string  `json:"metric"`
+	Kind         string  `json:"kind"`
+	OldClaimed   float64 `json:"old_claimed"`
+	NewClaimed   float64 `json:"new_claimed"`
+	MeasuredMean float64 `json:"measured_mean"`
+	Sample       int     `json:"sample"`
+	Verdict      string  `json:"verdict"`
+	CalibErr     float64 `json:"calib_err"`
+	ClaimsPath   string  `json:"claims_path"`
+	LineNo       int     `json:"line_no"`
+	Before       string  `json:"before"`
+	After        string  `json:"after"`
+	DryRun       bool    `json:"dry_run"`
+	Note         string  `json:"note"`
+}
+
+// runDojoRSIRewrite previews the single-literal change a RECALIBRATE candidate would
+// make to the claim registry. It is the pure-core preview of the Phase-2 worktree arm
+// (#1024): it reads the report, proposes recalibrations, picks the worst mechanical
+// RECALIBRATE cell (or the --cell the operator names), and renders the exact anchored
+// diff `dojocal.RewriteClaim` would apply — WITHOUT writing the file, opening a
+// worktree, or committing. A floor/REPROJECT/HARVEST cell is refused with the reason
+// it routes to the agent arm instead of being recalibrated, so the preview can never
+// suggest erasing a guard the dojo defends.
+func runDojoRSIRewrite(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak dojo-rsi rewrite", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	reportPath := fs.String("report", "", "dojo report JSON from `fak dojo run --json`")
+	cellSel := fs.String("cell", "", "target a specific cell as lever/metric (default: the worst RECALIBRATE candidate)")
+	claimsPath := fs.String("claims", "", "claim registry path (default: <root>/"+dojocal.ClaimsRelPath+")")
+	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak dojo-rsi rewrite: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	report, ok := readDojoRSIReport(stderr, *reportPath)
+	if !ok {
+		return 2
+	}
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	}
+
+	payload := dojocal.ProposeRecals(report)
+	cand, ok := selectRewriteCandidate(stderr, payload.Candidates, *cellSel)
+	if !ok {
+		return 1
+	}
+
+	path := *claimsPath
+	if path == "" {
+		path = filepath.Join(root, filepath.FromSlash(dojocal.ClaimsRelPath))
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak dojo-rsi rewrite: read claims registry: %v\n", err)
+		return 1
+	}
+	lineNo, before, after, err := dojocal.ClaimChangeLine(src, cand.Lever, cand.Metric, cand.NewClaimed)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak dojo-rsi rewrite: %v\n", err)
+		return 1
+	}
+
+	prev := dojoRSIRewritePreview{
+		Schema:       "fak-dojo-rsi.rewrite/1",
+		Lever:        cand.Lever,
+		Metric:       cand.Metric,
+		Kind:         string(cand.Kind),
+		OldClaimed:   cand.OldClaimed,
+		NewClaimed:   cand.NewClaimed,
+		MeasuredMean: cand.MeasuredMean,
+		Sample:       cand.Sample,
+		Verdict:      cand.Verdict,
+		CalibErr:     cand.CalibErr,
+		ClaimsPath:   filepath.ToSlash(dojocal.ClaimsRelPath),
+		LineNo:       lineNo,
+		Before:       strings.TrimSpace(before),
+		After:        strings.TrimSpace(after),
+		DryRun:       true,
+		Note:         "dry run: nothing written. The Phase-2 worktree arm (#1024) applies this exact swap inside a throwaway worktree, re-measures FoldCalibrable on two disjoint shards, and only then lands it by-path.",
+	}
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, prev, "fak dojo-rsi rewrite")
+	}
+	renderDojoRSIRewrite(stdout, prev)
+	return 0
+}
+
+// selectRewriteCandidate picks the cell to preview: an explicit lever/metric from
+// --cell, else the worst RECALIBRATE candidate (the candidates are sorted worst-first
+// with RECALIBRATE highest-priority, so the first one is the worst mechanical cell).
+// A named cell that is not RECALIBRATE — a floor, an UNDER_CLAIM harvest, or a pinned
+// REPROJECT — is refused with the reason it routes to the agent arm, never previewed
+// as a claim swap.
+func selectRewriteCandidate(stderr io.Writer, candidates []dojocal.Recal, cellSel string) (dojocal.Recal, bool) {
+	if sel := strings.TrimSpace(cellSel); sel != "" {
+		lever, metric, found := strings.Cut(sel, "/")
+		if !found {
+			fmt.Fprintf(stderr, "fak dojo-rsi rewrite: --cell %q must be lever/metric\n", sel)
+			return dojocal.Recal{}, false
+		}
+		for _, c := range candidates {
+			if c.Lever == lever && c.Metric == metric {
+				if c.Kind != dojocal.RecalibrateKind {
+					fmt.Fprintf(stderr, "fak dojo-rsi rewrite: %s/%s is %s, not a mechanical RECALIBRATE — %s\n", lever, metric, c.Kind, c.Reason)
+					return dojocal.Recal{}, false
+				}
+				return c, true
+			}
+		}
+		fmt.Fprintf(stderr, "fak dojo-rsi rewrite: no candidate cell %s in the report (see `fak dojo-rsi propose`)\n", sel)
+		return dojocal.Recal{}, false
+	}
+	for _, c := range candidates {
+		if c.Kind == dojocal.RecalibrateKind {
+			return c, true
+		}
+	}
+	// No mechanical recalibration available — name the worst candidate and why it routes.
+	if len(candidates) > 0 {
+		w := candidates[0]
+		fmt.Fprintf(stderr, "fak dojo-rsi rewrite: no mechanical RECALIBRATE candidate; worst cell is %s/%s (%s) — %s\n", w.Lever, w.Metric, w.Kind, w.Reason)
+	} else {
+		fmt.Fprintln(stderr, "fak dojo-rsi rewrite: the report produced no candidates (nothing measured to recalibrate)")
+	}
+	return dojocal.Recal{}, false
+}
+
+// renderDojoRSIRewrite prints the human preview: the cell, the claim delta, and the
+// anchored one-line diff, with the dry-run note last so it is the parting word.
+func renderDojoRSIRewrite(w io.Writer, p dojoRSIRewritePreview) {
+	fmt.Fprintf(w, "dojo-rsi rewrite (DRY RUN) — %s/%s  %s\n", p.Lever, p.Metric, p.Kind)
+	fmt.Fprintf(w, "  re-point claim %.3g -> %.3g (corpus mean %.3g over %d sample(s); worst %s, calib_err %.3g)\n",
+		p.OldClaimed, p.NewClaimed, p.MeasuredMean, p.Sample, p.Verdict, p.CalibErr)
+	fmt.Fprintf(w, "  %s:%d\n", p.ClaimsPath, p.LineNo)
+	fmt.Fprintf(w, "    - %s\n", p.Before)
+	fmt.Fprintf(w, "    + %s\n", p.After)
+	fmt.Fprintf(w, "  %s\n", p.Note)
 }
 
 func runDojoRSIRun(stdout, stderr io.Writer, argv []string) int {
