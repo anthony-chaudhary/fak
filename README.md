@@ -31,7 +31,8 @@ expensive. `fak` points one base URL at itself for you; nothing else in your set
 > safety floor and records every decision. One binary, no rewrite, no key to start.
 
 **Who is this for?** Pick your path: [run your agent through it now](#get-started-with-fak-guard)
-· [run a model in the kernel](#run-the-model-in-the-kernel) ·
+· [run the modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) ·
+[run a model in the kernel](#run-the-model-in-the-kernel) ·
 [the performance story](#the-performance-value-proposition) ·
 [a hard security floor](#for-security-teams).
 
@@ -91,6 +92,11 @@ fak benchmarks list --offline   # -> the zero-asset benchmark set you can run ri
 single-model baseline. On the demo corpus it prints `routed is ~20% cheaper, ~10% less total
 compute, quality tied`. That is a deterministic offline lens, not a bill, and the fastest
 way to see the kernel do something real before you wire it to anything.
+
+Prefer a hosted run with expected-state checks? Open the
+[modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb):
+policy proof, HTTP adjudication, offline value measurement, and an optional T4-backed
+Ollama gateway case.
 
 ## Run the model in the kernel
 

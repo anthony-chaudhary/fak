@@ -195,19 +195,35 @@ def stop_process(name):
 print("source :", cmd(["git","log","-1","--format=%h %cI %s"]).stdout.strip())
 print("binary :")
 print(fak("version").stdout.strip())'''),
+        md(r'''## Expected state for a CPU run
+
+Run-all on a CPU-only runtime should finish Cases A-C and print these success signals:
+
+- Case A: `refund_payment` is `DENY/POLICY_BLOCK`, `search_kb` is `ALLOW`, and the policy attestation passes with zero failed probes.
+- Case B: local `fak serve` reports healthy, and `/v1/fak/adjudicate` denies `refund_payment` before your app executes it.
+- Case C: `benchmarks list --offline` prints the zero-asset benchmark catalog, `bench` reports `PRIMARY GATE : pass`, and `turntax` reports 9 turns saved on the fixture.
+- Case D: skipped on CPU-only runtimes; on a GPU runtime it should serve `qwen2.5:1.5b` through the OpenAI SDK.
+
+The cells below include assertions for the stable CPU expectations, so a stale policy,
+missing verb, or broken HTTP adjudication path fails where it happens.'''),
         md(r'''## Case A - policy floor you can ship
 
 This is the no-model proof. `preflight` runs the same adjudication fold a served call uses,
 and `attest` turns the policy file into a re-checkable proof obligation.'''),
         code(r'''# A1. Three structural calls: explicit deny, prefix allow, fail-closed unknown.
 cases = [
-    ("explicit deny", "refund_payment", {}),
-    ("prefix allow", "search_kb", {"query": "refund policy"}),
-    ("fail-closed unknown", "__not_in_policy__", {}),
+    ("explicit deny", "refund_payment", {}, "DENY", "POLICY_BLOCK"),
+    ("prefix allow", "search_kb", {"query": "refund policy"}, "ALLOW", ""),
+    ("fail-closed unknown", "__not_in_policy__", {}, "DENY", "DEFAULT_DENY"),
 ]
-for label, tool, args in cases:
-    out = fak("preflight", "--policy", POL, "--tool", tool, "--args", json.dumps(args)).stdout.strip()
-    print(f"{label:<20} {tool:<22} -> {out}")
+for label, tool, args, want_kind, want_reason in cases:
+    d0 = fak_json("preflight", "--policy", POL, "--tool", tool, "--args", json.dumps(args),
+                  "--json")
+    got = (d0["verdict"], d0.get("reason", ""))
+    assert d0["verdict"] == want_kind, (label, got, want_kind)
+    if want_reason:
+        assert d0.get("reason") == want_reason, (label, got, want_reason)
+    print(f"{label:<20} {tool:<22} -> {d0['verdict']} {d0.get('reason','')}")
 
 # A2. Explain the exact winning rung without logging raw args.
 d = fak_json("preflight", "--policy", POL, "--tool", "refund_payment", "--args", "{}",
@@ -220,6 +236,8 @@ for r in d["rungs"]:
     print(f"{mark} [{r['index']}] {r['rung']:<26} {r.get('kind','ELIDED'):<9} {r.get('reason','')}")'''),
         code(r'''# A3. Prove the whole manifest, not just one cherry-picked call.
 att = fak_json("attest", "--policy", POL, "--quiet")
+assert att["summary"]["pass"] is True, att["summary"]
+assert att["summary"]["failed"] == 0, att["summary"]
 print("attestation schema:", att["schema"])
 print("policy sha256     :", att["policy"]["sha256"][:16] + "...")
 print("probes            :", att["summary"]["probes"])
@@ -257,6 +275,10 @@ api_cases = [
 for label, payload in api_cases:
     r = post_json(API, "/v1/fak/adjudicate", payload)
     v = r["verdict"]
+    if payload["tool"] == "refund_payment":
+        assert v["kind"] == "DENY" and v.get("reason") == "POLICY_BLOCK", v
+    if payload["tool"] == "search_kb":
+        assert v["kind"] == "ALLOW", v
     print(f"{label:<24} -> {v['kind']:<5} {v.get('reason','')} {v.get('disposition','')}")
 
 print("\nThis was adjudicate-only: your application still owns execution of allowed tools.")'''),
@@ -268,12 +290,16 @@ surfaces, then two small runs show the transport/value axes on committed fixture
 print(clip(fak("benchmarks", "list", "--offline").stdout, 3600))'''),
         code(r'''# Run the short transport benchmark and a turn-tax report on frozen fixtures.
 print("== transport A/B ==")
-print(clip(fak("bench", "--suite", "tau2-smoke", "--baseline-n", "5",
-               "--out", "quickstart-bench.json", timeout=240).stdout, 2200))
+bench_out = fak("bench", "--suite", "tau2-smoke", "--baseline-n", "5",
+                "--out", "quickstart-bench.json", timeout=240).stdout
+assert "PRIMARY GATE" in bench_out and "pass" in bench_out, bench_out
+print(clip(bench_out, 2200))
 
 print("\n== turn-tax A/B ==")
-print(clip(fak("turntax", "--suite", "turntax-airline",
-               "--out", "quickstart-turntax.json", timeout=240).stdout, 2600))'''),
+turntax_out = fak("turntax", "--suite", "turntax-airline",
+                  "--out", "quickstart-turntax.json", timeout=240).stdout
+assert "turns saved" in turntax_out and ": 9" in turntax_out, turntax_out
+print(clip(turntax_out, 2600))'''),
         md(r'''## Case D - real model gateway
 
 If the runtime has a GPU, this starts Ollama with a small model and puts `fak serve` in front

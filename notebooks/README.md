@@ -30,7 +30,7 @@ flowchart LR
 | [`fak-quickstart.ipynb`](fak-quickstart.ipynb) | **Google Colab** / Kaggle (free T4) | Policy proof, HTTP adjudication, offline value measurement, optional real-model gateway | runnable |
 | [`fak-inkernel.ipynb`](fak-inkernel.ipynb) | Lightning AI / RunPod Jupyter (neocloud) | 2 — fused in-kernel decode + a stable endpoint | runnable |
 
-Open the quickstart directly:
+Open the modular quickstart directly:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb)
 
 ## Running `fak-quickstart.ipynb`
@@ -47,6 +47,14 @@ Open the quickstart directly:
 The notebook is **Run-all idempotent** (refreshes/re-builds the binary and re-pulls the
 model on a fresh runtime) and degrades gracefully — with no GPU it runs the CPU cases and
 tells you why Case D was skipped.
+
+Expected CPU-only state after ▶ **Run all**:
+
+- Case A prints `DENY POLICY_BLOCK`, `ALLOW`, and `floor proven : True`.
+- Case B prints a healthy local gateway and `adjudicate verdict=DENY` for `refund_payment`.
+- Case C prints the offline benchmark catalog, `PRIMARY GATE : pass`, and 9 turn-tax turns saved.
+- Case D prints the no-GPU skip message. On a T4/GPU runtime, it instead pulls
+  `qwen2.5:1.5b` and serves it through the OpenAI SDK.
 
 > **Knobs** (environment / Colab secrets): `FAK_REPO`, `FAK_BRANCH` (pin a release tag
 > here), `FAK_REFRESH=0` (reuse an existing checkout without fetching), `FAK_MODEL`

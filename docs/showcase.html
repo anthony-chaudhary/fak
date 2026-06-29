@@ -433,6 +433,7 @@ fak preflight --tool refund_payment --args "{}"
 <span class="c">#   → </span><span class="g">DENY (DEFAULT_DENY)</span><span class="c">  — unknown tool, refused by structure (fail-closed)</span>
 fak agent --offline
 <span class="c">#   → runs the task twice: tools wired direct vs. behind fak, prints the before/after</span>
+<span class="c"># hosted expected-state run: Colab Case A-C should show policy PROVEN, gateway DENY, bench PASS, turntax 9</span>
 <span class="c"># have the source? from a clone, deny by argument value against a named floor:</span>
 <span class="c">#   go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"  → DENY (POLICY_BLOCK)</span></div>
 
@@ -443,7 +444,7 @@ fak agent --offline
           </a>
           <a class="lnk" href="https://github.com/anthony-chaudhary/fak#readme" rel="noopener">README &amp; the two flips</a>
           <a class="lnk" href="https://github.com/anthony-chaudhary/fak/releases/latest" rel="noopener">Releases &amp; binaries</a>
-          <a class="lnk" href="https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb" rel="noopener">Try it in Colab</a>
+          <a class="lnk" href="https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb" rel="noopener">Modular Colab quickstart</a>
         </div>
       </div>
     </article>

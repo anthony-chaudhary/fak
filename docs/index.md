@@ -73,6 +73,7 @@ security floor reach for it too ([see below](#for-security-teams)).
 </div>
 
 [**▶ Try the live demos**](demos.html){: .btn } ·
+[Open the modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb){: .btn } ·
 [Install (1 line, no clone)](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md){: .btn } ·
 [Get started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md){: .btn } ·
 [See the showcase](showcase.html){: .btn } ·
@@ -83,7 +84,10 @@ security floor reach for it too ([see below](#for-security-teams)).
 > `go run ./cmd/dropindemo -print`, `go run ./cmd/guarddemo -print`, or
 > `go run ./cmd/tokendemo -print`. Then move to the dedicated security,
 > research/science, adoption, memory/serving, and hosted live-model tracks.
-> **[Open the demos →](demos.html)** Or [run your own copy](run-the-demos.md)
+> **[Open the demos →](demos.html)** Or open the
+> [modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb)
+> for policy proof, HTTP adjudication, offline value measurement, and an optional
+> GPU-backed gateway case. You can also [run your own copy](run-the-demos.md)
 > locally, in a container, or on your own cloud VM.
 
 ---
