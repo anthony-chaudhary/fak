@@ -470,7 +470,8 @@ func fetchGuardStopHookConsecutive(ctx context.Context, metricsURL string, timeo
 	if err != nil {
 		return 0, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}

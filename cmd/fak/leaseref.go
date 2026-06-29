@@ -238,6 +238,7 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	store := leaseref.NewInDir(*dir)
 	recs, err := store.List(context.Background())
 	if err != nil {
