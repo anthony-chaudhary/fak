@@ -1,0 +1,10 @@
+{
+  "tool": "create_user",
+  "note": "A positional call whose arity does NOT match the grammar (3 values vs 1 required param) cannot be mechanically zipped. The rung does NOT guess the mapping — it refuses with a MODEL-FIXABLE disposition: Deny(MISROUTE). The model can re-emit a correct call; fak never silently dispatches a wrong-shaped one.",
+  "grammar": { "required_params_in_order": ["name"] },
+  "args_as_emitted": { "_positional": ["a", "b", "c"] },
+  "expected_verdict": "DENY",
+  "expected_reason": "MISROUTE",
+  "expected_by": "grammar",
+  "witness": "go test ./internal/grammar/ -run TestAdjudicatePositionalUnrepairable"
+}

@@ -1,0 +1,8 @@
+{
+  "tool": "convert_currency",
+  "note": "The model used synonym keys (from/to) for the required canonical params (from_currency/to_currency) — the single most common shape error a competent model makes on a strict schema. The grammar rung renames them in-syscall (a TRANSFORM) so the call never bounces back as an error the model must spend a turn to fix.",
+  "args_as_emitted": { "from": "USD", "to": "EUR", "amount": 240 },
+  "args_after_repair": { "from_currency": "USD", "to_currency": "EUR", "amount": 240 },
+  "expected_verdict": "TRANSFORM",
+  "expected_by": "grammar"
+}

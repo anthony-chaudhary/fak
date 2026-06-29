@@ -1,0 +1,10 @@
+{
+  "tool": "create_user",
+  "note": "A tool call arrives with POSITIONAL args (which weaker models emit often) and an arity that matches the grammar's required params exactly. The grammar rung zips the positional values into the named params 1:1, in-syscall, with no model turn. This is the positional->named half of the rung; the convert_currency demo above exercises the alias-rename half end-to-end in `fak agent`.",
+  "grammar": { "required_params_in_order": ["name"] },
+  "args_as_emitted": { "_positional": ["alice"] },
+  "args_after_repair": { "name": "alice" },
+  "expected_verdict": "TRANSFORM",
+  "expected_by": "grammar",
+  "witness": "go test ./internal/grammar/ -run TestAdjudicatePositionalRepairable"
+}
