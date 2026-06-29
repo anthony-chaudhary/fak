@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
@@ -85,8 +86,11 @@ func cmdSelfUpdate(argv []string) {
 	// tree: that gives a clean VCS stamp on the installed binary and guarantees we install
 	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
 	ctx := context.Background()
-	buildDir, cleanup, perr := selfinstall.PrepareOrigin(ctx, selfinstall.RealRunner, repoRoot, "origin/main",
-		filepath.Join(repoRoot, ".git", "fak-selfupdate-build"))
+	// The build worktree must live OUTSIDE .git (git refuses `worktree add` to a path
+	// inside the git dir) and outside the live tree (so it never shows up as peer churn).
+	// A per-invocation temp dir under the OS temp root satisfies both.
+	buildDir := filepath.Join(os.TempDir(), "fak-selfupdate-build-"+strconv.Itoa(os.Getpid()))
+	_, cleanup, perr := selfinstall.PrepareOrigin(ctx, selfinstall.RealRunner, repoRoot, "origin/main", buildDir)
 	if perr != nil {
 		fmt.Fprintln(os.Stderr, "self-update:", perr)
 		os.Exit(1)
