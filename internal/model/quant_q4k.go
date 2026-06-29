@@ -448,9 +448,17 @@ func (k sessionQ4KKernel) mul(name string, x any, out, in int) []float32 {
 		// or the Metal q4_k GEMV under MetalQ4K (q4kMatRowsDispatch).
 		return k.s.q4kMatRowsDispatch(name, qt, xf)
 	}
-	// Q6_K matmul weights with no Q4_K resident copy (qwen3.5 attn_qkv → split q/k/v,
-	// ffn_down) fall back to the proven Q8_0 GEMV. The f32 activation is quantized on
-	// demand for this minority, so prep staying the identity for the Q4_K majority is fine.
+	if qt := k.s.M.kqw[name]; qt != nil {
+		// Resident Q5_K/Q6_K matmul weight (e.g. the q4_k_m expert down_proj, which loads Q6_K
+		// into kqw, not q4kw). Use the resident k-quant GEMV — its int8 reducer quantizes the
+		// activation once and is byte-identical to the f32 dequant-then-dot (kQuantMatRows;
+		// TestKQuantMatRowsMatchesF32). Without this the weight would miss q4kw and fall to the
+		// Q8 dequant-and-requantize path below, the slowest available route for these experts.
+		return kQuantMatRows(qt, xf)
+	}
+	// Quant matmul weights with no resident Q4_K or k-quant copy (qwen3.5 attn_qkv → split
+	// q/k/v) fall back to the proven Q8_0 GEMV. The f32 activation is quantized on demand for
+	// this minority, so prep staying the identity for the Q4_K majority is fine.
 	return qMatRows(k.s.M.q8(name), quantizeVecQ8(xf))
 }
 
