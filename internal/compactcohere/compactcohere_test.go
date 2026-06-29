@@ -39,7 +39,7 @@ func TestClassify(t *testing.T) {
 			name: "fak world-break dominates everything",
 			prev: prev,
 			cur: TurnObservation{
-				InboundPrefixDigest: "B", // even with a changed prefix...
+				InboundPrefixDigest: "B",  // even with a changed prefix...
 				FakWorldBreak:       true, // ...fak's own break wins attribution
 				FakCompactFired:     true,
 			},
