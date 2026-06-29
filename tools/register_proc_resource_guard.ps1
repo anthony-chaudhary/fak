@@ -15,6 +15,11 @@ and a CPU pin only after it has held the threshold across every sample window
 killed. It never touches an OS-critical process (System/csrss/lsass/...) or its own
 tree. See docs/perf-runaway-guard.md.
 
+Registration prefers an S4U task (windowless, session 0, survives logoff) when run
+from an elevated shell, and otherwise falls back automatically to an Interactive
+task (runs as this user while logged on, no admin needed) launched via pythonw.exe
+so it never flashes a console window.
+
   .\register_proc_resource_guard.ps1                 # install REPORT-ONLY (safe default)
   .\register_proc_resource_guard.ps1 -Enact          # install ENACTING (reaps runaways/orphans/CPU pins)
   .\register_proc_resource_guard.ps1 -Action status
@@ -31,12 +36,21 @@ param(
   [double]$CpuWindow = 2.0,
   [int]$CpuSamples = 4,
   [string]$TaskName = 'FleetProcResourceGuard',
-  # Resolve the sibling guard in THIS clone, so registering from any checkout
-  # schedules that checkout's script -- not a hardcoded operator path.
-  [string]$Guard = (Join-Path $PSScriptRoot 'proc_resource_guard.py'),
-  [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot)
+  # Empty by default and resolved in the body: $PSScriptRoot is EMPTY when read in a
+  # param-block default under Windows PowerShell 5.1 launched via -File (and in some
+  # Scheduled-Task contexts), which crashed the old `Join-Path $PSScriptRoot ...`
+  # default. Resolve it below with a 3-tier fallback -- the trap host-maintenance docs.
+  [string]$Guard = '',
+  [string]$RepoRoot = ''
 )
 $ErrorActionPreference = 'Stop'
+
+# --- Robust script root (works on PS 5.1 -File, dot-source, and pwsh 7) ---
+$ScriptRoot = $PSScriptRoot
+if (-not $ScriptRoot) { $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $ScriptRoot) { $ScriptRoot = (Get-Location).Path }
+if (-not $Guard)    { $Guard    = Join-Path $ScriptRoot 'proc_resource_guard.py' }
+if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent $ScriptRoot }
 
 if ($Action -eq 'status') {
   $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -44,7 +58,8 @@ if ($Action -eq 'status') {
   $i = Get-ScheduledTaskInfo -TaskName $TaskName
   $a = ($t.Actions | Select-Object -First 1).Arguments
   $modeStr = if ($a -match '--enact') { 'ENACT (reaps)' } else { 'REPORT-ONLY' }
-  Write-Output "State=$($t.State) mode=$modeStr LastRun=$($i.LastRunTime) LastResult=$($i.LastTaskResult) NextRun=$($i.NextRunTime)"
+  $logon = ($t.Principal.LogonType)
+  Write-Output "State=$($t.State) mode=$modeStr logon=$logon LastRun=$($i.LastRunTime) LastResult=$($i.LastTaskResult) NextRun=$($i.NextRunTime)"
   return
 }
 if ($Action -eq 'remove') {
@@ -52,10 +67,14 @@ if ($Action -eq 'remove') {
   Write-Output "removed $TaskName"; return
 }
 
-# Resolve a Python launcher: prefer `python`, fall back to the `py` launcher.
+# Resolve a Python launcher: prefer `python`, fall back to the `py` launcher; and the
+# windowless sibling (pythonw / pyw) used by the no-elevation Interactive fallback.
 $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command py.exe -ErrorAction SilentlyContinue).Source }
 if (-not $py) { $py = 'python' }
+$pyw = ''
+if ($py -match '(?i)python\.exe$') { $c = $py -replace '(?i)python\.exe$','pythonw.exe'; if (Test-Path $c) { $pyw = $c } }
+elseif ($py -match '(?i)\\py\.exe$') { $c = $py -replace '(?i)py\.exe$','pyw.exe'; if (Test-Path $c) { $pyw = $c } }
 
 # The guard scans every live process; it flags thread/handle runaways, reaps orphaned
 # dos_mcp.server helpers, and (the single-threaded-core-pin witness) a process holding
@@ -63,22 +82,42 @@ if (-not $py) { $py = 'python' }
 $enactArg = if ($Enact) { ' --enact' } else { '' }
 $guardArgs = "`"$Guard`" --reap-orphans --max-cpu-pct $MaxCpuPct --cpu-window $CpuWindow --cpu-samples $CpuSamples$enactArg"
 
-$taskAction = New-ScheduledTaskAction -Execute $py -Argument $guardArgs -WorkingDirectory $RepoRoot
-$trigger    = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-                -RepetitionInterval (New-TimeSpan -Minutes $EveryMin) `
-                -RepetitionDuration (New-TimeSpan -Days 3650)
-# S4U (non-interactive, session 0), NOT the schtasks default Interactive: a console
-# python.exe launched in the interactive session would flash a window on every trigger.
-# S4U runs windowless in session 0 yet still AS THIS USER, so it can still enumerate
-# and (with -Enact) terminate this user's runaways -- same-user terminate needs no
-# elevation. -StartWhenAvailable resumes it after a reboot that missed a tick.
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
-$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
-Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
-               -Principal $principal -Settings $settings -Force | Out-Null
+$trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+              -RepetitionInterval (New-TimeSpan -Minutes $EveryMin) `
+              -RepetitionDuration (New-TimeSpan -Days 3650)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+              -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+
+function Register-Guard([string]$exe, $principal) {
+  $action = New-ScheduledTaskAction -Execute $exe -Argument $guardArgs -WorkingDirectory $RepoRoot
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+    -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+}
+
+# Prefer S4U (windowless, session 0, survives logoff) -- needs an elevated shell.
+# On access-denied, fall back to an Interactive task (this user, while logged on, no
+# admin) launched via pythonw.exe so it stays windowless.
+$modeNote = ''
+try {
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+  Register-Guard $py $principal
+  $modeNote = 'S4U (windowless, session 0, survives logoff)'
+} catch {
+  $s4uErr = $_.Exception.Message
+  $exe = if ($pyw) { $pyw } else { $py }
+  try {
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    Register-Guard $exe $principal
+    $wl = if ($pyw) { 'pythonw, windowless' } else { 'python -- console may flash; install pythonw to silence' }
+    $modeNote = "Interactive as $env:USERNAME (runs while logged on; $wl). S4U skipped: $s4uErr"
+  } catch {
+    throw "register failed. S4U: $s4uErr ; Interactive: $($_.Exception.Message). Try an elevated shell for the S4U daemon."
+  }
+}
+
 $mode = if ($Enact) { "ENACT (reaps runaways/orphans + CPU pins >$MaxCpuPct%/core sustained ${CpuSamples}x${CpuWindow}s)" } else { 'REPORT-ONLY (logs intentions only)' }
-Write-Output "installed $TaskName - every $EveryMin min, $mode, S4U (windowless, restart-durable)"
-Write-Output "log: tools/_watchdog/proc_guard.log (one line per scan)"
+Write-Output "installed $TaskName - every $EveryMin min, $mode"
+Write-Output "  principal: $modeNote"
+Write-Output "  log: tools/_watchdog/proc_guard.log (one line per scan)"
 Write-Output "flip to enacting later:  .\tools\register_proc_resource_guard.ps1 -Enact"
 Write-Output "remove:                  .\tools\register_proc_resource_guard.ps1 -Action remove"

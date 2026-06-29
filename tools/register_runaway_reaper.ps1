@@ -14,11 +14,19 @@ param(
   [switch]$Live,
   [int]$EveryMin = 5,
   [string]$TaskName = 'FleetRunawayReaper',
-  # Resolve the sibling reaper in THIS clone, so registering from any checkout
-  # schedules that checkout's script -- not a hardcoded operator path.
-  [string]$Reaper = (Join-Path $PSScriptRoot 'runaway_process_reaper.ps1')
+  # Empty by default and resolved in the body: $PSScriptRoot is EMPTY when read in a
+  # param-block default under Windows PowerShell 5.1 launched via -File, which crashes
+  # `Join-Path $PSScriptRoot ...`. Resolve the sibling reaper below with a 3-tier
+  # fallback so registering from any checkout schedules that checkout's script.
+  [string]$Reaper = ''
 )
 $ErrorActionPreference = 'Stop'
+
+$ScriptRoot = $PSScriptRoot
+if (-not $ScriptRoot) { $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $ScriptRoot) { $ScriptRoot = (Get-Location).Path }
+if (-not $Reaper) { $Reaper = Join-Path $ScriptRoot 'runaway_process_reaper.ps1' }
+$RepoRoot = Split-Path -Parent $ScriptRoot
 
 if ($Action -eq 'status') {
   $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -38,7 +46,7 @@ $liveArg = if ($Live) { ' -Live' } else { '' }
 $pwsh = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
 if (-not $pwsh) { $pwsh = 'powershell.exe' }
 $psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Reaper`"$liveArg"
-$taskAction = New-ScheduledTaskAction -Execute $pwsh -Argument $psArgs -WorkingDirectory (Split-Path -Parent $PSScriptRoot)
+$taskAction = New-ScheduledTaskAction -Execute $pwsh -Argument $psArgs -WorkingDirectory $RepoRoot
 $trigger    = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                 -RepetitionInterval (New-TimeSpan -Minutes $EveryMin) `
                 -RepetitionDuration (New-TimeSpan -Days 3650)
