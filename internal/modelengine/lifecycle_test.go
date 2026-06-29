@@ -167,6 +167,46 @@ func TestEngineAdmitUsesNativeContinuousBatching(t *testing.T) {
 	}
 }
 
+func TestEngineNativeSchedulerMaxRunningEnv(t *testing.T) {
+	t.Setenv("FAK_NATIVE_MAX_RUNNING", "1")
+	ctx := context.Background()
+	e := New()
+	calls := []*abi.ToolCall{
+		inlineCall("search_flights", `{"from":"SFO"}`),
+		inlineCall("get_user_details", `{"id":1}`),
+		inlineCall("list_all_airports", `{"region":"EU"}`),
+	}
+
+	reqs := make([]abi.EngineRequest, len(calls))
+	for i, c := range calls {
+		r, err := e.Admit(ctx, c)
+		if err != nil {
+			t.Fatalf("Admit %d: %v", i, err)
+		}
+		reqs[i] = r
+	}
+
+	var wg sync.WaitGroup
+	for _, r := range reqs {
+		wg.Add(1)
+		go func(r abi.EngineRequest) {
+			defer wg.Done()
+			for range r.Tokens() {
+			}
+		}(r)
+	}
+	wg.Wait()
+
+	if peak := e.nativeScheduler().MaxObservedRunning(); peak != 1 {
+		t.Fatalf("FAK_NATIVE_MAX_RUNNING peak running = %d, want 1", peak)
+	}
+	for i, r := range reqs {
+		if _, err := r.Result(); err != nil {
+			t.Fatalf("Result %d: %v", i, err)
+		}
+	}
+}
+
 func serialGreedyTokens(m *model.Model, prompt []int) []int {
 	sess := m.NewSession()
 	logits := sess.Prefill(prompt)

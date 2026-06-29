@@ -32,6 +32,7 @@ package modelengine
 import (
 	"context"
 	"os"
+	"strconv"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -203,7 +204,7 @@ func (e *Engine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, er
 // boot-selected tokenizer and resident-Q4_K mode without widening the public ABI.
 func (e *Engine) nativeScheduler() *NativeScheduler {
 	e.schedOnce.Do(func() {
-		e.sched = newNativeScheduler(e.model(), func(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
+		sched := newNativeScheduler(e.model(), func(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
 			args := refBytes(ctx, c.Args)
 			return schedPrepare{
 				prompt: e.buildPrompt(c.Tool, args, m.Cfg.VocabSize),
@@ -211,8 +212,22 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 				q4k:    e.q4k,
 			}
 		})
+		sched.SetMaxRunning(nativeMaxRunningFromEnv())
+		e.sched = sched
 	})
 	return e.sched
+}
+
+func nativeMaxRunningFromEnv() int {
+	raw := os.Getenv("FAK_NATIVE_MAX_RUNNING")
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // buildPrompt turns a tool name + argument bytes into a bounded prompt of token ids,
