@@ -1,10 +1,12 @@
 {
   "schema": "fleet-bench-nodes/1",
   "_doc": "Registry for tools/bench_node.sh — the repeatable bench-node runner. THIS file is the public-safe TEMPLATE (placeholders only). Copy it to tools/bench_nodes.json (GITIGNORED) and fill in REAL tailnet IPs / ssh users / repo paths there. Only 'sanitized_name' may ever appear in a committed artifact. Mirrors the fleet_endpoints.example.json convention.",
+  "_resolve_cmd_doc": "EPHEMERAL hosts (#12): a node may carry an OPTIONAL 'resolve_cmd' instead of relying on a static tailnet_ip. When present, the runner runs it just-in-time (read-only; must print exactly one host/IP on stdout) to learn the CURRENT address of a host whose IP rotates per launch (e.g. a TTL-guarded GCP bench VM, #571), then takes the SAME ssh path. `info` never calls the resolver, so it stays offline-safe. Keep the REAL project/zone/instance inside resolve_cmd or its env in the GITIGNORED registry copy.",
   "_safety": [
-    "tools/bench_nodes.json is gitignored — real identity (tailnet_ip, ssh_user, magicdns, repo_path, host_key) lives ONLY there.",
+    "tools/bench_nodes.json is gitignored — real identity (tailnet_ip or resolve_cmd inputs, ssh_user, magicdns, repo_path, host_key) lives ONLY there.",
     "Reachability is an SSH handshake, not ICMP/tailscale ping (a node can answer ping with no sshd).",
-    "host_key is PINNED here after bootstrap — the driver verifies against it instead of blind accept-new.",
+    "host_key is PINNED here after bootstrap — the driver verifies against it instead of blind accept-new. An ephemeral host whose key rotates per provision leaves host_key empty and falls back to accept-new.",
+    "resolve_cmd must be a CHEAP read-only lookup (e.g. tools/gcp_bench.py --resolve-ip for a kept GCP VM, or a tailscale magicdns resolve) — it runs on every connecting subcommand; it must never provision or bill.",
     "Every run writes lineage.json (utc datetime + fak version/commit + node + go) for traceability.",
     "Results go to tools/_registry/bench-runs/ (gitignored). Promoting a result to a committed path needs a REAL redaction pass (CPU brand + go/git + hostname) — the shape-only scrub audit does NOT do that."
   ],
@@ -14,7 +16,7 @@
       { "node": "macbook", "sanitized_name": "node-macos-a",         "status": "onboarded", "verified": "2026-06-21", "note": "Apple M3 Pro arm64 — tests green, BenchmarkDecide ~317 ns idle." },
       { "node": "desktop", "sanitized_name": "node-linux-desktop-a", "status": "pending",   "issue": 922, "blocker": "host-reachability — desktop answers ICMP but ships with no sshd; enable sshd + add driver pubkey, then pin host_key." },
       { "node": "laptop",  "sanitized_name": "node-linux-laptop-a",  "status": "pending",   "issue": 10,  "blocker": "remote-shell-mismatch — host reachable + key-auth OK over Tailscale (RTX 4070, Ada/sm_89), but its SSH login shell is Windows cmd (a remote `uname` returns 'not recognized'), so the runner's `bash -s` model can't execute there; set WSL bash as the SSH login shell (or add a Windows-shell adapter to bench_node.sh), THEN fill the gitignored registry + verify." },
-      { "node": "gcp-gpu", "sanitized_name": "node-gcp-gpu-a",       "status": "pending",   "issue": 12,  "blocker": "ephemeral-host — cloud VM IP + host_key rotate on each provision and the driver's ADC may be stale; (re)bootstrap per provision, then pin." },
+      { "node": "gcp-gpu", "sanitized_name": "node-gcp-gpu-a",       "status": "pending",   "issue": 12,  "blocker": "private-registry-fill — dynamic-IP bridge is wired; copy the resolver entry into gitignored bench_nodes.json, set the real GCP project/zone/instance there or in env, then run bench_node.sh gcp-gpu ping after provisioning." },
       { "node": "dgx-a100","sanitized_name": "node-dgx-a100",        "status": "pending",   "issue": 922, "blocker": "no-direct-ssh — DGX is reached via a relay bridge, not a direct tailnet SSH handshake; needs a reachable sshd path before the driver can poll it." }
     ]
   },
@@ -76,7 +78,9 @@
     {
       "name": "gcp-gpu",
       "sanitized_name": "node-gcp-gpu-a",
-      "tailnet_ip": "203.0.113.30",
+      "_ephemeral_doc": "EPHEMERAL host (#12): tailnet_ip is empty because a TTL-guarded bench VM (#571) gets a fresh IP per launch. At runtime resolve_cmd asks the GCP provisioner for the CURRENT external IP. In the gitignored copy, set BENCH_NODE_GCP_INSTANCE/BENCH_NODE_GCP_ZONE and GCP_PROJECT/GCP_ACCOUNT as needed.",
+      "tailnet_ip": "",
+      "resolve_cmd": "python tools/gcp_bench.py --resolve-ip \"${BENCH_NODE_GCP_INSTANCE:?set BENCH_NODE_GCP_INSTANCE}\" --zone \"${BENCH_NODE_GCP_ZONE:?set BENCH_NODE_GCP_ZONE}\"",
       "magicdns": "node-gcp-gpu-a.example.ts.net",
       "ssh_user": "user",
       "ssh_key": "~/.ssh/id_ed25519",

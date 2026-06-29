@@ -83,6 +83,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import datetime as _dt
 import json
 import os
@@ -90,6 +91,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 from dataclasses import dataclass
@@ -701,6 +703,30 @@ def warn_preexisting_bench_instances(runner: Runner) -> None:
             log("    delete: re-run `gcloud compute instances list` to resolve its zone")
 
 
+def resolve_instance_ip(runner: Runner, name: str, zone: str) -> Optional[str]:
+    """Return the current external NAT IP for an existing bench VM."""
+    proc = runner.run(
+        [
+            "compute", "instances", "describe", name,
+            f"--zone={zone}",
+            "--format=get(networkInterfaces[0].accessConfigs[0].natIP)",
+        ],
+        capture=True, timeout=120, check=False,
+    )
+    if runner.dry_run:
+        return None
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or "").strip()
+        suffix = f": {msg}" if msg else ""
+        log(f"STOP: could not resolve current IP for {name} in {zone}{suffix}")
+        return None
+    ip = (proc.stdout or "").strip()
+    if not ip:
+        log(f"STOP: {name} in {zone} has no external NAT IP")
+        return None
+    return ip.splitlines()[0].strip()
+
+
 def resolve_tier(args, runner: Runner) -> Optional[gcp_accel.AccelTier]:
     """Pick the tier to launch: explicit pin, proof, or probe the ladder."""
     if args.proof:
@@ -953,6 +979,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--zone", default=None, help="override zone (else tier default)")
     ap.add_argument("--project", default=os.environ.get("GCP_PROJECT") or None)
     ap.add_argument("--account", default=os.environ.get("GCP_ACCOUNT") or None)
+    ap.add_argument("--resolve-ip", metavar="INSTANCE",
+                    help="print the current external IP for an existing GCP bench VM "
+                         "and exit; intended for bench_nodes.json resolve_cmd")
     ap.add_argument("--spot", action="store_true",
                     help="request a Spot VM (cheaper, preemptible)")
     ap.add_argument("--hf-repo", default=DEFAULT_HF_REPO)
@@ -966,6 +995,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print every gcloud command; create/run/delete nothing")
     args = ap.parse_args(argv)
+
+    if args.resolve_ip:
+        if not args.zone:
+            log("STOP: --resolve-ip requires --zone")
+            return 2
+        runner = Runner(args.dry_run, args.project, args.account)
+        with redirect_stdout(sys.stderr):
+            ip = resolve_instance_ip(runner, args.resolve_ip, args.zone)
+        if not ip:
+            return 1
+        print(ip)
+        return 0
 
     try:
         engine_keys = resolve_engines(args.engine)

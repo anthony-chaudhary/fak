@@ -203,6 +203,29 @@ class ProvisionerLogicTest(unittest.TestCase):
             text,
         )
 
+    def test_resolve_instance_ip_describes_current_nat_ip(self):
+        class IPRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.dry_run = False
+
+            def run(self, args, *, capture=False, timeout=600, check=True):
+                self.calls.append(args)
+                return SimpleNamespace(returncode=0, stdout="203.0.113.44\n", stderr="")
+
+        r = IPRunner()
+        ip = gcp_bench.resolve_instance_ip(r, "fak-bench-g2-l4-20260629t000000z",
+                                           "us-central1-a")
+        self.assertEqual(ip, "203.0.113.44")
+        self.assertEqual(
+            r.calls[0],
+            [
+                "compute", "instances", "describe", "fak-bench-g2-l4-20260629t000000z",
+                "--zone=us-central1-a",
+                "--format=get(networkInterfaces[0].accessConfigs[0].natIP)",
+            ],
+        )
+
     def test_main_runs_preexisting_bench_sweep_at_startup(self):
         class LeakedRunner(FakeRunner):
             def __init__(self):

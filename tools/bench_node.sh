@@ -22,8 +22,9 @@
 # CPU brand / hostname. Promoting a result to a committed path needs a real redaction pass.
 set -uo pipefail
 
-RUNNER_VERSION="0.3.0"   # 0.3.0: kernels subcommand (arm64 NEON hot-path A/B + prove/refute); 0.2.0: lineage.json
+RUNNER_VERSION="0.4.0"   # 0.4.0: resolve_cmd dynamic host/IP resolver; 0.3.0: kernels subcommand; 0.2.0: lineage.json
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SELF_DIR/.." && pwd)"
 REG="${BENCH_NODES:-$SELF_DIR/bench_nodes.json}"
 SCRATCH="${BENCH_RUNS_DIR:-$SELF_DIR/_registry/bench-runs}"   # gitignored
 
@@ -69,8 +70,50 @@ print("" if v is None else v)
 PY
 }
 
+resolve_dynamic_ip(){
+  local cmd="$1" out lines count first rc
+  out="$(cd "$ROOT_DIR" && BENCH_NODE="$NODE" BENCH_REGISTRY="$REG" bash -lc "$cmd")"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "node '$NODE': resolve_cmd failed (rc=$rc): $cmd" >&2
+    return 5
+  fi
+  lines="$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d')"
+  if [ -z "$lines" ]; then
+    echo "node '$NODE': resolve_cmd returned no host/IP (provisioner down or VM torn down?): $cmd" >&2
+    return 5
+  fi
+  count="$(printf '%s\n' "$lines" | wc -l | tr -d ' ')"
+  if [ "$count" != "1" ]; then
+    echo "node '$NODE': resolve_cmd must print exactly one host/IP line (got $count): $cmd" >&2
+    return 5
+  fi
+  first="$(printf '%s\n' "$lines" | sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}')"
+  if [[ "$first" =~ [[:space:]] ]]; then
+    echo "node '$NODE': resolve_cmd host/IP must not contain whitespace: $first" >&2
+    return 5
+  fi
+  printf '%s\n' "$first"
+}
+
 SAN="$(field sanitized_name)"   || exit $?
-IP="$(field tailnet_ip)"        || exit $?
+# IP resolution. An EPHEMERAL host (GCP bench VM, #12) is TTL-guarded (#571) and gets a FRESH
+# IP per launch, so a static tailnet_ip won't do. If the node carries a `resolve_cmd`, run it
+# just-in-time to learn the CURRENT IP from the provisioner, then take the SAME ssh path below.
+# Real project/zone/instance live in the resolve_cmd inside the GITIGNORED registry; only the
+# sanitized name is ever public. `info` stays offline-safe -- it never calls the provisioner.
+TAILNET_IP="$(field tailnet_ip 1)"
+RESOLVE_CMD="$(field resolve_cmd 1)"
+if [ -n "$RESOLVE_CMD" ] && [ "$SUB" != "info" ]; then
+  IP="$(resolve_dynamic_ip "$RESOLVE_CMD")" || exit $?
+  echo "resolve: $NODE current host/IP fetched via resolve_cmd (ephemeral host)" >&2
+elif [ -n "$TAILNET_IP" ]; then
+  IP="$TAILNET_IP"
+elif [ -n "$RESOLVE_CMD" ]; then
+  IP=""
+else
+  echo "node '$NODE' needs tailnet_ip or resolve_cmd in $REG" >&2
+  exit 4
+fi
 SSH_USER="$(field ssh_user)"    || exit $?   # NB: namespaced, never the reserved $USER
 SSH_KEY="$(field ssh_key)"      || exit $?; SSH_KEY="${SSH_KEY/#\~/$HOME}"
 SSH_PORT="$(field ssh_port)"    || exit $?
@@ -170,7 +213,7 @@ JSON
 
 case "$SUB" in
   info)
-    echo "node=$NODE sanitized=$SAN repo=$REPO toolchain=$TC pinned_hostkey=$([ -n "$HOSTKEY" ] && echo yes || echo no)"
+    echo "node=$NODE sanitized=$SAN repo=$REPO toolchain=$TC pinned_hostkey=$([ -n "$HOSTKEY" ] && echo yes || echo no) ip_source=$([ -n "$RESOLVE_CMD" ] && echo resolve_cmd || echo static)"
     ;;
   ping)
     if reachable; then echo "REACHABLE $NODE (as $SAN)"; else echo "UNREACHABLE $NODE" >&2; exit 3; fi
