@@ -223,7 +223,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "max_workers": max_workers,
         "registry_refresh": reg,
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
-                      "cap": pre.get("cap"), "live": pre.get("live")},
+                      "cap": pre.get("cap"), "live": pre.get("live"),
+                      # host_cap is the host-derived ADAPTIVE ceiling (#1337): when it
+                      # is the binding term the cap tracks live host headroom (cores,
+                      # free RAM, OS-thread total) rather than a static number, so a
+                      # loaded box auto-throttles and recovers as load clears. Surface
+                      # it in the dispatcher's own telemetry so "live population tracks
+                      # host_cap" is observable here, not only inside the preflight
+                      # reason string.
+                      "host_cap": pre.get("host_cap")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen,
         "lane_issue_count": lane_pick.get("issues"),
@@ -276,7 +284,9 @@ def render(p: dict[str, Any]) -> str:
     pf = p.get("preflight") or {}
     lines = [
         f"issue-dispatch: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})  live={p.get('live')}",
-        f"  preflight : {pf.get('verdict')} ({pf.get('live')}/{pf.get('cap')} live)",
+        f"  preflight : {pf.get('verdict')} ({pf.get('live')}/{pf.get('cap')} live"
+        + (f", host_cap {pf.get('host_cap')}" if pf.get('host_cap') is not None else "")
+        + ")",
         f"  account   : {a.get('tag') or '-'} (t{a.get('tier')})  {a.get('model') or ''}",
         f"  lane      : {p.get('lane') or '-'}  ({p.get('lane_issue_count')} issues)",
         f"  witness   : {(p.get('witness') or {}).get('cmd') or '-'}",

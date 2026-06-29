@@ -195,6 +195,35 @@ class EvaluateTest(unittest.TestCase):
         self.assertIn("preflight refused", p["reason"])
         self.assertIn("2/2 live", p["reason"])
 
+    def test_preflight_payload_surfaces_host_cap(self) -> None:
+        # #1337: the host-derived adaptive ceiling must be observable in the
+        # dispatcher's OWN telemetry — its structured preflight payload and the
+        # human render — not only buried in the preflight reason string, so an
+        # operator can see the live population tracking host headroom.
+        mod = load()
+        self._no_spawn(mod)
+        self._patch(
+            mod,
+            pre={"verdict": "REFUSE_AT_CAP", "reason": "3/3 live, host_cap=3",
+                 "cap": 3, "live": 3, "host_cap": 3, "account": {}},
+            lane_pick={"lane": "tools", "issues": 1, "by_lane": {}})
+        p = mod.evaluate(ROOT, max_workers=10, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(p["preflight"]["host_cap"], 3)
+        self.assertIn("host_cap 3", mod.render(p))
+
+    def test_preflight_payload_omits_host_cap_when_unbounded(self) -> None:
+        # When no host dimension is readable host_cap is None; the render then
+        # falls back to the static live/cap form with no host_cap clause.
+        mod = load()
+        self._no_spawn(mod)
+        self._patch(mod, pre=self.SPAWN_OK,
+                    lane_pick={"lane": "tools", "issues": 1, "by_lane": {}})
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertIsNone(p["preflight"]["host_cap"])
+        self.assertNotIn("host_cap", mod.render(p))
+
     def test_no_lane_when_router_empty(self) -> None:
         mod = load()
         self._no_spawn(mod)
