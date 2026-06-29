@@ -1,0 +1,18 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "update_booking",
+    "cancel_order",
+    "get_booking",
+    "get_order"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ]
+}
