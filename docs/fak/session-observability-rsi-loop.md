@@ -42,6 +42,13 @@ label, so the behavior cannot be correlated with anything.
 Attach that label and the corpus becomes learnable. Leave it off and the corpus is a
 cost ledger, not an RSI substrate.
 
+> **Status (shipped):** this rung is now built. `fak sessions score` attaches the
+> outcome label from real evidence — a session NAMES the commits it landed in its own
+> transcript (`git commit`'s `[<branch> <sha>]` success marker), and a SHA is graded
+> `shipped` only when it is still an ancestor of `HEAD` (witnessed, not reverted). The
+> section below keeps the original framing because it is still the clearest statement
+> of *why* the link is the load-bearing rung.
+
 ## The observability ladder
 
 Session data becomes RSI-useful one rung at a time. Naming the rungs is what lets us
@@ -50,17 +57,26 @@ don't".
 
 1. **capture** — the data exists and is retained. (Done: transcripts on disk.)
 2. **structure** — each session is an analysis-shaped record, not an opaque blob.
-   (Done for cost: `session_audit.py` parses per-session token/tool structure.)
+   (Done: `fak sessions` folds each transcript into a scrubbed `Record`;
+   `session_audit.py` parses the cost side.)
 3. **link** — each record is tied to its outcome, so value and waste are
-   distinguishable. (Missing. This is the rung that unlocks the rest.)
+   distinguishable. (Done: `fak sessions score` classifies each session's outcome
+   from the commit markers in its own transcript, witnessed against git history.)
 4. **aggregate** — each record carries behavior signals (guard refusals, tool
    errors, interrupts, commits, stop/goal events) that a loop can contrast across
-   many sessions. (Partly possible; not collected with the outcome.)
+   many sessions. (Done: the signals are folded with the outcome; see "The
+   guard-refusal signal" below for the one with the sharpest collection caveat.)
 5. **learn** — a registered RSI loop reads a committed, scrubbed corpus and changes
-   behavior on a strict, witnessed gain. (Missing.)
+   behavior on a strict, witnessed gain. (Done for reporting: `fak sessions learn`
+   runs the value-vs-waste contrast and the `sessions_learn` garden member reads the
+   committed corpus each tick; the S0 RSI demo closes the keep/revert loop
+   end-to-end.)
 
 A pipeline that has climbed to rung 2 has cost observability. A pipeline that has
-climbed to rung 5 has RSI. The gap between them is the work.
+climbed to rung 5 has RSI. Every HARD rung above is now built — a fold of ~1850 real
+host sessions scores `sessionobs_debt=0` (linked 90%, value 600 / waste 295). What
+remains is productionization, not unbuilt rungs: a committed fleet-wide corpus and
+folding the scorecard into the control-pane ratchet (the one SOFT rung still open).
 
 ## The scorecard
 
@@ -119,6 +135,35 @@ author — the same honesty gate as the [guard verdict RSI
 loop](guard-verdict-rsi-loop.md). The loop closes on our own usage, or it does not
 close.
 
+### The guard-refusal signal (and its collection caveat)
+
+`guard_refusals` is the contrast's first-ranked feature, and the rung with the
+sharpest collection caveat, so it is worth stating precisely. It counts the turns on
+which the kernel **DENIED a proposed tool call** — the friction behind the contrast's
+own recovery action ("surface the `AGENTS.md` recovery table earlier when refusals
+spike, before the session fights the guard into a STOP"). The fold derives it from the
+gateway's denial banners in **assistant text** (`internal/gateway/http.go`:
+`adjudicationNote`'s "Do not re-propose a refused call unchanged" and `denySummary`'s
+"All proposed tool calls were refused by the fak kernel"), anchored on the full phrase
+so an analysis session that merely *mentions* a refusal does not register one, and
+scanned only in assistant text so a tool_result that *quotes* a banner cannot.
+
+Two honest limits travel with it:
+
+- **Denials, not quarantines.** The result-floor QUARANTINE page-out ("held out of
+  context as a safety precaution") is a *different* event — an inbound tool result held
+  back, which the banner itself flags as often a false positive on a placeholder
+  credential — and it fires per-result. On one host's corpus it appeared in 150+ turns
+  of a single session, which is why it is deliberately excluded: lumping it in drove the
+  count to 218 on a session with 3 tool calls and would have swamped the real signal.
+  After excluding it, the same fold tops out at single digits, tracking real denials.
+- **Gateway sessions only; the journal is authoritative.** Banners exist only for
+  sessions routed through the fak gateway, so a bare-`claude` session shows zero
+  refusals whether or not it provoked any. The authoritative, non-text source is the
+  guard decision journal (`fak audit`, the `DENY`/`QUARANTINE` rows); joining it to the
+  session corpus is the next increment for a refusal count that does not depend on
+  banner text at all.
+
 ## Build plan
 
 This lands in increments, debt-retiring worst-first.
@@ -129,11 +174,12 @@ This lands in increments, debt-retiring worst-first.
   at any corpus + pipeline facts and it tells you, honestly, how far up the ladder
   you are. Run against today's reality it reports high debt — the link and learn
   rungs are unbuilt — which is the correct, non-gamed baseline.
-- **Increment 2: the ingester + outcome linker.** A `fak sessions` command (the
-  impure shell) that reads the host's transcripts, derives each session's behavior
-  signals, links it to a git/witness outcome via `ClassifyOutcome`, and writes the
-  scrubbed `Record` corpus. This retires the `outcome_link_rate`,
-  `value_waste_separable`, and `corpus_committed` rungs.
+- **Increment 2 (shipped): the ingester + outcome linker.** The `fak sessions`
+  command (the impure shell) reads the host's transcripts, derives each session's
+  behavior signals, links it to a git/witness outcome via `ClassifyOutcome`, and
+  writes the scrubbed `Record` corpus (`fak sessions discover|score|learn`,
+  committed at `experiments/sessionobs/corpus.jsonl`). This retired the
+  `outcome_link_rate`, `value_waste_separable`, and `corpus_committed` rungs.
 - **Increment 3 (shipped for the S0 objective): the loop.** `cmd/rsiloop
   -harness sessionobs` makes the loop-index itself the RSI objective:
   `internal/rsiloop.NewSessionObsDemoHarness` measures S0 as the higher-better
