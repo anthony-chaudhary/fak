@@ -40,6 +40,7 @@ DEMOS: tuple[Demo, ...] = (
     ),
     Demo("dropindemo", "/dropin", "api/gallery", "fak guard drop-in gallery", default_port=8154),
     Demo("unseedemo", "/unsee", "api/events", "Un-See It", default_port=8156),
+    Demo("timewolfdemo", "/timewolf", "api/scenarios", "what time is it, Mr. Wolf?", default_port=8155),
 )
 
 

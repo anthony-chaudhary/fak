@@ -22,7 +22,10 @@
 //	         explicit floor deny) and the off-floor wipe_disk with DEFAULT_DENY.
 //	         1 allowed, 2 refused. The safety floor, inside a live agent loop.
 //
-// Headless, three ways (no browser):
+// Serve it (browser), or run it headless (no browser, CI / cross-platform):
+//
+//	go run ./cmd/timewolfdemo                      # serve the browser surface (default)
+//	# open http://127.0.0.1:8155 → pick a scenario → "Run the agent"
 //
 //	go run ./cmd/timewolfdemo -print              # the mr-wolf walkthrough in the terminal
 //	go run ./cmd/timewolfdemo -print -scenario redteam
@@ -32,9 +35,11 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -46,6 +51,11 @@ import (
 	// witness, engines) before kernel.Fold runs inside agentdemo.Run.
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
 )
+
+//go:embed page.html
+var pageFS embed.FS
+
+const version = "fak-timewolfdemo-v1"
 
 // dinnerBase is the injected clock's start (11:55) and dinner is when the wolf
 // chases (12:00). The get_time handler is a pure function of its `tick` arg, so the
@@ -123,13 +133,80 @@ func findScenario(id string) (scenario, bool) {
 	return scenario{}, false
 }
 
+// writeJSON encodes v as the JSON body of an API response.
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// handleIndex serves the embedded browser page at the mount root.
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := pageFS.ReadFile("page.html")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(b)
+}
+
+// scenarioRow is the picker entry the browser renders one option per. It is the
+// demo's own catalog (id + label + planned call count), not a kernel verdict.
+type scenarioRow struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Calls int    `json:"calls"`
+}
+
+// handleScenarios lists the scenarios plus the hardware probe (the compute surface
+// this kernel loop runs on). The browser populates its <select> from this.
+func handleScenarios(w http.ResponseWriter, r *http.Request) {
+	rows := make([]scenarioRow, 0, 2)
+	for _, s := range scenarios() {
+		rows = append(rows, scenarioRow{ID: s.id, Label: s.label, Calls: len(s.plan)})
+	}
+	writeJSON(w, map[string]any{
+		"scenarios": rows,
+		"hardware":  demoui.Probe(),
+	})
+}
+
+// handleRun folds the requested scenario through the REAL kernel and returns the
+// transcript (a real verdict per turn). The page animates the turns and renders the
+// agent's final answer plus the allow/deny tally — the same data -json emits.
+func handleRun(ts *agentdemo.Toolset) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("scenario")
+		if id == "" {
+			id = "mr-wolf"
+		}
+		s, ok := findScenario(id)
+		if !ok {
+			http.Error(w, "unknown scenario: "+id, 400)
+			return
+		}
+		tr, err := ts.Run(r.Context(), s.id, s.prompt, s.plan)
+		if err != nil {
+			http.Error(w, "run: "+err.Error(), 500)
+			return
+		}
+		writeJSON(w, tr)
+	}
+}
+
 func main() {
-	fs := flag.NewFlagSet("timewolfdemo", flag.ExitOnError)
-	doPrint := fs.Bool("print", false, "render the agent-loop walkthrough in the terminal (no browser)")
-	doJSON := fs.Bool("json", false, "emit the exact transcript as JSON (verdict per turn)")
-	doSelfcheck := fs.Bool("selfcheck", false, "replay both scenarios, assert the floor invariants, exit non-zero on drift")
-	which := fs.String("scenario", "mr-wolf", "scenario for -print/-json: mr-wolf | redteam")
-	_ = fs.Parse(os.Args[1:])
+	const defaultAddr = "127.0.0.1:8155"
+	addr := flag.String("addr", defaultAddr, "listen address")
+	basePath := demoui.BasePathFlag(flag.CommandLine, "/timewolf")
+	doPrint := flag.Bool("print", false, "render the agent-loop walkthrough in the TERMINAL (no browser, no port) and exit")
+	doJSON := flag.Bool("json", false, "emit the exact transcript as JSON (a real verdict per turn) and exit")
+	doSelfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay both scenarios through the kernel, assert the documented agentic-floor invariants, exit non-zero on drift. No browser, no network — the CI / cross-platform dog-food of this demo's data path.")
+	which := flag.String("scenario", "mr-wolf", "scenario for -print/-json: mr-wolf | redteam")
+	flag.Parse()
 
 	ctx := context.Background()
 	ts := wolfToolset()
@@ -149,9 +226,8 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(tr.JSON())
-	default:
-		// -print (and the bare default) render the chosen scenario.
-		_ = doPrint
+		return
+	case *doPrint:
 		s, ok := findScenario(*which)
 		if !ok {
 			fmt.Fprintf(os.Stderr, "timewolfdemo: unknown scenario %q\n", *which)
@@ -165,6 +241,27 @@ func main() {
 		fmt.Printf("timewolfdemo · %s — %s\n", s.id, s.label)
 		fmt.Printf("hardware: %s\n\n", demoui.Probe().Summary)
 		tr.RenderText(os.Stdout)
+		return
+	}
+
+	// Default: serve the browser surface. The same scenarios the headless paths
+	// render are folded live per request through the real kernel (handleRun).
+	app := http.NewServeMux()
+	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/api/scenarios", handleScenarios)
+	app.HandleFunc("/api/run", handleRun(ts))
+	mux := http.NewServeMux()
+	base := demoui.MountWithBasePath(mux, *basePath, app)
+
+	bind := demoui.ListenAddr(*addr, defaultAddr)
+	fmt.Fprintf(os.Stderr, "timewolfdemo %s on %s\n", version, demoui.LocalURL(bind, base))
+	fmt.Fprintf(os.Stderr, "the children's game as an agent loop — pick a scenario → 'Run the agent'\n")
+	if base != "" {
+		fmt.Fprintf(os.Stderr, "base path: %s (set by -base-path or %s)\n", base, demoui.DemoBasePathEnv)
+	}
+	if err := http.ListenAndServe(bind, mux); err != nil {
+		fmt.Fprintln(os.Stderr, "listen:", err)
+		os.Exit(1)
 	}
 }
 

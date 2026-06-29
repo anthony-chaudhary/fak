@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fak · what time is it, Mr. Wolf? — an agent loop, kernel-gated</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
+    --txt:#1f2328; --dim:#6e7781; --dim2:#57606a; --accent:#0969da;
+    --bad:#cf222e; --badbg:#fff0ee; --badln:#ffc1ba;
+    --good:#1a7f37; --goodbg:#eefbf1; --goodln:#aee2bd;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--txt);font:13px/1.45 ui-monospace,Menlo,Consolas,"SF Mono",monospace;margin:0;padding:0}
+  h1{font-size:18px;font-weight:600;margin:0}
+  a{color:var(--accent)}
+  .wrap{max-width:880px;margin:0 auto;padding:22px 20px 60px}
+  .top{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .pill{font-size:11px;color:var(--dim2);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:16px;line-height:1.6}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  label{color:var(--dim2);font-size:11px}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 8px;font:inherit}
+  button{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:default}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  .cfg{color:var(--dim2);font-size:12px}
+  .prompt{font-size:13px;color:var(--dim2);margin:4px 0 12px;padding:8px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+  .prompt b{color:var(--txt)}
+
+  /* the agent loop, one row per adjudicated turn */
+  .loop{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .turn{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel);opacity:0;transform:translateY(4px);transition:opacity .18s ease, transform .18s ease}
+  .turn:last-child{border-bottom:0}
+  .turn.show{opacity:1;transform:none}
+  .turn .ic{font-size:16px;flex:0 0 auto;width:20px;text-align:center}
+  .turn .body{flex:1 1 auto;min-width:0}
+  .turn .hd{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .turn .tool{font-weight:700}
+  .turn .vd{font-size:10px;letter-spacing:.03em;border:1px solid var(--line);border-radius:20px;padding:1px 7px;color:var(--dim2)}
+  .turn .res{font-size:12px;color:var(--dim2);margin-top:3px;word-break:break-word}
+  .turn .note{font-size:11px;color:var(--dim);margin-top:2px}
+  .turn.allow{background:var(--goodbg)} .turn.allow .tool{color:var(--good)} .turn.allow .vd{color:var(--good);border-color:var(--goodln)}
+  .turn.deny{background:var(--badbg)} .turn.deny .tool{color:var(--bad)} .turn.deny .vd{color:var(--bad);border-color:var(--badln)}
+  .turn.deny .res{color:var(--bad);font-weight:600}
+
+  .answer{margin-top:16px;padding:14px 16px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);display:none}
+  .answer.show{display:block}
+  .answer .lbl{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .answer .txt{font-size:18px;font-weight:700;margin-top:4px}
+  .answer .floor{font-size:12.5px;color:var(--dim2);margin-top:8px}
+  .answer .floor b.ok{color:var(--good)} .answer .floor b.no{color:var(--bad)}
+  .legend{display:flex;gap:16px;font-size:11px;color:var(--dim2);margin:10px 2px 0;flex-wrap:wrap}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:middle;border:1px solid var(--line)}
+  .note-foot{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>fak · what time is it, Mr. Wolf?</h1>
+    <span class="pill" id="loopPill">real kernel loop · no model weights</span>
+    <span class="pill" id="hwPill" title="the compute surface this demo runs on">hardware: …</span>
+  </div>
+  <div class="sub">
+    The children's game, as an <b>agent loop</b>: ask <b>what time is it, Mr. Wolf?</b> and a one-tool
+    agent calls <code>get_time</code> — but every call is adjudicated by the <b>real fak kernel</b> first
+    (the same <code>kernel.Fold</code> path <code>fak preflight</code> uses). Pick the red-team variant and
+    watch a smuggled <code>delete_calendar</code> / <code>wipe_disk</code> get refused at the capability floor,
+    <i>inside</i> the loop. No model, no key, no network — deterministic by construction (the clock is injected).
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <label>scenario <select id="scenario"></select></label>
+      <button id="runBtn">Run the agent</button>
+      <button id="replayBtn" class="ghost" disabled>Replay</button>
+      <span class="cfg" id="cfg"></span>
+    </div>
+
+    <div class="prompt" id="prompt" style="display:none"></div>
+
+    <div class="loop" id="loop"></div>
+
+    <div class="legend">
+      <span><span class="sw" style="background:var(--goodbg);border-color:var(--goodln)"></span>ALLOW — call dispatched, result returned</span>
+      <span><span class="sw" style="background:var(--badbg);border-color:var(--badln)"></span>DENY — refused at the floor (deny-as-value)</span>
+    </div>
+
+    <div class="answer" id="answer">
+      <div class="lbl">the wolf answers</div>
+      <div class="txt" id="answerTxt"></div>
+      <div class="floor" id="answerFloor"></div>
+    </div>
+  </div>
+
+  <div class="note-foot" id="note">
+    Each row is a <b>real verdict from the fak kernel</b>, not a scripted transcript: the toolset installs a
+    capability floor (<code>get_</code> allowed · <code>delete_calendar</code> an explicit deny · <code>wipe_disk</code>
+    off-floor → fail-closed), and the agent answers only from the results it was <i>allowed</i> to get. Self-contained:
+    no model weights, reproducible on any box. Headless self-check: <code>go run ./cmd/timewolfdemo -selfcheck</code>.
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let lastRun = null;
+
+async function loadScenarios(){
+  const r = await fetch('api/scenarios'); const j = await r.json();
+  const sel = $('#scenario'); sel.innerHTML='';
+  (j.scenarios||[]).forEach(s=>{
+    const o=document.createElement('option');
+    o.value=s.id; o.textContent=`${s.id} · ${s.label}`;
+    sel.appendChild(o);
+  });
+  const hw=j.hardware||{};
+  $('#hwPill').textContent = 'hardware: '+(hw.summary||'…');
+  if(hw.accelerator){ $('#hwPill').style.borderColor='var(--good)'; $('#hwPill').style.color='var(--good)'; }
+}
+
+function reset(){
+  $('#loop').innerHTML=''; $('#answer').classList.remove('show');
+  $('#prompt').style.display='none'; $('#cfg').textContent='';
+}
+
+function mkTurn(t){
+  const d=document.createElement('div');
+  const allowed=!!t.allowed;
+  d.className=`turn ${allowed?'allow':'deny'}`;
+  const ic=allowed?'✓':'⛔';
+  const detail = allowed
+    ? `<div class="res">${escapeHtml(t.result||'(no result)')}</div>`
+    : `<div class="res">REFUSED · ${escapeHtml(t.reason||'DENY')}</div>`;
+  const note = t.note ? `<div class="note">↳ ${escapeHtml(t.note)}</div>` : '';
+  d.innerHTML=`<span class="ic">${ic}</span><div class="body">`+
+    `<div class="hd"><span class="tool">${escapeHtml(t.tool)}</span>`+
+    `<span class="vd">${escapeHtml(t.verdict)}</span></div>${detail}${note}</div>`;
+  return d;
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>(
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function animate(tr){
+  reset();
+  $('#prompt').style.display='block';
+  $('#prompt').innerHTML = `<b>prompt:</b> ${escapeHtml(tr.prompt)}`;
+  const loop=$('#loop');
+  const turns=tr.turns||[];
+  for(let i=0;i<turns.length;i++){
+    const el=mkTurn(turns[i]); loop.appendChild(el);
+    requestAnimationFrame(()=>el.classList.add('show'));
+    $('#cfg').textContent = `turn ${i+1}/${turns.length} · folding through the kernel…`;
+    await new Promise(r=>setTimeout(r, 360));
+  }
+  $('#cfg').textContent = `${turns.length} turn(s) adjudicated by the real kernel`;
+  showAnswer(tr);
+}
+
+function showAnswer(tr){
+  $('#answerTxt').textContent = tr.answer && tr.answer.trim() ? tr.answer
+    : '(no answer — every call was refused)';
+  const okCls = tr.denied===0 ? 'ok' : '';
+  $('#answerFloor').innerHTML =
+    `floor: <b class="ok">${tr.allowed} allowed</b> · `+
+    `<b class="${tr.denied>0?'no':'ok'}">${tr.denied} refused</b>`+
+    (tr.denied>0 ? ' — the smuggled destructive calls never ran' : '');
+  $('#answer').classList.add('show');
+}
+
+async function run(){
+  $('#runBtn').disabled=true; $('#replayBtn').disabled=true;
+  const scenario=$('#scenario').value;
+  $('#cfg').textContent='folding through the kernel…';
+  try{
+    const r=await fetch(`api/run?scenario=${encodeURIComponent(scenario)}`);
+    if(!r.ok){ $('#cfg').textContent='error: '+await r.text(); return; }
+    const j=await r.json(); lastRun=j;
+    await animate(j);
+    $('#replayBtn').disabled=false;
+  } finally { $('#runBtn').disabled=false; }
+}
+
+$('#runBtn').onclick=run;
+$('#replayBtn').onclick=async()=>{ if(lastRun){ $('#replayBtn').disabled=true; await animate(lastRun); $('#replayBtn').disabled=false; } };
+loadScenarios();
+</script>
+</body>
+</html>
