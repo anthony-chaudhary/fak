@@ -710,13 +710,27 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 					fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
 			}
 		}
+		// A 529 is Anthropic's non-standard "Overloaded": the PROVIDER is over capacity,
+		// which is a different failure from a 500 crash AND from a 429 rate limit. Its
+		// recovery is the OPPOSITE of a 429's: a 429 carries a trustworthy Retry-After to
+		// honor, whereas a 529 has no retry-after a client can trust and wants exponential
+		// backoff + jitter (and, past a couple tries, provider failover). Surfacing it as a
+		// generic 502 "upstream model error" (the fallthrough below) flattens it into a
+		// crash and strips the client's ability to apply the right posture — so give it a
+		// distinct status + code. The matching `type` (overloaded_error) comes from
+		// errType(529) at the write site. The Retry-After echo (if the provider sent one)
+		// still happens at writeUpstreamErr, harmlessly.
+		if se.Status == 529 { // statusOverloaded (agent.statusOverloaded is unexported)
+			return 529, "upstream_overloaded",
+				"upstream is overloaded (HTTP 529) — the provider is over capacity (not a rate limit and not a crash); back off with exponential jitter, and consider failing over"
+		}
 		// A 503 the upstream tagged with a Retry-After is an OVERLOAD the client should
 		// back off on, not a generic gateway fault — surface the real 503 (and the
 		// Retry-After echo happens at the write site) so a wrapped agent waits instead of
-		// hammering. Every other 5xx stays the opaque 502 below: the upstream itself
-		// failed in a way the client cannot time. code stays "" (the historical
-		// code:null shape) for both so the 5xx envelope is byte-identical apart from the
-		// genuinely-overloaded 503.
+		// hammering. Every other 5xx (except the 529 above) stays the opaque 502 below: the
+		// upstream itself failed in a way the client cannot time. code stays "" (the
+		// historical code:null shape) for both so the 5xx envelope is byte-identical apart
+		// from the genuinely-overloaded 503/529.
 		if se.Status == http.StatusServiceUnavailable && se.RetryAfter != "" {
 			return http.StatusServiceUnavailable, "",
 				"upstream temporarily unavailable (HTTP 503) — back off and retry (see the Retry-After response header)"
@@ -1388,6 +1402,12 @@ func errType(status int) string {
 		// classifies it correctly — without this it fell through to invalid_request_error
 		// and was indistinguishable from a 400.
 		return "rate_limit_error"
+	case status == 529:
+		// 529 is Anthropic's "Overloaded": a PROVIDER-capacity failure, distinct from a 500
+		// crash. Give it the Anthropic-standard overloaded_error type so a client can apply
+		// backoff+jitter (a 529 has no trustworthy Retry-After) instead of treating it like
+		// a generic server_error. Must precede the status>=500 arm.
+		return "overloaded_error"
 	case status >= 500:
 		return "server_error"
 	default:

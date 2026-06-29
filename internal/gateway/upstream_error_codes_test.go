@@ -61,6 +61,7 @@ func TestErrType_RateLimitArm(t *testing.T) {
 		{http.StatusNotFound, "invalid_request_error"},
 		{http.StatusBadGateway, "server_error"},
 		{http.StatusServiceUnavailable, "server_error"},
+		{529, "overloaded_error"}, // Anthropic "Overloaded" gets its own type, not server_error
 	}
 	for _, c := range cases {
 		if got := errType(c.status); got != c.want {
@@ -89,6 +90,7 @@ func TestUpstreamError_LaddersAgree(t *testing.T) {
 		{409, "upstream_request_rejected", "status_4xx"},
 		{500, "", "status_5xx"}, // 5xx keeps the historical code:null shape and the coarse kind
 		{503, "", "status_5xx"},
+		{529, "upstream_overloaded", "overloaded"}, // 529 is carved out of the coarse 5xx bucket
 	}
 	for _, c := range cases {
 		err := &agent.UpstreamStatusError{Status: c.status}
@@ -136,6 +138,17 @@ func TestUpstreamErrorStatus_5xxEnvelopeUnchanged(t *testing.T) {
 	status, _, _ = upstreamErrorStatus(&agent.UpstreamStatusError{Status: 503, RetryAfter: "30"})
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("503+Retry-After = %d, want 503", status)
+	}
+	// A 529 (Anthropic "Overloaded") is carved OUT of the opaque-502 5xx bucket: it surfaces
+	// the real 529 with a distinct code, so a client can apply backoff+jitter instead of
+	// treating provider-over-capacity like a crash. This holds even with no Retry-After (a 529
+	// has none a client can trust).
+	status, code, msg = upstreamErrorStatus(&agent.UpstreamStatusError{Status: 529, Body: "provider body"})
+	if status != 529 || code != "upstream_overloaded" {
+		t.Fatalf("529 envelope = (%d, %q), want (529, \"upstream_overloaded\")", status, code)
+	}
+	if !strings.Contains(strings.ToLower(msg), "overloaded") {
+		t.Fatalf("529 message %q does not name the overloaded condition", msg)
 	}
 }
 
