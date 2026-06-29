@@ -13,9 +13,7 @@ package modelengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -165,38 +163,7 @@ func buildPipelinePrompt(tok NLTokenizer, tool string, args []byte, vocab int) [
 }
 
 func assemblePipelineResult(ctx context.Context, tool string, promptLen int, gen []int, tok NLTokenizer) *abi.Result {
-	text := ""
-	if tok != nil {
-		if s, err := tok.Decode(gen); err == nil {
-			text = s
-		}
-	}
-	body, _ := json.Marshal(struct {
-		Tool   string `json:"tool"`
-		Engine string `json:"engine"`
-		Model  string `json:"model"`
-		Tokens []int  `json:"generated_tokens"`
-		Text   string `json:"generated_text,omitempty"`
-	}{
-		Tool:   tool,
-		Engine: PipelineEngineID,
-		Model:  "smollm2-inkernel-pipeline",
-		Tokens: gen,
-		Text:   text,
-	})
-	meta := map[string]string{
-		"engine":        PipelineEngineID,
-		"input_tokens":  strconv.Itoa(promptLen),
-		"output_tokens": strconv.Itoa(len(gen)),
-	}
-	if tok != nil {
-		meta["detokenized"] = "true"
-	}
-	return &abi.Result{
-		Payload: putBytes(ctx, body),
-		Status:  abi.StatusOK,
-		Meta:    meta,
-	}
+	return assembleSyscallResult(ctx, tool, PipelineEngineID, "smollm2-inkernel-pipeline", promptLen, gen, tok)
 }
 
 type pipelineRequest struct {

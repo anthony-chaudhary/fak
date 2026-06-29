@@ -34,6 +34,16 @@ func (e *Engine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest,
 // not just raw ids (#463); a nil tok (the byte-level default) omits both, leaving the
 // payload byte-identical to the pre-tokenizer path.
 func assembleResult(ctx context.Context, tool string, promptLen int, gen []int, tok NLTokenizer) *abi.Result {
+	return assembleSyscallResult(ctx, tool, EngineID, "smollm2-inkernel", promptLen, gen, tok)
+}
+
+// assembleSyscallResult builds the syscall decode result shared by the buffered lifecycle
+// path (assembleResult) and the pipeline path (assemblePipelineResult): the two produce a
+// byte-identical payload + Meta and differ ONLY in the engineID/modelName labels they
+// stamp, so those are parameters here. A non-nil tok ADDITIVELY carries the detokenized
+// "generated_text" + a "detokenized" Meta flag (#463); a nil tok omits both, leaving the
+// payload byte-identical to the pre-tokenizer path.
+func assembleSyscallResult(ctx context.Context, tool, engineID, modelName string, promptLen int, gen []int, tok NLTokenizer) *abi.Result {
 	text := ""
 	if tok != nil {
 		if s, err := tok.Decode(gen); err == nil {
@@ -48,14 +58,13 @@ func assembleResult(ctx context.Context, tool string, promptLen int, gen []int, 
 		Text   string `json:"generated_text,omitempty"`
 	}{
 		Tool:   tool,
-		Engine: EngineID,
-		Model:  "smollm2-inkernel",
+		Engine: engineID,
+		Model:  modelName,
 		Tokens: gen,
 		Text:   text,
 	})
-	ref := putBytes(ctx, body)
 	meta := map[string]string{
-		"engine":        EngineID,
+		"engine":        engineID,
 		"input_tokens":  strconv.Itoa(promptLen),
 		"output_tokens": strconv.Itoa(len(gen)),
 	}
@@ -63,7 +72,7 @@ func assembleResult(ctx context.Context, tool string, promptLen int, gen []int, 
 		meta["detokenized"] = "true"
 	}
 	return &abi.Result{
-		Payload: ref,
+		Payload: putBytes(ctx, body),
 		Status:  abi.StatusOK,
 		Meta:    meta,
 	}
