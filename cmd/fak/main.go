@@ -101,6 +101,8 @@ func main() {
 		cmdTask(os.Args[2:])
 	case "test":
 		cmdTest(os.Args[2:])
+	case "profile":
+		cmdProfile(os.Args[2:])
 	case "c":
 		cmdTUI(append([]string{"agent"}, os.Args[2:]...))
 	case "console":
@@ -227,6 +229,8 @@ func main() {
 		cmdGarden(os.Args[2:])
 	case "cadence":
 		cmdCadence(os.Args[2:])
+	case "milestone":
+		cmdMilestone(os.Args[2:])
 	case "rollup":
 		cmdRollup(os.Args[2:])
 	case "nightrun":
