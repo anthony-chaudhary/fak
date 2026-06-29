@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // TestAdmissionTokenBudget is the issue-#35 AC#1 token-budget witness: a request enters
@@ -260,6 +263,51 @@ func TestAdmissionControllerRendersIntoLiveMetrics(t *testing.T) {
 	srv.SetAdmissionController(nil)
 	if post := srv.renderMetrics(); strings.Contains(post, schedMetricPrefix) {
 		t.Fatalf("fak_sched_* still present after detaching the controller:\n%s", post)
+	}
+}
+
+// TestNativeGatewayNewAttachesAdmissionController is the issue-#35 live-worker witness:
+// a native in-kernel gateway gets the default admission controller at construction time,
+// so a real fak-native worker exposes fak_sched_* load without a separate CLI-only attach.
+// Proxy/mock gateways stay inert unless their host explicitly calls SetAdmissionController.
+func TestNativeGatewayNewAttachesAdmissionController(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	noop := func(string, ...any) {}
+
+	native, err := New(Config{
+		EngineID:      "test",
+		Model:         "test-model",
+		InKernelModel: &model.Model{},
+		Tokenizer:     &tokenizer.Tokenizer{},
+		Logf:          noop,
+	})
+	if err != nil {
+		t.Fatalf("New(native): %v", err)
+	}
+	t.Cleanup(native.Close)
+	if native.admissionCtl == nil {
+		t.Fatal("native admission controller is nil, want default controller attached")
+	}
+	if out := native.renderMetrics(); !strings.Contains(out, "fak_sched_max_num_seqs 256\n") {
+		t.Fatalf("native /metrics missing default fak_sched_* family:\n%s", out)
+	}
+
+	proxy, err := New(Config{
+		EngineID:      "test",
+		Model:         "test-model",
+		BaseURL:       "http://127.0.0.1:1",
+		InKernelModel: &model.Model{},
+		Tokenizer:     &tokenizer.Tokenizer{},
+		Logf:          noop,
+	})
+	if err != nil {
+		t.Fatalf("New(proxy): %v", err)
+	}
+	t.Cleanup(proxy.Close)
+	if proxy.admissionCtl != nil {
+		t.Fatal("proxy admission controller attached by default, want native-only attachment")
 	}
 }
 

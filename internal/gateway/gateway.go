@@ -812,6 +812,10 @@ func New(cfg Config) (*Server, error) {
 	if cfg.CtxViewBudget > 0 {
 		ctxView = &agent.CtxViewPlanner{Enabled: true, Budget: cfg.CtxViewBudget}
 	}
+	var admissionCtl *AdmissionController
+	if cfg.InKernelModel != nil && cfg.Tokenizer != nil && len(proxyURLs) == 0 {
+		admissionCtl = NewAdmissionController(DefaultAdmissionPolicy())
+	}
 
 	s := &Server{
 		k:                          k,
@@ -837,6 +841,7 @@ func New(cfg Config) (*Server, error) {
 		planner:                    planner,
 		inKernelModelButChatIsMock: inKernelModelButChatIsMock,
 		engineCache:                remoteCache,
+		admissionCtl:               admissionCtl,
 		ctxView:                    ctxView,
 		compactHistoryBudget:       cfg.CompactHistoryBudget,
 		elideResultBytes:           cfg.ElideResultBytes,

@@ -106,11 +106,6 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return nil
 	}
 
-	start()
-	if note := resultAdmissionNote(resultAdmissions); note != "" {
-		emitAnthropicTextBlock(sendLocked, &outIdx, note)
-	}
-
 	var temp *float64
 	if req.Temperature != 0 {
 		temp = &req.Temperature
@@ -121,6 +116,18 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		agent.WithTopP(req.TopP),
 		agent.WithTopK(req.TopK),
 		agent.WithStop(req.StopSequences),
+	}
+	lease, err := s.beginServedAdmission(r.Context(), sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
+	if err != nil {
+		s.logf("gateway: scheduler admission refused (messages stream): %v", err)
+		s.writeUpstreamErr(w, err)
+		return true
+	}
+	defer lease.Release()
+
+	start()
+	if note := resultAdmissionNote(resultAdmissions); note != "" {
+		emitAnthropicTextBlock(sendLocked, &outIdx, note)
 	}
 
 	guard := newLiftGuard(emitText)

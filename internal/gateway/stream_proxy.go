@@ -79,9 +79,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// model buries in content never reaches the wire before adjudication. Whatever the
 	// guard withheld is reconciled against the buffered post-lift content below.
 	guard := newLiftGuard(emitContent)
-
-	began := time.Now()
-	comp, err := sp.CompleteStream(ctx, guard.write, req.Messages, req.Tools,
+	opts := []agent.SampleOpt{
 		agent.WithModel(req.Model),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(req.Temperature),
@@ -93,7 +91,17 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// adjudicated whole. No-op when absent (bit-exact drop-in).
 		agent.WithResponseFormat(req.ResponseFormat),
 		agent.WithLogitBias(req.LogitBias),
-	)
+	}
+	lease, err := s.beginServedAdmission(ctx, sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
+	if err != nil {
+		s.logf("gateway: scheduler admission refused (stream): %v", err)
+		s.writeUpstreamErr(w, err)
+		return true
+	}
+	defer lease.Release()
+
+	began := time.Now()
+	comp, err := sp.CompleteStream(ctx, guard.write, req.Messages, req.Tools, opts...)
 	if err != nil {
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
 			s.observePlannerRequestMemory()

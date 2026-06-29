@@ -587,6 +587,9 @@ func validateSamplingRanges(temperature, topP *float64) string {
 // detail is NEVER forwarded — only the status + classification cross the boundary —
 // so an upstream error message cannot leak to a possibly-unauthenticated caller.
 func upstreamErrorStatus(err error) (status int, code, msg string) {
+	if status, code, msg, ok := admissionErrorStatus(err); ok {
+		return status, code, msg
+	}
 	// An in-kernel device-allocation failure (e.g. the model decode OOM'd on a small GPU under
 	// a large prompt) is a LOCAL resource exhaustion the caller can act on, not an upstream
 	// failure. It is in-kernel by construction (only the in-kernel planner produces it), so the
@@ -702,8 +705,10 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 
 func (s *Server) plannerErrorStatus(err error) (status int, code, msg string) {
 	if s != nil && s.metrics != nil {
-		s.metrics.observeInKernelOOM(err)
-		s.metrics.observeUpstreamError(err)
+		if _, _, _, ok := admissionErrorStatus(err); !ok {
+			s.metrics.observeInKernelOOM(err)
+			s.metrics.observeUpstreamError(err)
+		}
 	}
 	return upstreamErrorStatus(err)
 }
