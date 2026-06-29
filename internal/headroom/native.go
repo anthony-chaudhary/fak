@@ -10,12 +10,14 @@ import (
 
 // NativeName is the in-process, dependency-free structural compressor: the plugin
 // that proves the seam end-to-end with ZERO external service. It applies only
-// safe, model-readable transforms — JSON minification (lossless), consecutive
-// duplicate-line collapse with an explicit elision count, blank-run collapse, and
-// trailing-whitespace trim. It is NOT Headroom's ML compression (no SmartCrusher,
-// no Kompress model); it is the honest local baseline that always works offline.
-// The original bytes are preserved in the shared CAS by the gate, so even the
-// lossy line-collapse stays reversible (the CCR promise).
+// safe, model-readable transforms — terminal-control stripping (ANSI/escape
+// sequences and bare control bytes, lossless to the model), carriage-return redraw
+// collapse (a progress bar reduced to its final frame), JSON minification
+// (lossless), consecutive duplicate-line collapse with an explicit elision count,
+// blank-run collapse, and trailing-whitespace trim. It is NOT Headroom's ML
+// compression (no SmartCrusher, no Kompress model); it is the honest local baseline
+// that always works offline. The original bytes are preserved in the shared CAS by
+// the gate, so even the lossy line-collapse stays reversible (the CCR promise).
 const NativeName = "native"
 
 // dupRunMin: a run of at least this many identical consecutive lines collapses to
@@ -32,31 +34,42 @@ func (nativeCompressor) Compress(_ context.Context, in Input) (Output, error) {
 	if len(orig) == 0 {
 		return passthrough(in), nil
 	}
+
+	// Terminal-control normalization first: ANSI/escape sequences and
+	// carriage-return redraw frames are pure noise to the model (it renders no
+	// color and never sees the intermediate frames of a progress bar), so removing
+	// them is lossless to the reader and often the single largest saving on
+	// colorized or progress-bar tool output. Running it before the structural pass
+	// lets JSON/line detection and dedup see the cleaned bytes.
+	work, codecs := stripTerminalControl(orig)
+
 	kind := in.Kind
 	if kind == KindUnknown {
-		kind = Detect(orig)
+		kind = Detect(work)
 	}
 
-	var out []byte
-	var codecs []string
+	var body []byte
 	if kind == KindJSON {
-		if mini, ok := minifyJSON(orig); ok {
-			out, codecs = mini, append(codecs, "json-min")
+		if mini, ok := minifyJSON(work); ok {
+			body = mini
+			codecs = append(codecs, "json-min")
 		}
 	}
-	if out == nil {
-		out, codecs = normalizeLines(orig)
+	if body == nil {
+		var lineCodecs []string
+		body, lineCodecs = normalizeLines(work)
+		codecs = append(codecs, lineCodecs...)
 	}
 
-	if len(codecs) == 0 || len(out) >= len(orig) {
+	if len(codecs) == 0 || len(body) >= len(orig) {
 		return passthrough(in), nil // nothing helped -> admit the original as-is
 	}
 	return Output{
-		Bytes:      out,
+		Bytes:      body,
 		Compressed: true,
 		Codec:      strings.Join(codecs, "+"),
 		OrigLen:    len(orig),
-		NewLen:     len(out),
+		NewLen:     len(body),
 	}, nil
 }
 
