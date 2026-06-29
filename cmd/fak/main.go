@@ -113,6 +113,10 @@ func main() {
 		cmdClaudeMacFak(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
+	case "bgloop":
+		cmdBgloop(os.Args[2:])
+	case "loop-score":
+		cmdLoopScore(os.Args[2:])
 	case "cron":
 		cmdCron(os.Args[2:])
 	case "snapshot":

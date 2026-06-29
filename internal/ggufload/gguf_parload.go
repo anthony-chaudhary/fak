@@ -96,15 +96,6 @@ func residentExpertBlockGeometry(t TensorType) (blockWeights, blockBytes int, ok
 	return 0, 0, false
 }
 
-// residentExpertBlockBytes is the legacy byte-only view used by older split tests.
-func residentExpertBlockBytes(t TensorType) (int, bool) {
-	_, blockBytes, ok := residentExpertBlockGeometry(t)
-	if !ok {
-		return 0, false
-	}
-	return blockBytes, true
-}
-
 // tensorWork is one GGUF tensor's parallel-load result: the progress byte count, the builder
 // mutations to apply, the per-quant-type accounting for the load-path breakdown, or an error.
 type tensorWork struct {
