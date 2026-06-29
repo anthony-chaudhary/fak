@@ -56,7 +56,7 @@
     {
       "type": "row",
       "title": "Gateway health",
-      "id": 24,
+      "id": 25,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -74,7 +74,7 @@
       "title": "Scrape",
       "description": "Prometheus scrape health for fak serve /metrics.",
       "type": "stat",
-      "id": 25,
+      "id": 26,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -154,7 +154,7 @@
       "title": "Gateway up",
       "description": "Self-reported gateway liveness.",
       "type": "stat",
-      "id": 26,
+      "id": 27,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -218,7 +218,7 @@
       "title": "Requests / sec",
       "description": "Total HTTP request throughput over 5m.",
       "type": "stat",
-      "id": 27,
+      "id": 28,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -278,7 +278,7 @@
       "title": "5xx ratio",
       "description": "5xx responses divided by all gateway requests.",
       "type": "stat",
-      "id": 28,
+      "id": 29,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -346,7 +346,7 @@
       "title": "HTTP p95",
       "description": "Gateway HTTP p95 latency over 5m.",
       "type": "stat",
-      "id": 29,
+      "id": 30,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -414,7 +414,7 @@
       "title": "Inflight",
       "description": "Requests currently executing in the gateway.",
       "type": "stat",
-      "id": 30,
+      "id": 31,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -469,7 +469,7 @@
     {
       "type": "row",
       "title": "HTTP surface",
-      "id": 31,
+      "id": 32,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -487,7 +487,7 @@
       "title": "HTTP request rate by route/status",
       "description": "Which route/status classes are driving traffic.",
       "type": "timeseries",
-      "id": 32,
+      "id": 33,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -557,7 +557,7 @@
       "title": "HTTP p95 by route",
       "description": "Route-level p95 latency over 5m.",
       "type": "timeseries",
-      "id": 33,
+      "id": 34,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -627,7 +627,7 @@
       "title": "Current route rate",
       "description": "Instant route throughput ranked by current rate.",
       "type": "bargauge",
-      "id": 34,
+      "id": 35,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -690,7 +690,7 @@
       "title": "Current status rate",
       "description": "Instant status-class throughput ranked by current rate.",
       "type": "bargauge",
-      "id": 35,
+      "id": 36,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -748,7 +748,7 @@
     {
       "type": "row",
       "title": "Kernel operations",
-      "id": 36,
+      "id": 37,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -766,7 +766,7 @@
       "title": "Operation verdict rate",
       "description": "syscall/adjudicate/admit verdict mix.",
       "type": "timeseries",
-      "id": 37,
+      "id": 38,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -836,7 +836,7 @@
       "title": "Operation p95 by operation",
       "description": "Kernel operation p95 over 5m.",
       "type": "timeseries",
-      "id": 38,
+      "id": 39,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -906,7 +906,7 @@
       "title": "Operation p95",
       "description": "Aggregate syscall/adjudicate/admit p95 latency.",
       "type": "stat",
-      "id": 39,
+      "id": 40,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -974,7 +974,7 @@
       "title": "vDSO hit ratio",
       "description": "Cumulative fast-path hit ratio over kernel submissions.",
       "type": "stat",
-      "id": 40,
+      "id": 41,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1042,7 +1042,7 @@
       "title": "Denied / sec",
       "description": "Denied gateway operations per second (0 when none denied).",
       "type": "stat",
-      "id": 41,
+      "id": 42,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1106,7 +1106,7 @@
       "title": "Quarantines / sec",
       "description": "Result admissions quarantined by the result-side stack.",
       "type": "stat",
-      "id": 42,
+      "id": 43,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1170,7 +1170,7 @@
       "title": "Engine calls / sec",
       "description": "Kernel calls that reached the engine.",
       "type": "stat",
-      "id": 43,
+      "id": 44,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1230,7 +1230,7 @@
       "title": "Submits / sec",
       "description": "Kernel submissions per second.",
       "type": "stat",
-      "id": 44,
+      "id": 45,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1285,7 +1285,7 @@
     {
       "type": "row",
       "title": "Trust floor (DOS refusals by reason)",
-      "id": 45,
+      "id": 46,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1303,7 +1303,7 @@
       "title": "Refusal rate by reason",
       "description": "Per-second rate of non-ALLOW verdicts grouped by the closed refusal vocabulary (internal/abi/reasons.go). This is the trust floor firing \u2014 0 across the board means nothing is being refused.",
       "type": "timeseries",
-      "id": 46,
+      "id": 47,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -1373,7 +1373,7 @@
       "title": "Top refusal reasons (now)",
       "description": "Instant ranking of which refusal reasons are firing \u2014 the kernel's structured 'why I said no', ranked by current rate.",
       "type": "bargauge",
-      "id": 47,
+      "id": 48,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -1440,7 +1440,7 @@
       "title": "Refusal disposition mix",
       "description": "How refusals are dispatched (DENY vs WAIT vs ...) \u2014 the action the caller should take, aggregated over all reasons.",
       "type": "timeseries",
-      "id": 48,
+      "id": 49,
       "gridPos": {
         "h": 6,
         "w": 24,
@@ -1505,7 +1505,7 @@
     {
       "type": "row",
       "title": "Kernel counters",
-      "id": 49,
+      "id": 50,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1523,7 +1523,7 @@
       "title": "Kernel call-path rates",
       "description": "The kernel counters exported from fak serve /metrics.",
       "type": "timeseries",
-      "id": 50,
+      "id": 51,
       "gridPos": {
         "h": 8,
         "w": 24,

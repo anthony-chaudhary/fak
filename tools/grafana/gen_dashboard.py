@@ -247,37 +247,77 @@ LAT_TH = steps((None, "green"), (0.5, "yellow"), (2, "red"))
 ERR_TH = steps((None, "green"), (0.01, "yellow"), (0.05, "red"))
 
 
+# Shared first-run note, shown at the top of each dashboard that has panels which
+# stay "No data" until a specific subsystem is exercised. Markdown text panels carry
+# no PromQL, so they always render - they are the in-dashboard explanation issue #309
+# asks for (why a panel is empty on the up.sh first-run path, and what to run).
+AUDIT_NOTE = (
+    "Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts "
+    "match the namespace filter (default `C--work`); run "
+    "`python tools/session_audit.py discover --all` to check."
+)
+MODEL_LOAD_NOTE = (
+    "Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path "
+    "uses the inkernel engine against a fak-format export, so these stay empty unless "
+    "you re-launch with `--gguf MODEL.gguf`."
+)
+DOGFOOD_NOTE = (
+    "Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a "
+    "Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not "
+    "appear here."
+)
+
+
 def build():
     panels = []
 
-    panels.append(row("Fleet health", 0))
-    panels.append(stat("Health", "fleet_health_state", 0, 1, color="thresholds",
+    panels.append(text_panel(
+        "First run: why some panels read No data",
+        "Bringing the stack up with `tools/grafana/up.sh` and driving the hinted "
+        "`/v1/fak/syscall` smoke request populates the gateway counters but NOT the "
+        "token-spend tiles below. Those read a **session audit** over local Claude "
+        "Code transcripts:\n\n"
+        "- **Token spend (cost & cache) row** (Window cost, Cost/session-hr, Median "
+        "cache-hit, Median I:O, Transcripts analyzed, Top spenders, Lowest cache-hit): "
+        + AUDIT_NOTE + "\n\n"
+        "Everything else here is fed by `fleet_bottleneck.py /metrics` and fills in as "
+        "the fleet runs. No panel is broken; the empty ones are waiting on the audit "
+        "pass, not on traffic.",
+        0, 0, w=24, h=5,
+        desc="Why the token-spend tiles can read No data on a fresh up.sh stack, and "
+             "how to populate them."))
+    panels.append(row("Fleet health", 5))
+    panels.append(stat("Health", "fleet_health_state", 0, 6, color="thresholds",
                        mappings=HEALTH_MAP, thresholds=steps((None, "green"), (1, "yellow"), (2, "red")),
                        desc="0 OK · 1 DEGRADED · 2 CRITICAL · 3 DOWN (no telemetry)."))
-    panels.append(stat("#1 bottleneck score", "fleet_headline_score", 4, 1,
+    panels.append(stat("#1 bottleneck score", "fleet_headline_score", 4, 6,
                        thresholds=SCORE_TH, desc="Score of the most-likely actual limiter right now."))
-    panels.append(stat("Active workers", "fleet_workers_active", 8, 1,
+    panels.append(stat("Active workers", "fleet_workers_active", 8, 6,
                        desc="In-flight workers (not cleanly finished)."))
-    panels.append(stat("Accounts throttled", "fleet_accounts_throttled", 12, 1,
+    panels.append(stat("Accounts throttled", "fleet_accounts_throttled", 12, 6,
                        thresholds=ONE_RED, desc="Accounts currently rate-limited."))
-    panels.append(stat("Auth-blocked workers", "fleet_workers_auth_blocked", 16, 1,
+    panels.append(stat("Auth-blocked workers", "fleet_workers_auth_blocked", 16, 6,
                        thresholds=ONE_RED, desc="Workers that need /login (a human must re-auth)."))
-    panels.append(stat("Telemetry age", "fleet_registry_age_minutes", 20, 1, unit="m",
+    panels.append(stat("Telemetry age", "fleet_registry_age_minutes", 20, 6, unit="m",
                        thresholds=AGE_TH, desc="Age of the session registry — stale = flying blind (#8)."))
 
-    panels.append(row("Ranked bottlenecks (the Top 10)", 5))
+    panels.append(row("Ranked bottlenecks (the Top 10)", 10))
     panels.append(bargauge(
-        "Bottleneck scores (ranked)", "fleet_bottleneck_score", "{{title}}", 0, 6,
+        "Bottleneck scores (ranked)", "fleet_bottleneck_score", "{{title}}", 0, 11,
         w=12, h=9, maxv=100, thresholds=SCORE_TH,
-        desc="Every scored class, 0-100 — likelihood it is the actual limiter."))
+        desc="Every scored class, 0-100 - likelihood it is the actual limiter. Empty "
+             "until at least one of the Top 10 classes fires; a fresh fleet with no "
+             "active workers scores nothing, which is healthy, not broken."))
     panels.append(table(
-        "Bottleneck detail", "fleet_bottleneck_score", 12, 6, w=12, h=9,
-        desc="Title · layer · score (score color = severity band) for each scored class."))
+        "Bottleneck detail", "fleet_bottleneck_score", 12, 11, w=12, h=9,
+        desc="Title / layer / score (score color = severity band) for each scored "
+             "class. Empty until a bottleneck class fires."))
     panels.append(timeseries(
-        "Bottleneck score history", [("fleet_bottleneck_score", "{{title}}")], 0, 15,
-        w=24, h=8, desc="How each class's score moves over time."))
+        "Bottleneck score history", [("fleet_bottleneck_score", "{{title}}")], 0, 20,
+        w=24, h=8, desc="How each class's score moves over time. A flat/empty chart "
+                        "means no class has scored over the window."))
 
-    panels.append(row("Capacity & accounts", 23))
+    panels.append(row("Capacity & accounts", 28))
     panels.append(timeseries(
         "Worker states over time", [
             ("fleet_workers_active", "active"),
@@ -287,39 +327,48 @@ def build():
             ("fleet_resume_queue", "resume queue"),
             ("fleet_surface_backlog", "surface backlog"),
             ("fleet_api_error_stalls", "api-error stalls"),
-        ], 0, 24, w=16, h=8, desc="The in-flight worker buckets that drive #1-#10."))
+        ], 0, 29, w=16, h=8, desc="The in-flight worker buckets that drive #1-#10."))
     panels.append(bargauge(
         "Active workers per account", "fleet_workers_active_per_account", "{{account}}",
-        16, 24, w=8, h=8, desc="Concentration on one account = imbalance (#7) + throttle blast radius (#1)."))
+        16, 29, w=8, h=8, desc="Concentration on one account = imbalance (#7) + throttle blast radius (#1)."))
 
-    panels.append(row("Token spend (cost & cache)", 32))
-    panels.append(stat("Window cost", "fleet_cost_usd", 0, 33, unit="currencyUSD",
-                       desc="Estimated token spend over the audit window (assumed pricing)."))
-    panels.append(stat("Cost / session-hr", "fleet_cost_per_active_session_hour", 4, 33,
-                       unit="currencyUSD", desc="Estimated cost per active session-hour."))
-    panels.append(stat("Median cache-hit", "fleet_cache_hit_ratio_median", 8, 33,
+    panels.append(row("Token spend (cost & cache)", 37))
+    panels.append(stat("Window cost", "fleet_cost_usd", 0, 38, unit="currencyUSD",
+                       desc="Estimated token spend over the audit window (assumed "
+                            "pricing). " + AUDIT_NOTE))
+    panels.append(stat("Cost / session-hr", "fleet_cost_per_active_session_hour", 4, 38,
+                       unit="currencyUSD", desc="Estimated cost per active session-hour. "
+                       + AUDIT_NOTE))
+    panels.append(stat("Median cache-hit", "fleet_cache_hit_ratio_median", 8, 38,
                        unit="percentunit", thresholds=CACHE_TH,
-                       desc="Median per-session prompt-cache-hit fraction — low = token waste (#6)."))
-    panels.append(stat("Median I:O", "fleet_io_ratio_median", 12, 33,
-                       desc="Median per-session input:output token ratio."))
-    panels.append(stat("Transcripts analyzed", "fleet_audit_sessions", 16, 33,
-                       desc="Sessions in the token-spend pass."))
-    panels.append(stat("Bottlenecks scored", "fleet_bottlenecks", 20, 33,
+                       desc="Median per-session prompt-cache-hit fraction - low = token "
+                            "waste (#6). " + AUDIT_NOTE))
+    panels.append(stat("Median I:O", "fleet_io_ratio_median", 12, 38,
+                       desc="Median per-session input:output token ratio. " + AUDIT_NOTE))
+    panels.append(stat("Transcripts analyzed", "fleet_audit_sessions", 16, 38,
+                       desc="Sessions in the token-spend pass. 0/No data when the audit "
+                            "matched nothing. " + AUDIT_NOTE))
+    panels.append(stat("Bottlenecks scored", "fleet_bottlenecks", 20, 38,
                        desc="How many of the Top 10 classes are firing now."))
     panels.append(bargauge(
         "Top spenders (output tokens)", "fleet_top_spender_output_tokens", "{{session}}",
-        0, 38, w=12, h=8, desc="The heaviest sessions by output tokens (leaderboard)."))
+        0, 43, w=12, h=8, desc="The heaviest sessions by output tokens (leaderboard). "
+        + AUDIT_NOTE))
     panels.append(bargauge(
         "Lowest cache-hit sessions", "fleet_worst_cache_hit_ratio", "{{session}}",
-        12, 38, w=12, h=8, unit="percentunit", thresholds=CACHE_TH,
-        desc="Token-waste suspects — sessions with the lowest cache reuse (#6)."))
+        12, 43, w=12, h=8, unit="percentunit", thresholds=CACHE_TH,
+        desc="Token-waste suspects - sessions with the lowest cache reuse (#6). "
+        + AUDIT_NOTE))
 
     return {
         "uid": "fleet-bottleneck",
         "title": "Fleet Bottleneck & Visibility",
         "description": "Ranked bottlenecks (Top 10) + capacity, account, and token-spend "
                        "visibility for the autonomous Claude Code worker fleet. "
-                       "Source: fleet_bottleneck.py /metrics (namespace fleet_).",
+                       "Source: fleet_bottleneck.py /metrics (namespace fleet_). On a "
+                       "fresh up.sh stack the token-spend tiles read No data until a "
+                       "session audit returns rows (run python tools/session_audit.py "
+                       "discover --all); see the First run note at the top.",
         "tags": ["fleet", "bottleneck", "observability"],
         "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
         "schemaVersion": 39, "version": 1, "refresh": "30s",
@@ -525,60 +574,79 @@ def build_dogfood():
             f"(sum(rate({bucket}[$__rate_interval])) or vector(0))"
         )
 
-    panels.append(row("Dogfood health", 0))
-    panels.append(stat("Scrape", 'up{job="fak_gateway"}', 0, 1,
+    panels.append(text_panel(
+        "First run: this dashboard needs Claude Code traffic",
+        "Every latency, status, slow-request, and in-flight panel here filters "
+        "`route=\"/v1/messages\"` - **Claude Code traffic**. The `tools/grafana/up.sh` "
+        "next-step hint drives `/v1/fak/syscall`, which does NOT appear on this route, "
+        "so a fresh stack shows this dashboard almost entirely **No data**. " + DOGFOOD_NOTE
+        + "\n\n"
+        "The Scrape and Gateway up tiles populate immediately (they are route-agnostic). "
+        "The Kernel activity panels at the bottom drop the route filter, so they light "
+        "up on any gateway traffic - including the syscall smoke request.",
+        0, 0, w=24, h=5,
+        desc="Why this dashboard reads No data until a Claude Code session drives "
+             "/v1/messages, and how to populate it."))
+
+    panels.append(row("Dogfood health", 5))
+    panels.append(stat("Scrape", 'up{job="fak_gateway"}', 0, 6,
                        thresholds=UP_TH,
                        mappings=[{"type": "value", "options": {
                            "0": {"text": "DOWN", "color": "red", "index": 0},
                            "1": {"text": "UP", "color": "green", "index": 1}}}],
                        desc="Prometheus scrape health for the fak gateway."))
-    panels.append(stat("Gateway up", "fak_gateway_up", 4, 1,
+    panels.append(stat("Gateway up", "fak_gateway_up", 4, 6,
                        thresholds=UP_TH, desc="Self-reported gateway liveness."))
-    panels.append(stat("Messages in flight", msg_inflight, 8, 1,
+    panels.append(stat("Messages in flight", msg_inflight, 8, 6,
                        thresholds=steps((None, "green"), (1, "yellow"), (3, "red")),
-                       desc="/v1/messages requests currently executing in the gateway."))
-    panels.append(stat("Oldest in-flight", oldest_inflight, 12, 1, unit="s",
+                       desc="/v1/messages requests currently executing in the gateway. "
+                            + DOGFOOD_NOTE))
+    panels.append(stat("Oldest in-flight", oldest_inflight, 12, 6, unit="s",
                        thresholds=steps((None, "green"), (60, "yellow"), (300, "red")),
                        desc="Age of the oldest currently-running gateway request."))
-    panels.append(stat("/v1/messages / sec", msg_rate, 16, 1,
-                       desc="Claude Code dogfood request throughput."))
-    panels.append(stat("/v1/messages p95", msg_quantile("0.95"), 20, 1, unit="s",
+    panels.append(stat("/v1/messages / sec", msg_rate, 16, 6,
+                       desc="Claude Code dogfood request throughput. " + DOGFOOD_NOTE))
+    panels.append(stat("/v1/messages p95", msg_quantile("0.95"), 20, 6, unit="s",
                        thresholds=steps((None, "green"), (60, "yellow"), (180, "red")),
-                       desc="p95 completed /v1/messages latency. Qwen3.6 local turns can be minutes."))
+                       desc="p95 completed /v1/messages latency. Qwen3.6 local turns can "
+                            "be minutes. " + DOGFOOD_NOTE))
 
-    panels.append(row("Claude /v1/messages latency", 5))
+    panels.append(row("Claude /v1/messages latency", 10))
     panels.append(timeseries(
         "Latency quantiles",
         [(msg_quantile("0.50"), "p50"),
          (msg_avg, "avg"),
          (msg_quantile("0.95"), "p95"),
          (msg_quantile("0.99"), "p99")],
-        0, 6, w=12, h=8, unit="s",
-        desc="Completed /v1/messages latency. Buckets extend to 1800s for local 27B prefill."))
+        0, 11, w=12, h=8, unit="s",
+        desc="Completed /v1/messages latency. Buckets extend to 1800s for local 27B "
+             "prefill. " + DOGFOOD_NOTE))
     panels.append(timeseries(
         "Request rate by status",
         [(f"sum by (status) (rate({msg_requests_by_status}[$__rate_interval]))", "{{status}}")],
-        12, 6, w=12, h=8,
-        desc="Status mix for the Claude Code dogfood endpoint."))
+        12, 11, w=12, h=8,
+        desc="Status mix for the Claude Code dogfood endpoint. " + DOGFOOD_NOTE))
 
-    panels.append(row("Slow request threshold rate", 14))
+    panels.append(row("Slow request threshold rate", 19))
     panels.append(timeseries(
         "Requests slower than threshold",
         [(slow_over("30"), ">30s"),
          (slow_over("60"), ">60s"),
          (slow_over("120"), ">120s"),
          (slow_over("300"), ">300s")],
-        0, 15, w=24, h=8,
-        desc="Rate of completed /v1/messages requests slower than each bucket threshold."))
+        0, 20, w=24, h=8,
+        desc="Rate of completed /v1/messages requests slower than each bucket "
+             "threshold. " + DOGFOOD_NOTE))
 
-    panels.append(row("Kernel activity during dogfood turns", 23))
+    panels.append(row("Kernel activity during dogfood turns", 28))
     panels.append(timeseries(
         "Kernel operation verdict rate",
         [('sum by (operation, verdict) '
           '(rate(fak_gateway_operations_total{job="fak_gateway"}[$__rate_interval]))',
           "{{operation}} {{verdict}}")],
-        0, 24, w=12, h=8,
-        desc="Adjudication activity while Claude Code is using the gateway."))
+        0, 29, w=12, h=8,
+        desc="Adjudication activity while Claude Code is using the gateway. This panel "
+             "drops the /v1/messages filter, so it also reflects /v1/fak/syscall traffic."))
     panels.append(timeseries(
         "Kernel counter rates",
         [
@@ -588,8 +656,9 @@ def build_dogfood():
             ('rate(fak_kernel_denies_total{job="fak_gateway"}[$__rate_interval])', "denies"),
             ('rate(fak_kernel_quarantines_total{job="fak_gateway"}[$__rate_interval])', "quarantines"),
         ],
-        12, 24, w=12, h=8,
-        desc="Kernel call-path counters during dogfood sessions."))
+        12, 29, w=12, h=8,
+        desc="Kernel call-path counters during dogfood sessions. Route-agnostic, so "
+             "any gateway traffic lights these up."))
 
     panels.append(text_panel(
         "Request/debug log pointers",
@@ -599,14 +668,18 @@ def build_dogfood():
         "Set `FAK_DOGFOOD_CLAUDE_DEBUG_FILE=/path/to/file` if you want Claude's debug stream "
         "written to a dedicated file while the metrics in this dashboard show whether the "
         "request is still in flight, completed slowly, or failed by status.",
-        0, 32, w=24, h=5,
+        0, 37, w=24, h=5,
         desc="Operational pointers for the logs that contain raw Claude/gateway request detail."))
 
     return {
         "uid": "fak-dogfood-slow-requests",
         "title": "FAK Dogfood Slow Requests",
         "description": "Focused /v1/messages latency, status, inflight, and kernel activity "
-                       "for Claude Code dogfood sessions against slow local models.",
+                       "for Claude Code dogfood sessions against slow local models. The "
+                       "timeseries panels filter route=\"/v1/messages\", so they read No "
+                       "data until a Claude Code session drives the gateway; the "
+                       "/v1/fak/syscall smoke request does not appear here. See the First "
+                       "run note at the top.",
         "tags": ["fak", "dogfood", "claude", "slow-requests"],
         "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
         "schemaVersion": 39, "version": 1, "refresh": "10s",
@@ -639,44 +712,60 @@ def build_startup():
     miss it entirely on a fast restart."""
     panels = []
 
+    panels.append(text_panel(
+        "First run: the Model weight load panels need --gguf",
+        "The default `tools/grafana/up.sh` path starts the gateway with `--engine "
+        "inkernel --model smollm2-135m` against a fak-format export, with **no "
+        "`--gguf`** - so every `fak_model_load_*` panel (Model load time, Weights "
+        "loaded, Tensors, the GGUF phase bargauges, and the Loaded model table) stays "
+        "**No data**. " + MODEL_LOAD_NOTE + "\n\n"
+        "The Boot summary tiles and the Startup phase breakdown DO populate on the "
+        "up.sh path - they time every gateway boot regardless of weights. Only the "
+        "GGUF weight-load section is `--gguf`-gated.",
+        0, 0, w=24, h=5,
+        desc="Why the model-load panels read No data on a fresh up.sh stack (no --gguf), "
+             "and what to run to populate them."))
+
     # Boot summary — two rows of four stat tiles (24-wide grid, w=6 each).
-    panels.append(row("Boot summary", 0))
-    panels.append(stat("Time to ready", "fak_gateway_time_to_ready_seconds", 0, 1,
+    panels.append(row("Boot summary", 5))
+    panels.append(stat("Time to ready", "fak_gateway_time_to_ready_seconds", 0, 6,
                        unit="s", thresholds=READY_TH,
                        desc="Total wall-clock from process start to the gateway becoming "
                             "ready to serve (socket bound). 0 until the boot completes."))
-    panels.append(stat("Boot unaccounted", "fak_gateway_startup_unaccounted_seconds", 6, 1,
+    panels.append(stat("Boot unaccounted", "fak_gateway_startup_unaccounted_seconds", 6, 6,
                        unit="s", thresholds=UNACCOUNTED_TH,
                        desc="Boot wall-clock the named phases do NOT explain "
                             "(time_to_ready minus the sum of phase durations). Near-zero "
                             "means startup is FULLY instrumented; a non-zero value means a "
                             "phase is missing or work ran between New and MarkReady that "
                             "no phase records."))
-    panels.append(stat("Gateway up", "fak_gateway_up", 12, 1, thresholds=UP_TH,
+    panels.append(stat("Gateway up", "fak_gateway_up", 12, 6, thresholds=UP_TH,
                        mappings=[{"type": "value", "options": {
                          "0": {"text": "DOWN", "color": "red", "index": 0},
                          "1": {"text": "UP", "color": "green", "index": 1}}}],
                        desc="Self-reported gateway liveness."))
-    panels.append(stat("Uptime", "time() - fak_gateway_start_time_seconds", 18, 1,
+    panels.append(stat("Uptime", "time() - fak_gateway_start_time_seconds", 18, 6,
                        unit="s", desc="Time since this gateway process started."))
-    panels.append(stat("Model load time", "fak_model_load_duration_seconds", 0, 5,
+    panels.append(stat("Model load time", "fak_model_load_duration_seconds", 0, 10,
                        unit="s", thresholds=READY_TH,
                        desc="Total wall-clock to load model weights at boot. No data "
-                            "when serving with no --gguf weights."))
-    panels.append(stat("Weights loaded", "fak_model_load_bytes", 6, 5, unit="bytes",
+                            "when serving with no --gguf weights. " + MODEL_LOAD_NOTE))
+    panels.append(stat("Weights loaded", "fak_model_load_bytes", 6, 10, unit="bytes",
                        color="thresholds", thresholds=steps((None, "blue")),
-                       desc="Total bytes read/materialized while loading weights at boot."))
-    panels.append(stat("Tensors", "fak_model_load_tensors", 12, 5,
+                       desc="Total bytes read/materialized while loading weights at boot. "
+                            + MODEL_LOAD_NOTE))
+    panels.append(stat("Tensors", "fak_model_load_tensors", 12, 10,
                        thresholds=steps((None, "blue")),
-                       desc="Tensors materialized while loading weights at boot."))
-    panels.append(stat("Ready at", "fak_gateway_ready_time_seconds * 1000", 18, 5,
+                       desc="Tensors materialized while loading weights at boot. "
+                            + MODEL_LOAD_NOTE))
+    panels.append(stat("Ready at", "fak_gateway_ready_time_seconds * 1000", 18, 10,
                        unit="none", thresholds=steps((None, "blue")),
                        desc="Unix instant (ms) the gateway became ready to serve."))
 
-    panels.append(row("Startup phase breakdown", 9))
+    panels.append(row("Startup phase breakdown", 14))
     panels.append(bargauge(
         "Boot phase cost (now)", "sort_desc(fak_gateway_startup_phase_duration_seconds)",
-        "{{phase}}", 0, 10, w=12, h=8, unit="s",
+        "{{phase}}", 0, 15, w=12, h=8, unit="s",
         desc="Wall-clock of each boot phase, bottleneck first: flag-parse, policy-load, "
              "planner-init, vdso-config, kernel-init, listener-bind, and model-load "
              "(with --gguf). The listener-bind phase is measured on the synchronous "
@@ -685,26 +774,27 @@ def build_startup():
         "Time to ready over restarts",
         [("fak_gateway_time_to_ready_seconds", "time to ready"),
          ("fak_gateway_startup_unaccounted_seconds", "unaccounted")],
-        12, 10, w=12, h=8, unit="s",
+        12, 15, w=12, h=8, unit="s",
         desc="Both gauges hold their once-at-boot values, so each fresh process shows "
              "as a new level — restarts and their boot cost are visible across the "
              "window. unaccounted tracking time-to-ready means a phase is missing."))
 
-    panels.append(row("Model weight load (GGUF phases)", 18))
+    panels.append(row("Model weight load (GGUF phases)", 23))
     panels.append(bargauge(
         "Load phase time (bottleneck first)",
         "sort_desc(fak_model_load_phase_duration_seconds)", "{{phase}}",
-        0, 19, w=12, h=8, unit="s",
+        0, 24, w=12, h=8, unit="s",
         desc="Wall-clock of each GGUF weight-load phase. The top bar is the bottleneck. "
-             "Empty until a gateway is started with --gguf."))
+             "Empty until a gateway is started with --gguf. " + MODEL_LOAD_NOTE))
     panels.append(bargauge(
         "Load phase bytes", "sort_desc(fak_model_load_phase_bytes)", "{{phase}}",
-        12, 19, w=12, h=8, unit="bytes",
-        desc="Bytes processed by each GGUF weight-load phase."))
+        12, 24, w=12, h=8, unit="bytes",
+        desc="Bytes processed by each GGUF weight-load phase. " + MODEL_LOAD_NOTE))
     panels.append(info_table(
-        "Loaded model", "fak_model_load_info", 0, 27, w=24, h=6,
+        "Loaded model", "fak_model_load_info", 0, 32, w=24, h=6,
         desc="Static labels for the model loaded at boot: source path, loader mode, "
-             "and the slowest (bottleneck) load phase. Empty with no --gguf weights."))
+             "and the slowest (bottleneck) load phase. Empty with no --gguf weights. "
+             + MODEL_LOAD_NOTE))
 
     return {
         "uid": "fak-startup-load",

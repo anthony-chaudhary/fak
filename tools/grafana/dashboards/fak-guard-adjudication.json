@@ -57,7 +57,7 @@
     {
       "type": "row",
       "title": "Session at a glance",
-      "id": 83,
+      "id": 86,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -75,7 +75,7 @@
       "title": "Scrape",
       "description": "Prometheus scrape health. Start guard on this port with `fak guard --addr 127.0.0.1:8080 -- claude`.",
       "type": "stat",
-      "id": 84,
+      "id": 87,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -155,7 +155,7 @@
       "title": "Kernel decisions",
       "description": "Every verdict the kernel reached this session (allow + deny + repair + admit).",
       "type": "stat",
-      "id": 85,
+      "id": 88,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -215,7 +215,7 @@
       "title": "Allowed",
       "description": "Tool calls the capability floor let through.",
       "type": "stat",
-      "id": 86,
+      "id": 89,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -275,7 +275,7 @@
       "title": "Denied",
       "description": "Proposed tool calls the floor refused before they ran.",
       "type": "stat",
-      "id": 87,
+      "id": 90,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -339,7 +339,7 @@
       "title": "Repaired",
       "description": "Calls repaired in-flight (e.g. grammar) instead of costing a wasted round-trip.",
       "type": "stat",
-      "id": 88,
+      "id": 91,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -399,7 +399,7 @@
       "title": "Quarantined",
       "description": "Poisoned/untrusted tool-result payloads the context-MMU paged out before the model read them.",
       "type": "stat",
-      "id": 89,
+      "id": 92,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -458,7 +458,7 @@
     {
       "type": "row",
       "title": "Trust floor \u2014 refusals by reason",
-      "id": 90,
+      "id": 93,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -476,7 +476,7 @@
       "title": "Refusal rate by reason",
       "description": "Per-second rate of non-ALLOW verdicts grouped by the closed refusal vocabulary (internal/abi/reasons.go: TRUST_VIOLATION, SECRET_EXFIL, SELF_MODIFY, POLICY_BLOCK, DEFAULT_DENY, ...). 0 across the board means the floor refused nothing.",
       "type": "timeseries",
-      "id": 91,
+      "id": 94,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -546,7 +546,7 @@
       "title": "Refusals by reason (session total)",
       "description": "Cumulative count of each structured refusal reason this session \u2014 the kernel's 'why I said no', ranked.",
       "type": "bargauge",
-      "id": 92,
+      "id": 95,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -608,7 +608,7 @@
     {
       "type": "row",
       "title": "Verdict & disposition mix",
-      "id": 93,
+      "id": 96,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -626,7 +626,7 @@
       "title": "Verdict mix (rate)",
       "description": "syscall/adjudicate/admit verdict rate while the wrapped agent runs.",
       "type": "timeseries",
-      "id": 94,
+      "id": 97,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -696,7 +696,7 @@
       "title": "Refusal disposition (rate)",
       "description": "How refusals are dispatched (DENY vs WAIT vs ...) \u2014 the action the caller should take, aggregated over all reasons.",
       "type": "timeseries",
-      "id": 95,
+      "id": 98,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -761,7 +761,7 @@
     {
       "type": "row",
       "title": "Cache value \u2014 what the kernel hop saved",
-      "id": 96,
+      "id": 99,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -779,7 +779,7 @@
       "title": "Net saved (tok-equiv)",
       "description": "NET realized provider-cache saving (read rebate MINUS write premium). Negative until the reads repay a cold write. Same number as `fak vcache observe`.",
       "type": "stat",
-      "id": 97,
+      "id": 100,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -843,7 +843,7 @@
       "title": "Cache multiplier",
       "description": "baseline/actual token-equiv; 1.0 = no net saving.",
       "type": "stat",
-      "id": 98,
+      "id": 101,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -903,7 +903,7 @@
       "title": "Provider hit-rate",
       "description": "cache_read share of the uncached baseline.",
       "type": "stat",
-      "id": 99,
+      "id": 102,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -971,7 +971,7 @@
       "title": "Repaid?",
       "description": "1 once the session's observed cache reads repaid the write premium (NET positive); else 0 (cold/write-dominated).",
       "type": "stat",
-      "id": 100,
+      "id": 103,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1051,7 +1051,7 @@
       "title": "Provider cached tokens",
       "description": "Prompt tokens the provider served from its own cache, preserved byte-for-byte through the kernel hop.",
       "type": "stat",
-      "id": 101,
+      "id": 104,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1111,7 +1111,7 @@
       "title": "Cache writes (tok)",
       "description": "cache_creation tokens \u2014 the write premium the reads repay.",
       "type": "stat",
-      "id": 102,
+      "id": 105,
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1171,7 +1171,7 @@
       "title": "Cache economics over time",
       "description": "The uncached baseline vs actual token-equiv cost and the net saving between them. Series appear once a turn carries provider cache activity.",
       "type": "timeseries",
-      "id": 103,
+      "id": 106,
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -1254,7 +1254,7 @@
     {
       "type": "row",
       "title": "Token shedding \u2014 compaction & tool-floor prune",
-      "id": 104,
+      "id": 107,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1272,7 +1272,7 @@
       "title": "Compaction attempts (session)",
       "description": "fired = body rewritten with the protected prefix shipped byte-identical; bailed = returned identity; off = budget unset.",
       "type": "bargauge",
-      "id": 105,
+      "id": 108,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1335,7 +1335,7 @@
       "title": "Compaction bail reasons",
       "description": "Why a compaction bailed. under_budget/no_breakpoint are benign; prefix_mismatch / splice_failed / redecode_failed are the only fak-fault cache signals and must stay 0.",
       "type": "bargauge",
-      "id": 106,
+      "id": 109,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1402,7 +1402,7 @@
       "title": "Tokens shed",
       "description": "Estimated tokens fak removed from the outbound body across all fires (what fak SENT, not a provider-billing claim).",
       "type": "stat",
-      "id": 107,
+      "id": 110,
       "gridPos": {
         "h": 4,
         "w": 8,
@@ -1462,7 +1462,7 @@
       "title": "Tool defs pruned",
       "description": "Unreachable tool definitions dropped from tools[], cache-prefix-preserving. 0 on Claude Code, whose single breakpoint sits on the LAST tool.",
       "type": "stat",
-      "id": 108,
+      "id": 111,
       "gridPos": {
         "h": 4,
         "w": 8,
@@ -1517,7 +1517,7 @@
     {
       "type": "row",
       "title": "Upstream health & turns saved",
-      "id": 109,
+      "id": 112,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1535,7 +1535,7 @@
       "title": "Upstream turn failures by kind",
       "description": "Why proxied turns failed (stalled / unreachable / status_4xx / status_5xx / oom / other) \u2014 the cumulative twin of the per-turn FAILED line.",
       "type": "timeseries",
-      "id": 110,
+      "id": 113,
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -1605,7 +1605,7 @@
       "title": "Turns saved by mechanism",
       "description": "vdso_dedup = a duplicate read served with no engine round-trip; grammar_repair = a malformed call repaired instead of a retry turn.",
       "type": "bargauge",
-      "id": 111,
+      "id": 114,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1668,7 +1668,7 @@
       "title": "Upstream retries",
       "description": "Planner 429/5xx exponential-backoff attempts this session.",
       "type": "stat",
-      "id": 112,
+      "id": 115,
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -1728,7 +1728,7 @@
       "title": "Scrape a fak guard session",
       "description": "How to point Prometheus at a guard session, and where the durable record lives.",
       "type": "text",
-      "id": 113,
+      "id": 116,
       "gridPos": {
         "h": 6,
         "w": 24,

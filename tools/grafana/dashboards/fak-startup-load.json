@@ -55,15 +55,40 @@
   },
   "panels": [
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "title": "First run: the Model weight load panels need --gguf",
+      "description": "Why the model-load panels read No data on a fresh up.sh stack (no --gguf), and what to run to populate them.",
+      "type": "text",
+      "id": 69,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "The default `tools/grafana/up.sh` path starts the gateway with `--engine inkernel --model smollm2-135m` against a fak-format export, with **no `--gguf`** - so every `fak_model_load_*` panel (Model load time, Weights loaded, Tensors, the GGUF phase bargauges, and the Loaded model table) stays **No data**. Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path uses the inkernel engine against a fak-format export, so these stay empty unless you re-launch with `--gguf MODEL.gguf`.\n\nThe Boot summary tiles and the Startup phase breakdown DO populate on the up.sh path - they time every gateway boot regardless of weights. Only the GGUF weight-load section is `--gguf`-gated."
+      },
+      "pluginVersion": "11.5.2"
+    },
+    {
       "type": "row",
       "title": "Boot summary",
-      "id": 67,
+      "id": 70,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 5
       },
       "panels": []
     },
@@ -75,12 +100,12 @@
       "title": "Time to ready",
       "description": "Total wall-clock from process start to the gateway becoming ready to serve (socket bound). 0 until the boot completes.",
       "type": "stat",
-      "id": 68,
+      "id": 71,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -143,12 +168,12 @@
       "title": "Boot unaccounted",
       "description": "Boot wall-clock the named phases do NOT explain (time_to_ready minus the sum of phase durations). Near-zero means startup is FULLY instrumented; a non-zero value means a phase is missing or work ran between New and MarkReady that no phase records.",
       "type": "stat",
-      "id": 69,
+      "id": 72,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 6,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -211,12 +236,12 @@
       "title": "Gateway up",
       "description": "Self-reported gateway liveness.",
       "type": "stat",
-      "id": 70,
+      "id": 73,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -291,12 +316,12 @@
       "title": "Uptime",
       "description": "Time since this gateway process started.",
       "type": "stat",
-      "id": 71,
+      "id": 74,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 18,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -349,14 +374,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Model load time",
-      "description": "Total wall-clock to load model weights at boot. No data when serving with no --gguf weights.",
+      "description": "Total wall-clock to load model weights at boot. No data when serving with no --gguf weights. Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path uses the inkernel engine against a fak-format export, so these stay empty unless you re-launch with `--gguf MODEL.gguf`.",
       "type": "stat",
-      "id": 72,
+      "id": 75,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 5
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
@@ -417,14 +442,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Weights loaded",
-      "description": "Total bytes read/materialized while loading weights at boot.",
+      "description": "Total bytes read/materialized while loading weights at boot. Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path uses the inkernel engine against a fak-format export, so these stay empty unless you re-launch with `--gguf MODEL.gguf`.",
       "type": "stat",
-      "id": 73,
+      "id": 76,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 6,
-        "y": 5
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
@@ -477,14 +502,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Tensors",
-      "description": "Tensors materialized while loading weights at boot.",
+      "description": "Tensors materialized while loading weights at boot. Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path uses the inkernel engine against a fak-format export, so these stay empty unless you re-launch with `--gguf MODEL.gguf`.",
       "type": "stat",
-      "id": 74,
+      "id": 77,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 5
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
@@ -539,12 +564,12 @@
       "title": "Ready at",
       "description": "Unix instant (ms) the gateway became ready to serve.",
       "type": "stat",
-      "id": 75,
+      "id": 78,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 18,
-        "y": 5
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
@@ -594,13 +619,13 @@
     {
       "type": "row",
       "title": "Startup phase breakdown",
-      "id": 76,
+      "id": 79,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 14
       },
       "panels": []
     },
@@ -612,12 +637,12 @@
       "title": "Boot phase cost (now)",
       "description": "Wall-clock of each boot phase, bottleneck first: flag-parse, policy-load, planner-init, vdso-config, kernel-init, listener-bind, and model-load (with --gguf). The listener-bind phase is measured on the synchronous net.Listen, so it is accurate to the moment the socket is ready.",
       "type": "bargauge",
-      "id": 77,
+      "id": 80,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 10
+        "y": 15
       },
       "fieldConfig": {
         "defaults": {
@@ -675,12 +700,12 @@
       "title": "Time to ready over restarts",
       "description": "Both gauges hold their once-at-boot values, so each fresh process shows as a new level \u2014 restarts and their boot cost are visible across the window. unaccounted tracking time-to-ready means a phase is missing.",
       "type": "timeseries",
-      "id": 78,
+      "id": 81,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 10
+        "y": 15
       },
       "fieldConfig": {
         "defaults": {
@@ -749,13 +774,13 @@
     {
       "type": "row",
       "title": "Model weight load (GGUF phases)",
-      "id": 79,
+      "id": 82,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 18
+        "y": 23
       },
       "panels": []
     },
@@ -765,14 +790,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Load phase time (bottleneck first)",
-      "description": "Wall-clock of each GGUF weight-load phase. The top bar is the bottleneck. Empty until a gateway is started with --gguf.",
+      "description": "Wall-clock of each GGUF weight-load phase. The top bar is the bottleneck. Empty until a gateway is started with --gguf. Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path uses the inkernel engine against a fak-format export, so these stay empty unless you re-launch with `--gguf MODEL.gguf`.",
       "type": "bargauge",
-      "id": 80,
+      "id": 83,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 19
+        "y": 24
       },
       "fieldConfig": {
         "defaults": {
@@ -828,14 +853,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Load phase bytes",
-      "description": "Bytes processed by each GGUF weight-load phase.",
+      "description": "Bytes processed by each GGUF weight-load phase. Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path uses the inkernel engine against a fak-format export, so these stay empty unless you re-launch with `--gguf MODEL.gguf`.",
       "type": "bargauge",
-      "id": 81,
+      "id": 84,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 19
+        "y": 24
       },
       "fieldConfig": {
         "defaults": {
@@ -891,14 +916,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Loaded model",
-      "description": "Static labels for the model loaded at boot: source path, loader mode, and the slowest (bottleneck) load phase. Empty with no --gguf weights.",
+      "description": "Static labels for the model loaded at boot: source path, loader mode, and the slowest (bottleneck) load phase. Empty with no --gguf weights. Emitted only when `fak serve` is started with `--gguf`. The default `up.sh` path uses the inkernel engine against a fak-format export, so these stay empty unless you re-launch with `--gguf MODEL.gguf`.",
       "type": "table",
-      "id": 82,
+      "id": 85,
       "gridPos": {
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {

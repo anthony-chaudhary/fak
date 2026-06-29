@@ -1,7 +1,7 @@
 {
   "uid": "fleet-bottleneck",
   "title": "Fleet Bottleneck & Visibility",
-  "description": "Ranked bottlenecks (Top 10) + capacity, account, and token-spend visibility for the autonomous Claude Code worker fleet. Source: fleet_bottleneck.py /metrics (namespace fleet_).",
+  "description": "Ranked bottlenecks (Top 10) + capacity, account, and token-spend visibility for the autonomous Claude Code worker fleet. Source: fleet_bottleneck.py /metrics (namespace fleet_). On a fresh up.sh stack the token-spend tiles read No data until a session audit returns rows (run python tools/session_audit.py discover --all); see the First run note at the top.",
   "tags": [
     "fleet",
     "bottleneck",
@@ -54,15 +54,40 @@
   },
   "panels": [
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "title": "First run: why some panels read No data",
+      "description": "Why the token-spend tiles can read No data on a fresh up.sh stack, and how to populate them.",
+      "type": "text",
+      "id": 1,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Bringing the stack up with `tools/grafana/up.sh` and driving the hinted `/v1/fak/syscall` smoke request populates the gateway counters but NOT the token-spend tiles below. Those read a **session audit** over local Claude Code transcripts:\n\n- **Token spend (cost & cache) row** (Window cost, Cost/session-hr, Median cache-hit, Median I:O, Transcripts analyzed, Top spenders, Lowest cache-hit): Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.\n\nEverything else here is fed by `fleet_bottleneck.py /metrics` and fills in as the fleet runs. No panel is broken; the empty ones are waiting on the audit pass, not on traffic."
+      },
+      "pluginVersion": "11.5.2"
+    },
+    {
       "type": "row",
       "title": "Fleet health",
-      "id": 1,
+      "id": 2,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 5
       },
       "panels": []
     },
@@ -74,12 +99,12 @@
       "title": "Health",
       "description": "0 OK \u00b7 1 DEGRADED \u00b7 2 CRITICAL \u00b7 3 DOWN (no telemetry).",
       "type": "stat",
-      "id": 2,
+      "id": 3,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -168,12 +193,12 @@
       "title": "#1 bottleneck score",
       "description": "Score of the most-likely actual limiter right now.",
       "type": "stat",
-      "id": 3,
+      "id": 4,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -240,12 +265,12 @@
       "title": "Active workers",
       "description": "In-flight workers (not cleanly finished).",
       "type": "stat",
-      "id": 4,
+      "id": 5,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -300,12 +325,12 @@
       "title": "Accounts throttled",
       "description": "Accounts currently rate-limited.",
       "type": "stat",
-      "id": 5,
+      "id": 6,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -364,12 +389,12 @@
       "title": "Auth-blocked workers",
       "description": "Workers that need /login (a human must re-auth).",
       "type": "stat",
-      "id": 6,
+      "id": 7,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -428,12 +453,12 @@
       "title": "Telemetry age",
       "description": "Age of the session registry \u2014 stale = flying blind (#8).",
       "type": "stat",
-      "id": 7,
+      "id": 8,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -491,13 +516,13 @@
     {
       "type": "row",
       "title": "Ranked bottlenecks (the Top 10)",
-      "id": 8,
+      "id": 9,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 10
       },
       "panels": []
     },
@@ -507,14 +532,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Bottleneck scores (ranked)",
-      "description": "Every scored class, 0-100 \u2014 likelihood it is the actual limiter.",
+      "description": "Every scored class, 0-100 - likelihood it is the actual limiter. Empty until at least one of the Top 10 classes fires; a fresh fleet with no active workers scores nothing, which is healthy, not broken.",
       "type": "bargauge",
-      "id": 9,
+      "id": 10,
       "gridPos": {
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -584,14 +609,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Bottleneck detail",
-      "description": "Title \u00b7 layer \u00b7 score (score color = severity band) for each scored class.",
+      "description": "Title / layer / score (score color = severity band) for each scored class. Empty until a bottleneck class fires.",
       "type": "table",
-      "id": 10,
+      "id": 11,
       "gridPos": {
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -703,14 +728,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Bottleneck score history",
-      "description": "How each class's score moves over time.",
+      "description": "How each class's score moves over time. A flat/empty chart means no class has scored over the window.",
       "type": "timeseries",
-      "id": 11,
+      "id": 12,
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 20
       },
       "fieldConfig": {
         "defaults": {
@@ -770,13 +795,13 @@
     {
       "type": "row",
       "title": "Capacity & accounts",
-      "id": 12,
+      "id": 13,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 28
       },
       "panels": []
     },
@@ -788,12 +813,12 @@
       "title": "Worker states over time",
       "description": "The in-flight worker buckets that drive #1-#10.",
       "type": "timeseries",
-      "id": 13,
+      "id": 14,
       "gridPos": {
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 24
+        "y": 29
       },
       "fieldConfig": {
         "defaults": {
@@ -912,12 +937,12 @@
       "title": "Active workers per account",
       "description": "Concentration on one account = imbalance (#7) + throttle blast radius (#1).",
       "type": "bargauge",
-      "id": 14,
+      "id": 15,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 24
+        "y": 29
       },
       "fieldConfig": {
         "defaults": {
@@ -970,13 +995,13 @@
     {
       "type": "row",
       "title": "Token spend (cost & cache)",
-      "id": 15,
+      "id": 16,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 37
       },
       "panels": []
     },
@@ -986,14 +1011,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Window cost",
-      "description": "Estimated token spend over the audit window (assumed pricing).",
+      "description": "Estimated token spend over the audit window (assumed pricing). Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.",
       "type": "stat",
-      "id": 16,
+      "id": 17,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 33
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -1046,14 +1071,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Cost / session-hr",
-      "description": "Estimated cost per active session-hour.",
+      "description": "Estimated cost per active session-hour. Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.",
       "type": "stat",
-      "id": 17,
+      "id": 18,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 33
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -1106,14 +1131,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Median cache-hit",
-      "description": "Median per-session prompt-cache-hit fraction \u2014 low = token waste (#6).",
+      "description": "Median per-session prompt-cache-hit fraction - low = token waste (#6). Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.",
       "type": "stat",
-      "id": 18,
+      "id": 19,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 33
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -1174,14 +1199,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Median I:O",
-      "description": "Median per-session input:output token ratio.",
+      "description": "Median per-session input:output token ratio. Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.",
       "type": "stat",
-      "id": 19,
+      "id": 20,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 33
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -1234,14 +1259,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Transcripts analyzed",
-      "description": "Sessions in the token-spend pass.",
+      "description": "Sessions in the token-spend pass. 0/No data when the audit matched nothing. Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.",
       "type": "stat",
-      "id": 20,
+      "id": 21,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 33
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -1296,12 +1321,12 @@
       "title": "Bottlenecks scored",
       "description": "How many of the Top 10 classes are firing now.",
       "type": "stat",
-      "id": 21,
+      "id": 22,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 33
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -1354,14 +1379,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Top spenders (output tokens)",
-      "description": "The heaviest sessions by output tokens (leaderboard).",
+      "description": "The heaviest sessions by output tokens (leaderboard). Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.",
       "type": "bargauge",
-      "id": 22,
+      "id": 23,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 38
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {
@@ -1417,14 +1442,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Lowest cache-hit sessions",
-      "description": "Token-waste suspects \u2014 sessions with the lowest cache reuse (#6).",
+      "description": "Token-waste suspects - sessions with the lowest cache reuse (#6). Populated by `session_audit` over `~/.claude/projects`. Empty if no transcripts match the namespace filter (default `C--work`); run `python tools/session_audit.py discover --all` to check.",
       "type": "bargauge",
-      "id": 23,
+      "id": 24,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 38
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {

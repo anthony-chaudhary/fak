@@ -1,7 +1,7 @@
 {
   "uid": "fak-dogfood-slow-requests",
   "title": "FAK Dogfood Slow Requests",
-  "description": "Focused /v1/messages latency, status, inflight, and kernel activity for Claude Code dogfood sessions against slow local models.",
+  "description": "Focused /v1/messages latency, status, inflight, and kernel activity for Claude Code dogfood sessions against slow local models. The timeseries panels filter route=\"/v1/messages\", so they read No data until a Claude Code session drives the gateway; the /v1/fak/syscall smoke request does not appear here. See the First run note at the top.",
   "tags": [
     "fak",
     "dogfood",
@@ -55,15 +55,40 @@
   },
   "panels": [
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "title": "First run: this dashboard needs Claude Code traffic",
+      "description": "Why this dashboard reads No data until a Claude Code session drives /v1/messages, and how to populate it.",
+      "type": "text",
+      "id": 52,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Every latency, status, slow-request, and in-flight panel here filters `route=\"/v1/messages\"` - **Claude Code traffic**. The `tools/grafana/up.sh` next-step hint drives `/v1/fak/syscall`, which does NOT appear on this route, so a fresh stack shows this dashboard almost entirely **No data**. Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not appear here.\n\nThe Scrape and Gateway up tiles populate immediately (they are route-agnostic). The Kernel activity panels at the bottom drop the route filter, so they light up on any gateway traffic - including the syscall smoke request."
+      },
+      "pluginVersion": "11.5.2"
+    },
+    {
       "type": "row",
       "title": "Dogfood health",
-      "id": 51,
+      "id": 53,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 5
       },
       "panels": []
     },
@@ -75,12 +100,12 @@
       "title": "Scrape",
       "description": "Prometheus scrape health for the fak gateway.",
       "type": "stat",
-      "id": 52,
+      "id": 54,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -155,12 +180,12 @@
       "title": "Gateway up",
       "description": "Self-reported gateway liveness.",
       "type": "stat",
-      "id": 53,
+      "id": 55,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -217,14 +242,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Messages in flight",
-      "description": "/v1/messages requests currently executing in the gateway.",
+      "description": "/v1/messages requests currently executing in the gateway. Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not appear here.",
       "type": "stat",
-      "id": 54,
+      "id": 56,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -287,12 +312,12 @@
       "title": "Oldest in-flight",
       "description": "Age of the oldest currently-running gateway request.",
       "type": "stat",
-      "id": 55,
+      "id": 57,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -353,14 +378,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "/v1/messages / sec",
-      "description": "Claude Code dogfood request throughput.",
+      "description": "Claude Code dogfood request throughput. Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not appear here.",
       "type": "stat",
-      "id": 56,
+      "id": 58,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -413,14 +438,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "/v1/messages p95",
-      "description": "p95 completed /v1/messages latency. Qwen3.6 local turns can be minutes.",
+      "description": "p95 completed /v1/messages latency. Qwen3.6 local turns can be minutes. Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not appear here.",
       "type": "stat",
-      "id": 57,
+      "id": 59,
       "gridPos": {
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 1
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -478,13 +503,13 @@
     {
       "type": "row",
       "title": "Claude /v1/messages latency",
-      "id": 58,
+      "id": 60,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 10
       },
       "panels": []
     },
@@ -494,14 +519,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Latency quantiles",
-      "description": "Completed /v1/messages latency. Buckets extend to 1800s for local 27B prefill.",
+      "description": "Completed /v1/messages latency. Buckets extend to 1800s for local 27B prefill. Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not appear here.",
       "type": "timeseries",
-      "id": 59,
+      "id": 61,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -591,14 +616,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Request rate by status",
-      "description": "Status mix for the Claude Code dogfood endpoint.",
+      "description": "Status mix for the Claude Code dogfood endpoint. Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not appear here.",
       "type": "timeseries",
-      "id": 60,
+      "id": 62,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -658,13 +683,13 @@
     {
       "type": "row",
       "title": "Slow request threshold rate",
-      "id": 61,
+      "id": 63,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 19
       },
       "panels": []
     },
@@ -674,14 +699,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Requests slower than threshold",
-      "description": "Rate of completed /v1/messages requests slower than each bucket threshold.",
+      "description": "Rate of completed /v1/messages requests slower than each bucket threshold. Filters `route=\"/v1/messages\"` (Claude Code traffic). Drive them by pointing a Claude Code session at `fak serve`; the `/v1/fak/syscall` smoke request does not appear here.",
       "type": "timeseries",
-      "id": 62,
+      "id": 64,
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 20
       },
       "fieldConfig": {
         "defaults": {
@@ -768,13 +793,13 @@
     {
       "type": "row",
       "title": "Kernel activity during dogfood turns",
-      "id": 63,
+      "id": 65,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 28
       },
       "panels": []
     },
@@ -784,14 +809,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Kernel operation verdict rate",
-      "description": "Adjudication activity while Claude Code is using the gateway.",
+      "description": "Adjudication activity while Claude Code is using the gateway. This panel drops the /v1/messages filter, so it also reflects /v1/fak/syscall traffic.",
       "type": "timeseries",
-      "id": 64,
+      "id": 66,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 29
       },
       "fieldConfig": {
         "defaults": {
@@ -854,14 +879,14 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "title": "Kernel counter rates",
-      "description": "Kernel call-path counters during dogfood sessions.",
+      "description": "Kernel call-path counters during dogfood sessions. Route-agnostic, so any gateway traffic lights these up.",
       "type": "timeseries",
-      "id": 65,
+      "id": 67,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 29
       },
       "fieldConfig": {
         "defaults": {
@@ -962,12 +987,12 @@
       "title": "Request/debug log pointers",
       "description": "Operational pointers for the logs that contain raw Claude/gateway request detail.",
       "type": "text",
-      "id": 66,
+      "id": 68,
       "gridPos": {
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 37
       },
       "fieldConfig": {
         "defaults": {},
