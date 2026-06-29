@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/queried-overlay-schema.json",
+  "title": "Queried-harness-overlay schema (fak-overlay/v1)",
+  "description": "A portable, engine-free selection check for the system-prompt MMU's overlay tier (Rung 3, #1261 / C3): given a turn's INTENT + a token BUDGET + a catalog of at-rest capability cards (refs only, body-on-demand), which cards are FAULTED IN, which are MASKED, and is an identical re-invocation a HIT? Author an OverlayQuery (the root) against this with any JSON Schema validator; no fak engine is required. $defs/OverlayDecision is the fault|hit|refuse(reason) the overlay selector returns. The kind set, the disposition set, and the refuse-reason set are CLOSED enums; a card may not carry a BODY at rest (additionalProperties:false on CapCard — invariant 4, pointers not bodies); a CapRef is defined ONCE ($defs/CapRef, the canonical capindex.CapRef — the #1144 fold); and a HIT re-faults nothing (faulted == 0). Fill the overlay by QUERY, not menu: an empty intent is rejected at the authoring boundary, never dumped as a full menu.",
+  "$ref": "#/$defs/OverlayQuery",
+  "$defs": {
+    "CapKind": {
+      "description": "The kind of harness capability a card describes — the shipped capindex.CapKind taxonomy. CLOSED enum. 'skill' is a local Agent Skill; 'mcp-tool' is an MCP tool descriptor; 'a2a-agent' is an agent-to-agent peer. The harness's situational rules ride as cards of one of these kinds (the menu). An out-of-set kind is UNKNOWN_KIND, rejected here.",
+      "type": "string",
+      "enum": ["skill", "mcp-tool", "a2a-agent"]
+    },
+    "Disposition": {
+      "description": "The whole-query overlay disposition — the MaterializationKind vocabulary of the selector. CLOSED enum. 'fault' pages in the selected winners' bodies on a cold query; 'hit' serves a prior overlay with an identical digest and re-faults NOTHING (contextq.SkillContextRecord HIT-on-reinvocation); 'refuse' returns a closed reason and selects nothing. Absence of an affirmative fault/hit is a refusal, never a silent serve.",
+      "type": "string",
+      "enum": ["fault", "hit", "refuse"]
+    },
+    "RefuseReason": {
+      "description": "The closed refuse vocabulary the selector returns. A new reason is a new enum value + a decision arm, never free text. Every token names a load-bearing constraint of the system-prompt MMU's overlay tier (the design note's invariants 2 and 4, plus the Rung-2 breakpoint stability and the #1144 single-CapRef fold).",
+      "type": "string",
+      "enum": [
+        "NO_INTENT",
+        "BODY_AT_REST",
+        "OVER_BUDGET",
+        "BREAKPOINT_MOVED",
+        "DUPLICATE_CAPREF",
+        "UNKNOWN_KIND"
+      ]
+    },
+    "CapRef": {
+      "description": "The canonical capability reference — {kind, name, version} — defined ONCE here and referenced everywhere (the #1144 reconciliation: one capindex.CapRef, never a duplicate copy in contextq). 'version' is optional; empty means latest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/CapKind" },
+        "name": { "type": "string", "minLength": 1, "description": "The capability name." },
+        "version": { "type": "string", "description": "The capability version; empty/omitted = latest." }
+      }
+    },
+    "CapCard": {
+      "description": "The tiny at-rest card: a ref + the cheap metadata the index ranks against (trigger + tags), at ~100 tokens, body-on-demand (invariant 4: the base is pointers, not bodies). The card is a CLOSED object — there is deliberately NO 'body' field, so a card carrying its body at rest is rejected at the authoring boundary (BODY_AT_REST). The body is faulted in only when the query selects the card.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "trigger", "card_tokens"],
+      "properties": {
+        "ref": { "$ref": "#/$defs/CapRef" },
+        "digest": { "type": "string", "description": "sha256 over the body (the ScaleMCP sync key + the HIT-on-reinvocation key)." },
+        "trigger": { "type": "string", "minLength": 1, "description": "The trigger clause the query ranks against (what the model matches)." },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional ranking/filtering tags." },
+        "card_tokens": { "type": "integer", "minimum": 0, "description": "The at-rest card cost (~100). Bounded — the resident descriptor index is itself paged once it grows." }
+      }
+    },
+    "OverlayQuery": {
+      "description": "The INPUT the overlay selector takes: the turn's INTENT, a token BUDGET, the resident-base breakpoint offset, and the at-rest catalog (cards, never bodies). Fill the overlay by QUERY, not menu — 'intent' is required and non-empty (an empty intent is a menu dump, refused NO_INTENT). 'prior_digest' carries a prior overlay digest for the HIT check. Closed object — an unknown field is rejected, never silently ignored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent", "token_budget", "breakpoint_at", "catalog"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^fak-overlay/v1",
+          "description": "Schema tag. Omitted => current version. A different MAJOR is refused; a newer MINOR is forward-accepted (additive-only)."
+        },
+        "intent": { "type": "string", "minLength": 1, "description": "The turn's query (MCP-Zero active discovery). REQUIRED and non-empty — fill by query, not menu." },
+        "token_budget": { "type": "integer", "minimum": 0, "description": "The overlay token budget. Winners are faulted in up to this; the rest are masked (OVER_BUDGET, not dropped)." },
+        "breakpoint_at": { "type": "integer", "minimum": 0, "description": "The resident-base token count = the Rung-2 cache-breakpoint offset. The overlay is appended AFTER this; it must NOT move (the Rung-2 assertion stays green, else BREAKPOINT_MOVED)." },
+        "catalog": { "type": "array", "items": { "$ref": "#/$defs/CapCard" }, "description": "The at-rest cards — refs + trigger only, NO bodies (invariant 4). May be empty. May grow without bound: base tokens stay flat (0-for-infinity)." },
+        "prior_digest": { "type": "string", "description": "OPTIONAL prior overlay digest. If it equals the recomputed overlay_digest, the disposition is a HIT and nothing re-faults." }
+      }
+    },
+    "OverlayDecision": {
+      "description": "The OUTPUT the overlay selector returns: the disposition, the faulted-in 'selected' refs, the 'masked' refs (masked, NOT removed from the resident array — invariant 2), the resulting overlay_digest (the HIT key), and the accounting that makes the acceptance checkable (base_tokens flat at breakpoint_at; selected_tokens <= the budget; faulted == 0 on a HIT). An OUTPUT shape, so a richer implementation MAY add fields (additionalProperties open). A 'refuse' MUST carry a reason from the closed set; a 'hit' MUST have faulted == 0.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["disposition"],
+      "properties": {
+        "query": { "$ref": "#/$defs/OverlayQuery" },
+        "disposition": { "$ref": "#/$defs/Disposition" },
+        "selected": { "type": "array", "items": { "$ref": "#/$defs/CapRef" }, "description": "The faulted-in winners (refs only). Only the cards the intent needs — not the whole menu." },
+        "masked": { "type": "array", "items": { "$ref": "#/$defs/CapRef" }, "description": "The masked-out cards. Masked, never mutated out of the resident array (invariant 2: availability changes by masking the overlay set)." },
+        "overlay_digest": { "type": "string", "description": "The digest of the selected overlay set — the key an identical re-invocation matches for a HIT." },
+        "base_tokens": { "type": "integer", "minimum": 0, "description": "The resident-base token count AFTER selection. MUST equal the query's breakpoint_at regardless of catalog size (0-for-infinity: flat as the catalog grows). A change is BREAKPOINT_MOVED." },
+        "selected_tokens": { "type": "integer", "minimum": 0, "description": "The overlay tokens faulted in. MUST be <= the query's token_budget (else OVER_BUDGET)." },
+        "faulted": { "type": "integer", "minimum": 0, "description": "How many bodies were paged in. 0 on a HIT — the economic proof that an identical re-invocation re-faulted nothing." },
+        "reason": { "$ref": "#/$defs/RefuseReason" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "disposition": { "const": "refuse" } }, "required": ["disposition"] },
+          "then": { "required": ["disposition", "reason"] }
+        },
+        {
+          "if": { "properties": { "disposition": { "const": "hit" } }, "required": ["disposition"] },
+          "then": { "properties": { "faulted": { "const": 0 } } }
+        }
+      ]
+    }
+  }
+}

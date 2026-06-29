@@ -1,0 +1,50 @@
+{
+  "version": "fak-overlay/v1",
+  "intent": "summarize and label a PR diff for the reviewer",
+  "token_budget": 300,
+  "breakpoint_at": 1024,
+  "catalog": [
+    {
+      "ref": { "kind": "skill", "name": "code-review", "version": "" },
+      "digest": "sha256:1a2b3c",
+      "trigger": "review a code diff for bugs and cleanups",
+      "tags": ["review", "diff"],
+      "card_tokens": 100
+    },
+    {
+      "ref": { "kind": "mcp-tool", "name": "github.pulls.get", "version": "" },
+      "digest": "sha256:4d5e6f",
+      "trigger": "fetch a pull request and its diff",
+      "tags": ["github", "pr", "diff"],
+      "card_tokens": 100
+    },
+    {
+      "ref": { "kind": "a2a-agent", "name": "release-notes-writer", "version": "" },
+      "digest": "sha256:7a8b9c",
+      "trigger": "draft user-facing release notes from a changelog",
+      "tags": ["release", "notes"],
+      "card_tokens": 100
+    },
+    {
+      "ref": { "kind": "skill", "name": "image-resize", "version": "" },
+      "digest": "sha256:b1c2d3",
+      "trigger": "resize and re-encode an image asset",
+      "tags": ["image", "media"],
+      "card_tokens": 100
+    },
+    {
+      "ref": { "kind": "mcp-tool", "name": "calendar.events.list", "version": "" },
+      "digest": "sha256:e4f5a6",
+      "trigger": "list upcoming calendar events for a user",
+      "tags": ["calendar", "schedule"],
+      "card_tokens": 100
+    },
+    {
+      "ref": { "kind": "a2a-agent", "name": "invoice-reconciler", "version": "" },
+      "digest": "sha256:c7d8e9",
+      "trigger": "reconcile invoices against a ledger",
+      "tags": ["finance", "ledger"],
+      "card_tokens": 100
+    }
+  ]
+}

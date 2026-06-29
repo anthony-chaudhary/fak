@@ -1,0 +1,17 @@
+{
+  "disposition": "fault",
+  "selected": [
+    { "kind": "skill", "name": "code-review", "version": "" },
+    { "kind": "mcp-tool", "name": "github.pulls.get", "version": "" }
+  ],
+  "masked": [
+    { "kind": "a2a-agent", "name": "release-notes-writer", "version": "" },
+    { "kind": "skill", "name": "image-resize", "version": "" },
+    { "kind": "mcp-tool", "name": "calendar.events.list", "version": "" },
+    { "kind": "a2a-agent", "name": "invoice-reconciler", "version": "" }
+  ],
+  "overlay_digest": "sha256:ov-2cards-cr-pulls",
+  "base_tokens": 1024,
+  "selected_tokens": 240,
+  "faulted": 2
+}

@@ -1,0 +1,13 @@
+{
+  "version": "fak-overlay/v1",
+  "intent": "",
+  "token_budget": 300,
+  "breakpoint_at": 1024,
+  "catalog": [
+    {
+      "ref": { "kind": "skill", "name": "code-review", "version": "" },
+      "trigger": "review a code diff for bugs and cleanups",
+      "card_tokens": 100
+    }
+  ]
+}

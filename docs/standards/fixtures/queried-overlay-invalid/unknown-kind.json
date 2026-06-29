@@ -1,0 +1,13 @@
+{
+  "version": "fak-overlay/v1",
+  "intent": "summarize and label a PR diff for the reviewer",
+  "token_budget": 300,
+  "breakpoint_at": 1024,
+  "catalog": [
+    {
+      "ref": { "kind": "plugin", "name": "code-review", "version": "" },
+      "trigger": "review a code diff for bugs and cleanups",
+      "card_tokens": 100
+    }
+  ]
+}

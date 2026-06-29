@@ -1,0 +1,8 @@
+{
+  "version": "fak-overlay/v1",
+  "intent": "summarize and label a PR diff for the reviewer",
+  "token_budget": 300,
+  "breakpoint_at": 1024,
+  "catalog": [],
+  "freeform": "an unconstrained field the agent slipped past the closed vocabulary"
+}
