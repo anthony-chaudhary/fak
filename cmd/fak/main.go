@@ -129,6 +129,8 @@ func main() {
 		cmdDoctor(os.Args[2:])
 	case "tree-doctor":
 		cmdTreeDoctor(os.Args[2:])
+	case "self-update":
+		cmdSelfUpdate(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":
