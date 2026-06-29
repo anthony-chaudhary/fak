@@ -1,0 +1,59 @@
+{
+  "issue": "#610",
+  "what": "scripted multi-turn Claude-Code-shaped loop over fak's in-kernel tool-calling path",
+  "date": "2026-06-29",
+  "witness_command": ".\\test.ps1 ./internal/gateway -run TestInKernelMultiTurnToolLoopReachesAnthropicWire -count=1",
+  "witness_result": "ok github.com/anthony-chaudhary/fak/internal/gateway",
+  "path_under_test": [
+    "POST /v1/messages Anthropic wire",
+    "agent.DecodeAnthropicMessagesRequest tool_result decode",
+    "agent.LiftTextToolCalls text <tool_call> lift used by the in-kernel planner",
+    "gateway adjudicateProposed for each proposed call",
+    "agent.AnthropicResponseBlocks tool_use rendering",
+    "agent.AnthropicStopReason tool_use/end_turn mapping"
+  ],
+  "scripted_decode_only": true,
+  "why_scripted": "The Windows CPU host can prove the round-trip wiring quickly, but a live full Claude Code -Kernel prompt is GPU/Metal territory because CPU prefill of the full tool-schema prompt has hit the 900 s ceiling on Qwen2.5-1.5B-Q8.",
+  "turns": [
+    {
+      "turn": 1,
+      "planner_saw_tool_results": 0,
+      "assistant_stop_reason": "tool_use",
+      "assistant_tool_use": {
+        "name": "allow_list_files",
+        "input": {"path": "."},
+        "adjudication": {"kind": "ALLOW", "admitted": true}
+      },
+      "harness_tool_result": "main.go go.mod"
+    },
+    {
+      "turn": 2,
+      "planner_saw_tool_results": 1,
+      "assistant_stop_reason": "tool_use",
+      "assistant_tool_use": {
+        "name": "allow_read_file",
+        "input": {"path": "main.go"},
+        "adjudication": {"kind": "ALLOW", "admitted": true}
+      },
+      "harness_tool_result": "package main"
+    },
+    {
+      "turn": 3,
+      "planner_saw_tool_results": 2,
+      "assistant_stop_reason": "end_turn",
+      "assistant_text": "Both files are present; main.go is the entrypoint.",
+      "assistant_tool_use": null
+    }
+  ],
+  "claim": "The in-kernel Anthropic path closes the multi-turn tool_result round trip: call -> tool_result -> second call -> tool_result -> final answer, with every proposed call adjudicated.",
+  "honest_model_floor": {
+    "floor_for_reliable_tool_syntax": "7B-class tool model, e.g. Qwen2.5-Coder-7B Q8",
+    "not_floor": "Qwen2.5 1.5B and similar <=3B cached models intermittently emit malformed/raw tool calls under Claude Code's large multi-tool prompt.",
+    "observed_failure_modes": [
+      "malformed/raw <tool_call> text from small models",
+      "truncation or timeout before a complete tool call on the CPU full-prompt path",
+      "fail-closed ToolCallsDropped when an unclosed <tool_call> is lifted"
+    ],
+    "live_competence_gate": "A live -Kernel --probe multi-turn run with the full Claude Code prompt still needs a GPU/Metal decode lane or much longer CPU timeouts; this artifact does not claim that live pass."
+  }
+}

@@ -244,6 +244,25 @@ forward of Qwen2.5-1.5B-Q8 returned `stop_reason: tool_use` with an **adjudicate
 Claude-Code-style tool use, on fak's pure kernel, end to end. `-Kernel --smoke`
 returns a genuinely-decoded reply (not the mock's canned `tool_use`) in seconds.
 
+Multi-turn round-trip witness (#610):
+`TestInKernelMultiTurnToolLoopReachesAnthropicWire` plus
+`experiments/agent-live/inkernel-multiturn-toolloop-witness-2026-06-29.json`
+drive a Claude-Code-shaped three-turn transcript over the real `/v1/messages`
+handler: first text-form `<tool_call>` -> adjudicated `tool_use` -> inbound
+`tool_result` -> second text-form `<tool_call>` -> adjudicated `tool_use` ->
+second `tool_result` -> final `end_turn`. Only the model decode is scripted; the
+tool_result decode, text-to-structured lift, kernel adjudication, Anthropic
+rendering, and stop-reason mapping are the production in-kernel path.
+
+Honest model-floor note: the reliable floor for tool syntax under Claude Code's
+large multi-tool prompt remains a 7B-class tool model (for example
+Qwen2.5-Coder-7B Q8). The cached 1.5B/3B-class models can still emit malformed or
+raw tool calls, and on this Windows CPU host a full `-Kernel --probe` has also
+hit the 900 s timeout before completing the full prompt. Those failures are
+fail-closed by the existing `ToolCallsDropped` path when a `<tool_call>` is
+truncated, but a live multi-turn `-Kernel --probe` competence pass is still a
+GPU/Metal decode-lane witness, not a CPU claim in this repo change.
+
 > **Honest caveat — the CPU forward is too slow for a *full* Claude Code CLI turn.**
 > The wire, the kernel boundary, and the adjudication are proven above. But a real
 > `claude -p` turn sends its whole system prompt + every tool schema (~5–6K tokens),
