@@ -118,6 +118,8 @@ The highest-leverage fix is zero-infrastructure **cache-friendly prompt design**
 
 Beyond prompt design: place explicit cache breakpoints at the end of the growing history (not just the system prompt) and match the cache TTL to your tool latency; use tree-structured prefix caches (RadixAttention) for parallel tool calls and fan-out from a shared prefix; and use KV offloading / hierarchical caches to survive slow tool calls without re-prefilling. Mid-context (non-prefix) reuse — recomputing only the small fraction of cross-attention that actually changes — is the active research edge for "a tool result in the middle invalidates everything after it."
 
+One scope caveat that matters: **append-only and mask-don't-delete are forced only when you do *not* own the cache** — a provider prompt-cache or a third-party engine (vLLM/SGLang), whose reuse is a radix-tree prefix keyed from token 0, so any head edit goes cold. When the engine is *yours*, the KV cache is an addressable kernel object: keep the pre-RoPE keys and you can **delete** a span from the middle bit-exactly and re-RoPE the survivors, so a head edit need not cold-start the suffix. fak does exactly this (`KVCache.Evict`, proven `max|Δ|=0`; live behind a flag, the live HTTP loop still byte-quarantines today). The honest bound: that buys span *deletion*, not relocated-span *reuse* (a moved span still faults to selective recompute). See [The addressable KV cache](addressable-kv-cache.md).
+
 ## Frequently asked questions
 
 **Does tool output break the KV cache?**
