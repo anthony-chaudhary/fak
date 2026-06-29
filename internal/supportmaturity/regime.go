@@ -18,6 +18,39 @@ type RegimePlaybook struct {
 	Tooling     []string
 	ReportStyle string
 	WhoOperates string
+	StepBudget  StepBudget
+}
+
+// StepBudget is the work/effort horizon for a regime. It is the step-count dual
+// of dormancy horizons (#1178): dormancy budgets time away from work; this budgets
+// steps to advance a rung. Continuous regimes have no finite maximum.
+type StepBudget struct {
+	MinSteps   int
+	MaxSteps   int
+	Continuous bool
+}
+
+// ScopeDecision is the closed result of checking an observed step count against a
+// regime budget.
+type ScopeDecision string
+
+const (
+	ScopeWithinBudget ScopeDecision = "within-budget"
+	ScopeMisScoped    ScopeDecision = "re-regime-or-escalate"
+)
+
+// BudgetCheck is the read-back for "is this cell scoped to the right regime?"
+type BudgetCheck struct {
+	Regime   Regime
+	Steps    int
+	Budget   StepBudget
+	Decision ScopeDecision
+}
+
+// Over reports whether steps exceeds this finite budget. Continuous budgets never
+// trip the over-budget flag.
+func (b StepBudget) Over(steps int) bool {
+	return !b.Continuous && b.MaxSteps > 0 && steps > b.MaxSteps
 }
 
 var regimePlaybooks = []RegimePlaybook{
@@ -28,6 +61,7 @@ var regimePlaybooks = []RegimePlaybook{
 		Tooling:     []string{"idea-scout", "research notes", "scouts"},
 		ReportStyle: "a feasibility note -- is there a path worth a fence at all?",
 		WhoOperates: "human + scout",
+		StepBudget:  StepBudget{MinSteps: 1, MaxSteps: 9},
 	},
 	R1Prototype: {
 		ID:          "R1",
@@ -36,6 +70,7 @@ var regimePlaybooks = []RegimePlaybook{
 		Tooling:     []string{"dispatch worker", "get-to-green", "tests"},
 		ReportStyle: "green-or-red -- does it run end-to-end and pass a CI oracle?",
 		WhoOperates: "dispatch fleet",
+		StepBudget:  StepBudget{MinSteps: 10, MaxSteps: 100},
 	},
 	R2Optimize: {
 		ID:          "R2",
@@ -44,6 +79,7 @@ var regimePlaybooks = []RegimePlaybook{
 		Tooling:     []string{"rsiloop", "shipgate", "kernel/compiler tooling", "benches"},
 		ReportStyle: "a witnessed bench delta vs the reference baseline (x-speedup)",
 		WhoOperates: "autonomous RSI loop",
+		StepBudget:  StepBudget{MinSteps: 1000, MaxSteps: 10000},
 	},
 	R3Production: {
 		ID:          "R3",
@@ -52,6 +88,7 @@ var regimePlaybooks = []RegimePlaybook{
 		Tooling:     []string{"self-tax #1147 gate", "SLOs", "bgloop", "UX"},
 		ReportStyle: "a continuous SLO + regression-gate readout -- is parity held?",
 		WhoOperates: "gate + on-call",
+		StepBudget:  StepBudget{Continuous: true},
 	},
 }
 
@@ -105,6 +142,20 @@ func (g Regime) Playbook() RegimePlaybook {
 		return regimePlaybooks[g]
 	}
 	return regimePlaybooks[R0Explore]
+}
+
+// StepBudget returns the regime's work/effort horizon.
+func (g Regime) StepBudget() StepBudget { return g.Playbook().StepBudget }
+
+// CheckStepBudget flags work that has outgrown its regime's horizon. A mis-scoped
+// cell should either escalate to a human or be re-regimed to a longer-horizon loop.
+func (g Regime) CheckStepBudget(steps int) BudgetCheck {
+	b := g.StepBudget()
+	decision := ScopeWithinBudget
+	if b.Over(steps) {
+		decision = ScopeMisScoped
+	}
+	return BudgetCheck{Regime: g, Steps: steps, Budget: b, Decision: decision}
 }
 
 // PlaybookFor routes a Rung to its regime and returns that regime's playbook.

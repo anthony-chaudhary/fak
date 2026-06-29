@@ -150,6 +150,9 @@ func TestRegimePlaybookComplete(t *testing.T) {
 		if p.WhoOperates == "" {
 			t.Fatalf("regime %s has no who-operates", p.ID)
 		}
+		if !p.StepBudget.Continuous && p.StepBudget.MaxSteps <= 0 {
+			t.Fatalf("regime %s has no finite step budget", p.ID)
+		}
 		if seenID[p.ID] {
 			t.Fatalf("duplicate regime id %q", p.ID)
 		}
@@ -157,6 +160,60 @@ func TestRegimePlaybookComplete(t *testing.T) {
 			t.Fatalf("duplicate regime name %q", p.Name)
 		}
 		seenID[p.ID], seenName[p.Name] = true, true
+	}
+}
+
+// TestRegimeStepBudgets pins the work/effort horizon axis from #1251: R0 is
+// abandon-cheap, R1 is a 10-100 step prototype, R2 is a 1k-10k optimization loop,
+// and R3 is continuous production hold-work. The finite budgets are strictly
+// increasing, so a cell can be re-regimed instead of silently overrunning.
+func TestRegimeStepBudgets(t *testing.T) {
+	want := map[Regime]StepBudget{
+		R0Explore:    {MinSteps: 1, MaxSteps: 9},
+		R1Prototype:  {MinSteps: 10, MaxSteps: 100},
+		R2Optimize:   {MinSteps: 1000, MaxSteps: 10000},
+		R3Production: {Continuous: true},
+	}
+	for _, g := range Regimes {
+		got := g.StepBudget()
+		if got != want[g] {
+			t.Fatalf("%s StepBudget = %+v, want %+v", g, got, want[g])
+		}
+		if !got.Continuous && got.MinSteps > got.MaxSteps {
+			t.Fatalf("%s budget min > max: %+v", g, got)
+		}
+	}
+	if !(R0Explore.StepBudget().MaxSteps < R1Prototype.StepBudget().MinSteps &&
+		R1Prototype.StepBudget().MaxSteps < R2Optimize.StepBudget().MinSteps) {
+		t.Fatalf("finite step budgets are not ordered R0 << R1 << R2")
+	}
+	if !R3Production.StepBudget().Continuous {
+		t.Fatalf("R3 production must be a continuous horizon")
+	}
+}
+
+// TestRegimeStepBudgetFlagsMisScoped is the #1251 witness: a cell whose observed
+// work exceeds its regime budget is flagged for re-regime/escalation, while in-budget
+// and continuous production work stays within scope.
+func TestRegimeStepBudgetFlagsMisScoped(t *testing.T) {
+	cases := []struct {
+		name  string
+		g     Regime
+		steps int
+		want  ScopeDecision
+	}{
+		{"r0 in budget", R0Explore, 9, ScopeWithinBudget},
+		{"r0 over budget", R0Explore, 10, ScopeMisScoped},
+		{"r1 in budget", R1Prototype, 100, ScopeWithinBudget},
+		{"r1 over budget", R1Prototype, 101, ScopeMisScoped},
+		{"r2 in budget", R2Optimize, 10000, ScopeWithinBudget},
+		{"r2 over budget", R2Optimize, 10001, ScopeMisScoped},
+		{"r3 continuous", R3Production, 1_000_000, ScopeWithinBudget},
+	}
+	for _, tc := range cases {
+		if got := tc.g.CheckStepBudget(tc.steps); got.Decision != tc.want {
+			t.Fatalf("%s: decision = %s, want %s (check=%+v)", tc.name, got.Decision, tc.want, got)
+		}
 	}
 }
 
