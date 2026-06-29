@@ -54,7 +54,7 @@ durable parity floor.
 | Tokenizer byte-exact vs llama.cpp | `internal/tokenizer` oracle gate (#90) | byte-exact on the Qwen vocab + the 22-token ChatML smoke prompt | [`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md) |
 | GGUF tensor mapping (tiny + real) | `TestQwen35GGUFConfigCanonicalizesHybridTensorsAndRunsForward`, `TestOptionalQwen35GGUFMapsEveryTensorName` | all 851 real-GGUF tensors map; hybrid knobs derived | [`FAK-NATIVE-QWEN35-RESULTS.md`](FAK-NATIVE-QWEN35-RESULTS.md) |
 | Cached session == cacheless forward | `TestQwen35HybridSessionMatchesForwardAndPersistsState`, `TestQwen35HybridQuantTokenLoopPersistsState` | last-position logits match | [`FAK-NATIVE-QWEN35-RESULTS.md`](FAK-NATIVE-QWEN35-RESULTS.md) |
-| #71 Metal-hybrid-prefill CPU orchestration | `TestQwen35HybridViaMMMatchesCPUTemplate` (drives `prefillQwen35HybridViaMM`) | logits + KV cache + linear-attn cache match the proven CPU template within ~1e-6 Q8 float-order drift; green on `windows/amd64`, `CGO_ENABLED=0` | [`experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md`](../../experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §2 |
+| #71 Metal-hybrid-prefill CPU orchestration | `TestQwen35HybridViaMMMatchesCPUTemplate` (drives `prefillQwen35HybridViaMM`) | logits + KV cache + linear-attn cache match the proven CPU template within ~1e-6 Q8 float-order drift; green on `windows/amd64`, `CGO_ENABLED=0` — **re-built + re-run green 2026-06-29 at `cf8af435`** (#1242 build-hole closure: the prior dogfood's policy-blocked SKIP is now a real build, not a rounded pass) | [`experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md`](../../experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §2; [`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](../../experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json) |
 | q4_k GEMM/GEMV dispatch bit-identical | `TestQ4KGemmMatchesMatRows`, `TestQ4KGemmInt8MatchesMatRowsInt8`, `TestQ4KMatRowsMatchesF32` | batched GEMM bit-identical to per-token decode GEMV (f32 + int8-SDOT) — the q4_k majority adds **zero** drift | [`experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md`](../../experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md) §3; [`…decode-gemv-status…`](../../experiments/qwen36/metal-q4k-decode-gemv-status-2026-06-28.md) §3 |
 | #71 model-lane code LANDED on `main` | core `prefillQwen35HybridViaMM` (`c80d64fa`); Metal twin + gate + stub + `kv.go` dispatch (`5c065118`) | `dos commit-audit` `diff-witnessed` (`code_effect`) | [`…metal-hybrid-prefill-status…`](../../experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §1/§3 |
 
@@ -147,6 +147,20 @@ Mac verify node runs to re-confirm the gated half of §3 in one go — the `-tag
 build + GPU numerics parity + the clean (no co-resident llama-server) `FAK_QPROFILE` tok/s
 captures, against the recorded 51.55 / 7.29 bars. Until it is green on a witnessed commit,
 rows 1–8 of §3 stay `not yet`.
+
+**Build-hole closure (2026-06-29, #1242).** The prior ultracode dogfood (2026-06-28) left
+exactly one hole: its `build-sanity` lane was policy-blocked in the subagent sandbox and
+recorded as a **SKIP**, so the *host-independent* Go witness was never freshly built+run in
+that wave. #1242 closes that hole with a **real build**:
+`TestQwen35HybridViaMMMatchesCPUTemplate` was re-built and re-run **green** on a
+`windows/amd64` orchestrator at commit `cf8af435` (an ancestor of `origin/main`), both with
+the default build and `CGO_ENABLED=0`, and an independent multi-agent wave re-checked the
+witness (build re-run, `SKIP != PASS`, commit ancestry, oracle ids, secret-shape scrub). Witness:
+[`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](../../experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json).
+This closes a §2-class (host-independent) item; it does **not** move §3 — the Apple-Silicon
+gate (`tools/qwen36_mac_parity_gate.sh` Arms 1–3 on a real M3 Pro) was **not** run here, so
+rows 1–8 of §3 honestly **stay `not yet`**, gated on the M3 Pro verify node + the 27B GGUF +
+llama.cpp b9707 that this orchestrator does not have.
 
 ---
 

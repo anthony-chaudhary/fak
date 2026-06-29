@@ -1,0 +1,102 @@
+{
+  "schema": "fak.qwen36-parity-build-hole-closure.v1",
+  "issue": 1242,
+  "goal": "Close the ONE hole #1242 names: re-build+run the host-independent Go witness TestQwen35HybridViaMMMatchesCPUTemplate that the prior ultracode dogfood (2026-06-28) recorded as a policy-blocked SKIP, capture it as a gradeable witness at a witnessed commit, and have an independent multi-agent wave re-check it. The full Mac M3 Pro parity gate (tools/qwen36_mac_parity_gate.sh, Arms 1-3) is NOT run here: this orchestrator has no Apple Silicon, no 27B GGUF, and no llama.cpp b9707 — those arms stay host-blocked, recorded as SKIP, never as PASS.",
+  "captured_at": "20260629T071148Z",
+  "orchestrator_host": "windows/amd64 (MINGW64_NT-10.0-26200, x86_64) — no Apple Silicon, no NVIDIA GPU, no 27B artifact",
+  "commit": "cf8af435d4f26ec5318868b9943f3aee2053c6c1",
+  "commit_is_ancestor_of_origin_main": true,
+  "go_version": "go1.26.3 windows/amd64",
+  "honesty_note": "Per docs/proofs/00-METHOD.md a SKIP is not a PASS. Exactly one arm below ran here (the host-independent build-hole witness); it is recorded as a real PASS with its build output. The three Apple-Silicon/Metal/27B-gated arms are recorded as SKIP with the host capability each needs and the recorded prior witness each cites; none is rounded up to a pass. No speed/GPU/27B figure was re-measured on this box.",
+
+  "build_hole_arm": {
+    "dod_item": "Build hole closed: the host-independent Go witness TestQwen35HybridViaMMMatchesCPUTemplate builds + passes green in a real build (not a policy-blocked SKIP).",
+    "prior_state": "In the 2026-06-28 ultracode dogfood (experiments/agent-live/ultracode-dogfood-witness-20260628.json, wave_2 build-sanity lane) this build was POLICY_BLOCK/TERMINAL in the subagent sandbox -> recorded as SKIP, counted as 0 deliverables. #1242 closes that hole with a real build.",
+    "test": "TestQwen35HybridViaMMMatchesCPUTemplate",
+    "package": "github.com/anthony-chaudhary/fak/internal/model",
+    "drives": "prefillQwen35HybridViaMM (the #71 Metal-hybrid-prefill CPU orchestration template; matches logits + KV cache + linear-attn cache to the proven CPU template within ~1e-6 Q8 float-order drift)",
+    "host_independent": true,
+    "commands": [
+      "go test ./internal/model -run TestQwen35HybridViaMMMatchesCPUTemplate -count=1 -v",
+      "CGO_ENABLED=0 go test ./internal/model -run TestQwen35HybridViaMMMatchesCPUTemplate -count=1"
+    ],
+    "result": "PASS",
+    "output_tail": "=== RUN   TestQwen35HybridViaMMMatchesCPUTemplate\n--- PASS: TestQwen35HybridViaMMMatchesCPUTemplate (0.05s)\nPASS\nok  \tgithub.com/anthony-chaudhary/fak/internal/model\t1.583s\n(CGO_ENABLED=0 re-run: ok  github.com/anthony-chaudhary/fak/internal/model  0.364s)",
+    "package_builds": "go build ./internal/model -> exit 0"
+  },
+
+  "mac_gate_arms": {
+    "note": "These are the three arms of tools/qwen36_mac_parity_gate.sh. On this windows/amd64 box the gate's own precondition (uname -s == Darwin) fails, so the script would print 'SKIP: not macOS' and exit non-zero before any arm. Each arm is recorded here as SKIP with the host it needs; the recorded prior witness each cites is the figure of record, NOT re-measured.",
+    "arm1_correctness": {
+      "status": "SKIP",
+      "skip_reason": "needs an Apple M3 Pro + Qwen3.6-27B.q4_k_m.gguf (15.4 GB) + llama.cpp b9707; absent on this orchestrator",
+      "host_needed": "M3 Pro / darwin-arm64 + 27B GGUF + llama.cpp b9707",
+      "recorded_prior": {
+        "fak_token_ids": [248068, 198, 8160],
+        "llamacpp_token_ids": [248068, 198, 90700],
+        "first_divergence_index": 2,
+        "correctness_parity": false,
+        "interpretation": "REFUTED at 27B scale: two-token match then a near-tie argmax flip at token 3 (fak 'Here' logit 23.18 vs 2nd 90700 21.43; llama 'Thinking'). Prime suspect: the GDN delta-rule recurrent scan.",
+        "source_fak": "experiments/qwen36/native-gguf-q8-multitoken-parity-20260619.json",
+        "source_oracle": "experiments/qwen36/llamacpp-qwen36-multitoken-oracle-20260619.json"
+      }
+    },
+    "arm2_metal_gpu_numerics": {
+      "status": "SKIP",
+      "skip_reason": "needs macOS Metal toolchain for the -tags fakmetal build (go test ./internal/model -tags fakmetal -run Qwen35Hybrid); this box is windows/amd64",
+      "host_needed": "M3 Pro / darwin-arm64 + Xcode CLT (Metal) for -tags fakmetal",
+      "metal_gate_pass": null,
+      "recorded_prior": "code landed (c80d64fa core; 5c065118 Metal twin+gate+stub+kv.go dispatch); GPU f16 GEMM numerics parity unverified on-device (rollup 2026-06-28 §3 row 2)"
+    },
+    "arm3_speed_reported": {
+      "status": "SKIP",
+      "skip_reason": "needs the Mac engine + 27B GGUF + the swap rule (no co-resident llama-server on the 36 GiB box); not measurable here",
+      "host_needed": "M3 Pro / darwin-arm64 + 27B GGUF, no co-resident llama-server",
+      "fak_prefill_tok_s": null,
+      "fak_decode_tok_s": null,
+      "bar_prefill_tok_s": 51.55,
+      "bar_decode_tok_s": 7.29,
+      "recorded_prior": "fak M3 Pro single-stream decode 0.1 -> 0.9 -> 1.2 tok/s vs the 7.29 tok/s bar (~6x under); wall = command-buffer launch overhead, kernels bit-correct (rollup 2026-06-28 §4)"
+    }
+  },
+
+  "verification_wave": {
+    "status": "done",
+    "mode": "ultracode multi-agent (4 independent disjoint adversarial lanes, run via the Workflow orchestrator on this box; each instructed to REFUTE, not rubber-stamp; read-only, edits_made=none)",
+    "overall": "4/4 PASS — every claim corroborated with independent evidence; one actionable correction folded back (the scrub tool, see scrub.tool_mismatch_caught).",
+    "lanes": [
+      {
+        "lane": "build-rerun",
+        "verdict": "PASS",
+        "evidence": "Independently re-ran: `go test ./internal/model -run TestQwen35HybridViaMMMatchesCPUTemplate -count=1 -v` -> '--- PASS (0.05s)' / 'ok ... internal/model 1.361s' exit 0; `go build ./internal/model` exit 0; `CGO_ENABLED=0 go test ...` 'ok' exit 0. Bash was NOT policy-blocked here, so the prior wave's hole is genuinely re-runnable. Test body carries real assertions (assertQuantLogitsClose/assertKVCacheQuantClose/assertLinearAttnCacheQuantClose), not a no-op."
+      },
+      {
+        "lane": "witness-honesty",
+        "verdict": "PASS",
+        "evidence": "(a) build_hole_arm.result=PASS reproduced; (b) all three mac_gate_arms status=SKIP, none rounded to a pass; (c) recorded_prior ids match the pinned sources EXACTLY (fak [248068,198,8160], llama [248068,198,90700], divergence index 2); (d) commit cf8af435 confirmed ancestor of origin/main (merge-base --is-ancestor exit 0); (e) all DoD fields present. Non-blocking notes: cf8af435 is a 'fix(gitgate)' commit (a witnessed ancestor, which is all the witness claims), and the witness file is untracked (an in-flight artifact, expected)."
+      },
+      {
+        "lane": "scrub-leak",
+        "verdict": "PASS",
+        "evidence": "leak_scan.py exit 0 but VACUOUS (Go-leak scanner, 0 .go files); substantive scrub confirmed clean via `check_secret_shapes.py --audit-tree` (exit 0), exhaustive shape greps (IPv4/Users/.local/tailnet/keys -> 0), and a recursive per-field JSON shape scan of this witness (NONE). Only host token is the permitted MINGW64_NT-10.0-26200 / windows/amd64.",
+        "actionable_catch": "the issue-named tools/leak_scan.py is the WRONG tool for a secret scrub; the witness scrub block was corrected to cite check_secret_shapes.py as the substantive gate (see scrub below)."
+      },
+      {
+        "lane": "rollup-accuracy",
+        "verdict": "PASS",
+        "evidence": "Rollup §2 row now cites the 2026-06-29 re-run at cf8af435 and links this witness; §6 'Build-hole closure' note states the build hole is closed host-independently AND that §3 rows 1-8 stay 'not yet' (no claim the Mac gate ran); numeric audit of all added lines found NO new benchmark figure (the 51.55/7.29 bars do not appear in any added line); §3 untouched (its REFUTED row intact). Commit ancestry independently re-confirmed."
+      }
+    ]
+  },
+
+  "scrub": {
+    "status": "clean",
+    "substantive_gate": "tools/check_secret_shapes.py --audit-tree -> 'secret-shape: clean (tracked tree).' exit 0 (covers the tracked rollup edit)",
+    "untracked_witness_coverage": "this witness JSON is still untracked, so --audit-tree does not cover it; it was scanned by direct shape greps (IPv4 / /Users / .local / ts.net / tailnet / ssh keys / api tokens -> 0 hits) and a recursive per-field JSON shape scan (NONE), both clean",
+    "tool_mismatch_caught": "the issue body and this witness initially named tools/leak_scan.py as THE scrub gate; the verification wave found leak_scan.py is a Go goroutine/memory-leak candidate scanner (walks only .go files), so its exit-0 'clean' on a .json/.md is vacuous and proves nothing about secret leakage. leak_scan.py was still run (exit 0) but the real secret gate is check_secret_shapes.py, recorded above.",
+    "result": "no real host/user/IP/key in any committed artifact"
+  },
+
+  "overall_verdict": "BUILD_HOLE_CLOSED (host-independent witness green at a witnessed commit); MAC_GATE_HOST_BLOCKED (Arms 1-3 require an Apple M3 Pro this orchestrator lacks — recorded as SKIP, not PASS).",
+  "dod_residual": "The full Mac M3 Pro run of tools/qwen36_mac_parity_gate.sh (Arms 1-3 emitting a single witness JSON captured ON an Apple-Silicon node) remains open — it needs the M3 Pro verify node + the 27B GGUF + llama.cpp b9707. Smallest next step: run `bash tools/qwen36_mac_parity_gate.sh` on that node and commit the emitted experiments/agent-live/qwen36-mac-parity-gate-<ts>.json."
+}
