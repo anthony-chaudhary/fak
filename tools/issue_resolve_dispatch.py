@@ -21,6 +21,15 @@ In-flight de-dup: it skips an issue that already has a live resolution worker (a
 dispatch log naming ``#N`` whose process is still alive) so two ticks never storm
 the same issue.
 
+Pre-spawn lane-lease gate (#1310): it also HOLDS the target lane before launching
+rather than trusting the worker to self-arbitrate. fak's taxonomy is one worker
+per leaf tree, so a second worker on a lane that already has a live one co-edits
+the same files. The auto-pick reroutes around held lanes (busiest FREE lane); an
+explicitly-named lane that is held is refused ``LANE_BUSY`` (COLLISION_RISK)
+instead of raced. This is the upstream half of the verified loop — deny the
+collision by structure, *before* the spawn — paired with the downstream
+commit-time closure audit (the ``#N``-in-subject witness, still the close arm).
+
 Loop ledger: the CLI path appends this dispatcher tick to fak's durable loop
 ledger by default (``fak loop append``): every tick records ``fire`` and
 admitted/refused ``admit`` rows, live spawns record ``start``, and successful ticks
@@ -68,6 +77,9 @@ RUNS_DIRNAME = ".dispatch-runs"
 WAVE_SIDECAR_SUFFIX = ".wave"
 ACCOUNT_SIDECAR_SUFFIX = ".account"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
+# The `lane=<L>` field of the `# fak-spawn` header `spawn_issue_worker` flushes as
+# the first line of every worker log (used by the pre-spawn lane-lease gate, #1310).
+_SPAWN_LANE_RE = re.compile(r"\blane=(\S+)")
 _RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
 DEFAULT_SPAWN_PROBE_S = 5.0
@@ -156,6 +168,59 @@ def live_resolution_issues(
                 pid_file, alive=alive, probe=probe):
                 live.add(int(m.group(1)))
     return live
+
+
+def _spawn_header_lane(log: Path) -> str | None:
+    """Parse ``lane=<L>`` from a worker log's ``# fak-spawn`` header — its first
+    line, flushed before exec by :func:`spawn_issue_worker`. Returns ``None`` when
+    the log is unreadable or has no recoverable lane field (best effort)."""
+    try:
+        with open(log, "r", encoding="utf-8", errors="replace") as fh:
+            head = fh.readline()
+    except OSError:
+        return None
+    if not head.startswith("# fak-spawn"):
+        return None
+    m = _SPAWN_LANE_RE.search(head)
+    return m.group(1) if m else None
+
+
+def live_resolution_lanes(
+    runs_dir: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+) -> set[str]:
+    """Lanes that already hold a LIVE resolution worker — the pre-spawn collision
+    set (#1310). fak's lane taxonomy is ONE worker per leaf tree (``dos.toml``: a
+    named lane serializes even on disjoint sub-trees), so a second worker on a
+    held lane co-edits the same files. Read the ``lane=`` field the spawn header
+    stamps into each ``resolve-<N>-<stamp>.log`` and keep only the lanes whose
+    worker pid is still alive — the SAME identity gate as
+    :func:`live_resolution_issues`. Best effort: a log we cannot parse, or whose
+    pid is gone, contributes no lane."""
+    lanes: set[str] = set()
+    if not runs_dir.is_dir():
+        return lanes
+    if alive is None and probe is None:
+        try:
+            import psutil  # type: ignore
+            alive = {p.pid for p in psutil.process_iter()}
+        except ImportError:
+            alive = None
+    for log in runs_dir.glob("resolve-*.log"):
+        if not _LOG_ISSUE_RE.search(log.name):
+            continue
+        pid_file = log.with_suffix(".pid")
+        if not pid_file.exists():
+            continue
+        if not dispatch_preflight.resolve_sidecar_pid_is_live(
+                pid_file, alive=alive, probe=probe):
+            continue
+        lane = _spawn_header_lane(log)
+        if lane:
+            lanes.add(lane)
+    return lanes
 
 
 def recently_attempted_issues(runs_dir: Path, *, cooldown_min: int,
@@ -1325,7 +1390,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     effective_exclude = set(exclude_lanes or set())
     if realloc["claimed_lanes"]:
         effective_exclude -= {lc for lc in realloc["claimed_lanes"] if lc}
-    pick = lane_issue_numbers(root, lane, exclude=effective_exclude)
+    # Pre-spawn lane-lease gate (#1310): the dispatcher HOLDS the target lane
+    # before launching instead of trusting the worker to self-arbitrate. fak's
+    # taxonomy is one worker per leaf tree, so a second worker on a lane that
+    # already has a live one co-edits the same files. Fold the held lanes into the
+    # busiest-pick exclude so the auto-pick reroutes to a FREE lane (queued
+    # elsewhere); an explicitly-named lane that is held is refused below
+    # (COLLISION_RISK) rather than raced.
+    held_lanes = live_resolution_lanes(runs_dir)
+    pick = lane_issue_numbers(root, lane, exclude=effective_exclude | held_lanes)
     chosen_lane = pick.get("lane")
     live_issues = live_resolution_issues(runs_dir)
     cooled = recently_attempted_issues(runs_dir, cooldown_min=cooldown_min)
@@ -1347,7 +1420,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen_lane, "lane_issue_count": len(pick.get("numbers") or []),
         "cooled_recently": sorted(cooled), "target_issue": target,
-        "already_live": sorted(live_issues),
+        "already_live": sorted(live_issues), "held_lanes": sorted(held_lanes),
     }
 
     if not pre_ok:
@@ -1358,6 +1431,19 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     if not chosen_lane:
         payload.update({"ok": False, "action": "no_lane", "verdict": "NO_LANE",
                         "reason": "no lane has open issues (router empty/error)"})
+        return finish(payload)
+    if chosen_lane in held_lanes:
+        # The lane lease is held by a live worker (only reachable via an explicit
+        # --lane, since the auto-pick excluded held lanes above). Refuse instead of
+        # racing a second worker onto the same leaf tree — the upstream half of the
+        # verified loop (#1310): deny the collision by structure, before the spawn.
+        payload.update({"ok": False, "action": "lane_busy", "verdict": "LANE_BUSY",
+                        "reason": (f"lane '{chosen_lane}' already holds a live "
+                                   f"resolution worker (held lanes "
+                                   f"{sorted(held_lanes)}); refusing COLLISION_RISK "
+                                   f"— the dispatcher holds the lane lease before "
+                                   f"launching, it does not race a second worker "
+                                   f"onto the same leaf tree")})
         return finish(payload)
     if target is None:
         payload.update({"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",

@@ -101,6 +101,77 @@ class LiveResolutionIssuesTest(unittest.TestCase):
             self.assertEqual(mod.live_resolution_issues(runs, probe=probe), set())
 
 
+class LiveResolutionLanesTest(unittest.TestCase):
+    """The pre-spawn lane-lease set (#1310): a lane is HELD when it already has a
+    live worker. Read from the ``# fak-spawn ... lane=<L>`` header
+    ``spawn_issue_worker`` flushes, gated by the SAME sidecar-pid liveness check
+    as the live-issue set, so a recycled PID never falsely holds a lane."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, lane: str, *, pid: int,
+            sidecar_mtime: float, header: bool = True) -> None:
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        body = (f"# fak-spawn {stamp} issue={issue} lane={lane} backend=claude "
+                f"argv0=claude.exe\n") if header else ""
+        log.write_text(body, encoding="utf-8")
+        pid_file = log.with_suffix(".pid")
+        pid_file.write_text(str(pid), encoding="utf-8")
+        os.utime(pid_file, (sidecar_mtime, sidecar_mtime))
+
+    def test_held_lane_when_live_worker_header_names_it(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 717, "20260625-062210", "docs", pid=101, sidecar_mtime=now)
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                        "name": "claude.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolution_lanes(runs, probe=probe), {"docs"})
+
+    def test_recycled_pid_does_not_hold_its_lane(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 718, "20260625-060712", "gateway", pid=102, sidecar_mtime=now)
+            def probe(pid):  # a different process owns the PID now → worker is gone
+                return {"alive": True, "create_time": now + 60 * 60,
+                        "name": "chrome.exe", "cmdline": "chrome.exe --type=renderer"}
+            self.assertEqual(mod.live_resolution_lanes(runs, probe=probe), set())
+
+    def test_headerless_log_contributes_no_lane(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # live pid but a 0-byte log (died before exec wrote the header) → its
+            # lane is unknowable, so it holds nothing (best effort, fail-open).
+            self._mk(runs, 719, "20260625-070000", "docs", pid=103,
+                     sidecar_mtime=now, header=False)
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                        "name": "claude.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolution_lanes(runs, probe=probe), set())
+
+    def test_two_live_workers_hold_two_lanes(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 717, "20260625-062210", "docs", pid=101, sidecar_mtime=now)
+            self._mk(runs, 720, "20260625-063000", "gateway", pid=104, sidecar_mtime=now)
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                        "name": "claude.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolution_lanes(runs, probe=probe),
+                             {"docs", "gateway"})
+
+
 class TimedOutWorkerReapTest(unittest.TestCase):
     def _mk(self, runs: Path, issue: int, stamp: str, *, pid: int,
             sidecar_mtime: float) -> Path:
@@ -353,11 +424,12 @@ class EvaluateTest(unittest.TestCase):
     }
 
     def _patch(self, mod, *, pre, pick, live_issues=None, cooled=None,
-               prompt_chars=900) -> None:
+               held_lanes=None, prompt_chars=900) -> None:
         mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
         mod.issue_dispatch.preflight = lambda root, **kw: pre
         mod.lane_issue_numbers = lambda root, lane, exclude=None: pick
         mod.live_resolution_issues = lambda runs_dir: set(live_issues or [])
+        mod.live_resolution_lanes = lambda runs_dir: set(held_lanes or [])
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
@@ -401,6 +473,7 @@ class EvaluateTest(unittest.TestCase):
         mod.lane_issue_numbers = lambda root, lane, exclude=None: {
             "lane": "gateway", "numbers": [467], "by_lane_count": {"gateway": 1}}
         mod.live_resolution_issues = lambda runs_dir: set()
+        mod.live_resolution_lanes = lambda runs_dir: set()
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}"}
@@ -421,6 +494,44 @@ class EvaluateTest(unittest.TestCase):
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False)
         self.assertEqual(p["target_issue"], 466)   # 467 skipped (live)
+
+    def test_refuses_lane_busy_when_explicit_lane_already_held(self) -> None:
+        # The concurrency witness (#1310): a second tick targeting a lane that
+        # already holds a live worker is REFUSED (COLLISION_RISK), not raced onto
+        # the same leaf tree. spawn_issue_worker is the `boom` stub, so reaching it
+        # would fail the test — the gate must short-circuit before the live spawn.
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "docs", "numbers": [310, 309],
+                          "by_lane_count": {"docs": 2}},
+                    held_lanes=["docs"])
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane="docs", live=True)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "LANE_BUSY")
+        self.assertEqual(p["action"], "lane_busy")
+        self.assertEqual(p["held_lanes"], ["docs"])
+        self.assertIn("docs", p["reason"])
+
+    def test_autopick_reroutes_around_a_held_lane(self) -> None:
+        # The "queued elsewhere" half (#1310): the busiest-pick must EXCLUDE a held
+        # lane so the dispatcher reroutes to a free lane instead of refusing.
+        mod = load()
+        seen: dict = {}
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467], "by_lane_count": {}},
+                    held_lanes=["docs"])
+
+        def _router(root, lane, exclude=None):
+            seen["exclude"] = set(exclude or set())
+            return {"lane": "gateway", "numbers": [467], "by_lane_count": {"gateway": 1}}
+        mod.lane_issue_numbers = _router
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertIn("docs", seen["exclude"])     # held lane folded into the exclude
+        self.assertEqual(p["lane"], "gateway")       # rerouted to a free lane
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["held_lanes"], ["docs"])
 
     def test_skips_cooled_issue_and_advances(self) -> None:
         mod = load()
@@ -642,6 +753,7 @@ class BackendRoutingTest(unittest.TestCase):
         mod.lane_issue_numbers = lambda root, lane, exclude=None: {
             "lane": "docs", "numbers": [260], "by_lane_count": {"docs": 1}}
         mod.live_resolution_issues = lambda runs_dir: set()
+        mod.live_resolution_lanes = lambda runs_dir: set()
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"t{n}"}
@@ -944,6 +1056,9 @@ class EvaluateBackendHealthTest(unittest.TestCase):
             "timeout_s": None, "live": k.get("live"),
             "candidates": [], "reaped": [], "would_reap": []}
         mod.prune_dead_sidecars = lambda runs_dir, **k: {"pruned": []}
+        # Hermetic: no lane is held, so the pre-spawn lane-lease gate (#1310) never
+        # reads the real .dispatch-runs and never trips for these backend-health tests.
+        mod.live_resolution_lanes = lambda runs_dir: set()
 
     def test_dead_backend_self_suppresses_without_spawning(self) -> None:
         mod = load()
