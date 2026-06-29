@@ -44,8 +44,8 @@ this index plus these hashes: re-derive them with `sha256sum <path>` and compare
 
 | Artifact | Role in the packet | SHA-256 |
 |---|---|---|
-| `experiments/agent-live/terminalbench-official-run-contract-20260626.json` | Official-run contract (machine-readable gate): task selection, both arm commands, score-evidence link, gates, required-before-claim, `result_claim_allowed=false`. | `c89798de6f3205a695268b79e46efdd3d3192eb6fa72fbc07cd4ea7d4da7bd94` |
-| `experiments/agent-live/terminalbench-official-run-contract-20260626.md` | Human-readable render of the contract above. | `99f4f595604e8c17081e35008bdb4dce5605f34ee205cf1eb157b8ab49bee65f` |
+| `experiments/agent-live/terminalbench-official-run-contract-20260626.json` | Official-run contract (machine-readable gate): task selection, both arm commands, score-evidence link, gates, required-before-claim, `result_claim_allowed=false`. | `6d7e7ca55197fa0c098f32308974f314ea98cd45f2650db20906300e02dd3eb8` |
+| `experiments/agent-live/terminalbench-official-run-contract-20260626.md` | Human-readable render of the contract above. | `151a5f2f33e7f2da5a6f7e23b8ba16b8916b6a9c6d2228048da1cb5de6a651db` |
 | `experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.json` | Rehearsal host-readiness preflight (#900): machine-readable **environment metadata** — the Harbor, Docker-engine, `OPENAI_API_KEY`, and fak-gateway gates this host passes or fails — and the checked-in witness that the credentialed run is `BLOCKED_PREFLIGHT`. Never a result; `result_claim_allowed=false`. | `e7963ed751290b299bd5332bde9939628c719b0d91815dbed1b0ce632e87c58a` |
 | `experiments/agent-live/terminalbench-21-rehearsal-preflight-20260626.md` | Human-readable render of the preflight above. | `e90080cd0945cc72a465982117838143e3105d85c574152c34a08f3568422c10` |
 | `experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json` | Adapter smoke (`SIMULATED_LOCAL_FIXTURE`): raw-vs-fak command-boundary shape over a recorded trace. Adapter evidence only — never a leaderboard number. | `2db95bdaa778e2df0733de41973fc895bfae01ea911ffd5a1a8f8d521c43f31c` |
@@ -100,12 +100,12 @@ into this index before the packet leaves precredential state:
 
 - benchmark-native Terminal-Bench task ids for the selected fixed subset;
 - the Terminal-Bench image / environment-setup manifest for each selected task;
-- the **raw** arm `tb run` directory — command log + official test output over
+- the **raw** arm Harbor run directory — command log + official test output over
   those exact task ids;
-- the **fak** arm `tb run` directory — command log + official test output over
+- the **fak** arm Harbor run directory — command log + official test output over
   the same task ids, model, image, budget, concurrency, and retry policy;
 - a fak per-command verdict/evidence log joined to the tb command log and test
-  output (join keys: `task_id`, `turn_or_command_index`, `command`, `cwd`,
+  output (join keys: `task_id`, `command_index`, `command`, `cwd`,
   `evidence_id`, `state_hash`);
 - a raw-vs-fak **compare artifact** reporting benchmark-native solve separately
   from safe resolve, blocked dangerous actions, unnecessary blocks, runtime, and
@@ -134,7 +134,7 @@ for the leaderboard statistic:
 | Safe-resolve / blocked-dangerous / unnecessary-blocks | fak adjudication outcomes on the same runs | **fak-SPECIFIC** — mediated verdict evidence, not a leaderboard number |
 | Cost / token budget per task | raw vs fak | **fak-SPECIFIC** — observed, label whose number it is |
 | Artifact paths + SHA-256 | contract, raw dir, fak dir, compare, gateway witness | this index |
-| Reproduce command | the exact `tb run` + fak gateway invocation | the contract arms |
+| Reproduce command | the exact `harbor run` + fak gateway invocation | the contract arms |
 | Limitations | parity fences, subset scope, statistic used | plain |
 
 Until that row exists, no Terminal-Bench number may appear in `README.md`, the

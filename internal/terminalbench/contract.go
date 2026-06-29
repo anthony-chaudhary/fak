@@ -18,6 +18,7 @@ type OfficialRunContractInput struct {
 	Model                string
 	Agent                string
 	FakAgent             string
+	PublicAgentLabel     string
 	NConcurrent          int
 	RawCommand           string
 	FakCommand           string
@@ -66,11 +67,14 @@ type ContractTaskCandidate struct {
 }
 
 type ContractModel struct {
-	Agent             string `json:"agent"`
-	FakAgent          string `json:"fak_agent"`
-	Model             string `json:"model"`
-	FakGateway        string `json:"fak_gateway"`
-	SameModelRequired bool   `json:"same_model_required"`
+	Agent               string `json:"agent"`
+	FakAgent            string `json:"fak_agent"`
+	PublicAgentLabel    string `json:"public_agent_label,omitempty"`
+	Model               string `json:"model"`
+	FakGateway          string `json:"fak_gateway"`
+	SameAgentRequired   bool   `json:"same_agent_required"`
+	SameModelRequired   bool   `json:"same_model_required"`
+	HarborCodexRequired bool   `json:"harbor_codex_required"`
 }
 
 type ContractArm struct {
@@ -103,19 +107,19 @@ type ContractGate struct {
 
 func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 	if in.DatasetName == "" {
-		in.DatasetName = "terminal-bench-core"
-	}
-	if in.DatasetVersion == "" {
-		in.DatasetVersion = "0.1.1"
+		in.DatasetName = "terminal-bench/terminal-bench-2-1"
 	}
 	if in.Model == "" {
-		in.Model = "shared-agent-model"
+		in.Model = "gpt-5.5"
 	}
 	if in.Agent == "" {
-		in.Agent = "terminus"
+		in.Agent = "codex"
 	}
 	if in.FakAgent == "" {
-		in.FakAgent = in.Agent + "-through-fak"
+		in.FakAgent = in.Agent
+	}
+	if in.PublicAgentLabel == "" && strings.TrimSpace(in.Agent) == "codex" {
+		in.PublicAgentLabel = "codex-cli"
 	}
 	if in.NConcurrent <= 0 {
 		in.NConcurrent = 1
@@ -124,23 +128,27 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 	taskIDs := contractTaskIDs(tasks)
 	gates := []ContractGate{
 		{Name: "candidate_task_ids", OK: len(taskIDs) > 0, Detail: candidateTaskDetail(len(taskIDs))},
-		{Name: "official_dataset_pin", OK: strings.TrimSpace(in.DatasetName) != "" && strings.TrimSpace(in.DatasetVersion) != "", Detail: datasetPin(in.DatasetName, in.DatasetVersion)},
+		{Name: "official_dataset_pin", OK: strings.TrimSpace(in.DatasetName) != "", Detail: datasetPin(in.DatasetName, in.DatasetVersion)},
 		{Name: "same_task_ids_required", OK: true, Detail: "raw and fak official runs must use the same benchmark-native Terminal-Bench task ids"},
 		{Name: "same_image_required", OK: true, Detail: "raw and fak official runs must use the same benchmark-provided image or environment setup for each task"},
 		{Name: "same_budget_required", OK: true, Detail: "raw and fak official runs must use the same task budget and retry policy"},
+		{Name: "same_agent_required", OK: strings.TrimSpace(in.Agent) == strings.TrimSpace(in.FakAgent), Detail: fmt.Sprintf("raw=%s fak=%s", strings.TrimSpace(in.Agent), strings.TrimSpace(in.FakAgent))},
 		{Name: "same_model_required", OK: strings.TrimSpace(in.Model) != "", Detail: strings.TrimSpace(in.Model)},
+		{Name: "harbor_codex_adapter", OK: strings.TrimSpace(in.Agent) == "codex" && strings.TrimSpace(in.FakAgent) == "codex", Detail: "Harbor adapter name must be codex; codex-cli is only the public leaderboard label"},
 		{Name: "raw_arm_command", OK: strings.TrimSpace(in.RawCommand) != "", Detail: strings.TrimSpace(in.RawCommand)},
 		{Name: "fak_arm_command", OK: strings.TrimSpace(in.FakCommand) != "", Detail: strings.TrimSpace(in.FakCommand)},
-		{Name: "official_harness_required", OK: true, Detail: "external tb run output with benchmark-native test results is required before promotion"},
+		{Name: "fak_gateway_agent_env", OK: fakGatewayAgentEnvReady(in.FakCommand), Detail: "fak Harbor arm must pass OPENAI_BASE_URL, OPENAI_API_BASE, and OPENAI_API_KEY through --agent-env"},
+		{Name: "fak_gateway_host_allowlist", OK: strings.Contains(in.FakCommand, "--allow-agent-host"), Detail: "fak Harbor arm must allow the Docker agent to reach the host fak gateway"},
+		{Name: "official_harness_required", OK: true, Detail: "external Harbor run output with benchmark-native test results is required before promotion"},
 	}
 	return OfficialRunContract{
 		Schema:               OfficialRunContractSchema,
 		GeneratedAt:          in.GeneratedAt,
-		Benchmark:            "Terminal-Bench command-boundary official-run contract",
+		Benchmark:            "Terminal-Bench Harbor/Codex official-run contract",
 		Status:               contractStatus(gates),
 		EvidenceClass:        "EXTERNAL_RUN_CONTRACT",
 		LocalFixtureArtifact: strings.TrimSpace(in.LocalFixtureArtifact),
-		ClaimBoundary:        "External-run contract only: fixes the raw/fak Terminal-Bench command shape, shared task/model/image/budget requirements, evidence paths, and promotion gates. It is not an official result until benchmark-native tb run task logs, test output, and a raw-vs-fak compare artifact are checked in.",
+		ClaimBoundary:        "External-run contract only: fixes the raw/fak Harbor command shape, shared task/model/image/budget requirements, fak gateway adapter wiring, evidence paths, and promotion gates. It is not an official result until benchmark-native Harbor task logs, test output, gateway witness, and a raw-vs-fak compare artifact are checked in.",
 		TaskSelection: ContractTaskSelection{
 			CandidateSuite:          strings.TrimSpace(in.SuitePath),
 			CandidateTaskIDs:        taskIDs,
@@ -154,11 +162,14 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 			NConcurrent:             in.NConcurrent,
 		},
 		Model: ContractModel{
-			Agent:             strings.TrimSpace(in.Agent),
-			FakAgent:          strings.TrimSpace(in.FakAgent),
-			Model:             strings.TrimSpace(in.Model),
-			FakGateway:        strings.TrimSpace(in.FakGateway),
-			SameModelRequired: true,
+			Agent:               strings.TrimSpace(in.Agent),
+			FakAgent:            strings.TrimSpace(in.FakAgent),
+			PublicAgentLabel:    strings.TrimSpace(in.PublicAgentLabel),
+			Model:               strings.TrimSpace(in.Model),
+			FakGateway:          strings.TrimSpace(in.FakGateway),
+			SameAgentRequired:   true,
+			SameModelRequired:   true,
+			HarborCodexRequired: true,
 		},
 		Arms: []ContractArm{
 			{
@@ -167,9 +178,9 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 				Command:   strings.TrimSpace(in.RawCommand),
 				OutputDir: strings.TrimSpace(in.RawOutputDir),
 				RequiredArtifacts: []string{
-					"tb run directory for each selected task",
-					"benchmark-native command log",
-					"benchmark-native test output or result summary",
+					"Harbor run directory for each selected task",
+					"Harbor command log",
+					"Harbor test output or result summary",
 				},
 			},
 			{
@@ -178,24 +189,25 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 				Command:   strings.TrimSpace(in.FakCommand),
 				OutputDir: strings.TrimSpace(in.FakOutputDir),
 				RequiredArtifacts: []string{
-					"tb run directory for each selected task",
-					"benchmark-native command log",
-					"benchmark-native test output or result summary",
+					"Harbor run directory for each selected task",
+					"Harbor command log",
+					"Harbor test output or result summary",
 					"fak verdict/evidence log linked to mediated terminal commands",
+					"fak gateway log witness proving Dockerized Codex traffic reached fak",
 				},
 			},
 		},
 		ScoreEvidenceLink: terminalBenchScoreEvidenceLink(in.RawOutputDir, in.FakOutputDir),
 		UpstreamRefs: []UpstreamRef{
 			{
-				Name:  "Terminal-Bench first steps",
-				URL:   "https://www.tbench.ai/docs/first-steps",
-				Notes: "Documents tb run with dataset, agent, model, and task-id selection.",
+				Name:  "Harbor job CLI",
+				URL:   "https://github.com/harbor-framework/harbor/blob/main/src/harbor/cli/jobs.py",
+				Notes: "Defines harbor run/job start flags including dataset, agent, model, --agent-env, --allow-agent-host, and --allow-environment-host.",
 			},
 			{
-				Name:  "Terminal-Bench adapters",
-				URL:   "https://www.tbench.ai/docs/adapters",
-				Notes: "Documents benchmark-native task subsets and parity experiments through the Terminal-Bench harness.",
+				Name:  "Harbor agent names",
+				URL:   "https://github.com/harbor-framework/harbor/blob/main/src/harbor/models/agent/name.py",
+				Notes: "Defines codex as the valid Harbor adapter name; codex-cli is the public leaderboard label only.",
 			},
 			{
 				Name:  "Terminal-Bench leaderboard logs",
@@ -219,14 +231,17 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 			"cost_or_token_budget",
 			"fak_denied_commands",
 			"fak_verdict_evidence_completeness",
+			"fak_gateway_model_http_success",
+			"fak_gateway_inference_turn_observed",
 		},
 		RequiredBeforeClaim: []string{
 			"benchmark-native Terminal-Bench task ids for the selected fixed subset",
 			"Terminal-Bench image or environment setup manifest for each selected task",
-			"raw-arm tb run directory with command log and official test output over those exact task ids",
-			"fak-arm tb run directory with command log and official test output over those exact task ids",
-			"proof that raw and fak arms used the same model, task ids, image or environment, budget, concurrency, and retry policy",
-			"fak per-command verdict/evidence log linked to the corresponding tb run command log and test output",
+			"raw-arm Harbor run directory with command log and official test output over those exact task ids",
+			"fak-arm Harbor run directory with command log and official test output over those exact task ids",
+			"proof that raw and fak arms used the same Harbor codex adapter, model, task ids, image or environment, budget, concurrency, and retry policy",
+			"fak per-command verdict/evidence log linked to the corresponding Harbor command log and test output",
+			"gateway witness proving at least one structured model HTTP success and one gateway inference-turn event from the Dockerized Codex agent",
 			"raw/fak compare artifact reporting benchmark-native solve separately from safe resolve, blocked dangerous actions, unnecessary blocks, runtime, cost or token budget, and evidence completeness",
 		},
 		ResultClaimAllowed: false,
@@ -249,8 +264,11 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 	fmt.Fprintf(&b, "## Task Selection\n\n")
 	fmt.Fprintf(&b, "- Candidate suite: `%s`\n", c.TaskSelection.CandidateSuite)
 	fmt.Fprintf(&b, "- Candidate task ids: `%s`\n", strings.Join(c.TaskSelection.CandidateTaskIDs, ", "))
-	fmt.Fprintf(&b, "- Official dataset: `%s==%s`\n", c.TaskSelection.OfficialDataset, c.TaskSelection.OfficialDatasetVersion)
+	fmt.Fprintf(&b, "- Official dataset: `%s`\n", datasetPin(c.TaskSelection.OfficialDataset, c.TaskSelection.OfficialDatasetVersion))
 	fmt.Fprintf(&b, "- Concurrent tasks: `%d`\n\n", c.TaskSelection.NConcurrent)
+	if c.Model.PublicAgentLabel != "" {
+		fmt.Fprintf(&b, "- Public agent label: `%s`\n\n", c.Model.PublicAgentLabel)
+	}
 	if len(c.TaskSelection.CandidateTasks) > 0 {
 		fmt.Fprintf(&b, "| Candidate | Image | Budget turns | Test oracle |\n")
 		fmt.Fprintf(&b, "|---|---|---:|---|\n")
@@ -296,25 +314,33 @@ func terminalBenchScoreEvidenceLink(rawOutputDir, fakOutputDir string) ContractS
 	return ContractScoreEvidenceLink{
 		Required: true,
 		OfficialTestArtifacts: []string{
-			joinArtifactPath(rawOutputDir, "tb-results.json"),
-			joinArtifactPath(rawOutputDir, "command-log.jsonl"),
-			joinArtifactPath(fakOutputDir, "tb-results.json"),
-			joinArtifactPath(fakOutputDir, "command-log.jsonl"),
+			joinArtifactPath(rawOutputDir, "harbor-test-results.json"),
+			joinArtifactPath(rawOutputDir, "harbor-command-log.jsonl"),
+			joinArtifactPath(fakOutputDir, "harbor-test-results.json"),
+			joinArtifactPath(fakOutputDir, "harbor-command-log.jsonl"),
 		},
 		FakCommandEvidenceFiles: []string{
 			joinArtifactPath(fakOutputDir, "fak-command-evidence.jsonl"),
 			joinArtifactPath(fakOutputDir, "raw-fak-command-join.json"),
+			joinArtifactPath(fakOutputDir, "fak-gateway-witness.json"),
 		},
 		JoinKeys: []string{
 			"task_id",
-			"turn_or_command_index",
+			"command_index",
 			"command",
 			"cwd",
 			"evidence_id",
 			"state_hash",
 		},
-		Detail: "The official compare artifact must join Terminal-Bench test/pass rows and command logs to the mediated fak command verdict and evidence checkpoint for the same task command.",
+		Detail: "The official compare artifact must join Harbor test/pass rows and command logs to the mediated fak command verdict and evidence checkpoint for the same task command.",
 	}
+}
+
+func fakGatewayAgentEnvReady(command string) bool {
+	return strings.Contains(command, "--agent-env") &&
+		strings.Contains(command, "OPENAI_BASE_URL=") &&
+		strings.Contains(command, "OPENAI_API_BASE=") &&
+		strings.Contains(command, "OPENAI_API_KEY=")
 }
 
 func joinArtifactPath(dir, leaf string) string {

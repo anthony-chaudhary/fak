@@ -91,8 +91,15 @@ func TestRunCommandBoundarySmoke(t *testing.T) {
 	if lastCommand.Tool != "terminal.exec" || lastCommand.EvidenceID == "" || lastCommand.StateHash == "" {
 		t.Fatalf("last normalized command missing tool/evidence: %+v", lastCommand)
 	}
+	if lastCommand.TaskID != "danger-after-tests" || lastCommand.CommandIndex != 4 {
+		t.Fatalf("last normalized command join keys wrong: %+v", lastCommand)
+	}
 	if !strings.Contains(string(lastCommand.Args), `"command":"rm -rf /"`) {
 		t.Fatalf("last normalized command args do not preserve command: %s", lastCommand.Args)
+	}
+	lastEvidence := task.Fak.Evidence[len(task.Fak.Evidence)-1]
+	if lastEvidence.TaskID != "danger-after-tests" || lastEvidence.CommandIndex != 3 || lastEvidence.CWD != "/workspace" || lastEvidence.StateHash == "" {
+		t.Fatalf("last executed evidence join keys wrong: %+v", lastEvidence)
 	}
 }
 

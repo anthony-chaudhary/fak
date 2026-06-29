@@ -1,10 +1,10 @@
 {
   "schema": "fak.terminalbench-official-run-contract.v1",
-  "generated_at": "2026-06-26T11:14:18Z",
-  "benchmark": "Terminal-Bench command-boundary official-run contract",
+  "generated_at": "2026-06-29T19:15:36Z",
+  "benchmark": "Terminal-Bench Harbor/Codex official-run contract",
   "status": "READY_FOR_EXTERNAL_HARNESS",
   "evidence_class": "EXTERNAL_RUN_CONTRACT",
-  "claim_boundary": "External-run contract only: fixes the raw/fak Terminal-Bench command shape, shared task/model/image/budget requirements, evidence paths, and promotion gates. It is not an official result until benchmark-native tb run task logs, test output, and a raw-vs-fak compare artifact are checked in.",
+  "claim_boundary": "External-run contract only: fixes the raw/fak Harbor command shape, shared task/model/image/budget requirements, fak gateway adapter wiring, evidence paths, and promotion gates. It is not an official result until benchmark-native Harbor task logs, test output, gateway witness, and a raw-vs-fak compare artifact are checked in.",
   "local_fixture_artifact": "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json",
   "task_selection": {
     "candidate_suite": "testdata\\terminalbench\\command_boundary_smoke.json",
@@ -26,8 +26,8 @@
         "budget_turns": 4
       }
     ],
-    "official_dataset": "terminal-bench-core",
-    "official_dataset_version": "0.1.1",
+    "official_dataset": "terminal-bench/terminal-bench-2-1",
+    "official_dataset_version": "",
     "official_task_ids_required": true,
     "same_task_ids_required": true,
     "same_image_required": true,
@@ -35,69 +35,74 @@
     "n_concurrent": 1
   },
   "model": {
-    "agent": "terminus",
-    "fak_agent": "terminus-through-fak",
-    "model": "shared-agent-model",
-    "fak_gateway": "http://localhost:8080/v1",
-    "same_model_required": true
+    "agent": "codex",
+    "fak_agent": "codex",
+    "public_agent_label": "codex-cli",
+    "model": "gpt-5.5",
+    "fak_gateway": "http://host.docker.internal:18080/v1",
+    "same_agent_required": true,
+    "same_model_required": true,
+    "harbor_codex_required": true
   },
   "arms": [
     {
       "name": "raw-terminalbench",
       "harness": "benchmark-native",
-      "command": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus --model shared-agent-model --task-id $task --n-concurrent 1 }",
+      "command": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 }",
       "output_dir": "experiments/agent-live/terminalbench-official-raw-20260626",
       "required_artifacts": [
-        "tb run directory for each selected task",
-        "benchmark-native command log",
-        "benchmark-native test output or result summary"
+        "Harbor run directory for each selected task",
+        "Harbor command log",
+        "Harbor test output or result summary"
       ]
     },
     {
       "name": "fak-terminalbench",
       "harness": "benchmark-native-through-fak-gateway",
-      "command": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus-through-fak --model shared-agent-model --task-id $task --n-concurrent 1 }",
+      "command": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal }",
       "output_dir": "experiments/agent-live/terminalbench-official-fak-20260626",
       "required_artifacts": [
-        "tb run directory for each selected task",
-        "benchmark-native command log",
-        "benchmark-native test output or result summary",
-        "fak verdict/evidence log linked to mediated terminal commands"
+        "Harbor run directory for each selected task",
+        "Harbor command log",
+        "Harbor test output or result summary",
+        "fak verdict/evidence log linked to mediated terminal commands",
+        "fak gateway log witness proving Dockerized Codex traffic reached fak"
       ]
     }
   ],
   "score_evidence_link": {
     "required": true,
     "official_test_artifacts": [
-      "experiments/agent-live/terminalbench-official-raw-20260626/tb-results.json",
-      "experiments/agent-live/terminalbench-official-raw-20260626/command-log.jsonl",
-      "experiments/agent-live/terminalbench-official-fak-20260626/tb-results.json",
-      "experiments/agent-live/terminalbench-official-fak-20260626/command-log.jsonl"
+      "experiments/agent-live/terminalbench-official-raw-20260626/harbor-test-results.json",
+      "experiments/agent-live/terminalbench-official-raw-20260626/harbor-command-log.jsonl",
+      "experiments/agent-live/terminalbench-official-fak-20260626/harbor-test-results.json",
+      "experiments/agent-live/terminalbench-official-fak-20260626/harbor-command-log.jsonl"
     ],
     "fak_command_evidence_files": [
       "experiments/agent-live/terminalbench-official-fak-20260626/fak-command-evidence.jsonl",
-      "experiments/agent-live/terminalbench-official-fak-20260626/raw-fak-command-join.json"
+      "experiments/agent-live/terminalbench-official-fak-20260626/raw-fak-command-join.json",
+      "experiments/agent-live/terminalbench-official-fak-20260626/fak-gateway-witness.json"
     ],
     "join_keys": [
       "task_id",
-      "turn_or_command_index",
+      "command_index",
       "command",
       "cwd",
       "evidence_id",
       "state_hash"
     ],
-    "detail": "The official compare artifact must join Terminal-Bench test/pass rows and command logs to the mediated fak command verdict and evidence checkpoint for the same task command."
+    "detail": "The official compare artifact must join Harbor test/pass rows and command logs to the mediated fak command verdict and evidence checkpoint for the same task command."
   },
   "upstream_refs": [
     {
-      "name": "Terminal-Bench first steps",
-      "url": "https://www.tbench.ai/docs/first-steps",
-      "notes": "Documents tb run with dataset, agent, model, and task-id selection."
+      "name": "Harbor job CLI",
+      "url": "https://github.com/harbor-framework/harbor/blob/main/src/harbor/cli/jobs.py",
+      "notes": "Defines harbor run/job start flags including dataset, agent, model, --agent-env, --allow-agent-host, and --allow-environment-host."
     },
     {
-      "name": "Terminal-Bench adapters",
-      "url": "https://www.tbench.ai/docs/adapters",
-      "notes": "Documents benchmark-native task subsets and parity experiments through the Terminal-Bench harness."
+      "name": "Harbor agent names",
+      "url": "https://github.com/harbor-framework/harbor/blob/main/src/harbor/models/agent/name.py",
+      "notes": "Defines codex as the valid Harbor adapter name; codex-cli is the public leaderboard label only."
     },
     {
       "name": "Terminal-Bench leaderboard logs",
@@ -119,7 +124,7 @@
     {
       "name": "official_dataset_pin",
       "ok": true,
-      "detail": "terminal-bench-core==0.1.1"
+      "detail": "terminal-bench/terminal-bench-2-1"
     },
     {
       "name": "same_task_ids_required",
@@ -137,24 +142,44 @@
       "detail": "raw and fak official runs must use the same task budget and retry policy"
     },
     {
+      "name": "same_agent_required",
+      "ok": true,
+      "detail": "raw=codex fak=codex"
+    },
+    {
       "name": "same_model_required",
       "ok": true,
-      "detail": "shared-agent-model"
+      "detail": "gpt-5.5"
+    },
+    {
+      "name": "harbor_codex_adapter",
+      "ok": true,
+      "detail": "Harbor adapter name must be codex; codex-cli is only the public leaderboard label"
     },
     {
       "name": "raw_arm_command",
       "ok": true,
-      "detail": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus --model shared-agent-model --task-id $task --n-concurrent 1 }"
+      "detail": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 }"
     },
     {
       "name": "fak_arm_command",
       "ok": true,
-      "detail": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset terminal-bench-core==0.1.1 --agent terminus-through-fak --model shared-agent-model --task-id $task --n-concurrent 1 }"
+      "detail": "$env:TERMINAL_BENCH_TASK_IDS='\u003cspace-separated official task ids\u003e'; foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --task-id $task --n-concurrent 1 --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal }"
+    },
+    {
+      "name": "fak_gateway_agent_env",
+      "ok": true,
+      "detail": "fak Harbor arm must pass OPENAI_BASE_URL, OPENAI_API_BASE, and OPENAI_API_KEY through --agent-env"
+    },
+    {
+      "name": "fak_gateway_host_allowlist",
+      "ok": true,
+      "detail": "fak Harbor arm must allow the Docker agent to reach the host fak gateway"
     },
     {
       "name": "official_harness_required",
       "ok": true,
-      "detail": "external tb run output with benchmark-native test results is required before promotion"
+      "detail": "external Harbor run output with benchmark-native test results is required before promotion"
     }
   ],
   "compare_metrics": [
@@ -166,15 +191,18 @@
     "runtime",
     "cost_or_token_budget",
     "fak_denied_commands",
-    "fak_verdict_evidence_completeness"
+    "fak_verdict_evidence_completeness",
+    "fak_gateway_model_http_success",
+    "fak_gateway_inference_turn_observed"
   ],
   "required_before_claim": [
     "benchmark-native Terminal-Bench task ids for the selected fixed subset",
     "Terminal-Bench image or environment setup manifest for each selected task",
-    "raw-arm tb run directory with command log and official test output over those exact task ids",
-    "fak-arm tb run directory with command log and official test output over those exact task ids",
-    "proof that raw and fak arms used the same model, task ids, image or environment, budget, concurrency, and retry policy",
-    "fak per-command verdict/evidence log linked to the corresponding tb run command log and test output",
+    "raw-arm Harbor run directory with command log and official test output over those exact task ids",
+    "fak-arm Harbor run directory with command log and official test output over those exact task ids",
+    "proof that raw and fak arms used the same Harbor codex adapter, model, task ids, image or environment, budget, concurrency, and retry policy",
+    "fak per-command verdict/evidence log linked to the corresponding Harbor command log and test output",
+    "gateway witness proving at least one structured model HTTP success and one gateway inference-turn event from the Dockerized Codex agent",
     "raw/fak compare artifact reporting benchmark-native solve separately from safe resolve, blocked dangerous actions, unnecessary blocks, runtime, cost or token budget, and evidence completeness"
   ],
   "result_claim_allowed": false

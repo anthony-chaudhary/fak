@@ -122,6 +122,8 @@ type ArmResult struct {
 }
 
 type CommandEvent struct {
+	TaskID          string  `json:"task_id,omitempty"`
+	CommandIndex    int     `json:"command_index,omitempty"`
 	Turn            int     `json:"turn,omitempty"`
 	Tool            string  `json:"tool,omitempty"`
 	Command         string  `json:"command,omitempty"`
@@ -136,20 +138,24 @@ type CommandEvent struct {
 }
 
 type NormalizedCommand struct {
-	Turn       int             `json:"turn,omitempty"`
-	Tool       string          `json:"tool"`
-	Args       json.RawMessage `json:"args"`
-	EvidenceID string          `json:"evidence_id,omitempty"`
-	StateHash  string          `json:"state_hash,omitempty"`
+	TaskID       string          `json:"task_id,omitempty"`
+	CommandIndex int             `json:"command_index,omitempty"`
+	Turn         int             `json:"turn,omitempty"`
+	Tool         string          `json:"tool"`
+	Args         json.RawMessage `json:"args"`
+	EvidenceID   string          `json:"evidence_id,omitempty"`
+	StateHash    string          `json:"state_hash,omitempty"`
 }
 
 type EvidenceCheckpoint struct {
-	ID        string `json:"id"`
-	Turn      int    `json:"turn,omitempty"`
-	Tool      string `json:"tool"`
-	Command   string `json:"command"`
-	CWD       string `json:"cwd,omitempty"`
-	StateHash string `json:"state_hash"`
+	ID           string `json:"id"`
+	TaskID       string `json:"task_id"`
+	CommandIndex int    `json:"command_index"`
+	Turn         int    `json:"turn,omitempty"`
+	Tool         string `json:"tool"`
+	Command      string `json:"command"`
+	CWD          string `json:"cwd,omitempty"`
+	StateHash    string `json:"state_hash"`
 }
 
 type Summary struct {
@@ -347,12 +353,12 @@ func runRaw(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	adj := adjudicator.New(pol)
 	out := ArmResult{Commands: len(task.Trace), ExecutedCommands: len(task.Trace), TestSuccess: testsPassed(task.Tests)}
 	done := map[string]bool{}
-	for _, step := range task.Trace {
+	for i, step := range task.Trace {
 		tool, args, _ := NormalizeCommand(task, step)
-		cp := evidenceCheckpoint(task, step, tool)
-		out.NormalizedCommands = append(out.NormalizedCommands, normalizedCommand(step, tool, args, cp))
+		cp := evidenceCheckpoint(task, step, tool, i+1)
+		out.NormalizedCommands = append(out.NormalizedCommands, normalizedCommand(task, step, tool, args, cp))
 		v := adjudicate(ctx, adj, tool, args)
-		ev := commandEvent(step, tool, v)
+		ev := commandEvent(task, step, tool, v, i+1)
 		out.Verdicts = append(out.Verdicts, ev)
 		out.Evidence = append(out.Evidence, cp)
 		out.RuntimeMS += positive(step.ElapsedMS)
@@ -378,12 +384,12 @@ func runFak(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	adj := adjudicator.New(pol)
 	out := ArmResult{Commands: len(task.Trace), TestSuccess: testsPassed(task.Tests)}
 	done := map[string]bool{}
-	for _, step := range task.Trace {
+	for i, step := range task.Trace {
 		tool, args, _ := NormalizeCommand(task, step)
-		cp := evidenceCheckpoint(task, step, tool)
-		out.NormalizedCommands = append(out.NormalizedCommands, normalizedCommand(step, tool, args, cp))
+		cp := evidenceCheckpoint(task, step, tool, i+1)
+		out.NormalizedCommands = append(out.NormalizedCommands, normalizedCommand(task, step, tool, args, cp))
 		v := adjudicate(ctx, adj, tool, args)
-		ev := commandEvent(step, tool, v)
+		ev := commandEvent(task, step, tool, v, i+1)
 		out.Verdicts = append(out.Verdicts, ev)
 		if v.Kind == abi.VerdictTransform {
 			out.ArgumentRepairs++
@@ -423,8 +429,10 @@ func adjudicate(ctx context.Context, adj *adjudicator.Adjudicator, tool string, 
 	})
 }
 
-func commandEvent(step CommandStep, tool string, v abi.Verdict) CommandEvent {
+func commandEvent(task Task, step CommandStep, tool string, v abi.Verdict, commandIndex int) CommandEvent {
 	return CommandEvent{
+		TaskID:          task.ID,
+		CommandIndex:    commandIndex,
 		Turn:            step.Turn,
 		Tool:            tool,
 		Command:         strings.TrimSpace(step.Command),
@@ -439,20 +447,23 @@ func commandEvent(step CommandStep, tool string, v abi.Verdict) CommandEvent {
 	}
 }
 
-func normalizedCommand(step CommandStep, tool string, args json.RawMessage, cp EvidenceCheckpoint) NormalizedCommand {
+func normalizedCommand(task Task, step CommandStep, tool string, args json.RawMessage, cp EvidenceCheckpoint) NormalizedCommand {
 	return NormalizedCommand{
-		Turn:       step.Turn,
-		Tool:       tool,
-		Args:       append(json.RawMessage(nil), args...),
-		EvidenceID: cp.ID,
-		StateHash:  cp.StateHash,
+		TaskID:       task.ID,
+		CommandIndex: cp.CommandIndex,
+		Turn:         step.Turn,
+		Tool:         tool,
+		Args:         append(json.RawMessage(nil), args...),
+		EvidenceID:   cp.ID,
+		StateHash:    cp.StateHash,
 	}
 }
 
-func evidenceCheckpoint(task Task, step CommandStep, tool string) EvidenceCheckpoint {
+func evidenceCheckpoint(task Task, step CommandStep, tool string, commandIndex int) EvidenceCheckpoint {
 	cwd := valueOr(strings.TrimSpace(step.CWD), ".")
 	material := strings.Join([]string{
 		task.ID,
+		fmt.Sprintf("%d", commandIndex),
 		fmt.Sprintf("%d", step.Turn),
 		tool,
 		strings.TrimSpace(step.Command),
@@ -464,12 +475,14 @@ func evidenceCheckpoint(task Task, step CommandStep, tool string) EvidenceCheckp
 	sum := sha256.Sum256([]byte(material))
 	short := hex.EncodeToString(sum[:])[:12]
 	return EvidenceCheckpoint{
-		ID:        fmt.Sprintf("%s:%d:%s", task.ID, step.Turn, short),
-		Turn:      step.Turn,
-		Tool:      tool,
-		Command:   strings.TrimSpace(step.Command),
-		CWD:       cwd,
-		StateHash: "sha256:" + hex.EncodeToString(sum[:]),
+		ID:           fmt.Sprintf("%s:%d:%s", task.ID, commandIndex, short),
+		TaskID:       task.ID,
+		CommandIndex: commandIndex,
+		Turn:         step.Turn,
+		Tool:         tool,
+		Command:      strings.TrimSpace(step.Command),
+		CWD:          cwd,
+		StateHash:    "sha256:" + hex.EncodeToString(sum[:]),
 	}
 }
 

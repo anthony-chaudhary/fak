@@ -11,17 +11,17 @@ func TestBuildOfficialRunContractKeepsResultGated(t *testing.T) {
 		Suite:                sampleContractSuite(),
 		SuitePath:            "testdata/terminalbench/command_boundary_smoke.json",
 		LocalFixtureArtifact: "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json",
-		DatasetName:          "terminal-bench-core",
-		DatasetVersion:       "0.1.1",
-		Model:                "gpt-4.1",
-		Agent:                "terminus",
-		FakAgent:             "terminus-through-fak",
+		DatasetName:          "terminal-bench/terminal-bench-2-1",
+		Model:                "gpt-5.5",
+		Agent:                "codex",
+		FakAgent:             "codex",
+		PublicAgentLabel:     "codex-cli",
 		NConcurrent:          1,
-		RawCommand:           "tb run raw",
-		FakCommand:           "tb run fak",
+		RawCommand:           "harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5",
+		FakCommand:           "harbor run -d terminal-bench/terminal-bench-2-1 -a codex -m gpt-5.5 --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal",
 		RawOutputDir:         "experiments/raw",
 		FakOutputDir:         "experiments/fak",
-		FakGateway:           "http://localhost:8080/v1",
+		FakGateway:           "http://host.docker.internal:18080/v1",
 	})
 	if c.Schema != OfficialRunContractSchema {
 		t.Fatalf("schema = %q", c.Schema)
@@ -38,11 +38,27 @@ func TestBuildOfficialRunContractKeepsResultGated(t *testing.T) {
 	if len(c.TaskSelection.CandidateTaskIDs) != 2 || !c.TaskSelection.OfficialTaskIDsRequired || !c.TaskSelection.SameImageRequired {
 		t.Fatalf("task selection = %+v", c.TaskSelection)
 	}
+	if c.Model.Agent != "codex" || c.Model.FakAgent != "codex" || c.Model.PublicAgentLabel != "codex-cli" || !c.Model.SameAgentRequired || !c.Model.HarborCodexRequired {
+		t.Fatalf("model/agent contract = %+v", c.Model)
+	}
 	if !c.ScoreEvidenceLink.Required || len(c.ScoreEvidenceLink.JoinKeys) == 0 {
 		t.Fatalf("score evidence link = %+v", c.ScoreEvidenceLink)
 	}
-	if len(c.RequiredBeforeClaim) == 0 || !strings.Contains(strings.Join(c.RequiredBeforeClaim, " "), "tb run") {
-		t.Fatalf("requirements do not name Terminal-Bench evidence: %+v", c.RequiredBeforeClaim)
+	required := strings.Join(c.RequiredBeforeClaim, " ")
+	if len(c.RequiredBeforeClaim) == 0 || !strings.Contains(required, "Harbor run") || !strings.Contains(required, "gateway witness") {
+		t.Fatalf("requirements do not name Harbor/gateway evidence: %+v", c.RequiredBeforeClaim)
+	}
+	var sawAgentEnvGate, sawHostGate bool
+	for _, gate := range c.Gates {
+		if gate.Name == "fak_gateway_agent_env" && gate.OK {
+			sawAgentEnvGate = true
+		}
+		if gate.Name == "fak_gateway_host_allowlist" && gate.OK {
+			sawHostGate = true
+		}
+	}
+	if !sawAgentEnvGate || !sawHostGate {
+		t.Fatalf("gateway gates not satisfied: %+v", c.Gates)
 	}
 }
 
@@ -65,8 +81,8 @@ func TestBuildOfficialRunContractIncompleteWithoutCommands(t *testing.T) {
 func TestBuildOfficialRunContractSortsCandidates(t *testing.T) {
 	c := BuildOfficialRunContract(OfficialRunContractInput{
 		Suite:      sampleContractSuite(),
-		RawCommand: "raw",
-		FakCommand: "fak",
+		RawCommand: "harbor run raw",
+		FakCommand: "harbor run fak --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal",
 	})
 	got := c.TaskSelection.CandidateTaskIDs
 	if len(got) != 2 || got[0] != "go-cli-help-benign" || got[1] != "python-config-fix-danger-after-tests" {
@@ -77,16 +93,40 @@ func TestBuildOfficialRunContractSortsCandidates(t *testing.T) {
 func TestRenderOfficialRunContractMarkdown(t *testing.T) {
 	c := BuildOfficialRunContract(OfficialRunContractInput{
 		Suite:      sampleContractSuite(),
-		Model:      "gpt-4.1",
-		Agent:      "terminus",
-		RawCommand: "raw",
-		FakCommand: "fak",
+		Model:      "gpt-5.5",
+		Agent:      "codex",
+		FakAgent:   "codex",
+		RawCommand: "harbor run raw",
+		FakCommand: "harbor run fak --agent-env OPENAI_BASE_URL=http://host.docker.internal:18080/v1 --agent-env OPENAI_API_BASE=http://host.docker.internal:18080/v1 --agent-env 'OPENAI_API_KEY={{FAK_GATEWAY_KEY}}' --allow-agent-host host.docker.internal",
 	})
 	md := RenderOfficialRunContractMarkdown(c)
-	for _, want := range []string{"Terminal-Bench Official-Run Contract", "Score Evidence Link", "Required Before Any Result Claim", "raw-terminalbench"} {
+	for _, want := range []string{"Terminal-Bench Official-Run Contract", "Score Evidence Link", "Required Before Any Result Claim", "raw-terminalbench", "codex-cli"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}
+	}
+}
+
+func TestBuildOfficialRunContractRejectsMissingGatewayShape(t *testing.T) {
+	c := BuildOfficialRunContract(OfficialRunContractInput{
+		Suite:      sampleContractSuite(),
+		RawCommand: "harbor run raw",
+		FakCommand: "harbor run fak -a codex",
+	})
+	if c.Status != "INCOMPLETE_CONTRACT" {
+		t.Fatalf("status = %q", c.Status)
+	}
+	var envGateFailed, hostGateFailed bool
+	for _, gate := range c.Gates {
+		if gate.Name == "fak_gateway_agent_env" && !gate.OK {
+			envGateFailed = true
+		}
+		if gate.Name == "fak_gateway_host_allowlist" && !gate.OK {
+			hostGateFailed = true
+		}
+	}
+	if !envGateFailed || !hostGateFailed {
+		t.Fatalf("expected gateway shape gates to fail: %+v", c.Gates)
 	}
 }
 

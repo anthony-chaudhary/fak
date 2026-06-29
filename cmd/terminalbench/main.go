@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,15 +32,17 @@ func main() {
 	officialContract := flag.String("official-contract", "experiments/agent-live/terminalbench-official-run-contract-20260626.json", "path to the official-run contract this preflight gates")
 	submissionPacket := flag.String("submission-packet", "docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md", "path to the submission-packet index this preflight feeds")
 	issueRef := flag.String("issue", "#900", "campaign issue reference recorded in the preflight artifact")
-	datasetName := flag.String("dataset-name", "terminal-bench-core", "official Terminal-Bench dataset name")
-	datasetVersion := flag.String("dataset-version", "0.1.1", "official Terminal-Bench dataset version")
-	model := flag.String("model", "shared-agent-model", "model id shared by raw and fak arms")
-	agent := flag.String("agent", "terminus", "Terminal-Bench agent used by the raw arm")
-	fakAgent := flag.String("fak-agent", "", "Terminal-Bench agent used by the fak arm (default: --agent-through-fak)")
+	datasetName := flag.String("dataset-name", "terminal-bench/terminal-bench-2-1", "official Harbor dataset slug")
+	datasetVersion := flag.String("dataset-version", "", "optional dataset version suffix")
+	model := flag.String("model", "gpt-5.5", "model id shared by raw and fak arms")
+	agent := flag.String("agent", "codex", "Harbor agent adapter used by the raw arm")
+	fakAgent := flag.String("fak-agent", "", "Harbor agent adapter used by the fak arm (default: same as --agent)")
 	nConcurrent := flag.Int("n-concurrent", 1, "Terminal-Bench concurrency shared by raw and fak arms")
-	rawCommand := flag.String("raw-command", "", "explicit raw tb run command")
-	fakCommand := flag.String("fak-command", "", "explicit fak tb run command")
-	fakGateway := flag.String("fak-gateway", "http://localhost:8080/v1", "OpenAI-compatible fak gateway base URL for the fak arm")
+	rawCommand := flag.String("raw-command", "", "explicit raw Harbor run command")
+	fakCommand := flag.String("fak-command", "", "explicit fak Harbor run command")
+	fakGateway := flag.String("fak-gateway", "http://host.docker.internal:18080/v1", "Docker-reachable OpenAI-compatible fak gateway base URL for the fak arm")
+	fakGatewayKey := flag.String("fak-gateway-key-placeholder", "{{FAK_GATEWAY_KEY}}", "redacted bearer token placeholder persisted in the Harbor fak command")
+	allowEnvironmentHost := flag.Bool("allow-environment-host", false, "also add --allow-environment-host for the fak gateway host when setup/environment egress needs it")
 	rawOutput := flag.String("raw-output", "experiments/agent-live/terminalbench-official-raw-20260626", "raw Terminal-Bench output archive directory")
 	fakOutput := flag.String("fak-output", "experiments/agent-live/terminalbench-official-fak-20260626", "fak Terminal-Bench output archive directory")
 	localFixture := flag.String("local-fixture", "experiments/agent-live/terminalbench-command-boundary-smoke-20260625.json", "local fixture artifact this contract supersedes for promotion")
@@ -52,15 +55,15 @@ func main() {
 	if *contractMode {
 		fakArmAgent := strings.TrimSpace(*fakAgent)
 		if fakArmAgent == "" {
-			fakArmAgent = strings.TrimSpace(*agent) + "-through-fak"
+			fakArmAgent = strings.TrimSpace(*agent)
 		}
 		raw := strings.TrimSpace(*rawCommand)
 		if raw == "" {
-			raw = buildOfficialRunCommand(*datasetName, *datasetVersion, *agent, *model, "", *nConcurrent)
+			raw = buildOfficialRunCommand(*datasetName, *datasetVersion, *agent, *model, "", "", *nConcurrent, false)
 		}
 		fak := strings.TrimSpace(*fakCommand)
 		if fak == "" {
-			fak = buildOfficialRunCommand(*datasetName, *datasetVersion, fakArmAgent, *model, *fakGateway, *nConcurrent)
+			fak = buildOfficialRunCommand(*datasetName, *datasetVersion, fakArmAgent, *model, *fakGateway, *fakGatewayKey, *nConcurrent, *allowEnvironmentHost)
 		}
 		contract := terminalbench.BuildOfficialRunContract(terminalbench.OfficialRunContractInput{
 			GeneratedAt:          time.Now().UTC().Format(time.RFC3339),
@@ -72,6 +75,7 @@ func main() {
 			Model:                *model,
 			Agent:                *agent,
 			FakAgent:             fakArmAgent,
+			PublicAgentLabel:     "codex-cli",
 			NConcurrent:          *nConcurrent,
 			RawCommand:           raw,
 			FakCommand:           fak,
@@ -99,7 +103,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\n== terminalbench contract ==\n")
 		fmt.Fprintf(os.Stderr, "suite        : %s\n", *suitePath)
 		fmt.Fprintf(os.Stderr, "status       : %s\n", contract.Status)
-		fmt.Fprintf(os.Stderr, "dataset      : %s==%s\n", contract.TaskSelection.OfficialDataset, contract.TaskSelection.OfficialDatasetVersion)
+		fmt.Fprintf(os.Stderr, "dataset      : %s\n", terminalBenchDataset(contract.TaskSelection.OfficialDataset, contract.TaskSelection.OfficialDatasetVersion))
 		fmt.Fprintf(os.Stderr, "tasks        : %d candidate %s\n", len(contract.TaskSelection.CandidateTaskIDs), candidateIDLabel(len(contract.TaskSelection.CandidateTaskIDs)))
 		fmt.Fprintf(os.Stderr, "claim        : %t\n", contract.ResultClaimAllowed)
 		if *outPath != "" {
@@ -218,19 +222,37 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
-func buildOfficialRunCommand(datasetName, datasetVersion, agent, model, fakGateway string, nConcurrent int) string {
+func buildOfficialRunCommand(datasetName, datasetVersion, agent, model, fakGateway, gatewayKeyPlaceholder string, nConcurrent int, allowEnvironmentHost bool) string {
 	if nConcurrent <= 0 {
 		nConcurrent = 1
 	}
 	dataset := terminalBenchDataset(datasetName, datasetVersion)
 	parts := []string{"$env:TERMINAL_BENCH_TASK_IDS='<space-separated official task ids>'"}
-	if fakGateway != "" {
-		parts = append(parts, "$env:OPENAI_BASE_URL="+quotePowerShellValue(fakGateway))
-		parts = append(parts, "$env:OPENAI_API_BASE="+quotePowerShellValue(fakGateway))
+	run := []string{
+		"harbor", "run",
+		"-d", quoteCLIArg(dataset),
+		"-a", quoteCLIArg(agent),
+		"-m", quoteCLIArg(model),
+		"--task-id", "$task",
+		"--n-concurrent", fmt.Sprintf("%d", nConcurrent),
 	}
-	parts = append(parts,
-		fmt.Sprintf("foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { tb run --dataset %s --agent %s --model %s --task-id $task --n-concurrent %d }",
-			quoteCLIArg(dataset), quoteCLIArg(agent), quoteCLIArg(model), nConcurrent))
+	if fakGateway != "" {
+		key := strings.TrimSpace(gatewayKeyPlaceholder)
+		if key == "" {
+			key = "{{FAK_GATEWAY_KEY}}"
+		}
+		host := gatewayAllowHost(fakGateway)
+		run = append(run,
+			"--agent-env", quoteCLIArg("OPENAI_BASE_URL="+strings.TrimSpace(fakGateway)),
+			"--agent-env", quoteCLIArg("OPENAI_API_BASE="+strings.TrimSpace(fakGateway)),
+			"--agent-env", quoteCLIArg("OPENAI_API_KEY="+key),
+			"--allow-agent-host", quoteCLIArg(host),
+		)
+		if allowEnvironmentHost {
+			run = append(run, "--allow-environment-host", quoteCLIArg(host))
+		}
+	}
+	parts = append(parts, fmt.Sprintf("foreach ($task in ($env:TERMINAL_BENCH_TASK_IDS -split ' ')) { %s }", strings.Join(run, " ")))
 	return strings.Join(parts, "; ")
 }
 
@@ -248,10 +270,18 @@ func quoteCLIArg(s string) string {
 	if s == "" {
 		return "''"
 	}
-	if strings.ContainsAny(s, " \t`\"'|()") {
+	if strings.ContainsAny(s, " \t`\"'|(){}") {
 		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 	}
 	return s
+}
+
+func gatewayAllowHost(base string) string {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return "host.docker.internal"
 }
 
 func quotePowerShellValue(s string) string {
