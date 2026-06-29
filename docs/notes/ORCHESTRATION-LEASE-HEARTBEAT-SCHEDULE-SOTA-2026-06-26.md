@@ -259,11 +259,16 @@ distinguishes the five decisions*). The other three boxes are code/process child
 named here so the sibling agent-OS issues can link to this contract instead of
 re-defining the semantics inline:
 
-- **C1 — Fencing token (highest value).** Add a monotonic `Generation` (and a
-  `RenewedAt`) to `leaseref.Record`; bump it on every acquire/transition; have the
-  call-boundary admit a write only when the presented generation matches the current
-  lease. Unblocks the issue's *fenced stale-holder* acceptance test
-  (`go test ./internal/leaseref`).
+- **C1 — Fencing token (highest value). SHIPPED 2026-06-29.** A monotonic `Generation`
+  (and a `RenewedAt`) now ride `leaseref.Record`; `Store.AcquireFenced` bumps the
+  generation on every transition (reaping an expired holder) and keeps it on a
+  same-holder renew, writing under a real `git update-ref` compare-and-swap;
+  `Store.Fence` is the read-side gate that returns `STALE_LEASE` when the presented
+  generation is behind the live lease, and `Store.Renew` is the no-bump heartbeat
+  (`internal/leaseref/fence.go`). Surfaced operator-side as `fak leaseref
+  acquire|fence|renew`. The *fenced stale-holder* acceptance test is green
+  (`TestFenceStaleHolderRefused`, `go test ./internal/leaseref`). This unblocks #1182,
+  which composes `Fence` with the `dormancy` band for the long-dormancy halt-and-reacquire.
 - **C2 — Overlap-lock test.** Two workers racing for one named job: prove the
   mutating section runs once, and that a stale holder cannot write after the fence
   advances (`internal/loopmgr` or `internal/leaseref`). Acceptance box 2.

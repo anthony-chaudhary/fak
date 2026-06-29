@@ -49,6 +49,12 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefList(stdout, stderr, rest)
 	case "reap":
 		return runLeaserefReap(stdout, stderr, rest)
+	case "acquire":
+		return runLeaserefAcquire(stdout, stderr, rest)
+	case "fence":
+		return runLeaserefFence(stdout, stderr, rest)
+	case "renew":
+		return runLeaserefRenew(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, leaserefUsage)
 		return 0
@@ -56,6 +62,30 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref: unknown subcommand %q\n%s\n", sub, leaserefUsage)
 		return 2
 	}
+}
+
+// leaserefRefused is the exit code for a STRUCTURED fence refusal (STALE_LEASE / LEASE_HELD /
+// LEASE_CONTENDED / NO_LEASE) — distinct from 1 (a git/store failure) and 2 (a usage error),
+// so a shell caller can branch `fak leaseref fence ... || halt-and-reacquire` while still
+// telling a refusal apart from a broken git. The verdict JSON is emitted on stdout either way.
+const leaserefRefused = 3
+
+// repeatedString is a flag.Value that accumulates each `--tree GLOB` into a slice, so a lease
+// can cover several trees without comma-splitting a glob that may itself contain a comma.
+type repeatedString []string
+
+func (r *repeatedString) String() string { return fmt.Sprint([]string(*r)) }
+func (r *repeatedString) Set(v string) error {
+	*r = append(*r, v)
+	return nil
+}
+
+// fencedResult is the acquire/renew JSON shape: the deny-as-value verdict plus, on admit, the
+// WRITTEN record (so the caller learns its assigned Generation — the fencing token it must
+// present on every later write/fence). On a refusal Record is omitted.
+type fencedResult struct {
+	Verdict leaseref.FenceVerdict `json:"verdict"`
+	Record  *leaseref.Record      `json:"record,omitempty"`
 }
 
 const leaserefUsage = `fak leaseref - cross-machine lease visibility (over internal/leaseref, #825)
@@ -77,9 +107,27 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       The delete is an ordinary ref delete that converges across clones the same way
       acquisition does.
 
-This is VISIBILITY, not atomic acquisition: it lets an arbiter SEE a cross-machine
-conflict, it does not arbitrate a same-fetch-window race.
-Exit: 0 ok, 2 usage/parse error, 1 a git/store failure.`
+  fak leaseref acquire --id ID --holder H [--tree GLOB ...] [--ttl SEC] [--dir DIR]
+      FENCED acquire (#906-C1): take the lease with a monotonic fencing token.
+      Fresh -> generation 1; reaping an EXPIRED holder -> generation bumps (a
+      transition); the SAME holder reacquiring a live lease -> a renew (generation
+      kept). A DIFFERENT live holder is refused LEASE_HELD. Emits {verdict, record};
+      the record carries the assigned 'generation' you must present to 'fence'.
+
+  fak leaseref fence --id ID --holder H --generation N [--dir DIR]
+      The GATE an agent runs BEFORE a write: is the lease you hold still current?
+      Emits the fence verdict. STALE_LEASE means a newer holder was admitted while
+      you were paused/dormant — halt and reacquire, never resume:
+        fak leaseref fence --id L --holder $ME --generation $G || reacquire
+
+  fak leaseref renew --id ID --holder H [--ttl SEC] [--dir DIR]
+      Heartbeat: extend YOUR live lease's window WITHOUT bumping the generation. A
+      lease taken over by a peer is refused STALE_LEASE; a lapsed/absent lease NO_LEASE.
+
+This is VISIBILITY, not atomic acquisition across machines: it lets an arbiter SEE a
+cross-machine conflict and does not arbitrate a same-fetch-window race. The fenced
+acquire/renew DO enforce real SAME-HOST atomicity via an update-ref compare-and-swap.
+Exit: 0 ok, 2 usage/parse error, 1 a git/store failure, 3 a structured fence refusal.`
 
 func runLeaserefLive(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref live", flag.ContinueOnError)
@@ -160,6 +208,108 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "reaped %d expired lease(s), %d expired session(s)\n", len(leases), len(sessions))
 	return rc
+}
+
+func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref acquire", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	id := fs.String("id", "", "lease id (one safe ref segment under refs/fak/locks/)")
+	holder := fs.String("holder", "", "holder identity (machine/session); required to fence a write")
+	ttl := fs.Int64("ttl", 0, "lease lifetime in seconds (0 = no expiry)")
+	var trees repeatedString
+	fs.Var(&trees, "tree", "repo-relative tree glob this lease covers (repeatable)")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	if *id == "" {
+		fmt.Fprintln(stderr, "fak leaseref acquire: --id is required")
+		return 2
+	}
+	store := leaseref.NewInDir(*dir)
+	rec, v, err := store.AcquireFenced(context.Background(), leaseref.Record{
+		ID:         *id,
+		TreeGlobs:  trees,
+		Holder:     *holder,
+		TTLSeconds: *ttl,
+	}, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak leaseref acquire: %v\n", err)
+		return 1
+	}
+	out := fencedResult{Verdict: v}
+	if v.OK {
+		out.Record = &rec
+	}
+	if code := emitLeaserefJSON(stdout, stderr, out, "acquire"); code != 0 {
+		return code
+	}
+	if !v.OK {
+		return leaserefRefused
+	}
+	return 0
+}
+
+func runLeaserefFence(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref fence", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	id := fs.String("id", "", "lease id to fence against")
+	holder := fs.String("holder", "", "the holder identity you hold the lease as")
+	gen := fs.Int64("generation", 0, "the fencing token (generation) you were granted at acquire")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	if *id == "" {
+		fmt.Fprintln(stderr, "fak leaseref fence: --id is required")
+		return 2
+	}
+	store := leaseref.NewInDir(*dir)
+	v, err := store.Fence(context.Background(), leaseref.Record{ID: *id, Holder: *holder, Generation: *gen}, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak leaseref fence: %v\n", err)
+		return 1
+	}
+	if code := emitLeaserefJSON(stdout, stderr, v, "fence"); code != 0 {
+		return code
+	}
+	if !v.OK {
+		return leaserefRefused
+	}
+	return 0
+}
+
+func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref renew", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	id := fs.String("id", "", "lease id to renew")
+	holder := fs.String("holder", "", "the holder identity that owns the lease")
+	ttl := fs.Int64("ttl", 0, "new lifetime in seconds (0 = keep the lease's existing TTL)")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	if *id == "" || *holder == "" {
+		fmt.Fprintln(stderr, "fak leaseref renew: --id and --holder are required")
+		return 2
+	}
+	store := leaseref.NewInDir(*dir)
+	rec, v, err := store.Renew(context.Background(), *id, *holder, *ttl, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak leaseref renew: %v\n", err)
+		return 1
+	}
+	out := fencedResult{Verdict: v}
+	if v.OK {
+		out.Record = &rec
+	}
+	if code := emitLeaserefJSON(stdout, stderr, out, "renew"); code != 0 {
+		return code
+	}
+	if !v.OK {
+		return leaserefRefused
+	}
+	return 0
 }
 
 func emitLeaserefJSON(stdout, stderr io.Writer, v any, sub string) int {

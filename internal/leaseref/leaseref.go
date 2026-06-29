@@ -78,20 +78,45 @@ type Record struct {
 	ID          string   `json:"id"`            // the lease id (the ref basename under refs/fak/locks/)
 	TreeGlobs   []string `json:"tree_globs"`    // the repo-relative trees this lease covers
 	Holder      string   `json:"holder"`        // who holds it (machine/session identity, free-form)
-	AcquiredAt  int64    `json:"acquired_unix"` // unix seconds at acquisition
+	AcquiredAt  int64    `json:"acquired_unix"` // unix seconds at acquisition (the current generation began)
 	TTLSeconds  int64    `json:"ttl_seconds"`   // lifetime in seconds; 0 means no expiry
 	Description string   `json:"description,omitempty"`
+	// Generation is the monotonic FENCING TOKEN (#906 §3.3 / #1182): it is bumped on every
+	// TRANSITION (a new holder reaping + reacquiring an expired lease) and NEVER on a
+	// same-holder renew, so a write can be admitted only when the holder's presented
+	// generation still matches the live lease's (see fence.go). 0 is the legacy/unfenced
+	// value — a record written by the pre-fence blind Acquire carries no generation, and the
+	// first AcquireFenced lifts it to 1. omitempty keeps a legacy record byte-identical.
+	Generation int64 `json:"generation,omitempty"`
+	// RenewedAt is the unix-seconds instant of the last same-holder RENEW (a liveness
+	// heartbeat) — the K8s renewTime to AcquiredAt's leaseTransitions. A renew moves the
+	// expiry window forward without a transition; 0 means never renewed since acquisition,
+	// in which case the window is measured from AcquiredAt exactly as a pre-fence record was.
+	RenewedAt int64 `json:"renewed_unix,omitempty"`
+}
+
+// effectiveActiveAt is the later of AcquiredAt and RenewedAt — the instant the lease's
+// liveness window is measured from. A renew (heartbeat) moves the window forward without a
+// transition; a record never renewed (RenewedAt == 0, every pre-fence record) measures from
+// AcquiredAt exactly as before, so the renew-awareness is strictly backward-compatible.
+func (r Record) effectiveActiveAt() int64 {
+	if r.RenewedAt > r.AcquiredAt {
+		return r.RenewedAt
+	}
+	return r.AcquiredAt
 }
 
 // Expired reports whether the lease is past its TTL at time now. A zero TTL never
 // expires. An expired record is REAPABLE by a peer — a crashed holder's lease is
 // bounded, not a permanent deadlock. (Reaping is itself a ref delete that converges
-// across clones the same way acquisition does.)
+// across clones the same way acquisition does.) The window is measured from the
+// renew-aware effectiveActiveAt, so a heartbeated lease stays live; a never-renewed
+// record measures from AcquiredAt, identical to the pre-fence behavior.
 func (r Record) Expired(now time.Time) bool {
 	if r.TTLSeconds <= 0 {
 		return false
 	}
-	return now.Unix() >= r.AcquiredAt+r.TTLSeconds
+	return now.Unix() >= r.effectiveActiveAt()+r.TTLSeconds
 }
 
 // Ref returns the full ref path this record is stored at.
@@ -103,10 +128,12 @@ func (r Record) Ref() string { return refPrefix + r.ID }
 // r.LastActive().HorizonAt(now). A holder that went dormant past its TTL and returns is
 // the worst-case stale writer (#906 §3.3); this is the measured "how long has this lease
 // been held without a refresh?" the Phase-2 lease-fence rung (#1182) keys halt-and-
-// reacquire on. Pure: it reads only the recorded AcquiredAt, adds no field, and writes
-// no ref. A zero AcquiredAt yields the zero (unknown) Stamp, which buckets to Ancient.
+// reacquire on. It reads the renew-aware effectiveActiveAt, so a heartbeated lease reads
+// warm and only a genuinely un-refreshed one ages — exactly the "without a refresh"
+// quantity the rung wants. Pure: reads only recorded times, adds no field, writes no ref.
+// A zero effective time yields the zero (unknown) Stamp, which buckets to Ancient.
 func (r Record) LastActive() dormancy.Stamp {
-	return dormancy.FromUnix(r.AcquiredAt)
+	return dormancy.FromUnix(r.effectiveActiveAt())
 }
 
 // Store reads and writes lease records under refs/fak/locks/* through the ONE Runner

@@ -108,3 +108,81 @@ func TestLeaserefLiveEndToEnd(t *testing.T) {
 		t.Fatalf("reap wrongly removed the live docs-lane")
 	}
 }
+
+// TestLeaserefFenceEndToEnd drives the fenced acquire/fence/renew verbs against a REAL git
+// temp repo, exercising the actual `git update-ref` compare-and-swap and
+// `git rev-parse --show-object-format` (skipped when git is unavailable). It seeds an EXPIRED
+// holder, has a new holder TRANSITION over it (generation bumps), then proves the old
+// holder's fence is refused STALE_LEASE (exit 3) while the new holder's is admitted.
+func TestLeaserefFenceEndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	store := leaseref.NewInDir(dir)
+	ctx := context.Background()
+	// Seed an EXPIRED generation-1 lease held by A (AcquiredAt far in the past).
+	if _, err := store.Acquire(ctx, leaseref.Record{ID: "lane", TreeGlobs: []string{"x/**"}, Holder: "A", AcquiredAt: 100, TTLSeconds: 10, Generation: 1}); err != nil {
+		t.Fatalf("seed expired lease: %v", err)
+	}
+
+	// B acquires: the seeded lease is expired, so this is a TRANSITION -> generation 2.
+	var out, errb bytes.Buffer
+	if code := runLeaseref(&out, &errb, []string{"acquire", "--id", "lane", "--holder", "B", "--ttl", "3600", "--tree", "x/**", "--dir", dir}); code != 0 {
+		t.Fatalf("acquire exit=%d stderr=%q out=%q", code, errb.String(), out.String())
+	}
+	var acq fencedResult
+	if err := json.Unmarshal(out.Bytes(), &acq); err != nil {
+		t.Fatalf("acquire JSON: %v\nout=%s", err, out.String())
+	}
+	if !acq.Verdict.OK || acq.Record == nil || acq.Record.Generation != 2 || acq.Record.Holder != "B" {
+		t.Fatalf("acquire transition = %+v, want ok gen=2 holder=B", acq)
+	}
+
+	// A returns and fences with its stale generation 1 -> STALE_LEASE, exit 3.
+	out.Reset()
+	errb.Reset()
+	if code := runLeaseref(&out, &errb, []string{"fence", "--id", "lane", "--holder", "A", "--generation", "1", "--dir", dir}); code != leaserefRefused {
+		t.Fatalf("stale fence exit=%d, want %d (out=%q)", code, leaserefRefused, out.String())
+	}
+	var fv leaseref.FenceVerdict
+	if err := json.Unmarshal(out.Bytes(), &fv); err != nil {
+		t.Fatalf("fence JSON: %v\nout=%s", err, out.String())
+	}
+	if fv.OK || fv.Reason != leaseref.ReasonStaleLease || fv.Current != 2 {
+		t.Fatalf("stale fence verdict = %+v, want refused STALE_LEASE current=2", fv)
+	}
+
+	// B fences with its current generation 2 -> OK, exit 0.
+	out.Reset()
+	errb.Reset()
+	if code := runLeaseref(&out, &errb, []string{"fence", "--id", "lane", "--holder", "B", "--generation", "2", "--dir", dir}); code != 0 {
+		t.Fatalf("live fence exit=%d, want 0 (out=%q stderr=%q)", code, out.String(), errb.String())
+	}
+
+	// B renews: generation stays 2, exit 0.
+	out.Reset()
+	errb.Reset()
+	if code := runLeaseref(&out, &errb, []string{"renew", "--id", "lane", "--holder", "B", "--dir", dir}); code != 0 {
+		t.Fatalf("renew exit=%d, want 0 (out=%q stderr=%q)", code, out.String(), errb.String())
+	}
+	var rn fencedResult
+	if err := json.Unmarshal(out.Bytes(), &rn); err != nil {
+		t.Fatalf("renew JSON: %v\nout=%s", err, out.String())
+	}
+	if !rn.Verdict.OK || rn.Record == nil || rn.Record.Generation != 2 || rn.Record.RenewedAt == 0 {
+		t.Fatalf("renew = %+v, want ok gen=2 with RenewedAt set", rn)
+	}
+}

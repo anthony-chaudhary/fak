@@ -48,9 +48,29 @@ func (f *fakeGit) run(ctx context.Context, dir string, args ...string) (string, 
 			delete(f.refs, ref)
 			return "", 0, nil
 		}
-		f.refs[args[1]] = args[2]
+		ref, newval := args[1], args[2]
+		// CAS form `update-ref <ref> <new> <old>`: honor the old-value compare-and-swap the
+		// fence write (casWrite) relies on. An all-zeros <old> is git's "must not exist"
+		// sentinel; any other <old> must equal the ref's current object id, else the CAS is
+		// lost (exit non-zero). The 3-arg blind form (Acquire) skips this — unchanged.
+		if len(args) >= 4 {
+			old := args[3]
+			cur, exists := f.refs[ref]
+			if isAllZeros(old) {
+				if exists {
+					return "", 1, nil // must-not-exist violated: a peer created it first
+				}
+			} else if !exists || cur != old {
+				return "", 1, nil // old-value mismatch: the ref advanced under the writer
+			}
+		}
+		f.refs[ref] = newval
 		return "", 0, nil
 	case "rev-parse":
+		// rev-parse --show-object-format -> the repo's hash algorithm (zeroOID sizing).
+		if len(args) == 2 && args[1] == "--show-object-format" {
+			return "sha1\n", 0, nil
+		}
 		// rev-parse --verify --quiet <ref>
 		ref := args[len(args)-1]
 		if id, ok := f.refs[ref]; ok {
@@ -80,6 +100,20 @@ func (f *fakeGit) run(ctx context.Context, dir string, args ...string) (string, 
 		return strings.Join(lines, "\n") + "\n", 0, nil
 	}
 	return "", 0, nil
+}
+
+// isAllZeros reports whether s is a non-empty all-zeros object id — git's update-ref
+// "must not exist" CAS sentinel. Used by the fake's update-ref to model the create CAS.
+func isAllZeros(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '0' {
+			return false
+		}
+	}
+	return true
 }
 
 // synthID renders a small int as a stable synthetic object id for the fake object store.
