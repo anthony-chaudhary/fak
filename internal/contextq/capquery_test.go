@@ -8,8 +8,8 @@ import (
 
 // mockResolver is a test Resolver implementation.
 type mockResolver struct {
-	cards     []CapCard
-	capMap    map[CapRef]Capability
+	cards  []CapCard
+	capMap map[CapRef]Capability
 }
 
 func (m *mockResolver) Index() []CapCard {

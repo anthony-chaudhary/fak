@@ -874,7 +874,7 @@ const (
 
 // CapSpan records a single capability's residency state and metrics.
 type CapSpan struct {
-	CapRef    CapRef  `json:"cap_ref"`
+	CapRef    CapRef   `json:"cap_ref"`
 	State     CapState `json:"state"`
 	Faults    int      `json:"faults"`
 	LastFault int64    `json:"last_fault"`
@@ -1049,8 +1049,8 @@ func (l *CapabilityLedger) EvictUnderBudget(budgetBytes int) []CapRef {
 // CapRef identifies a capability (from C2 QueryCapabilities).
 type CapRef struct {
 	Name    string `json:"name"`
-	Source  string `json:"source"`  // skill name or system
-	Card    int    `json:"card"`    // 0 = scalar, >0 = collection
+	Source  string `json:"source"`   // skill name or system
+	Card    int    `json:"card"`     // 0 = scalar, >0 = collection
 	IsQuery bool   `json:"is_query"` // true if from a query parameter
 }
 
@@ -1074,8 +1074,8 @@ type CapResult struct {
 type CapKind string
 
 const (
-	CapKindSkill   CapKind = "skill"
-	CapKindMCPTool CapKind = "mcp-tool"
+	CapKindSkill    CapKind = "skill"
+	CapKindMCPTool  CapKind = "mcp-tool"
 	CapKindA2AAgent CapKind = "a2a-agent"
 )
 
@@ -1083,23 +1083,23 @@ const (
 // trigger clause (what the model searches for), and tags. It is the O(1) query
 // surface; only winners' full bodies are faulted in.
 type CapCard struct {
-	Name        string   `json:"name"`
-	Kind        CapKind  `json:"kind"`
-	Version     string   `json:"version"`
-	Trigger     string   `json:"trigger"` // search query text
-	Tags        []string `json:"tags"`
-	EstimateBytes int    `json:"estimate_bytes"` // size hint for budgeting
+	Name          string   `json:"name"`
+	Kind          CapKind  `json:"kind"`
+	Version       string   `json:"version"`
+	Trigger       string   `json:"trigger"` // search query text
+	Tags          []string `json:"tags"`
+	EstimateBytes int      `json:"estimate_bytes"` // size hint for budgeting
 }
 
 // Capability is a full capability descriptor: its reference, digest (content hash),
 // the CapCard (indexable metadata), and a Resolve function that pages in the body
 // on FAULT. The body is lazily loaded; only queried winners are materialized.
 type Capability struct {
-	Ref     CapRef          `json:"ref"`
-	Digest  string          `json:"digest"`
-	Card    CapCard         `json:"card"`
-	Resolve func() []byte   `json:"-"`
-	Scope   abi.ShareScope  `json:"scope"`
+	Ref     CapRef         `json:"ref"`
+	Digest  string         `json:"digest"`
+	Card    CapCard        `json:"card"`
+	Resolve func() []byte  `json:"-"`
+	Scope   abi.ShareScope `json:"scope"`
 }
 
 // Resolver is the protocol-generic capability lookup seam. Every protocol
@@ -1114,7 +1114,7 @@ type Resolver interface {
 
 // CapQueryRequest is a model-emitted intent+budget query over the capability space.
 type CapQueryRequest struct {
-	Intent      string `json:"intent"`      // natural-language query from the model
+	Intent      string `json:"intent"`       // natural-language query from the model
 	BudgetBytes int64  `json:"budget_bytes"` // max rendered bytes for faulted winners
 	K           int    `json:"k,omitempty"`  // max winners to return (0 = unbounded)
 }
@@ -1196,8 +1196,8 @@ func indexAll(resolvers []Resolver) []CapCard {
 func rankByIntent(cards []CapCard, intent string) []CapCard {
 	queryTokens := tokens(intent)
 	type scoredCard struct {
-		card   CapCard
-		score  int
+		card  CapCard
+		score int
 	}
 	var scored []scoredCard
 	for _, card := range cards {
