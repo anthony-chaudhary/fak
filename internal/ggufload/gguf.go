@@ -74,18 +74,18 @@ const (
 type TensorType uint32
 
 const (
-	TensorF32    TensorType = 0
-	TensorF16    TensorType = 1
-	TensorQ4_0   TensorType = 2
-	TensorQ4_1   TensorType = 3
-	TensorQ5_0   TensorType = 6
-	TensorQ5_1   TensorType = 7
-	TensorQ8_0   TensorType = 8
-	TensorQ2_K   TensorType = 10
-	TensorQ3_K   TensorType = 11
-	TensorQ4_K   TensorType = 12
-	TensorQ5_K   TensorType = 13
-	TensorQ6_K   TensorType = 14
+	TensorF32     TensorType = 0
+	TensorF16     TensorType = 1
+	TensorQ4_0    TensorType = 2
+	TensorQ4_1    TensorType = 3
+	TensorQ5_0    TensorType = 6
+	TensorQ5_1    TensorType = 7
+	TensorQ8_0    TensorType = 8
+	TensorQ2_K    TensorType = 10
+	TensorQ3_K    TensorType = 11
+	TensorQ4_K    TensorType = 12
+	TensorQ5_K    TensorType = 13
+	TensorQ6_K    TensorType = 14
 	TensorIQ3_XXS TensorType = 18
 	TensorIQ4_NL  TensorType = 20
 	TensorIQ4_XS  TensorType = 23
