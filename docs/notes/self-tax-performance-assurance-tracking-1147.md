@@ -597,44 +597,46 @@ red condition — so the eventual build is **wiring against a fixed contract**, 
 what blocks the live `make ci` red today (the epic's own sequencing law, §8: *no budget ⇒ no
 breach ⇒ no gate*).
 
-### 12.1 The substrate (four inputs, each with its current build state)
+### 12.1 The substrate (the inputs, each with its current build state)
 
-The honest accounting: three of the four inputs the gate folds are already built and tested —
-the gate is **additive wiring**, not greenfield — but the one that defines "over-budget" is not.
+The honest accounting: the two inputs that *produce and attribute* the on−off delta are built and
+tested today — the gate is **additive wiring**, not greenfield — but the piece that defines
+"over-budget," and the sequential/change-point hardening, are not yet in-tree.
 
 | Input | Source (current) | What it contributes | Build state |
 |---|---|---|---|
-| on/off ablation matrix | `cmd/fak/ablate` + `internal/ablate.Sweep` | replays the **same** frozen trace under each arm; the `all-off` arm is fak-OFF, `all-on` is fak-ON; one `WorkloadHash` binds the arms (the identical-workload guard) so the on−off delta is apples-to-apples | **BUILT** |
-| per-rung causal attribution | `internal/turnbench` `RunLeverFlip` → `LeverFlipReport` | which rung actually moved the counters on this trace (`AttributionPerRun = L` causal ablations per recorded run), so a breach can be **attributed**, not just flagged | **BUILT** |
-| the sequential decision | `internal/turnbench` `RunSequentialGate` / `SPRT` (T8, [#1164](https://github.com/anthony-chaudhary/fak/issues/1164)) | accumulates the on−off effect stream and stops the moment it crosses a boundary: `AcceptH1` = regression real; `AcceptH0` = the **futility** boundary (noise-only / not regressing) | **BUILT** |
-| the **budget** envelope | T2 `OVERHEAD_BUDGET_EXCEEDED` ([#1150](https://github.com/anthony-chaudhary/fak/issues/1150)) | the declared per-rung/per-method overhead a breach is defined **against** — the `mu0`/`mu1` calibration the SPRT needs to know what "over-budget" means | OPEN — **the blocker** |
-| (hardening) change-point | T7 over stored runs | replaces a brittle fixed threshold; gate on "exceeds **and** distribution-shifts" — feeds the persistence rule (§4) | OPEN |
+| on/off ablation matrix | `cmd/fak/ablate` + `internal/ablate.Sweep` | replays the **same** frozen trace under each arm; the `all-off` arm is fak-OFF, `all-on` is fak-ON; one `WorkloadHash` binds the arms (the identical-workload guard) so the on−off delta is apples-to-apples | **BUILT** (`internal/ablate` green) |
+| per-rung causal attribution | `internal/turnbench` `RunLeverFlip` → `LeverFlipReport` | which rung actually moved the counters on this trace (`AttributionPerRun = L` causal ablations per recorded run), so a breach can be **attributed**, not just flagged | **BUILT** (`internal/turnbench` green) |
+| the **budget** envelope | T2 `OVERHEAD_BUDGET_EXCEEDED` ([#1150](https://github.com/anthony-chaudhary/fak/issues/1150)) | the declared per-rung/per-method overhead a breach is defined **against** — the calibration the decision needs to know what "over-budget" means | OPEN — **the blocker** |
+| the sequential decision (hardening) | `internal/turnbench` SPRT sequential gate (T8, [#1164](https://github.com/anthony-chaudhary/fak/issues/1164)) | early-stops the on−off A/B the moment the effect stream crosses a boundary (regression-real vs the **futility** boundary), at ~half the samples of fixed-N | OPEN ([#1164](https://github.com/anthony-chaudhary/fak/issues/1164)) — landing separately, not yet in-tree |
+| change-point (hardening) | T7 over stored runs ([#1163](https://github.com/anthony-chaudhary/fak/issues/1163)) | replaces a brittle fixed threshold; gate on "exceeds **and** distribution-shifts" — feeds the persistence rule (§4) | OPEN ([#1163](https://github.com/anthony-chaudhary/fak/issues/1163)) |
 
-### 12.2 The gate's shape (frozen workload → on/off arms → effect stream → SPRT → persistence → red)
+### 12.2 The gate's shape (frozen workload → on/off arms → over-budget delta → persistence → red)
 
-The pipeline, each stage grounded in a built piece above:
+The pipeline, each stage marked built or pending its ticket:
 
 1. **Frozen canonical workload.** The committed `testdata/tau2` trace the ablate sweep already
    replays — a fixed tool-call recording, not a live agent run, so the gate is deterministic and
    `$0`/no-model. The `WorkloadHash` is the freeze: a trace edit changes the hash and is a
-   deliberate, reviewed re-baseline, never a silent drift.
+   deliberate, reviewed re-baseline, never a silent drift. **(built)**
 2. **Two arms.** `fak ablate --baseline all-off` yields the `all-off` (fak-OFF) and `all-on`
    (fak-ON) arms over that one trace; the per-arm kernel counters (`p50_ns`, token-delta,
-   denies, quarantines, vDSO hits) are read straight off the run.
-3. **The effect stream.** The per-sample effect the gate decides over is the **on−off overhead
-   delta** (per-call `p50_ns` / token-delta), repeated across the trace's calls — the
-   `treatment-minus-control` stream `RunSequentialGate` already documents as its input.
-4. **The decision.** `RunSequentialGate(label, deltas, mu0, mu1, sigma, alpha, beta)` with
-   `mu0 = 0` (no over-budget regression) and `mu1 =` the minimum over-budget effect worth
-   detecting, **both calibrated from the T2 budget** (#1150). `AcceptH1` ⇒ a real over-budget
-   regression; `AcceptH0` ⇒ within budget / noise — the futility boundary is exactly the §4
-   "not a single spike" guard.
-5. **The persistence rule (§4).** Red only when the over-budget verdict **persists** — a
-   change-point shift (T7) or ≥3 consecutive `AcceptH1` runs — never one noisy sample. This is
-   the §6 honesty fence in force: *a gate that costs 8% and saves 40% is a net win*, so the gate
-   reds on a budget **breach** that holds, not on the existence of overhead.
-6. **The red.** On a persistent `AcceptH1`, the gated target exits non-zero, reding `make ci`;
-   the `LeverFlipReport` names the culprit rung in the failure message.
+   denies, quarantines, vDSO hits) are read straight off the run. **(built)**
+3. **The over-budget delta.** The effect the gate decides over is the **on−off overhead delta**
+   (per-call `p50_ns` / token-delta) compared against the T2 budget for that workload+metric:
+   `breach ⇔ on_cost − off_cost > budget`. **(pending T2 / [#1150](https://github.com/anthony-chaudhary/fak/issues/1150) — the budget the delta is judged against)**
+4. **The decision.** The MVP rule is a fixed over-budget threshold over a small fan of runs; the
+   T8 SPRT sequential gate ([#1164](https://github.com/anthony-chaudhary/fak/issues/1164)) refines
+   it to an early-stopping A/B with a **futility** boundary (the §4 "not a single spike" guard),
+   landing separately. **(MVP pending T2; SPRT refinement is T8)**
+5. **The persistence rule (§4).** Red only when the over-budget verdict **persists** — ≥N
+   consecutive over-budget runs, or a T7 change-point shift
+   ([#1163](https://github.com/anthony-chaudhary/fak/issues/1163)) — never one noisy sample. This
+   is the §6 honesty fence in force: *a gate that costs 8% and saves 40% is a net win*, so the gate
+   reds on a budget **breach** that holds, not on the existence of overhead. **(MVP = consecutive-run
+   count; change-point is T7)**
+6. **The red.** On a persistent breach, the gated target exits non-zero, reding `make ci`; the
+   `LeverFlipReport` names the culprit rung in the failure message. **(wiring pending T2)**
 
 ### 12.3 Acceptance mapped to witnesses
 
@@ -642,13 +644,13 @@ The issue's three acceptance clauses, each tied to the witness that proves it:
 
 - **AC1 — wired into `make ci`.** A default-on target in the `ci` chain (a `go test` tier over
   the frozen-workload sweep, or a `gated-tests`-style runner) — runs on every `make ci`, no flag.
-- **AC2 — a synthetic injected regression reds it.** An arm with deliberately inflated per-call
-  cost drives the on−off stream over the H1 boundary → `AcceptH1` → non-zero exit; a noise-only
-  run stays `AcceptH0` → no false red. **The statistical half is already witnessed:**
-  `sprt_test.go`'s `TestRunSequentialGate_SingleFixtureWitness` (an H1-drawn stream reads
-  `AcceptH1`) and `TestSPRT_FutilityBoundaryUnderH0` (an H0 stream reads `AcceptH0`, no false
-  red) prove the decision behaves; what AC2 adds is feeding it the **real** ablate on−off deltas
-  against the T2 budget rather than synthetic Gaussian samples.
+- **AC2 — a synthetic injected regression reds it; noise does not.** An arm with deliberately
+  inflated per-call cost drives the on−off delta over the T2 budget → non-zero exit; a noise-only
+  re-run of the same frozen workload stays within budget → no false red (the §6 DoD item 5 "no
+  false red" witness). The **comparison + attribution half is committed and green today** —
+  `internal/ablate`'s `Sweep` / identical-workload guard and `internal/turnbench`'s `RunLeverFlip`
+  both pass; what AC2 adds is feeding the real on−off deltas against the T2 budget, with the
+  SPRT/change-point statistical hardening (T8/[#1164](https://github.com/anthony-chaudhary/fak/issues/1164), T7/[#1163](https://github.com/anthony-chaudhary/fak/issues/1163)) layered on after.
 - **AC3 — documented reproduce command.** The on-vs-off matrix is reproducible **today** via the
   built verb (§12.5); the gate's own `go test` invocation joins it once the wiring lands.
 
@@ -656,35 +658,42 @@ The issue's three acceptance clauses, each tied to the witness that proves it:
 
 - **Blocked-on (the honest fence).** The always-on `make ci` **red** is blocked on T2
   ([#1150](https://github.com/anthony-chaudhary/fak/issues/1150), OPEN): without a declared
-  budget there is no `mu0`/`mu1` to calibrate "over-budget," so a gate built now would either red
-  on *any* overhead — which the §6 fence forbids (an 8%-cost/40%-save gate is a **net win**) — or
-  invent an ad-hoc number that preempts T2 and violates the §8 sequencing law (*no budget ⇒ no
-  breach ⇒ no gate*). T7's change-point hardening of the persistence rule is likewise unbuilt.
-- **Built, so the build is additive.** `ablate` (fak-on/off + the identical-workload hash),
-  `turnbench` LeverFlip (attribution), and `RunSequentialGate`/SPRT (the regress-or-not decision
-  with its futility boundary, T8/#1164) are all built and tested — so once T2 lands the gate is
-  **wiring against this fixed contract**, not a design decision deferred to build time.
-- **Lane for the build:** the gate verb + the `make ci` hook is `cmd`/`turnbench` — **not**
+  budget there is no calibrated "over-budget," so a gate built now would either red on *any*
+  overhead — which the §6 fence forbids (an 8%-cost/40%-save gate is a **net win**) — or invent an
+  ad-hoc number that preempts T2 and violates the §8 sequencing law (*no budget ⇒ no breach ⇒ no
+  gate*). The SPRT sequential decision (T8/[#1164](https://github.com/anthony-chaudhary/fak/issues/1164)) and the change-point persistence hardening (T7/[#1163](https://github.com/anthony-chaudhary/fak/issues/1163)) are likewise separate, not-yet-in-tree tickets.
+- **Built, so the build is additive.** `ablate` (fak-on/off + the identical-workload hash) and
+  `turnbench` LeverFlip (attribution) are built and tested — so once T2 lands the gate's MVP is
+  **wiring against this fixed contract**, not a design decision deferred to build time, with the
+  T8/T7 hardening folded in as it arrives.
+- **Lane for the build:** the gate verb + the `make ci` hook is `cmd`/`turnbench`/`ci` — **not**
   `docs`. This docs increment pins the contract only; it does **not** itself wire the gate or red
   the tree. (Mirrors §10.4's lane fence.)
 
 ### 12.5 Reproduce (the on-vs-off matrix today; the gate once T2 lands)
 
 ```sh
-# Available today — the fak-ON vs fak-OFF matrix on the frozen canonical workload:
-fak ablate --suite tau2-smoke --baseline all-off --json | \
-  jq '.workload_hash, (.runs[] | {arm: .arm_id, p50_ns: .arm.p50_ns, tokens: .tokens})'
-# all-off = fak-OFF, all-on = fak-ON; one workload_hash binds the arms (identical-workload guard).
+# Available today — the fak-ON vs fak-OFF matrix on the frozen canonical workload (no model, $0):
+fak ablate --sweep vdso
+#   arm        features    calls  vdso_hits  p50_ns  tokens
+#   all-off    vdso=off       12          0    2879     937    <- fak-OFF (baseline)
+#   vdso       vdso=on        12          7    3000     417    <- fak-ON
+#   delta vs all-off:  vdso_hits +7   p50_ns +121   tokens -520   (signed net: +121 ns / -520 tok)
 
-# The sequential decision the gate folds (its statistical witness, today):
-go test ./internal/turnbench -run 'TestRunSequentialGate|TestSPRT_Futility' -count=1
+# The AblationReport JSON the gate folds (one workload_hash binds the arms):
+fak ablate --suite tau2-smoke --baseline all-off --json | \
+  jq '.workload_hash, (.runs[] | {arm: .arm_id, p50_ns: .arm.p50_ns, tokens: (.arm.input_tokens + .arm.output_tokens)})'
+
+# The committed on/off + attribution substrate the gate is built on (green today):
+go test ./internal/ablate ./internal/turnbench -run 'Sweep|LeverFlip' -count=1
 ```
 
 Stated plainly, like §9.4 / §10.5 / §11.6: this is the **contract** the follow-on build verifies,
 not a live `make ci` gate today — the always-on over-budget red does not exist until T2 (#1150)
-declares the budget the breach is measured against. The reused substrate — `ablate`, LeverFlip,
-and the SPRT sequential gate — **is** built. Pinning the gate's shape here (frozen workload, the
-`all-off`/`all-on` arms, the on−off effect stream, the SPRT decision with its futility boundary,
-the persistence rule, the budget-breach red) is the docs-lane increment of L3; the executable
-always-on gate and its `make ci` hook are the named follow-on in the `cmd` / `turnbench` lane,
-unblocked by T2.
+declares the budget the breach is measured against. The reused substrate — `ablate` (on/off +
+identical-workload hash) and `turnbench` LeverFlip (attribution) — **is** built and green; the
+SPRT sequential decision (T8/#1164) and the change-point persistence rule (T7/#1163) are separate,
+not-yet-in-tree hardening tickets. Pinning the gate's shape here (frozen workload, the
+`all-off`/`all-on` arms, the on−off over-budget delta, the persistence rule, the budget-breach
+red) is the docs-lane increment of L3; the executable always-on gate and its `make ci` hook are
+the named follow-on in the `cmd` / `turnbench` / `ci` lane, unblocked by T2.
