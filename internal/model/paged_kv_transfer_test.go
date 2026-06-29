@@ -70,7 +70,12 @@ func TestPagedKVTransferRoundTripCarriesDescriptor(t *testing.T) {
 		Scope:            abi.ScopeAgent,
 		AdmissionVerdict: cachemeta.AdmissionQuarantine,
 		AdmittedBy:       "admission-gate",
-		Outcome:          cachemeta.KVTransferOK,
+		DeletionCertificate: cachemeta.DeletionCertificate{
+			Schema:  "fak.deletioncert/v1",
+			Subject: "span-issue-27",
+			Digest:  "cert-issue-27",
+		},
+		Outcome: cachemeta.KVTransferOK,
 	}
 
 	frame, err := MarshalPagedKVTransfer(src, transfer, from, n)
@@ -98,6 +103,13 @@ func TestPagedKVTransferRoundTripCarriesDescriptor(t *testing.T) {
 	}
 	if got.Entry.Derivation.SerializerID != PagedKVTransferSerializerID {
 		t.Fatalf("serializer id = %q, want %q", got.Entry.Derivation.SerializerID, PagedKVTransferSerializerID)
+	}
+	gov := cachemeta.GovernanceFromEntry(got.Entry)
+	if gov.Lease != "lease-29" ||
+		gov.DeletionCertificate.Schema != "fak.deletioncert/v1" ||
+		gov.DeletionCertificate.Subject != "span-issue-27" ||
+		gov.DeletionCertificate.Digest != "cert-issue-27" {
+		t.Fatalf("paged transfer did not reconstruct deletion certificate governance: %+v", gov)
 	}
 	if got.Verdict().Kind != cachemeta.LookupHit {
 		t.Fatalf("ok transfer verdict = %s, want hit", got.Verdict().Kind)

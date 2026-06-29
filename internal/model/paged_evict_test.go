@@ -1,6 +1,11 @@
 package model
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+)
 
 // paged_evict_test.go — the #33 proof gate: a mid-span Evict on the paged/block KV layout
 // (paged_evict.go) is BIT-IDENTICAL to the contiguous KVCache.Evict (kvcache.go), and the
@@ -86,7 +91,7 @@ func TestPagedEvictBitIdenticalToContiguous(t *testing.T) {
 	m := NewSynthetic(cfg)
 
 	all := []int{3, 17, 5, 23, 41, 2, 19} // 7 tokens
-	const from, n = 2, 3                   // middle span [2,5); survivors {0,1,5,6} -> {0,1,2,3}
+	const from, n = 2, 3                  // middle span [2,5); survivors {0,1,5,6} -> {0,1,2,3}
 
 	// Contiguous reference.
 	cs := m.NewSession()
@@ -189,5 +194,105 @@ func TestPagedEvictCOWLeavesForkedParentUnchanged(t *testing.T) {
 	for l := 0; l < cfg.NumLayers; l++ {
 		assertFloat32BitsEqual(t, "child K == contiguous l"+itoa(l), cs.Cache.K[l], child.GatherK(l))
 		assertFloat32BitsEqual(t, "child V == contiguous l"+itoa(l), cs.Cache.V[l], child.GatherV(l))
+	}
+}
+
+func TestPagedEvictGovernedAttestationCarriesRefereeDescriptor(t *testing.T) {
+	cfg := pagedEvictCfg()
+	m := NewSynthetic(cfg)
+	all := []int{3, 17, 5, 23, 41, 2, 19}
+	const from, n = 2, 3
+
+	cs := m.NewSession()
+	cs.Prefill(all)
+	seq := snapshotCacheToPaged(NewPagedKVPoolWithRaw(cfg, 4), cs.Cache)
+	target := cachemeta.EntryID{
+		Digest:    "span-27",
+		MediaType: cachemeta.MediaKVSpan,
+		Length:    n,
+		Unit:      cachemeta.UnitPositions,
+	}
+	gov := cachemeta.KVGovernance{
+		Security: cachemeta.Security{
+			Taint:            abi.TaintQuarantined,
+			Scope:            abi.ScopeAgent,
+			AdmissionVerdict: cachemeta.AdmissionQuarantine,
+			AdmittedBy:       "l3-referee",
+		},
+		Lease: "lease-27",
+		DeletionCertificate: cachemeta.DeletionCertificate{
+			Schema:  "fak.deletioncert/v1",
+			Subject: "span-27",
+			Digest:  "cert-27",
+		},
+	}
+
+	rc := cs.Cache.Evict(from, n)
+	rp, att := seq.EvictGoverned(from, n, cfg, target, gov)
+	if rc != rp || rp != n {
+		t.Fatalf("removed mismatch: contiguous=%d paged=%d want=%d", rc, rp, n)
+	}
+	if att.Target != target ||
+		att.Scope != cachemeta.KVEvictionScopeExactSpan ||
+		!att.ExactSpanSupported ||
+		att.Degraded ||
+		!att.RefereeAdmitted ||
+		att.RefereeReason != cachemeta.KVRefereeAdmitted {
+		t.Fatalf("native governed eviction did not attest exact-span outcome: %+v", att)
+	}
+	if att.Governance.Security.AdmissionVerdict != cachemeta.AdmissionQuarantine ||
+		att.Governance.Security.AdmittedBy != "l3-referee" ||
+		att.Governance.Lease != "lease-27" ||
+		att.Governance.DeletionCertificate.Digest != "cert-27" {
+		t.Fatalf("native governed eviction lost referee descriptor: %+v", att.Governance)
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		assertFloat32BitsEqual(t, "governed paged-evict K l"+itoa(l), cs.Cache.K[l], seq.GatherK(l))
+		assertFloat32BitsEqual(t, "governed paged-evict Kraw l"+itoa(l), cs.Cache.Kraw[l], seq.GatherKraw(l))
+		assertFloat32BitsEqual(t, "governed paged-evict V l"+itoa(l), cs.Cache.V[l], seq.GatherV(l))
+	}
+}
+
+func TestPagedEvictGovernedRefusesUngovernedSpanBeforeMutation(t *testing.T) {
+	cfg := pagedEvictCfg()
+	m := NewSynthetic(cfg)
+	cs := m.NewSession()
+	cs.Prefill([]int{3, 17, 5, 23, 41, 2, 19})
+	seq := snapshotCacheToPaged(NewPagedKVPoolWithRaw(cfg, 4), cs.Cache)
+
+	beforeK := make([][]float32, cfg.NumLayers)
+	beforeKraw := make([][]float32, cfg.NumLayers)
+	beforeV := make([][]float32, cfg.NumLayers)
+	for l := 0; l < cfg.NumLayers; l++ {
+		beforeK[l] = seq.GatherK(l)
+		beforeKraw[l] = seq.GatherKraw(l)
+		beforeV[l] = seq.GatherV(l)
+	}
+
+	target := cachemeta.EntryID{Digest: "span-27", MediaType: cachemeta.MediaKVSpan, Length: 3, Unit: cachemeta.UnitPositions}
+	gov := cachemeta.KVGovernance{
+		Security: cachemeta.Security{
+			Taint:            abi.TaintQuarantined,
+			Scope:            abi.ScopeAgent,
+			AdmissionVerdict: cachemeta.AdmissionQuarantine,
+			AdmittedBy:       "l3-referee",
+		},
+		Lease: "lease-27",
+	}
+
+	removed, att := seq.EvictGoverned(2, 3, cfg, target, gov)
+	if removed != 0 {
+		t.Fatalf("ungoverned eviction removed %d positions, want 0", removed)
+	}
+	if att.RefereeAdmitted || att.RefereeReason != cachemeta.KVRefereeMissingDeletionCertificate {
+		t.Fatalf("ungoverned eviction did not surface certificate refusal: %+v", att)
+	}
+	if seq.Len() != len([]int{3, 17, 5, 23, 41, 2, 19}) {
+		t.Fatalf("ungoverned eviction changed length to %d", seq.Len())
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		assertFloat32BitsEqual(t, "refused paged-evict K l"+itoa(l), beforeK[l], seq.GatherK(l))
+		assertFloat32BitsEqual(t, "refused paged-evict Kraw l"+itoa(l), beforeKraw[l], seq.GatherKraw(l))
+		assertFloat32BitsEqual(t, "refused paged-evict V l"+itoa(l), beforeV[l], seq.GatherV(l))
 	}
 }

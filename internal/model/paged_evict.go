@@ -1,5 +1,7 @@
 package model
 
+import "github.com/anthony-chaudhary/fak/internal/cachemeta"
+
 // paged_evict.go — #33 design-gate prototype: carrying the bit-exact middle-span Evict
 // value-add (kvcache.go) onto the paged/block KV layout (pagedkv.go, #277).
 //
@@ -146,6 +148,20 @@ func (s *PagedKV) Evict(from, n int, cfg Config) int {
 		s.AppendRaw(k, kraw, v)
 	}
 	return end - from
+}
+
+// EvictGoverned is the Track B native lowering for a governed exact-span eviction:
+// it runs the real paged/block Evict and returns the same payload-free attestation
+// shape Track A emits after lowering to an external engine. The governance
+// descriptor is supplied by the caller's referee/admission path; this method does
+// not invent a new policy model.
+func (s *PagedKV) EvictGoverned(from, n int, cfg Config, target cachemeta.EntryID, gov cachemeta.KVGovernance) (int, cachemeta.KVEvictionAttestation) {
+	att := cachemeta.DefaultKVGovernanceReferee.AttestEviction(cachemeta.ExternalInvalidateKVSpan, target, cachemeta.KVEvictionScopeExactSpan, true, "", gov)
+	if !att.RefereeAdmitted {
+		return 0, att
+	}
+	removed := s.Evict(from, n, cfg)
+	return removed, att
 }
 
 // reropeRowFromRaw re-derives layer l's post-RoPE K row for logical position pos from its
