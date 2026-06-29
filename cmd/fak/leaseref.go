@@ -71,9 +71,11 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       its LIVE/EXPIRED status; --json emits the raw records.
 
   fak leaseref reap [--dir DIR]
-      Delete the expired (reapable) records — a crashed holder's lapsed lease is
-      bounded, not a permanent deadlock. The delete is an ordinary ref delete that
-      converges across clones the same way acquisition does.
+      Delete the expired (reapable) records — BOTH expired lock leases and expired
+      guard-session descriptors under refs/fak/locks/*. A crashed holder's lapsed
+      lease (or a crashed node's lapsed session) is bounded, not a permanent ghost.
+      The delete is an ordinary ref delete that converges across clones the same way
+      acquisition does.
 
 This is VISIBILITY, not atomic acquisition: it lets an arbiter SEE a cross-machine
 conflict, it does not arbitrate a same-fetch-window race.
@@ -139,21 +141,25 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 	}
 	store := leaseref.NewInDir(*dir)
 	ctx := context.Background()
-	_, expired, err := store.Live(ctx, time.Now())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak leaseref reap: %v\n", err)
-		return 1
+	now := time.Now()
+	rc := 0
+
+	// Reap BOTH ref kinds under refs/fak/locks/*: expired lock leases and expired session
+	// descriptors. Each sweep is independent and best-effort — a failure on one kind is
+	// reported but never suppresses the other. Store.Reap / ReapSessions delete only their
+	// own kind (the namespace split), so a session is never mistaken for a lock lease.
+	leases, lerr := store.Reap(ctx, now)
+	if lerr != nil {
+		fmt.Fprintf(stderr, "fak leaseref reap: leases: %v\n", lerr)
+		rc = 1
 	}
-	reaped := 0
-	for _, id := range expired {
-		if err := store.Release(ctx, id); err != nil {
-			fmt.Fprintf(stderr, "fak leaseref reap: release %s: %v\n", id, err)
-			continue
-		}
-		reaped++
+	sessions, serr := store.ReapSessions(ctx, now)
+	if serr != nil {
+		fmt.Fprintf(stderr, "fak leaseref reap: sessions: %v\n", serr)
+		rc = 1
 	}
-	fmt.Fprintf(stdout, "reaped %d expired lease(s)\n", reaped)
-	return 0
+	fmt.Fprintf(stdout, "reaped %d expired lease(s), %d expired session(s)\n", len(leases), len(sessions))
+	return rc
 }
 
 func emitLeaserefJSON(stdout, stderr io.Writer, v any, sub string) int {
