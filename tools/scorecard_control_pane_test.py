@@ -243,11 +243,61 @@ def test_grade_weight_maps_letters_to_severity() -> None:
 
 
 def test_grade_weight_falls_back_to_debt_when_no_grade() -> None:
-    # a scorecard that emits debt but no letter (readme-freshness) still contributes.
+    # a scorecard that emits debt but no letter AND no score (readme-freshness)
+    # still contributes via the last-resort debt-magnitude tier.
     assert scp.grade_weight({"grade": None, "debt": 0}) == 0     # derive A
     assert scp.grade_weight({"grade": None, "debt": 2}) == 1     # derive B
     assert scp.grade_weight({"grade": None, "debt": 4}) == 2     # derive C
     assert scp.grade_weight({"grade": "??", "debt": 20}) == 8    # bad grade -> derive F
+
+
+def test_grade_from_score_shared_ladder() -> None:
+    assert (scp.grade_from_score(90), scp.grade_from_score(89.9)) == ("A", "B")
+    assert (scp.grade_from_score(80), scp.grade_from_score(70)) == ("B", "C")
+    assert (scp.grade_from_score(60), scp.grade_from_score(59.9)) == ("D", "F")
+
+
+def test_score_tier_beats_debt_for_scoreless_scorecard() -> None:
+    """The fix: a scoreless-but-scored surface (seo/demo/docs/robustness) with a
+    high score but a pile of OCCURRENCE-count debt is graded A from its score, not
+    F from debt magnitude — the units-not-severity error the lens exists to kill."""
+    # seo on the real tree: score 92.5, seo_debt 25. Debt-magnitude would say F(8);
+    # the score says A(0).
+    m = {"grade": None, "score": 92.5, "debt": 25}
+    assert scp.display_grade(m) == "A" and scp.grade_weight(m) == 0
+    # a genuinely-low score still grades F via the SAME score tier.
+    assert scp.grade_weight({"grade": None, "score": 41.0, "debt": 25}) == 8
+
+
+def test_grade_precedence_emitted_letter_beats_score_beats_debt() -> None:
+    # emitted letter wins even over a contradicting score...
+    assert scp.display_grade({"grade": "C", "score": 99.0, "debt": 0}) == "C"
+    # ...score wins over debt when no letter...
+    assert scp.display_grade({"grade": None, "score": 75.0, "debt": 999}) == "C"
+    # ...debt is the last resort when neither letter nor score is present.
+    assert scp.display_grade({"grade": None, "score": None, "debt": 3}) == "C"
+
+
+def test_metric_from_payload_stamps_corpus_score_for_scoreless_cards() -> None:
+    # the seo card emits overall_score at corpus level but no corpus grade; the
+    # fold must carry that score so grade_weight can derive the true grade.
+    seo = next(c for c in scp.SCORECARDS if c["key"] == "seo")
+    payload = {"corpus": {"seo_debt": 25, "overall_score": 92.5}}
+    m = scp.metric_from_payload(seo, payload)
+    assert m["score"] == 92.5 and m["grade"] is None
+    assert scp.grade_weight(m) == 0          # A, from the score — not F from debt 25
+    # a card with no SCORE_KEYS entry carries score=None (debt/letter tiers only).
+    code = next(c for c in scp.SCORECARDS if c["key"] == "code")
+    m2 = scp.metric_from_payload(code, {"corpus": {"code_debt": 5, "grade": "C", "score": 72}})
+    assert m2["score"] is None and m2["grade"] == "C"
+
+
+def test_find_score_prefers_corpus_over_nested_entries() -> None:
+    # a per-page mean_score must NOT be picked over the corpus aggregate.
+    payload = {"corpus": {"mean_score": 96.0}, "demos": [{"mean_score": 10.0}]}
+    assert scp.find_score(payload, "mean_score") == 96.0
+    assert scp.find_score({"corpus": {}}, "mean_score") is None
+    assert scp.find_score({"corpus": {"mean_score": True}}, "mean_score") is None  # bool != score
 
 
 def test_grade_debt_is_scale_invariant_vs_raw_sum() -> None:

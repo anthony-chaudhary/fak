@@ -98,14 +98,46 @@ BASELINE_REL = "tools/scorecard_baseline.json"
 # raw-count improvement can no longer mask.
 GRADE_DEBT: dict[str, int] = {"A": 0, "B": 1, "C": 2, "D": 4, "F": 8}
 
+# The 4 scorecards that grade per-item but emit NO corpus-level letter grade
+# (docs/seo/demo/robustness). Each DOES emit a corpus-level aggregate SCORE; this
+# maps the metric key -> that score field so the lens can derive the TRUE grade
+# from the score (scale-invariant, on the same 90/80/70/60 ladder the scorecards'
+# own grade_letter uses) instead of from raw debt magnitude. Without this, an
+# A-grade surface carrying occurrence-count debt is mis-ranked F — the very
+# units-not-severity error the grade lens exists to kill (verified live: seo
+# 92.5, demo 96.0, robustness 92.4, docs 96.9 — all A, all debt-derived to F/B).
+# Keyed on the SCORECARDS `key` (note: the docs metric's key is "doc", not "docs").
+SCORE_KEYS: dict[str, str] = {
+    "doc": "mean_score",
+    "seo": "overall_score",
+    "demo": "mean_score",
+    "robustness": "mean_score",
+}
+
+
+def grade_from_score(score: float) -> str:
+    """A-F on the family's shared 90/80/70/60 ladder — the SAME thresholds every
+    scorecard's own ``grade_letter`` uses, so a score-derived grade reproduces
+    exactly the letter the scorecard would have emitted had it surfaced one."""
+    if score >= 90:
+        return "A"
+    if score >= 80:
+        return "B"
+    if score >= 70:
+        return "C"
+    if score >= 60:
+        return "D"
+    return "F"
+
 
 def derive_grade(debt: int) -> str:
-    """Fallback grade for a scorecard that emits a debt integer but no letter.
+    """Last-resort grade for a scorecard that emits neither a letter NOR a score.
 
-    A few family members (readme-freshness) report only ``*_debt``, no corpus
-    ``grade``. Without a fallback they'd be invisible to the grade-weighted lens,
-    re-introducing the very blind spot it closes. This maps debt onto the same
-    A-F ladder by magnitude so every measured metric contributes a severity.
+    A family member that reports only ``*_debt`` (readme-freshness) would be
+    invisible to the grade-weighted lens without a fallback, re-opening the blind
+    spot it closes. This maps debt onto the A-F ladder by magnitude. It is
+    SCALE-VARIANT (debt units aren't comparable across metrics), so it is the
+    lowest-precedence source — used only when no letter and no score exist.
     """
     if debt <= 0:
         return "A"
@@ -118,17 +150,29 @@ def derive_grade(debt: int) -> str:
     return "F"
 
 
-def grade_weight(metric: dict[str, Any]) -> int:
-    """The severity weight one measured metric contributes to ``grade_debt``.
+def display_grade(metric: dict[str, Any]) -> str:
+    """The single source of truth for a metric's effective letter grade.
 
-    Prefers the scorecard's own emitted letter grade (scale-invariant by
-    construction); falls back to a debt-derived grade when none was reported.
+    Three-tier precedence: the scorecard's own EMITTED letter (scale-invariant) >
+    a SCORE-derived letter on the shared ladder (scale-invariant) > a DEBT-derived
+    letter by magnitude (scale-variant, last resort). Both the severity weight and
+    the rendered breakdown read this, so the number and the displayed letter can
+    never diverge.
     """
     grade = metric.get("grade")
-    if not isinstance(grade, str) or grade.upper() not in GRADE_DEBT:
-        debt = metric.get("debt")
-        grade = derive_grade(int(debt)) if isinstance(debt, int) and not isinstance(debt, bool) else "F"
-    return GRADE_DEBT[grade.upper()]
+    if isinstance(grade, str) and grade.upper() in GRADE_DEBT:
+        return grade.upper()
+    score = metric.get("score")
+    if isinstance(score, (int, float)) and not isinstance(score, bool):
+        return grade_from_score(float(score))
+    debt = metric.get("debt")
+    return derive_grade(int(debt)) if isinstance(debt, int) and not isinstance(debt, bool) else "F"
+
+
+def grade_weight(metric: dict[str, Any]) -> int:
+    """The severity weight one measured metric contributes to ``grade_debt``,
+    via the shared three-tier :func:`display_grade` precedence."""
+    return GRADE_DEBT[display_grade(metric)]
 
 # The scorecard family, in the canonical order the issue lists them. Each entry
 # binds the scorecard's script to the debt integer it emits; the runner folds
@@ -223,6 +267,27 @@ def find_grade(payload: Any) -> str | None:
     return None
 
 
+def find_score(payload: Any, key: str) -> float | None:
+    """The corpus/doc-level aggregate score stored under ``key``, if any.
+
+    Scoped to the corpus/doc/top level ONLY (unlike :func:`find_int`'s deep walk)
+    — per-item entries carry their own ``mean_score``-like fields, and a deep
+    search could pick a page's score over the corpus aggregate. Used to derive the
+    TRUE grade for the scorecards that emit a score but no corpus letter.
+    """
+    if not key or not isinstance(payload, dict):
+        return None
+    for nest in ("corpus", "doc"):
+        sub = payload.get(nest)
+        if isinstance(sub, dict) and isinstance(sub.get(key), (int, float)) \
+                and not isinstance(sub.get(key), bool):
+            return float(sub[key])
+    val = payload.get(key)
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return float(val)
+    return None
+
+
 def metric_from_payload(card: dict[str, str], payload: dict[str, Any] | None,
                         error: str = "") -> dict[str, Any]:
     debt_key = card["debt"]
@@ -233,17 +298,22 @@ def metric_from_payload(card: dict[str, str], payload: dict[str, Any] | None,
             "debt_key": debt_key,
             "debt": None,
             "grade": None,
+            "score": None,
             "ok": False,
             "verdict": "ERROR",
             "error": error or "no payload",
         }
     debt = find_int(payload, debt_key)
+    # Carry the corpus-level score for the scoreless-but-scored scorecards so the
+    # severity lens can derive their TRUE grade instead of debt-magnitude.
+    score_key = SCORE_KEYS.get(card["key"])
     return {
         "key": card["key"],
         "label": card["label"],
         "debt_key": debt_key,
         "debt": debt,
         "grade": find_grade(payload),
+        "score": find_score(payload, score_key) if score_key else None,
         "ok": bool(payload.get("ok")),
         "verdict": str(payload.get("verdict") or ""),
         "error": "" if debt is not None else f"missing {debt_key} in payload",
@@ -260,7 +330,11 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
     # severity of its OWN grade, so the cross-family number isn't 91% two
     # occurrence-counters. Stamped onto each metric so the renderer/baseline see it.
     for m in measured:
-        m["grade_weight"] = grade_weight(m)
+        # eff_grade is the single three-tier truth (emitted > score-derived >
+        # debt-derived); grade_weight is its severity. Stamp both so the renderer
+        # and baseline never re-derive a letter that disagrees with the weight.
+        m["eff_grade"] = display_grade(m)
+        m["grade_weight"] = GRADE_DEBT[m["eff_grade"]]
     grade_debt = sum(int(m["grade_weight"]) for m in measured)
 
     trend = compute_trend(metrics, baseline, total_debt, grade_debt)
@@ -269,7 +343,7 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
     breakdown = ", ".join(f"{m['label']} {m['debt']}" for m in by_debt) or "none"
     by_grade = sorted(measured, key=lambda m: int(m["grade_weight"]), reverse=True)
     grade_breakdown = ", ".join(
-        f"{m['label']} {m.get('grade') or derive_grade(int(m['debt']))}({m['grade_weight']})"
+        f"{m['label']} {m['eff_grade']}({m['grade_weight']})"
         for m in by_grade if int(m["grade_weight"]) > 0) or "all A"
 
     regressed = trend["direction"] == "regressed"
