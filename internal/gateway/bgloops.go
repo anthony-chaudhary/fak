@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/bgloop"
+	"github.com/anthony-chaudhary/fak/internal/marketing"
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 // defaultHeartbeatInterval is how often the built-in kernel heartbeat loop ticks. It
@@ -39,7 +41,83 @@ func newBgloopSupervisor(s *Server) *bgloop.Supervisor {
 			Tick: func(context.Context) error { return nil },
 		})
 	}
+	if iv := marketingLoopInterval(); iv > 0 {
+		_ = sup.Register(bgloop.Loop{
+			Name:     "marketing",
+			Interval: iv,
+			// The AUTO marketing surface: each tick reads the high-water mark, gathers
+			// genuinely-new WITNESSED ships (hooks.StampOf trailer|direct), and posts one
+			// digest to #marketing — idempotently, so a re-tick over the same commits is a
+			// no-op. Opt-in (FAK_MARKETING_LOOP), inert until a channel/token resolve, and it
+			// inherits backoff + the admit gate + /metrics + /v1/fak/loops from the supervisor.
+			Tick: s.marketingTick,
+		})
+	}
 	return sup
+}
+
+// marketingLoopInterval reads FAK_MARKETING_LOOP / FAK_MARKETING_LOOP_S: the loop is OFF
+// unless FAK_MARKETING_LOOP is truthy (1/true/on), then ticks every FAK_MARKETING_LOOP_S
+// seconds (default 1h). A non-positive _S also disables it. Off-by-default because a marketing
+// post is an outward-facing side effect — a host opts in, it is never automatic on serve.
+func marketingLoopInterval() time.Duration {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_MARKETING_LOOP"))) {
+	case "1", "true", "on", "yes":
+	default:
+		return 0
+	}
+	iv := time.Hour
+	if v := strings.TrimSpace(os.Getenv("FAK_MARKETING_LOOP_S")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n <= 0 {
+				return 0
+			}
+			iv = time.Duration(n) * time.Second
+		}
+	}
+	return iv
+}
+
+// marketingTick is the in-kernel marketing loop body: resolve the #marketing channel/token,
+// build a dedupe-aware Poster, and run one idempotent marketing.Tick over the repo. An
+// unresolved channel/token is NOT an error — the loop stays armed but inert (like an
+// unconfigured scoreboard) until a host configures FAK_MARKETING_CHANNEL/TOKEN. A tick that
+// finds no new witnessed ships is a clean no-op. The repo root is the gateway's working dir
+// (where `fak serve` runs); the source label is "serve".
+func (s *Server) marketingTick(ctx context.Context) error {
+	ch := marketing.ResolveChannel()
+	if ch == "" {
+		return nil // inert until configured — not a failure
+	}
+	client, err := scoreboard.NewClient(marketing.ResolveToken())
+	if err != nil {
+		return nil // no token yet — inert, not a failure (a real token error surfaces on post)
+	}
+	opts := marketing.Opts{
+		Root:   ".",
+		Source: "serve",
+		Poster: marketingLoopPoster{client: client, channel: ch},
+	}
+	res, err := opts.Tick(ctx, time.Now())
+	if err != nil {
+		return err // a real post/transport error -> the supervisor records it + backs off
+	}
+	if res.Status == "posted" {
+		s.logf("fak marketing: posted %d witnessed ship(s) to #marketing ts=%s", res.NewShips, res.PostedTS)
+	}
+	return nil
+}
+
+// marketingLoopPoster adapts the scoreboard client to the marketing.Poster seam for the
+// in-kernel loop (the gateway twin of cmd/fak's marketingPoster). It keys the dedupe-aware
+// PostWithUpdate on the artifact's stable DedupeKey, the backstop behind the high-water CAS.
+type marketingLoopPoster struct {
+	client  *scoreboard.Client
+	channel string
+}
+
+func (p marketingLoopPoster) PostArtifact(ctx context.Context, a marketing.Artifact) (string, error) {
+	return p.client.PostWithUpdate(ctx, p.channel, scoreboard.Update{Title: a.DedupeKey}, a.Text(), a.Blocks())
 }
 
 // heartbeatInterval reads FAK_BGLOOP_HEARTBEAT_S (seconds); unset uses the default,
