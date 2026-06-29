@@ -39,6 +39,7 @@ bit-exact KV cache and the default-deny capability floor.*
 | [vCache scorecard playbook](vcache-scorecard-playbook.md) | Run `fak vcache score` to read the 2x agent-dev gate, build the hot-anchor index it plans, and move a workload from planned savings to provider-telemetry-proven savings. |
 | [P/D + KV-routing SOTA matrix](pd-disaggregation-kv-routing-sota.md) | The ride-vs-own decision matrix comparing vLLM, SGLang, LMCache, Dynamo, Mooncake, and current fak across prefix cache, P/D split, KV transfer, routing, autoscaling, metrics, and invalidation — plus the source-tagged `CacheEvent`/`ServingEvent` vocabulary (#903). |
 | [Multi-node compute](multi-node-compute.md) | The runnable witness: `fak cluster` runs a real cross-node collective over the `DistComm` process group on any two CPU hosts today, plus the rung ladder from that host-layer floor to GPU-speed multi-node serving (#652, #639, #85, #30, #29, #25). |
+| [Native device mesh and collectives](native-device-mesh-collectives.md) | The R3+ design gate for native DP x TP x PP x EP: process groups, rank/world-size, `compute.CollectiveBackend` primitives, CPU-ref single-rank behavior, and the TP -> EP-for-MoE dependency chain (#25). |
 
 ## How these relate
 
