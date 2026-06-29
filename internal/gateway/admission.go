@@ -43,24 +43,27 @@ package gateway
 //     behavior. A per-tenant trust verdict can DENY admission outright (VerdictDenied).
 //
 // HONEST FENCE — what this is NOT (yet). This is the admission POLICY plus its L2
-// serving-metrics fragment (running/waiting/admitted/rejected counts) and the optional
-// /metrics RENDER seam: a host wires a live controller onto the Server with
-// SetAdmissionController and renderMetrics folds WriteMetrics into the shared serving-metrics
-// surface (writeAdmissionMetrics) — inert (no fak_sched_* series) until one is attached, so
-// there is no phantom zero series. It runs no model and moves no KV. The live HTTP 429 path
-// is NOT wired yet: mapping VerdictShed→429 on the synchronous request path needs the native
-// iteration scheduler on the serve loop to run Schedule rounds (modelengine.NativeScheduler is
-// reached only through the EngineDriver seam in tests, deliberately not auto-registered as the
-// default serve engine), so the host maps VerdictShed→429 once the native scheduler is on
-// `fak serve`. The KV-block budget, preemption / KV swap-out, and the cross-replica router are
-// explicit non-goals here (separate sibling seeds).
+// serving-metrics fragment (running/waiting/admitted/rejected counts) and the live
+// gateway lease wrapper: a host wires a controller onto the Server with
+// SetAdmissionController, served requests acquire a lease before the planner runs,
+// VerdictShed maps to HTTP 429, and renderMetrics folds WriteMetrics into the shared
+// serving-metrics surface (writeAdmissionMetrics). With no controller attached the
+// surface is inert (no fak_sched_* series) and the request path is byte-for-byte
+// historical. It runs no model and moves no KV. The KV-block budget, preemption /
+// KV swap-out, and the cross-replica router are explicit non-goals here (separate
+// sibling seeds).
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // AdmissionPolicy holds the admission knobs. Each cap is disabled by a non-positive value
@@ -189,6 +192,7 @@ type AdmissionController struct {
 	waiting []waitEntry           // waiting queue, re-sorted by effective priority each round
 	round   int64                 // monotone admission-round counter (drives aging)
 	stats   AdmissionStats        // cumulative counters (gauges are derived in Stats)
+	seq     uint64                // internal per-request suffix for duplicate caller traces
 }
 
 // waitEntry is one queued request plus the round it was enqueued, so aging can measure
@@ -196,11 +200,45 @@ type AdmissionController struct {
 type waitEntry struct {
 	req           SeqRequest
 	enqueuedRound int64
+	ready         chan struct{}
 }
 
 // NewAdmissionController builds a gate under the given policy.
 func NewAdmissionController(p AdmissionPolicy) *AdmissionController {
 	return &AdmissionController{policy: p, running: map[string]SeqRequest{}}
+}
+
+// AdmissionLease is the live request's hold on one admitted scheduler slot. Release is
+// idempotent and schedules the next waiting request after freeing this request's budget.
+type AdmissionLease struct {
+	ctl     *AdmissionController
+	traceID string
+	once    sync.Once
+}
+
+// Release frees the admitted request's token/sequence budget and promotes waiters.
+func (l *AdmissionLease) Release() {
+	if l == nil || l.ctl == nil || l.traceID == "" {
+		return
+	}
+	l.once.Do(func() { l.ctl.completeAndSchedule(l.traceID) })
+}
+
+// AdmissionError is the typed served-path refusal returned when the live admission
+// gate sheds overload or a trust verdict denies a request before the planner runs.
+type AdmissionError struct {
+	Verdict AdmissionVerdict
+	Reason  string
+}
+
+func (e *AdmissionError) Error() string {
+	if e == nil {
+		return "scheduler admission refused"
+	}
+	if e.Reason != "" {
+		return "scheduler admission " + e.Verdict.String() + ": " + e.Reason
+	}
+	return "scheduler admission " + e.Verdict.String()
 }
 
 // Offer presents a new request to the gate and classifies it. It admits straight to the
@@ -234,6 +272,64 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 	return VerdictQueued
 }
 
+// Acquire is the live gateway boundary over Offer/Schedule: it either returns an
+// admitted lease, returns an AdmissionError for immediate shed/deny, or waits until a
+// queued request is promoted. The controller assigns an internal unique TraceID suffix
+// so two concurrent HTTP requests for the same served session do not overwrite each
+// other in the running map.
+func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*AdmissionLease, error) {
+	if c == nil {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req.TraceID = c.admissionTraceID(req.TraceID)
+
+	c.mu.Lock()
+	if req.Trust.Deny {
+		c.stats.Denied++
+		c.mu.Unlock()
+		return nil, &AdmissionError{Verdict: VerdictDenied, Reason: req.Trust.Reason}
+	}
+	if len(c.waiting) == 0 && c.hasHeadroomLocked(req.Tokens) {
+		c.admitLocked(req)
+		c.mu.Unlock()
+		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
+	}
+	if c.policy.MaxWaiting > 0 && len(c.waiting) >= c.policy.MaxWaiting {
+		c.stats.Shed++
+		c.mu.Unlock()
+		return nil, &AdmissionError{Verdict: VerdictShed}
+	}
+	ready := make(chan struct{})
+	c.waiting = append(c.waiting, waitEntry{req: req, enqueuedRound: c.round, ready: ready})
+	c.stats.Queued++
+	c.scheduleLocked()
+	c.mu.Unlock()
+
+	select {
+	case <-ready:
+		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
+	default:
+	}
+	select {
+	case <-ready:
+		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
+	case <-ctx.Done():
+		c.cancelAdmission(req.TraceID)
+		return nil, ctx.Err()
+	}
+}
+
+func (c *AdmissionController) admissionTraceID(traceID string) string {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		traceID = "request"
+	}
+	return fmt.Sprintf("%s#%d", traceID, atomic.AddUint64(&c.seq, 1))
+}
+
 // Schedule runs ONE admission round: it advances the aging clock, orders the waiting queue
 // by effective priority, and promotes waiters into the running set while the token budget
 // and the max-num-seqs cap have headroom — stopping at the first request that does not fit
@@ -245,6 +341,10 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 func (c *AdmissionController) Schedule() []SeqRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.scheduleLocked()
+}
+
+func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	c.round++
 	if len(c.waiting) == 0 {
 		return nil
@@ -265,6 +365,9 @@ func (c *AdmissionController) Schedule() []SeqRequest {
 			break // head-of-line: do not let a lower-priority request skip a blocked one
 		}
 		c.admitLocked(e.req)
+		if e.ready != nil {
+			close(e.ready)
+		}
 		admitted = append(admitted, e.req)
 	}
 	// The admitted set is the sorted prefix; keep the rest. Copy so the released entries
@@ -279,6 +382,20 @@ func (c *AdmissionController) Schedule() []SeqRequest {
 func (c *AdmissionController) Complete(traceID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.completeLocked(traceID)
+}
+
+func (c *AdmissionController) completeAndSchedule(traceID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ok := c.completeLocked(traceID)
+	if ok {
+		c.scheduleLocked()
+	}
+	return ok
+}
+
+func (c *AdmissionController) completeLocked(traceID string) bool {
 	req, ok := c.running[traceID]
 	if !ok {
 		return false
@@ -289,6 +406,20 @@ func (c *AdmissionController) Complete(traceID string) bool {
 		c.tokens = 0
 	}
 	return true
+}
+
+func (c *AdmissionController) cancelAdmission(traceID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, e := range c.waiting {
+		if e.req.TraceID == traceID {
+			c.waiting = append(c.waiting[:i], c.waiting[i+1:]...)
+			return
+		}
+	}
+	if c.completeLocked(traceID) {
+		c.scheduleLocked()
+	}
 }
 
 // hasHeadroomLocked reports whether a request of the given token footprint fits the
@@ -408,4 +539,85 @@ func (s *Server) writeAdmissionMetrics(b *strings.Builder) {
 		return
 	}
 	c.WriteMetrics(b)
+}
+
+func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, maxTokens int) (*AdmissionLease, error) {
+	if s == nil {
+		return nil, nil
+	}
+	s.admissionMu.RLock()
+	c := s.admissionCtl
+	s.admissionMu.RUnlock()
+	if c == nil {
+		return nil, nil
+	}
+	return c.Acquire(ctx, SeqRequest{
+		TraceID:  turn.traceID,
+		Priority: turn.state.Priority,
+		Tokens:   estimateServedAdmissionTokens(messages, tools, maxTokens),
+	})
+}
+
+func estimateServedAdmissionTokens(messages []agent.Message, tools []agent.ToolDef, maxTokens int) int {
+	chars := 0
+	for _, m := range messages {
+		chars += len(m.Role) + len(m.Content) + len(m.ToolCallID) + len(m.Name)
+		if m.FunctionCall != nil {
+			chars += len(m.FunctionCall.Name) + len(m.FunctionCall.Arguments)
+		}
+		for _, tc := range m.ToolCalls {
+			chars += len(tc.ID) + len(tc.Type) + len(tc.Function.Name) + len(tc.Function.Arguments)
+		}
+	}
+	for _, t := range tools {
+		chars += len(t.Type) + len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
+	}
+	tokens := chars / 4
+	if chars > 0 && tokens == 0 {
+		tokens = 1
+	}
+	if maxTokens > 0 {
+		tokens += maxTokens
+	} else {
+		tokens++
+	}
+	if tokens <= 0 {
+		return 1
+	}
+	return tokens
+}
+
+func sampleMaxTokens(opts []agent.SampleOpt) int {
+	var sp agent.SampleParams
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&sp)
+		}
+	}
+	if sp.MaxTokens == nil {
+		return 0
+	}
+	return *sp.MaxTokens
+}
+
+func admissionErrorStatus(err error) (status int, code, msg string, ok bool) {
+	var ae *AdmissionError
+	if !errors.As(err, &ae) {
+		return 0, "", "", false
+	}
+	switch ae.Verdict {
+	case VerdictShed:
+		return http.StatusTooManyRequests, "scheduler_overloaded",
+			"scheduler overloaded — back off and retry", true
+	case VerdictDenied:
+		reason := strings.TrimSpace(ae.Reason)
+		if reason == "" {
+			reason = "trust verdict denied admission"
+		}
+		return http.StatusForbidden, "scheduler_admission_denied",
+			"scheduler admission denied: " + reason, true
+	default:
+		return http.StatusServiceUnavailable, "scheduler_unavailable",
+			"scheduler admission refused", true
+	}
 }

@@ -1,9 +1,17 @@
 package gateway
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // TestAdmissionTokenBudget is the issue-#35 AC#1 token-budget witness: a request enters
@@ -255,8 +263,123 @@ func TestAdmissionControllerRendersIntoLiveMetrics(t *testing.T) {
 	}
 }
 
+// TestServedAdmissionSheds429BeforePlanner is the live issue-#35 backpressure witness:
+// with the native serving gate wired into the gateway, one request holds the only running
+// slot, one request fills the waiting queue, and the next request gets a real HTTP 429
+// before it reaches the planner instead of joining an unbounded queue.
+func TestServedAdmissionSheds429BeforePlanner(t *testing.T) {
+	srv := newTestServer(t)
+	ctl := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 1, AgingRounds: 1})
+	srv.SetAdmissionController(ctl)
+
+	planner := newBlockingAdmissionPlanner()
+	defer planner.Release()
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	first := make(chan int, 1)
+	go func() { first <- postAdmissionChat(t, ts.URL, "first") }()
+	select {
+	case <-planner.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first request never reached the planner")
+	}
+
+	second := make(chan int, 1)
+	go func() { second <- postAdmissionChat(t, ts.URL, "second") }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if st := ctl.Stats(); st.Running == 1 && st.Waiting == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("second request did not fill waiting queue; stats=%+v", ctl.Stats())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if status := postAdmissionChat(t, ts.URL, "third"); status != http.StatusTooManyRequests {
+		t.Fatalf("third status = %d, want 429", status)
+	}
+	if calls := planner.Calls(); calls != 1 {
+		t.Fatalf("planner calls after shed = %d, want only the first request reached planner", calls)
+	}
+
+	planner.Release()
+	if status := <-first; status != http.StatusOK {
+		t.Fatalf("first status = %d, want 200", status)
+	}
+	if status := <-second; status != http.StatusOK {
+		t.Fatalf("second status = %d, want 200 after first releases", status)
+	}
+	if st := ctl.Stats(); st.Running != 0 || st.Waiting != 0 || st.Shed != 1 || st.Admitted != 2 {
+		t.Fatalf("final admission stats = %+v, want running=0 waiting=0 shed=1 admitted=2", st)
+	}
+}
+
 // floodID names the r-th flood arrival without time/randomness, so the scenario is
 // byte-reproducible across machines.
 func floodID(r int) string {
 	return "flood-" + strconv.Itoa(r)
+}
+
+type blockingAdmissionPlanner struct {
+	entered     chan struct{}
+	release     chan struct{}
+	enterOnce   sync.Once
+	releaseOnce sync.Once
+	mu          sync.Mutex
+	calls       int
+}
+
+func newBlockingAdmissionPlanner() *blockingAdmissionPlanner {
+	return &blockingAdmissionPlanner{entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (p *blockingAdmissionPlanner) Complete(ctx context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.mu.Lock()
+	p.calls++
+	p.mu.Unlock()
+	p.enterOnce.Do(func() { close(p.entered) })
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "ok"},
+		FinishReason: "stop",
+		Usage:        agent.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+		Model:        "admission-test",
+	}, nil
+}
+
+func (*blockingAdmissionPlanner) Model() string { return "admission-test" }
+
+func (p *blockingAdmissionPlanner) Release() {
+	p.releaseOnce.Do(func() { close(p.release) })
+}
+
+func (p *blockingAdmissionPlanner) Calls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+func postAdmissionChat(t *testing.T, base, trace string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, base+"/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hello"}],"max_tokens":1}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(traceHeader, trace)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST chat: %v", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode
 }
