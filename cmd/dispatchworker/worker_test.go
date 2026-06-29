@@ -127,7 +127,7 @@ func TestLiveNonzeroReturncodePropagatesToPayloadOkFalse(t *testing.T) {
 	}
 	cmd, _ := buildCommand("x", "claude")
 	res := launch(cmd, ".", map[string]string{}, runner, 0, false)
-	p := buildPayload("x", "claude", ".", false, &res, "")
+	p := buildPayload("x", "claude", ".", false, &res, "", nil, false)
 	if p.OK {
 		t.Error("nonzero returncode must make payload ok=false")
 	}
@@ -140,7 +140,7 @@ func TestResolveExeFallsBackToNameWhenNotFound(t *testing.T) {
 }
 
 func TestDryRunPayloadDoesNotLaunch(t *testing.T) {
-	p := buildPayload("docs", "claude", "C:/work/fleet", true, nil, "")
+	p := buildPayload("docs", "claude", "C:/work/fleet", true, nil, "", nil, false)
 	if !p.OK || !p.DryRun || p.Result != nil || p.Backend != "claude" {
 		t.Errorf("dry-run payload wrong: %+v", p)
 	}

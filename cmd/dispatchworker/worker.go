@@ -239,6 +239,7 @@ type payload struct {
 	OK        bool              `json:"ok"`
 	Lane      string            `json:"lane"`
 	Backend   string            `json:"backend"`
+	Guarded   bool              `json:"guarded"`
 	Workspace string            `json:"workspace"`
 	DryRun    bool              `json:"dry_run"`
 	Command   []string          `json:"command"`
@@ -247,11 +248,12 @@ type payload struct {
 	Error     string            `json:"error,omitempty"`
 }
 
-// buildPayload mirrors dispatch_worker.build_payload: command is the argv (empty on
-// an error), ok is true iff there was no error and (no result yet or returncode 0).
-func buildPayload(lane, backend, workspace string, dryRun bool, result *launchResult, errMsg string) payload {
-	var command []string
-	if errMsg == "" {
+// buildPayload mirrors dispatch_worker.build_payload. command defaults to the raw
+// (unguarded) worker argv when nil (backward compat); a live/dry-run launch passes
+// the ACTUAL launched argv (kernel-fronted when guarded) so the record shows exactly
+// what ran. ok is true iff there was no error and (no result yet or returncode 0).
+func buildPayload(lane, backend, workspace string, dryRun bool, result *launchResult, errMsg string, command []string, guarded bool) payload {
+	if command == nil && errMsg == "" {
 		command, _ = buildCommand(lane, backend)
 	}
 	ok := errMsg == "" && (result == nil || result.ReturnCode == 0)
@@ -260,6 +262,7 @@ func buildPayload(lane, backend, workspace string, dryRun bool, result *launchRe
 		OK:        ok,
 		Lane:      lane,
 		Backend:   backend,
+		Guarded:   guarded,
 		Workspace: workspace,
 		DryRun:    dryRun,
 		Command:   command,
@@ -279,7 +282,7 @@ func render(p payload) string {
 		cmd = strings.Join(p.Command, " ")
 	}
 	lines := []string{
-		fmt.Sprintf("dispatch-worker: backend=%s lane=%s dry_run=%v", p.Backend, p.Lane, p.DryRun),
+		fmt.Sprintf("dispatch-worker: backend=%s lane=%s guarded=%v dry_run=%v", p.Backend, p.Lane, p.Guarded, p.DryRun),
 		"command: " + cmd,
 	}
 	if p.Error != "" {

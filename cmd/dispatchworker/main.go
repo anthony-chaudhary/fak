@@ -42,19 +42,32 @@ func main() {
 		backend = b
 	}
 
+	// Resolve the argv to actually launch, fronting it with `fak guard` when dogfood
+	// mode is on and a fak binary resolves (fail OPEN to an unwrapped worker otherwise).
+	// Computed for BOTH paths so --dry-run reveals the kernel-fronted argv an operator
+	// will actually run.
+	var command []string
+	guarded := false
+	if errMsg == "" {
+		raw, _ := buildCommand(*lane, backend)
+		command, guarded = guardedLaunchCommand(raw, *lane, backend, workspace, nil)
+	}
+
 	if *dryRun || errMsg != "" {
-		emit(buildPayload(*lane, backend, workspace, true, nil, errMsg), *asJSON)
+		emit(buildPayload(*lane, backend, workspace, true, nil, errMsg, command, guarded), *asJSON)
 		if errMsg != "" {
 			os.Exit(2)
 		}
 		os.Exit(0)
 	}
 
-	command, _ := buildCommand(*lane, backend)
 	env := childEnv(*lane, backend, workspace, nil)
+	if guarded {
+		guardEnvAugment(env)
+	}
 	timeout, bounded := normalizeTimeout(*timeoutS)
 	result := launch(command, workspace, env, nil, timeout, bounded)
-	emit(buildPayload(*lane, backend, workspace, false, &result, ""), *asJSON)
+	emit(buildPayload(*lane, backend, workspace, false, &result, "", command, guarded), *asJSON)
 	os.Exit(result.ReturnCode)
 }
 
