@@ -427,11 +427,14 @@
           </ul>
         </div>
 
-        <div class="cmd"><span class="c"># see it in 2 minutes — no key, no model, no GPU (just Go 1.26+)</span>
-go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
-<span class="c">#   → </span><span class="g">DENY (POLICY_BLOCK)</span><span class="c">  — refused with a named reason</span>
-go run ./cmd/fak agent --offline
-<span class="c">#   → runs the task twice: tools wired direct vs. behind fak, prints the before/after</span></div>
+        <div class="cmd"><span class="c"># see it in 2 minutes — no key, no model, no GPU, no clone</span>
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
+fak preflight --tool refund_payment --args "{}"
+<span class="c">#   → </span><span class="g">DENY (DEFAULT_DENY)</span><span class="c">  — unknown tool, refused by structure (fail-closed)</span>
+fak agent --offline
+<span class="c">#   → runs the task twice: tools wired direct vs. behind fak, prints the before/after</span>
+<span class="c"># have the source? from a clone, deny by argument value against a named floor:</span>
+<span class="c">#   go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"  → DENY (POLICY_BLOCK)</span></div>
 
         <div class="p-foot">
           <a class="lnk go" href="https://github.com/anthony-chaudhary/fak" rel="noopener">
