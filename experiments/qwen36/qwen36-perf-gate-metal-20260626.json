@@ -53,6 +53,7 @@
   "failures": [
     "metal-q4k-27b decode: fak 1.2 < 0.5x llama 7.29"
   ],
+  "min_prefill_tokens": 256,
   "min_ratio": 0.5,
   "passed": false,
   "schema": "fak.qwen36-perf-gate.v1"

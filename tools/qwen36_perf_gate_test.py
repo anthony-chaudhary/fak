@@ -97,6 +97,56 @@ def test_metal_arm_passes_once_fak_clears_the_checked_ratio():
     assert report["passed"] is True, report["failures"]
 
 
+def test_metal_prefill_below_agentic_floor_is_recorded_not_asserted():
+    # #64 comment#2: a Metal prefill point below the agentic floor (P>=256) -- e.g.
+    # the tiny-prompt P=22/29 artifact, which is weight-read-dominated and reads ~an
+    # order of magnitude below the agentic rate -- must be RECORDED for provenance but
+    # NEVER asserted against the bar. Even though 0.6 << 0.5x*51.55, it adds no failure.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        fak = write_json(root / "fak.json", fak_artifact({22: 0.6}, decode_tps=1.2))
+        llama = write_json(root / "llama.json", llama_artifact({22: 51.55}, decode_tps=7.29))
+
+        report = gate.build_report(
+            [("metal", fak, llama)],
+            min_ratio=gate.METAL_TARGET_RATIO,
+            min_prefill_tokens=gate.METAL_MIN_PREFILL_TOKENS,
+        )
+
+        prefill = next(
+            row for case in report["cases"] for row in case["rows"] if row["kind"] == "prefill"
+        )
+        assert prefill["tokens"] == 22
+        assert prefill["scored"] is False
+        assert "#64 comment#2" in prefill["note"]
+        # The forbidden tiny-prompt comparison drives NO failure -- it cannot become the verdict.
+        assert not any("P22" in failure for failure in report["failures"])
+        assert "RECORDED" in gate.render_markdown(report)
+
+
+def test_metal_prefill_at_agentic_floor_is_asserted():
+    # At/above the floor (P=512) the prefill pair IS scored against the bar, so a
+    # matched-length fak-Metal prefill point flips the gate exactly as #300 intends.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        fak = write_json(root / "fak.json", fak_artifact({512: 30.0}, decode_tps=1.2))
+        llama = write_json(root / "llama.json", llama_artifact({512: 51.55}, decode_tps=7.29))
+
+        report = gate.build_report(
+            [("metal", fak, llama)],
+            min_ratio=gate.METAL_TARGET_RATIO,
+            min_prefill_tokens=gate.METAL_MIN_PREFILL_TOKENS,
+        )
+
+        prefill = next(
+            row for case in report["cases"] for row in case["rows"] if row["kind"] == "prefill"
+        )
+        assert prefill["tokens"] == 512
+        assert prefill["scored"] is True
+        # 30/51.55 = 0.58 >= 0.5 -> the asserted prefill point passes the within-2x bar.
+        assert prefill["passed"] is True
+
+
 def test_metal_bar_provenance_caveat_is_surfaced():
     # The bar is observed-external (#459/#452) -- the gate must carry the caveat
     # through so it is never silently asserted as a fak-controlled witness.
@@ -113,6 +163,8 @@ if __name__ == "__main__":
     test_gate_fails_when_any_ratio_is_below_threshold()
     test_metal_arm_records_the_open_decode_gap_at_the_within_2x_bar()
     test_metal_arm_passes_once_fak_clears_the_checked_ratio()
+    test_metal_prefill_below_agentic_floor_is_recorded_not_asserted()
+    test_metal_prefill_at_agentic_floor_is_asserted()
     test_metal_bar_provenance_caveat_is_surfaced()
     test_default_artifacts_pass_current_committed_gate()
     print("PASS qwen36_perf_gate_test")

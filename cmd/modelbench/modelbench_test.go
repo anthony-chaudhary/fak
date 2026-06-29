@@ -7,11 +7,19 @@ package main
 import (
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+func testBool(v bool) *bool { return &v }
+
+func testBenchFlags(q4k, quant, metal bool) *benchFlags {
+	return &benchFlags{q4k: testBool(q4k), quant: testBool(quant), metal: testBool(metal)}
+}
 
 func TestParsePositiveInts(t *testing.T) {
 	tests := []struct {
@@ -168,6 +176,59 @@ func TestQ8UploadGate(t *testing.T) {
 	}
 	if q8UploadUnsupported(false, be.Caps()) {
 		t.Fatalf("cpu-ref must keep the f32 path open when -quant is false")
+	}
+}
+
+func TestQ4KMetalSessionFlagsUseMetalQ4K(t *testing.T) {
+	f := testBenchFlags(true, false, true)
+	s := &model.Session{}
+	applyLegacySessionFlags(s, f)
+
+	if !s.Q4K {
+		t.Fatalf("Q4K flag was not applied")
+	}
+	if !s.MetalQ4K {
+		t.Fatalf("-q4k -metal must route through Session.MetalQ4K")
+	}
+	if s.Metal {
+		t.Fatalf("-q4k -metal must not route through the Q8/f16 Session.Metal lane")
+	}
+	if s.Quant {
+		t.Fatalf("-q4k -metal must not force the separate Q8_0 session flag")
+	}
+}
+
+func TestQ8MetalSessionFlagsKeepMetalLane(t *testing.T) {
+	f := testBenchFlags(false, true, true)
+	s := &model.Session{}
+	applyLegacySessionFlags(s, f)
+
+	if !s.Quant || !s.Metal {
+		t.Fatalf("Q8 -metal should keep Quant+Metal set, got Quant=%v Metal=%v", s.Quant, s.Metal)
+	}
+	if s.Q4K || s.MetalQ4K {
+		t.Fatalf("Q8 -metal should not set Q4K/MetalQ4K, got Q4K=%v MetalQ4K=%v", s.Q4K, s.MetalQ4K)
+	}
+}
+
+func TestResolveMetalDoesNotForceQuantForQ4K(t *testing.T) {
+	f := testBenchFlags(true, false, true)
+	resolveMetal(f)
+
+	if *f.quant {
+		t.Fatalf("-q4k -metal must not force Quantize(); LoadModelQ4K already owns the resident mixed store")
+	}
+}
+
+func TestDescribeEngineLabelsQ4KMetal(t *testing.T) {
+	f := testBenchFlags(true, false, true)
+	engine, precision, _ := describeEngine(f, nil, nil)
+
+	if !strings.Contains(engine, "Metal Q4_K") {
+		t.Fatalf("engine %q does not identify the Q4_K Metal scorer", engine)
+	}
+	if !strings.Contains(precision, "MetalQ4K") {
+		t.Fatalf("precision %q does not identify MetalQ4K", precision)
 	}
 }
 

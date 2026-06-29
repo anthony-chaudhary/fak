@@ -275,7 +275,7 @@ func parseFlags() *benchFlags {
 		decodeSteps:           flag.Int("decode-steps", 32, "tokens to decode"),
 		decodePrompt:          flag.Int("decode-prompt", 16, "prompt length before decode"),
 		quant:                 flag.Bool("quant", false, "use the Q8_0 quantized forward path (else f32)"),
-		metal:                 flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (requires -tags fakmetal; implies -quant for the weight store)"),
+		metal:                 flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (requires Apple Silicon+cgo and -tags fakmetal; implies -quant for the Q8 weight store; with -q4k, routes Q4_K tensors through MetalQ4K)"),
 		verify:                flag.Bool("verify", false, "with -metal: cross-check the Metal prefill's last-token logits against the CPU Q8 path (argmax agreement + max|Δ|) and exit"),
 		backendName:           flag.String("backend", "legacy", "execution backend: legacy or a compute backend name"),
 		requireNonReference:   flag.Bool("require-non-reference", false, "fail unless -backend selects a non-reference compute backend"),
@@ -331,8 +331,8 @@ func validateFlags(f *benchFlags) {
 		case *f.backendName != "legacy":
 			fmt.Fprintln(os.Stderr, "-q4k currently runs through the legacy resident-Q4_K session path; omit -backend")
 			os.Exit(2)
-		case *f.metal || *f.verify:
-			fmt.Fprintln(os.Stderr, "-q4k modelbench scoring is CPU-only for now; omit -metal/-verify")
+		case *f.verify:
+			fmt.Fprintln(os.Stderr, "-q4k -verify is not wired; use go test ./internal/model -tags fakmetal -run MetalQ4K for the parity gate")
 			os.Exit(2)
 		}
 	}
@@ -495,11 +495,22 @@ func resolveBackend(f *benchFlags) (compute.Backend, []string) {
 	return be, registeredBackends
 }
 
-// resolveMetal validates the Metal prefill path: it needs the Q8 weight store (it
-// dequantizes its f16 GPU copies from it) and a live device. Resolve availability before
-// the quantize step so the report is honest, falling back to CPU Q8 when unavailable.
+// resolveMetal validates the requested Metal path and falls back to CPU when the backend is
+// unavailable. The Q8/f16 lane needs Quantize(); the resident Q4_K lane already carries its
+// mixed q4_k/Q8 store from LoadModelQ4K, so -q4k -metal must not force a second Q8_0 copy.
 func resolveMetal(f *benchFlags) {
 	if !*f.metal {
+		return
+	}
+	if *f.q4k {
+		if !metalgemm.Available() {
+			if metalgemm.Compiled() {
+				fmt.Fprintln(os.Stderr, "metal: no usable Metal device; falling back to CPU resident Q4_K")
+			} else {
+				fmt.Fprintln(os.Stderr, "metal: backend not compiled in (requires darwin/arm64 with cgo and -tags fakmetal); falling back to CPU resident Q4_K")
+			}
+			*f.metal = false
+		}
 		return
 	}
 	*f.quant = true
@@ -507,7 +518,7 @@ func resolveMetal(f *benchFlags) {
 		if metalgemm.Compiled() {
 			fmt.Fprintln(os.Stderr, "metal: no usable Metal device; falling back to CPU Q8 prefill")
 		} else {
-			fmt.Fprintln(os.Stderr, "metal: backend not compiled in (rebuild with -tags fakmetal); falling back to CPU Q8 prefill")
+			fmt.Fprintln(os.Stderr, "metal: backend not compiled in (requires darwin/arm64 with cgo and -tags fakmetal); falling back to CPU Q8 prefill")
 		}
 		*f.metal = false
 	}
@@ -597,8 +608,11 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 	if *f.q4k {
 		engine = "fak-in-kernel resident Q4_K/Q8 hybrid (raw GGUF Q4_K majority + Q8 minority)"
 		precision = "Q4_K/Q8 resident hybrid"
-	}
-	if *f.metal {
+		if *f.metal {
+			engine = "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)"
+			precision = "Q4_K/Q8 resident hybrid + MetalQ4K"
+		}
+	} else if *f.metal {
 		engine = "fak-in-kernel Metal prefill (MPS f16 GEMM on GPU; CPU Q8 decode)"
 		precision = "Q8_0 weights / f16 GPU GEMM"
 	}
@@ -617,6 +631,16 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 		}
 	}
 	return engine, precision, backendReport
+}
+
+func applyLegacySessionFlags(s *model.Session, f *benchFlags) {
+	s.Quant = *f.quant
+	s.Q4K = *f.q4k
+	if *f.q4k {
+		s.MetalQ4K = *f.metal
+		return
+	}
+	s.Metal = *f.metal
 }
 
 func modelConfigReport(cfg model.Config) map[string]any {
@@ -869,9 +893,7 @@ func main() {
 			return s
 		}
 		s := m.NewSession()
-		s.Quant = *f.quant
-		s.Q4K = *f.q4k
-		s.Metal = *f.metal
+		applyLegacySessionFlags(s, f)
 		return s
 	}
 
@@ -902,6 +924,8 @@ func main() {
 		"quant_ms":          quantMS,
 		"lean":              *f.lean,
 		"q4k":               *f.q4k,
+		"metal":             *f.metal,
+		"metal_q4k":         *f.q4k && *f.metal,
 		"quantized_at_load": *f.lean || *f.q4k,
 		"workers":           model.NumWorkers(),   // global matmul worker budget (prefill and explicit paths)
 		"budget":            model.WorkerBudget(), // how the worker count was resolved (FAK_WORKERS / FAK_BUDGET / -budget / default)
@@ -1102,9 +1126,7 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 			}
 		}()
 		s := m.NewSession()
-		s.Quant = *f.quant
-		s.Q4K = *f.q4k
-		s.Metal = *f.metal
+		applyLegacySessionFlags(s, f)
 		defer s.Close()
 		logits := s.Prefill(lcgIDs(*f.decodePrompt, vocab))
 		if !allFinite(logits) {

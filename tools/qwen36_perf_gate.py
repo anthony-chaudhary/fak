@@ -19,13 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = (
     (
         "amd-p16-64-256",
-        "fak/experiments/qwen36/native-gguf-q8-hybrid-headscan-p16-64-256-20260619.json",
-        "fak/experiments/qwen36/llamacpp-vulkan-qwen36-pp16-64-256-tg1-20260619.json",
+        "experiments/qwen36/native-gguf-q8-hybrid-headscan-p16-64-256-20260619.json",
+        "experiments/qwen36/llamacpp-vulkan-qwen36-pp16-64-256-tg1-20260619.json",
     ),
     (
         "amd-p512-1024",
-        "fak/experiments/qwen36/native-gguf-q8-hybrid-headscan-p512-1024-dp256-d16-20260619.json",
-        "fak/experiments/qwen36/llamacpp-vulkan-qwen36-pp512-1024-tg16-20260619.json",
+        "experiments/qwen36/native-gguf-q8-hybrid-headscan-p512-1024-dp256-d16-20260619.json",
+        "experiments/qwen36/llamacpp-vulkan-qwen36-pp512-1024-tg16-20260619.json",
     ),
 )
 
@@ -47,6 +47,15 @@ METAL_CASES = (
 
 # #300 acceptance bar: fak within 2x of the llama.cpp-Metal SOTA -> fak/llama >= 0.5.
 METAL_TARGET_RATIO = 0.5
+
+# #64 comment#2: a Metal prefill assertion must FIX the prompt length at an agentic
+# value (P=256/512), NOT the tiny-prompt P~22/29 artifact. Prefill reads each q4_k
+# weight ~once per 128-token tile, so a tiny prompt is weight-read-dominated and reads
+# ~an order of magnitude below the agentic rate (0.6 tok/s @ P=29 vs 4.5 @ P=421). The
+# gate REFUSES to score a Metal prefill pair below this floor: it is recorded for
+# provenance but never asserted against the (provenance-caveated #459/#452) bar, so a
+# tiny-prompt point can never masquerade as the within-2x verdict.
+METAL_MIN_PREFILL_TOKENS = 256
 
 
 def repo_path(path: str) -> Path:
@@ -146,7 +155,13 @@ def llama_metrics(path: Path) -> dict:
     return {"path": rel(path), "prefill": prefill, "decode": decode, **meta}
 
 
-def compare_case(label: str, fak_path: Path, llama_path: Path, min_ratio: float) -> dict:
+def compare_case(
+    label: str,
+    fak_path: Path,
+    llama_path: Path,
+    min_ratio: float,
+    min_prefill_tokens: int = 0,
+) -> dict:
     fak = fak_metrics(fak_path)
     llama = llama_metrics(llama_path)
     rows = []
@@ -157,6 +172,24 @@ def compare_case(label: str, fak_path: Path, llama_path: Path, min_ratio: float)
         ft = fak["prefill"][tokens]
         lt = llama["prefill"][tokens]
         ratio = ft / lt
+        if tokens < min_prefill_tokens:
+            # Below the agentic prefill floor (#64 comment#2): a tiny-prompt point is
+            # weight-read-dominated and reads ~an order of magnitude below the agentic
+            # rate. Record it for provenance but NEVER assert it against the bar -- it
+            # contributes no pass/fail, so it can never masquerade as the verdict.
+            rows.append({
+                "metric": f"prefill_P{tokens}",
+                "kind": "prefill",
+                "tokens": tokens,
+                "fak_tok_per_sec": ft,
+                "llama_tok_per_sec": lt,
+                "ratio": ratio,
+                "passed": True,
+                "scored": False,
+                "note": f"P{tokens} below agentic prefill floor P>={min_prefill_tokens} "
+                        "(#64 comment#2): recorded, not asserted",
+            })
+            continue
         passed = ratio >= min_ratio
         if not passed:
             failures.append(f"{label} P{tokens}: fak {ft:.4g} < {min_ratio:g}x llama {lt:.4g}")
@@ -168,6 +201,7 @@ def compare_case(label: str, fak_path: Path, llama_path: Path, min_ratio: float)
             "llama_tok_per_sec": lt,
             "ratio": ratio,
             "passed": passed,
+            "scored": True,
         })
 
     if fak["decode"] and llama["decode"]:
@@ -215,10 +249,14 @@ def render_markdown(report: dict) -> str:
     ]
     for case in report["cases"]:
         for row in case["rows"]:
+            if row.get("scored") is False:
+                verdict = "RECORDED"
+            else:
+                verdict = "PASS" if row["passed"] else "FAIL"
             lines.append(
                 f"| {case['label']} | `{row['metric']}` | "
                 f"{row['fak_tok_per_sec']:.2f} | {row['llama_tok_per_sec']:.2f} | "
-                f"{row['ratio']:.2f}x | {'PASS' if row['passed'] else 'FAIL'} |"
+                f"{row['ratio']:.2f}x | {verdict} |"
             )
     caveats = []
     for case in report["cases"]:
@@ -235,16 +273,19 @@ def render_markdown(report: dict) -> str:
     return "\n".join(lines)
 
 
-def build_report(cases, min_ratio: float) -> dict:
+def build_report(cases, min_ratio: float, min_prefill_tokens: int = 0) -> dict:
     checked = []
     failures = []
     for label, fak_path, llama_path in cases:
-        case = compare_case(label, repo_path(fak_path), repo_path(llama_path), min_ratio)
+        case = compare_case(
+            label, repo_path(fak_path), repo_path(llama_path), min_ratio, min_prefill_tokens
+        )
         checked.append(case)
         failures.extend(case["failures"])
     return {
         "schema": SCHEMA,
         "min_ratio": min_ratio,
+        "min_prefill_tokens": min_prefill_tokens,
         "passed": not failures,
         "failures": failures,
         "cases": checked,
@@ -276,11 +317,14 @@ def main(argv=None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args.case:
         cases = args.case
+        min_prefill_tokens = 0
     elif args.metal:
         cases = METAL_CASES
+        min_prefill_tokens = METAL_MIN_PREFILL_TOKENS
     else:
         cases = DEFAULT_CASES
-    report = build_report(cases, args.min_ratio)
+        min_prefill_tokens = 0
+    report = build_report(cases, args.min_ratio, min_prefill_tokens)
     if args.out:
         out = repo_path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
