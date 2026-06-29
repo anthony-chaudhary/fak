@@ -1,0 +1,46 @@
+{
+  "schema": "fak-grafana-links/1",
+  "base_url": "http://localhost:3000",
+  "links": [
+    {
+      "title": "Fleet Bottleneck & Visibility",
+      "uid": "fleet-bottleneck",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "home dashboard — Top-10 fleet bottlenecks scored from on-disk telemetry",
+      "source": "tools/grafana/dashboards/fleet-bottleneck-overview.json"
+    },
+    {
+      "title": "FAK Gateway Observability",
+      "uid": "fak-gateway-observability",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "live gateway/kernel metrics — request rate, status mix, p50/p95/p99 latency, inflight",
+      "source": "tools/grafana/dashboards/fak-gateway-observability.json"
+    },
+    {
+      "title": "FAK Dogfood Slow Requests",
+      "uid": "fak-dogfood-slow-requests",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "focused debugging view for Claude Code sessions through fak serve /v1/messages",
+      "source": "tools/grafana/dashboards/fak-dogfood-slow-requests.json"
+    },
+    {
+      "title": "FAK Startup & Model Load",
+      "uid": "fak-startup-load",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "one-time boot timeline — time-to-ready, per-phase breakdown, GGUF weight-load phases",
+      "source": "tools/grafana/dashboards/fak-startup-load.json"
+    },
+    {
+      "title": "FAK Guard — Kernel Adjudication",
+      "uid": "fak-guard-adjudication",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "verdict mix, trust-floor firing by refusal class, vcache economics for one guarded session",
+      "source": "tools/grafana/dashboards/fak-guard-adjudication.json"
+    }
+  ]
+}

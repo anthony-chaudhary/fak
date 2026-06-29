@@ -243,6 +243,8 @@ func main() {
 		cmdBlockers(os.Args[2:])
 	case "product":
 		cmdProduct(os.Args[2:])
+	case "grafana":
+		cmdGrafana(os.Args[2:])
 	case "marketing":
 		cmdMarketing(os.Args[2:])
 	case "nodeusage":
