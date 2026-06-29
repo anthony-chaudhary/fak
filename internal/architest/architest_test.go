@@ -69,6 +69,7 @@ var tier = map[string]int{
 	"guardcomplaint":       4,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"conflationscore":      1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
 	"scoreboard":           1,                // outbound Slack publisher for scorecard/score/run-event status posts; stdlib-only, off the hot path.
+	"slackmeta":            1,                // common Slack report metadata formatter; stdlib-only, off the hot path.
 	"benchpost":            1,                // outbound Slack publisher for bench-channel rollups/run-requests; folds catalog/baseline/plan JSON, reuses scoreboard(1) transport, off the hot path.
 	"blockerpost":          1,                // outbound Slack publisher for the central #blockers channel: severity-driven (background status vs surfaced operator page); reuses scoreboard(1) transport, off the hot path.
 	"dispatchpost":         1,                // outbound Slack publisher for background code-dispatch run RESULTS; reuses scoreboard(1) transport, off the hot path.
@@ -445,7 +446,7 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
 	"agent":      "the single outbound chat-completions client (HTTPPlanner)",
-	"engine":     "the vLLM EngineDriver adapter over vLLM's public OpenAI-compatible generation surface",
+	"engine":     "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
 	"gateway":    "the inbound /v1/chat/completions server route (adjudication proxy)",
 	"chatrelay":  "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
 	"webbench":   "the off-path serving-parity benchmark client (not a live planner)",
@@ -1847,7 +1848,8 @@ var engineDriverRole = map[string]map[string]string{
 	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
 	"localtools": {"agent": "the local tool-call engine wired by cmd/fak"},
 	"mock":       {"engine": "the routing/mock engine behind the engine.route capability"},
-	"vllm":       {"engine": "the vLLM V1 public HTTP/KV-events/metrics adapter"},
+	"sglang":     {"engine": "the SGLang EngineDriver adapter for hosted generation, metrics, and radix-cache observations"},
+	"vllm":       {"engine": "the vLLM EngineDriver adapter for hosted OpenAI-compatible generation, metrics, and KV events"},
 }
 
 // resolveEngineIDArg returns the engine-id string a RegisterEngine call's first argument
