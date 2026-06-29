@@ -92,6 +92,7 @@ var tier = map[string]int{
 	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
+	"docfreshrsi": 4, // RSI rung of the docs-freshness loop (#1278/#1284): an rsiloop(4) sibling that imports only shipgate(2)'s keep-bit, off the hot path.
 	"capindexgw": 4, // gateway-backed capindex resolvers (MCP tools / A2A methods): the adapter that couples capindex(2) to gateway(4). It lives at the higher tier so the capindex keystone itself stays tier-2 and importable by the tier-3 skill-loader.
 	"tracesink":  4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
 	"agenttest":  4, // public agent-workflow TEST harness (#238, D-008): deterministic fixtures + tool-call assertion library + mock tool responses + reproduce-from-transcript replay; imports agent(4), off the hot path.
@@ -422,12 +423,14 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // degenerate `engine.HTTPEngine` once duplicated the live planner (spoke a bespoke
 // `tool=X args=Y` prompt, never wired, never spoke real tool-calling) and the seam
 // *entrenched* over time before it was deleted. `agent` owns the general outbound
-// planner (`HTTPPlanner`); `gateway` is the inbound SERVER of that route (the
-// adjudication proxy), not a client; and off-path witnesses may replay or benchmark
-// the same wire. cmd/fak's help text also names it but lives outside internal/, so it
-// is not scanned.
+// planner (`HTTPPlanner`); `engine` owns the narrow vLLM EngineDriver adapter that
+// must speak vLLM's public OpenAI-compatible generation surface; `gateway` is the
+// inbound SERVER of that route (the adjudication proxy), not a client; and off-path
+// witnesses may replay or benchmark the same wire. cmd/fak's help text also names it
+// but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
 	"agent":      "the single outbound chat-completions client (HTTPPlanner)",
+	"engine":     "the vLLM EngineDriver adapter over vLLM's public OpenAI-compatible generation surface",
 	"gateway":    "the inbound /v1/chat/completions server route (adjudication proxy)",
 	"webbench":   "the off-path serving-parity benchmark client (not a live planner)",
 	"guardtrace": "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
