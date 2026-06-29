@@ -1,8 +1,9 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast test-affected bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet architest-gate test test-fast test-affected bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
+ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$$
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -36,7 +37,10 @@ build:
 vet:
 	go vet ./...
 
-test:
+architest-gate:
+	go test -count=1 ./internal/architest/ -run '$(ARCHITEST_GATE_RE)'
+
+test: architest-gate
 	go test ./...
 
 # test-fast: the 2s smoke tier — the synthetic + architest invariants only.
@@ -46,7 +50,7 @@ test:
 # the right floor for a pre-commit / pre-push gate. Pair `build vet` with it so a
 # commit that doesn't compile or vet-clean is caught at the same gate. The full
 # `test` target (no -short) still runs the real oracle locally + in CI.
-test-fast: build vet
+test-fast: build vet architest-gate
 	go test -short ./...
 	@echo "test-fast OK (smoke tier; run 'make test' for the weight-backed witnesses)"
 

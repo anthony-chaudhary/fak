@@ -6,12 +6,13 @@ import (
 	"strings"
 )
 
-// gate_tierdeclared.go — the whole-tree gate that catches an internal/<leaf> package
-// added WITHOUT a tier declaration. internal/architest's TestEveryPackageDeclaresTier
-// already fails when a package on disk is missing from its `tier` map — but that test
-// only reds the trunk AFTER the undeclared leaf has been committed and CI runs. This
-// gate surfaces the same gap one boundary earlier, in `fak hygiene`, so a contributor
-// adding a leaf sees the missing tier row before the shared trunk goes red (#962).
+// gate_tierdeclared.go — the whole-tree gate that catches drift between internal/<leaf>
+// packages and the architest tier table. internal/architest's
+// TestEveryPackageDeclaresTier already fails when a package on disk is missing from its
+// `tier` map, or when the map names a removed package, but that test only reds the
+// trunk AFTER the drift has been committed and CI runs. This gate surfaces the same gap
+// one boundary earlier, in `fak hygiene`, so a contributor sees the missing or stale
+// tier row before the shared trunk goes red (#962, #1145).
 //
 // It is the architest twin of laneaudit.go's dos.toml lane check: both answer "which
 // real leaf drifted in without its declaration?" — one for the LANE taxonomy, one for
@@ -61,7 +62,8 @@ func declaredTiers(t *TrackedTree) (map[string]bool, bool) {
 }
 
 // gateTierDeclaredTree emits a TIER_DECLARED finding for every internal/<leaf> package
-// that holds a non-test .go file but is absent from the tier table. architest excludes
+// that holds a non-test .go file but is absent from the tier table, and for every tier
+// table row whose package no longer exists in the tracked tree. architest excludes
 // itself from its own on-disk scan, so this gate excludes it too. Returns ErrCouldNotRun
 // when the tier table cannot be parsed (fail open, exit 2 → the architest TEST still
 // catches it in CI as the backstop).
@@ -98,6 +100,20 @@ func gateTierDeclaredTree(t *TrackedTree) ([]Finding, error) {
 			Detail: "internal/" + pkg + " has no tier declaration — add a row to the `tier` map in " +
 				tierTableFile + " at the LOWEST tier whose role it fits (or run `python tools/new_leaf.py " +
 				pkg + " --tier <tier>`), so its `(fak " + pkg + ")` ship-stamp binds to a declared layer.",
+		})
+	}
+	for pkg := range declared {
+		if pkg == "architest" { // keep symmetric with the on-disk scan above
+			continue
+		}
+		if hasGo[pkg] {
+			continue
+		}
+		findings = append(findings, Finding{
+			Gate: "TIER_DECLARED",
+			File: "internal/" + pkg + "/",
+			Detail: "tier table declares internal/" + pkg + ", but no tracked non-test Go package exists " +
+				"(stale row — remove it from " + tierTableFile + ").",
 		})
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })

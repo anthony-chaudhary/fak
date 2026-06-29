@@ -162,11 +162,14 @@ var tier = map[string]int{
 	"dojo":            1, // the prediction-vs-reality gym's pure scoring/fold/ledger/board core: Prediction/Outcome/Episode scoring + the cross-lever leaderboard fold; stdlib-only, imports nothing internal (the corpus-scanning levers live in cmd/fak), off the hot path.
 	"looprecover":     1, // pure loop-recovery decision helper; stdlib-only, imports nothing internal, off the hot path.
 	"nightrun":        1, // RUN-IT-ALL-NIGHT local-capability data-collection planner: probes the box + ranks feasible-here collection tasks over the benchmark grid; imports benchcatalog(1)+stdlib, off the hot path.
+	"claimcheck":      1, // pure net-true-value claim grader; stdlib-only, off the hot path.
 	"loopindex":       1, // pure S0 agentic-loop scorecard: folds orient->plan->act->verify->ship->learn probes into loop-index + loopindex_debt; stdlib-only, off the hot path.
+	"loopmap":         1, // queryable loop-stage -> tool map over loopindex(1); off the hot path.
 	"sessionobs":      1, // SESSION-OBSERVABILITY-for-RSI scorecard: the value-side complement to tools/session_audit.py — grades how far our coding-session data has climbed the capture->structure->link->aggregate->learn ladder, folding the missing rungs into one sessionobs_debt integer. Pure scorer (Record/Outcome/Pipeline/Score), stdlib-only, imports nothing internal, off the hot path.
 	"compactcohere":   1, // fak<->harness context-manager COHERENCE policy (#1131): attributes a served turn's prefix event (stable/fak_cut/fak_world_break/harness_rewrite/cold_ttl) + a standing PreCompact block/allow posture to suppress Claude Code's cache-destroying auto-compaction while fak's cache-preserving compaction copes. Pure sensor+policy, stdlib-only, imports nothing internal, off the hot path.
 	"loopdrive":       1,
 	"loopgate":        1, // pure loop exit gate: maps a claimed-done turn plus a witness criterion to WITNESSED/NOT_YET/REFUSED; witness execution is caller-injected.
+	"turntaxmeter":    1, // pure observer-effect sampling and overhead-budget meter; stdlib-only, off the hot path.
 	"slackenv":        1, // the ONE .env.slack.local token/channel resolver every outbound Slack publisher (scoreboard/blockerpost/benchpost/dispatchpost/dojopost/marketing/nodeusagepost) and chatrelay delegates to; pure stdlib, off the hot path.
 	"dormancy":        1, // dormancy clock + horizon bucketer (#1179, epic #1178): a durable monotonic LastActiveAt Stamp + a pure Horizon(gap) -> {warm,cool,cold,frozen,ancient} bucketer (thresholds anchored to the resume cache TTLs); stdlib-only, imports nothing internal, off the hot path. Surfaced on session/loop/lease as the shared "how long dormant" field.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
@@ -417,13 +420,12 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // degenerate `engine.HTTPEngine` once duplicated the live planner (spoke a bespoke
 // `tool=X args=Y` prompt, never wired, never spoke real tool-calling) and the seam
 // *entrenched* over time before it was deleted. `agent` owns the general outbound
-// planner (`HTTPPlanner`); `engine` owns the narrow vLLM EngineDriver adapter; and
-// `gateway` is the inbound SERVER of that route (the adjudication proxy), not a
-// client. cmd/fak's help text also names it but lives outside internal/, so it is
-// not scanned.
+// planner (`HTTPPlanner`); `gateway` is the inbound SERVER of that route (the
+// adjudication proxy), not a client; and off-path witnesses may replay or benchmark
+// the same wire. cmd/fak's help text also names it but lives outside internal/, so it
+// is not scanned.
 var chatEndpointRole = map[string]string{
 	"agent":      "the single outbound chat-completions client (HTTPPlanner)",
-	"engine":     "the vLLM EngineDriver adapter's OpenAI-compatible upstream route",
 	"gateway":    "the inbound /v1/chat/completions server route (adjudication proxy)",
 	"webbench":   "the off-path serving-parity benchmark client (not a live planner)",
 	"guardtrace": "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",

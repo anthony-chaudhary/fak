@@ -54,6 +54,8 @@ func TestTierDeclared_FiresOnUndeclaredLeaf(t *testing.T) {
 			}
 		}
 		write(tierTableFile, tierBody(declareSynth))
+		write("internal/abi/x.go", "package abi\n")
+		write("internal/hooks/x.go", "package hooks\n")
 		write("internal/synthundeclared/x.go", "package synthundeclared\n")
 		// an _test.go-only dir must NOT count as a leaf needing a tier
 		write("internal/onlytests/x_test.go", "package onlytests\n")
@@ -61,6 +63,8 @@ func TestTierDeclared_FiresOnUndeclaredLeaf(t *testing.T) {
 			Root: root,
 			Paths: []string{
 				tierTableFile,
+				"internal/abi/x.go",
+				"internal/hooks/x.go",
 				"internal/synthundeclared/x.go",
 				"internal/onlytests/x_test.go",
 			},
@@ -87,6 +91,52 @@ func TestTierDeclared_FiresOnUndeclaredLeaf(t *testing.T) {
 	}
 	if len(findings) != 0 {
 		t.Fatalf("declared leaf should be clean, got %+v", findings)
+	}
+}
+
+// TestTierDeclared_FiresOnStaleTierRow covers the other #1145 recurrence: a package
+// was removed, but its tier row stayed behind. That must fail at the same hygiene gate
+// as a missing row, without waiting for someone to run internal/architest by hand.
+func TestTierDeclared_FiresOnStaleTierRow(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(tierTableFile, `package architest
+
+var tier = map[string]int{
+	"abi": 0,
+	"hooks": 1,
+	"stalegone": 1,
+}
+`)
+	write("internal/abi/x.go", "package abi\n")
+	write("internal/hooks/x.go", "package hooks\n")
+	tree := &TrackedTree{
+		Root: root,
+		Paths: []string{
+			tierTableFile,
+			"internal/abi/x.go",
+			"internal/hooks/x.go",
+		},
+		fileCache: map[string]fileEntry{},
+	}
+
+	findings, err := gateTierDeclaredTree(tree)
+	if err != nil {
+		t.Fatalf("gate error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("want 1 stale TIER_DECLARED finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Gate != "TIER_DECLARED" || findings[0].File != "internal/stalegone/" {
+		t.Fatalf("finding wrong: %+v", findings[0])
 	}
 }
 

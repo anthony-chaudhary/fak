@@ -33,8 +33,6 @@
 # says so and allows the push — a missing verifier must never wedge the trunk.
 
 mode="${FLEET_REVIEW_GUARD:-block}"
-[ "$mode" = "off" ] && exit 0
-[ "${FLEET_ALLOW_RESIDUAL:-0}" = "1" ] && exit 0
 
 # Only gate pushes of the trunk itself; a topic branch / tag push is not the shared
 # floor this guard protects.
@@ -46,14 +44,53 @@ case "$branch" in
 	*) exit 0 ;;
 esac
 
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# The architest tier table must not drift between pushes. GitHub Actions can report
+# TestEveryPackageDeclaresTier red after a direct push, but the local push boundary is
+# the earliest in-repo place to refuse the same recurrence (#1145). Use `fak hygiene`
+# instead of `go test` so native Windows clones avoid the OS test-binary block noted in
+# AGENTS.md. As with the claim review below, a missing runner fails open rather than
+# wedging a fresh clone.
+tier_mode="${FLEET_TIER_GUARD:-block}"
+if [ "$tier_mode" != "off" ] && [ "${ALLOW_TIER_DRIFT:-0}" != "1" ]; then
+	if command -v fak >/dev/null 2>&1; then
+		tier_out="$(fak hygiene --root "$root" --gates TIER_DECLARED 2>&1)"
+		tier_status=$?
+	elif command -v go >/dev/null 2>&1; then
+		tier_out="$(cd "$root" && go run ./cmd/fak hygiene --root "$root" --gates TIER_DECLARED 2>&1)"
+		tier_status=$?
+	else
+		tier_out="neither 'fak' nor 'go' is on PATH"
+		tier_status=2
+	fi
+
+	if [ "$tier_status" -eq 1 ]; then
+		if [ "$tier_mode" = "block" ]; then
+			echo "TIER_DECLARED (blocked): architest tier table drift would red the trunk." >&2
+			echo "$tier_out" >&2
+			echo "  fix: add the missing tier row or remove the stale row in internal/architest/architest_test.go." >&2
+			echo "  override once: ALLOW_TIER_DRIFT=1 git push   (intentional false-positive only)" >&2
+			exit 1
+		else
+			echo "TIER_DECLARED (advisory): architest tier table drift detected." >&2
+			echo "$tier_out" >&2
+		fi
+	elif [ "$tier_status" -ne 0 ]; then
+		echo "TIER_DECLARED (warn): tier drift gate could not run; push allowed." >&2
+		echo "$tier_out" >&2
+	fi
+fi
+
+[ "$mode" = "off" ] && exit 0
+[ "${FLEET_ALLOW_RESIDUAL:-0}" = "1" ] && exit 0
+
 # Need the dos CLI. Resolve it from PATH; if absent, fail open with a note.
 dos_bin="$(command -v dos 2>/dev/null)"
 if [ -z "$dos_bin" ]; then
 	echo "CLAIM_UNWITNESSED (warn): 'dos' CLI not on PATH; claim-honesty review skipped." >&2
 	exit 0
 fi
-
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
 # The range this push would ADD to the trunk: prefer this branch's own upstream,
 # then origin/main, then the legacy origin/master. If none is known (fresh clone,
