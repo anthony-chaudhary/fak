@@ -3,9 +3,11 @@ package modelengine
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // TestAdmitStreamsThenAssembles proves the lifecycle path streams exactly genTokens
@@ -97,11 +99,85 @@ func TestAdmitCancelStopsMidDecodeAndReclaims(t *testing.T) {
 	if res != nil {
 		t.Fatalf("a cancelled request must yield a nil result, got %+v", res)
 	}
-	ir, ok := req.(*inkernelRequest)
+	ln, ok := req.(*schedLane)
 	if !ok {
-		t.Fatalf("Admit returned %T, want *inkernelRequest", req)
+		t.Fatalf("Admit returned %T, want *schedLane", req)
 	}
-	if !ir.Reclaimed() {
+	if !ln.Reclaimed() {
 		t.Fatal("cancelled request did not signal KV reclaim")
 	}
+}
+
+// TestEngineAdmitUsesNativeContinuousBatching proves the registered Engine's lifecycle path
+// now rides NativeScheduler rather than the retired per-request goroutine: requests admitted
+// before any consumer drains them are co-promoted into the scheduler's running set and decode
+// through the shared StepBatch loop, while each lane's tokens remain serial-bit-identical.
+func TestEngineAdmitUsesNativeContinuousBatching(t *testing.T) {
+	ctx := context.Background()
+	e := New()
+	m := e.model()
+	calls := []*abi.ToolCall{
+		inlineCall("search_flights", `{"from":"SFO"}`),
+		inlineCall("get_user_details", `{"id":1}`),
+		inlineCall("list_all_airports", `{"region":"EU"}`),
+	}
+
+	want := make([][]int, len(calls))
+	for i, c := range calls {
+		prompt := e.buildPrompt(c.Tool, refBytes(ctx, c.Args), m.Cfg.VocabSize)
+		want[i] = serialGreedyTokens(m, prompt)
+	}
+
+	reqs := make([]abi.EngineRequest, len(calls))
+	for i, c := range calls {
+		r, err := e.Admit(ctx, c)
+		if err != nil {
+			t.Fatalf("Admit %d: %v", i, err)
+		}
+		reqs[i] = r
+	}
+
+	got := make([][]int, len(reqs))
+	var wg sync.WaitGroup
+	for i, r := range reqs {
+		wg.Add(1)
+		go func(i int, r abi.EngineRequest) {
+			defer wg.Done()
+			for tok := range r.Tokens() {
+				got[i] = append(got[i], tok.ID)
+			}
+		}(i, r)
+	}
+	wg.Wait()
+
+	if peak := e.nativeScheduler().MaxObservedRunning(); peak < 2 {
+		t.Fatalf("engine scheduler peak running = %d, want >=2 (requests did not co-batch)", peak)
+	}
+	for i := range calls {
+		if !equalInts(got[i], want[i]) {
+			t.Fatalf("call %d: scheduler tokens %v != serial tokens %v", i, got[i], want[i])
+		}
+		res, err := reqs[i].Result()
+		if err != nil {
+			t.Fatalf("Result %d: %v", i, err)
+		}
+		if res == nil || res.Status != abi.StatusOK {
+			t.Fatalf("Result %d = %+v, want StatusOK", i, res)
+		}
+	}
+}
+
+func serialGreedyTokens(m *model.Model, prompt []int) []int {
+	sess := m.NewSession()
+	logits := sess.Prefill(prompt)
+	gen := make([]int, 0, genTokens)
+	for i := 0; i < genTokens; i++ {
+		next := argmax(logits)
+		gen = append(gen, next)
+		if sess.M.Cfg.IsEOS(next) {
+			break
+		}
+		logits = sess.Step(next)
+	}
+	return gen
 }

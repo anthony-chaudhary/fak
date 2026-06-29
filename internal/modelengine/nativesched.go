@@ -1,36 +1,18 @@
 package modelengine
 
-// nativesched.go — the NATIVE continuous-batching consumer of the lifecycle seam.
+// nativesched.go — native continuous batching for the in-kernel engine lifecycle.
 //
-// WHY IT EXISTS. The engine-seam issue's #1 design risk is shaping the lifecycle
-// against ONLY the external-adapter consumer (a per-request async stream), then
-// discovering the native continuous-batching scheduler cannot fit the same
-// interface — forcing a breaking rework once the native engine lands. The defense
-// is to land a native-scheduler STUB that compiles against the SAME unchanged
-// abi.LifecycleEngine the in-kernel per-request engine (lifecycle.go) and the
-// external adapter (internal/engine) implement, BEFORE either real consumer is
-// built. This file is that stub.
+// NativeScheduler admits many requests, then a SINGLE scheduler loop advances all live
+// non-Q4_K lanes with one model.BatchSession StepBatch call per iteration: the shared
+// weight-stream move that continuous batching exists to make. It dynamically admits new
+// requests between decode steps, retires finished/cancelled lanes immediately, fans each
+// token into that lane's own stream, and drops the lane's KV-bearing Session on terminal.
 //
-// WHAT IT PROVES (and only that). NativeScheduler admits many requests, then a
-// SINGLE scheduler loop advances ALL admitted lanes with ONE model.BatchSession
-// StepBatch call per iteration — the shared-weight-stream continuous-batching move
-// — fanning each lane's produced token into that lane's own stream, and freeing a
-// lane's KV-bearing session the instant its request is cancelled. That is the
-// admit -> shared-step -> per-lane-stream -> reclaim shape, expressed through the
-// frozen interface, which is the cross-shape review the seam exists to pass.
-//
-// WHAT IT IS NOT (explicit non-goals from the issue). It carries the BARE waiting/
-// running queue the issue scopes (Admit enqueues; the loop promotes waiting->running
-// between steps, FIFO, under a structural maxRunning cap), but NOT the production KV-
-// governance scheduler: no paged KV, no preemption, no priority/fairness/KV-budget
-// admission, no ragged-lane MAC accounting, no throughput claim. The maxRunning knob
-// is a plain capacity gate, not an admission POLICY — priority/fairness/budget is the
-// sibling issue's job. The loop rebuilds a transient BatchSession wrapper each tick
-// over the live lanes' own *Session objects (each keeps its own KV), which is correct
-// but not allocation-tuned. A lane whose consumer neither drains nor cancels will
-// back-pressure the loop (head-of-line) — acceptable here, called out so no one
-// mistakes it for the real scheduler. Paged KV, preemption, and the priority/fairness
-// admission policy are the sibling issues that CONSUME this same contract.
+// Honest scope. This is the native in-kernel syscall scheduler, not a vLLM-class
+// multi-tenant serving scheduler: paged-KV pressure relief, priority/fairness admission,
+// and SLA p99 policy live in the gateway admission/preemption leaves that consume this
+// seam. Resident Q4_K decode is preserved by falling back to per-lane Session.Step because
+// BatchSession does not yet implement the Q4_K kernel.
 
 import (
 	"context"
@@ -43,9 +25,23 @@ import (
 
 var errSchedClosed = errors.New("modelengine: native scheduler closed")
 
-// NativeScheduler is the continuous-batching-shaped LifecycleEngine stub.
+type schedPrepare struct {
+	prompt []int
+	tok    NLTokenizer
+	q4k    bool
+}
+
+type schedPrepareFunc func(context.Context, *abi.ToolCall, *model.Model) schedPrepare
+
+func defaultSchedPrepare(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
+	return schedPrepare{prompt: tokenize(c.Tool, refBytes(ctx, c.Args), m.Cfg.VocabSize)}
+}
+
+// NativeScheduler is the continuous-batching LifecycleEngine used by the registered
+// in-kernel Engine and by tests that register it under a separate id.
 type NativeScheduler struct {
-	m *model.Model
+	m       *model.Model
+	prepare schedPrepareFunc
 
 	mu sync.Mutex
 	// waiting holds admitted-but-not-yet-running lanes (the WAITING queue); lanes
@@ -87,17 +83,23 @@ func (s *NativeScheduler) MaxObservedRunning() int {
 }
 
 // NewNativeScheduler builds a scheduler over an already-constructed model (a real
-// export or model.NewSynthetic). It is deliberately NOT auto-registered as a kernel
-// engine id: it is a shape proof a test drives directly, not the default dispatch
-// path (auto-registering it would also perturb abi.Engine("")'s lowest-id pick).
+// export or model.NewSynthetic). It is deliberately NOT auto-registered as a second
+// kernel engine id; the registered "inkernel" Engine owns its own scheduler.
 func NewNativeScheduler(m *model.Model) *NativeScheduler {
-	return &NativeScheduler{m: m, wake: make(chan struct{}, 1)}
+	return newNativeScheduler(m, nil)
+}
+
+func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeScheduler {
+	if prepare == nil {
+		prepare = defaultSchedPrepare
+	}
+	return &NativeScheduler{m: m, prepare: prepare, wake: make(chan struct{}, 1)}
 }
 
 // Caps advertises the lifecycle seam (so a consumer negotiates streaming/cancel
 // without a type assertion) plus the scheduler's own id token.
 func (s *NativeScheduler) Caps() []abi.Capability {
-	return []abi.Capability{"engine.native-sched", abi.EngineLifecycleCap}
+	return []abi.Capability{"engine.native-sched", "engine.continuous-batching", abi.EngineLifecycleCap}
 }
 
 // Admit registers one request: it prefills the prompt synchronously (so the lane
@@ -114,8 +116,19 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 	}
 	s.mu.Unlock()
 
-	prompt := tokenize(c.Tool, refBytes(ctx, c.Args), s.m.Cfg.VocabSize)
+	prep := s.prepare(ctx, c, s.m)
+	prompt := prep.prompt
+	if len(prompt) == 0 {
+		prompt = []int{0}
+	}
 	sess := s.m.NewSession()
+	if prep.q4k {
+		// Resident-Q4_K preload: engage the Q4_K decode kernel. Multi-lane Q4_K
+		// falls back to serial Step in stepOnce because BatchSession does not yet
+		// implement q4kw dispatch.
+		sess.Quant = true
+		sess.Q4K = true
+	}
 	logits := sess.Prefill(prompt)
 
 	cctx, cancel := context.WithCancel(ctx)
@@ -128,7 +141,9 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 		tool:      c.Tool,
 		promptLen: len(prompt),
 		putCtx:    ctx,
-		tokens:    make(chan abi.EngineToken),
+		tok:       prep.tok,
+		q4k:       prep.q4k,
+		tokens:    make(chan abi.EngineToken, 1),
 		done:      make(chan struct{}),
 	}
 
@@ -258,13 +273,19 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 		ln.gen = append(ln.gen, next)
 		ln.emitted++
 		if ln.sess.M.Cfg.IsEOS(next) || ln.emitted >= genTokens {
-			ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, nil), nil)
+			ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, ln.tok), nil)
 			continue
 		}
 		cont = append(cont, ln)
 		ids = append(ids, next)
 	}
 	if len(cont) == 0 {
+		return
+	}
+	if anyQ4K(cont) {
+		for i, ln := range cont {
+			ln.logits = copyF32(ln.sess.Step(ids[i]))
+		}
 		return
 	}
 	// The shared, weight-stream-amortised decode step: ONE StepBatch over every
@@ -281,6 +302,15 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	}
 }
 
+func anyQ4K(lanes []*schedLane) bool {
+	for _, ln := range lanes {
+		if ln.q4k {
+			return true
+		}
+	}
+	return false
+}
+
 // schedLane is one admitted request's state + its EngineRequest handle.
 type schedLane struct {
 	sched  *NativeScheduler // back-pointer so Cancel can wake the run loop
@@ -295,6 +325,8 @@ type schedLane struct {
 	tool      string
 	promptLen int
 	putCtx    context.Context
+	tok       NLTokenizer
+	q4k       bool
 	terminal  bool
 
 	tokens chan abi.EngineToken

@@ -10,10 +10,11 @@
 // `--engine inkernel` flag (or one blank-import line), never a kernel edit.
 //
 // What "completing a tool call on the in-kernel model" means here: the driver
-// materializes the call's argument bytes, byte-tokenizes them into a prompt, and
-// runs a REAL greedy Prefill+Step decode over a kernel-owned KV cache
-// (model.Session.Generate) — the exact cache path the HF-oracle-verified model
-// uses. The result payload carries the generated token ids + token accounting.
+// materializes the call's argument bytes, tokenizes them into a bounded prompt, and
+// runs a REAL greedy decode over kernel-owned per-request KV caches. Concurrent
+// calls are admitted into the native continuous-batching scheduler, which advances
+// live lanes with model.BatchSession StepBatch when that path is supported. The
+// result payload carries the generated token ids + token accounting.
 //
 // Weights: by default the driver runs a small DETERMINISTIC synthetic checkpoint
 // (model.NewSynthetic) so the engine works on a CI box with no model export and a
@@ -65,10 +66,12 @@ const maxPromptTokens = 64
 
 // Engine is the in-kernel-model EngineDriver. The model is constructed lazily.
 type Engine struct {
-	once sync.Once
-	m    *model.Model
-	cfg  model.Config
-	q4k  bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
+	once      sync.Once
+	m         *model.Model
+	cfg       model.Config
+	q4k       bool // resident-Q4_K preload: Complete routes the dispatch decode through Session.Q4K
+	schedOnce sync.Once
+	sched     *NativeScheduler
 
 	// tok is the OPTIONAL NL tokenizer (nil = byte-level default). Set ONCE at boot via
 	// SetTokenizer, before the server accepts requests, then read-only on the dispatch
@@ -167,19 +170,17 @@ func SetTokenizer(t NLTokenizer) { Default.SetTokenizer(t) }
 // streaming/cancel without a type assertion. A worker that doesn't know either cap
 // simply never negotiates it; the engine is still selectable by id.
 func (e *Engine) Caps() []abi.Capability {
-	return []abi.Capability{"engine.inkernel", abi.EngineLifecycleCap}
+	return []abi.Capability{"engine.inkernel", "engine.continuous-batching", abi.EngineLifecycleCap}
 }
 
 // Complete runs the call's arguments through a real in-kernel-model decode and
 // returns the generated tokens as the result. This is the EngineDriver seam: the
 // kernel folds adjudication at Submit, then dispatches an ALLOWED call here at Reap.
 //
-// It is now a thin one-shot shim OVER the admit/step/stream lifecycle (Admit): it
+// It is now a thin one-shot shim OVER the native scheduler lifecycle (Admit): it
 // drains the per-step token stream and returns the assembled turn. The decode, the
-// payload, and the Meta are byte-identical to the pre-lifecycle buffered path
-// (TestCompleteRunsRealDecode / TestDecodeIsDeterministicAndInputDriven pin that),
-// so every existing one-shot caller — the kernel's Reap dispatch included — is
-// unchanged while the engine has gained a real per-step, cancellable contract.
+// payload, and the Meta remain byte-identical to the pre-scheduler path for one
+// request, while overlapping requests share the scheduler's StepBatch loop.
 func (e *Engine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
 	req, err := e.Admit(ctx, c)
 	if err != nil {
@@ -195,6 +196,23 @@ func (e *Engine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, er
 		res.Call = c // preserve the pre-shim Result.Call binding
 	}
 	return res, nil
+}
+
+// nativeScheduler returns the process-local continuous-batching scheduler that backs this
+// Engine. The prepare hook reads Engine fields at admit time so the scheduler preserves the
+// boot-selected tokenizer and resident-Q4_K mode without widening the public ABI.
+func (e *Engine) nativeScheduler() *NativeScheduler {
+	e.schedOnce.Do(func() {
+		e.sched = newNativeScheduler(e.model(), func(ctx context.Context, c *abi.ToolCall, m *model.Model) schedPrepare {
+			args := refBytes(ctx, c.Args)
+			return schedPrepare{
+				prompt: e.buildPrompt(c.Tool, args, m.Cfg.VocabSize),
+				tok:    e.tok,
+				q4k:    e.q4k,
+			}
+		})
+	})
+	return e.sched
 }
 
 // buildPrompt turns a tool name + argument bytes into a bounded prompt of token ids,
@@ -285,6 +303,7 @@ var Default = New()
 func init() {
 	abi.RegisterEngine(EngineID, Default)
 	abi.RegisterCapability("engine.inkernel")
+	abi.RegisterCapability("engine.continuous-batching")
 	// Register the in-process model.Session adapter as the default KV-MMU enforcement
 	// backend (the existing model->abi seam this package already owns). The KV-MMU
 	// (internal/kvmmu) enforces its quarantine through whatever KVBackend is registered;
