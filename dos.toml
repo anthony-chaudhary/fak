@@ -427,6 +427,19 @@ summary  = "work landed off the trunk -- a new branch or worktree was created in
 fix      = "commit directly to main with small, path-scoped commits; pull/merge frequently, preferring merge or pull --no-rebase when unrelated dirty files are present. `git commit -- <paths>` and merge never need a clean tree, so a worktree is never required to ship -- a dirty/diverged tree means WAIT or merge in place, never escape into a side tree; if you truly cannot proceed on main, STOP and surface the blocker. Floor: tools/githooks/reference-transaction blocks off-trunk branch creation by default; set FLEET_TRUNK_GUARD=warn for advisory mode, or FLEET_ALLOW_BRANCH=1 to override once (release tooling only)."
 see_also = ["CLAUDE.md", "AGENTS.md", "tools/githooks/reference-transaction", "tools/install_trunk_guard.py"]
 
+# Stale-base deletion: a `git commit -- <path>` (or `fak commit`) stages the
+# WORKING-TREE copy of exactly the named pathspec, so a stale whole-file base
+# SILENTLY drops a peer's pushed block even on a pure-add change. The content-level
+# merge-base guard in internal/safecommit (FAK_STALE_BASE_GUARD=block|warn|off)
+# refuses with this reason when the committed blob would delete a contiguous
+# peer-added run present on origin/<trunk> but absent from the working tree.
+[reasons.STALE_BASE_DELETION]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a pathspec commit would silently drop a peer's pushed block -- the working-tree copy of the named path is stale relative to origin/<trunk>, so committing it deletes a contiguous peer-added run the local change never touched"
+fix      = "fetch + rebase/merge origin/<trunk> so the working-tree base includes the peer's block, then re-commit; never escape into a side tree. FAK_STALE_BASE_GUARD=warn for advisory mode, =off to disable. Floor: internal/safecommit checkStaleBaseDeletion (fail-open on a fresh base / absent ref)."
+see_also = ["fak/internal/safecommit/stalebase.go", "fak/CLAUDE.md", "fak/AGENTS.md"]
+
 # Public-copy leak scan: the private canonical repo is the source for every
 # future public export, so the redact-needles listed in PUBLIC-SCRUB-POLICY.md
 # (operator Tailscale IPs, SSH user, machine paths, the .claude-agent-*
