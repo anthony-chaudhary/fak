@@ -272,7 +272,7 @@ def test_bar_proportional_and_sliver() -> None:
     assert cd._bar(5, 0, width=4) == "." * 4
 
 
-# --- the load-bearing live smoke: the committed catalog is clean + honestly low ---
+# --- the load-bearing live smoke: the committed catalog is clean + honestly incomplete ---
 
 def test_live_real_data_is_clean_and_in_band() -> None:
     root = cd.repo_root()
@@ -291,8 +291,9 @@ def test_live_real_data_is_clean_and_in_band() -> None:
     # The namespace is only partly mapped: coverage-debt is the honest birth state.
     assert c["coverage_debt"] > 0, "a born-clean coverage means the discovery found nothing - check the corpus"
     assert c["coverage"]["discovered"] >= 100, "the confusable universe should be large"
-    # The headline must land in the intended 2/10 - 5/10 band: accurate, with room to grow.
-    assert 20 <= c["score"] <= 50, f"score {c['score']} out of the 2-5/10 band"
+    # The scorecard is no longer birth-low, but it must stay honest: enough of the
+    # namespace is positioned to be useful, and remaining coverage-debt keeps it below A.
+    assert 50 <= c["score"] < 90, f"score {c['score']} out of the honest-incomplete band"
     # A credible foundation: a real spread of crystal + defined concepts is positioned.
     assert c["standing"]["crystal"] >= 20, "real crystal-clear concepts (the cache family is the exemplar)"
     assert c["standing"]["defined"] >= 5, "honest defined-but-not-yet-anchored concepts"

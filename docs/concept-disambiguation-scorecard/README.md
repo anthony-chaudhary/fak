@@ -5,7 +5,7 @@ description: "Inward naming scorecard: each confusable fak concept positioned on
 
 # Concept-disambiguation scorecard - crystal clarity across similar-sounding names
 
-<!-- concept-disambiguation-scorecard: 2026-06-27 wave-2 coverage push #942 - process: tools/concept_disambiguation_scorecard.py - data: tools/concept_disambiguation_scorecard.data/ -->
+<!-- concept-disambiguation-scorecard: 2026-06-29 #1257 support-maturity - process: tools/concept_disambiguation_scorecard.py - data: tools/concept_disambiguation_scorecard.data/ -->
 
 The sibling scorecards grade fak's code, docs, and competitive standing. This one asks the question that bites a reader as the system grows: **of the massive, growing set of similar-sounding names (cache, vCache, KV cache, cachemeta, the provider prompt-cache), is each distinct concept crystal-clear - one canonical name, a written definition, and an explicit line drawn against the siblings it is confused with?** Every number below is re-derived by `tools/concept_disambiguation_scorecard.py` and cross-checked against the real tree (the grounding token must appear in the production corpus; the glossary anchor must exist; a `distinct_from` reference must resolve). No verdict is hand-typed.
 
@@ -15,21 +15,21 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **86.4/100** (grade B) = 8.6/10 |
-| **Coverage** | **79.1%** (520/657 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **137** (clarity 0 + coverage 137) |
-| Crystal-clear concepts | 104 of 486 positioned |
-| As of | 2026-06-26 (fak v0.34.0) |
+| **Score** | **78.6/100** (grade C) = 7.9/10 |
+| **Coverage** | **67.1%** (523/779 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **256** (clarity 0 + coverage 256) |
+| Crystal-clear concepts | 109 of 491 positioned |
+| As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 486 concepts - score 86.4/100 (grade B) - disambiguation-debt 137
+concept-disambiguation chart - 491 concepts - score 78.6/100 (grade C) - disambiguation-debt 256
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ########.................... 104
+  * crystal       ########.................... 109
   o defined       ############################ 382
   ~ drifting      ............................ 0
   x colliding     ............................ 0
@@ -51,27 +51,29 @@ clarity mix by family (each cell = one concept):
   render-materialize ***oooooooooooooooooooooo (25 concept(s); 3 crystal)
   score-debt       ***                (3 concept(s); 3 crystal)
   session-runtime  *******ooooooooooooooooooooooooooooooooooooooooooooo (52 concept(s); 7 crystal)
+  support-maturity *****              (5 concept(s); 5 crystal)
   witness-proof    *****ooooooooooooooooooooooo (28 concept(s); 5 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ##########.................. 22/64
-  plan             ####################........ 79/108
-  gateway-engine   ######################...... 85/108
-  context-ctx      #####################....... 43/58
-  session-runtime  #########################... 54/61
-  render-materialize #########################... 43/48
-  cache            ##########################.. 54/58
-  evict            #####################....... 9/12
-  policy-capability ##########################.. 43/46
-  score-debt       #################........... 3/5
-  attention        ###########################. 54/55
+  plan             #################........... 79/134
+  guard-gate       ########.................... 21/74
+  cache            ##################.......... 53/81
+  gateway-engine   #####################....... 85/111
+  context-ctx      ###################......... 44/66
+  render-materialize ####################........ 43/60
+  session-runtime  #######################..... 54/67
+  evict            ############................ 9/21
+  policy-capability #######################..... 43/52
+  witness-proof    ######################...... 29/37
+  pool             ####################........ 13/18
+  score-debt       ##########.................. 3/8
+  decision         ###################......... 8/12
+  attention        ###########################. 54/56
   layout           #########################... 9/10
-  pool             ##########################.. 13/14
-  witness-proof    ###########################. 29/30
   cross-cluster    ............................ 0/0
-  decision         ############################ 8/8
+  support-maturity ############################ 5/5
 
-namespace coverage  [#########################.......] 79.1%  (520/657 confusable tokens positioned)
+namespace coverage  [#####################...........] 67.1%  (523/779 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -189,6 +191,11 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | * | crystal | symbol | session-runtime | **session.State** - Live, mutable per-session control record: run-state, budget, priority, pace, and revision (an optimistic-concurrency guard). |
 | * | crystal | subsystem | session-runtime | **sessionimage.Image** - Loaded, integrity-verified portable session archive: drive (session.json), recall manifest, ctxplan index, trajectory corpus, and image.json meta. |
 | * | crystal | symbol | session-runtime | **SessionPlanner** - Persistent per-session context planner: a long-lived lossless store plus candidate index that ingests each turn's new messages incrementally. |
+| * | crystal | concept | support-maturity | **support** - A capability is supported when fak has an implemented path that accepts the case without asserting how broadly it is exercised, whether every answer is right, how it compares to a peer, or whether it is production-mature. |
+| * | crystal | metric | support-maturity | **coverage** - Coverage is the measured fraction of a declared or discovered universe that has rows, tests, witnesses, or other positioned evidence. |
+| * | crystal | concept | support-maturity | **correctness** - Correctness is the property that the implementation's behavior matches its stated contract or oracle for the case being judged. |
+| * | crystal | concept | support-maturity | **parity** - Parity is a same-workload comparison against a named peer, baseline, or oracle, reporting match, lead, or trailing behavior under the stated conditions. |
+| * | crystal | concept | support-maturity | **maturity** - Maturity is the readiness level of a supported capability after considering implementation completeness, evidence breadth, correctness witnesses, parity results, guardrails, and operating posture. |
 | * | crystal | symbol | witness-proof | **World-state witness** - An external reference (commit hash, blob digest, etag, lease epoch) a cache entry is admitted under, so the entry can be refuted when that external state changes. |
 | * | crystal | symbol | witness-proof | **Claim** - A worker or agent's assertion that it completed an effect (shipped a phase, created a file, ran a test), awaiting corroboration against independent evidence. |
 | * | crystal | symbol | witness-proof | **WitnessResolver** - The component that corroborates claims against independent evidence sources (git history, filesystem, HTTP APIs) and returns Confirmed, Refuted, or Abstain. |
@@ -573,7 +580,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | witness-proof | **StatusWitnessRefused (loop run status)** - loopmgr.StatusWitnessRefused is the loop run-status 'witness_refused' (and its WitnessRefused counter) meaning a witness RAN and the evidence contradicted the run's claimed completion. |
 | o | defined | metric | witness-proof | **MissWitnessRevoked (vdso cache-miss)** - vdso.MissWitnessRevoked is the cache-miss reason 'WITNESS_REVOKED' counted when a cached entry was admitted under a now-refuted external witness and therefore fails closed instead of serving stale bytes. |
 | o | defined | symbol | witness-proof | **VerifiedUnavailable (witness unavailable)** - taskmgr.VerifiedUnavailable (and loopmgr.StatusWitnessUnavailable) is the state where a witness was ASKED but could not read the effect back — no network, a missing ref — so the claim is neither confirmed nor refused and must not downgrade to claimed-done. |
-| o | defined | doc-term | witness-proof | **dgxGlmGpuWitness (CUDA GPU proof)** - dgxGlmGpuWitness is the on-GPU server CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via tools/dgx_glm_gpu_witness.sh), invoked because the win32 build host cannot execute the CUDA path. |
+| o | defined | doc-term | witness-proof | **dgxGlmGpuWitness (CUDA GPU proof)** - dgxGlmGpuWitness is the on-DGX CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via tools/dgx_glm_gpu_witness.sh), invoked because the win32 build host cannot execute the CUDA path. |
 | o | defined | symbol | witness-proof | **WitnessOutcome** - The result of claim corroboration: Confirmed (evidence supports it), Refuted (evidence contradicts it), or Abstain (no definitive evidence). |
 | o | defined | symbol | witness-proof | **TrustEpoch** - A monotonically-increasing integrity clock that increments with each witness refutation, dual to WorldVersion (the consistency clock). |
 
@@ -582,7 +589,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 11 kind/grounding mismatch |
-| well-formed | `well_formed` | 100 | 0 | all 486 rows well-formed |
+| well-formed | `well_formed` | 100 | 0 | all 491 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -595,20 +602,21 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 22 | 64 | 42 |
-| plan | 79 | 108 | 29 |
-| gateway-engine | 85 | 108 | 23 |
-| context-ctx | 43 | 58 | 15 |
-| session-runtime | 54 | 61 | 7 |
-| render-materialize | 43 | 48 | 5 |
-| cache | 54 | 58 | 4 |
-| evict | 9 | 12 | 3 |
-| policy-capability | 43 | 46 | 3 |
-| score-debt | 3 | 5 | 2 |
-| attention | 54 | 55 | 1 |
+| plan | 79 | 134 | 55 |
+| guard-gate | 21 | 74 | 53 |
+| cache | 53 | 81 | 28 |
+| gateway-engine | 85 | 111 | 26 |
+| context-ctx | 44 | 66 | 22 |
+| render-materialize | 43 | 60 | 17 |
+| session-runtime | 54 | 67 | 13 |
+| evict | 9 | 21 | 12 |
+| policy-capability | 43 | 52 | 9 |
+| witness-proof | 29 | 37 | 8 |
+| pool | 13 | 18 | 5 |
+| score-debt | 3 | 8 | 5 |
+| decision | 8 | 12 | 4 |
+| attention | 54 | 56 | 2 |
 | layout | 9 | 10 | 1 |
-| pool | 13 | 14 | 1 |
-| witness-proof | 29 | 30 | 1 |
 | cross-cluster | 0 | 0 | 0 |
-| decision | 8 | 8 | 0 |
+| support-maturity | 5 | 5 | 0 |
 
