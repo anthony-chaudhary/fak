@@ -12,7 +12,7 @@ import (
 
 // usage prints the full `fak` help banner. The verb list is long enough to be a
 // god-function on its own, so the body is split into three contiguous raw-string
-// sections (core verbs / ops verbs / scorecards + aliases) printed back-to-back â€”
+// sections (core verbs / ops verbs / scorecards + aliases) printed back-to-back —
 // the output is byte-identical to the single block it replaced.
 func usage() {
 	fmt.Fprintf(os.Stderr, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
@@ -38,11 +38,11 @@ func usageCoreVerbs() {
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
   fak sweep     [--dir DIR] [--json] | --apply --lane L -m "SUBJECT" [--path P ...] [--push]
                 (DRIVE A DIRTY MULTI-SESSION TREE TOWARD ZERO: the layer above fak commit.
-                 Default mode REPORTS the working tree grouped by lane â€” every stampable
+                 Default mode REPORTS the working tree grouped by lane — every stampable
                  change under the (fak <leaf>) trailer its paths imply (the SAME dos.toml
                  path->lane engine the pre-commit lint binds to), plus the residual a sweep
                  must NOT silently commit: stray scratch/log junk, and root-level files with
-                 no inferable lane. It never invents a subject â€” with --apply --lane L -m S it
+                 no inferable lane. It never invents a subject — with --apply --lane L -m S it
                  commits exactly lane L's dirty paths (narrow with --path) through the safe
                  commit path (appends the (fak L) stamp, pre-lints, refuses OFF_TRUNK / a
                  pathspec race / an off-lane stamp). --json feeds a drive-to-zero loop.
@@ -59,21 +59,21 @@ func usageCoreVerbs() {
                  measured verify-loop JSON; --file supplies a representative changed path.
                  make ci still runs the full suite as the authoritative gate.)
   fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
-                (the COMMIT-BOUNDARY GATES in ONE process â€” the Go port of the
+                (the COMMIT-BOUNDARY GATES in ONE process — the Go port of the
                  tools/check_*.py git-hook checkers. pre-commit runs all 7 staged-diff
                  gates (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/
                  INDEX_SYNC/PROVENANCE_LABEL) over ONE staged-diff read instead of spawning
                  7 Python interpreters (~10.7s -> ~0.3s measured). Honors each gate
                  FLEET_<NAME>_GUARD block|warn|off + one-shot escape env. Exit 0 clean,
                  1 a block gate fired, 2 could-not-run (the shell hook then falls back to
-                 the Python checkers â€” fail-open). The shell hooks prefer this.)
+                 the Python checkers — fail-open). The shell hooks prefer this.)
   fak hygiene   [--root DIR] [--json] [--gates A,B,...]
-                (the WHOLE-TREE hygiene gates in ONE process â€” the --audit-tree twin of
+                (the WHOLE-TREE hygiene gates in ONE process — the --audit-tree twin of
                  fak hooks. Runs the ported make-hygiene checkers (DOC_PLACEMENT/BROKEN_LINK/
                  FILE_ADMISSION/SECRET_SHAPE/PROVENANCE_LABEL/INDEX_SYNC) over ONE
                  git-ls-files read instead of spawning a Python interpreter per checker.
                  Exit 0 clean, 1 a gate fired, 2 could-not-run (make/CI then falls back to
-                 the Python path â€” fail-open). make hygiene / make index-sync prefer this.)
+                 the Python path — fail-open). make hygiene / make index-sync prefer this.)
   fak preflight --tool NAME --args JSON [--policy FILE]
   fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)
                 (prove the NETWORK-EGRESS floor on one destination: the cloud-metadata /
@@ -259,8 +259,8 @@ func usageOpsVerbs() {
                  --debug-stats is ON by default: one compact per-turn line leading
                  with a verdict (ok/warming/degraded/cold) + the NET write-premium-
                  aware token saving, then cache health + compaction. Token-saving
-                 defaults â€” compact-history-
-                 budget and elide-result-bytes â€” are passed explicitly so they
+                 defaults — compact-history-
+                 budget and elide-result-bytes — are passed explicitly so they
                  appear in --dry-run output. 'fak c' is the canonical shortcut)
   fak console   issues [--epic N] [--issues-json FILE] [--json] |
                 loops [--ledger FILE] [--json] | sessions [--sessions-json FILE] [--json] |
