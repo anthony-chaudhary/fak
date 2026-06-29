@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "repo": "anthony-chaudhary/fak",
+  "description": "Named issue views — the default selection surface for fak dispatch and triage. This is the API-readable mirror of the GitHub saved views at https://github.com/anthony-chaudhary/fak/issues/views, which hydrate client-side and are NOT reachable through gh/REST/GraphQL. Edit views here; reconcile against the GitHub UI by hand. Each `query` is GitHub issue-search syntax fed verbatim to `gh issue list --search`. NOTE: `label:a,b` (comma) is OR; two separate `label:` tokens are AND. Always paired with an explicit --limit because gh defaults to 30.",
+  "default": "ready-leaves",
+  "limit": 300,
+  "views": [
+    {
+      "slug": "ready-leaves",
+      "title": "Ready leaves",
+      "query": "is:open -label:epic -label:research no:assignee",
+      "note": "The default 'what should I work on' surface: unclaimed, non-epic, non-research issues — the dispatchable backlog. Epics are umbrellas (see `epics`); research is design-shaped (not ship-ready)."
+    },
+    {
+      "slug": "p0-p1",
+      "title": "P0/P1 leaves",
+      "query": "is:open label:priority/P0,priority/P1 -label:epic sort:created-asc",
+      "note": "Prioritized, dispatchable leaves. P0 = load-bearing, do first; P1 = high priority. Oldest-first so the long-waiting work surfaces."
+    },
+    {
+      "slug": "epics",
+      "title": "Epics (decompose, don't dispatch)",
+      "query": "is:open label:epic",
+      "note": "Parent/umbrella issues that group child leaves by track. Feed these to /dos-replan to decompose — do NOT dispatch an epic as a single leaf."
+    },
+    {
+      "slug": "needs-triage",
+      "title": "Needs human triage",
+      "query": "is:open label:idea-scout",
+      "note": "Auto-filed by the daily idea-scout (tools/idea_scout.py). A standing queue for the /issue-triage pass — set priority/kind/area before they become dispatchable. Often empty; that means triage is caught up."
+    },
+    {
+      "slug": "help-wanted",
+      "title": "Help wanted",
+      "query": "is:open label:\"help wanted\" -label:epic",
+      "note": "Issues flagged as good hand-offs / extra attention needed — the surface to point a new contributor or a spare worker at."
+    },
+    {
+      "slug": "good-first-issue",
+      "title": "Good first issue",
+      "query": "is:open label:\"good first issue\"",
+      "note": "Newcomer-friendly leaves. Smallest blast radius; good for a cold-start worker."
+    },
+    {
+      "slug": "agentic-serving",
+      "title": "Agentic serving",
+      "query": "is:open label:agentic-serving -label:epic",
+      "note": "Area cluster: coherent agentic-first serving (cross-agent shared cache + correctness-gated invalidation). The largest single area in the backlog."
+    },
+    {
+      "slug": "substrate",
+      "title": "Substrate / ABI",
+      "query": "is:open label:substrate -label:epic",
+      "note": "Area cluster: substrate / standard / ABI-as-public-contract work."
+    },
+    {
+      "slug": "trust-floor",
+      "title": "Trust floor",
+      "query": "is:open label:trust-floor -label:epic",
+      "note": "Area cluster: wire the trust floor (Decide-vs-Syscall gap + dormant-until-wired seams)."
+    },
+    {
+      "slug": "gpu",
+      "title": "GPU / compute",
+      "query": "is:open label:gpu,compute,multi-gpu,metal -label:epic",
+      "note": "Area cluster (OR over gpu/compute/multi-gpu/metal): the GPU-backend and kernel work. Often gated on a physical device witness."
+    }
+  ]
+}
