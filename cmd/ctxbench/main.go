@@ -13,6 +13,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -26,14 +27,14 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the blob PageOut/Resolver backend
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
+	_ "github.com/anthony-chaudhary/fak/internal/normgate" // rank-5 normalize-and-rescan ResultAdmitter for -chain
 	"github.com/anthony-chaudhary/fak/internal/preflight"
-	_ "github.com/anthony-chaudhary/fak/internal/registrations" // built-in driver list (ctxmmu + normgate + ...)
 )
 
 // foldAdmit mirrors kernel.admitResult: run the registered ResultAdmitter chain in
 // rank order (each does its own page-out side-effect), and report the
 // most-restrictive verdict. This measures the REAL composed chain, so enabling
-// normgate is exactly one import line in internal/registrations.
+// normgate is exactly one blank import line.
 func foldAdmit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
 	best := abi.Verdict{Kind: abi.VerdictAllow, By: "default-admit"}
 	bestRank := abi.FoldRank(abi.VerdictAllow)
@@ -50,17 +51,87 @@ func foldAdmit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict 
 }
 
 type corpus struct {
-	Sources []string `json:"sources"`
-	Calls   []struct {
-		Tool string `json:"tool"`
-		Args string `json:"args"`
-	} `json:"calls"`
-	Results []struct {
-		Name    string `json:"name"`
-		Tool    string `json:"tool"`
-		Payload string `json:"payload"`
-		Bytes   int    `json:"bytes"`
-	} `json:"results"`
+	Sources []string     `json:"sources"`
+	Calls   []callCase   `json:"calls"`
+	Results []resultCase `json:"results"`
+}
+
+type callCase struct {
+	Tool string `json:"tool"`
+	Args string `json:"args"`
+}
+
+type resultCase struct {
+	Name    string `json:"name"`
+	Tool    string `json:"tool"`
+	Payload string `json:"payload"`
+	Bytes   int    `json:"bytes"`
+}
+
+type corpusJSONLRow struct {
+	Type    string `json:"type,omitempty"`
+	Source  string `json:"source,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Tool    string `json:"tool,omitempty"`
+	Args    string `json:"args,omitempty"`
+	Payload string `json:"payload,omitempty"`
+	Bytes   int    `json:"bytes,omitempty"`
+}
+
+func loadCorpus(path string) (corpus, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return corpus{}, fmt.Errorf("read corpus: %w", err)
+	}
+	var cp corpus
+	if err := json.Unmarshal(raw, &cp); err == nil {
+		return cp, nil
+	} else if !strings.HasSuffix(strings.ToLower(path), ".jsonl") {
+		return corpus{}, fmt.Errorf("parse corpus: %w", err)
+	} else if jcp, jerr := parseJSONLCorpus(raw); jerr != nil {
+		return corpus{}, fmt.Errorf("parse corpus as JSON (%v) or JSONL (%w)", err, jerr)
+	} else {
+		return jcp, nil
+	}
+}
+
+func parseJSONLCorpus(raw []byte) (corpus, error) {
+	var cp corpus
+	for i, line := range bytes.Split(raw, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var row corpusJSONLRow
+		if err := json.Unmarshal(line, &row); err != nil {
+			return corpus{}, fmt.Errorf("line %d: %w", i+1, err)
+		}
+		switch strings.ToLower(row.Type) {
+		case "source":
+			if row.Source == "" {
+				return corpus{}, fmt.Errorf("line %d: source row missing source", i+1)
+			}
+			cp.Sources = append(cp.Sources, row.Source)
+		case "call":
+			if row.Tool == "" {
+				return corpus{}, fmt.Errorf("line %d: call row missing tool", i+1)
+			}
+			cp.Calls = append(cp.Calls, callCase{Tool: row.Tool, Args: row.Args})
+		case "", "result":
+			if row.Name == "" || row.Tool == "" {
+				return corpus{}, fmt.Errorf("line %d: result row missing name or tool", i+1)
+			}
+			cp.Results = append(cp.Results, resultCase{
+				Name: row.Name, Tool: row.Tool, Payload: row.Payload, Bytes: row.Bytes,
+			})
+		default:
+			return corpus{}, fmt.Errorf("line %d: unknown row type %q", i+1, row.Type)
+		}
+	}
+	if len(cp.Results) == 0 && len(cp.Calls) == 0 {
+		return corpus{}, fmt.Errorf("no call or result rows")
+	}
+	return cp, nil
 }
 
 // Reporting copies of the ctxmmu detectors — used ONLY to explain WHICH trigger
@@ -127,14 +198,9 @@ func main() {
 	chain := flag.Bool("chain", false, "fold the registered ResultAdmitter chain (normgate+ctxmmu) instead of a bare ctxmmu")
 	flag.Parse()
 
-	raw, err := os.ReadFile(*in)
+	cp, err := loadCorpus(*in)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "read corpus:", err)
-		os.Exit(1)
-	}
-	var cp corpus
-	if err := json.Unmarshal(raw, &cp); err != nil {
-		fmt.Fprintln(os.Stderr, "parse corpus:", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	ctx := context.Background()
@@ -224,7 +290,14 @@ func main() {
 		fmt.Printf("sources: %v\n\n", cp.Sources)
 	}
 
-	fmt.Printf("RESULT side — ctxmmu.Admit (write-time context-admission gate)\n")
+	resultGate := "ctxmmu.Admit (bare write-time context-admission gate)"
+	if *chain {
+		resultGate = "registered ResultAdmitter chain (normgate+ctxmmu)"
+		if strings.EqualFold(os.Getenv("FAK_NORMGATE"), "off") {
+			resultGate = "registered ResultAdmitter chain (normgate=off + ctxmmu)"
+		}
+	}
+	fmt.Printf("RESULT side — %s\n", resultGate)
 	fmt.Printf("  results admitted : %d  (%d bytes total)\n", total, totalBytes)
 	for _, k := range maputil.SortedKeys(byVerdict) {
 		fmt.Printf("    %-11s %d\n", k, byVerdict[k])
