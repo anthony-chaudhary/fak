@@ -1064,7 +1064,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		billed := gateway.HumanTokenEquiv(net.ActualTokenEquiv)
 		baseline := gateway.HumanTokenEquiv(net.BaselineTokenEquiv)
 		if net.SavedTokenEquiv > 0 {
-			fmt.Fprintf(&b, "fak guard: prompt-cache saving — input billed ~%s of ~%s token-equiv (the no-cache price) → the provider cache saved ~%s (%.0f%% off), net of the cache-write premium, across %d cached turn(s). fak forwarded the cache_control prefix intact; it did not author this saving.\n",
+			fmt.Fprintf(&b, "fak guard: prompt-cache saving — input billed ~%s of ~%s token-equiv (the no-cache price) → the provider cache saved ~%s (%.0f%% off), net of the cache-write premium, across %d cached turn(s). fak forwarded the cache_control prefix intact; it relays this provider-reported value and did not author this saving.\n",
 				billed, baseline, gateway.HumanTokenEquiv(net.SavedTokenEquiv), net.SavedPct, sum.CachedTurns)
 		} else {
 			fmt.Fprintf(&b, "fak guard: prompt-cache saving — input billed ~%s of ~%s token-equiv (the no-cache price); the cache has not yet repaid its write premium (net ~%s so far — a cold write the later reads have not paid back), across %d cached turn(s). fak forwarded the cache_control prefix intact.\n",

@@ -1910,7 +1910,7 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 		snap[k] = v
 	}
 	m.upstreamErrMu.Unlock()
-	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures by kind (stalled, unreachable, oom, rate_limited, auth, forbidden, status_4xx, status_5xx, other).", "counter")
+	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures, OBSERVED from the provider and relayed by fak (not a fak fault), by kind (stalled, unreachable, oom, rate_limited, auth, forbidden, status_4xx, status_5xx, other).", "counter")
 	kinds := make([]string, 0, len(snap))
 	for k := range snap {
 		kinds = append(kinds, k)
@@ -1919,7 +1919,7 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	for _, kind := range kinds {
 		fmt.Fprintf(b, "fak_gateway_upstream_errors_total{kind=\"%s\"} %d\n", promQuote(kind), snap[kind])
 	}
-	writeCounter(b, "fak_gateway_upstream_retries_total", "Upstream retry attempts (the planner's 429/5xx exponential backoff) since process start.", int64(atomic.LoadUint64(&m.upstreamRetries)))
+	writeCounter(b, "fak_gateway_upstream_retries_total", "Upstream retry attempts — fak's exponential backoff in response to OBSERVED, provider-reported 429/5xx from the planner — since process start.", int64(atomic.LoadUint64(&m.upstreamRetries)))
 }
 
 // writeInferenceMetrics renders the model-generation family from the live
@@ -2204,7 +2204,7 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	// sits on the LAST tool, so nothing is droppable) — which, before these rows existed, was the
 	// invisible fact: the prune result was discarded with no counter.
 	pruneTurns, pruneCount := m.inboundToolPruneSnapshot()
-	writeCounter(b, "fak_gateway_inbound_tools_pruned_total", "WITNESSED (fak authored): cumulative unreachable tool DEFINITIONS dropped from the outbound tools[] across the session. A pure uncached-token saving — the pruner drops only tools after the cache_control breakpoint and re-proves the protected prefix is byte-identical, so a counted prune never bursts the upstream cache.", int64(pruneCount))
+	writeCounter(b, "fak_gateway_inbound_tools_pruned_total", "WITNESSED (fak authored): cumulative unreachable tool DEFINITIONS dropped from the outbound tools[] across the session. A pure uncached-token saving — the pruner drops only tools after the cache_control breakpoint and re-proves the protected prefix is byte-identical, so a counted prune never bursts the provider-side upstream cache.", int64(pruneCount))
 	writeCounter(b, "fak_gateway_inbound_tools_prune_turns_total", "WITNESSED (fak authored): turns on which at least one unreachable tool def was pruned from tools[]. Zero on a harness (e.g. Claude Code) whose single cache_control breakpoint sits on the LAST tool, since nothing is then droppable.", int64(pruneTurns))
 }
 
