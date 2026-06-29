@@ -319,3 +319,67 @@ func TestExpertParallelGLMSharedExpert(t *testing.T) {
 	}
 	t.Logf("GLM EP +shared: ranks=1 bit-exact, ranks=%d within round-off vs glmMoeFFN (%d experts)", cfg.NumExperts, cfg.NumExperts)
 }
+
+// TestGlmMoeEPFFNMatchesMonolith pins the LIVE-PATH wiring (Rung 0): ffnForLayer dispatches a
+// routed glm_moe_dsa layer to glmMoeEPFFN exactly when Model.epRanks > 1 (and to the monolith
+// glmMoeFFN otherwise), and the dispatched glmMoeEPFFN.apply equals glmMoeFFN.apply byte-for-byte
+// at ranks=1. This is the per-ffnKind, through-the-dispatch analogue of TestExpertParallelGLMSharedExpert
+// (which calls expertParallelGLMMoEDelta directly): it proves the EP twin is now reachable from the
+// live decode path (mlpBody -> ffnForLayer) and is a no-op until ranks>1, so an existing serve
+// (epRanks 0) is unchanged.
+func TestGlmMoeEPFFNMatchesMonolith(t *testing.T) {
+	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", true, false, true /*withMoE*/, true /*withSharedExperts*/)
+	m, err := LoadSafetensors(path, cfg)
+	if err != nil {
+		t.Fatalf("LoadSafetensors: %v", err)
+	}
+	mat := residentKernel{m}
+	layer := -1
+	for l := 0; l < cfg.NumLayers; l++ {
+		if m.hasWeight(routerName(l)) && m.hasWeight(expertName(l, 0, "gate_proj.weight")) {
+			layer = l
+			break
+		}
+	}
+	if layer < 0 {
+		t.Fatalf("no routed MoE layer in the glm fixture")
+	}
+
+	// Dispatch wiring: epRanks 0/1 keeps the monolith; epRanks>1 routes through glmMoeEPFFN.
+	m.SetExpertParallelRanks(0)
+	if _, ok := m.ffnForLayer(layer).(glmMoeFFN); !ok {
+		t.Fatalf("epRanks=0: ffnForLayer = %T, want glmMoeFFN (no-op default)", m.ffnForLayer(layer))
+	}
+	m.SetExpertParallelRanks(1)
+	if _, ok := m.ffnForLayer(layer).(glmMoeFFN); !ok {
+		t.Fatalf("epRanks=1: ffnForLayer = %T, want glmMoeFFN (ranks=1 not yet sharded)", m.ffnForLayer(layer))
+	}
+	m.SetExpertParallelRanks(2)
+	ep, ok := m.ffnForLayer(layer).(glmMoeEPFFN)
+	if !ok {
+		t.Fatalf("epRanks=2: ffnForLayer = %T, want glmMoeEPFFN (EP dispatched)", m.ffnForLayer(layer))
+	}
+
+	xn := make([]float32, cfg.HiddenSize)
+	for i := range xn {
+		xn[i] = float32(math.Sin(float64(i)*0.11 + 0.3))
+	}
+	mono := glmMoeFFN{}.apply(m, layer, xn, mat)
+
+	// Bit-exact: the dispatched EP ffnKind at ranks=1 == the monolith. Build a ranks=1 plan
+	// (the dispatch above made a ranks=2 plan; ranks=1 is the bit-exact rung).
+	plan1, err := ExpertParallelPlan(cfg.NumExperts, 1)
+	if err != nil {
+		t.Fatalf("ExpertParallelPlan(1): %v", err)
+	}
+	got := glmMoeEPFFN{plan: plan1, coll: LocalCollective{}}.apply(m, layer, xn, mat)
+	if mx := epMaxAbs(got, mono); mx != 0 {
+		t.Fatalf("glmMoeEPFFN(ranks=1).apply vs glmMoeFFN.apply max|Δ|=%g, want 0 (bit-exact)", mx)
+	}
+	// And the ranks=2 ffnKind the dispatch actually returned matches within reassociation round-off.
+	got2 := ep.apply(m, layer, xn, mat)
+	if cos := epCosine(got2, mono); cos < 0.99999 {
+		t.Fatalf("dispatched glmMoeEPFFN(ranks=2).apply vs glmMoeFFN cosine=%.8f, want ≥ 0.99999", cos)
+	}
+	t.Logf("glmMoeEPFFN wired into ffnForLayer: epRanks≤1 -> monolith, >1 -> EP; ranks=1 bit-exact, ranks=2 within round-off")
+}

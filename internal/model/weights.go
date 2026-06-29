@@ -240,6 +240,17 @@ type Model struct {
 	// projection adds its active adapters' low-rank delta after the base matvec
 	// (decode-time apply, no merged weight copy). See lora.go.
 	lora *LoRASet
+
+	// epRanks is the expert-parallel rank count for the routed MoE FFN: the number of
+	// expert shards the per-token MoE delta is reduced across (expert_parallel.go). 0/1
+	// keep the live forward on the monolith glmMoeFFN (the no-op default — nothing
+	// changes for an existing serve); >1 routes routed-expert picks through glmMoeEPFFN,
+	// which reduces the per-rank residual partials with one AllReduceSum. The reduction
+	// runs through the Collective the serve wires: LocalCollective (single-box, bit-exact)
+	// until the device NCCL CollectiveBackend lands, at which point the same plan reduces
+	// experts resident across real GPUs. Set via SetExpertParallelRanks from the serve
+	// flag; the EP arithmetic is bit-exact vs the monolith at ranks=1 (expert_parallel_test.go).
+	epRanks int
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

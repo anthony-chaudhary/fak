@@ -63,6 +63,16 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 	// — a dense first-k GLM layer would fall through to moeFFN whose router mul panics in
 	// glmDsaWeightHAL ("missing resident weight …mlp.gate.weight" — the dense layer has none).
 	if m.Cfg.isGLMMoeDsa() && layer >= m.Cfg.FirstKDenseReplace && m.hasWeight(routerName(layer)) {
+		// Expert-parallel dispatch (#971): when a serve requested EP (epRanks > 1) and the
+		// expert tiling is valid for this config, route the routed-expert delta through the
+		// EP twin instead of the monolith. ExpertParallelPlan fails closed (ranks must be in
+		// [1,NumExperts]); on any plan error keep the proven monolith — the no-op default for
+		// epRanks 0/1 and the safe fallback for a degenerate rank count.
+		if m.epRanks > 1 {
+			if plan, err := ExpertParallelPlan(m.Cfg.NumExperts, m.epRanks); err == nil {
+				return glmMoeEPFFN{plan: plan, coll: LocalCollective{}}
+			}
+		}
 		return glmMoeFFN{}
 	}
 	if m.Cfg.isMiniMaxSparseAttn() {
@@ -442,6 +452,41 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 		for i := 0; i < H; i++ {
 			delta[i] += shared[i]
 		}
+	}
+	return delta
+}
+
+// glmMoeEPFFN is the expert-parallel twin of glmMoeFFN dispatched into the LIVE per-token
+// decode path (mlpBody -> ffnForLayer) when a serve requests expert parallelism (Model.epRanks
+// > 1). It runs the SAME router (glmRoute is replicated across ranks per the EP contract — every
+// rank picks the same top-k) and reduces the routed-expert residual through expertParallelGLMMoEDelta:
+// each rank contributes only the picks whose expert it owns (plan.Shards[r]), and the per-rank [H]
+// partials are summed by one coll.AllReduceSum, with the always-on GLM shared expert added once
+// after the reduce — the identical routed-then-shared order glmMoeFFN uses. So it is bit-exact vs
+// glmMoeFFN at ranks=1 (TestGlmMoeEPFFNMatchesMonolith), and at ranks>1 the only difference is the
+// reassociation round-off of the reduction (~1e-6), never the expert math.
+//
+// The Collective is whatever the serve wires: LocalCollective today (single-box, bit-exact) — so
+// at ranks=1 this changes NO output and the existing serve, which leaves epRanks 0, never reaches
+// it. A real multi-GPU resident-expert reduction needs the device NCCL CollectiveBackend rung; the
+// serve flag gates ranks>1 until that lands, so this ffnKind is the proven host seam those ranks
+// flow through, not a claim that experts are resident across GPUs yet.
+//
+// It FAILS CLOSED to the monolith: any plan/wrapper error (a degenerate ExpertParallelPlan, the
+// qwen3.5 singular gated shared expert expertParallelGLMMoEDelta refuses) falls back to
+// glmMoeFFN{}.apply for this token rather than dropping a term — the routed result stays correct.
+type glmMoeEPFFN struct {
+	plan TPPlan
+	coll Collective
+}
+
+func (k glmMoeEPFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
+	picks := glmRoute(m, layer, xn, mat)
+	delta, err := m.expertParallelGLMMoEDelta(layer, xn, mat, picks, k.plan, k.coll)
+	if err != nil {
+		// Fail closed to the proven monolith rather than mis-serve (e.g. the qwen3.5 singular
+		// gated shared expert this EP wrapper does not add). Same routed-then-shared math.
+		return glmMoeFFN{}.apply(m, layer, xn, mat)
 	}
 	return delta
 }

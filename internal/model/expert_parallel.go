@@ -171,3 +171,14 @@ func (m *Model) expertParallelGLMMoEDelta(layer int, xn any, mat matKernel, pick
 	}
 	return delta, nil
 }
+
+// SetExpertParallelRanks records the expert-parallel rank count the live MoE forward shards the
+// routed delta across (Model.epRanks). 0 or 1 leaves the forward on the monolith glmMoeFFN (the
+// no-op default); >1 makes ffnForLayer dispatch routed glm_moe_dsa layers through glmMoeEPFFN.
+// It is the setter the serve flag (--expert-parallel N) drives; the ranks=1 path is bit-exact vs
+// the monolith and needs no device — ranks>1 carry a real multi-GPU claim only once the device
+// NCCL CollectiveBackend reduces the per-rank partials across GPUs.
+func (m *Model) SetExpertParallelRanks(ranks int) { m.epRanks = ranks }
+
+// ExpertParallelRanks reports the configured expert-parallel rank count (0/1 == monolith).
+func (m *Model) ExpertParallelRanks() int { return m.epRanks }
