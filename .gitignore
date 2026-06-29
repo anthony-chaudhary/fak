@@ -311,6 +311,15 @@ fak.exe
 # probe JSON next to it, not the log)
 experiments/agent-live/*-stderr.log
 
+# Per-session codex dogfood/gate harness output + raw token telemetry. Regenerated on
+# every dogfood run (keyed on a codex session id) and re-leaks into `git status` each
+# session. These are NOT the committed evidence — deliberate witnesses carry a
+# descriptive, schema-versioned name (e.g. openai-wire-seat-guard-live-witness-*.json),
+# which these session-id-named globs do not match, so authored witnesses stay tracked.
+experiments/agent-live/codex-dogfood-*.json
+experiments/agent-live/codex-fak-gate-*.json
+experiments/agent-live/*.usage.jsonl
+
 # `go build ./cmd/<name>` drops a same-named binary at the module root. These are
 # regenerable artifacts (the SOURCE lives in cmd/<name>/ and stays tracked). Each is
 # ANCHORED for the same reason as `/fak` above: a bare name would also match the
