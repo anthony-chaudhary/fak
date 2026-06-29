@@ -187,15 +187,38 @@ func runHooksCommitMsg(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	// FALL THROUGH to the Python commit-msg gates (exit 2). The Go path owns ONLY the fast
-	// PUBLIC_LEAK pre-block above; the HARDWARE_TELL gate (a private node label in the
-	// subject/body) and the COMMIT_MSG subject-shape advisory live in tools/*.py, which the
-	// shell hook runs when this returns 2. Returning 0 here would make the shell exit before
-	// those gates ever run — which is exactly how a `dgx3` rode into history. There is no Go
-	// port of the hardware tells (the dgxN regex needs lookahead RE2 lacks), so 2 = "Go did
-	// its fast check; let Python finish." (Python COMMIT_MSG owns the subject-shape advisory,
-	// so it is not duplicated here.)
-	return 2
+	hwMode, hwEscaped := gateMode("FLEET_HW_GUARD", "FLEET_ALLOW_HW")
+	if hwMode != "off" && !hwEscaped {
+		if tells := hooks.ScanMessageHardwareTells(msg); len(tells) > 0 {
+			fmt.Fprintf(stderr, "HARDWARE_TELL: the commit MESSAGE carries %d private hardware name(s):\n", len(tells))
+			for _, f := range tells {
+				fmt.Fprintf(stderr, "  %s\n", formatFinding(f))
+			}
+			fmt.Fprintln(stderr, "  fix: describe the box generically (GPU server / datacenter GPU), per PUBLIC-SCRUB-POLICY.md.")
+			if hwMode == "block" {
+				fmt.Fprintln(stderr, "  override once: FLEET_ALLOW_HW=1 <git cmd>  (a competitor citation / a commit about the scrubber).")
+				return 1
+			}
+			fmt.Fprintln(stderr, "  advisory only because FLEET_HW_GUARD=warn.")
+		}
+	}
+
+	msgMode, msgEscaped := gateMode("FLEET_MSG_GUARD", "FLEET_ALLOW_MSG")
+	if strings.TrimSpace(os.Getenv("FLEET_MSG_GUARD")) == "" {
+		msgMode = "warn"
+	}
+	if msgMode == "off" || msgEscaped {
+		return 0
+	}
+	if ok, why := hooks.CommitMsgVerdict(msg); !ok {
+		fmt.Fprintf(stderr, "COMMIT_MSG: %s\n", why)
+		if msgMode == "block" {
+			fmt.Fprintln(stderr, "  (FLEET_MSG_GUARD=warn softens; =off disables; FLEET_ALLOW_MSG=1 overrides once)")
+			return 1
+		}
+		fmt.Fprintln(stderr, "  hard-enforce with FLEET_MSG_GUARD=block.")
+	}
+	return 0
 }
 
 func formatFinding(f hooks.Finding) string {
