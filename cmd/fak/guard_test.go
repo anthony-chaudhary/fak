@@ -554,15 +554,19 @@ func TestFormatAuditSummary(t *testing.T) {
 		t.Errorf("clean summary should not mention deferred/escalated:\n%s", clean)
 	}
 
-	// Cache reuse is surfaced as the ONE number that matters: the NET token-equiv saving fak's
-	// hop preserved this session (read rebate minus write premium) — not the provider's raw
-	// cached-token count. baseline = 412+23428+756 = 24596; actual = 412 + 23428*0.1 + 756*1.25
-	// = 3699.8; saved = 20896.2 -> "20.9k" (85% of the uncached cost).
+	// Cache reuse is surfaced HONESTLY: the line names the no-cache baseline (so "saved vs
+	// WHAT?" is answered inline) and credits the PROVIDER cache fak forwarded intact, never
+	// implying fak authored it. baseline = 412+23428+756 = 24596 -> "24.6k"; actual = 412 +
+	// 23428*0.1 + 756*1.25 = 3699.8 -> "3.7k"; saved = 20896.2 -> "20.9k" (85% off).
 	cached := formatAuditSummary(gateway.AdjudicationSummary{
 		Total: 2, Allowed: 2,
 		CachedPromptTokens: 23428, CachedTurns: 1, InputTokens: 412, CacheCreationTokens: 756,
 	})
-	for _, want := range []string{"cache saving", "saved ~20.9k input-token-equiv", "across 1 turn(s)", "NET of the write premium", "85%"} {
+	for _, want := range []string{
+		"prompt-cache saving", "billed ~3.7k of ~24.6k token-equiv", "the no-cache price",
+		"saved ~20.9k (85% off)", "net of the cache-write premium", "across 1 cached turn(s)",
+		"did not author this saving",
+	} {
 		if !strings.Contains(cached, want) {
 			t.Errorf("cached summary missing %q:\n%s", want, cached)
 		}
@@ -591,6 +595,27 @@ func TestFormatAuditSummary(t *testing.T) {
 	// not print a vacuous prune line.
 	if strings.Contains(clean, "tool-floor prune") {
 		t.Errorf("a run with no tool-floor prune must not print a prune line:\n%s", clean)
+	}
+}
+
+// TestFormatVCacheSnapshotPointer pins the exit pointer that closes the loop from the LIVE
+// guard cache summary to the OFFLINE `fak vcache` family: a session that recorded turns must
+// name the snapshot path AND the `fak vcache score` command that replays it (the related
+// vcache item is otherwise invisible — the snapshot is written silently), while a session
+// with no recorded turns must stay quiet rather than print a vacuous 0-turn pointer.
+func TestFormatVCacheSnapshotPointer(t *testing.T) {
+	got := formatVCacheSnapshotPointer(122, "/cfg/fak/vcache-turns.jsonl")
+	for _, want := range []string{
+		"cache window", "recorded 122 turn(s)", "/cfg/fak/vcache-turns.jsonl",
+		"fak vcache score", "fak vcache observe",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("snapshot pointer missing %q:\n%s", want, got)
+		}
+	}
+	// No turns recorded → no pointer (the no-cache / non-passthrough run stays quiet).
+	if p := formatVCacheSnapshotPointer(0, "/cfg/fak/vcache-turns.jsonl"); p != "" {
+		t.Errorf("a session with no recorded turns must not print a pointer, got: %q", p)
 	}
 }
 
