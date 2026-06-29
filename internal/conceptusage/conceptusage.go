@@ -55,6 +55,18 @@ const (
 	witnessWindow = 50
 )
 
+// decClass labels a recent journal row by what KIND of dev decision it represents,
+// for the windowed witness-share. decNoise (a passive RECALL_UNVERIFIABLE the kernel
+// could not check) is excluded from the share denominator: the dev made no
+// trust-vs-witness decision there, so counting it as a failed witness is wrong.
+type decClass uint8
+
+const (
+	decNoise          decClass = iota // passive RECALL_UNVERIFIABLE — kernel background, not a decision
+	decResolvedRecall                 // a recall the dev actually re-checked (FRESH/STALE/REVERT)
+	decProactive                      // a proactive verify/improve witness syscall
+)
+
 // stampRe / convRe / bindRe mirror the commit contract the witness referee grades
 // (AGENTS.md): a ship commit ends with a `(fak <leaf>)` trailer, uses a Conventional
 // type, and leads after `type(scope):` with a verb that BINDS a witnessable effect.
@@ -99,15 +111,16 @@ type Evidence struct {
 	RecallRows      int  `json:"recall_rows"`
 	RecallResolved  int  `json:"recall_resolved"`  // RECALL_FRESH + RECALL_STALE + RECALL_REVERT (actually re-checked)
 	WindowProactive int  `json:"window_proactive"` // verify+improve in the recent witnessWindow
-	WindowRecall    int  `json:"window_recall"`    // memory_recall in the recent witnessWindow
+	WindowRecall    int  `json:"window_recall"`    // RESOLVED recalls (re-checked) in the recent window
+	WindowNoise     int  `json:"window_noise"`     // passive RECALL_UNVERIFIABLE in the window (excluded from the share)
 	LaneRows        int  `json:"lane_rows"`
 	LaneAcquires    int  `json:"lane_acquires"`
 	DistinctLanes   int  `json:"distinct_lanes"`
 	JournalPresent  bool `json:"journal_present"`
 
-	// window is a scratch ring of decision classes (true=proactive, false=recall),
-	// folded into WindowProactive/WindowRecall after the scan. Not serialized.
-	window []bool `json:"-"`
+	// window is a scratch ring of decision classes, folded into the Window* counts
+	// after the scan. Not serialized.
+	window []decClass `json:"-"`
 }
 
 type ScorecardPayload struct {
@@ -255,27 +268,39 @@ func scanVerdictJournal(path string, ev *Evidence) {
 		}
 		// Window the decision-class counts to the most-recent rows so the witness
 		// SHARE reflects whether the CURRENT dev loop witnesses — not whether all of
-		// repo history did. Passive memory_recall rows accrue every session while
-		// proactive witnessing is rare, so an all-time ratio is structurally pinned
-		// low and cannot register genuine recent witnessing. We keep a ring of the
-		// last decision classes and fold the window after the scan.
+		// repo history did. Three classes: a proactive witness (verify/improve), a
+		// recall the dev actually RE-CHECKED (resolved to FRESH/STALE/REVERT — a real
+		// trust-vs-witness decision), and passive RECALL_UNVERIFIABLE NOISE — a memory
+		// the kernel injected but could not check, where the dev made NO decision at
+		// all. Counting that noise as a failed witness conflates kernel background
+		// chatter with dev behavior, which is exactly what pinned the old ratio near
+		// zero. We keep a ring of decision classes and fold the window after the scan.
 		switch row.Syscall {
 		case "verify", "improve":
-			ev.window = append(ev.window, true)
+			ev.window = append(ev.window, decProactive)
 		case "memory_recall":
-			ev.window = append(ev.window, false)
+			switch row.Verdict {
+			case "RECALL_FRESH", "RECALL_STALE", "RECALL_REVERT", "KEEP", "REVERT":
+				ev.window = append(ev.window, decResolvedRecall)
+			default:
+				ev.window = append(ev.window, decNoise)
+			}
 		}
 	}
-	// Fold the recency window (tail of the ring) into the windowed counts.
+	// Fold the recency window (tail of the ring) into the windowed counts. Passive
+	// noise is excluded from the denominator — it is not a dev decision.
 	w := ev.window
 	if len(w) > witnessWindow {
 		w = w[len(w)-witnessWindow:]
 	}
-	for _, proactive := range w {
-		if proactive {
+	for _, d := range w {
+		switch d {
+		case decProactive:
 			ev.WindowProactive++
-		} else {
+		case decResolvedRecall:
 			ev.WindowRecall++
+		case decNoise:
+			ev.WindowNoise++
 		}
 	}
 }
@@ -378,9 +403,9 @@ func witnessResults(ev Evidence) []KPIResult {
 			proactive > 0,
 			itoa(ev.VerifySyscalls)+" verify + "+itoa(ev.ImproveCalls)+" improve syscall(s) in the journal"),
 		result("witness_share", axis, true, 3,
-			"a healthy share of RECENT decisions are evidence-grounded (verify/improve), not recall-only",
+			"a healthy share of RECENT dev decisions are evidence-grounded (verify/improve), not recall-only",
 			windowPoints > 0 && witnessShare >= 15,
-			itoa(witnessShare)+"% of the last "+itoa(windowPoints)+" decision(s) used a proactive witness syscall (target >=15%)"),
+			itoa(witnessShare)+"% of the last "+itoa(windowPoints)+" dev decision(s) used a proactive witness syscall (target >=15%; "+itoa(ev.WindowNoise)+" passive UNVERIFIABLE auto-recalls excluded as non-decisions)"),
 		result("recall_reverified", axis, false, 2,
 			"recalled memory was re-verified against ground truth, not left UNVERIFIABLE",
 			ev.RecallRows == 0 || recallFreshPct >= 40,

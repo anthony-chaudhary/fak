@@ -189,3 +189,38 @@ func TestWindowedWitnessShare_RecentBurstRegisters(t *testing.T) {
 		t.Fatalf("windowed share (%d%%) should exceed the all-time share (%d%%) for a recent burst", windowShare, allTime)
 	}
 }
+
+// Noise-exclusion proof: passive RECALL_UNVERIFIABLE rows (the kernel auto-injecting a
+// memory it could not check) are NOT dev decisions and must be excluded from the
+// witness-share denominator — counting them as failed witnesses conflates kernel
+// background chatter with dev behavior. A window of mostly-noise plus a few real
+// witnessing decisions must score on the real decisions, not be drowned by the noise.
+func TestWindowedWitnessShare_ExcludesPassiveNoise(t *testing.T) {
+	root := t.TempDir()
+	var lines []string
+	// 40 passive UNVERIFIABLE auto-recalls (kernel noise) ...
+	for i := 0; i < 40; i++ {
+		lines = append(lines, `{"syscall":"memory_recall","verdict":"RECALL_UNVERIFIABLE"}`)
+	}
+	// ... plus 6 proactive witnesses and 4 resolved recalls (10 real decisions, 60% witnessed).
+	for i := 0; i < 6; i++ {
+		lines = append(lines, `{"syscall":"improve","verdict":"KEEP"}`)
+	}
+	for i := 0; i < 4; i++ {
+		lines = append(lines, `{"syscall":"memory_recall","verdict":"RECALL_FRESH"}`)
+	}
+	writeJournal(t, root, "verdict-journal.jsonl", lines...)
+	var ev Evidence
+	scanVerdictJournal(filepath.Join(root, ".dos", "verdict-journal.jsonl"), &ev)
+	if ev.WindowNoise != 40 {
+		t.Fatalf("expected 40 passive-noise rows tracked separately, got %d", ev.WindowNoise)
+	}
+	dec := ev.WindowProactive + ev.WindowRecall // real decisions only
+	if dec != 10 {
+		t.Fatalf("expected 10 real dev decisions (noise excluded), got %d", dec)
+	}
+	share := pct(ev.WindowProactive, dec)
+	if share < 50 {
+		t.Fatalf("witness-share over REAL decisions should be ~60%%, got %d%% (noise must not dilute it)", share)
+	}
+}

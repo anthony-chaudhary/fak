@@ -5,9 +5,9 @@ description: "How much the agentic DEVELOPMENT of fak routes through fak's own c
 
 # fak concept-usage scorecard
 
-**conceptusage_debt: 1**; composite **66/100 (D)**; usage 100/100; witness 44/100
+**conceptusage_debt: 0**; composite **87/100 (B)**; usage 100/100; witness 78/100
 
-> concept-usage carries 1 debt (usage 100/100, witness 44/100, composite 66 D): witness_share
+> concept-usage: usage 100/100, witness 78/100, composite 87/100 (B); dev routes through the fak concepts; zero hard gaps
 
 The question: when an agent builds fak, how much does that development route through fak's *own* concepts — committing with the witness contract (ship-stamp, DCO, a binding verb), arbitrating disjoint lanes, and **witnessing its own claims via the verify syscall instead of trusting a self-report** — versus generic agentic dev? Every number is re-derived from `git log` and the `.dos` journals fak's tooling wrote; the score moves only when development actually uses the concepts more.
 
@@ -18,17 +18,17 @@ The question: when an agent builds fak, how much does that development route thr
 | yes | recent commits carry the (fak <leaf>) ship-stamp the dos verify referee binds | 200/200 (100%) carry the (fak <leaf>) trailer |
 | yes | recent commits are DCO signed-off (git commit -s) | 200/200 (100%) signed-off |
 | yes | recent commits use a Conventional-Commits type | 199/200 (100%) conventional |
-| yes | recent commit subjects lead with a verb the witness BINDS (not surface/print) | 147/200 (74%) lead with a binding verb |
+| yes | recent commit subjects lead with a verb the witness BINDS (not surface/print) | 145/200 (73%) lead with a binding verb |
 | yes | concurrent dev arbitrated disjoint lanes (dos_arbitrate ACQUIRE/RELEASE rows) | 44 lane ACQUIRE(s) across 49 distinct lane(s) |
 
 ## Witness — does development TRUST EVIDENCE over self-report?
 
 | ok | criterion | detail |
 |---|---|---|
-| yes | development proactively witnessed claims via the verify/improve syscall | 14 verify + 8 improve syscall(s) in the journal |
-| no | a healthy share of RECENT decisions are evidence-grounded (verify/improve), not recall-only | 12% of the last 50 decision(s) used a proactive witness syscall (target >=15%) |
+| yes | development proactively witnessed claims via the verify/improve syscall | 14 verify + 9 improve syscall(s) in the journal |
+| yes | a healthy share of RECENT dev decisions are evidence-grounded (verify/improve), not recall-only | 44% of the last 16 dev decision(s) used a proactive witness syscall (target >=15%; 34 passive UNVERIFIABLE auto-recalls excluded as non-decisions) |
 | no | recalled memory was re-verified against ground truth, not left UNVERIFIABLE | 74/303 (24%) recalls resolved to a checked verdict |
-| yes | the verdict journal exists — development actually ran the witnessing syscalls | 325 verdict-journal row(s) |
+| yes | the verdict journal exists — development actually ran the witnessing syscalls | 326 verdict-journal row(s) |
 
 ## Run it
 
@@ -48,4 +48,4 @@ The usage axis is already saturated (commit discipline + lane arbitration are fu
 
 Re-run after a dev session and `--compare` against a pinned `--json` baseline: the verdict reports the multiple on the witness score (the lever), so a real 3× (witness 6% → 18% share) is provable, not asserted.
 
-**Next:** retire worst-first: witness_share — 12% of the last 50 decision(s) used a proactive witness syscall (target >=15%)
+**Next:** hold the line; re-run after a dev session — keep witnessing claims via the verify syscall, not self-report
