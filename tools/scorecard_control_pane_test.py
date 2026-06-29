@@ -222,6 +222,82 @@ def test_render_shows_early_warning_line() -> None:
     assert "early-warning" in text.lower() and "seo" in text
 
 
+# --- grade-weighted severity lens (scale-invariant companion) --------------
+
+def graded_metric(key: str, debt: int, grade: str | None) -> dict:
+    """A folded metric for `key` carrying an explicit grade (or none)."""
+    card = next(c for c in scp.SCORECARDS if c["key"] == key)
+    if grade is None:
+        payload = {"corpus": {card["debt"]: debt}}
+    else:
+        payload = corpus_card(card["debt"], debt, grade=grade)
+    return scp.metric_from_payload(card, payload)
+
+
+def test_grade_weight_maps_letters_to_severity() -> None:
+    # the scale-invariant ladder: A free, F worst.
+    assert scp.GRADE_DEBT == {"A": 0, "B": 1, "C": 2, "D": 4, "F": 8}
+    assert scp.grade_weight({"grade": "A", "debt": 999}) == 0   # grade wins over raw debt
+    assert scp.grade_weight({"grade": "F", "debt": 0}) == 8
+    assert scp.grade_weight({"grade": "c", "debt": 1}) == 2      # case-insensitive
+
+
+def test_grade_weight_falls_back_to_debt_when_no_grade() -> None:
+    # a scorecard that emits debt but no letter (readme-freshness) still contributes.
+    assert scp.grade_weight({"grade": None, "debt": 0}) == 0     # derive A
+    assert scp.grade_weight({"grade": None, "debt": 2}) == 1     # derive B
+    assert scp.grade_weight({"grade": None, "debt": 4}) == 2     # derive C
+    assert scp.grade_weight({"grade": "??", "debt": 20}) == 8    # bad grade -> derive F
+
+
+def test_grade_debt_is_scale_invariant_vs_raw_sum() -> None:
+    """The core fix: a huge raw-unit debt at a GOOD grade weighs less than a tiny
+    raw debt at a BAD grade — the opposite of what the raw sum reports. This is
+    the discrimination the raw `total_debt` lost to two occurrence-counters."""
+    # metric H: 500 raw units but grade B (an occurrence-counter, mostly clean).
+    # metric L: 3 raw units but grade F (a bounded metric in real trouble).
+    metrics = [graded_metric("slop", 500, "B"), graded_metric("stability", 3, "F")]
+    out = scp.fold(metrics, None, workspace=".", commit="c0")
+    assert out["total_debt"] == 503           # raw sum: H dominates 500:3
+    assert out["grade_debt"] == 1 + 8          # severity: L dominates 8:1
+    # the severity breakdown ranks the F metric first, not the 500-unit one.
+    assert out["grade_breakdown"].startswith("stability F(8)")
+
+
+def test_grade_debt_folds_onto_payload_and_baseline() -> None:
+    out = scp.fold(full_metrics(code=9, hygiene=5), None, workspace=".", commit="pin01")
+    # full_metrics grades every corpus card B (weight 1); appeal nests under doc
+    # with no grade and debt 0 -> derive A (weight 0).
+    measured = out["measured"]
+    assert out["grade_debt"] == measured - 1   # every B except the A-graded appeal
+    doc = scp.baseline_doc(out)
+    assert doc["grade_debt"] == out["grade_debt"]
+
+
+def test_grade_debt_regression_is_advisory_under_green_raw_ratchet() -> None:
+    """A severity regression the raw ratchet's units mask: slop's occurrence count
+    FALLS (raw total improves, gate green) while a bounded metric drops B->F. The
+    grade-debt axis must flag it advisory without tripping the gate."""
+    base_metrics = [graded_metric("slop", 500, "B"), graded_metric("stability", 1, "B")]
+    base = scp.baseline_doc(scp.fold(base_metrics, None, workspace=".", commit="base01"))
+    # now: slop fell 500->480 (raw total drops), but stability B->F (severity rises).
+    now_metrics = [graded_metric("slop", 480, "B"), graded_metric("stability", 1, "F")]
+    out = scp.fold(now_metrics, base, workspace=".", commit="now01")
+    assert out["trend"]["total_delta"] == -20          # raw improved
+    assert out["trend"]["grade_delta"] == 7            # 1+1 -> 1+8 severity rose
+    code, msg = scp.check_gate(out)
+    assert code == 0                                    # gate stays green (raw held)
+    assert "GRADE-DEBT WARN" in msg and "+7" in msg     # severity surfaced advisory
+
+
+def test_render_shows_grade_debt_line() -> None:
+    out = scp.fold([graded_metric("slop", 500, "B"), graded_metric("stability", 3, "F")],
+                   None, workspace=".", commit="c0")
+    text = scp.render(out)
+    assert "grade-debt" in text.lower() and "severity" in text.lower()
+    assert "stability F" in text
+
+
 def test_baseline_round_trip() -> None:
     payload = scp.fold(full_metrics(code=9, hygiene=5), None, workspace=".", commit="pin01")
     doc = scp.baseline_doc(payload)

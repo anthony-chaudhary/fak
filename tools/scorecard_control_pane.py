@@ -49,6 +49,22 @@ the trend carries an ``early_warning`` list, ``--check`` appends it to the
 RATCHET OK line WITHOUT tripping the gate (the portfolio ratchet semantics are
 unchanged), and the human snapshot prints it. So a hidden per-metric regression
 surfaces BEFORE a re-pin locks it in.
+
+There is a second, deeper blind spot the per-metric lens alone doesn't close:
+the raw ``total_debt`` sums HETEROGENEOUS units. One ``code`` defect is a
+god-file (bounded, ~tens); one ``slop``/``disambiguation`` defect is a single
+occurrence over the whole tree (unbounded, hundreds). So the portfolio sum is
+~91% two occurrence-counters (slop 535 + disambiguation 550 of 1187), and a real
+regression in any of the other 23 metrics sits below their noise floor — the
+universal ranking has stopped DISCRIMINATING across the family it folds. The
+grade-weighted lens closes it: every scorecard already grades A-F on identical
+thresholds (a scale-invariant signal the fold collected but never used), so this
+folds those grades into one ``grade_debt`` where each metric contributes by
+SEVERITY (A=0/B=1/C=2/D=4/F=8), not by raw unit count — a ``slop`` A->B
+regression now weighs exactly as much as a ``stability`` A->B. ``grade_debt``
+runs ALONGSIDE the raw ratchet (``total_debt`` and its gate are unchanged); its
+own per-commit delta is a second advisory axis a raw-count improvement can no
+longer mask.
 """
 from __future__ import annotations
 
@@ -63,6 +79,56 @@ from typing import Any
 SCHEMA = "fak-scorecard-control-pane/1"
 BASELINE_SCHEMA = "fak-scorecard-control-pane.baseline/1"
 BASELINE_REL = "tools/scorecard_baseline.json"
+
+# --- grade-weighted portfolio lens (#712-follow-on) ------------------------
+# The raw ``total_debt`` fold sums heterogeneous units: one ``code`` defect is a
+# god-file (bounded, ~tens); one ``slop``/``disambiguation`` defect is a single
+# occurrence over the WHOLE tree (unbounded, hundreds). So the portfolio sum is
+# ~91% two occurrence-counters (slop 535 + disambiguation 550 of 1187), and a
+# real regression in any of the other 23 metrics sits below their noise floor —
+# the universal ranking has stopped discriminating across the family it folds.
+#
+# Every scorecard already emits the SAME scale-invariant signal: a letter grade
+# on identical thresholds (score >=90 A / 80 B / 70 C / 60 D / else F). This lens
+# folds those grades into one ``grade_debt`` where each metric contributes by
+# SEVERITY, not by raw unit count — a ``slop`` A->B regression now counts exactly
+# as much as a ``stability`` A->B regression. It runs ALONGSIDE the raw ratchet
+# (``total_debt`` is unchanged); ``grade_debt`` is the cross-metric-comparable
+# number, and its own per-commit delta is a second early-warning axis that a
+# raw-count improvement can no longer mask.
+GRADE_DEBT: dict[str, int] = {"A": 0, "B": 1, "C": 2, "D": 4, "F": 8}
+
+
+def derive_grade(debt: int) -> str:
+    """Fallback grade for a scorecard that emits a debt integer but no letter.
+
+    A few family members (readme-freshness) report only ``*_debt``, no corpus
+    ``grade``. Without a fallback they'd be invisible to the grade-weighted lens,
+    re-introducing the very blind spot it closes. This maps debt onto the same
+    A-F ladder by magnitude so every measured metric contributes a severity.
+    """
+    if debt <= 0:
+        return "A"
+    if debt <= 2:
+        return "B"
+    if debt <= 5:
+        return "C"
+    if debt <= 10:
+        return "D"
+    return "F"
+
+
+def grade_weight(metric: dict[str, Any]) -> int:
+    """The severity weight one measured metric contributes to ``grade_debt``.
+
+    Prefers the scorecard's own emitted letter grade (scale-invariant by
+    construction); falls back to a debt-derived grade when none was reported.
+    """
+    grade = metric.get("grade")
+    if not isinstance(grade, str) or grade.upper() not in GRADE_DEBT:
+        debt = metric.get("debt")
+        grade = derive_grade(int(debt)) if isinstance(debt, int) and not isinstance(debt, bool) else "F"
+    return GRADE_DEBT[grade.upper()]
 
 # The scorecard family, in the canonical order the issue lists them. Each entry
 # binds the scorecard's script to the debt integer it emits; the runner folds
@@ -190,11 +256,21 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
     measured = [m for m in metrics if isinstance(m.get("debt"), int)]
     errors = [m for m in metrics if not isinstance(m.get("debt"), int)]
     total_debt = sum(int(m["debt"]) for m in measured)
+    # The scale-invariant companion to total_debt: every metric weighted by the
+    # severity of its OWN grade, so the cross-family number isn't 91% two
+    # occurrence-counters. Stamped onto each metric so the renderer/baseline see it.
+    for m in measured:
+        m["grade_weight"] = grade_weight(m)
+    grade_debt = sum(int(m["grade_weight"]) for m in measured)
 
-    trend = compute_trend(metrics, baseline, total_debt)
+    trend = compute_trend(metrics, baseline, total_debt, grade_debt)
 
     by_debt = sorted(measured, key=lambda m: int(m["debt"]), reverse=True)
     breakdown = ", ".join(f"{m['label']} {m['debt']}" for m in by_debt) or "none"
+    by_grade = sorted(measured, key=lambda m: int(m["grade_weight"]), reverse=True)
+    grade_breakdown = ", ".join(
+        f"{m['label']} {m.get('grade') or derive_grade(int(m['debt']))}({m['grade_weight']})"
+        for m in by_grade if int(m["grade_weight"]) > 0) or "all A"
 
     regressed = trend["direction"] == "regressed"
     early_warning = trend.get("early_warning") or []
@@ -255,6 +331,8 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
         "workspace": workspace,
         "commit": commit,
         "total_debt": total_debt,
+        "grade_debt": grade_debt,
+        "grade_breakdown": grade_breakdown,
         "measured": len(measured),
         "errored": len(errors),
         "early_warning": early_warning,
@@ -263,25 +341,40 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
     }
 
 
+def _base_int(baseline: dict[str, Any], key: str) -> int | None:
+    val = baseline.get(key)
+    return int(val) if isinstance(val, int) and not isinstance(val, bool) else None
+
+
 def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
-                  total_debt: int) -> dict[str, Any]:
-    """Per-metric + portfolio delta vs a pinned baseline."""
+                  total_debt: int, grade_debt: int = 0) -> dict[str, Any]:
+    """Per-metric + portfolio delta vs a pinned baseline.
+
+    Tracks two portfolio axes against the pin: ``total_debt`` (the raw-unit sum,
+    the ratchet's gate) and ``grade_debt`` (the scale-invariant severity sum). A
+    severity regression that a raw-count improvement would mask shows up as a
+    positive ``grade_delta`` even when ``total_delta`` is flat-or-down.
+    """
     base_metrics = {}
     base_commit = ""
     base_total = None
+    base_grade = None
     if isinstance(baseline, dict):
         base_metrics = baseline.get("metrics") or {}
         base_commit = str(baseline.get("commit") or "")
-        bt = baseline.get("total_debt")
-        base_total = int(bt) if isinstance(bt, int) and not isinstance(bt, bool) else None
+        base_total = _base_int(baseline, "total_debt")
+        base_grade = _base_int(baseline, "grade_debt")
 
     if not base_metrics or base_total is None:
         return {
             "direction": "unpinned",
             "summary": "unpinned (no baseline; run --pin)",
             "total_delta": 0,
+            "grade_delta": 0,
             "baseline_commit": base_commit,
             "baseline_total": base_total,
+            "baseline_grade": base_grade,
+            "grade_debt": grade_debt,
             "deltas": {},
             "worsened": [],
             "improved": [],
@@ -314,6 +407,7 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
             improved.append(m["label"])
 
     total_delta = total_debt - base_total
+    grade_delta = grade_debt - base_grade if base_grade is not None else 0
     if total_delta > 0:
         direction = "regressed"
     elif total_delta < 0:
@@ -322,12 +416,17 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
         direction = "flat"
     summary = (f"{direction} {total_delta:+d} vs @{base_commit or 'baseline'} "
                f"(was {base_total}, now {total_debt})")
+    if base_grade is not None and grade_delta != 0:
+        summary += f"; grade-debt {base_grade}->{grade_debt} ({grade_delta:+d})"
     return {
         "direction": direction,
         "summary": summary,
         "total_delta": total_delta,
+        "grade_delta": grade_delta,
         "baseline_commit": base_commit,
         "baseline_total": base_total,
+        "baseline_grade": base_grade,
+        "grade_debt": grade_debt,
         "deltas": deltas,
         "worsened": worsened,
         "improved": improved,
@@ -346,9 +445,12 @@ def baseline_doc(payload: dict[str, Any]) -> dict[str, Any]:
         "schema": BASELINE_SCHEMA,
         "commit": payload.get("commit", ""),
         "total_debt": payload.get("total_debt", 0),
+        "grade_debt": payload.get("grade_debt", 0),
         "metrics": metrics,
         "_doc": ("Pinned per-metric scorecard-debt baseline for the unified "
-                 "control pane. Re-pin after a debt drop to ratchet the trend down: "
+                 "control pane. total_debt is the raw-unit ratchet gate; grade_debt "
+                 "is the scale-invariant severity companion. Re-pin after a debt "
+                 "drop to ratchet the trend down: "
                  "python tools/scorecard_control_pane.py --pin"),
     }
 
@@ -401,8 +503,10 @@ def load_baseline(path: Path) -> dict[str, Any] | None:
 def render(payload: dict[str, Any]) -> str:
     lines = [
         f"scorecard control pane — {payload['verdict']} ({payload['finding']})",
-        f"  portfolio debt: {payload['total_debt']}  "
+        f"  portfolio debt: {payload['total_debt']} (raw units)  "
+        f"grade-debt: {payload.get('grade_debt', 0)} (severity, scale-invariant)  "
         f"({payload['measured']} measured, {payload['errored']} errored)  @{payload['commit']}",
+        f"  grade severity: {payload.get('grade_breakdown', 'n/a')}",
         f"  trend: {payload['trend']['summary']}",
         "",
     ]
@@ -450,6 +554,17 @@ def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
         msg += ("; EARLY-WARNING (advisory, gate still green): "
                 + ", ".join(f"{e['label']} +{e['delta']}" for e in early_warning)
                 + " rose vs baseline — a hidden per-metric regression; review before --pin")
+    # The grade-debt axis (severity, scale-invariant): a regression here that the
+    # raw ratchet's units mask — e.g. slop's occurrence-count fell while three
+    # bounded metrics each dropped a letter grade — is exactly the cross-family
+    # blind spot this lens closes. Advisory, like the per-metric early-warning:
+    # the raw ratchet stays the gate, severity is surfaced before a re-pin.
+    grade_delta = int(trend.get("grade_delta") or 0) if isinstance(trend, dict) else 0
+    if grade_delta > 0:
+        msg += (f"; GRADE-DEBT WARN (advisory, gate still green): severity rose "
+                f"{grade_delta:+d} to {payload.get('grade_debt')} vs baseline "
+                f"({payload.get('grade_breakdown')}) — a scale-invariant regression "
+                f"the raw-unit sum can mask; review before --pin")
     return 0, msg
 
 
