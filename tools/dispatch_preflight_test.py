@@ -709,5 +709,52 @@ class SeatRefusalTest(unittest.TestCase):
         self.assertIn("seat", p)
 
 
+class DoubledDefaultCeilingTest(unittest.TestCase):
+    """The 2x-concurrency change (DEFAULT_MAX_WORKERS 2->4) is safe iff the doubled
+    static ceiling is still strictly bounded by the adaptive gates. These tests pin
+    the new default AND prove the doubling can never exceed host_cap or the seat pool
+    — i.e. raising the operator ceiling only realizes concurrency the box and the
+    account roster can actually carry."""
+
+    def test_default_ceiling_is_doubled(self) -> None:
+        # The ceiling itself: pin 4 so a later silent revert is caught.
+        mod = load()
+        self.assertEqual(mod.DEFAULT_MAX_WORKERS, 4)
+
+    def test_default_ceiling_realizes_2x_on_a_roomy_box_with_seats(self) -> None:
+        # The win: a roomy box with >=4 free seats and no dos throttle lets the default
+        # ceiling fill to 4 — double the old static 2 — governed only by the gates.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0,
+                     host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
+                     seat={"total": 4, "free": 4, "leased": 0, "depleted": False})
+        p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
+        self.assertEqual(p["cap"], 4)               # min(4, host_cap=32, seats=4)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+    def test_default_ceiling_still_throttles_on_a_loaded_box(self) -> None:
+        # Safety: doubling the ceiling cannot saturate a loaded host — host_cap pulls
+        # the effective cap back below 4 (here to the floor), exactly as before.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     host_res={"cores": 8, "free_ram_mb": 64_000, "total_threads": 200_000},
+                     seat={"total": 8, "free": 8, "leased": 0, "depleted": False})
+        p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
+        self.assertEqual(p["host_cap"], 1)
+        self.assertEqual(p["cap"], 1)               # doubled ceiling, still throttled
+        self.assertLess(p["cap"], mod.DEFAULT_MAX_WORKERS)
+
+    def test_default_ceiling_still_bounded_by_a_smaller_seat_pool(self) -> None:
+        # Safety: doubling the ceiling cannot double-book accounts — a 3-seat roster
+        # caps the doubled ceiling at 3, not 4 (the live agent-host case).
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
+                     seat={"total": 3, "free": 3, "leased": 0, "depleted": False})
+        p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
+        self.assertEqual(p["cap"], 3)               # min(4, host_cap=32, seats=3)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+
 if __name__ == "__main__":
     unittest.main()

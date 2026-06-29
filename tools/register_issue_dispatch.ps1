@@ -13,11 +13,14 @@ runs ONE guarded tick of tools/issue_dispatch.py every few minutes. Each tick:
 
 SAFE BY DEFAULT: installed WITHOUT -Live, the tick is DRY-RUN -- the task only
 LOGS the plan it would run, spawning nothing. Add -Live to actually spawn workers
-(an explicit opt-in to autonomous spawning). -MaxWorkers is the hard ceiling the
-preflight enforces (default 2).
+(an explicit opt-in to autonomous spawning). -MaxWorkers is the operator's outer
+ceiling (default 4); the preflight's adaptive cap = min(this, host_cap, seats) is
+the real DoS bound, so a loaded box or a depleted account pool throttles below it.
+NOTE: an already-installed task keeps the -MaxWorkers it was registered with (the
+value is baked into the stored argument list) -- re-run install to pick up a new one.
 
   .\register_issue_dispatch.ps1                       # install, DRY-RUN (logs plans, spawns nothing)
-  .\register_issue_dispatch.ps1 -Live -MaxWorkers 2   # install, LIVE (bounded autonomous spawning)
+  .\register_issue_dispatch.ps1 -Live -MaxWorkers 4   # install, LIVE (bounded autonomous spawning)
   .\register_issue_dispatch.ps1 -Action status
   .\register_issue_dispatch.ps1 -Action remove
 #>
@@ -26,7 +29,7 @@ param(
   [ValidateSet('install','remove','status')] [string]$Action = 'install',
   [string]$TaskName   = 'FleetIssueDispatch',
   [string]$Workspace  = $(Split-Path -Parent $PSScriptRoot),
-  [int]$MaxWorkers    = 2,
+  [int]$MaxWorkers    = 4,
   [int]$EveryMinutes  = 10,
   # Which tick the always-on task runs:
   #   resolve (default) -> issue_resolve_dispatch.py: spawns an ISSUE-resolution

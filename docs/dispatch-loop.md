@@ -51,10 +51,16 @@ These are the rules that make it safe to hand autonomous spawning to an unattend
 loop. Each one is a hard guarantee, not a best effort:
 
 - **DoS cap.** The live worker population is provably ≤ `cap = min(--max-workers,
-  dos [supervise].target)`, where `live = MAX(kernel lease count, OS process scan for
-  the worker marker)` — so neither a stale lease nor an unleased orphan can hide
-  capacity. The preflight `REFUSE_AT_CAP` is correct steady-state behavior, not a
-  failure.
+  dos [supervise].target, host_cap, seats)`, where `live = MAX(kernel lease count, OS
+  process scan for the worker marker)` — so neither a stale lease nor an unleased
+  orphan can hide capacity. `--max-workers` (default **4**) is only the operator's
+  outer ceiling; the binding safety terms are `host_cap` (#1337, the box's adaptive
+  cores/RAM/thread headroom — it auto-throttles a loaded host and recovers as load
+  clears) and `seats` (#1336, one routable account per worker, so a spawn can never
+  double-book a rate limit). Because those two can only *lower* the effective cap,
+  doubling the static ceiling 2→4 raises concurrency exactly as far as the box and
+  the account pool allow and no further. The preflight `REFUSE_AT_CAP` / `REFUSE_NO_SEAT`
+  is correct steady-state behavior, not a failure.
 - **`#N`-in-subject binding.** The commit→issue link is reconstructed **only** from
   the commit subject/body (`close/fix/resolve #N`, or `#N` in the subject), because
   this repo runs no PR-keyword workflow. A resolved issue whose commit omits `#N` can
@@ -126,7 +132,7 @@ the wrapper run rows — enough to see in `fak loop status` that the doc actuall
 
 ```powershell
 # install all three live (bounded autonomous spawn + close + doc refresh)
-.\tools\register_issue_dispatch.ps1     -Workspace C:\work\fak -Mode resolve -Live -MaxWorkers 2
+.\tools\register_issue_dispatch.ps1     -Workspace C:\work\fak -Mode resolve -Live -MaxWorkers 4
 .\tools\register_resolve_progress.ps1   -Workspace C:\work\fak -Live -Target 50
 .\tools\register_dispatch_status_doc.ps1 -Workspace C:\work\fak -EveryMinutes 30
 

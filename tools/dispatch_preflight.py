@@ -83,10 +83,16 @@ REFUSE_NO_SEAT = "REFUSE_NO_SEAT"    # seat pool depleted: every seat leased to 
 REFUSE_AT_CAP = "REFUSE_AT_CAP"      # live workers already at/over the operator/dos cap
 REFUSE_INSPECT = "REFUSE_INSPECT"    # a check could not run (fail-safe → refuse)
 
-# Default ceiling on simultaneous live dispatch workers. Intentionally small: the
-# box is a live multi-session fleet, so the safe default is "barely grow", not
-# "fill to dos target". The operator raises it deliberately with --max-workers.
-DEFAULT_MAX_WORKERS = 2
+# Operator's *aspirational* ceiling on simultaneous live dispatch workers — NOT the
+# safety bound. The real DoS proof is the adaptive cap below: min(this, host_cap,
+# seats). host_cap (#1337) auto-throttles to the box's live cores/RAM/thread
+# headroom; the seat pool (#1336) hard-bounds at one worker per routable account so a
+# spawn can never double-book a rate limit. With both gates in place this default was
+# doubled 2->4: the old 2 sat below host_cap and the seat count alike (it was the
+# artificial bottleneck), so raising it simply lets the adaptive gates — which can
+# only LOWER the effective cap — govern. The box is still a live multi-session fleet,
+# so on a loaded host host_cap pulls the effective cap back down automatically.
+DEFAULT_MAX_WORKERS = 4
 
 # A live dispatch worker's command line carries this marker (dispatch_worker.py
 # launches `claude -p ... /dos-kernel:dos-dispatch-loop --lane X`). Used to count

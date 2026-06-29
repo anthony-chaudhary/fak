@@ -18,7 +18,16 @@ const (
 	WaveSidecarSuffix      = ".wave"
 	AccountSidecarSuffix   = ".account"
 	BaseSHASidecarSuffix   = ".basesha"
-	DefaultMaxWorkers      = 2
+	// DefaultMaxWorkers is the operator's *aspirational* outer ceiling on live
+	// dispatch workers, not the safety bound. The real DoS proof is the preflight's
+	// adaptive cap = min(this, host_cap, seats): host_cap (#1337) auto-throttles to
+	// the box's current cores/RAM/thread headroom, and the seat pool (#1336) hard-
+	// bounds at one worker per routable account so a spawn can never double-book a
+	// rate limit. Doubled 2->4 once those two gates landed: the static 2 sat below
+	// both and was the artificial bottleneck; raising it lets the adaptive gates --
+	// which can only LOWER the effective cap -- govern, so concurrency rises to what
+	// the box and the account pool can actually carry and no further.
+	DefaultMaxWorkers      = 4
 	DefaultCooldownMinutes = 120
 	DefaultWorkerTimeoutS  = 1800
 	DefaultSpawnProbeS     = 5.0
