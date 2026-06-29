@@ -11,10 +11,13 @@ fix from 2026-06-20 (heaviest session 093ca0fc: 901->455 turns, $634->$323) hold
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "session_audit.py"
@@ -57,6 +60,13 @@ def _write_transcript(records):
         tmp.write(json.dumps(r) + "\n")
     tmp.close()
     return tmp.name
+
+
+def _write_transcript_in(root, ns, rel, records):
+    path = Path(root) / ns / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    return str(path)
 
 
 class DedupTest(unittest.TestCase):
@@ -178,6 +188,65 @@ class DiscoverNamespaceDefaultTest(unittest.TestCase):
 
             narrowed = sa.discover([str(root)], ns_prefix="C--work")
             self.assertEqual({r["ns"] for r in narrowed}, {"C--work-fak"})
+
+
+class ReportScopeAndMixTest(unittest.TestCase):
+    def test_header_names_actual_scope_and_time_window(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            p = _write_transcript_in(
+                d, "C--work-fak", "session-a.jsonl",
+                [_assistant("a", out=100, cread=1_000, ccreate=100)])
+            s = sa.analyze(p)
+            md = sa.report_md([s], sa.aggregate([s]), ns_prefix="C--work-fak",
+                              since_days=None)
+
+        self.assertIn("# Session-Transcript Audit — active scope", md)
+        self.assertIn("1 namespaces folded (C--work-fak)", md)
+        self.assertIn("namespace filter: C--work-fak", md)
+        self.assertIn("time window: all-time", md)
+        self.assertIn("## Scope totals (EXACT token counts)", md)
+        self.assertNotIn("recent sessions, this machine", md)
+        self.assertNotIn("Machine-wide totals", md)
+
+    def test_default_audit_warns_when_subagents_are_excluded(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            _write_transcript_in(
+                d, "C--work-fak", "session-a.jsonl",
+                [_assistant("top", out=100, cread=1_000, ccreate=100)])
+            _write_transcript_in(
+                d, "C--work-fak", "session-a/subagents/worker.jsonl",
+                [_assistant("sub", out=2_000, cread=3_000, ccreate=400)])
+            args = SimpleNamespace(root=[d], since_days=None, ns_prefix="",
+                                   all=True, include_subagents=False,
+                                   max=None, md=None, json=None)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                sa.cmd_audit(args)
+            md = out.getvalue()
+
+        self.assertIn("NOTE: +1 subagent transcripts uncounted", md)
+        self.assertIn("re-run with `--include-subagents`", md)
+        self.assertIn("+2,000 output tok", md)
+
+    def test_model_mix_kpi_reports_output_and_cost_shares(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            p = _write_transcript_in(
+                d, "C--work-fak", "session-a.jsonl",
+                [
+                    _assistant("opus", out=850, cread=0, ccreate=0, model="claude-opus-4-8"),
+                    _assistant("haiku", out=150, cread=0, ccreate=0, model="claude-haiku-4-5"),
+                ])
+            s = sa.analyze(p)
+            md = sa.report_md([s], sa.aggregate([s]))
+
+        self.assertIn("## Model-mix KPI (tier shares)", md)
+        self.assertIn("| opus | 850 | 85.0% |", md)
+        self.assertIn("| haiku | 150 | 15.0% |", md)
+        self.assertIn("Opus output share", md)
+        self.assertIn("| C--work-fak | 1 | 1,000 | 85.0% |", md)
 
 
 class BillingBucketTest(unittest.TestCase):

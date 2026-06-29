@@ -120,6 +120,16 @@ def model_cost(model, c):
     return cost_usd(model, c.get("input", 0), c.get("cache_create", 0),
                     c.get("cache_read", 0), c.get("output", 0))
 
+def model_tier(model):
+    """Stable model tier for mix KPIs (opus/sonnet/haiku/etc.), not a full model id."""
+    if (model or "") in NONBILLED_MODELS:
+        return "<synthetic>"
+    m = (model or "").lower()
+    for key in PRICING:
+        if key in m:
+            return key
+    return "unpriced"
+
 def discover(roots, since_days=None, ns_prefix=NS_INCLUDE_PREFIX, include_subagents=False):
     cutoff = None
     if since_days is not None:
@@ -354,6 +364,14 @@ def aggregate(sessions):
     bucket_roll = collections.defaultdict(collections.Counter)
     for model, c in pm_roll.items():
         bucket_roll[provider_bucket(model)].update(c)
+    tier_roll = collections.defaultdict(collections.Counter)
+    for model, c in pm_roll.items():
+        tier_roll[model_tier(model)].update(c)
+    ns_opus_share = {}
+    for ns, models in ns_models.items():
+        out = sum(models.values())
+        opus = sum(v for m, v in models.items() if model_tier(m) == "opus")
+        ns_opus_share[ns] = (opus / out) if out else None
     calls = [s["n_tool_use"] for s in S]
     outs  = [s["tokens"]["output"] for s in S]
     ios   = [s["io_ratio"] for s in S if s["io_ratio"]]
@@ -366,8 +384,10 @@ def aggregate(sessions):
         "per_namespace_cost": dict(ns_cost),
         "per_namespace_top_model": {k: (v.most_common(1)[0][0] if v else "?")
                                     for k, v in ns_models.items()},
+        "per_namespace_opus_share": ns_opus_share,
         "per_model": {m: dict(c) for m, c in pm_roll.items()},
         "per_bucket": {b: dict(c) for b, c in bucket_roll.items()},
+        "per_tier": {t: dict(c) for t, c in tier_roll.items()},
         "dist": {
             "calls_per_session": {"median": statistics.median(calls) if calls else None,
                                   "mean": round(statistics.mean(calls),1) if calls else None,
@@ -386,14 +406,49 @@ def aggregate(sessions):
 def fmt_int(n):
     return f"{n:,}"
 
-def report_md(sessions, agg):
+def fmt_pct(frac):
+    return "—" if frac is None else f"{frac*100:.1f}%"
+
+def _namespace_name(path):
+    return os.path.basename(os.path.dirname(path))
+
+def _scope_line(sessions, ns_prefix, since_days, include_subagents, max_sessions):
+    namespaces = sorted({_namespace_name(s["path"]) for s in sessions if "error" not in s})
+    if len(namespaces) > 8:
+        ns_desc = ", ".join(namespaces[:8]) + f", ... (+{len(namespaces)-8} more)"
+    else:
+        ns_desc = ", ".join(namespaces) if namespaces else "none"
+    ns_filter = ns_prefix or "all non-excluded namespaces"
+    window = "all-time" if since_days is None else f"last {since_days:g} days"
+    kinds = "top-level session transcripts"
+    if include_subagents:
+        kinds += " (subagents reported separately below)"
+    cap = f"; max top-level sessions: {max_sessions}" if max_sessions else ""
+    return (f"{len(namespaces)} namespaces folded ({ns_desc}); "
+            f"namespace filter: {ns_filter}; time window: {window}; {kinds}{cap}")
+
+def _subagent_note(summary):
+    if not summary or not summary.get("count"):
+        return None
+    tokens = summary.get("tokens", {})
+    return (f"NOTE: +{summary['count']} subagent transcripts uncounted; "
+            f"re-run with `--include-subagents` "
+            f"(about +${summary.get('cost_usd', 0.0):,.2f} / "
+            f"+{fmt_int(tokens.get('output', 0))} output tok).")
+
+def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
+              include_subagents=False, max_sessions=None, excluded_subagents=None):
     S = [s for s in sessions if "error" not in s]
     L = []
-    L.append("# Session-Transcript Audit — recent sessions, this machine\n")
+    L.append("# Session-Transcript Audit — active scope\n")
     L.append(f"**Generated:** {datetime.datetime.now().isoformat(timespec='seconds')}  ")
-    L.append(f"**Sessions audited:** {agg['n_sessions']}  ·  **Tool:** `tools/session_audit.py` (re-runnable)\n")
+    L.append(f"**Top-level sessions audited:** {agg['n_sessions']}  ·  **Tool:** `tools/session_audit.py` (re-runnable)  ")
+    L.append(f"**Scope:** {_scope_line(S, ns_prefix, since_days, include_subagents, max_sessions)}")
+    note = _subagent_note(excluded_subagents)
+    if note:
+        L.append(note)
     t = agg["totals"]
-    L.append("## Machine-wide totals (EXACT token counts)\n")
+    L.append("## Scope totals (EXACT token counts)\n")
     L.append(f"- **Output tokens (the actual work generated):** {fmt_int(t['output'])}")
     L.append(f"- **Fresh input tokens (billed, non-cached):** {fmt_int(t['input'])}")
     L.append(f"- **Cache-read tokens (prompt-cache / KV reuse):** {fmt_int(t['cache_read'])}")
@@ -423,12 +478,28 @@ def report_md(sessions, agg):
     if other:
         parts = [f"{b} ({fmt_int(c['output'])} output tok, unpriced — add its card)"
                  for b, c in sorted(other.items(), key=lambda kv: -kv[1].get("output", 0))]
-        L.append(f"- **⚠ Other billing buckets present (NOT in the total above — different invoices):** "
+        L.append("- **⚠ Other billing buckets present (NOT in the total above — different invoices):** "
                  + "; ".join(parts))
     nb = buckets.get("non-billed (harness)", {})
     if nb.get("turns"):
         L.append(f"- **Non-billed `<synthetic>` turns (harness-injected, $0):** {fmt_int(nb.get('turns',0))} "
                  f"({fmt_int(nb.get('output',0))} output tok)")
+    L.append("")
+
+    # Per-tier share — the headline mix KPI that makes "opus-heavy vs haiku-heavy" explicit.
+    L.append("## Model-mix KPI (tier shares)\n")
+    L.append("| Tier | Output tok | Output share | Est. cost | Cost share |")
+    L.append("|---|---:|---:|---:|---:|")
+    total_output = sum(c.get("output", 0) for c in agg.get("per_tier", {}).values())
+    total_priced_cost = sum(model_cost(m, c) for m, c in agg.get("per_model", {}).items())
+    for tier, c in sorted(agg.get("per_tier", {}).items(),
+                          key=lambda kv: -kv[1].get("output", 0)):
+        tier_cost = sum(model_cost(m, mc) for m, mc in agg.get("per_model", {}).items()
+                        if model_tier(m) == tier)
+        out_share = (c.get("output", 0) / total_output) if total_output else None
+        cost_share = (tier_cost / total_priced_cost) if total_priced_cost else None
+        L.append(f"| {tier} | {fmt_int(c.get('output',0))} | {fmt_pct(out_share)} | "
+                 f"${tier_cost:,.2f} | {fmt_pct(cost_share)} |")
     L.append("")
 
     # Per billing bucket — the answer to "is this Claude or Gemini money?". NEVER summed.
@@ -456,11 +527,13 @@ def report_md(sessions, agg):
     L.append("")
 
     L.append("## Per-namespace rollup\n")
-    L.append("| Namespace | Sessions | Output tok | Cache-read tok | Tool calls | Top model (by output) | Est. cost |")
-    L.append("|---|---:|---:|---:|---:|---|---:|")
+    L.append("| Namespace | Sessions | Output tok | Opus output share | Cache-read tok | Tool calls | Top model (by output) | Est. cost |")
+    L.append("|---|---:|---:|---:|---:|---:|---|---:|")
     top_model = agg.get("per_namespace_top_model", {})
+    opus_share = agg.get("per_namespace_opus_share", {})
     for ns, v in sorted(agg["per_namespace"].items(), key=lambda kv: -kv[1]["output"]):
-        L.append(f"| {ns} | {v['sessions']} | {fmt_int(v['output'])} | {fmt_int(v['cache_read'])} | "
+        L.append(f"| {ns} | {v['sessions']} | {fmt_int(v['output'])} | {fmt_pct(opus_share.get(ns))} | "
+                 f"{fmt_int(v['cache_read'])} | "
                  f"{fmt_int(v['tool_use'])} | {top_model.get(ns, '?')} | ${agg['per_namespace_cost'][ns]:,.2f} |")
     L.append("")
 
@@ -501,8 +574,30 @@ def cmd_discover(a):
         mt = datetime.datetime.fromtimestamp(s["mtime"]).isoformat(timespec="seconds")
         print(f"  {mt}  {s['size']//1024:6d}KB  {s['ns']}/{os.path.basename(s['path'])}")
 
+def summarize_analyses(results):
+    totals = collections.Counter()
+    cost = 0.0
+    ok = 0
+    for r in results:
+        if "error" in r:
+            continue
+        ok += 1
+        for k, v in r["tokens"].items():
+            totals[k] += v
+        cost += r["cost_usd"]
+    return {"count": ok, "tokens": dict(totals), "cost_usd": cost}
+
+def summarize_transcripts(records):
+    results = []
+    for rec in records:
+        r = analyze(rec["path"])
+        results.append(r)
+    return summarize_analyses(results)
+
 def cmd_audit(a):
-    ss = discover(a.root or DEFAULT_ROOTS, a.since_days, "" if a.all else a.ns_prefix,
+    roots = a.root or DEFAULT_ROOTS
+    ns_prefix = "" if a.all else a.ns_prefix
+    ss = discover(roots, a.since_days, ns_prefix,
                   include_subagents=a.include_subagents)
     if a.max:
         ss = ss[:a.max]
@@ -516,15 +611,20 @@ def cmd_audit(a):
     sess = [r for r in out if r.get("kind") == "session"]
     subs = [r for r in out if r.get("kind") == "subagent"]
     agg = aggregate(sess)
-    md = report_md(sess, agg)
+    excluded_subagents = None
+    if not a.include_subagents:
+        subagent_records = [s for s in discover(roots, a.since_days, ns_prefix,
+                                                include_subagents=True)
+                            if s.get("kind") == "subagent"]
+        if subagent_records:
+            excluded_subagents = summarize_transcripts(subagent_records)
+    md = report_md(sess, agg, ns_prefix=ns_prefix, since_days=a.since_days,
+                   include_subagents=a.include_subagents, max_sessions=a.max,
+                   excluded_subagents=excluded_subagents)
     if subs:
-        st = collections.Counter()
-        for r in subs:
-            if "error" in r:
-                continue
-            for k, v in r["tokens"].items():
-                st[k] += v
-        scost = sum(r["cost_usd"] for r in subs if "error" not in r)
+        sub_summary = summarize_analyses(subs)
+        st = collections.Counter(sub_summary["tokens"])
+        scost = sub_summary["cost_usd"]
         md += ("\n## Subagent / workflow spend (SEPARATE transcripts, usually uncounted)\n\n"
                f"- **{len(subs)} subagent transcripts** (workflow/fan-out agents under `<session>/subagents/`)\n"
                f"- Output tokens: {fmt_int(st['output'])}  ·  Cache-read: {fmt_int(st['cache_read'])}  "
@@ -538,6 +638,7 @@ def cmd_audit(a):
         print(f"wrote {a.md}", file=sys.stderr)
     if a.json:
         slim = {"aggregate": agg,
+                "excluded_subagents": excluded_subagents,
                 "sessions": [{k: v for k, v in s.items() if k != "prompts"} for s in out]}
         json.dump(slim, open(a.json, "w", encoding="utf-8"), indent=2)
         print(f"wrote {a.json}", file=sys.stderr)
