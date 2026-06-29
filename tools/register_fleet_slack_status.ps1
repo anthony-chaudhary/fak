@@ -50,6 +50,9 @@ if ($Action -eq 'remove') {
 $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
 if (-not $py) { throw "python not found on PATH" }
+# pythonw.exe (the console-less interpreter, sibling of python.exe) for the non-elevated
+# fallback path so a current-user Interactive task posts windowless -- no popup per tick.
+$pyw = Join-Path (Split-Path -Parent $py) 'pythonw.exe'
 $tick = Join-Path $Workspace 'tools\fleet_slack_status.py'
 if (-not (Test-Path $tick)) { throw "fleet_slack_status.py not found at $tick" }
 
@@ -61,29 +64,42 @@ if ($Fast)         { $childArgs += '--fast' }
 if (-not $Live)    { $childArgs += '--dry-run' }
 $pyArgs = ($childArgs -join ' ')
 
-# Register python.exe DIRECTLY via the ScheduledTasks cmdlets (NOT a powershell.exe
-# -Command wrapper): a Program-Files python path has a SPACE, and the nested quotes
-# protecting it do not survive the PowerShell -> schtasks /TR handoff (the stored
-# -Command truncates at "C:\Program", the task logs LastResult=0 while python never
-# runs). Splitting Execute from Argument sidesteps the quoting; WorkingDirectory anchors
-# the relative paths; python's exit code becomes LastTaskResult directly.
-$taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
 $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
                -RepetitionDuration (New-TimeSpan -Days 3650)
-# S4U (non-interactive, session 0), NOT Interactive: the tick executes python.exe
-# directly, and a console exe launched in the interactive session flashes a console
-# window on EVERY trigger. S4U runs it windowless yet still AS THIS USER, so the
-# machine-wide FAK_DISPATCH_CHANNEL / .env.slack.local resolve exactly as in a shell.
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
-Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
-               -Principal $principal -Settings $settings -Force | Out-Null
+
+# Register python DIRECTLY via the ScheduledTasks cmdlets (NOT a powershell.exe -Command
+# wrapper): a Program-Files python path has a SPACE, and the nested quotes protecting it
+# do not survive the PowerShell -> schtasks /TR handoff (the stored -Command truncates at
+# "C:\Program", the task logs LastResult=0 while python never runs). Splitting Execute from
+# Argument sidesteps the quoting; WorkingDirectory anchors the relative paths.
+#
+# Preferred: S4U (session 0, windowless, runs AS THIS USER even when not logged in) with
+# python.exe. S4U registration requires elevation, so when it is denied (a non-admin
+# install) fall back to a current-user Interactive task running the console-less
+# pythonw.exe -- it needs no elevation and still never flashes a window (it runs while the
+# user is logged in, which is exactly when an operator watches the channel).
+$reg = $null
+try {
+  $taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+  $reg = Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
+               -Principal $principal -Settings $settings -Force -ErrorAction Stop
+  $principalKind = 'S4U (session 0)'
+} catch {
+  $exe = if (Test-Path $pyw) { $pyw } else { $py }   # windowless if pythonw is present
+  $taskAction = New-ScheduledTaskAction -Execute $exe -Argument $pyArgs -WorkingDirectory $Workspace
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  $reg = Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
+               -Principal $principal -Settings $settings -Force
+  $principalKind = "Interactive (non-elevated; $(Split-Path -Leaf $exe))"
+}
 
 $runMode = if ($Live) { 'LIVE (posts to Slack)' } else { 'DRY-RUN (resolves channel/token, sends nothing)' }
 $chanStr = if ($SlackChannel) { $SlackChannel } else { '$FAK_DISPATCH_CHANNEL / .env.slack.local' }
-Write-Output "installed $TaskName -- every $EveryMinutes min, current-user S4U, $runMode"
+Write-Output "installed $TaskName -- every $EveryMinutes min, $principalKind, $runMode"
 Write-Output "channel:  $chanStr   (token: FAK_SCOREBOARD_TOKEN / FAK_DISPATCH_TOKEN)"
 Write-Output "check resolution any time:  python tools\fleet_slack_status.py --dry-run --fast"
 if (-not $Live) {
