@@ -1,9 +1,16 @@
 name: Release cadence
 
 # Fleet's release cadence is evidence-driven and dry-run-first. Scheduled ticks
-# decide and plan, but do not mutate the repo. A manual dispatch with
+# decide and plan; whether they also EXECUTE is opt-in. A manual dispatch with
 # dry_run=false is the explicit arm for commit -> push -> CI witness -> tag ->
-# GitHub release.
+# GitHub release. Additionally, when the repo variable FAK_AUTO_RELEASE == '1' is
+# set, a SCHEDULED tick that decides "release" executes the same chain with no
+# human in the loop (#1355, epic #1354) — the root-cause fix for a fast trunk whose
+# @latest rots behind HEAD. Auto-cut carries NO new trust: every safety gate still
+# binds (release_decide's blocker taxonomy with --require-ci-green, the cut/tag/
+# publish refusals, the single-writer concurrency group). It is gated, reversible
+# (unset the variable), and bounded — it can only cut what a manual dry_run=false
+# run could have cut at that same instant.
 on:
   schedule:
     - cron: "37 */6 * * *"
@@ -105,6 +112,28 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Arm execute decision
+        id: arm
+        env:
+          # Opt-in: a scheduled tick executes only when this repo variable is '1'.
+          AUTO_RELEASE: ${{ vars.FAK_AUTO_RELEASE }}
+        run: |
+          set -euo pipefail
+          # execute = a manual dispatch with dry_run=false, OR a scheduled tick with
+          # auto-release armed. Anything else stops after the plan (dry-run).
+          execute=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            execute=true
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${AUTO_RELEASE:-}" = "1" ]; then
+            execute=true
+          fi
+          echo "execute=$execute" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Execute decision"
+            echo ""
+            echo "event=${{ github.event_name }} · auto_release=${AUTO_RELEASE:-unset} · execute=$execute"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Hold without mutation
         if: steps.decide.outputs.decision != 'release'
         run: |
@@ -127,17 +156,16 @@ jobs:
       - name: Dry-run stop
         if: >-
           steps.decide.outputs.decision == 'release' &&
-          (github.event_name == 'schedule' || inputs.dry_run)
+          steps.arm.outputs.execute != 'true'
         run: |
           echo "## Dry-run only" >> "$GITHUB_STEP_SUMMARY"
-          echo "Scheduled ticks and default manual runs stop after the plan. Dispatch with dry_run=false to execute." >> "$GITHUB_STEP_SUMMARY"
+          echo "This run stops after the plan. Dispatch with dry_run=false, or set the repo variable FAK_AUTO_RELEASE=1 to let scheduled ticks execute (#1355)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cut release commit
         id: cut
         if: >-
           steps.decide.outputs.decision == 'release' &&
-          github.event_name == 'workflow_dispatch' &&
-          inputs.dry_run == false
+          steps.arm.outputs.execute == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
