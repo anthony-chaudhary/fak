@@ -170,7 +170,16 @@ func qgemm8tile512(qw, qx *int8, dw, dx *float32, in, nblk, outStride int, dst *
 //go:noescape
 func qgemm8tile512x1(qw, qx *int8, dw, dx *float32, in, nblk, outStride int, dst *float32)
 
-const qgemmMR = 5 // full tile rows; row remainders use qgemm8tile512x1 plus scalar token tail
+// qgemm8tile256 is the AVX2 sibling of qgemm8tile512: a 3(row)×2(token) register-blocked Q8
+// tile for hosts without AVX-512. Bit-identical to qgemm8cell(...,8) — TestQGemm8AVX2MatchesScalar
+// pins it. Same operand layout as qgemm8tile512 (see quant_amd64.s).
+//
+//go:noescape
+func qgemm8tile256(qw, qx *int8, dw, dx *float32, in, nblk, outStride int, dst *float32)
+
+const qgemmMR = 5    // full AVX-512 tile rows; row remainders use qgemm8tile512x1 plus scalar token tail
+const qgemmMR256 = 3 // full AVX2 tile rows
+const qgemmNR256 = 2 // full AVX2 tile tokens
 
 // qGemm8 is the batched Q8_0 prefill GEMM dispatcher: register-blocked tile kernel on
 // AVX-512, with a scalar reference for the row/token remainder (and as the AVX2/scalar
@@ -191,9 +200,15 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		qGemm8legacyInto(qt, qp, Y)
 		return
 	}
+	if qtier == tierAVX2 {
+		// AVX2-only host (the da33 EPYC-7742 floor): the register-blocked AVX2 tile, with
+		// lanes=8 scalar-ref remainders so the whole path is bit-identical to qGemm8scalar(...,8).
+		qGemm8avx2Into(qt, qp, Y)
+		return
+	}
 	if qtier != tierAVX512 {
-		// AVX2/scalar: no tile kernel yet — the portable reference (correct, slower).
-		// lanes=16 keeps the fallback's numerics independent of which non-512 box runs it.
+		// Pure scalar (no AVX2): the portable reference (correct, slower). lanes=16 keeps the
+		// scalar fallback's numerics independent of which non-vector box runs it.
 		qGemm8scalarInto(qt, qp, 16, Y)
 		return
 	}
@@ -237,6 +252,55 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		dx := qp.d[t*nblk : t*nblk+nblk]
 		for o := 0; o < nTiles*qgemmMR; o++ {
 			Y[t*out+o] = qgemm8cell(qt.q[o*in:o*in+in], qt.d[o*nblk:o*nblk+nblk], qx, dx, nblk, 16)
+		}
+	}
+}
+
+// qGemm8avx2Into runs the Q8 prefill GEMM with the AVX2 register-blocked tile (qgemm8tile256,
+// MR=3×NR=2) over the tile-aligned bulk and the lanes=8 scalar reference (qgemm8cell) for the
+// row/token remainders. The whole path is Float32bits-identical to qGemm8scalar(qt, qp, 8) —
+// the tile is pinned bit-for-bit to qgemm8cell(...,8) and the remainders call it directly — so
+// the AVX2 host's prefill GEMM stops running the scalar reference (the #1127 da33 floor) while
+// staying on the same authoritative argmax-vs-f32 Q8 gate. Callable directly (not gated on the
+// resolved qtier) so it can be exercised on any AVX2-capable host; wired into qGemm8Into for
+// tierAVX2. Output row-major [P, out].
+func qGemm8avx2Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
+	out, in, nblk, P := qt.out, qt.in, qt.nblk, qp.P
+	Pmain := P &^ (qgemmNR256 - 1) // tokens handled by the NR=2 tile; remainder via the cell ref
+	nTiles := out / qgemmMR256
+
+	tile := func(lo, hi int) {
+		for tt := lo; tt < hi; tt++ {
+			o := tt * qgemmMR256
+			for t := 0; t < Pmain; t += qgemmNR256 {
+				qgemm8tile256(
+					&qt.q[o*in], &qp.q[t*in],
+					&qt.d[o*nblk], &qp.d[t*nblk],
+					in, nblk, out, &Y[t*out+o],
+				)
+			}
+		}
+	}
+	if out*in*P < parThreshold {
+		tile(0, nTiles)
+	} else {
+		parFor(nTiles, numWorkers, tile)
+	}
+
+	// Remainder rows (out % MR): every token, via the matching lanes=8 scalar reference.
+	for o := nTiles * qgemmMR256; o < out; o++ {
+		qw := qt.q[o*in : o*in+in]
+		dw := qt.d[o*nblk : o*nblk+nblk]
+		for t := 0; t < P; t++ {
+			Y[t*out+o] = qgemm8cell(qw, dw, qp.q[t*in:t*in+in], qp.d[t*nblk:t*nblk+nblk], nblk, 8)
+		}
+	}
+	// Remainder tokens (P % NR): the tiled rows still need these columns.
+	for t := Pmain; t < P; t++ {
+		qx := qp.q[t*in : t*in+in]
+		dx := qp.d[t*nblk : t*nblk+nblk]
+		for o := 0; o < nTiles*qgemmMR256; o++ {
+			Y[t*out+o] = qgemm8cell(qt.q[o*in:o*in+in], qt.d[o*nblk:o*nblk+nblk], qx, dx, nblk, 8)
 		}
 	}
 }

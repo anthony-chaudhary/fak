@@ -1,6 +1,11 @@
 package model
 
-import "testing"
+import (
+	"io"
+	"os"
+	"strings"
+	"testing"
+)
 
 // qwen35HybridQ4KTestCfg is the qwen35 hybrid test config with every projection reduction
 // dim a multiple of qkK=256, the Q4_K precondition (quantizeQ4KFromRaw panics otherwise).
@@ -115,7 +120,19 @@ func TestPrefillQwen35HybridQ4KMatchesTokenLoop(t *testing.T) {
 	// K/Kraw stay at the strict 1e-5 (their RMSNorm damps the propagated drift); V takes a
 	// 2e-4 bound for the documented Q8-minority deferred-reduction drift carried raw into the
 	// V cache (see this test's doc comment for the legacy-fallback bit-identity witness).
-	assertKVCacheQuantCloseTol(t, "hybrid q4k batched prefill", ref.Cache, got.Cache, 1e-5, 2e-4)
+	// On AVX-512 the Q8-minority prefill GEMM (qgemm8tile512, lanes=16) and the decode GEMV
+	// (qdot8gemv512, lanes=16) share a reduction order, so K/Kraw stay ≈4e-6. On an AVX2-only
+	// host (#1127) the prefill GEMM runs the lanes=8 register-blocked tile (qgemm8tile256)
+	// while decode runs the per-block-scalar qdot8asm, so the same damped drift is marginally
+	// larger — measured Kraw≈1.4e-5 at this seed — and K/Kraw take a still-strict 2e-5 (a real
+	// wiring bug would diverge O(1), orders of magnitude past either bound). V already passes
+	// the 2e-4 bound on both tiers (≈1.96e-4 on AVX2). The legacy-fallback witness above holds
+	// per-tier: under FAK_QGEMM=legacy every K/Kraw/V layer is bit-identical on AVX2 too.
+	kTol := 1e-5
+	if qtier == tierAVX2 {
+		kTol = 2e-5
+	}
+	assertKVCacheQuantCloseTol(t, "hybrid q4k batched prefill", ref.Cache, got.Cache, kTol, 2e-4)
 	assertLinearAttnCacheQuantClose(t, "hybrid q4k batched prefill", ref.Cache.linear, got.Cache.linear)
 }
 
@@ -163,4 +180,57 @@ func TestPrefillQwen35HybridQ4KDeterministic(t *testing.T) {
 
 	assertFloat32BitsEqual(t, "hybrid q4k prefill determinism", l1, l2)
 	assertLinearAttnCacheQuantClose(t, "hybrid q4k prefill determinism", s1.Cache.linear, s2.Cache.linear)
+}
+
+func TestPrefillQwen35HybridQ4KProfilePrintsHybridSplit(t *testing.T) {
+	t.Setenv("FAK_QPROFILE", "1")
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	os.Stderr = w
+	writerClosed := false
+	defer func() {
+		os.Stderr = oldStderr
+		if !writerClosed {
+			_ = w.Close()
+		}
+	}()
+
+	out := make(chan string, 1)
+	go func() {
+		var b strings.Builder
+		_, _ = io.Copy(&b, r)
+		out <- b.String()
+	}()
+
+	cfg := qwen35HybridQ4KTestCfg()
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajority(t, m, cfg)
+	prompt := []int{3, 7, 11, 5, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61}
+
+	s := m.NewSession()
+	s.Q4K = true
+	s.Prefill(prompt)
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writerClosed = true
+	got := <-out
+	for _, want := range []string{
+		"[metalprof-hybrid P=16]",
+		"total=",
+		"gemm+roundtrip=",
+		"rest(recurrence/attn/norm)=",
+		"path=q4k",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("profile output %q missing %q", got, want)
+		}
+	}
 }

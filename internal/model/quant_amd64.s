@@ -743,6 +743,180 @@ x1reduce:
 	VZEROUPPER
 	RET
 
+// qgemm8tile256 computes a 3(row)×2(token) Q8_0 output tile with AVX2+FMA — the AVX2
+// sibling of qgemm8tile512, the register-blocked prefill micro-kernel for hosts without
+// AVX-512 (the da33 EPYC-7742 floor: AVX2, no AVX-512/VNNI). AVX2 has only 16 YMM
+// registers (no zmm and no Y16..Y31 EVEX file) and one VPMOVSXBW widens a 16-byte half (not
+// a full 32-byte block as the AVX-512 path does), so each block is processed as a low/high
+// 16-byte pair and the tile is sized 3×2: six float accumulators (Y0..Y5, indexed row*2+
+// token) stay live across the reduction, the two sign-extended weight halves (Y10/Y11) feed
+// both tokens, and the two token halves per column (Y6/Y7, Y8/Y9) feed all three rows. Each
+// block folds in with VPMADDWD(lo)+VPMADDWD(hi)+VPADDD → VCVTDQ2PS → VFMADD231PS (scale·int
+// + acc fused, one rounding, NO per-block horizontal reduce); the 8-lane horizontal reduce
+// runs ONCE per output in the store phase, in the same pairwise tree qgemm8cell(...,8) uses
+// (acc[k]+=acc[k+4]; acc[0]+=acc[2]; acc[1]+=acc[3]; acc[0]+acc[1]), so the result is
+// Float32bits-identical to qgemm8cell(...,8), whose per-block accumulate also uses math.FMA
+// (TestQGemm8AVX2MatchesScalar). VFMADD231PS requires FMA3, which is universal on every
+// AVX2 x86 part (Haswell+, Zen+) — the same assumption the AVX-512 sibling makes.
+//
+// Layout (identical to qgemm8tile512): weight row i, block b at qw + i*in + b*32 (scale
+// dw + i*nblk + b); token j, block b at qx + j*in + b*32 (scale dx + j*nblk + b); output
+// (row i, token j) at dst + j*outStride + i (floats). `in` is the per-row code stride in
+// bytes (== inner dim). The hi half of block b is at +16 from its lo half.
+//
+// func qgemm8tile256(qw, qx *int8, dw, dx *float32, in, nblk, outStride int, dst *float32)
+TEXT ·qgemm8tile256(SB), NOSPLIT, $0-64
+	MOVQ qw+0(FP), SI
+	MOVQ qx+8(FP), DI
+	MOVQ dw+16(FP), R8
+	MOVQ dx+24(FP), R9
+	MOVQ in+32(FP), R10    // code row/token stride (bytes)
+	MOVQ nblk+40(FP), CX
+	MOVQ R10, R14
+	ADDQ R10, R14          // R14 = 2*in (weight row 2 offset)
+	MOVQ CX, R11
+	SHLQ $2, R11           // R11 = nblk*4 (scale stride: row1 dw, token1 dx)
+	MOVQ R11, R12
+	ADDQ R11, R12          // R12 = 2*nblk*4 (row 2 dw offset)
+	// zero the 6 accumulators
+	VPXOR Y0, Y0, Y0
+	VPXOR Y1, Y1, Y1
+	VPXOR Y2, Y2, Y2
+	VPXOR Y3, Y3, Y3
+	VPXOR Y4, Y4, Y4
+	VPXOR Y5, Y5, Y5
+	TESTQ CX, CX
+	JLE   tile256reduce
+
+tile256loop:
+	// sign-extend the 2 token blocks (low+high 16-byte halves) to int16
+	VPMOVSXBW (DI), Y6              // token0 lo
+	VPMOVSXBW 16(DI), Y7           // token0 hi
+	VPMOVSXBW (DI)(R10*1), Y8     // token1 lo
+	VPMOVSXBW 16(DI)(R10*1), Y9  // token1 hi
+
+	// row 0: weight (SI), dw (R8)
+	VPMOVSXBW (SI), Y10
+	VPMOVSXBW 16(SI), Y11
+	VMOVSS    (R8), X14            // dw[0]
+	VPMADDWD  Y6, Y10, Y12         // (r0,t0) lo
+	VPMADDWD  Y7, Y11, Y13         // (r0,t0) hi
+	VPADDD    Y13, Y12, Y12
+	VCVTDQ2PS Y12, Y12
+	VMULSS    (R9), X14, X15       // dw0*dx0
+	VBROADCASTSS X15, Y13
+	VFMADD231PS Y13, Y12, Y0
+	VPMADDWD  Y8, Y10, Y12         // (r0,t1) lo
+	VPMADDWD  Y9, Y11, Y13         // (r0,t1) hi
+	VPADDD    Y13, Y12, Y12
+	VCVTDQ2PS Y12, Y12
+	VMULSS    (R9)(R11*1), X14, X15 // dw0*dx1
+	VBROADCASTSS X15, Y13
+	VFMADD231PS Y13, Y12, Y1
+
+	// row 1: weight (SI)(R10*1), dw (R8)(R11*1)
+	VPMOVSXBW (SI)(R10*1), Y10
+	VPMOVSXBW 16(SI)(R10*1), Y11
+	VMOVSS    (R8)(R11*1), X14     // dw[1]
+	VPMADDWD  Y6, Y10, Y12         // (r1,t0) lo
+	VPMADDWD  Y7, Y11, Y13         // (r1,t0) hi
+	VPADDD    Y13, Y12, Y12
+	VCVTDQ2PS Y12, Y12
+	VMULSS    (R9), X14, X15       // dw1*dx0
+	VBROADCASTSS X15, Y13
+	VFMADD231PS Y13, Y12, Y2
+	VPMADDWD  Y8, Y10, Y12         // (r1,t1) lo
+	VPMADDWD  Y9, Y11, Y13         // (r1,t1) hi
+	VPADDD    Y13, Y12, Y12
+	VCVTDQ2PS Y12, Y12
+	VMULSS    (R9)(R11*1), X14, X15 // dw1*dx1
+	VBROADCASTSS X15, Y13
+	VFMADD231PS Y13, Y12, Y3
+
+	// row 2: weight (SI)(R14*1), dw (R8)(R12*1)
+	VPMOVSXBW (SI)(R14*1), Y10
+	VPMOVSXBW 16(SI)(R14*1), Y11
+	VMOVSS    (R8)(R12*1), X14     // dw[2]
+	VPMADDWD  Y6, Y10, Y12         // (r2,t0) lo
+	VPMADDWD  Y7, Y11, Y13         // (r2,t0) hi
+	VPADDD    Y13, Y12, Y12
+	VCVTDQ2PS Y12, Y12
+	VMULSS    (R9), X14, X15       // dw2*dx0
+	VBROADCASTSS X15, Y13
+	VFMADD231PS Y13, Y12, Y4
+	VPMADDWD  Y8, Y10, Y12         // (r2,t1) lo
+	VPMADDWD  Y9, Y11, Y13         // (r2,t1) hi
+	VPADDD    Y13, Y12, Y12
+	VCVTDQ2PS Y12, Y12
+	VMULSS    (R9)(R11*1), X14, X15 // dw2*dx1
+	VBROADCASTSS X15, Y13
+	VFMADD231PS Y13, Y12, Y5
+
+	ADDQ $32, SI
+	ADDQ $32, DI
+	ADDQ $4, R8
+	ADDQ $4, R9
+	DECQ CX
+	JNZ  tile256loop
+
+tile256reduce:
+	// store phase: reduce each accumulator (8 lanes -> scalar) in qgemm8cell(...,8)'s tree,
+	// then store (row i, token j) at dst + j*outStride + i. Token bases: AX (t0), BX (t1).
+	MOVQ dst+56(FP), AX
+	MOVQ outStride+48(FP), DX
+	SHLQ $2, DX            // outStride bytes
+	MOVQ AX, BX
+	ADDQ DX, BX           // token1 base
+
+	// token 0 (base AX): rows 0..2 = Y0,Y2,Y4 at +0,+4,+8
+	VEXTRACTI128 $1, Y0, X12
+	VADDPS    X12, X0, X0
+	VPSHUFD   $0xEE, X0, X12
+	VADDPS    X12, X0, X0
+	VPSHUFD   $0x55, X0, X12
+	VADDSS    X12, X0, X0
+	VMOVSS    X0, 0(AX)
+	VEXTRACTI128 $1, Y2, X12
+	VADDPS    X12, X2, X2
+	VPSHUFD   $0xEE, X2, X12
+	VADDPS    X12, X2, X2
+	VPSHUFD   $0x55, X2, X12
+	VADDSS    X12, X2, X2
+	VMOVSS    X2, 4(AX)
+	VEXTRACTI128 $1, Y4, X12
+	VADDPS    X12, X4, X4
+	VPSHUFD   $0xEE, X4, X12
+	VADDPS    X12, X4, X4
+	VPSHUFD   $0x55, X4, X12
+	VADDSS    X12, X4, X4
+	VMOVSS    X4, 8(AX)
+
+	// token 1 (base BX): rows 0..2 = Y1,Y3,Y5
+	VEXTRACTI128 $1, Y1, X12
+	VADDPS    X12, X1, X1
+	VPSHUFD   $0xEE, X1, X12
+	VADDPS    X12, X1, X1
+	VPSHUFD   $0x55, X1, X12
+	VADDSS    X12, X1, X1
+	VMOVSS    X1, 0(BX)
+	VEXTRACTI128 $1, Y3, X12
+	VADDPS    X12, X3, X3
+	VPSHUFD   $0xEE, X3, X12
+	VADDPS    X12, X3, X3
+	VPSHUFD   $0x55, X3, X12
+	VADDSS    X12, X3, X3
+	VMOVSS    X3, 4(BX)
+	VEXTRACTI128 $1, Y5, X12
+	VADDPS    X12, X5, X5
+	VPSHUFD   $0xEE, X5, X12
+	VADDPS    X12, X5, X5
+	VPSHUFD   $0x55, X5, X12
+	VADDSS    X12, X5, X5
+	VMOVSS    X5, 8(BX)
+
+	VZEROUPPER
+	RET
+
 // func cpuid(eaxArg, ecxArg uint32) (eax, ebx, ecx, edx uint32)
 TEXT ·cpuid(SB), NOSPLIT, $0-24
 	MOVL eaxArg+0(FP), AX
