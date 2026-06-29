@@ -102,10 +102,24 @@ type Point struct {
 	// in candidate-scoring operations: the store grows by one span a turn, so at turn i the
 	// planner scores i candidates, and Σ i = N·(N+1)/2 = Θ(N²) — the same shape as the linear
 	// prefill tax, in scoring ops rather than tokens. It is the cost "O(1) resident" does NOT
-	// bound: residency is constant, planning is not (unless the candidate set is index-bounded,
-	// which would flatten this term — priced here at the unbounded worst case the model runs today).
+	// bound for a FULL-SCAN planner: residency is constant, planning is not. This is the
+	// unbounded worst case; PlannerComputeBounded below is the flattened term the index buys.
 	// Zero for Linear (whole transcript resident, no re-planner) and Compaction (no cost-based planner).
 	PlannerComputeCum int64 `json:"planner_compute_cum"`
+	// PlannerComputeBounded is the cumulative re-planning WORK through turn N when the planner
+	// scores only an INDEX-BOUNDED candidate set of size CandidateBound each turn (Planned
+	// regime only): Σ_{i=1..N} c = c·N = Θ(c·N) — LINEAR in the horizon, the flatten the
+	// inverted index buys (index.go's IndexBoundedPlannerCompute). It sits NEXT TO the full-scan
+	// PlannerComputeCum so the table reads the resident bend beside both compute terms: the
+	// quadratic a full re-scan costs and the linear a bounded probe costs. The index caps SCORED
+	// CANDIDATES at c the way the working-set budget caps RESIDENT TOKENS at W — both turn a Θ(N²)
+	// growth into Θ(c·N)/Θ(W·N), which is what makes "1 current turn + a flexible history" hold for
+	// the planner's compute, not just its output. Zero for Linear and Compaction (no re-planner).
+	PlannerComputeBounded int64 `json:"planner_compute_bounded"`
+	// CandidateBound is the index-bounded candidate-set size c the Planned regime priced
+	// PlannerComputeBounded at (DefaultMaxCandidates), surfaced so the Θ(c·N) term is auditable.
+	// Zero for Linear and Compaction (no re-planner).
+	CandidateBound int `json:"candidate_bound,omitempty"`
 }
 
 // Model computes the regime's curve at each turn count in turns (which must be positive
@@ -153,7 +167,14 @@ func modelAt(r Regime, p Params, n int) Point {
 		// planner scores a candidate set that grows one span a turn). Both are now reproducible
 		// numbers instead of named-omissions; the headline "O(1) resident" bend is unchanged.
 		pt.FaultTaxCum = cumFaultTax(b, hit, n)
+		// Both compute terms, side by side (issue #562): the full-scan Θ(N²) the planner pays
+		// when it re-scores the whole store every turn, AND the flattened Θ(c·N) the inverted
+		// index buys when it scores only a bounded probe of size c. The bounded term is the
+		// compute analogue of cumCapped's resident bend — the table now reads the resident bend
+		// next to BOTH the unbounded and the index-bounded planning cost.
 		pt.PlannerComputeCum = cumPlannerCompute(n)
+		pt.CandidateBound = DefaultMaxCandidates
+		pt.PlannerComputeBounded = IndexBoundedPlannerCompute(pt.CandidateBound, n)
 	}
 	return pt
 }
@@ -255,25 +276,69 @@ func Compare(p Params, turns []int) Comparison {
 }
 
 // Table renders the comparison as an operator-readable block: resident tokens and exact
-// recall per regime at each horizon, plus the two Planned-only priced costs (the forecast-
-// miss re-prefill tax and the O(N) planner compute) so the "O(1) resident" bend is shown
-// beside the real costs it does not bound. The slices are index-aligned with turns.
+// recall per regime at each horizon, plus the Planned-only priced costs (the forecast-miss
+// re-prefill tax and BOTH planner-compute terms) so the "O(1) resident" bend is shown beside
+// the real costs it does not bound. The two compute columns are the full-scan Θ(N²)
+// (planner-cpu) and the index-bounded Θ(c·N) (planner-cpu-idx, the flatten the inverted index
+// buys), read side by side. The slices are index-aligned with turns.
 func (c Comparison) Table() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-12s | %-14s %-8s | %-14s %-8s | %-14s %-8s %-10s %-11s %-12s\n",
+	fmt.Fprintf(&b, "%-12s | %-14s %-8s | %-14s %-8s | %-14s %-8s %-10s %-11s %-12s %-14s\n",
 		"turns", "linear-resident", "recall", "compact-resident", "recall",
-		"planned-resident", "recall", "faults", "fault-tax", "planner-cpu")
-	b.WriteString(strings.Repeat("-", 116) + "\n")
+		"planned-resident", "recall", "faults", "fault-tax", "planner-cpu", "planner-cpu-idx")
+	b.WriteString(strings.Repeat("-", 132) + "\n")
 	for i, n := range c.Turns {
 		l, cm, pl := c.Linear[i], c.Compaction[i], c.Planned[i]
-		fmt.Fprintf(&b, "%-12s | %-14s %-8.3f | %-14s %-8.3f | %-14s %-8.3f %-10s %-11s %-12s\n",
+		fmt.Fprintf(&b, "%-12s | %-14s %-8.3f | %-14s %-8.3f | %-14s %-8.3f %-10s %-11s %-12s %-14s\n",
 			human(n),
 			human(l.Resident), l.RecallExact,
 			human(cm.Resident), cm.RecallExact,
 			human(pl.Resident), pl.RecallExact,
-			human(int(pl.RetrieveFaults)), human(int(pl.FaultTaxCum)), human(int(pl.PlannerComputeCum)))
+			human(int(pl.RetrieveFaults)), human(int(pl.FaultTaxCum)),
+			human(int(pl.PlannerComputeCum)), human(int(pl.PlannerComputeBounded)))
 	}
 	return b.String()
+}
+
+// GreedyGap is the MEASURED optimality gap between the production greedy-by-density planner
+// (ObjGreedy) and the exact 0/1-knapsack oracle (ObjExact) on one representative store: the
+// benefit each objective achieves under the same budget, and the gap as both an absolute
+// benefit delta and a ratio of greedy to optimal. It is arithmetic over the two plans (no wall
+// clock, no randomness — fully reproducible), and it is a measured BOUND, not an assertion that
+// the gap is zero: a denser span can box greedy out of a more valuable pair (the classic
+// knapsack counterexample), so Ratio is the fraction of the optimum greedy actually captures.
+type GreedyGap struct {
+	Budget        int     `json:"budget"`         // the token budget both planners ran under
+	Candidates    int     `json:"candidates"`     // candidate spans scored (the oracle-sized input)
+	GreedyBenefit float64 `json:"greedy_benefit"` // benefit ObjGreedy achieved (the production planner)
+	ExactBenefit  float64 `json:"exact_benefit"`  // benefit ObjExact achieved (the optimal oracle)
+	AbsGap        float64 `json:"abs_gap"`        // ExactBenefit - GreedyBenefit (>= 0; the value greedy leaves on the table)
+	Ratio         float64 `json:"ratio"`          // GreedyBenefit / ExactBenefit in (0,1]; 1.0 means greedy was optimal here
+}
+
+// MeasureGreedyGap runs the greedy planner and the exact-DP oracle over the SAME candidates and
+// budget and records the empirical optimality gap (issue #562). It is the witness that the
+// "O(1) resident" planner's greedy choice stays near-optimal: the gap is MEASURED on real
+// candidate sets, reported as a bound, never assumed zero. The oracle is only meaningful on
+// oracle-sized inputs (knapsackExact degrades to greedy past DPExactLimit), so callers pass a
+// bounded candidate set — exactly the index-bounded probe the Planned regime scores each turn.
+// An empty candidate set or non-positive budget yields a Ratio of 1.0 (nothing to lose).
+func MeasureGreedyGap(cands []Candidate, budget int) GreedyGap {
+	greedy := Optimize(cands, Budget{Tokens: budget}, nil, ObjGreedy)
+	exact := Optimize(cands, Budget{Tokens: budget}, nil, ObjExact)
+	g := GreedyGap{
+		Budget:        budget,
+		Candidates:    len(cands),
+		GreedyBenefit: greedy.Benefit,
+		ExactBenefit:  exact.Benefit,
+		AbsGap:        exact.Benefit - greedy.Benefit,
+	}
+	if exact.Benefit > 0 {
+		g.Ratio = greedy.Benefit / exact.Benefit
+	} else {
+		g.Ratio = 1.0 // no achievable benefit — greedy lost nothing
+	}
+	return g
 }
 
 // human renders an int with K/M/B suffixes so a 700,000,000-token resident set is
