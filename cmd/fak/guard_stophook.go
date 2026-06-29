@@ -37,28 +37,136 @@ const (
 	guardStopHookEnvMode       = "FAK_GUARD_DENYALL_MODE"
 	guardStopHookEnvMetricsURL = "FAK_GUARD_DENYALL_METRICS_URL"
 	guardStopHookEnvMax        = "FAK_GUARD_DENYALL_MAX"
+	guardStopHookEnvWarn       = "FAK_GUARD_DENYALL_WARN"
+	guardStopHookEnvFinal      = "FAK_GUARD_DENYALL_FINAL"
 
 	// guardStopHookMetricName is the gateway gauge this hook polls: the count of consecutive
 	// deny-all turns ending the most recent served turn (0 on a healthy completion).
 	guardStopHookMetricName = "fak_guard_deny_all_consecutive"
 
-	// guardStopHookDefaultMax bounds how many consecutive deny-all turns the hook will
-	// auto-continue past before it gives up and lets the turn end — so a model that keeps
-	// re-proposing refused calls cannot loop forever.
-	guardStopHookDefaultMax = 3
+	// The graduated back-off ladder. Rather than a single cliff (continue N times, then a hard
+	// stop), the auto-continue guidance ESCALATES with the consecutive deny-all depth, and the
+	// hard give-up moves much later. This gives a confused-but-capable model more room while a
+	// genuinely-blocked one is told, early and explicitly, to declare BLOCKED and stop cleanly:
+	//
+	//	consecutive 0	-> ALLOW   (a clean completion is a real stop)
+	//	1 .. Warn-1	-> NUDGE   (gentle "pick an allowed alternative")
+	//	Warn .. Final-1	-> WARN    (force a relevance decision; name the BLOCKED exit)
+	//	Final .. Max	-> FINAL   (last attempts; act now or declare BLOCKED)
+	//	> Max		-> GIVE-UP (allow the stop, LOUDLY, so it is no longer invisible)
+	guardStopHookDefaultWarn  = 3
+	guardStopHookDefaultFinal = 7
+	guardStopHookDefaultMax   = 9
 )
 
-// guardStopHookContinueReason is the instruction fed back to the model (via the Stop hook's
-// exit-2 stderr) when fak resumes the agent past a deny-all stop. The per-call refusal detail
-// is already in the transcript (the in-band `[fak] refused …` note on the ended turn); this is
-// the nudge to act on it rather than stop.
+// guardStopHookStage is the rung of the graduated deny-all back-off ladder the current
+// consecutive count falls in. It drives BOTH the decision (allow / continue / give-up) and the
+// firmness of the guidance fed back to the model.
+type guardStopHookStage int
+
+const (
+	guardStopHookAllow  guardStopHookStage = iota // consecutive 0: a clean completion — allow the stop
+	guardStopHookNudge                            // 1 .. Warn-1: gentle "pick an allowed alternative"
+	guardStopHookWarn                             // Warn .. Final-1: force a relevance decision
+	guardStopHookFinal                            // Final .. Max: last attempts before give-up
+	guardStopHookGiveUp                           // > Max: bounded give-up — allow the stop, loudly
+)
+
+func (s guardStopHookStage) String() string {
+	switch s {
+	case guardStopHookAllow:
+		return "allow"
+	case guardStopHookNudge:
+		return "nudge"
+	case guardStopHookWarn:
+		return "warn"
+	case guardStopHookFinal:
+		return "final"
+	case guardStopHookGiveUp:
+		return "give-up"
+	default:
+		return "unknown"
+	}
+}
+
+// guardStopHookContinueReason is the NUDGE-rung instruction fed back to the model (via the Stop
+// hook's exit-2 stderr) when fak first resumes the agent past a deny-all stop. The per-call
+// refusal detail is already in the transcript (the in-band `[fak] refused …` note on the ended
+// turn); this is the gentle nudge to act on it rather than stop. Later rungs of the ladder
+// (guardStopHookStageMessage) escalate the firmness and name the sanctioned clean exit.
 const guardStopHookContinueReason = "fak guard: your previous turn proposed only tool call(s) the capability floor refused, so it ended without action (reported upstream as end_turn). Do NOT re-propose a refused call unchanged — pick an ALLOWED alternative and continue the task. If there is genuinely no allowed way to make progress, say so explicitly and then stop."
+
+// normalizeDenyAllThresholds makes the ladder a TOTAL, deterministic function of its three
+// knobs: it clamps any operator/env misconfiguration into the invariant 1 <= warn <= final <=
+// max so a bad flag can never invert the ladder or wedge the hook. A non-positive max falls
+// back to the default; warn floors at 1; final is pulled into [warn, max].
+func normalizeDenyAllThresholds(warnAt, finalAt, maxN int) (int, int, int) {
+	if maxN <= 0 {
+		maxN = guardStopHookDefaultMax
+	}
+	if warnAt < 1 {
+		warnAt = 1
+	}
+	if warnAt > maxN {
+		warnAt = maxN
+	}
+	if finalAt < warnAt {
+		finalAt = warnAt
+	}
+	if finalAt > maxN {
+		finalAt = maxN
+	}
+	return warnAt, finalAt, maxN
+}
+
+// guardStopHookStageFor maps a consecutive deny-all count onto its ladder rung. Pure + total;
+// thresholds are normalized first so the rung order can never invert.
+func guardStopHookStageFor(consecutive, warnAt, finalAt, maxN int) guardStopHookStage {
+	warnAt, finalAt, maxN = normalizeDenyAllThresholds(warnAt, finalAt, maxN)
+	switch {
+	case consecutive <= 0:
+		return guardStopHookAllow
+	case consecutive > maxN:
+		return guardStopHookGiveUp
+	case consecutive >= finalAt:
+		return guardStopHookFinal
+	case consecutive >= warnAt:
+		return guardStopHookWarn
+	default:
+		return guardStopHookNudge
+	}
+}
+
+// guardStopHookStageMessage is the exact stderr text fed back to the model when the hook BLOCKS
+// the stop (exit 2) at a continue rung. Each rung is firmer than the last, and the WARN/FINAL
+// rungs name the sanctioned clean exit: reply `BLOCKED: <reason>` and stop. (A pure-text turn
+// resets the gateway's consecutive gauge to 0, so that declaration genuinely lets the next stop
+// through — the agent's own choice, not a fak-forced halt.)
+func guardStopHookStageMessage(stage guardStopHookStage, consecutive, maxN int) string {
+	switch stage {
+	case guardStopHookWarn:
+		return fmt.Sprintf("fak guard: %d turns in a row now ended with EVERY proposed tool call refused by the capability floor — you are repeating calls it will not allow. STOP and DECIDE: is the remaining work actually reachable under this floor? If YES, take a DIFFERENT, allowed action now (a different tool, a narrower command, or a path the floor permits). If NO, reply on one line `BLOCKED: <reason>` and then stop — declaring blocked is a clean, expected outcome, not a failure. (Auto-continue %d of %d before fak lets the turn end.)", consecutive, consecutive, maxN)
+	case guardStopHookFinal:
+		return fmt.Sprintf("fak guard: FINAL auto-continue (%d of %d). After %d consecutive refused-everything turns fak will let the session stop with work possibly unfinished. If you have ANY allowed way to make progress, take it on THIS turn; otherwise reply on one line `BLOCKED: <reason>` and stop now, so the stop is your decision, not fak's.", consecutive, maxN, maxN)
+	default:
+		return guardStopHookContinueReason
+	}
+}
+
+// guardStopHookGiveUpMessage is the OPERATOR-facing line printed when the hook gives up and
+// allows the stop (exit 0, so it is NOT fed to the model). It makes the previously-invisible
+// give-up legible: the residual false-stop the audit named.
+func guardStopHookGiveUpMessage(consecutive, maxN int) string {
+	return fmt.Sprintf("fak guard Stop: GIVE-UP after %d consecutive deny-all turns (every proposed tool call refused; %d > max %d) — allowing the stop with work possibly unfinished. Inspect why the floor refuses everything (fak guard --dump-policy) or raise --deny-all-max; --deny-all-continue off disables this layer.", consecutive, consecutive, maxN)
+}
 
 type guardStopHookInstall struct {
 	Applied      bool
 	Mode         string
 	SettingsPath string
 	MetricsURL   string
+	WarnAt       int
+	FinalAt      int
 	Max          int
 	Reason       string
 }
@@ -76,7 +184,9 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 	fs.SetOutput(stderr)
 	modeFlag := fs.String("mode", os.Getenv(guardStopHookEnvMode), "off|shadow|enforce")
 	metricsURLFlag := fs.String("metrics-url", os.Getenv(guardStopHookEnvMetricsURL), "gateway /metrics URL")
-	maxFlag := fs.Int("max", guardStopHookMaxFromEnv(), "max consecutive deny-all turns to auto-continue past")
+	maxFlag := fs.Int("max", guardStopHookMaxFromEnv(), "hard give-up: max consecutive deny-all turns to auto-continue past before letting the turn end")
+	warnFlag := fs.Int("warn", guardStopHookWarnFromEnv(), "escalate the continue guidance to a relevance-decision warning at this consecutive deny-all depth")
+	finalFlag := fs.Int("final", guardStopHookFinalFromEnv(), "escalate the continue guidance to a final warning at this consecutive deny-all depth")
 	timeout := fs.Duration("timeout", 500*time.Millisecond, "maximum time to wait for the gateway gauge")
 	if err := fs.Parse(argv); err != nil {
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; bad hook args: %v\n", err)
@@ -107,45 +217,52 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; deny-all gauge unavailable: %v\n", err)
 		return 0
 	}
-	maxN := *maxFlag
-	if maxN <= 0 {
-		maxN = guardStopHookDefaultMax
-	}
-	exit, block := guardStopHookDecision(consecutive, maxN, mode)
+	warnAt, finalAt, maxN := normalizeDenyAllThresholds(*warnFlag, *finalFlag, *maxFlag)
+	exit, block, stage := guardStopHookDecision(consecutive, warnAt, finalAt, maxN, mode)
 	if mode == guardPreCompactModeShadow {
 		action := "allow stop"
-		if block {
+		switch {
+		case block:
 			action = "auto-continue (block stop)"
+		case stage == guardStopHookGiveUp:
+			action = "give up and allow stop"
 		}
-		fmt.Fprintf(stderr, "fak guard Stop: shadow would %s (deny_all_consecutive=%d max=%d stop_hook_active=%v)\n", action, consecutive, maxN, active)
+		fmt.Fprintf(stderr, "fak guard Stop: shadow would %s (stage=%s deny_all_consecutive=%d warn=%d final=%d max=%d stop_hook_active=%v)\n", action, stage, consecutive, warnAt, finalAt, maxN, active)
 		return 0
 	}
 	if exit == 2 {
-		// Exit 2 blocks the stop; stderr is shown to Claude as the reason to continue.
-		fmt.Fprintln(stderr, guardStopHookContinueReason)
+		// Exit 2 blocks the stop; stderr is shown to Claude as the reason to continue. The text
+		// escalates with the ladder rung (nudge -> warn -> final).
+		fmt.Fprintln(stderr, guardStopHookStageMessage(stage, consecutive, maxN))
 		return 2
+	}
+	// Allowed (exit 0). A clean completion (stage allow) is silent; a bounded GIVE-UP is the
+	// residual false-stop — make it loud and operator-visible (it is NOT fed to the model).
+	if stage == guardStopHookGiveUp {
+		fmt.Fprintln(stderr, guardStopHookGiveUpMessage(consecutive, maxN))
 	}
 	return 0
 }
 
 // guardStopHookDecision is the PURE decision behind the hook: given the gateway's consecutive
-// deny-all count, the retry bound, and the mode, return the exit code and whether it WOULD
-// block. Side-effect-free so the policy is unit-tested without an HTTP gateway. The block
-// window is 1..max inclusive: 0 means the last turn was a clean (non-deny-all) completion —
-// allow the stop; above max means we have already auto-continued enough — give up and let the
-// turn end so a stuck model cannot loop forever.
-func guardStopHookDecision(consecutive, maxN int, mode string) (exit int, block bool) {
+// deny-all count, the graduated thresholds, and the mode, return the exit code, whether it
+// WOULD block, and the ladder rung (drives the guidance text + the shadow log). Side-effect-free
+// so the policy is unit-tested without an HTTP gateway. The continue rungs (nudge/warn/final)
+// block the stop (1..max); rung 0 is a clean completion and rung > max is the bounded give-up —
+// both ALLOW the stop, so a stuck model cannot loop forever.
+func guardStopHookDecision(consecutive, warnAt, finalAt, maxN int, mode string) (exit int, block bool, stage guardStopHookStage) {
+	stage = guardStopHookStageFor(consecutive, warnAt, finalAt, maxN)
 	if mode == guardPreCompactModeOff {
-		return 0, false
+		return 0, false, stage
 	}
-	block = consecutive >= 1 && consecutive <= maxN
+	block = stage == guardStopHookNudge || stage == guardStopHookWarn || stage == guardStopHookFinal
 	if mode == guardPreCompactModeShadow {
-		return 0, block // shadow always allows the stop (exit 0) but reports the would-be block
+		return 0, block, stage // shadow always allows the stop (exit 0) but reports the would-be block
 	}
 	if block {
-		return 2, true
+		return 2, true, stage
 	}
-	return 0, false
+	return 0, false, stage
 }
 
 // readStopHookActive parses the stop_hook_active flag from Claude's Stop-hook stdin JSON. A nil
@@ -185,12 +302,26 @@ func normalizeGuardStopHookMode(mode string) (string, error) {
 }
 
 func guardStopHookMaxFromEnv() int {
-	if v := strings.TrimSpace(os.Getenv(guardStopHookEnvMax)); v != "" {
+	return guardStopHookIntFromEnv(guardStopHookEnvMax, guardStopHookDefaultMax)
+}
+
+func guardStopHookWarnFromEnv() int {
+	return guardStopHookIntFromEnv(guardStopHookEnvWarn, guardStopHookDefaultWarn)
+}
+
+func guardStopHookFinalFromEnv() int {
+	return guardStopHookIntFromEnv(guardStopHookEnvFinal, guardStopHookDefaultFinal)
+}
+
+// guardStopHookIntFromEnv reads a positive int env override, falling back to def on any unset,
+// blank, unparseable, or non-positive value (normalization clamps the rest).
+func guardStopHookIntFromEnv(name string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
-	return guardStopHookDefaultMax
+	return def
 }
 
 // installGuardStopHook installs the Claude Code Stop hook for a guard session. When the
@@ -198,12 +329,12 @@ func guardStopHookMaxFromEnv() int {
 // hook is MERGED into it so a single --settings carries both (--settings is a single-value flag;
 // injecting it twice clobbers rather than merges). Otherwise it writes its own settings file and
 // injects --settings. Off mode or a non-claude child is a no-op (command returned unchanged).
-func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, maxN int) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, warnAt, finalAt, maxN int) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
 	}
-	install := guardStopHookInstall{Mode: normalized, Max: maxN}
+	install := guardStopHookInstall{Mode: normalized, WarnAt: warnAt, FinalAt: finalAt, Max: maxN}
 	if normalized == guardPreCompactModeOff {
 		install.Reason = "disabled"
 		return command, nil, install, nil
@@ -223,15 +354,19 @@ func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath st
 			return command, nil, guardStopHookInstall{}, err
 		}
 	}
-	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, maxN)
+	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, warnAt, finalAt, maxN)
 }
 
-func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, maxN int) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, warnAt, finalAt, maxN int) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
 	}
-	install := guardStopHookInstall{Mode: normalized, Max: maxN}
+	// Normalize once so the install record, the banner, and the injected env all carry the SAME
+	// effective ladder the hook will use — a misconfigured flag can never present one ladder and
+	// run another.
+	warnAt, finalAt, maxN = normalizeDenyAllThresholds(warnAt, finalAt, maxN)
+	install := guardStopHookInstall{Mode: normalized, WarnAt: warnAt, FinalAt: finalAt, Max: maxN}
 	if normalized == guardPreCompactModeOff {
 		install.Reason = "disabled"
 		return command, nil, install, nil
@@ -240,10 +375,6 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		install.Reason = "non-claude-child"
 		return command, nil, install, nil
 	}
-	if maxN <= 0 {
-		maxN = guardStopHookDefaultMax
-	}
-	install.Max = maxN
 
 	var settingsPath string
 	if strings.TrimSpace(existingSettingsPath) != "" {
@@ -273,6 +404,8 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 	env := [][2]string{
 		{guardStopHookEnvMode, normalized},
 		{guardStopHookEnvMetricsURL, metricsURL},
+		{guardStopHookEnvWarn, strconv.Itoa(warnAt)},
+		{guardStopHookEnvFinal, strconv.Itoa(finalAt)},
 		{guardStopHookEnvMax, strconv.Itoa(maxN)},
 	}
 	return command, env, install, nil

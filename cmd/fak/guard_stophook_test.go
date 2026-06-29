@@ -11,27 +11,51 @@ import (
 )
 
 func TestGuardStopHookDecision(t *testing.T) {
+	// Default ladder: warn=3, final=7, max=9.
+	const (
+		warn  = guardStopHookDefaultWarn  // 3
+		final = guardStopHookDefaultFinal // 7
+		max   = guardStopHookDefaultMax   // 9
+	)
 	for _, tc := range []struct {
 		name        string
 		consecutive int
+		warnAt      int
+		finalAt     int
 		maxN        int
 		mode        string
 		wantExit    int
 		wantBlock   bool
+		wantStage   guardStopHookStage
 	}{
-		{"off-never-blocks", 2, 3, guardPreCompactModeOff, 0, false},
-		{"enforce-first-deny-all", 1, 3, guardPreCompactModeEnforce, 2, true},
-		{"enforce-at-bound", 3, 3, guardPreCompactModeEnforce, 2, true},
-		{"enforce-above-bound-gives-up", 4, 3, guardPreCompactModeEnforce, 0, false},
-		{"enforce-clean-completion", 0, 3, guardPreCompactModeEnforce, 0, false},
-		{"shadow-would-block-but-allows", 1, 3, guardPreCompactModeShadow, 0, true},
-		{"shadow-clean", 0, 3, guardPreCompactModeShadow, 0, false},
+		// off never blocks, but still reports the rung it WOULD be at.
+		{"off-never-blocks", 5, warn, final, max, guardPreCompactModeOff, 0, false, guardStopHookWarn},
+		// enforce: a clean completion (rung 0) allows; the three continue rungs all block (exit 2).
+		{"enforce-clean-completion", 0, warn, final, max, guardPreCompactModeEnforce, 0, false, guardStopHookAllow},
+		{"enforce-nudge-low", 1, warn, final, max, guardPreCompactModeEnforce, 2, true, guardStopHookNudge},
+		{"enforce-nudge-high", 2, warn, final, max, guardPreCompactModeEnforce, 2, true, guardStopHookNudge},
+		{"enforce-warn-low", 3, warn, final, max, guardPreCompactModeEnforce, 2, true, guardStopHookWarn},
+		{"enforce-warn-high", 6, warn, final, max, guardPreCompactModeEnforce, 2, true, guardStopHookWarn},
+		{"enforce-final-low", 7, warn, final, max, guardPreCompactModeEnforce, 2, true, guardStopHookFinal},
+		{"enforce-final-at-max", 9, warn, final, max, guardPreCompactModeEnforce, 2, true, guardStopHookFinal},
+		// > max is the bounded give-up: allow the stop (exit 0) so a stuck model cannot loop forever.
+		{"enforce-give-up-above-max", 10, warn, final, max, guardPreCompactModeEnforce, 0, false, guardStopHookGiveUp},
+		// shadow always allows (exit 0) but reports the would-be block + rung.
+		{"shadow-would-block", 1, warn, final, max, guardPreCompactModeShadow, 0, true, guardStopHookNudge},
+		{"shadow-clean", 0, warn, final, max, guardPreCompactModeShadow, 0, false, guardStopHookAllow},
+		{"shadow-give-up", 10, warn, final, max, guardPreCompactModeShadow, 0, false, guardStopHookGiveUp},
+		// Normalization clamps an INVERTED config so the rungs cannot invert: warn=5 clamps to
+		// max=4, final=2 pulls up to warn -> warn=final=max=4.
+		{"normalize-inverted-final", 4, 5, 2, 4, guardPreCompactModeEnforce, 2, true, guardStopHookFinal},
+		{"normalize-inverted-giveup", 5, 5, 2, 4, guardPreCompactModeEnforce, 0, false, guardStopHookGiveUp},
+		// A zero/garbage max falls back to the default ladder rather than wedging.
+		{"normalize-zero-max", 1, 100, 1, 0, guardPreCompactModeEnforce, 2, true, guardStopHookNudge},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			exit, block := guardStopHookDecision(tc.consecutive, tc.maxN, tc.mode)
-			if exit != tc.wantExit || block != tc.wantBlock {
-				t.Fatalf("decision(%d,%d,%q) = exit %d block %v, want exit %d block %v",
-					tc.consecutive, tc.maxN, tc.mode, exit, block, tc.wantExit, tc.wantBlock)
+			exit, block, stage := guardStopHookDecision(tc.consecutive, tc.warnAt, tc.finalAt, tc.maxN, tc.mode)
+			if exit != tc.wantExit || block != tc.wantBlock || stage != tc.wantStage {
+				t.Fatalf("decision(c=%d,w=%d,f=%d,m=%d,%q) = exit %d block %v stage %s, want exit %d block %v stage %s",
+					tc.consecutive, tc.warnAt, tc.finalAt, tc.maxN, tc.mode, exit, block, stage, tc.wantExit, tc.wantBlock, tc.wantStage)
 			}
 		})
 	}
@@ -179,7 +203,7 @@ func TestInstallGuardStopHookMergesIntoPreCompactSettings(t *testing.T) {
 	}
 
 	command, env, stopInstall, err := installGuardStopHookAt(
-		command, guardPreCompactModeEnforce, "http://127.0.0.1:4567", fakBin, "", pcInstall.SettingsPath, 3)
+		command, guardPreCompactModeEnforce, "http://127.0.0.1:4567", fakBin, "", pcInstall.SettingsPath, 3, 7, 9)
 	if err != nil || !stopInstall.Applied {
 		t.Fatalf("stop install: applied=%v err=%v", stopInstall.Applied, err)
 	}
@@ -190,20 +214,24 @@ func TestInstallGuardStopHookMergesIntoPreCompactSettings(t *testing.T) {
 	if n := strings.Count(strings.Join(command, "\x00"), "--settings"); n != 1 {
 		t.Fatalf("command has %d --settings flags, want exactly 1: %v", n, command)
 	}
-	if stopInstall.Max != 3 {
-		t.Fatalf("max = %d, want 3", stopInstall.Max)
+	if stopInstall.WarnAt != 3 || stopInstall.FinalAt != 7 || stopInstall.Max != 9 {
+		t.Fatalf("ladder = warn %d final %d max %d, want 3/7/9", stopInstall.WarnAt, stopInstall.FinalAt, stopInstall.Max)
 	}
-	var sawMode, sawMax bool
+	var sawMode, sawWarn, sawFinal, sawMax bool
 	for _, kv := range env {
-		if kv[0] == guardStopHookEnvMode && kv[1] == guardPreCompactModeEnforce {
+		switch {
+		case kv[0] == guardStopHookEnvMode && kv[1] == guardPreCompactModeEnforce:
 			sawMode = true
-		}
-		if kv[0] == guardStopHookEnvMax && kv[1] == "3" {
+		case kv[0] == guardStopHookEnvWarn && kv[1] == "3":
+			sawWarn = true
+		case kv[0] == guardStopHookEnvFinal && kv[1] == "7":
+			sawFinal = true
+		case kv[0] == guardStopHookEnvMax && kv[1] == "9":
 			sawMax = true
 		}
 	}
-	if !sawMode || !sawMax {
-		t.Fatalf("missing stop-hook env: mode=%v max=%v from %v", sawMode, sawMax, env)
+	if !sawMode || !sawWarn || !sawFinal || !sawMax {
+		t.Fatalf("missing stop-hook env: mode=%v warn=%v final=%v max=%v from %v", sawMode, sawWarn, sawFinal, sawMax, env)
 	}
 
 	// The single settings file now carries BOTH hooks.
@@ -236,7 +264,7 @@ func TestInstallGuardStopHookCreatesOwnSettingsWhenPreCompactOff(t *testing.T) {
 	dir := t.TempDir()
 	command, env, install, err := installGuardStopHookAt(
 		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce, "http://127.0.0.1:4567",
-		filepath.Join(dir, "fak.exe"), dir, "", 2)
+		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9)
 	if err != nil || !install.Applied {
 		t.Fatalf("install: applied=%v err=%v", install.Applied, err)
 	}
@@ -262,7 +290,7 @@ func TestInstallGuardStopHookSkipsOffAndNonClaude(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			command, env, install, err := installGuardStopHookAt(tc.command, tc.mode, "http://127.0.0.1:4567", "fak", dir, "", 3)
+			command, env, install, err := installGuardStopHookAt(tc.command, tc.mode, "http://127.0.0.1:4567", "fak", dir, "", 3, 7, 9)
 			if err != nil {
 				t.Fatalf("install: %v", err)
 			}
