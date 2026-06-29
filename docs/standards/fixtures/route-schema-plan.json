@@ -1,0 +1,19 @@
+{
+  "_comment": "The REVIEW artifact: the Decision produced by routing the subject below through route-schema-manifest.json with NO model and NO fak engine in the loop. The first matching rule wins (guard-writes-vote), so the same subject shape always yields this same plan.",
+  "subject": {
+    "aspect": "tool_call",
+    "tool": "write_file",
+    "latency": "interactive",
+    "labels": { "tenant": "acme" }
+  },
+  "rule": "guard-writes-vote",
+  "matched": true,
+  "plan": {
+    "members": [
+      { "model": "guard-a", "weight": 1, "role": "primary" },
+      { "model": "guard-b", "weight": 1, "role": "verifier" }
+    ],
+    "reduce": "vote",
+    "reason": "write-shaped tool call: two guard models must agree (weighted majority) before the call proceeds"
+  }
+}

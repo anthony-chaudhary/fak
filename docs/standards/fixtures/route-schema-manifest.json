@@ -1,0 +1,63 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [{ "model": "medium", "role": "primary" }],
+    "reason": "no rule matched; fail-closed to the balanced mid-tier model"
+  },
+  "rules": [
+    {
+      "name": "guard-writes-vote",
+      "match": { "aspect": "tool_call", "tool": "write_*" },
+      "plan": {
+        "members": [
+          { "model": "guard-a", "weight": 1, "role": "primary" },
+          { "model": "guard-b", "weight": 1, "role": "verifier" }
+        ],
+        "reduce": "vote",
+        "reason": "write-shaped tool call: two guard models must agree (weighted majority) before the call proceeds"
+      }
+    },
+    {
+      "name": "legal-best-of",
+      "match": { "aspect": "query", "labels": { "domain": "legal" } },
+      "plan": {
+        "members": [
+          { "model": "drafter-a", "role": "drafter" },
+          { "model": "drafter-b", "role": "drafter" },
+          { "model": "judge", "role": "judge" }
+        ],
+        "reduce": "best_of",
+        "scout": "tiny-classifier",
+        "reason": "legal sub-query: two drafters, a judge scores, best answer wins; a tiny scout pre-classifies risk first"
+      }
+    },
+    {
+      "name": "retrieval-small",
+      "match": { "aspect": "tool_call", "tool": "search_*" },
+      "plan": {
+        "members": [{ "model": "small" }],
+        "reason": "cheap read-shaped tool call -> small/fast model"
+      }
+    },
+    {
+      "name": "fanout-concat",
+      "match": { "aspect": "query", "labels": { "mode": "fanout" } },
+      "plan": {
+        "members": [
+          { "model": "worker-a" },
+          { "model": "worker-b" }
+        ],
+        "reduce": "concat",
+        "reason": "fan-out gather: concatenate both workers' partial answers in member order"
+      }
+    },
+    {
+      "name": "hard-reasoning-step",
+      "match": { "aspect": "step", "min_complexity": "high" },
+      "plan": {
+        "members": [{ "model": "large" }],
+        "reason": "a hard reasoning step -> the large model (only the hard aspects pay the large-model price)"
+      }
+    }
+  ]
+}
