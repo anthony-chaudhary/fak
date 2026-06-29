@@ -695,7 +695,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// If the result-side floor paged out an inbound tool result, say so in-band too:
 	// the model is about to read a quarantine stub where its tool output was, and a
 	// silent stub reads as a broken tool. Naming the quarantine lets the agent adapt.
-	if note := resultAdmissionNote(resultAdmissions); note != "" {
+	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
 		blocks = prependTextBlock(blocks, note)
 	}
 	// Echo the model the client asked for (Anthropic reflects the requested id);
@@ -733,63 +733,114 @@ func (s *Server) anthropicPassthrough() bool {
 	return ok && hp.Provider == agent.ProviderAnthropic
 }
 
-// resultAdmissionNote names any inbound tool result the kernel PAGED OUT and explains,
-// in plain language, WHY and what to do about it — so a quarantine stub does not read as
-// a broken tool. It is deliberately NON-ALARMING: a quarantine is a routine safety
+// resultAdmissionNote names any inbound tool result the kernel PAGED OUT so a quarantine
+// stub does not read as a broken tool — in ONE line. A quarantine is a routine safety
 // precaution (most often a credential-shaped string or injection-shaped text in the
-// tool's OWN output, which CAN be a false positive on placeholder/example content), not a
-// sign the agent did anything wrong. The structured per-result verdicts still ride the
-// machine-readable `fak` extension; this is the human/agent-facing prose for both the
-// buffered and streaming Anthropic paths. Returns "" when every result was a clean allow.
+// tool's OWN output, which CAN be a false positive on placeholder/example or
+// security-discussing content), not a sign the agent did anything wrong. The per-result
+// verdicts (tool, reason, page-in id) still ride the machine-readable `fak` extension, so
+// the prose only needs to carry the three things a reading model acts on: that something
+// was held (not lost), that it is retrievable, and that it is not the agent's fault. The
+// reason CODES (TRUST_VIOLATION / SECRET_EXFIL / OVERSIZE) are the closed-vocabulary
+// labels — terse and self-describing — instead of a per-item paragraph. Returns "" when
+// every result was a clean allow.
+//
+// This is the buffered/streaming Anthropic + Gemini prose; resultAdmissionNoteOnce wraps
+// it with per-session dedup so a single held result is announced once, not every replayed
+// turn.
 func resultAdmissionNote(adms []ResultAdmission) string {
-	items := make([]string, 0, len(adms))
+	n := 0
+	counts := map[string]int{}
+	order := make([]string, 0, 4)
 	for _, a := range adms {
 		if a.Verdict.Kind != "QUARANTINE" {
 			continue
 		}
-		tool := a.Tool
-		if tool == "" {
-			tool = "a tool result"
+		n++
+		reason := a.Verdict.Reason
+		if reason == "" {
+			reason = "RESULT_FLOOR"
 		}
-		items = append(items, tool+" — "+quarantineReasonPhrase(a.Verdict.Reason))
+		if _, seen := counts[reason]; !seen {
+			order = append(order, reason)
+		}
+		counts[reason]++
 	}
-	if len(items) == 0 {
+	if n == 0 {
 		return ""
 	}
-	lead := "[fak] Heads up: 1 inbound tool result was held out of context as a safety precaution"
-	if len(items) > 1 {
-		lead = "[fak] Heads up: " + strconv.Itoa(len(items)) + " inbound tool results were held out of context as a safety precaution"
+	noun, verb := "tool result", "was"
+	if n > 1 {
+		noun, verb = "tool results", "were"
 	}
-	// Paged out, not lost — a short stub stands in its place. Tell the agent it can keep
-	// going (this is expected) and where the bytes went, rather than leaving it to read a
-	// bare stub as a failed tool call.
-	return lead + " (paged out, not lost — a stub stands in its place): " + strings.Join(items, "; ") +
-		". This is routine fak guard behavior, not an error you caused — continue normally. " +
-		"The held bytes stay retrievable through the kernel page-in gate if they are genuinely needed; " +
-		"just don't treat the stub itself as the real result."
+	parts := make([]string, 0, len(order))
+	for _, reason := range order {
+		if c := counts[reason]; c > 1 {
+			parts = append(parts, reason+"×"+strconv.Itoa(c))
+		} else {
+			parts = append(parts, reason)
+		}
+	}
+	return "[fak] " + strconv.Itoa(n) + " " + noun + " " + verb + " held out of context (" +
+		strings.Join(parts, ", ") + ") — paged out, not lost; retrievable via the kernel page-in gate. " +
+		"Routine guard behavior, not an error you caused; see the `fak` extension for per-result detail."
 }
 
-// quarantineReasonPhrase turns a closed-vocabulary refusal CODE (e.g. "SECRET_EXFIL")
-// into a one-line, human explanation of what fak saw and why it held the result. It maps
-// the codes the result-side floor actually emits; an unrecognized code falls back to its
-// raw name so a newly added reason is surfaced rather than silently dropped. The SECRET
-// case names the false-positive risk explicitly, because the most common trigger is the
-// agent reading its OWN files (source, .env.example, docs) where a credential-SHAPED
-// string is a placeholder, not a live secret.
-func quarantineReasonPhrase(reason string) string {
-	switch reason {
-	case "SECRET_EXFIL", "RESULT_SECRET_DISCOVERED":
-		return "a credential-shaped string was detected in its output and withheld so it never enters the model's context " +
-			"(often a false positive on a placeholder or example credential, e.g. when reading your own source/config)"
-	case "TRUST_VIOLATION":
-		return "prompt-injection-shaped text was detected in its output (e.g. \"ignore previous instructions\") and withheld so it cannot steer the model"
-	case "OVERSIZE":
-		return "the result exceeded the context-admission budget and was paged out"
-	case "":
-		return "held by the kernel result floor"
-	default:
-		return "held by the kernel result floor (" + reason + ")"
+// resultAdmissionNoteOnce is resultAdmissionNote with PER-SESSION dedup: it emits the
+// prose banner only for quarantined results this trace has not already announced, so a
+// held result is surfaced once rather than re-announced on every replayed turn (the client
+// re-sends the full transcript each turn, so admitInboundResults re-quarantines the SAME
+// result every time). The machine-readable verdicts still ride the `fak` extension on every
+// turn — only the repeated human paragraph is suppressed, so dedup costs no signal. A
+// fresh quarantine on a later turn (new key) still emits. An empty trace falls back to the
+// un-deduped note (no session to key on).
+func (s *Server) resultAdmissionNoteOnce(trace string, adms []ResultAdmission) string {
+	if s == nil || trace == "" {
+		return resultAdmissionNote(adms)
 	}
+	fresh := make([]ResultAdmission, 0, len(adms))
+	s.notedResultsMu.Lock()
+	if s.notedResults == nil {
+		s.notedResults = map[string]map[string]struct{}{}
+	}
+	if len(s.notedResults) >= maxResetHealthSessions {
+		// Bound the map (same reaper convention as turnSafety/resetHealth): drop one stale
+		// trace. The dedup is best-effort observability, so an evicted trace re-announcing
+		// once is harmless.
+		for k := range s.notedResults {
+			delete(s.notedResults, k)
+			break
+		}
+	}
+	seen := s.notedResults[trace]
+	if seen == nil {
+		seen = map[string]struct{}{}
+		s.notedResults[trace] = seen
+	}
+	for _, a := range adms {
+		if a.Verdict.Kind != "QUARANTINE" {
+			continue
+		}
+		key := resultNoteKey(a)
+		if _, already := seen[key]; already {
+			continue
+		}
+		seen[key] = struct{}{}
+		fresh = append(fresh, a)
+	}
+	s.notedResultsMu.Unlock()
+	return resultAdmissionNote(fresh)
+}
+
+// resultNoteKey is the stable per-result dedup key. The tool_call_id is replayed
+// byte-identically across turns by the client, so it identifies the SAME held result over
+// a session; an idless result (a nameless cross-boundary payload) falls back to
+// tool|reason, which collapses repeats of the same shape without a stable id.
+func resultNoteKey(a ResultAdmission) string {
+	if a.ToolCallID != "" {
+		return a.ToolCallID
+	}
+	return a.Tool + "|" + a.Verdict.Reason
 }
 
 // anyRepaired reports whether the kernel rewrote any admitted call's arguments.

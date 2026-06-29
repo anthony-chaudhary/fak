@@ -239,7 +239,7 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 			parts = prependGeminiTextPart(parts, note)
 		}
 	}
-	if note := resultAdmissionNote(resultAdmissions); note != "" {
+	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
 		parts = prependGeminiTextPart(parts, note)
 	}
 	// Every proposed call refused and no surviving prose: carry the deny summary as

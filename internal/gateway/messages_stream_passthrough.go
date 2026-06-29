@@ -196,7 +196,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		p.send("message_start", ev.Data)
 		// The model is about to read a quarantine stub where an inbound tool result
 		// was paged out — say so in-band, as a LEADING text block, before its prose.
-		if note := resultAdmissionNote(p.resultAdms); note != "" {
+		if note := p.s.resultAdmissionNoteOnce(p.reqTrace, p.resultAdms); note != "" {
 			emitAnthropicTextBlock(p.send, &p.outIdx, note)
 		}
 

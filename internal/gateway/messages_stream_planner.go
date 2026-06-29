@@ -126,7 +126,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	defer lease.Release()
 
 	start()
-	if note := resultAdmissionNote(resultAdmissions); note != "" {
+	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
 		emitAnthropicTextBlock(sendLocked, &outIdx, note)
 	}
 
