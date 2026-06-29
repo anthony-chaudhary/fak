@@ -55,6 +55,7 @@ SCHEMA = "fleet-dos-supervisor-watchdog/1"
 
 ENACTABLE_VERDICTS = {"READY_TO_CANARY"}
 NOOP_VERDICTS = {"AT_TARGET", "READY"}
+PLAN_EMPTY_VERDICT = "PLAN_SURFACE_EMPTY"
 
 # The 3 exclusive lanes that need fleet-wide consensus (mirrors dos_fleet_lease.GLOBAL_LANES).
 GLOBAL_LANES = ("abi", "release", "global")
@@ -230,6 +231,51 @@ def enact_command(workspace: Path, target: int, max_ticks: int, lane: str | None
     return cmd
 
 
+def issue_surface_fallback(workspace: Path, *, timeout_s: int = 130) -> dict[str, Any]:
+    """Read the issue-lane router as the fallback work surface.
+
+    The router may exit non-zero when unrouted work is still high; that is not a
+    fallback failure if it also returns routed lanes. We consume the JSON payload
+    and let _issue_fallback_ready decide whether there is dispatchable issue work.
+    """
+    cmd = [sys.executable, str(workspace / "tools" / "issue_lane_router.py"), "--json"]
+    try:
+        proc = subprocess.run(
+            cmd, cwd=workspace, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout_s)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"_error": str(exc), "_cmd": cmd}
+    doc = status.read_json_from_text(proc.stdout)
+    if not isinstance(doc, dict):
+        doc = {}
+    doc["_returncode"] = proc.returncode
+    doc["_cmd"] = cmd
+    if proc.returncode not in range(0, 16) and "_error" not in doc:
+        doc["_error"] = (proc.stderr or proc.stdout or "").strip()[-500:]
+    return doc
+
+
+def _issue_fallback_ready(issue_fallback: dict[str, Any] | None) -> bool:
+    if not issue_fallback or issue_fallback.get("_error"):
+        return False
+    counts = issue_fallback.get("counts") or {}
+    lanes = issue_fallback.get("lanes") or {}
+    return _int(counts.get("routed"), 0) > 0 and bool(lanes)
+
+
+def issue_fallback_command(workspace: Path, target: int, *, live: bool) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(workspace / "tools" / "issue_resolve_dispatch.py"),
+        "--workspace", str(workspace),
+        "--max-workers", str(max(1, target)),
+        "--json",
+    ]
+    if live:
+        cmd.append("--live")
+    return cmd
+
+
 def build_plan(
     readiness: dict[str, Any],
     *,
@@ -239,6 +285,7 @@ def build_plan(
     live: bool,
     safety: dict[str, Any] | None = None,
     env: dict[str, str] | None = None,
+    issue_fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     verdict = str(readiness.get("verdict") or "")
     supervise = readiness.get("supervise") or {}
@@ -274,6 +321,32 @@ def build_plan(
     # Build the command with the first available (allowlist-steered) spawn lane
     lane = spawn[0] if spawn else None
     command = enact_command(workspace, target, max_ticks, lane=lane)
+
+    if verdict == PLAN_EMPTY_VERDICT and _issue_fallback_ready(issue_fallback):
+        counts = issue_fallback.get("counts") or {}
+        fallback_command = issue_fallback_command(workspace, target, live=live)
+        return _plan(
+            readiness=readiness,
+            workspace=workspace,
+            target=target,
+            max_ticks=max_ticks,
+            live=live,
+            action="enact" if live else "would_enact",
+            ok=True,
+            reason=(
+                "plan surface empty; falling back to issue surface with "
+                f"{counts.get('routed')} routed open issue(s)"
+            ),
+            command=fallback_command,
+            safety=safety,
+            issue_fallback={
+                "schema": issue_fallback.get("schema"),
+                "routed": counts.get("routed"),
+                "unrouted": counts.get("unrouted"),
+                "open": counts.get("open"),
+                "lanes": sorted((issue_fallback.get("lanes") or {}).keys()),
+            },
+        )
 
     if not readiness.get("ok"):
         return _plan(
@@ -341,6 +414,7 @@ def _plan(
     reason: str,
     command: list[str],
     safety: dict[str, Any] | None = None,
+    issue_fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     supervise = readiness.get("supervise") or {}
     return {
@@ -364,6 +438,7 @@ def _plan(
             "alive": supervise.get("alive"),
             "target": supervise.get("target"),
         },
+        **({"issue_fallback": issue_fallback} if issue_fallback else {}),
     }
 
 
@@ -375,6 +450,7 @@ def run_watchdog(
     live: bool,
     timeout_s: int,
     readiness: dict[str, Any] | None = None,
+    issue_fallback: dict[str, Any] | None = None,
     runner: Runner | None = None,
     safety: dict[str, Any] | None = None,
     allow_dirty: bool = False,
@@ -384,6 +460,8 @@ def run_watchdog(
 ) -> dict[str, Any]:
     root = workspace.resolve()
     payload = readiness if readiness is not None else status.collect(root)
+    if issue_fallback is None and payload.get("verdict") == PLAN_EMPTY_VERDICT:
+        issue_fallback = issue_surface_fallback(root)
     safety_payload = safety if safety is not None else workspace_safety(root)
     resolved_target = resolve_target(payload, target)
     plan = build_plan(
@@ -394,6 +472,7 @@ def run_watchdog(
         live=live,
         safety=safety_payload,
         env=env,
+        issue_fallback=issue_fallback,
     )
     if plan["action"] != "enact":
         return plan

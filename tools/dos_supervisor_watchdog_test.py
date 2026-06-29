@@ -167,6 +167,85 @@ class DosSupervisorWatchdogTest(unittest.TestCase):
         self.assertTrue(got["ok"])
         self.assertEqual(got["action"], "noop")
 
+    def test_plan_surface_empty_falls_back_to_issue_resolver(self) -> None:
+        mod = load()
+
+        def fail_runner(_cmd, _cwd, _timeout_s):
+            raise AssertionError("dry run must not call runner")
+
+        got = mod.run_watchdog(
+            workspace=ROOT,
+            target=2,
+            max_ticks=1,
+            live=False,
+            timeout_s=120,
+            readiness=readiness("PLAN_SURFACE_EMPTY", ok=False, spawn=[], alive=0, target=0),
+            issue_fallback={
+                "schema": "fleet-issue-lane-router/1",
+                "counts": {"open": 5, "routed": 3, "unrouted": 2},
+                "lanes": {"tools": {"issues": [1, 2, 3]}},
+            },
+            runner=fail_runner,
+            safety=clean_safety(),
+        )
+
+        self.assertTrue(got["ok"])
+        self.assertEqual(got["action"], "would_enact")
+        self.assertIn("issue_resolve_dispatch.py", " ".join(got["command"]))
+        self.assertNotIn("--live", got["command"])
+        self.assertEqual(got["issue_fallback"]["routed"], 3)
+        self.assertIn("falling back to issue surface", got["reason"])
+
+    def test_plan_surface_empty_without_routed_issues_still_refuses(self) -> None:
+        mod = load()
+
+        got = mod.run_watchdog(
+            workspace=ROOT,
+            target=1,
+            max_ticks=1,
+            live=False,
+            timeout_s=120,
+            readiness=readiness("PLAN_SURFACE_EMPTY", ok=False, spawn=[], alive=0, target=0),
+            issue_fallback={
+                "schema": "fleet-issue-lane-router/1",
+                "counts": {"open": 2, "routed": 0, "unrouted": 2},
+                "lanes": {},
+            },
+            safety=clean_safety(),
+        )
+
+        self.assertFalse(got["ok"])
+        self.assertEqual(got["action"], "refuse")
+
+    def test_live_plan_empty_fallback_runs_issue_resolver_with_live_flag(self) -> None:
+        mod = load()
+        calls = []
+
+        got = mod.run_watchdog(
+            workspace=ROOT,
+            target=1,
+            max_ticks=1,
+            live=True,
+            timeout_s=120,
+            readiness=readiness("PLAN_SURFACE_EMPTY", ok=False, spawn=[], alive=0, target=0),
+            issue_fallback={
+                "schema": "fleet-issue-lane-router/1",
+                "counts": {"open": 1, "routed": 1, "unrouted": 0},
+                "lanes": {"tools": {"issues": [1]}},
+            },
+            runner=lambda cmd, cwd, timeout_s: (
+                calls.append((cmd, cwd, timeout_s)) or
+                {"returncode": 0, "stdout": "{}", "stderr": ""}
+            ),
+            safety=clean_safety(),
+        )
+
+        self.assertTrue(got["ok"])
+        self.assertEqual(got["action"], "enacted")
+        self.assertEqual(len(calls), 1)
+        self.assertIn("--live", calls[0][0])
+        self.assertIn("issue_resolve_dispatch.py", " ".join(calls[0][0]))
+
     def test_live_ready_to_canary_calls_runner_once(self) -> None:
         mod = load()
         calls = []

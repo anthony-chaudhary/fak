@@ -24,7 +24,10 @@ def load():
 m = load()
 
 # A 6-lane subset mirroring dos doctor output (+ the exclusive abi lane).
-LANES = ["gateway", "compute", "docs", "tools", "experiments", "model", "abi"]
+LANES = [
+    "gateway", "compute", "docs", "tools", "experiments", "model", "abi",
+    "bench", "ci", "sessionimage", "promptmmu", "devindex", "metrics", "examples",
+]
 # Real-layout trees (the Go module is the repo ROOT): `internal/...`, NOT
 # `fak/internal/...`. Mirrors the corrected `dos doctor --json` output after the
 # 2026-06-22 dos.toml prefix reconciliation. Issue bodies below still name files in
@@ -38,6 +41,13 @@ TREES = {
     "experiments": ["experiments/**"],
     "model": ["internal/model/**"],
     "abi": ["internal/abi/**"],
+    "bench": ["internal/bench/**"],
+    "ci": [".github/**"],
+    "sessionimage": ["internal/sessionimage/**"],
+    "promptmmu": ["internal/promptmmu/**"],
+    "devindex": ["internal/devindex/**"],
+    "metrics": ["internal/metrics/**"],
+    "examples": ["examples/**"],
 }
 
 
@@ -129,11 +139,38 @@ class RoutingRungTest(unittest.TestCase):
         self.assertEqual(r["confidence"], "alias")
         self.assertIn("cuda->compute", r["signal"])
 
+    def test_new_scope_aliases_route_rot_prone_issue_families(self):
+        cases = [
+            ("feat(terminal-bench): official contract", "bench"),
+            ("feat(testing): deterministic time-travel harness", "ci"),
+            ("feat(rehydrate): cold prompt-cache handling on wake", "sessionimage"),
+            ("devex(scorecard): agentic coding loop-index", "devindex"),
+            ("feat(dashboard): performance dashboards", "metrics"),
+            ("feat(mobile): Android NDK example", "examples"),
+            ("feat(support-maturity): scorecard router", "tools"),
+        ]
+        for title, lane in cases:
+            with self.subTest(title=title):
+                r = route(issue(20, title))
+                self.assertEqual(r["lane"], lane)
+                self.assertEqual(r["confidence"], "alias")
+
     def test_label_only_fallback(self):
         # No conventional scope; routed by label.
         r = route(issue(3, "GPU server Benchmark needs network access", labels=["gpu"]))
         self.assertEqual(r["lane"], "compute")
         self.assertEqual(r["confidence"], "label")
+
+    def test_keyword_fallback_routes_unscoped_lane_terms(self):
+        r = route(issue(21, "promptmmu rung 6: generalize skill demotion"))
+        self.assertEqual(r["lane"], "promptmmu")
+        self.assertEqual(r["confidence"], "keyword")
+        self.assertIn("promptmmu->promptmmu", r["signal"])
+
+    def test_keyword_fallback_does_not_match_inside_token(self):
+        r = route(issue(22, "gpucheck/modelbench frontier"))
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["confidence"], "none")
 
     def test_path_confirmed_overrides_wrong_scope(self):
         # Scope says docs, but the body names a tools/ path -> route to tools.
@@ -227,6 +264,14 @@ class ConfigOverrideTest(unittest.TestCase):
         )
         self.assertEqual(r["lane"], "gateway")
         self.assertEqual(r["confidence"], "alias")
+
+    def test_keyword_alias_override(self):
+        r = m.route_issue(
+            issue(2, "plain title with frobnicate inside"), LANES, TREES,
+            keyword_alias={"frobnicate": "gateway"},
+        )
+        self.assertEqual(r["lane"], "gateway")
+        self.assertEqual(r["confidence"], "keyword")
 
 
 class CoverageTest(unittest.TestCase):

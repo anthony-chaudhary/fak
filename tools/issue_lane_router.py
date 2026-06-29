@@ -9,7 +9,7 @@ the cost: closure_rate sits near zero because nothing aims the fleet at tickets.
 
 This tool is the missing aim. For each open issue it picks the lane whose `trees`
 globs the issue most likely touches, with a confidence ladder
-(path-confirmed > exact-scope > alias > label > none) so the supervisor can
+(path-confirmed > exact-scope > alias > label > keyword > none) so the supervisor can
 prefer high-confidence routes and the worker can fold its lane's issues into the
 dispositions sidecar it already builds. UNROUTED is a first-class, surfaced
 output — an issue with no defensible lane is never force-fit (and an exclusive
@@ -68,10 +68,19 @@ SCOPE_ALIAS: dict[str, str] = {
     "loader": "ggufload",
     "swebench": "experiments", "demo": "experiments", "simpledemo": "experiments",
     "fanbench": "bench",
+    "terminal-bench": "bench",
+    "testing": "ci",
+    "simd": "model",
+    "rehydrate": "sessionimage",
+    "devex": "devindex",
     "readme": "docs", "getting-started": "docs", "fak": "docs",
     "adopt": "docs", "licensing": "docs",
+    "dashboard": "metrics", "observability": "metrics",
     "dos": "tools", "control-pane": "tools", "rsi": "tools",
     "dispatch": "tools", "scrub": "tools", "ops": "tools",
+    "grafana": "tools", "support-maturity": "tools", "cachevalue": "tools",
+    "tooling": "tools",
+    "mobile": "examples", "edge": "examples",
     "install": "cmd",
     "adjudication": "adjudicator",
 }
@@ -88,8 +97,31 @@ LABEL_ALIAS: dict[str, str] = {
     "agentic-serving": "gateway",
 }
 
+# Last-rung lexical fallback for unscoped issue titles/bodies. This is deliberately
+# small and lane-named: it catches obvious routing words that were otherwise rotting
+# with no conventional scope, without dumping ambiguous work into a catch-all lane.
+KEYWORD_ALIAS: dict[str, str] = {
+    "promptmmu": "promptmmu",
+    "cuda": "compute",
+    "a100": "compute",
+    "gpu": "compute",
+    "benchmark": "bench",
+    "dashboard": "metrics",
+    "observability": "metrics",
+    "telemetry": "metrics",
+    "tooling": "tools",
+    "backlog": "tools",
+}
+
 # Confidence ordering (higher wins; used for sort + override decisions).
-CONFIDENCE_RANK = {"path-confirmed": 4, "exact-scope": 3, "alias": 2, "label": 1, "none": 0}
+CONFIDENCE_RANK = {
+    "path-confirmed": 5,
+    "exact-scope": 4,
+    "alias": 3,
+    "label": 2,
+    "keyword": 1,
+    "none": 0,
+}
 
 # Issues a required HUMAN/EXTERNAL action genuinely blocks (e.g. a legal trademark
 # filing) — nothing an agent can land. Carrying the `blocked-by-human` GitHub label,
@@ -228,8 +260,20 @@ def _scope_token(title: str) -> str | None:
     return bare.group(1).strip().lower() if bare else None
 
 
+def _type_token(title: str) -> str | None:
+    """The leading type from `type(scope):` for nonstandard issue families."""
+    m = _SCOPE_RE.search(title or "")
+    return m.group(1).strip().lower() if m else None
+
+
 def _label_names(issue: dict[str, Any]) -> set[str]:
     return {str(lab.get("name", "")) for lab in issue.get("labels", [])}
+
+
+def _has_keyword(text: str, keyword: str) -> bool:
+    """Whole-token keyword match, treating '-' and '_' as part of a token."""
+    return bool(re.search(r"(?<![\w-])" + re.escape(keyword.lower()) + r"(?![\w-])",
+                          text.lower()))
 
 
 def is_blocked_by_human(issue: dict[str, Any], *, label: str = BLOCKED_BY_HUMAN_LABEL) -> bool:
@@ -268,10 +312,12 @@ def route_issue(
     *,
     scope_alias: dict[str, str] | None = None,
     label_alias: dict[str, str] | None = None,
+    keyword_alias: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Route one issue to a lane via the confidence ladder. Pure + deterministic."""
     scope_alias = scope_alias or SCOPE_ALIAS
     label_alias = label_alias or LABEL_ALIAS
+    keyword_alias = keyword_alias or KEYWORD_ALIAS
     title = str(issue.get("title") or "")
     body = str(issue.get("body") or "")
     lane_set = set(concurrent)
@@ -290,6 +336,7 @@ def route_issue(
         path_ambiguous = True
 
     scope = _scope_token(title)
+    typ = _type_token(title)
 
     # Rung 2: exact scope == lane.
     scope_lane = None
@@ -299,12 +346,25 @@ def route_issue(
     # Rung 3: alias scope -> lane.
     elif scope and scope in scope_alias and scope_alias[scope] in lane_set:
         scope_lane, scope_conf = scope_alias[scope], "alias"
+    elif typ and typ in scope_alias and scope_alias[typ] in lane_set:
+        scope_lane, scope_conf = scope_alias[typ], "alias"
 
     # Rung 4: label -> lane.
     label_lane = None
     for lab in sorted(_label_names(issue)):
         if lab in label_alias and label_alias[lab] in lane_set:
             label_lane = label_alias[lab]
+            break
+
+    # Rung 5: explicit keyword -> lane. Weakest automatic signal, but better than
+    # leaving obviously-lane-named issues permanently unrouted.
+    keyword_lane = None
+    keyword = None
+    searchable = title + "\n" + body
+    for key in sorted(keyword_alias):
+        lane = keyword_alias[key]
+        if lane in lane_set and _has_keyword(searchable, key):
+            keyword, keyword_lane = key, lane
             break
 
     # Exclusive-lane scope is operator-gated, never auto-routed.
@@ -327,9 +387,12 @@ def route_issue(
                       True, unrouted_reason=None)
 
     if scope_lane is not None:
-        return _route(issue, scope_lane, scope_conf, f"scope:{scope}->{scope_lane}", False)
+        token = scope if scope in lane_set or scope in scope_alias else typ
+        return _route(issue, scope_lane, scope_conf, f"scope:{token}->{scope_lane}", False)
     if label_lane is not None:
         return _route(issue, label_lane, "label", f"label->{label_lane}", False)
+    if keyword_lane is not None:
+        return _route(issue, keyword_lane, "keyword", f"keyword:{keyword}->{keyword_lane}", False)
 
     reason = "no scope, no repo-path, no aliasable label" if scope else "no scope/path/label signal"
     return _route(issue, None, "none", "unrouted", False, unrouted_reason=reason)
@@ -491,6 +554,7 @@ def collect(
     fetcher: IssueFetcher | None = None,
     scope_alias: dict[str, str] | None = None,
     label_alias: dict[str, str] | None = None,
+    keyword_alias: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     root = workspace.resolve()
     concurrent, trees = lane_taxonomy(root)
@@ -508,7 +572,8 @@ def collect(
     elif not issues:
         fetch_error = "gh returned no open issues (auth/network?)"
     routes = [
-        route_issue(i, concurrent, trees, scope_alias=scope_alias, label_alias=label_alias)
+        route_issue(i, concurrent, trees, scope_alias=scope_alias, label_alias=label_alias,
+                    keyword_alias=keyword_alias)
         for i in routable
     ]
     return build_payload(
@@ -590,14 +655,17 @@ def main(argv: list[str] | None = None) -> int:
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
     scope_alias = label_alias = None
+    keyword_alias = None
     if args.config:
         cfg = json.loads(Path(args.config).read_text(encoding="utf-8"))
         scope_alias = cfg.get("scope_alias")
         label_alias = cfg.get("label_alias")
+        keyword_alias = cfg.get("keyword_alias")
 
     payload = collect(
         workspace, issue_limit=args.issue_limit, max_unrouted_frac=args.max_unrouted_frac,
         scope_alias=scope_alias, label_alias=label_alias,
+        keyword_alias=keyword_alias,
     )
 
     if args.md:
