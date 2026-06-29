@@ -70,6 +70,15 @@ func TestClassifyDestructiveAndOffTrunk(t *testing.T) {
 		{"config hooksPath unset OK", "git config --unset core.hooksPath", false, ""},
 		{"config unrelated OK", "git config user.name Alice", false, ""},
 
+		// ---- persistent signing-disable via config --------------------------
+		{"config gpgsign false", "git config commit.gpgsign false", true, "skip-signing"},
+		{"config gpgsign global off", "git config --global commit.gpgsign off", true, "skip-signing"},
+		{"config gpgsign joined", "git config commit.gpgsign=false", true, "skip-signing"},
+		{"config gpgsign zero", "git config commit.gpgsign 0", true, "skip-signing"},
+		{"config gpgsign true OK", "git config commit.gpgsign true", false, ""},
+		{"config gpgsign get OK", "git config --get commit.gpgsign", false, ""},
+		{"config gpgsign unset OK", "git config --unset commit.gpgsign", false, ""},
+
 		// ---- laundering: the unwrap pass must still see these ---------------
 		{"reset hard via bash -c", `bash -c "git reset --hard"`, true, "reset-hard"},
 		{"clean via pipe", "echo go | git clean -fd", true, "clean-force"},

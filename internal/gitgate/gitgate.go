@@ -193,6 +193,12 @@ const historyRewriteLaw = "history-rewrite refused: `git filter-branch` / `git f
 // --unset (which RESTORES the default hooks) is safe and stays deferred.
 const configHooksLaw = "skip-hooks refused: `git config core.hooksPath ...` persistently redirects the hooks directory, disabling the commit/push guards for every later git op (the durable sibling of `git -c core.hooksPath=`). Do not relocate hooks; reach the goal with the guards enabled."
 
+// configSignLaw fires on a PERSISTENT `git config commit.gpgsign false` — the
+// durable sibling of the per-commit `--no-gpg-sign` flag the hazard table already
+// catches: it turns signing off for every later commit, not just one. Only the
+// SET-to-false form fires; setting it true, a read, or an --unset is safe.
+const configSignLaw = "skip-signing refused: `git config commit.gpgsign false` persistently disables commit signing for every later commit (the durable sibling of `commit --no-gpg-sign`). Leave signing enabled."
+
 // ToolCollectiveCommit is the synthetic tool name for the collective-commit
 // barrier. It never shells out; its args are a CollectiveCommitPlan JSON object.
 const ToolCollectiveCommit = "gitgate.collective_commit"
@@ -573,22 +579,40 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 		return historyRewriteLaw, true
 	}
 
-	// `git config core.hooksPath ...` persistently relocates the hooks dir, disabling
-	// the guards. Refuse the SET form; a read (--get*/--list/-l) or --unset (which
-	// restores the default hooks) is safe and falls through to defer.
+	// Persistent `git config` writes that disable a guard: `core.hooksPath` (relocates
+	// the hooks dir) and `commit.gpgsign false` (turns signing off) — the durable
+	// siblings of `git -c core.hooksPath=` and `commit --no-gpg-sign`. Refuse the SET
+	// form only; a read (--get*/--list/-l), an --unset (restores the default), and
+	// setting gpgsign back ON all fall through to defer.
 	if sub == "config" {
-		hasHooksPath, isReadOrUnset := false, false
-		for _, t := range rest {
-			if strings.Contains(strings.ToLower(t), "core.hookspath") {
-				hasHooksPath = true
-			}
+		hasHooksPath, gpgSignOff, isReadOrUnset := false, false, false
+		for i, t := range rest {
+			lt := strings.ToLower(t)
 			switch t {
 			case "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--unset", "--unset-all":
 				isReadOrUnset = true
 			}
+			if strings.Contains(lt, "core.hookspath") {
+				hasHooksPath = true
+			}
+			// commit.gpgsign as a bare key (value is the next operand) or joined key=value.
+			if key, val, joined := splitConfigKey(lt); key == "commit.gpgsign" {
+				v := val
+				if !joined && i+1 < len(rest) {
+					v = strings.ToLower(rest[i+1])
+				}
+				if isGitFalse(v) {
+					gpgSignOff = true
+				}
+			}
 		}
-		if hasHooksPath && !isReadOrUnset {
-			return configHooksLaw, true
+		if !isReadOrUnset {
+			if hasHooksPath {
+				return configHooksLaw, true
+			}
+			if gpgSignOff {
+				return configSignLaw, true
+			}
 		}
 	}
 
@@ -732,6 +756,27 @@ func clusterHas(token string, ch byte) bool {
 		if token[i] == ch {
 			return true
 		}
+	}
+	return false
+}
+
+// splitConfigKey splits a `git config` token into its key and (joined) value:
+// `commit.gpgsign=false` -> ("commit.gpgsign", "false", true); a bare
+// `commit.gpgsign` -> ("commit.gpgsign", "", false), where the value is the next
+// operand. Used to recognize a persistent guard-disabling config write.
+func splitConfigKey(tok string) (key, val string, joined bool) {
+	if eq := strings.IndexByte(tok, '='); eq >= 0 {
+		return tok[:eq], tok[eq+1:], true
+	}
+	return tok, "", false
+}
+
+// isGitFalse reports whether v is one of git's boolean-false spellings
+// (false/no/off/0), used to detect a `commit.gpgsign false` signing-disable.
+func isGitFalse(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "no", "off", "0":
+		return true
 	}
 	return false
 }
