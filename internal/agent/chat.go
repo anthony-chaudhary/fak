@@ -13,9 +13,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -877,9 +879,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// transport failure (connection refused, DNS NXDOMAIN, TLS handshake) is a
 	// misconfiguration that a retry cannot fix, so it fails fast without burning the
 	// ~8s backoff budget and is tagged so the gateway can surface its cause (#346).
-	const maxAttempts = 4
+	// maxAttempts is the TOTAL number of tries (first attempt + retries). The default is
+	// deliberately generous and operator-tunable (FAK_PLANNER_MAX_ATTEMPTS): a fleet
+	// sharing one upstream account rides out a long 429/529 overload window far better with
+	// more, longer-spaced retries than with a fast give-up.
+	maxAttempts := plannerMaxAttempts()
 	var lastErr error
-	lastStatus := 0 // the status that triggered the pending retry (0 = a transient transport error)
+	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
+	lastRetryAfter := "" // the triggering response's Retry-After header, honored as the next wait
 	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
 	// OAuth token may have rotated (or been briefly torn) between resolve and send, so we
 	// re-read it fresh and retry. triedAuthRefresh caps that at a single extra attempt so a
@@ -890,10 +897,13 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// Surface the retry BEFORE the silent backoff sleep — the otherwise-invisible
 			// window. nil hook = unchanged. status carries WHY we are retrying (the upstream
 			// HTTP status, or 0 for a transport error) so the operator line can say "429".
+			// The wait is computed ONCE and shared with the hook so the reported wait is the
+			// exact one slept (it carries jitter and any honored Retry-After).
+			wait := retryWait(attempt, lastRetryAfter)
 			if p.RetryNotify != nil {
-				p.RetryNotify(attempt, lastStatus, backoffDuration(attempt))
+				p.RetryNotify(attempt, lastStatus, wait)
 			}
-			if err := backoff(ctx, attempt); err != nil {
+			if err := sleepCtx(ctx, wait); err != nil {
 				return nil, err
 			}
 		}
@@ -911,15 +921,18 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				return nil, &UpstreamUnreachableError{Err: err}
 			}
 			lastErr = err
-			lastStatus = 0 // a transient transport error has no HTTP status
+			lastStatus = 0      // a transient transport error has no HTTP status
+			lastRetryAfter = "" // ...and no Retry-After to honor — fall back to backoff
 			continue
 		}
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			if retryableStatus(resp.StatusCode) {
-				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
+				ra := resp.Header.Get("Retry-After")
+				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: ra}
 				lastStatus = resp.StatusCode
+				lastRetryAfter = ra // a 429/503/529 may NAME when to retry — honor it as the next wait
 				continue
 			}
 			// A 401 on the rotating-subscription path: re-resolve the credential fresh and
@@ -930,6 +943,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				triedAuthRefresh = true
 				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
 				lastStatus = resp.StatusCode
+				lastRetryAfter = "" // re-send immediately with the fresh token; do not wait
 				// Do not count the credential-refresh retry against the backoff schedule:
 				// rewind so the next iteration re-sends immediately with the fresh token.
 				attempt--
@@ -1116,27 +1130,143 @@ func deterministicTransportError(err error) bool {
 	return false
 }
 
-// retryableStatus reports whether an HTTP status warrants a backoff retry: 429
-// (rate limited) and the 5xx overload/transient family.
+// statusOverloaded is Anthropic's non-standard HTTP 529 "Overloaded" — the upstream is
+// momentarily over capacity. net/http has no constant for it, and it is exactly as
+// transient as a 503, so it belongs in retryableStatus. fak most often fronts Claude, so
+// a 529 from the real Anthropic API was the single most common retryable status the
+// original 429/5xx set silently dropped onto the non-retried path.
+const statusOverloaded = 529
+
+// retryableStatus reports whether an HTTP status warrants a backoff retry: the
+// transient/overload family. 408 (the upstream timed out RECEIVING the request) and 429
+// (rate limited) are the retryable 4xx; 500/502/503/504 are the 5xx overload/transient
+// family; 529 is Anthropic's "Overloaded". Every OTHER 4xx is a request error a retry
+// cannot fix and is NOT retried.
 func retryableStatus(code int) bool {
-	return code == http.StatusTooManyRequests ||
-		code == http.StatusInternalServerError ||
-		code == http.StatusBadGateway ||
-		code == http.StatusServiceUnavailable ||
-		code == http.StatusGatewayTimeout
+	switch code {
+	case http.StatusRequestTimeout, // 408
+		http.StatusTooManyRequests,     // 429
+		http.StatusInternalServerError, // 500
+		http.StatusBadGateway,          // 502
+		http.StatusServiceUnavailable,  // 503
+		http.StatusGatewayTimeout,      // 504
+		statusOverloaded:               // 529
+		return true
+	}
+	return false
 }
 
-// backoff sleeps attempt^2 * 600ms (0.6s, 2.4s, 5.4s), honoring context
-// cancellation, before the next retry.
-// backoffDuration is the exponential backoff wait before retry `attempt` (attempt² × 600ms:
-// 0, 600ms, 2.4s, 5.4s). Extracted so the RetryNotify hook can report the SAME wait the loop
-// is about to elapse, without duplicating the formula.
+// plannerMaxAttempts is the TOTAL number of upstream tries (first attempt + retries)
+// Complete makes on a transient failure. The default of 8 (raised from 4) trades a
+// longer worst-case stall for far better resilience to the long rate-limit/overload
+// windows a fleet sharing one account actually hits. FAK_PLANNER_MAX_ATTEMPTS overrides
+// it, clamped to [1, 16] so a typo can neither disable retries (0/negative) nor wedge a
+// turn for hours (huge). 1 means a single attempt with no retries.
+func plannerMaxAttempts() int {
+	if v := os.Getenv("FAK_PLANNER_MAX_ATTEMPTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 16 {
+			return n
+		}
+	}
+	return 8
+}
+
+// maxBackoff caps a single exponential backoff wait. The attempt²×600ms schedule would
+// otherwise grow without bound as the attempt budget rises; the cap keeps any ONE wait
+// reasonable while still letting the OVERALL retry window stretch across many attempts.
+const maxBackoff = 30 * time.Second
+
+// maxHonoredRetryAfter caps how long an upstream-supplied Retry-After can make us wait. A
+// rate-limited/overloaded upstream names when to come back and is usually right, so we
+// honor it — but only up to a ceiling, so a hostile or fat-fingered header value cannot
+// wedge a turn for minutes. Beyond the cap we wait the cap, then retry (re-reading a
+// fresh Retry-After if the upstream still isn't ready).
+const maxHonoredRetryAfter = 60 * time.Second
+
+// retryWait returns how long to sleep before `attempt`. A server-directed Retry-After
+// (delta-seconds) wins — the upstream knows when it will be ready better than any local
+// schedule — capped, and nudged with a little UPWARD jitter so a fleet honoring the SAME
+// value does not stampede the instant it expires. Otherwise it falls back to the
+// exponential schedule with equal jitter, which both desynchronizes lockstep retries and
+// keeps the reported wait strictly positive.
+func retryWait(attempt int, retryAfter string) time.Duration {
+	if d, ok := parseRetryAfterSeconds(retryAfter); ok {
+		if d > maxHonoredRetryAfter {
+			d = maxHonoredRetryAfter
+		}
+		return jitterUp(d)
+	}
+	return jitter(backoffDuration(attempt))
+}
+
+// backoffDuration is the exponential backoff base for retry `attempt`: attempt²×600ms
+// (600ms, 2.4s, 5.4s, 9.6s, …), capped at maxBackoff. retryWait applies jitter on top, so
+// this is the pre-jitter schedule, not the literal sleep.
 func backoffDuration(attempt int) time.Duration {
-	return time.Duration(attempt*attempt) * 600 * time.Millisecond
+	d := time.Duration(attempt*attempt) * 600 * time.Millisecond
+	if d > maxBackoff {
+		return maxBackoff
+	}
+	return d
 }
 
-func backoff(ctx context.Context, attempt int) error {
-	t := time.NewTimer(backoffDuration(attempt))
+// jitter applies equal-jitter to base: a uniformly random wait in [base/2, base]. A fleet
+// that hit the same rate-limit window at the same instant then retries spread across the
+// window instead of in lockstep, so it does not immediately re-trigger the limit. base<=0
+// (the no-wait first attempt) stays 0.
+func jitter(base time.Duration) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	half := int64(base / 2)
+	return time.Duration(half) + time.Duration(rand.Int63n(half+1))
+}
+
+// jitterUp returns base plus a uniformly random extra in [0, base/4]. Used for a honored
+// Retry-After: the upstream asked us not to come back BEFORE its named instant, so the
+// wait is never reduced — only nudged slightly past it so a fleet sharing the value fans
+// out instead of stampeding the upstream the moment it expires.
+func jitterUp(base time.Duration) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	q := int64(base / 4)
+	if q <= 0 {
+		return base
+	}
+	return base + time.Duration(rand.Int63n(q+1))
+}
+
+// parseRetryAfterSeconds parses an RFC 7231 Retry-After in its delta-seconds form ("120")
+// into a duration. The HTTP-date form is intentionally NOT handled — honoring an absolute
+// date would mean trusting the upstream's clock and could imply an arbitrarily long wait —
+// so on that form (or any non-numeric/negative value) it returns ok=false and the caller
+// falls back to local exponential backoff.
+func parseRetryAfterSeconds(v string) (time.Duration, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return time.Duration(n) * time.Second, true
+}
+
+// sleepCtx waits for d, returning ctx.Err() early if the context is cancelled. A
+// non-positive d does not sleep but still surfaces an already-cancelled context, so a
+// cancelled turn never sneaks one more upstream attempt past the check.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():

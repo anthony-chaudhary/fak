@@ -258,10 +258,11 @@ type openAIStreamChunk struct {
 // finish) once the upstream closes the stream. Tool calls are accumulated, NEVER
 // streamed, so the caller can adjudicate them before exposing them.
 //
-// Unlike Complete it does not retry mid-stream: a connection/status failure surfaces
-// before any sink call (so the caller can still choose an HTTP status), but once
-// bytes have flowed a read error is returned as-is. A non-OpenAI wire returns
-// ErrStreamingUnsupported without a network call.
+// Like Complete it retries a transient transport error or a retryable status (429/503/
+// 529/…) with backoff — but ONLY before the first byte reaches the sink, where a retry is
+// invisible to the client and the caller can still choose an HTTP status. It NEVER retries
+// mid-stream: once bytes have flowed a read error is returned as-is. A non-OpenAI wire
+// returns ErrStreamingUnsupported without a network call.
 func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	if !p.StreamingSupported() {
 		return nil, ErrStreamingUnsupported
@@ -270,24 +271,74 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
-	if err != nil {
-		return nil, err
-	}
-	call.applyHeaders(req)
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := p.Client.Do(req)
-	if err != nil {
-		if deterministicTransportError(err) {
-			return nil, &UpstreamUnreachableError{Err: err}
+	// Retry a transient transport error OR a retryable status (429/503/529/…) with the
+	// SAME backoff+jitter+Retry-After policy as Complete — but ONLY here, before the first
+	// byte is streamed. A pre-stream failure has emitted nothing to the sink, so the retry
+	// is safe and invisible to the client. A deterministic dial failure fails fast (no
+	// backoff). A 401 on the rotating-credential path self-heals once via a fresh-token
+	// re-send (a no-op on the static-key/passthrough paths). Each non-200 response body is
+	// drained+closed in the loop; only the successful 200 escapes to the streaming reader.
+	maxAttempts := plannerMaxAttempts()
+	var lastErr error
+	lastStatus := 0
+	lastRetryAfter := ""
+	triedAuthRefresh := false
+	var resp *http.Response
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			wait := retryWait(attempt, lastRetryAfter)
+			if p.RetryNotify != nil {
+				p.RetryNotify(attempt, lastStatus, wait)
+			}
+			if err := sleepCtx(ctx, wait); err != nil {
+				return nil, err
+			}
 		}
-		return nil, err
+		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
+		if err != nil {
+			return nil, err
+		}
+		call.applyHeaders(req)
+		req.Header.Set("Accept", "text/event-stream")
+		r, err := p.Client.Do(req)
+		if err != nil {
+			if deterministicTransportError(err) {
+				return nil, &UpstreamUnreachableError{Err: err}
+			}
+			lastErr = err
+			lastStatus = 0
+			lastRetryAfter = ""
+			continue
+		}
+		if r.StatusCode == http.StatusOK {
+			resp = r
+			break
+		}
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		r.Body.Close()
+		if retryableStatus(r.StatusCode) {
+			ra := r.Header.Get("Retry-After")
+			lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
+			lastStatus = r.StatusCode
+			lastRetryAfter = ra
+			continue
+		}
+		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
+		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring Complete.
+		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKey(p) {
+			triedAuthRefresh = true
+			lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
+			lastStatus = r.StatusCode
+			lastRetryAfter = ""
+			attempt--
+			continue
+		}
+		return nil, &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("planner: streaming failed after %d attempts: %w", maxAttempts, lastErr)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
-	}
 
 	// Some "OpenAI-compatible" servers ignore stream:true and answer with a single
 	// buffered JSON body. Detect that by content-type and fall back to the buffered
