@@ -373,6 +373,17 @@ func cmdGuard(argv []string) {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
 		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
+		// No subscription token anywhere AND the child has no key of its own: a headless spawn
+		// would block on a /login the wrapped agent can never complete (the unrecoverable end of
+		// the 'stuck on login' class — distinct from the rotation race, which the pin-on-intent
+		// branch handles). Fail loud with the setup guidance BEFORE spawning, but ONLY when stdin
+		// is not interactive: an attended terminal can complete the login, so it keeps today's
+		// behavior.
+		if us.noTokenAnywhere && !cmdGuardStdinInteractive() {
+			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription token found and no ANTHROPIC_API_KEY set, and stdin is not a terminal — refusing to spawn a headless agent that would hang on an interactive login it cannot complete.")
+			fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in, or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or set ANTHROPIC_API_KEY for API billing.")
+			os.Exit(2)
+		}
 		if us.passthroughFallback && !*quiet {
 			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — the wrapped agent's own credential (a subscription login or ANTHROPIC_API_KEY) is forwarded upstream. If you hit a 401, run `claude` once or `claude setup-token`.")
 		}
@@ -913,6 +924,24 @@ func guardSubscriptionLoginPresent(tokenEnv string) bool {
 		}
 	}
 	return false
+}
+
+// cmdGuardStdinInteractive reports whether the guard process's stdin is an interactive
+// terminal (a character device), as opposed to a pipe, file, or /dev/null (headless). The
+// headless no-token fail-loud gate uses this so an attended user who CAN complete an
+// interactive login is never blocked, while an automated/headless run — where a blocked
+// login is unrecoverable — fails loud with guidance instead of hanging. A Stat error is
+// treated as non-interactive (fail safe toward the loud error, not a silent hang).
+func cmdGuardStdinInteractive() bool {
+	fi, err := os.Stdin.Stat()
+	return err == nil && guardModeInteractive(fi.Mode())
+}
+
+// guardModeInteractive is the pure half of cmdGuardStdinInteractive (the FileMode test),
+// split out so it can be unit-tested without a real terminal. A character device is a TTY;
+// a pipe (ModeNamedPipe) or a regular file is not.
+func guardModeInteractive(mode os.FileMode) bool {
+	return mode&os.ModeCharDevice != 0
 }
 
 // guardClaudeConfigDir resolves the directory that holds Claude Code's per-account

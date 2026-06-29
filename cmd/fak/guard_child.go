@@ -55,6 +55,12 @@ type guardUpstream struct {
 	// silently bill the API account — so cmdGuard surfaces a one-line note pointing at the
 	// explicit API-billing opt-in (--api-key-env ANTHROPIC_API_KEY) for discoverability.
 	ambientKeyOverridden bool
+	// noTokenAnywhere is set when guard is on the Anthropic auto-OAuth path and found NO
+	// subscription token anywhere AND nothing to recover (no env token, no .credentials.json to
+	// rotate, no .oauth-token). There is nothing to pin and nothing to refresh, so cmdGuard
+	// fails loud before spawning a headless child that would block on a login it can never
+	// complete. Distinct from passthroughFallback, which still has a path (the child's own key).
+	noTokenAnywhere bool
 }
 
 // resolveGuardUpstream picks the upstream wire and credential posture: an explicit
@@ -110,6 +116,7 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 	oauthSource := ""
 	passthroughFallback := false
 	ambientKeyOverridden := false
+	noTokenAnywhere := false
 	if forceOAuth && up != "anthropic" {
 		fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
 		os.Exit(2)
@@ -145,18 +152,24 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 			pinUpstream = true
 			oauthSource = "subscription login (token rotating; resolved per request)"
 		default:
-			// Auto attempt found no token AND no subscription login is present at all: fall
-			// back to plain passthrough — the wrapped agent's own credential (a subscription
-			// login OR ANTHROPIC_API_KEY) flows upstream, so a pure API-billing user is
-			// unaffected.
+			// Auto attempt found no token AND no subscription login is present at all. There is
+			// nothing to pin and nothing for the per-request refresh to recover. Two sub-cases:
+			//   - the child carries its own ANTHROPIC_API_KEY → legitimate API-billing
+			//     passthrough (its key flows upstream); keep spawning.
+			//   - the child has no key either → a headless spawn would block on a /login the
+			//     wrapped agent can never complete. Flag noTokenAnywhere so cmdGuard can fail
+			//     loud BEFORE spawning rather than hang. (An attended terminal still gets the
+			//     interactive login — cmdGuard gates the hard exit on a non-interactive stdin.)
 			passthroughFallback = true
+			noTokenAnywhere = os.Getenv("ANTHROPIC_API_KEY") == ""
 		}
 	}
 	return guardUpstream{
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
 		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
 		passthroughFallback: passthroughFallback, ambientKeyOverridden: ambientKeyOverridden,
-		remoteServe: remote,
+		noTokenAnywhere: noTokenAnywhere,
+		remoteServe:     remote,
 	}
 }
 

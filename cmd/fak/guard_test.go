@@ -1113,6 +1113,56 @@ func TestGuardPinsOnIntentWhenLoginPresentButTokenUnreadable(t *testing.T) {
 	}
 }
 
+// TestGuardNoTokenAnywhereFlagsHeadlessHardExit witnesses the unrecoverable end of the
+// 'stuck on login' class: a genuinely headless box with NO subscription token anywhere AND no
+// ANTHROPIC_API_KEY. There is nothing to pin and nothing for the per-request refresh to
+// recover, so spawning would hang the wrapped agent at a /login it can never complete. guard
+// flags noTokenAnywhere so cmdGuard can fail loud before spawning (gated on a non-interactive
+// stdin, so an attended terminal is never blocked). A real ambient ANTHROPIC_API_KEY keeps the
+// legitimate API-billing passthrough path, so noTokenAnywhere stays false there.
+func TestGuardNoTokenAnywhereFlagsHeadlessHardExit(t *testing.T) {
+	bare := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", bare)
+	const tokenEnv = "FAK_TEST_GUARD_NO_TOKEN"
+	t.Setenv(tokenEnv, "")
+
+	// No token, no credentials file, and no ANTHROPIC_API_KEY → unrecoverable headless miss.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	us := resolveGuardUpstream("anthropic", "claude", "", "", "", false, tokenEnv)
+	if !us.passthroughFallback {
+		t.Fatalf("want passthroughFallback=true with no token anywhere; got %+v", us)
+	}
+	if !us.noTokenAnywhere {
+		t.Fatalf("want noTokenAnywhere=true so cmdGuard can fail loud before a headless hang; got %+v", us)
+	}
+
+	// A real ambient ANTHROPIC_API_KEY is a legitimate API-billing passthrough: the child's own
+	// key flows upstream, so guard must NOT block it as a no-token headless case.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api03-real")
+	us = resolveGuardUpstream("anthropic", "claude", "", "", "", false, tokenEnv)
+	if us.noTokenAnywhere {
+		t.Fatalf("must NOT flag noTokenAnywhere when the child carries its own ANTHROPIC_API_KEY; got %+v", us)
+	}
+}
+
+// TestGuardModeInteractive proves the pure half of the headless gate: a character device is an
+// interactive terminal (login completable; keep today's spawn), while a pipe or a regular file
+// is not (a blocked login is unrecoverable; fail loud).
+func TestGuardModeInteractive(t *testing.T) {
+	if !guardModeInteractive(os.ModeCharDevice) {
+		t.Fatal("a character device must be reported interactive")
+	}
+	if !guardModeInteractive(os.ModeCharDevice | os.ModeDevice) {
+		t.Fatal("a char+device mode must be reported interactive")
+	}
+	if guardModeInteractive(os.ModeNamedPipe) {
+		t.Fatal("a pipe must NOT be reported interactive (headless)")
+	}
+	if guardModeInteractive(0) {
+		t.Fatal("a regular file must NOT be reported interactive (headless)")
+	}
+}
+
 // TestGuardSubscriptionDefaultIgnoresAmbientAPIKey proves the OAuth-by-default change: a
 // bare ANTHROPIC_API_KEY in the environment no longer silently flips guard onto API
 // billing. With a subscription token reachable, guard PINS the OAuth token upstream even
