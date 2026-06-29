@@ -1,0 +1,20 @@
+{
+  "version": "fak-calibrate/v1",
+  "prediction": {
+    "metric": "cross_session_warm_hit_rate",
+    "claimed": 0.17,
+    "unit": "fraction",
+    "basis": "fixed point estimate before any corpus was back-tested",
+    "lower_is_better": false
+  },
+  "measurement": {
+    "realized": 0.0,
+    "provenance": "OBSERVED",
+    "source": "no billed corpus available for this workload yet",
+    "measured": false,
+    "sample": 0
+  },
+  "band": { "calibrated_max": 0.10, "min_sample": 8 },
+  "verdict": "INSUFFICIENT",
+  "reason": "no ground truth existed to score the 0.17 claim against — reported INSUFFICIENT, never rounded up to CALIBRATED (cf. the warm-hit bimodal lesson #963: a point estimate must be back-tested before it is defaulted on)"
+}

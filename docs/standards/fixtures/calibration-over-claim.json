@@ -1,0 +1,21 @@
+{
+  "version": "fak-calibrate/v1",
+  "prediction": {
+    "metric": "cache_hit_rate",
+    "claimed": 0.94,
+    "unit": "fraction",
+    "basis": "router KV-affinity model, projected over the prior session mix",
+    "lower_is_better": false
+  },
+  "measurement": {
+    "realized": 0.80,
+    "provenance": "OBSERVED",
+    "source": "router_telemetry: served-from-cache / total over the billed window",
+    "measured": true,
+    "sample": 132
+  },
+  "band": { "calibrated_max": 0.10, "min_sample": 8 },
+  "verdict": "OVER_CLAIM",
+  "calib_err": 0.149,
+  "reason": "realized 0.80 fell on the worse-than-claim side of 0.94 by 14.9% (> 10% band) — the router promised more cache reuse than telemetry delivered; recalibrate the claim down, never hide the verdict"
+}

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/prediction-calibration.json",
+  "title": "Prediction-calibration contract (fak-calibrate/v1)",
+  "description": "A portable, engine-free schema for back-testing a projection against witnessed reality: a declared Prediction, a Measurement the predictor did not author, and an EvalBand fold into exactly one Verdict from a CLOSED set. Author and validate against this with any JSON Schema validator; no fak engine is required. The root validates a Calibration envelope (the inputs plus the produced verdict). The Verdict vocabulary is a CLOSED enum — an out-of-set token is UNCLASSIFIED and rejected at the boundary, never coerced to a pass. A thin or absent corpus is INSUFFICIENT, reported and never rounded up to CALIBRATED.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["prediction", "measurement", "verdict"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^fak-calibrate/v1",
+      "description": "Schema tag. Omitted => current version. A different MAJOR is refused; a newer MINOR is forward-accepted (additive-only discipline)."
+    },
+    "prediction": { "$ref": "#/$defs/Prediction" },
+    "measurement": { "$ref": "#/$defs/Measurement" },
+    "band": {
+      "$ref": "#/$defs/EvalBand",
+      "description": "The tolerance the verdict reads. Omitted => the conservative default (calibrated_max 0.10)."
+    },
+    "verdict": {
+      "$ref": "#/$defs/Verdict",
+      "description": "The produced calibration verdict — the OUTPUT, recorded in the envelope so a reviewer reads inputs and verdict as one data object."
+    },
+    "calib_err": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Optional: the normalized residual the verdict was decided on (|realized-claimed|/|claimed|, capped), surfaced for review."
+    },
+    "reason": { "type": "string", "description": "Optional free-text note surfaced in the calibration trace." }
+  },
+  "$defs": {
+    "Verdict": {
+      "description": "The calibration outcome. CLOSED set — an out-of-set token is UNCLASSIFIED and rejected, never a silent pass. CALIBRATED: reality met the claim within the band. OVER_CLAIM: reality landed on the worse-than-claim side (the theory promised more than reality delivered) — the harmful direction, surfaced never hidden. UNDER_CLAIM: reality landed on the better side (the theory under-promised). INSUFFICIENT: no ground truth, or a corpus thinner than min_sample — fail-closed, never rounded up.",
+      "type": "string",
+      "enum": ["CALIBRATED", "OVER_CLAIM", "UNDER_CLAIM", "INSUFFICIENT"]
+    },
+    "Provenance": {
+      "description": "Whose number the measurement is. CLOSED set. WITNESSED: a number fak authored and controls. OBSERVED: a number relayed from an upstream party (the model provider) fak does not control. A measurement the PREDICTOR authored is not admissible ground truth.",
+      "type": "string",
+      "enum": ["WITNESSED", "OBSERVED"]
+    },
+    "Prediction": {
+      "description": "The declared theory, asserted BEFORE reality is consulted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "claimed"],
+      "properties": {
+        "metric": { "type": "string", "minLength": 1, "description": "What is being predicted (a hit rate, a residency, a saving)." },
+        "claimed": { "type": "number", "description": "The value the theory asserts." },
+        "unit": { "type": "string", "description": "The metric's unit (fraction, tokens, seconds, USD, ...)." },
+        "basis": { "type": "string", "description": "How the claim was derived — review provenance, not part of the decision." },
+        "lower_is_better": { "type": "boolean", "description": "The metric's DIRECTION. false (default) => higher is better, so realized BELOW claimed is the over-claim side; true => realized ABOVE claimed is the over-claim side." },
+        "intentional_floor": { "type": "boolean", "description": "The claim is a GUARD reality must not breach, not an estimate. Scored by its breach (worse side only); never recalibrated up to its empirical rate." }
+      }
+    },
+    "Measurement": {
+      "description": "The witnessed ground truth the predictor did NOT author — the only admissible truth.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["realized"],
+      "properties": {
+        "realized": { "type": "number", "description": "The value reality delivered." },
+        "provenance": { "$ref": "#/$defs/Provenance" },
+        "source": { "type": "string", "description": "Where the ground truth came from (a usage record, a meter)." },
+        "measured": { "type": "boolean", "description": "false => no ground truth existed; the calibration is INSUFFICIENT, never a scored zero. Omitted => true." },
+        "sample": { "type": "integer", "minimum": 0, "description": "How many boundaries/turns stand behind `realized`. Below the band's min_sample => INSUFFICIENT." }
+      }
+    },
+    "EvalBand": {
+      "description": "The closed tolerance the verdict reads — the eval-fn made data.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "calibrated_max": { "type": "number", "exclusiveMinimum": 0, "description": "A normalized residual at or under this scores CALIBRATED. Default 0.10 (within 10% of the claim)." },
+        "min_sample": { "type": "integer", "minimum": 0, "description": "Fewer measured boundaries than this scores INSUFFICIENT (fail-closed). Omitted => 0 (only `measured: false` is insufficient)." }
+      }
+    }
+  }
+}

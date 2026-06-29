@@ -1,0 +1,21 @@
+{
+  "version": "fak-calibrate/v1",
+  "prediction": {
+    "metric": "resident_tokens",
+    "claimed": 48000,
+    "unit": "tokens",
+    "basis": "planner residency forecast for the prefill working set",
+    "lower_is_better": false
+  },
+  "measurement": {
+    "realized": 47200,
+    "provenance": "WITNESSED",
+    "source": "resident-set meter the planner does not author",
+    "measured": true,
+    "sample": 64
+  },
+  "band": { "calibrated_max": 0.10, "min_sample": 8 },
+  "verdict": "CALIBRATED",
+  "calib_err": 0.017,
+  "reason": "realized 47200 met the 48000 forecast within 1.7% (under the 10% band) — the residency forecast holds"
+}
