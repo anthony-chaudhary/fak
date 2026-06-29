@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -14,14 +15,18 @@ import (
 //
 //	fak grafana post --snapshot --title "p99 spike" --url <snapshot> \
 //	    --dashboard "FAK Gateway Observability" --range "last 6h"   # an exported snapshot
+//	fak grafana post --snapshot --create --grafana-url http://localhost:3000 \
+//	    --uid fak-gateway-observability --expires-seconds 604800     # PULL a fresh snapshot via the API
 //	fak grafana post --rollup all                                   # fold the link registry
 //	fak grafana post --rollup public-demo                           # only long-lived demo links
 //	fak grafana post --link fak-gateway-observability               # one dashboard link
 //
-// A snapshot post is a POST of a URL the operator already exported from Grafana; there
-// is no inbound listener (pulling snapshots from a live Grafana is a follow-on). All
-// modes default to the FAK_GRAFANA_* workspace (token falls back to the scoreboard
-// token; channel falls back to the public built-in default) and honor --dry-run.
+// A plain snapshot post is a POST of a URL the operator already exported from Grafana.
+// With --create it instead PULLS one: it calls the live Grafana snapshots API
+// (--grafana-url + a FAK_GRAFANA_API_TOKEN) to create a snapshot for --uid, then posts
+// the public URL Grafana returned — never a URL fak fabricated. All modes default to the
+// FAK_GRAFANA_* workspace (Slack token falls back to the scoreboard token; channel falls
+// back to the public built-in default) and honor --dry-run.
 func cmdGrafana(argv []string) {
 	dispatchSubcommands("grafana", "post", argv,
 		subcommand{"post", runGrafanaPost},
@@ -41,6 +46,13 @@ func runGrafanaPost(stdout, stderr io.Writer, argv []string) int {
 	timeRange := fs.String("range", "", "snapshot: captured time window, e.g. \"last 6h\"")
 	expires := fs.String("expires", "", "snapshot: when the snapshot link expires (e.g. \"in 7d\")")
 	note := fs.String("note", "", "snapshot: optional note under the headline")
+	// Inbound ingestion (--snapshot --create): pull a snapshot from a live Grafana via
+	// its API instead of posting a hand-exported URL.
+	create := fs.Bool("create", false, "snapshot: create the snapshot via the Grafana API for --uid (needs --grafana-url + FAK_GRAFANA_API_TOKEN); posts the URL Grafana returns")
+	grafanaURL := fs.String("grafana-url", "", "snapshot --create: the live Grafana base URL, e.g. http://localhost:3000")
+	uid := fs.String("uid", "", "snapshot --create: the dashboard uid to snapshot")
+	expiresSeconds := fs.Int("expires-seconds", 0, "snapshot --create: snapshot TTL in seconds (0 = Grafana default, no expiry)")
+	grafanaToken := fs.String("grafana-token", "", "snapshot --create: override the Grafana API token (default: $FAK_GRAFANA_API_TOKEN / .env.slack.local)")
 	// Shared.
 	registry := fs.String("registry", "docs/grafana/links.json", "link registry path (rollup / link modes)")
 	baseURL := fs.String("base-url", "", "override the Grafana base URL used to resolve uid-only links (default: the registry base_url)")
@@ -71,18 +83,30 @@ func runGrafanaPost(stdout, stderr io.Writer, argv []string) int {
 	var post grafanapost.Post
 	switch {
 	case *snapshot:
-		if *url == "" && !*dryRun {
-			fmt.Fprintln(stderr, "fak grafana post: --snapshot needs --url (the exported Grafana snapshot link)")
-			return 2
-		}
-		post = grafanapost.SnapshotPost(grafanapost.Snapshot{
+		snap := grafanapost.Snapshot{
 			Title:     *title,
 			URL:       *url,
 			Dashboard: *dashboard,
 			TimeRange: *timeRange,
 			Expires:   *expires,
 			Note:      *note,
-		})
+		}
+		if *create {
+			// Inbound: pull a fresh snapshot from the live Grafana. The URL we post is
+			// whatever Grafana returned — never one fak built.
+			res, err := createGrafanaSnapshot(*grafanaURL, *grafanaToken, *uid, *expiresSeconds, stderr)
+			if err != nil {
+				return 2
+			}
+			snap.URL = res.URL
+			if snap.Title == "" {
+				snap.Title = *uid
+			}
+		} else if *url == "" && !*dryRun {
+			fmt.Fprintln(stderr, "fak grafana post: --snapshot needs --url (the exported Grafana snapshot link), or --create to pull one via the API")
+			return 2
+		}
+		post = grafanapost.SnapshotPost(snap)
 	case *rollup != "":
 		reg, err := loadGrafanaRegistry(*registry, *baseURL, stderr)
 		if err != nil {
@@ -133,4 +157,36 @@ func loadGrafanaRegistry(path, baseURL string, stderr io.Writer) (*grafanapost.R
 		reg.BaseURL = baseURL
 	}
 	return reg, nil
+}
+
+// createGrafanaSnapshot drives the inbound (--create) path: it resolves the Grafana API
+// token (--grafana-token override, else FAK_GRAFANA_API_TOKEN / .env.slack.local), then
+// calls the live Grafana snapshots API to create a snapshot for uid and returns the
+// result Grafana minted. Validation errors and API failures are written to stderr and
+// returned, so the caller posts nothing rather than an empty link.
+func createGrafanaSnapshot(grafanaURL, tokenOverride, uid string, expiresSeconds int, stderr io.Writer) (grafanapost.SnapshotResult, error) {
+	var zero grafanapost.SnapshotResult
+	if grafanaURL == "" {
+		fmt.Fprintln(stderr, "fak grafana post: --create needs --grafana-url (the live Grafana base URL)")
+		return zero, fmt.Errorf("missing --grafana-url")
+	}
+	if uid == "" {
+		fmt.Fprintln(stderr, "fak grafana post: --create needs --uid (the dashboard to snapshot)")
+		return zero, fmt.Errorf("missing --uid")
+	}
+	tok := tokenOverride
+	if tok == "" {
+		tok = grafanapost.ResolveAPIToken()
+	}
+	if tok == "" {
+		fmt.Fprintln(stderr, "fak grafana post: --create needs a Grafana API token (set FAK_GRAFANA_API_TOKEN or pass --grafana-token)")
+		return zero, fmt.Errorf("missing Grafana API token")
+	}
+	client := grafanapost.NewClient(grafanaURL, tok)
+	res, err := client.CreateSnapshotForDashboard(context.Background(), uid, expiresSeconds)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak grafana post: %v\n", err)
+		return zero, err
+	}
+	return res, nil
 }
