@@ -431,6 +431,68 @@ class BackendStubRateScanTest(unittest.TestCase):
             self.assertEqual(out, [])
 
 
+class BackendHookFailureScanTest(unittest.TestCase):
+    """backend_hook_failures() makes a fully-unhooked backend visible (#1277)."""
+
+    def _mk(self, runs: Path, issue: int, stamp: str, *, backend: str,
+            text: str, mtime: float) -> None:
+        import os
+
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text(text, encoding="utf-8")
+        log.with_suffix(".backend").write_text(backend, encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+
+    def test_all_recent_sessions_with_hook_failures_are_flagged(self) -> None:
+        mod = load()
+        now = 2_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(
+                runs, 65, "20260629-115413", backend="codex", mtime=now - 10,
+                text="hook: SessionStart Failed\nhook: PreToolUse Failed\n")
+            self._mk(
+                runs, 1176, "20260629-043016", backend="codex", mtime=now - 20,
+                text="hook: UserPromptSubmit Failed\n")
+            self._mk(
+                runs, 1207, "20260629-173104", backend="opencode", mtime=now - 30,
+                text="> build - glm\n")
+
+            rows = mod.backend_hook_failures(runs, now_ts=now)
+            by_product = {row["product"]: row for row in rows}
+
+            self.assertEqual(by_product["codex"]["sessions"], 2)
+            self.assertEqual(by_product["codex"]["sessions_with_hook_failures"], 2)
+            self.assertEqual(by_product["codex"]["hook_failures"], 3)
+            self.assertEqual(by_product["codex"]["failure_session_rate"], 1.0)
+            self.assertTrue(by_product["codex"]["all_sessions_unhooked"])
+            self.assertEqual(by_product["opencode"]["failure_session_rate"], 0.0)
+            self.assertFalse(by_product["opencode"]["all_sessions_unhooked"])
+
+
+class HookHealthPayloadTest(unittest.TestCase):
+    def test_unhooked_backend_reaches_payload_reason_and_render(self) -> None:
+        mod = load()
+        hook_failures = [{
+            "product": "codex",
+            "lookback_min": 90,
+            "sessions": 3,
+            "sessions_with_hook_failures": 3,
+            "failure_session_rate": 1.0,
+            "hook_failures": 195,
+            "evidence_logs": ["resolve-65-20260629-115413.log"],
+            "all_sessions_unhooked": True,
+        }]
+
+        p = build(mod, hook_failures=hook_failures)
+
+        self.assertEqual(p["hook_health"]["unhooked_count"], 1)
+        self.assertEqual(p["hook_health"]["by_backend"], hook_failures)
+        self.assertTrue(any("guard hook layer UNBOUND" in r for r in p["reasons"]))
+        self.assertIn("hooks", mod.render(p))
+        self.assertIn("codex=195 fail/3 sess (100%)", mod.render(p))
+
+
 class RenderMdTest(unittest.TestCase):
     """render_md is pure: a hand-built payload -> the committed-doc markdown."""
 
@@ -484,6 +546,23 @@ class RenderMdTest(unittest.TestCase):
         self.assertIn("No `backend-health-*.json` sidecar", md)
         self.assertNotIn("All backends healthy", md)
         self.assertIn("| opencode | 90m | 9 | 1 | 8 | 0.889 | **MAJORITY_STUB** |", md)
+
+    def test_md_hook_health_lists_unhooked_backend(self) -> None:
+        mod = load()
+        hook_failures = [{
+            "product": "codex",
+            "lookback_min": 90,
+            "sessions": 3,
+            "sessions_with_hook_failures": 3,
+            "failure_session_rate": 1.0,
+            "hook_failures": 195,
+            "evidence_logs": ["resolve-65-20260629-115413.log"],
+            "all_sessions_unhooked": True,
+        }]
+        md = mod.render_md(self._payload(mod, hook_failures=hook_failures),
+                           date="2026-06-29")
+        self.assertIn("## Hook health", md)
+        self.assertIn("| codex | 90m | 3 | 3 | 1.0 | 195 | **UNHOOKED** |", md)
 
     def test_md_silent_section_says_none_when_clean(self) -> None:
         mod = load()

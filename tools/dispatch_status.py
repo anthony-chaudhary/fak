@@ -392,6 +392,87 @@ def backend_stub_rates(
     return out
 
 
+# A worker logs ``hook: <name> Failed`` when a lifecycle hook (the fak guard layer
+# bound via the harness's hook config) fails to execute. ``claude`` binds the
+# guard hooks natively; a non-claude backend (codex/opencode) runs its OWN native
+# hook config, and when that config can't reach the dos hook CLI at runtime EVERY
+# lifecycle hook fails — the worker stays productive while running UNHOOKED by the
+# guard layer. Reuse the stub-rate lookback so both backend folds share one window.
+_HOOK_FAIL_LOOKBACK_MIN = _BACKEND_STUB_LOOKBACK_MIN
+
+
+def backend_hook_failures(
+    runs_dir: Path,
+    *,
+    lookback_min: int = _HOOK_FAIL_LOOKBACK_MIN,
+    now_ts: float | None = None,
+    reader: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Per-backend hook-failure rollup from recent worker-log content (#1277).
+
+    The fak guard hooks (PreToolUse / PostToolUse / Stop) bind a worker through the
+    harness's lifecycle-hook layer. A non-claude backend (codex/opencode) runs its
+    OWN native hook config, and when that config can't reach the dos hook CLI at
+    runtime every lifecycle hook logs ``hook: <name> Failed`` — the worker stays
+    productive while running UNHOOKED by the guard layer. This fold counts those
+    lines per backend over the recent ``resolve-*.log`` sessions and flags any
+    backend whose EVERY recent session failed its hooks, so a fully-unhooked backend
+    is no longer silent in the status card — the explicit "at minimum, surface the
+    hook-failure rate" ask of #1277.
+
+    Reuses ``dispatch_log_audit``'s hook detector + backend sidecar reader (one
+    source of truth for the ``hook: … Failed`` signature). Best-effort: if that
+    module can't import, the fold is empty (no false signal). Worst (unhooked, most
+    failures) first.
+    """
+    if not runs_dir.is_dir():
+        return []
+    import time
+    try:
+        import dispatch_log_audit as dla  # type: ignore
+    except ImportError:
+        return []
+    now_ts = time.time() if now_ts is None else now_ts
+    horizon = now_ts - lookback_min * 60
+    read = reader or dla._read_text
+    by_backend: dict[str, dict[str, Any]] = {}
+    for log in sorted(runs_dir.glob("resolve-*.log")):
+        if not _RESOLVE_LOG_RE.search(log.name):
+            continue
+        try:
+            if log.stat().st_mtime < horizon:
+                continue
+        except OSError:
+            continue
+        text = read(log)
+        if text is None:
+            continue
+        backend = str(dla.backend_of_log(log) or "claude")
+        row = by_backend.setdefault(backend, {
+            "product": backend, "lookback_min": lookback_min, "sessions": 0,
+            "sessions_with_hook_failures": 0, "hook_failures": 0, "evidence_logs": []})
+        row["sessions"] += 1
+        count = sum(int(f["count"]) for f in dla._match_hook_failures(text))
+        if count > 0:
+            row["sessions_with_hook_failures"] += 1
+            row["hook_failures"] += count
+            if len(row["evidence_logs"]) < 5:
+                row["evidence_logs"].append(log.name)
+    out: list[dict[str, Any]] = []
+    for row in by_backend.values():
+        s = int(row["sessions"])
+        failed_sessions = int(row["sessions_with_hook_failures"])
+        row["failure_session_rate"] = round(failed_sessions / s, 3) if s else 0.0
+        # "fully unhooked" = every recent session of this backend failed its hooks,
+        # i.e. the guard hook layer never bound on this backend over the window.
+        row["all_sessions_unhooked"] = bool(
+            s > 0 and failed_sessions == s and row["hook_failures"] > 0)
+        out.append(row)
+    out.sort(key=lambda r: (not r["all_sessions_unhooked"],
+                            -int(r["hook_failures"]), str(r["product"])))
+    return out
+
+
 def _total_commits(root: Path) -> int | None:
     """Commits reachable from HEAD, or None if git can't answer. Used to size the
     closure-audit window to the repo so it never silently scans a stale slice."""
@@ -445,13 +526,15 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                                         (pre.get("account") or {}).get("tag"))
     backend_health = read_backend_health(root / RUNS_DIRNAME)
     backend_stub_rate = backend_stub_rates(root / RUNS_DIRNAME)
+    hook_failures = backend_hook_failures(root / RUNS_DIRNAME)
     run_status = read_run_status_digests(root)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
                          silent=silent, weekly_cap=weekly_cap, throughput=throughput,
                          backend_health=backend_health,
-                         backend_stub_rate=backend_stub_rate, run_status=run_status)
+                         backend_stub_rate=backend_stub_rate,
+                         hook_failures=hook_failures, run_status=run_status)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -461,6 +544,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   throughput: dict[str, Any] | None = None,
                   backend_health: list[dict[str, Any]] | None = None,
                   backend_stub_rate: list[dict[str, Any]] | None = None,
+                  hook_failures: list[dict[str, Any]] | None = None,
                   run_status: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
@@ -550,6 +634,22 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                           for r in majority_stub[:4])
         reasons.append(f"backend stub-rate majority-stub over recent logs ({names}) — inspect backend output")
 
+    # Hook-layer binding: a backend whose every recent session logs hook failures is
+    # running UNHOOKED by the guard layer (productive but unguarded by the hook
+    # backstop). Information, not breakage — like the stub-rate signal it adds a
+    # reason but never flips ok (the commit-path / OFF_TRUNK guard is the backstop).
+    hook_failures = hook_failures or []
+    unhooked = [r for r in hook_failures if r.get("all_sessions_unhooked")]
+    if unhooked:
+        names = ", ".join(f"{r.get('product')} {r.get('hook_failures')} fail/"
+                          f"{r.get('sessions')} sess "
+                          f"({int(float(r.get('failure_session_rate') or 0) * 100)}%)"
+                          for r in unhooked[:4])
+        reasons.append(
+            f"guard hook layer UNBOUND on {len(unhooked)} backend(s) ({names}) — "
+            f"productive but running unhooked; the commit-path/OFF_TRUNK guard is the "
+            f"backstop (#1277)")
+
     if not tp_na:
         tp_verdict = throughput.get("verdict")
         tp_rate = throughput.get("completed_rate_per_hour")
@@ -633,6 +733,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "dead": backend_health,
             "stub_rate": backend_stub_rate,
         },
+        "hook_health": {
+            "unhooked_count": len(unhooked),
+            "by_backend": hook_failures,
+        },
         "run_status": {
             "source": "dos status",
             "count": len(run_status),
@@ -698,6 +802,13 @@ def render(p: dict[str, Any]) -> str:
         bits = ", ".join(f"{r.get('product')}={r.get('stub')}/{r.get('total')} stub"
                          for r in flagged_rates[:4])
         lines.append(f"║ backend   : majority-stub recent logs [{bits}]")
+    hh = p.get("hook_health") or {}
+    unhooked_rows = [r for r in (hh.get("by_backend") or []) if r.get("all_sessions_unhooked")]
+    if unhooked_rows:
+        bits = ", ".join(f"{r.get('product')}={r.get('hook_failures')} fail/{r.get('sessions')} sess"
+                         f" ({int(float(r.get('failure_session_rate') or 0) * 100)}%)"
+                         for r in unhooked_rows[:4])
+        lines.append(f"║ hooks     : guard layer UNBOUND [{bits}] (#1277)")
     rs = p.get("run_status") or {}
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
@@ -870,6 +981,40 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| {row.get('product')} | {row.get('lookback_min')}m | "
                        f"{row.get('total')} | {row.get('productive')} | {row.get('stub')} | "
                        f"{rate} | {verdict} | {evidence} |")
+
+    hh = payload.get("hook_health") or {}
+    hook_rows = hh.get("by_backend") or []
+    out += ["", "## Hook health (guard-layer binding)", ""]
+    if not hook_rows:
+        out.append("_No recent resolve logs in the hook-failure sweep window._")
+    else:
+        unhooked = [r for r in hook_rows if r.get("all_sessions_unhooked")]
+        if unhooked:
+            out += [
+                f"**{len(unhooked)}** backend(s) ran **UNHOOKED** by the guard layer over "
+                "the recent window — every session logged `hook: <name> Failed`, so the fak "
+                "guard hooks (PreToolUse / PostToolUse / Stop) never bound. `claude` binds "
+                "the guard hooks natively; a non-claude backend (codex/opencode) runs its "
+                "own native hook config, and when that config can't reach the dos hook CLI "
+                "at runtime every lifecycle hook fails. Such a worker stays productive but "
+                "runs unguarded by the hook backstop — the commit-path / `OFF_TRUNK` guard "
+                "is what still holds the line (#1277).",
+                "",
+            ]
+        else:
+            out += ["All backends bound their guard hooks over the recent window — "
+                    "no `hook: <name> Failed` storm.", ""]
+        out += [
+            "| backend | lookback | sessions | sessions w/ hook fail | fail-session rate | hook failures | verdict | evidence |",
+            "|---|---:|---:|---:|---:|---:|---|---|",
+        ]
+        for row in hook_rows:
+            verdict = "**UNHOOKED**" if row.get("all_sessions_unhooked") else "ok"
+            evidence = ", ".join(f"`{log}`" for log in (row.get("evidence_logs") or [])[:3]) or "—"
+            rate = row.get("failure_session_rate")
+            out.append(f"| {row.get('product')} | {row.get('lookback_min')}m | "
+                       f"{row.get('sessions')} | {row.get('sessions_with_hook_failures')} | "
+                       f"{rate} | {row.get('hook_failures')} | {verdict} | {evidence} |")
 
     sc = w.get("silent_count") or 0
     out += ["", "## Workers that produced nothing", ""]
