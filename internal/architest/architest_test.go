@@ -59,7 +59,7 @@ var tier = map[string]int{
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; imports scoreboard(1)+stdlib, off the hot path.
-	"supportmaturityscore": 1,                // pure scorecard over internal/covmatrix; off the hot path.
+	"supportmaturityscore": 2,                // support-maturity scorecard over covmatrix + supportmaturity(2); off the hot path.
 	"supportmaturity":      2,                // support-maturity ladder + shipgate-gated promotion/drop rules (#1244/#1245); imports tier-1 support facts and shipgate(2), off the hot path.
 	"releasestale":         1,                // pure publish-staleness verdict (latest tag vs HEAD, in commits+days) + a thin git Gather shell; the publish-axis dual of binstamp's source-axis freshness. Stdlib-only, imports nothing internal, off the hot path.
 	"affectedtests":        1,                // pure reverse-dependency closure for the `fak affected` fast test gate: changed packages + every package that (transitively, test imports included) imports one; stdlib-only, imports nothing internal, off the hot path.
