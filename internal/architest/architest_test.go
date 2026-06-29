@@ -166,6 +166,7 @@ var tier = map[string]int{
 	"vcachesnapshot":  2, // vCache observed-cache-window snapshot bridge (#827d882f): folds vcacheobserve's realized traffic into the read-side snapshot the score consumes; imports vcacheobserve(2)+stdlib only, off the hot path.
 	"cadencereport":   3, // the consolidated regular-cadence report: a read-only fold-over-folds that distills the scorecard control pane (scores), git (work-done), and release-status (releases) into one schema/ok/verdict/finding envelope + a durable JSONL trend ledger. Composer (like gardenbundle): shells to the Python folds + git off the hot path, imports nothing internal.
 	"dispatchorder":   1, // pure dispatch-ordering helper; stdlib-only, imports nothing internal, off the hot path.
+	"dispatchtick":    1, // pure issue-resolution dispatch tick contract: backend argv, guard wrap, wave/account sidecars; stdlib-only, off the hot path.
 	"dispatchsweep":   1, // pure queue-drain loop core for `fak dispatch sweep`: find next issue -> spawn one worker -> repeat, until a tick refuses or the best-effort agent ceiling is hit; tick+settle are injected (the cmd/fak shell shells the Python dispatch tick). stdlib-only, imports nothing internal, off the hot path.
 	"dojo":            1, // the prediction-vs-reality gym's pure scoring/fold/ledger/board core: Prediction/Outcome/Episode scoring + the cross-lever leaderboard fold; stdlib-only, imports nothing internal (the corpus-scanning levers live in cmd/fak), off the hot path.
 	"looprecover":     1, // pure loop-recovery decision helper; stdlib-only, imports nothing internal, off the hot path.
@@ -186,6 +187,7 @@ var tier = map[string]int{
 	"opttarget":       4, // declarative target layer of the RSI optimization fuser (epic #1279): Compile lowers an OptTarget (data) into a rsiloop.Harness, so it imports rsiloop(4) and is forced to the integrator layer. Off the hot path.
 	"cachevaluepost":  2, // outbound Slack publisher for the cache-value P&L roll-up (twin of benchpost/dojopost/grafanapost); forced to tier 2 by its cachevaluereport(2) import. Imports cachevalueledger(1)+cachevaluereport(2)+scoreboard(1)+slackenv(1), off the hot path.
 	"loopscore":       1, // pure loop scorecard: folds the loopmgr ledger + job registry into a durability/self-report/dogfood score for the agentic background loops; imports loopmgr(1), off the hot path.
+	"loopfleet":       1, // cross-ledger loop-health fold (#1196): pure read-only adapters over the loopmgr/nightrun/dojo/cadence/dispatch journals joined into one per-loop health view in loopmgr's HealthState vocabulary; imports loopmgr(1), off the hot path.
 	// new-leaf:tier â€” `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
