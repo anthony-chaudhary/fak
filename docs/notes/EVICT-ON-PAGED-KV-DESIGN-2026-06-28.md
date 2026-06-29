@@ -168,12 +168,15 @@ worse. So exact-span eviction and quantized K are in tension. The decision:
 The GLM-MoE-DSA cache evicts through `evictGLMDsa` (`kvcache.go`), which compacts the DSA
 index/state and re-rotates survivors via `glm.rerotateSurvivor` using the **same new-logical-
 index re-derivation**. The invariant is identical: re-derivation is a function of the new
-logical position, not physical layout, so the §1–§4 argument transfers verbatim. It is
-**scoped out of the prototype** with reason: the DSA index/state is a separate per-layer
-structure that is not yet plumbed into the paged pool, and prototyping it would mean porting the
-whole `glmDsaKVCache` onto blocks — which is #34's job, not this design gate's. The dense
-softmax-K/V/`Kraw` proof here establishes the load-bearing invariant; carrying the DSA state
-onto paged blocks is tracked as part of #34 (and #492 owns the GLM-DSA backend's future).
+logical position, not physical layout, so the §1–§4 argument transfers verbatim.
+
+The GLM-DSA path is now covered by a separate paged-row witness rather than forced through the
+dense `PagedKVPool`: its attention K, pre-RoPE Kraw, V, and learned-indexer K/Kraw rows have
+different strides and element widths, so `paged_glmdsa.go` pages each row family under its own
+fixed-size block table. `TestPagedGLMDsaEvictBitIdenticalToContiguous` snapshots a contiguous
+GLM-DSA cache into that paged representation, evicts a middle span, materializes back to
+`KVCache`, and proves the result plus the next decode step are bit-identical to
+`KVCache.Evict`.
 
 ## 8. Prototype + proof (what landed)
 
@@ -191,9 +194,13 @@ onto paged blocks is tracked as part of #34 (and #492 owns the GLM-DSA backend's
   - `TestPagedEvictCOWLeavesForkedParentUnchanged` — a forked sibling that shares blocks COW is
     left byte-for-byte unchanged when the other fork evicts; the evicting fork still equals the
     contiguous Evict.
+- `internal/model/paged_glmdsa.go` / `_test.go` — the GLM-DSA row-geometry variant:
+  attention K/Kraw/V and learned-indexer K/Kraw are paged in separate row planes, then a
+  middle-span evict is proven bit-identical to the contiguous GLM-DSA cache and next decode
+  step.
 
-Run: `go test ./internal/model -run TestPagedEvict` (or `.\fak\test.ps1`). Green on win32/amd64
-at `max|Δ| = 0`.
+Run: `wsl -e bash -lc 'cd /mnt/c/work/fak && go test ./internal/model -run "TestPagedEvict|TestPagedGLMDsaEvict"'`
+(or `.\test.ps1` for the full Windows-host gate). Green at `max|Δ| = 0`.
 
 ## 9. Recommendation to #34 and #27
 

@@ -87,7 +87,7 @@ but lack an on-disk numeric oracle today.
 | **#414 / #413** | OPEN | GLM-5.2 DSA (exact-span evict / full-size serving) | `glm_dsa.go`, `dsa_index.go` |
 | **#86** | OPEN | GLM-DSA has no `compute.Backend` path (`requireGLMDsaSession` panics) | `kv.go:551` |
 | **#479** | OPEN | device-resident KVStore (sibling, not a dependency) | `internal/compute` |
-| **#33** | OPEN | bit-exact middle-evict under paged/block KV | `kv.go` Evict |
+| **#33** | **CLOSED** | bit-exact middle-evict under paged/block KV | `paged_evict.go` + `docs/notes/EVICT-ON-PAGED-KV-DESIGN-2026-06-28.md` |
 
 ---
 
