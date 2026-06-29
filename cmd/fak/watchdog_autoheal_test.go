@@ -161,10 +161,16 @@ func TestWatchdogAutohealPlatformProjection(t *testing.T) {
 		!serviceProjectionHas(win, "taskscheduler", "FleetDOSDispatchWatchdog") {
 		t.Fatalf("windows projection missing expected Scheduled Tasks: %+v", win)
 	}
+	if !serviceProjectionHas(win, "taskscheduler", "FleetStaleWorkGarden") {
+		t.Fatalf("windows projection missing stale-work garden task: %+v", win)
+	}
 
 	darwin := watchdogAutohealServicesForGOOS("darwin")
 	if !serviceProjectionHas(darwin, "launchd", "com.fleet.dispatch-supervisor") {
 		t.Fatalf("darwin projection missing launchd dispatch supervisor: %+v", darwin)
+	}
+	if !serviceProjectionHas(darwin, "launchd", "com.fleet.stale-work-garden") {
+		t.Fatalf("darwin projection missing launchd stale-work garden: %+v", darwin)
 	}
 	for _, svc := range darwin {
 		if svc.Manager == "launchd" && !strings.Contains(filepath.ToSlash(svc.UnitPath), "LaunchAgents/") {
@@ -175,6 +181,9 @@ func TestWatchdogAutohealPlatformProjection(t *testing.T) {
 	linux := watchdogAutohealServicesForGOOS("linux")
 	if !serviceProjectionHas(linux, "systemd", "fleet-dos-dispatch-watchdog.timer") {
 		t.Fatalf("linux projection missing systemd dispatch watchdog timer: %+v", linux)
+	}
+	if !serviceProjectionHas(linux, "systemd", "fleet-stale-work-garden.timer") {
+		t.Fatalf("linux projection missing systemd stale-work garden timer: %+v", linux)
 	}
 }
 

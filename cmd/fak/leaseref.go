@@ -29,9 +29,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdLeaseref(argv []string) { os.Exit(runLeaseref(os.Stdout, os.Stderr, argv)) }
@@ -49,6 +51,8 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefList(stdout, stderr, rest)
 	case "reap":
 		return runLeaserefReap(stdout, stderr, rest)
+	case "audit":
+		return runLeaserefAudit(stdout, stderr, rest)
 	case "acquire":
 		return runLeaserefAcquire(stdout, stderr, rest)
 	case "fence":
@@ -107,6 +111,12 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       The delete is an ordinary ref delete that converges across clones the same way
       acquisition does.
 
+  fak leaseref audit [--dir DIR]
+      READ-ONLY staleness report over refs/fak/locks/*: list every lease, classify
+      live-vs-expired against now, and emit the garden control-pane envelope
+      (ok/verdict/reason). Reaps NOTHING — verdict ACTION when an expired lease lingers
+      is the signal to run 'fak leaseref reap'. This is the member 'fak garden' folds.
+
   fak leaseref acquire --id ID --holder H [--tree GLOB ...] [--ttl SEC] [--dir DIR]
       FENCED acquire (#906-C1): take the lease with a monotonic fencing token.
       Fresh -> generation 1; reaping an EXPIRED holder -> generation bumps (a
@@ -136,6 +146,7 @@ func runLeaserefLive(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	store := leaseref.NewInDir(*dir)
 	leases, err := store.LiveLeases(context.Background(), time.Now())
 	if err != nil {
@@ -153,6 +164,7 @@ func runLeaserefList(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	store := leaseref.NewInDir(*dir)
 	recs, err := store.List(context.Background())
 	if err != nil {
@@ -187,6 +199,7 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	store := leaseref.NewInDir(*dir)
 	ctx := context.Background()
 	now := time.Now()
@@ -210,6 +223,55 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 	return rc
 }
 
+// runLeaserefAudit is the READ-ONLY staleness reporter over refs/fak/locks/*: it lists every
+// lease, classifies live-vs-expired against now, and emits the garden control-pane envelope
+// (ok/verdict/reason) so the `fak garden` bundle can fold it. It REAPS NOTHING — deleting an
+// expired lease stays the explicit `fak leaseref reap` verb, kept separate from this audit so a
+// read-only garden tick never mutates the cross-machine lock state. ok is always true (reporting
+// is the pass working); verdict is ACTION only when an expired lease lingers, the signal to reap.
+func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref audit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	asControlPane := fs.Bool("control-pane", false, "emit the garden control-pane envelope (the default for this verb)")
+	_ = asControlPane // the audit verb only speaks the control-pane envelope; the flag is accepted for symmetry
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	store := leaseref.NewInDir(*dir)
+	recs, err := store.List(context.Background())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak leaseref audit: %v\n", err)
+		return 1
+	}
+	now := time.Now()
+	var liveIDs, expiredIDs []string
+	for _, r := range recs {
+		if r.Expired(now) {
+			expiredIDs = append(expiredIDs, r.ID)
+		} else {
+			liveIDs = append(liveIDs, r.ID)
+		}
+	}
+	verdict := "OK"
+	reason := fmt.Sprintf("%d live lease(s), 0 expired under refs/fak/locks/*", len(liveIDs))
+	if len(expiredIDs) > 0 {
+		verdict = "ACTION"
+		reason = fmt.Sprintf("%d live, %d EXPIRED lease(s) under refs/fak/locks/* (%s) — run `fak leaseref reap`",
+			len(liveIDs), len(expiredIDs), strings.Join(expiredIDs, ", "))
+	}
+	env := map[string]any{
+		"schema":        "fak.leaseref-audit-control-pane.v1",
+		"ok":            true,
+		"verdict":       verdict,
+		"reason":        reason,
+		"live_count":    len(liveIDs),
+		"expired_count": len(expiredIDs),
+		"expired_ids":   expiredIDs,
+	}
+	return emitLeaserefJSON(stdout, stderr, env, "audit")
+}
+
 func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref acquire", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -222,6 +284,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if *id == "" {
 		fmt.Fprintln(stderr, "fak leaseref acquire: --id is required")
 		return 2
@@ -260,6 +323,7 @@ func runLeaserefFence(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if *id == "" {
 		fmt.Fprintln(stderr, "fak leaseref fence: --id is required")
 		return 2
@@ -289,6 +353,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if *id == "" || *holder == "" {
 		fmt.Fprintln(stderr, "fak leaseref renew: --id and --holder are required")
 		return 2

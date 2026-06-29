@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,4 +136,71 @@ func TestLoopRecoverStrayArg(t *testing.T) {
 	if _, _, code := runLoopRecoverAt("stray"); code != 2 {
 		t.Errorf("unexpected arg: exit = %d, want 2", code)
 	}
+}
+
+// TestLoopRecoverForkedLedgerSurvives pins the separation-of-concerns fix: a forked seq chain
+// (a concurrent double-append to the append-only audit log) must NOT take recover down. The
+// tolerant LoadPrefix recovers the valid prefix, the break is surfaced as a finding on stderr
+// (logging), the worklist is planned from the prefix (default working behavior), and the audit
+// log is never rewritten — exit 0, not 1 (the strict loader's behavior before the fix).
+func TestLoopRecoverForkedLedgerSurvives(t *testing.T) {
+	const now = 2_000_000
+	path := recoverLedger(t, now) // 6 valid hash-chained events
+	// Append a raw line that collides on seq (the real-world fork: two loops appended
+	// concurrently and both got the same seq). This breaks the strict chain at this line.
+	forkLine := `{"schema":"fak.loop-event.v1","seq":1,"loop_id":"x","kind":"fire","prev_hash":"deadbeef","hash":"00"}` + "\n"
+	if err := appendRawLine(t, path, forkLine); err != nil {
+		t.Fatalf("append fork line: %v", err)
+	}
+
+	out, errb, code := runLoopRecoverAt("--ledger", path, "--now", "2000000", "--stale-min", "30", "--json")
+	if code != 0 {
+		t.Fatalf("forked ledger: exit = %d, want 0 (recover must survive a fork; stderr: %s)", code, errb)
+	}
+	if !strings.Contains(errb, "integrity break") {
+		t.Errorf("forked ledger: stderr should report the integrity break as a finding, got: %s", errb)
+	}
+	if !strings.Contains(errb, "audit log is left intact") {
+		t.Errorf("forked ledger: stderr should state the audit log is not rewritten, got: %s", errb)
+	}
+	// The worklist is still planned from the recovered prefix (the 6 valid events).
+	var res looprecover.Result
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if res.OrphanedCount != 1 || res.UnwitnessedCount != 1 {
+		t.Errorf("forked ledger recovered prefix counts = orphaned %d unwit %d, want 1/1", res.OrphanedCount, res.UnwitnessedCount)
+	}
+
+	// The control-pane envelope folds the break into the reason and stays ok:true (advisory).
+	cp, _, cpCode := runLoopRecoverAt("--ledger", path, "--now", "2000000", "--stale-min", "30", "--control-pane")
+	if cpCode != 0 {
+		t.Fatalf("control-pane on forked ledger: exit = %d, want 0", cpCode)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(cp), &env); err != nil {
+		t.Fatalf("control-pane output is not valid JSON: %v\n%s", err, cp)
+	}
+	if env["ok"] != true {
+		t.Errorf("control-pane ok = %v, want true (a found orphan / a fork is advisory, not a red)", env["ok"])
+	}
+	if env["ledger_broken"] != true {
+		t.Errorf("control-pane ledger_broken = %v, want true", env["ledger_broken"])
+	}
+	if reason, _ := env["reason"].(string); !strings.Contains(reason, "integrity break") {
+		t.Errorf("control-pane reason should fold the integrity break, got: %v", env["reason"])
+	}
+}
+
+// appendRawLine appends a raw (possibly chain-breaking) line to a ledger file, bypassing
+// loopmgr.Append's hash-chaining — the only way to synthesize a forked ledger in a test.
+func appendRawLine(t *testing.T, path, line string) error {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(line)
+	return err
 }

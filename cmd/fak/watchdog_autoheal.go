@@ -167,6 +167,12 @@ func watchdogAutohealServicesForGOOS(goos string) []watchdogService {
 			{ID: "fleet-resume-watchdog", Manager: "taskscheduler", Unit: "FleetResumeWatchdog"},
 			{ID: "fleet-supervisor-watchdog", Manager: "taskscheduler", Unit: "FleetSupervisorWatchdog"},
 			{ID: "fleet-dos-dispatch-watchdog", Manager: "taskscheduler", Unit: "FleetDOSDispatchWatchdog"},
+			// The stale-work garden tick: runs `fak garden --check` on a cadence so orphaned
+			// runs, a forked loop ledger, expired leases, and a stale @latest are caught
+			// unattended. Not-installed is a no-op (a host without the timer is never an error);
+			// installed-but-stopped is auto-restarted. Install with `fak cron emit --target
+			// taskscheduler --label FleetStaleWorkGarden ...` (see docs/cli-reference.md).
+			{ID: "fleet-stale-work-garden", Manager: "taskscheduler", Unit: "FleetStaleWorkGarden"},
 		}
 	case "darwin":
 		home, _ := os.UserHomeDir()
@@ -174,12 +180,14 @@ func watchdogAutohealServicesForGOOS(goos string) []watchdogService {
 		return []watchdogService{
 			{ID: "fleet-dos-dispatch-watchdog", Manager: "launchd", Unit: "com.fleet.dispatch-supervisor", UnitPath: filepath.Join(launchAgents, "com.fleet.dispatch-supervisor.plist")},
 			{ID: "fak-dogfood-fleet", Manager: "launchd", Unit: "com.fak.dogfood-fleet", UnitPath: filepath.Join(launchAgents, "com.fak.dogfood-fleet.plist")},
+			{ID: "fleet-stale-work-garden", Manager: "launchd", Unit: "com.fleet.stale-work-garden", UnitPath: filepath.Join(launchAgents, "com.fleet.stale-work-garden.plist")},
 		}
 	case "linux":
 		return []watchdogService{
 			{ID: "fleet-resume-watchdog", Manager: "systemd", Unit: "fleet-resume-watchdog.timer"},
 			{ID: "fleet-supervisor-watchdog", Manager: "systemd", Unit: "fleet-supervisor-watchdog.timer"},
 			{ID: "fleet-dos-dispatch-watchdog", Manager: "systemd", Unit: "fleet-dos-dispatch-watchdog.timer"},
+			{ID: "fleet-stale-work-garden", Manager: "systemd", Unit: "fleet-stale-work-garden.timer"},
 		}
 	default:
 		return nil

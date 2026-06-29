@@ -19,6 +19,13 @@ package main
 // crash, a rate limit, a timeout). It does not yet probe the worker pid for confirmed liveness —
 // the leaf already accepts that stronger signal (RunFact.WorkerKnown/WorkerLive); wiring a pid
 // probe is a later, more precise rung.
+//
+// LEDGER INTEGRITY (separation of concerns). The loop ledger is an append-only, hash-chained
+// AUDIT LOG; a concurrent double-append can fork the seq chain. recover must NOT die on a fork
+// (the strict loopmgr.Load refuses the whole file) and must NEVER rewrite the audit log to
+// "fix" it. So it loads via the TOLERANT loopmgr.LoadPrefix — recover the longest valid prefix,
+// surface the break (line/seq/reason/recovered) as a FINDING (logging), and keep planning from
+// the prefix (default working behavior). This mirrors runLoopHealth (loop.go).
 
 import (
 	"flag"
@@ -41,6 +48,7 @@ func runLoopRecover(stdout, stderr io.Writer, argv []string) int {
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for the silence math (0 = current time)")
 	all := fs.Bool("all", false, "also list running, complete, and failed runs (not just the recovery worklist)")
 	asJSON := fs.Bool("json", false, "emit the raw Result JSON instead of the human table")
+	controlPane := fs.Bool("control-pane", false, "emit the garden control-pane envelope (ok/verdict/reason) for the garden bundle")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -49,10 +57,17 @@ func runLoopRecover(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	events, err := loopmgr.Load(*ledger)
+	// Tolerant load: recover the longest valid prefix of the append-only ledger and carry
+	// the integrity break (if any) as a finding. A forked seq chain (a concurrent double
+	// append) no longer takes recover down — it recovers what it can and reports the break.
+	events, integ, err := loopmgr.LoadPrefix(*ledger)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak loop recover: %v\n", err)
 		return 1
+	}
+	if integ.Broken {
+		fmt.Fprintf(stderr, "fak loop recover: ledger integrity break at line %d (seq %d): %s (recovered %d event(s); planning from the recovered prefix — the audit log is left intact)\n",
+			integ.AtLine, integ.AtSeq, integ.Reason, integ.Recovered)
 	}
 	now := *nowUnix
 	if now == 0 {
@@ -69,11 +84,45 @@ func runLoopRecover(stdout, stderr io.Writer, argv []string) int {
 		StaleSeconds: staleSec,
 	})
 
+	if *controlPane {
+		return encodeJSONOrFail(stdout, stderr, recoverControlPane(res, integ), "fak loop recover")
+	}
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, res, "fak loop recover")
 	}
 	renderLoopRecover(stdout, *ledger, res, *all)
 	return 0
+}
+
+// recoverControlPane projects a recovery Result onto the garden-bundle control-pane envelope
+// (ok/verdict/reason — the only keys gardenbundle.Fold reads). A found orphan is the pass
+// WORKING, so ok is always true (advisory ACTION, never a red); a forked ledger is folded into
+// the reason so the garden surface sees the integrity break too. The raw Result stays available
+// under --json for the orphan worklist itself.
+func recoverControlPane(res looprecover.Result, integ loopmgr.Integrity) map[string]any {
+	recover := res.OrphanedCount + res.UnwitnessedCount
+	verdict := "OK"
+	reason := fmt.Sprintf("no runs to recover (%d running, %d complete, %d failed)",
+		res.RunningCount, res.CompleteCount, res.FailedCount)
+	if recover > 0 {
+		verdict = "ACTION"
+		reason = fmt.Sprintf("%d orphaned, %d unwitnessed run(s) to recover", res.OrphanedCount, res.UnwitnessedCount)
+	}
+	if integ.Broken {
+		reason += fmt.Sprintf("; ledger integrity break at line %d (recovered %d event(s))", integ.AtLine, integ.Recovered)
+		if verdict == "OK" {
+			verdict = "ACTION"
+		}
+	}
+	return map[string]any{
+		"schema":            "fak.loop-recover-control-pane.v1",
+		"ok":                true,
+		"verdict":           verdict,
+		"reason":            reason,
+		"orphaned_count":    res.OrphanedCount,
+		"unwitnessed_count": res.UnwitnessedCount,
+		"ledger_broken":     integ.Broken,
+	}
 }
 
 // foldRuns groups the ledger events sharing a run id into one RunFact each, keeping only runs

@@ -166,7 +166,7 @@ fak bench post    --rollup latest|regression [--n N] [--catalog PATH] [--baselin
 fak bench request [--now STAMP | --plan-json FILE] [--top N] [--dry-run]   # post a bench RUN-REQUEST (the bench_plan next-test-per-machine) to the bench channel. A request is a POST, not a dispatch — no inbound listener; the bench-nodes act on it out-of-band
 fak blockers post [--severity status|operator|clear] --title ... [--detail ... --owner "<@U>" --action ... --action-url URL --ref ...] [--dry-run]   # post a BLOCKER to the central Slack #blockers channel: a background `status` line records quietly, an `operator` one is SURFACED (pages <!here>/owner, red, with a do-this-next). FAK_BLOCKERS_* (token falls back to the scoreboard token; #blockers is the built-in default)
 fak blockers feed --issues FILE [--label blocked --repo-url URL] [--dry-run]   # CI roll-up: fold a `gh issue list --json number,title,url,assignees,labels` payload into one card — clear when empty, operator (paged) when a blocker is UNOWNED, background status when all are assigned
-fak leaseref  live [--dir DIR] | list [--json] [--dir DIR] | reap [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825)
+fak leaseref  live [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `audit` is the read-only staleness report
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
@@ -225,8 +225,15 @@ git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'
 dos arbitrate --lane docs --tree 'docs/**' --leases "$(fak leaseref live)"
 
 fak leaseref list           # every record under refs/fak/locks/*, marked LIVE / EXPIRED
+fak leaseref audit          # READ-ONLY staleness report (control-pane envelope); reaps nothing
 fak leaseref reap           # delete the expired (reapable) records — a crashed holder is bounded
 ```
+
+`audit` is the read-only counterpart of `reap`: it classifies every lease live-vs-expired and
+emits the `fak garden` control-pane envelope (`ok`/`verdict`/`reason`, `verdict ACTION` when an
+expired lease lingers) **without deleting anything**. Keeping the report (`audit`) and the
+mutation (`reap`) as separate verbs is deliberate — a read-only garden tick can fold the audit
+member without ever mutating the cross-machine lock state.
 
 `live` emits the **non-expired** records as the `dos_arbitrate` `live_leases`
 array `[{lane,lane_kind,tree}, …]` (each ref-stored lease is a tree-scoped
@@ -238,6 +245,34 @@ acquisition** — it lets the arbiter *see* a cross-machine conflict, it does no
 arbitrate a same-fetch-window race; a signature envelope over the record is
 deferred follow-up. Exits `0` ok, `2` on a usage/parse error, `1` on a git/store
 failure.
+
+### Gardening stale work + the watchdog cadence
+
+`fak garden` is the one composed, read-only fold over the repo's self-maintenance passes.
+Three of its members watch **stale work** specifically:
+
+- `orphaned_runs` — `fak loop recover --control-pane`: dispatched runs that started but were
+  never finished or witnessed. It reads the loop ledger **tolerantly** — a forked seq chain (a
+  concurrent double-append to the append-only, hash-chained audit log) no longer takes the
+  detector down; it recovers the valid prefix, surfaces the integrity break as a finding, and
+  plans the worklist from the prefix. The audit log is never rewritten. Advisory (non-gating).
+- `release_staleness` — `fak release-staleness --json`: a **gating** member that turns a stale
+  `@latest` (the trunk moving far past the last release tag) into a loud red.
+- `stale_leases` — `fak leaseref audit`: expired cross-machine leases under `refs/fak/locks/*`,
+  reported read-only (it reaps nothing). Advisory; the remedy is the explicit `fak leaseref reap`.
+
+```bash
+fak garden            # human snapshot of every member, stale-work members included
+fak garden --check    # CI/watchdog gate: non-zero when a gating member regressed
+```
+
+To run the pass **unattended**, install an OS-scheduler unit whose command is `fak garden
+--check` on a cadence, named `FleetStaleWorkGarden` (Windows Scheduled Task) /
+`com.fleet.stale-work-garden` (launchd) / `fleet-stale-work-garden.timer` (systemd). `fak start`
+(via `serve`/`guard`) then **auto-heals** that unit: the watchdog-autoheal pass probes it and
+restarts it if it has stopped — the same probe/restart/lease/debounce machinery that keeps the
+fleet supervisors alive (`FAK_WATCHDOG_AUTOHEAL=off` disables it; `=warn` logs without
+restarting). `FAK_GARDEN=off` is the env-side brake on the garden pass itself.
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
 from a declarative JSON **manifest** instead of the compiled-in default — so WHICH

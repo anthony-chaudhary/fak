@@ -97,6 +97,43 @@ var Members = []Member{
 		Kind:  "envelope",
 		Exec:  "command",
 	},
+	{
+		// Stale-work rung 1: orphaned/unwitnessed dispatched runs. Re-invokes the on-disk
+		// fak binary (Exec=command, Argv[0]=fak -> os.Executable), reads the loop ledger
+		// TOLERANTLY (a forked seq chain no longer takes recover down), and surfaces the
+		// recovery worklist. Non-gating: a found orphan is the pass WORKING, not a broken
+		// garden — the operator re-dispatches/re-verifies. --control-pane emits ok/verdict/reason.
+		Key:   "orphaned_runs",
+		Label: "orphaned runs",
+		Argv:  []string{"fak", "loop", "recover", "--control-pane"},
+		Gates: false,
+		Kind:  "envelope",
+		Exec:  "command",
+	},
+	{
+		// Stale-work rung 2: publish freshness. `@latest` rots silently as the trunk moves
+		// past the last release tag; this makes the lag a loud, GATING red so an unattended
+		// garden tick flags "adopters are on a stale binary". The member already speaks the
+		// control-pane envelope (ok/verdict/reason) with no extra flag.
+		Key:   "release_staleness",
+		Label: "release staleness",
+		Argv:  []string{"fak", "release-staleness", "--json"},
+		Gates: true,
+		Kind:  "envelope",
+		Exec:  "command",
+	},
+	{
+		// Stale-work rung 3: expired cross-machine leases under refs/fak/locks/*. READ-ONLY
+		// audit — it reaps NOTHING (reaping stays the explicit `fak leaseref reap` so a
+		// read-only garden fold never mutates lock state). Non-gating: an expired lease is an
+		// advisory ACTION (run reap), not a red. A crashed holder's lapsed lease is surfaced.
+		Key:   "stale_leases",
+		Label: "stale leases",
+		Argv:  []string{"fak", "leaseref", "audit"},
+		Gates: false,
+		Kind:  "envelope",
+		Exec:  "command",
+	},
 }
 
 // DeepMember is the opt-in deep member (added by --deep). Non-gating advisory.
