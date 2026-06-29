@@ -87,6 +87,15 @@ func collectLoopIndex(root string) loopindex.Loop {
 		}
 		return false
 	}
+	hasAllFold := func(rel string, needles ...string) bool {
+		body := strings.ToLower(read(rel))
+		for _, n := range needles {
+			if !strings.Contains(body, strings.ToLower(n)) {
+				return false
+			}
+		}
+		return true
+	}
 	bothDoors := func(needle string) bool { return has("cmd/fak/serve.go", needle) && has("cmd/fak/guard.go", needle) }
 	mainCase := func(verb string) bool { return has("cmd/fak/main.go", `case "`+verb+`"`) }
 
@@ -139,12 +148,17 @@ func collectLoopIndex(root string) loopindex.Loop {
 	verify := loopindex.Stage{
 		Name: loopindex.StageVerify, Signal: "unwitnessed-done rate", Floor: 0.6,
 		Probes: []loopindex.Probe{
-			liProbe("stop_seam_mechanism", "the STOP-failure seam exists (internal/stopfailure marker planner/settler)",
-				true, exists("internal/stopfailure")),
+			liProbe("stop_seam_mechanism", "the STOP gate exists (internal/loopgate) and the STOP-failure marker planner/settler exists (internal/stopfailure)",
+				true, exists("internal/loopgate") && exists("internal/stopfailure")),
 			liProbe("false_done_refused_default", "a false \"done\" is refused at the STOP seam by DEFAULT via commit-audit / unwitnessed-done detection (#1157)",
-				true, hasFold("internal/stopfailure/stopfailure.go", "commit-audit", "commitaudit", "unwitnessed", "false_done")),
+				true,
+				hasAllFold("internal/loopgate/loopgate.go", "ReasonDoneUnwitnessed", "CriterionCommitAudit", "OutcomeNotYet") &&
+					hasAllFold("cmd/fak/loop_drive.go", "StatusWitnessRefused", "turn landed no new commit", "ReasonDoneUnwitnessed") &&
+					hasAllFold("tools/githooks/pre-push", "FLEET_REVIEW_GUARD:-block", "dos review", "RESIDUAL")),
 			liProbe("commit_preview", "`fak commit --preview` cross-checks the claim before it lands (lane/stamp pre-check)",
 				false, has("cmd/fak/commit.go", "preview")),
+			liProbe("review_residual_surface", "`dos review` is the default ship-review surface: residual first, cleared commits cost near-zero attention",
+				false, hasAllFold("tools/githooks/pre-push", "dos review", "RESIDUAL", "CLEARED", "attention")),
 			liProbe("stop_settle_verb", "the STOP-failure markers are settleable from the CLI (cmd/fak/stopfailure.go)",
 				false, exists("cmd/fak/stopfailure.go")),
 		},

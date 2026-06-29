@@ -7,6 +7,8 @@
 # touching zero _test.go files, a `fix():` touching zero source, ...). This is fak
 # applying its OWN thesis to its OWN development: don't believe the commit message,
 # verify the claim against the file set git itself recorded.
+# The echoed review surface is residual-first: RESIDUAL is the operator work-list,
+# CLEARED is the near-zero-attention band for claims the kernel already witnessed.
 #
 # Why a git hook (not just a CLAUDE.md line): git runs it BELOW the agent layer, so
 # the same floor binds Claude Code, Codex, and a human at the push boundary — the
@@ -14,13 +16,14 @@
 # to the pre-commit leak-scan guard, and the local stand-in for the `dos review`
 # CI gate (docs/358) while CI is billing-blocked on the private repo.
 #
-# Mode  (env FLEET_REVIEW_GUARD):  warn (default) | block | off
-#   warn   allow the push, print the residual + how to fix it      (exit 0)
+# Mode  (env FLEET_REVIEW_GUARD):  block (default) | warn | off
 #   block  refuse the push until the residual is witnessed/amended  (exit 1)
+#   warn   allow the push, print the residual + how to fix it      (exit 0)
 #   off    do nothing
-# Default is WARN, not block: a residual is a claim-shape mismatch, not a security
-# leak, and the trunk is shared/high-churn — we surface it loudly first and let a
-# session flip to block once the baseline is clean. Promote with FLEET_REVIEW_GUARD=block.
+# Default is BLOCK: false "done" is refused at the ship seam, while `dos review`
+# still renders the residual band first so human attention goes only to claims the
+# witness could not clear. Soften with FLEET_REVIEW_GUARD=warn while settling an
+# intentional false positive.
 #
 # Escape hatch:  FLEET_ALLOW_RESIDUAL=1 git push   always allows (e.g. an
 # intentional data-artifact commit whose `test()` subject is a known false-positive;
@@ -29,7 +32,7 @@
 # Fail-open by design: if the `dos` CLI or the trunk ref is unavailable, the hook
 # says so and allows the push — a missing verifier must never wedge the trunk.
 
-mode="${FLEET_REVIEW_GUARD:-warn}"
+mode="${FLEET_REVIEW_GUARD:-block}"
 [ "$mode" = "off" ] && exit 0
 [ "${FLEET_ALLOW_RESIDUAL:-0}" = "1" ] && exit 0
 
@@ -94,6 +97,6 @@ if [ "$mode" = "block" ]; then
 else
 	echo "CLAIM_UNWITNESSED (advisory): a commit in $range claims something its diff does not witness." >&2
 	echo "$out" >&2
-	echo "  fix the subject to match the diff, or add the witnessing file. Hard-enforce with FLEET_REVIEW_GUARD=block." >&2
+	echo "  fix the subject to match the diff, or add the witnessing file. This hook blocks by default; current mode is FLEET_REVIEW_GUARD=warn." >&2
 	exit 0
 fi
