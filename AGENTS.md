@@ -226,10 +226,11 @@ tag is cut as work lands, `@latest` rots behind HEAD — check the lag any time 
 `make release-staleness` (`fak release-staleness --json`), and the whole release
 posture with `make release-readiness` (the deterministic release-debt scorecard).
 
-To cut one, run the **`/release` skill** — it drives the mechanical helpers under
-[`tools/`](tools/) in the right order (`release_decide` → `release_cut` →
-`release_tag` → `release_publish`) and explains the ordering gotchas they enforce by
-refusing. The short version:
+To cut one from the normal hot shared tree, run `fak release ship --execute --json`.
+It creates a transient detached worktree at `origin/main`, shares the repo-level
+release lock, runs the mechanical helpers in order, pushes the release commit to
+`main`, tags after the CI witness, creates the GitHub release page, and removes the
+worktree. The lower-level helpers remain available for diagnosis:
 
 1. **Decide** — `python tools/release_decide.py --json`. `decision: "hold"` names a
    blocker (`CI_BASE_RED`, `VERSION_DRIFT`, `NOTHING_TO_SHIP`); don't cut through it.
@@ -243,8 +244,8 @@ refusing. The short version:
    binaries + checksums — it fails `release not found` if the page doesn't exist yet).
 
 Same trunk rules as everything else: commit on `main`, by path, `-s` for DCO; on a
-**hot tree** cut in a detached worktree at `origin/main` rather than stashing peers'
-work. Stable rollback anchors are a separate, slower channel — see
+**hot tree** use `fak release ship --execute` rather than stashing peers' work.
+Stable rollback anchors are a separate, slower channel — see
 [`docs/stable-releases/`](docs/stable-releases/).
 
 ## Where to go next

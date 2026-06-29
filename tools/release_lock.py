@@ -73,6 +73,9 @@ def repo_root() -> Path:
 
 
 def lock_path(root: Path) -> Path:
+    override = os.environ.get("FAK_RELEASE_LOCK_ROOT")
+    if override:
+        return Path(override).resolve() / LOCK_NAME
     return root / LOCK_NAME
 
 

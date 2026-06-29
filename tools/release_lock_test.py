@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # import the sibling helper
@@ -36,6 +37,27 @@ class LockTest(unittest.TestCase):
         self.assertTrue(rl.lock_path(self.root).exists())
         self.assertEqual(out["lock"]["owner"], "A")
         self.assertEqual(out["lock"]["snapshot"], ["VERSION"])
+
+    def test_lock_root_env_override_shares_lock_across_worktrees(self) -> None:
+        shared = self.root / "shared-lock-root"
+        shared.mkdir()
+        worktree = self.root / "detached-worktree"
+        worktree.mkdir()
+        old = os.environ.get("FAK_RELEASE_LOCK_ROOT")
+        os.environ["FAK_RELEASE_LOCK_ROOT"] = str(shared)
+        try:
+            out, code = rl.acquire(worktree, ttl=60, owner="A", snapshot=[],
+                                   note=None, steal_stale=True, force=False)
+            self.assertEqual(code, rl.EXIT_OK)
+            self.assertTrue(out["ok"])
+            self.assertTrue((shared / rl.LOCK_NAME).exists())
+            self.assertFalse((worktree / rl.LOCK_NAME).exists())
+            self.assertEqual(rl.held_by(worktree, "A")[0], True)
+        finally:
+            if old is None:
+                os.environ.pop("FAK_RELEASE_LOCK_ROOT", None)
+            else:
+                os.environ["FAK_RELEASE_LOCK_ROOT"] = old
 
     def test_second_live_acquire_is_denied(self) -> None:
         rl.acquire(self.root, ttl=60, owner="A", snapshot=[], note=None, steal_stale=True, force=False)

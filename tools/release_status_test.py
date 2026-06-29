@@ -227,7 +227,7 @@ class ReleaseStatusTest(unittest.TestCase):
                 {},
                 {"clean": False, "modified_count": 2, "untracked_count": 1},
             )["kind"],
-            "clean_worktree",
+            "cut_release_hot_tree",
         )
         billing = rs.classify_ci_annotations([
             "The job was not started because recent account payments have failed or your spending limit needs to be increased.",
@@ -284,7 +284,20 @@ class ReleaseStatusTest(unittest.TestCase):
         )
         self.assertEqual(
             rs.next_action({"decision": "release", "next_version": "0.3.0"}, {}, unrelated_dirty)["kind"],
-            "clean_worktree",
+            "cut_release_hot_tree",
+        )
+        self.assertIn(
+            "fak release ship --execute",
+            rs.next_action(
+                {"decision": "release", "next_version": "0.3.0"},
+                {},
+                {
+                    "clean": False,
+                    "modified_count": 1,
+                    "untracked_count": 0,
+                    "release_relevant_count": 1,
+                },
+            )["detail"],
         )
         self.assertEqual(
             rs.next_action({"decision": "release", "next_version": "0.3.0"}, {})["kind"],

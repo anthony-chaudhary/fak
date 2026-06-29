@@ -35,6 +35,7 @@ ACTION_NEXT_ACTIONS = {
     "fix_version_topology",
     "repair_stable_evidence",
     "promote_stable",
+    "cut_release_hot_tree",
     "hold",
     "consider_stable",
 }
@@ -688,6 +689,22 @@ def next_action(
 ) -> dict:
     dirty = dirty or {}
     blockers = [str(b) for b in (decision.get("blockers") or [])]
+    if decision.get("decision") == "release":
+        if not dirty.get("clean", True):
+            modified = int(dirty.get("modified_count") or 0)
+            untracked = int(dirty.get("untracked_count") or 0)
+            return {
+                "kind": "cut_release_hot_tree",
+                "detail": (
+                    f"cut {decision.get('next_version')} with `fak release ship --execute`; "
+                    f"it uses a detached origin/main checkout and leaves this checkout's "
+                    f"{modified} modified and {untracked} untracked path(s) untouched"
+                ),
+            }
+        return {
+            "kind": "cut_release",
+            "detail": f"cut {decision.get('next_version')} with release_cut, push, then tag after green CI",
+        }
     if dirty_requires_clean_before_status(dirty):
         modified = int(dirty.get("modified_count") or 0)
         untracked = int(dirty.get("untracked_count") or 0)
@@ -698,21 +715,6 @@ def next_action(
                 f"commit, shelve, or remove {relevant} release-relevant dirty path(s) "
                 "before treating release status as trunk evidence"
             ),
-        }
-    if decision.get("decision") == "release":
-        if dirty_requires_clean_before_cut(dirty):
-            modified = int(dirty.get("modified_count") or 0)
-            untracked = int(dirty.get("untracked_count") or 0)
-            return {
-                "kind": "clean_worktree",
-                "detail": (
-                    f"commit, shelve, or remove {modified} modified and {untracked} untracked path(s) "
-                    "before executing release_cut"
-                ),
-            }
-        return {
-            "kind": "cut_release",
-            "detail": f"cut {decision.get('next_version')} with release_cut, push, then tag after green CI",
         }
     if "CI_BASE_RED" in blockers:
         if (ci_diagnosis or {}).get("action") == "fix_ci_billing":
