@@ -153,6 +153,11 @@ func main() {
 		cmdServeWiring(os.Args[2:])
 	case "guard":
 		cmdGuard(os.Args[2:])
+	case "info":
+		// The live fak-info overlay: poll a fak guard/serve gateway's /debug/vars and print
+		// one compact line per tick (cache economy + floor safety + liveness). This is the 20%
+		// pane `fak guard --split` opens; also runnable by hand in a second pane.
+		cmdInfo(os.Args[2:])
 	case "guard-precompact":
 		// Hidden: Claude Code PreCompact hook actuator installed by `fak guard`.
 		cmdGuardPreCompact(os.Args[2:])
@@ -238,8 +243,8 @@ func main() {
 		cmdDogfoodScore(os.Args[2:])
 	case "concept-usage-score":
 		cmdConceptUsageScore(os.Args[2:])
-	case "loop-score":
-		cmdLoopScore(os.Args[2:])
+	case "maturity":
+		cmdMaturity(os.Args[2:])
 	case "token-defaults-scorecard":
 		cmdTokenDefaultsScorecard(os.Args[2:])
 	case "skill-effectiveness-scorecard":
@@ -270,6 +275,8 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "complain":
+		cmdComplain(os.Args[2:])
 	case "learning-debt-dispatch":
 		cmdLearningDebtDispatch(os.Args[2:])
 	case "stopfailure":

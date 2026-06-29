@@ -141,6 +141,8 @@ concurrent = [
   "devindex",
   "learningdebt",
   "opttarget",
+  "guardcomplaint", # the agent APPEAL channel (`fak complain`): the subjective complement of guardroute; tree = internal/guardcomplaint/** only (its cmd/fak/complain.go shim stays in the `cmd` lane, keeping every leaf tree pairwise-disjoint per the header invariant)
+  "maturity",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -198,6 +200,8 @@ autopick = [
   "devindex",
   "learningdebt",
   "opttarget",
+  "guardcomplaint", # agent APPEAL channel (`fak complain`); see [lanes].concurrent note
+  "maturity", # internal/maturity leaf (the feature-maturity lifecycle scorecard), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -311,6 +315,7 @@ modelroute = ["internal/modelroute/**"]
 # (the disjointness algebra had no region to compare) -- the very same-tree collision protection
 # #1029 set out to add was inert. Tree = internal/modelreg/** only; its cmd/fak shim stays in `cmd`.
 modelreg = ["internal/modelreg/**"]
+maturity = ["internal/maturity/**"]
 sessionimage = ["internal/sessionimage/**"]
 a2achan = ["internal/a2achan/**"]
 snapshot = ["internal/snapshot/**"]
@@ -339,6 +344,7 @@ dispatchorder = ["internal/dispatchorder/**"]
 devindex = ["internal/devindex/**"]
 learningdebt = ["internal/learningdebt/**"]
 opttarget = ["internal/opttarget/**"]
+guardcomplaint = ["internal/guardcomplaint/**"] # agent APPEAL channel (`fak complain`); cmd/fak/complain.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
