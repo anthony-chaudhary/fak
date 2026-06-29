@@ -25,6 +25,7 @@
 //	grep:<pattern>    some commit message in history matches
 //	clean:<pathspec>  the working tree is clean there      (a green-tree ship)
 //	notests:<ref>     the commit did NOT edit its own gating tests (reward-hack guard)
+//	symptom:<ref>     a fix(...) ships a test that fails on the parent, passes at the ref (#1326)
 //	exec:<json>       fail-to-pass/pass-to-pass execution witness
 //
 // The notests rung is the dual of the others: where the rest CONFIRM that a
@@ -33,6 +34,13 @@
 // reward-hack. CONFIRMED means the commit touched no test file (clean); REFUTED
 // names the suspicious commit for a human; a bad/unknown ref or missing git
 // abstains (never a false CONFIRM that lets a test-rewriting commit through).
+//
+// The symptom rung is notests's mirror (#1326): notests REFUTES a commit that
+// edited its gating tests; symptom CONFIRMS a fix-commit that ADDED a test which
+// genuinely constrains the bug — one that FAILS on the parent's source and PASSES
+// at the fix (red-then-green), the test analog of commit-audit's diff-witness. Its
+// structural half (no test touched => REFUTED) always runs; the red-then-green
+// execution is opt-in via FAK_WITNESS_SYMPTOM (default ABSTAIN). See symptom.go.
 //
 // An unrecognized or empty claim, or any environment where git is unavailable,
 // resolves to ABSTAIN (fail-to-abstain) — the witness never blocks on its own
@@ -219,6 +227,11 @@ func (r *Resolver) Resolve(ctx context.Context, c *abi.ToolCall, claim string) a
 		return abi.WitnessConfirmed
 	case "exec":
 		return r.resolveExecution(ctx, arg)
+	case "symptom":
+		// The fix-witness rung (#1326): does the fix at <ref> carry a test that FAILS on the
+		// parent and PASSES at the ref? Structural check always runs; the red-then-green
+		// execution is opt-in (FAK_WITNESS_SYMPTOM). See symptom.go.
+		return r.resolveSymptom(ctx, arg)
 	case "rsl":
 		// The gittuf-RSL ref-move rung (#826): a FLAGGED SPIKE, off by default —
 		// resolveRSL abstains without parsing unless FAK_WITNESS_RSL is opted in.
