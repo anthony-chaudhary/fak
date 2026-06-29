@@ -427,6 +427,34 @@ summary  = "A loop turn claimed done, but the configured external witness did no
 fix      = "Re-arm the loop with this reason as feedback, make the next turn satisfy the goal's witness criterion (commit-audit, verify, test-witness, or a registered witness), then re-check the gate."
 see_also = ["internal/loopgate", "dos commit-audit", "dos verify", "dos test-witness", "dos witness"]
 
+[reasons.STALE_RECALL]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "A dev-ex loop is about to act on recalled status or plan memory whose backing witness is stale relative to the current git/ledger source of truth."
+fix      = "Refresh from the source witness (`dos status`, `dos verify`, `dos commit-audit`, or the current git ref), discard the stale recall, then retry with the refreshed digest."
+see_also = ["dos status", "dos verify", "dos commit-audit", "docs/goal-spec.md"]
+
+[reasons.COLLISION_RISK]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A dispatch or worker launch would overlap a live lease/region and risks two agents mutating the same file tree concurrently."
+fix      = "Run the arbiter and wait, repartition, or pick a disjoint lane/region before launching. Floor: `dos arbitrate` / lane lease checks."
+see_also = ["dos arbitrate", "dos top", "tools/dos_fleet_lease.py"]
+
+[reasons.GATE_LATENCY_REGRESSION]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A guard or DOS gate grew slow enough to threaten the loop's dev-ex latency budget, so the loop should not normalize the regression as healthy."
+fix      = "Measure the gate with the relevant hook/status benchmark, fix or budget the added latency, and rerun before claiming the loop is healthy."
+see_also = ["tools/dos_hook_bench.py", "docs/perf-dos-hook-cost.md", "dos status"]
+
+[reasons.RUN_STATUS_CLAIMED_FIELD]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "`dos status` returned a run digest containing a `claimed` field, violating the witnessed-status contract that peers read liveness/progress from evidence only."
+fix      = "Fix the status producer so the digest contains only liveness, ledger-verified progress, lease region, and resume evidence; do not consume claimed status."
+see_also = ["dos status", "tools/dispatch_status.py"]
+
 [reasons.ARCH_LAYER_VIOLATION]
 category = "OPERATOR_GATE"
 refusal  = true

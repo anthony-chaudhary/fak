@@ -289,7 +289,9 @@ class LoopLedgerTest(unittest.TestCase):
             "verdict": "WOULD_SPAWN",
             "reason": "safe to spawn one worker",
         }
-        rec = mod.record_loop_tick(ROOT, payload, ledger=Path("loops.jsonl"), append=append)
+        rec = mod.record_loop_tick(
+            ROOT, payload, ledger=Path("loops.jsonl"), append=append,
+            mint=lambda root, process: "RID-DISPATCH1")
 
         self.assertTrue(rec["ok"])
         self.assertEqual(rec["loop_id"], "issue-resolve-dispatch/claude")
@@ -298,7 +300,7 @@ class LoopLedgerTest(unittest.TestCase):
         self.assertEqual(rows[1]["reason"], "WOULD_SPAWN")
         self.assertEqual(rows[1]["metrics"]["target_issue"], 717)
         self.assertIn(("issue", "717"), rows[1]["evidence"])
-        self.assertTrue(payload["run_id"].startswith("resolve-tick-claude-"))
+        self.assertEqual(payload["run_id"], "RID-DISPATCH1")
 
     def test_record_loop_tick_refusal_has_fire_and_refused_admit(self) -> None:
         mod = load()
@@ -324,6 +326,7 @@ class LoopLedgerTest(unittest.TestCase):
             payload,
             ledger=Path("loops.jsonl"),
             append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-DISPATCH2",
         )
 
         self.assertEqual([r["kind"] for r in rows], ["fire", "admit"])

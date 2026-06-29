@@ -68,6 +68,7 @@ RUNS_DIRNAME = ".dispatch-runs"
 WAVE_SIDECAR_SUFFIX = ".wave"
 ACCOUNT_SIDECAR_SUFFIX = ".account"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
+_RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
 DEFAULT_SPAWN_PROBE_S = 5.0
 # Hard ceiling on how many extra worker slots a healthy backend may claim from dead
@@ -1035,6 +1036,37 @@ def fak_loop_cmd(root: Path) -> list[str]:
     return ["go", "run", "./cmd/fak"]
 
 
+def is_dos_run_id(run_id: object) -> bool:
+    return bool(_RID_RE.fullmatch(str(run_id or "")))
+
+
+def mint_dos_run_id(root: Path, process: str, parent: str | None = None) -> str | None:
+    """Mint the DOS RID that `dos status` accepts, fail-open to caller fallback."""
+    cmd = ["dos", "run-id", "mint", process, "--root", str(root)]
+    if parent:
+        cmd += ["--parent", parent]
+    kwargs: dict[str, Any] = {
+        "cwd": root,
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "timeout": 30,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = no_window_creationflags()
+    try:
+        proc = subprocess.run(cmd, **kwargs)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        doc = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    rid = str(doc.get("run_id") or "")
+    return rid if proc.returncode == 0 and is_dos_run_id(rid) else None
+
+
 def _loop_metric_args(metrics: dict[str, int]) -> list[str]:
     out: list[str] = []
     for key in sorted(metrics):
@@ -1088,18 +1120,30 @@ def append_loop_event(root: Path, ledger: Path, event: dict[str, Any],
     }
 
 
-def loop_run_id(payload: dict[str, Any]) -> str:
+def loop_run_id(payload: dict[str, Any], root: Path | None = None,
+                mint: Any | None = None) -> str:
+    existing = str(payload.get("run_id") or "")
+    if is_dos_run_id(existing):
+        return existing
+    backend = str(payload.get("backend") or "claude").strip() or "claude"
+    if root is not None:
+        minted = (mint or mint_dos_run_id)(root, f"issue-resolve-dispatch-{backend}")
+        if is_dos_run_id(minted):
+            return str(minted)
+    if existing:
+        return existing
     spawned = payload.get("spawned") or {}
     if spawned.get("pid"):
         return f"resolve-{payload.get('target_issue') or 'none'}-{spawned.get('pid')}"
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"resolve-tick-{payload.get('backend') or 'claude'}-{stamp}"
+    return f"resolve-tick-{backend}-{stamp}"
 
 
 def record_loop_tick(root: Path, payload: dict[str, Any],
                      *,
                      ledger: Path | None = None,
-                     append: Any | None = None) -> dict[str, Any]:
+                     append: Any | None = None,
+                     mint: Any | None = None) -> dict[str, Any]:
     """Lower one issue-resolve dispatcher tick into loop ledger events.
 
     The rows describe the DISPATCHER tick, not the spawned worker's eventual issue
@@ -1108,7 +1152,7 @@ def record_loop_tick(root: Path, payload: dict[str, Any],
     """
     ledger = ledger or default_loop_ledger(root)
     append = append or append_loop_event
-    run_id = str(payload.get("run_id") or loop_run_id(payload))
+    run_id = str(loop_run_id(payload, root=root, mint=mint))
     payload["run_id"] = run_id
     loop_id = loop_id_for_payload(payload)
     pre = payload.get("preflight") or {}

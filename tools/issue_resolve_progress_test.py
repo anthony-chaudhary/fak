@@ -91,6 +91,7 @@ class LoopLedgerTest(unittest.TestCase):
             rec,
             ledger=Path("loops.jsonl"),
             append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-PROGRESS1",
         )
 
         self.assertTrue(out["ok"])
@@ -102,7 +103,7 @@ class LoopLedgerTest(unittest.TestCase):
         self.assertEqual(rows[3]["verified_state"], "verified_done")
         self.assertEqual(rows[3]["metrics"]["open_now"], 479)
         self.assertIn(("open_witnessed_issue", "491"), rows[3]["evidence"])
-        self.assertEqual(rec["run_id"], "progress-20260625T101500")
+        self.assertEqual(rec["run_id"], "RID-PROGRESS1")
 
     def test_record_loop_tick_audit_error_marks_witness_unavailable(self) -> None:
         mod = load()
@@ -130,6 +131,7 @@ class LoopLedgerTest(unittest.TestCase):
             rec,
             ledger=Path("loops.jsonl"),
             append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-PROGRESS2",
         )
 
         self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end", "witness"])
@@ -164,6 +166,7 @@ class LoopLedgerTest(unittest.TestCase):
             rec,
             ledger=Path("loops.jsonl"),
             append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-PROGRESS3",
         )
 
         self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end"])

@@ -152,6 +152,41 @@ class WatchdogReasonTest(unittest.TestCase):
         self.assertFalse(any("watchdog" in r for r in p["reasons"]))
 
 
+class RunStatusDigestTest(unittest.TestCase):
+    def test_loop_ledger_run_ids_are_recent_rids_only(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Path(d) / "loops.jsonl"
+            ledger.write_text("\n".join([
+                '{"loop_id":"issue-resolve-dispatch/claude","run_id":"legacy-1"}',
+                '{"loop_id":"other","run_id":"RID-OTHER1"}',
+                '{"loop_id":"issue-resolve-progress","run_id":"RID-PROGRESS1"}',
+                '{"loop_id":"issue-resolve-dispatch/codex","run_id":"RID-DISPATCH1"}',
+                '{"loop_id":"issue-resolve-dispatch/codex","run_id":"RID-DISPATCH1"}',
+            ]) + "\n", encoding="utf-8")
+            self.assertEqual(
+                mod.run_ids_from_loop_ledger(ledger),
+                ["RID-DISPATCH1", "RID-PROGRESS1"])
+
+    def test_claimed_key_detector_is_recursive(self) -> None:
+        mod = load()
+        self.assertTrue(mod.has_key_named({"liveness": [{"claimed": "done"}]}, "claimed"))
+        self.assertFalse(mod.has_key_named({"liveness": [{"verdict": "STALLED"}]}, "claimed"))
+
+    def test_build_payload_summarizes_dos_status_digests(self) -> None:
+        mod = load()
+        p = build(mod, run_status=[
+            {"run_id": "RID-DISPATCH1", "liveness": {"verdict": "ADVANCING"}},
+            {"run_id": "RID-PROGRESS1", "_error": "dos unavailable"},
+        ])
+        self.assertEqual(p["run_status"]["source"], "dos status")
+        self.assertEqual(p["run_status"]["count"], 2)
+        self.assertEqual(p["run_status"]["liveness"], {"ADVANCING": 1})
+        self.assertEqual(p["run_status"]["errors"], 1)
+        self.assertTrue(any("dos status digest" in r for r in p["reasons"]))
+        self.assertIn("run truth", mod.render(p))
+
+
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_minimal_payload(self) -> None:
         mod = load()

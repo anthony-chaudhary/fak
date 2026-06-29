@@ -53,6 +53,7 @@ WATCHDOG_TASK = "FleetIssueDispatch"
 RUNS_DIRNAME = ".dispatch-runs"
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
+_RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -101,6 +102,73 @@ def _last_json(text: str) -> dict[str, Any]:
         if isinstance(obj, dict):
             return obj
     return {}
+
+
+def has_key_named(obj: Any, key: str) -> bool:
+    if isinstance(obj, dict):
+        return key in obj or any(has_key_named(v, key) for v in obj.values())
+    if isinstance(obj, list):
+        return any(has_key_named(v, key) for v in obj)
+    return False
+
+
+def run_ids_from_loop_ledger(ledger: Path, *, limit: int = 6) -> list[str]:
+    if limit <= 0 or not ledger.exists():
+        return []
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        loop_id = str(row.get("loop_id") or "")
+        run_id = str(row.get("run_id") or "")
+        if not loop_id.startswith("issue-resolve-") or not _RID_RE.fullmatch(run_id):
+            continue
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        out.append(run_id)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def dos_status_digest(root: Path, run_id: str) -> dict[str, Any]:
+    if not _RID_RE.fullmatch(run_id):
+        return {"run_id": run_id, "_error": "not a DOS RID"}
+    try:
+        proc = subprocess.run(
+            ["dos", "status", "--workspace", str(root), "--json", run_id],
+            cwd=root, capture_output=True, text=True, timeout=45)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"run_id": run_id, "_error": str(exc)}
+    doc = _last_json(proc.stdout)
+    if not doc:
+        return {"run_id": run_id, "_error": (proc.stderr or proc.stdout or "no JSON").strip()[-500:]}
+    if has_key_named(doc, "claimed"):
+        return {"run_id": run_id, "_error": "dos status emitted forbidden claimed field",
+                "reason": "RUN_STATUS_CLAIMED_FIELD"}
+    doc.setdefault("run_id", run_id)
+    doc["_returncode"] = proc.returncode
+    return doc
+
+
+def read_run_status_digests(
+    root: Path,
+    *,
+    ledger: Path | None = None,
+    limit: int = 6,
+    status_reader: Any | None = None,
+) -> list[dict[str, Any]]:
+    ledger = ledger or root / ".fak" / "loops.jsonl"
+    reader = status_reader or (lambda rid: dos_status_digest(root, rid))
+    return [reader(rid) for rid in run_ids_from_loop_ledger(ledger, limit=limit)]
 
 
 def silent_workers(
@@ -285,11 +353,12 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     weekly_cap = read_active_weekly_cap(root / RUNS_DIRNAME,
                                         (pre.get("account") or {}).get("tag"))
     backend_health = read_backend_health(root / RUNS_DIRNAME)
+    run_status = read_run_status_digests(root)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
                          silent=silent, weekly_cap=weekly_cap, throughput=throughput,
-                         backend_health=backend_health)
+                         backend_health=backend_health, run_status=run_status)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -297,7 +366,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   silent: list[dict[str, Any]] | None = None,
                   weekly_cap: dict[str, Any] | None = None,
                   throughput: dict[str, Any] | None = None,
-                  backend_health: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                  backend_health: list[dict[str, Any]] | None = None,
+                  run_status: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -392,6 +462,21 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             reasons.append(f"throughput {tp_verdict} ({tp_rate}/h completed over the {win}h analysis window, "
                            f"target {tp_target}/h)")
 
+    run_status = run_status or []
+    status_counts: dict[str, int] = {}
+    status_errors = 0
+    for digest in run_status:
+        if digest.get("_error"):
+            status_errors += 1
+            continue
+        verdict = str(((digest.get("liveness") or {}).get("verdict")) or "UNKNOWN")
+        status_counts[verdict] = status_counts.get(verdict, 0) + 1
+    if run_status:
+        if status_errors:
+            reasons.append(f"dos status digest read had {status_errors} error(s); inspect run_status")
+        else:
+            reasons.append(f"run truth from dos status digest for {len(run_status)} RID(s)")
+
     return {
         "schema": SCHEMA,
         "ok": ok,
@@ -447,6 +532,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "dead_count": len(backend_health),
             "dead": backend_health,
         },
+        "run_status": {
+            "source": "dos status",
+            "count": len(run_status),
+            "liveness": status_counts,
+            "errors": status_errors,
+            "digests": run_status,
+        },
         "fast": fast,
     }
 
@@ -499,6 +591,10 @@ def render(p: dict[str, Any]) -> str:
     if sc:
         nums = ", ".join(f"#{s['issue']}" for s in (w.get("silent") or [])[:6])
         lines.append(f"║ workers   : {sc} silent (0-byte log, exited) [{nums}]")
+    rs = p.get("run_status") or {}
+    if rs.get("count"):
+        bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
+        lines.append(f"║ run truth : dos status {rs.get('count')} RID(s), errors={rs.get('errors')} [{bits}]")
     lines.append("╚═ " + " | ".join(p.get("reasons") or []))
     return "\n".join(lines)
 
@@ -549,6 +645,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
            ("**NOT installed**" if wd.get("installed") is False else "unknown")),
         f"- **supervisor**: `{s.get('verdict')}` "
         f"(alive {s.get('alive')}/{s.get('target')})",
+    ]
+    rs = payload.get("run_status") or {}
+    if rs.get("count"):
+        out.append(f"- **run status source**: `dos status` digests for {rs.get('count')} RID(s), "
+                   f"errors={rs.get('errors')}")
+    out += [
         "",
         "## Backlog by lane (issue → lane sync)",
         "",

@@ -221,7 +221,8 @@ def progress_run_id(rec: dict[str, Any]) -> str:
 def record_loop_tick(root: Path, rec: dict[str, Any],
                      *,
                      ledger: Path | None = None,
-                     append: Any | None = None) -> dict[str, Any]:
+                     append: Any | None = None,
+                     mint: Any | None = None) -> dict[str, Any]:
     """Lower one progress/close tick into fak loop-ledger events.
 
     The witness row is about the progress instrument's independent read-back
@@ -230,7 +231,16 @@ def record_loop_tick(root: Path, rec: dict[str, Any],
     ledger = ledger or loop_writer.default_loop_ledger(root)
     append = append or (lambda r, l, ev: loop_writer.append_loop_event(
         r, l, ev, source="issue_resolve_progress"))
-    run_id = str(rec.get("run_id") or progress_run_id(rec))
+    existing = str(rec.get("run_id") or "")
+    minted = None
+    if not existing:
+        minted = (mint or loop_writer.mint_dos_run_id)(root, "issue-resolve-progress")
+    if loop_writer.is_dos_run_id(existing):
+        run_id = existing
+    elif loop_writer.is_dos_run_id(minted):
+        run_id = str(minted)
+    else:
+        run_id = existing or progress_run_id(rec)
     rec["run_id"] = run_id
     metrics = _metric_ints(rec)
     evidence = [("progress_log", str(root / RUNS_DIRNAME / PROGRESS_LOG))]
