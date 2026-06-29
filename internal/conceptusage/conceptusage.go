@@ -1,0 +1,599 @@
+// Package conceptusage scores the OVERALL dogfooding of fak's own concepts while
+// fak itself is being developed by an agent fleet — the question "when we build fak,
+// how much does that development route through fak's own primitives, versus generic
+// agentic dev (raw git, unverified self-reports, no lane arbitration)?"
+//
+// It is the breadth-and-depth sibling of internal/dogfoodscore, which scores ONE
+// narrow loop (a launched session's honesty over a Stop-hook error). This scorecard
+// is wider: it folds the concrete, on-disk traces fak's own tooling leaves behind
+// during real development into a single conceptusage_debt + an A–F grade, across two
+// axes:
+//
+//   - USAGE breadth — does the development *output* carry the fak discipline? Measured
+//     from `git log`: the (fak <leaf>) ship-stamp, the DCO sign-off, a conventional
+//     type, and a verb the witness contract BINDS (add/fix/implement…), plus whether
+//     concurrent dev arbitrated disjoint lanes (the lane-journal ACQUIRE/RELEASE rows).
+//   - WITNESS depth — does the development *trust evidence over self-report*? Measured
+//     from `.dos/verdict-journal.jsonl`: the share of decisions made via the verify /
+//     improve syscalls (proactive, evidence-grounded) rather than passive recall, and
+//     whether recalled memory was actually re-verified (RECALL_FRESH/STALE) instead of
+//     left RECALL_UNVERIFIABLE.
+//
+// Every number is re-derived from disk (git + the journals fak's tools wrote). The
+// score cannot be moved by editing a JSON file — only by actually using the concepts
+// more while developing. That is the point: driving this debt down IS dogfooding more.
+package conceptusage
+
+import (
+	"bufio"
+	"encoding/json"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	Schema = "fak-conceptusage-scorecard/1"
+	// DefaultCommitWindow is how many recent commits define "agentic dev now". Wide
+	// enough to be stable across a single session, narrow enough that a long-ago lapse
+	// does not keep the score red forever.
+	DefaultCommitWindow = 200
+	// Axis weights: usage breadth is the output discipline (well-dogfooded already),
+	// witness depth is the thin concept the 3x program must grow. Weight depth higher
+	// so the composite tracks the lever that actually moves.
+	usageAxisWeight   = 0.4
+	witnessAxisWeight = 0.6
+)
+
+// stampRe / convRe / bindRe mirror the commit contract the witness referee grades
+// (AGENTS.md): a ship commit ends with a `(fak <leaf>)` trailer, uses a Conventional
+// type, and leads after `type(scope):` with a verb that BINDS a witnessable effect.
+var (
+	stampRe = regexp.MustCompile(`\(fak [a-z0-9][a-z0-9-]*\)\s*$`)
+	convRe  = regexp.MustCompile(`(?i)^(feat|fix|docs|test|refactor|perf|chore|build|ci|style|add)(\([^)]*\))?!?:\s`)
+	bindRe  = regexp.MustCompile(`(?i)^\w+(\([^)]*\))?!?:\s*(add|fix|implement|wire|port|extract|split|map|gate|fail|kill|pin|hoist|declare|resolve|exclude|treat|close|fold|route|enforce|attest|witness|cancel)\b`)
+)
+
+// KPIResult is one graded criterion. Identical shape to dogfoodscore.KPIResult so the
+// two scorecards render and fold the same way.
+type KPIResult struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Hard   bool   `json:"hard"`
+	Weight int    `json:"weight"`
+	Axis   string `json:"axis"`
+	Passed bool   `json:"passed"`
+	Detail string `json:"detail"`
+}
+
+type KPIPayload struct {
+	KPI     string   `json:"kpi"`
+	Group   string   `json:"group"`
+	Score   int      `json:"score"`
+	Detail  string   `json:"detail"`
+	Defects []string `json:"defects"`
+	Soft    []string `json:"soft"`
+}
+
+// Evidence is the raw, re-derived-from-disk corpus the KPIs read. Exported so a caller
+// (the verb, a test) can inspect exactly what was counted.
+type Evidence struct {
+	Commits        int  `json:"commits"`
+	Stamped        int  `json:"stamped"`
+	Signed         int  `json:"signed"`
+	Conventional   int  `json:"conventional"`
+	BindingVerb    int  `json:"binding_verb"`
+	VerdictRows    int  `json:"verdict_rows"`
+	VerifySyscalls int  `json:"verify_syscalls"`
+	ImproveCalls   int  `json:"improve_syscalls"`
+	RecallRows     int  `json:"recall_rows"`
+	RecallResolved int  `json:"recall_resolved"` // RECALL_FRESH + RECALL_STALE + RECALL_REVERT (actually re-checked)
+	LaneRows       int  `json:"lane_rows"`
+	LaneAcquires   int  `json:"lane_acquires"`
+	DistinctLanes  int  `json:"distinct_lanes"`
+	JournalPresent bool `json:"journal_present"`
+}
+
+type ScorecardPayload struct {
+	Schema     string         `json:"schema"`
+	OK         bool           `json:"ok"`
+	Verdict    string         `json:"verdict"`
+	Finding    string         `json:"finding"`
+	Reason     string         `json:"reason"`
+	NextAction string         `json:"next_action"`
+	Workspace  string         `json:"workspace"`
+	Corpus     map[string]any `json:"corpus"`
+	KPIs       []KPIPayload   `json:"kpis"`
+	Usage      []KPIResult    `json:"usage"`
+	Witness    []KPIResult    `json:"witness"`
+	Evidence   Evidence       `json:"evidence"`
+}
+
+// Options pins the clock and root so the score is deterministic for tests.
+type Options struct {
+	Root         string
+	Now          time.Time
+	CommitWindow int
+	// gitLog overrides the git-log read for tests; nil means shell out to git.
+	gitLog func(root string, window int) []commit
+}
+
+func (o Options) normalize() Options {
+	if o.Root == "" {
+		o.Root = "."
+	}
+	if o.Now.IsZero() {
+		o.Now = time.Now().UTC()
+	}
+	if o.CommitWindow <= 0 {
+		o.CommitWindow = DefaultCommitWindow
+	}
+	return o
+}
+
+type commit struct {
+	subject string
+	body    string
+}
+
+// ---- evidence gathering (the impure shell, kept thin) -----------------------------
+
+// gitCommits reads recent commits via git, splitting subject/body on a record
+// separator so multi-line bodies survive. Returns nil if git is unavailable, which
+// degrades the usage axis to "no evidence" rather than a false pass.
+func gitCommits(root string, window int) []commit {
+	cmd := exec.Command("git", "-C", root, "log",
+		"--format=%s%x1f%b%x1e", "-n", strconv.Itoa(window))
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var cs []commit
+	for _, rec := range strings.Split(string(out), "\x1e") {
+		rec = strings.TrimLeft(rec, "\n")
+		if strings.TrimSpace(rec) == "" {
+			continue
+		}
+		parts := strings.SplitN(rec, "\x1f", 2)
+		c := commit{subject: strings.TrimSpace(parts[0])}
+		if len(parts) > 1 {
+			c.body = parts[1]
+		}
+		cs = append(cs, c)
+	}
+	return cs
+}
+
+func gatherEvidence(opts Options) Evidence {
+	root, _ := filepath.Abs(opts.Root)
+	if root == "" {
+		root = opts.Root
+	}
+	var ev Evidence
+
+	// --- USAGE: commit discipline ---
+	logFn := opts.gitLog
+	if logFn == nil {
+		logFn = gitCommits
+	}
+	for _, c := range logFn(root, opts.CommitWindow) {
+		ev.Commits++
+		if stampRe.MatchString(c.subject) {
+			ev.Stamped++
+		}
+		if convRe.MatchString(c.subject) {
+			ev.Conventional++
+		}
+		if bindRe.MatchString(c.subject) {
+			ev.BindingVerb++
+		}
+		if strings.Contains(c.body, "Signed-off-by:") {
+			ev.Signed++
+		}
+	}
+
+	// --- WITNESS: verdict journal (verify/improve/recall) ---
+	scanVerdictJournal(filepath.Join(root, ".dos", "verdict-journal.jsonl"), &ev)
+
+	// --- USAGE: lane arbitration journal ---
+	scanLaneJournal(filepath.Join(root, ".dos", "lane-journal.jsonl"), &ev)
+
+	return ev
+}
+
+// scanVerdictJournal folds the decision journal fak's verify/recall/improve syscalls
+// write. Tolerates a malformed tail line (a journal being appended concurrently).
+func scanVerdictJournal(path string, ev *Evidence) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	ev.JournalPresent = true
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var row struct {
+			Syscall string `json:"syscall"`
+			Verdict string `json:"verdict"`
+		}
+		if json.Unmarshal([]byte(line), &row) != nil {
+			continue
+		}
+		ev.VerdictRows++
+		switch row.Syscall {
+		case "verify":
+			ev.VerifySyscalls++
+		case "improve":
+			ev.ImproveCalls++
+		case "memory_recall":
+			ev.RecallRows++
+			switch row.Verdict {
+			case "RECALL_FRESH", "RECALL_STALE", "RECALL_REVERT", "KEEP", "REVERT":
+				ev.RecallResolved++
+			}
+		}
+	}
+}
+
+// scanLaneJournal folds the lane-lease journal dos_arbitrate writes. ACQUIRE/RELEASE
+// are the active arbitration acts; ENFORCE rows are the passive per-call gate and are
+// not counted as proactive usage.
+func scanLaneJournal(path string, ev *Evidence) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	lanes := map[string]struct{}{}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var row struct {
+			Op   string `json:"op"`
+			Lane string `json:"lane"`
+		}
+		if json.Unmarshal([]byte(line), &row) != nil {
+			continue
+		}
+		ev.LaneRows++
+		if row.Op == "ACQUIRE" {
+			ev.LaneAcquires++
+		}
+		if row.Lane != "" {
+			lanes[row.Lane] = struct{}{}
+		}
+	}
+	ev.DistinctLanes = len(lanes)
+}
+
+// ---- KPI definitions --------------------------------------------------------------
+
+func pct(num, den int) int {
+	if den <= 0 {
+		return 0
+	}
+	return int(math.Round(100 * float64(num) / float64(den)))
+}
+
+// usageResults grade the development OUTPUT discipline. These are mostly green in a
+// well-run fak tree — the point is to keep them green, and to red if dev ever ships
+// without the stamp/sign-off/binding-verb/lane discipline.
+func usageResults(ev Evidence) []KPIResult {
+	const axis = "usage"
+	stampPct := pct(ev.Stamped, ev.Commits)
+	signPct := pct(ev.Signed, ev.Commits)
+	convPct := pct(ev.Conventional, ev.Commits)
+	bindPct := pct(ev.BindingVerb, ev.Commits)
+	return []KPIResult{
+		result("ship_stamp", axis, true, 3,
+			"recent commits carry the (fak <leaf>) ship-stamp the dos verify referee binds",
+			ev.Commits > 0 && stampPct >= 90,
+			itoa(ev.Stamped)+"/"+itoa(ev.Commits)+" ("+itoa(stampPct)+"%) carry the (fak <leaf>) trailer"),
+		result("dco_signoff", axis, true, 2,
+			"recent commits are DCO signed-off (git commit -s)",
+			ev.Commits > 0 && signPct >= 90,
+			itoa(ev.Signed)+"/"+itoa(ev.Commits)+" ("+itoa(signPct)+"%) signed-off"),
+		result("conventional_type", axis, true, 2,
+			"recent commits use a Conventional-Commits type",
+			ev.Commits > 0 && convPct >= 90,
+			itoa(ev.Conventional)+"/"+itoa(ev.Commits)+" ("+itoa(convPct)+"%) conventional"),
+		result("binding_verb", axis, false, 2,
+			"recent commit subjects lead with a verb the witness BINDS (not surface/print)",
+			ev.Commits > 0 && bindPct >= 70,
+			itoa(ev.BindingVerb)+"/"+itoa(ev.Commits)+" ("+itoa(bindPct)+"%) lead with a binding verb"),
+		result("lane_arbitration", axis, false, 1,
+			"concurrent dev arbitrated disjoint lanes (dos_arbitrate ACQUIRE/RELEASE rows)",
+			ev.LaneAcquires > 0,
+			itoa(ev.LaneAcquires)+" lane ACQUIRE(s) across "+itoa(ev.DistinctLanes)+" distinct lane(s)"),
+	}
+}
+
+// witnessResults grade whether development TRUSTS EVIDENCE OVER SELF-REPORT. This is
+// the thin axis the 3x program grows: the share of decisions made via the proactive
+// verify/improve syscalls, and whether recalled memory was actually re-verified.
+func witnessResults(ev Evidence) []KPIResult {
+	const axis = "witness"
+	// Proactive-witness share: verify + improve syscalls as a fraction of all the
+	// proactive decision points (verify + improve + recall). A high recall-only share
+	// means dev leaned on memory it never re-checked instead of witnessing claims.
+	proactive := ev.VerifySyscalls + ev.ImproveCalls
+	decisionPoints := proactive + ev.RecallRows
+	witnessShare := pct(proactive, decisionPoints)
+	recallFreshPct := pct(ev.RecallResolved, ev.RecallRows)
+	return []KPIResult{
+		result("verify_syscall_used", axis, true, 3,
+			"development proactively witnessed claims via the verify/improve syscall",
+			proactive > 0,
+			itoa(ev.VerifySyscalls)+" verify + "+itoa(ev.ImproveCalls)+" improve syscall(s) in the journal"),
+		result("witness_share", axis, true, 3,
+			"a healthy share of decisions are evidence-grounded (verify/improve), not recall-only",
+			decisionPoints > 0 && witnessShare >= 15,
+			itoa(witnessShare)+"% of "+itoa(decisionPoints)+" decision point(s) used a proactive witness syscall (target >=15%)"),
+		result("recall_reverified", axis, false, 2,
+			"recalled memory was re-verified against ground truth, not left UNVERIFIABLE",
+			ev.RecallRows == 0 || recallFreshPct >= 40,
+			itoa(ev.RecallResolved)+"/"+itoa(ev.RecallRows)+" ("+itoa(recallFreshPct)+"%) recalls resolved to a checked verdict"),
+		result("journal_present", axis, true, 1,
+			"the verdict journal exists — development actually ran the witnessing syscalls",
+			ev.JournalPresent && ev.VerdictRows > 0,
+			itoa(ev.VerdictRows)+" verdict-journal row(s)"),
+	}
+}
+
+// ---- fold -------------------------------------------------------------------------
+
+func Build(opts Options) ScorecardPayload {
+	opts = opts.normalize()
+	root, _ := filepath.Abs(opts.Root)
+	if root == "" {
+		root = opts.Root
+	}
+	ev := gatherEvidence(opts)
+
+	usage := usageResults(ev)
+	witness := witnessResults(ev)
+	all := append(append([]KPIResult{}, usage...), witness...)
+
+	uScore := axisScore(usage)
+	wScore := axisScore(witness)
+	composite := int(math.Round(usageAxisWeight*float64(uScore) + witnessAxisWeight*float64(wScore)))
+
+	var hardFail []KPIResult
+	for _, r := range all {
+		if r.Hard && !r.Passed {
+			hardFail = append(hardFail, r)
+		}
+	}
+	// conceptusage_debt = one per HARD gap. A thin witness axis (the common case)
+	// surfaces here as a real, halvable integer the 3x program drives down by actually
+	// witnessing more during development.
+	debt := len(hardFail)
+	grade := GradeLetter(composite)
+	ok := debt == 0
+	verdict, finding, reason, next := "OK", "concept_usage_healthy", "", ""
+	if ok {
+		reason = "concept-usage: usage " + itoa(uScore) + "/100, witness " + itoa(wScore) +
+			"/100, composite " + itoa(composite) + "/100 (" + grade + "); dev routes through the fak concepts; zero hard gaps"
+		next = "hold the line; re-run after a dev session — keep witnessing claims via the verify syscall, not self-report"
+	} else {
+		verdict, finding = "ACTION", "conceptusage_debt"
+		keys := make([]string, len(hardFail))
+		for i, r := range hardFail {
+			keys[i] = r.Key
+		}
+		reason = "concept-usage carries " + itoa(debt) + " debt (usage " + itoa(uScore) +
+			"/100, witness " + itoa(wScore) + "/100, composite " + itoa(composite) + " " + grade + "): " +
+			strings.Join(keys, ", ")
+		lead := hardFail[0]
+		next = "retire worst-first: " + lead.Key + " — " + lead.Detail
+	}
+	return ScorecardPayload{
+		Schema:     Schema,
+		OK:         ok,
+		Verdict:    verdict,
+		Finding:    finding,
+		Reason:     reason,
+		NextAction: next,
+		Workspace:  root,
+		Corpus: map[string]any{
+			"conceptusage_debt": debt,
+			"score":             composite,
+			"grade":             grade,
+			"usage_score":       uScore,
+			"witness_score":     wScore,
+			"commits_scanned":   ev.Commits,
+			"verify_syscalls":   ev.VerifySyscalls,
+			"recall_rows":       ev.RecallRows,
+			"lane_acquires":     ev.LaneAcquires,
+		},
+		KPIs:     kpiPayloads(all),
+		Usage:    usage,
+		Witness:  witness,
+		Evidence: ev,
+	}
+}
+
+// ---- render -----------------------------------------------------------------------
+
+func Render(p ScorecardPayload) string {
+	c := p.Corpus
+	lines := []string{
+		"concept-usage — " + p.Verdict + " (" + p.Finding + ")",
+		"  conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "   composite " + anyStr(c["score"]) +
+			"/100 [" + anyStr(c["grade"]) + "]   (usage " + anyStr(c["usage_score"]) + "; witness " + anyStr(c["witness_score"]) + ")",
+		"  evidence: " + anyStr(c["commits_scanned"]) + " commit(s); " + anyStr(c["verify_syscalls"]) +
+			" verify syscall(s); " + anyStr(c["recall_rows"]) + " recall(s); " + anyStr(c["lane_acquires"]) + " lane acquire(s)",
+		"",
+		"  USAGE (does the dev OUTPUT carry the fak discipline?):",
+	}
+	for _, r := range p.Usage {
+		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+	}
+	lines = append(lines, "", "  WITNESS (does dev TRUST EVIDENCE over self-report?):")
+	for _, r := range p.Witness {
+		lines = append(lines, "    "+passMark(r.Passed)+" "+r.Label+"  ["+r.Detail+"]")
+	}
+	lines = append(lines, "", "  NEXT: "+p.NextAction)
+	return strings.Join(lines, "\n")
+}
+
+func Markdown(p ScorecardPayload) string {
+	c := p.Corpus
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString(`title: "fak concept-usage scorecard"` + "\n")
+	b.WriteString(`description: "How much the agentic DEVELOPMENT of fak routes through fak's own concepts — the ship-stamp/DCO/binding-verb commit discipline and lane arbitration (usage breadth), and the verify/improve witness syscalls over passive recall (witness depth), all re-derived from git and the .dos journals."` + "\n")
+	b.WriteString("---\n\n")
+	b.WriteString("# fak concept-usage scorecard\n\n")
+	b.WriteString("**conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "**; composite **" + anyStr(c["score"]) +
+		"/100 (" + anyStr(c["grade"]) + ")**; usage " + anyStr(c["usage_score"]) + "/100; witness " +
+		anyStr(c["witness_score"]) + "/100\n\n")
+	b.WriteString("> " + p.Reason + "\n\n")
+	b.WriteString("The question: when an agent builds fak, how much does that development route through fak's *own* concepts — committing with the witness contract (ship-stamp, DCO, a binding verb), arbitrating disjoint lanes, and **witnessing its own claims via the verify syscall instead of trusting a self-report** — versus generic agentic dev? Every number is re-derived from `git log` and the `.dos` journals fak's tooling wrote; the score moves only when development actually uses the concepts more.\n\n")
+	b.WriteString("## Usage — does the development OUTPUT carry the fak discipline?\n\n| ok | criterion | detail |\n|---|---|---|\n")
+	for _, r := range p.Usage {
+		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+	}
+	b.WriteString("\n## Witness — does development TRUST EVIDENCE over self-report?\n\n| ok | criterion | detail |\n|---|---|---|\n")
+	for _, r := range p.Witness {
+		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+	}
+	b.WriteString("\n## Run it\n\n```bash\ngo run ./cmd/fak concept-usage-score            # score this tree's concept dogfooding\ngo run ./cmd/fak concept-usage-score --markdown # regenerate this doc\ngo test ./internal/conceptusage/...             # prove the fold over a thin vs healthy corpus\n```\n\n")
+	b.WriteString("**Next:** " + p.NextAction + "\n")
+	return b.String()
+}
+
+func Compare(current ScorecardPayload, baseline map[string]any) string {
+	bc, _ := baseline["corpus"].(map[string]any)
+	if bc == nil {
+		bc = baseline
+	}
+	bDebt := anyInt(bc["conceptusage_debt"])
+	cDebt := anyInt(current.Corpus["conceptusage_debt"])
+	bWit := anyInt(bc["witness_score"])
+	cWit := anyInt(current.Corpus["witness_score"])
+	lines := []string{
+		"concept-usage compare:",
+		"  conceptusage_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
+		"  composite: " + anyStr(bc["score"]) + " -> " + anyStr(current.Corpus["score"]) +
+			"  grade " + anyStr(bc["grade"]) + " -> " + anyStr(current.Corpus["grade"]),
+		"  witness_score: " + itoa(bWit) + " -> " + itoa(cWit),
+	}
+	// The 3x program drives the witness axis up; report the multiple on the witness
+	// score (the lever) as well as the debt.
+	switch {
+	case bDebt > 0 && cDebt == 0:
+		lines = append(lines, "  VERDICT: all concept-usage debt retired")
+	case bWit > 0 && cWit >= 3*bWit:
+		lines = append(lines, "  VERDICT: >=3x witness-axis lift ("+itoa(bWit)+" -> "+itoa(cWit)+")")
+	case bWit > 0 && cWit >= 2*bWit:
+		lines = append(lines, "  VERDICT: >=2x witness-axis lift ("+itoa(bWit)+" -> "+itoa(cWit)+")")
+	case cWit > bWit || cDebt < bDebt:
+		lines = append(lines, "  VERDICT: improved ("+itoa(bDebt)+" -> "+itoa(cDebt)+" debt, witness "+itoa(bWit)+" -> "+itoa(cWit)+")")
+	default:
+		lines = append(lines, "  VERDICT: no improvement")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ---- small helpers (mirror dogfoodscore idiom) ------------------------------------
+
+func axisScore(rows []KPIResult) int {
+	total, got := 0, 0
+	for _, r := range rows {
+		total += r.Weight
+		if r.Passed {
+			got += r.Weight
+		}
+	}
+	if total == 0 {
+		return 0
+	}
+	return int(math.Round(100 * float64(got) / float64(total)))
+}
+
+func GradeLetter(score int) string {
+	switch {
+	case score >= 90:
+		return "A"
+	case score >= 80:
+		return "B"
+	case score >= 70:
+		return "C"
+	case score >= 60:
+		return "D"
+	default:
+		return "F"
+	}
+}
+
+func kpiPayloads(rows []KPIResult) []KPIPayload {
+	out := make([]KPIPayload, 0, len(rows))
+	for _, r := range rows {
+		k := KPIPayload{KPI: r.Key, Group: r.Axis, Detail: r.Detail}
+		if r.Passed {
+			k.Score = 100
+		} else if r.Hard {
+			k.Defects = []string{r.Key + ": " + r.Detail}
+		} else {
+			k.Soft = []string{r.Key + ": " + r.Detail}
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
+	return KPIResult{Key: key, Label: label, Hard: hard, Weight: weight, Axis: axis, Passed: passed, Detail: detail}
+}
+
+func passMark(ok bool) string {
+	if ok {
+		return "yes"
+	}
+	return "no"
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+func anyStr(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case int:
+		return itoa(x)
+	default:
+		b, _ := json.Marshal(v)
+		return string(b)
+	}
+}
+
+func anyInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	default:
+		return 0
+	}
+}

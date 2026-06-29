@@ -236,6 +236,8 @@ func main() {
 		cmdGuardRSIScorecard(os.Args[2:])
 	case "dogfood-score":
 		cmdDogfoodScore(os.Args[2:])
+	case "concept-usage-score":
+		cmdConceptUsageScore(os.Args[2:])
 	case "token-defaults-scorecard":
 		cmdTokenDefaultsScorecard(os.Args[2:])
 	case "skill-effectiveness-scorecard":

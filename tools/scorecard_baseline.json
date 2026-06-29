@@ -24,6 +24,7 @@
     "tokendefaults": 0,
     "guard_rsi": 0,
     "dogfood": 4,
+    "conceptusage": 1,
     "growth": 0,
     "support_maturity": 37,
     "claim_repro": 3

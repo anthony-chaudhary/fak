@@ -199,6 +199,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "tokendefaults", "debt": "token_defaults_debt", "script": "", "cmd": "go run ./cmd/fak token-defaults-scorecard --json", "label": "token-defaults"},
     {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak guard-rsi-scorecard --json", "label": "guard-rsi"},
     {"key": "dogfood", "debt": "dogfood_debt", "script": "", "cmd": "go run ./cmd/fak dogfood-score --json", "label": "dogfood-loop"},
+    {"key": "conceptusage", "debt": "conceptusage_debt", "script": "", "cmd": "go run ./cmd/fak concept-usage-score --json", "label": "concept-usage"},
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak support-maturity-scorecard --json", "label": "support-maturity"},
     {"key": "claim_repro", "debt": "claim_repro_debt", "script": "claim_repro_scorecard.py", "label": "claim-repro"},

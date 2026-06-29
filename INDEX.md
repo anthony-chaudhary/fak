@@ -48,6 +48,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Demo-quality scorecard](docs/DEMO-QUALITY-SCORECARD.md) — are the demos runnable, honest, self-contained.
 - [Demo-robustness scorecard](docs/DEMO-ROBUSTNESS-SCORECARD.md) — do the demos survive bad input and odd environments.
 - [Learning-docs scorecard](docs/LEARNING-SCORECARD.md) — does the teaching set actually teach (learning-debt: a how-to with no runnable command, a tutorial with no worked output, an orphan lesson, an uncovered topic). Pedagogy counterpart of repo-hygiene (structure) and doc-appeal (voice).
+- [Concept-usage scorecard](docs/fak/concept-usage-scorecard.md) — the INWARD dogfooding stick: when an agent BUILDS fak, how much does that development route through fak's *own* concepts? Two axes, both re-derived from `git log` + the `.dos` journals — **usage** (the ship-stamp / DCO / binding-verb commit discipline + lane arbitration) and **witness** (the `verify`/`improve` syscalls over passive recall). The thin axis is witness: it catches development that ships with fak's commit clothes but still trusts a self-report instead of witnessing its own claim. Breadth-and-depth sibling of the [dogfood-loop scorecard](docs/fak/dogfood-loop-scorecard.md) (one launched-session honesty loop).
 - [Code-2x program](docs/CODE-2X-PROGRAM.md) — the plan to halve code-debt, then halve it again.
 
 ## Architecture & design
