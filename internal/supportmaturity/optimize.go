@@ -57,3 +57,21 @@ func (c OptimizeCell) PromoteOnRun(runVerdict shipgate.Decision) OptimizeCell {
 	}
 	return c
 }
+
+// Regime is the cell's dev-regime derived from its Current rung — the C7 lowering
+// (regime.go, #1250). An OptimizeCell is well-placed only while its rung sits in
+// R2Optimize, the regime whose playbook IS rsiloop+shipgate; once a kept run climbs it
+// into R3Production the optimize loop has done its job and the self-tax gate takes over.
+func (c OptimizeCell) Regime() Regime { return RegimeFor(c.Current) }
+
+// InOptimizeRegime reports whether the cell's Current rung is still in the R2 optimize
+// regime — the guard the rsiloop consumer checks before starting a run, so it only ever
+// optimizes a cell the router (NextActionFor) actually routes to LoopRSIShipgate.
+func (c OptimizeCell) InOptimizeRegime() bool { return c.Regime() == R2Optimize }
+
+// NextAction is the routed next-action the C9 router (router.go, #1252) emits for the
+// cell's Current rung. For a cell in R2Optimize it is LoopRSIShipgate — the long-running
+// rsiloop run PromoteOnRun then folds back into the rung. This is the seam that makes the
+// C10 consumer the named destination of the C9 routing: the router says "send this cell
+// to rsiloop", and OptimizeCell is what receives that work and climbs the ladder with it.
+func (c OptimizeCell) NextAction() NextAction { return NextActionFor(c.Current) }

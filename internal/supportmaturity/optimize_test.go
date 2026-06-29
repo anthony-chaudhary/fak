@@ -127,3 +127,33 @@ func TestEscalateDoesNotPromote(t *testing.T) {
 		t.Fatalf("ESCALATE must not promote, rung moved to %s", got)
 	}
 }
+
+// TestOptimizeCellComposesRouter pins that the C10 consumer IS the destination the C7/C9
+// router routes an R2 cell to: while a cell's rung sits in the optimize regime (M4/M5) it
+// reports InOptimizeRegime and its NextAction is LoopRSIShipgate — the rsiloop loop
+// PromoteOnRun folds back into the rung. Once a kept run carries it to M6 the regime hands
+// off to R3 production (self-tax), so the optimize consumer correctly steps aside.
+func TestOptimizeCellComposesRouter(t *testing.T) {
+	for _, r := range []Rung{M4Correct, M5Optimized} {
+		cell := OptimizeCell{Name: "qwen3 x cuda", Current: r, Target: M6Parity}
+		if !cell.InOptimizeRegime() {
+			t.Fatalf("rung %s must be in the R2 optimize regime", r)
+		}
+		if cell.Regime() != R2Optimize {
+			t.Fatalf("Regime(%s) = %s, want R2", r, cell.Regime())
+		}
+		if got := cell.NextAction().Loop; got != LoopRSIShipgate {
+			t.Fatalf("R2 cell at %s must route to rsiloop+shipgate, got %s", r, got)
+		}
+	}
+
+	// At M6 the climb has left the optimize regime: the router hands the cell to R3's
+	// self-tax gate, and the rsiloop consumer steps aside.
+	done := OptimizeCell{Name: "qwen3 x cuda", Current: M6Parity, Target: M6Parity}
+	if done.InOptimizeRegime() {
+		t.Fatalf("a parity (M6) cell is R3 production, not R2 optimize")
+	}
+	if got := done.NextAction().Loop; got != LoopSelfTax {
+		t.Fatalf("an M6 cell must route to the self-tax gate, got %s", got)
+	}
+}
