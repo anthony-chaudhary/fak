@@ -115,6 +115,32 @@ def fetch_issues() -> list[dict]:
     return json.loads(proc.stdout or "[]")
 
 
+def load_injected_issues(source: str) -> list[dict]:
+    """Read issues from a ``gh issue list --json`` array (a file path, or ``-`` for
+    stdin) instead of the built-in gh fetch — so a NAMED VIEW can drive triage:
+    ``issue_views.py show --view needs-triage --json --fields <triage fields> |
+    issue_triage.py --issues -``. issue-views is the default selection surface;
+    this lets that same slice feed the ranker instead of always re-fetching the
+    whole open backlog.
+
+    Field-tolerant: triage reads each field with a default, so a view that omits
+    one degrades gracefully — but ``createdAt`` drives the age/stale score, so pass
+    enough ``--fields`` upstream (``createdAt``/``updatedAt``/``assignees`` …) when
+    those rungs matter. Raises ValueError on non-array / invalid JSON.
+    """
+    raw = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+    text = raw.strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"--issues input is not valid JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError("--issues input must be a JSON array of gh issue objects")
+    return data
+
+
 def _label_names(issue: dict) -> set[str]:
     return {lab["name"] for lab in issue.get("labels", [])}
 
@@ -412,14 +438,19 @@ def main(argv: list[str] | None = None) -> int:
                     help="filter rows by a tag: priority|kind|area|orphans|stale|dup|question")
     ap.add_argument("--config", default=None, help="JSON file overriding label sets/thresholds")
     ap.add_argument("--as-of", default=None, help="date stamp (default: today UTC)")
+    ap.add_argument("--issues", default=None, metavar="PATH|-",
+                    help="triage a gh-issue-list JSON array from a file or '-' (stdin) "
+                         "instead of fetching via gh — lets a named view drive triage; "
+                         "pass enough --fields upstream (createdAt for the stale score)")
     a = ap.parse_args(argv)
 
     _load_config(a.config)
 
     try:
-        issues = fetch_issues()
+        issues = load_injected_issues(a.issues) if a.issues else fetch_issues()
     except FileNotFoundError:
-        print("ERROR: `gh` not found on PATH.", file=sys.stderr)
+        msg = f"--issues file not found: {a.issues}" if a.issues else "`gh` not found on PATH."
+        print(f"ERROR: {msg}", file=sys.stderr)
         return 2
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

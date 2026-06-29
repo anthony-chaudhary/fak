@@ -164,5 +164,44 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class InjectedIssuesTest(unittest.TestCase):
+    """`--issues PATH|-` lets a named view (issue_views.py show --json) drive triage
+    instead of always fetching the full backlog via gh."""
+
+    def _stdin(self, text: str):
+        import io
+        from unittest import mock
+        return mock.patch.object(m.sys, "stdin", io.StringIO(text))
+
+    def test_load_from_file(self):
+        import json
+        import tempfile
+        rows = [{"number": 7, "title": "t", "labels": [], "url": "u"}]
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "view.json"
+            p.write_text(json.dumps(rows), encoding="utf-8")
+            self.assertEqual(m.load_injected_issues(str(p)), rows)
+
+    def test_load_from_stdin(self):
+        import json
+        rows = [{"number": 8, "title": "t", "labels": [], "url": "u"}]
+        with self._stdin(json.dumps(rows)):
+            self.assertEqual(m.load_injected_issues("-"), rows)
+
+    def test_empty_input_is_empty_list(self):
+        with self._stdin("  \n"):
+            self.assertEqual(m.load_injected_issues("-"), [])
+
+    def test_non_array_rejected(self):
+        with self._stdin('{"number": 1}'):
+            with self.assertRaises(ValueError):
+                m.load_injected_issues("-")
+
+    def test_invalid_json_rejected(self):
+        with self._stdin("not json"):
+            with self.assertRaises(ValueError):
+                m.load_injected_issues("-")
+
+
 if __name__ == "__main__":
     unittest.main()
