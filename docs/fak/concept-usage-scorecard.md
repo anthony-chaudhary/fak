@@ -25,10 +25,10 @@ The question: when an agent builds fak, how much does that development route thr
 
 | ok | criterion | detail |
 |---|---|---|
-| yes | development proactively witnessed claims via the verify/improve syscall | 14 verify + 4 improve syscall(s) in the journal |
-| no | a healthy share of decisions are evidence-grounded (verify/improve), not recall-only | 6% of 321 decision point(s) used a proactive witness syscall (target >=15%) |
+| yes | development proactively witnessed claims via the verify/improve syscall | 14 verify + 8 improve syscall(s) in the journal |
+| no | a healthy share of RECENT decisions are evidence-grounded (verify/improve), not recall-only | 12% of the last 50 decision(s) used a proactive witness syscall (target >=15%) |
 | no | recalled memory was re-verified against ground truth, not left UNVERIFIABLE | 74/303 (24%) recalls resolved to a checked verdict |
-| yes | the verdict journal exists — development actually ran the witnessing syscalls | 321 verdict-journal row(s) |
+| yes | the verdict journal exists — development actually ran the witnessing syscalls | 325 verdict-journal row(s) |
 
 ## Run it
 
@@ -48,4 +48,4 @@ The usage axis is already saturated (commit discipline + lane arbitration are fu
 
 Re-run after a dev session and `--compare` against a pinned `--json` baseline: the verdict reports the multiple on the witness score (the lever), so a real 3× (witness 6% → 18% share) is provable, not asserted.
 
-**Next:** retire worst-first: witness_share — 6% of 321 decision point(s) used a proactive witness syscall (target >=15%)
+**Next:** retire worst-first: witness_share — 12% of the last 50 decision(s) used a proactive witness syscall (target >=15%)

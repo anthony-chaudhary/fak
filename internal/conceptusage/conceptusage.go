@@ -48,6 +48,11 @@ const (
 	// so the composite tracks the lever that actually moves.
 	usageAxisWeight   = 0.4
 	witnessAxisWeight = 0.6
+	// witnessWindow scopes the witness-SHARE to the most-recent decision rows so the
+	// metric measures whether the CURRENT dev loop witnesses, not whether all of repo
+	// history did. Wide enough to span a working session, narrow enough that a recent
+	// burst of real witnessing actually moves the number.
+	witnessWindow = 50
 )
 
 // stampRe / convRe / bindRe mirror the commit contract the witness referee grades
@@ -83,20 +88,26 @@ type KPIPayload struct {
 // Evidence is the raw, re-derived-from-disk corpus the KPIs read. Exported so a caller
 // (the verb, a test) can inspect exactly what was counted.
 type Evidence struct {
-	Commits        int  `json:"commits"`
-	Stamped        int  `json:"stamped"`
-	Signed         int  `json:"signed"`
-	Conventional   int  `json:"conventional"`
-	BindingVerb    int  `json:"binding_verb"`
-	VerdictRows    int  `json:"verdict_rows"`
-	VerifySyscalls int  `json:"verify_syscalls"`
-	ImproveCalls   int  `json:"improve_syscalls"`
-	RecallRows     int  `json:"recall_rows"`
-	RecallResolved int  `json:"recall_resolved"` // RECALL_FRESH + RECALL_STALE + RECALL_REVERT (actually re-checked)
-	LaneRows       int  `json:"lane_rows"`
-	LaneAcquires   int  `json:"lane_acquires"`
-	DistinctLanes  int  `json:"distinct_lanes"`
-	JournalPresent bool `json:"journal_present"`
+	Commits         int  `json:"commits"`
+	Stamped         int  `json:"stamped"`
+	Signed          int  `json:"signed"`
+	Conventional    int  `json:"conventional"`
+	BindingVerb     int  `json:"binding_verb"`
+	VerdictRows     int  `json:"verdict_rows"`
+	VerifySyscalls  int  `json:"verify_syscalls"`
+	ImproveCalls    int  `json:"improve_syscalls"`
+	RecallRows      int  `json:"recall_rows"`
+	RecallResolved  int  `json:"recall_resolved"`  // RECALL_FRESH + RECALL_STALE + RECALL_REVERT (actually re-checked)
+	WindowProactive int  `json:"window_proactive"` // verify+improve in the recent witnessWindow
+	WindowRecall    int  `json:"window_recall"`    // memory_recall in the recent witnessWindow
+	LaneRows        int  `json:"lane_rows"`
+	LaneAcquires    int  `json:"lane_acquires"`
+	DistinctLanes   int  `json:"distinct_lanes"`
+	JournalPresent  bool `json:"journal_present"`
+
+	// window is a scratch ring of decision classes (true=proactive, false=recall),
+	// folded into WindowProactive/WindowRecall after the scan. Not serialized.
+	window []bool `json:"-"`
 }
 
 type ScorecardPayload struct {
@@ -242,6 +253,30 @@ func scanVerdictJournal(path string, ev *Evidence) {
 				ev.RecallResolved++
 			}
 		}
+		// Window the decision-class counts to the most-recent rows so the witness
+		// SHARE reflects whether the CURRENT dev loop witnesses — not whether all of
+		// repo history did. Passive memory_recall rows accrue every session while
+		// proactive witnessing is rare, so an all-time ratio is structurally pinned
+		// low and cannot register genuine recent witnessing. We keep a ring of the
+		// last decision classes and fold the window after the scan.
+		switch row.Syscall {
+		case "verify", "improve":
+			ev.window = append(ev.window, true)
+		case "memory_recall":
+			ev.window = append(ev.window, false)
+		}
+	}
+	// Fold the recency window (tail of the ring) into the windowed counts.
+	w := ev.window
+	if len(w) > witnessWindow {
+		w = w[len(w)-witnessWindow:]
+	}
+	for _, proactive := range w {
+		if proactive {
+			ev.WindowProactive++
+		} else {
+			ev.WindowRecall++
+		}
 	}
 }
 
@@ -327,12 +362,15 @@ func usageResults(ev Evidence) []KPIResult {
 // verify/improve syscalls, and whether recalled memory was actually re-verified.
 func witnessResults(ev Evidence) []KPIResult {
 	const axis = "witness"
-	// Proactive-witness share: verify + improve syscalls as a fraction of all the
-	// proactive decision points (verify + improve + recall). A high recall-only share
-	// means dev leaned on memory it never re-checked instead of witnessing claims.
+	// Proactive-witness share, measured over the RECENT window so the number reflects
+	// whether the CURRENT dev loop witnesses — not whether all of repo history did.
+	// Passive memory_recall rows accrue every session while proactive witnessing is
+	// rare; an all-time ratio is structurally pinned low and never registers a recent
+	// burst of genuine witnessing. The window fixes that without becoming gameable: the
+	// only way to raise it is to actually witness more in the recent decisions.
 	proactive := ev.VerifySyscalls + ev.ImproveCalls
-	decisionPoints := proactive + ev.RecallRows
-	witnessShare := pct(proactive, decisionPoints)
+	windowPoints := ev.WindowProactive + ev.WindowRecall
+	witnessShare := pct(ev.WindowProactive, windowPoints)
 	recallFreshPct := pct(ev.RecallResolved, ev.RecallRows)
 	return []KPIResult{
 		result("verify_syscall_used", axis, true, 3,
@@ -340,9 +378,9 @@ func witnessResults(ev Evidence) []KPIResult {
 			proactive > 0,
 			itoa(ev.VerifySyscalls)+" verify + "+itoa(ev.ImproveCalls)+" improve syscall(s) in the journal"),
 		result("witness_share", axis, true, 3,
-			"a healthy share of decisions are evidence-grounded (verify/improve), not recall-only",
-			decisionPoints > 0 && witnessShare >= 15,
-			itoa(witnessShare)+"% of "+itoa(decisionPoints)+" decision point(s) used a proactive witness syscall (target >=15%)"),
+			"a healthy share of RECENT decisions are evidence-grounded (verify/improve), not recall-only",
+			windowPoints > 0 && witnessShare >= 15,
+			itoa(witnessShare)+"% of the last "+itoa(windowPoints)+" decision(s) used a proactive witness syscall (target >=15%)"),
 		result("recall_reverified", axis, false, 2,
 			"recalled memory was re-verified against ground truth, not left UNVERIFIABLE",
 			ev.RecallRows == 0 || recallFreshPct >= 40,

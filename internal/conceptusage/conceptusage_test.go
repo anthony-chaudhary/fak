@@ -158,3 +158,34 @@ func TestScan_ToleratesMalformedTail(t *testing.T) {
 		t.Fatalf("expected 2 verify rows counted before the malformed tail, got %d", ev.VerifySyscalls)
 	}
 }
+
+// Windowing proof: a long tail of OLD recalls followed by a recent burst of witnessing
+// must register on the windowed share — the all-time ratio would stay pinned near zero,
+// but the window reflects that the CURRENT dev loop witnesses. This is the metric-honesty
+// fix that lets genuine recent witnessing move the number without becoming gameable.
+func TestWindowedWitnessShare_RecentBurstRegisters(t *testing.T) {
+	root := t.TempDir()
+	var lines []string
+	// 300 old passive recalls (history) ...
+	for i := 0; i < 300; i++ {
+		lines = append(lines, `{"syscall":"memory_recall","verdict":"RECALL_UNVERIFIABLE"}`)
+	}
+	// ... then a recent burst of 20 real witnessing decisions.
+	for i := 0; i < 20; i++ {
+		lines = append(lines, `{"syscall":"improve","verdict":"KEEP"}`)
+	}
+	writeJournal(t, root, "verdict-journal.jsonl", lines...)
+	var ev Evidence
+	scanVerdictJournal(filepath.Join(root, ".dos", "verdict-journal.jsonl"), &ev)
+	// All-time share is ~6% (20/320); the windowed share over the last 50 must be far
+	// higher because the recent tail is mostly witnessing.
+	windowShare := pct(ev.WindowProactive, ev.WindowProactive+ev.WindowRecall)
+	if windowShare < 15 {
+		t.Fatalf("recent witnessing burst should register on the window, got %d%% (proactive=%d recall=%d)",
+			windowShare, ev.WindowProactive, ev.WindowRecall)
+	}
+	allTime := pct(ev.VerifySyscalls+ev.ImproveCalls, ev.VerifySyscalls+ev.ImproveCalls+ev.RecallRows)
+	if allTime >= windowShare {
+		t.Fatalf("windowed share (%d%%) should exceed the all-time share (%d%%) for a recent burst", windowShare, allTime)
+	}
+}
