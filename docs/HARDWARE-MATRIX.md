@@ -102,7 +102,7 @@ The box almost every published `fak` number is measured on.
 | GPU | 18-core GPU (Metal 4) |
 | Memory | 36 GB unified (CPU+GPU shared), ~150 GB/s |
 | OS / toolchain | macOS · Go 1.26.0 |
-| Backends | **NEON Q8** (arm64 SIMD), **Metal GPU** (`-tags fakmetal`), pure-Go HF/GGUF loaders |
+| Backends | **NEON Q8** (arm64 SIMD), **Metal GPU** (darwin/arm64+cgo), pure-Go HF/GGUF loaders |
 
 **What's been profiled here:**
 

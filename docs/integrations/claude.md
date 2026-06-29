@@ -139,7 +139,7 @@ fak guard --gguf hf://owner/repo/model.gguf -- claude # download on demand
 
 **GPU acceleration (optional):**
 
-Use `--backend cuda` or `--backend metal` to run decode on GPU (requires a `-tags cuda` or `-tags fakmetal` build):
+Use `--backend cuda` or `--backend metal` to run decode on GPU (CUDA requires `-tags cuda`; Metal is linked on darwin/arm64 with cgo):
 
 ```bash
 FAK_GGUF_LOAD_WORKERS=8 fak guard --gguf qwen2.5:7b --backend cuda -- claude
