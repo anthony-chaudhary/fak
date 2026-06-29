@@ -24,11 +24,16 @@
 // split internal/resume (the decision) and cmd/fak/resume_scan.go (the wire) use.
 package dispatchorder
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // DefaultCooldownSeconds mirrors the dispatcher's --cooldown-min default (120 minutes) so the
 // leaf agrees with the live picker when the caller does not pin a window.
 const DefaultCooldownSeconds = 120 * 60
+
+const exactSafeSetLimit = 24
 
 // Disposition is what the planner decided to do with one candidate this tick.
 type Disposition string
@@ -46,6 +51,10 @@ const (
 	// DispCooling: this unit is the freshest for its key but was attempted within the cooldown
 	// window — skip it THIS tick (and do not fall back to an older duplicate), retry once it cools.
 	DispCooling Disposition = "cooling"
+	// DispCollisionRisk: this unit was otherwise dispatchable, but the collision-priced fan-out
+	// preflight found that launching it in this wave would overlap another kept worker's tree.
+	// It is serialized before launch, so the caller can run the safe set now and retry later.
+	DispCollisionRisk Disposition = "collision_risk"
 )
 
 // The closed reason vocabulary for a Ranked.Reason, so an observability sink records WHY
@@ -59,6 +68,8 @@ const (
 	ReasonWorkerLive = "worker_live"
 	// ReasonCooldown: the freshest unit for its key was attempted within the cooldown window.
 	ReasonCooldown = "cooldown"
+	// ReasonCollisionRisk: the closed DOS refusal token for a pre-launch tree collision.
+	ReasonCollisionRisk = "COLLISION_RISK"
 )
 
 // Candidate is one unit of dispatchable work — all the facts the order needs, none of the
@@ -71,6 +82,18 @@ type Candidate struct {
 	// Key is the supersede/target identity. Units sharing a non-empty Key are the same target;
 	// only the freshest survives. Empty Key => unique (its own group, never superseded).
 	Key string `json:"key"`
+	// Lane is the dos.toml lane this worker would acquire. It is optional for legacy order-only
+	// callers, but when any candidate declares a Lane/Tree/Mode the input is treated as a
+	// collision-priced fan-out. Same exclusive lane requests serialize before launch.
+	Lane string `json:"lane,omitempty"`
+	// Tree is the repo-relative file tree(s) this worker would touch, using the same prefix/glob
+	// shape as dos arbitrate's lane tree. In priced mode an empty Tree is an unknown blast radius
+	// and conservatively collides with every other candidate.
+	Tree []string `json:"tree,omitempty"`
+	// Mode is the requested lock mode ("exclusive" or "shared"). Empty means exclusive, matching
+	// the dispatch lease default. shared/shared may overlap; any exclusive participant must be
+	// tree-disjoint.
+	Mode string `json:"mode,omitempty"`
 	// CreatedUnix is when the unit was created (0 = unknown); the recency fallback.
 	CreatedUnix int64 `json:"created_unix"`
 	// UpdatedUnix is when the unit was last updated (0 = unknown); the PRIMARY recency signal.
@@ -98,6 +121,8 @@ type Ranked struct {
 	Reason string `json:"reason"`
 	// SupersededBy is the winning unit's ID when Disposition is DispSuperseded; empty otherwise.
 	SupersededBy string `json:"superseded_by,omitempty"`
+	// CollidesWith names the unit(s) that caused a collision-risk serialization. Empty otherwise.
+	CollidesWith []string `json:"collides_with,omitempty"`
 	// Recency is the freshness value the unit was judged on (echoed for transparency).
 	Recency int64 `json:"recency"`
 	// Rank is the 0-based dispatch position among DispKeep units; -1 for everything else.
@@ -126,6 +151,26 @@ type Result struct {
 	SupersededCount int `json:"superseded_count"`
 	LiveCount       int `json:"live_count"`
 	CoolingCount    int `json:"cooling_count"`
+	CollisionCount  int `json:"collision_count"`
+	// Collisions is the priced collision graph over otherwise dispatchable fan-out candidates.
+	Collisions []Collision `json:"collisions,omitempty"`
+	// S0-facing accounting: collisions_avoided is the number of colliding pairs serialized before
+	// launch; lanes_utilized is the count of safe lanes/workers admitted this wave; and
+	// serialization_wasted is the count of otherwise-dispatchable workers held for a later wave.
+	CollisionsAvoided   int `json:"collisions_avoided"`
+	LanesUtilized       int `json:"lanes_utilized"`
+	SerializationWasted int `json:"serialization_wasted"`
+	SafeConcurrency     int `json:"safe_concurrency"`
+}
+
+// Collision is one edge in the pre-launch collision graph. It is pure geometry: no worker has
+// launched yet, and no live lease was acquired by this planner.
+type Collision struct {
+	A      string   `json:"a"`
+	B      string   `json:"b"`
+	Reason string   `json:"reason"`
+	Lane   []string `json:"lane,omitempty"`
+	Tree   []string `json:"tree,omitempty"`
 }
 
 // Pick is the single unit a worker should take this tick — Keep[0], or "" when nothing is
@@ -179,6 +224,11 @@ func Plan(in Input) Result {
 		ranked = append(ranked, r)
 	}
 
+	collisions := priceFanout(ranked)
+	if len(collisions) > 0 {
+		applyCollisionPrice(ranked, collisions)
+	}
+
 	// Order: DispKeep first by recency (freshest-first), then the rest by recency, stable and
 	// deterministic. Ranks and the Keep list are assigned from the kept prefix.
 	sort.SliceStable(ranked, func(i, j int) bool {
@@ -202,8 +252,15 @@ func Plan(in Input) Result {
 			out.LiveCount++
 		case DispCooling:
 			out.CoolingCount++
+		case DispCollisionRisk:
+			out.CollisionCount++
 		}
 	}
+	out.Collisions = collisions
+	out.CollisionsAvoided = len(collisions)
+	out.LanesUtilized = lanesUtilized(out.Order)
+	out.SerializationWasted = out.CollisionCount
+	out.SafeConcurrency = out.KeepCount
 	return out
 }
 
@@ -240,3 +297,222 @@ func beats(a, b Candidate) bool {
 
 // moreRecent is beats lifted to Ranked, for the final ordering of equally-disposed units.
 func moreRecent(a, b Ranked) bool { return beats(a.Candidate, b.Candidate) }
+
+// priceFanout builds the collision graph over the otherwise-kept candidates. Legacy order-only
+// callers that provide no lane/tree/mode facts keep the pre-existing behavior; as soon as any
+// candidate carries those facts, the whole candidate set is the proposed multi-agent fan-out and
+// unknown trees collide conservatively.
+func priceFanout(ranked []Ranked) []Collision {
+	priced := false
+	var keep []Ranked
+	for _, r := range ranked {
+		if r.Disposition == DispKeep {
+			keep = append(keep, r)
+		}
+		if candidatePriced(r.Candidate) {
+			priced = true
+		}
+	}
+	if !priced || len(keep) < 2 {
+		return nil
+	}
+
+	var collisions []Collision
+	for i := 0; i < len(keep); i++ {
+		for j := i + 1; j < len(keep); j++ {
+			if c, ok := collisionOf(keep[i].Candidate, keep[j].Candidate); ok {
+				collisions = append(collisions, c)
+			}
+		}
+	}
+	return collisions
+}
+
+func applyCollisionPrice(ranked []Ranked, collisions []Collision) {
+	collides := make(map[string][]string)
+	for _, c := range collisions {
+		collides[c.A] = append(collides[c.A], c.B)
+		collides[c.B] = append(collides[c.B], c.A)
+	}
+
+	var keep []Ranked
+	for _, r := range ranked {
+		if r.Disposition == DispKeep {
+			keep = append(keep, r)
+		}
+	}
+	sort.SliceStable(keep, func(i, j int) bool { return moreRecent(keep[i], keep[j]) })
+	safe := maxSafeSet(keep, collisions)
+	for i := range ranked {
+		if ranked[i].Disposition != DispKeep {
+			continue
+		}
+		if safe[ranked[i].ID] {
+			continue
+		}
+		ranked[i].Disposition = DispCollisionRisk
+		ranked[i].Reason = ReasonCollisionRisk
+		ranked[i].CollidesWith = append([]string(nil), collides[ranked[i].ID]...)
+		sort.Strings(ranked[i].CollidesWith)
+	}
+}
+
+// maxSafeSet returns the largest collision-free subset for normal fan-out widths, preferring
+// fresher candidates when several subsets have the same size. Very large candidate lists fall
+// back to the same deterministic freshest-first admission rule so a planning helper never turns
+// one issue-lane backlog into an exponential search.
+func maxSafeSet(cands []Ranked, collisions []Collision) map[string]bool {
+	n := len(cands)
+	graph := make(map[string]map[string]bool, len(cands))
+	for _, c := range collisions {
+		if graph[c.A] == nil {
+			graph[c.A] = map[string]bool{}
+		}
+		if graph[c.B] == nil {
+			graph[c.B] = map[string]bool{}
+		}
+		graph[c.A][c.B] = true
+		graph[c.B][c.A] = true
+	}
+	if n > exactSafeSetLimit {
+		return greedySafeSet(cands, graph)
+	}
+
+	var best []string
+	var dfs func(pos int, chosen []string)
+	dfs = func(pos int, chosen []string) {
+		if len(chosen)+n-pos < len(best) {
+			return
+		}
+		if pos == n {
+			if len(chosen) > len(best) {
+				best = append([]string(nil), chosen...)
+			}
+			return
+		}
+		id := cands[pos].ID
+		ok := true
+		for _, prev := range chosen {
+			if graph[id][prev] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			dfs(pos+1, append(chosen, id))
+		}
+		dfs(pos+1, chosen)
+	}
+	dfs(0, nil)
+
+	out := make(map[string]bool, len(best))
+	for _, id := range best {
+		out[id] = true
+	}
+	return out
+}
+
+func greedySafeSet(cands []Ranked, graph map[string]map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for _, cand := range cands {
+		ok := true
+		for id := range out {
+			if graph[cand.ID][id] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out[cand.ID] = true
+		}
+	}
+	return out
+}
+
+func candidatePriced(c Candidate) bool {
+	return strings.TrimSpace(c.Lane) != "" || len(cleanTree(c.Tree)) > 0 || strings.TrimSpace(c.Mode) != ""
+}
+
+func collisionOf(a, b Candidate) (Collision, bool) {
+	ma, mb := lockMode(a), lockMode(b)
+	if ma == "shared" && mb == "shared" {
+		return Collision{}, false
+	}
+	c := Collision{A: a.ID, B: b.ID, Reason: ReasonCollisionRisk}
+	if laneA, laneB := strings.TrimSpace(a.Lane), strings.TrimSpace(b.Lane); laneA != "" || laneB != "" {
+		c.Lane = []string{laneA, laneB}
+		if laneA != "" && laneA == laneB {
+			return c, true
+		}
+	}
+	ta, tb := cleanTree(a.Tree), cleanTree(b.Tree)
+	if len(ta) == 0 || len(tb) == 0 {
+		return c, true
+	}
+	for _, x := range ta {
+		for _, y := range tb {
+			if treeOverlap(x, y) {
+				c.Tree = []string{x, y}
+				return c, true
+			}
+		}
+	}
+	return Collision{}, false
+}
+
+func lockMode(c Candidate) string {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case "shared":
+		return "shared"
+	default:
+		return "exclusive"
+	}
+}
+
+func cleanTree(tree []string) []string {
+	var out []string
+	for _, t := range tree {
+		if n := normalizeTree(t); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func treeOverlap(a, b string) bool {
+	a, b = normalizeTree(a), normalizeTree(b)
+	if a == "" || b == "" {
+		return true
+	}
+	if a == "**/*" || a == "**" || b == "**/*" || b == "**" {
+		return true
+	}
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+func normalizeTree(t string) string {
+	t = strings.TrimSpace(strings.ReplaceAll(t, "\\", "/"))
+	t = strings.TrimPrefix(t, "./")
+	t = strings.TrimSuffix(t, "/")
+	t = strings.TrimSuffix(t, "/**")
+	t = strings.TrimSuffix(t, "/*")
+	return strings.TrimSuffix(t, "/")
+}
+
+func lanesUtilized(order []Ranked) int {
+	lanes := map[string]bool{}
+	kept := 0
+	for _, r := range order {
+		if r.Disposition != DispKeep {
+			continue
+		}
+		kept++
+		if lane := strings.TrimSpace(r.Lane); lane != "" {
+			lanes[lane] = true
+		}
+	}
+	if len(lanes) > 0 {
+		return len(lanes)
+	}
+	return kept
+}

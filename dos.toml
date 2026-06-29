@@ -133,6 +133,7 @@ concurrent = [
   "nightrun",
   "loopdrive",
   "loopgate",
+  "dispatchorder",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -186,6 +187,7 @@ autopick = [
   "marketing", # internal/marketing leaf (completion-driven marketing subsystem), see [lanes].concurrent note
   "loopdrive",
   "loopgate",
+  "dispatchorder",
   # new-leaf:lane
 ]
 
@@ -323,6 +325,7 @@ scoreboard = ["internal/scoreboard/**"] # #1000: fak scoreboard Slack scorecard 
 marketing = ["internal/marketing/**"] # completion-driven marketing subsystem (any cmd/fak shim lives in the `cmd` lane to keep leaf trees pairwise-disjoint)
 loopdrive = ["internal/loopdrive/**"]
 loopgate = ["internal/loopgate/**"]
+dispatchorder = ["internal/dispatchorder/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

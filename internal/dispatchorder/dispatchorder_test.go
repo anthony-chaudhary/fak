@@ -71,6 +71,58 @@ func TestDistinctKeysAllKeptFreshestFirst(t *testing.T) {
 	}
 }
 
+func TestCollisionPricedFanoutSerializesExclusiveOverlapBeforeLaunch(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "gateway-old", Key: "A", Lane: "gateway", Tree: []string{"internal/gateway/**"}, UpdatedUnix: base - 300},
+		{ID: "gateway-fresh", Key: "B", Lane: "gateway", Tree: []string{"internal/gateway/http.go"}, UpdatedUnix: base - 100},
+		{ID: "docs", Key: "C", Lane: "docs", Tree: []string{"docs/**"}, UpdatedUnix: base - 200},
+	}})
+
+	if r.KeepCount != 2 || r.CollisionCount != 1 {
+		t.Fatalf("counts = keep %d collision %d, want 2/1", r.KeepCount, r.CollisionCount)
+	}
+	if dispoOf(r, "gateway-fresh") != DispKeep || dispoOf(r, "docs") != DispKeep {
+		t.Fatalf("safe set dispositions: gateway-fresh=%q docs=%q, want keep/keep",
+			dispoOf(r, "gateway-fresh"), dispoOf(r, "docs"))
+	}
+	if dispoOf(r, "gateway-old") != DispCollisionRisk {
+		t.Fatalf("gateway-old disposition = %q, want collision_risk", dispoOf(r, "gateway-old"))
+	}
+	if r.CollisionsAvoided != 1 || r.LanesUtilized != 2 || r.SerializationWasted != 1 || r.SafeConcurrency != 2 {
+		t.Fatalf("S0 counts = avoided %d lanes %d wasted %d safe %d, want 1/2/1/2",
+			r.CollisionsAvoided, r.LanesUtilized, r.SerializationWasted, r.SafeConcurrency)
+	}
+	if len(r.Collisions) != 1 || r.Collisions[0].Reason != ReasonCollisionRisk {
+		t.Fatalf("collisions = %+v, want one %s edge", r.Collisions, ReasonCollisionRisk)
+	}
+}
+
+func TestCollisionPricedFanoutAllowsSharedSharedOverlap(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "reader-a", Key: "A", Lane: "docs", Tree: []string{"docs/**"}, Mode: "shared", UpdatedUnix: base - 10},
+		{ID: "reader-b", Key: "B", Lane: "docs", Tree: []string{"docs/notes/**"}, Mode: "shared", UpdatedUnix: base - 20},
+	}})
+	if r.KeepCount != 2 || r.CollisionCount != 0 || len(r.Collisions) != 0 {
+		t.Fatalf("shared/shared overlap counts = keep %d collision %d edges %d, want 2/0/0",
+			r.KeepCount, r.CollisionCount, len(r.Collisions))
+	}
+}
+
+func TestCollisionPricedFanoutUnknownTreeCollidesConservatively(t *testing.T) {
+	r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+		{ID: "unknown", Key: "A", Lane: "gateway", UpdatedUnix: base - 10},
+		{ID: "known", Key: "B", Lane: "docs", Tree: []string{"docs/**"}, UpdatedUnix: base - 20},
+	}})
+	if r.KeepCount != 1 || r.CollisionCount != 1 || r.CollisionsAvoided != 1 {
+		t.Fatalf("unknown-tree pricing = keep %d collision %d avoided %d, want 1/1/1",
+			r.KeepCount, r.CollisionCount, r.CollisionsAvoided)
+	}
+	if dispoOf(r, "unknown") != DispKeep || dispoOf(r, "known") != DispCollisionRisk {
+		t.Fatalf("dispositions unknown=%q known=%q, want keep/collision_risk",
+			dispoOf(r, "unknown"), dispoOf(r, "known"))
+	}
+}
+
 // TestEmptyKeyNeverSuperseded: an empty Key opts a unit out of collapse — two empty-key units
 // are both kept even though they would otherwise look like duplicates.
 func TestEmptyKeyNeverSuperseded(t *testing.T) {

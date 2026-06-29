@@ -87,6 +87,30 @@ Branch on the exit code (the verdict IS the code):
 - `5` **BLOCKED** → picks blocked; skip, surface.
 - `6` **RACE** → lost a render race; retry the snapshot once.
 
+## Step 3b — Price multi-agent fan-out (default admission)
+
+If Step 4 would launch more than one worker/pick, price that fan-out before the
+first worker starts. This is the default admission step, not an optional
+operator check:
+
+```
+/dos-plan-price
+```
+
+Build the partition from the acquired lane tree plus each pick's declared tree
+or scope. Honor the returned action:
+
+- `LAUNCH_ALL` → proceed with the full dispatch list.
+- `LAUNCH_SAFE_SET` → launch only the priced safe set; serialize the colliding
+  picks into a later wave.
+- `REPARTITION_AND_REPRICE` / `SERIALIZE_UNKNOWN_SCOPE` → stop or narrow the
+  partition; do not launch a colliding or unknown-scope fan-out.
+
+Record the S0 counts (`collisions_avoided`, `lanes_utilized`,
+`serialization_wasted`) with the run archive when the pricing surface provides
+them. The reactive `dos arbitrate` lease in Step 1 remains mandatory; pricing
+does not replace it.
+
 ## Step 4 — Ship the packet (LIVE only)
 
 Launch the packet's dispatch list (the per-pick prompts `/dos-next-up` rendered).

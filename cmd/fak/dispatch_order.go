@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
@@ -147,8 +148,8 @@ func parseCandidates(raw []byte) ([]dispatchorder.Candidate, error) {
 // keep list (the pick order), then the superseded duplicates, then the units skipped because a
 // worker is live or they are cooling.
 func renderDispatchOrder(w io.Writer, r dispatchorder.Result, now int64) {
-	fmt.Fprintf(w, "dispatch order — %d candidate(s): %d keep  %d superseded  %d live  %d cooling\n\n",
-		len(r.Order), r.KeepCount, r.SupersededCount, r.LiveCount, r.CoolingCount)
+	fmt.Fprintf(w, "dispatch order — %d candidate(s): %d keep  %d superseded  %d live  %d cooling  %d collision-risk\n\n",
+		len(r.Order), r.KeepCount, r.SupersededCount, r.LiveCount, r.CoolingCount, r.CollisionCount)
 
 	if r.KeepCount > 0 {
 		fmt.Fprintf(w, "%-4s %-16s %-14s %10s\n", "rank", "unit", "key", "age")
@@ -166,7 +167,18 @@ func renderDispatchOrder(w io.Writer, r dispatchorder.Result, now int64) {
 			fmt.Fprintf(w, "  cooling    %-16s (freshest for key %q, attempted recently)\n", x.ID, x.Key)
 		case dispatchorder.DispLive:
 			fmt.Fprintf(w, "  live       %-16s (worker already running)\n", x.ID)
+		case dispatchorder.DispCollisionRisk:
+			with := strings.Join(x.CollidesWith, ",")
+			if with == "" {
+				with = "priced fan-out"
+			}
+			fmt.Fprintf(w, "  collision %-16s (%s: overlaps %s; serialized before launch)\n",
+				x.ID, dispatchorder.ReasonCollisionRisk, with)
 		}
+	}
+	if r.CollisionsAvoided > 0 || r.SerializationWasted > 0 {
+		fmt.Fprintf(w, "\npriced fan-out: collisions_avoided=%d  lanes_utilized=%d  serialization_wasted=%d  safe_concurrency=%d\n",
+			r.CollisionsAvoided, r.LanesUtilized, r.SerializationWasted, r.SafeConcurrency)
 	}
 
 	if pick := r.Pick(); pick != "" {
@@ -202,6 +214,11 @@ candidates + clock in, same order out.
 
 Candidates are a JSON array (or {"candidates":[...]}), each:
   {"id":"123","key":"<shared-target>","created_unix":N,"updated_unix":N,"last_attempt_unix":N,"live":false}
+
+For multi-agent fan-out, add the pre-launch lane/tree facts. Once any candidate carries
+lane/tree/mode, the planner prices the whole fan-out before launch; shared/shared may overlap,
+but any exclusive participant must be tree-disjoint:
+  {"id":"gw","lane":"gateway","tree":["internal/gateway/**"],"mode":"exclusive","updated_unix":N}
 
 example (collapse 25 tasks for the same target to the freshest, then pick):
   fak dispatch order --in candidates.json --json | jq .pick

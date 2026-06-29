@@ -120,8 +120,12 @@ func collectLoopIndex(root string) loopindex.Loop {
 		Probes: []loopindex.Probe{
 			liProbe("arbitrate_substrate", "the collision substrate exists (internal/dispatchorder + the dos.toml per-leaf lane taxonomy)",
 				true, exists("internal/dispatchorder") && has("dos.toml", "[lanes]")),
-			liProbe("priced_fanout_default", "collision-priced arbitrate runs as the DEFAULT before any multi-agent dispatch (#1154)",
-				true, hasFold("internal/dispatchorder/dispatchorder.go", "arbitrate", "collision-priced")),
+			liProbe("priced_fanout_default", "collision-priced arbitrate runs as the DEFAULT before any multi-agent dispatch and emits S0 counts (#1154)",
+				true,
+				hasAllFold("internal/dispatchorder/dispatchorder.go",
+					"collision-priced fan-out", "ReasonCollisionRisk", "CollisionsAvoided", "LanesUtilized", "SerializationWasted") &&
+					hasAllFold(".claude/skills/dos-dispatch/SKILL.md",
+						"price multi-agent fan-out", "default admission", "serialization_wasted")),
 			liProbe("dispatch_worker", "a dispatch worker exists to fan out across disjoint lanes (cmd/dispatchworker)",
 				false, exists("cmd/dispatchworker")),
 			liProbe("lane_trees_declared", "leaf trees are declared so the arbiter can prove disjointness ([lanes.trees])",

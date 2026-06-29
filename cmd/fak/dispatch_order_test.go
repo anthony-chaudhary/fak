@@ -108,6 +108,58 @@ func TestDispatchOrderCooldownHolds(t *testing.T) {
 	}
 }
 
+func TestDispatchOrderJSONPricesFanoutBeforeLaunch(t *testing.T) {
+	const now = 2_000_000
+	path := writeCandidates(t, `[
+	  {"id":"gateway-old","key":"A","lane":"gateway","tree":["internal/gateway/**"],"updated_unix":1999700},
+	  {"id":"gateway-fresh","key":"B","lane":"gateway","tree":["internal/gateway/http.go"],"updated_unix":1999900},
+	  {"id":"docs","key":"C","lane":"docs","tree":["docs/**"],"updated_unix":1999800}
+	]`)
+	out, errb, code := runDispatchAt("order", "--in", path, "--now", fmt.Sprint(now), "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var res struct {
+		dispatchorder.Result
+		Pick string `json:"pick"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if res.CollisionCount != 1 || res.CollisionsAvoided != 1 || res.LanesUtilized != 2 || res.SerializationWasted != 1 {
+		t.Fatalf("fanout counts collision=%d avoided=%d lanes=%d wasted=%d, want 1/1/2/1",
+			res.CollisionCount, res.CollisionsAvoided, res.LanesUtilized, res.SerializationWasted)
+	}
+	if res.Pick != "gateway-fresh" {
+		t.Fatalf("pick = %q, want gateway-fresh", res.Pick)
+	}
+	var old dispatchorder.Ranked
+	for _, row := range res.Order {
+		if row.ID == "gateway-old" {
+			old = row
+		}
+	}
+	if old.Disposition != dispatchorder.DispCollisionRisk || old.Reason != dispatchorder.ReasonCollisionRisk {
+		t.Fatalf("gateway-old ranked = %+v, want collision-risk %s", old, dispatchorder.ReasonCollisionRisk)
+	}
+}
+
+func TestDispatchOrderTableReportsCollisionPricing(t *testing.T) {
+	path := writeCandidates(t, `[
+	  {"id":"a","key":"A","lane":"gateway","tree":["internal/gateway/**"],"updated_unix":99},
+	  {"id":"b","key":"B","lane":"gateway","tree":["internal/gateway/http.go"],"updated_unix":100}
+	]`)
+	out, _, code := runDispatchAt("order", "--in", path, "--now", "200")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, want := range []string{"collision-risk", "COLLISION_RISK", "collisions_avoided=1", "serialization_wasted=1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestDispatchOrderBareArrayAndObject: both the bare array and the {"candidates":[...]} object
 // forms parse.
 func TestDispatchOrderBareArrayAndObject(t *testing.T) {
