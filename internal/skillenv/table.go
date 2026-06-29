@@ -26,11 +26,11 @@ import (
 // Blast radius is reported before a swap via ctxresidency.Query, telling the
 // operator exactly what will be invalidated by the flip.
 type Table struct {
-	mu             sync.RWMutex
-	versions       map[string]string // skill name → active version
-	resolver       Resolver          // how to resolve a skill name to a version
-	mmu            *ctxmmu.MMU        // for blast-radius reads
-	kvctx          *kvmmu.Context     // for blast-radius reads
+	mu       sync.RWMutex
+	versions map[string]string // skill name → active version
+	resolver Resolver          // how to resolve a skill name to a version
+	mmu      *ctxmmu.MMU       // for blast-radius reads
+	kvctx    *kvmmu.Context    // for blast-radius reads
 }
 
 // Resolver abstracts version resolution: pinned (explicit version), latest
