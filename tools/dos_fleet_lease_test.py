@@ -9,12 +9,14 @@ and every time-dependent function takes an injected `now`. Mirrors release_lock_
 """
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dos_fleet_lease as fl  # noqa: E402
@@ -364,6 +366,57 @@ class GlobalLaneTest(unittest.TestCase):
     def test_ordinary_lane_is_not_global(self):
         for lane in ("gateway", "tools", "docs", "compute"):
             self.assertFalse(fl.is_global_lane(lane))
+
+
+class StoreSelectionTest(unittest.TestCase):
+    """The activation seam (#21): global lanes default to the cross-node GitRefStore,
+    shard lanes keep the zero-network LocalDirStore, and an explicit store still wins.
+    No network — GitRefStore.__init__ only records root/remote (no git call)."""
+
+    def _ns(self, store: str = "") -> argparse.Namespace:
+        return argparse.Namespace(store=store)
+
+    def setUp(self):
+        # Pin the env override OFF so the default-selection branch is what we exercise.
+        self._env = mock.patch.dict("os.environ", {}, clear=False)
+        self._env.start()
+        import os
+        os.environ.pop("FAK_FLEET_LEASE_STORE", None)
+        self.root = fl.repo_root()
+
+    def tearDown(self):
+        self._env.stop()
+
+    def test_global_lane_defaults_to_git(self):
+        for lane in fl.GLOBAL_LANES:
+            store = fl._store_for(self._ns(), self.root, lane=lane)
+            self.assertIsInstance(store, fl.GitRefStore, f"{lane} must default to git")
+
+    def test_global_scope_defaults_to_git(self):
+        # An explicit `materialize --scope global` on no particular lane still goes cross-node.
+        store = fl._store_for(self._ns(), self.root, scope="global")
+        self.assertIsInstance(store, fl.GitRefStore)
+
+    def test_shard_lane_defaults_to_local(self):
+        for lane in ("tools", "docs", "gateway", ""):
+            store = fl._store_for(self._ns(), self.root, lane=lane)
+            self.assertIsInstance(store, fl.LocalDirStore, f"{lane!r} must stay local")
+
+    def test_explicit_git_flag_forces_git_on_a_shard_lane(self):
+        store = fl._store_for(self._ns(store="git"), self.root, lane="tools")
+        self.assertIsInstance(store, fl.GitRefStore)
+
+    def test_explicit_path_store_overrides_global_default(self):
+        # A test/dev can still force LocalDirStore even on a global lane.
+        with tempfile.TemporaryDirectory() as d:
+            store = fl._store_for(self._ns(store=d), self.root, lane="release")
+            self.assertIsInstance(store, fl.LocalDirStore)
+
+    def test_env_var_git_forces_git(self):
+        import os
+        os.environ["FAK_FLEET_LEASE_STORE"] = "git"
+        store = fl._store_for(self._ns(), self.root, lane="docs")
+        self.assertIsInstance(store, fl.GitRefStore)
 
 
 if __name__ == "__main__":

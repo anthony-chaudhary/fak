@@ -57,9 +57,23 @@ kernel's `dos lease-lane`, which this wraps — not release_lock.
 - The `GitRefStore` transport (a real `refs/dos-fleet-leases/<host_id>` force-with-lease
   CAS push) is IMPLEMENTED and TESTED — `GitRefStoreCASTest` exercises it against a real
   throwaway bare remote and proves a second node's stale-OID push is refused at the remote
-  (the cross-node double-grant is impossible at publish time). The DEFAULT store stays
-  `LocalDirStore` (zero network, the shard-by-node fast path); production multi-node opts in
-  via `--store git` / `FAK_FLEET_LEASE_STORE=git`. Both backends honor the same CAS contract.
+  (the cross-node double-grant is impossible at publish time). ACTIVATED (#21): the 3 global
+  exclusive lanes (abi/release/global) now default to `GitRefStore` — the lanes that need
+  cross-node consensus get it with no flag; shard-by-node lanes keep the zero-network
+  `LocalDirStore` fast path. An explicit `--store` / `FAK_FLEET_LEASE_STORE` still overrides
+  either way. Both backends honor the same CAS contract.
+
+## FLEET_LANE_ALLOWLIST decision (#21)
+
+DECIDED: a `FLEET_LANE_ALLOWLIST` is NOT built as a serialization floor. It cannot be
+sound from fleet code alone — the kernel's bare-autopick ladder (`arbiter.py` reads
+`cfg.lanes.autopick`) exposes no per-node override flag (`cli.py`), so a fleet-level
+allowlist can only filter what the supervisor *proposes*, never bind what the kernel
+*picks*. The serialization floor for the 3 global lanes is therefore the GitRefStore
+CAS, now wired ON by default for those lanes (see `_store_for`). Any future allowlist
+is ADVISORY steering only — a best-effort steer/refuse at
+`dos_supervisor_watchdog.build_plan` + `dispatch_worker.build_command` — and a real
+per-node allowlist is deferred until the dos kernel grows an autopick-override seam.
 
 Refuse reasons are REUSED from the kernel's closed vocabulary (verified known via
 `dos_check_reason`), not invented: `LANE_LEASE_HELD_BY_LIVE_DISPATCH_LOOP` (a foreign
@@ -332,8 +346,10 @@ class GitRefStore(FleetStore):
     Honest residual (see module docstring): this fences the lease *record* across
     nodes, and foreign liveness is the wall-clock TTL overlay in `foreign_record_live`
     — the remote ref CAS makes a *double-grant* impossible at publish time, but a
-    stale TTL window can still let a peer treat a crashed node's lane as free. Opt-in
-    via `--store git` / FAK_FLEET_LEASE_STORE=git; the default stays LocalDirStore.
+    stale TTL window can still let a peer treat a crashed node's lane as free. The 3
+    global exclusive lanes default to this store (`_store_for`, #21); shard lanes use
+    LocalDirStore. An explicit `--store git` / FAK_FLEET_LEASE_STORE=git forces it for
+    any lane.
     """
 
     REF_NS = "refs/dos-fleet-leases"
@@ -650,14 +666,29 @@ def _emit(payload: dict[str, Any], code: int) -> int:
     return code
 
 
-def _store_for(args: argparse.Namespace, root: Path) -> FleetStore | None:
+def _store_for(
+    args: argparse.Namespace, root: Path, *, lane: str = "", scope: str = "",
+) -> FleetStore | None:
+    """Pick the fleet store for an operation. The ACTIVATION seam for #21.
+
+    An explicit ``--store`` / ``FAK_FLEET_LEASE_STORE`` always wins (``git`` ->
+    GitRefStore, any other value -> a LocalDirStore at that path). With no explicit
+    backend, the 3 global exclusive lanes (abi/release/global) — and an explicit
+    ``materialize --scope global`` — default to the cross-node GitRefStore CAS
+    (refs/dos-fleet-leases/*), because those are exactly the operations that need
+    fleet-wide consensus. This wires the git transport ON for the global lanes rather
+    than leaving it opt-in: a bare ``acquire --lane release`` now publishes +
+    materializes-global through the remote ref, no flag. Shard-by-node lanes keep the
+    zero-network LocalDirStore fast path (the common, always-available case)."""
     backend = getattr(args, "store", "") or os.environ.get("FAK_FLEET_LEASE_STORE", "")
-    if not backend:
-        # Default store: a local dir under the registry (the MVP, hermetic-style).
-        backend = str(root / "tools" / "_registry" / "fleet-leases")
     if backend == "git":
         return GitRefStore(root)
-    return LocalDirStore(Path(backend))
+    if backend:
+        return LocalDirStore(Path(backend))
+    if scope == "global" or is_global_lane(lane):
+        return GitRefStore(root)
+    # Default store: a local dir under the registry (the MVP, hermetic-style).
+    return LocalDirStore(root / "tools" / "_registry" / "fleet-leases")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -701,7 +732,7 @@ def main(argv: list[str] | None = None) -> int:
             return _emit(payload, code)
 
         if args.cmd == "materialize":
-            store = None if args.scope == "local" else _store_for(args, root)
+            store = None if args.scope == "local" else _store_for(args, root, scope=args.scope)
             payload, code = do_materialize(
                 root, store, scope=args.scope, host=host, now=now, live=kernel_live,
                 ttl_s=args.ttl_s, skew_margin_s=args.skew_margin_s,
@@ -711,7 +742,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "acquire":
             owner = args.owner or default_owner()
             scope = args.scope or ("global" if is_global_lane(args.lane) else "local")
-            store = None if scope == "local" else _store_for(args, root)
+            store = None if scope == "local" else _store_for(args, root, lane=args.lane, scope=scope)
             payload, code = do_acquire(
                 root, store, lane=args.lane, owner=owner, kind=args.kind, mode=args.mode,
                 run_id=args.run_id, scope=scope, host=host, now=now,
@@ -722,13 +753,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "release":
             owner = args.owner or default_owner()
             res = kernel_release(root, lane=args.lane, owner=owner)
-            do_publish(root, _store_for(args, root), host=host, now=now, live=kernel_live)
+            do_publish(root, _store_for(args, root, lane=args.lane), host=host, now=now, live=kernel_live)
             return _emit({"ok": True, "kernel": res}, EXIT_OK)
 
         if args.cmd == "heartbeat":
             owner = args.owner or default_owner()
             res = kernel_heartbeat(root, lane=args.lane, owner=owner, loop_ts=args.loop_ts)
-            do_publish(root, _store_for(args, root), host=host, now=now, live=kernel_live)
+            do_publish(root, _store_for(args, root, lane=args.lane), host=host, now=now, live=kernel_live)
             return _emit({"ok": True, "kernel": res}, EXIT_OK)
     except Exception as exc:  # noqa: BLE001 - tooling seam: report, don't crash the caller
         return _emit({"ok": False, "reason": "internal", "detail": repr(exc)}, EXIT_INTERNAL)
