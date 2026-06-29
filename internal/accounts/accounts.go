@@ -289,6 +289,53 @@ func (r Registry) home(name string) (Home, bool) {
 // single Default conflated.
 func (r Registry) Default() (Home, bool) { return r.Role(RoleAnchor) }
 
+// ActiveMemoryDir resolves the ACTIVE persona's agent-memory directory for workspace —
+// the store a recall (e.g. dos_recall) should read from instead of the hardcoded
+// ~/.claude default. It is the affordance that lets a caller aim recall at the seat the
+// operator is actually working as (RoleActive — the rotating launch seat), not whichever
+// home happens to be ~/.claude.
+//
+// It returns <activeSeat.Dir>/projects/<key>/memory, where <key> is the Claude Code
+// session-store slug for workspace: every non-alphanumeric rune of the cleaned absolute
+// path collapsed to '-' (so "C:\\work\\fak" -> "C--work-fak"). This is the SAME slug
+// Claude Code derives for projects/<cwd> on disk (see projectSlug), so the path lands on
+// the real per-workspace store rather than a guessed one.
+//
+// Fail-closed: with no active seat (RoleActive unset or dangling) it returns ("", false) —
+// never a guessed path. It deliberately does NOT fall forward to the anchor: "the active
+// store" is a precise question and RoleActive is its only honest answer; the anchor
+// fall-forward in Serve/fallbackSeat is a different concern (a seat that can't SERVE),
+// not "whose memory is active". A caller that wants the anchor's store can call
+// Role(RoleAnchor) and join the same suffix.
+func (r Registry) ActiveMemoryDir(workspace string) (string, bool) {
+	h, ok := r.Role(RoleActive)
+	if !ok || h.Dir == "" {
+		return "", false
+	}
+	return filepath.Join(h.Dir, "projects", projectSlug(workspace), "memory"), true
+}
+
+// projectSlug is the on-disk session-store key Claude Code derives from a working
+// directory: it cleans the path, then collapses every NON-alphanumeric rune (separators,
+// the drive colon, '.', spaces) to a single '-' each — so "C:\\work\\fak" keys as
+// "C--work-fak" and "/home/u/p" as "-home-u-p". It mirrors the slug the fleet's Python
+// resume/checkpoint tools compute (re.sub(r"[^A-Za-z0-9]", "-", normpath(path))) so the
+// Go and Python views agree on which projects/<key> dir a workspace owns.
+func projectSlug(path string) string {
+	clean := filepath.Clean(path)
+	var b strings.Builder
+	b.Grow(len(clean))
+	for _, r := range clean {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
 // migrate folds a legacy registry forward in place: a pre-roles registry carried the rehome
 // anchor as a per-Home `default: true`. If no anchor role is set but some home carries the
 // legacy flag, adopt it as RoleAnchor (preserving Serve's old fall-forward target), then clear

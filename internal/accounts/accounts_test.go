@@ -3,6 +3,7 @@ package accounts
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,6 +111,63 @@ func TestDefault(t *testing.T) {
 	}
 	if _, ok := (Registry{Homes: []Home{{Name: "a", Dir: "/d"}}}).Default(); ok {
 		t.Fatalf("no anchor role set should report ok=false")
+	}
+}
+
+// TestActiveMemoryDir is the affordance toward #1313: ActiveMemoryDir yields the ACTIVE
+// seat's resolved per-workspace agent-memory dir (so a recall can read the active store
+// instead of the hardcoded ~/.claude default), and fails CLOSED — ("", false) — when no
+// active seat is set, never a guessed path.
+func TestActiveMemoryDir(t *testing.T) {
+	r := Registry{
+		Roles: map[string]string{RoleActive: "day27-seat", RoleAnchor: "gem8-seat"},
+		Homes: []Home{
+			{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat"},
+			{Name: "day27-seat", Dir: "/h/.claude-day27-seat"},
+		},
+	}
+	// A forward-slash workspace path is stable across OSes (filepath.Clean leaves it as-is
+	// on POSIX, and on Windows it normalizes to backslashes that the slug then collapses to
+	// the same '-' — so the per-component slug agrees). Every non-alphanumeric collapses to
+	// one '-': "/work/fak" -> "-work-fak".
+	const ws = "/work/fak"
+	got, ok := r.ActiveMemoryDir(ws)
+	if !ok {
+		t.Fatalf("ActiveMemoryDir(active seat set) ok=false, want true")
+	}
+	want := filepath.Join("/h/.claude-day27-seat", "projects", projectSlug(ws), "memory")
+	if got != want {
+		t.Fatalf("ActiveMemoryDir = %q, want %q", got, want)
+	}
+	// The active seat's dir, not the anchor's, is the base.
+	if !strings.Contains(got, "day27-seat") || strings.Contains(got, "gem8-seat") {
+		t.Fatalf("ActiveMemoryDir = %q, want it rooted at the ACTIVE (day27) seat, not the anchor", got)
+	}
+
+	// Fail-closed: no active role -> ("", false), never a guessed path.
+	noActive := Registry{
+		Roles: map[string]string{RoleAnchor: "gem8-seat"},
+		Homes: []Home{{Name: "gem8-seat", Dir: "/h/.claude-gem8-seat"}},
+	}
+	if got, ok := noActive.ActiveMemoryDir(ws); ok || got != "" {
+		t.Fatalf("ActiveMemoryDir(no active seat) = %q,%v, want \"\",false", got, ok)
+	}
+}
+
+// TestProjectSlug pins the Claude Code session-store key derivation: every non-alphanumeric
+// rune of the cleaned path collapses to a single '-', matching the fleet's Python tools so
+// the Go and Python views agree on which projects/<key> dir a workspace owns.
+func TestProjectSlug(t *testing.T) {
+	cases := map[string]string{
+		"/work/fak":       "-work-fak",
+		"/home/u/p":       "-home-u-p",
+		"a.b c@d":         "a-b-c-d",
+		"/a//b/../c":      "-a-c", // Clean folds "//" and ".." before slugging
+	}
+	for in, want := range cases {
+		if got := projectSlug(in); got != want {
+			t.Errorf("projectSlug(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
