@@ -93,9 +93,9 @@ func (r OrnithRecord) Witnessed() bool {
 // OrnithRepro is a set of reproduction records for an Ornith-9B SWE-bench
 // Verified run, plus the labels that keep the two scores honest.
 type OrnithRepro struct {
-	Model   string         `json:"model"`   // the vendor model under reproduction, e.g. "ornith-9b"
-	Dataset string         `json:"dataset"` // e.g. "swebench-verified"
-	Records []OrnithRecord `json:"records"`
+	Model   string          `json:"model"`   // the vendor model under reproduction, e.g. "ornith-9b"
+	Dataset string          `json:"dataset"` // e.g. "swebench-verified"
+	Records []*OrnithRecord `json:"records"`
 }
 
 // NewOrnithRepro builds an empty reproduction set for a model/dataset pair.
@@ -106,8 +106,9 @@ func NewOrnithRepro(model, dataset string) *OrnithRepro {
 // Add appends a ticket's vendor-observed result to the reproduction set and
 // returns a pointer to the stored record so a later fak run can witness it.
 func (o *OrnithRepro) Add(ticketID string, vendorObservedPass bool) *OrnithRecord {
-	o.Records = append(o.Records, NewOrnithRecord(ticketID, vendorObservedPass))
-	return &o.Records[len(o.Records)-1]
+	r := NewOrnithRecord(ticketID, vendorObservedPass)
+	o.Records = append(o.Records, &r)
+	return &r
 }
 
 // OrnithStatus summarizes how much of a reproduction set fak has actually
@@ -126,6 +127,10 @@ type OrnithStatus struct {
 func (o *OrnithRepro) Status() OrnithStatus {
 	st := OrnithStatus{Total: len(o.Records)}
 	for _, r := range o.Records {
+		if r == nil {
+			st.ObservedOnly++
+			continue
+		}
 		if r.VendorObservedPass {
 			st.VendorObservedOK++
 		}
@@ -151,6 +156,9 @@ func (o *OrnithRepro) FullyWitnessed() bool {
 		return false
 	}
 	for _, r := range o.Records {
+		if r == nil {
+			return false
+		}
 		if !r.Witnessed() {
 			return false
 		}
@@ -163,6 +171,9 @@ func (o *OrnithRepro) FullyWitnessed() bool {
 func (o *OrnithRepro) TicketIDs() []string {
 	ids := make([]string, len(o.Records))
 	for i, r := range o.Records {
+		if r == nil {
+			continue
+		}
 		ids[i] = r.TicketID
 	}
 	sort.Strings(ids)
