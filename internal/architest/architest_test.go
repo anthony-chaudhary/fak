@@ -131,6 +131,7 @@ var tier = map[string]int{
 	"taskmgr":         1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	"stopfailure":     1, // pure StopFailure marker planner/settler over JSON files and transcript existence; stdlib-only, off the hot path.
 	"dogfoodscore":    1, // pure dogfood-loop scorecard over transcripts/markers; imports stopfailure, off the hot path.
+	"conceptusage":    1, // pure concept-usage scorecard: folds git log + .dos journals into a dogfooding score; stdlib-only, off the hot path.
 	"dropin":          1,
 	"comm":            2,
 	"cohort":          2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
