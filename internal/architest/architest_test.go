@@ -67,6 +67,7 @@ var tier = map[string]int{
 	"blockerpost":     1,                // outbound Slack publisher for the central #blockers channel: severity-driven (background status vs surfaced operator page); reuses scoreboard(1) transport, off the hot path.
 	"dispatchpost":    1,                // outbound Slack publisher for background code-dispatch run RESULTS; reuses scoreboard(1) transport, off the hot path.
 	"dojopost":        1,                // outbound Slack publisher for dojo rollups/trends; folds dojo(1) reports, reuses scoreboard(1) transport, off the hot path.
+	"marketing":       1,                // completion-driven marketing subsystem: witnessed-ship(hooks) -> claim/artifact, CLAIMS.md honesty gate, AEO/AgentEO refresh; imports hooks(1)+scoreboard(1)+stdlib, off the hot path.
 	"fleet":           1,                // fleet-roster snapshot fold for the #node-usage feeder; stdlib-only, imports nothing internal, off the hot path.
 	"nodeusagepost":   1,                // outbound Slack publisher for the #node-usage feeder; folds fleet(1), reuses scoreboard(1) transport, off the hot path.
 	"blobfs":          1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
