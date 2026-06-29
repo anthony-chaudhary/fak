@@ -142,13 +142,19 @@ a result.
 
 ## The dev loop (commit and ship)
 
-The tooling above feeds one loop: build → test → commit-by-path → ship. The rules
+The tooling above feeds one loop: build -> test -> commit-by-path -> ship. The rules
 below are enforced *below* the agent layer (git hooks refuse a violation), so they
-are verbs, not etiquette.
+are verbs, not etiquette. A dirty shared tree is not a reason to leave finished work
+loose: inspect it with `fak sweep`, then land the coherent, green slice by explicit
+path.
 
 ```bash
+fak sweep                                        # group the dirty tree by lane; --json for a loop
 make test-fast                                   # green the smoke tier first
-git commit -s -- <explicit paths>                # commit BY PATH (never git add -A; shared multi-session tree)
+fak commit --preview -m "<subject>" --path <p>   # lint the first subject/stamp before git is touched
+fak commit --path <p> -m "<subject>"             # preferred commit path for a narrow change
+# or:
+fak sweep --apply --lane <lane> -m "<subject>"   # preferred commit path for a whole lane group
 # subject: Conventional-Commits, verb-led, with a (fak <leaf>) trailer, e.g.
 #   fix(gateway): treat same-tick ready as positive (fak gateway)
 ```
@@ -159,8 +165,13 @@ equals what you asked for (refusing `PATHSPEC_RACE` if a peer swept extra files 
 Preview the message without touching git with `fak commit --preview -m "<subj>"
 --path <p>` — it catches a noun-led subject, a missing `(fak <leaf>)` trailer, or a
 stamp/lane mismatch up front, which is the only place you can fix them on a shared
-trunk. Work directly on `main`; the trunk guard refuses an off-trunk commit
-(`OFF_TRUNK`). Default is to ship: once `make ci` is green, commit and push.
+trunk. `fak sweep --apply --lane <lane> -m "<subj>"` is the layer above it for a
+dirty tree: it reuses the same lane resolver, appends the `(fak <lane>)` trailer when
+needed, and commits exactly that lane's dirty paths through the safe-commit path.
+Raw `git commit -s -- <explicit paths>` remains the fallback when the binary is not
+available; do not use `git add -A`. Work directly on `main`; the trunk guard refuses
+an off-trunk commit (`OFF_TRUNK`). Default is to ship: once `make ci` is green,
+commit and push.
 
 Full contributor contract: [`CONTRIBUTING.md`](../CONTRIBUTING.md). How a *feature*
 attaches as a leaf behind a `Register*` seam: [`EXTENDING.md`](../EXTENDING.md). A

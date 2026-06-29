@@ -81,6 +81,13 @@ The HOW below is unchanged and gates the WHEN: stay on the trunk, `git commit -s
 mid-flight, or a blocker stands — reconcile in place or STOP; the default does not fire
 until it clears.
 
+Dirty shared trees are normal; finished, green work should not sit there. Before reporting
+done, use the repo's index-safe commit tools: `fak sweep [--json]` to group the dirty tree
+by lane, then `fak sweep --apply --lane <lane> -m "<subject>" [--push]` for a whole lane
+group or `fak commit --preview ...` followed by `fak commit --path <p> ... -m "<subject>"`
+for a narrower change. Use raw `git commit -s -- <paths>` only as a fallback when the
+binary/tooling is unavailable, and say so in the handoff.
+
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree.**
   The trunk guard *refuses* off-trunk commits (the `OFF_TRUNK` law). A dirty/diverged
   tree means reconcile **in place** or STOP — never escape into a side branch.
@@ -109,7 +116,8 @@ until it clears.
     `MERGE_HEAD` clears. If it is a **peer's**, do NOT abort or complete it:
     `git restore --staged` your files, leave edits in the working tree, and wait for
     `MERGE_HEAD` to clear, then commit by explicit path.
-- **Commit by explicit path** — `git commit -- <paths>`, never `git add -A`. This is a
+- **Commit by explicit path** — prefer `fak commit --path <p> ...` (or `fak sweep --apply`
+  for one lane group); fallback is `git commit -- <paths>`, never `git add -A`. This is a
   shared multi-session tree; never stage a peer's uncommitted files. `fak commit --path
   <p> -m "<msg>"` mechanizes this whole rule: it stages only the named paths under an
   advisory lock, writes the message to a file (so an em-dash/multiline subject can't
