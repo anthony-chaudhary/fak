@@ -116,6 +116,21 @@ func cmdSelfUpdate(argv []string) {
 		installTarget = exe
 	}
 
+	// Single-flight: only one self-update may BUILD at a time on this host. A second
+	// invocation (e.g. the scheduled tick firing while a slow build from the last tick is
+	// still going on a saturated box) exits immediately rather than stacking another
+	// expensive origin checkout + build. The lock is released on return (or process exit).
+	release, lerr := selfinstall.TrySingleFlight("")
+	if lerr != nil {
+		if lerr == selfinstall.ErrBusy {
+			fmt.Println("self-update: another self-update is already building — skipping this run.")
+			return
+		}
+		fmt.Fprintln(os.Stderr, "self-update: lock error:", lerr)
+		os.Exit(1)
+	}
+	defer release()
+
 	// Build from a PRISTINE detached origin/main checkout, never the live (peer-dirty)
 	// tree: that gives a clean VCS stamp on the installed binary and guarantees we install
 	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
