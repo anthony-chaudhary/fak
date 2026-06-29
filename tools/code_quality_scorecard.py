@@ -119,7 +119,16 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Directories whose .go is NOT first-party shipped kernel code. testdata holds
 # fixtures (intentionally odd); vendored/generated trees are not ours to grade.
-GO_EXCLUDE_DIRS = {".git", "node_modules", "testdata", "vendor", "__pycache__"}
+GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", "node_modules", "testdata", "vendor", "__pycache__"}
+# `.claude` and `.fak` both hold full repo CHECKOUTS created by the agent machinery:
+# `.claude/worktrees/<wt>/` (the worktree-isolation feature) and
+# `.fak/tmp/issue<N>-clean-<sha>/` (the dispatch clean-checkout feature). Both are
+# gitignored. Walking them grades every copied .go a second time as phantom debt
+# (a `.claude` worktree inflated this scorecard 13 -> 22; a `.fak/tmp` checkout
+# inflated the architecture work-list 13 -> 27 here), which would make the committed
+# snapshot flap on a transient, gitignored checkout. A worktree copy is identical to
+# its tracked source by construction — so exclude both, matching the code-slop
+# scorecard's already-present `.claude`/`.fak` exclusion.
 
 _MARKER_RE = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
 # A real Go test entry point — used to confirm a _test.go is not just a bare

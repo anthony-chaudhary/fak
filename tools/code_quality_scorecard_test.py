@@ -90,6 +90,18 @@ def test_architecture_clean():
     assert not k["defects"] and k["score"] == 100
 
 
+def test_agent_checkout_go_files_excluded_from_corpus():
+    # `.claude/worktrees/<wt>/` (worktree-isolation) and `.fak/tmp/issue<N>-clean-<sha>/`
+    # (dispatch clean-checkout) are full repo CHECKOUTS the agent machinery leaves behind.
+    # Walking them double-grades every copied .go as phantom debt (a `.fak/tmp` checkout
+    # once inflated the architecture work-list 13 -> 27). Both must be pruned by name.
+    assert cq._excluded_go(".claude/worktrees/wt/internal/gateway/metrics.go")
+    assert cq._excluded_go(".fak/tmp/issue1155-clean-deadbeef/cmd/fak/guard.go")
+    # first-party kernel paths are still graded
+    assert not cq._excluded_go("internal/gateway/metrics.go")
+    assert not cq._excluded_go("cmd/fak/guard.go")
+
+
 # --- tests ----------------------------------------------------------------
 
 def test_tests_untested_packages_are_debt():
