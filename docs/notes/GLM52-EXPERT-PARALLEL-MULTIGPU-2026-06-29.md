@@ -94,6 +94,24 @@ per-token cost on this CPU, not full-checkpoint serving throughput (that is the 
 resident-EP number below). The EP decomposition this note lands does not change these single-box
 figures — its win is multi-GPU residency, which needs the device collective.
 
+### Decode-path lever benchmarks (executed this session, AMD Ryzen 9 9950X, Zen 5 / AVX-512-VNNI)
+
+The host expert path EP shards is built on two shipped levers
+([GLM52-DECODE-PATH-TO-10-TOKS](GLM52-DECODE-PATH-TO-10-TOKS-2026-06-27.md)). Both were
+re-measured on current trunk this session — they corroborate the decode-path doc's numbers:
+
+| lever | benchmark | result |
+|---|---|---|
+| **2: batched expert dispatch** (`hostBatchedGLMExperts`, the path EP reuses) | `GLMExpertDispatch` Looped→Batched (8 experts, MI=1536, H=5120) | 12.93 ms → 6.27 ms = **2.06×** (8→1 allocs); doc estimated ~1.8× |
+| **3: Q4_K int8 SIMD reducer** (gate/up experts) | `Q4KGEMV` f32→int8 | 19.42 ms → 1.65 ms = **11.79×** (matches the doc's ~11.9× VNNI) |
+| **3: Q5_K int8 SIMD reducer** (down experts) | `Q5KGEMV` f32→int8 | 55.76 ms → 3.03 ms = **18.4×** |
+| **3: Q6_K int8 SIMD reducer** | `Q6KGEMV` f32→int8 | 22.72 ms → 2.70 ms = **8.41×** |
+
+These are the per-kernel wins under each expert GEMV; EP distributes those same GEMVs across
+ranks, so the multi-GPU path inherits them. (Reproduce: `go test ./internal/model -run '^$'
+-bench 'GLMExpertDispatch|Q4KInt8GEMV|Q4KF32GEMV|Q5KInt8GEMV|Q5KF32GEMV|Q6KInt8GEMV|Q6KF32GEMV'
+-benchmem`.)
+
 ## What is `not yet` (the honest gap to a live 753B number)
 
 A **live resident-EP tok/s witness** does not exist yet. Three things gate it, in order:
