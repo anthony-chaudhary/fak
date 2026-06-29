@@ -37,6 +37,21 @@ jobs:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
 
+      # Build/test cache: setup-go's built-in cache is off (no go.sum to key on), but the
+      # GOCACHE — compiled packages AND cached test results — is the biggest CI-time lever
+      # on this zero-dep module. `go build ./...` and `go test ./...` otherwise recompile and
+      # re-run the whole tree every push. Key on go.mod (the toolchain) with a per-commit save
+      # and a prefix restore, so a warm cache skips unchanged packages and unchanged tests.
+      # GOCACHE is content-addressed, so a restored entry is never wrong — a miss just rebuilds.
+      - name: cache Go build/test artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
       # Fleet guard installation (#19): arm git guards (leak/claim/trunk) on every CI node.
       # A fresh clone without hooksPath set fails open; this step installs the guards
       # so pre-commit/pre-push/commit-msg hooks fire during this CI run.
@@ -617,6 +632,20 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false # zero external deps -> no go.sum to key a cache on
+
+      # Race-build cache, the single biggest CI-time win here: `-race` re-instruments and
+      # recompiles the whole tree (the reason this job carries a 25m timeout). Its GOCACHE
+      # entries are race-instrumented, so they get a SEPARATE key prefix (gorace) from the
+      # non-race build cache above — restoring it lets a push recompile only the packages
+      # that changed under instrumentation instead of all of them.
+      - name: cache Go race build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gorace-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gorace-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gorace-
 
       - name: C toolchain present (the race detector needs cgo)
         run: cc --version
