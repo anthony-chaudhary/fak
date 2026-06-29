@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
@@ -94,6 +95,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 
 	root := resolveRoot(*dir)
 	if strings.TrimSpace(root) == "" {

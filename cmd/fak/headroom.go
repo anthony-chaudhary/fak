@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/headroom"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdHeadroom(argv []string) {
@@ -175,6 +176,7 @@ func runHeadroomBench(stdout, stderr io.Writer, argv []string) int {
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	comp, ok := headroom.Lookup(*via)
 	if !ok {
 		fmt.Fprintf(stderr, "fak headroom: unknown plugin %q (have %s)\n", *via, strings.Join(headroom.Names(), ", "))
