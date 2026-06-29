@@ -104,6 +104,11 @@ curl -fsSLO "${BASE}/SHA256SUMS"
 # Verify before trusting the binary.
 grep " ${ARCHIVE}\$" SHA256SUMS | sha256sum -c -
 
+# Stronger than the checksum: verify the SLSA build-provenance attestation — proof
+# the archive was built by this repo's release workflow from a tagged commit
+# (requires the `gh` CLI). Each release asset is attested by release-artifacts.yml.
+gh attestation verify "${ARCHIVE}" --repo anthony-chaudhary/fak
+
 tar -xzf "${ARCHIVE}"        # extracts: fak, LICENSE, GETTING-STARTED.md
 chmod +x fak
 sudo mv fak /usr/local/bin/  # or any dir on your PATH

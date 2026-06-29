@@ -49,6 +49,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write # gh release upload
+      id-token: write # SLSA build-provenance attestation (#1372)
+      attestations: write # write the attestation to the repo's attestation store
     strategy:
       fail-fast: false
       matrix:
@@ -136,6 +138,19 @@ jobs:
           # Upload only the one archive (+ its checksum) this matrix leg built.
           # --clobber makes a re-run (dispatch backfill, retried matrix leg) idempotent.
           gh release upload "$TAG" "$ARCHIVE" "$ARCHIVE_SUM" --clobber
+
+      - name: Attest build provenance (SLSA)
+        # Cryptographic, machine-verifiable proof that THIS archive was built by THIS
+        # workflow from THIS commit — the supply-chain guarantee a sha256 sidecar
+        # can't give (#1372, epic #1354). A consumer verifies with:
+        #   gh attestation verify <archive> --repo anthony-chaudhary/fak
+        # Best-effort: skip on a fork / unprovisioned repo where id-token isn't
+        # available, so the release stays green rather than failing on a perms gap.
+        if: ${{ !github.event.repository.fork }}
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ env.ARCHIVE }}
 
   checksums:
     name: aggregate SHA256SUMS
