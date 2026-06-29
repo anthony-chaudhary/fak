@@ -1,0 +1,33 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "fetch_url",
+    "read_corp_kb",
+    "read_file",
+    "summarize",
+    "send_email",
+    "transfer_to_human_user"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "deny": {
+    "drop_table": "POLICY_BLOCK",
+    "exfiltrate": "POLICY_BLOCK"
+  },
+  "safe_sinks": [
+    "transfer_to_human_user"
+  ],
+  "sources": {
+    "fetch_url": "untrusted",
+    "read_webpage": "untrusted",
+    "read_corp_kb": "trusted_local",
+    "read_file": "trusted_local"
+  }
+}
