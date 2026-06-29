@@ -219,7 +219,9 @@ win, and the plane must say so rather than red on the 8% alone.
 ### L5 — observability
 - **T11 · `fak perf` verb + one net-true `/metrics` family.** Fold turntax + the session ledger +
   the ablate gate + benchscore into one read-out (rungstats-for-the-whole-plane). *Witness:* verb
-  output golden-tested; metric family reads back. *(depends on T3, T5, T6)*
+  output golden-tested; metric family reads back. *(depends on T3, T5, T6 — contract pinned in
+  [§10](#10-l5--the-fak-perf-read-out--net-true-metrics-family-pinned-contract); executable build
+  is the named follow-on, blocked until the three deps land)*
 - **T12 · living self-tax authority row + trend doc.** A BENCHMARK-AUTHORITY row that tracks fak's
   own overhead and net effect over time, net-true-labeled. *Witness:* the row traces to a
   committed artifact + reproduce command, like every other authority row.
@@ -328,3 +330,117 @@ fold that emits `net_tokens` and the labeled split directly (rather than a reade
 counters) belongs in the `gateway`/`metrics` lane and is the deeper close of T13's "surface"
 verb — this section pins the detector's definition, guard, and worked acceptance so that build
 is wiring against a fixed contract.
+
+## 10. L5 — the `fak perf` read-out + net-true `/metrics` family (pinned contract)
+
+T11 ([#1168](https://github.com/anthony-chaudhary/fak/issues/1168)) is the *fold*: take the
+per-turn meter (T3), the session ledger (T5), the ablate gate (T6), and `internal/benchscore`
+and surface them through **one** offline read-out — `fak perf`, *rungstats-for-the-whole-plane*
+— and **one** net-true `/metrics` family. The acceptance is code: *verb output golden-tested;
+metric family reads back.* That code is **blocked on its three deps, which are unbuilt** — T3
+([#1151](https://github.com/anthony-chaudhary/fak/issues/1151)), T5
+([#1159](https://github.com/anthony-chaudhary/fak/issues/1159)), T6
+([#1162](https://github.com/anthony-chaudhary/fak/issues/1162)) are all OPEN, so there is no
+real per-turn meter, session ledger, or ablate-gate output to fold yet. The sibling
+[`SELF-TAX-TREND.md`](../benchmarks/SELF-TAX-TREND.md) (T12,
+[#1169](https://github.com/anthony-chaudhary/fak/issues/1169)) already *names* this verb as the
+"named follow-on … not built here." This section upgrades it from *named* to *pinned* — the
+same move §9 made for T13: fix the read-out shape, the metric-family schema, the golden-test
+acceptance, and the double-count guard, so the eventual build is **wiring against a fixed
+contract**, not a design decision deferred to build time.
+
+### 10.1 What `fak perf` folds (four inputs, each with its current build state)
+
+The fold is honest about provenance *and* about readiness — three of the four inputs are not
+yet built, so today the verb would fold one real source (benchscore) plus the live rung
+verdict/cost stream `fak rungstats` already reads. The contract names all four so the build is
+additive as each dep lands.
+
+| Input | Source (current) | What it contributes to the read-out | Build state |
+|---|---|---|---|
+| **T3** per-turn meter | `cmd/turntaxdemo` → first-class `fak turntax` | kernel-ns vs engine-ns; tokens *added* (transform/quarantine) vs *saved* (vDSO/radix) per turn, vs the T2 budget | OPEN ([#1151](https://github.com/anthony-chaudhary/fak/issues/1151)) — still a demo |
+| **T5** session ledger | `internal/sessionobs` outcome-link rung (reusing `cadencereport`) | per-session **HELPED / WASH / HURT** verdict, provenance-labeled | OPEN ([#1159](https://github.com/anthony-chaudhary/fak/issues/1159)) — no `HELPED/WASH/HURT` in code yet |
+| **T6** ablate gate | `cmd/fak/ablate` + `internal/turnbench` LeverFlip | fak-on vs fak-off delta on a frozen workload, signed, vs budget | OPEN ([#1162](https://github.com/anthony-chaudhary/fak/issues/1162)) — `ablate` exists as a one-off, not an always-on gate |
+| `internal/benchscore` | `benchscore.Scan(root) → Report` (`fak.benchscore-report.v1`) | the frozen-workload **baseline rows** the deltas are measured against | **BUILT** |
+| (spine) `internal/rungobs` + `fak rungstats` | live `fak_gateway_operation_duration_seconds{adjudicator-rung}` twin | the per-`(rung,kind,reason)` verdict **and** cost fold the whole plane extends | **BUILT** (verdict; cost fold is T1) |
+
+### 10.2 The `fak perf` read-out shape (golden-testable)
+
+A stable, deterministic report — schema `fak.perf-readout.v1` — so a frozen fixture round-trips
+byte-identically and *that* is the golden test. It is `benchscore.Report` / `rungstats`
+generalized to the whole plane: one object, five folds, one signed net line.
+
+| Fold | From | Fields (per row) | Verdict |
+|---|---|---|---|
+| `rung_overhead` | T1 cost-fold over `rungobs` | `rung, kind, count, p50_ns, p99_ns, token_delta` | `OK` / `OVERHEAD_BUDGET_EXCEEDED` vs T2 |
+| `turn_tax` | T3 `fak turntax` | `kernel_ns, engine_ns, tokens_added, tokens_saved, budget_ns` | within / over budget |
+| `session_net` | T5 ledger | `session_id, helped_wash_hurt, tokens_added, tokens_saved, provenance` | HELPED / WASH / HURT |
+| `ablate_delta` | T6 gate | `lever, on_value, off_value, delta, sign, budget` | within / over budget |
+| `bench_baseline` | `benchscore` | the existing `Row` set (`workload, metric, value, baseline, speedup`) | accepted / negative / exploratory |
+| **`net`** | §9 formula | `net_tokens` (signed) `= realized_reuse − mediation_tax`, with the `local ⊕ provider` split | improvement ⇔ `net_tokens > 0` |
+
+Percentiles, never means — guardrails hurt the tail first (§4). The read-out reports p50/p99,
+matching the live histogram twin. The illustrative shape (numbers from §9.3, **not** a
+benchmark claim — the structure is the witness):
+
+```
+fak perf  (schema fak.perf-readout.v1)
+  rung_overhead   adjudicator/decide   p50=362ns  p99=605ns  Δtok=0     OK
+  turn_tax        turn#6   kernel=0.4ms engine=83ms  +0 / −9,400 tok    under budget
+  session_net     sess-ab12  HELPED     +180 / −12,600 tok  WITNESSED⊕OBSERVED−MODELED
+  ablate_delta    vdso       on=417 off=937  Δ=−520 tok (−)             under budget
+  net             +12,420 tok   (local 9,400 [74.6%] ⊕ provider 3,200 [25.4%])  → improvement
+```
+
+### 10.3 The single net-true `/metrics` family
+
+One family — proposed prefix `fak_self_tax_*` — folds the scattered counters §9 sums by hand
+into a first-class read-back surface. Each member is **net-true-labeled** in its help text
+(WITNESSED / OBSERVED / MODELED), and the `plane` label is the structural double-count guard:
+a token is local *or* provider, never both (§9.1), so the two are reported as two series and
+never collapsed.
+
+| Member | Type | Folds (existing source) | Provenance |
+|---|---|---|---|
+| `fak_self_tax_net_tokens` | gauge (signed) | `realized_reuse − mediation_tax` (the headline) | derived |
+| `fak_self_tax_realized_reuse_tokens_total{plane="local"}` | counter | `fak_gateway_kv_prefix_reused_tokens_total` | **WITNESSED** (in-kernel RadixAttention) |
+| `fak_self_tax_realized_reuse_tokens_total{plane="provider"}` | counter | `fak_gateway_inference_cached_prompt_tokens_total` | **OBSERVED** (provider-relayed) |
+| `fak_self_tax_mediation_tax_tokens_total` | counter | tokens mediation re-emits (transform/quarantine) | **MODELED** |
+| `fak_self_tax_rung_overhead_seconds{rung,kind}` | histogram | `fak_gateway_operation_duration_seconds{adjudicator-rung}` | **WITNESSED** |
+| `fak_self_tax_budget_breach_total{rung}` | counter | T2 `OVERHEAD_BUDGET_EXCEEDED` events | **WITNESSED** |
+
+"Reads back" (the acceptance) = a test scrapes `/metrics`, parses the family, and re-derives
+`net_tokens = (realized_reuse{local} + realized_reuse{provider}) − mediation_tax` — the §9.2
+identity, now emitted directly rather than summed by a reader. `fak_self_tax_net_tokens` is the
+denominated-in-prefill-tokens net of §9.2, never the vs-naive `1/(1−reuse)` re-prefill multiple
+the #1066 honesty fence excludes.
+
+### 10.4 Acceptance, and what blocks it today
+
+- **AC1 — verb output golden-tested.** A frozen plane fixture round-trips to the §10.2 schema
+  byte-identically (the `benchscore_test.go` / `rungstats` golden pattern).
+- **AC2 — metric family reads back.** A scrape of the §10.3 family parses and re-derives the
+  net per the §9.2 identity, with the `plane` split intact.
+- **Blocked-on (the honest fence).** AC1/AC2 cannot be met until T3
+  ([#1151](https://github.com/anthony-chaudhary/fak/issues/1151)), T5
+  ([#1159](https://github.com/anthony-chaudhary/fak/issues/1159)), and T6
+  ([#1162](https://github.com/anthony-chaudhary/fak/issues/1162)) land — there is no real
+  per-turn meter, session ledger, or always-on ablate gate to fold. `benchscore`, `rungstats`,
+  and the two reuse counters are built, so the fold is **additive wiring** as each dep arrives,
+  not greenfield. **Lane for the build:** the verb is `cmd` (`cmd/fak/perf.go` + a pure
+  `internal/perfreadout`), the family is `gateway`/`metrics` — **not** `docs`. This docs
+  increment pins the contract only; it does not itself satisfy AC1/AC2.
+
+### 10.5 Reproduce (the contract check, once the deps land)
+
+```sh
+fak perf --json | jq '.schema, .net.net_tokens, .net.split'        # AC1: golden round-trip
+curl -s localhost:PORT/metrics | grep -E '^fak_self_tax_'          # AC2: family reads back
+# net_tokens == realized_reuse{local}+realized_reuse{provider} − mediation_tax  (§9.2 identity)
+```
+
+Stated plainly, like the §9.4 reproduce: this is the **contract** the follow-on build verifies,
+not a live witness today — `fak perf` and the `fak_self_tax_*` family do not exist until
+T3/T5/T6 close. Pinning the shape here is the docs-lane increment of L5; the executable
+golden-tested verb and the live metric family are the named follow-on in the `cmd` /
+`gateway`/`metrics` lanes.
