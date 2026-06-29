@@ -29,6 +29,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -120,7 +121,7 @@ func run(outPath string) error {
 	if maxDelta != 0 {
 		return fmt.Errorf("evicted continuation != never-saw (max|Δ|=%d) — eviction NOT bit-exact", maxDelta)
 	}
-	if equalInts(keptCont, neverCont) {
+	if slices.Equal(keptCont, neverCont) {
 		return fmt.Errorf("kept-secret == never-saw — the secret does not perturb decode; witness is vacuous")
 	}
 	fmt.Printf("\n  PROVEN: evicted == never-saw (max|Δ|=0); kept-secret differs (non-vacuous).\n")
@@ -408,18 +409,6 @@ func concat(parts ...[]int) []int {
 		out = append(out, p...)
 	}
 	return out
-}
-
-func equalInts(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func maxAbsIntDelta(a, b []int) int {

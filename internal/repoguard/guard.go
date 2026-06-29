@@ -18,6 +18,7 @@ package repoguard
 
 import (
 	"os"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -169,10 +170,10 @@ func isUnder(child, parent string) bool {
 		return false
 	}
 	if len(pParts) == len(cParts) {
-		return equalParts(cParts, pParts) // child == parent
+		return slices.Equal(cParts, pParts) // child == parent
 	}
 	if len(pParts) < len(cParts) { // parent is an ancestor of child
-		return equalParts(cParts[:len(pParts)], pParts)
+		return slices.Equal(cParts[:len(pParts)], pParts)
 	}
 	return false
 }
@@ -187,18 +188,6 @@ func splitPosix(s string) (bool, []string) {
 		parts = append(parts, seg)
 	}
 	return abs, parts
-}
-
-func equalParts(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // --------------------------------------------------------------------------- //

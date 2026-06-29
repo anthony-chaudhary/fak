@@ -2,6 +2,7 @@ package agenttest
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ type T interface {
 // pattern assertion.
 func (r Run) MatchToolSequence(want ...string) error {
 	got := r.ToolNames()
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		return fmt.Errorf("tool sequence mismatch:\n  want: %v\n  got:  %v", want, got)
 	}
 	return nil
@@ -166,16 +167,4 @@ func AssertAllMocked(t T, r Run) {
 	if un := r.UnmockedTools(); len(un) > 0 {
 		t.Errorf("run called unmocked tools: %v", un)
 	}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

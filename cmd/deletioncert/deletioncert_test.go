@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -61,40 +62,18 @@ func TestMaxAbsIntDelta(t *testing.T) {
 	}
 }
 
-// TestEqualInts verifies element-wise equality with a length guard.
-func TestEqualInts(t *testing.T) {
-	tests := []struct {
-		name string
-		a, b []int
-		want bool
-	}{
-		{"equal", []int{1, 2, 3}, []int{1, 2, 3}, true},
-		{"differ in middle", []int{1, 9, 3}, []int{1, 2, 3}, false},
-		{"length mismatch", []int{1, 2}, []int{1, 2, 3}, false},
-		{"both empty", []int{}, []int{}, true},
-		{"empty vs nonempty", []int{}, []int{1}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := equalInts(tt.a, tt.b); got != tt.want {
-				t.Fatalf("equalInts(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestConcat checks the variadic flatten preserves order across all parts.
 func TestConcat(t *testing.T) {
 	got := concat([]int{3, 17, 5}, []int{41, 2}, []int{23, 11})
 	want := []int{3, 17, 5, 41, 2, 23, 11}
-	if !equalInts(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("concat = %v, want %v", got, want)
 	}
 
 	// An empty middle part contributes nothing and order is kept.
 	got2 := concat([]int{1}, []int{}, []int{2, 3})
 	want2 := []int{1, 2, 3}
-	if !equalInts(got2, want2) {
+	if !slices.Equal(got2, want2) {
 		t.Fatalf("concat with empty middle = %v, want %v", got2, want2)
 	}
 
