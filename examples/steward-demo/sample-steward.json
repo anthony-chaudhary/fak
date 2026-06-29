@@ -1,0 +1,141 @@
+{
+  "_comment": [
+    "A small, self-contained scenario for the steward demo (#324).",
+    "It mirrors the four shipped single-invariant stewards in fak/internal/steward/steward.go",
+    "and the meta-steward prune (units 87-92 in fak/internal/steward/steward_test.go).",
+    "",
+    "The load-bearing field is `witness`. A steward returns (violated, witness). It only",
+    "RAISES when both (a) its one-sentence invariant pattern matches AND (b) the `witness`",
+    "field is non-empty -- and a witness is authored by an INDEPENDENT scan, never by the",
+    "thing under test. A pattern match with an empty witness is a self-accusation the model",
+    "cannot make, so the steward ABSTAINS. That is the whole trust model: you do not trust",
+    "the alert, you trust the witness chain behind it.",
+    "",
+    "Each `probe` below is a frozen capture of what the real steward's check function would",
+    "observe at runtime (the context snapshot, the live lease set, the KPI pair, the vDSO",
+    "probe). `witness_author` records WHO produced the witness, so the demo can show the",
+    "difference between an independently-corroborated raise and an un-witnessed (suppressed)",
+    "one."
+  ],
+
+  "stewards": [
+    {
+      "name": "no-secret-in-context",
+      "invariant": "no secret-shaped bytes are ever admitted to the model's context window",
+      "kind": "secret-in-context",
+      "maps_to": "internal/steward/steward.go:SecretInContext (unit 89)",
+      "cases": [
+        {
+          "label": "secret admitted, independently scanned -> RAISE",
+          "probe": { "context_snapshot": ["user: please use token sk-abcdef0123456789abcdef0123 for the call"] },
+          "witness": "secret-shaped bytes admitted to context: sk-abcde…",
+          "witness_author": "secretscan (independent regex scanner over the live context snapshot)"
+        },
+        {
+          "label": "same pattern, NO independent scan authored a witness -> SUPPRESSED",
+          "probe": { "context_snapshot": ["user: please use token sk-abcdef0123456789abcdef0123 for the call"] },
+          "witness": "",
+          "witness_author": "model-self-report (the agent claiming about its own context; not trusted)"
+        },
+        {
+          "label": "clean context, nothing to scan -> ABSTAIN",
+          "probe": { "context_snapshot": ["user: summarize the changelog", "assistant: sure"] },
+          "witness": "",
+          "witness_author": "secretscan (independent regex scanner over the live context snapshot)"
+        }
+      ]
+    },
+
+    {
+      "name": "lease-disjointness",
+      "invariant": "no two live file-tree leases share a path prefix",
+      "kind": "lease-disjointness",
+      "maps_to": "internal/steward/steward.go:LeaseDisjointness (unit 90)",
+      "cases": [
+        {
+          "label": "two leases collide on a tree prefix, arbiter confirms -> RAISE",
+          "probe": { "leases": [
+            { "lane": "a", "trees": ["internal/abi"] },
+            { "lane": "b", "trees": ["internal/abi/types"] }
+          ] },
+          "witness": "a and b collide on internal/abi/internal/abi/types",
+          "witness_author": "arbiter (independent lease registry replay, not either worker)"
+        },
+        {
+          "label": "fully disjoint leases -> ABSTAIN",
+          "probe": { "leases": [
+            { "lane": "a", "trees": ["internal/abi"] },
+            { "lane": "b", "trees": ["internal/steward"] }
+          ] },
+          "witness": "",
+          "witness_author": "arbiter (independent lease registry replay, not either worker)"
+        }
+      ]
+    },
+
+    {
+      "name": "kpi-regression",
+      "invariant": "the current p50 never regresses past the committed baseline by more than tol",
+      "kind": "kpi-regression",
+      "maps_to": "internal/steward/steward.go:KPIRegression (unit 91)",
+      "tol": 0.1,
+      "cases": [
+        {
+          "label": "current p50 doubled vs committed baseline, scoreboard confirms -> RAISE",
+          "probe": { "baseline": 1.0, "current": 2.0 },
+          "witness": "p50 regressed: baseline=1 current=2",
+          "witness_author": "scoreboard (independent committed-baseline reader, not the run reporting its own number)"
+        },
+        {
+          "label": "current == baseline -> ABSTAIN",
+          "probe": { "baseline": 1.0, "current": 1.0 },
+          "witness": "",
+          "witness_author": "scoreboard (independent committed-baseline reader, not the run reporting its own number)"
+        }
+      ]
+    },
+
+    {
+      "name": "vdso-soundness",
+      "invariant": "a cached-path result is bit-identical to a fresh pure recompute",
+      "kind": "vdso-soundness",
+      "maps_to": "internal/steward/steward.go:VDSOSoundness (unit 88)",
+      "cases": [
+        {
+          "label": "cache hit disagrees with a fresh recompute, replayer confirms -> RAISE",
+          "probe": { "mismatch": true },
+          "witness": "vdso cache hit != fresh pure call (recompute disagreed)",
+          "witness_author": "replayer (independent fresh recompute of the same pure call, side-by-side)"
+        },
+        {
+          "label": "cache hit equals the fresh recompute -> ABSTAIN",
+          "probe": { "mismatch": false },
+          "witness": "",
+          "witness_author": "replayer (independent fresh recompute of the same pure call, side-by-side)"
+        }
+      ]
+    }
+  ],
+
+  "meta_steward": {
+    "_comment": [
+      "The meta-steward (Population.Prune, unit 92) is dead-code detection for the",
+      "invariant layer itself: after a soak it removes any steward that NEVER fired, so",
+      "the population cannot ossify into checks that can no longer trip. This fixture has",
+      "one steward wired to a probe it can never match -- the soak proves it dead and the",
+      "meta-steward prunes it."
+    ],
+    "soak_sweeps": 3,
+    "population": [
+      { "name": "no-secret-in-context", "fires_during_soak": true },
+      { "name": "lease-disjointness",   "fires_during_soak": true },
+      { "name": "kpi-regression",        "fires_during_soak": true },
+      { "name": "vdso-soundness",        "fires_during_soak": true },
+      {
+        "name": "clock-monotonic",
+        "fires_during_soak": false,
+        "why_dead": "guards a clock-skew invariant the platform made impossible; the probe can no longer trip, so the steward is dead weight"
+      }
+    ]
+  }
+}
