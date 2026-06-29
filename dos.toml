@@ -131,7 +131,10 @@ concurrent = [
   # so the walk reaches them and the arbiter protects internal/dojo/** & internal/nightrun/** edits.
   "dojo",
   "nightrun",
-  "loopdrive",
+  # reconciled 2026-06-29 (dos lint CONCURRENT_LANES_OVERLAP 'loopdrive+loopdrive'): loopdrive
+  # was re-added here with the 2026-06-28 dojo/nightrun batch but is ALREADY declared once in
+  # the 2026-06-23 block above -- a self-overlap that made the roster spawn-order-sensitive for
+  # loopdrive. The duplicate second occurrence is removed; loopdrive stays declared once above.
   "loopgate",
   "dispatchorder",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above

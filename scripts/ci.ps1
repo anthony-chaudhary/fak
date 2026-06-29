@@ -19,6 +19,20 @@ Write-Host "== claims lint =="
 & (Join-Path $PSScriptRoot "claims-lint.ps1")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+# dos-lint (#1194): validate dos.toml's own lane taxonomy + reason registry so a half-wired
+# lane (declared in one roster but not [lanes.trees], a duplicate that makes the concurrent
+# roster spawn-order-sensitive, an autopick lane absent from concurrent) REDS the build
+# instead of accreting silently. DEFAULT `dos lint` (gates on warn+error), NOT --strict
+# (errors only) -- the recurring class is the CONCURRENT_LANES_OVERLAP warning. Real gate
+# where the dos CLI is present; an advisory SKIP where it is not (same contract as salience).
+if (Get-Command dos -ErrorAction SilentlyContinue) {
+    Write-Host "== dos-lint (dos.toml lane taxonomy) =="
+    dos lint
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+} else {
+    Write-Host "== dos-lint (warn): dos CLI not on PATH; gate skipped =="
+}
+
 # index-sync (#511): the curated INDEX.md / llms.txt must not drift from the tree.
 # Resolve a python interpreter once (Windows ships `python`/`py`, not `python3`).
 $py = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }

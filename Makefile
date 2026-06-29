@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet architest-gate test test-fast test-affected bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet architest-gate test test-fast test-affected bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
 ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$$
@@ -20,7 +20,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build gofmt-check vet test claims-lint salience index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build gofmt-check vet test claims-lint salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -133,6 +133,24 @@ claims-lint:
 # gated there by tools/claims_salience_register_test.py.
 salience:
 	@python3 tools/claims_salience_register.py --check
+
+# dos-lint (#1194): fak dogfoods DOS on itself via dos.toml, but nothing validated that
+# file -- so lane-taxonomy defects accreted silently (a lane in [lanes].concurrent but not
+# [lanes.trees] can't be arbitrated; a lane listed twice makes the roster spawn-order-
+# sensitive; an autopick lane absent from concurrent is silently skipped). modelreg,
+# nightrun, dojo and loopdrive each shipped half-wired and were caught only by a human
+# reading a 500-line TOML. This wires `dos lint` into the green gate so the next one reds
+# the build instead. Uses DEFAULT `dos lint` (gates on warn+error), NOT `--strict` (errors
+# only): the recurring class is the CONCURRENT_LANES_OVERLAP *warning*, which --strict
+# exempts. Real gate where the `dos` CLI is present (this trunk, the fleet hosts); an
+# advisory SKIP (exit 0) where it is not (hermetic CI runners) -- the same dos-availability
+# contract as the `salience` target above.
+dos-lint:
+	@if command -v dos >/dev/null 2>&1; then \
+		dos lint; \
+	else \
+		echo "dos-lint: SKIP (dos CLI not on PATH)"; \
+	fi
 
 # index-sync (#511): the curated INDEX.md / llms.txt must not drift from the tree.
 # Two gates: the reciprocal orphan gate (dangling links + unlisted dated notes) and
