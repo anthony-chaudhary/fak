@@ -1,57 +1,49 @@
 # fak — the **F**used **A**gent **K**ernel
 
-<!-- readme-verified: 2026-06-27 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
+<!-- readme-verified: 2026-06-28 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Front-page overflow (Why Now, full use-case table, vCache/routing deep-dives, three-axes) moved to docs/README-legacy.md on 2026-06-28. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
-**One binary you put in front of the agent you already run — it keeps your key, puts a default-deny floor under every tool call, and makes long sessions cheaper.**
+**Make the agent you already run cheaper and faster — without changing your setup. One binary in front of Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client.**
 
-## What It Is
+A long agent session burns money on the same problem over and over: a 100k-token
+Claude Code conversation re-sends its *whole* transcript every single turn. `fak`
+sits in front of the agent you already run and gives you back the parts of the loop
+that get expensive — while keeping your model, your IDE, and your tools exactly as
+they are. You point one base URL at `fak`; nothing else changes.
 
-`fak` is one Go binary you put in front of the AI agent you already run: Claude
-Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. You keep your model,
-your IDE, and your tools. You point one base URL at `fak`, and it gives you a handle
-on the parts of a real agent loop that get expensive or go wrong:
+**What you get, in numbers** — every figure traces to
+[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md):
 
-- **Cheaper long sessions.** A 100k-token Claude Code conversation re-sends its whole
-  transcript every turn. `fak` sheds the old turns while keeping the provider's
-  prompt-cache prefix byte-identical, so the discount survives instead of breaking.
-- **The right model per call.** Send an easy read to a cheap model and a write-shaped
-  call to a careful one, chosen per tool call rather than per whole request.
-- **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in
-  place, a dead-end branch refused before the agent spends a turn on it.
-- **A trail you can audit.** Every decision is a plain verdict: `ALLOW`, `DENY`,
-  `TRANSFORM`, or `QUARANTINE`. It lands in JSON logs, an optional hash-chained
-  journal, and Prometheus metrics.
+- **~4.1× less work than a tuned warm-cache stack** on a 50-turn × 5-agent run —
+  because `fak` reuses the shared prompt prefix across agents instead of
+  re-paying for it. (Reuse of that prefix climbs to **6.95×** across the model
+  ladder. Against the naive re-send loop the gap is ~60×, but beating naive is
+  easy — the number that matters is the one above, vs a stack that already caches.)
+- **~120 tok/s in-kernel GPU decode** on an RTX 4070 (SmolLM2-135M, on the gated
+  `FAK_CUDA_GRAPH=1` path) — **at parity with llama.cpp Q8_0**.
+- **The cache discount survives a long session.** `fak` sheds old turns while
+  keeping the provider's prompt-cache prefix byte-identical, so the rebate holds
+  instead of breaking the moment the conversation sprawls.
+- **The guard tax is ~362 ns per call** — the kernel's allow/deny decision is
+  in-process (measured, Apple M3 Pro), not a network hop.
 
-> **fak in one line:** Put `fak` in front of the agent you already run. It makes long sessions
-> cheaper, routes each call to the right model, keeps unsafe tool results out of
-> context, and records every verdict. One binary, no rewrite, no key to start.
+> **fak in one line:** Put `fak` in front of the agent you already run. It makes
+> long sessions cheaper, routes each call to the right model, and — the same
+> boundary — keeps unsafe tool results out of context and records every verdict.
+> One binary, no rewrite, no key to start.
 
-**The 30-second picture, in numbers** — every figure traces to
-[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). On a 50-turn × 5-agent run, `fak`'s
-reuse does **~4.1× less work than a tuned warm-cache stack** (and ~60× less than the
-naive re-send loop); reuse of the shared prompt prefix climbs to **6.95×** across the
-model ladder. (For speedup figures: 45× = Phase-0 batched-decode gate currently failing
-at 40.98×; ~60× = headline session wall-time vs naive stateless; ~1.5–4× = realistic gain
-vs tuned warm-cache stack.) The guard is cheap where it counts — the kernel's allow/deny decision is
-~362 ns in-process per call (measured, Apple M3 Pro), not a network hop, and on the
-gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`) the in-kernel GPU decode holds
-~120 tok/s on an RTX 4070 (SmolLM2-135M), at parity with llama.cpp Q8_0.
-`fak guard` also reports live prefill vs decode tok/s on `/metrics`, so a slow first
-request gets an answer instead of a shrug.
-
-**Pick your path:** wrap the agent you already run in one command
-([`fak guard`](#use-it-with-your-agent)), stand up an always-on gateway and point any CLI at
-it ([`fak node`](#an-always-on-gateway-fak-node)), put `fak` in front of any OpenAI /
-Anthropic / MCP endpoint ([`fak serve`](#any-openai-compatible-or-anthropic-compatible-client)),
-or — if a hard security floor is why you're here — jump to
+**Pick your path:** try the 2-minute no-key demo ([Start Here](#start-here)), wrap
+the agent you already run in one command
+([`fak guard`](#use-it-with-your-agent)), stand up an always-on gateway
+([`fak node`](#an-always-on-gateway-fak-node)), put `fak` in front of any OpenAI /
+Anthropic / MCP endpoint
+([`fak serve`](#any-openai-compatible-or-anthropic-compatible-client)), or — if a
+hard security floor is why you're here — jump to
 [For security teams](#for-security-teams).
 
 It does this by sitting on the tool-call path as a kernel. The model *proposes* a
 call. `fak` decides whether that call exists, whether its arguments are allowed,
 whether the result may enter context, and what gets reused. The same boundary that
-saves you tokens is also where a dangerous call gets refused. That is why teams who
-need a hard security floor reach for it too (see
-[For security teams](#for-security-teams)).
+saves you tokens is where a dangerous call gets refused.
 
 ```text
 agent --> proposed tool call --> fak kernel --> allowed tool / denied call
@@ -70,7 +62,6 @@ built-in default floor:
 fak preflight --tool refund_payment --args "{}"     # -> DENY  (DEFAULT_DENY): unknown tool, fail-closed
 fak preflight --tool search_kb      --args "{}"     # -> ALLOW: a read-shaped name is not blanket-blocked
 fak preflight --tool shell_rm_rf    --args "{}"     # -> DENY  (POLICY_BLOCK): refused by structure
-fak preflight --tool exfiltrate     --args "{}"     # -> DENY  (SECRET_EXFIL)
 fak agent --offline                                 # the injection / destructive-op A/B, fully offline
 ```
 
@@ -109,10 +100,11 @@ See [docs/integrations/claude.md](docs/integrations/claude.md).
 
 ### Long sessions: shed history, keep the cache hit
 
-A long session re-sends its whole transcript every turn, so a 100k-token conversation
-gets expensive fast. The same wrap fixes that **on by default** — once a conversation
-sprawls past ~48k resident tokens, `fak guard` sheds the old middle while a short
-session is left untouched. Tighten it with one flag, or pass `0` to disable:
+This is where most of the cost goes, and where the same wrap pays for itself.
+A long session re-sends its whole transcript every turn, so a 100k-token
+conversation gets expensive fast. `fak guard` fixes that **on by default** — once
+a conversation sprawls past ~48k resident tokens, it sheds the old middle while a
+short session is left untouched. Tighten it with one flag, or pass `0` to disable:
 
 ```bash
 fak guard --compact-history-budget 8000 -- claude   # tighter than the ~48k default
@@ -199,28 +191,30 @@ or at `http://127.0.0.1:8080` for Anthropic Messages traffic. Harden it with
 See [GETTING-STARTED.md](GETTING-STARTED.md) and
 [docs/fak/api-reference.md](docs/fak/api-reference.md).
 
-## Why Now
+## Benchmarks, In One Page
 
-The agent stack has moved from demos into operations. Coding agents now have
-plugins and background agents. They also have MCP servers, prompt caches, long
-sessions, and live tool permissions.
+The benchmark rule is simple: every number must trace to
+[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
-Recent public tooling points in the same direction. MCP reliability, auth, and
-observability work is active. Claude Code is shipping MCP and sandbox permission
-fixes. Security writing has moved toward runtime tool poisoning alongside prompt
-wording.
+The numbers worth remembering:
 
-That changes the useful first screen for `fak`. The value is:
+- 50-turn × 5-agent Qwen2.5-1.5B authority row: **4.1× vs tuned warm-cache**.
+  Larger numbers are fenced as vs-naive.
+- GPU decode on the gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`):
+  **~120 tok/s on an RTX 4070** (SmolLM2-135M), at parity with llama.cpp Q8_0.
+- WebVoyager geometry model: 8-worker fleet prefill is **1.10× less work than tuned
+  per-agent KV** (and 9.7× less than the naive re-prefill floor). This is modeled
+  prefill-token work, separate from wall-clock.
+- `guarddemo -selfcheck`: frozen attack traces reproduce zero breaches behind
+  `fak`.
+- vCache provider-cache telemetry proofs are accounting proofs, separate from
+  serving throughput — see [docs/README-legacy.md](docs/README-legacy.md#vcache-provider-cache-as-a-budget-signal).
 
-- Make prompt-cache and routing decisions explicit enough to test — and keep the
-  cache discount alive across a long session instead of busting it.
-- Preserve a traceable, privacy-conscious audit trail of every tool call.
-- Put a default-deny floor under the tools your agent already has.
-- Keep poisoned tool output and secret-shaped results out of model context.
+`fak guard` also reports live prefill vs decode tok/s on `/metrics`, so a slow first
+request gets an answer instead of a shrug.
 
-Relevant external signals: [Claude Code changelog](https://code.claude.com/docs/en/changelog),
-[MCP stateless/auth discussion](https://dev.to/alexmercedcoder/ai-weekly-codex-goes-long-mcp-goes-stateless-584d),
-and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mcp-security-tool-poisoning).
+Use vLLM or SGLang for raw token serving. Put `fak` on the agent boundary. Use
+it for policy and quarantine. Use it for audit, routing, and controlled reuse.
 
 ## What The Kernel Does
 
@@ -242,32 +236,23 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 Every claim in [CLAIMS.md](CLAIMS.md) carries exactly one tag:
 `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
 
-## Use Cases By Domain
+## Starter Policy Floors
 
-Each row is a starter policy floor: a reviewable allow-list you copy, trim, and run
-`fak preflight` against to watch the floor bite. Point your agent at one with
-`fak guard --policy examples/<file>` (or `fak serve --policy …` for a gateway). The
-full catalogue, with a witness command per floor, is in
-[examples/README.md](examples/README.md).
+Each policy floor is a reviewable allow-list you copy, trim, and run `fak preflight`
+against to watch the floor bite. Point your agent at one with
+`fak guard --policy examples/<file>` (or `fak serve --policy …` for a gateway).
 
 | Domain | Starter floor | The dangerous action it denies |
 |---|---|---|
 | Coding agent | [`presets/coding-agent-safe.json`](examples/presets/coding-agent-safe.json) | force-push, `git add -A`, out-of-tree writes, destructive shell |
-| Coding agent (push feature branches) | [`protected-push-floor-policy.json`](examples/protected-push-floor-policy.json) | a `git_push` whose ref is `main`/`release/*`, by argument value |
-| PR-review bot | [`code-review-bot-policy.json`](examples/code-review-bot-policy.json) | `merge_pull_request`, `git_push`, `workflow_dispatch` |
 | Customer support | [`customer-support-readonly-policy.json`](examples/customer-support-readonly-policy.json) | `refund_payment`, direct account or email action |
-| Open-web research | [`research-agent-policy.json`](examples/research-agent-policy.json) | `send_email`, shell, upload, arbitrary note path |
-| Browsing / scraping | [`browser-web-agent-policy.json`](examples/browser-web-agent-policy.json) | `submit_form`, `execute_script`, a `file:`/`javascript:` URL |
-| Email / calendar | [`email-calendar-assistant-policy.json`](examples/email-calendar-assistant-policy.json) | `send_email`, `forward_email`, `invite_external_guest` |
 | Infra / DevOps review | [`devops-dryrun-policy.json`](examples/devops-dryrun-policy.json) | `terraform_apply`, exec, delete, production deploy |
-| Flight booking | [`flight-booking-agent-policy.json`](examples/flight-booking-agent-policy.json) | `refund_payment`, `export_pnr`, a `$10k+` fare |
-| Trading / brokerage | [`finance-trading-agent-policy.json`](examples/finance-trading-agent-policy.json) | `withdraw_funds`, a six-figure order, a `short` side |
-| Clinical / PHI | [`healthcare-phi-policy.json`](examples/healthcare-phi-policy.json) | `export_patient_data`, `email_phi`, record delete |
-| BI / SQL analyst | [`sql-analyst-policy.json`](examples/sql-analyst-policy.json) | a `DROP`/`INSERT` inside an allowed read-query tool |
 
-Each denied action escalates to that floor's human safe sink instead of failing
-silently. Every refusal cites a closed reason code you can assert on, such as
-`POLICY_BLOCK`, `OVERSIZE`, or `SECRET_EXFIL`.
+The full catalogue — flight booking, trading, clinical/PHI, SQL analyst, and more,
+with a witness command per floor — is in [examples/README.md](examples/README.md)
+and the [front-page overflow page](docs/README-legacy.md#use-cases-by-domain). Every
+refusal cites a closed reason code you can assert on, such as `POLICY_BLOCK`,
+`OVERSIZE`, or `SECRET_EXFIL`.
 
 ## For security teams
 
@@ -294,77 +279,6 @@ gate before they become model context.
 
 Read [POLICY.md](POLICY.md), [docs/fak/security.md](docs/fak/security.md), and
 [docs/integrations/agent-memory.md](docs/integrations/agent-memory.md).
-
-## vCache: Provider Cache As A Budget Signal
-
-A provider's prompt cache is not memory you control. You cannot ask it to evict a span
-or prove a prefix is resident. You just get telemetry after the request. So `fak vcache`
-treats a cache hit as a realized rebate, never something the answer depends on. It
-proves or refutes each saving from the provider's own usage counters.
-
-```bash
-./fak vcache status
-./fak vcache prove
-```
-
-Evidence from two live traces:
-
-- Claude Code prefix probe: **13,141.5 input-token equivalents saved** over four
-  sibling turns, **4.73%**.
-- Codex/OpenAI session telemetry: **9,147,340.8 token equivalents saved** over
-  68 token-count events, **85.98%**.
-
-Those are provider-cache accounting proofs on those traces: `fak` supplies the
-accounting and control plane. The design contract, the full command set, and the
-causality fences are on the
-[vCache page](docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md); the Codex/OpenAI
-probe is written up in
-[the probe note](experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md).
-
-## Model Routing And Router Fusion
-
-Most routers pick one model for a whole request. `fak route` routes an aspect
-instead. The unit can be the request or one tool call. It can also be a
-sub-query, reasoning step, or tagged stage.
-
-An ensemble is a first-class plan. Supported reductions include `vote` and
-`best_of`. They also include `first`, `concat`, and scalar `all_reduce`.
-
-Try it offline:
-
-```bash
-./fak route --aspect tool_call --tool write_file --simulate "approve,deny,deny"
-./fak route --aspect step --complexity high
-./fak routebench
-```
-
-The router is useful because it sits at the same point as the security floor. A
-write-shaped call can route to a guard ensemble. An easy read can route to a
-cheap model. A tenant-sensitive payload bound for a remote route is denied by
-the residency floor.
-
-Read [docs/model-routing.md](docs/model-routing.md) and
-[docs/integrations/litellm.md](docs/integrations/litellm.md).
-
-## Benchmarks, In One Page
-
-The benchmark rule is simple: every number must trace to
-[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
-
-The numbers worth remembering:
-
-- `guarddemo -selfcheck`: frozen attack traces reproduce zero breaches behind
-  `fak`.
-- WebVoyager geometry model: 8-worker fleet prefill is **1.10x less work than tuned
-  per-agent KV** (and 9.7x less than the naive re-prefill floor). This is modeled
-  prefill-token work, separate from wall-clock.
-- 50-turn x 5-agent Qwen2.5-1.5B authority row: **4.1x vs tuned warm-cache**.
-  Larger numbers are fenced as vs-naive.
-- vCache telemetry proofs above are provider-cache accounting proofs, separate
-  from serving throughput claims.
-
-Use vLLM or SGLang for raw token serving. Put `fak` on the agent boundary. Use
-it for policy and quarantine. Use it for audit, routing, and controlled reuse.
 
 ## Install
 
@@ -413,24 +327,13 @@ can be blocked by OS Application Control on freshly compiled test binaries. Use
   tests. Use a tuned serving stack for production throughput.
 - Dangerous tools: keep irreversible and exfil-shaped tools off the allow-list.
 
-## Three axes of the same kernel
+## Going Deeper
 
-`fak`'s invariants repeat along three dimensions:
-
-- **Scale axis** (vertical): tool call → turn → session → fleet → RSI. How much of
-  the stack lives in one address space. The same observe → decide → act → verify
-  shape and trust invariant recur at every ring.
-- **Depth axis** (downward): CPU reference → CUDA → Vulkan → Metal. Which silicon
-  runs the matmul. New backends plug in via registration against the compute HAL.
-- **Deployment-substrate axis** (across): IoT → edge → laptop → hyperscaler.
-  What *kind of box* and how big. The same workload shape (agent loop proposing
-  tool calls) and the same invariants (default-deny, quarantine, bit-exact reuse,
-  tamper-evident audit) do not change with the box.
-
-The crossing point is one kernel present at the most scales, depths, and substrate
-targets, carrying the same invariants through all of them — the way Linux runs on
-the phone in your pocket and the rack training the model on it. See [the
-cross-platform spine](docs/explainers/cross-platform-spine.md).
+Narrower-audience and deep-dive material that used to sit on this page now lives
+on the [front-page overflow page](docs/README-legacy.md): why the agent stack
+needs this now, the full per-domain use-case catalogue, the vCache provider-cache
+budget signal, model routing and router fusion, and the three-axes view of the
+kernel (scale → depth → deployment substrate).
 
 ## Docs Map
 
@@ -449,6 +352,7 @@ cross-platform spine](docs/explainers/cross-platform-spine.md).
 | Model routing | [docs/model-routing.md](docs/model-routing.md) |
 | Benchmark authority | [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) |
 | Honesty ledger | [CLAIMS.md](CLAIMS.md) |
+| Front-page overflow (legacy) | [docs/README-legacy.md](docs/README-legacy.md) |
 | Machine-readable map | [llms.txt](llms.txt) |
 | Old README snapshot | [docs/archive/README-2026-06-25-before-fresh-start.md](docs/archive/README-2026-06-25-before-fresh-start.md) |
 
