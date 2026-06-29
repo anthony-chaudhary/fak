@@ -135,6 +135,10 @@ func main() {
 		cmdTreeDoctor(os.Args[2:])
 	case "self-update":
 		cmdSelfUpdate(os.Args[2:])
+	case "slack":
+		cmdSlack(os.Args[2:])
+	case "release-staleness":
+		cmdReleaseStaleness(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":
