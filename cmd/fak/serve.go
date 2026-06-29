@@ -110,6 +110,8 @@ func cmdServe(argv []string) {
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
 	metal := fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
+	expertParallel := fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move the expert GEMM off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 is REJECTED until the device NCCL collective lands: the EP arithmetic is host-proven bit-exact at ranks=1, but a real resident-across-GPUs reduction needs a non-cpu-ref compute.CollectiveBackend (cudaSetDevice(0) is still pinned, Caps().Collective=false).")
+	tensorParallel := fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 is REJECTED until the device NCCL collective lands (same device-collective gate as --expert-parallel); registered now so the flag surface is stable for the multi-GPU rungs.")
 	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
 	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
@@ -202,6 +204,22 @@ func cmdServe(argv []string) {
 	}
 	if useMetal {
 		fmt.Println("fak: in-kernel chat decode → Apple-Silicon Metal GPU (prefill + resident Q8 decode)")
+	}
+	// Multi-GPU rank counts (#971). The EP arithmetic is host-proven bit-exact at ranks=1
+	// (the no-op default), but a ranks>1 reduction is only a real multi-GPU serve when it
+	// runs over a non-cpu-ref device collective — and no device backend advertises one yet
+	// (cudaSetDevice(0) is pinned, Caps().Collective=false). Fail loud on N>1 rather than
+	// silently reduce through the single-box LocalCollective and mislabel it "multi-GPU".
+	if *expertParallel < 1 || *tensorParallel < 1 {
+		fmt.Fprintln(os.Stderr, "fak serve: --expert-parallel and --tensor-parallel must be >= 1")
+		os.Exit(2)
+	}
+	if *expertParallel > 1 || *tensorParallel > 1 {
+		deviceCollective := chatBackend != nil && chatBackend.Caps().Collective
+		if !deviceCollective {
+			fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel/--tensor-parallel N>1 requires a multi-device collective backend (not yet wired): no compute backend advertises Caps().Collective. The expert-parallel forward is wired and bit-exact at ranks=1; a real resident-across-GPUs reduction needs the device NCCL CollectiveBackend rung (#971).\n")
+			os.Exit(2)
+		}
 	}
 	// --cuda-graph flips the (init-time, FAK_CUDA_GRAPH-gated) graph-replay decode path on
 	// from a parsed flag. graphEnabled is consulted per token at GraphBegin, so this post-init
@@ -348,6 +366,7 @@ func cmdServe(argv []string) {
 		Backend:                     chatBackend,
 		CPUOffloadExperts:           *cpuOffloadExperts,
 		Metal:                       useMetal,
+		ExpertParallelRanks:         *expertParallel,
 		RequireKey:                  requireKey,
 		VDSO:                        *vdso,
 		Invalidation:                *invalidation,

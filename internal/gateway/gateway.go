@@ -169,6 +169,15 @@ type Config struct {
 	// (the metalgemm stub makes the decode/prefill dispatch fall back to CPU), and the
 	// resident decode self-declines anything but a dense Qwen-class Q8 model.
 	Metal bool
+	// ExpertParallelRanks is the expert-parallel rank count for the in-kernel MoE forward:
+	// the number of expert shards the routed glm_moe_dsa MoE delta is reduced across
+	// (model.SetExpertParallelRanks; the EP twin glmMoeEPFFN). 0/1 leave the forward on the
+	// monolith glmMoeFFN (the no-op default — an existing serve is unchanged); >1 dispatches
+	// routed layers through the EP path. Set by `fak serve --expert-parallel N`. At ranks=1
+	// the EP path is bit-exact vs the monolith and needs no device; ranks>1 reduce through the
+	// Collective the build wires (LocalCollective today), so a real multi-GPU resident-expert
+	// serve is gated until the device NCCL CollectiveBackend lands — serve rejects N>1 until then.
+	ExpertParallelRanks int
 	// RequireKey, if non-empty, is the bearer token the gateway REQUIRES on every
 	// request (except /healthz). Empty => no auth (drop-in compatible, loopback).
 	RequireKey string
@@ -803,6 +812,11 @@ func New(cfg Config) (*Server, error) {
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
 		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
 		// into a Planner. Falls through to MockPlanner if the host didn't preload.
+		// Expert parallelism is model state, set on the in-kernel Model here (the EP rank
+		// lives on the Model, consumed by ffnForLayer); 0/1 is the no-op default.
+		if cfg.ExpertParallelRanks > 1 {
+			cfg.InKernelModel.SetExpertParallelRanks(cfg.ExpertParallelRanks)
+		}
 		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, cfg.CPUOffloadExperts)
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
