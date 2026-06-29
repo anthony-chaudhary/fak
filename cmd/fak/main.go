@@ -99,6 +99,8 @@ func main() {
 		cmdSignal(os.Args[2:])
 	case "task":
 		cmdTask(os.Args[2:])
+	case "test":
+		cmdTest(os.Args[2:])
 	case "c":
 		cmdTUI(append([]string{"agent"}, os.Args[2:]...))
 	case "console":
@@ -111,6 +113,8 @@ func main() {
 		cmdChatRelay(os.Args[2:])
 	case "claude-mac-fak":
 		cmdClaudeMacFak(os.Args[2:])
+	case "codex":
+		cmdCodex(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "bgloop":
@@ -239,6 +243,8 @@ func main() {
 		cmdCoverageMatrix(os.Args[2:])
 	case "support-maturity-scorecard":
 		cmdSupportMaturityScorecard(os.Args[2:])
+	case "support":
+		cmdSupport(os.Args[2:])
 	case "dojo":
 		cmdDojo(os.Args[2:])
 	case "dojo-rsi":
