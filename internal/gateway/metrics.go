@@ -28,15 +28,6 @@ var gatewayLatencyBuckets = []float64{
 	0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 900, 1800,
 }
 
-// forwardedTokenBuckets are the ~token-size cutoffs for the forwarded-body-size histograms
-// (compaction prefix vs window). The high cutoffs span a full provider context window so an
-// unbounded protected prefix (#1376) lands in a visibly high bucket instead of saturating a
-// short tail: a prefix that climbs into the 128k/200k buckets while the window stays near the
-// budget IS the leak. Same ~4-chars/token currency as the compaction shed/budget counters.
-var forwardedTokenBuckets = []float64{
-	256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 48000, 65536, 98304, 131072, 200000,
-}
-
 type gatewayMetrics struct {
 	start    time.Time
 	inflight int64
@@ -1172,42 +1163,6 @@ type latencySnapshot struct {
 }
 
 func (c *latencyCounter) snapshot() latencySnapshot {
-	return latencySnapshot{
-		count:   c.count,
-		sum:     c.sum,
-		buckets: append([]uint64(nil), c.buckets...),
-	}
-}
-
-// bucketCounter is the bucket-parametrized peer of latencyCounter: a Prometheus histogram over a
-// caller-supplied cutoff set (latencyCounter hardcodes gatewayLatencyBuckets). It backs the
-// forwarded-body-size histograms, whose cutoffs are token counts (forwardedTokenBuckets), not
-// seconds. Reuses latencySnapshot as the carrier — same count/sum/buckets shape.
-type bucketCounter struct {
-	bounds  []float64
-	count   uint64
-	sum     float64
-	buckets []uint64
-}
-
-func newBucketCounter(bounds []float64) *bucketCounter {
-	return &bucketCounter{bounds: bounds, buckets: make([]uint64, len(bounds))}
-}
-
-func (c *bucketCounter) observe(v float64) {
-	c.count++
-	c.sum += v
-	for i, le := range c.bounds {
-		if v <= le {
-			c.buckets[i]++
-		}
-	}
-}
-
-func (c *bucketCounter) snapshot() latencySnapshot {
-	if c == nil {
-		return latencySnapshot{}
-	}
 	return latencySnapshot{
 		count:   c.count,
 		sum:     c.sum,
