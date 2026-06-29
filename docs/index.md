@@ -73,6 +73,7 @@ security floor reach for it too ([see below](#for-security-teams)).
 </div>
 
 [**▶ Try the live demos**](demos.html){: .btn } ·
+[Install (1 line, no clone)](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md){: .btn } ·
 [Get started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md){: .btn } ·
 [See the showcase](showcase.html){: .btn } ·
 [Read the FAQ](FAQ.md){: .btn } ·
@@ -185,13 +186,35 @@ untrusted bytes have to pass a gate before they become model context. Read
 
 ## Try it in 2 minutes (no key, no model, no GPU)
 
+Get the binary — no clone, no Go toolchain. The installer detects your OS/arch,
+downloads the prebuilt static binary for the latest release, verifies its checksum, and
+drops `fak` on your PATH:
+
 ```bash
-go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
-go run ./cmd/fak agent --offline
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
+fak version          # prints the installed version, e.g. 0.34.0
 ```
 
-`refund_payment` returns `DENY (POLICY_BLOCK)`; `agent --offline` runs the same task
-twice — tools wired directly vs. behind `fak` — and prints the before/after.
+Now prove the floor from the bare binary — these need no clone and no `examples/` dir:
+
+```bash
+fak preflight --tool refund_payment --args "{}"   # -> DENY  (DEFAULT_DENY): unknown tool, fail-closed
+fak preflight --tool search_kb      --args "{}"   # -> ALLOW: a read-shaped name is not blanket-blocked
+fak agent --offline                               # runs one task twice — tools wired directly vs. behind fak — and prints the before/after
+```
+
+The dangerous action is refused by structure, before any model interpretation matters.
+Then wrap the agent you already run — one command, no rewrite, no key to start:
+
+```bash
+fak guard -- claude          # or: fak guard --provider openai -- opencode
+```
+
+> **Have the source already?** From a clone you can skip the install and run the same
+> proof against a named example floor, where the deny is by *argument value*:
+> `go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"`.
+> Full paths in [INSTALL.md](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md)
+> (one-line installer · manual download · Docker · build-from-source · Windows).
 
 ## Learn more
 
