@@ -37,12 +37,12 @@ const (
 // Verb (which lives on surface Kind), because Why. Keywords drive the free-text Ask
 // match; they are the words a mid-tier agent would actually type at that moment.
 type Entry struct {
-	Stage    string   `json:"stage"`
-	Situation string  `json:"situation"`
-	Verb     string   `json:"verb"`
-	Kind     Kind     `json:"kind"`
-	Why      string   `json:"why"`
-	Keywords []string `json:"keywords"`
+	Stage     string   `json:"stage"`
+	Situation string   `json:"situation"`
+	Verb      string   `json:"verb"`
+	Kind      Kind     `json:"kind"`
+	Why       string   `json:"why"`
+	Keywords  []string `json:"keywords"`
 }
 
 // entries is the curated map, one or more rows per loop stage, in loop order. The

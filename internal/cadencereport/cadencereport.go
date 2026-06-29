@@ -127,16 +127,16 @@ type Report struct {
 // LedgerRow is one durable, append-only history line (a flattened projection of
 // the three dimensions, so the ledger is a self-describing time series).
 type LedgerRow struct {
-	Schema         string `json:"schema"`
-	Date           string `json:"date"`
-	Commit         string `json:"commit"`
-	GeneratedAt    string `json:"generated_at"`
-	Verdict        string `json:"verdict"`
-	ScoresDebt     int    `json:"scores_debt"`
-	ScoresTrend    string `json:"scores_trend"`
-	WorkWindowDays int    `json:"work_window_days"`
-	WorkCommits    int    `json:"work_commits"`
-	WorkShips      int    `json:"work_ships"`
+	Schema               string `json:"schema"`
+	Date                 string `json:"date"`
+	Commit               string `json:"commit"`
+	GeneratedAt          string `json:"generated_at"`
+	Verdict              string `json:"verdict"`
+	ScoresDebt           int    `json:"scores_debt"`
+	ScoresTrend          string `json:"scores_trend"`
+	WorkWindowDays       int    `json:"work_window_days"`
+	WorkCommits          int    `json:"work_commits"`
+	WorkShips            int    `json:"work_ships"`
 	ReleaseVersion       string `json:"release_version"`
 	ReleaseAction        string `json:"release_action"`
 	ReleaseCommitsBehind int    `json:"release_commits_behind,omitempty"`
@@ -277,16 +277,16 @@ type FoldOpts struct {
 // RowFromReport projects a folded report into one durable ledger row.
 func RowFromReport(r Report) LedgerRow {
 	return LedgerRow{
-		Schema:         LedgerSchema,
-		Date:           r.Date,
-		Commit:         r.Commit,
-		GeneratedAt:    r.GeneratedAt,
-		Verdict:        r.Verdict,
-		ScoresDebt:     r.Scores.Debt,
-		ScoresTrend:    r.Scores.TrendDirection,
-		WorkWindowDays: r.Work.WindowDays,
-		WorkCommits:    r.Work.Commits,
-		WorkShips:      r.Work.Ships,
+		Schema:               LedgerSchema,
+		Date:                 r.Date,
+		Commit:               r.Commit,
+		GeneratedAt:          r.GeneratedAt,
+		Verdict:              r.Verdict,
+		ScoresDebt:           r.Scores.Debt,
+		ScoresTrend:          r.Scores.TrendDirection,
+		WorkWindowDays:       r.Work.WindowDays,
+		WorkCommits:          r.Work.Commits,
+		WorkShips:            r.Work.Ships,
 		ReleaseVersion:       r.Releases.Version,
 		ReleaseAction:        r.Releases.ActionKind,
 		ReleaseCommitsBehind: r.Releases.CommitsBehind,

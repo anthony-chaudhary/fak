@@ -209,9 +209,9 @@ func (v *VDSO) MissReasons() map[string]uint64 {
 }
 
 type entry struct {
-	key     string
-	ref     abi.Ref
-	witness string    // external world-state witness this entry was admitted under ("" = none)
+	key      string
+	ref      abi.Ref
+	witness  string    // external world-state witness this entry was admitted under ("" = none)
 	filledAt time.Time // when this tier-2 entry was stored — surfaced as age_ms on a hit so the model can judge staleness
 }
 

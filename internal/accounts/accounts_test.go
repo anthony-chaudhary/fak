@@ -159,10 +159,10 @@ func TestActiveMemoryDir(t *testing.T) {
 // the Go and Python views agree on which projects/<key> dir a workspace owns.
 func TestProjectSlug(t *testing.T) {
 	cases := map[string]string{
-		"/work/fak":       "-work-fak",
-		"/home/u/p":       "-home-u-p",
-		"a.b c@d":         "a-b-c-d",
-		"/a//b/../c":      "-a-c", // Clean folds "//" and ".." before slugging
+		"/work/fak":  "-work-fak",
+		"/home/u/p":  "-home-u-p",
+		"a.b c@d":    "a-b-c-d",
+		"/a//b/../c": "-a-c", // Clean folds "//" and ".." before slugging
 	}
 	for in, want := range cases {
 		if got := projectSlug(in); got != want {

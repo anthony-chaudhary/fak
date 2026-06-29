@@ -12,13 +12,13 @@ import (
 func TestFormatGuardResumeGuidance(t *testing.T) {
 	out := formatGuardResumeGuidance("claude", 1)
 	for _, want := range []string{
-		"claude",                // the wrapped agent is named
-		"code 1",                // the abnormal exit code is surfaced
-		"fak guard --",          // the resume re-run command
-		"--continue",            // the agent's own resume/continue flag
-		"fak audit verify",      // the journal is replayable
-		"WITHOUT fak guard",     // the bare-resume recovery
-		"upstream model error",  // the specific failure it recovers
+		"claude",               // the wrapped agent is named
+		"code 1",               // the abnormal exit code is surfaced
+		"fak guard --",         // the resume re-run command
+		"--continue",           // the agent's own resume/continue flag
+		"fak audit verify",     // the journal is replayable
+		"WITHOUT fak guard",    // the bare-resume recovery
+		"upstream model error", // the specific failure it recovers
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("guidance missing %q\n--- guidance ---\n%s", want, out)

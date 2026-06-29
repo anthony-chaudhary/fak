@@ -105,8 +105,8 @@ func TestBuildSurfaceReportsAllUnset(t *testing.T) {
 
 func TestRedactToken(t *testing.T) {
 	cases := map[string]string{
-		"":              "(unset)",
-		"abc":           "****",
+		"":                "(unset)",
+		"abc":             "****",
 		"bottok-secret99": "****et99",
 	}
 	for in, want := range cases {

@@ -41,8 +41,8 @@ func TestAccountsNextRoundRobin(t *testing.T) {
 	// Pool is [alice-seat, bob-seat] (carol reserved). Round-robin wraps.
 	for _, c := range []struct{ after, want string }{
 		{"alice-seat", "bob-seat"},
-		{"bob-seat", "alice-seat"}, // wrap (carol is reserved, not in the pool)
-		{"", "alice-seat"},         // no anchor -> first in rotation
+		{"bob-seat", "alice-seat"},   // wrap (carol is reserved, not in the pool)
+		{"", "alice-seat"},           // no anchor -> first in rotation
 		{"carol-seat", "alice-seat"}, // a reserved anchor is not in the pool -> fresh start
 	} {
 		out, errb, rc := run("--after", c.after)

@@ -31,8 +31,8 @@ func TestQ4KKernelRoutesResidentQ6KToKQuant(t *testing.T) {
 
 	m := &Model{
 		Cfg:  Config{HiddenSize: in},
-		q4kw: map[string]*q4kTensor{},      // intentionally EMPTY for the name
-		q8w:  map[string]*q8Tensor{},       // intentionally EMPTY → Q8 fallback would panic
+		q4kw: map[string]*q4kTensor{}, // intentionally EMPTY for the name
+		q8w:  map[string]*q8Tensor{},  // intentionally EMPTY → Q8 fallback would panic
 		kqw:  map[string]*kQuantTensor{},
 	}
 	const name = "model.layers.0.mlp.experts.3.down_proj.weight"

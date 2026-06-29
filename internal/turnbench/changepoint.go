@@ -13,7 +13,7 @@
 //  1. SPLIT STATISTIC. Over a segment x[lo:hi], scan every candidate split k and compute the
 //     two-sample t-statistic of the mean shift across it:
 //
-//         t(k) = |mean(x[k:hi]) − mean(x[lo:k])| / sqrt( sp² · (1/nL + 1/nR) )
+//     t(k) = |mean(x[k:hi]) − mean(x[lo:k])| / sqrt( sp² · (1/nL + 1/nR) )
 //
 //     with sp² the pooled within-segment variance. The split k* with the largest |t| is the most
 //     change-point-like position in the segment. (This is the standardized CUSUM / maximum-
@@ -243,8 +243,8 @@ func maxSplitStat(seg []float64, minSeg int) (best float64, splitLocal int) {
 		if df <= 0 {
 			continue
 		}
-		sp2 := (ssL + ssR) / df       // pooled variance
-		scale := sp2 * (1/nL + 1/nR)  // variance of the mean difference
+		sp2 := (ssL + ssR) / df      // pooled variance
+		scale := sp2 * (1/nL + 1/nR) // variance of the mean difference
 		diff := meanR - meanL
 		var t float64
 		switch {
