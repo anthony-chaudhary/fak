@@ -39,13 +39,25 @@ type skillFrontmatter struct {
 // The Digest is SHA-256 over the full SKILL.md bytes so a change to the body
 // (not just the frontmatter) yields a new digest and a re-index of exactly that
 // one entry. Cards are sorted by name for determinism.
-func (r *SkillResolver) Index() []CapCard {
+// skillDir is one subdirectory under Root that carries a readable SKILL.md, with
+// its frontmatter and resolved name already in hand.
+type skillDir struct {
+	path string
+	body []byte
+	fm   skillFrontmatter
+	name string // frontmatter name, or the directory name as a fallback
+}
+
+// scanSkillDirs walks Root and returns one skillDir per subdirectory that has a
+// readable SKILL.md, resolving each skill's name (frontmatter name, else the
+// directory name). It is the shared directory walk behind Index (build every
+// card) and locate (find one ref) — both previously inlined this same scan.
+func (r *SkillResolver) scanSkillDirs() []skillDir {
 	dirs, err := os.ReadDir(r.Root)
 	if err != nil {
 		return nil
 	}
-
-	cards := make([]CapCard, 0, len(dirs))
+	out := make([]skillDir, 0, len(dirs))
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
@@ -60,23 +72,31 @@ func (r *SkillResolver) Index() []CapCard {
 		if name == "" {
 			name = d.Name() // fall back to the directory name
 		}
+		out = append(out, skillDir{path: path, body: body, fm: fm, name: name})
+	}
+	return out
+}
 
+func (r *SkillResolver) Index() []CapCard {
+	entries := r.scanSkillDirs()
+	cards := make([]CapCard, 0, len(entries))
+	for _, e := range entries {
 		cardBytes, _ := json.Marshal(map[string]any{
-			"name":        name,
-			"version":     fm.version,
-			"description": fm.description,
-			"tags":        fm.tags,
+			"name":        e.name,
+			"version":     e.fm.version,
+			"description": e.fm.description,
+			"tags":        e.fm.tags,
 		})
 
-		tags := append([]string{"skill"}, fm.tags...)
+		tags := append([]string{"skill"}, e.fm.tags...)
 		cards = append(cards, CapCard{
 			Ref: CapRef{
 				Kind:    CapKindSkill,
-				Name:    name,
-				Version: fm.version,
+				Name:    e.name,
+				Version: e.fm.version,
 			},
-			Digest:    Digest(body), // hash the WHOLE SKILL.md, not just the card
-			Trigger:   fm.description,
+			Digest:    Digest(e.body), // hash the WHOLE SKILL.md, not just the card
+			Trigger:   e.fm.description,
 			Tags:      tags,
 			CardBytes: cardBytes,
 		})
@@ -131,31 +151,14 @@ func (r *SkillResolver) Fault(ref CapRef) (Capability, error) {
 // returns the path, the bytes already read (for digesting), and whether a match
 // was found.
 func (r *SkillResolver) locate(ref CapRef) (string, []byte, bool) {
-	dirs, err := os.ReadDir(r.Root)
-	if err != nil {
-		return "", nil, false
-	}
-	for _, d := range dirs {
-		if !d.IsDir() {
+	for _, e := range r.scanSkillDirs() {
+		if e.name != ref.Name {
 			continue
 		}
-		path := filepath.Join(r.Root, d.Name(), "SKILL.md")
-		body, err := os.ReadFile(path)
-		if err != nil {
+		if ref.Version != "" && e.fm.version != ref.Version {
 			continue
 		}
-		fm := parseFrontmatter(body)
-		name := fm.name
-		if name == "" {
-			name = d.Name()
-		}
-		if name != ref.Name {
-			continue
-		}
-		if ref.Version != "" && fm.version != ref.Version {
-			continue
-		}
-		return path, body, true
+		return e.path, e.body, true
 	}
 	return "", nil, false
 }
