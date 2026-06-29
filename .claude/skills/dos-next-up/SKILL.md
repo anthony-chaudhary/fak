@@ -46,6 +46,38 @@ Parse the JSON object. The fields you use:
 If `git` is `false`, warn the operator: `dos verify`'s git rung has no history to
 read, so every pick will report `source="none"` unless a registry exists.
 
+## Step 0b — Default selection surface: the board / milestone focus
+
+Before walking plan docs, consult the workspace's **named issue-view surface** —
+the operator-marked board/milestone focus is the DEFAULT "what to work on", ahead
+of any ad-hoc `gh issue list --label` query:
+
+```bash
+python tools/issue_views.py show --view current   # the operator-marked focus
+python tools/issue_views.py list                  # current, m1-…..m11-…, ready-leaves, …
+```
+
+`--view current` is the active focus the operator marks two ways (GitHub
+milestones cannot carry a label): the `current` issue-label on specific issues, or
+by pointing the `current` view at a milestone (`milestone:"<title>"` in
+`.github/issue-views.json`). The per-milestone views (`m1-…` … `m11-…`) select a
+whole milestone's dispatchable leaves.
+
+**Fall-through — never starve:** if `current` is empty (nothing marked yet), fall
+back to a per-milestone view, then `ready-leaves`, then the plan glob in Step 1.
+Pipe a view straight into the router (it routes the slice to lanes for you):
+
+```bash
+python tools/issue_lane_router.py --view current --json   # router resolves the view, fail-soft to full backlog
+```
+
+GitHub's saved views at `/issues/views` are NOT API-readable; `.github/issue-views.json`
+is the API-readable mirror — edit it to track the UI. Issues are the default
+selection surface; the plan-glob walk below is the secondary source for
+plan-shaped work that has no issue. (Sibling skills `/dos-dispatch` and
+`/dos-dispatch-loop` chain this skill, so they inherit this surface; `/dos-replan`
+gardens its queue from the same views.)
+
 ## Step 1 — Walk the plans glob → candidate picks
 
 List the plan docs under `paths.plans_glob` (relative to `paths.root`). For each
