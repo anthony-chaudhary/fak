@@ -17,12 +17,12 @@
 // PROVENANCE (the ABI Ref.Taint seam, unused by ctxmmu v0.1): the fold is
 // monotonic (most-restrictive wins), so a chained driver can only ADD restriction,
 // never remove a false positive a later driver imposes. normgate therefore treats
-// provenance as a FIRST-CLASS input to its OWN verdict: an injection-shaped result
-// whose source is a TRUSTED LOCAL read (the agent reading its own files) is paged
-// out as a RETRIEVABLE Transform, not sealed as a Quarantine — closing the
-// "quarantined my own source code" false positives. Untrusted egress still
-// quarantines. Secrets quarantine regardless of source (a leaked credential is
-// worth holding even from a local read).
+// provenance as a FIRST-CLASS input to its OWN verdict: injection-shaped content
+// is only sealed when its confidence is high. Trusted-local hits, and single-marker
+// untrusted hits with no sink/egress clue, page out as RETRIEVABLE transforms so
+// the bytes stay out of context without raising the loud quarantine banner.
+// Secrets quarantine regardless of source (a leaked credential is worth holding
+// even from a local read).
 //
 // The de-obfuscating canonicalization + lexical detection lives in internal/canon
 // (one primitive, tested once, reused by the read-time recall re-screen too).
@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -138,9 +139,118 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 		return g.quarantineOut(ctx, r, abi.ReasonSecretExfil, body)
 	}
 	if !trustedLocal(c, r) {
+		if !highConfidenceInjection(body) {
+			return g.transformOut(ctx, r, body, "paged-low-confidence", "low-confidence injection-shaped content (retrievable, not sealed)")
+		}
 		return g.quarantineOut(ctx, r, abi.ReasonTrustViolation, body)
 	}
-	return g.transformOut(ctx, r, body) // trusted-local injection-shaped: page out, retrievable
+	return g.transformOut(ctx, r, body, "paged-trusted-local", "trusted-local injection-shaped content (retrievable, not sealed)")
+}
+
+type injectionSignal struct {
+	distinctMarkers int
+	obfuscated      bool
+	sinkHint        bool
+}
+
+func (s injectionSignal) highConfidence() bool {
+	return s.distinctMarkers >= 2 || s.obfuscated || s.sinkHint
+}
+
+// highConfidenceInjection separates a low-confidence lexical mention from a payload
+// that looks operational: multiple distinct markers, any marker only revealed by
+// canonicalization/decoding/squeezing, or a co-occurring sensitive sink hint.
+func highConfidenceInjection(body []byte) bool {
+	return analyzeInjection(body).highConfidence()
+}
+
+func analyzeInjection(body []byte) injectionSignal {
+	raw := string(body)
+	rawLower := strings.ToLower(raw)
+	norm := canon.Normalize(raw)
+	dec := strings.TrimSpace(canon.Decoded(raw) + " " + canon.Decoded(norm))
+	rev := reverseRunes(norm)
+
+	rawKeys := map[string]bool{}
+	markers := map[string]bool{}
+	obfuscated := false
+
+	for _, m := range canon.InjectionMarkers {
+		key := canon.SqueezeAlnum(m)
+		if strings.Contains(rawLower, m) {
+			rawKeys[key] = true
+			markers[key] = true
+		}
+	}
+
+	addCanonical := func(marker string, obfuscatedView bool) {
+		key := canon.SqueezeAlnum(marker)
+		markers[key] = true
+		if obfuscatedView || !rawKeys[key] {
+			obfuscated = true
+		}
+	}
+	normChanged := norm != raw
+	for _, m := range canon.InjectionMarkers {
+		if strings.Contains(strings.ToLower(norm), m) {
+			addCanonical(m, normChanged && !rawKeys[canon.SqueezeAlnum(m)])
+		}
+		if dec != "" && strings.Contains(strings.ToLower(dec), m) {
+			addCanonical(m, true)
+		}
+		if strings.Contains(strings.ToLower(rev), m) {
+			addCanonical(m, true)
+		}
+	}
+	for _, view := range []struct {
+		text       string
+		obfuscated bool
+	}{
+		{canon.SqueezeAlnum(norm), normChanged},
+		{canon.SqueezeAlnum(dec), dec != ""},
+		{canon.SqueezeAlnum(rev), true},
+	} {
+		for _, m := range canon.DistinctiveSqueezed {
+			key := strings.ToLower(m)
+			if strings.Contains(view.text, key) {
+				markers[key] = true
+				if view.obfuscated || !rawKeys[key] {
+					obfuscated = true
+				}
+			}
+		}
+	}
+
+	return injectionSignal{
+		distinctMarkers: len(markers),
+		obfuscated:      obfuscated,
+		sinkHint:        hasInjectionSinkHint(rawLower),
+	}
+}
+
+var injectionSinkHints = []string{
+	"send_email", "send email", "email the", "email to", "mail the", "mail to",
+	"http_post", "post it", "post to", "webhook", "http://", "https://",
+	"attacker.", "delete_", "delete all", "delete the", "wipe ",
+	"run_command", "run the", "execute ", "curl ", "wget ",
+	"refund_payment", "transfer_funds", "wire_transfer", "upload ",
+}
+
+func hasInjectionSinkHint(lower string) bool {
+	for _, h := range injectionSinkHints {
+		if strings.Contains(lower, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func reverseRunes(s string) string {
+	rs := []rune(s)
+	for i, j := 0, len(rs)-1; i < j; i, j = i+1, j-1 {
+		rs[i], rs[j] = rs[j], rs[i]
+	}
+	return string(rs)
 }
 
 func (g *Gate) quarantineOut(ctx context.Context, r *abi.Result, reason abi.ReasonCode, body []byte) abi.Verdict {
@@ -225,11 +335,11 @@ func (g *Gate) PageIn(ctx context.Context, id string) ([]byte, canon.Findings, e
 	return body, f, nil
 }
 
-func (g *Gate) transformOut(ctx context.Context, r *abi.Result, body []byte) abi.Verdict {
+func (g *Gate) transformOut(ctx context.Context, r *abi.Result, body []byte, metaValue, hint string) abi.Verdict {
 	atomic.AddInt64(&g.transform, 1)
 	handle := g.pageOut(ctx, body)
 	stub := map[string]any{"_paged": true, "ref": handle.Digest, "len": len(body),
-		"by": "normgate", "hint": "trusted-local injection-shaped content (retrievable, not sealed)"}
+		"by": "normgate", "hint": hint}
 	ref, ok := putJSON(ctx, stub)
 	if !ok {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "normgate"}
@@ -238,7 +348,7 @@ func (g *Gate) transformOut(ctx context.Context, r *abi.Result, body []byte) abi
 	if r.Meta == nil {
 		r.Meta = map[string]string{}
 	}
-	r.Meta["normgate"] = "paged-trusted-local"
+	r.Meta["normgate"] = metaValue
 	return abi.Verdict{Kind: abi.VerdictTransform, By: "normgate", Payload: abi.TransformPayload{NewArgs: ref}}
 }
 
