@@ -189,6 +189,16 @@ type gatewayMetrics struct {
 	// RetryNotify hook, off the request path. The metric twin of the `fak-turn … retry` line.
 	upstreamRetries uint64
 
+	// servedInline counts read-only tool calls the vDSO served LOCALLY on a served turn
+	// (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded
+	// into the assistant turn and dropped from the kept set, so the client never re-ran it —
+	// the engine round-trip it would otherwise cost is SAVED. Bumped atomically from the
+	// adjudication seam on every wire. DISTINCT from the kernel's VDSOHits counter (only the
+	// k.Syscall path bumps that); naming a gateway-seam Lookup a kernel-submission hit would
+	// conflate provenances. The vDSO's own hits/lookups still update, so fak_vdso_hit_rate
+	// reflects these probes too.
+	servedInline uint64
+
 	// vcacheMu guards the per-family live-observe accumulator (#935). The cumulative
 	// fak_vcache_* family above is one aggregate row; this retains the per-turn,
 	// family-tagged provider-cache telemetry so the live gateway can expose the SAME
@@ -543,6 +553,25 @@ func (m *gatewayMetrics) recordAdjudicationOutcome(denyAll bool) {
 		m.denyAllConsecutive = 0
 	}
 	m.denyAllMu.Unlock()
+}
+
+// recordServedInline attributes n vDSO served-inline hits (a read-only call answered
+// locally on a served turn, folded to assistant text, dropped before the client could
+// re-run it) to the gateway seam. Atomic, off any lock — bumped once per served turn
+// from every wire's adjudication handler. A no-op for a nil metrics.
+func (m *gatewayMetrics) recordServedInline(n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	atomic.AddUint64(&m.servedInline, uint64(n))
+}
+
+// servedInlineSnapshot reads the cumulative served-inline count. Pure read.
+func (m *gatewayMetrics) servedInlineSnapshot() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.servedInline)
 }
 
 // denyAllSnapshot reads the deny-all accumulators under their lock. Pure read — the exit
@@ -1278,7 +1307,7 @@ func (s *Server) renderMetrics() string {
 	for _, row := range opRows {
 		opSecs += row.val.sum
 	}
-	writeFleetValueMetrics(&b, c, inf.decodeSecs+opSecs)
+	writeFleetValueMetrics(&b, c, m.servedInlineSnapshot(), inf.decodeSecs+opSecs)
 
 	s.writeModelLoadMetrics(&b)
 	return b.String()
@@ -1989,6 +2018,7 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_gateway_upstream_errors_total{kind=\"%s\"} %d\n", promQuote(kind), snap[kind])
 	}
 	writeCounter(b, "fak_gateway_upstream_retries_total", "Upstream retry attempts — fak's exponential backoff in response to OBSERVED, provider-reported 429/5xx from the planner — since process start.", int64(atomic.LoadUint64(&m.upstreamRetries)))
+	writeCounter(b, "fak_gateway_served_inline_total", "Read-only tool calls the vDSO served LOCALLY on a served turn (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded into the assistant turn and dropped before the client could re-run it — each one a saved engine round-trip. WITNESSED (fak authored the serve), distinct from the kernel fak_kernel_vdso_hits_total which only the explicit k.Syscall path bumps.", int64(m.servedInlineSnapshot()))
 }
 
 // writeInferenceMetrics renders the model-generation family from the live
@@ -2167,9 +2197,9 @@ func (m *gatewayMetrics) writeVCacheMetrics(b *strings.Builder) {
 //
 // The KV-reuse "context saved" KPI is fak_gateway_inference_cached_prompt_tokens_total
 // in the inference family above; it is not re-emitted here to avoid a duplicate series.
-func writeFleetValueMetrics(b *strings.Builder, c kernel.Counters, agentSeconds float64) {
+func writeFleetValueMetrics(b *strings.Builder, c kernel.Counters, servedInline uint64, agentSeconds float64) {
 	writeHelpType(b, "fak_gateway_turns_saved_total", "Agent turns the kernel saved the served fleet, by mechanism: vdso_dedup = a duplicate read served from the fast path with no engine round-trip; grammar_repair = a malformed tool call repaired in-syscall instead of costing the baseline a retry turn. The comparable 'turns saved' headline (LIVE-RESULTS.md) is this measured against a no-kernel baseline arm; this is the live cumulative count of each mechanism firing.", "counter")
-	fmt.Fprintf(b, "fak_gateway_turns_saved_total{mechanism=\"vdso_dedup\"} %d\n", c.VDSOHits)
+	fmt.Fprintf(b, "fak_gateway_turns_saved_total{mechanism=\"vdso_dedup\"} %d\n", c.VDSOHits+int64(servedInline))
 	fmt.Fprintf(b, "fak_gateway_turns_saved_total{mechanism=\"grammar_repair\"} %d\n", c.Transforms)
 
 	writeCounter(b, "fak_gateway_context_pollutions_blocked_total", "Untrusted/poisoned tool-result payloads the context-MMU paged out before they reached the model's context window — each a context-window pollution (and on a weak model a derailment) prevented. The live 'context saved' KPI.", c.Quarantines)

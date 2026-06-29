@@ -158,15 +158,18 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// Adjudicate any proposed tool call BEFORE the client sees it — the load-bearing
 	// invariant, applied whether or not tools were offered (a model can hallucinate a
 	// call even with none offered). Only survivors are emitted.
-	kept, adjs, dropped := s.adjudicateProposed(ctx, comp.Message.ToolCalls, reqTrace)
+	kept, adjs, dropped, servedText, servedHits := s.adjudicateProposedServed(ctx, comp.Message.ToolCalls, reqTrace)
+	if servedHits > 0 {
+		s.metrics.recordServedInline(servedHits)
+	}
 	finish := comp.FinishReason
 	switch {
 	case len(kept) > 0:
 		finish = "tool_calls"
 	case finish == "" || finish == "tool_calls":
 		// No surviving call — either none was proposed, or every hallucinated call
-		// was dropped, or the upstream omitted a finish_reason. Any of these is a
-		// normal stop to an OpenAI client.
+		// was dropped, every read served inline from the vDSO, or the upstream omitted
+		// a finish_reason. Any of these is a normal stop to an OpenAI client.
 		finish = "stop"
 	}
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", true, comp.Usage, finish, time.Since(began), false)
@@ -182,6 +185,13 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	remaining := liftRemainder(guard.streamed(), comp.Message.Content)
 	if err := emitContent(remaining); err != nil {
 		return true
+	}
+	// vDSO served-inline (vDSO live in the hot path): a fresh cache hit is emitted as
+	// assistant content; the call was dropped from kept so the client never re-runs it.
+	if servedText != "" {
+		if err := emitContent("\n" + servedText); err != nil {
+			return true
+		}
 	}
 	// Parity with the buffered path: when every proposed call was refused AND the turn
 	// carried no content of its own, give even a fak-unaware client an actionable note

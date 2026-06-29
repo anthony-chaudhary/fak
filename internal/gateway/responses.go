@@ -226,17 +226,32 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kept, adjs, dropped := s.adjudicateProposed(ctx, asst.ToolCalls, reqTrace)
+	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	asst.ToolCalls = kept
+	if bodyRefused {
+		asst.Content = ""
+	}
+	// vDSO served-inline (vDSO live in the hot path): fold a fresh cache hit into the
+	// assistant text and drop the call, so the client never re-runs the read.
+	if servedText != "" {
+		if asst.Content != "" {
+			asst.Content += "\n" + servedText
+		} else {
+			asst.Content = servedText
+		}
+	}
+	if servedHits > 0 {
+		s.metrics.recordServedInline(servedHits)
+	}
 
 	// finishReason drives both the logged turn classification and the Responses
 	// status: a length-truncated turn is `incomplete`, everything else `completed`.
 	finish := comp.FinishReason
 	if len(kept) > 0 {
 		finish = "tool_calls"
-	} else if dropped > 0 {
-		// Every proposed call was refused: give even a fak-unaware client an
-		// actionable in-band message instead of an empty turn (mirrors the chat wire).
+	} else if dropped > 0 || servedHits > 0 {
+		// Every proposed call was refused OR served inline: give even a fak-unaware
+		// client an actionable in-band message instead of an empty turn (mirrors chat).
 		finish = "stop"
 		if asst.Content == "" {
 			asst.Content = denySummary(adjs)

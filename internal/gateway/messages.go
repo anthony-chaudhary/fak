@@ -150,6 +150,16 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
+	// Native-harness keystone (#1316): when `fak serve --native` is set, drive fak's OWN
+	// agent loop for a non-streaming turn instead of the single-shot proxy turn below. The
+	// owned loop runs its own per-turn session gate (WithSessionGate over the same
+	// DecideSession/DebitSession hooks), so it is branched BEFORE the request-boundary
+	// admission to avoid a double Decide. A streaming request falls through to the existing
+	// proxy path (native streaming is a tracked follow-on).
+	if s.native && !req.Stream {
+		s.serveNativeMessages(w, r, req, reqTrace)
+		return
+	}
 	// Operator control / budget / pace at the served request boundary. With
 	// DecideSession wired this mutates the live session table (TurnsLeft debit,
 	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
@@ -634,8 +644,27 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 
 	asst := comp.Message
 	asst.Role = agent.RoleAssistant
-	kept, adjs, dropped := s.adjudicateProposed(ctx, asst.ToolCalls, reqTrace)
+	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	asst.ToolCalls = kept
+	if bodyRefused {
+		asst.Content = ""
+	}
+	// vDSO served-inline (vDSO live in the hot path): a re-proposed read-only call the
+	// vDSO already holds fresh is answered LOCALLY and folded into the assistant text
+	// (the only wire-valid surface — a tool_result is a user-turn block). The call was
+	// dropped from kept, so the client never re-executes it; the engine round-trip is
+	// saved. metrics.recordServedInline attributes it to the gateway seam (not the
+	// kernel VDSOHits counter, which only the k.Syscall path bumps).
+	if servedText != "" {
+		if asst.Content != "" {
+			asst.Content += "\n" + servedText
+		} else {
+			asst.Content = servedText
+		}
+	}
+	if servedHits > 0 {
+		s.metrics.recordServedInline(servedHits)
+	}
 	// Stash this turn's SAFETY delta (blocked/repaired calls + quarantined inbound results) for the
 	// per-turn fak-turn debug line, the buffered-wire twin of the streaming flushHeldTools call.
 	// resultAdmissions came from admitInboundResults on the SAME reqTrace earlier in this turn.
@@ -643,8 +672,9 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// Fold this turn's adjudication SHAPE into the deny-all stop family: a deny-all (the model
 	// proposed tools and the floor refused every one) is the turn the wire reports as end_turn
 	// below (AnthropicStopReason with no surviving call), the unchosen stop the guard Stop-hook
-	// resumes. A surviving call — or a pure-text turn (no adjs) — resets the consecutive run.
-	s.metrics.recordAdjudicationOutcome(len(adjs) > 0 && len(kept) == 0)
+	// resumes. A surviving call — a vDSO-served hit (a SUCCESS, not a deny) — or a pure-text turn
+	// (no adjs) — resets the consecutive run.
+	s.metrics.recordAdjudicationOutcome(len(adjs) > 0 && len(kept) == 0 && servedHits == 0)
 
 	blocks := agent.AnthropicResponseBlocks(asst)
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)

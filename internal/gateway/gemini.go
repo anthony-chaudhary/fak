@@ -209,8 +209,23 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 		return nil, errGeminiToolCallConformance
 	}
 
-	kept, adjs, dropped := s.adjudicateProposed(ctx, asst.ToolCalls, reqTrace)
+	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	asst.ToolCalls = kept
+	if bodyRefused {
+		asst.Content = ""
+	}
+	// vDSO served-inline (vDSO live in the hot path): fold a fresh cache hit into the
+	// assistant text and drop the call, so the client never re-runs the read.
+	if servedText != "" {
+		if asst.Content != "" {
+			asst.Content += "\n" + servedText
+		} else {
+			asst.Content = servedText
+		}
+	}
+	if servedHits > 0 {
+		s.metrics.recordServedInline(servedHits)
+	}
 
 	parts := agent.GeminiResponseParts(asst)
 

@@ -493,15 +493,33 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kept, adjs, dropped := s.adjudicateProposed(ctx, asst.ToolCalls, reqTrace)
+	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	asst.ToolCalls = kept
+	if bodyRefused {
+		asst.Content = ""
+	}
+	// vDSO served-inline (vDSO live in the hot path): a re-proposed read-only call the
+	// vDSO already holds fresh is answered LOCALLY and folded into the assistant content
+	// (the OpenAI assistant message carries tool_calls, never results), the call dropped
+	// from kept so the client never re-runs it — the engine round-trip is saved.
+	if servedText != "" {
+		if asst.Content != "" {
+			asst.Content += "\n" + servedText
+		} else {
+			asst.Content = servedText
+		}
+	}
+	if servedHits > 0 {
+		s.metrics.recordServedInline(servedHits)
+	}
 
 	finish := comp.FinishReason
 	if len(kept) > 0 {
 		finish = "tool_calls"
-	} else if dropped > 0 {
-		// Every proposed call was refused. Give even a fak-unaware client something
-		// actionable in-band rather than an empty turn.
+	} else if dropped > 0 || servedHits > 0 {
+		// Every proposed call was refused OR served inline. A pure-served turn has
+		// dropped==0, so broaden the guard: the turn ends (no surviving tool_calls
+		// array for the client to act on). On a deny, surface the reason in-band.
 		finish = "stop"
 		if asst.Content == "" {
 			asst.Content = denySummary(adjs)

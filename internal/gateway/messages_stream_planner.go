@@ -206,7 +206,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return true
 	}
 
-	kept, adjs, dropped := s.adjudicateProposed(r.Context(), comp.Message.ToolCalls, reqTrace)
+	kept, adjs, dropped, servedText, servedHits := s.adjudicateProposedServed(r.Context(), comp.Message.ToolCalls, reqTrace)
 	if remaining := liftRemainder(guard.streamed(), comp.Message.Content); remaining != "" {
 		_ = emitText(remaining)
 	}
@@ -230,6 +230,15 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		if note := adjudicationNote(adjs); note != "" {
 			emitAnthropicTextBlock(sendLocked, &outIdx, note)
 		}
+	}
+	// vDSO served-inline (vDSO live in the hot path): a fresh cache hit is folded into a
+	// synthetic assistant text block; the call was already dropped from kept so no
+	// tool_use is emitted for it and the client never re-runs it.
+	if servedText != "" {
+		emitAnthropicTextBlock(sendLocked, &outIdx, servedText)
+	}
+	if servedHits > 0 {
+		s.metrics.recordServedInline(servedHits)
 	}
 
 	usage := anthropicUsage{

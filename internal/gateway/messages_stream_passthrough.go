@@ -68,6 +68,7 @@ type anthropicPassthrough struct {
 	resultAdms   []ResultAdmission
 	flushedTools bool
 	keptTools    int
+	servedTools  int // vDSO served-inline hits this turn (a SUCCESS, excluded from deny-all)
 
 	promptTok, complTok, cacheRead, cacheCreate int
 	finishReason                                string
@@ -125,8 +126,9 @@ func (p *anthropicPassthrough) flushHeldTools() {
 			Function: agent.Func{Name: ta.name, Arguments: args},
 		})
 	}
-	kept, adjs, dropped := p.s.adjudicateProposed(p.r.Context(), calls, p.reqTrace)
+	kept, adjs, dropped, servedText, servedHits := p.s.adjudicateProposedServed(p.r.Context(), calls, p.reqTrace)
 	p.keptTools = len(kept)
+	p.servedTools = servedHits
 	// Stash this turn's SAFETY delta (blocked/repaired calls + quarantined inbound results) so the
 	// per-turn fak-turn debug line, rendered just after the terminal inference observation, shows
 	// what the kernel refused the MOMENT it happened — not only in the exit summary. p.resultAdms
@@ -152,6 +154,16 @@ func (p *anthropicPassthrough) flushHeldTools() {
 		if note := adjudicationNote(adjs); note != "" {
 			emitAnthropicTextBlock(p.send, &p.outIdx, note)
 		}
+	}
+	// vDSO served-inline (vDSO live in the hot path): fold a fresh cache hit into a
+	// synthetic assistant text block; the call was dropped from kept so no tool_use is
+	// emitted and the client never re-runs it. relayMessageDelta already rewrites a
+	// fully-served turn (hadTools, keptTools==0) tool_use -> end_turn.
+	if servedText != "" {
+		emitAnthropicTextBlock(p.send, &p.outIdx, servedText)
+	}
+	if servedHits > 0 {
+		p.s.metrics.recordServedInline(servedHits)
 	}
 }
 
@@ -256,7 +268,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		// refused) is exactly the case relayMessageDelta rewrites to end_turn, the unchosen stop
 		// the guard Stop-hook resumes. A survivor — or a pure-text turn (no held tools) — resets
 		// the consecutive run. Once per turn (message_delta is terminal).
-		p.s.metrics.recordAdjudicationOutcome(len(p.toolOrder) > 0 && p.keptTools == 0)
+		p.s.metrics.recordAdjudicationOutcome(len(p.toolOrder) > 0 && p.keptTools == 0 && p.servedTools == 0)
 		p.complTok, p.finishReason = relayMessageDelta(p.send, ev.Data, p.complTok, len(p.toolOrder) > 0, p.keptTools)
 
 	case "message_stop":
@@ -331,12 +343,32 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		case p.wroteError:
 			return true // a clean terminal HTTP error was already written
 		default:
-			// The stream never opened and nothing was written — let the caller fall back
-			// to the buffered path (exactly one upstream generation total). Surface the
-			// fall-back on the debug line so the operator sees WHY a turn took the slower
-			// buffered path instead of a silent gap.
+			// The stream never opened and nothing was written. Count + surface the failure on
+			// the default debug line (the s.logf calls below only reach the --log stream, OFF
+			// by default), so an operator sees WHY a turn took a non-streaming path.
 			s.metrics.observeUpstreamError(err)
 			s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
+			// If the upstream answered with a DEFINITE HTTP status — a retryable one that
+			// StreamAnthropicRaw already retried to exhaustion (a persistent 429/529), or a
+			// non-retryable 4xx no retry can fix — re-issuing it through the buffered fallback
+			// would only hit the SAME status a second time, doubling the load on a (commonly
+			// shared) upstream account on the very rate limit it just refused. Surface it
+			// straight to the client with its distinct status/code + any Retry-After (the
+			// classify here is the PURE mapper; the metric was already observed just above, so
+			// the failure is counted exactly once), exactly as the planner-live sibling does.
+			// The buffered fall-back is kept only for the genuine "this wire can't stream"
+			// cases — ErrStreamingUnsupported, an unreachable dial, or a nil-but-no-events
+			// open — handled by the return false below.
+			var statusErr *agent.UpstreamStatusError
+			if errors.As(err, &statusErr) {
+				status, code, msg := upstreamErrorStatus(err)
+				if ra := upstreamRetryAfter(err); ra != "" {
+					w.Header().Set("Retry-After", ra)
+				}
+				s.logf("gateway: upstream model error (messages passthrough; surfaced, not re-tried via buffered): %v", err)
+				writeErrCode(w, status, code, msg)
+				return true
+			}
 			s.logf("gateway: anthropic passthrough stream did not open (%v); falling back to buffered", err)
 			return false
 		}
