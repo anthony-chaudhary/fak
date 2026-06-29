@@ -449,6 +449,71 @@ func TestInferencePrefillDecodeSplit(t *testing.T) {
 	}
 }
 
+// TestInferenceLatencyHistograms proves the three serving-latency DISTRIBUTIONS the
+// cumulative-mean rates structurally hide: idle they publish count 0 (no phantom
+// distribution), a buffered turn lands in e2e ONLY (no observable prefill boundary), and
+// a streamed turn lands in all three with the right buckets and sums.
+func TestInferenceLatencyHistograms(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	// Idle: every distribution reads count 0 — no phantom percentile before a turn.
+	idle := renderInference(m)
+	for _, want := range []string{
+		"fak_gateway_inference_ttft_seconds_count 0\n",
+		"fak_gateway_inference_tpot_seconds_count 0\n",
+		"fak_gateway_inference_e2e_seconds_count 0\n",
+	} {
+		if !strings.Contains(idle, want) {
+			t.Fatalf("idle scrape missing %q\n%s", want, idle)
+		}
+	}
+
+	// A buffered turn (no TTFT boundary): must land in e2e ONLY.
+	m.observeInference(200, 100, 0, 0, "stop", 5*time.Second)
+	buffered := renderInference(m)
+	for _, want := range []string{
+		"fak_gateway_inference_e2e_seconds_count 1\n",
+		"fak_gateway_inference_e2e_seconds_sum 5\n",
+		"fak_gateway_inference_ttft_seconds_count 0\n", // buffered turn excluded
+		"fak_gateway_inference_tpot_seconds_count 0\n",
+	} {
+		if !strings.Contains(buffered, want) {
+			t.Fatalf("buffered scrape missing %q\n%s", want, buffered)
+		}
+	}
+
+	// A streamed turn: dur=5s, ttft=4s → decode=1s, 200 completion tokens.
+	// tpot = decode/tokens = 1s/200 = 0.005s/token. Lands in ALL three.
+	m.observeInferenceTimed(1000, 200, 0, 0, "end_turn", 5*time.Second, 4*time.Second)
+	live := renderInference(m)
+	for _, want := range []string{
+		// e2e now sums BOTH turns: 5 + 5 = 10s over 2 turns.
+		"fak_gateway_inference_e2e_seconds_count 2\n",
+		"fak_gateway_inference_e2e_seconds_sum 10\n",
+		// ttft: only the streamed turn measured it (4s).
+		"fak_gateway_inference_ttft_seconds_count 1\n",
+		"fak_gateway_inference_ttft_seconds_sum 4\n",
+		// tpot: one sample at 0.005s/token.
+		"fak_gateway_inference_tpot_seconds_count 1\n",
+		"fak_gateway_inference_tpot_seconds_sum 0.005\n",
+		// Right buckets: both e2e samples are 5s → le="5" holds 2, le="2.5" holds 0.
+		`fak_gateway_inference_e2e_seconds_bucket{le="5"} 2`,
+		`fak_gateway_inference_e2e_seconds_bucket{le="2.5"} 0`,
+		// ttft 4s → le="5" holds 1, le="2.5" holds 0.
+		`fak_gateway_inference_ttft_seconds_bucket{le="5"} 1`,
+		`fak_gateway_inference_ttft_seconds_bucket{le="2.5"} 0`,
+		// tpot 0.005s → le="0.005" holds 1, le="0.001" holds 0.
+		`fak_gateway_inference_tpot_seconds_bucket{le="0.005"} 1`,
+		`fak_gateway_inference_tpot_seconds_bucket{le="0.001"} 0`,
+		// Label-less +Inf bucket carries the full count, no leading-comma label set.
+		`fak_gateway_inference_e2e_seconds_bucket{le="+Inf"} 2`,
+	} {
+		if !strings.Contains(live, want) {
+			t.Fatalf("streamed scrape missing %q\n--- inference ---\n%s", want, live)
+		}
+	}
+}
+
 // TestInferenceVarsMatchPrometheus proves the /debug/vars inference block derives the
 // exact same rates the Prometheus renderer does — the panel can never disagree with
 // /metrics. It feeds one streamed turn and asserts the struct fields equal the

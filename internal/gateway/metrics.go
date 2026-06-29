@@ -84,6 +84,17 @@ type gatewayMetrics struct {
 	// skew it.
 	inferMeasuredDecodeSecs  float64
 	inferMeasuredComplTokens uint64
+	// Latency DISTRIBUTIONS, not just the cumulative MEANS above. The prefill/decode
+	// rates are session-cumulative gauges that structurally hide the P95/P99 tail an
+	// operator watches under load. These three Prometheus histograms record per-turn
+	// time-to-first-token, per-output-token (inter-token) latency, and whole-turn
+	// wall-clock, fed on the SAME turn-completion path under inferenceMu, so
+	// P50/P95/P99 become queryable. They stay empty (count 0) on an idle gateway — no
+	// phantom distribution — and are the fak analogues of vLLM's
+	// time_to_first_token / inter_token_latency / e2e_request_latency histograms.
+	inferTTFTHist *latencyCounter
+	inferTPOTHist *latencyCounter
+	inferE2EHist  *latencyCounter
 
 	// reqMemoryMu guards cumulative in-kernel request-memory pressure observed after
 	// planner turns. The planner already exposes the most recent admission plan; these
@@ -278,6 +289,9 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		upstreamErrors:     map[string]uint64{},
 		harnessCoherence:   newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
 		routing:            newRoutingMetrics(),
+		inferTTFTHist:      newLatencyCounter(),
+		inferTPOTHist:      newLatencyCounter(),
+		inferE2EHist:       newLatencyCounter(),
 	}
 }
 
@@ -753,6 +767,11 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 	if m.inferReqs == nil {
 		m.inferReqs = map[string]uint64{}
 	}
+	if m.inferE2EHist == nil { // a directly-constructed metrics (no newGatewayMetrics)
+		m.inferTTFTHist = newLatencyCounter()
+		m.inferTPOTHist = newLatencyCounter()
+		m.inferE2EHist = newLatencyCounter()
+	}
 	m.inferReqs[finishReason]++
 	if promptTok > 0 {
 		m.inferPromptTokens += uint64(promptTok)
@@ -769,6 +788,8 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 	}
 	if dur > 0 {
 		m.inferDecodeSecs += dur.Seconds()
+		// e2e distribution: every served turn (buffered or streamed) lands here.
+		m.inferE2EHist.observe(dur.Seconds())
 	}
 	// Split prefill from decode only when TTFT was actually observed and is sane
 	// (positive and within the total). A clamp guards against a clock skew producing
@@ -780,12 +801,18 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 		}
 		m.inferPrefillSecs += pre.Seconds()
 		m.inferTTFTTurns++
+		// ttft distribution: only the streamed turns whose prefill boundary is observable.
+		m.inferTTFTHist.observe(pre.Seconds())
 		if promptTok > 0 {
 			m.inferPrefillPromptTokens += uint64(promptTok)
 		}
-		m.inferMeasuredDecodeSecs += (dur - pre).Seconds()
+		decodeSecs := (dur - pre).Seconds()
+		m.inferMeasuredDecodeSecs += decodeSecs
 		if complTok > 0 {
 			m.inferMeasuredComplTokens += uint64(complTok)
+			// tpot (inter-token) distribution: mean per-output-token latency for this
+			// turn = decode wall-clock / generated tokens.
+			m.inferTPOTHist.observe(decodeSecs / float64(complTok))
 		}
 	}
 	m.inferenceMu.Unlock()
@@ -1642,6 +1669,10 @@ type inferenceSnapshot struct {
 	// measured and unmeasured denominators.
 	measuredDecodeSecs float64
 	measuredComplTok   uint64
+	// Latency-distribution snapshots (see the inferTTFTHist/TPOT/E2E accumulators).
+	ttftHist latencySnapshot
+	tpotHist latencySnapshot
+	e2eHist  latencySnapshot
 }
 
 type compactionSnapshot struct {
@@ -1710,7 +1741,20 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		prefillPromptTok:   m.inferPrefillPromptTokens,
 		measuredDecodeSecs: m.inferMeasuredDecodeSecs,
 		measuredComplTok:   m.inferMeasuredComplTokens,
+		ttftHist:           histSnapshot(m.inferTTFTHist),
+		tpotHist:           histSnapshot(m.inferTPOTHist),
+		e2eHist:            histSnapshot(m.inferE2EHist),
 	}
+}
+
+// histSnapshot reads a latency histogram, tolerating a nil counter (a
+// directly-constructed gatewayMetrics that rendered before any turn) by returning an
+// empty but correctly-sized snapshot so writeHistogram never indexes a nil bucket slice.
+func histSnapshot(c *latencyCounter) latencySnapshot {
+	if c == nil {
+		return latencySnapshot{buckets: make([]uint64, len(gatewayLatencyBuckets))}
+	}
+	return c.snapshot()
 }
 
 func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
@@ -1973,6 +2017,18 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 		decodeTPS = float64(snap.measuredComplTok) / snap.measuredDecodeSecs
 	}
 	fmt.Fprintf(b, "fak_gateway_inference_decode_tokens_per_second %s\n", promFloat(decodeTPS))
+
+	// Latency DISTRIBUTIONS — the P50/P95/P99 tail the cumulative-mean rates above
+	// structurally hide. Each is empty (count 0) until the first qualifying turn, so an
+	// idle gateway publishes no phantom distribution. These are the fak analogues of
+	// vLLM's time_to_first_token / inter_token_latency / e2e_request_latency histograms,
+	// bringing the de facto serving-latency Prometheus SET to parity.
+	writeHelpType(b, "fak_gateway_inference_ttft_seconds", "Time-to-first-token (prefill: prompt ingest + first token) distribution, over the streamed turns whose prefill boundary was observable. The percentile view behind fak_gateway_inference_prefill_seconds_total's mean. fak analogue of vLLM time_to_first_token_seconds.", "histogram")
+	writeHistogram(b, "fak_gateway_inference_ttft_seconds", "", snap.ttftHist)
+	writeHelpType(b, "fak_gateway_inference_tpot_seconds", "Per-output-token (inter-token) latency distribution = decode wall-clock / generated tokens, per measured turn. The percentile view behind fak_gateway_inference_decode_tokens_per_second. fak analogue of vLLM inter_token_latency_seconds.", "histogram")
+	writeHistogram(b, "fak_gateway_inference_tpot_seconds", "", snap.tpotHist)
+	writeHelpType(b, "fak_gateway_inference_e2e_seconds", "Whole model-turn wall-clock distribution, over EVERY served turn (buffered or streamed). fak analogue of vLLM e2e_request_latency_seconds.", "histogram")
+	writeHistogram(b, "fak_gateway_inference_e2e_seconds", "", snap.e2eHist)
 	return snap
 }
 
@@ -2209,12 +2265,23 @@ func writeCounter(b *strings.Builder, name, help string, n int64) {
 }
 
 func writeHistogram(b *strings.Builder, name, baseLabels string, s latencySnapshot) {
-	for i, le := range gatewayLatencyBuckets {
-		fmt.Fprintf(b, "%s_bucket{%s,le=\"%s\"} %d\n", name, baseLabels, promQuote(promFloat(le)), s.buckets[i])
+	// A label-less histogram (baseLabels=="") must not emit a leading comma inside the
+	// bucket braces, and renders _sum/_count with no brace set at all.
+	lead := baseLabels
+	if lead != "" {
+		lead += ","
 	}
-	fmt.Fprintf(b, "%s_bucket{%s,le=\"+Inf\"} %d\n", name, baseLabels, s.count)
-	fmt.Fprintf(b, "%s_sum{%s} %s\n", name, baseLabels, promFloat(s.sum))
-	fmt.Fprintf(b, "%s_count{%s} %d\n", name, baseLabels, s.count)
+	for i, le := range gatewayLatencyBuckets {
+		fmt.Fprintf(b, "%s_bucket{%sle=\"%s\"} %d\n", name, lead, promQuote(promFloat(le)), s.buckets[i])
+	}
+	fmt.Fprintf(b, "%s_bucket{%sle=\"+Inf\"} %d\n", name, lead, s.count)
+	if baseLabels == "" {
+		fmt.Fprintf(b, "%s_sum %s\n", name, promFloat(s.sum))
+		fmt.Fprintf(b, "%s_count %d\n", name, s.count)
+	} else {
+		fmt.Fprintf(b, "%s_sum{%s} %s\n", name, baseLabels, promFloat(s.sum))
+		fmt.Fprintf(b, "%s_count{%s} %d\n", name, baseLabels, s.count)
+	}
 }
 
 func promFloat(v float64) string {
