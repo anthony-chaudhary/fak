@@ -31,8 +31,6 @@ import (
 //	fak loop-index-scorecard --json     the control-pane Report (corpus.loopindex_debt)
 //	fak loop-index-scorecard --markdown regenerate docs/fak/loop-index-scorecard.md
 
-const loopIndexSnapshotRel = "docs/fak/loop-index-scorecard.md"
-
 func cmdLoopIndexScorecard(argv []string) {
 	fs := flag.NewFlagSet("fak loop-index-scorecard", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "emit the machine-readable control-pane Report JSON")
