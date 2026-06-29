@@ -33,9 +33,10 @@ A control-pane loop first, an opt-in reaper second.
   tools (PowerShell `Get-Process` on Windows, `ps -eo pid,nlwp,rss,comm` on
   Linux — no third-party deps) and flags any process over a threshold.
   `ok:false` ⇒ ACTION (a runaway is live).
-- **Single-shot by design.** Thread count is the load-bearing signal — 129k
-  threads is unambiguous and needs no second sample — so the guard never has to
-  poll a CPU counter twice.
+- **Single-shot for the *level* dimensions.** Thread count is the load-bearing
+  signal — 129k threads is unambiguous and needs no second sample — so the guard
+  never has to poll a counter twice. The one exception is the opt-in **CPU-pin**
+  dimension (see below), which is a *rate* and so needs two samples.
 - **Thresholds.** Default thread ceiling **2000** — far above the busiest
   legitimate process observed (the NT `System` kernel at ~600) yet far below the
   pathological 129k. Handle and working-set ceilings are opt-in
@@ -59,6 +60,49 @@ python tools/proc_resource_guard.py --enact
 
 Wired into `tools/control_pane.loops.json` as the **`proc-resource-guard`** loop
 (read-only `--json`, no `--enact`). Logs each scan to `tools/_watchdog/proc_guard.log`.
+
+## The CPU-pin dimension (the *single-threaded* runaway)
+
+The thread/handle/working-set ceilings catch a process that runs away in *level*.
+They are blind to the other loud failure: a process that runs away in *rate* — a
+**single thread pinning one core to 100% forever**. A stuck spin loop, a `while
+true` left running in a terminal, an inference binary wedged busy-waiting on the
+CPU: each burns a whole core indefinitely while showing a completely normal thread
+count (often **1**), handle count, and memory. On a many-core host this is easy to
+miss — one pinned core is only `100/ncores`% of total CPU (≈6% on a 16-core box),
+so the machine "feels a little slow" and no level gauge ever trips.
+
+`--max-cpu-pct` is the witness for that class. Because CPU% is a *rate*, it is the
+one dimension that takes more than one sample: the guard reads cumulative
+CPU-seconds two (or more) times `--cpu-window` apart and computes **per-core**
+percent, top-style — **100 = one full core saturated**, 400 = four cores.
+
+The honest hard part is telling a *pin* from a *legitimate burst* (a compile, a
+test run, a scorecard pass all saturate a core for a few seconds — and should
+**not** be reaped). The guard separates them with `--cpu-samples`: with N samples it
+takes N−1 consecutive windows and scores each process by the **minimum** window —
+so a process is only flagged if it stayed over the threshold in *every* window. A
+burst that ends mid-measurement scores its quiet window and drops out. This turns
+the single-shot guard into a "sustained over (N−1)×`--cpu-window` seconds" test
+with **no external state to persist**.
+
+```sh
+# report any process pinning >90% of one core, sustained over two 2s windows (4s)
+python tools/proc_resource_guard.py --max-cpu-pct 90 --cpu-window 2 --cpu-samples 3
+
+# the safe enacting shape: must hold >90%/core across three 2s windows (6s) first
+python tools/proc_resource_guard.py --max-cpu-pct 90 --cpu-window 2 --cpu-samples 4 --enact
+```
+
+**Threshold guidance.** A single-threaded runaway pins ≈100%/core, so a reaping
+threshold of **90** (a near-full core) sits safely above almost all legitimate
+bursty work while still catching the wedge. Reaping a CPU pin should always use a
+longer sustained window (`--cpu-samples 4 --cpu-window 2` ⇒ 6 s) than a bare report,
+and never reaps a protected OS process or the guard's own tree. On POSIX `cputimes`
+is integer-second, so use a window ≥ a few seconds there. Witnessed on this host: a
+single-threaded `code_slop_scorecard.py` worker sustaining 66%/core for 4 s was
+*reported* at `--max-cpu-pct 40` and, being report-only by default, correctly **not
+killed** — exactly the legitimate transient a 90%/6 s reaping bar excludes.
 
 ### Root-cause hygiene for inference launchers
 
@@ -111,6 +155,31 @@ The standing **`proc-resource-guard`** control-pane loop now runs `--reap-orphan
 in its read-only fold, so an orphaned MCP server surfaces as ACTION the same way
 a runaway does (idle-shell detection stays manual to avoid flagging interactive
 shells). Reaping still requires a deliberate `--enact` run.
+
+## Standing scheduled home
+
+The control-pane fold above surfaces a runaway only when the pane is run. For a
+host that should *always* be watched without an operator in the loop,
+`tools/register_proc_resource_guard.ps1` installs the guard as a restart-durable
+Scheduled Task (`FleetProcResourceGuard`), the Python-guard peer of the find/grep
+reaper's `register_runaway_reaper.ps1`:
+
+```powershell
+# install REPORT-ONLY (safe default): logs every scan, kills nothing
+.\tools\register_proc_resource_guard.ps1
+
+# flip to ENACTING: reaps runaways + orphans, and a CPU pin only after it holds
+# >90%/core across 4x2s = 6s sustained (a legit compile/test burst is never killed)
+.\tools\register_proc_resource_guard.ps1 -Enact
+
+.\tools\register_proc_resource_guard.ps1 -Action status   # mode + last run
+.\tools\register_proc_resource_guard.ps1 -Action remove
+```
+
+It runs windowless (S4U, session 0) as this user, so it can enumerate and — when
+enacting — terminate this user's runaways without elevation, and `-StartWhenAvailable`
+resumes it after a missed reboot tick. The reaping safety is the guard's, not the
+scheduler's: protected OS processes and the guard's own tree are never killed.
 
 > Why this and not "kill anything with a dead parent": a dead parent PID is **not**
 > proof of abandonment — a detached `-p` worker is *born* with a dead parent and is

@@ -26,10 +26,18 @@ the same ``--enact`` gate, and the same ledger. The liveness test is direction-
 safe under PID reuse: a reused parent PID reads as *alive* and is never reaped
 (a missed reap, never a wrong one).
 
-Single-shot by design: thread count is the load-bearing signal (129k threads is
-unambiguous and needs no second sample), so the guard never has to poll a CPU
-counter twice -- one process scan, one verdict. Cross-platform via the platform's
-own tools (PowerShell on Windows, ``ps`` on Linux); no third-party deps.
+Single-shot by design for the *level* dimensions: thread count is the load-bearing
+signal (129k threads is unambiguous and needs no second sample), so the guard never
+has to poll a counter twice. The one exception is the opt-in **CPU-pin** dimension
+(``--max-cpu-pct``), which catches the quieter runaway the thread ceiling cannot --
+a *single-threaded* process pinning one core to 100% forever (a stuck spin loop, a
+``while true`` in a terminal, an inference binary wedged on the CPU). That has a
+normal thread/handle count, so the only witness is rate-of-CPU: the guard takes two
+(or more) cumulative-CPU-seconds samples ``--cpu-window`` apart and flags a process
+whose *sustained* per-core CPU (the minimum across consecutive windows, so a brief
+legitimate burst that ends mid-measurement is not mistaken for a pin) stays over the
+threshold. Cross-platform via the platform's own tools (PowerShell on Windows, ``ps``
+on Linux); no third-party deps.
 
 Exit code: 0 == clean / disabled (no runaway) ; 1 == a runaway is flagged
 (ACTION). With ``--enact`` the kills are reported in the JSON ``enacted`` list.
@@ -41,6 +49,7 @@ import json
 import os
 import platform
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -54,6 +63,14 @@ SCHEMA = "fleet-proc-resource-guard/1"
 DEFAULT_MAX_THREADS = 2000
 DEFAULT_MAX_HANDLES = 0  # 0 == dimension disabled
 DEFAULT_MAX_WS_MB = 0    # 0 == dimension disabled
+
+# CPU-pin dimension (opt-in via --max-cpu-pct; 0 disables). Percent is TOP-style
+# per-core: 100 == one full core saturated, 400 == four cores. A single-threaded
+# runaway pins exactly one core (100%/core) while showing a normal thread/handle
+# count, so this is the only dimension that needs two samples (a rate, not a level).
+DEFAULT_MAX_CPU_PCT = 0.0      # 0 == dimension disabled (default)
+DEFAULT_CPU_WINDOW_SEC = 3.0   # seconds between consecutive CPU samples
+DEFAULT_CPU_SAMPLES = 2        # 2 == one window; >2 requires the pin to hold every window
 
 # Orphan-sprawl reaping (opt-in via --reap-orphans / --reap-idle-shells). An
 # "orphaned helper" is an ephemeral stdio child still resident after its owner
@@ -99,6 +116,7 @@ def classify(
     max_threads: int = DEFAULT_MAX_THREADS,
     max_handles: int = DEFAULT_MAX_HANDLES,
     max_ws_mb: int = DEFAULT_MAX_WS_MB,
+    max_cpu_pct: float = DEFAULT_MAX_CPU_PCT,
     protected_pids: frozenset[int] = frozenset(),
     protected_names: frozenset[str] = PROTECTED_NAMES,
     allow_names: frozenset[str] = frozenset(),
@@ -106,8 +124,8 @@ def classify(
     """Return the subset of ``procs`` that breach a configured threshold.
 
     Each input proc is a dict with at least ``pid`` and ``name``; ``threads``,
-    ``handles``, ``ws_mb`` are optional (a missing / negative value means the
-    collector could not read that dimension on this platform and it is skipped,
+    ``handles``, ``ws_mb``, ``cpu_pct`` are optional (a missing / negative value means
+    the collector could not read that dimension on this platform and it is skipped,
     never treated as a breach). Output rows carry ``reasons`` and a ``protected``
     bit so the reaper can refuse protected kills.
     """
@@ -121,12 +139,15 @@ def classify(
         threads = _as_int(proc.get("threads"))
         handles = _as_int(proc.get("handles"))
         ws_mb = _as_int(proc.get("ws_mb"))
+        cpu_pct = _as_float(proc.get("cpu_pct"))
         if max_threads > 0 and threads is not None and threads > max_threads:
             reasons.append(f"threads {threads} > {max_threads}")
         if max_handles > 0 and handles is not None and handles > max_handles:
             reasons.append(f"handles {handles} > {max_handles}")
         if max_ws_mb > 0 and ws_mb is not None and ws_mb > max_ws_mb:
             reasons.append(f"ws_mb {ws_mb} > {max_ws_mb}")
+        if max_cpu_pct > 0 and cpu_pct is not None and cpu_pct > max_cpu_pct:
+            reasons.append(f"cpu {cpu_pct:.0f}%/core > {max_cpu_pct:.0f}% sustained")
         if not reasons:
             continue
         pid = _as_int(proc.get("pid"))
@@ -138,11 +159,14 @@ def classify(
                 "threads": threads,
                 "handles": handles,
                 "ws_mb": ws_mb,
+                "cpu_pct": cpu_pct,
                 "reasons": reasons,
                 "protected": protected,
             }
         )
-    flagged.sort(key=lambda r: (r["threads"] or 0), reverse=True)
+    # Surface the loudest signal first: a CPU pin (a live core-burner) outranks a
+    # high static thread count for operator attention, then thread count breaks ties.
+    flagged.sort(key=lambda r: (r.get("cpu_pct") or 0.0, r.get("threads") or 0), reverse=True)
     return flagged
 
 
@@ -258,7 +282,7 @@ def _merge_flagged(
             by_pid[pid] = dict(row)
             order.append(pid)
     merged = [by_pid[p] for p in order]
-    merged.sort(key=lambda r: (r.get("threads") or 0), reverse=True)
+    merged.sort(key=lambda r: (r.get("cpu_pct") or 0.0, r.get("threads") or 0), reverse=True)
     return merged
 
 
@@ -271,6 +295,7 @@ def build_payload(
     protected_pids: frozenset[int],
     allow_names: frozenset[str],
     enact: bool,
+    max_cpu_pct: float = DEFAULT_MAX_CPU_PCT,
     killer: Any = None,
     collect_error: str = "",
     orphan_rows: list[dict[str, Any]] | None = None,
@@ -281,6 +306,7 @@ def build_payload(
             max_threads=max_threads,
             max_handles=max_handles,
             max_ws_mb=max_ws_mb,
+            max_cpu_pct=max_cpu_pct,
             protected_pids=protected_pids,
             allow_names=allow_names,
         ),
@@ -317,6 +343,7 @@ def build_payload(
             "max_threads": max_threads,
             "max_handles": max_handles,
             "max_ws_mb": max_ws_mb,
+            "max_cpu_pct": max_cpu_pct,
         },
         "scanned": len(procs),
         "flagged_count": len(flagged),
@@ -357,6 +384,62 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def _as_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def cpu_pct_delta(cpu_s_before: Any, cpu_s_after: Any, dt: float) -> float | None:
+    """Per-core (top-style) CPU% over one window: 100 == one full core saturated.
+
+    ``cpu_s_*`` are cumulative CPU-seconds (summed over every core the process used).
+    A process that burned one core for the whole ``dt``-second window accrues ``dt``
+    CPU-seconds -> 100%; four cores -> 400%. Returns ``None`` (dimension skipped, never
+    a breach) when a sample is missing or the counter went backwards -- a backward
+    delta means the PID was reused by a newly-started process, so we refuse to
+    attribute the old process's time to it (a missed flag, never a wrong kill)."""
+    before = _as_float(cpu_s_before)
+    after = _as_float(cpu_s_after)
+    if before is None or after is None or dt <= 0:
+        return None
+    delta = after - before
+    if delta < 0:
+        return None
+    return (delta / dt) * 100.0
+
+
+def cpu_pct_sustained(samples: list[dict[Any, Any]], dt: float) -> dict[Any, float]:
+    """Sustained per-core CPU% per pid: the MINIMUM window-% across consecutive
+    samples. Each entry of ``samples`` maps pid -> cumulative CPU-seconds at one
+    instant, taken ``dt`` apart. Taking the minimum (not the mean) is what makes the
+    signal a *pin* and not a *burst*: a process must stay over the threshold in EVERY
+    window to score high, so a legitimate compile that saturates a core for one window
+    and then finishes scores its quiet window (low) and is not flagged. A pid missing
+    from any sample, or whose counter went backwards in any window, is omitted."""
+    if len(samples) < 2 or dt <= 0:
+        return {}
+    pids: set[Any] = set()
+    for snap in samples:
+        pids.update(snap.keys())
+    out: dict[Any, float] = {}
+    for pid in pids:
+        windows: list[float] = []
+        ok = True
+        for before, after in zip(samples, samples[1:]):
+            pct = cpu_pct_delta(before.get(pid), after.get(pid), dt)
+            if pct is None:
+                ok = False
+                break
+            windows.append(pct)
+        if ok and windows:
+            out[pid] = min(windows)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Platform collectors (I/O)
 # --------------------------------------------------------------------------- #
@@ -370,11 +453,40 @@ def collect_processes() -> tuple[list[dict[str, Any]], str]:
         return [], f"{type(exc).__name__}: {exc}"
 
 
+def collect_processes_cpu(
+    window_sec: float = DEFAULT_CPU_WINDOW_SEC,
+    samples: int = DEFAULT_CPU_SAMPLES,
+    sleeper: Any = time.sleep,
+) -> tuple[list[dict[str, Any]], str]:
+    """Like ``collect_processes`` but enriches each row with a ``cpu_pct`` measured
+    over ``samples`` snapshots taken ``window_sec`` apart. The LAST (most recent)
+    snapshot is returned as the process set, annotated with the sustained per-core
+    CPU% (``cpu_pct_sustained`` -> the minimum across windows). Used only when the
+    CPU dimension is enabled, so the common path pays no extra scan. ``sleeper`` is
+    injectable for hermetic tests."""
+    n = max(2, samples)
+    snaps: list[dict[Any, Any]] = []
+    last: list[dict[str, Any]] = []
+    for i in range(n):
+        if i:
+            sleeper(max(0.1, window_sec))
+        procs, err = collect_processes()
+        if err:
+            return procs, err
+        last = procs
+        snaps.append({p.get("pid"): p.get("cpu_s") for p in procs if p.get("pid") is not None})
+    pct = cpu_pct_sustained(snaps, window_sec)
+    for p in last:
+        p["cpu_pct"] = pct.get(p.get("pid"))
+    return last, ""
+
+
 def _collect_windows() -> list[dict[str, Any]]:
     script = (
         "Get-Process -ErrorAction SilentlyContinue | ForEach-Object { "
         "try { [pscustomobject]@{ pid=$_.Id; name=$_.ProcessName; "
-        "threads=$_.Threads.Count; handles=$_.HandleCount; ws=[int64]$_.WorkingSet64 } } catch {} "
+        "threads=$_.Threads.Count; handles=$_.HandleCount; ws=[int64]$_.WorkingSet64; "
+        "cpu=$_.CPU } } catch {} "
         "} | ConvertTo-Json -Compress"
     )
     proc = subprocess.run(
@@ -405,17 +517,21 @@ def _parse_windows_json(text: str) -> list[dict[str, Any]]:
                 "threads": _as_int(row.get("threads")),
                 "handles": _as_int(row.get("handles")),
                 "ws_mb": (ws // (1024 * 1024)) if ws is not None else None,
+                "cpu_s": _as_float(row.get("cpu")),
             }
         )
     return out
 
 
 def _collect_posix() -> list[dict[str, Any]]:
-    # nlwp == number of light-weight processes (threads). Linux ps supports it;
-    # if a platform's ps does not, threads come back None and the thread
-    # dimension is simply skipped for that host (ws still works).
+    # nlwp == number of light-weight processes (threads). cputimes == cumulative
+    # CPU seconds (Linux ps; integer resolution -- use a longer --cpu-window on
+    # POSIX so a one-second tick is a small fraction of the window). cputimes sits
+    # BEFORE comm so a space-bearing command name stays the parser's final field.
+    # If a platform's ps lacks a column it comes back absent and that dimension is
+    # simply skipped for that host (the others still work).
     proc = subprocess.run(
-        ["ps", "-eo", "pid=,nlwp=,rss=,comm="],
+        ["ps", "-eo", "pid=,nlwp=,rss=,cputimes=,comm="],
         capture_output=True,
         text=True,
         timeout=30,
@@ -427,10 +543,16 @@ def _collect_posix() -> list[dict[str, Any]]:
 def _parse_posix_ps(text: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for line in (text or "").splitlines():
-        parts = line.split(None, 3)
-        if len(parts) < 4:
+        parts = line.split(None, 4)
+        # 5-column = pid nlwp rss cputimes comm (current format); 4-column =
+        # pid nlwp rss comm (a ps without cputimes) -> cpu_s skipped, not a breach.
+        if len(parts) >= 5:
+            pid, nlwp, rss, cputimes, comm = parts[0], parts[1], parts[2], parts[3], parts[4]
+        elif len(parts) == 4:
+            pid, nlwp, rss, comm = parts
+            cputimes = None
+        else:
             continue
-        pid, nlwp, rss, comm = parts
         rss_kb = _as_int(rss)
         out.append(
             {
@@ -439,6 +561,7 @@ def _parse_posix_ps(text: str) -> list[dict[str, Any]]:
                 "threads": _as_int(nlwp),
                 "handles": None,
                 "ws_mb": (rss_kb // 1024) if rss_kb is not None else None,
+                "cpu_s": _as_float(cputimes),
             }
         )
     return out
@@ -576,9 +699,11 @@ def render(payload: dict[str, Any]) -> str:
     for row in payload.get("flagged") or []:
         tag = "PROTECTED" if row.get("protected") else (row.get("action") or "report")
         kind = f"{row.get('kind')} " if row.get("kind") else ""
+        cpu = row.get("cpu_pct")
+        cpu_str = f"cpu={cpu:.0f}%/core " if cpu is not None else ""
         lines.append(
             f"  [{tag}] {kind}pid={row.get('pid')} {row.get('name')} "
-            f"threads={row.get('threads')} handles={row.get('handles')} "
+            f"{cpu_str}threads={row.get('threads')} handles={row.get('handles')} "
             f"ws_mb={row.get('ws_mb')} :: {', '.join(row.get('reasons') or [])}"
         )
     lines.append(f"next: {payload.get('next_action')}")
@@ -587,11 +712,38 @@ def render(payload: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Flag (and optionally reap) runaway processes by thread/handle/working-set count."
+        description="Flag (and optionally reap) runaway processes by thread/handle/"
+        "working-set count or sustained per-core CPU."
     )
     ap.add_argument("--max-threads", type=int, default=DEFAULT_MAX_THREADS)
     ap.add_argument("--max-handles", type=int, default=DEFAULT_MAX_HANDLES, help="0 disables")
     ap.add_argument("--max-ws-mb", type=int, default=DEFAULT_MAX_WS_MB, help="0 disables")
+    ap.add_argument(
+        "--max-cpu-pct",
+        type=float,
+        default=DEFAULT_MAX_CPU_PCT,
+        metavar="PCT",
+        help="flag a process sustaining > PCT%% of ONE core (top-style: 100 = one full "
+        "core) across --cpu-samples windows. Catches a single-threaded runaway pinning a "
+        "core that the thread ceiling misses. 0 disables (default).",
+    )
+    ap.add_argument(
+        "--cpu-window",
+        type=float,
+        default=DEFAULT_CPU_WINDOW_SEC,
+        metavar="SEC",
+        help=f"seconds between consecutive CPU samples (default {DEFAULT_CPU_WINDOW_SEC}; "
+        "use longer on POSIX where cputimes is integer-second)",
+    )
+    ap.add_argument(
+        "--cpu-samples",
+        type=int,
+        default=DEFAULT_CPU_SAMPLES,
+        metavar="N",
+        help="CPU snapshots to take (>=2; default 2 = one window). N>2 requires the pin to "
+        "hold in EVERY window, so a brief legit burst is not mistaken for a runaway -- the "
+        "safe setting before --enact (e.g. --cpu-samples 4 --cpu-window 2 = 6s sustained).",
+    )
     ap.add_argument(
         "--allow",
         action="append",
@@ -635,7 +787,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--log-dir", default="", help="watchdog log dir (default: tools/_watchdog)")
     args = ap.parse_args(argv)
 
-    procs, collect_error = collect_processes()
+    # The CPU dimension needs two+ samples; every other dimension is single-shot.
+    if args.max_cpu_pct > 0:
+        procs, collect_error = collect_processes_cpu(args.cpu_window, args.cpu_samples)
+    else:
+        procs, collect_error = collect_processes()
     # Never let the guard kill its own process tree.
     protected_pids = frozenset(p for p in (os.getpid(), os.getppid()) if p)
 
@@ -668,6 +824,7 @@ def main(argv: list[str] | None = None) -> int:
         max_threads=args.max_threads,
         max_handles=args.max_handles,
         max_ws_mb=args.max_ws_mb,
+        max_cpu_pct=args.max_cpu_pct,
         protected_pids=protected_pids,
         allow_names=frozenset(args.allow),
         enact=args.enact,
