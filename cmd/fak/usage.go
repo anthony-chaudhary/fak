@@ -169,6 +169,13 @@ func usageCoreVerbs() {
                  cross-check the real kernel admit verdict (would the context-MMU
                  quarantine it?), then RECOMMEND what to do about each finding. Exit 1
                  on any finding. The fak analogue of 'dos doctor')
+  fak index     lane <path>... | leaf [<query>] | docs <query>   [--json] [--limit N] [--root DIR]
+                (the QUERYABLE SELF-INDEX: query fak's own dev facts instead of
+                 re-surveying prose. 'lane' resolves which lane/leaf owns a path
+                 (+ the (fak <leaf>) commit stamp it implies); 'leaf' searches the
+                 dos.toml lane taxonomy by name/tree/description; 'docs' ranks the
+                 curated INDEX.md doc map by relevance. A VIEW over dos.toml + INDEX.md,
+                 never a competing source of truth. --json for tooling/MCP)
 `)
 }
 
@@ -368,6 +375,11 @@ func usageScorecardVerbs() {
                  matrix into support_maturity_debt, coverage percentage, and an A-F grade.
                  --matrix-md emits the generated matrix block; --write-doc regenerates it in
                  docs/HARDWARE-MATRIX.md; --check-doc reds when a committed cell is stale)
+  fak learning-debt-dispatch --scorecard FILE [--cap N] [--cache FILE] [--live]
+                [--fetch-existing] [--existing-json FILE] [--repo owner/repo] [--json]
+                (learning-scorecard -> backlog: file at most --cap triage issues for HARD
+                 learning-debt defects, deduped by the gitignored seen-cache plus issue-body
+                 markers. Dry-run by default; --live is required to call gh and update cache)
   fak steering  status | report | alert [--index-delta N] [--pin] | pin
                 [--channel ID] [--scorecard-json FILE] [--dry-run]
                 (the STEERABILITY Slack surface for #steering-guard: status posts the

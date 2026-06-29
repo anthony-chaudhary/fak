@@ -137,6 +137,8 @@ func main() {
 		cmdClaimCheck(os.Args[2:])
 	case "doctor":
 		cmdDoctor(os.Args[2:])
+	case "index":
+		cmdIndex(os.Args[2:])
 	case "tree-doctor":
 		cmdTreeDoctor(os.Args[2:])
 	case "self-update":
