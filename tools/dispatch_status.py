@@ -763,6 +763,32 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     return "\n".join(out) + "\n"
 
 
+def slack_text(payload: dict[str, Any]) -> str:
+    """The Slack message body for a status card: a one-line headline (so the channel
+    preview and notification carry the verdict) above the full boxed card in a code
+    fence (monospace keeps the box-drawing aligned)."""
+    import slack_post  # sibling module in tools/
+
+    verdict = payload.get("verdict")
+    ok = payload.get("ok")
+    headline = f"*dispatch status:* `{verdict}` ({'ok' if ok else 'ACTION'})"
+    return headline + "\n" + slack_post.wrap_code(render(payload))
+
+
+def post_to_slack(payload: dict[str, Any], *, channel: str = "",
+                  dry_run: bool = False, transport: Any | None = None) -> dict[str, Any]:
+    """Post the rendered status card to Slack via tools/slack_post. Never raises — a
+    missing poster or a Slack failure becomes a typed verdict the caller logs, exactly
+    like the rest of this read-only fold. Channel/token resolve through slack_post
+    (``$FAK_DISPATCH_CHANNEL`` / the shared scoreboard token) unless ``channel`` is set."""
+    try:
+        import slack_post  # sibling module in tools/
+    except Exception as exc:  # noqa: BLE001
+        return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
+    return slack_post.send(slack_text(payload), channel=channel, dry_run=dry_run,
+                           transport=transport)
+
+
 def git_date(root: Path) -> str:
     """The last-commit date (YYYY-MM-DD) — deterministic, no wall-clock in the tool."""
     try:
@@ -789,14 +815,43 @@ def main(argv: list[str] | None = None) -> int:
                     help="write the committed markdown status doc to this path "
                          "(forces the full fold; --fast is ignored when --md is set)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--slack", nargs="?", const="__env__", default=None,
+                    metavar="CHANNEL",
+                    help="post the status card to Slack (optional channel id; default: "
+                         "$FAK_DISPATCH_CHANNEL via tools/slack_post). Forces the full "
+                         "fold so the posted card is never all-n/a.")
+    ap.add_argument("--slack-dry-run", action="store_true",
+                    help="with --slack: resolve the channel/token and report what WOULD "
+                         "be posted without sending")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     # The committed doc must carry the real backlog/closure tables, so --md always
-    # runs the full fold regardless of --fast.
-    fast = args.fast and not args.md
+    # runs the full fold regardless of --fast. A LIVE Slack post is just as useless when
+    # every row reads "n/a (fast)", so --slack forces the full fold too — but a
+    # --slack-dry-run is a wiring check where speed matters, so it still honors --fast.
+    live_slack = args.slack is not None and not args.slack_dry_run
+    fast = args.fast and not args.md and not live_slack
     payload = collect(root, max_workers=args.max_workers, fast=fast,
                       closure_commits=args.closure_commits)
+
+    if args.slack is not None:
+        channel = "" if args.slack == "__env__" else args.slack
+        slack_verdict = post_to_slack(payload, channel=channel,
+                                      dry_run=args.slack_dry_run)
+        payload["slack"] = slack_verdict
+        if not args.json:
+            if slack_verdict.get("posted"):
+                print(f"slack: posted card to {slack_verdict.get('channel')} "
+                      f"(ts={slack_verdict.get('ts')})")
+            elif slack_verdict.get("dry_run"):
+                print(f"slack (dry-run): would post to "
+                      f"{slack_verdict.get('channel') or '(unset)'} "
+                      f"[{slack_verdict.get('channel_source')}]")
+            elif slack_verdict.get("skipped"):
+                print(f"slack: skipped — {slack_verdict.get('skipped')}")
+            else:
+                print(f"slack: FAILED — {slack_verdict.get('error')}")
 
     if args.md:
         md_path = Path(args.md)

@@ -371,5 +371,84 @@ class RenderMdTest(unittest.TestCase):
         self.assertIn("Closure audit n/a", md)
 
 
+class SlackPostTest(unittest.TestCase):
+    """The --slack wiring: slack_text is pure; post_to_slack resolves + posts via the
+    injected transport (no network, no real token/channel)."""
+
+    SLACK_KEYS = ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN")
+
+    def _clear_env(self):
+        import os
+        saved = {k: os.environ.pop(k, None) for k in self.SLACK_KEYS}
+        self.addCleanup(self._restore_env, saved)
+
+    def _restore_env(self, saved):
+        import os
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_slack_text_has_headline_and_fenced_card(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"))
+        text = mod.slack_text(p)
+        self.assertIn("*dispatch status:* `READY_TO_GROW` (ok)", text)
+        self.assertIn("```", text)            # card is fenced for monospace alignment
+        self.assertIn("DISPATCHER", text)     # the rendered card body is included
+
+    def test_post_to_slack_posts_via_injected_transport(self) -> None:
+        import json as _json
+        import os
+        mod = load()
+        self._clear_env()
+        os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test-tok"
+        os.environ["FAK_DISPATCH_CHANNEL"] = "C0DISPATCH"
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append({"url": url, "body": _json.loads(body.decode("utf-8")),
+                          "auth": headers.get("Authorization")})
+            return 200, _json.dumps({"ok": True, "ts": "9.9", "channel": "C0DISPATCH"})
+
+        p = build(mod, pre=pre("SPAWN_OK"))
+        verdict = mod.post_to_slack(p, transport=transport)
+        self.assertTrue(verdict["posted"])
+        self.assertEqual(verdict["channel"], "C0DISPATCH")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["auth"], "Bearer xoxb-test-tok")
+        self.assertIn("READY_TO_GROW", calls[0]["body"]["text"])
+
+    def test_post_to_slack_dry_run_does_not_call_transport(self) -> None:
+        import os
+        mod = load()
+        self._clear_env()
+        os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test-tok"
+        os.environ["FAK_DISPATCH_CHANNEL"] = "C0DISPATCH"
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append(1)
+            return 200, "{}"
+
+        p = build(mod, pre=pre("SPAWN_OK"))
+        verdict = mod.post_to_slack(p, dry_run=True, transport=transport)
+        self.assertFalse(verdict["posted"])
+        self.assertEqual(verdict["skipped"], "dry-run")
+        self.assertEqual(calls, [])
+
+    def test_post_to_slack_skips_cleanly_without_channel(self) -> None:
+        import os
+        mod = load()
+        self._clear_env()
+        os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test-tok"
+        # no channel anywhere -> a clean skip, never a crash
+        p = build(mod, pre=pre("SPAWN_OK"))
+        verdict = mod.post_to_slack(p, channel="")
+        self.assertFalse(verdict["posted"])
+        self.assertIn("no channel", verdict["skipped"])
+
+
 if __name__ == "__main__":
     unittest.main()
