@@ -71,7 +71,30 @@ overnight collection (`docs/nightrun/collected.jsonl`, 2026-06-28):
 
 The cpu-offload path is host-expert-GEMM-bound; resident EP moves that GEMM onto the idle GPUs.
 
-## What is `not yet` (the honest gap to a live number)
+## Benchmark run this session (native GLM-DSA decode, host CPU)
+
+To keep the benchmark thread honest with an actually-executed measurement (not only the
+capacity computation above), `cmd/glmdsatput -backend legacy` was run on the agent-host CPU
+this session. It drives fak's **native** glm_moe_dsa forward — the real MLA + DSA-indexer +
+sparse-attend + dense-FFN kernels — over a synthetic, reduced-layer model. A 3-point sweep
+(Q8_0, prompt=64, 16 decode steps, median of 3 reps):
+
+| config (layers × hidden, heads, inter) | prefill tok/s | decode tok/s | ms/tok |
+|---|---|---|---|
+| 4 × 1024, h8, i4096 | 33.6 | **33.57** | 29.79 |
+| 8 × 1024, h8, i4096 (2× depth) | 19.1 | **17.85** | 56.01 |
+| 4 × 2048, h16, i8192 (2× width) | 12.5 | **9.31** | 107.42 |
+
+Scaling is coherent: 2× depth → 1.88× slower decode (near-linear in layer count), 2× width
+→ 3.6× slower (super-linear — attention + FFN GEMMs grow with hidden²). These are WITNESSED on
+fak's own kernels, this session, on the **agent-host CPU** (a desktop, not a bench-node), and
+carry the tool's own scope label: **synthetic weights, reduced layers, dense-FFN (no MoE expert
+GEMMs), optimistic lower-bound, NOT the 753B**. They measure the native GLM-5.2-architecture
+per-token cost on this CPU, not full-checkpoint serving throughput (that is the cpu-offload /
+resident-EP number below). The EP decomposition this note lands does not change these single-box
+figures — its win is multi-GPU residency, which needs the device collective.
+
+## What is `not yet` (the honest gap to a live 753B number)
 
 A **live resident-EP tok/s witness** does not exist yet. Three things gate it, in order:
 
