@@ -186,6 +186,14 @@ def test_excluded_py():
     assert tq._excluded_py("conftest.py")
     assert tq._excluded_py("__pycache__/x.py")
     assert not tq._excluded_py("real_tool.py")
+    # agent-machinery repo COPIES (`.dos/_dos_park/_iso_build/`, `.fak/tmp/`,
+    # `.claude/worktrees/`) must be pruned or every copied .py double-counts as debt.
+    assert tq._excluded_py(".dos/_dos_park/_iso_build/tools/foo.py")
+    assert tq._excluded_py(".fak/tmp/issue1-clean-abc/tools/foo.py")
+    assert tq._excluded_py(".claude/worktrees/wt/tools/foo.py")
+    # a cp1252<->utf-8 mojibake phantom path (U+F05C backslash-glyph) is never source.
+    assert tq._excluded_py(chr(0xF05C) + "/tools/foo.py")
+    assert not tq._excluded_py("tools/real_tool.py")
 
 
 # --- compare --------------------------------------------------------------
