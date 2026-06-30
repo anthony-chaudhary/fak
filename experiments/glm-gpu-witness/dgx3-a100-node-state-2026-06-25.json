@@ -45,7 +45,7 @@
     "quant": "unsloth/GLM-5.2-GGUF UD-Q4_K_M (~466 GB, 11 shards)",
     "staging_dir": "/projects/glm52-q4 (4.1 TB free; fits the 466 GB shards)",
     "expert_offload": "n-cpu-moe=999 keeps MoE experts on the ~2 TB host RAM; A100s hold attention/shared tensors",
-    "status_as_of_capture": "runner committed to origin/main; launch blocked on a degraded Slack control-bridge (box sessions stopped consuming stdin mid-session). Not a kernel/approach block; re-launch when the bridge recovers."
+    "status_as_of_capture": "runner committed to origin/main; launch blocked on a degraded private control bridge (box sessions stopped consuming stdin mid-session). Not a kernel/approach block; re-launch when the bridge recovers."
   },
   "fak_path_verified_locally": {
     "note": "The fak kernel + fak local guard path that will front the GLM-5.2 endpoint is verified end-to-end against an OpenAI-compatible wire (the same wire llama.cpp serves). Only the GLM-5.2 endpoint itself is gated on the box.",

@@ -13,7 +13,7 @@ raw-vs-fak run. It makes no result claim; it makes the run turnkey.
 
 ## Witnessed node readiness — a GPU server node ("GPU server", 2026-06-27 16:42Z)
 
-Probed read-only via the Slack control bridge (`fak-private/tools/dgxsh.py`; the node's
+Probed read-only via the private control bridge (`fak-private/tools/dgxsh.py`; the node's
 control channel and hostname live in the gitignored private tooling, never the public repo):
 
 | Gate | Status |

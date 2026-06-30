@@ -46,7 +46,7 @@
     "speedup_vs_cpu_offload": "~100x",
     "pure_cpu_llamacpp_decode_tok_s": 0.89,
     "speedup_vs_pure_cpu_baseline": "~26x",
-    "baselines_source": "docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md"
+    "baselines_source": "docs/nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md"
   },
   "fak_fronting": {
     "note": "fak's gateway fronts the multi-GPU endpoint and accounts tokens + cache.",
