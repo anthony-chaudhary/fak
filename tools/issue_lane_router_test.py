@@ -517,5 +517,23 @@ class ViewFetchFailSoft(unittest.TestCase):
             m.fetch_view_issues(Path("."), "no-such-view-zzz")
 
 
+class LaneConfTagTest(unittest.TestCase):
+    def test_strongest_rung_first_zeros_omitted(self):
+        tag = m._lane_conf_tag({"exact-scope": 4, "path-confirmed": 1,
+                                "keyword": 2, "label": 0})
+        self.assertEqual(tag, "path 1·scope 4·kw 2")   # rank order; label(0) omitted
+
+    def test_empty_or_none_is_blank(self):
+        self.assertEqual(m._lane_conf_tag(None), "")
+        self.assertEqual(m._lane_conf_tag({}), "")
+
+    def test_render_shows_lane_confidence_tag(self):
+        routes = [route(issue(1, "fix(gateway): a")),
+                  route(issue(2, "perf", body="see fak/internal/gateway/serve.go"))]
+        text = m.render(m.build_payload(workspace="C:/work/fleet", routes=routes,
+                                        trees=TREES))
+        self.assertIn("[path 1·scope 1]", text)
+
+
 if __name__ == "__main__":
     unittest.main()
