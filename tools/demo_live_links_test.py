@@ -412,16 +412,18 @@ def test_hosted_status_matrix_folds_http_https_and_witness_state() -> None:
     assert row["page"] == {"checked": True, "ok": True, "status": 200}, row
     assert row["api"]["status"] == 200, row
     assert row["https"]["state"] == "unavailable", row
-    assert {row["demo"] for row in rows if row["status"] == "local_only"} == {"guarddemo", "dropindemo", "unseedemo"}, rows
+    assert {row["demo"] for row in rows if row["status"] == "local_only"} == {
+        "guarddemo", "dropindemo", "unseedemo", "timewolfdemo", "trychatdemo",
+    }, rows
     summary = dl.status_summary(rows)
     assert summary["hosted"] == 1, summary
     assert summary["hosted_links"] == 1, summary
     assert summary["hosted_demos"] == 1, summary
     assert summary["hub"] == 0, summary
     assert summary["ok"] == 1, summary
-    assert summary["local_only"] == 3, summary
+    assert summary["local_only"] == 5, summary
     assert summary["https"]["unavailable"] == 1, summary
-    assert summary["https"]["not_applicable"] == 3, summary
+    assert summary["https"]["not_applicable"] == 5, summary
 
 
 def test_collect_real_doc_includes_static_status_matrix() -> None:
@@ -429,10 +431,13 @@ def test_collect_real_doc_includes_static_status_matrix() -> None:
     rows = payload["audit"]["status_matrix"]
     assert rows, payload
     assert {row["demo"] for row in rows} == {
-        "guarddemo", "turntaxdemo", "ctxdemo", "demorace", "dropindemo", "unseedemo", "hub",
+        "guarddemo", "turntaxdemo", "ctxdemo", "demorace", "dropindemo",
+        "unseedemo", "timewolfdemo", "trychatdemo", "hub",
     }, rows
     local_only = [row for row in rows if row["status"] == "local_only"]
-    assert {row["demo"] for row in local_only} == {"guarddemo", "dropindemo", "unseedemo"}, rows
+    assert {row["demo"] for row in local_only} == {
+        "guarddemo", "dropindemo", "unseedemo", "timewolfdemo", "trychatdemo",
+    }, rows
     assert all(row["transport"] == "not_hosted" for row in local_only), rows
     hosted = [row for row in rows if row["status"] == "ok"]
     assert {row["demo"] for row in hosted} == {"turntaxdemo", "ctxdemo", "demorace", "hub"}, rows
@@ -445,12 +450,14 @@ def test_collect_real_doc_includes_static_status_matrix() -> None:
     assert summary["hub"] == 1, summary
     assert summary["check"] == 4, summary
     assert summary["action"] == 0, summary
-    assert summary["local_only"] == 3, summary
+    assert summary["local_only"] == 5, summary
     rendered = dl.render(payload)
     assert "demo status:" in rendered, rendered
     assert "LOCAL guarddemo local-only" in rendered, rendered
     assert "LOCAL dropindemo local-only" in rendered, rendered
     assert "LOCAL unseedemo local-only" in rendered, rendered
+    assert "LOCAL timewolfdemo local-only" in rendered, rendered
+    assert "LOCAL trychatdemo local-only" in rendered, rendered
 
 
 def test_status_title_names_static_live_and_published_modes() -> None:
@@ -468,7 +475,7 @@ def test_format_count_map_is_stable() -> None:
 def test_render_summary_line_uses_status_summary() -> None:
     payload = dl.collect(dl.repo_root(), live=False)
     assert dl.render_summary_line(payload["audit"]).startswith(
-        "summary: hosted-links=4 hosted-demos=3 hub=1 ok=0 check=4 action=0 local-only=3"
+        "summary: hosted-links=4 hosted-demos=3 hub=1 ok=0 check=4 action=0 local-only=5"
     )
 
 
@@ -476,10 +483,12 @@ def test_render_status_includes_hosted_and_local_only_rows() -> None:
     payload = dl.collect(dl.repo_root(), live=False)
     rendered = dl.render_status(payload)
     assert rendered.startswith("demo-static-status: OK"), rendered
-    assert "summary: hosted-links=4 hosted-demos=3 hub=1 ok=0 check=4 action=0 local-only=3" in rendered, rendered
+    assert "summary: hosted-links=4 hosted-demos=3 hub=1 ok=0 check=4 action=0 local-only=5" in rendered, rendered
     assert "turntaxdemo card        CHECK" in rendered, rendered
     assert "guarddemo" in rendered and "local-only" in rendered and "LOCAL" in rendered, rendered
     assert "unseedemo" in rendered and "local-only" in rendered and "LOCAL" in rendered, rendered
+    assert "timewolfdemo" in rendered and "local-only" in rendered and "LOCAL" in rendered, rendered
+    assert "trychatdemo" in rendered and "local-only" in rendered and "LOCAL" in rendered, rendered
     assert "(not hosted)" in rendered, rendered
 
 
@@ -504,13 +513,15 @@ def test_collect_published_matrix_names_stale_demo_instead_of_unknown() -> None:
         assert any("stale hosted demo link for guarddemo" in d for d in guard["defects"]), rows
         assert [row["demo"] for row in rows].count("guarddemo") == 1, rows
         summary = payload["audit"]["status_summary"]
+        local_only = {row["demo"] for row in rows if row["status"] == "local_only"}
+        assert local_only == {"dropindemo", "unseedemo", "timewolfdemo", "trychatdemo"}, rows
         assert summary["hosted"] == 5, summary
         assert summary["hosted_links"] == 5, summary
         assert summary["hosted_demos"] == 4, summary
         assert summary["hub"] == 1, summary
         assert summary["action"] == 1, summary
         assert summary["check"] == 4, summary
-        assert summary["local_only"] == 2, summary
+        assert summary["local_only"] == len(local_only), summary
         rendered = dl.render(payload)
         assert "ACTION guarddemo card" in rendered, rendered
         status = dl.render_status(payload)
