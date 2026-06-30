@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -30,6 +32,14 @@ type windowgatePayload struct {
 	Tools       map[string]int `json:"watchlist_tools,omitempty"`
 	Files       map[string]int `json:"watchlist_files,omitempty"`
 	Dirs        map[string]int `json:"watchlist_dirs,omitempty"`
+	LiveTasks   *liveTaskPayload `json:"live_tasks,omitempty"`
+}
+
+type liveTaskPayload struct {
+	OK         bool     `json:"ok"`
+	Scanned    int      `json:"scanned"`
+	Violations []string `json:"violations,omitempty"`
+	Watchlist  []string `json:"watchlist,omitempty"`
 }
 
 func cmdWindowgate(argv []string) { os.Exit(runWindowgate(os.Stdout, os.Stderr, argv)) }
@@ -43,6 +53,7 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	failCandidates := fs.Bool("fail-on-candidates", false, "also exit non-zero when advisory console-tool candidates remain")
+	liveTasks := fs.Bool("live-tasks", false, "also audit already-installed Windows Scheduled Tasks")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -63,6 +74,16 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	payload := buildWindowgatePayload(root, rep, *failCandidates)
+	if *liveTasks {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		live, err := windowgate.ScanLiveScheduledTasks(ctx)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak windowgate: live tasks: %v\n", err)
+			return 1
+		}
+		attachLiveTaskPayload(&payload, live, *failCandidates)
+	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fak windowgate: encode json: %v\n", err)
@@ -130,6 +151,27 @@ func buildWindowgatePayload(root string, rep windowgate.Report, failCandidates b
 	return p
 }
 
+func attachLiveTaskPayload(p *windowgatePayload, live windowgate.LiveTaskReport, failWatchlist bool) {
+	p.LiveTasks = &liveTaskPayload{
+		OK:         live.OK(),
+		Scanned:    live.Scanned,
+		Violations: append([]string{}, live.Violations...),
+		Watchlist:  append([]string{}, live.Watchlist...),
+	}
+	if len(live.Violations) > 0 {
+		p.OK = false
+		p.Verdict = "ACTION"
+		p.Finding = "no_desktop_popup_live_task_regression"
+		p.Reason = fmt.Sprintf("%d live Scheduled Task action(s) can still flash visible console windows", len(live.Violations))
+		p.NextAction = "re-register or disable the named task with an off-desktop principal, conhost --headless, pythonw.exe, or -WindowStyle Hidden"
+		return
+	}
+	if failWatchlist && len(live.Watchlist) > 0 {
+		p.OK = false
+		p.Verdict = "ACTION"
+	}
+}
+
 func renderWindowgate(p windowgatePayload) string {
 	var b strings.Builder
 	status := "OK"
@@ -159,6 +201,19 @@ func renderWindowgate(p windowgatePayload) string {
 		b.WriteString("\nwatchlist:\n")
 		for _, row := range p.Watchlist {
 			fmt.Fprintf(&b, "  - %s\n", row)
+		}
+	}
+	if p.LiveTasks != nil {
+		fmt.Fprintf(&b, "\nlive tasks: scanned=%d violations=%d watchlist=%d\n",
+			p.LiveTasks.Scanned, len(p.LiveTasks.Violations), len(p.LiveTasks.Watchlist))
+		for _, row := range p.LiveTasks.Violations {
+			fmt.Fprintf(&b, "  - %s\n", row)
+		}
+		if len(p.LiveTasks.Watchlist) > 0 {
+			b.WriteString("live task watchlist:\n")
+			for _, row := range p.LiveTasks.Watchlist {
+				fmt.Fprintf(&b, "  - %s\n", row)
+			}
 		}
 	}
 	fmt.Fprintf(&b, "\nreason: %s\nnext: %s", p.Reason, p.NextAction)

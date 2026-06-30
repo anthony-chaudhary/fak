@@ -53,3 +53,18 @@ func TestBuildWindowgatePayloadCanFailCandidates(t *testing.T) {
 		t.Fatalf("payload = ok %v verdict %q finding %q, want candidate ACTION", p.OK, p.Verdict, p.Finding)
 	}
 }
+
+func TestAttachLiveTaskPayloadFailsVisibleTasks(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachLiveTaskPayload(&p, windowgate.LiveTaskReport{
+		Scanned:    2,
+		Violations: []string{"\\Visible: cmd.exe can flash"},
+		Watchlist:  []string{"\\Hidden: review child spawns"},
+	}, false)
+	if p.OK || p.Verdict != "ACTION" || p.Finding != "no_desktop_popup_live_task_regression" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want live-task ACTION", p.OK, p.Verdict, p.Finding)
+	}
+	if p.LiveTasks == nil || p.LiveTasks.Scanned != 2 || len(p.LiveTasks.Violations) != 1 || len(p.LiveTasks.Watchlist) != 1 {
+		t.Fatalf("live task payload not surfaced: %+v", p.LiveTasks)
+	}
+}
