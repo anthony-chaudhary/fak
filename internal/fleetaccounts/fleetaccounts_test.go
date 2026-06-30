@@ -261,6 +261,41 @@ func TestClaudeWorkerWithoutCredentialsIsBlockedByLoginStatus(t *testing.T) {
 	}
 }
 
+func TestCanServeFalseBlocksSwitcherEvenWithoutLoginStatus(t *testing.T) {
+	rows := []Account{{
+		Dir:        "C:/Users/u/.claude-stale",
+		Product:    "claude",
+		Account:    ".claude-stale",
+		Tag:        "stale",
+		Kind:       KindWorker,
+		Reason:     "real offered account",
+		ModelTier:  intp(1),
+		Available: boolp(true),
+		CanServe:  boolp(false),
+	}}
+
+	annotated := Annotate(rows, Registry{})
+	got := annotated[0]
+	if derefBool(got.Available) || !derefBool(got.Blocked) ||
+		derefStr(got.BlockKind) != "auth" || derefStr(got.BlockReason) == "" {
+		t.Fatalf("annotated row = %+v, want auth-blocked by can_serve=false", got)
+	}
+	if len(Available(rows)) != 0 || len(Available(annotated)) != 0 {
+		t.Fatalf("can_serve=false row was offered: raw=%+v annotated=%+v", Available(rows), Available(annotated))
+	}
+
+	route := RouteAccount(rows, "ship feature", "engineering", false, false, "claude", DefaultPolicy())
+	if route.OK || len(route.BlockedTargetAccounts) != 1 ||
+		route.BlockedTargetAccounts[0].CanServe == nil || *route.BlockedTargetAccounts[0].CanServe {
+		t.Fatalf("route = %+v, want blocked target with can_serve=false", route)
+	}
+
+	resolved := Resolve(rows, t.TempDir(), ResolveRequest{Pin: "stale"}, DefaultPolicy())
+	if resolved.OK || !strings.Contains(resolved.Reason, "blocked") || resolved.BlockReason == "" {
+		t.Fatalf("resolve = %+v, want pinned account blocked by can_serve=false", resolved)
+	}
+}
+
 func TestExcludeReasonUsesNote(t *testing.T) {
 	home, cfg, _ := fixture(t)
 	rows := Discover(home, cfg, DefaultPolicy())
