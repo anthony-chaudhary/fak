@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
+func TestBlockDequantParallelMatchesScalar(t *testing.T) {
 	oldProcs := runtime.GOMAXPROCS(4)
 	t.Cleanup(func() { runtime.GOMAXPROCS(oldProcs) })
 
@@ -19,13 +19,79 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 
 	for _, tc := range []struct {
 		name       string
+		qk         int
 		blockBytes int
 		dequant    func([]float32, []byte)
 		scalar     func([]float32, []byte)
 		fixRaw     func([]byte)
 	}{
 		{
+			name:       "Q4_0",
+			qk:         qk4,
+			blockBytes: blockQ4_0Bytes,
+			dequant:    dequantQ4_0,
+			scalar:     dequantQ4_0Scalar,
+			fixRaw: func(raw []byte) {
+				for b := 0; b < len(raw)/blockQ4_0Bytes; b++ {
+					putFiniteF16ParallelTest(raw, b*blockQ4_0Bytes, b)
+				}
+			},
+		},
+		{
+			name:       "Q4_1",
+			qk:         qk4,
+			blockBytes: blockQ4_1Bytes,
+			dequant:    dequantQ4_1,
+			scalar:     dequantQ4_1Scalar,
+			fixRaw: func(raw []byte) {
+				for b := 0; b < len(raw)/blockQ4_1Bytes; b++ {
+					base := b * blockQ4_1Bytes
+					putFiniteF16ParallelTest(raw, base, b)
+					putFiniteF16ParallelTest(raw, base+2, b+1)
+				}
+			},
+		},
+		{
+			name:       "Q5_0",
+			qk:         qk5,
+			blockBytes: blockQ5_0Bytes,
+			dequant:    dequantQ5_0,
+			scalar:     dequantQ5_0Scalar,
+			fixRaw: func(raw []byte) {
+				for b := 0; b < len(raw)/blockQ5_0Bytes; b++ {
+					putFiniteF16ParallelTest(raw, b*blockQ5_0Bytes, b)
+				}
+			},
+		},
+		{
+			name:       "Q5_1",
+			qk:         qk5,
+			blockBytes: blockQ5_1Bytes,
+			dequant:    dequantQ5_1,
+			scalar:     dequantQ5_1Scalar,
+			fixRaw: func(raw []byte) {
+				for b := 0; b < len(raw)/blockQ5_1Bytes; b++ {
+					base := b * blockQ5_1Bytes
+					putFiniteF16ParallelTest(raw, base, b)
+					putFiniteF16ParallelTest(raw, base+2, b+1)
+				}
+			},
+		},
+		{
+			name:       "Q8_0",
+			qk:         qk8_0,
+			blockBytes: blockQ8_0Bytes,
+			dequant:    dequantQ8_0,
+			scalar:     dequantQ8_0Scalar,
+			fixRaw: func(raw []byte) {
+				for b := 0; b < len(raw)/blockQ8_0Bytes; b++ {
+					putFiniteF16ParallelTest(raw, b*blockQ8_0Bytes, b)
+				}
+			},
+		},
+		{
 			name:       "Q2_K",
+			qk:         qkK,
 			blockBytes: blockQ2KBytes,
 			dequant:    dequantQ2K,
 			scalar:     dequantQ2KScalar,
@@ -39,6 +105,7 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 		},
 		{
 			name:       "Q3_K",
+			qk:         qkK,
 			blockBytes: blockQ3KBytes,
 			dequant:    dequantQ3K,
 			scalar:     dequantQ3KScalar,
@@ -50,6 +117,7 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 		},
 		{
 			name:       "Q4_K",
+			qk:         qkK,
 			blockBytes: blockQ4KBytes,
 			dequant:    dequantQ4K,
 			scalar:     dequantQ4KScalar,
@@ -63,6 +131,7 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 		},
 		{
 			name:       "Q5_K",
+			qk:         qkK,
 			blockBytes: blockQ5KBytes,
 			dequant:    dequantQ5K,
 			scalar:     dequantQ5KScalar,
@@ -76,6 +145,7 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 		},
 		{
 			name:       "Q6_K",
+			qk:         qkK,
 			blockBytes: blockQ6KBytes,
 			dequant:    dequantQ6K,
 			scalar:     dequantQ6KScalar,
@@ -86,7 +156,32 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 			},
 		},
 		{
+			name:       "MXFP4",
+			qk:         qkMXFP4,
+			blockBytes: blockMXFP4Bytes,
+			dequant:    dequantMXFP4,
+			scalar:     dequantMXFP4Scalar,
+			fixRaw: func(raw []byte) {
+				for b := 0; b < len(raw)/blockMXFP4Bytes; b++ {
+					raw[b*blockMXFP4Bytes] = 127 // scale = 0.5, keeps random codes finite
+				}
+			},
+		},
+		{
+			name:       "IQ4_NL",
+			qk:         qkIQ4NL,
+			blockBytes: blockIQ4NLBytes,
+			dequant:    dequantIQ4NL,
+			scalar:     dequantIQ4NLScalar,
+			fixRaw: func(raw []byte) {
+				for b := 0; b < len(raw)/blockIQ4NLBytes; b++ {
+					putFiniteF16ParallelTest(raw, b*blockIQ4NLBytes, b)
+				}
+			},
+		},
+		{
 			name:       "IQ4_XS",
+			qk:         qkK,
 			blockBytes: blockIQ4XSBytes,
 			dequant:    dequantIQ4XS,
 			scalar:     dequantIQ4XSScalar,
@@ -98,6 +193,7 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 		},
 		{
 			name:       "IQ3_XXS",
+			qk:         qkK,
 			blockBytes: blockIQ3XXSBytes,
 			dequant:    dequantIQ3XXS,
 			scalar:     dequantIQ3XXSScalar,
@@ -112,8 +208,8 @@ func TestKQuantDequantParallelMatchesScalar(t *testing.T) {
 			raw := randomParallelDequantRaw(blocks, tc.blockBytes)
 			tc.fixRaw(raw)
 
-			want := make([]float32, blocks*qkK)
-			got := make([]float32, blocks*qkK)
+			want := make([]float32, blocks*tc.qk)
+			got := make([]float32, blocks*tc.qk)
 			tc.scalar(want, raw)
 			tc.dequant(got, raw)
 			assertF32BitsEqualParallelTest(t, tc.name, got, want)
