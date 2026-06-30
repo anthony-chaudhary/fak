@@ -1,11 +1,14 @@
 package windowgate
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -30,6 +33,148 @@ var (
 	reStartProcess   = regexp.MustCompile(`(?i)\bStart-Process\b`)
 	rePSWindowless   = regexp.MustCompile(`(?i)-WindowStyle\s+Hidden\b|-NoNewWindow\b`)
 )
+
+// LiveScheduledTask is one action from the local Task Scheduler read-back.
+type LiveScheduledTask struct {
+	TaskPath  string `json:"task_path"`
+	TaskName  string `json:"task_name"`
+	State     string `json:"state"`
+	LogonType string `json:"logon_type"`
+	User      string `json:"user"`
+	Execute   string `json:"execute"`
+	Arguments string `json:"arguments"`
+}
+
+// LiveTaskReport is the runtime counterpart to ScanTree: it audits already
+// installed Windows Scheduled Tasks, where the actual desktop-popup behavior can
+// diverge from the current repo scripts until tasks are re-registered.
+type LiveTaskReport struct {
+	Scanned    int
+	Violations []string
+	Watchlist  []string
+}
+
+// OK reports whether the live task read-back found no active visible-window risk.
+func (r LiveTaskReport) OK() bool { return len(r.Violations) == 0 }
+
+// ScanLiveScheduledTasks reads local Windows Scheduled Tasks and classifies any
+// console-prone interactive actions. On non-Windows hosts it returns an empty
+// report so the CLI flag stays portable.
+func ScanLiveScheduledTasks(ctx context.Context) (LiveTaskReport, error) {
+	if runtime.GOOS != "windows" {
+		return LiveTaskReport{}, nil
+	}
+	const ps = `$ErrorActionPreference='SilentlyContinue'
+Get-ScheduledTask | ForEach-Object {
+  $task = $_
+  foreach ($action in $task.Actions) {
+    [pscustomobject]@{
+      task_path = "$($task.TaskPath)"
+      task_name = "$($task.TaskName)"
+      state = "$($task.State)"
+      logon_type = "$($task.Principal.LogonType)"
+      user = "$($task.Principal.UserId)"
+      execute = "$($action.Execute)"
+      arguments = "$($action.Arguments)"
+    }
+  }
+} | ConvertTo-Json -Depth 4`
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+	ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return LiveTaskReport{}, fmt.Errorf("read scheduled tasks: %w", err)
+	}
+	tasks, err := parseLiveScheduledTasks(out)
+	if err != nil {
+		return LiveTaskReport{}, err
+	}
+	return ClassifyLiveScheduledTasks(tasks), nil
+}
+
+func parseLiveScheduledTasks(out []byte) ([]LiveScheduledTask, error) {
+	text := strings.TrimSpace(string(out))
+	if text == "" || text == "null" {
+		return nil, nil
+	}
+	var many []LiveScheduledTask
+	if err := json.Unmarshal([]byte(text), &many); err == nil {
+		return many, nil
+	}
+	var one LiveScheduledTask
+	if err := json.Unmarshal([]byte(text), &one); err != nil {
+		return nil, fmt.Errorf("parse scheduled tasks json: %w", err)
+	}
+	return []LiveScheduledTask{one}, nil
+}
+
+// ClassifyLiveScheduledTasks folds a Task Scheduler read-back into hard
+// violations and review-only watch rows. Hard rows are enabled/running interactive
+// tasks that launch a console-prone action without a hidden/no-new-window/headless
+// wrapper. Watch rows are disabled copies of the same risk and enabled interactive
+// hidden wrappers, which are safe at the top level but still depend on child
+// subprocess suppression in the launched script.
+func ClassifyLiveScheduledTasks(tasks []LiveScheduledTask) LiveTaskReport {
+	rep := LiveTaskReport{Scanned: len(tasks)}
+	for _, task := range tasks {
+		if !liveTaskConsoleProne(task) || !liveTaskInteractive(task.LogonType) {
+			continue
+		}
+		row := liveTaskRow(task)
+		if liveTaskDisabled(task.State) {
+			rep.Watchlist = append(rep.Watchlist, row+" is disabled but would be desktop-visible if re-enabled")
+			continue
+		}
+		if liveTaskWindowless(task) {
+			rep.Watchlist = append(rep.Watchlist, row+" is interactive but top-level hidden/headless; keep child subprocesses suppressed")
+			continue
+		}
+		rep.Violations = append(rep.Violations, row+" is enabled/running and can flash a visible console window")
+	}
+	sort.Strings(rep.Violations)
+	sort.Strings(rep.Watchlist)
+	return rep
+}
+
+func liveTaskRow(task LiveScheduledTask) string {
+	name := strings.TrimSpace(task.TaskPath + task.TaskName)
+	return fmt.Sprintf("%s: logon=%s state=%s action=%s %s", name, task.LogonType, task.State, task.Execute, task.Arguments)
+}
+
+func liveTaskDisabled(state string) bool {
+	s := strings.ToLower(strings.TrimSpace(state))
+	return s == "disabled" || s == "1"
+}
+
+func liveTaskInteractive(logonType string) bool {
+	s := strings.ToLower(strings.TrimSpace(logonType))
+	return s == "interactive" || s == "interactivetoken" ||
+		s == "interactiveorpassword" || s == "interactivetokenorpassword" ||
+		s == "3" || s == "6"
+}
+
+func liveTaskWindowless(task LiveScheduledTask) bool {
+	text := strings.ToLower(task.Execute + " " + task.Arguments)
+	return strings.Contains(text, "conhost.exe --headless") ||
+		strings.Contains(text, "-windowstyle hidden") ||
+		strings.Contains(text, "-nonewwindow") ||
+		strings.Contains(text, "pythonw.exe")
+}
+
+func liveTaskConsoleProne(task LiveScheduledTask) bool {
+	exe := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.Trim(task.Execute, `"`), "\\", "/")))
+	if candidateConsoleTools[exe] || exe == "bash.exe" || exe == "bash" || exe == "pythonw.exe" ||
+		exe == "conhost.exe" || exe == "powershell_ise.exe" {
+		return true
+	}
+	text := strings.ToLower(task.Execute + " " + task.Arguments)
+	for tool := range candidateConsoleTools {
+		if strings.Contains(text, tool) {
+			return true
+		}
+	}
+	return strings.Contains(text, "python.exe") || strings.Contains(text, "bash.exe")
+}
 
 // PSInstallerViolation returns a one-line violation for a task-creating .ps1 that
 // is neither off-desktop nor headless, and ok=false when the file is clean (or is

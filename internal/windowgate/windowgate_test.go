@@ -65,6 +65,37 @@ func TestPSStartProcessRules(t *testing.T) {
 	}
 }
 
+func TestClassifyLiveScheduledTasks(t *testing.T) {
+	rep := ClassifyLiveScheduledTasks([]LiveScheduledTask{
+		{
+			TaskPath: "\\", TaskName: "Visible", State: "Ready", LogonType: "InteractiveToken",
+			Execute: "cmd.exe", Arguments: "/c C:\\work\\fak\\tools\\tick.bat",
+		},
+		{
+			TaskPath: "\\", TaskName: "Headless", State: "Ready", LogonType: "3",
+			Execute: "conhost.exe", Arguments: "--headless powershell.exe -WindowStyle Hidden -File C:\\work\\fak\\tools\\tick.ps1",
+		},
+		{
+			TaskPath: "\\", TaskName: "PythonW", State: "Ready", LogonType: "3",
+			Execute: "C:\\Python313\\pythonw.exe", Arguments: "C:\\work\\fak\\tools\\guard.py",
+		},
+		{
+			TaskPath: "\\", TaskName: "DisabledVisible", State: "Disabled", LogonType: "3",
+			Execute: "bash.exe", Arguments: "-lc C:\\work\\fak\\scripts\\tick.sh",
+		},
+		{
+			TaskPath: "\\", TaskName: "OffDesktop", State: "Ready", LogonType: "S4U",
+			Execute: "cmd.exe", Arguments: "/c C:\\work\\fak\\tools\\tick.bat",
+		},
+	})
+	if len(rep.Violations) != 1 {
+		t.Fatalf("violations = %d %v, want exactly the visible interactive task", len(rep.Violations), rep.Violations)
+	}
+	if len(rep.Watchlist) != 3 {
+		t.Fatalf("watchlist = %d %v, want hidden/headless/pythonw/disabled rows", len(rep.Watchlist), rep.Watchlist)
+	}
+}
+
 func TestPySpawnRules(t *testing.T) {
 	cases := []struct {
 		name string
