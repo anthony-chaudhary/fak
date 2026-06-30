@@ -26,6 +26,31 @@ There are two halves: **stand the node up** (once, on GCP) and **use it here** (
 preset). The preset, the wire, and the bring-up plan are proven on any host; the live
 model turn needs the GCP node up — see [What is proven here](#what-is-proven-here).
 
+## The one command: `gcp-glm-demo.sh`
+
+If you just want the whole demo as a single reviewable command, `scripts/gcp-glm-demo.sh`
+chains the four steps end to end, **plan-by-default**, defaulting to the **8× H100** tier
+(`a3-high-h100`, 640 GB — GLM-5.2 at `UD-Q4_K_M` is ~466 GB, so it needs the 8-GPU shape):
+
+1. **provision + serve** GLM-5.2 through the **pure fak kernel** (it forces `SERVE=fak`
+   even on sm_90, where the bring-up would otherwise pick stock SGLang — this is the whole
+   point of "fak kernel", and the precondition for step 3's metric to exist at all). It
+   *composes* `gcp-glm-serve.sh` rather than re-implementing the gcloud/serve rendering.
+2. **probe** — two `claude-glm-gcp --probe` turns that share a system+tools prefix, so
+   turn 2 reuses the KV prefix fak already holds resident.
+3. **cache value** — scrape fak's own realized KV-prefix reuse off the serve `/metrics`
+   surface (`fak_gateway_kv_prefix_reused_tokens_total` > 0 = the witnessed demo datum).
+4. **teardown** — delete the VM on an EXIT trap so the demo leaves zero residual cost.
+
+```bash
+./scripts/gcp-glm-demo.sh                                # PLAN: the whole demo, no creds
+GCP_PROJECT=<id> HF_TOKEN=<hf> ./scripts/gcp-glm-demo.sh --apply   # run it on 8× H100, then tear down
+KEEP=1 GCP_PROJECT=<id> ./scripts/gcp-glm-demo.sh --apply # skip teardown to debug the node
+```
+
+The plan render is proven on any host (`go test ./cmd/fak -run TestClaudeGLMGCPDemoPlan`);
+the live cache-value turn is hardware-gated, the same gate as the rest of this page.
+
 ## Half A — stand up GLM-5.2 on GCP
 
 `scripts/gcp-glm-serve.sh` provisions a GPU VM and stands the GLM-5.2 serve up on it. It is
@@ -133,6 +158,8 @@ which is not stood up from the implementing host — same gate as
 |---|---|---|
 | The `glm-gcp` preset resolves to fak's openai backend at the GLM `/v1` with model `glm-5.2` | `go test ./cmd/fak -run TestClaudeGLMGCP` (bash + PowerShell launchers) | ✅ proven on any host |
 | The bring-up plan renders the gcloud create + serve + the `claude-glm-gcp` hand-off, with no creds | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanRendersWithoutCreds` | ✅ proven on any host |
+| The **one-command demo** (`gcp-glm-demo.sh`) renders provision → pure-fak serve → probe → cache-value scrape → teardown on the **8× H100** tier, no creds | `go test ./cmd/fak -run TestClaudeGLMGCPDemoPlan` (wiring on any OS; bash render on Unix/CI) | ✅ proven on any host |
+| A **live cache-value turn** (`fak_gateway_kv_prefix_reused_tokens_total` > 0 on turns 2..N) through the demo | needs the 8× H100 node up (`gcp-glm-demo.sh --apply`) | ⏳ hardware-gated |
 | The **datacenter GPU tiers** are in the single registry (`a2-ultra-a100-80gb`, `a2-high-a100-40gb`) | `tools/gcp_accel_test.py` + `go test ./cmd/fak -run TestClaudeGLMGCPA100TiersInRegistry` | ✅ proven on any host |
 | The datacenter GPU plan **wires the pure fak kernel** by default; `SERVE=llamacpp` wires the llama.cpp benchmark | `go test ./cmd/fak -run 'TestClaudeGLMGCPA100Plan'` (WSL/Unix CI) + `TestClaudeGLMGCPFakNativeServeWiring` | ✅ proven on any host |
 | The fak-native **`glm_moe_dsa` forward is bit-exact** on datacenter GPU (sm_80) **at q8**: cosine 1.0, argmax-exact (incl. the cpu-offload hybrid) | `experiments/glm-gpu-witness/a100-glm52-*.json` (`TestCUDAGLMMoeDsaBackendForward` …) | ✅ witnessed (q8) on sm_80 |
@@ -160,6 +187,7 @@ the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
 ## Refs
 
+- `scripts/gcp-glm-demo.sh` — the **one-command demo** (plan/apply): provision → pure-fak serve → probe → cache-value → teardown, default tier `a3-high-h100` (8× H100)
 - `scripts/gcp-glm-serve.sh` — the GCP bring-up (plan/apply), `SERVE=fak|llamacpp|sglang|vllm`
 - `scripts/dogfood-claude.sh` / `.ps1` — the launcher + the `glm-gcp` preset
 - `tools/gcp_accel.py` — the GCP accelerator registry (datacenter GPU tiers + `--emit-shell` feeds the bring-up)
