@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 )
 
 const (
@@ -49,25 +51,54 @@ type HandoffTask struct {
 // HandoffNextStep is one concrete follow-up the next agent can pick up. The CLI
 // can sync each entry to one stable GitHub issue.
 type HandoffNextStep struct {
-	Key          string        `json:"key"`
-	Title        string        `json:"title"`
-	Body         string        `json:"body"`
-	Reason       string        `json:"reason"`
-	Priority     string        `json:"priority,omitempty"`
-	Labels       []string      `json:"labels,omitempty"`
-	EvidenceRefs []EvidenceRef `json:"evidence_refs,omitempty"`
+	Key             string        `json:"key"`
+	Title           string        `json:"title"`
+	Body            string        `json:"body"`
+	Reason          string        `json:"reason"`
+	WorkingSpine    string        `json:"working_spine,omitempty"`
+	PriorityContext string        `json:"priority_context,omitempty"`
+	WorkUnit        string        `json:"work_unit,omitempty"`
+	ExpectedSteps   int           `json:"expected_steps,omitempty"`
+	Assumptions     []string      `json:"assumptions,omitempty"`
+	ConfusionRisks  []string      `json:"confusion_risks,omitempty"`
+	Coordination    []string      `json:"coordination,omitempty"`
+	Trigger         string        `json:"trigger,omitempty"`
+	BatchPolicy     string        `json:"batch_policy,omitempty"`
+	InScope         string        `json:"in_scope,omitempty"`
+	OutOfScope      string        `json:"out_of_scope,omitempty"`
+	DoneCondition   string        `json:"done_condition,omitempty"`
+	Witness         string        `json:"witness,omitempty"`
+	AcceptanceGate  string        `json:"acceptance_gate,omitempty"`
+	Lane            string        `json:"lane,omitempty"`
+	Paths           []string      `json:"paths,omitempty"`
+	Priority        string        `json:"priority,omitempty"`
+	Labels          []string      `json:"labels,omitempty"`
+	BoundaryNotes   []string      `json:"boundary_notes,omitempty"`
+	ClosureBinding  string        `json:"closure_binding,omitempty"`
+	EvidenceRefs    []EvidenceRef `json:"evidence_refs,omitempty"`
 }
 
 // HandoffReview is the pure verdict. OK means the handoff has enough witnessed
 // completion evidence and next-step state for an automated loop to act on it.
 type HandoffReview struct {
-	Schema       string   `json:"schema"`
-	OK           bool     `json:"ok"`
-	Verdict      string   `json:"verdict"`
-	Reasons      []string `json:"reasons,omitempty"`
-	TaskID       string   `json:"task_id,omitempty"`
-	NextStepKeys []string `json:"next_step_keys,omitempty"`
-	IssueCount   int      `json:"issue_count"`
+	Schema       string                 `json:"schema"`
+	OK           bool                   `json:"ok"`
+	Verdict      string                 `json:"verdict"`
+	Reasons      []string               `json:"reasons,omitempty"`
+	TaskID       string                 `json:"task_id,omitempty"`
+	NextStepKeys []string               `json:"next_step_keys,omitempty"`
+	IssueCount   int                    `json:"issue_count"`
+	IssueReviews []issuecontract.Review `json:"issue_reviews,omitempty"`
+}
+
+// HandoffReviewOptions turns on the stricter GitHub-issue contract for callers
+// that are about to plan or sync follow-up issues. The default ReviewHandoff path
+// stays the basic task-completion gate for existing non-issue users.
+type HandoffReviewOptions struct {
+	StrictScope   bool
+	Live          bool
+	DedupeChecked bool
+	DedupeCap     int
 }
 
 // HandoffIssue is the subset of a GitHub issue needed to dedupe handoff-created
@@ -98,6 +129,13 @@ type HandoffIssuePlanRow struct {
 // VerifiedDone for StateDone handoffs: a task's own "done" string is not proof
 // that it should fan out follow-up work.
 func ReviewHandoff(h Handoff) HandoffReview {
+	return ReviewHandoffWithOptions(h, HandoffReviewOptions{})
+}
+
+// ReviewHandoffWithOptions grades h with optional strict review of every
+// next-step issue candidate. StrictScope is the guard used by the CLI before it
+// can create GitHub follow-up issues.
+func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview {
 	var reasons []string
 	if h.Schema != SchemaHandoff {
 		reasons = append(reasons, "BAD_SCHEMA")
@@ -155,6 +193,23 @@ func ReviewHandoff(h Handoff) HandoffReview {
 		}
 	}
 
+	var issueReviews []issuecontract.Review
+	if opt.StrictScope && nextCount > 0 {
+		issueReviews = make([]issuecontract.Review, 0, nextCount)
+		for i, step := range h.NextSteps {
+			prefix := "NEXT_STEP_" + strconv.Itoa(i+1) + "_"
+			ir := issuecontract.ReviewCandidate(handoffIssueCandidate(h, step), issuecontract.Options{
+				Live:          opt.Live,
+				DedupeChecked: opt.DedupeChecked,
+				DedupeCap:     opt.DedupeCap,
+			})
+			issueReviews = append(issueReviews, ir)
+			for _, reason := range ir.Reasons {
+				reasons = append(reasons, prefix+reason)
+			}
+		}
+	}
+
 	review := HandoffReview{
 		Schema:       SchemaHandoffReview,
 		OK:           len(reasons) == 0,
@@ -162,6 +217,7 @@ func ReviewHandoff(h Handoff) HandoffReview {
 		Reasons:      reasons,
 		NextStepKeys: keys,
 		IssueCount:   nextCount,
+		IssueReviews: issueReviews,
 	}
 	switch {
 	case !review.OK:
@@ -172,6 +228,37 @@ func ReviewHandoff(h Handoff) HandoffReview {
 		review.Verdict = "ready"
 	}
 	return review
+}
+
+func handoffIssueCandidate(h Handoff, step HandoffNextStep) issuecontract.Candidate {
+	return issuecontract.Candidate{
+		Schema:          issuecontract.Schema,
+		Key:             strings.TrimSpace(step.Key),
+		Title:           strings.TrimSpace(step.Title),
+		ParentRef:       strings.TrimSpace(h.Task.TaskID),
+		CurrentState:    strings.TrimSpace(h.CurrentState),
+		WhyNow:          strings.TrimSpace(step.Reason),
+		WorkingSpine:    strings.TrimSpace(step.WorkingSpine),
+		PriorityContext: strings.TrimSpace(step.PriorityContext),
+		WorkUnit:        firstNonEmpty(step.WorkUnit, "leaf"),
+		ExpectedSteps:   step.ExpectedSteps,
+		Assumptions:     compactStrings(step.Assumptions),
+		ConfusionRisks:  compactStrings(step.ConfusionRisks),
+		Coordination:    compactStrings(step.Coordination),
+		Trigger:         firstNonEmpty(step.Trigger, "Verified task handoff proposed this next step."),
+		BatchPolicy:     firstNonEmpty(step.BatchPolicy, "At most two follow-up issues per handoff; update by marker key on rerun."),
+		InScope:         firstNonEmpty(step.InScope, step.Body),
+		OutOfScope:      strings.TrimSpace(step.OutOfScope),
+		DoneCondition:   strings.TrimSpace(step.DoneCondition),
+		Witness:         strings.TrimSpace(step.Witness),
+		AcceptanceGate:  strings.TrimSpace(step.AcceptanceGate),
+		Lane:            strings.TrimSpace(step.Lane),
+		Paths:           compactStrings(step.Paths),
+		Labels:          compactStrings(step.Labels),
+		Priority:        strings.TrimSpace(step.Priority),
+		BoundaryNotes:   compactStrings(step.BoundaryNotes),
+		ClosureBinding:  strings.TrimSpace(step.ClosureBinding),
+	}
 }
 
 // HandoffMarkerKey extracts the stable marker key from an issue body.
@@ -250,12 +337,57 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 		}
 	}
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Next step")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, strings.TrimSpace(step.Body))
-	fmt.Fprintln(&b)
+	writeSection(&b, "Parent context", strings.TrimSpace(h.Task.TaskID), "This handoff did not name the parent task.")
+	writeSection(&b, "Current state", strings.TrimSpace(h.CurrentState), "Not specified by this handoff.")
+	writeSection(&b, "Why this is next", strings.TrimSpace(step.Reason), "Not specified by this handoff.")
+	writeSection(&b, "Working spine", strings.TrimSpace(step.WorkingSpine), "Not specified by this handoff.")
+	writeSection(&b, "Priority context", strings.TrimSpace(step.PriorityContext), "Not specified by this handoff.")
+	writeSection(&b, "Work unit", firstNonEmpty(step.WorkUnit, "leaf"), "leaf")
+	if step.ExpectedSteps > 0 {
+		writeSection(&b, "Expected steps", strconv.Itoa(step.ExpectedSteps), "Not specified by this handoff.")
+	} else {
+		writeSection(&b, "Expected steps", "", "Not specified by this handoff.")
+	}
+	writeListSection(&b, "Assumptions", step.Assumptions, "None named.")
+	writeListSection(&b, "Confusion risks", step.ConfusionRisks, "None named.")
+	writeListSection(&b, "Coordination notes", step.Coordination, "No special coordination beyond the lane lease.")
+	writeSection(&b, "Trigger", firstNonEmpty(step.Trigger, "Verified task handoff proposed this next step."), "Verified task handoff proposed this next step.")
+	writeSection(&b, "Batch policy", firstNonEmpty(step.BatchPolicy, "At most two follow-up issues per handoff; update by marker key on rerun."), "At most two follow-up issues per handoff; update by marker key on rerun.")
+	writeSection(&b, "In scope", firstNonEmpty(step.InScope, step.Body), "Not specified by this handoff.")
+	writeSection(&b, "Out of scope", strings.TrimSpace(step.OutOfScope), "Not specified by this handoff.")
+	writeSection(&b, "Done condition", strings.TrimSpace(step.DoneCondition), "Not specified by this handoff.")
+	writeSection(&b, "Witness", strings.TrimSpace(step.Witness), "Not specified by this handoff.")
+	writeSection(&b, "Acceptance gate", strings.TrimSpace(step.AcceptanceGate), "Not specified by this handoff.")
+	writeSection(&b, "Lane", strings.TrimSpace(step.Lane), "Not specified by this handoff.")
+	writeListSection(&b, "Path hints", step.Paths, "Not specified by this handoff.")
+	writeListSection(&b, "Boundary notes", step.BoundaryNotes, "Public issue only; no private evidence named.")
+	writeSection(&b, "Closure binding", strings.TrimSpace(step.ClosureBinding), "Resolving commit cites this issue and carries the matching fak trailer.")
 	fmt.Fprintln(&b, "Managed by `fak task handoff`; re-running the same handoff updates this issue in place.")
 	return b.String()
+}
+
+func writeSection(b *strings.Builder, title, value, fallback string) {
+	fmt.Fprintf(b, "## %s\n\n", title)
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	fmt.Fprintln(b, value)
+	fmt.Fprintln(b)
+}
+
+func writeListSection(b *strings.Builder, title string, values []string, fallback string) {
+	fmt.Fprintf(b, "## %s\n\n", title)
+	values = compactStrings(values)
+	if len(values) == 0 {
+		fmt.Fprintln(b, fallback)
+		fmt.Fprintln(b)
+		return
+	}
+	for _, value := range values {
+		fmt.Fprintf(b, "- `%s`\n", value)
+	}
+	fmt.Fprintln(b)
 }
 
 func compactStrings(in []string) []string {
@@ -310,4 +442,13 @@ func oneLine(s string) string {
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return strings.Join(strings.Fields(s), " ")
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, val := range vals {
+		if s := strings.TrimSpace(val); s != "" {
+			return s
+		}
+	}
+	return ""
 }

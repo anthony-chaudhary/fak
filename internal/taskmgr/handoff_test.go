@@ -21,12 +21,30 @@ func verifiedHandoff() Handoff {
 		},
 		CompletionEvidence: []EvidenceRef{{Kind: "commit", Ref: "deadbeef", Note: "diff-witnessed"}},
 		NextSteps: []HandoffNextStep{{
-			Key:      "task_push_next/issue-sync",
-			Title:    "Add live issue sync smoke",
-			Body:     "Wire the dry-run handoff into one live gh smoke on a disposable fixture.",
-			Reason:   "The typed handoff exists; the next useful proof is a live end-to-end issue update.",
-			Priority: "p2",
-			Labels:   []string{"agent-handoff", "agent-handoff"},
+			Key:             "task_push_next/issue-sync",
+			Title:           "Add live issue sync smoke",
+			Body:            "Wire the dry-run handoff into one live gh smoke on a disposable fixture.",
+			Reason:          "The typed handoff exists; the next useful proof is a live end-to-end issue update.",
+			WorkingSpine:    "A verified task completion can create one scoped follow-up issue.",
+			PriorityContext: "Working path: completed task -> scoped follow-up issue -> dispatch. Current blocker: live sync lacks an operator-owned smoke. Unblocks: task handoffs can feed dispatch safely. Not polish: this proves the minimal live path.",
+			WorkUnit:        "leaf",
+			ExpectedSteps:   4,
+			Assumptions:     []string{"The disposable issue fixture can be updated by marker key."},
+			ConfusionRisks:  []string{"A live smoke is not a broad redesign of task storage."},
+			Coordination:    []string{"Do not run concurrently with other taskmgr issue-body edits."},
+			Trigger:         "Verified task handoff proposes one follow-up after the dry-run path passed.",
+			BatchPolicy:     "At most two follow-up issues per handoff; reruns update by marker.",
+			InScope:         "Add one live issue sync smoke and keep the handoff body parseable by the issue contract.",
+			OutOfScope:      "Do not change task state storage or dispatch routing.",
+			DoneCondition:   "The live sync smoke can create or update the disposable follow-up issue.",
+			Witness:         "go test ./cmd/fak -run TestTaskHandoff",
+			AcceptanceGate:  "go test ./internal/taskmgr ./cmd/fak -run TestTaskHandoff",
+			Lane:            "taskmgr",
+			Paths:           []string{"internal/taskmgr/**", "cmd/fak/taskmgr.go"},
+			Priority:        "p2",
+			Labels:          []string{"agent-handoff", "agent-handoff"},
+			BoundaryNotes:   []string{"Public handoff issue only; no private operator transcript."},
+			ClosureBinding:  "Resolving commit cites the issue and carries `(fak taskmgr)`.",
 			EvidenceRefs: []EvidenceRef{{
 				Kind: "path", Ref: "internal/taskmgr/handoff.go",
 			}},
@@ -84,6 +102,46 @@ func TestReviewHandoffCapsFollowUpsAtTwoAndChecksKeys(t *testing.T) {
 	}
 }
 
+func TestReviewHandoffStrictScopeRejectsVagueNextStep(t *testing.T) {
+	h := verifiedHandoff()
+	h.NextSteps[0].WorkingSpine = ""
+	h.NextSteps[0].OutOfScope = ""
+	h.NextSteps[0].DoneCondition = ""
+	h.NextSteps[0].Witness = ""
+	h.NextSteps[0].Lane = ""
+	h.NextSteps[0].Paths = nil
+
+	review := ReviewHandoffWithOptions(h, HandoffReviewOptions{StrictScope: true})
+	if review.OK {
+		t.Fatalf("strict vague handoff passed: %+v", review)
+	}
+	if len(review.IssueReviews) != 1 {
+		t.Fatalf("issue reviews = %d, want 1", len(review.IssueReviews))
+	}
+	if !contains(review.Reasons, "NEXT_STEP_1_ISSUE_SCOPE_INCOMPLETE") ||
+		!contains(review.Reasons, "NEXT_STEP_1_ISSUE_UNROUTED") {
+		t.Fatalf("strict reasons = %+v", review.Reasons)
+	}
+}
+
+func TestReviewHandoffStrictScopeAcceptsDispatchableNextStep(t *testing.T) {
+	review := ReviewHandoffWithOptions(verifiedHandoff(), HandoffReviewOptions{
+		StrictScope:   true,
+		Live:          true,
+		DedupeChecked: true,
+		DedupeCap:     300,
+	})
+	if !review.OK || review.Verdict != "ready" {
+		t.Fatalf("strict review = %+v, want ready", review)
+	}
+	if len(review.IssueReviews) != 1 || review.IssueReviews[0].Score.Total != 100 {
+		t.Fatalf("issue review = %+v, want one full-score issue", review.IssueReviews)
+	}
+	if review.IssueReviews[0].AgentContext.Total != 100 {
+		t.Fatalf("agent context = %+v, want full-score issue", review.IssueReviews[0].AgentContext)
+	}
+}
+
 func TestBuildHandoffIssuePlanDedupesByStableMarker(t *testing.T) {
 	h := verifiedHandoff()
 	existing := []HandoffIssue{{
@@ -110,6 +168,34 @@ func TestBuildHandoffIssuePlanDedupesByStableMarker(t *testing.T) {
 	}
 	if len(row.Labels) != 1 || row.Labels[0] != "agent-handoff" {
 		t.Fatalf("labels = %+v, want deduped agent-handoff", row.Labels)
+	}
+}
+
+func TestHandoffIssueBodyIncludesStrictScopeSections(t *testing.T) {
+	h := verifiedHandoff()
+	body := HandoffIssueBody(h, h.NextSteps[0])
+	for _, want := range []string{
+		"## Working spine",
+		"## Priority context",
+		"## Work unit",
+		"## Expected steps",
+		"## Assumptions",
+		"## Confusion risks",
+		"## Coordination notes",
+		"## Trigger",
+		"## Batch policy",
+		"## In scope",
+		"## Out of scope",
+		"## Done condition",
+		"## Witness",
+		"## Acceptance gate",
+		"## Lane",
+		"## Path hints",
+		"## Closure binding",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
 	}
 }
 
