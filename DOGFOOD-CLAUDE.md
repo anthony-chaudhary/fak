@@ -134,10 +134,10 @@ on exit.
 > isolated dogfood account with `--faklocal-ok`). No front door re-implements the
 > roster+route+token dance.
 
-> **Fanning out across accounts?** `fak fleet-accounts wave --count N` hands each lane a
-> *distinct* account, so a burst doesn't pile onto one rate-limit pool (a single-account
-> `resolve` returns the same account N times in a burst). It's a per-account rate-limit
-> load balancer — operator fleet plumbing, not a kernel feature.
+> **Fanning out across accounts?** `fak dispatch wave --count N` allocates lanes across
+> *distinct* account pools for issue-dispatch fan-out, so a burst doesn't pile onto one
+> rate-limit pool. It's a per-account rate-limit load balancer — operator fleet plumbing,
+> not a kernel feature.
 
 Knobs: `FAK_DOGFOOD_PORT` (8080), `FAK_DOGFOOD_MODEL` (override; default = the
 **largest installed** ollama model, auto-upgraded to `FAK_DOGFOOD_FALLBACK_MODEL`
