@@ -111,6 +111,13 @@ var registry = []Bench{
 		Doc:     "docs/benchmarks/ABLATE-RESULTS.md",
 	},
 	{
+		Name: "agentbenchdemo", Kind: KindCmd, Need: NeedNone,
+		Summary: "Self-tax micro-benchmark for fak's agentic spine: folds a fixed allow/deny tool-call plan through the real kernel and reports per-call adjudication cost.",
+		Run:     "go run ./cmd/agentbenchdemo -selfcheck",
+		Flags:   []string{"-n  -  iterations to fold", "-json  -  emit measured result as JSON", "-selfcheck  -  assert deterministic counts and sane per-call ceiling"},
+		Doc:     "cmd/agentbenchdemo/README.md",
+	},
+	{
 		Name: "agenticbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Parent #868 rollup gate: folds the committed agentic benchmark child artifacts and reports whether any real raw-vs-fak result claim is allowed.",
 		Run:     "go run ./cmd/agenticbench -out experiments/agent-live/agentic-benchmark-epic-868-status-20260626.json -md experiments/agent-live/agentic-benchmark-epic-868-status-20260626.md -external-queue experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.json -external-queue-md experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.md",
