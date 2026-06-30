@@ -78,7 +78,7 @@ Code MCP-server setup and the CI-embed shape, none of which need the dogfood lau
 
 Don't see your exact tool below? Read on — if it lets you set a base URL (almost all
 do), it already works. The [compatibility matrix](compatibility-matrix.md) is the full
-sourced list: 44 harnesses, frameworks, backends, and protocols, each with the exact key
+sourced list: 47 harnesses, frameworks, backends, and protocols, each with the exact key
 you set to repoint it.
 
 ---
@@ -145,7 +145,7 @@ run `fak serve --stdio` as the server command. The one-paste setup and the five
 `fak_*` tools it exposes are in [`../../examples/mcp/README.md`](../../examples/mcp/README.md).
 
 **Need the exact key for *your* tool?** The [compatibility matrix](compatibility-matrix.md)
-lists 44 surveyed harnesses, frameworks, backends, and protocols — the wire each speaks,
+lists 47 surveyed harnesses, frameworks, backends, and protocols — the wire each speaks,
 whether it takes a custom base URL, and the literal env var / arg / config field — each
 with a source link.
 
@@ -254,9 +254,10 @@ governance surface, not tokens per second. Full scope, claim by claim:
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
 - [Harden any MCP server](harden-any-mcp.md) — drop fak in front of any MCP server: a context-MMU quarantines poisoned tool results out of context and a capability allow-list blocks tools you never wired.
 - [fak + LiteLLM](litellm.md) — the three topologies (fak in front of a LiteLLM proxy, fak as a governed node behind it, and fak's per-aspect routing dispatching through it), and why supporting LiteLLM is one wire, not a hundred adapters.
+- [fak + llm-d](llm-d.md) — front the llm-d Gateway API OpenAI-compatible route, or use the registered `llm-d` engine id for syscall/model-route dispatch.
 - [Routers & gateways](routers.md) — OpenRouter, Portkey, LiteLLM Router, Unify, Martian: fak as a complement (govern + route per aspect) to request-level routers, with the honest categorical positioning.
 - [Interoperability stance](interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the capability floor) and the honest per-wire grade for the flagship harnesses and every interop protocol.
-- [Compatibility matrix](compatibility-matrix.md) — 44 harnesses, frameworks, backends, and protocols, each with its wire, custom-base-URL support, and the exact repoint key, sourced.
+- [Compatibility matrix](compatibility-matrix.md) — 47 harnesses, frameworks, backends, and protocols, each with its wire, custom-base-URL support, and the exact repoint key, sourced.
 - [Getting started](../../GETTING-STARTED.md) — install the single static binary.
 - [Guided tutorial](../fak/tutorial.md) — zero to first adjudicated tool call, real output at every step.
 - [Debugging a verdict](debugging.md) — why was my call denied/transformed? Reproduce it offline with `fak preflight --explain`, then trace it across the live gateway.

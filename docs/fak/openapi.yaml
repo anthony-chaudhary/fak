@@ -697,6 +697,27 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /v1/fak/vcache/score:
+    get:
+      tags: [fak-native]
+      summary: Read the live vCache scorecard
+      description: |
+        Returns the same `fak.vcache.score.v1` report shape as
+        `fak vcache score`: planned economics, optional observed provider-cache
+        telemetry, witnessed pure-fak KV reuse, witnessed O(1) context/history
+        compaction shed-token evidence, external-engine prefix-cache hit-rate
+        evidence, explicit fak-authored activation counters, and the separate
+        `default_usefulness` score. Provider cache counters remain observed
+        rebates only; they do not imply fak-owned activation, kernel KV reuse,
+        context value, or external-engine cache control.
+      responses:
+        '200':
+          description: The current vCache scorecard report.
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /v1/fak/revoke:
     post:
       tags: [fak-native]

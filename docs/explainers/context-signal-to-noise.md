@@ -1,6 +1,6 @@
 ---
-title: "Context signal-to-noise: the number cache-hit % can't give you"
-description: "Provider cache-hit % is a denominator artifact — it climbs toward 1.0 with session length alone, whether or not the resident context is any good (measured: 0.88 short → 0.99 long across 247 sessions, with 10× density spread at the same 99%). The number actually worth maximizing is whether the resident window equals the desired window. fak's ctxplan records the ground truth per turn (which resident spans the turn referenced vs left idle), and ComputeSignalNoise folds it into a token-weighted signal-to-noise ratio that is invariant to caching and to length — so a session can read cache-hit 0.99 and S/N 0.30 at once, finally making the bloat legible."
+title: "Context signal-to-noise: what provider-observed cache-hit % can't give you"
+description: "Provider-observed cache-hit % is a denominator artifact — it climbs toward 1.0 with session length alone, whether or not the resident context is any good (measured: 0.88 short → 0.99 long across 247 sessions, with 10× density spread at the same observed 99%). The number actually worth maximizing is whether the resident window equals the desired window. fak's ctxplan records the ground truth per turn (which resident spans the turn referenced vs left idle), and ComputeSignalNoise folds it into a token-weighted signal-to-noise ratio that is invariant to caching and to length — so a session can read OBSERVED provider cache-hit 0.99 and WITNESSED ctxplan S/N 0.30 at once, finally making the bloat legible."
 slug: context-signal-to-noise
 keywords:
   - context signal-to-noise
@@ -10,14 +10,14 @@ keywords:
   - resident context budget
 ---
 
-# Context signal-to-noise: the number cache-hit % can't give you
+# Context signal-to-noise: what provider-observed cache-hit % can't give you
 
-> **Audience.** Anyone judging agent context quality by cache-hit % — by the end you'll see why that number rises with length alone and what token-weighted signal-to-noise ratio replaces it.
+> **Audience.** Anyone judging agent context quality by provider-observed cache-hit % — by the end you'll see why that number rises with length alone and what token-weighted signal-to-noise ratio replaces it.
 
-Cache-hit percentage is the metric everyone reaches for, and it is the wrong one for
+Provider-observed cache-hit percentage is the metric everyone reaches for, and it is the wrong one for
 judging context quality. Here is the trap, the math, and the metric that replaces it.
 
-## Cache-hit % rises with length, mechanically, whether or not the context is any good
+## Provider-observed cache-hit % rises with length, mechanically, whether or not the context is any good
 
 Provider cache-hit fraction is
 
@@ -40,7 +40,7 @@ This is not a hypothesis. Measured on fak's own corpus of 247 Claude Code sessio
 | 150–200 turns (n=7) | 0.992 |
 
 Pearson correlation of cache-hit to turn count is ≈ 0.48; to total context size ≈ 0.39.
-And the tell: among sessions **all at ~99% cache-hit**, context density differs **10×**
+And the tell: among sessions **all at the same OBSERVED provider cache-hit rate (~99%)**, context density differs **10×**
 (8.69 vs 2.81 turns per MB). Same headline cache-hit, wildly different efficiency. A
 high cache-hit on a bloated window just means you are **re-reading the wrong thing
 cheaply** — efficiently caching garbage.
@@ -77,7 +77,7 @@ Three properties make it the right number where cache-hit is the wrong one:
 
 2. **Invariant to caching and to length.** Re-reading a `Wasted` span cheaply (cached)
    does not make it signal — it is still resident-but-untouched. So a session can report
-   **cache-hit 0.99 and S/N 0.30 at the same time**. That pair — high cache-hit, low S/N
+   **OBSERVED provider cache-hit 0.99 and WITNESSED ctxplan S/N 0.30 at the same time**. That pair — high cache-hit, low S/N
    — *is* the pathology, finally legible.
 
 3. **The opposite failure is on its own axis.** Trimming a needed span out of the window

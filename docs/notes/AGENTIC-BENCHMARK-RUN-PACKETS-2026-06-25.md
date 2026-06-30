@@ -97,7 +97,7 @@ python tools/glm52_vllm_agentic_battery.py `
 Run command: use the generated
 `experiments/vllm/glm52-agentic-battery/run.sh` on a GLM-5.2-capable node. The
 full reproduce runbook is
-[`docs/benchmarks/DGX-GLM52-VLLM-AGENTIC-BENCHMARKS.md`](../benchmarks/DGX-GLM52-VLLM-AGENTIC-BENCHMARKS.md).
+[`docs/benchmarks/GPU-SERVER-GLM52-VLLM-AGENTIC-BENCHMARKS.md`](../benchmarks/GPU-SERVER-GLM52-VLLM-AGENTIC-BENCHMARKS.md).
 
 Evidence that would count:
 

@@ -279,7 +279,7 @@ payload-free line per served turn to stderr whose first job is to answer **"did 
 work?"** at a glance:
 
 ```
-fak-turn trace=guard ok saved=20.7k tok (95% of prompt) cache=healthy_cache compact=none finish=end_turn
+fak-turn trace=guard ok prov=20.7k tok (95% of prompt) fak=0 tok cache=healthy_cache compact=none finish=end_turn
 ```
 
 Read it left to right:
@@ -288,11 +288,13 @@ Read it left to right:
   `warming` (cache activity but no net saving yet — a cold write the later reads haven't
   repaid), `degraded` (the prefix is decaying/stale or a reset is recommended), or `cold`
   (no cache activity this turn).
-- **`saved=20.7k tok (95% of prompt)`** — the **NET** token-equivalent saving this turn: the
-  cache-read rebate **minus** the cache-write premium, so a cold-write turn honestly reads a
-  **negative** saving until the later reads repay it. This is the same number `/metrics`
-  (`fak_vcache_saved_token_equiv`) and `fak vcache observe` report, so the views never
-  disagree. It is the fak-vs-no-cache value, not the provider's raw cached-token count.
+- **`prov=20.7k tok (95% of prompt)`** — the provider prompt-cache **NET**
+  token-equivalent saving this turn: the cache-read rebate **minus** the cache-write
+  premium, so a cold-write turn honestly reads a **negative** provider saving until
+  later reads repay it. This is OBSERVED/provider-relayed, not fak-authored.
+- **`fak=0 tok`** — fak-authored token savings this turn. This is the WITNESSED slice:
+  compaction shed and in-kernel KV-prefix reuse. vDSO is reported as avoided calls,
+  not token-equivalents, until there is a token witness for a skipped call.
 - **`cache=healthy_cache`** — the rolling resetScore health; **`compact`** — the
   history-compaction action (`none`/`fired`).
 
@@ -306,8 +308,9 @@ fak is doing its job. They remain available for deep debugging in the JSON `--lo
 disagree:
 
 - **per-turn debug line** (default **ON**) — the `fak-turn …` line above, one per served
-  turn on stderr: a verdict, the net `saved=` token-equiv, the `cache` health, and the
-  `compact` action. No payload, ever. `--debug-stats=false` or `--quiet` to silence.
+  turn on stderr: a verdict, `prov=` provider prompt-cache token-equiv, `fak=`
+  fak-authored token-equiv, the `cache` health, and the `compact` action. No payload,
+  ever. `--debug-stats=false` or `--quiet` to silence.
 - **`--log FILE`** (or `--log -` for stderr) streams every per-request and per-verdict
   line — `event=gateway_http_request` and `event=gateway_operation`, each carrying the
   `trace_id` that ties the request, its verdicts, and the metrics together.

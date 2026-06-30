@@ -21,7 +21,10 @@ truth** for account identity + policy. Everything else is a **generated view** o
 | job view | `<job>/config/claude_accounts.yaml` | `fak accounts sync --job-view` | `u` = `job-search claude-accounts observe` |
 
 Never hand-edit a view — regenerate it. A view that drifts from the registry is caught by
-`fak accounts check` (RED, exit 1).
+`fak accounts check` (RED, exit 1). Both generated views now carry the same
+`login_status` + `can_serve` fields as `fak accounts status`, so switchers can consume the
+closed login vocabulary directly instead of guessing from `enabled`, directory existence, or
+credential files.
 
 The shell entry points (the shared `shortcuts.ps1` profile):
 
@@ -41,6 +44,7 @@ fak accounts remove --name <seat> --archive
 
 # inspect: the roster (tool/registry version stamped on top) and "is my binary current?"
 fak accounts list
+fak accounts status --json
 fak accounts version
 ```
 
@@ -61,10 +65,13 @@ deliberate step.
 
 ## Runbook: retire one or more seats
 
-1. **Look before you cut.** `fak accounts list` — note `dup -> <canonical>` (a seat that is
-   really another account), `CREDS` (does it hold a unique login?), and whether a backup exists
-   under `~/.claude-account-backups/<email>`. A seat with a unique login and no backup loses that
-   login on the eventual purge — keep its `.DELETED-*` dir until you are sure.
+1. **Look before you cut.** `fak accounts list` shows the human table; `fak accounts status
+   --json` is the machine report (`fak.accounts.login.v1`) with one closed `status` per seat
+   (`ready`, `needs_login`, `missing_dir`, `disabled`, `tombstoned`), `can_serve`, warnings, and
+   the next action. Note `dup -> <canonical>` / `duplicate_account_bucket` (a seat that is really
+   another account), `CREDS` / `needs_login` (does it hold a unique login?), and whether a backup
+   exists under `~/.claude-account-backups/<email>`. A seat with a unique login and no backup loses
+   that login on the eventual purge — keep its `.DELETED-*` dir until you are sure.
 2. **Don't retire the seat you are sitting on.** `echo $CLAUDE_CONFIG_DIR` — `--archive` refuses
    it anyway (you cannot move the dir this session runs from); retire that one from another session.
 3. **Retire it in one command (reversible):**
@@ -118,7 +125,14 @@ and the multi-step retire — both now closed.
   supports, and the verb set. Closes the stale-binary trap: a binary behind source prints an old
   version / short verb list instead of failing a newer verb with a raw flag error.
 - **`fak accounts list` provenance header** — `# fak <ver> · registry <schema>` above the table,
-  so any roster read shows the tool version inline.
+  so any roster read shows the tool version inline. It now includes a `LOGIN` column derived from
+  the same closed status vocabulary as `fak accounts status`.
+- **`fak accounts status [--json]`** — the observable login report for all users of the account
+  switcher: no ad hoc boolean guessing, just one status, `can_serve`, warnings, roles, and a next
+  action per seat.
+- **Generated view login fields** — `fak accounts sync` writes `login_status` and `can_serve` into
+  the dos/job roster rows, so `claude-as`, `u`, and other switcher consumers can read the same
+  readiness surface without reimplementing the registry's login rules.
 - **`fak accounts remove --archive`** — the one-command retire (tombstone + dir-rename + registry
   repoint + resync) that replaces the manual dance this note was written about.
 

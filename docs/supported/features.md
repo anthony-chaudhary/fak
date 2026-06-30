@@ -108,7 +108,7 @@ fak tags every capability with exactly one of three honest states:
 | Poly-model serving core | Shipped | The deterministic "host many models, share the prefill, decode one" policy/accounting brain (residency pool, serial decode lane, speculative-accept core, cross-model prefill-share gate). Runs no model and is off mainline by construction (`FAK_POLYMODEL`, default off). |
 | Single-pass batched + tree-attention verify | Shipped | `model.VerifyForward` turns the accept decision into a real one-pass forward over candidate tokens, token-identical to sequential decode; CPU synthetic regime, so no tokens/sec, off mainline (`FAK_POLYMODEL`). |
 | Multi-model weight-residency layer | Shipped | `internal/residency` lifts the single-model assumption with a weight-byte budget and LRU page-out, reusing `polymodel.Pool`'s policy; moves no weight bytes, off mainline (`FAK_POLYMODEL`). |
-| RadixAttention parity vs SGLang | Shipped | `internal/radixkv` rebuilds SGLang's radix-tree prefix reuse over the kernel-owned KVCache; measured 77.2–88.2% cache hit rate inside SGLang's 50–99% band, reuse-through-edge-split bit-identical to recompute. |
+| RadixAttention parity vs SGLang | Shipped | `internal/radixkv` rebuilds SGLang's radix-tree prefix reuse over the kernel-owned KVCache; WITNESSED kernel-owned reuse measured 77.2–88.2% cache hit rate inside SGLang's 50–99% band, reuse-through-edge-split bit-identical to recompute. |
 | GPTQ resident loader/session (#300) | Shipped | `model.LoadGPTQ` parses AutoGPTQ/GPTQModel safetensors triples (`qweight`/`qzeros`/`scales`, optional `g_idx`) for 4-bit and 8-bit weights, keeps normal tensors f32, and runs opt-in `Session.GPTQ` through resident GPTQ GEMV. CPU-resident path only; native packed GPTQ CUDA throughput is not claimed. |
 | int8/Q8_0 SIMD lane | Simulated | Hand-written AVX2/AVX-512 lane (CPUID-gated, scalar fallback) is the active in-flight increment, witnessed green in the working tree but deliberately not given a Shipped row in the ledger until the implementation lane commits it. |
 
@@ -190,7 +190,7 @@ For the witnessed source of record behind every row on this page, read the [clai
 - [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
 - [APIs, wires & MCP](apis-and-protocols.md) — OpenAI Chat/Responses, Anthropic Messages, Gemini, xAI, MCP, fak-native endpoints
 - [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
-- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio, and the in-kernel reference engine
 
 ## Reference (the witnessed sources behind this page)
 

@@ -99,7 +99,7 @@ For a 20-turn session with 5K shared prefix:
 
 **What it does:**
 - Open-source RadixAttention implementation
-- 86.7% cache hit rate on agent workloads
+- OBSERVED external-engine 86.7% cache hit rate on agent workloads
 - 7.50× token speedup vs naive re-prefill
 
 **Measured against fak (from benchmark authority):**

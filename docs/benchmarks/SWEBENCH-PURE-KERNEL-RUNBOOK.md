@@ -112,7 +112,7 @@ pure-kernel proof.**
   proves the path works. Resolve-rate > 0 is the second milestone; full SWE-bench Verified
   is the goal.
 - **The long pole is operational, not algorithmic.** Reaching the GPU server today goes
-  through the Slack control bridge, whose transcript readback (`!dump`) is unreliable
+  through the private control bridge, whose transcript readback (`!dump`) is unreliable
   (tracked in private lab tooling). A direct shell, or fixing that readback, is the
   highest-risk GPU-server item — everything in steps 3–5 is blocked on *observing* the run, not on
   the kernel.

@@ -1,6 +1,6 @@
 ---
 title: "Compatibility matrix — what speaks a wire fak can sit on"
-description: "A sourced reference of 46 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
+description: "A sourced reference of 47 agent harnesses, frameworks, model backends, and interop protocols, each with the wire it speaks, whether it supports a custom base URL, and the exact key you set to repoint it at fak. fak is the gateway; if your tool can set a base URL, it already works."
 ---
 
 # Compatibility matrix
@@ -8,7 +8,7 @@ description: "A sourced reference of 46 agent harnesses, frameworks, model backe
 `fak serve` adjudicates over the wires your stack already speaks — OpenAI Chat
 Completions, Anthropic Messages, and MCP. So the practical question for any tool is
 narrow: **does it let you repoint its base URL?** If yes, the gate drops in front with no
-code change. This page answers that question for 46 surveyed targets, with the exact key
+code change. This page answers that question for 47 surveyed targets, with the exact key
 you set and a link to the docs that prove it.
 
 It's a reference, not a tutorial. For the copy-paste recipe, start at the
@@ -24,8 +24,8 @@ var, constructor arg, or config field. A **Partial** or **No** means the repoint
 templated, indirect, or undocumented — the [caveats](#caveats-worth-knowing) below say
 exactly how.
 
-> Surveyed 2026-06-27 across 46 targets (12 harnesses, 14 frameworks, 13 backends, 7
-> protocols). Each row carries a source link; 39 of 46 are high-confidence, the rest
+> Surveyed 2026-06-30 across 47 targets (12 harnesses, 14 frameworks, 14 backends, 7
+> protocols). Each row carries a source link; 40 of 47 are high-confidence, the rest
 > flagged in the caveats. Wires and config keys drift — when a row looks stale, the source
 > link is the ground truth, not this table.
 
@@ -79,6 +79,7 @@ What actually serves the tokens. `fak serve --base-url <here>` puts the gate in 
 |---|---|---|---|
 | [Ollama](https://docs.ollama.com/api/openai-compatibility) | OpenAI Chat Completions (plus its own native /api/* REST) | Yes | OpenAI client base_url='http://localhost:11434/v1/' (host/port configurable via OLLAMA_HOST); from fak's side --base-url http://<host>:11434/v1 |
 | [vLLM](https://docs.vllm.ai/en/stable/serving/openai_compatible_server/) | OpenAI Chat Completions / Completions / Embeddings | Yes | Server launched with `vllm serve`; client points at base_url='http://localhost:8000/v1' (host/port set by --host/--port). From fak: --base-url http://<host>:8000/v1 |
+| [llm-d](https://github.com/llm-d/llm-d) | OpenAI Chat Completions through a Kubernetes Gateway API route; vLLM workers behind Endpoint Picker Provider routing | Yes | Point the OpenAI client at the llm-d Gateway API route's `/v1` root. From fak: `--provider openai --base-url http://<llm-d-gateway>/v1`; for fak syscall/model-route dispatch use `--engine llm-d` with `FAK_LLMD_BASE_URL` (or `FAK_LLM_D_BASE_URL`). |
 | [SGLang](https://docs.sglang.ai/backend/openai_api_completions.html) | OpenAI Chat Completions / Completions / Embeddings (plus SGLang-native extensions) | Yes | Launched via `python3 -m sglang.launch_server ... --host 0.0.0.0 --port 30000`; client base_url='http://<host>:30000/v1'. From fak: --base-url http://<host>:30000/v1 |
 | [llama.cpp (llama-server)](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) | OpenAI Chat Completions (plus llama.cpp-native /completion, /props, etc.) | Yes | `llama-server -m model.gguf --host 0.0.0.0 --port 8080`; client base_url='http://localhost:8080/v1'. From fak: --base-url http://<host>:8080/v1 |
 | [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) | OpenAI Chat Completions / Completions / Embeddings / Models (also OpenAI Responses API in recent builds) | Yes | Start the local server in the Developer tab; client base_url='http://localhost:1234/v1' (port configurable in the app). From fak: --base-url http://<host>:1234/v1 |
@@ -123,7 +124,7 @@ Where a row says **Partial** or **No**, or the repoint has a sharp edge, here's 
 
 ## Summary
 
-Of the 46 targets, **40 expose a custom base URL outright** and 4 more do so partially —
+Of the 47 targets, **41 expose a custom base URL outright** and 4 more do so partially —
 because the OpenAI-compatible wire has become the field's lingua franca, and `fak serve`
 speaks it. The handful that don't (`llms.txt` is a static file; Windsurf routes through a
 closed backend) aren't runtime boundaries a gateway can sit on in the first place.

@@ -51,6 +51,8 @@ no single live view.
 | [GitHub Issues](https://github.com/anthony-chaudhary/fak/issues) plus [`docs/dispatch-loop.md`](dispatch-loop.md) | The live backlog and the witness-gated loop that drives it (`cmd/dispatchworker`: spawn, ship #N, witness, close). The always-current open-issue count lives in the tracker, never hard-coded here. |
 | [`docs/idea-scout.md`](idea-scout.md) | The inbound feeder: a daily arXiv and GitHub sweep that files triage-ready issues (`tools/idea_scout.py`), the complement to the dispatch loop. |
 | [`docs/EXECUTIVE-ROLLUP.md`](EXECUTIVE-ROLLUP.md), [`docs/PRODUCT-STATUS.md`](PRODUCT-STATUS.md) | Point-in-time snapshots: the leadership roll-up and the tree-checked product-standing map. Current, regenerated from the tree. |
+| [`operator-brief.md`](operator-brief.md) / `fak operator brief` | The human pacing layer: folds cadence, program, milestone, optional operator-heaviness JSON, and optional previous-brief JSON into source coherence, change delta, attention timebox/read-order, human-use guidance, and `human`, `agent`, `watch`, and `background` buckets so operators can see decisions separately from delegable work, surface pressure, and ambient telemetry. |
+| [`human-operator-effectiveness.md`](human-operator-effectiveness.md) / `fak program report` | The ongoing human-steerability program: tracks operator attention, learning pace, source coherence, change compression, and surface pressure as a frontier + trend rather than a completion bar. |
 
 ## 3. Dev: the core development and contributor workflow
 

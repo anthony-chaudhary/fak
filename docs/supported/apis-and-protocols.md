@@ -56,7 +56,7 @@ keys, named as such.
 
 Any tool not listed above that lets you set a base URL connects through one of these
 wires. That covers most of the field. Rather than restate the list here, see the
-[compatibility matrix](../integrations/compatibility-matrix.md), which sources 44
+[compatibility matrix](../integrations/compatibility-matrix.md), which sources 47
 harnesses, frameworks, backends, and protocols, each with the exact repoint key.
 
 ---
@@ -159,11 +159,11 @@ adapter position rather than a closed door.
 - [Features](features.md) — every capability with its shipped / simulated / stub status
 - [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
 - [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
-- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio, and the in-kernel reference engine
 
 ## Reference (the witnessed sources behind this page)
 
-- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 47 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
 - [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
 - [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
 - [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)

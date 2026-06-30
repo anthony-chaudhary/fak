@@ -48,7 +48,7 @@ endpoints, see [APIs, wires & MCP](apis-and-protocols.md) and the
 
 When a tighter per-model claim is not sourced, treat it as **fronted via the
 OpenAI-compatible wire** — the [Compatibility matrix](../integrations/compatibility-matrix.md)
-is the surveyed list (44 harnesses, frameworks, backends, and protocols, each with the
+is the surveyed list (47 harnesses, frameworks, backends, and protocols, each with the
 exact repoint key). fak's role at this layer is the governance surface, not tokens per
 second.
 
@@ -162,7 +162,7 @@ through the gateway over the OpenAI-compatible wire and it works unchanged. See 
 - [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
 - [APIs, wires & MCP](apis-and-protocols.md) — OpenAI Chat/Responses, Anthropic Messages, Gemini, xAI, MCP, fak-native endpoints
 - [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
-- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio, and the in-kernel reference engine
 
 ## Reference (the witnessed sources behind this page)
 

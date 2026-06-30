@@ -21,7 +21,7 @@ Read with:
 - [`docs/HARDWARE-MATRIX.md`](../HARDWARE-MATRIX.md) — the four profiled platforms.
 - [`docs/explainers/ultracode-multi-agent-dogfood.md`](../explainers/ultracode-multi-agent-dogfood.md) — the multi-agent *orchestration* mode and its metric.
 - [`examples/fleet-reuse-demo/`](../../examples/fleet-reuse-demo/) — the runnable, GPU-free reuse curve.
-- [`docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md`](../nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md) — the honest frontier-MoE wall.
+- [`docs/nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md`](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md) — the honest frontier-MoE wall.
 
 ---
 
@@ -73,7 +73,7 @@ GLM-5.2 under `--cpu-offload-experts` decodes at **0.23 tok/s** steady-state and
 gets *worse* under concurrency (2-way = 0.27× of single-stream — it serializes,
 it does not batch); pure-CPU `llama.cpp` on the big-RAM host is **0.89 tok/s**,
 ~3.8× *faster* than fak's offload path
-([DGX-OVERNIGHT-PLAN](../nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md)). The fix is
+([GPU-SERVER-OVERNIGHT-PLAN](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md)). The fix is
 known — GLM-5.2's *dense* path is already pure-GPU witnessed (cosine 1.0 on the
 datacenter GPU, [CLAIMS.md](../../CLAIMS.md) Engine §); the DSA sparse-attention
 and DSA-KV are still host-side (#86/#413). Until the experts move off the host,
@@ -113,7 +113,7 @@ Everything in §2 is the tier where it *is* doable.
   preflight** (`RefuseMemoryPlanIfTooBig` / `EstimateF32LoadMemoryPlan`) refuses
   a model that won't fit RAM headroom *before* allocation — the gate that exists
   precisely because the all-resident path once wedged a 1 TB host (#974,
-  [DGX-OVERNIGHT-PLAN](../nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md)).
+  [GPU-SERVER-OVERNIGHT-PLAN](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md)).
 - **Showable today:** [`examples/fleet-reuse-demo`](../../examples/fleet-reuse-demo/)
   runs the N-agent shared-prefix reuse curve **with no GPU and no model** (exact
   byte accounting, `--offline`), landing in the ~1.5–4× vs-tuned region at N=5.

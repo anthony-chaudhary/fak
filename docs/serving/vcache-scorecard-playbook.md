@@ -36,6 +36,9 @@ active source: planned
 active multiplier: 3.76x (target 2.00x)
 2x gate: pass
 planned proof: PROVEN saved 21094.4 / 28742.0 (73.4%)
+planes: provider=MISSING kernel=MISSING context=MISSING external=MISSING forecast=FORECAST
+agentic activation: 0 events (kernel=0 context=0 provider-decisions=0 external=0)
+default usefulness: not_ready (F 32/100) - no realized provider/kernel/context/external evidence supplied; score is mostly forecast
 concentration: s=1.74 measured=true defeated=false
 hot-anchor index: top 8 covers 86.4% (target 85.0%)
 prediction errors: false-warm 0.00% false-cold 0.00% (0 samples)
@@ -60,10 +63,26 @@ proofs, the index, and the action/risk lists) and `--out FILE` to persist it.
 | `active source` | `planned` (the deterministic star-anchor proof) until you feed real provider telemetry, then `observed`. The score prefers observed over planned the moment telemetry is present. |
 | `active multiplier` | The savings ratio the gate judges, against `--two-x` (default 2.0). |
 | `2x gate` | The one-bit ship signal: does this workload earn the virtual-cache path? |
+| `planes.provider_observed` | Provider prompt-cache telemetry, relayed from upstream usage counters. This is a rebate witness, not fak-owned reuse. |
+| `planes.kernel_witnessed` | Pure-fak KV-prefix reuse evidence, supplied by `--kernel-kv-prompt-tokens` / `--kernel-kv-reused-tokens` or the gateway cache observer. |
+| `planes.context_witnessed` | O(1) context/query value, including gateway compaction shed-token evidence. Shed-only evidence is visible but needs a resident/baseline denominator for net-value credit. |
+| `planes.external_engine_observed` | SGLang/vLLM/llama prefix-cache hit-rate evidence. Hit rate alone improves coverage, not token-value credit. |
+| `agentic_activation` | Counts fak-authored mechanisms that fired. Provider cache counters alone do not increment it. |
+| `default_usefulness` | A separate conservative score over realized value, activation, cold-path correctness, granularity, coverage, drift resistance, and actionability. |
 | `concentration` | The Zipf `s` of the workload's anchor reuse. `defeated=true` means the workload is too flat for anchor caching to help -- the honest "do not bother" case. |
 | `hot-anchor index` | The plan: how many top anchors to index and the coverage they buy. This is the artifact the agent persists (`--index-out FILE`). |
 | `prediction errors` | False-warm / false-cold rates from any calibration samples you pass -- the cost of warming the wrong anchors. |
 | `recall proof` | The chain-recall economics: for a single small unit recalled from a long warm prefix, the cost gate REFUSES (a net loss); rebuild wins only past the named sibling fan-out. |
+
+The old 2x gate remains intentionally provider-compatible: a provider-only run can
+print `2x gate: pass` while `default_usefulness` stays `partial` because fak did
+not author any cache action. Supply fak-owned activity with
+`--kernel-kv-events`, `--context-events`, `--provider-vcache-decisions`, and
+`--external-engine-events`. For value witnesses, add
+`--kernel-kv-prompt-tokens` / `--kernel-kv-reused-tokens` for pure-fak KV,
+`--context-shed-tokens` / `--context-resident-tokens` for O(1) context, and
+`--external-engine-hit-rate` for external serving engines. A running gateway also
+exposes the same report at `GET /v1/fak/vcache/score`.
 
 ## The workflow: planned to proven
 
@@ -116,5 +135,8 @@ The score is deterministic, so it gates cleanly:
 - `fak vcache prove-telemetry` -- realized savings from one provider usage JSONL.
 - `fak vcache prove-recall` -- the chain-recall cost-gate proof (the single-unit
   recall is a net loss; rebuild wins only for amortized fan-out).
+- `GET /v1/fak/vcache/score` -- the served API twin of `fak vcache score`, folding
+  live provider telemetry, kernel KV observer data, compaction shed-token context
+  evidence, and external serving-engine cache hit-rate rows.
 - [Hardware-aware KV cache](hardware-aware-cache.md) -- where a warmed span physically
   lives across the memory tiers.

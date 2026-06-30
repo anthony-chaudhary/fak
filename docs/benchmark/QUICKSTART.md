@@ -59,25 +59,25 @@ python tools/bench_catalog.py update
 
 ```bash
 # List all runs
-python tools/bench_cli.py list
+fak bench-runs list
 
 # Filter by machine
-python tools/bench_cli.py list --machine anthony-laptop
+fak bench-runs list --machine anthony-laptop
 
 # Filter by model
-python tools/bench_cli.py list --model smollm2-135m
+fak bench-runs list --model smollm2-135m
 
 # Show detailed run info
-python tools/bench_cli.py show <run-id>
+fak bench-runs show <run-id>
 
 # Compare two runs
-python tools/bench_cli.py compare <run-id-1> <run-id-2>
+fak bench-runs compare <run-id-1> <run-id-2>
 
 # Find the best run for a model
-python tools/bench_cli.py best --model smollm2-135m
+fak bench-runs best --model smollm2-135m
 
 # Generate comparison table (Markdown)
-python tools/bench_cli.py table --model smollm2-135m
+fak bench-runs table --model smollm2-135m
 ```
 
 ### Generate Charts
@@ -120,7 +120,7 @@ python tools/bench_catalog.py update
 ### Step 4: Verify
 
 ```bash
-python tools/bench_cli.py list --machine <machine-id>
+fak bench-runs list --machine <machine-id>
 ```
 
 ## Directory Structure Reference
@@ -156,7 +156,7 @@ python tools/bench_catalog.py validate
 ### Check a Specific Run
 
 ```bash
-python tools/bench_cli.py show <run-id>
+fak bench-runs show <run-id>
 ```
 
 ## Common Workflows
@@ -165,7 +165,7 @@ python tools/bench_cli.py show <run-id>
 
 ```bash
 # Get comparison table
-python tools/bench_cli.py table --model smollm2-135m --format markdown
+fak bench-runs table --model smollm2-135m --format markdown
 
 # Generate scaling curve chart
 python tools/bench_chart.py scaling --model smollm2-135m
@@ -175,21 +175,21 @@ python tools/bench_chart.py scaling --model smollm2-135m
 
 ```bash
 # List all runs for a machine, sorted by date
-python tools/bench_cli.py list --machine anthony-laptop
+fak bench-runs list --machine anthony-laptop
 
 # Compare latest vs previous
-python tools/bench_cli.py compare <latest-id> <previous-id>
+fak bench-runs compare <latest-id> <previous-id>
 ```
 
 ### Find Performance Regression
 
 ```bash
 # List all runs for a model
-python tools/bench_cli.py list --model smollm2-135m
+fak bench-runs list --model smollm2-135m
 
 # Check if latest is slower than best
-python tools/bench_cli.py best --model smollm2-135m
-python tools/bench_cli.py compare <latest> <best-id>
+fak bench-runs best --model smollm2-135m
+fak bench-runs compare <latest> <best-id>
 ```
 
 ## Troubleshooting

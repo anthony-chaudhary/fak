@@ -62,7 +62,7 @@ What fak *can* do here is **result-RECOGNITION, not interception**: a `tool_resu
 A tool call may be served from a view **iff serving it is observationally indistinguishable from running it fresh.** The admission floor is the **conjunction** of two independent predicates, both required:
 
 1. **SOUND** — no false hit is ever possible. Every served entry is bound, at serve time, to an invalidation key that has *strictly advanced* if reality changed in a way that could alter the result. Serving can only ever degrade to a MISS → engine; it can never invent a stale hit. (The revoke.go lemma generalizes: every gate only turns a would-be hit into a miss.)
-2. **CHEAPER-THAN-THE-CALL** — the invalidation predicate's evaluation cost is *strictly less* than executing the tool. A predicate as expensive as "re-run and diff" is sound but pointless — it deletes the speed win. This is the tool-result form of vCache's `recall.go` break-even gate (`P·r < S·U`): serving from cache wins only when the **check** is amortized-cheaper than the **call**.
+2. **CHEAPER-THAN-THE-CALL** — the invalidation predicate's evaluation cost is *strictly less* than executing the tool. A predicate as expensive as "re-run and diff" is sound but pointless — it deletes the speed win. This is the tool-result form of vCache's `recall.go` break-even gate (`P·r < S·U`): serving from cache is worthwhile only when the **check** is amortized-cheaper than the **call**.
 
 Soundness alone is insufficient; that is the load-bearing addition over "just cache it."
 

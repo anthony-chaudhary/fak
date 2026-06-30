@@ -1,6 +1,6 @@
 ---
 title: "GPU server overnight run plan — 2026-06-28"
-description: "Per-box overnight data-collection plan for the GPU server/CPU server fleet driven over the Slack control bridge: what each box collects tonight, the exact runbook, and the honesty boundary."
+description: "Per-box overnight data-collection plan for the GPU server/CPU server fleet driven over the private control bridge: what each box collects tonight, the exact runbook, and the honesty boundary."
 ---
 
 # GPU server overnight run plan — 2026-06-28
@@ -8,25 +8,25 @@ description: "Per-box overnight data-collection plan for the GPU server/CPU serv
 The fleet-scale companion to [`README.md`](README.md) (`fak nightrun`, which is
 *local*-box aware). `nightrun` answers "what can the box I'm sitting on collect?";
 this doc answers the same question for the **remote GPU server/CPU server boxes reached only
-through the Slack control bridge** (`fak-private/tools/dgxsh.py`) — the boxes
+through the private control bridge** — the boxes
 where the project's frontier GLM-5.2 witnesses actually live.
 
 It is the durable plan: the next operator or agent reads this, confirms the
 bridge is live, and resumes collection where this night left off. The witnessed
 numbers land in [`collected.jsonl`](collected.jsonl) (durable trunk evidence) and
-the per-box raw logs stay on the box under `/tmp/fakgpu/<tag>.log`.
+the per-box raw logs stay on the box under a private scratch path.
 
 ## Live fleet state (witnessed 2026-06-28 ~05:48Z via the bridge)
 
 | box | channel | hardware | GLM-5.2 state tonight | overnight target |
 |---|---|---|---|---|
-| **GPU server** | `dgx3-control` | 8-GPU datacenter server, 886 GiB RAM | **2 fak-kernel serves UP** (`/tmp/fakdgx` :8000, `/tmp/fakdgx_q5q6` :8001) running ~1.5 d; GPU0 ~37 GB, **GPU1-7 fully free** | **live decode tok/s witness** against :8000 (read-only chat completion — the #971 cpu-offload wall) |
-| **CPU server** | `da33-control` | CPU-only high-RAM host (256 CPU, ~1 TB RAM, **~454 GiB free**) | no serve up; **fak-bin 0.34.0 staged on NVMe** (`/mnt/nvme-glm/fak-bin`); full UD-Q4_K_M (434 GB) staged on NVMe | **llama.cpp mmap CPU throughput baseline** (memory-safe — fak-native resident needs ~458 GB > free, would OOM-wedge the shared host) |
-| **GPU server** | `dgx2-control` | 8-GPU datacenter server | GLM-5.2 serve + a peer agent mid-flight (RC2 poll loop) | leave to peer; revisit when its session drains |
-| **GPU server** | `dgx1-control` | 8-GPU datacenter server | OCCUPIED — sglang `gpt-oss-120b` TP-8, VRAM fully committed | **not a GLM target** (do not evict) |
+| **GPU server A** | private channel key | 8-GPU datacenter server, 886 GiB RAM | **2 fak-kernel serves UP** (private scratch paths, ports :8000/:8001) running ~1.5 d; GPU0 ~37 GB, **GPU1-7 fully free** | **live decode tok/s witness** against :8000 (read-only chat completion - the #971 cpu-offload wall) |
+| **CPU server A** | private channel key | CPU-only high-RAM host (256 CPU, ~1 TB RAM, **~454 GiB free**) | no serve up; **fak-bin 0.34.0 staged on NVMe**; full UD-Q4_K_M (434 GB) staged on NVMe | **llama.cpp mmap CPU throughput baseline** (memory-safe - fak-native resident needs ~458 GB > free, would OOM-wedge the shared host) |
+| **GPU server B** | private channel key | 8-GPU datacenter server | GLM-5.2 serve + a peer agent mid-flight (RC2 poll loop) | leave to peer; revisit when its session drains |
+| **GPU server C** | private channel key | 8-GPU datacenter server | OCCUPIED - sglang `gpt-oss-120b` TP-8, VRAM fully committed | **not a GLM target** (do not evict) |
 
-The symbolic `*-control` keys resolve to real Slack channel IDs in `fak-private`'s
-`tools/dgxsh.py` `_CHANNELS` map — the IDs never reach this public tree by policy
+The private channel keys resolve to real channel IDs in the private repo's bridge map;
+the IDs never reach this public tree by policy
 (see [`docs/fak/scrubbing-real-values.md`](../fak/scrubbing-real-values.md)).
 
 ## What each box collects tonight
@@ -40,10 +40,10 @@ wall, historically ~190 s for a 5-tok turn ≈ 0.026 tok/s wall). Keep `max_toke
 small (≈16) so the turn returns inside one poll window.
 
 ```bash
-# from fak-private, in a FRESH session (newsess) to avoid peer-stdin collision:
-CHANNEL=dgx3-control python tools/dgxsh.py bg <sess> \
-  <scratch>/dgx3_glm_decode_witness.sh glmdec1
-CHANNEL=dgx3-control python tools/dgxsh.py poll <sess> glmdec1 40
+# from the private bridge repo, in a fresh session to avoid peer-stdin collision:
+CHANNEL=<private-channel-key> python <private-bridge-helper> bg <sess> \
+  <scratch>/gpu_glm_decode_witness.sh glmdec1
+CHANNEL=<private-channel-key> python <private-bridge-helper> poll <sess> glmdec1 40
 ```
 
 ### CPU server — GLM-5.2 UD-Q4_K_M CPU throughput baseline (`witness-glm52-cpu-throughput`, CPU arm)
@@ -54,8 +54,8 @@ page-cache reclaimable) so it **cannot OOM-wedge** the shared host (it also runs
 the documented memory-safe baseline arm.
 
 ```bash
-LB=/projects/llama.cpp/build-cpu/bin/llama-bench
-GGUF=/mnt/nvme-glm/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf
+LB=<llama.cpp-build>/bin/llama-bench
+GGUF=<nvme-model-dir>/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf
 "$LB" -m "$GGUF" -ngl 0 -t 128 -p 512 -n 64 -r 2   # mmap default ON
 ```
 
@@ -68,11 +68,11 @@ resident path is operator-gated on this shared box.
 
 ## How the loop closes
 
-1. **Probe** — `dgxsh.py auth` (bridge live?), then per-box `nvidia-smi` / `free -g`
+1. **Probe** — private bridge auth (bridge live?), then per-box `nvidia-smi` / `free -g`
    / `ss -ltnp` to confirm free GPUs and RAM headroom.
 2. **Launch** — one `bg <sess> <runner> <tag>` per box (fresh `newsess` per box;
    never share a session with a live peer agent).
-3. **Watch** — poll `/tmp/fakgpu/<tag>.done` on a slow cadence (the bridge is
+3. **Watch** — poll the private scratch completion marker on a slow cadence (the bridge is
    rate-limited; `cmd_sync` rc is unreliable on busy boxes → read the transcript
    tail directly).
 4. **Record** — fold each completed datum into [`collected.jsonl`](collected.jsonl)

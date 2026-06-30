@@ -182,7 +182,7 @@ For a long session the reconstructed window saturates at the budget, so C costs 
 No, for the crossover. Output is 5× input for Opus, Sonnet, and Haiku alike, and the crossover is set by the cache multipliers (read 0.1×, write 1.25×) and the workload shape, not the per-token price. The dollar figures scale with the model's input price; the ratios do not.
 
 **When is the append-only cache still the right call?**
-When the cache stays warm and the window cannot be made small. If your reconstructed context would have to be a large fraction of the full transcript anyway — because the task genuinely needs most of the history every turn — you are above the crossover and the cache wins. The O(1) design pays off precisely when most of the transcript is *not* needed on most turns, which is the common shape of long tool-use loops (92% of context is tool results, most of them stale).
+When the provider prompt-cache stays warm and the window cannot be made small. If your reconstructed context would have to be a large fraction of the full transcript anyway — because the task genuinely needs most of the history every turn — you are above the crossover and the MODELED provider-cache cost wins. The O(1) design pays off precisely when most of the transcript is *not* needed on most turns, which is the common shape of long tool-use loops (92% of context is tool results, most of them stale).
 
 **What about a provider with no prefix caching?**
 Then there is no discount to beat. The O(1) window wins at every budget, by the full size ratio — 28× cheaper at a 4K window on this corpus. This is the case the contrarian design is most obviously right for: a "random API" where you cannot rely on the cache at all.

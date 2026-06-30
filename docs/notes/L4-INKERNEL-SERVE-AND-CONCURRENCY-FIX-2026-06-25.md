@@ -6,7 +6,7 @@ description: "The first warm steady-state decode tok/s measured against fak's LI
 # fak in-kernel CUDA serve on an L4: live tok/s + a concurrency crash fixed
 
 _2026-06-25._ A companion to
-[DGX2-CROSS-ENGINE-DATA](DGX2-CROSS-ENGINE-DATA-2026-06-25.md) and
+[GPU-SERVER-CROSS-ENGINE-DATA](GPU-SERVER-CROSS-ENGINE-DATA-2026-06-25.md) and
 [GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN](GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md).
 Those notes record native-kernel and 753B-serving work on GPU-server-class datacenter nodes. This one
 records what could be measured **right now, on the one GPU node actually reachable** — the

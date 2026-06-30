@@ -1,14 +1,14 @@
 ---
-title: "GPU-server / Slack boundary: public vs private"
+title: "GPU-server private boundary: public vs private"
 description: "The source of truth for what is public versus private in fak's GPU-server work, and the scrub and file-admission gates that enforce the boundary."
 ---
 
-# GPU-Server / Slack Boundary
+# GPU-Server Private Boundary
 
-This is the source of truth for the recurring GPU-server/Slack confusion.
+This is the source of truth for the recurring GPU-server public/private boundary.
 
 > **Just want to reach the channel?** See [`private-comms-channel.md`](private-comms-channel.md)
-> — the public stub that points to the live Slack control-bridge in `fak-private`. This doc
+> — the public stub that points to the live private control bridge in `fak-private`. This doc
 > explains *what is public vs private and why*; that stub is the entry point.
 >
 > **Operating the box fleet?** See [`fleet.md`](fleet.md) — the public, transport-agnostic
@@ -36,13 +36,12 @@ belongs in `fak-private`, not here.
 
 Private-only paths and concepts:
 
-- `cmd/*dgx*/`, `internal/*dgx*/`
-- `cmd/slackgc/`
-- `cmd/*slack*bridge*/`, `internal/*slack*control*/`, and similar Slack control-bridge
-  packages
+- private bridge commands and support packages
+- private notification cleanup helpers
+- private bridge/control packages
 - the sunset Python bridge paths `tools/bench_slack.py` and `tools/bench_slack_test.py`
-- GPU-server machine catalog runs under `experiments/benchmark/runs/by-machine/dgx*/`
-- raw Slack-control state, transcripts, tokens, workspace IDs, lab hostnames, and
+- GPU-server machine catalog runs under private machine IDs
+- raw control-plane state, transcripts, tokens, workspace IDs, lab hostnames, and
   operator paths
 
 ## Confirming a feeder actually posted
@@ -64,19 +63,19 @@ pure logic under `internal/<name>/` where appropriate. Do not add a new `tools/*
 The public, transport-agnostic fleet core now exists in Go: `cmd/fleetctl/` (`fleetctl`)
 is the Go home the scattered `tools/fleet_*.py` helpers port into — a typed roster, a
 deterministic fold + readiness score, and a render that stays readable at 100+ boxes. It
-reads the per-box report JSON the private Slack bridge writes (the seam is a data contract,
+reads the per-box report JSON the private bridge writes (the seam is a data contract,
 not a code import), so the live control plane stays private while the core stays public.
 See [`fleet.md`](fleet.md).
 
 Existing Python tools are grandfathered only. The allowlist in `internal/pythongate` can
 shrink when a Python tool is ported or sunset, but it must not grow. Restoring
 `tools/bench_slack.py` would violate both rules: it is a new Python path after deletion
-and it is private Slack/GPU-server control-plane code.
+and it is private GPU-server control-plane code.
 
 ## Enforced by
 
 - `internal/pythongate`: refuses new tracked `tools/*.py`
-- `tools/check_committed_files.py`: refuses private-only Slack/GPU-server control paths
+- `tools/check_committed_files.py`: refuses private-only GPU-server control paths
 - `.gitignore`: keeps private GPU-server run outputs and bridge working copies out of status
 - `tools/scrub_public_copy.py`: strips private GPU-server machine runs and lab identifiers from
   exported copies

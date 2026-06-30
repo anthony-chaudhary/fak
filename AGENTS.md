@@ -22,7 +22,7 @@ the shared setup work once, not every turn).
 | `internal/` | Kernel subsystems: `adjudicator`, `policy`, `vdso`, `engine`, `gateway`, `ctxmmu`, `model`, … |
 | `examples/` | Policy manifests **and** runnable demos (`adjudication-demo/`, `agentdojo-redteam/`, `mcp/`). |
 | `docs/` | Explainers, integration guides (`docs/integrations/`), benchmark methodology, proofs. |
-| `docs/private-comms-channel.md` | **The private comms channel** (Slack control-bridge to the lab GPU servers) — a public stub pointing to its home in the `fak-private` companion repo. Start here to reach the hardware. |
+| `docs/private-comms-channel.md` | **The private comms channel** (private control bridge to the lab GPU servers) — a public stub pointing to its home in the `fak-private` companion repo. Start here to reach the hardware. |
 
 ## Build / test / run
 
@@ -190,8 +190,8 @@ binary/tooling is unavailable, and say so in the handoff.
   runbooks can live here once scrubbed to generic GPU-server language, but live Slack
   control code belongs in `fak-private`: `cmd|internal/*dgx*/`, Slack bridge/control
   packages, `cmd/slackgc/`, and the sunset `tools/bench_slack.py` path. See
-  [`docs/dgx-slack-boundary.md`](docs/dgx-slack-boundary.md). **To actually reach the
-  channel** (the Slack control-bridge to the lab GPU servers), start at the public stub
+  [`docs/gpu-server-private-boundary.md`](docs/gpu-server-private-boundary.md). **To actually reach the
+  channel** (the private control bridge to the lab GPU servers), start at the public stub
   [`docs/private-comms-channel.md`](docs/private-comms-channel.md) — it points to the live
   plumbing in `fak-private` (checked out at `../fak-private`).
 - **Never `find /` (also `find ~`, `find /mnt`, `find /proc`) in Git Bash on Windows.**
@@ -227,7 +227,7 @@ route around the guard (that just trips the next one).
 | `STALE_BASE_DELETION` | a pathspec commit would silently drop a peer-added block because the working-tree copy is stale relative to `origin/<trunk>` | fetch and merge/rebase `origin/<trunk>` in place so the working tree includes the peer block, then re-commit by explicit path |
 | `ARCH_LAYER_VIOLATION` | an upward/cross-tier import, or a new leaf with no declared tier | invert the dependency through a registration seam, or push the shared type down a layer; declare a new leaf's tier (`python tools/new_leaf.py`). Floor: `internal/architest` |
 | `OUT_OF_DIRECTION` | request-path logic in an untyped language, or a non-Go package blank-imported into the kernel | keep the request path Go-only; a non-Go seam stays off-path behind a typed, re-validated boundary. Floor: architest `TestHotPathHasNoExec` |
-| `FILE_ADMISSION` | a staged path is private-only content, a **noisy one-off operational artifact** (GPU reserve/availability status, dispatch telemetry, scratch dump — by the `fak:operator-private` marker or the loose-ops-doc name backstop), regenerable junk, or an oversized blob | move private-only code + operator-only status to `fak-private`; mark a one-off ops doc `fak:operator-private` (or gitignore it); a genuine curated note goes under `docs/notes/` in scrubbed language; drop or gitignore junk; put real data under `experiments/` or `testdata/`. See [`docs/dgx-slack-boundary.md`](docs/dgx-slack-boundary.md) |
+| `FILE_ADMISSION` | a staged path is private-only content, a **noisy one-off operational artifact** (GPU reserve/availability status, dispatch telemetry, scratch dump — by the `fak:operator-private` marker or the loose-ops-doc name backstop), regenerable junk, or an oversized blob | move private-only code + operator-only status to `fak-private`; mark a one-off ops doc `fak:operator-private` (or gitignore it); a genuine curated note goes under `docs/notes/` in scrubbed language; drop or gitignore junk; put real data under `experiments/` or `testdata/`. See [`docs/gpu-server-private-boundary.md`](docs/gpu-server-private-boundary.md) |
 | `PUBLIC_LEAK` | staged content matches a redact-needle | remove or redact the needle before committing; `FLEET_ALLOW_LEAK=1` overrides once, only for an intentional adversarial fixture |
 | `OUT_OF_TREE_WRITE` | a write op escaped the repo into a sibling tree | operate inside the workspace; send scratch to a temp dir, never `..`. Soften with `FAK_REPO_GUARD=warn`. See [`docs/repo-guard.md`](docs/repo-guard.md) |
 | `STALE_RECALL` | a loop is about to act on recalled status/plan memory whose witness is stale relative to git or the loop ledger | refresh from the source witness (`dos status`, `dos verify`, `dos commit-audit`, or current git ref), discard the stale recall, then retry |

@@ -27,7 +27,7 @@ The benchmark infrastructure enables:
 | Tool | Purpose |
 |------|---------|
 | `tools/bench_catalog.py` | Build/update master catalog |
-| `tools/bench_cli.py` | Query and compare results |
+| `fak bench-runs` | Query and compare results |
 | `tools/bench_chart.py` | Generate visualizations |
 | `tools/bench_onboard.py` | Register a new machine |
 | `tools/bench_migrate.py` | Migrate existing data |
@@ -81,7 +81,7 @@ python tools/bench_catalog.py build
 python tools/bench_catalog.py update
 
 # List runs
-python tools/bench_cli.py list
+fak bench-runs list
 
 # Generate charts
 python tools/bench_chart.py all
@@ -97,7 +97,7 @@ python tools/bench_onboard.py --interactive
 python tools/bench_catalog.py update
 
 # Verify
-python tools/bench_cli.py list --machine <new-machine-id>
+fak bench-runs list --machine <new-machine-id>
 ```
 
 ## Related Methodology Documents

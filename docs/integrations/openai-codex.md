@@ -24,6 +24,7 @@ There are two useful fak entry points:
 | If you run... | Use this fak path | Why |
 |---|---|---|
 | Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
+| Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak guard`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
 | OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. |
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
@@ -75,6 +76,35 @@ Build the binary:
 ```bash
 go build -o fak ./cmd/fak
 ```
+
+### One-command guarded Codex launcher
+
+For Codex CLI sessions where you have an `OPENAI_API_KEY` available and want fak to
+mediate Codex's model wire directly, use the launcher:
+
+```bash
+./fak codex --dry-run --split off -- exec --json "List active MCP servers only."
+./fak codex -- exec --json "Summarize AGENTS.md."
+```
+
+The dry-run should print a command shaped like:
+
+```text
+fak guard --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
+```
+
+At runtime `fak guard` rewrites the Codex child argv to include:
+
+```text
+-c model_provider=fak
+-c model_providers.fak.base_url="http://127.0.0.1:<port>/v1"
+-c model_providers.fak.wire_api="responses"
+-c model_providers.fak.env_key="OPENAI_API_KEY"
+```
+
+That path is API-key billing today. A `codex login` ChatGPT subscription remains best
+used with the MCP path below until subscription auth is wired through the guarded
+Responses proxy.
 
 Optional self-check for the MCP server:
 

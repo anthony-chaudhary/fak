@@ -148,6 +148,7 @@ fak task      handoff --file HANDOFF.json [--json] [--live] [--repo owner/repo] 
 fak test      [fast|full|race|<pkg>] [-n] [-- go test args]   # host-aware test runner; Windows routes go test through WSL/test.ps1
 fak profile   <pkg> [--bench RE] [--cpuprofile F] [--memprofile F] [--top] [-n]   # host-aware Go benchmark profiler; captures pprof CPU + allocation profiles
 fak console agent --account claude-seat --dry-run -- -p "task"  # native launch-plan for real Claude Code through fak guard, using a selected Claude config home
+fak codex     [--dry-run] [--split off] -- exec --json "task"  # launch OpenAI Codex through fak guard; guard injects Codex -c model_provider=fak / wire_api=responses overrides
 fak c <target>|--target NAME|--auto|--list-targets      # pick a named compute backend (mac/gcp/local/anthropic + ~/.fak/targets.json); --auto ranks by health then cheapest/most-local (cost local<mac<gcp<anthropic), fails over past a DOWN target. quota is a [stub] (not a live fak accounts read) and never excludes
 fak snapshot  kinds | demo | info | dump-fleet | restore-fleet   # dump/restore any primitive (turn|tool|session|fleet|RSI loop) to a portable sha256-integrity bundle
 fak serve     --addr :8080 [--require-key-env VAR]     # OpenAI-compatible HTTP + MCP gateway (any-language agents)
@@ -160,14 +161,17 @@ fak codelint  PATH...                                  # lint agent-written code
 fak policy    --dump | --check FILE                        # author/validate the deployable capability floor
 fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simulate "a,b,b"]   # which model/ensemble routes this aspect; --dump/--check author the routing manifest
 fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
-fak vcache    status | prove | prove-telemetry           # virtual provider-cache status plus planned/observed token-savings proof/refutation
+fak vcache    status | prove | prove-telemetry | score   # virtual provider-cache status plus planned/observed token-savings proof/refutation and scorecard
 fak cachevalue report|review|feed [--since DATE] [--json] [--append-ledger FILE] [--markdown-out FILE] # cache-effectiveness P&L plus generated cache-frontier review artifacts
 fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
 fak cadence   [--json] [--check] [--append-history] [--window N]   # consolidated regular-cadence report: folds scores + maturity + work-done + releases into one control-pane envelope, including the top public `fak maturity route` seed; --append-history writes the durable ledger with standing_score + difficulty fields (docs/cadence/history.jsonl)
 fak milestone report|post [--json] [--check] [--append-history]   # milestone report: the maturity CLIMB (model x backend M0-M7 grid) + the epic ROADMAP, split by WORK CLASS — DISCRETE epics on a completion % vs ONGOING optimization programs (kernel-opt, cache-opt) shown as frontier activity with NO % (they have no 100%). Trended in docs/milestones/history.jsonl
-fak program   report [--json] [--check] [--append-history] [--window N]   # ongoing-program report (the milestone sibling for never-'done' work): the two optimization PROGRAMS — kernel-optimization (perf-lane ship activity) + cache-optimization (the #1066-fenced cache-value reuse trend) — by FRONTIER + TREND, never a completion %. Trended in docs/programs/history.jsonl
+fak program   report [--json] [--check] [--append-history] [--window N]   # ongoing-program report (the milestone sibling for never-'done' work): kernel-optimization, cache-optimization, and human-operator-effectiveness by FRONTIER + TREND, never a completion %. Trended in docs/programs/history.jsonl
+fak operator  brief [--cadence FILE] [--program FILE] [--milestone FILE] [--heaviness FILE] [--previous FILE] [--collect] [--json] [--check]   # human pacing brief: folds cadence/program/milestone plus optional operator-heaviness and previous-brief JSON into source coherence, since_previous delta, attention timebox/read-order, human-use guidance, strengths, choices, challenges, learning, and human/agent/watch/background buckets
+fak operator  heaviness [--json] [--markdown] [--compare FILE]   # operator-surface pressure scorecard: verb surface, guard flag burden, refusal vocabulary, doc-map discoverability, appeal channel, heaviness_debt, and heaviness_pressure
 fak maturity  [next] [--json|--markdown] [--compare base.json]   # feature-maturity lifecycle scorecard: places every declared capability on a closed ladder and emits `fak maturity next`, the ranked backlog. `fak maturity route [--limit N] [--fetch-existing|--live]` turns the top public-routeable backlog rows into stable, deduped GitHub issue plans so the issue-dispatch loop can work them.
 fak scoreboard post [--from card.json --debt-key K | --kpi NAME --value V --grade A --verdict OK --detail ...] [--dry-run]   # post a scorecard result/score to the Slack scoreboard channel (its own FAK_SCOREBOARD_* workspace, separate from the lab bridge); CI + local agents publish a number the moment it changes
+fak bench-loop status|next|walk|run [--json]   # benchmark super-loop manager: folds registry, recorded runs, nightrun ledger, local next selection, and authority gap; run delegates to fak nightrun run
 fak bench post    --rollup latest|regression [--n N] [--catalog PATH] [--baseline PATH] [--dry-run]   # post a bench-channel rollup: the latest catalog runs (WITNESSED/OBSERVED-labeled) or tok/s drops vs the pinned baseline. FAK_BENCH_* workspace (token falls back to the scoreboard token)
 fak bench request [--now STAMP | --plan-json FILE] [--top N] [--dry-run]   # post a bench RUN-REQUEST (the bench_plan next-test-per-machine) to the bench channel. A request is a POST, not a dispatch — no inbound listener; the bench-nodes act on it out-of-band
 fak blockers post [--severity status|operator|clear] --title ... [--detail ... --owner "<@U>" --action ... --action-url URL --ref ...] [--dry-run]   # post a BLOCKER to the central Slack #blockers channel: a background `status` line records quietly, an `operator` one is SURFACED (pages <!here>/owner, red, with a do-this-next). FAK_BLOCKERS_* (token falls back to the scoreboard token; #blockers is the built-in default)
@@ -280,6 +284,37 @@ restarts it if it has stopped — the same probe/restart/lease/debounce machiner
 fleet supervisors alive (`FAK_WATCHDOG_AUTOHEAL=off` disables it; `=warn` logs without
 restarting). `FAK_GARDEN=off` is the env-side brake on the garden pass itself.
 
+### Walking the item backlog — `fak garden walk`
+
+Where `fak garden` folds the **~8 orchestrator members** and `fak garden tick` acts at the
+member level, `fak garden walk` zooms **in** to the hundreds of *individual* garden items a
+member surfaces — today the open-issue backlog (300+ live items), classified by the same issue
+gardener the console uses. It is the answer to "one command that walks sets of 100s of garden
+items, aware of what to do or not, to save resources/time": it loads the set once (no per-item
+network), and folds it through a **resource-aware** policy:
+
+- **skip-active** (on by default) — an item already `in-progress` is being handled, so it is
+  dropped before the worklist. The cheap pre-filter that fires even when update timestamps are
+  unreliable (on a bot-churned tracker `--skip-fresh` over-skips, so it is **off** by default).
+- **budget** — at most `--budget N` items (default 20) earn a worklist row, picked **worst-first**
+  by the gardener's score; the rest are **deferred** to the next pass. So the output — and the
+  follow-up work it implies — is bounded no matter how large the set, and a recurring walk drains
+  the backlog worst-first over passes.
+- **propose, don't execute** — each row carries the exact `gh` command (close a dormant question,
+  mark a stale issue) but the walk never runs it; auto-apply is a later, witness-gated rung. The
+  same propose-don't-mutate discipline as the garden tick and `trajectory-garden`.
+
+```bash
+fak garden walk                       # worst-20 worklist over the open-issue backlog
+fak garden walk --budget 50 --json    # bounded machine-readable worklist
+fak garden walk --skip-fresh 7        # also skip items touched in the last week
+fak garden walk --register            # arm the durable 6h walk loop (loopmgr; survives restart)
+```
+
+Every run appends a witnessed run-end to the loop ledger (walked / attention / acted / deferred /
+skipped), so `fak loop health` shows the walk living. `--register` installs the durable
+`garden-item-walk` loop unit (6 h cadence) the same way the stale-work tick registers itself.
+
 `fak slack health` is the watchdog **dual of the Slack feeders**. The cadence feeders
 (`scoreboard-feed.yml`, `bench-feed.yml`, …) POST a card on a schedule and fail OPEN — a
 missing token or channel renders to the step summary and exits 0 — so a misconfigured or
@@ -359,6 +394,16 @@ at `experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl` prov
 reports the verifier as ready, includes a cached-token sample proof and zero-cache
 refutation, and keeps the raw OpenAI API probe as an optional no-credential skip path.
 These are cost proofs only: correctness never depends on a provider cache hit.
+
+`fak vcache score` also reports per-plane evidence and a separate
+`default_usefulness` score. Provider counters populate `planes.provider_observed`
+only; they do not count as fak-owned activation. Pass witnessed local activity
+with `--kernel-kv-events`, `--context-events`, `--provider-vcache-decisions`, or
+`--external-engine-events`; pass pure-fak KV value with
+`--kernel-kv-prompt-tokens` and `--kernel-kv-reused-tokens`; pass O(1)
+context/query value with `--context-shed-tokens` and
+`--context-resident-tokens`; pass SGLang/vLLM/llama prefix-cache evidence with
+`--external-engine-hit-rate`.
 
 `scripts/ci.ps1` (or `make ci`) runs build + vet + test + the CLAIMS lint as one gate.
 

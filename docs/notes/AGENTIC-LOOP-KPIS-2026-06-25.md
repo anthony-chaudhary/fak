@@ -78,7 +78,7 @@ The headline current KPIs, by layer. This is the operationally meaningful set, n
 | `net_value_add_vs_tuned` (B/C) | fak vs warm per-agent KV (the honest serving baseline) | ratio | `sessionbench cell.NetVsTuned` | standing (live arm) |
 | `prefill_tokens.a_over_c` / `b_over_c` | exact, contention-free prefill work-elimination | ratio | `sessionbench.prefillTokens` | standing |
 | `turn_tax_A_over_B` | KV-persistence value (re-prefill vs warm) | ratio | `sessionbench cell.TurnTax` | standing |
-| `provider_cache_hits` / `read_tokens` | remote provider prefix-cache wins, kept distinct from local | count | `metrics.Arm.ProviderCacheHits` (#112) | guarded |
+| `provider_cache_hits` / `read_tokens` | OBSERVED remote provider prefix-cache wins, kept distinct from local | count | `metrics.Arm.ProviderCacheHits` (#112) | guarded |
 | `cache_hit_rate` (radix) | prompt tokens served from the radix cache | % | `radixbench analyze` ← `radixkv.Tree.MatchLen` | standing |
 
 **Gap:** the portable session image (`internal/sessionimage`, shipped 2026-06-24) has **no dump/restore latency**, no resume-warmth, no promotion-rate, no integrity-verify timing.

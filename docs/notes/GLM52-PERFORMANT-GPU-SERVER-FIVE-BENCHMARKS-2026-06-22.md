@@ -91,7 +91,7 @@ on-hardware findings — is
 
 ### The GPU server is reachable today (fresh, 2026-06-22)
 
-A read-only probe of the Slack control bridge from the build box at `HEAD`:
+A read-only probe of the private control bridge from the build box at `HEAD`:
 
 - `control --probe` → **auth OK · channel OK · membership OK · history-read OK**.
 - the hub enumerates **multiple live `running` pipe-mode control sessions**, and a
@@ -182,6 +182,6 @@ go run ./cmd/fak turntax --suite turntax-airline && go run ./cmd/fak turntax --s
 go run ./cmd/radixbench -scale 1
 go run ./cmd/ctxdemo    -print
 
-# 3. GLM-5.2 on the pure fak CUDA kernel on the A100 DGX (via the Slack control bridge)
+# 3. GLM-5.2 on the pure fak CUDA kernel on the A100 DGX (via the private control bridge)
 #    bash tools/dgx_glm_gpu_witness.sh   # clones origin/main, nvcc sm_80, runs TestCUDAGLMMoeDsaBackendForward
 ```

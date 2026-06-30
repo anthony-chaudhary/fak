@@ -90,7 +90,7 @@ RAM can serve the way llama.cpp does).
 - `experiments/nightrun/backlog.json` — a `witness-glm52-cpu-throughput` **frontier** datum so
   `fak nightrun next` surfaces "collect GLM-5.2 CPU throughput" on any CPU+weights box
   (commit `e0d54dbc`).
-- A `say` verb on the private Slack control bridge for operator status notes.
+- A `say` verb on the private private control bridge for operator status notes.
 
 ## Finding 3 — the slow load was path-precedence, not (only) the I/O ceiling (root cause, fixed)
 A follow-up diagnosis on the GPU staging host (GPU server) found the ~1h+ loads were **path

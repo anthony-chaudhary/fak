@@ -54,7 +54,7 @@ only the first is achievable today. This doc proves #1 on a real datacenter GPU 
   **8.0 / sm_80**), 256 logical cores, **~1007 GB host RAM**. GPUs idle except GPU0, which holds
   **~6 GB** — a llama.cpp `llama-server` (the CPU-offloaded GLM path; see §5). CUDA **12.8**
   (`/usr/local/cuda`), **go1.26.0**.
-- **Reach:** only via the Slack control bridge (private lab tooling, **pipe
+- **Reach:** only via the private control bridge (private lab tooling, **pipe
   mode** — the readback fix from the prior handoff is live; `selftest` round-trips an echo OK).
   The build host is win32 with **no CUDA toolkit / no GPU**, so the device execution below is the
   explicit residual it cannot run.

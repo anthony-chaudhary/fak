@@ -27,7 +27,7 @@ Reusable description (≈140 chars): *In-process default-deny permission gate fo
 | Short Description | In-process default-deny permission gate for AI agents fused with a bit-exact KV cache; fronts OpenAI/Anthropic/MCP wires and ships `fak_*` adjudication tools to contain prompt injection and tool poisoning. |
 | Link | `https://github.com/anthony-chaudhary/fak` |
 | Category | Development |
-| Contact Email | `day24@netrasystems.ai` |
+| Contact Email | `<your-contact-email>` |
 
 Free listing goes to a manual review queue (a $39 tier skips the wait — not necessary).
 

@@ -59,6 +59,22 @@ dispatch layer turns a Target into a live planner; the resolver itself does no I
 
 A full example is `examples/model-accounts.example.json`.
 
+## Two account layers, one vocabulary
+
+This page is about **provider accounts**: which credential/env-var serves a routed model.
+Claude Code subscription seats add a second layer: **config-home accounts** (`CLAUDE_CONFIG_DIR`
+homes such as `~/.claude-gem8-seat`) that may be logged in, logged out, tombstoned, disabled, or
+duplicated onto the same rate-limit bucket. That lifecycle is owned by `fak accounts`, not by the
+provider roster.
+
+Use `fak accounts status --json` for the observable config-home login report. It emits
+`fak.accounts.login.v1`: one closed `status` per seat (`ready`, `needs_login`, `missing_dir`,
+`disabled`, `tombstoned`), `can_serve`, roles, warnings (`duplicate_account_bucket`,
+`split_setup_token`, `unverified_account`), and a next action. The human `fak accounts list` table
+shows the same status in its `LOGIN` column, and `fak accounts sync` materializes
+`login_status` plus `can_serve` into the generated dos/job roster rows. That keeps the account
+switcher from guessing at login readiness from directory names or scattered credential booleans.
+
 ## Mix and match at any level
 
 There is no per-aspect special case. The routing decision produces model ids for the
@@ -84,6 +100,12 @@ resolved Target, the `EngineRoute`, and every `--accounts` / `--accounts-dump` o
 carry the *name*, never the value. Validation enforces this: a `cred_env` that is not a
 valid env-var name — a pasted `sk-ant-…` key, a `Bearer …` string, an `X=Y` pair — is
 rejected at the boundary, so a real key cannot end up committed in a roster.
+
+Use `fak route --accounts-status roster.json` to inspect provider-account readiness in the
+current shell. It emits `fak.modelroute.accounts.v1`: local accounts are `not_required`; remote
+accounts are `ready` only when their named env var is present and non-empty, otherwise
+`needs_credential` with the env var to set. This is intentionally an environment observation, not
+a live API probe or billing claim, and it still prints only env-var names.
 
 ## Residency is declared, not guessed
 

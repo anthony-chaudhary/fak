@@ -56,6 +56,11 @@ subsystem but leaves no dogfood, demo, surface, or evidence belongs behind work 
 
 This board is deliberately small. It is the set of next work that keeps the cache
 frontier visible and product-shaped.
+The expanded ranked backlog is
+[`docs/cache-frontier/DEFAULT-ENABLEMENT-NEXT-50.md`](cache-frontier/DEFAULT-ENABLEMENT-NEXT-50.md):
+50 next items for making pure fak, the served API, O(1) context/query,
+provider-cache preservation, and SGLang/vLLM/llama adapters useful by default
+without blending their evidence planes.
 
 | Lane | Now | Next witness | Definition of done |
 |---|---|---|---|

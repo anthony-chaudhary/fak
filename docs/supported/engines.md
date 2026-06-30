@@ -1,6 +1,6 @@
 ---
 title: "Model serving engines fak supports"
-description: "The token engines fak serve fronts over the OpenAI-compatible wire — Ollama, vLLM, SGLang, llama.cpp (llama-server), and LM Studio — plus fak's own in-kernel reference engine. fak is the governance and gateway band in front of the engine, not the engine itself."
+description: "The token engines fak serve fronts over the OpenAI-compatible wire — Ollama, vLLM, SGLang, llm-d, llama.cpp (llama-server), and LM Studio — plus fak's own in-kernel reference engine. fak is the governance and gateway band in front of the engine, not the engine itself."
 ---
 
 # Model serving engines fak supports
@@ -32,6 +32,7 @@ own deployment.
 |---|---|---|
 | [Ollama](https://docs.ollama.com/api/openai-compatibility) | `http://localhost:11434/v1` | `fak serve --provider openai --base-url http://<host>:11434/v1` (host/port via `OLLAMA_HOST`) |
 | [vLLM](https://docs.vllm.ai/en/stable/serving/openai_compatible_server/) | `http://localhost:8000/v1` | `fak serve --provider openai --base-url http://<host>:8000/v1` (server launched with `vllm serve`, host/port via `--host`/`--port`) |
+| [llm-d](../integrations/llm-d.md) | cluster Gateway API route, usually `http://<gateway-host>/v1` | `fak serve --provider openai --base-url http://<llm-d-gateway>/v1` for chat proxy mode. For kernel-dispatched calls and route manifests, use the registered engine id `llm-d` with `FAK_LLMD_BASE_URL`, `FAK_LLMD_MODEL`, and optional `FAK_LLMD_API_KEY` / `FAK_LLMD_METRICS_URL`. |
 | [SGLang](https://docs.sglang.ai/backend/openai_api_completions.html) | `http://localhost:30000/v1` | `fak serve --provider openai --base-url http://<host>:30000/v1` (launched via `python3 -m sglang.launch_server`) |
 | [llama.cpp (llama-server)](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) | `http://localhost:8080/v1` | `fak serve --provider openai --base-url http://<host>:8080/v1` (`llama-server -m model.gguf --host 0.0.0.0 --port 8080`) |
 | [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) | `http://localhost:1234/v1` | `fak serve --provider openai --base-url http://<host>:1234/v1` (start the server in the Developer tab, port configurable in the app) |
@@ -44,11 +45,39 @@ manual two-terminal walkthrough, including the engine launch commands and the Cl
 environment variables; the `dogfood-claude.sh` / `dogfood-claude.ps1` launchers automate
 the same stack with one command.
 
-If the engine needs provider-specific request fields (for example vLLM or SGLang sampling
+If the engine needs provider-specific request fields (for example vLLM, llm-d, or SGLang sampling
 knobs), pass them through with `FAK_PROVIDER_EXTRA_BODY_JSON`. The
 [serve config reference](../serve-config.md) covers that plus the auth, policy, and timeout
 knobs you set for a network-facing deploy — a slow local CPU model in particular needs the
 write and planner timeouts raised together.
+
+### llm-d details
+
+llm-d is a Kubernetes serving stack, not a single local worker. It fronts vLLM workers
+through the Gateway API / Endpoint Picker Provider path and exposes an OpenAI-compatible
+route. Put fak in front of that route when your agent speaks Chat Completions:
+
+```bash
+fak serve --addr 0.0.0.0:8080 \
+  --provider openai \
+  --base-url http://<llm-d-gateway>/v1 \
+  --model <served-model> \
+  --policy floor.json \
+  --require-key-env FAK_GATEWAY_KEY
+```
+
+For routes that use fak's syscall dispatch or model-routing manifest, select the
+first-class engine id:
+
+```bash
+export FAK_LLMD_BASE_URL="http://<llm-d-gateway>/v1"
+export FAK_LLMD_MODEL="<served-model>"
+fak serve --engine llm-d --model "<served-model>"
+```
+
+`FAK_LLM_D_*` aliases are accepted for the same variables. The adapter deliberately
+uses llm-d's public OpenAI-compatible frontend and Prometheus/vLLM-style worker signals;
+it does not import llm-d internals or claim exact remote KV-span eviction.
 
 ## 2. The in-kernel reference engine
 
@@ -113,7 +142,8 @@ generate them faster.
 
 ## Reference (the witnessed sources behind this page)
 
-- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 47 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [llm-d upstream](https://github.com/llm-d/llm-d) and [architecture docs](https://llm-d.ai/docs/architecture) — Gateway API / EPP and OpenAI-compatible serving stack
 - [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
 - [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
 - [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)

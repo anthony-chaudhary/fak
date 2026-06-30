@@ -15,6 +15,10 @@ the three weekly questions from evidence:
 
 Entries should cite the command output they were derived from and keep Track 1
 WITNESSED kernel reuse separate from Track 2 OBSERVED provider-dollar savings.
+The ranked default-enablement backlog lives in
+[`DEFAULT-ENABLEMENT-NEXT-50.md`](DEFAULT-ENABLEMENT-NEXT-50.md); it keeps pure
+fak/API work, O(1) context/query, provider-cache preservation, and external-engine
+adapters on separate evidence planes.
 Each review has two artifacts:
 
 - a human-readable markdown note under `reviews/YYYY-MM-DD.md`;

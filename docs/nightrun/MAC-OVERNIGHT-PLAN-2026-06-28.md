@@ -5,8 +5,8 @@ description: "Per-box overnight data-collection plan for the Apple-Silicon Metal
 
 # Mac metal node overnight run plan — 2026-06-28
 
-The Apple-Silicon companion to [`DGX-OVERNIGHT-PLAN-2026-06-28.md`](DGX-OVERNIGHT-PLAN-2026-06-28.md).
-That doc covers the GPU-server/CPU boxes reached over the Slack control-bridge; this one
+The Apple-Silicon companion to [`GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md`](GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md).
+That doc covers the GPU-server/CPU boxes reached over the private control bridge; this one
 covers the **Mac Metal verify node** reached over the tailnet gateway — the box where fak's
 own Apple-Silicon Metal kernel actually runs. Tonight it collected its first witness in a
 while: the GLM-server boxes were saturated last night, but the Mac had collected *nothing*,

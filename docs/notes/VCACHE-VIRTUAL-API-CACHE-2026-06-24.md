@@ -188,7 +188,7 @@ Backing out the goal's intuition — solve `H(7,s)/H(V,s) = 0.85`:
 
 So **"7 units ≈ 85%" presumes a steep workload (s ≈ 1.8)** — a few dominant anchors (one system prompt, a handful of retrieved-doc bundles). That is realistic for agent fleets but **not universal**. The actionable law:
 
-**Measure `s` (the concentration) before trusting vCache.** Rank vBlocks by `frequency × size × reuse-density` and warm only the **head** — the *cache working set*. On a flat workload (`s ≈ 1`) the head is huge and vCache barely helps; on a steep one (`s ≳ 1.5`) a tiny pinned set captures most of the volume. This is `AccessRatePerSec`-driven ranking applied to the provider tier.
+**Measure `s` (the concentration) before enabling vCache cost/latency warming.** Rank vBlocks by `frequency × size × reuse-density` and warm only the **head** — the *cache working set*. On a flat workload (`s ≈ 1`) the head is huge and vCache barely helps; on a steep one (`s ≳ 1.5`) a tiny pinned set captures most of the volume. This is `AccessRatePerSec`-driven ranking applied to the provider tier.
 
 ### 5.3 Chain horizon: tiny units and the minimum-prefix wall
 
@@ -241,7 +241,7 @@ Worked example, half-utilized tier `R=4000, X=400000`, so `R_avail=2000, X_avail
 
 ## 6. Canonicalization — the load-bearing discipline
 
-Everything fails if the cacheable prefix is not byte-stable. `prefix_stability.go` already gives the offline linter; vCache makes it a **pre-flight gate** on every manifest entry before it is trusted as warm.
+Everything fails if the cacheable prefix is not byte-stable. `prefix_stability.go` already gives the offline linter; vCache makes it a **pre-flight gate** on every manifest entry before it is counted as warm economics.
 
 Silent invalidators to canonicalize away (the prefix must be deterministic to the byte):
 - **Render order** is `tools → system → messages`; a breakpoint on the last system block caches tools+system together.
@@ -250,7 +250,7 @@ Silent invalidators to canonicalize away (the prefix must be deterministic to th
 - **Vary axes are part of identity** — `Endpoint` and `ReasoningMode` (and `model`) silently break the cache; `provider.go` already folds them into the digest, so a mode switch reads as a *distinct* warm, not an invisible miss.
 - **Tokenizer drift** — same text → different tokens across model versions → different prefix. The manifest entry is bound to `TokenizerID`; a model bump cold-starts the whole warm set.
 
-**The dangerous failure** the Canonicalizer exists to prevent: *manifest says HIT, provider says MISS.* You pay full price and your savings accounting believes you won. The defense is **verify-then-trust**: after every real call, fold `cache_read_input_tokens`; if a believed-warm entry reads 0, mark the belief broken and diff the rendered prefix bytes to find the invalidator (`Diverge` / `FirstDivergeTokenOffset` localizes it — `ProviderCache.FirstDivergeAt` is the field they populate).
+**The dangerous failure** the Canonicalizer exists to prevent: *manifest says HIT, provider says MISS.* You pay full price and your savings accounting believes you won. The defense is **verify-then-account**: after every real call, fold `cache_read_input_tokens`; if a believed-warm entry reads 0, mark the economic belief broken and diff the rendered prefix bytes to find the invalidator (`Diverge` / `FirstDivergeTokenOffset` localizes it — `ProviderCache.FirstDivergeAt` is the field they populate).
 
 ---
 
@@ -323,7 +323,7 @@ So the **cost gate refuses almost every single-unit chain rebuild — and that i
 
 The lethal failure is not a cache *miss* (cheap, visible) — it's **"manifest says HIT, provider says MISS."** A `datetime.now()` in the prefix makes every recall a cache *write*; the manifest still reports the unit warm, so **you book 90% savings while paying 1250%.**
 
-- **Rule A1 — verify-then-trust.** A vBlock is "warm" only when `cache_creation_input_tokens>0` (explicit) or a real request reports `cached_tokens>0` (auto). A 200 response *never* marks it warm. Reconcile **every** call; demote + alarm + byte-diff on any believed-warm entry that reads `cache_read=0`.
+- **Rule A1 — verify-then-account.** A vBlock is "warm" for cost/latency accounting only when `cache_creation_input_tokens>0` (explicit) or a real request reports `cached_tokens>0` (auto). A 200 response *never* marks it warm. Reconcile **every** call; demote + alarm + byte-diff on any believed-warm entry that reads `cache_read=0`.
 - **Rule A2 — correctness never depends on warmth.** The full prefix that reconstructs a vBlock must **always be re-sendable**; a hit is *only ever* a cost/latency win. **Eliding resent context because "the provider has it" is banned** — eviction is invisible and unguaranteed, so eliding converts a cost bug into **silent data corruption** (the model answers over a truncated prefix). This single rule downgrades the one *fatal* failure to merely *expensive.*
 - **Rule A3 — budget at the uncached price by default;** cache savings are a *realized rebate* from confirmed telemetry, never a pre-credited plan or SLO. Robust to every false-warm without changing behavior.
 

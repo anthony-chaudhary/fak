@@ -7,7 +7,7 @@ description: "fleetctl is fak's public, transport-agnostic Go core for operating
 
 `fleetctl` (`cmd/fleetctl/`) is the **public, transport-agnostic** Go core for operating
 a fleet of boxes — GPU servers, worker nodes — that the operator drives over the private
-Slack control-bridge. It is the single Go home the scattered `tools/fleet_*.py` helpers
+private control bridge. It is the single Go home the scattered `tools/fleet_*.py` helpers
 port into: a typed roster, a deterministic fold, a 0–100 readiness score, and a view that
 stays readable as the fleet grows toward (and past) 100 boxes.
 
@@ -20,9 +20,9 @@ go build -o fleetctl ./cmd/fleetctl
 
 ## The public / private boundary is a data contract, not a code import
 
-The **live control plane** — the Slack control-bridge that actually reaches the lab boxes —
+The **live control plane** — the private control bridge that actually reaches the lab boxes —
 is private. It speaks a lab protocol and carries lab identifiers (host, channel, token), so
-it lives in `fak-private`, never here. See [`dgx-slack-boundary.md`](dgx-slack-boundary.md)
+it lives in `fak-private`, never here. See [`gpu-server-private-boundary.md`](gpu-server-private-boundary.md)
 for what is public vs private and which gates enforce it, and
 [`private-comms-channel.md`](private-comms-channel.md) for how to reach the channel.
 

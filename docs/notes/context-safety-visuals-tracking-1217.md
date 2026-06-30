@@ -44,7 +44,7 @@ ships `internal/ctxplan/signalnoise.go` *because* provider cache-hit %
 (`cache_read/(cache_read+fresh)`) is a denominator artifact: it climbs to ~1.0
 **mechanically** with session length regardless of quality (measured on fak's own
 247-session corpus: 0.88 under 50 turns → 0.99 at 150–200; two sessions both
-~99% cache-hit differ 10× in density). High cache-hit on a bloated window is
+at ~99% OBSERVED provider cache-hit differ 10× in density). High cache-hit on a bloated window is
 *efficiently caching garbage*. The lesson generalizes: **every context-safety
 claim needs an invariant metric AND a second orthogonal axis that catches the
 first being gamed.** A visual showing one axis is a lie by construction. The four

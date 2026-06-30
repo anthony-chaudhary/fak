@@ -134,7 +134,7 @@ Reproduce (WSL — native `go test` is blocked on the Windows host):
 
 Sub-items NOT closed by this validation — they require the measured fleet run on GPU server:
 
-- GPU server node access (private Slack control bridge; lives in `fak-private`).
+- GPU server node access (private private control bridge; lives in `fak-private`).
 - Deploy webbench harness to the GPU server (model server + browser-use + network — none
   confirmed configured even on the dev box; see `docs/webbench-blockers.md`).
 - Run the 100+ concurrent-agent fleet experiment.

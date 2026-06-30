@@ -55,6 +55,17 @@ render:
     decision, or operator-only evidence.
 11. Closure binding: worker-facing reminder that the resolving commit must cite
     `#N` and carry the matching `(fak <leaf>)` trailer.
+12. Work-unit shape: `leaf` or `step` means worker-dispatchable; `epic`,
+    `research`, `triage-only`, or `needs-triage` means decompose or review first.
+13. Expected step budget: a small integer that tells the worker whether the issue
+    is a one-turn leaf, a multi-step leaf, or accidentally an epic.
+14. Assumptions and confusion risks: the assumptions a worker should verify, and
+    nearby meanings it must not conflate.
+15. Coordination notes: lane leases, dependency order, sibling-file risks, or
+    "no special coordination" so the worker does not guess.
+16. Trigger: the event or threshold that justifies creating/updating the issue.
+17. Batch policy: the cap/grouping/update rule that prevents repeated signals
+    from becoming issue spam.
 
 ## Default creation policy
 
@@ -110,6 +121,13 @@ Candidate reasons to add to `dos.toml`:
   evidence.
 - `ISSUE_LIVE_UNARMORED`: scheduled/live creation lacks dedupe cap or a soak
   exception.
+- `ISSUE_NOT_DISPATCH_LEAF`: the row is explicitly an epic, research item,
+  triage item, or otherwise a decomposition target rather than a worker leaf.
+- `ISSUE_OVERSIZED_EXPECTED_STEPS`: the row declares a worker leaf, but the
+  expected-step budget is above the dispatch threshold and should be split before
+  sync or dispatch.
+- `ISSUE_NOISE_CONTROL_INCOMPLETE`: live sync lacks a creation trigger or batch
+  policy, so repeats cannot be grouped into an existing work item intentionally.
 
 ### Phase 2: harden task handoff first
 
@@ -183,6 +201,59 @@ Acceptance for "true end to end working":
 7. The close arm re-verifies the SHA and closes the issue.
 8. `dispatch_status` reports the issue as witnessed/closed, not self-claimed.
 
+## Current status
+
+- Phase 1 is implemented: `internal/issuecontract` and `fak issue contract`
+  provide the shared issue-candidate review surface.
+- Phase 2 is implemented for task handoff: strict scoped next-step fields render
+  into stable issue sections, `fak task handoff --live` implies strict scope, and
+  the guard Stop hook fails closed when required live GitHub sync fails.
+- The issue contract now carries an advisory `agent_context` score for work-unit
+  shape, assumptions/confusion risks, coordination notes, trigger, and batch
+  policy. Explicit epics/research/triage labels or work-unit values are
+  `ISSUE_NOT_DISPATCH_LEAF`, and explicit high expected-step budgets are
+  `ISSUE_OVERSIZED_EXPECTED_STEPS`, so they stay out of worker dispatch even if
+  the prose is otherwise complete. Live sync also refuses
+  `ISSUE_NOISE_CONTROL_INCOMPLETE` unless the issue names the trigger and batch
+  policy that keep repeated signals organized.
+- The native dispatch prompt now parses the standard issue sections into an
+  agent-first brief before the raw body, so the worker sees work-unit shape,
+  assumptions, confusion risks, coordination notes, trigger, batch policy, scope,
+  witness, and gate without mining the full issue text.
+- The native issue router now treats unlabeled issue bodies with non-leaf
+  `Work unit` values (`epic`, `research`, `triage-only`, `decompose`, etc.) as
+  non-dispatchable, and also skips `research` / `needs-scope` labels. That makes
+  the GitHub issue body itself a dispatch contract, not just a human-facing label
+  convention. It also treats an explicit `Expected steps` value above the
+  current dispatch threshold (`8`) as a split target, so a nominal leaf that
+  declares a large step budget does not enter worker dispatch as one oversized
+  task.
+- Skipped router rows now carry `reason`, `next_action`, `work_unit`, and
+  `expected_steps`, and the router counts skips by reason. That preserves the
+  legacy skip bucket while giving agents separate queues for human blockers,
+  scope gaps, non-leaf decomposition, and oversized leaf splitting.
+- Routed rows now preserve `work_unit`, `expected_steps`, `trigger`, and
+  `batch_policy`, and lane groups expose a `step_budget` plus per-issue step
+  metadata. That lets dispatch supervisors balance lanes by expected work units
+  instead of treating a lane with ten one-step leaves the same as ten larger
+  multi-step leaves.
+- Phase 3 is partially implemented: the Go issue producers now use the shared
+  contract where they create scoped work, while research/complaint/legacy feeders
+  stay `triage_only` until a human or later port supplies dispatch scope.
+- Phase 4 is partially implemented as default-routing policy: dispatch surfaces
+  can carry path-scoped launch plans, default issue views exclude triage-only
+  labels, and the shared review now refuses explicit non-leaves. The remaining
+  gap is to make every picker consume the review result instead of only labels.
+- Phase 5 remains open: no single witnessed run has yet proven create/update,
+  route, dispatch, commit, audit, close, and status read-back end to end.
+
+Verified on 2026-06-30 with:
+
+- `FAK_FAST=0 ./test.ps1 ./cmd/fak -run TestTaskHandoff -count=1`
+- `FAK_FAST=0 ./test.ps1 ./cmd/fak -run TestRunGuardStopHook -count=1`
+- `FAK_FAST=0 ./test.ps1 ./cmd/fak -run TestDispatchPrice -count=1`
+- `FAK_FAST=0 ./test.ps1 ./cmd/fak -run TestDispatchScorecard -count=1`
+
 ## Test plan
 
 - Unit-test issue-contract review reasons and dispatchability classes.
@@ -213,4 +284,3 @@ Acceptance for "true end to end working":
   issue creation and closure proof; the worker still chooses the smallest correct
   implementation.
 - Do not turn epics into worker tasks. Epics decompose; leaves dispatch.
-

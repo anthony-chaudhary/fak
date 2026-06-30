@@ -16,7 +16,7 @@ channel to drive it, and the public fleet view that folds the result.
 The split that makes it safe to keep public: the **kernel + the dev turn are public**
 (this repo); the **Slack transport is private** (the lab protocol carries lab identifiers,
 so it lives in `fak-private`). The seam between them is a data contract — a per-box report
-JSON — not a code import. See [the GPU-server / Slack boundary](../dgx-slack-boundary.md).
+JSON — not a code import. See [the GPU-server private boundary](../gpu-server-private-boundary.md).
 
 ```
   you (Slack, from anywhere)
@@ -135,6 +135,6 @@ fleet view.
 
 - [Always-on dogfood server](always-on-dogfood-server.md) — the 24/7 framing this loop is
   the lab-GPU lane of; section 2 covers the GPU-burst ladder via `tools/gcp_accel.py`.
-- [GPU-server / Slack boundary](../dgx-slack-boundary.md) — what is public vs private.
+- [GPU-server private boundary](../gpu-server-private-boundary.md) — what is public vs private.
 - [private-comms-channel](../private-comms-channel.md) — how to reach the bridge.
 - [fleet.md](../fleet.md) — the public fleet fold + readiness score.
