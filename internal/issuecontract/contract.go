@@ -30,6 +30,7 @@ const (
 	ReasonNotDispatchLeaf = "ISSUE_NOT_DISPATCH_LEAF"
 	ReasonOversizedSteps  = "ISSUE_OVERSIZED_EXPECTED_STEPS"
 	ReasonNoiseIncomplete = "ISSUE_NOISE_CONTROL_INCOMPLETE"
+	ReasonAgentIncomplete = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -153,6 +154,14 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	c = normalize(c)
 
 	missing := missingScopeFields(c)
+	agentMissing := []string{}
+	noiseMissing := []string{}
+	if opt.Live {
+		agentMissing = missingAgentContextFields(c)
+		noiseMissing = missingNoiseControlFields(c)
+		missing = append(missing, agentMissing...)
+		missing = append(missing, noiseMissing...)
+	}
 	reasons := reasonSet{}
 	if len(missing) > 0 {
 		reasons.add(ReasonScopeIncomplete)
@@ -168,8 +177,11 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	if opt.Live && (!opt.DedupeChecked || opt.DedupeCap <= 0) {
 		reasons.add(ReasonLiveUnarmored)
 	}
-	if opt.Live && (c.Trigger == "" || c.BatchPolicy == "") {
+	if opt.Live && len(noiseMissing) > 0 {
 		reasons.add(ReasonNoiseIncomplete)
+	}
+	if opt.Live && len(agentMissing) > 0 {
+		reasons.add(ReasonAgentIncomplete)
 	}
 	if !isDispatchLeaf(c) {
 		reasons.add(ReasonNotDispatchLeaf)
@@ -197,7 +209,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	case out.OK:
 		out.Verdict = "ready"
 		out.Dispatchability = Dispatchable
-	case private || reasons.has(ReasonLiveUnarmored) || reasons.has(ReasonNoiseIncomplete):
+	case private || reasons.has(ReasonLiveUnarmored) || reasons.has(ReasonNoiseIncomplete) || reasons.has(ReasonAgentIncomplete):
 		out.Verdict = "refused"
 		out.Dispatchability = Refused
 	default:
@@ -495,6 +507,37 @@ func missingScopeFields(c Candidate) []string {
 	add("witness", c.Witness)
 	add("acceptance_gate", c.AcceptanceGate)
 	add("closure_binding", c.ClosureBinding)
+	return missing
+}
+
+func missingAgentContextFields(c Candidate) []string {
+	var missing []string
+	if c.WorkUnit == "" {
+		missing = append(missing, "work_unit")
+	}
+	if c.ExpectedSteps <= 0 {
+		missing = append(missing, "expected_steps")
+	}
+	if len(c.Assumptions) == 0 {
+		missing = append(missing, "assumptions")
+	}
+	if len(c.ConfusionRisks) == 0 {
+		missing = append(missing, "confusion_risks")
+	}
+	if len(c.Coordination) == 0 {
+		missing = append(missing, "coordination")
+	}
+	return missing
+}
+
+func missingNoiseControlFields(c Candidate) []string {
+	var missing []string
+	if c.Trigger == "" {
+		missing = append(missing, "trigger")
+	}
+	if c.BatchPolicy == "" {
+		missing = append(missing, "batch_policy")
+	}
 	return missing
 }
 
