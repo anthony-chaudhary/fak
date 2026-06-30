@@ -2,6 +2,7 @@ package model
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -466,4 +467,73 @@ func TestGlmMoeEPFFNReducesThroughDeviceCollective(t *testing.T) {
 		t.Fatalf("after SetExpertParallelCollective(nil) coll = %T, want LocalCollective default", ep2.coll)
 	}
 	t.Logf("EP decode reduction flows through the wired device collective (cpu-ref BackendCollective), bit-exact vs LocalCollective; on NCCL the same apply all-reduces across GPUs")
+}
+
+// TestMoEResidentWeightBytesPartition pins the loaded-model input to the EP residency-fit gate:
+// MoEResidentWeightBytes splits the resident weight bytes into the routed experts EP shards and the
+// replicated remainder, quant-correctly (it walks the same stores ResidentReport tallies) and by
+// name. The partition must equal ResidentReport().TotalResidentBytes (no double-count, no omission),
+// the routed experts must be counted as expert (the manual oracle), and the always-on shared expert
+// must land in REPLICATED (it fires every token on every rank, EP does not shard it). It then feeds
+// compute.ExpertParallelPerRankWeightBytes, the per-rank footprint a serve checks against each GPU.
+func TestMoEResidentWeightBytesPartition(t *testing.T) {
+	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", true, false, true /*withMoE*/, true /*withSharedExperts*/)
+	m, err := LoadSafetensors(path, cfg)
+	if err != nil {
+		t.Fatalf("LoadSafetensors: %v", err)
+	}
+	replicated, expert, ok := m.MoEResidentWeightBytes()
+	if !ok {
+		t.Fatal("MoEResidentWeightBytes ok=false on a loaded MoE model")
+	}
+	if expert <= 0 {
+		t.Fatal("routed experts contribute 0 bytes; a glm MoE fixture has mlp.experts.* weights")
+	}
+	if replicated <= 0 {
+		t.Fatal("replicated weights contribute 0 bytes; attention/router/embed are not experts")
+	}
+
+	// Consistency with the shipped resident tally: the partition is exactly TotalResidentBytes
+	// split by role — no double-count, no omission.
+	rr := m.ResidentReport()
+	if got := replicated + expert; got != rr.TotalResidentBytes {
+		t.Fatalf("replicated+expert=%d != ResidentReport.TotalResidentBytes=%d", got, rr.TotalResidentBytes)
+	}
+
+	// Manual oracle: the routed-expert bytes equal the sum of the .mlp.experts.* manifest tensors.
+	var wantExpert int64
+	var sawShared bool
+	for name, meta := range m.manifest {
+		if strings.Contains(name, ".mlp.experts.") {
+			wantExpert += int64(meta.Nbytes)
+		}
+		if strings.Contains(name, ".mlp.shared_experts.") {
+			sawShared = true
+			// The shared expert is REPLICATED, not sharded — it must not be classed as a routed expert.
+			if isRoutedExpertTensor(name) {
+				t.Fatalf("shared expert %q misclassified as a routed (sharded) expert", name)
+			}
+		}
+	}
+	if expert != wantExpert {
+		t.Fatalf("expert bytes=%d, manual routed-expert manifest sum=%d", expert, wantExpert)
+	}
+	if !sawShared {
+		t.Fatal("fixture was requested withSharedExperts but no .mlp.shared_experts.* tensor is present")
+	}
+
+	// Feeds the EP fit gate: ranks=1 is the whole model; ranks>1 shrinks toward (never below) the
+	// replicated floor — the property that lets EP-N fit a model one card can't hold.
+	per1 := compute.ExpertParallelPerRankWeightBytes(replicated, expert, cfg.NumExperts, 1)
+	if per1 != replicated+expert {
+		t.Fatalf("ranks=1 per-rank=%d != full model=%d", per1, replicated+expert)
+	}
+	if cfg.NumExperts >= 2 {
+		per2 := compute.ExpertParallelPerRankWeightBytes(replicated, expert, cfg.NumExperts, 2)
+		if per2 > per1 || per2 < replicated {
+			t.Fatalf("ranks=2 per-rank=%d not in [replicated=%d, full=%d]", per2, replicated, per1)
+		}
+	}
+	t.Logf("MoEResidentWeightBytes: replicated=%d expert=%d (==TotalResidentBytes=%d); feeds the EP per-rank fit gate",
+		replicated, expert, rr.TotalResidentBytes)
 }

@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 // resident_report.go — observability for the resident hybrid Q4_K model: tallies which
 // weights landed in which resident store (raw Q4_K vs Q8_0 vs f32) and the bytes each
 // contributes, then derives the per-decode-token bandwidth stream. This is the small,
@@ -68,6 +70,55 @@ func (m *Model) ResidentReport() *ResidentReport {
 	r.DecodeBytesPerToken = r.Q4KBytes + r.Q8Bytes + r.KQuantBytes
 	r.DecodeGiBPerToken = float64(r.DecodeBytesPerToken) / (1 << 30)
 	return r
+}
+
+// isRoutedExpertTensor reports whether a weight name is one of the per-layer ROUTED experts
+// (model.layers.<L>.mlp.experts.<e>.<proj>.weight) — the only weights expert parallelism shards
+// across ranks. The always-on GLM shared expert (mlp.shared_experts.* / mlp.shared_expert.*) is
+// REPLICATED on every rank (it fires every token), so it deliberately does NOT match: the segment
+// after ".mlp." is "shared_experts", not "experts", so ".mlp.experts." is not a substring of it.
+func isRoutedExpertTensor(name string) bool {
+	return strings.Contains(name, ".mlp.experts.")
+}
+
+// MoEResidentWeightBytes partitions the model's RESIDENT weight bytes into the routed-expert bytes
+// (the only weights expert parallelism shards across ranks — model.layers.<L>.mlp.experts.<e>.*)
+// and the replicated remainder (dense FFN + attention + router + embeddings + the always-on shared
+// expert — held on EVERY rank). It walks the SAME resident stores ResidentReport tallies
+// (q4kw / q8w / kqw / the f32 manifest), so it is quant-correct BY CONSTRUCTION — every tensor is
+// counted at its actual resident size in whatever store holds it, never an f32 estimate of a
+// quantized weight — and replicated+expert equals ResidentReport().TotalResidentBytes (the test
+// pins this). It partitions purely by NAME (isRoutedExpertTensor).
+//
+// It is the loaded-model input to compute.ExpertParallelPerRankPlan: replicated stays per-rank
+// fixed while the expert term shards ~1/ranks, so a serve can pre-check whether `--expert-parallel N`
+// actually fits each GPU before the multi-minute weight load. ok is false when nothing is resident
+// (an empty/unloaded model), so a caller fails OPEN (skips the fit pre-check) rather than refusing on
+// a zero footprint.
+func (m *Model) MoEResidentWeightBytes() (replicated, expert int64, ok bool) {
+	add := func(name string, bytes int64) {
+		if bytes <= 0 {
+			return
+		}
+		if isRoutedExpertTensor(name) {
+			expert += bytes
+		} else {
+			replicated += bytes
+		}
+	}
+	for name, qt := range m.q4kw {
+		add(name, int64(len(qt.raw)))
+	}
+	for name, qt := range m.q8w {
+		add(name, int64(len(qt.q))+int64(len(qt.d))*4)
+	}
+	for name, qt := range m.kqw {
+		add(name, int64(len(qt.raw)))
+	}
+	for name, meta := range m.manifest {
+		add(name, int64(meta.Nbytes))
+	}
+	return replicated, expert, replicated+expert > 0
 }
 
 // DecodeTokSCeiling estimates the bandwidth-bound decode ceiling at a given machine memory
