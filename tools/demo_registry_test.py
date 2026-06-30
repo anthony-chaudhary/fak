@@ -25,6 +25,39 @@ def test_registry_has_unique_names_base_paths_and_api_paths() -> None:
             assert demo.hosted_api_keys, demo
 
 
+def test_lifecycle_decisions_cover_current_browser_demos() -> None:
+    assert dr.lifecycle_defects() == []
+    decisions = dr.lifecycle_map()
+    assert decisions["turntaxdemo"].state == "hosted-keep"
+    assert decisions["ctxdemo"].state == "hosted-keep"
+    assert decisions["demorace"].state == "hosted-keep"
+    assert decisions["timewolfdemo"].state == "promote-next"
+    assert decisions["trychatdemo"].state == "promote-next"
+    assert decisions["guarddemo"].state == "local-keep"
+    assert decisions["dropindemo"].state == "local-keep"
+    assert decisions["unseedemo"].state == "local-keep"
+
+
+def test_lifecycle_defects_flags_missing_unknown_invalid_and_hosting_mismatch() -> None:
+    demos = (
+        dr.Demo("hosted", "/hosted", "api/ping", "hosted", default_port=1, hosted_path="/"),
+        dr.Demo("local", "/local", "api/ping", "local", default_port=2),
+        dr.Demo("missing", "/missing", "api/ping", "missing", default_port=3),
+    )
+    decisions = {
+        "hosted": dr.LifecycleDecision("local-keep", 1, "wrong"),
+        "local": dr.LifecycleDecision("hosted-keep", 0, ""),
+        "ghost": dr.LifecycleDecision("bad-state", 1, "extra"),
+    }
+    defects = dr.lifecycle_defects(demos=demos, decisions=decisions)
+    assert "browser demo lacks lifecycle decision: cmd/missing" in defects
+    assert "lifecycle decision names unknown browser demo: cmd/ghost" in defects
+    assert "hosted: hosted demo must have lifecycle hosted-keep, got local-keep" in defects
+    assert "local: lifecycle decision missing GitHub issue number" in defects
+    assert "local: lifecycle decision missing reason" in defects
+    assert "local: lifecycle hosted-keep requires hosted_path metadata" in defects
+
+
 def test_demo_url_normalizes_base_path_and_relative_api() -> None:
     assert dr.demo_url(1234, "guarddemo") == "http://127.0.0.1:1234/guarddemo/"
     assert dr.demo_url(1234, "/guarddemo/", "/api/scenarios") == "http://127.0.0.1:1234/guarddemo/api/scenarios"

@@ -218,6 +218,24 @@ go run ./cmd/agentbenchdemo
 go run ./cmd/agentbenchdemo -selfcheck
 ```
 
+## Demo lifecycle
+
+Every browser demo has an explicit lifecycle decision in `tools/demo_registry.py`.
+`python tools/demo_browser_contract.py` fails if a browser demo is added without one.
+
+| State | Meaning | Current demos |
+|---|---|---|
+| `hosted-keep` | public online card; keep hosted while its live witness and public headline stay current | `turntaxdemo`, `ctxdemo`, `demorace` |
+| `promote-next` | healthy lowest-common-denominator local demo that should earn a hosted card next | `timewolfdemo`, `trychatdemo` |
+| `local-keep` | useful local/deep-catalog demo, but not a front-door hosted card by default | `guarddemo`, `dropindemo`, `unseedemo` |
+| `archive` | preserve docs/evidence but remove from the front-door path | none currently |
+| `tombstone` | old public route should redirect, show a curated tombstone, or have a documented intentional miss | old hosted route shapes tracked by the hosted-link audit |
+
+Use the lifecycle state before changing `docs/demos.html`: promote only when the demo
+has a deterministic local witness and a hosted/live witness; archive or tombstone when a
+demo is healthy but no longer belongs on the public front door, or when an old public URL
+must stop silently decaying.
+
 Or play all four in one shot — **fak in 30 seconds**, then a built-in acceptance check
 that each comparison still reproduces its documented headline (a cross-platform gate, no
 model, no network):

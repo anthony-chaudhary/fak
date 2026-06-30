@@ -11,6 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+VALID_LIFECYCLE_STATES: tuple[str, ...] = (
+    "hosted-keep",
+    "promote-next",
+    "local-keep",
+    "archive",
+    "tombstone",
+)
+
+
 @dataclass(frozen=True)
 class Demo:
     name: str
@@ -22,6 +31,13 @@ class Demo:
     hosted_path: str = ""
     hosted_port: int = 0
     hosted_api_keys: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class LifecycleDecision:
+    state: str
+    issue: int
+    reason: str
 
 
 DEMOS: tuple[Demo, ...] = (
@@ -45,8 +61,88 @@ DEMOS: tuple[Demo, ...] = (
 )
 
 
+DEMO_LIFECYCLE: dict[str, LifecycleDecision] = {
+    "guarddemo": LifecycleDecision(
+        "local-keep",
+        1738,
+        "healthy security-floor proof; keep in local/deep catalog unless promoted by a later rubric pass",
+    ),
+    "turntaxdemo": LifecycleDecision(
+        "hosted-keep",
+        1167,
+        "hosted front-door efficiency proof; live link currently witnessed",
+    ),
+    "ctxdemo": LifecycleDecision(
+        "hosted-keep",
+        1739,
+        "hosted research/performance slot; must re-earn with current model and net-value witness",
+    ),
+    "demorace": LifecycleDecision(
+        "hosted-keep",
+        1739,
+        "hosted live-model research slot; must re-earn with current model and net-value witness",
+    ),
+    "dropindemo": LifecycleDecision(
+        "local-keep",
+        1738,
+        "healthy adoption proof; keep in local/deep catalog unless it earns a front-door slot",
+    ),
+    "unseedemo": LifecycleDecision(
+        "local-keep",
+        1738,
+        "healthy KV-removal witness; keep in local/deep catalog unless promoted by the rubric",
+    ),
+    "timewolfdemo": LifecycleDecision(
+        "promote-next",
+        1736,
+        "healthy LCD agentic loop; next candidate for hosted agentic card",
+    ),
+    "trychatdemo": LifecycleDecision(
+        "promote-next",
+        1736,
+        "healthy LCD try-it chat; next candidate for hosted agentic card",
+    ),
+}
+
+
 def demo_map(demos: tuple[Demo, ...] = DEMOS) -> dict[str, Demo]:
     return {d.name: d for d in demos}
+
+
+def lifecycle_map(
+    decisions: dict[str, LifecycleDecision] = DEMO_LIFECYCLE,
+) -> dict[str, LifecycleDecision]:
+    return dict(decisions)
+
+
+def lifecycle_defects(
+    demos: tuple[Demo, ...] = DEMOS,
+    decisions: dict[str, LifecycleDecision] = DEMO_LIFECYCLE,
+) -> list[str]:
+    registered = {d.name: d for d in demos}
+    decision_names = set(decisions)
+    defects: list[str] = []
+    for name in sorted(set(registered) - decision_names):
+        defects.append(f"browser demo lacks lifecycle decision: cmd/{name}")
+    for name in sorted(decision_names - set(registered)):
+        defects.append(f"lifecycle decision names unknown browser demo: cmd/{name}")
+    for name in sorted(set(registered) & decision_names):
+        decision = decisions[name]
+        demo = registered[name]
+        if decision.state not in VALID_LIFECYCLE_STATES:
+            defects.append(
+                f"{name}: invalid lifecycle state {decision.state!r}; "
+                f"want one of {', '.join(VALID_LIFECYCLE_STATES)}"
+            )
+        if decision.issue <= 0:
+            defects.append(f"{name}: lifecycle decision missing GitHub issue number")
+        if not decision.reason.strip():
+            defects.append(f"{name}: lifecycle decision missing reason")
+        if demo.hosted_path and decision.state != "hosted-keep":
+            defects.append(f"{name}: hosted demo must have lifecycle hosted-keep, got {decision.state}")
+        if not demo.hosted_path and decision.state == "hosted-keep":
+            defects.append(f"{name}: lifecycle hosted-keep requires hosted_path metadata")
+    return defects
 
 
 def discover_browser_demo_names(workspace: Path) -> list[str]:

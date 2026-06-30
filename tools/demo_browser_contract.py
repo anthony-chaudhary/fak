@@ -127,19 +127,33 @@ def collect(workspace: Path) -> dict[str, Any]:
     if not public_doc_text:
         defects.append(f"read {PUBLIC_DOC}: missing or empty")
 
+    lifecycle_decisions = dr.lifecycle_map()
+    lifecycle_defects = dr.lifecycle_defects()
+
     for demo in dr.DEMOS:
         addr, port = source_default_addr(workspace, demo)
+        row_lifecycle_defects = [
+            defect for defect in lifecycle_defects
+            if defect.startswith(f"{demo.name}:") or f"cmd/{demo.name}" in defect
+        ]
         row_defects = demo_contract_defects(workspace, demo, run_doc_text, public_doc_text)
+        row_defects.extend(row_lifecycle_defects)
+        decision = lifecycle_decisions.get(demo.name)
         rows.append({
             "demo": demo.name,
             "base_path": demo.base_path,
             "default_port": demo.default_port,
+            "lifecycle": decision.state if decision else "",
+            "lifecycle_issue": decision.issue if decision else 0,
             "source_addr": addr,
             "source_port": port,
             "ok": not row_defects,
             "defects": row_defects,
         })
         defects.extend(row_defects)
+    for defect in lifecycle_defects:
+        if defect not in defects:
+            defects.append(defect)
 
     ok = not defects
     if ok:
@@ -176,7 +190,8 @@ def render(payload: dict[str, Any]) -> str:
         status = "OK" if row.get("ok") else "FAIL"
         lines.append(
             f"  {status:4} {row['demo']} port={row['default_port']} "
-            f"base={row['base_path']} source={row['source_addr'] or '<missing>'}"
+            f"base={row['base_path']} source={row['source_addr'] or '<missing>'} "
+            f"lifecycle={row.get('lifecycle', '')}"
         )
     if payload.get("defects"):
         lines.append("")
