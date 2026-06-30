@@ -146,6 +146,8 @@ fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [
 fak task      sample [--json] [--done N --total N]     # process-local task-manager snapshot: hardware/runtime sample + task/step/concept progress and ETA
 fak task      handoff --file HANDOFF.json [--json] [--live] [--repo owner/repo]  # verified completion handoff: require StateDone + VerifiedDone + current state, then plan/sync 1-2 follow-up issues
 fak test      [fast|full|race|<pkg>] [-n] [-- go test args]   # host-aware test runner; Windows routes go test through WSL/test.ps1
+fak commit    --path P... (-m STR | -F FILE/-) [--push] [--json]   # path-scoped shared-trunk commit; refuses unsafe states and emits score/grade/score_notes for every outcome
+fak sweep     [--json] | --apply --lane L -m "SUBJECT" [--path P...] [--push]   # dirty-tree lane planner above fak commit; lane groups carry score + score_notes before apply
 fak profile   <pkg> [--bench RE] [--cpuprofile F] [--memprofile F] [--top] [-n]   # host-aware Go benchmark profiler; captures pprof CPU + allocation profiles
 fak console agent --account claude-seat --dry-run -- -p "task"  # native launch-plan for real Claude Code through fak guard, using a selected Claude config home
 fak codex     [--dry-run] [--split off] -- exec --json "task"  # launch OpenAI Codex through fak guard; guard injects Codex -c model_provider=fak / wire_api=responses overrides

@@ -54,6 +54,31 @@ are hand-copies of the f32 loops). That is O(formats × hardware) edits to prove
 hot loops. The seam inverts it: **write the loop once against an interface; a new backend is
 a registration, never an edit.**
 
+### Hardware-shape neutrality ledger
+
+This is the competitive buyer view of the same table. A backend matrix can still be
+GPU-biased if it counts device names but leaves the model loop shaped like a host CPU. fak's
+claim is narrower and fenced: the `internal/compute` contract names the seven host-shape
+assumptions, gives each a boundary or fallback, and keeps unsupported regimes `FENCED`
+rather than silently `UNDEFINED` in the support-maturity sense
+([honesty fence](../standards/support-maturity-honesty-fence.md),
+[matrix](../HARDWARE-MATRIX.md)).
+
+| Assumption | Porting tax on non-GPU / neo-silicon | HAL fence | Current witness |
+|---|---|---|---|
+| float32 monoculture | Native bf16/fp8/MX/int4 hardware needs a new loop clone or lossy host expansion. | `Dtype` + `QuantSpec`; dtype dispatch lives on `Tensor` and weight ops. | `cpu-ref` f32/Q8 lanes and device backend parity tests exercise dtype-dispatched `MatMul`; broader low-precision coverage is still a scored gap. |
+| host-pointer aliasing | Device SRAM/VRAM cannot be passed as a Go `[]float32` without staging everything through host RAM. | Opaque `Tensor`/`Buffer`, `Host(t)` opt-in view, and `Read(t)` as the explicit fence. | CUDA, Vulkan, Metal, and CPU backends register behind the same contract; `DeviceMemory` remains cap-advertised only when true. |
+| x86 build-tag dispatch | A new accelerator becomes another build fork rather than a runtime backend. | `Register`, `Lookup`, `Pick`, and private `Tier()` probing. | `cpu-ref`, CUDA, Vulkan, and Metal are selected by registration/build tag without editing the forward loop. |
+| synchronous return-by-value | Async command queues must block at every op boundary, losing overlap and graph capture. | `Caps.Async`, `Buffer.Ready()`, and host fences at `Read` / `Argmax`. | The contract is fenced; production async depth is backend-specific and advertised only when implemented. |
+| goroutine-only parallelism | Device kernels must emulate row-splitting instead of using their native lanes, tiles, or graphs. | Whole-op `Backend` methods such as `MatMul`, `BatchedMatMul`, `Attention`, and `Argmax`. | CUDA/Vulkan/Metal lower whole ops behind the interface; CPU keeps goroutines private to the reference. |
+| row-major only | Tiled, blocked, sparse, or compiler-native layouts pay repack cost at every call site. | `Layout` on `Tensor`; backends repack at `Upload` and keep layout private after that. | The shipped path is row-major-first, but the layout boundary is explicit rather than an implicit host assumption. |
+| eager full-RAM residency + LE host | Small-SRAM, pre-staged, streaming, big-endian, or browser/WASM targets inherit a full host-blob requirement. | `WeightSource.Weight(name, want)` and `Upload(t, as)` move residency and narrowing behind the backend. | `WeightSource` is a shipped seam; broad vendor staging remains not-yet until backend conformance and scaffold tooling land. |
+
+Provenance: the contract and CPU/CUDA/Vulkan/Metal registrations are WITNESSED where their
+support rows say so. A specific future NPU, dataflow chip, PIM target, TPU, or vendor SDK
+remains ASPIRED until its backend passes the relevant conformance rung. This is why the
+industry scorecard reports hardware-shape neutrality separately from hardware breadth.
+
 ## 2. The type contract — assumptions neutralized in the types
 
 `internal/compute` lifts all seven assumptions **in the type system**, even though only the
