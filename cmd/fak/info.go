@@ -218,6 +218,29 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// width/height are loop-MUTABLE from here on: the overlay re-measures the pane on a resize
+	// (SIGWINCH) and on a terminal focus-in, so a tab resized while it was hidden repaints at the
+	// new geometry instead of drawing the rest of the session at the stale startup size. On a TTY
+	// remeasure refreshes both from term.GetSize (keeping the last good value on error); off a TTY
+	// it is a no-op, preserving the width=height=0 "size unknown" contract the append path relies on.
+	remeasure := func() {
+		if !tty {
+			return
+		}
+		// Read the REAL os.Stdout fd (the same source the startup measure at runInfo used), not
+		// the stdout writer param — under test that writer is a bytes.Buffer with tty=true, so an
+		// fd assertion on it would panic; the GetSize on a non-tty real fd simply errors and is
+		// ignored, leaving the test's passed-in width/height untouched.
+		if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+			if w > 0 {
+				width = w
+			}
+			if h > 0 {
+				height = h
+			}
+		}
+	}
+
 	// Visual is the DEFAULT for the live 20% pane: stacked sub-panes (trend sparklines + a
 	// task-manager gauge pane) redrawn in place. It needs a TTY for the cursor control, so off a
 	// TTY (piped/redirected log) and under --style line we keep the single compact status line.
@@ -236,11 +259,51 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	dirty := false // a status line / visual block is currently parked on the cursor (TTY in-place mode)
 	prevRows := 0  // rows the last visual frame drew (for the multi-line cursor-up redraw)
 
+	// Focus/resize layer. It is gated to a visual-mode TTY whose STDIN is also a TTY: reading the
+	// focus escape bytes (ESC [ I / ESC [ O) needs raw stdin, and the multi-line in-place redraw
+	// (prevRows delta) is the surface that benefits. Off a TTY, under --style line, or with a
+	// piped stdin the whole layer stays unbuilt — keyCh/resizeCh remain nil so their select cases
+	// block forever (a clean no-op), and not a byte of DECSET 1004 is emitted, so those paths are
+	// byte-for-byte unchanged. fs starts focused=true: a pane that opens already focused, and the
+	// universal case where the terminal never reports focus at all, must run at full cadence.
+	fs := focusState{focused: true}
+	var keyCh <-chan focusEvent
+	var resizeCh <-chan struct{}
+	var lastSample guardInfoVars
+	haveSample := false
+	focusable := visual && term.IsTerminal(int(os.Stdin.Fd()))
+	if focusable {
+		if oldState, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
+			// Register teardown BEFORE emitting any raw/1004 byte so a panic also restores cleanly.
+			// LIFO order on return: disable focus reporting, restore the cooked stdin, then (the
+			// existing) trailing newline if a frame is parked. Registered after `defer stop()` so it
+			// runs first.
+			defer func() {
+				writeFocusDisable(stdout)
+				_ = term.Restore(int(os.Stdin.Fd()), oldState)
+			}()
+			writeFocusEnable(stdout)
+			keyCh = startGuardInfoFocusReader(os.Stdin, stop)
+			rc, stopResize := newInfoResizeChan()
+			resizeCh = rc
+			defer stopResize()
+		}
+		// term.MakeRaw failure (a stdin that claims TTY but rejects raw mode): skip the focus layer
+		// entirely and run exactly as before — no raw mode, no 1004, no reader.
+	}
+
 	// writeFrame renders one tick. Visual mode pushes the sample into the trend ring and redraws
 	// the multi-line sub-pane block in place (cursor-up + clear-down). Line mode keeps the exact
 	// single-row \r\033[K redraw on a TTY, and appends one whole line per tick off a TTY so a
-	// captured log stays intact.
+	// captured log stays intact. A pending needsRepaint (set by a focus-in or a resize) forces a
+	// re-measure first, but KEEPS prevRows real so writeGuardInfoFrame's cursor-up + clear-down
+	// still erases the old block — zeroing prevRows here would skip the clear and leave ghost rows.
 	writeFrame := func(v guardInfoVars) {
+		lastSample, haveSample = v, true
+		if fs.needsRepaint {
+			remeasure()
+			fs.needsRepaint = false
+		}
 		if visual {
 			tr.push(v)
 			prevRows = writeGuardInfoFrame(stdout, renderGuardInfoVisualBlock(v, tr, width, height), prevRows)
@@ -294,6 +357,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	bg := backgroundInterval(interval) // the throttled cadence while the pane is focused-out
 	for {
 		select {
 		case <-ctx.Done():
@@ -301,6 +365,41 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 				fmt.Fprintln(stdout) // leave the cursor on a clean row on Ctrl-C
 			}
 			return 0
+		case ev := <-keyCh:
+			// A terminal focus report (or a raw-mode quit byte). focusQuit means Ctrl-C arrived as
+			// a 0x03 byte that raw mode swallowed before signal.NotifyContext could see it, so we
+			// cancel the context ourselves and let the ctx.Done() arm run the clean teardown.
+			if ev == focusQuit {
+				stop()
+				continue
+			}
+			prev := fs.focused
+			fs = applyFocus(fs, ev)
+			switch {
+			case fs.focused && !prev:
+				// Focus-IN edge: the tab may have been resized while hidden. Latch a repaint and
+				// paint it now from the last sample (writeFrame re-measures + clears the old block;
+				// no extra /debug/vars fetch). If no sample yet, the latch rides to the next tick.
+				// Then resume the foreground cadence.
+				fs.needsRepaint = true
+				if haveSample {
+					writeFrame(lastSample)
+				}
+				ticker.Reset(effectiveInterval(true, interval, bg))
+			case !fs.focused && prev:
+				// Focus-OUT edge: throttle (never pause) so a hidden tab stops churning.
+				ticker.Reset(effectiveInterval(false, interval, bg))
+			}
+			continue
+		case <-resizeCh:
+			// SIGWINCH (POSIX): latch a repaint and paint it now from the last sample (writeFrame
+			// re-measures to the new geometry + clears the old block). If no sample yet, the latch
+			// rides to the next tick.
+			fs.needsRepaint = true
+			if haveSample {
+				writeFrame(lastSample)
+			}
+			continue
 		case <-ticker.C:
 			if _, stop := emit(); stop {
 				return 0
