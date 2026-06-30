@@ -40,14 +40,8 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 			StepBudget  int      `json:"step_budget"`
 			ExampleKeys []string `json:"example_keys"`
 		} `json:"batch_groups"`
-		RepairQueues []struct {
-			Kind       string   `json:"kind"`
-			Count      int      `json:"count"`
-			StepBudget int      `json:"step_budget"`
-			NextAction string   `json:"next_action"`
-			ExampleKeys []string `json:"example_keys"`
-		} `json:"repair_queues"`
-		Reviews []struct {
+		RepairQueues []repairQueueAssertion `json:"repair_queues"`
+		Reviews      []struct {
 			OK              bool   `json:"ok"`
 			Key             string `json:"key"`
 			Dispatchability string `json:"dispatchability"`
@@ -260,15 +254,7 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 			StepBudget      int      `json:"step_budget"`
 			MissingMetadata []string `json:"missing_metadata"`
 		} `json:"batch_groups"`
-		RepairQueues []struct {
-			Kind          string         `json:"kind"`
-			Count         int            `json:"count"`
-			StepBudget    int            `json:"step_budget"`
-			NextAction    string         `json:"next_action"`
-			ByReason      map[string]int `json:"by_reason"`
-			MissingFields map[string]int `json:"missing_fields"`
-			ExampleKeys   []string       `json:"example_keys"`
-		} `json:"repair_queues"`
+		RepairQueues []repairQueueAssertion `json:"repair_queues"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
