@@ -38,6 +38,7 @@ const MaxDispatchExpectedSteps = 8
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
 var markdownHeadingRE = regexp.MustCompile(`^#{1,6}\s+(.+?)\s*$`)
 var codeSpanRE = regexp.MustCompile("`([^`]+)`")
+var issueMarkerKeyRE = regexp.MustCompile(`<!--\s*fak-[A-Za-z0-9_-]+-key:\s*([^>\s]+)\s*-->`)
 
 // IssueLabel is the subset of a GitHub label row used by IssueDraft.
 type IssueLabel struct {
@@ -59,6 +60,7 @@ type IssueDraft struct {
 // syncing a public GitHub issue.
 type Candidate struct {
 	Schema          string   `json:"schema,omitempty"`
+	IssueNumber     int      `json:"issue_number,omitempty"`
 	Key             string   `json:"key"`
 	Title           string   `json:"title"`
 	ParentRef       string   `json:"parent_ref,omitempty"`
@@ -139,6 +141,7 @@ type Review struct {
 	Dispatchability string        `json:"dispatchability"`
 	Reasons         []string      `json:"reasons,omitempty"`
 	MissingFields   []string      `json:"missing_fields,omitempty"`
+	IssueNumber     int           `json:"issue_number,omitempty"`
 	Key             string        `json:"key,omitempty"`
 	Lane            string        `json:"lane,omitempty"`
 	Paths           []string      `json:"paths,omitempty"`
@@ -203,6 +206,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	agentContext := agentContext(c)
 	out := Review{
 		Schema:         ReviewSchema,
+		IssueNumber:    c.IssueNumber,
 		Key:            c.Key,
 		Lane:           c.Lane,
 		Paths:          append([]string(nil), c.Paths...),
@@ -257,6 +261,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 	doneWitness := section("Done condition / witness")
 	return Candidate{
 		Schema:          Schema,
+		IssueNumber:     d.Number,
 		Key:             issueDraftKey(d),
 		Title:           d.Title,
 		ParentRef:       section("Parent context", "Parent ref", "Parent issue", "Source"),
@@ -305,6 +310,9 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func issueDraftKey(d IssueDraft) string {
+	if key := issueDraftMarkerKey(d.Body); key != "" {
+		return key
+	}
 	if d.Number > 0 {
 		return "issue/" + strconv.Itoa(d.Number)
 	}
@@ -313,6 +321,14 @@ func issueDraftKey(d IssueDraft) string {
 		slug = "unknown"
 	}
 	return "manual/" + slug
+}
+
+func issueDraftMarkerKey(body string) string {
+	m := issueMarkerKeyRE.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 func markdownSections(body string) map[string]string {

@@ -245,6 +245,65 @@ func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
 	}
 }
 
+func TestIssueContractGroupsDuplicateGeneratedMarkers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "issues.json")
+	body := []issuecontract.IssueDraft{
+		{
+			Number: 1450,
+			Title:  "taskmgr: follow up",
+			Body:   "<!-- fak-task-handoff-key: task_push_next/issue-sync -->\n" + completeIssueDraftBody(),
+			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+		},
+		{
+			Number: 1453,
+			Title:  "taskmgr: duplicate follow up",
+			Body:   "<!-- fak-task-handoff-key: task_push_next/issue-sync -->\n" + completeIssueDraftBody(),
+			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+		},
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	var got struct {
+		DuplicateKeyGroups []struct {
+			Key        string         `json:"key"`
+			Count      int            `json:"count"`
+			StepBudget int            `json:"step_budget"`
+			Issues     []int          `json:"issues"`
+			ByLane     map[string]int `json:"by_lane"`
+		} `json:"duplicate_key_groups"`
+		Reviews []struct {
+			Key         string `json:"key"`
+			IssueNumber int    `json:"issue_number"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if len(got.DuplicateKeyGroups) != 1 ||
+		got.DuplicateKeyGroups[0].Key != "task_push_next/issue-sync" ||
+		got.DuplicateKeyGroups[0].Count != 2 ||
+		got.DuplicateKeyGroups[0].StepBudget != 6 ||
+		got.DuplicateKeyGroups[0].ByLane["guardrsi"] != 2 ||
+		len(got.DuplicateKeyGroups[0].Issues) != 2 ||
+		got.DuplicateKeyGroups[0].Issues[0] != 1450 ||
+		got.DuplicateKeyGroups[0].Issues[1] != 1453 {
+		t.Fatalf("duplicate groups = %+v, want duplicated task handoff marker with issue numbers", got.DuplicateKeyGroups)
+	}
+	if len(got.Reviews) != 2 || got.Reviews[0].Key != "task_push_next/issue-sync" || got.Reviews[0].IssueNumber != 1450 {
+		t.Fatalf("reviews = %+v, want marker key and issue numbers", got.Reviews)
+	}
+}
+
 func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.json")
 	body := []issuecontract.IssueDraft{

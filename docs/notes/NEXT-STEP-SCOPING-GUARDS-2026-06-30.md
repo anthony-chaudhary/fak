@@ -236,7 +236,11 @@ Acceptance for "true end to end working":
   likely expansion before any child issues are synced. When the batch policy
   declares a numeric cap (`at most 2`, `max 20`, `limit 5`, etc.), the group also
   reports the declared cap and the overflow count, so agents can update or split
-  a flood before blindly creating excess GitHub issues. The audit also emits
+  a flood before blindly creating excess GitHub issues. Existing issue audits
+  also parse generated HTML marker keys (`fak-...-key`) and emit
+  `duplicate_key_groups` with the duplicate issue numbers, so a rerun that
+  accidentally created instead of updated becomes a cleanup queue rather than
+  silent spam. The audit also emits
   `assumption_groups`, `confusion_groups`, and `coordination_groups` keyed by
   the worker-facing agent note, with step budgets, split child-issue budgets,
   lane/reason buckets, and sample issue keys. That gives supervisors a direct

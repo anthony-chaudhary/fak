@@ -311,6 +311,51 @@ func TestReviewIssueDraftParsesStandardSections(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftUsesGeneratedMarkerKey(t *testing.T) {
+	body := "<!-- fak-task-handoff-key: task_push_next/issue-sync -->\n" + strings.Join([]string{
+		"### Parent context",
+		"task_push_next",
+		"### Current state",
+		"The handoff created a scoped follow-up.",
+		"### Why this is next",
+		"The follow-up is the next dispatchable leaf.",
+		"### Working spine",
+		"verified handoff -> issue -> worker",
+		"### Work unit",
+		"leaf",
+		"### Expected steps",
+		"3",
+		"### Assumptions",
+		"- Existing marker dedupe is available.",
+		"### Confusion risks",
+		"- Do not treat this as the parent epic.",
+		"### Coordination notes",
+		"- Serialize with taskmgr issue-body edits.",
+		"### Trigger",
+		"Verified task handoff proposed this next step.",
+		"### Batch policy",
+		"At most two follow-up issues per handoff; reruns update by marker.",
+		"### In scope",
+		"Update this one follow-up.",
+		"### Out of scope",
+		"Do not change the parent task.",
+		"### Done condition",
+		"The issue review uses the stable marker key.",
+		"### Witness",
+		"go test ./internal/issuecontract",
+		"### Acceptance gate",
+		"go test ./internal/issuecontract",
+		"### Lane",
+		"taskmgr",
+		"### Closure binding",
+		"Resolving commit cites #N.",
+	}, "\n")
+	review := ReviewIssueDraft(IssueDraft{Number: 1444, Title: "taskmgr: follow up", Body: body}, Options{})
+	if review.Key != "task_push_next/issue-sync" || review.IssueNumber != 1444 {
+		t.Fatalf("identity = key %q issue_number %d, want marker key and issue number", review.Key, review.IssueNumber)
+	}
+}
+
 func TestReviewIssueDraftFlagsOversizedExpectedSteps(t *testing.T) {
 	review := ReviewIssueDraft(IssueDraft{
 		Number: 42,

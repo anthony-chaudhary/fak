@@ -42,6 +42,7 @@ type issueContractResult struct {
 	Counts             issueContractCounts           `json:"counts"`
 	RepairQueues       []issueContractRepairQueue    `json:"repair_queues,omitempty"`
 	BatchGroups        []issueContractBatchGroup     `json:"batch_groups,omitempty"`
+	DuplicateKeyGroups []issueContractDuplicateGroup `json:"duplicate_key_groups,omitempty"`
 	AssumptionGroups   []issueContractAgentNoteGroup `json:"assumption_groups,omitempty"`
 	ConfusionGroups    []issueContractAgentNoteGroup `json:"confusion_groups,omitempty"`
 	CoordinationGroups []issueContractAgentNoteGroup `json:"coordination_groups,omitempty"`
@@ -106,6 +107,19 @@ type issueContractAgentNoteGroup struct {
 	ByWorkUnit       map[string]int `json:"by_work_unit,omitempty"`
 	ByReason         map[string]int `json:"by_reason,omitempty"`
 	ExampleKeys      []string       `json:"example_keys,omitempty"`
+}
+
+type issueContractDuplicateGroup struct {
+	Key              string         `json:"key"`
+	Count            int            `json:"count"`
+	StepBudget       int            `json:"step_budget"`
+	ChildIssueBudget int            `json:"child_issue_budget,omitempty"`
+	Issues           []int          `json:"issues,omitempty"`
+	Dispatchable     int            `json:"dispatchable"`
+	TriageOnly       int            `json:"triage_only"`
+	Refused          int            `json:"refused"`
+	ByLane           map[string]int `json:"by_lane,omitempty"`
+	ByReason         map[string]int `json:"by_reason,omitempty"`
 }
 
 func runIssueContract(stdout, stderr io.Writer, argv []string) int {
@@ -192,7 +206,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 			result.Reviews = append(result.Reviews, review)
 		}
 	}
-	result.Counts, result.BatchGroups, result.AssumptionGroups, result.ConfusionGroups, result.CoordinationGroups = summarizeIssueContractReviews(result.Reviews)
+	result.Counts, result.BatchGroups, result.DuplicateKeyGroups, result.AssumptionGroups, result.ConfusionGroups, result.CoordinationGroups = summarizeIssueContractReviews(result.Reviews)
 	result.RepairQueues = issueContractRepairQueues(result.Reviews)
 
 	if *asJSON {
@@ -209,7 +223,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContractCounts, []issueContractBatchGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup) {
+func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContractCounts, []issueContractBatchGroup, []issueContractDuplicateGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup) {
 	counts := issueContractCounts{
 		Total:                len(reviews),
 		ByReason:             map[string]int{},
@@ -218,6 +232,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		ByExpectedStepBucket: map[string]int{},
 	}
 	batches := map[string]*issueContractBatchGroup{}
+	duplicateGroups := map[string]*issueContractDuplicateGroup{}
 	assumptionGroups := map[string]*issueContractAgentNoteGroup{}
 	confusionGroups := map[string]*issueContractAgentNoteGroup{}
 	coordinationGroups := map[string]*issueContractAgentNoteGroup{}
@@ -283,6 +298,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		if review.Key != "" && len(group.ExampleKeys) < 5 {
 			group.ExampleKeys = append(group.ExampleKeys, review.Key)
 		}
+		issueContractAddDuplicateGroup(duplicateGroups, review, stepBudget)
 		issueContractAddAgentNoteGroups(assumptionGroups, review.Assumptions, review, stepBudget)
 		issueContractAddAgentNoteGroups(confusionGroups, review.ConfusionRisks, review, stepBudget)
 		issueContractAddAgentNoteGroups(coordinationGroups, review.Coordination, review, stepBudget)
@@ -315,10 +331,11 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		}
 		return groups[i].Key < groups[j].Key
 	})
+	duplicates := issueContractSortedDuplicateGroups(duplicateGroups)
 	assumptions := issueContractSortedAgentNoteGroups(assumptionGroups)
 	confusions := issueContractSortedAgentNoteGroups(confusionGroups)
 	coordination := issueContractSortedAgentNoteGroups(coordinationGroups)
-	return counts, groups, assumptions, confusions, coordination
+	return counts, groups, duplicates, assumptions, confusions, coordination
 }
 
 func issueContractReviewStepBudget(review issuecontract.Review) int {
@@ -326,6 +343,67 @@ func issueContractReviewStepBudget(review issuecontract.Review) int {
 		return review.ExpectedSteps
 	}
 	return 1
+}
+
+func issueContractAddDuplicateGroup(groups map[string]*issueContractDuplicateGroup, review issuecontract.Review, stepBudget int) {
+	key := strings.TrimSpace(review.Key)
+	if key == "" {
+		return
+	}
+	group := groups[key]
+	if group == nil {
+		group = &issueContractDuplicateGroup{
+			Key:      key,
+			ByLane:   map[string]int{},
+			ByReason: map[string]int{},
+		}
+		groups[key] = group
+	}
+	group.Count++
+	group.StepBudget += stepBudget
+	group.ChildIssueBudget += issueContractReviewSplitChildIssueBudget(review)
+	switch review.Dispatchability {
+	case issuecontract.Dispatchable:
+		group.Dispatchable++
+	case issuecontract.TriageOnly:
+		group.TriageOnly++
+	case issuecontract.Refused:
+		group.Refused++
+	}
+	group.ByLane[issueContractBucketValue(review.Lane, "(unrouted)")]++
+	for _, reason := range review.Reasons {
+		group.ByReason[reason]++
+	}
+	if review.IssueNumber > 0 && len(group.Issues) < 12 {
+		group.Issues = append(group.Issues, review.IssueNumber)
+	}
+}
+
+func issueContractSortedDuplicateGroups(groups map[string]*issueContractDuplicateGroup) []issueContractDuplicateGroup {
+	out := make([]issueContractDuplicateGroup, 0, len(groups))
+	for _, group := range groups {
+		if group.Count < 2 {
+			continue
+		}
+		if len(group.ByLane) == 0 {
+			group.ByLane = nil
+		}
+		if len(group.ByReason) == 0 {
+			group.ByReason = nil
+		}
+		sort.Ints(group.Issues)
+		out = append(out, *group)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		if out[i].StepBudget != out[j].StepBudget {
+			return out[i].StepBudget > out[j].StepBudget
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
 }
 
 func issueContractAddAgentNoteGroups(groups map[string]*issueContractAgentNoteGroup, notes []string, review issuecontract.Review, stepBudget int) {
@@ -798,6 +876,28 @@ func renderIssueContract(r issueContractResult) string {
 		lines = append(lines, line)
 		if len(group.MissingMetadata) > 0 {
 			lines = append(lines, "    missing_batch_metadata: "+strings.Join(group.MissingMetadata, ", "))
+		}
+	}
+	for i, group := range r.DuplicateKeyGroups {
+		if i >= 8 {
+			lines = append(lines, fmt.Sprintf("  duplicate_key_groups: ... %d more", len(r.DuplicateKeyGroups)-i))
+			break
+		}
+		line := fmt.Sprintf("  duplicate_key_group[%d]: count=%d steps=%d",
+			i, group.Count, group.StepBudget)
+		if group.ChildIssueBudget > 0 {
+			line += fmt.Sprintf(" child_issues=%d", group.ChildIssueBudget)
+		}
+		if len(group.Issues) > 0 {
+			line += fmt.Sprintf(" issues=%s", intList(group.Issues))
+		}
+		line += fmt.Sprintf(" key=%s", group.Key)
+		lines = append(lines, line)
+		if len(group.ByLane) > 0 {
+			lines = append(lines, "    lanes: "+renderIssueContractReasonCounts(group.ByLane))
+		}
+		if len(group.ByReason) > 0 {
+			lines = append(lines, "    reasons: "+renderIssueContractReasonCounts(group.ByReason))
 		}
 	}
 	lines = renderIssueContractAgentNoteGroups(lines, "assumption", r.AssumptionGroups)
