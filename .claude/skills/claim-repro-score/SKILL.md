@@ -1,1 +1,6 @@
+---
+name: claim-repro-score
+description: One repeatable RSI pass over claim reproducibility; run the claim-repro scorecard, retire unfalsifiable witness debt worst-first by adding the real artifact/test/path, re-measure, and commit only the claim-repro lane.
+---
+
 One repeatable RSI pass over claim reproducibility — the truth-maintenance sister to conflation-score (who owns this number?) and appeal-score (prose voice). Runs the claim-repro scorecard (tools/claim_repro_scorecard.py) over CLAIMS.md and BENCHMARK-AUTHORITY.md, reads the claim-repro-debt work-list (un-falsifiable witnesses: missing artifacts, non-existent test patterns, deleted cmd dirs), retires debt worst-first by ADDING the real witness (write the missing artifact, add the missing test, correct the package path), re-measures to PROVE the debt dropped, and commits only the claim-repro lane by explicit path. The claim-falsifiability sister of refresh-readme (freshness) and slop-score (code waste). Use after adding a claim or benchmark, when a witness is deleted or renamed, or on a /loop cadence to keep every claim genuinely falsifiable from a clean clone.
