@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // RunScorecard runs one card and returns its parsed payload or an error string,
@@ -35,10 +37,12 @@ func RunScorecard(root string, card Card, python string, timeout time.Duration) 
 	if len(argv) == 0 {
 		return nil, "empty command"
 	}
+	argv = rewriteGoRunFak(argv, os.Args[0])
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -83,6 +87,31 @@ func Collect(root, python string, timeout time.Duration) []Metric {
 	return metrics
 }
 
+func CollectBudgeted(root, python string, timeout, remaining time.Duration) []Metric {
+	if remaining <= 0 {
+		return budgetExhaustedMetrics()
+	}
+	if timeout > remaining {
+		timeout = remaining
+	}
+	return Collect(root, python, timeout)
+}
+
+func CollectBudgetedParallel(root, python string, timeout, remaining time.Duration, workers int) []Metric {
+	if remaining <= 0 {
+		return budgetExhaustedMetrics()
+	}
+	return CollectBudgeted(root, python, timeout, remaining)
+}
+
+func budgetExhaustedMetrics() []Metric {
+	out := make([]Metric, 0, len(Cards))
+	for _, card := range Cards {
+		out = append(out, MetricFromPayload(card, nil, "budget exhausted before running card"))
+	}
+	return out
+}
+
 // LoadBaseline reads the pinned baseline file, or returns nil when absent/unreadable
 // (matching the Python load_baseline returning None — an unpinned trend).
 func LoadBaseline(path string) *Baseline {
@@ -101,6 +130,7 @@ func LoadBaseline(path string) *Baseline {
 // Ported from the Python head_commit.
 func HeadCommitShort(root string) string {
 	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -120,6 +150,28 @@ func defaultPython() string {
 		}
 	}
 	return "python"
+}
+
+func rewriteGoRunFak(argv []string, fakBin string) []string {
+	if len(argv) < 3 || argv[0] != "go" || argv[1] != "run" || !isCmdFakTarget(argv[2]) {
+		return argv
+	}
+	if strings.TrimSpace(fakBin) == "" {
+		return argv
+	}
+	out := make([]string, 0, len(argv)-2)
+	out = append(out, fakBin)
+	out = append(out, argv[3:]...)
+	return out
+}
+
+func isCmdFakTarget(target string) bool {
+	norm := filepath.ToSlash(strings.ReplaceAll(strings.TrimSpace(target), `\`, "/"))
+	for strings.Contains(norm, "//") {
+		norm = strings.ReplaceAll(norm, "//", "/")
+	}
+	norm = strings.TrimPrefix(norm, "./")
+	return norm == "cmd/fak"
 }
 
 func lastLine(s string) string {

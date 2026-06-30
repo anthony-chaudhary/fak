@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // CollectHygiene reads the tracked tree at root and returns the folded payload. When
@@ -177,6 +179,7 @@ func isGitRepo(root string) bool {
 
 func gitLines(args []string, root string) []string {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {

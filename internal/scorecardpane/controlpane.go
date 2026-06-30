@@ -59,6 +59,13 @@ type Card struct {
 	Cmd    string
 }
 
+// Result is one collected scorecard payload paired with the card metadata needed
+// by downstream autopost/dedupe sinks.
+type Result struct {
+	Card Card
+	Raw  []byte
+}
+
 // Cards is the scorecard family in the canonical order the Python tool lists them.
 // The fold folds every Debt key into one portfolio number. GoBacked is derived
 // from a non-empty Cmd containing "go run".
@@ -73,7 +80,7 @@ var Cards = []Card{
 	{Key: "hygiene", Debt: "hygiene_debt", Script: "repo_hygiene_scorecard.py", Label: "repo-hygiene"},
 	{Key: "parity", Debt: "parity_debt", Script: "industry_scorecard.py", Label: "industry-parity"},
 	{Key: "agent", Debt: "friction_debt", Script: "agent_readiness_scorecard.py", Label: "agent-readiness"},
-	{Key: "product", Debt: "product_debt", Script: "product_scorecard.py", Label: "product"},
+	{Key: "product", Debt: "product_debt", Cmd: "go run ./cmd/fak product-scorecard --json", Label: "product"},
 	{Key: "persona", Debt: "persona_debt", Script: "persona_readiness_scorecard.py", Label: "persona"},
 	{Key: "stability", Debt: "stability_debt", Script: "stability_scorecard.py", Label: "stability"},
 	{Key: "slop", Debt: "slop_debt", Script: "code_slop_scorecard.py", Label: "code-slop"},
