@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/covmatrix"
 	"github.com/anthony-chaudhary/fak/internal/epicprogress"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // EpicSpec is one tracked roadmap milestone. It is an alias of
@@ -85,6 +86,7 @@ func countTaskList(body string) (total, checked int) {
 // leaf imports no sibling composer.
 func HeadCommit(root string) string {
 	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
