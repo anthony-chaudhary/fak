@@ -20,7 +20,8 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 	}
 	s := out.String()
 	for _, want := range []string{
-		"vCache M5 governor: up",
+		"vCache M5 governor: decision witness live",
+		"pin/lazy/evict actions not registered",
 		"vCache M4 chains & recall: up",
 		"M4 recall cost-gate proof: refuted",
 		"codex-like star proof: PROVEN",
@@ -53,6 +54,9 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 	if rep.CodexOpenAI.CachedSampleProof.Status != vcachegov.ProofProven ||
 		rep.CodexOpenAI.CachedSampleProof.SavedTokenEquiv != 1728 {
 		t.Fatalf("cached sample proof = %+v, want OpenAI cached-token savings", rep.CodexOpenAI.CachedSampleProof)
+	}
+	if !strings.Contains(rep.Governor, "decision witness live") || strings.Contains(rep.Governor, "up (pin/lazy/evict") {
+		t.Fatalf("governor status should distinguish live witness from registered actions: %q", rep.Governor)
 	}
 	if rep.CodexOpenAI.NoCacheRefutation.Status != vcachegov.ProofRefuted ||
 		rep.CodexOpenAI.NoCacheRefutation.SavedTokenEquiv != 0 {
