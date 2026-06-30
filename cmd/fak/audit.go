@@ -19,6 +19,9 @@ import (
 //	              was written.
 //	export PATH — re-emit the journal as JSONL on stdout (a sound copy of a sound
 //	              journal), for archival or piping to another tool.
+//	diagnose PATH — reconstruct the per-session chains from the hash links and tell a
+//	              benign concurrent-writer INTERLEAVE apart from real TAMPERING, so a
+//	              shared default journal is not mis-reported as broken (see audit_diagnose.go).
 func cmdAudit(args []string) {
 	if len(args) == 0 {
 		auditUsage()
@@ -29,6 +32,8 @@ func cmdAudit(args []string) {
 		cmdAuditVerify(args[1:])
 	case "export":
 		cmdAuditExport(args[1:])
+	case "diagnose":
+		cmdAuditDiagnose(args[1:])
 	case "-h", "--help", "help":
 		auditUsage()
 	default:
@@ -41,6 +46,7 @@ func cmdAudit(args []string) {
 func auditUsage() {
 	fmt.Fprintln(os.Stderr, "usage: fak audit verify <journal.jsonl>   (validate the tamper-evident hash chain; exit 1 if edited)")
 	fmt.Fprintln(os.Stderr, "       fak audit export <journal.jsonl>   (re-emit the journal as JSONL on stdout)")
+	fmt.Fprintln(os.Stderr, "       fak audit diagnose [<journal.jsonl>] (tell concurrent-writer interleave apart from real tampering)")
 }
 
 // cmdAuditVerify re-reads a decision journal and validates its hash chain. A clean

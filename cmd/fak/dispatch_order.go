@@ -229,7 +229,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
-  fak dispatch audit [--workspace DIR] [--json]
+  fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are

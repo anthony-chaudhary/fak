@@ -1218,24 +1218,6 @@ func accountFromMap(m map[string]any) dispatchtick.Account {
 	}
 }
 
-func issueNumbers(raw any) []int {
-	var out []int
-	switch v := raw.(type) {
-	case []any:
-		for _, it := range v {
-			switch x := it.(type) {
-			case float64:
-				out = append(out, int(x))
-			case map[string]any:
-				if n := dispatchMapInt(x, "number"); n != 0 {
-					out = append(out, n)
-				}
-			}
-		}
-	}
-	return out
-}
-
 func dispatchSplitCSV(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {

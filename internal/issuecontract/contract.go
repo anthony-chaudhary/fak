@@ -27,6 +27,7 @@ const (
 	ReasonUnrouted        = "ISSUE_UNROUTED"
 	ReasonPrivateBoundary = "ISSUE_PRIVATE_BOUNDARY"
 	ReasonLiveUnarmored   = "ISSUE_LIVE_UNARMORED"
+	ReasonNotDispatchLeaf = "ISSUE_NOT_DISPATCH_LEAF"
 )
 
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
@@ -60,6 +61,13 @@ type Candidate struct {
 	WhyNow          string   `json:"why_now,omitempty"`
 	WorkingSpine    string   `json:"working_spine,omitempty"`
 	PriorityContext string   `json:"priority_context,omitempty"`
+	WorkUnit        string   `json:"work_unit,omitempty"`
+	ExpectedSteps   int      `json:"expected_steps,omitempty"`
+	Assumptions     []string `json:"assumptions,omitempty"`
+	ConfusionRisks  []string `json:"confusion_risks,omitempty"`
+	Coordination    []string `json:"coordination,omitempty"`
+	Trigger         string   `json:"trigger,omitempty"`
+	BatchPolicy     string   `json:"batch_policy,omitempty"`
 	InScope         string   `json:"in_scope,omitempty"`
 	OutOfScope      string   `json:"out_of_scope,omitempty"`
 	DoneCondition   string   `json:"done_condition,omitempty"`
@@ -105,6 +113,19 @@ type SpinePriority struct {
 	Total       int `json:"total"`
 }
 
+// AgentContext scores whether an issue carries the extra context a worker needs
+// at scale: work-unit shape, assumption/confusion control, coordination hints,
+// and trigger/batch policy so high-volume issue generation does not turn into
+// spam. It is advisory; dispatchability still comes from the stricter scope /
+// route / witness contract.
+type AgentContext struct {
+	Shape        int `json:"shape"`
+	Assumptions  int `json:"assumptions"`
+	Coordination int `json:"coordination"`
+	NoiseControl int `json:"noise_control"`
+	Total        int `json:"total"`
+}
+
 // Review is the closed-vocabulary verdict over a Candidate.
 type Review struct {
 	Schema          string        `json:"schema"`
@@ -118,6 +139,7 @@ type Review struct {
 	Paths           []string      `json:"paths,omitempty"`
 	Score           Score         `json:"score"`
 	SpinePriority   SpinePriority `json:"spine_priority"`
+	AgentContext    AgentContext  `json:"agent_context"`
 }
 
 // ReviewCandidate grades c. OK means the candidate is safe to sync as a
@@ -142,9 +164,13 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	if opt.Live && (!opt.DedupeChecked || opt.DedupeCap <= 0) {
 		reasons.add(ReasonLiveUnarmored)
 	}
+	if !isDispatchLeaf(c) {
+		reasons.add(ReasonNotDispatchLeaf)
+	}
 
 	score := score(c, routeOK)
 	spinePriority := spinePriority(c)
+	agentContext := agentContext(c)
 	out := Review{
 		Schema:        ReviewSchema,
 		Key:           c.Key,
@@ -154,6 +180,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		MissingFields: missing,
 		Score:         score,
 		SpinePriority: spinePriority,
+		AgentContext:  agentContext,
 	}
 	out.OK = len(out.Reasons) == 0
 	switch {
@@ -200,6 +227,13 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		WhyNow:          section("Why this is next", "Why now"),
 		WorkingSpine:    section("Working spine"),
 		PriorityContext: section("Priority context", "Spine priority", "Importance"),
+		WorkUnit:        section("Work unit", "Work-unit shape", "Issue shape"),
+		ExpectedSteps:   parseExpectedSteps(section("Expected steps", "Step budget")),
+		Assumptions:     issueDraftAgentNotes(section("Assumptions")),
+		ConfusionRisks:  issueDraftAgentNotes(section("Confusion risks", "Known confusion", "Unknowns")),
+		Coordination:    issueDraftAgentNotes(section("Coordination", "Coordination notes", "Handoff notes")),
+		Trigger:         agentSectionValue(section("Trigger", "Creation trigger")),
+		BatchPolicy:     agentSectionValue(section("Batch policy", "Noise control", "Spam control")),
 		InScope:         section("In scope"),
 		OutOfScope:      section("Out of scope"),
 		DoneCondition:   firstNonEmpty(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
@@ -295,6 +329,27 @@ func issueDraftNotes(section string) []string {
 	return compact(out)
 }
 
+func issueDraftAgentNotes(section string) []string {
+	notes := issueDraftNotes(section)
+	out := notes[:0]
+	for _, note := range notes {
+		if agentSectionValue(note) != "" {
+			out = append(out, note)
+		}
+	}
+	return compact(out)
+}
+
+func agentSectionValue(s string) string {
+	s = strings.TrimSpace(s)
+	switch strings.ToLower(s) {
+	case "", "not specified.", "not specified", "none named.", "none named", "no special coordination beyond the lane lease.":
+		return ""
+	default:
+		return s
+	}
+}
+
 func issueDraftPaths(section string) []string {
 	var out []string
 	for _, m := range codeSpanRE.FindAllStringSubmatch(section, -1) {
@@ -311,6 +366,16 @@ func issueDraftPaths(section string) []string {
 	return compact(out)
 }
 
+func parseExpectedSteps(section string) int {
+	for _, tok := range strings.Fields(strings.TrimSpace(section)) {
+		tok = strings.Trim(tok, "`.,;:()[]")
+		if n, err := strconv.Atoi(tok); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
 func trimListPrefix(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "- ") || strings.HasPrefix(s, "* ") {
@@ -324,10 +389,6 @@ func trimListPrefix(s string) string {
 		return strings.TrimSpace(s[i+1:])
 	}
 	return s
-}
-
-func isPathHint(s string) bool {
-	return cleanPathHint(s) != ""
 }
 
 func cleanPathHint(s string) string {
@@ -383,6 +444,12 @@ func normalize(c Candidate) Candidate {
 	c.WhyNow = strings.TrimSpace(c.WhyNow)
 	c.WorkingSpine = strings.TrimSpace(c.WorkingSpine)
 	c.PriorityContext = strings.TrimSpace(c.PriorityContext)
+	c.WorkUnit = strings.TrimSpace(c.WorkUnit)
+	c.Assumptions = compact(c.Assumptions)
+	c.ConfusionRisks = compact(c.ConfusionRisks)
+	c.Coordination = compact(c.Coordination)
+	c.Trigger = strings.TrimSpace(c.Trigger)
+	c.BatchPolicy = strings.TrimSpace(c.BatchPolicy)
 	c.InScope = strings.TrimSpace(c.InScope)
 	c.OutOfScope = strings.TrimSpace(c.OutOfScope)
 	c.DoneCondition = strings.TrimSpace(c.DoneCondition)
@@ -489,6 +556,49 @@ func spinePriority(c Candidate) SpinePriority {
 	}
 	p.Total = p.WorkingPath + p.CurrentNeed + p.Unblocks + p.NotPolish
 	return p
+}
+
+func agentContext(c Candidate) AgentContext {
+	a := AgentContext{}
+	shapeKnown := c.WorkUnit != "" && (isDispatchWorkUnit(c.WorkUnit) || isNonDispatchWorkUnit(c.WorkUnit))
+	a.Shape = points(25, shapeKnown, c.ExpectedSteps > 0)
+	a.Assumptions = points(25, len(c.Assumptions) > 0, len(c.ConfusionRisks) > 0)
+	a.Coordination = points(25, len(c.Coordination) > 0)
+	a.NoiseControl = points(25, c.Trigger != "", c.BatchPolicy != "")
+	a.Total = a.Shape + a.Assumptions + a.Coordination + a.NoiseControl
+	return a
+}
+
+func isDispatchLeaf(c Candidate) bool {
+	if isNonDispatchWorkUnit(c.WorkUnit) {
+		return false
+	}
+	for _, label := range c.Labels {
+		label = strings.ToLower(strings.TrimSpace(label))
+		switch label {
+		case "epic", "research", "idea-scout", "needs-triage", "needs-scope", "triage-only", "triage_only":
+			return false
+		}
+	}
+	return true
+}
+
+func isDispatchWorkUnit(unit string) bool {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "leaf", "step", "patch", "task", "work-unit", "work_unit", "worker-ready":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNonDispatchWorkUnit(unit string) bool {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "epic", "program", "research", "idea", "triage", "triage-only", "triage_only", "decompose", "umbrella":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasAny(text string, needles ...string) bool {
