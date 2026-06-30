@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/devindex"
+	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
 
 // IndexLaneRequest is the MCP argument shape for fak_index_lane. It mirrors
@@ -202,4 +203,45 @@ func (s *Server) indexWork(req IndexSearchRequest) (IndexWorkResponse, error) {
 		Limit:   views.PageLimit(),
 		Views:   capResults(hits, req.Limit),
 	}, nil
+}
+
+// FeatureQueryRequest is the MCP argument shape for fak_feature_query. It mirrors
+// `fak feature query`: a non-empty intent, optional dev/live/all plane, optional
+// result limit, and optional detail fault for one selected card.
+type FeatureQueryRequest struct {
+	Root   string `json:"root,omitempty"`
+	Query  string `json:"query,omitempty"`
+	Plane  string `json:"plane,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	Detail string `json:"detail,omitempty"`
+}
+
+var featureQueryInputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "root": {"type": "string", "description": "optional repo root; omitted means search upward for dos.toml from the server working directory"},
+    "query": {"type": "string", "description": "non-empty intent to match against feature cards"},
+    "plane": {"type": "string", "enum": ["dev", "live", "all"], "description": "which catalog plane to query; default all"},
+    "limit": {"type": "integer", "description": "maximum result count; 0 or omitted means no cap"},
+    "detail": {"type": "string", "description": "optional card name/detail_ref to fault schema, doc snippet, or memory explain plan for"}
+  },
+  "required": ["query"]
+}`)
+
+func (s *Server) featureQuery(req FeatureQueryRequest) (selfquery.Response, error) {
+	if strings.TrimSpace(req.Query) == "" {
+		return selfquery.Response{}, errors.New("fak_feature_query requires query")
+	}
+	cat, err := selfquery.Load(req.Root, selfquery.Options{
+		Tools: selfquery.ToolDescriptorsFromMaps(toolDescriptors()),
+	})
+	if err != nil {
+		return selfquery.Response{}, err
+	}
+	return cat.Query(selfquery.Request{
+		Query:  req.Query,
+		Plane:  selfquery.Plane(req.Plane),
+		Limit:  req.Limit,
+		Detail: req.Detail,
+	})
 }

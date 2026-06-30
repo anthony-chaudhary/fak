@@ -679,6 +679,11 @@ type Server struct {
 	// tools[] unchanged.
 	toolFloorDenies func(toolName string) bool
 
+	// systemBlockDrop is the same inbound-prune seam for typed Anthropic system[]
+	// blocks: true means this named block element may be removed after the cached
+	// system breakpoint. nil leaves system[] byte-for-byte unchanged.
+	systemBlockDrop func(block, name string) bool
+
 	// auditLog is the optional A2A audit logging function. When non-nil, all A2A task
 	// state transitions are logged for tamper-evident tracking. nil disables A2A audit logging.
 	// Set by cmd/fak to wire in the DECISION JOURNAL-backed audit system.

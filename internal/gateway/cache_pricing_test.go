@@ -123,3 +123,33 @@ func TestProviderCacheSavingsUSD(t *testing.T) {
 		t.Errorf("ProviderCacheSavingsUSD(zero) = %v, want 0", got)
 	}
 }
+
+func TestMechanismSavingsSumsOwnersAndMechanisms(t *testing.T) {
+	s := AdjudicationSummary{
+		CachedPromptTokens:   1000, // provider read rebate = 900 token-equiv
+		CacheCreationTokens:  200,  // provider write premium = -50 token-equiv
+		CompactionShedTokens: 300,
+		KVPrefixReusedTokens: 400,
+	}
+	m := s.MechanismSavings()
+	m.FakVDSOAvoidedCalls = 7
+
+	if !approx(m.ProviderPromptCacheReadTokenEquiv, 900) {
+		t.Fatalf("provider read rebate = %v, want 900", m.ProviderPromptCacheReadTokenEquiv)
+	}
+	if !approx(m.ProviderPromptCacheWritePremiumTokenEquiv, -50) {
+		t.Fatalf("provider write premium = %v, want -50", m.ProviderPromptCacheWritePremiumTokenEquiv)
+	}
+	if !approx(m.ProviderTokenEquiv(), 850) {
+		t.Fatalf("provider net = %v, want 850", m.ProviderTokenEquiv())
+	}
+	if !approx(m.FakTokenEquiv(), 700) {
+		t.Fatalf("fak token-equiv = %v, want compaction+kv = 700", m.FakTokenEquiv())
+	}
+	if !approx(m.TotalTokenEquiv(), 1550) {
+		t.Fatalf("total token-equiv = %v, want provider+fak = 1550", m.TotalTokenEquiv())
+	}
+	if m.FakVDSOAvoidedCalls != 7 {
+		t.Fatalf("vdso avoided calls = %d, want 7", m.FakVDSOAvoidedCalls)
+	}
+}

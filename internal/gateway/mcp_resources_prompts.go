@@ -1,6 +1,10 @@
 package gateway
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/anthony-chaudhary/fak/internal/selfquery"
+)
 
 // MCP ecosystem surface beyond the tool registry (#213). The gateway already
 // serves the "tools" primitive (tools/list + tools/call = tool auto-discovery);
@@ -45,11 +49,31 @@ func (s *Server) resources() []mcpResource {
 					"version":          s.version,
 					"protocolVersions": mcpProtocolVersions,
 					"tools":            toolCatalogSummary(),
+					"selfFeatureQuery": selfFeatureSummary(),
 				}
 				b, _ := json.Marshal(doc)
 				return string(b)
 			},
 		},
+	}
+}
+
+func selfFeatureSummary() map[string]any {
+	cat, err := selfquery.Load("", selfquery.Options{
+		Tools: selfquery.ToolDescriptorsFromMaps(toolDescriptors()),
+	})
+	if err != nil {
+		return map[string]any{
+			"tool":  "fak_feature_query",
+			"ready": false,
+			"error": err.Error(),
+		}
+	}
+	return map[string]any{
+		"tool":    "fak_feature_query",
+		"ready":   true,
+		"digest":  cat.SummaryDigest(),
+		"sources": cat.Sources(),
 	}
 }
 

@@ -583,6 +583,42 @@ func TestFleetValueMetricsDeriveHeroKPIs(t *testing.T) {
 	}
 }
 
+func TestCacheAttributionMetricsSplitOwnerAndMechanism(t *testing.T) {
+	var b strings.Builder
+	writeCacheAttributionMetrics(&b, MechanismSavings{
+		ProviderPromptCacheReadTokenEquiv:         90,
+		ProviderPromptCacheWritePremiumTokenEquiv: -10,
+		FakCompactionShedTokens:                   25,
+		FakKVPrefixReusedTokens:                   15,
+		FakVDSOAvoidedCalls:                       3,
+	})
+	out := b.String()
+
+	for _, want := range []string{
+		"# TYPE fak_cache_saved_by_owner gauge",
+		`fak_cache_saved_by_owner{owner="provider"} 80`,
+		`fak_cache_saved_by_owner{owner="fak"} 40`,
+		"# TYPE fak_cache_saved_by_mechanism gauge",
+		`fak_cache_saved_by_mechanism{owner="provider",mechanism="provider_prompt_cache_read"} 90`,
+		`fak_cache_saved_by_mechanism{owner="provider",mechanism="provider_prompt_cache_write_premium"} -10`,
+		`fak_cache_saved_by_mechanism{owner="fak",mechanism="compaction_shed"} 25`,
+		`fak_cache_saved_by_mechanism{owner="fak",mechanism="kv_prefix_reuse"} 15`,
+		"# TYPE fak_cache_saved_token_equiv_by_owner gauge",
+		`fak_cache_saved_token_equiv_by_owner{owner="provider"} 80`,
+		`fak_cache_saved_token_equiv_by_owner{owner="fak"} 40`,
+		"# TYPE fak_cache_saved_token_equiv_by_mechanism gauge",
+		`fak_cache_saved_token_equiv_by_mechanism{owner="provider",mechanism="provider_prompt_cache_read"} 90`,
+		`fak_cache_saved_token_equiv_by_mechanism{owner="provider",mechanism="provider_prompt_cache_write_premium"} -10`,
+		`fak_cache_saved_token_equiv_by_mechanism{owner="fak",mechanism="compaction_shed"} 25`,
+		`fak_cache_saved_token_equiv_by_mechanism{owner="fak",mechanism="kv_prefix_reuse"} 15`,
+		`fak_cache_avoided_calls_by_mechanism_total{owner="fak",mechanism="vdso"} 3`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cache attribution metrics missing %q\n--- metrics ---\n%s", want, out)
+		}
+	}
+}
+
 // TestMetricsEndpointExposesFleetValueFamily proves the hero-KPI family reaches the
 // live scrape surface after real served traffic, alongside the kernel counters.
 func TestMetricsEndpointExposesFleetValueFamily(t *testing.T) {

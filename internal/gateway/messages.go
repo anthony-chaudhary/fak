@@ -238,6 +238,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// its WITNESSED prune count into /metrics (observeInboundToolPrune), so a turn that shed
 	// unreachable tool defs is now visible in the exit summary instead of silently discarded.
 	s.maybeCompactInboundTools(req)
+	s.maybeCompactInboundSystem(req)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
 	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
@@ -553,6 +554,70 @@ func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (
 	// prune never bursts the upstream cache (epic #1089 — is-our-thing-ENABLED-and-USED).
 	s.metrics.observeInboundToolPrune(len(res.Pruned))
 	return res.Pruned
+}
+
+func (s *Server) maybeCompactInboundSystem(req *agent.AnthropicMessagesRequest) (pruned []string) {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || s.systemBlockDrop == nil {
+		return nil
+	}
+	plans := inboundSystemBlockPlans(req.Raw, s.systemBlockDrop)
+	if len(plans) == 0 {
+		return nil
+	}
+	for _, plan := range plans {
+		res := promptmmu.CompactInboundSystem(req.Raw, plan, func(b []byte) error {
+			_, err := agent.DecodeAnthropicMessagesRequest(b)
+			return err
+		})
+		if !res.Changed {
+			continue
+		}
+		req.Raw = res.Body
+		for _, name := range res.Pruned {
+			pruned = append(pruned, plan.Block+":"+name)
+		}
+	}
+	return pruned
+}
+
+func inboundSystemBlockPlans(raw []byte, drop func(block, name string) bool) []promptmmu.BlockPlan {
+	if drop == nil {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	systemRaw := obj["system"]
+	if len(systemRaw) == 0 || systemRaw[0] != '[' {
+		return nil
+	}
+	var elems []struct {
+		Block string `json:"block"`
+		Name  string `json:"name"`
+	}
+	if err := json.Unmarshal(systemRaw, &elems); err != nil {
+		return nil
+	}
+	byBlock := map[string]map[string]bool{}
+	var order []string
+	for _, elem := range elems {
+		block := strings.TrimSpace(elem.Block)
+		name := strings.TrimSpace(elem.Name)
+		if block == "" || name == "" || !drop(block, name) {
+			continue
+		}
+		if byBlock[block] == nil {
+			byBlock[block] = map[string]bool{}
+			order = append(order, block)
+		}
+		byBlock[block][name] = true
+	}
+	plans := make([]promptmmu.BlockPlan, 0, len(order))
+	for _, block := range order {
+		plans = append(plans, promptmmu.BlockPlan{Block: block, Drop: byBlock[block]})
+	}
+	return plans
 }
 
 // writeAnthropicTurn renders a fully-formed turn to the wire as either a buffered JSON

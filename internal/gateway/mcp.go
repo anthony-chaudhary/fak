@@ -387,6 +387,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_work", func(req IndexSearchRequest) (any, error) {
 			return s.indexWork(req)
 		})
+	case "fak_feature_query":
+		return mcpDecodeCall[FeatureQueryRequest](p.Arguments, "fak_feature_query", func(req FeatureQueryRequest) (any, error) {
+			return s.featureQuery(req)
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -653,6 +657,11 @@ func toolDescriptors() []map[string]any {
 			"name":        "fak_index_work",
 			"description": "The selection surface: list the repo's named issue views (.github/issue-views.json) with the default 'what should I work on' view and each view's gh issue-search query, so an MCP client can pick the right dispatchable backlog. Optional query filters the views by slug/title/note.",
 			"inputSchema": indexSearchInputSchema,
+		},
+		{
+			"name":        "fak_feature_query",
+			"description": "Query fak's unified self-feature catalog: dev facts, live MCP tools, memory drivers, and capability cards. Returns lightweight FeatureCards with guarded request shapes; pass detail to fault only one selected schema, doc snippet, or memory explain plan.",
+			"inputSchema": featureQueryInputSchema,
 		},
 	}
 }

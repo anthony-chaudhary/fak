@@ -30,6 +30,7 @@ package gateway
 import (
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
@@ -97,6 +98,42 @@ func clampNonNeg(n int) int {
 	return n
 }
 
+func vcacheWindowHasCacheActivity(turns []vcacheobserve.Turn) bool {
+	for _, t := range turns {
+		if t.CacheRead > 0 || t.CacheCreation > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+var vcacheGovernorDecisionOrder = []vcachegov.GovernorDecision{
+	vcachegov.DecisionRideNatural,
+	vcachegov.DecisionHeartbeatPin,
+	vcachegov.DecisionLazyRebuild,
+	vcachegov.DecisionEvict,
+	vcachegov.DecisionNoCache,
+	vcachegov.DecisionExplicitCache,
+}
+
+func vcacheGovernorDecisionCounts(turns []vcacheobserve.Turn) map[vcachegov.GovernorDecision]int {
+	if len(turns) == 0 || !vcacheWindowHasCacheActivity(turns) {
+		return nil
+	}
+	rep := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers())
+	if len(rep.Families) == 0 {
+		return nil
+	}
+	counts := make(map[vcachegov.GovernorDecision]int, len(vcacheGovernorDecisionOrder))
+	for _, d := range vcacheGovernorDecisionOrder {
+		counts[d] = 0
+	}
+	for _, fam := range rep.Families {
+		counts[fam.GovernorDecision]++
+	}
+	return counts
+}
+
 // debugVCacheFamiliesVars is the /debug/vars `vcache_families` block: the per-family
 // observe view over the live rolling window, reconciling with `fak vcache observe` on
 // the same traffic. It is nil (the block is omitted) until a turn carries provider cache
@@ -148,14 +185,7 @@ func vcacheFamiliesVars(turns []vcacheobserve.Turn, windowCapped bool) *debugVCa
 	if len(turns) == 0 {
 		return nil
 	}
-	active := false
-	for _, t := range turns {
-		if t.CacheRead > 0 || t.CacheCreation > 0 {
-			active = true
-			break
-		}
-	}
-	if !active {
+	if !vcacheWindowHasCacheActivity(turns) {
 		return nil // a no-cache workload emits no per-family block (no phantom)
 	}
 

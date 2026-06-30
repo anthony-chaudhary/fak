@@ -172,6 +172,64 @@ func (s AdjudicationSummary) ProviderCacheNetSavings() vcachegov.TelemetrySaving
 	return vcacheProofFromCounters(s.InputTokens, s.CachedPromptTokens, s.CacheCreationTokens)
 }
 
+// MechanismSavings is the owner/mechanism split for cache-like savings that the
+// operator-facing surfaces render. Token-equivalent fields all use the same input-token
+// currency as ProviderCacheNetSavings and fak_vcache_saved_token_equiv:
+//
+//   - ProviderPromptCacheReadTokenEquiv is the provider-authored read rebate.
+//   - ProviderPromptCacheWritePremiumTokenEquiv is negative when a write billed above the
+//     uncached baseline, so cold-write-only sessions cannot look like wins.
+//   - FakCompactionShedTokens and FakKVPrefixReusedTokens are fak-authored savings.
+//
+// FakVDSOAvoidedCalls is kept in the same record for mechanism attribution, but it is not
+// folded into token-equivalent totals because the current witness is avoided engine calls,
+// not prompt tokens.
+type MechanismSavings struct {
+	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
+	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"`
+	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
+	FakKVPrefixReusedTokens                   uint64  `json:"fak_kv_prefix_reused_tokens"`
+	FakVDSOAvoidedCalls                       uint64  `json:"fak_vdso_avoided_calls"`
+}
+
+// MechanismSavings folds the summary's existing counters into the owner/mechanism split.
+// VDSO avoided calls live on kernel.Counters, so callers that have that witness should set
+// FakVDSOAvoidedCalls on the returned value before rendering.
+func (s AdjudicationSummary) MechanismSavings() MechanismSavings {
+	return MechanismSavings{
+		ProviderPromptCacheReadTokenEquiv:         float64(s.CachedPromptTokens) * (1 - CacheReadMultiplier),
+		ProviderPromptCacheWritePremiumTokenEquiv: float64(s.CacheCreationTokens) * (1 - CacheWrite5mMultiplier),
+		FakCompactionShedTokens:                   s.CompactionShedTokens,
+		FakKVPrefixReusedTokens:                   s.KVPrefixReusedTokens,
+	}
+}
+
+// ProviderTokenEquiv is the net OBSERVED provider prompt-cache effect: read rebate minus
+// write premium.
+func (m MechanismSavings) ProviderTokenEquiv() float64 {
+	return m.ProviderPromptCacheReadTokenEquiv + m.ProviderPromptCacheWritePremiumTokenEquiv
+}
+
+// FakTokenEquiv is the WITNESSED fak-authored token-equivalent slice. VDSO is deliberately
+// excluded because its current witness is avoided calls, not prompt-token equivalents.
+func (m MechanismSavings) FakTokenEquiv() float64 {
+	return float64(m.FakCompactionShedTokens + m.FakKVPrefixReusedTokens)
+}
+
+// TotalTokenEquiv is the sum of the token-equivalent owner slices.
+func (m MechanismSavings) TotalTokenEquiv() float64 {
+	return m.ProviderTokenEquiv() + m.FakTokenEquiv()
+}
+
+// HasAnyTokenActivity reports whether the token-equivalent attribution line has anything
+// nonzero to say, including a negative provider write premium.
+func (m MechanismSavings) HasAnyTokenActivity() bool {
+	return m.ProviderPromptCacheReadTokenEquiv != 0 ||
+		m.ProviderPromptCacheWritePremiumTokenEquiv != 0 ||
+		m.FakCompactionShedTokens != 0 ||
+		m.FakKVPrefixReusedTokens != 0
+}
+
 // vcacheProofFromCounters prices NET realized provider-cache economics over cumulative
 // (uncached input, cache_read, cache_creation) token counts using THIS gateway's
 // published cache multipliers — the single source the /metrics, /debug/vars, and the

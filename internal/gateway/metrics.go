@@ -692,12 +692,13 @@ type AdjudicationSummary struct {
 	// operator SEES the cache reuse rather than having to scrape /metrics.
 	CachedPromptTokens uint64 `json:"cached_prompt_tokens"`
 	CachedTurns        uint64 `json:"cached_turns"`
-	// InputTokens (the uncached input remainder) and CacheCreationTokens (the cache
-	// WRITE axis) are retained alongside CachedPromptTokens (the READ axis) so the
-	// summary can price the NET realized provider-cache saving — read rebate MINUS
-	// write premium — via ProviderCacheNetSavings, the axis the read-only
-	// ProviderCacheSavingsUSD deliberately omits. Both OBSERVED (provider-relayed).
+	// InputTokens (the uncached input remainder), OutputTokens, and CacheCreationTokens
+	// (the cache WRITE axis) are retained alongside CachedPromptTokens (the READ axis) so
+	// the summary can price the NET realized provider-cache saving — read rebate MINUS
+	// write premium — via ProviderCacheNetSavings and the Track-2 savings ledger. All are
+	// OBSERVED (provider-relayed).
 	InputTokens         uint64 `json:"input_tokens"`
+	OutputTokens        uint64 `json:"output_tokens"`
 	CacheCreationTokens uint64 `json:"cache_creation_tokens"`
 
 	// Compaction* folds the Anthropic history-compaction visibility into the same guard exit
@@ -737,6 +738,14 @@ type AdjudicationSummary struct {
 	// counters cannot tell apart.
 	CompactionBudget int `json:"compaction_budget"`
 
+	// KVPrefix* folds the local in-kernel RadixAttention prefix-cache reuse tap into
+	// the same attribution frame as provider prompt-cache and compaction. These are
+	// WITNESSED fak-authored savings: prompt prefill work the in-kernel planner did
+	// not redo. They are distinct from CachedPromptTokens, which are OBSERVED
+	// provider cache_read tokens.
+	KVPrefixPromptTokens uint64 `json:"kv_prefix_prompt_tokens"`
+	KVPrefixReusedTokens uint64 `json:"kv_prefix_reused_tokens"`
+
 	// ToolPrune* folds the INBOUND tool-definition prune lever into the same exit summary,
 	// WITNESSED (fak authored): ToolPruneTurns is the count of turns that dropped at least one
 	// unreachable tool def from the outbound tools[], and ToolPruneCount the total defs removed.
@@ -768,6 +777,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CachedPromptTokens = m.inferCachedTokens
 	sum.CachedTurns = m.inferCachedHits
 	sum.InputTokens = m.inferPromptTokens
+	sum.OutputTokens = m.inferComplTokens
 	sum.CacheCreationTokens = m.inferCacheCreationTokens
 	m.inferenceMu.Unlock()
 
@@ -788,6 +798,9 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	if len(comp.bailReasons) > 0 {
 		sum.CompactionBailReasons = comp.bailReasons
 	}
+	kv := cacheobs.Default.Snapshot()
+	sum.KVPrefixPromptTokens = kv.PromptTokens
+	sum.KVPrefixReusedTokens = kv.ReusedTokens
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1311,6 +1324,7 @@ func (s *Server) renderMetrics() string {
 	s.writeServingMetrics(&b, inf)
 	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
+	m.writeVCacheGovernorMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
 	s.writeInKernelPressureTrimMetrics(&b)
@@ -1335,7 +1349,14 @@ func (s *Server) renderMetrics() string {
 	for _, row := range opRows {
 		opSecs += row.val.sum
 	}
-	writeFleetValueMetrics(&b, c, m.servedInlineSnapshot(), inf.decodeSecs+opSecs)
+	servedInline := m.servedInlineSnapshot()
+	writeFleetValueMetrics(&b, c, servedInline, inf.decodeSecs+opSecs)
+	cacheSavings := m.adjudicationSummary().MechanismSavings()
+	if c.VDSOHits > 0 {
+		cacheSavings.FakVDSOAvoidedCalls += uint64(c.VDSOHits)
+	}
+	cacheSavings.FakVDSOAvoidedCalls += servedInline
+	writeCacheAttributionMetrics(&b, cacheSavings)
 
 	s.writeModelLoadMetrics(&b)
 	return b.String()
@@ -1691,6 +1712,35 @@ func writeKVPrefixMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_kv_prefix_reuse_ratio",
 		"Realized in-kernel KV-prefix cache-hit: reused / prompt tokens across served turns (0 until the first turn). A single append-only agent climbs toward ~1 (the frozen ceiling); flexibility, cold fan-out, or a divergent prefix drives it down — the frozen-trajectory cache cliff, measured live.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_prefix_reuse_ratio %s\n", promFloat(s.ReuseRatio))
+}
+
+// writeCacheAttributionMetrics renders the owner/mechanism split for cache-like value. The
+// token-equivalent series are gauges because the provider write-premium mechanism can be
+// negative until later reads repay it. VDSO is deliberately a separate avoided-call counter:
+// the current witness is a skipped engine round-trip, not a prompt-token amount.
+func writeCacheAttributionMetrics(b *strings.Builder, s MechanismSavings) {
+	writeHelpType(b, "fak_cache_saved_by_owner", "Cache-like token-equivalent saving by owner. owner=\"provider\" is OBSERVED provider prompt-cache net (read rebate minus write premium); owner=\"fak\" is WITNESSED fak-authored token savings (compaction shed + in-kernel KV-prefix reuse).", "gauge")
+	fmt.Fprintf(b, "fak_cache_saved_by_owner{owner=\"provider\"} %s\n", promFloat(s.ProviderTokenEquiv()))
+	fmt.Fprintf(b, "fak_cache_saved_by_owner{owner=\"fak\"} %s\n", promFloat(s.FakTokenEquiv()))
+
+	writeHelpType(b, "fak_cache_saved_by_mechanism", "Cache-like token-equivalent saving by owner/mechanism. provider_prompt_cache_write_premium is negative when cache writes have not yet been repaid; fak_vdso is not included here because its current witness is avoided calls, emitted separately.", "gauge")
+	fmt.Fprintf(b, "fak_cache_saved_by_mechanism{owner=\"provider\",mechanism=\"provider_prompt_cache_read\"} %s\n", promFloat(s.ProviderPromptCacheReadTokenEquiv))
+	fmt.Fprintf(b, "fak_cache_saved_by_mechanism{owner=\"provider\",mechanism=\"provider_prompt_cache_write_premium\"} %s\n", promFloat(s.ProviderPromptCacheWritePremiumTokenEquiv))
+	fmt.Fprintf(b, "fak_cache_saved_by_mechanism{owner=\"fak\",mechanism=\"compaction_shed\"} %d\n", s.FakCompactionShedTokens)
+	fmt.Fprintf(b, "fak_cache_saved_by_mechanism{owner=\"fak\",mechanism=\"kv_prefix_reuse\"} %d\n", s.FakKVPrefixReusedTokens)
+
+	writeHelpType(b, "fak_cache_saved_token_equiv_by_owner", "Cache-like token-equivalent saving by owner. owner=\"provider\" is OBSERVED provider prompt-cache net (read rebate minus write premium); owner=\"fak\" is WITNESSED fak-authored token savings (compaction shed + in-kernel KV-prefix reuse).", "gauge")
+	fmt.Fprintf(b, "fak_cache_saved_token_equiv_by_owner{owner=\"provider\"} %s\n", promFloat(s.ProviderTokenEquiv()))
+	fmt.Fprintf(b, "fak_cache_saved_token_equiv_by_owner{owner=\"fak\"} %s\n", promFloat(s.FakTokenEquiv()))
+
+	writeHelpType(b, "fak_cache_saved_token_equiv_by_mechanism", "Cache-like token-equivalent saving by mechanism. provider_prompt_cache_write_premium is negative when cache writes have not yet been repaid; fak_vdso is not included here because its current witness is avoided calls, emitted separately.", "gauge")
+	fmt.Fprintf(b, "fak_cache_saved_token_equiv_by_mechanism{owner=\"provider\",mechanism=\"provider_prompt_cache_read\"} %s\n", promFloat(s.ProviderPromptCacheReadTokenEquiv))
+	fmt.Fprintf(b, "fak_cache_saved_token_equiv_by_mechanism{owner=\"provider\",mechanism=\"provider_prompt_cache_write_premium\"} %s\n", promFloat(s.ProviderPromptCacheWritePremiumTokenEquiv))
+	fmt.Fprintf(b, "fak_cache_saved_token_equiv_by_mechanism{owner=\"fak\",mechanism=\"compaction_shed\"} %d\n", s.FakCompactionShedTokens)
+	fmt.Fprintf(b, "fak_cache_saved_token_equiv_by_mechanism{owner=\"fak\",mechanism=\"kv_prefix_reuse\"} %d\n", s.FakKVPrefixReusedTokens)
+
+	writeHelpType(b, "fak_cache_avoided_calls_by_mechanism_total", "Cache-like avoided engine calls by fak-authored mechanism. VDSO is counted here, not in token-equivalent gauges, because the live witness is skipped calls rather than prompt tokens.", "counter")
+	fmt.Fprintf(b, "fak_cache_avoided_calls_by_mechanism_total{owner=\"fak\",mechanism=\"vdso\"} %d\n", s.FakVDSOAvoidedCalls)
 }
 
 func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
@@ -2204,6 +2254,24 @@ func (m *gatewayMetrics) writeVCacheMetrics(b *strings.Builder) {
 	}
 	writeHelpType(b, "fak_vcache_proven", "1 when the session's observed cache reads repaid the write premium (NET positive); else 0 (cold/write-dominated). The honest break-even gate.", "gauge")
 	fmt.Fprintf(b, "fak_vcache_proven %d\n", proven)
+}
+
+// writeVCacheGovernorMetrics emits the low-cardinality live Governor witness: how many
+// active prefix families in the rolling provider-cache window classify into each M5
+// steady-state decision. The per-family identities stay in /debug/vars; Prometheus gets
+// only the closed decision set, derived through the same vcacheobserve.Observe engine as
+// `fak vcache observe`. This is a DECISION surface only: it records what the Governor
+// would do over observed traffic, but it does not warm, pin, evict, or suppress context.
+func (m *gatewayMetrics) writeVCacheGovernorMetrics(b *strings.Builder) {
+	turns, _ := m.vcacheTurnsSnapshot()
+	counts := vcacheGovernorDecisionCounts(turns)
+	if len(counts) == 0 {
+		return
+	}
+	writeHelpType(b, "fak_vcache_governor_decision_families", "DECISION (fak policy): active provider-cache prefix families in the live rolling window, classified by the M5 Governor verdict. Derived by the same vcacheobserve engine as `fak vcache observe`; records the default-on decision witness only, not a warming side effect.", "gauge")
+	for _, decision := range vcacheGovernorDecisionOrder {
+		fmt.Fprintf(b, "fak_vcache_governor_decision_families{decision=%q} %d\n", decision, counts[decision])
+	}
 }
 
 // writeFleetValueMetrics renders the hero-axis KPIs the live gateway can derive from

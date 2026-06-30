@@ -94,7 +94,13 @@ func TestResourcesListAndRead(t *testing.T) {
 		Name             string `json:"name"`
 		Version          string `json:"version"`
 		ProtocolVersions []string
-		Tools            []struct {
+		SelfFeatureQuery struct {
+			Tool    string   `json:"tool"`
+			Ready   bool     `json:"ready"`
+			Digest  string   `json:"digest"`
+			Sources []string `json:"sources"`
+		} `json:"selfFeatureQuery"`
+		Tools []struct {
 			Name string `json:"name"`
 		} `json:"tools"`
 	}
@@ -111,6 +117,9 @@ func TestResourcesListAndRead(t *testing.T) {
 	// It must reflect the actual catalog — fak_adjudicate is a load-bearing tool.
 	if !contains(names, "fak_adjudicate") {
 		t.Errorf("capabilities resource omitted fak_adjudicate; tools=%v", names)
+	}
+	if doc.SelfFeatureQuery.Tool != "fak_feature_query" || !doc.SelfFeatureQuery.Ready || doc.SelfFeatureQuery.Digest == "" {
+		t.Errorf("capabilities resource omitted self-feature query summary: %+v", doc.SelfFeatureQuery)
 	}
 	if len(doc.Tools) != len(toolDescriptors()) {
 		t.Errorf("capabilities resource lists %d tools, registry has %d", len(doc.Tools), len(toolDescriptors()))

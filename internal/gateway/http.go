@@ -81,6 +81,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/admit", s.handleFakAdmit},
 		{"/v1/fak/changes", s.handleFakChanges},
 		{"/v1/fak/events", s.handleFakEvents},
+		{"/v1/fak/vcache/score", s.handleFakVCacheScore},
 		{"/v1/fak/revoke", s.handleFakRevoke},
 		{"/v1/fak/context/change", s.handleFakContextChange},
 		{"/v1/fak/policy/reload", s.handleFakPolicyReload},

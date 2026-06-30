@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
@@ -194,6 +195,48 @@ func TestVCacheFamiliesNoPhantomAndProvenance(t *testing.T) {
 	for _, want := range []string{"OBSERVED", "DECISION", "governor_decision", "warmth_false_warm", "concentration", "grade_measured"} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("serialized block missing %q:\n%s", want, raw)
+		}
+	}
+}
+
+// TestVCacheGovernorDecisionMetrics proves the M5 Governor verdict is default-visible
+// on live gateway traffic without minting per-family Prometheus labels or phantom idle
+// series. The decisions are re-derived from the same rolling turns as /debug/vars, so a
+// scrape gives a low-cardinality witness that the Governor classified the active window.
+func TestVCacheGovernorDecisionMetrics(t *testing.T) {
+	idle := newGatewayMetrics(time.Now())
+	var idleOut strings.Builder
+	idle.writeVCacheGovernorMetrics(&idleOut)
+	if idleOut.Len() != 0 {
+		t.Fatalf("idle gateway must not emit governor phantom metrics:\n%s", idleOut.String())
+	}
+
+	noCache := newGatewayMetrics(time.Now())
+	noCache.observeVCacheTurn("s1", 0, 900, 0, 0)
+	var noCacheOut strings.Builder
+	noCache.writeVCacheGovernorMetrics(&noCacheOut)
+	if noCacheOut.Len() != 0 {
+		t.Fatalf("no-cache workload must not emit governor metrics:\n%s", noCacheOut.String())
+	}
+
+	srv := newTestServer(t)
+	srv.metrics.observeVCacheTurn("hot", 0, 100, 0, 40000)
+	srv.metrics.observeVCacheTurn("hot", 1000, 50, 40000, 0)
+	srv.metrics.observeVCacheTurn("sparse", 0, 100, 0, 8000)
+	srv.metrics.observeVCacheTurn("sparse", 10*vcachegov.TTL5MinutesMillis, 50, 8000, 0)
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		"# TYPE fak_vcache_governor_decision_families gauge",
+		`fak_vcache_governor_decision_families{decision="ride_natural"} 1`,
+		`fak_vcache_governor_decision_families{decision="lazy_rebuild"} 1`,
+		`fak_vcache_governor_decision_families{decision="heartbeat_pin"} 0`,
+		`fak_vcache_governor_decision_families{decision="evict"} 0`,
+		`fak_vcache_governor_decision_families{decision="no_cache"} 0`,
+		`fak_vcache_governor_decision_families{decision="explicit_cache"} 0`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("governor decision scrape missing %q\n--- metrics ---\n%s", want, text)
 		}
 	}
 }

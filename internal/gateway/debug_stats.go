@@ -7,11 +7,12 @@ package gateway
 //
 // What it shows (and why):
 //   - a one-word VERDICT (ok / warming / degraded / cold) — the glanceable "is fak working".
-//   - the NET token saving this turn (saved=…) — the write-premium-aware number, computed by
-//     the SAME engine /metrics (fak_vcache_*) and `fak vcache observe` use
-//     (vcacheProofFromCounters), so the human line can never disagree with the scrape. This
-//     is the honest fak-vs-no-cache value: a cold-write turn reads NEGATIVE until the reads
-//     repay the write, where the old read-only rebate would have overstated it.
+//   - the provider NET token saving this turn (prov=…) plus the explicit fak slice
+//     (fak=0 until this call site has a per-turn fak-authored token witness) — the
+//     write-premium-aware number computed by the SAME engine /metrics (fak_vcache_*) and
+//     `fak vcache observe` use (vcacheProofFromCounters), so the human line can never
+//     disagree with the scrape. A cold-write turn reads NEGATIVE until later reads repay
+//     the write, where the old read-only rebate would have overstated it.
 //   - the rolling compaction HEALTH and the compaction action.
 //
 // What it deliberately OMITS: the provider's own raw usage counters (cache_read /
@@ -240,21 +241,25 @@ func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt
 	if have {
 		health = string(d.Reason)
 	}
-	// The NET token saving — write-premium-aware — from the SAME engine /metrics and
-	// `fak vcache observe` use. prompt is the uncached input remainder (TelemetryRow.InputTokens);
-	// cacheRead/cacheCreate are the provider read/write axes. A cold-write turn comes back REFUTED
-	// with a negative saving (honest), where a read-only rebate would have overstated it.
+	// The provider-owned NET token saving — write-premium-aware — from the SAME engine
+	// /metrics and `fak vcache observe` use. prompt is the uncached input remainder
+	// (TelemetryRow.InputTokens); cacheRead/cacheCreate are the provider read/write axes.
+	// A cold-write turn comes back REFUTED with a negative saving (honest), where a
+	// read-only rebate would have overstated it. The per-turn line names this as `prov=`
+	// and keeps `fak=0` until a per-turn fak-authored token-saving witness is available,
+	// so the provider prompt cache cannot masquerade as a fak-authored cache win.
 	proof := vcacheProofFromCounters(uint64(maxNonNeg(prompt)), uint64(maxNonNeg(cacheRead)), uint64(maxNonNeg(cacheCreate)))
 	verdict := turnVerdict(proof, d, have, cacheRead, cacheCreate)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak-turn trace=%s %s", debugField(trace), verdict)
-	// saved=<net token-equiv> with the % of the uncached baseline it represents. Only meaningful
-	// when the turn had cache activity; a cold turn (no read, no write) shows saved=0.
+	// prov=<net token-equiv> with the % of the uncached baseline it represents. The fak
+	// per-turn slice is explicitly 0 because this call site has no per-turn shed/KV witness;
+	// session-level attribution folds those in from their own counters.
 	if cacheRead > 0 || cacheCreate > 0 {
-		fmt.Fprintf(&b, " saved=%s tok (%s%% of prompt)", HumanTokenEquiv(proof.SavedTokenEquiv), strconv.FormatFloat(proof.SavedPct, 'f', 0, 64))
+		fmt.Fprintf(&b, " prov=%s tok (%s%% of prompt) fak=0 tok", HumanTokenEquiv(proof.SavedTokenEquiv), strconv.FormatFloat(proof.SavedPct, 'f', 0, 64))
 	} else {
-		b.WriteString(" saved=0 tok")
+		b.WriteString(" prov=0 tok fak=0 tok")
 	}
 	fmt.Fprintf(&b, " cache=%s compact=%s finish=%s", health, compact, debugField(finish))
 	if safety.any() {
