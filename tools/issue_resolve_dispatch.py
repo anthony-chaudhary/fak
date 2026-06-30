@@ -786,12 +786,26 @@ _PT_TO_UTC = dt.timedelta(hours=7)
 
 
 def _backend_of_log(log: Path) -> str:
-    """The backend that produced a worker log, from its ``.backend`` sidecar;
-    legacy logs without one are the original ``claude`` backend."""
+    """The backend that produced a worker log, from its ``.backend`` sidecar; if
+    the sidecar is missing (#1452: 128/468 legacy + opencode logs never got one),
+    fall back to the ``backend=<x>`` field of the log's ``# fak-spawn`` header
+    line so an opencode/codex worker is NOT silently misattributed to ``claude``
+    — that misattribution blinds the opencode/codex cap+health scan to its own
+    quota-walled logs (it filters by backend) while polluting claude's. Only a log
+    with neither a sidecar nor a parseable header defaults to ``claude``."""
     try:
-        return log.with_suffix(".backend").read_text(encoding="utf-8").strip() or "claude"
+        sidecar = log.with_suffix(".backend").read_text(encoding="utf-8").strip()
+        if sidecar:
+            return sidecar
+    except OSError:
+        pass
+    try:
+        with log.open("r", encoding="utf-8", errors="replace") as fh:
+            header = fh.readline()
     except OSError:
         return "claude"
+    m = re.search(r"\bbackend=([A-Za-z0-9_]+)", header)
+    return m.group(1) if m else "claude"
 
 
 # How many trailing bytes of a worker log to inspect for the quota banner. A walled
