@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
 // Post is one bench-channel message, decoupled from which fold produced it. The three
@@ -37,7 +39,7 @@ func (p Post) Text() string {
 	if p.Source != "" {
 		fmt.Fprintf(&b, "\n_posted by %s_", p.Source)
 	}
-	return b.String()
+	return slackmeta.AppendText(b.String(), p.signalNoise())
 }
 
 // Blocks renders the Block Kit payload. It carries the same facts as Text so a
@@ -72,7 +74,13 @@ func (p Post) Blocks() []any {
 			"elements": []any{map[string]any{"type": "mrkdwn", "text": "posted by " + p.Source}},
 		})
 	}
-	return blocks
+	return slackmeta.AppendContext(blocks, p.signalNoise())
+}
+
+func (p Post) signalNoise() slackmeta.Score {
+	signal := 1 + slackmeta.NonEmpty(p.Lead) + len(p.Lines)
+	noise := 1 + slackmeta.NonEmpty(p.Source)
+	return slackmeta.New(signal, noise, "bench headline, rollup rows, and thresholds vs source/context")
 }
 
 // provenanceLabel maps a run's recorded provenance to the conflation-honest WITNESSED
