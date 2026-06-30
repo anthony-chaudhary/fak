@@ -150,7 +150,14 @@ concurrent = [
   "codexmcphealth",
   "operatorbrief",
   "safesync",
-  # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
+  "apihostprobe",
+  "benchloop",
+  "benchruns",
+  "newleaf",
+  "productscorecard",
+  "sessionaudit",
+  "selfquery",
+  # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
 # they serialize like release/ABI/global work instead of running as ordinary docs.
@@ -217,6 +224,13 @@ autopick = [
   "codexmcphealth",
   "operatorbrief",
   "safesync",
+  "apihostprobe",
+  "benchloop",
+  "benchruns",
+  "newleaf",
+  "productscorecard",
+  "sessionaudit",
+  "selfquery",
   # new-leaf:lane
 ]
 
@@ -366,6 +380,13 @@ loopindex = ["internal/loopindex/**"] # #1152: agentic-coding loop-index spine (
 codexmcphealth = ["internal/codexmcphealth/**"]
 operatorbrief = ["internal/operatorbrief/**"]
 safesync = ["internal/safesync/**"]
+apihostprobe = ["internal/apihostprobe/**"]
+benchloop = ["internal/benchloop/**"]
+benchruns = ["internal/benchruns/**"]
+newleaf = ["internal/newleaf/**"]
+productscorecard = ["internal/productscorecard/**"]
+sessionaudit = ["internal/sessionaudit/**"]
+selfquery = ["internal/selfquery/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
@@ -510,7 +531,7 @@ see_also = ["dos status", "tools/dispatch_status.py"]
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "change breaks the layered-DAG import contract (an upward/cross-tier import, or a new leaf with no declared tier)"
-fix      = "invert the dependency through a registration seam or push the shared type down a layer; declare a new leaf's tier in internal/architest (or run `python tools/new_leaf.py`). Floor: `.\\fak\\test.ps1 ./internal/architest/`"
+fix      = "invert the dependency through a registration seam or push the shared type down a layer; declare a new leaf's tier in internal/architest (or run `fak new-leaf`). Floor: `.\\fak\\test.ps1 ./internal/architest/`"
 see_also = ["fak/internal/architest/architest_test.go", "fak/ARCHITECTURE.md", "fak/GROWTH.md"]
 
 [reasons.OUT_OF_DIRECTION]
