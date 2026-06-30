@@ -13,8 +13,8 @@ import (
 // cmdBlockers posts a BLOCKER to the central Slack #blockers channel — the one place
 // the fleet records an ongoing impediment and surfaces a human-needed one.
 //
-//	fak blockers post --title "GPU-gated, waiting on DGX hours"            # background status
-//	fak blockers post --severity operator --title "DA33 host unreachable" \
+//	fak blockers post --title "GPU-gated, waiting on GPU-server hours"      # background status
+//	fak blockers post --severity operator --title "CPU host unreachable" \
 //	      --detail "CPU node not responding" --action "restart the serve"  # pages <!here>
 //	fak blockers post --severity operator --owner "<@U0OPS>" --title "..."  # pages one person
 //	fak blockers feed --issues issues.json --label blocked                  # CI roll-up of the backlog
@@ -36,10 +36,10 @@ func runBlockersPost(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak blockers post", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	severity := fs.String("severity", "status", "status (background, no page) | operator (surfaced, pages a human) | clear (all-clear heartbeat)")
-	title := fs.String("title", "", "short headline, e.g. \"DA33 host unreachable\"")
+	title := fs.String("title", "", "short headline, e.g. \"CPU host unreachable\"")
 	detail := fs.String("detail", "", "one-line what is blocked / why")
 	owner := fs.String("owner", "", "operator: who to page — a Slack mention like \"<@U123>\" or \"<!here>\" (default: <!here>)")
-	action := fs.String("action", "", "operator: a \"do this next\" label, e.g. \"restart the DA33 serve\"")
+	action := fs.String("action", "", "operator: a \"do this next\" label, e.g. \"restart the CPU-host serve\"")
 	actionURL := fs.String("action-url", "", "operator: a link for the do-this-next button (runbook / issue / docs)")
 	ref := fs.String("ref", "", "optional stable key shown in context, e.g. \"#921\" or a hostname")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")

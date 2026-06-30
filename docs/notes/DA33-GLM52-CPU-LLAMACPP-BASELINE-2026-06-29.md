@@ -1,9 +1,9 @@
 ---
-title: "GLM-5.2 on a CPU-only box (DA33): the witnessed llama.cpp pure-CPU baseline, and why fak-native is still RAM-gated"
-description: "The long-open apples-to-apples CPU witness, finally captured on DA33 (EPYC 7742, AVX2-only, no GPU): the real 753B GLM-5.2 UD-Q4_K_M serves on pure CPU via llama.cpp mmap at pp512=16.1 tok/s prefill, tg64=1.47 tok/s decode. Records the operational levers that made it measurable (sequential page-cache pre-warm vs random mmap-fault death; plain mmap vs --numa-distribute thrash), the fidelity caveat (llama.cpp drops GLM-5.2's DSA indexer + MTP head), and the witnessed root cause that still blocks fak-native here: q4 all-resident OOMs the fit gate, and q3/IQ3_XXS dequants to f32 and OOM-kills the box."
+title: "GLM-5.2 on a CPU-only box (CPU server): the witnessed llama.cpp pure-CPU baseline, and why fak-native is still RAM-gated"
+description: "The long-open apples-to-apples CPU witness, finally captured on CPU server (EPYC 7742, AVX2-only, no GPU): the real 753B GLM-5.2 UD-Q4_K_M serves on pure CPU via llama.cpp mmap at pp512=16.1 tok/s prefill, tg64=1.47 tok/s decode. Records the operational levers that made it measurable (sequential page-cache pre-warm vs random mmap-fault death; plain mmap vs --numa-distribute thrash), the fidelity caveat (llama.cpp drops GLM-5.2's DSA indexer + MTP head), and the witnessed root cause that still blocks fak-native here: q4 all-resident OOMs the fit gate, and q3/IQ3_XXS dequants to f32 and OOM-kills the box."
 ---
 
-# GLM-5.2 on DA33 (CPU-only): the llama.cpp pure-CPU baseline + the fak-native RAM wall
+# GLM-5.2 on CPU server (CPU-only): the llama.cpp pure-CPU baseline + the fak-native RAM wall
 
 _2026-06-29._ Companion to
 [GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25](GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md)
@@ -71,7 +71,7 @@ fak loads weights **all-resident** (no mmap/demand-paged path, #974), so on a bo
   root cause behind the prior `RESULT_Q3 = SERVE_DIED`. The global OOM killer correctly took the
   fak process, not the protected co-tenant eval (good-neighbor invariant held).
 
-**So the fak-native CPU decode tok/s on DA33 remains `not yet`.** The missing wiring is a
+**So the fak-native CPU decode tok/s on CPU server remains `not yet`.** The missing wiring is a
 **raw-resident IQ3 path** (the trunk loader has `quant_q4k_loader.go case TensorIQ3_XXS`, not active
 in the staged `fak-bin-iq3`) or the **mmap/demand-paged weight load** (#974-B). Either lets a
 ≤ ~390 GiB-resident GLM quant load without the dequant blow-up. Next checkable step: rebuild fak from

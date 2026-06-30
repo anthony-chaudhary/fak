@@ -91,6 +91,27 @@ class SkuPhraseAccuracyTest(unittest.TestCase):
         src = "see [plan](docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md) for detail\n"
         self.assertEqual(m.transform(src), src)
 
+    def test_link_display_text_filename_not_flagged(self):
+        # FALSE-POSITIVE fix: a link whose VISIBLE text is a file reference is an
+        # identifier, not prose. `--check` (residual_hits) must NOT flag it, and `--apply`
+        # (transform) must NOT corrupt it into a broken [GPU server-OVERNIGHT-PLAN](DGX-….md)
+        # display/target mismatch. Both halves are now masked, not just the target.
+        for src in (
+            "([DGX-OVERNIGHT-PLAN](../nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md)). The fix is\n",
+            "[DGX2-CROSS-ENGINE-DATA](DGX2-CROSS-ENGINE-DATA-2026-06-25.md) and\n",
+        ):
+            self.assertEqual(m.residual_hits(src), [], f"--check FP: {src!r}")
+            self.assertEqual(m.transform(src), src, f"--apply corruption: {src!r}")
+
+    def test_prose_link_text_still_scrubbed(self):
+        # The mask is scoped to a FILENAME-SHAPED token (no spaces + a separator), so real
+        # prose inside link text is still a tell that scrubs. "the DGX runbook" has spaces;
+        # a bare "[DGX]" has no separator — both stay prose.
+        self.assertEqual(m.transform("see [the DGX runbook](foo.md) here\n"),
+                         "see [the GPU server runbook](foo.md) here\n")
+        self.assertEqual(m.transform("see [DGX](foo.md) here\n"),
+                         "see [GPU server](foo.md) here\n")
+
 
 class IdentifierPreservationTest(unittest.TestCase):
     def test_inline_code_identifier_untouched(self):
@@ -191,6 +212,80 @@ class DgxNLabelTest(unittest.TestCase):
         self.assertEqual(m.residual_hits(m.transform(src)), [])
 
     def test_idempotent_over_corpus(self):
+        for src, _want in self.SCRUB:
+            once = m.transform(src)
+            self.assertEqual(m.transform(once), once, f"idempotent {src!r}")
+        for src in self.PRESERVE:
+            self.assertEqual(m.transform(m.transform(src)), m.transform(src))
+
+
+class Da33LabelTest(unittest.TestCase):
+    """The da33 host-label rule (the operator's AVX2-only EPYC-7742 CPU box): scrub the bare
+    prose label in every shape it appears in the corpus, preserve every identifier form
+    (Slack channel, hyphenated stem, FQDN shortname, JobID/Ref token). Mirrors DgxNLabelTest
+    — same case-insensitive, lookahead-guarded design — pinned against the real transform."""
+
+    # Replacement is "CPU server" (NOT "GPU server"): da33 is the CPU-only box the GLM-5.2
+    # docs contrast against the GPU server, so it gets its own generic label.
+    SCRUB = [
+        ("ran on da33\n", "ran on CPU server\n"),
+        ("**da33**\n", "**CPU server**\n"),
+        ("da33 measured 0.063 GB/s\n", "CPU server measured 0.063 GB/s\n"),
+        ("DA33 host unreachable\n", "CPU server host unreachable\n"),
+        # possessive scrubs (the ' is not -/word/., so both lookaheads pass), like DGX3's:
+        ("da33's MemAvailable\n", "CPU server's MemAvailable\n"),
+        ("DA33's CPU tier\n", "CPU server's CPU tier\n"),
+        # sentence-final period through the (?!\.[A-Za-z0-9]) lookahead:
+        ("the floor is da33.\n", "the floor is CPU server.\n"),
+        ("ran on da33. Next we tried it\n", "ran on CPU server. Next we tried it\n"),
+        # mixed case in a heading-style line:
+        ("GLM-5.2 on DA33 (CPU-only)\n", "GLM-5.2 on CPU server (CPU-only)\n"),
+    ]
+
+    PRESERVE = [
+        # Slack channel name — policy-KEPT (the hyphen lookahead refuses it), like dgx3-control:
+        "da33-control\n",
+        "DA33-CONTROL\n",
+        # hyphenated stems (artifact / class adjective) — hyphen lookahead refuses them:
+        "every da33-class CPU has it\n",
+        "the da33-node-state.v1 schema\n",
+        # FQDN shortname — the dot lookahead is the guard:
+        "host da33.example.lab is the box\n",
+        # JobID / Ref identifier tokens (the \\b leading boundary is fine; the alnum-suffix
+        # guard keeps a larger word intact):
+        "da33a\n",
+        "fak_da33\n",
+        "xda33\n",
+        # a bare "da" with other digits is a different/again-fragment — NOT the host:
+        "the da3 fragment\n",
+        "da330 overflow\n",
+    ]
+
+    def test_bare_label_scrubbed(self):
+        for src, want in self.SCRUB:
+            self.assertEqual(m.transform(src), want, f"SCRUB {src!r}")
+
+    def test_identifier_forms_preserved(self):
+        for src in self.PRESERVE:
+            self.assertEqual(m.transform(src), src, f"PRESERVE {src!r}")
+
+    def test_inline_code_da33_untouched(self):
+        # a JobID/Ref in a code span is an identifier -> masked, never rewritten.
+        self.assertEqual(m.transform('JobID `nightrun/da33` is disabled\n'),
+                         'JobID `nightrun/da33` is disabled\n')
+
+    def test_residual_lint_fires_on_bare_label(self):
+        self.assertEqual(len(m.residual_hits("we ran the eval on da33 today\n")), 1)
+
+    def test_residual_lint_silent_on_identifiers(self):
+        self.assertEqual(m.residual_hits("the da33-control channel\n"), [])
+        self.assertEqual(m.residual_hits("host da33.example.lab\n"), [])
+
+    def test_raw_gate_flags_bare_label(self):
+        # the commit-message gate catches a da33 tell in a subject/body.
+        self.assertEqual(len(m.raw_hardware_hits("docs: add the da33 CPU baseline")), 1)
+
+    def test_idempotent(self):
         for src, _want in self.SCRUB:
             once = m.transform(src)
             self.assertEqual(m.transform(once), once, f"idempotent {src!r}")

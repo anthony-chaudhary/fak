@@ -78,7 +78,7 @@ each bit-identical to the scalar reference (every reduction carries an asm-match
 | Q4_K | ~10.4 ms/op | ~1.17 ms/op | **~0.875 ms/op** | **~11.9×** |
 | Q5_K | ~10.6 ms/op | ~2.94 ms/op | **~2.42 ms/op** | **~4.4×** |
 
-So lever 3 is **done** on amd64: AVX2 is the floor (every da33-class CPU has it), VNNI auto-lights
+So lever 3 is **done** on amd64: AVX2 is the floor (every CPU-server-class host has it), VNNI auto-lights
 on Cascade Lake / Ice Lake / Zen 4+ via CPUID. The Q4_K win (11.9×) is far above the original
 ~2–4× estimate — Go's scalar int8 path emits per-byte sign-extend + scalar `imul`, so SIMD buys
 much more than the f32 comparison implied. The aggregate forward gain is bounded by Q5_K's smaller
@@ -90,19 +90,19 @@ the #971 wall — are no longer scalar.
 - The top *unshipped* lever is now **lever 2 (batch the expert dispatch, ~1.8×)** and the
   pure-CPU **serve config (lever 1)** — both are the path from the per-kernel wins to sustained
   decode tok/s.
-- The **end-to-end da33 decode tok/s is NOT yet measured** — the witness is host-gated and the
-  Slack bridge to da33 was unresponsive this session (120 s ping timeout; GPU server round-trips also
+- The **end-to-end CPU server decode tok/s is NOT yet measured** — the witness is host-gated and the
+  Slack bridge to CPU server was unresponsive this session (120 s ping timeout; GPU server round-trips also
   empty). Matrix row C (pure-CPU + `FAK_KQ_INT8=1`, read sustained decode after prefill, A/B
   `FAK_QKERNEL=scalar` vs default) still decides the real figure.
 
-  **da33 witnessed (this session, via the control bridge):** AMD **EPYC 7742 (Rome/Zen2), 256
-  cores, 1007 GB RAM / 462 GB avail, AVX2-only (no AVX512/VNNI)**. So on da33 the reducers run the
+  **CPU server witnessed (this session, via the control bridge):** AMD **EPYC 7742 (Rome/Zen2), 256
+  cores, 1007 GB RAM / 462 GB avail, AVX2-only (no AVX512/VNNI)**. So on CPU server the reducers run the
   **AVX2 tier** (Q4_K ~8.9×, Q5_K ~3.6× over scalar — the VNNI tier needs Cascade Lake / Ice Lake /
-  Zen 4+; da33 is older). Scaling UPDATE-1's batched-int8 ceiling to AVX2 on 256 cores keeps the
+  Zen 4+; CPU server is older). Scaling UPDATE-1's batched-int8 ceiling to AVX2 on 256 cores keeps the
   pure-CPU + batched estimate **near 10**, but it is an estimate. The e2e witness is **provisioning-
-  gated, not bridge-gated — and every blocker is removable ON da33 (no scp, no Slack binary
+  gated, not bridge-gated — and every blocker is removable ON CPU server (no scp, no Slack binary
   transfer):**
-    - **`go` is missing on da33, but it can be ADDED on-box:** `git` + internet both work
+    - **`go` is missing on CPU server, but it can be ADDED on-box:** `git` + internet both work
       (github.com and huggingface.co return HTTP/2 200), so `wget` the go.dev linux-amd64 tarball,
       extract it, `git clone` fak, and `go build ./cmd/fak` natively on the EPYC — the 26 MB binary
       never has to cross Slack.
@@ -111,21 +111,21 @@ the #971 wall — are no longer scalar.
       staging target; pull the GGUF straight from HF to `/mnt/nvme-glm/glm52-q4/`.
     - then a pure-CPU serve (`FAK_KQ_INT8=1`, no `--backend`) + decode is the remaining step.
 
-  **ATTEMPTED on da33 (2026-06-28 ~06:00Z) — hit a hard, quantified RAM-capacity wall.** Built fak
+  **ATTEMPTED on CPU server (2026-06-28 ~06:00Z) — hit a hard, quantified RAM-capacity wall.** Built fak
   on-box (Go installed to `/mnt/nvme-glm/go`, cloned + built `/mnt/nvme-glm/fak-bin`; the GGUF is at
   `/mnt/nvme-glm/glm52-q4/UD-Q4_K_M/`), then launched `fak-bin serve --gguf <shard1> --addr :8077
   --context-budget-tokens 2048` (`FAK_KQ_INT8=1`). It refuses with a typed `FitTooBig` every time:
   `weights 433.82 GiB + kv 1.04 GiB needs 434.91, host has ~394 GiB`. Cause: `cmd/fak/serve.go:713
-  serveGGUFHostHeadroom = 0.15` requires `weights ≤ MemAvailable × 0.85`; da33's MemAvailable is
+  serveGGUFHostHeadroom = 0.15` requires `weights ≤ MemAvailable × 0.85`; CPU server's MemAvailable is
   ~464 GiB, ×0.85 ≈ 394 → refuse. And the headroom guards a REAL cost — GLM-5.2 UD-Q4_K_M is **~458
   GiB RESIDENT** in fak's path (#974 struct overshoot over the 433 on-disk), so even at zero headroom
-  the ~458 GiB barely fits ~464 GiB free and would risk an OOM mid-load. da33's remaining RAM is held
+  the ~458 GiB barely fits ~464 GiB free and would risk an OOM mid-load. CPU server's remaining RAM is held
   by a protected 66-day SWE-bench eval that must not be killed. **So the e2e fak-kernel decode tok/s
-  on da33 is RAM-capacity-gated:** GLM-5.2 q4's ~458 GiB resident footprint does not safely fit
-  da33's ~464 GiB free alongside the protected eval, and fak (correctly) loads weights resident with
-  no mmap/lazy path. Unblocking needs ONE of: a host with ≥ ~520 GiB free (da33 idle, or a GPU server host's
+  on CPU server is RAM-capacity-gated:** GLM-5.2 q4's ~458 GiB resident footprint does not safely fit
+  CPU server's ~464 GiB free alongside the protected eval, and fak (correctly) loads weights resident with
+  no mmap/lazy path. Unblocking needs ONE of: a host with ≥ ~520 GiB free (CPU server idle, or a GPU server host's
   RAM), a fak mmap weight-load path (doesn't exist), or a smaller GLM quant (q3/q2 ~250–330 GiB —
-  none staged; a multi-hundred-GB download). The AVX2 reducers (da33's tier) are what would run once
+  none staged; a multi-hundred-GB download). The AVX2 reducers (CPU server's tier) are what would run once
   it fits; the microbench numbers above are the proven kernel witness.
 
 ## What is MEASURED vs INFERRED (kept honest)
@@ -208,5 +208,5 @@ not first-token latency). Capture `fak_*` /metrics + `FAK_WORKERS`/`FAK_BUDGET`.
 
 **Not yet at 10 tok/s.** Root cause localized (device glue, with the host-kernel ceiling
 quantified); levers prioritized; the confirming measurement is host-gated (GPU server and the
-CPU-only DA33 node were both in active peer use this session). Next: run matrix row C/D
+CPU-only CPU server node were both in active peer use this session). Next: run matrix row C/D
 on a free host to validate lever 1, then implement levers 2 and 3.

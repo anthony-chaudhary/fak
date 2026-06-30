@@ -20,7 +20,7 @@ post is:
 | Severity | Glyph | Pages anyone? | Use it for |
 |---|---|---|---|
 | `status` | :hourglass_flowing_sand: | no | an ongoing, tracked impediment — recorded, scrolls by. "GPU-gated, waiting on GPU server hours", "peer merge in flight". |
-| `operator` | :rotating_light: | **yes** — `<!here>` or a named owner | a blocker that needs a **human** to act, with a "do this next". "FAK_SCOREBOARD_TOKEN missing", "DA33 host unreachable — needs a manual restart". |
+| `operator` | :rotating_light: | **yes** — `<!here>` or a named owner | a blocker that needs a **human** to act, with a "do this next". "FAK_SCOREBOARD_TOKEN missing", "CPU server host unreachable — needs a manual restart". |
 | `clear` | :white_check_mark: | no | an all-clear heartbeat — the daily cadence's "no open blockers" card. |
 
 Only `operator` is surfaced; `status` and `clear` are the background tiers. An operator
@@ -32,12 +32,12 @@ block, which is what makes Slack actually page — see `internal/blockerpost/ren
 ```bash
 # background — an ongoing impediment, recorded quietly, pages no one
 fak blockers post --title "GPU-gated, waiting on DGX hours" \
-  --detail "Rungs 1/2/3/5 need the private DGX-A100." --ref "#921"
+  --detail "Rungs 1/2/3/5 need the private GPU server." --ref "#921"
 
 # surfaced — needs a human; pages the channel's active members (<!here>)
-fak blockers post --severity operator --title "DA33 host unreachable" \
+fak blockers post --severity operator --title "CPU host unreachable" \
   --detail "CPU GLM-5.2 node not responding." \
-  --action "restart the DA33 serve" --action-url "https://…/runbook"
+  --action "restart the CPU-host serve" --action-url "https://…/runbook"
 
 # surfaced to ONE person instead of <!here>
 fak blockers post --severity operator --owner "<@U0OPERATOR>" \

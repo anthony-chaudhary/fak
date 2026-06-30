@@ -201,7 +201,7 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		return
 	}
 	if qtier == tierAVX2 {
-		// AVX2-only host (the da33 EPYC-7742 floor): the register-blocked AVX2 tile, with
+		// AVX2-only host (the EPYC-7742 CPU-server floor): the register-blocked AVX2 tile, with
 		// lanes=8 scalar-ref remainders so the whole path is bit-identical to qGemm8scalar(...,8).
 		qGemm8avx2Into(qt, qp, Y)
 		return
@@ -260,7 +260,7 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 // MR=3×NR=2) over the tile-aligned bulk and the lanes=8 scalar reference (qgemm8cell) for the
 // row/token remainders. The whole path is Float32bits-identical to qGemm8scalar(qt, qp, 8) —
 // the tile is pinned bit-for-bit to qgemm8cell(...,8) and the remainders call it directly — so
-// the AVX2 host's prefill GEMM stops running the scalar reference (the #1127 da33 floor) while
+// the AVX2 host's prefill GEMM stops running the scalar reference (the #1127 CPU-server floor) while
 // staying on the same authoritative argmax-vs-f32 Q8 gate. Callable directly (not gated on the
 // resolved qtier) so it can be exercised on any AVX2-capable host; wired into qGemm8Into for
 // tierAVX2. Output row-major [P, out].

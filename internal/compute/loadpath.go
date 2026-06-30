@@ -4,7 +4,7 @@ import "fmt"
 
 // loadpath.go — the weights load-path probe (#1062). A serve launched against a large GGUF
 // on a NETWORK filesystem (NFS/CIFS) silently pays a ~50–100x time-to-ready tax vs a local
-// NVMe/SSD: da33 measured 0.063 GB/s reading GLM-5.2 (434 GiB) off NFS — ~82 minutes to
+// NVMe/SSD: a CPU server measured 0.063 GB/s reading GLM-5.2 (434 GiB) off NFS — ~82 minutes to
 // mmap — where the same weights staged on a local ext4 NVMe load at disk speed (minutes).
 // The load-path's filesystem type is therefore a first-class performance dimension, not an
 // afterthought. This classifies the storage backing a weights path so `serve` can warn the
@@ -115,7 +115,7 @@ func WarnSlowLoadPath(info LoadPathInfo) string {
 		return ""
 	}
 	return fmt.Sprintf("WARNING: weights are on a network filesystem (%s) — large-model load "+
-		"reads at network speed and can take ~50-100x longer than a local disk (da33 saw "+
+		"reads at network speed and can take ~50-100x longer than a local disk (a CPU server saw "+
 		"~82 min for GLM-5.2 over NFS). Stage the GGUF on a local NVMe/SSD mount for a "+
 		"minutes-not-hours time-to-ready (#1062).", info.FSName)
 }

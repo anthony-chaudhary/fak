@@ -92,6 +92,17 @@ HARDWARE_TERMS: list[tuple[str, str, bool, bool]] = [
     # (dgx3-node-state), and the dgx1.example.lab FQDN intact while still scrubbing a
     # sentence-final "dgx1." (the char after the dot is space/EOL, not [A-Za-z0-9]).
     (r"(?i)\bdgx[0-9]+(?![-\w])(?!\.[A-Za-z0-9])", "GPU server", False, True),
+    # da33 — the operator's AVX2-only CPU host (EPYC-7742, the #1127 GLM-5.2 CPU baseline
+    # box). Same shape and guards as the dgxN rule: case-insensitive (prose writes both
+    # "da33" and "DA33"), word-bounded, and the two negative lookaheads keep the channel
+    # name (da33-control), the artifact/schema stems (da33-class, da33-node-state), and an
+    # FQDN shortname (da33.example.lab) intact while still scrubbing a sentence-final
+    # "da33." and a possessive "da33's". The literal "33" anchors it to the one real host —
+    # "da" alone is a common English fragment, so unlike dgxN this is NOT a bare-prefix rule.
+    # Replacement is "CPU server" (NOT the dgxN "GPU server"): da33 is the CPU-only box the
+    # GLM-5.2 docs deliberately CONTRAST against the GPU server, so folding both to one label
+    # would erase the distinction the prose is making (a CPU vs GPU throughput comparison).
+    (r"(?i)\bda33(?![-\w])(?!\.[A-Za-z0-9])", "CPU server", False, True),
     # bare A100 — OVERLOADED: fak's box in fak's own runs, but a public fact when citing a
     # COMPETITOR's published hardware (Sarathi-Serve on 1xA100). competitor_guarded so the
     # rewrite skips a citation line; is_tell=False so it never BLOCKS a commit (a citation
@@ -193,17 +204,30 @@ RESIDUAL_TELLS = [pat for (pat, _repl, _guarded, tell) in HARDWARE_TERMS if tell
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # Things a prose rule must NEVER rewrite, masked in this order before the rules run:
 #   1. inline `code` spans (identifiers: cmd/dgxbridge, sm_80, "machine_id": "dgx")
-#   2. markdown link/image TARGETS `](...)` (paths like ...GPU-DGX-A100-...md)
-#   3. bare URLs
-#   4. bare filename/path tokens with a known extension (so `\bDGX-A100\b` can't mangle a
+#   2. markdown link/image DISPLAY TEXT that is itself a filename token (`[DGX-OVERNIGHT-PLAN](…)`)
+#   3. markdown link/image TARGETS `](...)` (paths like ...GPU-DGX-A100-...md)
+#   4. bare URLs
+#   5. bare filename/path tokens with a known extension (so `\bDGX-A100\b` can't mangle a
 #      filename that appears outside a link). Renames are a SEPARATE deterministic pass.
 # The URL/path classes EXCLUDE the \x00 sentinel ([^\s\x00]+ not \S+) so a later mask can
 # never swallow an earlier mask's placeholder — e.g. on "[x](https://h)" the link-target
-# mask (2) leaves "[x\x000\x00" and the URL mask (3) must NOT then eat "https://…\x000\x00"
+# mask leaves "[x\x000\x00" and the URL mask must NOT then eat "https://…\x000\x00"
 # into a nested placeholder. Nested placeholders + forward _unmask was the latent bug that
 # corrupted plain markdown links to "...\x000\x00 " on a first --apply.
+#
+# Mask 2 (the link-DISPLAY-TEXT filename) closes a false-positive class: a link whose
+# VISIBLE text is a file reference — `[DGX-OVERNIGHT-PLAN](../nightrun/DGX-OVERNIGHT-PLAN-…md)`
+# — is an identifier, not prose, exactly like the target the next mask already protects. The
+# old masks shielded the `](target)` half but left the `[text]` half exposed, so `--check`
+# flagged the visible filename and `--apply` corrupted the link to `[GPU server-OVERNIGHT-PLAN]`
+# (a broken display/target mismatch the agent could never clear). The match is scoped to a
+# FILENAME-SHAPED token only — no internal whitespace AND at least one `-`/`/`/`_`/`.` separator
+# — so it masks `[DGX-OVERNIGHT-PLAN]` and `[DGX2-CROSS-ENGINE-DATA]` but NOT real prose link
+# text like `[the DGX runbook](…)` (has spaces) or a bare `[DGX]` (no separator), which stay
+# prose and are still scrubbed. It excludes the \x00 sentinel for the same nesting reason.
 MASK_RES = [
     re.compile(r"`[^`]*`"),
+    re.compile(r"\[(?=[^\]\s\x00]*[-/_.])[^\]\s\x00]+\]"),
     re.compile(r"\]\([^)]*\)"),
     re.compile(r"https?://[^\s\x00]+"),
     re.compile(r"[\w./\\-]+\.(?:md|json|go|py|sh|txt|png|svg|jpg|ya?ml|toml|csv|html)\b"),

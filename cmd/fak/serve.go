@@ -977,7 +977,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 	tLoad := time.Now()
 	// #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed — the ~50-100x
-	// time-to-ready tax da33 hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe
+	// time-to-ready tax a CPU server hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe
 	// (minutes). Probed once here so it covers every serve arm (device + CPU); fail-open, so a
 	// local or unclassifiable weights path prints nothing and loads exactly as before.
 	if w := compute.WarnSlowLoadPath(compute.ProbeLoadPath(ggufPath)); w != "" {

@@ -745,7 +745,7 @@ x1reduce:
 
 // qgemm8tile256 computes a 3(row)×2(token) Q8_0 output tile with AVX2+FMA — the AVX2
 // sibling of qgemm8tile512, the register-blocked prefill micro-kernel for hosts without
-// AVX-512 (the da33 EPYC-7742 floor: AVX2, no AVX-512/VNNI). AVX2 has only 16 YMM
+// AVX-512 (the EPYC-7742 CPU-server floor: AVX2, no AVX-512/VNNI). AVX2 has only 16 YMM
 // registers (no zmm and no Y16..Y31 EVEX file) and one VPMOVSXBW widens a 16-byte half (not
 // a full 32-byte block as the AVX-512 path does), so each block is processed as a low/high
 // 16-byte pair and the tile is sized 3×2: six float accumulators (Y0..Y5, indexed row*2+

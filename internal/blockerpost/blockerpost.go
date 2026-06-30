@@ -11,11 +11,11 @@
 //
 //	status    an ongoing, tracked blocker the channel should RECORD but not page
 //	          anyone about — a muted line that scrolls by (no broadcast mention).
-//	          "GPU-gated, waiting on DGX hours", "peer merge in flight".
+//	          "GPU-gated, waiting on GPU-server hours", "peer merge in flight".
 //	operator  a blocker that needs a HUMAN to act — SURFACED: a broadcast mention
 //	          (<!here> by default, or a named owner), a red glyph, an OPERATOR-NEEDED
 //	          banner, and a "do this next" affordance. "FAK_SCOREBOARD_TOKEN missing",
-//	          "DA33 host unreachable — needs a manual restart".
+//	          "CPU host unreachable — needs a manual restart".
 //	clear     an all-clear heartbeat (no open blockers) — a quiet green card so the
 //	          daily cadence shows the pipe is alive without paging anyone.
 //
@@ -97,11 +97,11 @@ func ParseSeverity(s string) (Severity, bool) {
 // the same pattern as benchpost.Post and dojopost.Post.
 type Blocker struct {
 	Severity  Severity // status | operator | clear (default status)
-	Title     string   // short headline, e.g. "DA33 CPU host unreachable"
+	Title     string   // short headline, e.g. "CPU host unreachable"
 	Detail    string   // one-line what is blocked / why
 	Lines     []string // optional body, one per sub-item (the feeder's per-issue rows)
 	Owner     string   // operator mention target ("<@U123>" / "<!here>"); defaults to <!here>
-	Action    string   // optional "do this next" label, e.g. "restart the DA33 serve"
+	Action    string   // optional "do this next" label, e.g. "restart the CPU-host serve"
 	ActionURL string   // optional link target (a runbook / issue / docs URL)
 	Ref       string   // optional stable key shown in context, e.g. "#921" or a hostname
 	Source    string   // who posted: "ci" | "agent" | <hostname> (optional)

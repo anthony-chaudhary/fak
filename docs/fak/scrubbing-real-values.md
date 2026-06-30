@@ -64,7 +64,14 @@ real value (a new default, a runbook, a fixture):
 - `tools/history_leak_audit.py` — scans git **history** (a scrub is only real if
   the value was never committed; if it was, history must be rewritten).
 - `tools/scrub_public_copy.py` — produces a public-safe copy with reals removed.
-- `tools/scrub_hardware_names.py` — replaces internal hardware/node names.
+- `tools/scrub_hardware_names.py` — replaces internal hardware/node names. The
+  protected set is one declarative list (`HARDWARE_TERMS`): the GPU boxes (`DGX`,
+  `dgxN`, `A100`, `SXM4` → "GPU server" / "datacenter GPU") and the CPU host
+  (`da33`, the AVX2-only EPYC-7742 → "CPU server"). Each token rewrites in doc PROSE
+  while every code/data identifier that contains it (`cmd/dgxbridge`, the
+  `nightrun/da33` JobID, a `da33-control` channel) is preserved. Adding a new private
+  host or SKU is **one tuple** in that list, which keeps the doc-rewrite, the `--check`
+  doc-lint, and the commit-message gate in lockstep.
 
 A scrub that leaves the value in history is not a scrub. For
 `claude-mac-fak` the real IP was **never committed** — verify the same for any

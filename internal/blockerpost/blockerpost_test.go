@@ -138,11 +138,11 @@ func TestStatusBlockerIsMutedAndDoesNotPage(t *testing.T) {
 func TestOperatorBlockerIsSurfacedAndPages(t *testing.T) {
 	b := Blocker{
 		Severity:  SeverityOperator,
-		Title:     "DA33 host unreachable",
+		Title:     "CPU host unreachable",
 		Detail:    "CPU GLM-5.2 node is not responding.",
-		Action:    "restart the DA33 serve",
+		Action:    "restart the CPU-host serve",
 		ActionURL: "https://example.invalid/runbook",
-		Ref:       "host:DA33",
+		Ref:       "host:cpu-server-a",
 		Source:    "ci",
 	}
 	got := b.Text()
@@ -155,7 +155,7 @@ func TestOperatorBlockerIsSurfacedAndPages(t *testing.T) {
 	if !strings.Contains(got, "BLOCKER — needs operator") {
 		t.Fatalf("operator blocker missing the surfaced banner:\n%s", got)
 	}
-	if !strings.Contains(got, "restart the DA33 serve") || !strings.Contains(got, "https://example.invalid/runbook") {
+	if !strings.Contains(got, "restart the CPU-host serve") || !strings.Contains(got, "https://example.invalid/runbook") {
 		t.Fatalf("operator blocker dropped the do-this-next affordance:\n%s", got)
 	}
 	// The broadcast must ALSO be in the Block Kit payload (the mention pages in both paths).

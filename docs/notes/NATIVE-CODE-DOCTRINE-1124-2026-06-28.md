@@ -53,7 +53,7 @@ matters, on a device/arch where it is measurable.
 |---|---|---|
 | **C1 [#1125]** | Q6_K decode reduce is scalar on every arch → AVX2/VNNI + NEON | open (the deferred 3rd reducer from #209) |
 | **C2 [#1126]** | Q5_K decode reduce is scalar on arm64 → NEON SDOT | open (amd64 already has AVX2/VNNI) |
-| **C3 [#1127]** | AVX2 Q8 prefill GEMM falls to scalar → register-blocked AVX2 tile | open (the da33 / AVX2-only-host prefill floor) |
+| **C3 [#1127]** | AVX2 Q8 prefill GEMM falls to scalar → register-blocked AVX2 tile | open (the CPU server / AVX2-only-host prefill floor) |
 | **C4 [#1128]** | AWQ amd64 SIMD bodies were scalar placeholders → real AVX2/AVX-512 dequant+dot | **SHIPPED 2026-06-28** — `awq_amd64_simd.s`; dequant bit-identical, dot cosine-parity, vet(asmdecl)-clean, witnessed on Zen 5 (AVX2 **and** AVX-512). |
 | **C5 [#1129]** | CPU attention inner loop is pure scalar → measure share, then Go-ILP / flash / SIMD | open (lower-confidence; measure-first) |
 | **C6 [#1130]** | Dequant-at-LOAD body is scalar (and serial) → SIMD it, compose with #1102's parFor | open |
