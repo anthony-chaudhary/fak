@@ -21,16 +21,33 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 	var got struct {
 		OK     bool `json:"ok"`
 		Counts struct {
-			Total            int            `json:"total"`
-			Dispatchable     int            `json:"dispatchable"`
-			AgentContextAvg  int            `json:"agent_context_avg"`
-			AgentContextFull int            `json:"agent_context_full"`
-			ByReason         map[string]int `json:"by_reason"`
+			Total                int            `json:"total"`
+			Dispatchable         int            `json:"dispatchable"`
+			StepBudget           int            `json:"step_budget"`
+			MissingExpectedSteps int            `json:"missing_expected_steps"`
+			AgentContextAvg      int            `json:"agent_context_avg"`
+			AgentContextFull     int            `json:"agent_context_full"`
+			ByReason             map[string]int `json:"by_reason"`
+			ByLane               map[string]int `json:"by_lane"`
+			ByWorkUnit           map[string]int `json:"by_work_unit"`
+			ByExpectedStepBucket map[string]int `json:"by_expected_step_bucket"`
 		} `json:"counts"`
+		BatchGroups []struct {
+			Key         string   `json:"key"`
+			Lane        string   `json:"lane"`
+			WorkUnit    string   `json:"work_unit"`
+			Count       int      `json:"count"`
+			StepBudget  int      `json:"step_budget"`
+			ExampleKeys []string `json:"example_keys"`
+		} `json:"batch_groups"`
 		Reviews []struct {
 			OK              bool   `json:"ok"`
 			Key             string `json:"key"`
 			Dispatchability string `json:"dispatchability"`
+			WorkUnit        string `json:"work_unit"`
+			ExpectedSteps   int    `json:"expected_steps"`
+			Trigger         string `json:"trigger"`
+			BatchPolicy     string `json:"batch_policy"`
 			Score           struct {
 				Total int `json:"total"`
 			} `json:"score"`
@@ -46,12 +63,28 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 		t.Fatalf("review = %+v, want one OK review", got)
 	}
 	if got.Counts.Total != 1 || got.Counts.Dispatchable != 1 ||
+		got.Counts.StepBudget != 3 || got.Counts.MissingExpectedSteps != 0 ||
 		got.Counts.AgentContextAvg != 100 || got.Counts.AgentContextFull != 1 ||
 		len(got.Counts.ByReason) != 0 {
 		t.Fatalf("counts = %+v, want one full-context dispatchable review", got.Counts)
 	}
+	if got.Counts.ByLane["taskmgr"] != 1 ||
+		got.Counts.ByWorkUnit["leaf"] != 1 ||
+		got.Counts.ByExpectedStepBucket["2-3"] != 1 {
+		t.Fatalf("organization buckets = lane=%+v work_unit=%+v steps=%+v",
+			got.Counts.ByLane, got.Counts.ByWorkUnit, got.Counts.ByExpectedStepBucket)
+	}
+	if len(got.BatchGroups) != 1 || got.BatchGroups[0].Lane != "taskmgr" ||
+		got.BatchGroups[0].WorkUnit != "leaf" || got.BatchGroups[0].Count != 1 ||
+		got.BatchGroups[0].StepBudget != 3 || len(got.BatchGroups[0].ExampleKeys) != 1 {
+		t.Fatalf("batch groups = %+v, want one taskmgr leaf group", got.BatchGroups)
+	}
 	if got.Reviews[0].Key != "task_push_next/strict-scope" ||
 		got.Reviews[0].Dispatchability != issuecontract.Dispatchable ||
+		got.Reviews[0].WorkUnit != "leaf" ||
+		got.Reviews[0].ExpectedSteps != 3 ||
+		got.Reviews[0].Trigger == "" ||
+		got.Reviews[0].BatchPolicy == "" ||
 		got.Reviews[0].Score.Total != 100 ||
 		got.Reviews[0].SpinePriority.Total != 100 {
 		t.Fatalf("review identity = %+v", got.Reviews[0])
@@ -74,6 +107,10 @@ func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 	for _, want := range []string{
 		"counts: dispatchable=0 triage_only=1 refused=0",
 		"reasons: ISSUE_SCOPE_INCOMPLETE=1, ISSUE_UNROUTED=1",
+		"lanes: (unrouted)=1",
+		"work_units: leaf=1",
+		"step_buckets: 2-3=1",
+		"batch_group[0]: count=1 steps=3 lane=(unrouted) work_unit=leaf",
 		"ISSUE_SCOPE_INCOMPLETE",
 		"ISSUE_UNROUTED",
 		"missing: out_of_scope",
@@ -183,15 +220,26 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 	var got struct {
 		OK     bool `json:"ok"`
 		Counts struct {
-			Total               int            `json:"total"`
-			Dispatchable        int            `json:"dispatchable"`
-			TriageOnly          int            `json:"triage_only"`
-			Refused             int            `json:"refused"`
-			AgentContextAvg     int            `json:"agent_context_avg"`
-			AgentContextFull    int            `json:"agent_context_full"`
-			AgentContextMissing int            `json:"agent_context_missing"`
-			ByReason            map[string]int `json:"by_reason"`
+			Total                int            `json:"total"`
+			Dispatchable         int            `json:"dispatchable"`
+			TriageOnly           int            `json:"triage_only"`
+			Refused              int            `json:"refused"`
+			StepBudget           int            `json:"step_budget"`
+			MissingExpectedSteps int            `json:"missing_expected_steps"`
+			AgentContextAvg      int            `json:"agent_context_avg"`
+			AgentContextFull     int            `json:"agent_context_full"`
+			AgentContextMissing  int            `json:"agent_context_missing"`
+			ByReason             map[string]int `json:"by_reason"`
+			ByLane               map[string]int `json:"by_lane"`
+			ByWorkUnit           map[string]int `json:"by_work_unit"`
+			ByExpectedStepBucket map[string]int `json:"by_expected_step_bucket"`
 		} `json:"counts"`
+		BatchGroups []struct {
+			Key             string   `json:"key"`
+			Count           int      `json:"count"`
+			StepBudget      int      `json:"step_budget"`
+			MissingMetadata []string `json:"missing_metadata"`
+		} `json:"batch_groups"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
@@ -202,12 +250,27 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 	if got.Counts.Total != 2 || got.Counts.Dispatchable != 1 || got.Counts.TriageOnly != 1 || got.Counts.Refused != 0 {
 		t.Fatalf("dispatch counts = %+v, want one dispatchable and one triage-only", got.Counts)
 	}
+	if got.Counts.StepBudget != 4 || got.Counts.MissingExpectedSteps != 1 {
+		t.Fatalf("step counts = %+v, want fallback step budget 4 and one missing expected step", got.Counts)
+	}
 	if got.Counts.AgentContextAvg != 50 || got.Counts.AgentContextFull != 1 || got.Counts.AgentContextMissing != 1 {
 		t.Fatalf("agent context counts = %+v, want one full and one missing", got.Counts)
 	}
 	if got.Counts.ByReason[issuecontract.ReasonScopeIncomplete] != 1 ||
 		got.Counts.ByReason[issuecontract.ReasonUnrouted] != 1 {
 		t.Fatalf("reason counts = %+v, want one scope and one unrouted refusal", got.Counts.ByReason)
+	}
+	if got.Counts.ByLane["guardrsi"] != 1 || got.Counts.ByLane["(unrouted)"] != 1 {
+		t.Fatalf("lane buckets = %+v, want guardrsi and unrouted", got.Counts.ByLane)
+	}
+	if got.Counts.ByWorkUnit["leaf"] != 1 || got.Counts.ByWorkUnit["(missing)"] != 1 {
+		t.Fatalf("work-unit buckets = %+v, want leaf and missing", got.Counts.ByWorkUnit)
+	}
+	if got.Counts.ByExpectedStepBucket["2-3"] != 1 || got.Counts.ByExpectedStepBucket["(missing)"] != 1 {
+		t.Fatalf("step buckets = %+v, want 2-3 and missing", got.Counts.ByExpectedStepBucket)
+	}
+	if len(got.BatchGroups) != 2 || got.BatchGroups[0].Count != 1 || got.BatchGroups[0].StepBudget == 0 {
+		t.Fatalf("batch groups = %+v, want one group per audit row with step budgets", got.BatchGroups)
 	}
 }
 
