@@ -41,7 +41,7 @@ func (p *countingFinalPlanner) Complete(_ context.Context, _ []Message, _ []Tool
 func TestNativeLoopPauseResumesSameTurn(t *testing.T) {
 	tbl := session.NewTable()
 	const trace = "native-pause-resume"
-	tbl.Decide(trace)                                  // seed a live (Running) record
+	tbl.Decide(trace)                                      // seed a live (Running) record
 	tbl.Transition(trace, session.Paused, "operator hold") // operator pauses it
 
 	firstDecide := make(chan struct{}, 1)

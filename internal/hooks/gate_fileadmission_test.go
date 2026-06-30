@@ -69,8 +69,8 @@ func TestFileAdmission_OpsLooseDoc(t *testing.T) {
 		rel  string
 		want bool
 	}{
-		{"gpu-status.md", true},          // repo-root *.md
-		{"docs/gpu-status.md", true},     // depth-1 docs/
+		{"gpu-status.md", true},      // repo-root *.md
+		{"docs/gpu-status.md", true}, // depth-1 docs/
 		{"docs/notes/gpu-status.md", false},
 		{"docs/fak/gpu-status.md", false},
 		{"experiments/gpu-status.md", false}, // depth-1 but not under docs/
