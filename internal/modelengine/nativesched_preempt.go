@@ -78,12 +78,22 @@ func (s *NativeScheduler) KVPreemptionStats() NativePreemptionStats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.preemptStats
-	st.Running = len(s.lanes)
+	st.Running = s.runningKVLanesLocked()
 	st.UsedBlocks = s.usedKVBlocksLocked()
 	st.SwappedOut = len(s.preempted)
 	st.MaxBlocks = s.preemption.MaxBlocks
 	st.MaxPreemptRounds = s.maxPreemptRoundsLocked()
 	return st
+}
+
+func (s *NativeScheduler) runningKVLanesLocked() int {
+	n := 0
+	for _, ln := range s.lanes {
+		if ln != nil && !ln.terminal && ln.sess != nil {
+			n++
+		}
+	}
+	return n
 }
 
 // WriteKVPreemptionMetrics renders the live native scheduler's #31 counters in the same
