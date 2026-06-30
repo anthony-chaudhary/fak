@@ -1,6 +1,8 @@
 package loopfleet
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -39,6 +41,114 @@ func TestClassifyStateMachine(t *testing.T) {
 				t.Errorf("classify = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// deriveRow draws the line between "never fired" (DARK) and "ran but I can't
+// place it on the freshness timeline" (UNKNOWN). A loop with recorded runs but
+// no usable last tick must NOT be slandered as DARK — classify alone would do
+// exactly that (lastTick<=0, known cadence => DARK), which reads as "registered
+// but never ticked" and would trip a scheduler into reviving a loop that
+// demonstrably ran. deriveRow lifts that case to UNKNOWN; a genuinely empty loop
+// (runs==0, no tick) stays DARK.
+func TestDeriveRowRanButNoTickIsUnknownNotDark(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	th := loopmgr.HealthThresholds{DefaultCadenceSeconds: 3600, DarkMultiple: 2}
+	cadence := int64(3600)
+
+	// classify alone, given the same (no tick, known cadence), calls it DARK —
+	// proving the correction lives in deriveRow, not classify.
+	if got := classify(0, cadence, now, th); got != loopmgr.HealthDark {
+		t.Fatalf("precondition: classify(no tick, cadence) = %q, want DARK", got)
+	}
+
+	// A loop that ran 5 times but whose rows carried no parseable timestamp:
+	// runs>0, lastTick==0. Honest verdict is UNKNOWN, and Dark must be false so a
+	// `--json` consumer gating on Dark does not revive a loop that ran.
+	ran := deriveRow("dispatch", rawLoop{kind: "dispatch", runs: 5, keep: 2}, cadence, now, th)
+	if ran.State != loopmgr.HealthUnknown {
+		t.Errorf("ran-but-no-tick State = %q, want UNKNOWN", ran.State)
+	}
+	if ran.Dark {
+		t.Error("ran-but-no-tick Dark = true, want false (it demonstrably ran)")
+	}
+
+	// A genuinely empty loop (no runs, no tick) is still DARK — that one really
+	// never fired, so the correction must not over-reach.
+	empty := deriveRow("dispatch", rawLoop{kind: "dispatch", runs: 0}, cadence, now, th)
+	if empty.State != loopmgr.HealthDark || !empty.Dark {
+		t.Errorf("empty loop State/Dark = %q/%v, want DARK/true", empty.State, empty.Dark)
+	}
+
+	// A loop that ran AND has a fresh tick is classified by age, not forced to
+	// UNKNOWN — the correction only fires when the tick is missing.
+	fresh := deriveRow("dispatch", rawLoop{
+		kind:             "dispatch",
+		runs:             3,
+		lastTickUnixNano: now.Add(-30 * time.Minute).UnixNano(),
+	}, cadence, now, th)
+	if fresh.State != loopmgr.HealthLive {
+		t.Errorf("ran-and-fresh State = %q, want LIVE", fresh.State)
+	}
+}
+
+// Fold drives real JSONL through the adapter path. A cadence ledger with a fresh
+// row must read LIVE; a dispatch ledger whose rows parse but carry blank
+// timestamps (runs counted, no tick) must read UNKNOWN — not DARK — proving the
+// "ran but no usable tick" correction holds end to end, not just in deriveRow.
+func TestFoldRealLedgersDrawTheRightLine(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	th := loopmgr.HealthThresholds{DefaultCadenceSeconds: 3600, DarkMultiple: 2}
+	root := t.TempDir()
+
+	write := func(rel, body string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// cadence ledger: one fresh OK run 10 minutes ago, within the daily cadence.
+	freshStamp := now.Add(-10 * time.Minute).UTC().Format(time.RFC3339)
+	write(filepath.Join("docs", "cadence", "history.jsonl"),
+		`{"generated_at":"`+freshStamp+`","verdict":"OK","commit":"abc123"}`+"\n")
+
+	// dispatch ledger: two rows that PARSE (so runs==2) but carry no usable tick —
+	// the field is blank. Pre-fix this folds to DARK; the fix makes it UNKNOWN.
+	write(filepath.Join(".dispatch-runs", "progress.jsonl"),
+		`{"utc":"","ok":true,"closed_now":1}`+"\n"+
+			`{"utc":"","ok":false}`+"\n")
+
+	rep := Fold(root, now, th)
+
+	byKind := map[string]LoopHealth{}
+	for _, l := range rep.Loops {
+		byKind[l.Kind] = l
+	}
+
+	cad, ok := byKind["cadence"]
+	if !ok {
+		t.Fatalf("cadence loop missing from fold; loops=%+v", rep.Loops)
+	}
+	if cad.State != loopmgr.HealthLive {
+		t.Errorf("fresh cadence loop State = %q, want LIVE", cad.State)
+	}
+
+	dis, ok := byKind["dispatch"]
+	if !ok {
+		t.Fatalf("dispatch loop missing from fold; loops=%+v", rep.Loops)
+	}
+	if dis.Runs != 2 {
+		t.Errorf("dispatch Runs = %d, want 2 (rows parsed)", dis.Runs)
+	}
+	if dis.State != loopmgr.HealthUnknown {
+		t.Errorf("dispatch loop (ran, no tick) State = %q, want UNKNOWN (not DARK)", dis.State)
+	}
+	if dis.Dark {
+		t.Error("dispatch loop Dark = true, want false (it ran twice)")
 	}
 }
 

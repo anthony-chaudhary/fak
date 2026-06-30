@@ -255,6 +255,16 @@ func deriveRow(ledger string, raw rawLoop, cadence int64, now time.Time, th loop
 		row.AgeSeconds = age / int64(time.Second)
 	}
 	row.State = classify(raw.lastTickUnixNano, cadence, now, th)
+	// A loop with recorded runs but NO usable last tick (every ledger row missing
+	// or carrying an unparseable timestamp) is not "never fired" — classify would
+	// call it DARK, which reads as "registered but never ticked" and would trip a
+	// scheduler into reviving a loop that demonstrably ran. We have proof it ran
+	// (runs > 0) but cannot place it on the freshness timeline, so the honest
+	// verdict is UNKNOWN (decline to judge liveness), not DARK. A genuinely empty
+	// loop (runs == 0, no tick) stays DARK — that one really has never fired.
+	if raw.runs > 0 && raw.lastTickUnixNano <= 0 && row.State == loopmgr.HealthDark {
+		row.State = loopmgr.HealthUnknown
+	}
 	row.Dark = row.State == loopmgr.HealthDark
 	return row
 }
