@@ -22,6 +22,7 @@
 #   FILE_ADMISSION  FLEET_FILE_GUARD   ALLOW_STRAY_FILE    tools/check_committed_files.py
 #   INDEX_SYNC      FLEET_INDEX_GUARD  ALLOW_INDEX_DRIFT   tools/check_index_sync.py
 #   PROVENANCE_LABEL FLEET_PROVENANCE_GUARD ALLOW_PROVENANCE_DRIFT tools/check_provenance_labels.py
+#   HARDWARE_TELL   FLEET_HW_GUARD     FLEET_ALLOW_HW      tools/check_hardware_tells.py
 #
 # The leak needle list (AUDIT_NEEDLES) is owned by tools/scrub_public_copy.py so the
 # commit gate and the export-time scrub cannot drift; the other gates own their own
@@ -88,6 +89,7 @@ run_gate BROKEN_LINK    tools/check_links.py           "${FLEET_LINK_GUARD:-bloc
 run_gate FILE_ADMISSION tools/check_committed_files.py "${FLEET_FILE_GUARD:-block}"  "${ALLOW_STRAY_FILE:-0}"
 run_gate INDEX_SYNC     tools/check_index_sync.py      "${FLEET_INDEX_GUARD:-block}" "${ALLOW_INDEX_DRIFT:-0}"
 run_gate PROVENANCE_LABEL tools/check_provenance_labels.py "${FLEET_PROVENANCE_GUARD:-block}" "${ALLOW_PROVENANCE_DRIFT:-0}"
+run_gate HARDWARE_TELL  tools/check_hardware_tells.py  "${FLEET_HW_GUARD:-block}"    "${FLEET_ALLOW_HW:-0}"
 
 if [ "$gate_failed" -ne 0 ]; then
 	echo "" >&2
