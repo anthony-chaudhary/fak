@@ -108,12 +108,14 @@ func firstNonEmpty(a, b string) string {
 
 // BlockedAccount is the public projection of a blocked target account.
 type BlockedAccount struct {
-	Tag       string  `json:"tag"`
-	Account   string  `json:"account"`
-	Product   string  `json:"product"`
-	ModelTier *int    `json:"model_tier"`
-	Model     *string `json:"model"`
-	Reason    string  `json:"reason"`
+	Tag         string  `json:"tag"`
+	Account     string  `json:"account"`
+	Product     string  `json:"product"`
+	ModelTier   *int    `json:"model_tier"`
+	Model       *string `json:"model"`
+	Reason      string  `json:"reason"`
+	LoginStatus *string `json:"login_status,omitempty"`
+	CanServe    *bool   `json:"can_serve,omitempty"`
 }
 
 func publicBlocked(r Account) BlockedAccount {
@@ -127,6 +129,7 @@ func publicBlocked(r Account) BlockedAccount {
 	return BlockedAccount{
 		Tag: r.Tag, Account: r.Account, Product: r.Product,
 		ModelTier: r.ModelTier, Model: r.Model, Reason: reason,
+		LoginStatus: r.LoginStatus, CanServe: r.CanServe,
 	}
 }
 

@@ -46,6 +46,8 @@ type Resolved struct {
 	TargetTier   *int    `json:"target_tier"`
 	FallbackUsed bool    `json:"fallback_used"`
 	BlockReason  string  `json:"block_reason"`
+	LoginStatus  *string `json:"login_status,omitempty"`
+	CanServe     *bool   `json:"can_serve,omitempty"`
 
 	BlockedTargetAccounts []BlockedAccount `json:"blocked_target_accounts,omitempty"`
 }
@@ -66,7 +68,7 @@ func flattenResolved(acct Account, ok bool, reason string, selectedTier, targetT
 		OK: ok, Reason: reason, Account: acct.Account, Tag: acct.Tag, Product: acct.Product,
 		ConfigDir: configDir, OAuthToken: tok, Model: model, ModelTier: acct.ModelTier,
 		SelectedTier: st, TargetTier: targetTier, FallbackUsed: fallbackUsed,
-		BlockReason: blockReason,
+		BlockReason: blockReason, LoginStatus: acct.LoginStatus, CanServe: acct.CanServe,
 	}
 }
 
