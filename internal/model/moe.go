@@ -67,10 +67,14 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 		// expert tiling is valid for this config, route the routed-expert delta through the
 		// EP twin instead of the monolith. ExpertParallelPlan fails closed (ranks must be in
 		// [1,NumExperts]); on any plan error keep the proven monolith — the no-op default for
-		// epRanks 0/1 and the safe fallback for a degenerate rank count.
+		// epRanks 0/1 and the safe fallback for a degenerate rank count. The reduction runs
+		// through the Collective the serve wired (expertParallelCollective): the device NCCL
+		// CollectiveBackend on a multi-GPU box, else the single-box LocalCollective — so the
+		// decode all-reduce crosses the GPUs serve.go required Caps().Collective for, instead
+		// of a hardcoded host-side reduce.
 		if m.epRanks > 1 {
 			if plan, err := ExpertParallelPlan(m.Cfg.NumExperts, m.epRanks); err == nil {
-				return glmMoeEPFFN{plan: plan, coll: LocalCollective{}}
+				return glmMoeEPFFN{plan: plan, coll: m.expertParallelCollective()}
 			}
 		}
 		return glmMoeFFN{}

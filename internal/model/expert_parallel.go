@@ -182,3 +182,22 @@ func (m *Model) SetExpertParallelRanks(ranks int) { m.epRanks = ranks }
 
 // ExpertParallelRanks reports the configured expert-parallel rank count (0/1 == monolith).
 func (m *Model) ExpertParallelRanks() int { return m.epRanks }
+
+// SetExpertParallelCollective records the Collective the live decode EP path reduces the
+// per-rank expert partials through (Model.epColl). nil restores the single-box, bit-exact
+// LocalCollective default. The serve sets a BackendCollective wrapping the device NCCL
+// CollectiveBackend here when --expert-parallel N>1 runs on a multi-GPU box, so the routed-
+// expert AllReduceSum in glmMoeEPFFN crosses the GPUs the serve required a device collective
+// for — closing the gap where serve.go gates ranks>1 on Caps().Collective but the decode path
+// then reduced host-side through a hardcoded LocalCollective. Bit-exact on cpu-ref
+// (BackendCollective == LocalCollective), so it changes no host-tested bytes.
+func (m *Model) SetExpertParallelCollective(coll Collective) { m.epColl = coll }
+
+// expertParallelCollective returns the Collective the EP decode path reduces through: the one
+// the serve wired (m.epColl) or the single-box, bit-exact LocalCollective when none is set.
+func (m *Model) expertParallelCollective() Collective {
+	if m.epColl != nil {
+		return m.epColl
+	}
+	return LocalCollective{}
+}

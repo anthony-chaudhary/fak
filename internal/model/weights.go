@@ -251,6 +251,17 @@ type Model struct {
 	// experts resident across real GPUs. Set via SetExpertParallelRanks from the serve
 	// flag; the EP arithmetic is bit-exact vs the monolith at ranks=1 (expert_parallel_test.go).
 	epRanks int
+
+	// epColl is the Collective the live decode EP path reduces the per-rank expert partials
+	// through (glmMoeEPFFN -> expertParallelGLMMoEDelta). nil keeps the single-box, bit-exact
+	// LocalCollective default (an existing serve, or a box with no device collective). The
+	// serve sets it to a BackendCollective wrapping the device CollectiveBackend (NCCL) when
+	// --expert-parallel N>1 runs on a multi-GPU box, so the decode reduction the serve REQUIRED
+	// a device collective for (serve.go's Caps().Collective gate) actually flows across the
+	// GPUs instead of being computed host-side. On cpu-ref a BackendCollective is byte-identical
+	// to LocalCollective (collective_bridge_test.go), so wiring it changes no host-tested bytes;
+	// on NCCL the same call issues a real cross-GPU all-reduce. Set via SetExpertParallelCollective.
+	epColl Collective
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

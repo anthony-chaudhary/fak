@@ -54,6 +54,14 @@ func NewBackendCollective(be compute.Backend) (*BackendCollective, error) {
 	return &BackendCollective{be: be, coll: coll}, nil
 }
 
+func (b *BackendCollective) uploadRankF32(rank int, shape []int, data []float32) (compute.Tensor, error) {
+	t := compute.NewF32(b.be, shape, data)
+	if up, ok := b.be.(compute.RankUploader); ok {
+		return up.UploadRank(t, compute.F32, rank)
+	}
+	return b.be.Upload(t, compute.F32), nil
+}
+
 // AllGather concatenates the per-rank output bands in rank order through the HAL AllGather,
 // after the SAME width validation LocalCollective.AllGather performs — each parts[r] must be
 // exactly p.Shards[r].Width() long and the result exactly p.Dim — so a mis-sized rank is
@@ -69,7 +77,11 @@ func (b *BackendCollective) AllGather(parts [][]float32, p TPPlan) ([]float32, e
 		if len(parts[r]) != s.Width() {
 			return nil, fmt.Errorf("model: AllGather rank %d part len = %d, want shard width %d", r, len(parts[r]), s.Width())
 		}
-		ts[r] = compute.NewF32(b.be, []int{len(parts[r])}, parts[r])
+		t, err := b.uploadRankF32(r, []int{len(parts[r])}, parts[r])
+		if err != nil {
+			return nil, err
+		}
+		ts[r] = t
 	}
 	out, err := b.coll.AllGather(ts)
 	if err != nil {
@@ -94,7 +106,11 @@ func (b *BackendCollective) AllReduceSum(parts [][]float32) ([]float32, error) {
 	}
 	ts := make([]compute.Tensor, len(parts))
 	for r := range parts {
-		ts[r] = compute.NewF32(b.be, []int{len(parts[r])}, parts[r])
+		t, err := b.uploadRankF32(r, []int{len(parts[r])}, parts[r])
+		if err != nil {
+			return nil, err
+		}
+		ts[r] = t
 	}
 	out, err := b.coll.AllReduceSum(ts)
 	if err != nil {
@@ -105,3 +121,20 @@ func (b *BackendCollective) AllReduceSum(parts [][]float32) ([]float32, error) {
 
 // BackendCollective is a drop-in for the model Collective seam.
 var _ Collective = (*BackendCollective)(nil)
+
+// SetExpertParallelDeviceCollective wires the device CollectiveBackend behind `be` as the
+// Collective the live decode EP path reduces through (Model.epColl), so `--expert-parallel N>1`
+// on a multi-GPU box all-reduces the routed-expert partials across the GPUs serve.go required
+// Caps().Collective for — instead of the hardcoded single-box LocalCollective glmMoeEPFFN reduced
+// through before. It is the gateway's single call (the `model` package name is shadowed there by
+// the model-id string, so the BackendCollective construction lives here). Fails closed exactly
+// like NewBackendCollective: a backend lacking the seam returns an error and leaves the bit-exact
+// LocalCollective default in place, so the EP output stays correct (just reduced host-side).
+func (m *Model) SetExpertParallelDeviceCollective(be compute.Backend) error {
+	bc, err := NewBackendCollective(be)
+	if err != nil {
+		return err
+	}
+	m.SetExpertParallelCollective(bc)
+	return nil
+}

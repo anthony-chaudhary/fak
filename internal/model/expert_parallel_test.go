@@ -3,6 +3,8 @@ package model
 import (
 	"math"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // expert_parallel_test.go — the correctness gates for the expert-parallel (EP) MoE FFN
@@ -382,4 +384,86 @@ func TestGlmMoeEPFFNMatchesMonolith(t *testing.T) {
 		t.Fatalf("dispatched glmMoeEPFFN(ranks=2).apply vs glmMoeFFN cosine=%.8f, want ≥ 0.99999", cos)
 	}
 	t.Logf("glmMoeEPFFN wired into ffnForLayer: epRanks≤1 -> monolith, >1 -> EP; ranks=1 bit-exact, ranks=2 within round-off")
+}
+
+// TestGlmMoeEPFFNReducesThroughDeviceCollective pins the DEVICE-collective seam into the live
+// decode path — the gap GLM52-EXPERT-PARALLEL-MULTIGPU-2026-06-29.md named: serve.go gates
+// `--expert-parallel N>1` on a backend advertising Caps().Collective (the NCCL CollectiveBackend),
+// but ffnForLayer reduced glmMoeEPFFN through a HARDCODED LocalCollective, so the device communicator
+// the serve initialized was dead code in decode. After SetExpertParallelCollective, the dispatched
+// glmMoeEPFFN carries the wired Collective and reduces the routed-expert partials through it.
+//
+// Proven on cpu-ref, whose BackendCollective is byte-identical to LocalCollective
+// (collective_bridge_test.go), so the device-collective decode path is exercised end-to-end with
+// NO multi-GPU hardware and the reduction is bit-exact vs the LocalCollective-driven EP — the EP
+// decode twin of TestForwardTPViaBackendCollective. On a real NCCL backend the SAME glmMoeEPFFN.apply
+// issues a cross-GPU all-reduce per MoE layer (the first live multi-GPU decode path); only the
+// reduction order (NCCL ring/tree) then differs, within the Approx round-off every device op carries.
+func TestGlmMoeEPFFNReducesThroughDeviceCollective(t *testing.T) {
+	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", true, false, true /*withMoE*/, true /*withSharedExperts*/)
+	m, err := LoadSafetensors(path, cfg)
+	if err != nil {
+		t.Fatalf("LoadSafetensors: %v", err)
+	}
+	mat := residentKernel{m}
+	layer := -1
+	for l := 0; l < cfg.NumLayers; l++ {
+		if m.hasWeight(routerName(l)) && m.hasWeight(expertName(l, 0, "gate_proj.weight")) {
+			layer = l
+			break
+		}
+	}
+	if layer < 0 {
+		t.Fatalf("no routed MoE layer in the glm fixture")
+	}
+
+	// The serve wires a BackendCollective over the device backend (cpu-ref here; the NCCL backend
+	// on a multi-GPU box) — exactly what gateway.New does when ExpertParallelRanks > 1.
+	bc, err := NewBackendCollective(compute.Default())
+	if err != nil {
+		t.Fatalf("NewBackendCollective(cpu-ref): %v", err)
+	}
+	m.SetExpertParallelRanks(2)
+	m.SetExpertParallelCollective(bc)
+
+	// The dispatched ffnKind must carry the WIRED collective, not the hardcoded LocalCollective —
+	// the regression guard that the device-collective seam actually reaches the decode reduction.
+	ep, ok := m.ffnForLayer(layer).(glmMoeEPFFN)
+	if !ok {
+		t.Fatalf("epRanks=2: ffnForLayer = %T, want glmMoeEPFFN", m.ffnForLayer(layer))
+	}
+	if _, isLocal := ep.coll.(LocalCollective); isLocal {
+		t.Fatalf("dispatched glmMoeEPFFN still reduces through LocalCollective; want the wired BackendCollective (device communicator would be dead code in decode)")
+	}
+	if _, isBC := ep.coll.(*BackendCollective); !isBC {
+		t.Fatalf("dispatched glmMoeEPFFN coll = %T, want *BackendCollective (the device-collective seam)", ep.coll)
+	}
+
+	xn := make([]float32, cfg.HiddenSize)
+	for i := range xn {
+		xn[i] = float32(math.Sin(float64(i)*0.07 + 0.2))
+	}
+
+	// Bit-exact vs the SAME EP reduced through LocalCollective: BackendCollective(cpu-ref) ==
+	// LocalCollective byte-for-byte, so routing the decode reduction through the device seam
+	// changes no host bytes (the no-regression rung for the wiring).
+	plan2, err := ExpertParallelPlan(cfg.NumExperts, 2)
+	if err != nil {
+		t.Fatalf("ExpertParallelPlan(2): %v", err)
+	}
+	viaDevice := ep.apply(m, layer, xn, mat)
+	viaLocal := glmMoeEPFFN{plan: plan2, coll: LocalCollective{}}.apply(m, layer, xn, mat)
+	if mx := epMaxAbs(viaDevice, viaLocal); mx != 0 {
+		t.Fatalf("EP via device collective vs via LocalCollective max|Δ|=%g, want 0 (bit-exact on cpu-ref)", mx)
+	}
+
+	// Clearing the collective restores the LocalCollective default (no device state leaks into a
+	// subsequent host-only serve).
+	m.SetExpertParallelCollective(nil)
+	if ep2, ok := m.ffnForLayer(layer).(glmMoeEPFFN); !ok {
+		t.Fatalf("epRanks=2 after clear: ffnForLayer = %T, want glmMoeEPFFN", m.ffnForLayer(layer))
+	} else if _, isLocal := ep2.coll.(LocalCollective); !isLocal {
+		t.Fatalf("after SetExpertParallelCollective(nil) coll = %T, want LocalCollective default", ep2.coll)
+	}
+	t.Logf("EP decode reduction flows through the wired device collective (cpu-ref BackendCollective), bit-exact vs LocalCollective; on NCCL the same apply all-reduces across GPUs")
 }
