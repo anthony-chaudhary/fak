@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // gitRunner is the default Runner: it runs the real git binary. It mirrors
@@ -13,6 +15,7 @@ import (
 // surfaces its own typed errors), matching the witness resolver rather than safecommit.
 func gitRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
