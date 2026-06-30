@@ -463,7 +463,13 @@ jobs:
       #     today's debt, so a clean tree stays green; only a real regression
       #     reds the trunk. Retire worst-first with the owning scorecard's skill,
       #     then re-pin (`--pin`). Pure-stdlib Python.
-      - name: scorecard control pane (folds every *-debt + trend; HARD ratchet --check)
+      #   * the GRADE axis is gated too (#1423, the "stays Excellent" half of
+      #     #1414): the baseline carries per-metric grade_weights, so a scorecard
+      #     slipping a letter (A->B) reds CI EVEN WHEN total_debt held flat — the
+      #     regression a flat raw sum would hide. Mirror of the milestone climb
+      #     ratchet (#1442). HARD by default; FAK_SCORECARD_GRADE_RATCHET=0 demotes
+      #     it to advisory for a deliberate one-off pin on a known-dirty tree.
+      - name: scorecard control pane (folds every *-debt + trend; HARD raw+grade ratchet --check)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/readme_freshness_audit_test.py

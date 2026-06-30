@@ -12,6 +12,7 @@ or `python -m pytest tools/scorecard_control_pane_test.py -q`.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -385,20 +386,81 @@ def test_grade_debt_folds_onto_payload_and_baseline() -> None:
     assert doc["grade_debt"] == out["grade_debt"]
 
 
-def test_grade_debt_regression_is_advisory_under_green_raw_ratchet() -> None:
-    """A severity regression the raw ratchet's units mask: slop's occurrence count
-    FALLS (raw total improves, gate green) while a bounded metric drops B->F. The
-    grade-debt axis must flag it advisory without tripping the gate."""
+def test_grade_regression_reds_the_gate_under_green_raw_ratchet(monkeypatch=None) -> None:
+    """#1423 — the "stays Excellent" gate. A severity regression the raw ratchet's
+    units mask: slop's occurrence count FALLS (raw total improves, the raw gate
+    would stay green) while a bounded metric drops B->F. The grade ratchet must RED
+    the gate (HARD by default), not merely warn."""
+    os.environ.pop(scp.GRADE_RATCHET_ENV, None)
     base_metrics = [graded_metric("slop", 500, "B"), graded_metric("stability", 1, "B")]
     base = scp.baseline_doc(scp.fold(base_metrics, None, workspace=".", commit="base01"))
+    assert base["grade_weights"]["stability"] == 1     # B pinned per-metric
     # now: slop fell 500->480 (raw total drops), but stability B->F (severity rises).
     now_metrics = [graded_metric("slop", 480, "B"), graded_metric("stability", 1, "F")]
     out = scp.fold(now_metrics, base, workspace=".", commit="now01")
     assert out["trend"]["total_delta"] == -20          # raw improved
     assert out["trend"]["grade_delta"] == 7            # 1+1 -> 1+8 severity rose
+    assert [g["key"] for g in out["trend"]["grade_regressed"]] == ["stability"]
     code, msg = scp.check_gate(out)
-    assert code == 0                                    # gate stays green (raw held)
-    assert "GRADE-DEBT WARN" in msg and "+7" in msg     # severity surfaced advisory
+    assert code == 1                                    # HARD: the grade ratchet reds
+    assert "GRADE-RATCHET FAIL" in msg and "stability" in msg and "B->F" in msg
+
+
+def test_grade_regression_demoted_to_advisory_by_env_knob() -> None:
+    """FAK_SCORECARD_GRADE_RATCHET=0 restores the pre-#1423 advisory read: the same
+    B->F slip stays green, surfaced only as a non-blocking GRADE-DEBT WARN."""
+    base_metrics = [graded_metric("slop", 500, "B"), graded_metric("stability", 1, "B")]
+    base = scp.baseline_doc(scp.fold(base_metrics, None, workspace=".", commit="base01"))
+    now_metrics = [graded_metric("slop", 480, "B"), graded_metric("stability", 1, "F")]
+    out = scp.fold(now_metrics, base, workspace=".", commit="now01")
+    os.environ[scp.GRADE_RATCHET_ENV] = "0"
+    try:
+        code, msg = scp.check_gate(out)
+    finally:
+        os.environ.pop(scp.GRADE_RATCHET_ENV, None)
+    assert code == 0                                    # demoted: gate stays green
+    assert "GRADE-DEBT WARN" in msg and "+7" in msg     # surfaced advisory
+    assert "GRADE-RATCHET FAIL" not in msg
+
+
+def test_grade_ratchet_green_when_no_letter_slips() -> None:
+    """The clean read: raw debt fell and every grade held — the gate passes. Proves
+    the grade ratchet does not red on a pure improvement (no false positive)."""
+    os.environ.pop(scp.GRADE_RATCHET_ENV, None)
+    base_metrics = [graded_metric("slop", 500, "B"), graded_metric("stability", 1, "B")]
+    base = scp.baseline_doc(scp.fold(base_metrics, None, workspace=".", commit="base01"))
+    # slop fell, stability held its B — no grade slipped.
+    now_metrics = [graded_metric("slop", 480, "B"), graded_metric("stability", 1, "B")]
+    out = scp.fold(now_metrics, base, workspace=".", commit="now01")
+    assert out["trend"]["grade_regressed"] == []
+    code, msg = scp.check_gate(out)
+    assert code == 0 and "RATCHET OK" in msg
+
+
+def test_baseline_carries_per_metric_grade_weights() -> None:
+    """#1423 DoD: the re-pinned baseline records each scorecard's grade severity, so
+    an A->B slip reds even at flat raw debt. Round-trips through baseline_doc."""
+    payload = scp.fold([graded_metric("slop", 5, "A"), graded_metric("stability", 3, "C")],
+                       None, workspace=".", commit="pin01")
+    doc = scp.baseline_doc(payload)
+    assert doc["grade_weights"]["slop"] == 0           # A
+    assert doc["grade_weights"]["stability"] == 2      # C
+    assert doc["grade_debt"] == 2                       # 0 + 2
+    # re-fold against its own pin: flat, no grade regression.
+    again = scp.fold([graded_metric("slop", 5, "A"), graded_metric("stability", 3, "C")],
+                     doc, workspace=".", commit="pin02")
+    assert again["trend"]["grade_regressed"] == []
+    code, _ = scp.check_gate(again)
+    assert code == 0
+
+
+def test_tracked_baseline_carries_grade_debt_and_weights() -> None:
+    """The committed baseline file (#1423 re-pin) carries the grade axis: a
+    grade_debt integer AND per-metric grade_weights for the gate to compare."""
+    base = scp.load_baseline(scp.repo_root() / scp.BASELINE_REL)
+    assert base is not None
+    assert isinstance(base.get("grade_debt"), int)
+    assert isinstance(base.get("grade_weights"), dict) and base["grade_weights"]
 
 
 def test_render_shows_grade_debt_line() -> None:

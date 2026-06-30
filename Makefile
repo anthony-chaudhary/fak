@@ -299,6 +299,14 @@ demo-scorecards:
 # The README freshness card rides scorecard_control_pane.py --check with
 # readme_debt pinned at 0, so a front-page regression reds through the existing
 # green ratchet (#779/#893): debt may hold or fall, never rise.
+#
+# The "stays Excellent" gate (#1423, epic #1414): --check now enforces the GRADE
+# axis, not only the raw-unit sum. The pinned baseline (tools/scorecard_baseline.json)
+# carries per-metric grade_weights, so a scorecard slipping a letter (A->B) reds the
+# build EVEN WHEN total_debt held flat — the regression a flat raw total would hide.
+# HARD by default; FAK_SCORECARD_GRADE_RATCHET=0 demotes it to advisory for a
+# deliberate one-off pin on a known-dirty tree. Mirror of the milestone climb
+# ratchet (#1442). Re-pin both axes with `--pin` after a real drop.
 scorecard-ratchet:
 	@python3 tools/readme_freshness_audit_test.py
 	@python3 tools/scorecard_control_pane_test.py

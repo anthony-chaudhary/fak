@@ -70,11 +70,24 @@ regression now weighs exactly as much as a ``stability`` A->B. ``grade_debt``
 runs ALONGSIDE the raw ratchet (``total_debt`` and its gate are unchanged); its
 own per-commit delta is a second advisory axis a raw-count improvement can no
 longer mask.
+
+The "stays Excellent" half (#1423, epic #1414): once a surface reaches grade A,
+an advisory grade axis is not enough — a silent A->B regression must RED the
+build, not just warn. So ``--check`` now GATES on the grade axis, not only the
+raw sum. The baseline carries per-metric ``grade_weights`` (each scorecard's
+letter-grade severity), and ``--check`` reds when any metric's grade slips below
+its pin (A->B) OR the portfolio ``grade_debt`` rises — even when ``total_debt``
+held flat. This mirrors the milestone climb ratchet (#1442): a distinct gate that
+fires on a same-debt rung swap. It is HARD by default and env-overridable to the
+old advisory behavior via ``FAK_SCORECARD_GRADE_RATCHET=0`` (for a deliberate
+one-off pin on a known-dirty tree). Re-pin with ``--pin`` after a real drop to
+ratchet both axes down together.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -84,6 +97,27 @@ from typing import Any
 SCHEMA = "fak-scorecard-control-pane/1"
 BASELINE_SCHEMA = "fak-scorecard-control-pane.baseline/1"
 BASELINE_REL = "tools/scorecard_baseline.json"
+
+# The grade-carrying ratchet knob (#1423 / #1414's "stays Excellent" half). When
+# set, ``--check`` reds the gate on a SEVERITY regression (grade_debt rose vs the
+# pinned baseline) EVEN IF the raw-unit total held — the A->B slip a flat
+# total_debt would otherwise hide. Mirrors the milestone climb ratchet (#1442):
+# a distinct gate that fires on a same-debt rung swap. Default ON; set
+# FAK_SCORECARD_GRADE_RATCHET=0 to demote it back to advisory (the old behavior).
+GRADE_RATCHET_ENV = "FAK_SCORECARD_GRADE_RATCHET"
+
+
+def grade_ratchet_hard() -> bool:
+    """True when the grade-debt ratchet should RED the gate (the default).
+
+    Off only when the operator explicitly sets ``FAK_SCORECARD_GRADE_RATCHET`` to
+    a falsey value (0/false/no/off) — then a severity regression is advisory-only,
+    the pre-#1423 behavior, for a deliberate one-off pin on a known-dirty tree.
+    """
+    raw = os.environ.get(GRADE_RATCHET_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "no", "off", ""}
 
 # --- grade-weighted portfolio lens (#712-follow-on) ------------------------
 # The raw ``total_debt`` fold sums heterogeneous units: one ``code`` defect is a
@@ -510,11 +544,13 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
     positive ``grade_delta`` even when ``total_delta`` is flat-or-down.
     """
     base_metrics = {}
+    base_grade_weights = {}
     base_commit = ""
     base_total = None
     base_grade = None
     if isinstance(baseline, dict):
         base_metrics = baseline.get("metrics") or {}
+        base_grade_weights = baseline.get("grade_weights") or {}
         base_commit = str(baseline.get("commit") or "")
         base_total = _base_int(baseline, "total_debt")
         base_grade = _base_int(baseline, "grade_debt")
@@ -533,11 +569,18 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
             "worsened": [],
             "improved": [],
             "early_warning": [],
+            "grade_regressed": [],
         }
 
     deltas: dict[str, int] = {}
     worsened: list[str] = []
     improved: list[str] = []
+    # The per-metric GRADE-regression lens (#1423): every metric whose letter grade
+    # dropped vs its pinned grade (A->B etc), independent of its raw debt. This is
+    # the culprit list the grade ratchet reds on — a severity slip a flat raw total
+    # would hide. Needs the baseline to carry per-metric grade_weights (added by
+    # baseline_doc); when the pin predates that field this stays empty (advisory).
+    grade_regressed: list[dict[str, Any]] = []
     # The per-metric early-warning lens (#712): EVERY metric whose debt rose vs its
     # pinned value, independent of where the portfolio total landed. The portfolio
     # ratchet only trips when the SUM regresses, so a single metric's rise can hide
@@ -559,6 +602,19 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
                                   "delta": delta, "from": int(prior), "to": int(m["debt"])})
         elif delta < 0:
             improved.append(m["label"])
+        # GRADE regression (severity), tracked alongside the raw-debt delta. A
+        # metric can hold its raw count yet drop a letter; the grade ratchet reds
+        # on THAT. eff_grade/grade_weight are stamped onto m by fold() before
+        # compute_trend runs.
+        prior_w = base_grade_weights.get(m["key"])
+        cur_w = m.get("grade_weight")
+        if isinstance(prior_w, int) and not isinstance(prior_w, bool) \
+                and isinstance(cur_w, int) and cur_w > prior_w:
+            grade_regressed.append({
+                "key": m["key"], "label": m["label"],
+                "from_weight": int(prior_w), "to_weight": int(cur_w),
+                "to_grade": m.get("eff_grade", "?"),
+            })
 
     total_delta = total_debt - base_total
     grade_delta = grade_debt - base_grade if base_grade is not None else 0
@@ -585,6 +641,7 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
         "worsened": worsened,
         "improved": improved,
         "early_warning": early_warning,
+        "grade_regressed": grade_regressed,
     }
 
 
@@ -595,15 +652,27 @@ def baseline_doc(payload: dict[str, Any]) -> dict[str, Any]:
         for m in payload.get("metrics", [])
         if isinstance(m.get("debt"), int)
     }
+    # Per-metric grade SEVERITY weight (A=0..F=8), pinned alongside the raw count so
+    # the grade ratchet (#1423) can name exactly which scorecard slipped a letter —
+    # an A->B regression that leaves the raw debt flat. fold() stamps grade_weight
+    # onto each measured metric before this runs.
+    grade_weights = {
+        m["key"]: int(m["grade_weight"])
+        for m in payload.get("metrics", [])
+        if isinstance(m.get("debt"), int) and isinstance(m.get("grade_weight"), int)
+    }
     return {
         "schema": BASELINE_SCHEMA,
         "commit": payload.get("commit", ""),
         "total_debt": payload.get("total_debt", 0),
         "grade_debt": payload.get("grade_debt", 0),
         "metrics": metrics,
+        "grade_weights": grade_weights,
         "_doc": ("Pinned per-metric scorecard-debt baseline for the unified "
                  "control pane. total_debt is the raw-unit ratchet gate; grade_debt "
-                 "is the scale-invariant severity companion. Re-pin after a debt "
+                 "is the scale-invariant severity companion, and grade_weights pins "
+                 "each metric's letter-grade severity so an A->B slip reds the gate "
+                 "even at flat raw debt (#1423). Re-pin after a debt "
                  "drop to ratchet the trend down: "
                  "python tools/scorecard_control_pane.py --pin"),
     }
@@ -674,6 +743,12 @@ def render(payload: dict[str, Any]) -> str:
         for e in early_warning:
             lines.append(f"  WARN early-warning: {e['label']} rose {e['from']}->{e['to']} "
                          f"(+{e['delta']}) vs baseline — hidden under a green portfolio")
+    grade_regressed = (payload.get("trend") or {}).get("grade_regressed") or []
+    if grade_regressed:
+        lines.append("")
+        for g in grade_regressed:
+            lines.append(f"  GRADE REGRESSION: {g['label']} slipped to {g['to_grade']} "
+                         f"vs pinned grade — reds the grade ratchet (#1423)")
     lines.extend(["", f"  → {payload['next_action']}"])
     return "\n".join(lines)
 
@@ -686,8 +761,15 @@ def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
     repo-3x epic (#506) wants instead: debt may hold or fall, never rise.
 
       0  flat / improved   — the ratchet held (green even with nonzero debt)
-      1  regressed         — debt rose above the pinned baseline (or unmeasured)
+      1  regressed         — debt rose above the pinned baseline (raw OR grade),
+                             or a scorecard went unmeasured
       2  unpinned          — no baseline to ratchet against; run --pin first
+
+    The GRADE ratchet (#1423, the "stays Excellent" half of #1414) is HARD by
+    default: a per-metric letter-grade slip (A->B) or a portfolio grade_debt rise
+    reds the gate EVEN WHEN the raw-unit total held — the regression a flat
+    total_debt would otherwise hide. Mirror of the milestone climb ratchet (#1442).
+    Set FAK_SCORECARD_GRADE_RATCHET=0 to demote it to advisory (the pre-#1423 read).
     """
     if int(payload.get("errored", 0)) > 0:
         errored = [m for m in payload.get("metrics", [])
@@ -701,6 +783,26 @@ def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
                    "`python tools/scorecard_control_pane.py --pin` to set one")
     if direction == "regressed":
         return 1, f"RATCHET FAIL: {trend['summary']}; worsened: {', '.join(trend['worsened']) or 'see deltas'}"
+
+    # The grade ratchet (#1423): a SEVERITY regression the raw-unit sum can mask —
+    # a metric dropping a letter (A->B) at flat raw debt, or the portfolio
+    # grade_debt rising. HARD by default (reds the gate), env-overridable to
+    # advisory. Named per-metric so the failure says exactly which surface slipped.
+    grade_delta = int(trend.get("grade_delta") or 0) if isinstance(trend, dict) else 0
+    grade_regressed = (trend.get("grade_regressed") or []) if isinstance(trend, dict) else []
+    if (grade_regressed or grade_delta > 0) and grade_ratchet_hard():
+        if grade_regressed:
+            who = ", ".join(f"{g['label']} {_weight_letter(g['from_weight'])}->{g['to_grade']}"
+                            for g in grade_regressed)
+        else:
+            who = payload.get("grade_breakdown", "see grade severity")
+        return 1, (f"GRADE-RATCHET FAIL: grade-debt rose {grade_delta:+d} to "
+                   f"{payload.get('grade_debt')} vs baseline @{trend.get('baseline_commit')} "
+                   f"— a scorecard slipped a letter the raw-unit total held flat: {who}. "
+                   f"Retire it with the owning scorecard's skill, then re-pin "
+                   f"(`--pin`); or set {GRADE_RATCHET_ENV}=0 to demote this gate to "
+                   f"advisory for a deliberate one-off pin.")
+
     msg = f"RATCHET OK: {trend['summary']} (debt {payload['total_debt']} held at-or-below baseline)"
     # The early-warning lens (#712): the portfolio ratchet held (exit 0), but a
     # per-metric rise is hiding under it — surface it ADVISORY without tripping the
@@ -710,18 +812,24 @@ def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
         msg += ("; EARLY-WARNING (advisory, gate still green): "
                 + ", ".join(f"{e['label']} +{e['delta']}" for e in early_warning)
                 + " rose vs baseline — a hidden per-metric regression; review before --pin")
-    # The grade-debt axis (severity, scale-invariant): a regression here that the
-    # raw ratchet's units mask — e.g. slop's occurrence-count fell while three
-    # bounded metrics each dropped a letter grade — is exactly the cross-family
-    # blind spot this lens closes. Advisory, like the per-metric early-warning:
-    # the raw ratchet stays the gate, severity is surfaced before a re-pin.
-    grade_delta = int(trend.get("grade_delta") or 0) if isinstance(trend, dict) else 0
-    if grade_delta > 0:
-        msg += (f"; GRADE-DEBT WARN (advisory, gate still green): severity rose "
-                f"{grade_delta:+d} to {payload.get('grade_debt')} vs baseline "
-                f"({payload.get('grade_breakdown')}) — a scale-invariant regression "
-                f"the raw-unit sum can mask; review before --pin")
+    # When the grade ratchet is DEMOTED to advisory (FAK_SCORECARD_GRADE_RATCHET=0),
+    # a severity regression that survived the hard gate above still surfaces here as
+    # a non-blocking warning — the pre-#1423 behavior, preserved under the knob.
+    if grade_delta > 0 and not grade_ratchet_hard():
+        msg += (f"; GRADE-DEBT WARN (advisory — ratchet demoted via "
+                f"{GRADE_RATCHET_ENV}=0): severity rose {grade_delta:+d} to "
+                f"{payload.get('grade_debt')} vs baseline "
+                f"({payload.get('grade_breakdown')}) — review before --pin")
     return 0, msg
+
+
+def _weight_letter(weight: int) -> str:
+    """The letter grade a severity weight came from (inverse of GRADE_DEBT), for
+    rendering a from->to grade slip in the ratchet failure message."""
+    for letter, w in GRADE_DEBT.items():
+        if w == weight:
+            return letter
+    return "?"
 
 
 def main(argv: list[str] | None = None) -> int:
