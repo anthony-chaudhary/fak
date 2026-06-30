@@ -69,7 +69,7 @@ in **who acts and how fast**. Routing the complaint to the right one is what mak
 it actionable instead of noise.
 
 1. **Operator-needed impediment** — something a human must clear (host down,
-   GPU-gated work waiting on DGX hours, a release blocked). Channel: **`fak blockers
+   GPU-gated work waiting on GPU server hours, a release blocked). Channel: **`fak blockers
    post --severity operator`** (`cmd/fak/blockers.go`, `internal/blockerpost`). This
    is the stable, shipped surface; `operator` pages `<!here>` (or a named owner),
    carries a "do this next" action, and folds the open backlog into one roll-up via
