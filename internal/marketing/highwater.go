@@ -3,6 +3,8 @@ package marketing
 import (
 	"os/exec"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // highwater.go — the marketing high-water mark: a single git ref, refs/fak/marketing/last,
@@ -32,6 +34,7 @@ const highWaterRef = "refs/fak/marketing/last"
 // the loop; the worst case is re-scanning a window the DedupeKey then collapses).
 func ReadHighWater(root string) string {
 	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", highWaterRef)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -57,6 +60,7 @@ func AdvanceHighWater(root, newSHA, expectedOld string) bool {
 		args = append(args, expectedOld)
 	}
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	return cmd.Run() == nil
 }
@@ -65,6 +69,7 @@ func AdvanceHighWater(root, newSHA, expectedOld string) bool {
 // update-ref wants the full object name); CollectShips short-forms them only for display.
 func headSHA(root string) string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {

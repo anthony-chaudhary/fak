@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Ship is one git-witnessed completion: a commit whose SUBJECT carries a real per-leaf
@@ -81,6 +82,7 @@ func runGitLog(root, revRange string) (string, error) {
 		args = append(args, revRange)
 	}
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	b, err := cmd.Output()
 	if err != nil {
