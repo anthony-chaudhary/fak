@@ -47,7 +47,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	msg := fs.String("m", "", "commit message (mutually exclusive with -F)")
 	msgFile := fs.String("F", "", "read the commit message from this file ('-' = stdin)")
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
-	trunk := fs.String("trunk", "", "expected trunk branch (default: main)")
+	trunk := fs.String("trunk", "", "expected development branch override (default: configured development branch)")
 	push := fs.Bool("push", false, "push after a VERIFIED commit (plain push, never --force)")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
@@ -72,7 +72,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		if code != 0 {
 			return code
 		}
-		return runCommitPreview(stdout, stderr, message, paths, resolveRoot(*dir), *asJSON, *requireIssue)
+		root := resolveRoot(*dir)
+		return runCommitPreview(stdout, stderr, message, paths, root, safecommit.ExpectedTrunk(root, *trunk), *asJSON, *requireIssue)
 	}
 
 	if len(paths) == 0 {
@@ -93,7 +94,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		rep := hooks.LintCommitMessageWithOptions(message, paths, resolveRoot(*dir), true)
 		if !rep.OK {
 			fmt.Fprintln(stderr, "fak commit: --require-issue refused this commit:")
-			renderPreview(stderr, rep)
+			renderPreview(stderr, rep, "")
 			return 3
 		}
 	}

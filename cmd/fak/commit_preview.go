@@ -10,15 +10,19 @@ import (
 
 // runCommitPreview lints a proposed commit (message + the paths it would touch) and reports the
 // verdict WITHOUT running git. Exit 0 when nothing blocking was found, 1 otherwise.
-func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root string, asJSON, requireIssue bool) int {
+func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root, expectedBranch string, asJSON, requireIssue bool) int {
 	rep := hooks.LintCommitMessageWithOptions(message, paths, root, requireIssue)
 	if asJSON {
-		if err := writeIndentedJSON(stdout, rep); err != nil {
+		payload := struct {
+			hooks.CommitLintReport
+			ExpectedBranch string `json:"expected_branch,omitempty"`
+		}{CommitLintReport: rep, ExpectedBranch: expectedBranch}
+		if err := writeIndentedJSON(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fak commit: %v\n", err)
 			return 1
 		}
 	} else {
-		renderPreview(stdout, rep)
+		renderPreview(stdout, rep, expectedBranch)
 	}
 	if rep.OK {
 		return 0
@@ -26,7 +30,7 @@ func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, 
 	return 1
 }
 
-func renderPreview(w io.Writer, r hooks.CommitLintReport) {
+func renderPreview(w io.Writer, r hooks.CommitLintReport, expectedBranch string) {
 	if r.OK {
 		fmt.Fprintln(w, "commit-preview OK — subject is witness-gradeable and bindable")
 	} else {
@@ -41,6 +45,9 @@ func renderPreview(w io.Writer, r hooks.CommitLintReport) {
 	fmt.Fprintln(w)
 	if len(r.PathLanes) > 0 {
 		fmt.Fprintf(w, "  path lane: %s\n", strings.Join(r.PathLanes, ", "))
+	}
+	if expectedBranch != "" {
+		fmt.Fprintf(w, "  expected branch: %s\n", expectedBranch)
 	}
 	fmt.Fprintf(w, "  issue link: resolving=%v", r.IssueResolving)
 	if len(r.IssueRefs) > 0 {

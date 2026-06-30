@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,6 +79,9 @@ func TestRunCommitPreview_jsonShape(t *testing.T) {
 	if got["generation"] != "gen/next" {
 		t.Errorf("preview JSON should preserve generation sidecar, got %v", got["generation"])
 	}
+	if got["expected_branch"] != "main" {
+		t.Errorf("preview JSON should report expected branch, got %v", got["expected_branch"])
+	}
 }
 
 func TestRunCommitPreview_rendersGenerationSidecar(t *testing.T) {
@@ -108,4 +113,32 @@ func TestRunCommitPreview_doesNotCommit(t *testing.T) {
 		"-m", "feat(gateway): add x (fak gateway)",
 		"--path", "internal/gateway/server.go",
 	})
+}
+
+func TestRunCommitPreview_reportsConfiguredDevelopmentBranch(t *testing.T) {
+	tmp := t.TempDir()
+	dos := `[branch_roles]
+development_branch = "dev"
+
+[lanes]
+concurrent = ["gateway"]
+
+[lanes.trees]
+gateway = ["internal/gateway/**"]
+`
+	if err := os.WriteFile(filepath.Join(tmp, "dos.toml"), []byte(dos), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--preview", "--dir", tmp,
+		"-m", "feat(gateway): add x (fak gateway)",
+		"--path", "internal/gateway/server.go",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d (out=%q err=%q)", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "expected branch: dev") {
+		t.Fatalf("preview should render configured expected branch, got %q", out.String())
+	}
 }

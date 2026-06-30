@@ -117,7 +117,7 @@ func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, 
 	rep := hooks.LintCommitMessage(message, paths, root)
 	if !rep.OK {
 		fmt.Fprintln(stderr, "fak sweep --apply: refused — the subject/stamp did not pass preview:")
-		renderPreview(stderr, rep)
+		renderPreview(stderr, rep, safecommit.ExpectedTrunk(root, ""))
 		return 3
 	}
 

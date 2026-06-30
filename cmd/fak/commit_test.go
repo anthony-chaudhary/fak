@@ -101,7 +101,7 @@ func TestRunCommit_jsonShapeAndRaceExitCode(t *testing.T) {
 
 func TestRunCommit_offTrunkExit3(t *testing.T) {
 	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
-		return safecommit.Result{Reason: safecommit.ReasonOffTrunk, Detail: "on feature/x, expected main", Paths: o.Paths}, nil
+		return safecommit.Result{Reason: safecommit.ReasonOffTrunk, Detail: "on feature/x, expected development branch main", Paths: o.Paths}, nil
 	})
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "msg"})

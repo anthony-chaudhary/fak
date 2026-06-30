@@ -37,6 +37,15 @@ func TestTaskHandoffDryRunPlansIssueCreate(t *testing.T) {
 	if got.Planned[0].Key != "task_push_next/live-smoke" {
 		t.Fatalf("planned key = %q, want stable next-step key", got.Planned[0].Key)
 	}
+	labels := map[string]bool{}
+	for _, label := range got.Planned[0].Labels {
+		labels[label] = true
+	}
+	for _, want := range []string{"agent-handoff", "generation", "gen/next"} {
+		if !labels[want] {
+			t.Fatalf("planned labels = %+v, missing %q", got.Planned[0].Labels, want)
+		}
+	}
 }
 
 func TestTaskHandoffRefusesUnwitnessedCompletion(t *testing.T) {
@@ -121,11 +130,15 @@ func writeTaskHandoffFixtureWithScope(t *testing.T, dir string, witnessed, scope
 			State:  taskmgr.StateDone,
 		},
 		NextSteps: []taskmgr.HandoffNextStep{{
-			Key:    "task_push_next/live-smoke",
-			Title:  "Run live task handoff issue sync smoke",
-			Body:   "Exercise `fak task handoff --live` against a disposable follow-up issue.",
-			Reason: "Dry-run planning is covered; live gh behavior still needs an operator-owned witness.",
-			Labels: []string{"agent-handoff"},
+			Key:                "task_push_next/live-smoke",
+			Title:              "Run live task handoff issue sync smoke",
+			Body:               "Exercise `fak task handoff --live` against a disposable follow-up issue.",
+			Reason:             "Dry-run planning is covered; live gh behavior still needs an operator-owned witness.",
+			Generation:         "gen/next",
+			PromotionEvidence:  []string{"The live smoke proves task handoffs can feed dispatch safely."},
+			DemotionEvidence:   []string{"Generated follow-ups increase ambiguity or duplicate existing work."},
+			GenerationNonGoals: []string{"Do not treat gen/next as a branch or runtime exposure flag."},
+			Labels:             []string{"agent-handoff"},
 		}},
 	}
 	if scoped {
@@ -135,6 +148,7 @@ func writeTaskHandoffFixtureWithScope(t *testing.T, dir string, witnessed, scope
 		step.WorkUnit = "leaf"
 		step.ExpectedSteps = 4
 		step.Assumptions = []string{"The disposable issue fixture can be updated by marker key."}
+		step.InvalidatingAssumptions = []string{"The generated issue body stops being enough for the next worker to resume."}
 		step.ConfusionRisks = []string{"A live smoke is not a broad redesign of task storage."}
 		step.Coordination = []string{"Do not run concurrently with other taskmgr issue-body edits."}
 		step.Trigger = "Verified task handoff proposes one follow-up after the dry-run path passed."
