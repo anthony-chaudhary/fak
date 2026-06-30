@@ -129,6 +129,10 @@ func cmdGuard(argv []string) {
 	denyAllMax := fs.Int("deny-all-max", guardStopHookDefaultMax, "with --deny-all-continue=enforce: the hard give-up — the maximum number of CONSECUTIVE deny-all turns to auto-continue past (with escalating guidance) before letting the turn end, so a model that keeps re-proposing refused calls cannot loop forever. The give-up is LOGGED so it is not a silent false-stop.")
 	denyAllWarn := fs.Int("deny-all-warn", guardStopHookDefaultWarn, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the auto-continue guidance escalates from a gentle nudge to a relevance-decision WARNING (asks the agent whether the remaining work is reachable under the floor, and to declare BLOCKED and stop cleanly if not). Clamped to <= --deny-all-final <= --deny-all-max.")
 	denyAllFinal := fs.Int("deny-all-final", guardStopHookDefaultFinal, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the guidance escalates to a FINAL warning, the last attempts before the hard give-up at --deny-all-max.")
+	taskHandoffMode := fs.String("task-handoff", guardPreCompactModeEnforce, "Claude Code Stop hook completion handoff gate: off|shadow|enforce. ENFORCE by default: on a clean stop, require a valid fak.task-handoff.v1 JSON with witnessed done + current state + 1-2 next steps or no-next-step reason. The path is exposed as FAK_TASK_HANDOFF_FILE.")
+	taskHandoffFile := fs.String("task-handoff-file", "", "path the wrapped agent must write with fak.task-handoff.v1 before a clean stop (default: a private temp file for this guard session)")
+	taskHandoffRepo := fs.String("task-handoff-repo", "", "owner/repo for optional live handoff issue sync (passed to fak task handoff --live)")
+	taskHandoffLive := fs.Bool("task-handoff-live", false, "after a valid handoff with next_steps, the Stop hook runs fak task handoff --live before allowing the clean stop")
 	splitMode := fs.String("split", "auto", "the default-launch UI: open a 20% `fak info` pane BESIDE the 80% interactive agent pane so the live cache/token economy + the kernel floor's safety counters stay on screen (a bare `fak guard -- claude` hands the whole terminal to Claude, hiding fak). auto|on|off. AUTO (default): enable ONLY for an attended interactive launch inside a terminal multiplexer (tmux, or Windows Terminal via $WT_SESSION); no-op for headless/piped/CI/plain-terminal launches (zero behavior change there). on forces it (prints a recipe if no multiplexer is found); off disables. The pane polls THIS guard's own loopback gateway (auth-exempt on loopback); the bearer is never placed on a pane command line.")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a \"bottom\" strip or a \"right\" column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
@@ -474,12 +478,20 @@ func cmdGuard(argv []string) {
 	if guardTraceID == "" {
 		guardTraceID = "guard"
 	}
+	if err := configureServeSessionDurability(serveSessions, "", os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard:", err)
+		os.Exit(1)
+	}
 	if *contextBudgetTokens > 0 {
 		serveSessions.SetBudget(guardTraceID, session.Budget{
 			TurnsLeft:         session.Unbounded,
 			TokensLeft:        session.Unbounded,
 			ContextTokensLeft: *contextBudgetTokens,
 		})
+	}
+	if err := registerServeSessionDurability(context.Background(), guardTraceID); err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard:", err)
+		os.Exit(1)
 	}
 	restarter := newGuardBudgetRestarter(*restartOnBudget, *contextBudgetTokens, *restartLimit, *restartSeedDir, os.Stderr)
 
@@ -670,9 +682,26 @@ func cmdGuard(argv []string) {
 	// PreCompact hook wrote (preCompactInstall.SettingsPath; "" when PreCompact is off, in which
 	// case the Stop hook writes + injects its own). This is the harness half of the deny-all
 	// false-stop fix: it resumes the agent past a turn the floor refused entirely. See guard_stophook.go.
+	handoffMode, err := normalizeGuardTaskHandoffMode(*taskHandoffMode)
+	if err != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "fak guard: task handoff setup failed: %v\n", err)
+		os.Exit(2)
+	}
+	handoffFile := strings.TrimSpace(*taskHandoffFile)
+	if handoffMode != guardPreCompactModeOff && handoffFile == "" {
+		dir, err := os.MkdirTemp("", "fak-guard-handoff-*")
+		if err != nil {
+			cancel()
+			fmt.Fprintf(os.Stderr, "fak guard: task handoff setup failed: %v\n", err)
+			os.Exit(1)
+		}
+		handoffFile = filepath.Join(dir, "task-handoff.json")
+	}
+	handoffCfg := guardTaskHandoffConfig{Mode: handoffMode, File: handoffFile, Repo: *taskHandoffRepo, Live: *taskHandoffLive}
 	var stopHookInstall guardStopHookInstall
 	var stopHookEnv [][2]string
-	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax)
+	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, handoffCfg)
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook setup failed: %v\n", err)
@@ -703,6 +732,13 @@ func cmdGuard(argv []string) {
 		}
 		if stopHookInstall.Applied {
 			fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook (deny-all auto-continue): %s — graduated nudge→warn(%d)→final(%d)→give-up(>%d consecutive); a floor-refused-everything turn is reported as end_turn and this resumes the agent past it with escalating guidance, the give-up logged (--deny-all-continue off to disable)\n", stopHookInstall.Mode, stopHookInstall.WarnAt, stopHookInstall.FinalAt, stopHookInstall.Max)
+		}
+		if len(guardTaskHandoffEnv(handoffCfg)) > 0 {
+			live := "validate-only"
+			if handoffCfg.Live {
+				live = "live-issue-sync"
+			}
+			fmt.Fprintf(os.Stderr, "fak guard: task handoff Stop gate: %s (%s) — clean stops require %s; child sees $%s\n", handoffCfg.Mode, live, handoffCfg.File, guardTaskHandoffFileEnv)
 		}
 		printGuardCodexNote(os.Stderr, codexInstall)
 		switch {

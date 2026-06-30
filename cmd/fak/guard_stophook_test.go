@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 )
 
 func TestGuardStopHookDecision(t *testing.T) {
@@ -128,6 +130,77 @@ func TestRunGuardStopHookEnforceAllowsWhenNoDenyAll(t *testing.T) {
 	})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (a clean completion is a real stop)", code)
+	}
+}
+
+func TestRunGuardStopHookBlocksCleanStopWithoutTaskHandoff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 0\n"))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--task-handoff-mode", guardPreCompactModeEnforce,
+		"--task-handoff-file", filepath.Join(t.TempDir(), "missing-handoff.json"),
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (block clean stop until handoff exists); stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "task handoff required") || !strings.Contains(stderr.String(), taskmgr.SchemaHandoff) {
+		t.Fatalf("stderr should tell the agent how to write the handoff: %q", stderr.String())
+	}
+}
+
+func TestRunGuardStopHookAllowsValidTaskHandoff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 0\n"))
+	}))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "handoff.json")
+	writeGuardStopHookHandoff(t, path, []taskmgr.HandoffNextStep{{
+		Key:    "guard-test/follow-up",
+		Title:  "Follow up after guarded task",
+		Body:   "Pick up the remaining validation work.",
+		Reason: "The completed task left a concrete verification rung.",
+	}}, "")
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--task-handoff-mode", guardPreCompactModeEnforce,
+		"--task-handoff-file", path,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for valid handoff; stderr=%s", code, stderr.String())
+	}
+}
+
+func TestRunGuardStopHookDenyAllPrecedesTaskHandoff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fak_guard_deny_all_consecutive 1\n"))
+	}))
+	defer srv.Close()
+
+	var stderr strings.Builder
+	code := runGuardStopHook(&stderr, strings.NewReader("{}"), []string{
+		"--mode", guardPreCompactModeEnforce,
+		"--metrics-url", srv.URL + "/metrics",
+		"--task-handoff-mode", guardPreCompactModeEnforce,
+		"--task-handoff-file", filepath.Join(t.TempDir(), "missing-handoff.json"),
+		"--max", "3",
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "ALLOWED alternative") {
+		t.Fatalf("deny-all guidance should take precedence, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "task handoff required") {
+		t.Fatalf("task handoff should not mask deny-all guidance: %q", stderr.String())
 	}
 }
 
@@ -279,6 +352,29 @@ func TestInstallGuardStopHookCreatesOwnSettingsWhenPreCompactOff(t *testing.T) {
 	}
 }
 
+func TestInstallGuardStopHookInjectsTaskHandoffEnv(t *testing.T) {
+	dir := t.TempDir()
+	handoffPath := filepath.Join(dir, "handoff.json")
+	_, env, install, err := installGuardStopHookAt(
+		[]string{"claude", "-p", "hi"}, guardPreCompactModeEnforce, "http://127.0.0.1:4567",
+		filepath.Join(dir, "fak.exe"), dir, "", 3, 7, 9,
+		guardTaskHandoffConfig{Mode: guardPreCompactModeEnforce, File: handoffPath, Repo: "owner/repo", Live: true})
+	if err != nil || !install.Applied {
+		t.Fatalf("install: applied=%v err=%v", install.Applied, err)
+	}
+	got := map[string]string{}
+	for _, kv := range env {
+		got[kv[0]] = kv[1]
+	}
+	if got[guardTaskHandoffEnvMode] != guardPreCompactModeEnforce ||
+		got[guardTaskHandoffEnvFile] != handoffPath ||
+		got[guardTaskHandoffFileEnv] != handoffPath ||
+		got[guardTaskHandoffEnvRepo] != "owner/repo" ||
+		got[guardTaskHandoffEnvLive] != "1" {
+		t.Fatalf("task handoff env missing: %+v", got)
+	}
+}
+
 func TestInstallGuardStopHookSkipsOffAndNonClaude(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -304,5 +400,32 @@ func TestInstallGuardStopHookSkipsOffAndNonClaude(t *testing.T) {
 				t.Fatalf("command changed: %v -> %v", tc.command, command)
 			}
 		})
+	}
+}
+
+func writeGuardStopHookHandoff(t *testing.T, path string, steps []taskmgr.HandoffNextStep, noNext string) {
+	t.Helper()
+	h := taskmgr.Handoff{
+		Schema:       taskmgr.SchemaHandoff,
+		CurrentState: "The guarded task completed and the remaining state is documented.",
+		Task: taskmgr.HandoffTask{
+			TaskID: "guard-test",
+			Title:  "guard test",
+			State:  taskmgr.StateDone,
+			Witness: &taskmgr.WitnessRecord{
+				VerifiedState: taskmgr.VerifiedDone,
+				Source:        "test",
+				SHA:           "deadbeef",
+			},
+		},
+		NextSteps:        steps,
+		NoNextStepReason: noNext,
+	}
+	b, err := json.MarshalIndent(h, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -33,6 +33,7 @@ var hardJunk = []*regexp.Regexp{
 	regexp.MustCompile(`(^|/)node_modules/`),
 	regexp.MustCompile(`\.(pyc|pyo|class|o|a|obj)$`),
 	regexp.MustCompile(`\.(exe|dll|so|dylib)$`),
+	regexp.MustCompile(`^coverage$`),
 	regexp.MustCompile(`(^|/)coverage\.out$`),
 	regexp.MustCompile(`\.coverprofile$`),
 	regexp.MustCompile(`(^|/)\.DS_Store$`),

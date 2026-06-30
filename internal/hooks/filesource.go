@@ -181,6 +181,9 @@ func findDeadInlineRefs(fp fileProbe, f, dir, content string) []Finding {
 // shared by the staged FILE_ADMISSION gate and its tree twin (formerly classifyFile /
 // classifyFileTree). The only disk dependency is the size cap, read through fp.Size.
 func classifyFileWith(fp fileProbe, p string) string {
+	if why := opsArtifactReason(fp, p); why != "" {
+		return why
+	}
 	for _, sf := range secretFiles {
 		if sf.re.MatchString(p) {
 			return sf.why
@@ -213,4 +216,69 @@ func classifyFileWith(fp fileProbe, p string) string {
 		return oversizedBlobMsg(sz)
 	}
 	return ""
+}
+
+func opsArtifactReason(fp fileProbe, p string) string {
+	if opsMarkerFile(fp, p) {
+		return "operational status/reservation artifact (fak:operator-private marker) — move to fak-private or keep it gitignored"
+	}
+	if opsLooseDoc(p) {
+		return "operational status/reservation artifact (loose ops doc) — mark it fak:operator-private and move to fak-private, or put a curated note under docs/notes/"
+	}
+	return ""
+}
+
+func opsMarkerFile(fp fileProbe, p string) bool {
+	if p == "AGENTS.md" {
+		return false
+	}
+	ext := strings.ToLower(path.Ext(p))
+	switch ext {
+	case ".md", ".txt", ".json", ".yaml", ".yml":
+	default:
+		return false
+	}
+	fr, ok := fp.(fileReader)
+	if !ok {
+		return false
+	}
+	b, ok := fr.FileBytes(p)
+	return ok && strings.Contains(strings.ToLower(string(b)), "fak:operator-private")
+}
+
+func opsLooseDoc(p string) bool {
+	if grandfatheredOpsDoc[p] {
+		return false
+	}
+	if !strings.HasSuffix(strings.ToLower(p), ".md") {
+		return false
+	}
+	if strings.Contains(p, "/") {
+		dir := path.Dir(p)
+		if dir != "docs" {
+			return false
+		}
+	}
+	base := strings.ToLower(strings.TrimSuffix(path.Base(p), path.Ext(p)))
+	return hasAnyToken(base, opsInfraTokens) && hasAnyToken(base, opsStateTokens)
+}
+
+var opsInfraTokens = []string{"dispatch", "fleet", "gpu", "node", "reserve"}
+var opsStateTokens = []string{"availability", "reservation", "roster", "status"}
+var grandfatheredOpsDoc = map[string]bool{
+	"docs/dispatch-status.md": true,
+}
+
+func hasAnyToken(s string, toks []string) bool {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '-' || r == '_' || r == ' ' || r == '.'
+	})
+	for _, part := range parts {
+		for _, tok := range toks {
+			if part == tok {
+				return true
+			}
+		}
+	}
+	return false
 }

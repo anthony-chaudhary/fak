@@ -25,8 +25,10 @@ autopick = ["gateway", "policy"]
 gateway = ["internal/gateway/**"]
 policy  = ["internal/policy/**"]
 cmd     = ["cmd/**"]
-docs    = ["docs/**"]
+docs    = ["docs/**", "README.md", "INDEX.md", "llms.txt", "llms-full.txt"]
 release = ["VERSION", "docs/releases/**"]
+dos     = ["dos.toml", ".gitignore"]
+tools   = ["tools/**", "scripts/**"]
 global  = ["**/*"]
 
 [stamp]
@@ -159,6 +161,54 @@ func TestLintCommitMessage_releaseExempt(t *testing.T) {
 	// VERSION is a bare (non-glob) tree entry -> resolves to the release lane.
 	if len(r.PathLanes) != 1 || r.PathLanes[0] != "release" {
 		t.Errorf("want VERSION -> release lane, got %v", r.PathLanes)
+	}
+}
+
+func TestLintCommitMessage_rootDocsResolveToDocsLane(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage("docs(readme): update the entrypoint (fak docs)", []string{"README.md", "INDEX.md", "llms.txt"}, root)
+	if !r.OK {
+		t.Fatalf("expected root docs to lint cleanly, got issues=%v notes=%v", r.Issues, r.Notes)
+	}
+	if len(r.PathLanes) != 1 || r.PathLanes[0] != "docs" {
+		t.Fatalf("root docs PathLanes = %v, want [docs]", r.PathLanes)
+	}
+	if !r.LeafMatches {
+		t.Fatalf("(fak docs) should match root docs paths: %+v", r)
+	}
+	if r.SuggestTrailer != "(fak docs)" {
+		t.Fatalf("SuggestTrailer = %q, want (fak docs)", r.SuggestTrailer)
+	}
+}
+
+func TestLintCommitMessage_dosTomlResolvesToDosLane(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage("fix(dos): route taxonomy edits (fak dos)", []string{"dos.toml", ".gitignore"}, root)
+	if !r.OK {
+		t.Fatalf("expected dos.toml to lint cleanly, got issues=%v notes=%v", r.Issues, r.Notes)
+	}
+	if len(r.PathLanes) != 1 || r.PathLanes[0] != "dos" {
+		t.Fatalf("dos.toml PathLanes = %v, want [dos]", r.PathLanes)
+	}
+	if !r.LeafMatches {
+		t.Fatalf("(fak dos) should match dos.toml: %+v", r)
+	}
+	if r.SuggestTrailer != "(fak dos)" {
+		t.Fatalf("SuggestTrailer = %q, want (fak dos)", r.SuggestTrailer)
+	}
+}
+
+func TestLintCommitMessage_scriptsResolveToToolsLane(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage("fix(tools): refresh helper script (fak tools)", []string{"scripts/gcp-fleet-janitor.sh"}, root)
+	if !r.OK {
+		t.Fatalf("expected scripts/ helper to lint cleanly, got issues=%v notes=%v", r.Issues, r.Notes)
+	}
+	if len(r.PathLanes) != 1 || r.PathLanes[0] != "tools" {
+		t.Fatalf("scripts helper PathLanes = %v, want [tools]", r.PathLanes)
+	}
+	if !r.LeafMatches {
+		t.Fatalf("(fak tools) should match scripts/ helper: %+v", r)
 	}
 }
 

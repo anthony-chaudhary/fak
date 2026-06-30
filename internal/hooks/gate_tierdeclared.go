@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -109,6 +111,9 @@ func gateTierDeclaredTree(t *TrackedTree) ([]Finding, error) {
 		if hasGo[pkg] {
 			continue
 		}
+		if packageExistsOnDisk(t.Root, pkg) {
+			continue
+		}
 		findings = append(findings, Finding{
 			Gate: "TIER_DECLARED",
 			File: "internal/" + pkg + "/",
@@ -118,4 +123,24 @@ func gateTierDeclaredTree(t *TrackedTree) ([]Finding, error) {
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
 	return findings, nil
+}
+
+func packageExistsOnDisk(root, pkg string) bool {
+	if root == "" {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "internal", pkg))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
+			return true
+		}
+	}
+	return false
 }

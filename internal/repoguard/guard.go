@@ -398,7 +398,7 @@ func classifyCommand(command, workspaceRoot string, safeRoots []string) []Violat
 		if nullDevices[absTarget] {
 			continue // the null / std-stream device sinks — harmless, never a sibling
 		}
-		if underAny(absTarget, safe) {
+		if underAny(absTarget, safe, ws) {
 			continue // scratch
 		}
 		violations = append(violations, violation(tg.op, tg.raw, absTarget, whyOutside(absTarget, ws)))
@@ -427,10 +427,12 @@ func classifyWritePath(filePath, workspaceRoot string, safeRoots []string) []Vio
 	if nullDevices[absTarget] {
 		return nil // the null / std-stream device sinks — harmless, never a sibling
 	}
-	for _, s := range safeRoots {
-		if isUnder(absTarget, normalize(s)) {
-			return nil
-		}
+	safe := make([]string, len(safeRoots))
+	for i, s := range safeRoots {
+		safe[i] = normalize(s)
+	}
+	if underAny(absTarget, safe, ws) {
+		return nil
 	}
 	return []Violation{violation("write", filePath, absTarget, whyOutside(absTarget, ws))}
 }
@@ -440,8 +442,11 @@ func ClassifyWritePath(filePath, workspaceRoot string, safeRoots []string) []Vio
 	return classifyWritePath(filePath, workspaceRoot, safeRoots)
 }
 
-func underAny(absTarget string, roots []string) bool {
+func underAny(absTarget string, roots []string, workspace string) bool {
 	for _, s := range roots {
+		if isUnder(workspace, s) {
+			continue
+		}
 		if isUnder(absTarget, s) {
 			return true
 		}

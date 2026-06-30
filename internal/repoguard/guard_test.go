@@ -70,6 +70,19 @@ func TestScratchRootsAllowed(t *testing.T) {
 	}
 }
 
+func TestSafeRootAncestorDoesNotSwallowWorkspaceSiblings(t *testing.T) {
+	// WSL fast tests mirror the repo under ~/.cache. If the ~/.cache safe root is allowed
+	// to cover a workspace below it, an out-of-tree sibling write becomes invisible.
+	ws := "/home/user/.cache/fak-src/cmd/fak/.loop-containment-123/repo"
+	v := ClassifyCommand("echo bad > ../victim.txt", ws, []string{"/home/user/.cache"})
+	if len(v) == 0 {
+		t.Fatal("expected a violation for a sibling write under an ancestor safe root")
+	}
+	if v[0].Reason != "OUT_OF_TREE_WRITE" {
+		t.Errorf("reason = %q, want OUT_OF_TREE_WRITE", v[0].Reason)
+	}
+}
+
 func TestClaudeStateDirIsASafeRoot(t *testing.T) {
 	if !strings.Contains(strings.Join(defaultSafeRoots(), ""), "/.claude") {
 		t.Error("default safe roots must include the agent's ~/.claude state tree")

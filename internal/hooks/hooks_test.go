@@ -119,6 +119,7 @@ func TestFileAdmission_precedenceAndJunk(t *testing.T) {
 		"secrets/db.txt",          // SECRET_FILES
 		"cmd/dgxbox/main.go",      // PRIVATE_ONLY
 		"build/__pycache__/x.pyc", // HARD_JUNK
+		"coverage",                // HARD_JUNK
 		"foo.log",                 // SOFT_JUNK (not exempt)
 		"internal/x.log",          // SOFT_JUNK but EXEMPT_DATA_DIRS -> clean
 		"src/main.go",             // clean
@@ -133,6 +134,9 @@ func TestFileAdmission_precedenceAndJunk(t *testing.T) {
 	if !hasFindingFor(f, "FILE_ADMISSION", "build artifact") {
 		t.Errorf("missed __pycache__; got %+v", f)
 	}
+	if !hasFileAdmissionFindingForPath(f, "coverage") {
+		t.Errorf("missed root coverage; got %+v", f)
+	}
 	if !hasFindingFor(f, "FILE_ADMISSION", "log / temp") {
 		t.Errorf("missed foo.log; got %+v", f)
 	}
@@ -144,6 +148,15 @@ func TestFileAdmission_precedenceAndJunk(t *testing.T) {
 			t.Errorf("a normal .go file must be clean")
 		}
 	}
+}
+
+func hasFileAdmissionFindingForPath(fs []Finding, path string) bool {
+	for _, f := range fs {
+		if f.Gate == "FILE_ADMISSION" && f.File == path {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDocPlacement_rootMD(t *testing.T) {

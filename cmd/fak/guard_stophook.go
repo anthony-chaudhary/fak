@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 )
 
 // guard_stophook.go — the harness half of the deny-all false-stop fix.
@@ -39,6 +42,16 @@ const (
 	guardStopHookEnvMax        = "FAK_GUARD_DENYALL_MAX"
 	guardStopHookEnvWarn       = "FAK_GUARD_DENYALL_WARN"
 	guardStopHookEnvFinal      = "FAK_GUARD_DENYALL_FINAL"
+
+	guardTaskHandoffEnvMode = "FAK_GUARD_TASK_HANDOFF_MODE"
+	guardTaskHandoffEnvFile = "FAK_GUARD_TASK_HANDOFF_FILE"
+	guardTaskHandoffEnvRepo = "FAK_GUARD_TASK_HANDOFF_REPO"
+	guardTaskHandoffEnvLive = "FAK_GUARD_TASK_HANDOFF_LIVE"
+
+	// guardTaskHandoffFileEnv is the short, model-facing alias the wrapped agent sees. The
+	// hook reads the guard-prefixed env above, but the continuation instruction points agents
+	// at this stable name so they do not need to learn the hook's private wiring names.
+	guardTaskHandoffFileEnv = "FAK_TASK_HANDOFF_FILE"
 
 	// guardStopHookMetricName is the gateway gauge this hook polls: the count of consecutive
 	// deny-all turns ending the most recent served turn (0 on a healthy completion).
@@ -171,6 +184,13 @@ type guardStopHookInstall struct {
 	Reason       string
 }
 
+type guardTaskHandoffConfig struct {
+	Mode string
+	File string
+	Repo string
+	Live bool
+}
+
 func cmdGuardStopHook(argv []string) {
 	os.Exit(runGuardStopHook(os.Stderr, os.Stdin, argv))
 }
@@ -187,6 +207,10 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 	maxFlag := fs.Int("max", guardStopHookMaxFromEnv(), "hard give-up: max consecutive deny-all turns to auto-continue past before letting the turn end")
 	warnFlag := fs.Int("warn", guardStopHookWarnFromEnv(), "escalate the continue guidance to a relevance-decision warning at this consecutive deny-all depth")
 	finalFlag := fs.Int("final", guardStopHookFinalFromEnv(), "escalate the continue guidance to a final warning at this consecutive deny-all depth")
+	handoffModeFlag := fs.String("task-handoff-mode", os.Getenv(guardTaskHandoffEnvMode), "completion handoff gate: off|shadow|enforce")
+	handoffFileFlag := fs.String("task-handoff-file", os.Getenv(guardTaskHandoffEnvFile), "path to fak.task-handoff.v1 JSON the agent must write before a clean stop")
+	handoffRepoFlag := fs.String("task-handoff-repo", os.Getenv(guardTaskHandoffEnvRepo), "owner/repo passed to fak task handoff --live")
+	handoffLiveFlag := fs.Bool("task-handoff-live", guardTaskHandoffLiveFromEnv(), "when true, sync valid next steps to GitHub with fak task handoff --live")
 	timeout := fs.Duration("timeout", 500*time.Millisecond, "maximum time to wait for the gateway gauge")
 	if err := fs.Parse(argv); err != nil {
 		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; bad hook args: %v\n", err)
@@ -240,8 +264,97 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) int {
 	// residual false-stop — make it loud and operator-visible (it is NOT fed to the model).
 	if stage == guardStopHookGiveUp {
 		fmt.Fprintln(stderr, guardStopHookGiveUpMessage(consecutive, maxN))
+		return 0
+	}
+	if stage == guardStopHookAllow {
+		return runGuardTaskHandoffGate(stderr, guardTaskHandoffConfig{
+			Mode: *handoffModeFlag,
+			File: *handoffFileFlag,
+			Repo: *handoffRepoFlag,
+			Live: *handoffLiveFlag,
+		})
 	}
 	return 0
+}
+
+func runGuardTaskHandoffGate(stderr io.Writer, cfg guardTaskHandoffConfig) int {
+	mode, err := normalizeGuardTaskHandoffMode(cfg.Mode)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak guard Stop: allowing stop; %v\n", err)
+		return 0
+	}
+	if mode == guardPreCompactModeOff {
+		return 0
+	}
+	file := strings.TrimSpace(cfg.File)
+	if file == "" {
+		fmt.Fprintln(stderr, "fak guard Stop: allowing stop; task handoff gate enabled but no handoff file configured")
+		return 0
+	}
+	handoff, review, err := readAndReviewGuardTaskHandoff(file)
+	if err != nil || !review.OK {
+		msg := guardTaskHandoffRequiredMessage(file, review, err, cfg.Live, cfg.Repo)
+		if mode == guardPreCompactModeShadow {
+			fmt.Fprintf(stderr, "fak guard Stop: shadow would block clean stop for task handoff: %s\n", strings.TrimSpace(msg))
+			return 0
+		}
+		fmt.Fprintln(stderr, msg)
+		return 2
+	}
+	if cfg.Live && len(handoff.NextSteps) > 0 {
+		var out, errb bytes.Buffer
+		args := []string{"--file", file, "--live", "--json"}
+		if repo := strings.TrimSpace(cfg.Repo); repo != "" {
+			args = append(args, "--repo", repo)
+		}
+		code := runTaskHandoff(&out, &errb, args)
+		if code != 0 {
+			msg := fmt.Sprintf("fak guard Stop: task handoff is valid, but live GitHub issue sync failed (exit %d): %s", code, strings.TrimSpace(errb.String()))
+			if mode == guardPreCompactModeShadow {
+				fmt.Fprintln(stderr, "fak guard Stop: shadow would block clean stop: "+msg)
+				return 0
+			}
+			fmt.Fprintln(stderr, msg)
+			fmt.Fprintln(stderr, "Fix the handoff or GitHub sync, then stop again; use --task-handoff-live=false to require only the validated handoff artifact.")
+			return 2
+		}
+	}
+	return 0
+}
+
+func readAndReviewGuardTaskHandoff(file string) (taskmgr.Handoff, taskmgr.HandoffReview, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return taskmgr.Handoff{}, taskmgr.HandoffReview{}, err
+	}
+	var h taskmgr.Handoff
+	if err := json.Unmarshal(b, &h); err != nil {
+		return taskmgr.Handoff{}, taskmgr.HandoffReview{}, err
+	}
+	return h, taskmgr.ReviewHandoff(h), nil
+}
+
+func guardTaskHandoffRequiredMessage(file string, review taskmgr.HandoffReview, err error, live bool, repo string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak guard Stop: task handoff required before a clean stop. Write a valid `%s` JSON record to `%s` and stop again.\n", taskmgr.SchemaHandoff, file)
+	if err != nil {
+		fmt.Fprintf(&b, "Current handoff read failed: %v\n", err)
+	} else if len(review.Reasons) > 0 {
+		fmt.Fprintf(&b, "Current handoff was refused: %s\n", strings.Join(review.Reasons, ", "))
+	}
+	fmt.Fprintf(&b, "Required fields: task.state=`%s`, task.witness.verified_state=`%s`, current_state, and either 1-2 next_steps or no_next_step_reason.\n", taskmgr.StateDone, taskmgr.VerifiedDone)
+	fmt.Fprintln(&b, "When follow-up work is reasonable, prefer 1-2 next_steps with stable key/title/body/reason so `fak task handoff` can create or update GitHub issues.")
+	if live {
+		fmt.Fprintln(&b, "This hook is in live mode: after the JSON validates it will run `fak task handoff --live` before allowing the stop.")
+	} else {
+		cmd := "fak task handoff --file \"" + file + "\" --live"
+		if strings.TrimSpace(repo) != "" {
+			cmd += " --repo " + strings.TrimSpace(repo)
+		}
+		fmt.Fprintf(&b, "To sync issues yourself before stopping, run `%s`; otherwise the validated handoff artifact is the stop witness.\n", cmd)
+	}
+	fmt.Fprintf(&b, "The path is also exposed to the agent as `$%s`.\n", guardTaskHandoffFileEnv)
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // guardStopHookDecision is the PURE decision behind the hook: given the gateway's consecutive
@@ -301,6 +414,19 @@ func normalizeGuardStopHookMode(mode string) (string, error) {
 	}
 }
 
+func normalizeGuardTaskHandoffMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", guardPreCompactModeOff:
+		return guardPreCompactModeOff, nil
+	case guardPreCompactModeShadow:
+		return guardPreCompactModeShadow, nil
+	case guardPreCompactModeEnforce:
+		return guardPreCompactModeEnforce, nil
+	default:
+		return "", fmt.Errorf("invalid --task-handoff mode %q (want off, shadow, or enforce)", mode)
+	}
+}
+
 func guardStopHookMaxFromEnv() int {
 	return guardStopHookIntFromEnv(guardStopHookEnvMax, guardStopHookDefaultMax)
 }
@@ -324,12 +450,47 @@ func guardStopHookIntFromEnv(name string, def int) int {
 	return def
 }
 
+func guardTaskHandoffLiveFromEnv() bool {
+	v := strings.TrimSpace(os.Getenv(guardTaskHandoffEnvLive))
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+}
+
+func guardTaskHandoffEnv(cfg guardTaskHandoffConfig) [][2]string {
+	mode, err := normalizeGuardTaskHandoffMode(cfg.Mode)
+	if err != nil || mode == guardPreCompactModeOff {
+		return nil
+	}
+	file := strings.TrimSpace(cfg.File)
+	if file == "" {
+		return nil
+	}
+	env := [][2]string{
+		{guardTaskHandoffEnvMode, mode},
+		{guardTaskHandoffEnvFile, file},
+		{guardTaskHandoffFileEnv, file},
+	}
+	if repo := strings.TrimSpace(cfg.Repo); repo != "" {
+		env = append(env, [2]string{guardTaskHandoffEnvRepo, repo})
+	}
+	if cfg.Live {
+		env = append(env, [2]string{guardTaskHandoffEnvLive, "1"})
+	}
+	return env
+}
+
+func guardTaskHandoffConfigOrZero(configs []guardTaskHandoffConfig) guardTaskHandoffConfig {
+	if len(configs) == 0 {
+		return guardTaskHandoffConfig{}
+	}
+	return configs[0]
+}
+
 // installGuardStopHook installs the Claude Code Stop hook for a guard session. When the
 // PreCompact hook already wrote a --settings file (existingSettingsPath non-empty), the Stop
 // hook is MERGED into it so a single --settings carries both (--settings is a single-value flag;
 // injecting it twice clobbers rather than merges). Otherwise it writes its own settings file and
 // injects --settings. Off mode or a non-claude child is a no-op (command returned unchanged).
-func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, warnAt, finalAt, maxN int) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath string, warnAt, finalAt, maxN int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
@@ -354,10 +515,10 @@ func installGuardStopHook(command []string, mode, gwURL, existingSettingsPath st
 			return command, nil, guardStopHookInstall{}, err
 		}
 	}
-	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, warnAt, finalAt, maxN)
+	return installGuardStopHookAt(command, mode, gwURL, fakBin, dir, existingSettingsPath, warnAt, finalAt, maxN, handoffConfig...)
 }
 
-func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, warnAt, finalAt, maxN int) ([]string, [][2]string, guardStopHookInstall, error) {
+func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existingSettingsPath string, warnAt, finalAt, maxN int, handoffConfig ...guardTaskHandoffConfig) ([]string, [][2]string, guardStopHookInstall, error) {
 	normalized, err := normalizeGuardStopHookMode(mode)
 	if err != nil {
 		return command, nil, guardStopHookInstall{}, err
@@ -408,6 +569,7 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		{guardStopHookEnvFinal, strconv.Itoa(finalAt)},
 		{guardStopHookEnvMax, strconv.Itoa(maxN)},
 	}
+	env = append(env, guardTaskHandoffEnv(guardTaskHandoffConfigOrZero(handoffConfig))...)
 	return command, env, install, nil
 }
 
