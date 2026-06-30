@@ -54,6 +54,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Runner executes a git subcommand in dir and returns (stdout, exitCode, err). It
@@ -71,6 +72,7 @@ type CommandRunner func(ctx context.Context, dir string, argv ...string) (stdout
 // returned in code (not err); err signals git could not be executed at all.
 func gitRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -92,6 +94,7 @@ func commandRunner(ctx context.Context, dir string, argv ...string) (string, int
 		return "", -1, exec.ErrNotFound
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
