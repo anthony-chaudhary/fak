@@ -250,34 +250,60 @@ def record_loop_tick(root: Path, rec: dict[str, Any],
     if rec.get("audit_error"):
         status_reason = "AUDIT_UNAVAILABLE"
 
-    events: list[dict[str, Any]] = [{
-        "loop_id": LOOP_ID, "run_id": run_id, "kind": "fire",
-        "summary": f"issue progress tick target={rec.get('target')}",
-        "metrics": metrics, "evidence": evidence,
-    }, {
-        "loop_id": LOOP_ID, "run_id": run_id, "kind": "admit",
-        "status": "admitted" if rec.get("ok") else "refused",
-        "reason": status_reason,
-        "summary": f"open={rec.get('open_now')} target_remaining={rec.get('target_remaining')}",
-        "metrics": metrics, "evidence": evidence,
-    }, {
-        "loop_id": LOOP_ID, "run_id": run_id, "kind": "end",
-        "status": "claimed_done" if rec.get("ok") else "failed",
-        "reason": status_reason,
-        "summary": f"closed_now={rec.get('closed_now')} witnessed_open={rec.get('witnessed_open')}",
-        "metrics": metrics, "evidence": evidence,
-    }]
-    if rec.get("ok"):
-        witness_status = "witness_unavailable" if rec.get("audit_error") else "witnessed_done"
-        verified_state = "verified_unavailable" if rec.get("audit_error") else "verified_done"
-        events.append({
-            "loop_id": LOOP_ID, "run_id": run_id, "kind": "witness",
-            "status": witness_status,
-            "verified_state": verified_state,
-            "reason": status_reason,
-            "summary": f"open_count={rec.get('open_now')} audit_error={rec.get('audit_error') or ''}",
+    # #1453: when the target is met and this tick has genuinely nothing to do
+    # — open-count read OK, target_remaining==0, no closeable witnessed issue,
+    # nothing closed, and the close-audit healthy — collapse the four-event
+    # fire/admit/end/witness churn into a single scannable TARGET_MET heartbeat.
+    # A reader scanning loops.jsonl for "is the fleet doing useful work?" then
+    # sees one quiescent marker per tick instead of 4 no-op activity records.
+    # The guard deliberately stays FULL-fat whenever there is real signal — a
+    # closure this tick, a witnessed-open issue still to close, an open-count
+    # failure, or an audit error (AUDIT_UNAVAILABLE) — so a broken audit or
+    # pending work is never hidden behind the quiescent path.
+    quiescent = (
+        bool(rec.get("ok"))
+        and rec.get("target_remaining") == 0
+        and not rec.get("witnessed_open")
+        and not rec.get("closed_now")
+        and not rec.get("audit_error")
+    )
+    if quiescent:
+        events: list[dict[str, Any]] = [{
+            "loop_id": LOOP_ID, "run_id": run_id, "kind": "end",
+            "status": "claimed_done", "reason": "TARGET_MET",
+            "summary": (f"target met (remaining=0, witnessed_open=0); quiescent "
+                        f"heartbeat — no closures pending"),
             "metrics": metrics, "evidence": evidence,
-        })
+        }]
+    else:
+        events = [{
+            "loop_id": LOOP_ID, "run_id": run_id, "kind": "fire",
+            "summary": f"issue progress tick target={rec.get('target')}",
+            "metrics": metrics, "evidence": evidence,
+        }, {
+            "loop_id": LOOP_ID, "run_id": run_id, "kind": "admit",
+            "status": "admitted" if rec.get("ok") else "refused",
+            "reason": status_reason,
+            "summary": f"open={rec.get('open_now')} target_remaining={rec.get('target_remaining')}",
+            "metrics": metrics, "evidence": evidence,
+        }, {
+            "loop_id": LOOP_ID, "run_id": run_id, "kind": "end",
+            "status": "claimed_done" if rec.get("ok") else "failed",
+            "reason": status_reason,
+            "summary": f"closed_now={rec.get('closed_now')} witnessed_open={rec.get('witnessed_open')}",
+            "metrics": metrics, "evidence": evidence,
+        }]
+        if rec.get("ok"):
+            witness_status = "witness_unavailable" if rec.get("audit_error") else "witnessed_done"
+            verified_state = "verified_unavailable" if rec.get("audit_error") else "verified_done"
+            events.append({
+                "loop_id": LOOP_ID, "run_id": run_id, "kind": "witness",
+                "status": witness_status,
+                "verified_state": verified_state,
+                "reason": status_reason,
+                "summary": f"open_count={rec.get('open_now')} audit_error={rec.get('audit_error') or ''}",
+                "metrics": metrics, "evidence": evidence,
+            })
 
     rows = [append(root, ledger, ev) for ev in events]
     return {

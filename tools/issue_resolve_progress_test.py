@@ -105,6 +105,51 @@ class LoopLedgerTest(unittest.TestCase):
         self.assertIn(("open_witnessed_issue", "491"), rows[3]["evidence"])
         self.assertEqual(rec["run_id"], "RID-PROGRESS1")
 
+    def test_record_loop_tick_quiescent_when_target_met(self) -> None:
+        # #1453: a no-op tick (target met, nothing witnessed/closed, audit OK)
+        # collapses to a single scannable TARGET_MET heartbeat, not the 4-event
+        # fire/admit/end/witness churn that floods loops.jsonl.
+        mod = load()
+        rows: list[dict[str, object]] = []
+        rec = {
+            "schema": mod.SCHEMA, "utc": "2026-06-25T10:20:00Z", "target": 50,
+            "ok": True, "open_now": 195, "baseline_open": 483,
+            "resolved_toward_target": 288, "target_remaining": 0,
+            "witnessed_open": 0, "witnessed_numbers": [], "closed_now": 0,
+            "closed_by_loop_total": 672, "close_live": True, "close_result": None,
+            "audit_error": None,
+        }
+        mod.record_loop_tick(
+            ROOT, rec, ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-PROGRESS-Q",
+        )
+        self.assertEqual([r["kind"] for r in rows], ["end"])
+        self.assertEqual(rows[0]["status"], "claimed_done")
+        self.assertEqual(rows[0]["reason"], "TARGET_MET")
+
+    def test_record_loop_tick_audit_error_stays_full_when_target_met(self) -> None:
+        # A broken close-audit must NOT be hidden by the quiescent path even when
+        # the target is met — AUDIT_UNAVAILABLE still emits the full record set so
+        # a persistently-broken audit stays visible to a loops.jsonl reader.
+        mod = load()
+        rows: list[dict[str, object]] = []
+        rec = {
+            "schema": mod.SCHEMA, "utc": "2026-06-25T10:21:00Z", "target": 50,
+            "ok": True, "open_now": 195, "baseline_open": 483,
+            "resolved_toward_target": 288, "target_remaining": 0,
+            "witnessed_open": 0, "witnessed_numbers": [], "closed_now": 0,
+            "closed_by_loop_total": 672, "close_live": True, "close_result": None,
+            "audit_error": "dos unreachable",
+        }
+        mod.record_loop_tick(
+            ROOT, rec, ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+            mint=lambda root, process: "RID-PROGRESS-AE",
+        )
+        self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end", "witness"])
+        self.assertEqual(rows[1]["reason"], "AUDIT_UNAVAILABLE")
+
     def test_record_loop_tick_audit_error_marks_witness_unavailable(self) -> None:
         mod = load()
         rows: list[dict[str, object]] = []
