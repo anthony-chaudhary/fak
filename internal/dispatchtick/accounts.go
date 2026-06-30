@@ -65,6 +65,8 @@ type AccountWaveLane struct {
 	TargetTier   int    `json:"target_tier"`
 	FallbackUsed bool   `json:"fallback_used"`
 	BlockReason  string `json:"block_reason"`
+	LoginStatus  string `json:"login_status,omitempty"`
+	CanServe     *bool  `json:"can_serve,omitempty"`
 	Pool         string `json:"pool"`
 	Rank         int    `json:"rank"`
 	WaveID       string `json:"wave_id"`
@@ -72,12 +74,14 @@ type AccountWaveLane struct {
 }
 
 type BlockedAccount struct {
-	Tag       string `json:"tag"`
-	Account   string `json:"account"`
-	Product   string `json:"product"`
-	ModelTier int    `json:"model_tier"`
-	Model     string `json:"model"`
-	Reason    string `json:"reason"`
+	Tag         string `json:"tag"`
+	Account     string `json:"account"`
+	Product     string `json:"product"`
+	ModelTier   int    `json:"model_tier"`
+	Model       string `json:"model"`
+	Reason      string `json:"reason"`
+	LoginStatus string `json:"login_status,omitempty"`
+	CanServe    *bool  `json:"can_serve,omitempty"`
 }
 
 type AccountWaveResult struct {
@@ -284,6 +288,8 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 				SelectedTier: row.ModelTier,
 				TargetTier:   target,
 				FallbackUsed: tier != target,
+				LoginStatus:  row.LoginStatus,
+				CanServe:     row.CanServe,
 				Pool:         pool,
 			})
 		}
@@ -417,7 +423,7 @@ func (r AccountWaveResult) Map() map[string]any {
 }
 
 func (l AccountWaveLane) Map() map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"ok":            l.OK,
 		"reason":        l.Reason,
 		"account":       l.Account,
@@ -435,10 +441,17 @@ func (l AccountWaveLane) Map() map[string]any {
 		"wave_id":       l.WaveID,
 		"size":          l.Size,
 	}
+	if l.LoginStatus != "" {
+		out["login_status"] = l.LoginStatus
+	}
+	if l.CanServe != nil {
+		out["can_serve"] = *l.CanServe
+	}
+	return out
 }
 
 func (b BlockedAccount) Map() map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"tag":        b.Tag,
 		"account":    b.Account,
 		"product":    b.Product,
@@ -446,6 +459,13 @@ func (b BlockedAccount) Map() map[string]any {
 		"model":      b.Model,
 		"reason":     b.Reason,
 	}
+	if b.LoginStatus != "" {
+		out["login_status"] = b.LoginStatus
+	}
+	if b.CanServe != nil {
+		out["can_serve"] = *b.CanServe
+	}
+	return out
 }
 
 func PoolKey(row AccountRow) string {
@@ -517,12 +537,14 @@ func publicBlockedAccounts(rows []AccountRow, tier int) []BlockedAccount {
 			reason = "blocked"
 		}
 		out = append(out, BlockedAccount{
-			Tag:       row.Tag,
-			Account:   row.Account,
-			Product:   row.Product,
-			ModelTier: row.ModelTier,
-			Model:     row.Model,
-			Reason:    reason,
+			Tag:         row.Tag,
+			Account:     row.Account,
+			Product:     row.Product,
+			ModelTier:   row.ModelTier,
+			Model:       row.Model,
+			Reason:      reason,
+			LoginStatus: row.LoginStatus,
+			CanServe:    row.CanServe,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
