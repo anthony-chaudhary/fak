@@ -91,6 +91,15 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("commit -s", p)       # sign-off required
         self.assertIn("OFF_TRUNK", p)
 
+    def test_pathspec_race_recovery_preserves_explicit_paths(self) -> None:
+        mod = load()
+        p = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak")
+        self.assertIn("PATHSPEC_RACE", p)
+        self.assertIn("preserve your working-tree edits", p)
+        self.assertIn("refresh from the current trunk witness", p)
+        self.assertIn("recommit by the same explicit paths", p)
+        self.assertIn("Do NOT recover by sweeping the tree", p)
+
     def test_has_an_honest_block_clause(self) -> None:
         mod = load()
         p = mod.render_prompt(self.ISSUE, "docs", workspace="C:/work/fak")

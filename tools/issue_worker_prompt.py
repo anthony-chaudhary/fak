@@ -200,6 +200,11 @@ on a witnessed commit. Miss either the `#{n}` or the trailer and your resolved i
 never closes.
 - No push / tag / force-push / history-rewrite / reset / clean / \
 checkout-of-tracked-files. Just commit on main.
+- If `fak commit` or a hook reports `PATHSPEC_RACE`, preserve your working-tree \
+edits, refresh from the current trunk witness, and recommit by the same explicit \
+paths. Do NOT recover by sweeping the tree (`git add -A`, broad staging, reset, \
+clean, or checkout). If refresh exposes a conflict or a live merge, stop with the \
+specific blocker instead of staging unrelated files.
 
 acceptance (your stop condition): a committed change on `main` whose subject \
 cites `#{n}` and whose gate you actually ran is green — OR a final report that \
