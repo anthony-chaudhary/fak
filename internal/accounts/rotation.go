@@ -208,13 +208,13 @@ func (r Registry) bucketKey(name string) string {
 // seatStatus builds a RotationSeat snapshot of a home with the given status.
 func seatStatus(h Home, st RotationStatus) RotationSeat {
 	return RotationSeat{
-		Name:    h.Name,
-		Dir:     h.Dir,
-		Account: h.Identity.AccountKey(),
-		Status:  st,
-		Login:   h.LoginStatus(),
+		Name:     h.Name,
+		Dir:      h.Dir,
+		Account:  h.Identity.AccountKey(),
+		Status:   st,
+		Login:    h.LoginStatus(),
 		CanServe: h.CanServe(),
-		Email:   h.Identity.Email,
+		Email:    h.Identity.Email,
 	}
 }
 

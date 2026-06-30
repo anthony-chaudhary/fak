@@ -92,8 +92,16 @@ func TestRotationPlanDedupAndExclusions(t *testing.T) {
 	if r := excludedReason(res, "dave"); r != RotationDisabled {
 		t.Fatalf("dave excluded reason = %q, want disabled", r)
 	}
+	for _, s := range res.Pool {
+		if s.Login != LoginReady || !s.CanServe {
+			t.Fatalf("pool seat readiness = %+v, want login ready and can_serve true", s)
+		}
+	}
 	if s, ok := excludedSeat(res, "dave"); !ok || s.Login != LoginDisabled {
 		t.Fatalf("dave login = %q,%v, want disabled,true", s.Login, ok)
+	}
+	if s, ok := excludedSeat(res, "eve"); !ok || s.CanServe {
+		t.Fatalf("eve can_serve = %+v,%v, want false", s, ok)
 	}
 	if s, ok := excludedSeat(res, "eve"); !ok || s.Status != RotationUnservable || s.Login != LoginNeedsLogin {
 		t.Fatalf("eve excluded = %+v,%v, want unservable with login needs_login", s, ok)
