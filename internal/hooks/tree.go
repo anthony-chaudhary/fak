@@ -95,8 +95,8 @@ type HygieneGate struct {
 
 // HygieneGates returns the tree-mode gates that have a parity-proven Go twin, in the order
 // `make hygiene` / `make index-sync` run them. The remaining `make hygiene` checkers
-// (demo_* x3, scrub_hardware_names, guard_mcp_status_audit) stay on the Python path until
-// they are ported under #928 A3/A4/A5; each port appends its gate here.
+// (demo_* x3, guard_mcp_status_audit) stay on the Python path until they are ported under
+// #928 A3/A4/A5; each port appends its gate here.
 func HygieneGates() []HygieneGate {
 	return []HygieneGate{
 		{"DOC_PLACEMENT", gateDocPlacementTree},
@@ -107,6 +107,7 @@ func HygieneGates() []HygieneGate {
 		{"INDEX_SYNC", gateIndexSyncTree},
 		{"BRAND_CONSISTENCY", gateBrandConsistencyTree},
 		{"TIER_DECLARED", gateTierDeclaredTree},
+		{"HARDWARE_TELL", gateHardwareTreeTell},
 	}
 }
 

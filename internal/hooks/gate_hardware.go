@@ -83,6 +83,54 @@ func residualHardwareDocHits(content string) []Finding {
 	return findings
 }
 
+// hardwareGeneratedDocs / hardwareGeneratedDirPrefixes mirror scrub_hardware_names.py's
+// GENERATED_DOCS / GENERATED_DIR_PREFIXES: artifacts whose bytes a tool emits, so scrubbing the
+// artifact is pointless (the next run clobbers it) — their SOURCES are scrubbed separately.
+// default_doc_set() drops them from the --check lint, so the tree twin must drop the same set.
+var hardwareGeneratedDocs = map[string]bool{
+	"docs/bench-plan.md": true,
+	"llms-full.txt":      true,
+	"llms.txt":           true,
+}
+
+var hardwareGeneratedDirPrefixes = []string{
+	"docs/industry-scorecard/", // generated from tools/industry_scorecard.data/*.json
+}
+
+// gateHardwareTreeTell is the --audit-tree HARDWARE_TELL gate: the whole-tree twin of
+// scrub_hardware_names.py --check (the make-hygiene doc lint). The Python default_doc_set() scans
+// `git ls-files *.md` minus the generated set, then residual_hits flags any line that — outside
+// fenced code, with inline-code/link/path spans masked — still carries a prose DGX/SXM4/dgxN/da33
+// tell. This twin runs the SAME per-line detector (residualHardwareDocHits, shared with the staged
+// gateHardwareTell) over the same .md file set. Unlike the staged gate it applies NO selfRef
+// exclusion: --check's default_doc_set() drops only the generated artifacts, so a policy doc that
+// names the hardware in prose is flagged here exactly as the Python lint flags it.
+func gateHardwareTreeTell(t *TrackedTree) ([]Finding, error) {
+	var findings []Finding
+	for _, p := range t.Paths {
+		norm := strings.ReplaceAll(p, "\\", "/")
+		if !strings.HasSuffix(norm, ".md") {
+			continue // git ls-files *.md — only markdown docs
+		}
+		if hardwareGeneratedDocs[norm] || startsWithAny(norm, hardwareGeneratedDirPrefixes) {
+			continue
+		}
+		body, ok := t.FileBytes(p)
+		if !ok {
+			continue // not present on disk — default_doc_set() skips a missing file
+		}
+		for _, hit := range residualHardwareDocHits(string(body)) {
+			findings = append(findings, Finding{
+				Gate:   "HARDWARE_TELL",
+				File:   norm,
+				Line:   hit.Line,
+				Detail: preview(hit.Detail),
+			})
+		}
+	}
+	return findings, nil
+}
+
 func hardwareDocLineHasTell(line string) bool {
 	return hardwareLineHasTell(maskHardwareDocLine(line))
 }
