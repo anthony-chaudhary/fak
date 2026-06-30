@@ -14,7 +14,7 @@ no(){ echo "FAIL: $1"; fail=1; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 REGF="$TMP/reg.json"
 reg(){ cat > "$REGF"; }
-run(){ BENCH_NODES="$REGF" bash "$RUNNER" "$@"; }   # echoes exit via $?
+run(){ BENCH_NODES="$REGF" BENCH_RUNS_DIR="$TMP/runs" bash "$RUNNER" "$@"; }   # echoes exit via $?
 
 echo "bench_node resolve_cmd tests:"
 
@@ -81,6 +81,35 @@ t "static tailnet_ip back-compat (ip_source=static)"
 out="$(run stat info 2>/dev/null)"
 if echo "$out" | grep -q "sanitized=node-stat" && echo "$out" | grep -q "ip_source=static"; then ok
 else no "static node info failed (out: $out)"; fi
+
+# 6) Windows OpenSSH can launch cmd.exe as the login shell. The runner must still
+# handshake with a cmd-safe no-op, then pipe real run scripts into WSL bash.
+FAKEBIN="$TMP/bin"; mkdir -p "$FAKEBIN"
+cat > "$FAKEBIN/ssh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${SSH_LOG:?}"
+cat >/dev/null
+exit 0
+SH
+chmod +x "$FAKEBIN/ssh"
+SSH_LOG="$TMP/ssh.log"; : > "$SSH_LOG"
+reg <<JSON
+{ "schema":"fleet-bench-nodes/1","nodes":[
+  { "name":"win","sanitized_name":"node-win","tailnet_ip":"203.0.113.9",
+    "ssh_user":"u","ssh_key":"~/.ssh/id_ed25519","ssh_port":22,"host_key":"",
+    "remote_shell":"windows-wsl","wsl_distro":"Ubuntu",
+    "repo_path":"~/r","toolchain_env":"GOTOOLCHAIN=auto" } ]}
+JSON
+t "windows-wsl ping uses a cmd-safe probe"
+PATH="$FAKEBIN:$PATH" SSH_LOG="$SSH_LOG" run win ping >/dev/null 2>&1
+if grep -q "cmd /c exit 0" "$SSH_LOG"; then ok
+else no "windows-wsl ping did not use cmd probe (log: $(cat "$SSH_LOG"))"; fi
+
+: > "$SSH_LOG"
+t "windows-wsl run scripts enter WSL bash"
+PATH="$FAKEBIN:$PATH" SSH_LOG="$SSH_LOG" run win cmd 'echo OK' >/dev/null 2>&1
+if grep -q "wsl.exe -d Ubuntu -e bash -s" "$SSH_LOG"; then ok
+else no "windows-wsl cmd did not use WSL bash (log: $(cat "$SSH_LOG"))"; fi
 
 echo
 if [ "$fail" -eq 0 ]; then echo "PASS (bench_node resolve_cmd)"; exit 0

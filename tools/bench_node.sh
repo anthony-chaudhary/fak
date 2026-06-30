@@ -22,7 +22,7 @@
 # CPU brand / hostname. Promoting a result to a committed path needs a real redaction pass.
 set -uo pipefail
 
-RUNNER_VERSION="0.4.0"   # 0.4.0: resolve_cmd dynamic host/IP resolver; 0.3.0: kernels subcommand; 0.2.0: lineage.json
+RUNNER_VERSION="0.5.0"   # 0.5.0: windows-wsl remote_shell; 0.4.0: resolve_cmd dynamic host/IP resolver; 0.3.0: kernels
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SELF_DIR/.." && pwd)"
 REG="${BENCH_NODES:-$SELF_DIR/bench_nodes.json}"
@@ -123,6 +123,8 @@ GO_BIN="$(field go_bin 1)"; [ -z "$GO_BIN" ] && GO_BIN="/usr/local/go/bin"
 HOSTKEY="$(field host_key 1)"
 AGENT_HOST="$(field agent_host 1)"
 CAPS="$(field capabilities 1)"; [ -z "$CAPS" ] && CAPS='[]'
+REMOTE_SHELL="$(field remote_shell 1)"; [ -z "$REMOTE_SHELL" ] && REMOTE_SHELL="bash"
+WSL_DISTRO="$(field wsl_distro 1)"
 
 # remote preamble shared by every run path: put go on PATH (login PATH isn't inherited by
 # `bash -s`), set the toolchain, cd to the canonical repo. \$PATH stays literal for the node.
@@ -143,6 +145,29 @@ else
 fi
 ssh_node(){ ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"; }
 
+case "$REMOTE_SHELL" in
+  bash|zsh|sh)
+    remote_probe(){ ssh_node true >/dev/null 2>&1; }
+    remote_bash(){ ssh_node "bash -s"; }
+    ;;
+  windows-wsl)
+    # Windows OpenSSH may launch the account's default shell as cmd.exe. Keep the SSH
+    # reachability probe in cmd, then pipe the real runner script into WSL bash.
+    remote_probe(){ ssh_node "cmd /c exit 0" >/dev/null 2>&1; }
+    remote_bash(){
+      if [ -n "$WSL_DISTRO" ]; then
+        ssh_node wsl.exe -d "$WSL_DISTRO" -e bash -s
+      else
+        ssh_node wsl.exe -e bash -s
+      fi
+    }
+    ;;
+  *)
+    echo "node '$NODE' has unsupported remote_shell '$REMOTE_SHELL' in $REG (supported: bash, zsh, sh, windows-wsl)" >&2
+    exit 4
+    ;;
+esac
+
 # --- placement law: refuse if the target IS this host (real check: tailscale IP match) ---
 SELF_IP="$(tailscale ip -4 2>/dev/null | head -1)"
 if [ "$AGENT_HOST" = "true" ] || { [ -n "$SELF_IP" ] && [ "$SELF_IP" = "$IP" ]; }; then
@@ -151,7 +176,7 @@ if [ "$AGENT_HOST" = "true" ] || { [ -n "$SELF_IP" ] && [ "$SELF_IP" = "$IP" ]; 
   echo "WARN: BENCH_ALLOW_COLOCATED=1 -- proceeding under contention." >&2
 fi
 
-reachable(){ ssh_node true >/dev/null 2>&1; }   # SSH handshake -- a node can answer ping with no sshd
+reachable(){ remote_probe; }   # SSH handshake -- a node can answer ping with no sshd
 
 do_wait(){
   local max="${BENCH_WAIT_MAX_S:-86400}" d=5 t=0
@@ -181,7 +206,7 @@ newrun(){ # echo a fresh gitignored run dir for $SUB
 lineage(){ # lineage <outdir> <subcommand>
   local out="$1" sub="$2" utc nf go commit branch ver
   utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  nf="$(ssh_node "bash -s" <<EOF 2>/dev/null
+  nf="$(remote_bash <<EOF 2>/dev/null
 $PRE
 echo "go=\$(go version 2>/dev/null)"
 echo "commit=\$(git rev-parse --short HEAD 2>/dev/null)"
@@ -213,7 +238,7 @@ JSON
 
 case "$SUB" in
   info)
-    echo "node=$NODE sanitized=$SAN repo=$REPO toolchain=$TC pinned_hostkey=$([ -n "$HOSTKEY" ] && echo yes || echo no) ip_source=$([ -n "$RESOLVE_CMD" ] && echo resolve_cmd || echo static)"
+    echo "node=$NODE sanitized=$SAN repo=$REPO toolchain=$TC remote_shell=$REMOTE_SHELL pinned_hostkey=$([ -n "$HOSTKEY" ] && echo yes || echo no) ip_source=$([ -n "$RESOLVE_CMD" ] && echo resolve_cmd || echo static)"
     ;;
   ping)
     if reachable; then echo "REACHABLE $NODE (as $SAN)"; else echo "UNREACHABLE $NODE" >&2; exit 3; fi
@@ -225,13 +250,13 @@ case "$SUB" in
     ensure_online || exit $?
     [ $# -ge 1 ] || { echo "cmd needs a command" >&2; exit 64; }
     OUT="$(newrun)"; lineage "$OUT" "$SUB"
-    printf '%s\n%s\n' "$PRE" "$*" | ssh_node "bash -s" 2>&1 | tee "$OUT/run.log"
+    printf '%s\n%s\n' "$PRE" "$*" | remote_bash 2>&1 | tee "$OUT/run.log"
     echo "-> $OUT (gitignored)"
     ;;
   tests)
     ensure_online || exit $?
     OUT="$(newrun)"; lineage "$OUT" "$SUB"
-    ssh_node "bash -s" > "$OUT/run.log" 2>&1 <<EOF
+    remote_bash > "$OUT/run.log" 2>&1 <<EOF
 set -uo pipefail; $PRE
 go -C fak test ./internal/ggufload/ ./internal/model/ -count=1
 EOF
@@ -241,7 +266,7 @@ EOF
   bench)
     ensure_online || exit $?
     OUT="$(newrun)"; lineage "$OUT" "$SUB"
-    ssh_node "bash -s" > "$OUT/run.log" 2>&1 <<EOF
+    remote_bash > "$OUT/run.log" 2>&1 <<EOF
 set -uo pipefail; $PRE
 echo "### adjudicator ###"
 go -C fak test -run='^\$' -bench=. -benchmem -count=8 ./internal/adjudicator/
@@ -272,7 +297,7 @@ PY
     ensure_online || exit $?
     KCOUNT="${KCOUNT:-6}"
     OUT="$(newrun)"; lineage "$OUT" "$SUB"
-    ssh_node "bash -s" > "$OUT/run.log" 2>&1 <<EOF
+    remote_bash > "$OUT/run.log" 2>&1 <<EOF
 set -uo pipefail; $PRE
 echo "### arch ### \$(uname -m)"
 echo "### correctness ###"

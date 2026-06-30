@@ -11,12 +11,12 @@ flowchart LR
   Reg --> Resolve["optional resolve_cmd<br/>dynamic host/IP"]
   Resolve --> SSH["SSH handshake<br/>BatchMode + pinned host key"]
   SSH -->|"ssh"| Node["Bench node<br/>go_bin on PATH, GOTOOLCHAIN=auto"]
-  Node --> Run["bash -s remote script<br/>tests / bench (ns/op)"]
+  Node --> Run["bash -s remote script<br/>direct or via WSL<br/>tests / bench (ns/op)"]
   Run --> Results["bench-runs/sanitized/ts-sub<br/>(gitignored)"]
   Run --> Lineage["lineage.json<br/>version + date/time + machine"]
 ```
 
-*Flow: the laptop resolves the node from the gitignored registry, optionally runs a dynamic host/IP resolver, opens a pinned-host-key SSH handshake, runs the remote script via `bash -s`, and writes gitignored results plus a `lineage.json` witness.*
+*Flow: the laptop resolves the node from the gitignored registry, optionally runs a dynamic host/IP resolver, opens a pinned-host-key SSH handshake, runs the remote script via `bash -s` directly or through WSL, and writes gitignored results plus a `lineage.json` witness.*
 
 ## Usage
 
@@ -77,14 +77,27 @@ The real instance, zone, project, and account stay in the gitignored registry or
 environment (`BENCH_NODE_GCP_INSTANCE`, `BENCH_NODE_GCP_ZONE`, `GCP_PROJECT`,
 `GCP_ACCOUNT`).
 
+For a Windows bench target whose OpenSSH login shell is `cmd.exe` but whose repo and Go
+toolchain live inside WSL, set:
+
+```json
+"remote_shell": "windows-wsl",
+"wsl_distro": "Ubuntu",
+"repo_path": "~/work/fleet"
+```
+
+The SSH reachability probe stays Windows-safe (`cmd /c exit 0`), while `tests`, `bench`,
+`kernels`, and `cmd` pipe their scripts into `wsl.exe ... bash -s`.
+
 The committed, public-safe roster of which nodes the runner targets and where each stands
 (onboarded vs. pending, with the per-node blocker) lives in the `_onboarding` block of
 `bench_nodes.example.json` — that template already carries a ready-to-fill placeholder entry
 for every node in the roster, so onboarding a pending node is: copy its entry into the
 gitignored `bench_nodes.json`, fill in real identity, bootstrap, and `bench_node.sh <node> tests`.
-Each pending node also carries the GitHub `issue` that tracks its onboarding — a dedicated
-child where one is filed (#10 laptop-from-desktop, #12 GCP GPU VMs), else the umbrella #922
-itself (desktop, GPU server) — so the roster doubles as a navigable decomposition index.
+Each node also carries the GitHub `issue` that tracked or still tracks its onboarding — a
+dedicated child where one is filed (#10 laptop-from-desktop, #12 GCP GPU VMs), else the
+umbrella #922 itself (desktop, GPU server) — so the roster doubles as a navigable
+decomposition index.
 
 ## Design decisions (the adversarial-review fixes)
 
@@ -92,8 +105,9 @@ Deliberately **read-only w.r.t. the committed tree** — it never writes a commi
 because the repo's scrub audit is *shape-only* (Slack-token regex without the gitignored
 needles sidecar) and would **not** redact a CPU brand or hostname. So:
 
-- **Reachability = SSH handshake** (`ssh -o BatchMode=yes … true`), not `tailscale ping` — a
-  node can answer ping with no `sshd` (the desktop does exactly this).
+- **Reachability = SSH handshake**, not `tailscale ping` — a node can answer ping with no
+  `sshd` (the desktop does exactly this). POSIX targets probe with `true`; Windows-WSL
+  targets probe with `cmd /c exit 0`.
 - **Host key is pinned** from the registry (`StrictHostKeyChecking=yes`), not blind
   `accept-new`; ephemeral nodes may leave it empty and accept a per-run key in the temp
   known-hosts file.
@@ -105,7 +119,8 @@ needles sidecar) and would **not** redact a CPU brand or hostname. So:
 - **0-benchmark guard, per package**: a missing `bench_test.go` at the node's commit warns
   loudly instead of hiding behind another package's numbers.
 - **`go` on PATH + toolchain**: prepends the node's `go_bin` and exports `GOTOOLCHAIN=auto`;
-  always pipes the remote script to `bash -s` (the node's default zsh is fatal on globs).
+  always pipes the remote script to `bash -s` (directly on POSIX targets, through `wsl.exe`
+  for `remote_shell=windows-wsl`; the node's default zsh is fatal on globs).
 
 See the `_onboarding` roster in `bench_nodes.example.json` for the node roster (the private
 `HARDWARE-CATALOG.md` is the unsanitized version) and `run-on-bench-nodes-by-default` for the

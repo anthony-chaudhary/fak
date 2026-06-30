@@ -15,7 +15,7 @@
     "roster": [
       { "node": "macbook", "sanitized_name": "node-macos-a",         "status": "onboarded", "verified": "2026-06-21", "note": "Apple M3 Pro arm64 — tests green, BenchmarkDecide ~317 ns idle." },
       { "node": "desktop", "sanitized_name": "node-linux-desktop-a", "status": "pending",   "issue": 922, "blocker": "host-reachability — desktop answers ICMP but ships with no sshd; enable sshd + add driver pubkey, then pin host_key." },
-      { "node": "laptop",  "sanitized_name": "node-linux-laptop-a",  "status": "pending",   "issue": 10,  "blocker": "remote-shell-mismatch — host reachable + key-auth OK over Tailscale (RTX 4070, Ada/sm_89), but its SSH login shell is Windows cmd (a remote `uname` returns 'not recognized'), so the runner's `bash -s` model can't execute there; set WSL bash as the SSH login shell (or add a Windows-shell adapter to bench_node.sh), THEN fill the gitignored registry + verify." },
+      { "node": "laptop",  "sanitized_name": "node-linux-laptop-a",  "status": "onboarded", "verified": "2026-06-30", "issue": 10, "note": "RTX 4070 Laptop via Windows SSH -> WSL; `bench_node.sh laptop bench` passed from the desktop driver (bench rc=0, BenchmarkDecide ~1.1 us/op)." },
       { "node": "gcp-gpu", "sanitized_name": "node-gcp-gpu-a",       "status": "pending",   "issue": 12,  "blocker": "private-registry-fill — dynamic-IP bridge is wired; copy the resolver entry into gitignored bench_nodes.json, set the real GCP project/zone/instance there or in env, then run bench_node.sh gcp-gpu ping after provisioning." },
       { "node": "dgx-a100","sanitized_name": "node-dgx-a100",        "status": "pending",   "issue": 922, "blocker": "no-direct-ssh — DGX is reached via a relay bridge, not a direct tailnet SSH handshake; needs a reachable sshd path before the driver can poll it." }
     ]
@@ -66,7 +66,8 @@
       "ssh_key": "~/.ssh/id_ed25519",
       "ssh_port": 22,
       "host_key": "",
-      "remote_shell": "bash",
+      "remote_shell": "windows-wsl",
+      "wsl_distro": "Ubuntu",
       "repo_path": "~/work/fleet",
       "repo_module": "private",
       "toolchain_env": "GOTOOLCHAIN=auto",
