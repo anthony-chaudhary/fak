@@ -20,13 +20,13 @@ import (
 // economy an operator running `fak guard -- claude` actually wants visible next to the
 // session:
 //
-//   - the OBSERVED provider-cache economy (net saved-token-equiv, the cache multiplier,
-//     hit rate, and the PROVEN/REFUTED status from vcachegov) — the cache savings that
-//     otherwise only surface in the per-turn --debug-stats line Claude's alt-screen buries;
-//   - the SAFETY half: how many tool calls the kernel floor BLOCKED, REPAIRED, or
-//     QUARANTINED this session — so a refused `rm -rf` or a held-out hostile result is
-//     visible at a glance, not only in the exit summary;
-//   - liveness: turns served, in-flight requests, and gateway uptime.
+//   - whether re-using already-sent text is saving money (how much was re-used, how much
+//     cheaper that made it, and the running total saved) — savings that otherwise only
+//     surface in the per-turn --debug-stats line Claude's alt-screen buries;
+//   - the SAFETY half: how many tool calls fak BLOCKED, FIXED, or SET ASIDE this session —
+//     so a refused `rm -rf` or a suspicious result held back from the model is visible at a
+//     glance, not only in the exit summary;
+//   - how it's going: replies given, work in flight, and how long fak has been running.
 //
 // It is the 20% pane `fak guard --split` opens beside the 80% interactive agent pane, but
 // it is a first-class command in its own right: run it by hand in a second pane against any
@@ -228,59 +228,57 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	}
 }
 
-// renderGuardInfoLine renders one compact live line. It leads with the cache economy (the
-// headline for the default `fak guard -- claude` passthrough, where the kernel decode/serve
-// counters stay 0 because Anthropic generates the tokens), then the floor safety counters,
-// then liveness. Every value is the gateway's OBSERVED total, not a local estimate.
+// renderGuardInfoLine renders one compact live line in plain words a non-technical watcher
+// can read at a glance. It leads with whether re-using text is saving money (the headline for
+// the default `fak guard -- claude` passthrough, where the decode/serve counters stay 0
+// because Anthropic generates the tokens), then what fak blocked or fixed to keep you safe,
+// then a small liveness summary. Every value is the gateway's real running total.
 func renderGuardInfoLine(v guardInfoVars) string {
-	cache := "cache —" // until a turn carries provider cache activity
+	cache := "cache: nothing yet" // until a turn re-uses any text
 	if v.VCache != nil {
-		cache = fmt.Sprintf("cache %s ×%.2f  saved %s tok  hit %.0f%%",
-			vcacheStatusGlyph(v.VCache.Status), v.VCache.Multiplier,
-			signedTokens(v.VCache.SavedTokenEquiv), v.VCache.HitRate*100)
+		cache = guardCacheWord(v.VCache.Status, v.VCache.Multiplier, v.VCache.SavedTokenEquiv, v.VCache.HitRate)
 	}
-	return fmt.Sprintf("%s · %s · turns %d · inflight %d · up %s",
+	return fmt.Sprintf("%s · %s · replies %d · busy with %d · running %s",
 		cache,
 		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
 		v.Inference.Turns, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
 }
 
-// guardFloorSafetyWord summarizes what the kernel floor DID this session: blocked tool calls
-// (Denies), repaired/rewritten calls (Transforms), and quarantined results (Quarantines plus
-// result-admission denials). A clean session reads "floor clean" so the absence of refusals
-// is itself visible, not a blank.
+// guardCacheWord puts the re-use savings in plain words. The cache lets fak send the same text
+// to the model once and re-use it, which costs less. "saving money" means the re-use has more
+// than paid back the small extra cost of setting it up; "not saving yet" means it has not — the
+// saved-tokens number is below zero until then, so it carries its own sign. reused% is how much
+// of the text was served from the cache; ×N is how many times cheaper that made those tokens.
+func guardCacheWord(status string, multiplier, savedTokens, hitRate float64) string {
+	lead := "cache: saving money"
+	if !strings.EqualFold(strings.TrimSpace(status), "PROVEN") {
+		lead = "cache: not saving yet"
+	}
+	return fmt.Sprintf("%s — reused %.0f%% of text, ×%.2f cheaper, %s tokens",
+		lead, hitRate*100, multiplier, signedTokens(savedTokens))
+}
+
+// guardFloorSafetyWord summarizes, in plain words, what fak did this session to keep you safe:
+// blocked an unsafe tool call (Denies), fixed a risky one before it ran (Transforms), or set a
+// suspicious result aside instead of feeding it to the model (Quarantines plus result-admission
+// denials). A clean session reads "safety: nothing blocked" so the all-clear is visible, not a
+// blank.
 func guardFloorSafetyWord(denies, transforms, quarantines, resultDenies int64) string {
-	quar := quarantines + resultDenies
-	if denies == 0 && transforms == 0 && quar == 0 {
-		return "floor clean"
+	setAside := quarantines + resultDenies
+	if denies == 0 && transforms == 0 && setAside == 0 {
+		return "safety: nothing blocked"
 	}
 	var parts []string
 	if denies > 0 {
 		parts = append(parts, fmt.Sprintf("blocked %d", denies))
 	}
 	if transforms > 0 {
-		parts = append(parts, fmt.Sprintf("repaired %d", transforms))
+		parts = append(parts, fmt.Sprintf("fixed %d", transforms))
 	}
-	if quar > 0 {
-		parts = append(parts, fmt.Sprintf("quarantined %d", quar))
+	if setAside > 0 {
+		parts = append(parts, fmt.Sprintf("set aside %d", setAside))
 	}
-	return "floor " + strings.Join(parts, " ")
-}
-
-// vcacheStatusGlyph renders the vcachegov PROVEN/REFUTED status compactly. PROVEN means the
-// session's cumulative read rebate has repaid the cache-write premium (net positive saving);
-// REFUTED means it has not (yet). Any other/empty value renders as the raw status.
-func vcacheStatusGlyph(status string) string {
-	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "PROVEN":
-		return "PROVEN"
-	case "REFUTED":
-		return "REFUTED"
-	case "":
-		return "?"
-	default:
-		return strings.TrimSpace(status)
-	}
+	return "safety: " + strings.Join(parts, ", ")
 }
 
 // signedTokens renders a net saved-token-equiv with an explicit sign, because the value is
@@ -354,19 +352,20 @@ func guardInfoStartupHeader(base string, interval time.Duration, width int) stri
 	return b.String()
 }
 
-// guardInfoCompactLegend is the one-line legend for a narrow pane — the same terms as the
-// full legend, abbreviated so it fits beside the live status row instead of wrapping over it.
+// guardInfoCompactLegend is the one-line guide for a narrow pane — the same plain words as the
+// full guide, shortened so it fits beside the live status row instead of wrapping over it.
 func guardInfoCompactLegend() string {
-	return "legend: cache PROVEN/REFUTED ×mult saved hit · floor blocked/repaired/quarantined · turns/inflight/up"
+	return "what this means: cache = is re-using text saving money · safety = what fak blocked/fixed/set aside · replies/busy/running = how it's going"
 }
 
-// guardInfoLegend expands the terms on the info line, printed once in the header so a watcher
-// in a second pane can read the line without leaving the terminal.
+// guardInfoLegend explains each part of the live line in plain words, printed once at the top
+// so someone watching in a second pane knows what they are looking at without leaving the
+// terminal.
 func guardInfoLegend() string {
 	var b strings.Builder
-	fmt.Fprintln(&b, "legend:")
-	fmt.Fprintln(&b, "  cache = OBSERVED provider-cache economy: PROVEN/REFUTED (reads repaid the write premium?) · ×N multiplier · net saved-token-equiv · hit rate")
-	fmt.Fprintln(&b, "  floor = what the kernel did this session: blocked (refused tool calls) · repaired (rewritten) · quarantined (held-out results)")
-	fmt.Fprintln(&b, "  turns = model turns served · inflight = requests running now · up = gateway uptime · '—' = no cache activity yet")
+	fmt.Fprintln(&b, "what this means:")
+	fmt.Fprintln(&b, "  cache  = fak re-uses text it already sent so the model costs less. \"saving money\" = the re-use has paid off; \"reused %\" = how much was re-used; \"×N cheaper\" = how much cheaper; tokens = how much you've saved so far (can start below zero).")
+	fmt.Fprintln(&b, "  safety = what fak did to keep you safe: blocked an unsafe action, fixed a risky one before it ran, or set a suspicious result aside.")
+	fmt.Fprintln(&b, "  replies = answers the model has given · busy with = work happening right now · running = how long fak has been up · \"nothing yet\" = no re-use has happened.")
 	return b.String()
 }

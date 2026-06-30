@@ -35,14 +35,14 @@ func TestRenderGuardInfoLineNoCacheCleanFloor(t *testing.T) {
 	v.Inference.Turns = 4
 	v.Gateway.InflightRequests = 0
 	line := renderGuardInfoLine(v)
-	if !strings.Contains(line, "cache —") {
-		t.Fatalf("no-cache should read 'cache —', got: %s", line)
+	if !strings.Contains(line, "cache: nothing yet") {
+		t.Fatalf("no-cache should read 'cache: nothing yet', got: %s", line)
 	}
-	if !strings.Contains(line, "floor clean") {
-		t.Fatalf("zero refusals should read 'floor clean', got: %s", line)
+	if !strings.Contains(line, "safety: nothing blocked") {
+		t.Fatalf("zero refusals should read 'safety: nothing blocked', got: %s", line)
 	}
-	if !strings.Contains(line, "turns 4") {
-		t.Fatalf("missing turns: %s", line)
+	if !strings.Contains(line, "replies 4") {
+		t.Fatalf("missing replies: %s", line)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestRenderGuardInfoLineProvenCacheAndSafety(t *testing.T) {
 	}{CacheReadTokens: 1000, SavedTokenEquiv: 12345, HitRate: 0.88, Multiplier: 2.1, Status: "PROVEN"}
 
 	line := renderGuardInfoLine(v)
-	for _, want := range []string{"PROVEN", "×2.10", "saved +12,345 tok", "hit 88%", "blocked 1", "repaired 2", "quarantined 2"} {
+	for _, want := range []string{"saving money", "×2.10 cheaper", "+12,345 tokens", "reused 88%", "blocked 1", "fixed 2", "set aside 2"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("line missing %q:\n%s", want, line)
 		}
@@ -97,16 +97,16 @@ func TestRunInfoOnceRendersLine(t *testing.T) {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"PROVEN", "×2.10", "blocked 1", "quarantined 1", "turns 5", "inflight 1", "up 42s"} {
+	for _, want := range []string{"saving money", "×2.10 cheaper", "blocked 1", "set aside 1", "replies 5", "busy with 1", "running 42s"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
-	// --once is a quiet one-shot probe: ONE status line, no standing header and no legend
-	// (those belong to the watch loop). A probe that prints 5 lines of legend to then report
+	// --once is a quiet one-shot probe: ONE status line, no standing header and no guide
+	// (those belong to the watch loop). A probe that prints 5 lines of guide to then report
 	// one number is the pane-spam this command exists to avoid.
-	if strings.Contains(out, "fak info · ") || strings.Contains(out, "legend:") {
-		t.Fatalf("--once must not print the header/legend:\n%s", out)
+	if strings.Contains(out, "fak info · ") || strings.Contains(out, "what this means:") {
+		t.Fatalf("--once must not print the header/guide:\n%s", out)
 	}
 	if got := strings.Count(strings.TrimRight(out, "\n"), "\n"); got != 0 {
 		t.Fatalf("--once must print exactly one line, got %d extra newlines:\n%s", got, out)
@@ -160,8 +160,8 @@ func TestRunInfoOverlayNonTTYAppends(t *testing.T) {
 	if strings.Contains(out, "\r") || strings.Contains(out, "\033[K") {
 		t.Fatalf("non-TTY output must not use in-place redraw escapes:\n%q", out)
 	}
-	if !strings.Contains(out, "legend:") {
-		t.Fatalf("watch loop must print the legend once:\n%s", out)
+	if !strings.Contains(out, "what this means:") {
+		t.Fatalf("watch loop must print the guide once:\n%s", out)
 	}
 	if !strings.Contains(out, "fak info: gateway closed") {
 		t.Fatalf("must end on the gateway-closed line:\n%s", out)

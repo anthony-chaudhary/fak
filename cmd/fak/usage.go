@@ -290,10 +290,11 @@ func usageOpsVerbs() {
                  a one-shot JSON check)
   fak info      [--gateway-url URL] [--interval DUR] [--once] [--json]
                 (the live fak-info overlay: poll a fak guard/serve gateway's
-                 /debug/vars and print ONE compact line per tick — the OBSERVED
-                 cache economy (saved-token-equiv, multiplier, hit, PROVEN/REFUTED),
-                 the floor SAFETY counters (blocked/repaired/quarantined), and
-                 liveness. The 20% pane 'fak guard --split' opens beside the agent;
+                 /debug/vars and print ONE plain-words line per tick — whether
+                 re-using text is saving money (how much re-used, how much
+                 cheaper, total saved), what fak kept safe (blocked/fixed/set
+                 aside), and how it's going. The 20% pane 'fak guard --split'
+                 opens beside the agent;
                  also runnable by hand in a second pane. Read-only; loopback needs
                  no bearer)
   fak loop      append | run -- CMD | status | admit
