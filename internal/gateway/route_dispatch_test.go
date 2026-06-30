@@ -2,6 +2,11 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -157,6 +162,94 @@ func TestRouteDispatchesToRoutedEngine(t *testing.T) {
 	}
 	if r == nil || r.Meta["engine"] != "routed2" {
 		t.Fatalf("call must dispatch to the routed engine; result meta = %v", r.Meta)
+	}
+}
+
+// The llm-d adapter is a first-class route target, not just a standalone
+// EngineDriver: a served tool call routed by a manifest to `llm-d` reaches the
+// llm-d OpenAI-compatible frontend and returns with llm-d engine identity.
+func TestRouteManifestDispatchesToLLMDEngine(t *testing.T) {
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("llm-d upstream path = %q, want /v1/chat/completions", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer llmd-key" {
+			t.Errorf("Authorization = %q, want Bearer llmd-key", got)
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read llm-d upstream body: %v", err)
+		}
+		var req struct {
+			Model         string `json:"model"`
+			Stream        bool   `json:"stream"`
+			StreamOptions struct {
+				IncludeUsage bool `json:"include_usage"`
+			} `json:"stream_options"`
+		}
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatalf("decode llm-d upstream request: %v\n%s", err, raw)
+		}
+		if req.Model != "route-model" {
+			t.Errorf("llm-d upstream model = %q, want route-model", req.Model)
+		}
+		if !req.Stream || !req.StreamOptions.IncludeUsage {
+			t.Errorf("llm-d upstream stream flags = stream:%v include_usage:%v, want true/true", req.Stream, req.StreamOptions.IncludeUsage)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"model\":\"llm-d-served\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"model\":\"llm-d-served\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{}) // kernel default
+	abi.RegisterEngine(engine.LLMDEngineID, engine.NewLLMDEngine(engine.LLMDConfig{
+		BaseURL:  upstream.URL + "/v1",
+		Model:    "route-model",
+		APIKey:   "llmd-key",
+		WorkerID: "llmd-route",
+	}))
+	abi.RegisterAdjudicator(0, toolAdj{})
+	engine.RegisterResidencyGate()
+
+	srv, err := New(Config{
+		EngineID:      "test",
+		Model:         "m",
+		VDSO:          true,
+		RouteManifest: pickManifest("allow_llmd", engine.LLMDEngineID),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	wv, env, err := srv.syscall(context.Background(), "allow_llmd", `{"messages":[{"role":"user","content":"dispatch through llm-d"}]}`, false, "", "")
+	if err != nil {
+		t.Fatalf("syscall: %v", err)
+	}
+	if wv.Kind != "ALLOW" {
+		t.Fatalf("verdict = %+v, want ALLOW", wv)
+	}
+	if upstreamHits != 1 {
+		t.Fatalf("llm-d upstream hits = %d, want 1", upstreamHits)
+	}
+	if env == nil {
+		t.Fatal("missing result envelope")
+	}
+	if env.Meta["engine"] != engine.LLMDEngineID || env.Meta["worker"] != "llmd-route" || env.Meta["model"] != "llm-d-served" {
+		t.Fatalf("llm-d result meta = %v", env.Meta)
+	}
+	if env.Meta["input_tokens"] != "2" || env.Meta["output_tokens"] != "1" || env.Meta["total_tokens"] != "3" {
+		t.Fatalf("llm-d usage meta = %v", env.Meta)
+	}
+	if !strings.Contains(env.Content, `"text":"ok"`) {
+		t.Fatalf("llm-d result content = %q, want assembled ok text", env.Content)
 	}
 }
 
