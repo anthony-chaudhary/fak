@@ -243,6 +243,28 @@
       "gaps": []
     },
     {
+      "id": "heaviness-debt",
+      "canonical": "heaviness_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The single bounded debt integer emitted by the operator-heaviness scorecard: live operator pressure folded into the control pane by `fak operator heaviness`.",
+      "distinction": "One debt INTEGER for operator-heaviness pressure - NOT the operator-heaviness scorecard subsystem and NOT total-debt (the portfolio sum across all scorecards).",
+      "distinct_from": [
+        "total-debt",
+        "scorecard",
+        "control-pane"
+      ],
+      "aliases": [
+        "heavinessdebt"
+      ],
+      "grounding": "heavinessdebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "total-debt",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
       "id": "x3-plan-plantick",
       "canonical": "PlanTick (gardenbundle)",
       "family": "plan",

@@ -2,7 +2,7 @@
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "a9bd997",
   "total_debt": 959,
-  "grade_debt": 45,
+  "grade_debt": 47,
   "metrics": {
     "doc": 1,
     "readme": 0,
@@ -80,7 +80,7 @@
     "observability": 0,
     "learning": 0,
     "rsi_maturity": 0,
-    "tooling_quality": 2,
+    "tooling_quality": 4,
     "bench_dx": 0,
     "cuda_dev": 0,
     "persona_fit": 0
